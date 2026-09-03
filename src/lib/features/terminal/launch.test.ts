@@ -1,5 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { decideSpawn, launchPlan, type SpawnConditions } from "./launch";
+import {
+  decideSpawn,
+  discardOpenedPty,
+  gridDrifted,
+  handsOffToRelaunch,
+  launchFailureShows,
+  launchPlan,
+  ptyGrid,
+  sessionScanSince,
+  type LaunchStanding,
+  type SpawnConditions,
+} from "./launch";
 
 const idle: SpawnConditions = {
   spawned: false,
@@ -145,5 +156,150 @@ describe("what gets launched", () => {
       powershellNoProfile: true,
     });
     expect(plan.args).toEqual(["-NoProfile", "-NoLogo"]);
+  });
+});
+
+/**
+ * A launch that came back to a pane that has moved on. Every case here is a
+ * gap between two awaits inside one spawn, which is why none of them was
+ * reachable from a test until the verdicts moved out of the component.
+ */
+describe("what a launch still in flight is allowed to do", () => {
+  const live: LaunchStanding = {
+    destroyed: false,
+    superseded: false,
+    status: "idle",
+  };
+  const landed = (over: Partial<LaunchStanding & { hasScreen: boolean }> = {}) =>
+    discardOpenedPty({ ...live, hasScreen: true, ...over });
+
+  it("installs the PTY it opened on a pane that is still there", () => {
+    expect(landed()).toBe(false);
+    expect(landed({ status: "ready" })).toBe(false);
+  });
+
+  /** Handing a live process to a component that is gone is a PTY nothing will
+   * ever kill. */
+  it("kills a PTY that came back to a pane with nobody in it", () => {
+    expect(landed({ destroyed: true })).toBe(true);
+    expect(landed({ hasScreen: false })).toBe(true);
+  });
+
+  /** Installing it would leave the pane on the process the user asked to
+   * replace, and the newer launch with nowhere to go. */
+  it("kills a PTY a relaunch has already superseded", () => {
+    expect(landed({ superseded: true })).toBe(true);
+  });
+
+  it("kills a PTY whose row has gone or been stopped", () => {
+    expect(landed({ status: null })).toBe(true);
+    expect(landed({ status: "stopped" })).toBe(true);
+  });
+});
+
+describe("whether a failed launch is the thread's failure", () => {
+  const live: LaunchStanding = {
+    destroyed: false,
+    superseded: false,
+    status: "idle",
+  };
+  const failed = (over: Partial<LaunchStanding> = {}) =>
+    launchFailureShows({ ...live, ...over });
+
+  it("marks the row when the thread is still the one that failed", () => {
+    expect(failed()).toBe(true);
+  });
+
+  /**
+   * `error` is a finished thread, and a finished thread never auto-respawns:
+   * writing it here would refuse the relaunch waiting behind this attempt for
+   * the failure of the attempt it replaced.
+   */
+  it("says nothing about a launch a relaunch had already replaced", () => {
+    expect(failed({ superseded: true })).toBe(false);
+  });
+
+  it("says nothing about a pane that is gone, or a thread already stopped", () => {
+    expect(failed({ destroyed: true })).toBe(false);
+    expect(failed({ status: "stopped" })).toBe(false);
+  });
+
+  /**
+   * Deliberately different from `discardOpenedPty`, which refuses a missing
+   * row. Nothing is being handed to a row here, only a status written onto one
+   * that is not there, and that changes nothing anybody can observe. Pinned
+   * because the two look like one predicate and are not.
+   */
+  it("does not treat a missing row as a reason to stay quiet", () => {
+    expect(failed({ status: null })).toBe(true);
+  });
+});
+
+describe("who starts the launch waiting behind this one", () => {
+  const at = (over: Partial<Parameters<typeof handsOffToRelaunch>[0]>) =>
+    handsOffToRelaunch({
+      destroyed: false,
+      spawned: false,
+      superseded: false,
+      ...over,
+    });
+
+  it("hands over when a relaunch landed and this attempt opened nothing", () => {
+    expect(at({ superseded: true })).toBe(true);
+  });
+
+  it("does nothing when it was never superseded", () => {
+    expect(at({})).toBe(false);
+  });
+
+  /** This attempt installed a PTY after all: replacing it is the newer
+   * launch's own job, and starting one here is two PTYs on one pane. */
+  it("does not hand over a pane it left a process on", () => {
+    expect(at({ superseded: true, spawned: true })).toBe(false);
+  });
+
+  it("does not launch into a pane that is gone", () => {
+    expect(at({ superseded: true, destroyed: true })).toBe(false);
+  });
+});
+
+describe("the grid the process opens on", () => {
+  it("uses the grid the pane measured", () => {
+    expect(ptyGrid(120, 40)).toEqual({ cols: 120, rows: 40 });
+  });
+
+  /** xterm answers zero until it has measured a cell, and a PTY opened at zero
+   * columns wraps every line onto itself. */
+  it("falls back to a real size when the pane measured nothing", () => {
+    expect(ptyGrid(0, 0)).toEqual({ cols: 80, rows: 24 });
+  });
+
+  /** Below the floor a pseudoconsole refuses the size outright. */
+  it("never goes under the smallest grid a pseudoconsole takes", () => {
+    expect(ptyGrid(1, 0.4)).toEqual({ cols: 2, rows: 1 });
+  });
+
+  it("notices a pane that re-measured while the launch was in flight", () => {
+    expect(gridDrifted({ cols: 80, rows: 24 }, { cols: 80, rows: 24 })).toBe(false);
+    expect(gridDrifted({ cols: 80, rows: 24 }, { cols: 120, rows: 24 })).toBe(true);
+    expect(gridDrifted({ cols: 80, rows: 24 }, { cols: 80, rows: 40 })).toBe(true);
+  });
+});
+
+describe("how far back the session scan looks", () => {
+  /** A resume touches its transcript as the CLI starts; a wider window only
+   * offers older files to mistake it for. */
+  it("looks back a second for a thread that already has a session", () => {
+    expect(sessionScanSince(10_000, true)).toBe(9_000);
+  });
+
+  /** A fresh conversation's first file can take seconds to land, and a window
+   * that closes before it does leaves the thread unbound for good. */
+  it("looks back five seconds for a thread that has none", () => {
+    expect(sessionScanSince(10_000, false)).toBe(5_000);
+  });
+
+  it("never asks for a stamp before the epoch", () => {
+    expect(sessionScanSince(200, false)).toBe(0);
   });
 });

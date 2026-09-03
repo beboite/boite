@@ -64,9 +64,16 @@ import type {
   WorktreeHold,
 } from "../types";
 import type { Project, Settings, Thread, TodoItem } from "$lib/types";
-import type { CommitState, PrLookup } from "$lib/features/git/api";
+import type {
+  BranchInfo,
+  ChangeEntry,
+  Commit,
+  CommitState,
+  PrLookup,
+} from "$lib/features/git/api";
+import type { ChangedPath, DirEntry, SearchHit } from "$lib/features/explorer/api";
 import type { Platform, ShellOption } from "$lib/storage/platform.svelte";
-import { Socket, type ConnState, type SocketOptions } from "./socket";
+import { Socket, type ConnState, type RpcReply, type SocketOptions } from "./socket";
 
 interface RawSession {
   id: string;
@@ -140,7 +147,7 @@ export class RemoteBackend implements Backend {
   ) {
     const socket = new Socket(url, token, onState, onAuthRejected, options);
     this.#socket = socket;
-    const rpc = (m: string, p?: unknown) => socket.rpc(m, p);
+    const rpc = <T = RpcReply>(m: string, p?: unknown) => socket.rpc<T>(m, p);
     const keyToThread = this.#keyToThread;
     const threadIdOf = (key: string) => keyToThread.get(key) ?? key;
 
@@ -300,13 +307,16 @@ export class RemoteBackend implements Backend {
 
     this.git = {
       repoInfo: (path) => rpc("git.repoInfo", { path }),
-      findRepos: (path) => rpc("git.findRepos", { path }).then((r) => r.repos),
-      branches: (path) => rpc("git.branches", { path }).then((r) => r.branches),
+      findRepos: (path) =>
+        rpc<{ repos: string[] }>("git.findRepos", { path }).then((r) => r.repos),
+      branches: (path) =>
+        rpc<{ branches: BranchInfo[] }>("git.branches", { path }).then((r) => r.branches),
       switchBranch: (path, name, create, stash) =>
         rpc("git.switchBranch", { path, name, create, stash}),
-      status: (path) => rpc("git.status", { path }).then((r) => r.entries),
+      status: (path) =>
+        rpc<{ entries: ChangeEntry[] }>("git.status", { path }).then((r) => r.entries),
       log: (path, limit, skip) =>
-        rpc("git.log", { path, limit, skip }).then((r) => r.commits),
+        rpc<{ commits: Commit[] }>("git.log", { path, limit, skip }).then((r) => r.commits),
       // A failure here used to borrow `known: false`, which is the repository
       // saying it has never seen the sha, and the chip drew "not pushed" over a
       // commit that was on the remote. The shape is still filled in, since the
@@ -338,7 +348,8 @@ export class RemoteBackend implements Backend {
       unstage: (path, files) => rpc("git.unstage", { path, files }).then(() => {}),
       discard: (path, files, untracked) =>
         rpc("git.discard", { path, files, untracked }).then(() => {}),
-      commit: (path, message) => rpc("git.commit", { path, message }).then((r) => r.sha),
+      commit: (path, message) =>
+        rpc<{ sha: string }>("git.commit", { path, message }).then((r) => r.sha),
       fetch: (path) => rpc("git.fetch", { path }).then(() => {}),
       push: (path) => rpc("git.push", { path }).then(() => {}),
       pull: (path) => rpc("git.pull", { path }).then(() => {}),
@@ -366,7 +377,7 @@ export class RemoteBackend implements Backend {
         rpc("worktree.list", { repo }).then((r) => (r.worktrees ?? []) as WorktreeEntry[]),
       claim: (path, name) => rpc("worktree.claim", { path, name }).then(() => {}),
       reserve: (path, name) => rpc("worktree.reserve", { path, name }).then(() => {}),
-      hold: (path) => rpc("worktree.hold", { path }).then((r) => r as WorktreeHold),
+      hold: (path) => rpc<WorktreeHold>("worktree.hold", { path }),
       remove: (repo, path, force) =>
         rpc("worktree.remove", { repo, path, force }).then(() => {}),
       sizes: (paths) =>
@@ -374,10 +385,12 @@ export class RemoteBackend implements Backend {
     };
 
     this.explorer = {
-      readDir: (path) => rpc("fs.readDir", { path }).then((r) => r.entries),
-      changedPaths: (path) => rpc("git.changedPaths", { path }).then((r) => r.paths),
+      readDir: (path) =>
+        rpc<{ entries: DirEntry[] }>("fs.readDir", { path }).then((r) => r.entries),
+      changedPaths: (path) =>
+        rpc<{ paths: ChangedPath[] }>("git.changedPaths", { path }).then((r) => r.paths),
       search: (path, query, limit) =>
-        rpc("fs.search", { path, query, limit }).then((r) => r.hits),
+        rpc<{ hits: SearchHit[] }>("fs.search", { path, query, limit }).then((r) => r.hits),
     };
 
     this.editor = {
@@ -730,7 +743,7 @@ export class RemoteBackend implements Backend {
 
     this.pairing = {
       list: () => rpc("pairing.list").then((r) => (r.pairings ?? []) as PairedDevice[]),
-      invite: (options) => rpc("pairing.create", options).then((r) => r as PairingInvite),
+      invite: (options) => rpc<PairingInvite>("pairing.create", options),
       revoke: (id) => rpc("pairing.revoke", { id }).then((r) => r.revoked === true),
     };
   }
@@ -789,8 +802,8 @@ export class RemoteBackend implements Backend {
   // second device may be running at the same time.
   claimAgentRequest(requestId: string): Promise<boolean> {
     return this.#socket
-      .rpc("agent.claimRequest", { requestId })
-      .then((r) => Boolean((r as { claimed?: boolean }).claimed));
+      .rpc<{ claimed?: boolean }>("agent.claimRequest", { requestId })
+      .then((r) => Boolean(r.claimed));
   }
 
   answerAgentRequest(requestId: string, payload: Record<string, unknown>): Promise<void> {

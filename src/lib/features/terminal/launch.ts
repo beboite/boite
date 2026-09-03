@@ -3,13 +3,15 @@ import { isFinished } from "$lib/domain/thread-status";
 import { withPowershellFastFlags } from "$lib/features/thread/shell-wrap";
 
 /**
- * The two decisions inside opening a terminal, taken out of the opening.
+ * The decisions inside opening a terminal, taken out of the opening.
  *
  * `spawn()` in Terminal.svelte is long because it sequences side effects on a
  * dozen pieces of component state, and most of that cannot move without
- * inventing a class to hold them. These two can, and they are the two worth
- * moving: they are decisions rather than effects, they are where every bug in
- * that function has been, and until now neither could be tested at all.
+ * inventing a class to hold them. What is here is the part that can: verdicts
+ * rather than effects, no DOM, no store and no clock, which is what makes them
+ * the only part of a launch a test can reach at all. The component keeps the
+ * ordering and the writes; every question it asks on the way through is
+ * answered here.
  *
  * Whether to open, and whether opening means attaching to something already
  * running, has been wrong in three distinguishable ways: a remote thread the
@@ -40,20 +42,20 @@ export interface SpawnConditions {
   parked: boolean;
 }
 
-export type SpawnVerdict =
-  | {
-      go: false;
-      /**
-       * `debug` for a refusal that is transient by construction, `info` for one
-       * that is not. The difference matters more than it looks: `debug` is
-       * compiled out of a release build, and a terminal that never opens and
-       * says nothing about it is the one failure the log could not explain,
-       * which is how it went three releases without being found.
-       */
-      level: "debug" | "info";
-      why: string;
-    }
-  | { go: true; reattaching: boolean };
+export type SpawnVerdict = SpawnRefusal | { go: true; reattaching: boolean };
+
+export type SpawnRefusal = {
+  go: false;
+  /**
+   * `debug` for a refusal that is transient by construction, `info` for one
+   * that is not. The difference matters more than it looks: `debug` is
+   * compiled out of a release build, and a terminal that never opens and says
+   * nothing about it is the one failure the log could not explain, which is how
+   * it went three releases without being found.
+   */
+  level: "debug" | "info";
+  why: string;
+};
 
 /**
  * Whether to open a terminal for this thread, and whether that means attaching.
@@ -133,4 +135,133 @@ export function launchPlan(input: LaunchInput): LaunchPlan {
     };
   }
   return plan;
+}
+
+/**
+ * Where a launch stands against the pane it started from.
+ *
+ * A launch awaits three times before it has anything to install: the thread's
+ * directory, the resume lookup, the PTY itself. The pane can be unmounted, the
+ * row can be stopped and a relaunch can claim the pane in any of those gaps, so
+ * what finally comes back may have nowhere to go. `spawn()` asks about that at
+ * three moments and gets three different answers, which is why this is three
+ * predicates over one shape rather than one flag. Collapsing them is the
+ * refactor to resist: each one is the exact set of states in which its own side
+ * effect is still wanted, and they are not the same set.
+ */
+export interface LaunchStanding {
+  /** The pane was unmounted while this launch was in flight. */
+  destroyed: boolean;
+  /** A newer launch claimed the pane: the generation moved under this one. */
+  superseded: boolean;
+  /** What the row says now, or null when the row is gone. */
+  status: ThreadStatus | null;
+}
+
+/**
+ * Whether the PTY that just came back has to be killed rather than installed.
+ *
+ * Installing it would leave the pane on a process the user asked to replace and
+ * the newer launch with nowhere to go, or hand a live process to a component
+ * that is already gone — which is a PTY nothing will ever kill.
+ *
+ * The emulator is part of it and the row's absence is too: without a screen
+ * there is nothing to attach the output to, and a row that has gone or been
+ * stopped is a thread whose process was already decided against.
+ */
+export function discardOpenedPty(
+  c: LaunchStanding & { /** The pane still has its emulator. */ hasScreen: boolean },
+): boolean {
+  return (
+    c.destroyed ||
+    !c.hasScreen ||
+    c.status === null ||
+    c.status === "stopped" ||
+    c.superseded
+  );
+}
+
+/**
+ * Whether a launch that threw leaves the row `error`.
+ *
+ * Not for a launch that has already been superseded: an error status is a
+ * finished thread, and the relaunch waiting behind this one would be refused for
+ * the failure of the attempt it replaced.
+ *
+ * A row that has gone is deliberately not a refusal here, unlike above. Writing
+ * a status onto a thread that no longer exists changes nothing anyone can
+ * observe, and the check would only claim to guard something.
+ */
+export function launchFailureShows(c: LaunchStanding): boolean {
+  return !c.destroyed && !c.superseded && c.status !== "stopped";
+}
+
+/**
+ * Whether this attempt owes the pane one more launch on its way out.
+ *
+ * A relaunch that landed mid-flight is a launch the user is waiting for that has
+ * not started yet: this attempt read its own generation as stale, dropped
+ * whatever it had opened, and is the only thing left that can hand over. Not
+ * when it did install a PTY (`spawned`), which is the newer launch's own job to
+ * replace, and not into a pane that is gone.
+ */
+export function handsOffToRelaunch(c: {
+  destroyed: boolean;
+  /** This attempt installed a PTY after all. */
+  spawned: boolean;
+  superseded: boolean;
+}): boolean {
+  return !c.destroyed && !c.spawned && c.superseded;
+}
+
+/** A terminal grid, in cells. */
+export interface Grid {
+  cols: number;
+  rows: number;
+}
+
+/**
+ * The grid the process is told to open on.
+ *
+ * xterm reports zero for both until it has measured a cell, and a PTY opened at
+ * zero columns is a process wrapping every line onto itself. The floors are the
+ * smallest grid a pseudoconsole accepts rather than anything meaningful to look
+ * at: this is the fallback for a pane that answered nothing, not a size to lay
+ * out for.
+ */
+export function ptyGrid(cols: number, rows: number): Grid {
+  return { cols: Math.max(2, cols || 80), rows: Math.max(1, rows || 24) };
+}
+
+/**
+ * Whether the pane has re-measured onto a different grid than the one the
+ * process was told about.
+ *
+ * The grid is read before the resume lookup, and the worktree wait in front of
+ * that is seconds now rather than the instant a symlink took, so the pane has
+ * time to finish laying out and re-measure while the launch is still on its way.
+ * Every `onResize` firing in that window is dropped for want of a pty id to
+ * match, and nothing reconciled afterwards: the process spent its life drawing
+ * to a narrower grid than the one on screen, which looks like a strip of dead
+ * pane down the right-hand side that only a window resize clears.
+ */
+export function gridDrifted(told: Grid, now: Grid): boolean {
+  return now.cols !== told.cols || now.rows !== told.rows;
+}
+
+/**
+ * How far back the session scan looks for the conversation this launch opened.
+ *
+ * A thread that already carries a session id is being resumed, and the CLI
+ * touches that transcript as it starts, so a second is enough and a wider window
+ * only offers older files to mistake it for. A thread carrying none is a fresh
+ * conversation whose first file may take several seconds to land, and a window
+ * that closes before it does leaves the thread unbound for the rest of its life
+ * — which means its next relaunch opens a blank agent.
+ *
+ * Clamped at zero because the argument is a clock reading, and a machine whose
+ * clock sits near the epoch would otherwise ask for a negative stamp.
+ */
+export function sessionScanSince(spawnedAt: number, hasSession: boolean): number {
+  return Math.max(0, spawnedAt - (hasSession ? 1000 : 5000));
 }

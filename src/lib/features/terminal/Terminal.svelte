@@ -51,7 +51,17 @@
     getDetector,
     resolveKey,
   } from "$lib/features/thread/session";
-  import { decideSpawn, launchPlan } from "./launch";
+  import {
+    decideSpawn,
+    discardOpenedPty,
+    gridDrifted,
+    handsOffToRelaunch,
+    launchFailureShows,
+    launchPlan,
+    ptyGrid,
+    sessionScanSince,
+    type SpawnRefusal,
+  } from "./launch";
   import { keyIntent } from "./key-intent";
   import { claimTypedPrompt } from "$lib/features/thread/typedPrompt";
   import { isTerminalReport } from "./reports";
@@ -70,7 +80,7 @@
   import { longPress } from "$lib/shared/actions/longPress";
   import ContextMenu from "$lib/shared/components/ContextMenu.svelte";
   import type { ContextMenuItem } from "$lib/shared/components/ContextMenu.svelte";
-  import type { Thread } from "$lib/types";
+  import type { Thread, ThreadStatus } from "$lib/types";
   import Keyboard from "@lucide/svelte/icons/keyboard";
 
   type Props = { thread: Thread; visible: boolean; focused: boolean };
@@ -322,6 +332,13 @@
 
   function currentThread(): Thread | null {
     return app.threadById(thread.id);
+  }
+
+  // What the row says now, or null when the row is gone. Read fresh at each of
+  // the points a launch has to be judged against it: the row is written from
+  // outside this component, and a launch spends seconds between two of them.
+  function currentStatus(): ThreadStatus | null {
+    return currentThread()?.status ?? null;
   }
 
   function shouldUsePty(targetPtyId: string | null): targetPtyId is string {
@@ -917,9 +934,153 @@
     touches.end(e.touches);
   }
 
+  // A refusal, said at the level the verdict chose. Both levels are load-bearing
+  // and the choice is `launch.ts`'s: `debug` is compiled out of a release build,
+  // so a refusal written there is a terminal that never opens and never says so.
+  function sayNotOpening(refusal: SpawnRefusal) {
+    const said = `${thread.label}: not opening — ${refusal.why}`;
+    if (refusal.level === "info") logger.info("spawn", said);
+    else logger.debug("spawn", said);
+  }
+
+  /**
+   * The emulator this launch will open onto, measured and fitted — or nothing,
+   * with the reason logged and a retry already armed.
+   *
+   * Three ways a pane is not ready to carry a process, and all three are
+   * transient: the mount has not run, the box has no size worth measuring, or
+   * `fit()` threw on glyph metrics that are not there yet. None of them is a
+   * launch that failed, so each arms the retry instead, which is what lets a
+   * pane open as soon as it has a box rather than staying black.
+   */
+  function fittedScreen(): Terminal | null {
+    if (!term || !fit) {
+      logger.warn(
+        "spawn",
+        `${thread.label}: skip — term=${!!term} fit=${!!fit}`,
+      );
+      scheduleSpawnRetry();
+      return null;
+    }
+    if (!hasUsableTerminalSize()) {
+      logger.debug("spawn", `${thread.label}: retry — terminal not sized yet`);
+      scheduleSpawnRetry();
+      return null;
+    }
+    try {
+      fit.fit();
+    } catch (err) {
+      logger.warn("spawn", `${thread.label}: fit threw, retrying`, String(err));
+      scheduleSpawnRetry();
+      return null;
+    }
+    return term;
+  }
+
+  // The launch this pane is now measuring, with the previous one written off.
+  //
+  // A relaunch landing on a pane whose previous launch never printed a byte:
+  // that measurement is over, and leaving it pending would let the older launch
+  // write the line for the newer one's first output.
+  function beginTiming(): SpawnTiming {
+    launchTiming?.report("abandoned", { because: "relaunched" });
+    const timing = new SpawnTiming(thread.label);
+    launchTiming = timing;
+    timing.start();
+    return timing;
+  }
+
+  // How long the pane sat there before its launch started, or null when it was
+  // never mounted. A pane mounted seconds before the launch spent them being
+  // retried for want of a measured size, and that time is invisible in the
+  // phases: they only start when the launch does.
+  function msSinceMount(): number | null {
+    return mountedAt ? Date.now() - mountedAt : null;
+  }
+
+  /**
+   * Waits for the thread's directory, saying so on screen only if the wait is
+   * long enough to be mistaken for a terminal that failed to open.
+   *
+   * This wait is what lets a just-created thread appear in the sidebar the
+   * moment it is clicked: the directory is settled off the click path, and only
+   * the PTY blocks on it. It used to be a symlink and finished before anyone
+   * could see it. It now copies the build output, which is seconds on a large
+   * repository. Announced on a delay rather than always, so the ordinary case is
+   * still a clean screen.
+   */
+  async function awaitThreadDirectory(screen: Terminal) {
+    const ready = threadDirectoryReady(thread.id);
+    let notice: ReturnType<typeof setTimeout> | null = setTimeout(() => {
+      notice = null;
+      if (!destroyed) screen.write("\r\n[boite] preparing an isolated worktree…\r\n");
+    }, 400);
+    await ready;
+    if (notice) clearTimeout(notice);
+  }
+
+  /**
+   * The opening line a CLI that takes no positional prompt carries here instead.
+   *
+   * Typed and left there, except for a spawn an agent asked for: that caller
+   * already counts the worker as started, so Boite presses Enter for it. A move
+   * note and a todo hand-off still leave the Enter to the user, the same rule the
+   * Todo panel follows, because an agent turn is expensive and hard to call back.
+   *
+   * The Enter is checked against the pane again before it goes out. The text is
+   * an await away, and a relaunch or a close inside that window would otherwise
+   * submit into whatever process holds the pane by then.
+   *
+   * Never on a reattach. That agent is already mid-conversation, and claiming is
+   * one-shot so a respawn cannot repeat it either.
+   */
+  function typeOpeningPrompt(reattaching: boolean, generation: number) {
+    if (reattaching) return;
+    const opening = claimTypedPrompt(thread.id);
+    const id = ptyId;
+    if (!opening || !id) return;
+    void (async () => {
+      try {
+        await ptyWrite(id, encoder.encode(opening.text));
+        if (!opening.submit) return;
+        if (destroyed || generation !== spawnGeneration || ptyId !== id) return;
+        await ptyWrite(id, encoder.encode("\r"));
+      } catch (err) {
+        logger.warn("spawn", `could not type the opening prompt`, String(err));
+      }
+    })();
+  }
+
+  /**
+   * Points the session monitor at the run that just started.
+   *
+   * An attach gets one too. The agent it is attaching to may have started a
+   * conversation nobody wrote down — a thread parked before its first scan could
+   * bind, a workspace switched away from and back — and skipping the monitor
+   * there left that thread unbound for the rest of its life, so its next
+   * relaunch opened a blank agent. Nothing is bound twice: a scan that returns
+   * the session already on the row is a no-op.
+   */
+  function armSessionMonitor(cwd: string, spawnedAt: number) {
+    const detector = getDetector(thread);
+    if (!detector || !ptyId) return;
+    stopSessionMonitor();
+    sessionMonitor = startSessionMonitor({
+      threadId: thread.id,
+      cwd,
+      // Same resolution the detector was picked with, so the two never disagree
+      // on which agent this thread is.
+      kind: resolveKey(thread) as string,
+      detector,
+      since: sessionScanSince(spawnedAt, !!thread.sessionId),
+      targetPtyId: ptyId,
+      isPtyCurrent: (id) => ptyId === id,
+      lastActivityAt: () => Math.max(lastInputAt, lastOutputAt),
+    });
+  }
+
   async function spawn(reattach = false) {
     const generation = spawnGeneration;
-    const current = currentThread();
     // Whether to open at all, and whether opening means attaching to something
     // already running. Both live in `launch.ts`, where they can be tested: every
     // bug this function has had was in that verdict, and it was reachable only
@@ -928,44 +1089,22 @@
       spawned,
       spawning,
       destroyed,
-      status: current?.status ?? null,
+      status: currentStatus(),
       reattach,
       clientStatus: clientStatus(),
       parked: parkedLocal.has(thread.id),
     });
     if (!verdict.go) {
-      const said = `${thread.label}: not opening — ${verdict.why}`;
-      if (verdict.level === "info") logger.info("spawn", said);
-      else logger.debug("spawn", said);
+      sayNotOpening(verdict);
       return;
     }
     const reattaching = verdict.reattaching;
-    if (!term || !fit) {
-      logger.warn(
-        "spawn",
-        `${thread.label}: skip — term=${!!term} fit=${!!fit}`,
-      );
-      scheduleSpawnRetry();
-      return;
-    }
-
-    if (!hasUsableTerminalSize()) {
-      logger.debug("spawn", `${thread.label}: retry — terminal not sized yet`);
-      scheduleSpawnRetry();
-      return;
-    }
-
-    try {
-      fit.fit();
-    } catch (err) {
-      logger.warn("spawn", `${thread.label}: fit threw, retrying`, String(err));
-      scheduleSpawnRetry();
-      return;
-    }
+    const screen = fittedScreen();
+    if (!screen) return;
 
     const project = app.projects.find((p) => p.id === thread.projectId);
     if (!project) {
-      term.write("\r\n[boite] no project found\r\n");
+      screen.write("\r\n[boite] no project found\r\n");
       return;
     }
 
@@ -984,13 +1123,7 @@
     // idle/stopped, which is the reshuffle this exists to stop.
     if (thread.sessionId && !reattaching) noteThreadWaking(thread.id);
 
-    // A relaunch landing on a pane whose previous launch never printed a byte:
-    // that measurement is over, and leaving it pending would let the older
-    // launch write the line for the newer one's first output.
-    launchTiming?.report("abandoned", { because: "relaunched" });
-    const timing = new SpawnTiming(thread.label);
-    launchTiming = timing;
-    timing.start();
+    const timing = beginTiming();
     // Whether this launch got as far as installing its PTY, which is what tells
     // an abandoned launch apart from one still on its way to a line of its own.
     let installed = false;
@@ -998,7 +1131,7 @@
     // Both read now rather than at report time, because both are gone by then:
     // the line is written after the first byte, and a successful install has
     // already put the retry count back to zero.
-    const sinceMountMs = mountedAt ? Date.now() - mountedAt : null;
+    const sinceMountMs = msSinceMount();
     const retries = spawnRetryCount;
 
     // Everything from here down runs with the flag latched, so it is wrapped:
@@ -1009,25 +1142,10 @@
     // a silent no-op. The component remount used to cure that; there is no
     // remount any more.
     try {
-      // A just-created thread may still be having its worktree made. This wait
-      // is what lets it appear in the sidebar the moment it is clicked: the
-      // directory is settled off the click path, and only the PTY blocks on it.
-      // Held after `spawning` is set so a retry cannot slip past and open a
-      // second PTY in the meantime.
-      //
-      // It used to be a symlink and finished before anyone could see it. It now
-      // copies the build output, which is seconds on a large repository, and an
-      // unexplained black screen for that long reads as a terminal that failed
-      // to open. Announced on a delay rather than always, so the ordinary case
-      // is still a clean screen.
-      const ready = threadDirectoryReady(thread.id);
-      const screen = term;
-      let notice: ReturnType<typeof setTimeout> | null = setTimeout(() => {
-        notice = null;
-        if (!destroyed) screen.write("\r\n[boite] preparing an isolated worktree…\r\n");
-      }, 400);
-      await ready;
-      if (notice) clearTimeout(notice);
+      // A just-created thread may still be having its worktree made. Held after
+      // `spawning` is set so a retry cannot slip past and open a second PTY in
+      // the meantime.
+      await awaitThreadDirectory(screen);
       // Marked whether or not it waited: a zero here is the answer to "was it
       // the worktree?", and only a phase that is always present can give it.
       timing.mark("worktree");
@@ -1037,15 +1155,14 @@
       // otherwise: the terminal opens, it works, and it is writing in the
       // user's own checkout rather than in an isolated one.
       if (worktreeWaitTimedOut(thread.id)) {
-        term.write("\r\n[boite] no worktree came back — starting in the project folder\r\n");
+        screen.write("\r\n[boite] no worktree came back — starting in the project folder\r\n");
       }
       // Relaunched while the directory was being settled. Nothing has been
       // opened yet, so handing over to the newer launch — which the `finally`
       // below does — is the whole cleanup.
       if (generation !== spawnGeneration) return;
 
-      const cols = Math.max(2, term.cols || 80);
-      const rows = Math.max(1, term.rows || 24);
+      const grid = ptyGrid(screen.cols, screen.rows);
 
       // Resolved once: the session lookup below matches on an exact cwd, so a
       // thread whose PTY starts in a worktree and whose transcripts are searched
@@ -1133,8 +1250,8 @@
               cwd,
               cmd: plan.cmd,
               args: plan.args,
-              cols,
-              rows,
+              cols: grid.cols,
+              rows: grid.rows,
               wrap,
             },
             meta: {
@@ -1147,16 +1264,13 @@
           thread.origin,
         );
         timing.mark("pty");
-        const current = currentThread();
         if (
-          destroyed ||
-          !term ||
-          !current ||
-          current.status === "stopped" ||
-          // A relaunch landed while this one was opening. Installing this PTY
-          // would leave the pane on the process the user asked to replace, and
-          // the newer launch with nowhere to go.
-          generation !== spawnGeneration
+          discardOpenedPty({
+            destroyed,
+            hasScreen: !!term,
+            status: currentStatus(),
+            superseded: generation !== spawnGeneration,
+          })
         ) {
           void ptyKill(nextPtyId, true).catch(() => {});
           return;
@@ -1173,46 +1287,17 @@
         app.setThreadPtyId(thread.id, ptyId);
         app.setThreadStatus(thread.id, "ready");
         // The grid the process was told about, against the grid it landed in.
-        //
-        // `cols` and `rows` were read before the resume lookup, and the worktree
-        // wait above them is seconds now rather than the instant a symlink took,
-        // so the pane has time to finish laying out and re-measure while this
-        // launch is still on its way. Every `onResize` firing in that window is
-        // dropped: `shouldUsePty` has no pty id to match yet. Nothing reconciled
-        // afterwards, so the process spent its life drawing to a narrower grid
-        // than the one on screen, and what that looks like is a strip of dead
-        // pane down the right-hand side that only a window resize clears.
+        // Why they can differ is `gridDrifted`'s own note.
         //
         // Done here rather than by widening `shouldUsePty`, which guards writes
         // to a pty this pane may no longer own. This runs on the id it just
         // installed, on the line that installed it.
-        if (term.cols !== cols || term.rows !== rows) {
-          void ptyResize(nextPtyId, term.cols, term.rows).catch((err) => {
+        if (gridDrifted(grid, screen)) {
+          void ptyResize(nextPtyId, screen.cols, screen.rows).catch((err) => {
             logger.warn("spawn", `${thread.label}: could not resize`, String(err));
           });
         }
-        // A thread whose CLI takes no positional prompt carries its opening line
-        // here instead. Agent-initiated spawns submit after the text lands; a
-        // move note or a todo hand-off still leaves Enter to the user.
-        //
-        // Only on a real spawn. Reattaching means the agent is already mid-
-        // conversation, and claiming is one-shot so a respawn cannot repeat it.
-        if (!reattaching) {
-          const opening = claimTypedPrompt(thread.id);
-          const id = ptyId;
-          if (opening && id) {
-            void (async () => {
-              try {
-                await ptyWrite(id, encoder.encode(opening.text));
-                if (!opening.submit) return;
-                if (destroyed || generation !== spawnGeneration || ptyId !== id) return;
-                await ptyWrite(id, encoder.encode("\r"));
-              } catch (err) {
-                logger.warn("spawn", `could not type the opening prompt`, String(err));
-              }
-            })();
-          }
-        }
+        typeOpeningPrompt(reattaching, generation);
         // The line is written on the first byte rather than here, because a PTY
         // that came back in 40ms and printed nothing for eight seconds is the
         // case worth seeing, and a line written here calls that one fast. The
@@ -1222,13 +1307,12 @@
         else timing.opened(() => reportLaunch({ output: "none" }));
       } catch (err) {
         term?.write(`\r\n[boite] spawn failed: ${err}\r\n`);
-        // Not for a launch that has already been superseded: an error status is
-        // a finished thread, and the relaunch waiting behind this one would be
-        // refused for the failure of the attempt it replaced.
         if (
-          !destroyed &&
-          generation === spawnGeneration &&
-          currentThread()?.status !== "stopped"
+          launchFailureShows({
+            destroyed,
+            status: currentStatus(),
+            superseded: generation !== spawnGeneration,
+          })
         ) {
           app.setThreadStatus(thread.id, "error");
         }
@@ -1236,29 +1320,7 @@
         return;
       }
 
-      // An attach gets one too. The agent it is attaching to may have started a
-      // conversation nobody wrote down — a thread parked before its first scan
-      // could bind, a workspace switched away from and back — and skipping the
-      // monitor there left that thread unbound for the rest of its life, so its
-      // next relaunch opened a blank agent. Nothing is bound twice: a scan that
-      // returns the session already on the row is a no-op.
-      const detector = getDetector(thread);
-      if (detector && ptyId) {
-        const since = Math.max(0, spawnedAt - (thread.sessionId ? 1000 : 5000));
-        stopSessionMonitor();
-        sessionMonitor = startSessionMonitor({
-          threadId: thread.id,
-          cwd,
-          // Same resolution the detector was picked with, so the two never
-          // disagree on which agent this thread is.
-          kind: resolveKey(thread) as string,
-          detector,
-          since,
-          targetPtyId: ptyId,
-          isPtyCurrent: (id) => ptyId === id,
-          lastActivityAt: () => Math.max(lastInputAt, lastOutputAt),
-        });
-      }
+      armSessionMonitor(cwd, spawnedAt);
     } finally {
       spawning = false;
       // Every way out of the block above that did not install a PTY: destroyed
@@ -1270,7 +1332,15 @@
       // Whatever this attempt did with its own PTY, the launch the user is
       // actually waiting for has not started yet, and this is the attempt that
       // has to hand over to it.
-      if (!destroyed && !spawned && generation !== spawnGeneration) void spawn();
+      if (
+        handsOffToRelaunch({
+          destroyed,
+          spawned,
+          superseded: generation !== spawnGeneration,
+        })
+      ) {
+        void spawn();
+      }
     }
   }
 

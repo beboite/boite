@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { AgentTurnQuery } from "$lib/backend/types";
 import type { Thread, ThreadStatus } from "$lib/types";
 
 /**
@@ -17,7 +18,12 @@ const h = vi.hoisted(() => ({
   written: [] as Array<{ id: string; status: string }>,
   notified: [] as string[],
   emulators: new Set<string>(),
-  turn: null as { state: string } | null,
+  turn: null as { state: string; waitingFor?: string | null } | null,
+  // Mutable so a test can arm auto-sleep; the default is the setting off.
+  settings: { idleTimeoutMinutes: 0, idleAutocloseByIcon: {} as Record<string, boolean> },
+  parked: new Map<string, unknown>(),
+  killed: [] as string[],
+  polled: [] as AgentTurnQuery[][],
   // One fake group per test, holding the browser leaves the sweep reads.
   leaves: [] as Array<{ paneId: string; content: Record<string, unknown> }>,
   shown: new Set<string>(),
@@ -50,7 +56,11 @@ vi.mock("$lib/backend", () => ({
 }));
 
 vi.mock("$lib/features/settings/store.svelte", () => ({
-  settings: { state: { idleTimeoutMinutes: 0, idleAutocloseByIcon: {} } },
+  settings: {
+    get state() {
+      return h.settings;
+    },
+  },
 }));
 
 vi.mock("$lib/features/panes/store.svelte", () => ({
@@ -65,7 +75,6 @@ vi.mock("$lib/features/panes/store.svelte", () => ({
       return true;
     },
   },
-  leavesOf: () => [],
   threadLeavesOf: () => [],
   leafNodesOf: (root: { leaves: unknown[] }) => root.leaves,
 }));
@@ -74,7 +83,7 @@ vi.mock("$lib/features/panes/visible", () => ({
   paneIsShown: (paneId: string) => h.shown.has(paneId),
 }));
 
-vi.mock("$lib/backend/tauri/parked", () => ({ parkedLocal: new Map() }));
+vi.mock("$lib/backend/tauri/parked", () => ({ parkedLocal: h.parked }));
 
 // The case the whole backstop exists for: a thread whose pane is gone has no
 // emulator holding its rows, and nothing can be read off it at all.
@@ -92,12 +101,24 @@ vi.mock("$lib/storage/notify", () => ({
 
 vi.mock("$lib/i18n/index.svelte", () => ({ t: (key: string) => key }));
 vi.mock("$lib/shared/icons/detect", () => ({ detectIconKey: () => null }));
-vi.mock("$lib/storage/pty", () => ({ ptyKill: () => Promise.resolve() }));
+vi.mock("$lib/storage/pty", () => ({
+  ptyKill: (id: string) => {
+    h.killed.push(id);
+    return Promise.resolve();
+  },
+}));
 vi.mock("$lib/shared/services/logger.svelte", () => ({
   logger: { debug() {}, info() {}, warn() {}, error() {} },
 }));
 vi.mock("./agent-turns", () => ({
-  agentTurns: { stateOf: () => h.turn, poll: () => {}, cwdOf: () => null },
+  agentTurns: {
+    stateOf: () => h.turn,
+    poll: (_backend: unknown, queries: AgentTurnQuery[]) => {
+      h.polled.push(queries);
+    },
+    wake: () => {},
+    cwdOf: () => null,
+  },
 }));
 
 type Module = typeof import("./statusEngine");
@@ -135,6 +156,12 @@ beforeEach(async () => {
   h.notified = [];
   h.emulators = new Set();
   h.turn = null;
+  h.settings = { idleTimeoutMinutes: 0, idleAutocloseByIcon: {} };
+  // Cleared rather than replaced: `vi.mock` hands the module this exact map
+  // once, and a fresh instance here would never reach it.
+  h.parked.clear();
+  h.killed = [];
+  h.polled = [];
   h.leaves = [];
   h.shown = new Set();
   h.closed = [];
@@ -228,6 +255,148 @@ describe("a thread nothing can be read off", () => {
 
     expect(t.status).toBe("ready");
     expect(h.notified).toEqual([]);
+  });
+});
+
+describe("a thread with no live PTY", () => {
+  it("drops a live status back to idle", () => {
+    // Nothing is attached, so nothing could ever be read off it again. Any of
+    // the three live statuses left on the row would stay there for good.
+    for (const status of ["running", "waiting", "ready"] as const) {
+      h.threads = [thread({ id: status, ptyId: null, status })];
+      h.written = [];
+      mod.statusEngine.start();
+      vi.advanceTimersByTime(TICK_MS);
+      mod.statusEngine.stop();
+      expect(h.written).toEqual([{ id: status, status: "idle" }]);
+    }
+  });
+
+  it("leaves a status that is not this loop's alone", () => {
+    const t = thread({ ptyId: null, status: "stopped" });
+    h.threads = [t];
+    mod.statusEngine.start();
+    vi.advanceTimersByTime(TICK_MS * 4);
+    expect(h.written).toEqual([]);
+    expect(t.status).toBe("stopped");
+  });
+
+  it("keeps a parked local thread exactly as it is", () => {
+    // A workspace switch detaches the PTY without killing it. Demoting the row
+    // would flatten a ping the user is meant to still see when it reattaches.
+    const t = thread({ ptyId: null, status: "running" });
+    h.threads = [t];
+    h.parked.set(t.id, {});
+    mod.statusEngine.start();
+    vi.advanceTimersByTime(TICK_MS * 4);
+    expect(h.written).toEqual([]);
+    expect(t.status).toBe("running");
+  });
+});
+
+describe("a finished thread", () => {
+  it("is never judged again", () => {
+    const t = thread({ status: "done" });
+    h.threads = [t];
+    mod.statusEngine.start();
+    vi.advanceTimersByTime(TICK_MS * 8);
+    expect(h.written).toEqual([]);
+    expect(t.status).toBe("done");
+  });
+});
+
+describe("the poll", () => {
+  it("asks only about the threads running an agent", () => {
+    h.threads = [
+      thread({ id: "agent", iconKey: "cursor", sessionId: "s1" }),
+      thread({ id: "shell", iconKey: "terminal" }),
+      thread({ id: "unknown", iconKey: null }),
+    ];
+    mod.statusEngine.start();
+    vi.advanceTimersByTime(TICK_MS);
+
+    expect(h.polled).toEqual([[{ kind: "cursor", sessionId: "s1", cwd: "" }]]);
+  });
+
+  it("names a session it has not captured yet as null", () => {
+    h.threads = [thread({ sessionId: null })];
+    mod.statusEngine.start();
+    vi.advanceTimersByTime(TICK_MS);
+
+    expect(h.polled).toEqual([[{ kind: "cursor", sessionId: null, cwd: "" }]]);
+  });
+});
+
+describe("what a waiting thread is blocked on", () => {
+  it("is remembered while the dialog is up and dropped when it goes", () => {
+    const t = thread({ iconKey: "claude", status: "running" });
+    h.threads = [t];
+    h.emulators.add(t.id);
+    h.turn = { state: "waiting", waitingFor: "  Bash(rm -rf)  " };
+    mod.statusEngine.start();
+
+    vi.advanceTimersByTime(TICK_MS);
+    expect(mod.waitingReasonFor(t.id)).toBe("Bash(rm -rf)");
+
+    h.turn = { state: "busy" };
+    vi.advanceTimersByTime(TICK_MS);
+    expect(mod.waitingReasonFor(t.id)).toBeNull();
+  });
+
+  it("keeps nothing for a blank label", () => {
+    const t = thread({ iconKey: "claude", status: "running" });
+    h.threads = [t];
+    h.emulators.add(t.id);
+    h.turn = { state: "waiting", waitingFor: "   " };
+    mod.statusEngine.start();
+
+    vi.advanceTimersByTime(TICK_MS);
+    expect(t.status).toBe("waiting");
+    expect(mod.waitingReasonFor(t.id)).toBeNull();
+  });
+});
+
+describe("auto-sleep", () => {
+  it("kills the PTY of a settled thread nobody is looking at", () => {
+    h.settings = { idleTimeoutMinutes: 1, idleAutocloseByIcon: { cursor: true } };
+    const t = thread({ status: "ready" });
+    h.threads = [t];
+    mod.statusEngine.start();
+
+    // Anchored on the last real activity, not on the pass that noticed it went
+    // stale, so a one-minute setting sleeps after one minute.
+    vi.advanceTimersByTime(60_000 - TICK_MS);
+    expect(h.killed).toEqual([]);
+    vi.advanceTimersByTime(TICK_MS * 2);
+
+    expect(t.status).toBe("stopped");
+    expect(t.ptyId).toBeNull();
+    expect(h.killed).toEqual(["pty1"]);
+  });
+
+  it("refuses while anything is still stamping the thread", () => {
+    h.settings = { idleTimeoutMinutes: 1, idleAutocloseByIcon: { cursor: true } };
+    const t = thread({ status: "ready" });
+    h.threads = [t];
+    mod.statusEngine.start();
+
+    for (let i = 0; i < 200; i += 1) {
+      mod.statusEngine.markOutput(t.id);
+      vi.advanceTimersByTime(TICK_MS);
+    }
+    expect(h.killed).toEqual([]);
+    expect(t.status).toBe("ready");
+  });
+
+  it("leaves a thread whose icon was never opted in", () => {
+    h.settings = { idleTimeoutMinutes: 1, idleAutocloseByIcon: {} };
+    const t = thread({ status: "ready" });
+    h.threads = [t];
+    mod.statusEngine.start();
+    vi.advanceTimersByTime(60_000 * 3);
+
+    expect(h.killed).toEqual([]);
+    expect(t.status).toBe("ready");
   });
 });
 

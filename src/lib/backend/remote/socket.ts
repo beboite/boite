@@ -212,6 +212,13 @@ function bytesToUuid(b: Uint8Array): string {
   return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
 }
 
+/**
+ * What an RPC answers with when the caller names no shape: an object whose keys
+ * are reachable and whose values are still unknown, so reading one costs a
+ * narrowing or a cast the caller has to write on purpose.
+ */
+export type RpcReply = Record<string, unknown>;
+
 interface Pending {
   resolve: (v: unknown) => void;
   reject: (e: unknown) => void;
@@ -379,19 +386,32 @@ export class Socket {
     this.#setState("disconnected");
   }
 
-  rpc(method: string, params: unknown = {}): Promise<any> {
+  /**
+   * One request, one answer, over the open socket.
+   *
+   * A caller that knows the reply names it: `rpc<{ repos: string[] }>(...)`,
+   * which is the cast it would otherwise write on the `.then`, moved to where a
+   * reader looks for it. A caller that names nothing gets `RpcReply` and pays a
+   * narrowing per field. Nothing is checked at runtime, and the widening of
+   * `resolve` below is the one place a parsed reply becomes `T`.
+   */
+  rpc<T = RpcReply>(method: string, params: unknown = {}): Promise<T> {
     const ws = this.#ws;
     if (!ws || ws.readyState !== WebSocket.OPEN) {
       return Promise.reject(new Error("socket not open"));
     }
     const id = this.#nextId++;
     const ceiling = rpcTimeout(method);
-    return new Promise((resolve, reject) => {
+    return new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.#pending.delete(id);
         reject(new Error(`rpc timeout: ${method} (${ceiling}ms)`));
       }, ceiling);
-      this.#pending.set(id, { resolve, reject, timer });
+      this.#pending.set(id, {
+        resolve: resolve as (v: unknown) => void,
+        reject,
+        timer,
+      });
       ws.send(JSON.stringify({ id, method, params }));
     });
   }
@@ -432,7 +452,10 @@ export class Socket {
   ): Promise<{ ptyId?: string; size?: { cols: number; rows: number } }> {
     this.#attached.set(threadId, { cols, rows, onOutput, onReset, onLost });
     try {
-      return await this.rpc("thread.attach", this.#attachParams(threadId, cols, rows));
+      return await this.rpc<{ ptyId?: string; size?: { cols: number; rows: number } }>(
+        "thread.attach",
+        this.#attachParams(threadId, cols, rows),
+      );
     } catch (e) {
       this.#attached.delete(threadId);
       throw e;

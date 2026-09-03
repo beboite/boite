@@ -34,6 +34,21 @@ import {
   isRightPanelTab,
   readRightPanelMap,
 } from "./right-panel";
+import {
+  keepArray,
+  keepAtLeastZero,
+  keepBoolean,
+  keepBounded,
+  keepClamped,
+  keepFraction,
+  keepIf,
+  keepMerged,
+  keepNonBlank,
+  keepNonEmpty,
+  keepPositive,
+  keepRecord,
+  keepString,
+} from "./hydrate";
 import { cliDetection } from "./cliDetection.svelte";
 import { CLI_PRESETS, type CliPreset } from "./cliPresets";
 
@@ -524,190 +539,130 @@ class SettingsStore {
         Array.isArray(stored.shortcuts) && stored.shortcuts.length > 0;
       const backfilledSetup =
         typeof stored.setupCompleted !== "boolean" && inheritedSetup;
+      // One line per field, each naming the shape it accepts: the reads
+      // themselves are in hydrate.ts, where they are tested and where a `>`
+      // that should be a `>=` is visible instead of being one of fifty
+      // look-alike ternaries.
       this.state = {
         shortcuts: migratedShortcuts.shortcuts,
         keybindings: mergedKeys.bindings,
-        powershellNewline:
-          typeof stored.powershellNewline === "boolean"
-            ? stored.powershellNewline
-            : DEFAULTS.powershellNewline,
-        powershellNoProfile:
-          typeof stored.powershellNoProfile === "boolean"
-            ? stored.powershellNoProfile
-            : DEFAULTS.powershellNoProfile,
-        threadWorktrees:
-          typeof stored.threadWorktrees === "boolean"
-            ? stored.threadWorktrees
-            : DEFAULTS.threadWorktrees,
-        spawnReplayCombo:
-          typeof stored.spawnReplayCombo === "boolean"
-            ? stored.spawnReplayCombo
-            : DEFAULTS.spawnReplayCombo,
-        defaultShellId:
-          typeof stored.defaultShellId === "string"
-            ? stored.defaultShellId
-            : DEFAULTS.defaultShellId,
-        sidebarWidth:
-          typeof stored.sidebarWidth === "number" && stored.sidebarWidth > 0
-            ? stored.sidebarWidth
-            : DEFAULTS.sidebarWidth,
-        sidebarCollapsed:
-          typeof stored.sidebarCollapsed === "boolean"
-            ? stored.sidebarCollapsed
-            : DEFAULTS.sidebarCollapsed,
-        uiScalePercent:
-          typeof stored.uiScalePercent === "number" && stored.uiScalePercent > 0
-            ? stored.uiScalePercent
-            : DEFAULTS.uiScalePercent,
-        projectOrder: Array.isArray(stored.projectOrder)
-          ? stored.projectOrder
-          : structuredClone(DEFAULTS.projectOrder),
-        threadOrderByProject:
-          stored.threadOrderByProject && typeof stored.threadOrderByProject === "object"
-            ? stored.threadOrderByProject
-            : structuredClone(DEFAULTS.threadOrderByProject),
-        agentTodoAccess:
-          typeof stored.agentTodoAccess === "boolean"
-            ? stored.agentTodoAccess
-            : DEFAULTS.agentTodoAccess,
+        powershellNewline: keepBoolean(
+          stored.powershellNewline,
+          DEFAULTS.powershellNewline,
+        ),
+        powershellNoProfile: keepBoolean(
+          stored.powershellNoProfile,
+          DEFAULTS.powershellNoProfile,
+        ),
+        threadWorktrees: keepBoolean(stored.threadWorktrees, DEFAULTS.threadWorktrees),
+        spawnReplayCombo: keepBoolean(stored.spawnReplayCombo, DEFAULTS.spawnReplayCombo),
+        defaultShellId: keepString(stored.defaultShellId, DEFAULTS.defaultShellId),
+        sidebarWidth: keepPositive(stored.sidebarWidth, DEFAULTS.sidebarWidth),
+        sidebarCollapsed: keepBoolean(stored.sidebarCollapsed, DEFAULTS.sidebarCollapsed),
+        uiScalePercent: keepPositive(stored.uiScalePercent, DEFAULTS.uiScalePercent),
+        projectOrder: keepArray(stored.projectOrder, DEFAULTS.projectOrder),
+        threadOrderByProject: keepRecord(
+          stored.threadOrderByProject,
+          DEFAULTS.threadOrderByProject,
+        ),
+        agentTodoAccess: keepBoolean(stored.agentTodoAccess, DEFAULTS.agentTodoAccess),
         // Anything that is not exactly `true` is off. A blob from a build that
         // never had the key, or one whose value did not survive a round trip,
         // is a workspace nobody armed.
         mcpYolo: stored.mcpYolo === true,
-        todoPromptTemplate:
-          typeof stored.todoPromptTemplate === "string" && stored.todoPromptTemplate.trim()
-            ? stored.todoPromptTemplate
-            : DEFAULTS.todoPromptTemplate,
-        idleTimeoutMinutes:
-          typeof stored.idleTimeoutMinutes === "number" && stored.idleTimeoutMinutes >= 0
-            ? stored.idleTimeoutMinutes
-            : DEFAULTS.idleTimeoutMinutes,
-        idleAutocloseByIcon:
-          stored.idleAutocloseByIcon && typeof stored.idleAutocloseByIcon === "object"
-            ? {
-                ...structuredClone(DEFAULTS.idleAutocloseByIcon),
-                ...stored.idleAutocloseByIcon,
-              }
-            : structuredClone(DEFAULTS.idleAutocloseByIcon),
-        confirmCloseThread:
-          typeof stored.confirmCloseThread === "boolean"
-            ? stored.confirmCloseThread
-            : DEFAULTS.confirmCloseThread,
-        syncRemoteUrl:
-          typeof stored.syncRemoteUrl === "string" && stored.syncRemoteUrl.trim()
-            ? stored.syncRemoteUrl
-            : DEFAULTS.syncRemoteUrl,
-        syncOnLaunch:
-          typeof stored.syncOnLaunch === "boolean"
-            ? stored.syncOnLaunch
-            : DEFAULTS.syncOnLaunch,
-        syncSources:
-          stored.syncSources && typeof stored.syncSources === "object"
-            ? { ...stored.syncSources }
-            : structuredClone(DEFAULTS.syncSources),
-        rightPanel: isRightPanelTab(stored.rightPanel)
-          ? stored.rightPanel
-          : DEFAULTS.rightPanel,
+        todoPromptTemplate: keepNonBlank(
+          stored.todoPromptTemplate,
+          DEFAULTS.todoPromptTemplate,
+        ),
+        idleTimeoutMinutes: keepAtLeastZero(
+          stored.idleTimeoutMinutes,
+          DEFAULTS.idleTimeoutMinutes,
+        ),
+        // Merged rather than taken whole: an icon shipped after the row was
+        // written defaults to on instead of arriving undefined.
+        idleAutocloseByIcon: keepMerged(
+          stored.idleAutocloseByIcon,
+          DEFAULTS.idleAutocloseByIcon,
+        ),
+        confirmCloseThread: keepBoolean(
+          stored.confirmCloseThread,
+          DEFAULTS.confirmCloseThread,
+        ),
+        syncRemoteUrl: keepNonBlank(stored.syncRemoteUrl, DEFAULTS.syncRemoteUrl),
+        syncOnLaunch: keepBoolean(stored.syncOnLaunch, DEFAULTS.syncOnLaunch),
+        syncSources: keepMerged(stored.syncSources, DEFAULTS.syncSources),
+        rightPanel: keepIf(stored.rightPanel, isRightPanelTab, DEFAULTS.rightPanel),
         rightPanelByProject: readRightPanelMap(stored.rightPanelByProject),
-        rightPanelWidth:
-          typeof stored.rightPanelWidth === "number" && stored.rightPanelWidth > 0
-            ? stored.rightPanelWidth
-            : DEFAULTS.rightPanelWidth,
-        gitSplitFraction:
-          typeof stored.gitSplitFraction === "number" &&
-          stored.gitSplitFraction > 0 &&
-          stored.gitSplitFraction < 1
-            ? stored.gitSplitFraction
-            : DEFAULTS.gitSplitFraction,
-        gitAutoFetch:
-          typeof stored.gitAutoFetch === "boolean"
-            ? stored.gitAutoFetch
-            : DEFAULTS.gitAutoFetch,
-        gitAutoFetchSeconds:
-          typeof stored.gitAutoFetchSeconds === "number" &&
-          stored.gitAutoFetchSeconds >= GIT_AUTOFETCH_MIN_SECONDS
-            ? Math.min(stored.gitAutoFetchSeconds, GIT_AUTOFETCH_MAX_SECONDS)
-            : DEFAULTS.gitAutoFetchSeconds,
-        mobileLayout:
-          typeof stored.mobileLayout === "boolean"
-            ? stored.mobileLayout
-            : DEFAULTS.mobileLayout,
-        fastpickEnabled:
-          typeof stored.fastpickEnabled === "boolean"
-            ? stored.fastpickEnabled
-            : DEFAULTS.fastpickEnabled,
-        kebaccClaude:
-          typeof stored.kebaccClaude === "boolean"
-            ? stored.kebaccClaude
-            : DEFAULTS.kebaccClaude,
-        kebaccCodex:
-          typeof stored.kebaccCodex === "boolean"
-            ? stored.kebaccCodex
-            : DEFAULTS.kebaccCodex,
-        kebaccAntigravity:
-          typeof stored.kebaccAntigravity === "boolean"
-            ? stored.kebaccAntigravity
-            : DEFAULTS.kebaccAntigravity,
-        colorByModel:
-          typeof stored.colorByModel === "boolean"
-            ? stored.colorByModel
-            : DEFAULTS.colorByModel,
+        rightPanelWidth: keepPositive(stored.rightPanelWidth, DEFAULTS.rightPanelWidth),
+        gitSplitFraction: keepFraction(
+          stored.gitSplitFraction,
+          DEFAULTS.gitSplitFraction,
+        ),
+        gitAutoFetch: keepBoolean(stored.gitAutoFetch, DEFAULTS.gitAutoFetch),
+        gitAutoFetchSeconds: keepBounded(
+          stored.gitAutoFetchSeconds,
+          GIT_AUTOFETCH_MIN_SECONDS,
+          GIT_AUTOFETCH_MAX_SECONDS,
+          DEFAULTS.gitAutoFetchSeconds,
+        ),
+        mobileLayout: keepBoolean(stored.mobileLayout, DEFAULTS.mobileLayout),
+        fastpickEnabled: keepBoolean(stored.fastpickEnabled, DEFAULTS.fastpickEnabled),
+        kebaccClaude: keepBoolean(stored.kebaccClaude, DEFAULTS.kebaccClaude),
+        kebaccCodex: keepBoolean(stored.kebaccCodex, DEFAULTS.kebaccCodex),
+        kebaccAntigravity: keepBoolean(
+          stored.kebaccAntigravity,
+          DEFAULTS.kebaccAntigravity,
+        ),
+        colorByModel: keepBoolean(stored.colorByModel, DEFAULTS.colorByModel),
         sidebarDesign: readSidebarDesign(raw),
-        sidebarHarnessLogos:
-          typeof stored.sidebarHarnessLogos === "boolean"
-            ? stored.sidebarHarnessLogos
-            : DEFAULTS.sidebarHarnessLogos,
-        experimentInfoBox:
-          typeof stored.experimentInfoBox === "boolean"
-            ? stored.experimentInfoBox
-            : DEFAULTS.experimentInfoBox,
-        infoBoxAnchor: isInfoBoxAnchor(stored.infoBoxAnchor)
-          ? stored.infoBoxAnchor
-          : DEFAULTS.infoBoxAnchor,
-        infoBoxCollapsed:
-          typeof stored.infoBoxCollapsed === "boolean"
-            ? stored.infoBoxCollapsed
-            : DEFAULTS.infoBoxCollapsed,
-        experimentSmartSort:
-          typeof stored.experimentSmartSort === "boolean"
-            ? stored.experimentSmartSort
-            : DEFAULTS.experimentSmartSort,
-        experimentWhip:
-          typeof stored.experimentWhip === "boolean"
-            ? stored.experimentWhip
-            : DEFAULTS.experimentWhip,
-        whipSound: isWhipSound(stored.whipSound) ? stored.whipSound : DEFAULTS.whipSound,
-        smartSortBy: isSmartSortBy(stored.smartSortBy)
-          ? stored.smartSortBy
-          : DEFAULTS.smartSortBy,
-        smartSortDirection: isSortDirection(stored.smartSortDirection)
-          ? stored.smartSortDirection
-          : DEFAULTS.smartSortDirection,
-        experimentHome:
-          typeof stored.experimentHome === "boolean"
-            ? stored.experimentHome
-            : DEFAULTS.experimentHome,
-        openOnLaunch: isOpenOnLaunch(stored.openOnLaunch)
-          ? stored.openOnLaunch
-          : DEFAULTS.openOnLaunch,
+        sidebarHarnessLogos: keepBoolean(
+          stored.sidebarHarnessLogos,
+          DEFAULTS.sidebarHarnessLogos,
+        ),
+        experimentInfoBox: keepBoolean(
+          stored.experimentInfoBox,
+          DEFAULTS.experimentInfoBox,
+        ),
+        infoBoxAnchor: keepIf(
+          stored.infoBoxAnchor,
+          isInfoBoxAnchor,
+          DEFAULTS.infoBoxAnchor,
+        ),
+        infoBoxCollapsed: keepBoolean(stored.infoBoxCollapsed, DEFAULTS.infoBoxCollapsed),
+        experimentSmartSort: keepBoolean(
+          stored.experimentSmartSort,
+          DEFAULTS.experimentSmartSort,
+        ),
+        experimentWhip: keepBoolean(stored.experimentWhip, DEFAULTS.experimentWhip),
+        whipSound: keepIf(stored.whipSound, isWhipSound, DEFAULTS.whipSound),
+        smartSortBy: keepIf(stored.smartSortBy, isSmartSortBy, DEFAULTS.smartSortBy),
+        smartSortDirection: keepIf(
+          stored.smartSortDirection,
+          isSortDirection,
+          DEFAULTS.smartSortDirection,
+        ),
+        experimentHome: keepBoolean(stored.experimentHome, DEFAULTS.experimentHome),
+        openOnLaunch: keepIf(stored.openOnLaunch, isOpenOnLaunch, DEFAULTS.openOnLaunch),
         // The two arming flags are device-scoped; these blob reads only matter
         // as the one-shot seed applyDeviceOverrides migrates from.
-        experimentOrchestrator:
-          typeof stored.experimentOrchestrator === "boolean"
-            ? stored.experimentOrchestrator
-            : DEFAULTS.experimentOrchestrator,
-        experimentOrchestratorPerProject:
-          typeof stored.experimentOrchestratorPerProject === "boolean"
-            ? stored.experimentOrchestratorPerProject
-            : DEFAULTS.experimentOrchestratorPerProject,
-        orchestratorAgent:
-          typeof stored.orchestratorAgent === "string" && stored.orchestratorAgent
-            ? stored.orchestratorAgent
-            : DEFAULTS.orchestratorAgent,
+        experimentOrchestrator: keepBoolean(
+          stored.experimentOrchestrator,
+          DEFAULTS.experimentOrchestrator,
+        ),
+        experimentOrchestratorPerProject: keepBoolean(
+          stored.experimentOrchestratorPerProject,
+          DEFAULTS.experimentOrchestratorPerProject,
+        ),
+        orchestratorAgent: keepNonEmpty(
+          stored.orchestratorAgent,
+          DEFAULTS.orchestratorAgent,
+        ),
         orchestratorByProject: readOnOffMap(stored.orchestratorByProject),
-        orchestratorAutonomy: isOrchestratorAutonomy(stored.orchestratorAutonomy)
-          ? stored.orchestratorAutonomy
-          : DEFAULTS.orchestratorAutonomy,
+        orchestratorAutonomy: keepIf(
+          stored.orchestratorAutonomy,
+          isOrchestratorAutonomy,
+          DEFAULTS.orchestratorAutonomy,
+        ),
         orchestratorIdleMinutes: readMinutes(
           stored.orchestratorIdleMinutes,
           DEFAULTS.orchestratorIdleMinutes,
@@ -727,56 +682,35 @@ class SettingsStore {
         orchestratorBlindProjects: readStringList(stored.orchestratorBlindProjects),
         // Device-scoped end to end: these defaults only stand until
         // applyDeviceOverrides replays what this machine stored locally.
-        experimentVoice:
-          typeof stored.experimentVoice === "boolean"
-            ? stored.experimentVoice
-            : DEFAULTS.experimentVoice,
-        voiceStt: isVoiceStt(stored.voiceStt) ? stored.voiceStt : DEFAULTS.voiceStt,
-        voiceTts: isVoiceTts(stored.voiceTts) ? stored.voiceTts : DEFAULTS.voiceTts,
-        voiceName:
-          typeof stored.voiceName === "string" && stored.voiceName
-            ? stored.voiceName
-            : DEFAULTS.voiceName,
-        voicePushToTalk:
-          typeof stored.voicePushToTalk === "boolean"
-            ? stored.voicePushToTalk
-            : DEFAULTS.voicePushToTalk,
-        voiceAutoSend:
-          typeof stored.voiceAutoSend === "boolean"
-            ? stored.voiceAutoSend
-            : DEFAULTS.voiceAutoSend,
-        voiceSpeakWhenUnfocused:
-          typeof stored.voiceSpeakWhenUnfocused === "boolean"
-            ? stored.voiceSpeakWhenUnfocused
-            : DEFAULTS.voiceSpeakWhenUnfocused,
+        experimentVoice: keepBoolean(stored.experimentVoice, DEFAULTS.experimentVoice),
+        voiceStt: keepIf(stored.voiceStt, isVoiceStt, DEFAULTS.voiceStt),
+        voiceTts: keepIf(stored.voiceTts, isVoiceTts, DEFAULTS.voiceTts),
+        voiceName: keepNonEmpty(stored.voiceName, DEFAULTS.voiceName),
+        voicePushToTalk: keepBoolean(stored.voicePushToTalk, DEFAULTS.voicePushToTalk),
+        voiceAutoSend: keepBoolean(stored.voiceAutoSend, DEFAULTS.voiceAutoSend),
+        voiceSpeakWhenUnfocused: keepBoolean(
+          stored.voiceSpeakWhenUnfocused,
+          DEFAULTS.voiceSpeakWhenUnfocused,
+        ),
         // A settings row written before the wizard existed carries no flag.
         // Its owner already has a shortcut list, and finishing the wizard
         // replaces that list wholesale, so an existing install counts as
         // already set up. Only a genuinely empty install sees the wizard.
-        setupCompleted:
-          typeof stored.setupCompleted === "boolean"
-            ? stored.setupCompleted
-            : inheritedSetup,
+        setupCompleted: keepBoolean(stored.setupCompleted, inheritedSetup),
         // Device-scoped: the localStorage override below is the real source, and
         // these two only matter as a one-shot migration from the era when the
         // whole blob was persisted together.
-        motionMode: isMotionMode(stored.motionMode)
-          ? stored.motionMode
-          : DEFAULTS.motionMode,
-        themeMode: isThemeMode(stored.themeMode)
-          ? stored.themeMode
-          : DEFAULTS.themeMode,
+        motionMode: keepIf(stored.motionMode, isMotionMode, DEFAULTS.motionMode),
+        themeMode: keepIf(stored.themeMode, isThemeMode, DEFAULTS.themeMode),
         uiFontFamily: readFamily(stored.uiFontFamily),
         terminalFontFamily: readFamily(stored.terminalFontFamily),
-        terminalFontScalePercent:
-          typeof stored.terminalFontScalePercent === "number"
-            ? clampTerminalScale(stored.terminalFontScalePercent)
-            : DEFAULTS.terminalFontScalePercent,
-        locale: isLocaleSetting(stored.locale) ? stored.locale : DEFAULTS.locale,
-        layoutPinned:
-          typeof stored.layoutPinned === "boolean"
-            ? stored.layoutPinned
-            : DEFAULTS.layoutPinned,
+        terminalFontScalePercent: keepClamped(
+          stored.terminalFontScalePercent,
+          clampTerminalScale,
+          DEFAULTS.terminalFontScalePercent,
+        ),
+        locale: keepIf(stored.locale, isLocaleSetting, DEFAULTS.locale),
+        layoutPinned: keepBoolean(stored.layoutPinned, DEFAULTS.layoutPinned),
       };
       // Device fields come from localStorage, overriding the backend blob. If
       // there is none yet, seed it from what the blob carried (one-shot
