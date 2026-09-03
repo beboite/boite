@@ -1,6 +1,5 @@
 <script lang="ts">
   import { app } from "$lib/app/store.svelte";
-  import { backend } from "$lib/backend";
   import type { OrchestratorAction } from "$lib/backend/types";
   import { notifications } from "$lib/features/notifications/store.svelte";
   import { t } from "$lib/i18n/index.svelte";
@@ -8,6 +7,7 @@
   import { formatAgo, formatSpan } from "$lib/shared/utils/relative-time";
   import { threadActivitySince } from "$lib/features/thread/activity.svelte";
   import { home, openHomeThread, type InboxItem } from "./store.svelte";
+  import { orchestratorActions } from "./actions.svelte";
   import DashboardCard from "$lib/features/project/DashboardCard.svelte";
   import InboxIcon from "@lucide/svelte/icons/inbox";
 
@@ -70,24 +70,11 @@
   }
 
   // What the orchestrators caused, for the undo offers under the live items.
-  // Loaded when the card mounts and after each undo, not polled: the list
-  // moves when the orchestrator acts, and the card is redrawn on those wakes.
-  let actions = $state<OrchestratorAction[]>([]);
-  let undoing = $state<string | null>(null);
-
-  const undoable = $derived(actions.filter((a) => a.undoable && a.undoneAt === null));
-
-  async function loadActions() {
-    try {
-      actions = (await backend().conduct?.actions({ limit: 20 })) ?? [];
-    } catch {
-      actions = [];
-    }
-  }
-
-  $effect(() => {
-    void loadActions();
-  });
+  // The list is `actions.svelte.ts` now, and HomePage loads it: the merge rule
+  // that draws one "nothing waiting" card instead of two has to read it before
+  // deciding whether this card is drawn at all.
+  const undoable = $derived(orchestratorActions.undoable);
+  const undoing = $derived(orchestratorActions.undoing);
 
   function actionLine(action: OrchestratorAction): string {
     const name = action.objectId ? threadName(action.objectId) : "?";
@@ -97,16 +84,12 @@
   }
 
   async function undoAction(action: OrchestratorAction) {
-    undoing = action.id;
     try {
-      await backend().conduct?.undo({ actionId: action.id });
+      await orchestratorActions.undo(action.id);
     } catch (err) {
       // The bus refuses by name (busy thread, already undone); the sentence
       // is the answer and it is shown as it came.
       notifications.error(t("home.undoFailed", { error: String(err) }));
-    } finally {
-      undoing = null;
-      void loadActions();
     }
   }
 </script>
