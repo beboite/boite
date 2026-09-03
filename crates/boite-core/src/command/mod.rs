@@ -44,6 +44,7 @@ pub mod conduct;
 pub mod files;
 pub mod git;
 pub mod logs;
+pub mod pilot;
 pub mod records;
 pub mod sessions;
 pub mod sync;
@@ -54,6 +55,7 @@ pub use conduct::Conduct;
 pub use files::Files;
 pub use git::Git;
 pub use logs::Logs;
+pub use pilot::{Pilot, PilotReady};
 pub use records::{Records, ThreadPatch};
 pub use sessions::Sessions;
 pub use sync::Sync;
@@ -166,6 +168,28 @@ pub trait Host {
         None
     }
 
+    /// The pilot runtime this host owns, when it owns one.
+    ///
+    /// Same shape as [`Host::pulse_waiters`] and [`Host::child_pid`]: the bus
+    /// validates a `pilot.*` call and the host is what actually holds the child
+    /// processes. `None` is honest for a test, for a headless CLI and for a
+    /// build without the experiment, and every method in that domain refuses by
+    /// name rather than pretending a thread has no session.
+    fn pilot(&self) -> Option<Arc<boite_pilot::Runtime>> {
+        None
+    }
+
+    /// The MCP servers a pilot thread is launched with, boite-mcp first.
+    ///
+    /// A host method rather than something the bus builds: the sidecar path and
+    /// the per-thread environment (`BOITE_MCP_URL`, `BOITE_KEY_FILE`,
+    /// `BOITE_THREAD_ID`) are what that host stamps into a terminal thread at
+    /// spawn, and only it knows where its own files are. An empty list is a
+    /// thread with no boite tools, which is what a host that mints none has.
+    fn pilot_mcp(&self, _thread_id: &str) -> Vec<boite_pilot::McpServer> {
+        Vec::new()
+    }
+
     /// The process-wide telemetry runtime, when this host has one.
     ///
     /// `None` is honest for a test and for a host that never queued an event.
@@ -193,6 +217,7 @@ pub fn methods() -> impl Iterator<Item = &'static str> {
         .chain(sync::ALL_METHODS)
         .chain(telemetry::ALL_METHODS)
         .chain(logs::ALL_METHODS)
+        .chain(pilot::ALL_METHODS)
         .copied()
 }
 
@@ -262,6 +287,7 @@ fn probe_params() -> Value {
         "provider": "claude", "email": "you@example.com",
         "enabled": true, "modeA": true, "modeB": false, "stage": "available",
         "targetVersion": "1.0.0", "errorCode": "io", "paneKind": "editor",
+        "requestId": "r", "option": "allow", "mode": "ask", "afterSeq": 0,
         "uiLanguage": "en", "theme": "dark", "threadWorktrees": true,
         "animations": "system", "mcpYolo": false, "idleAutoclose": true,
         "orchestrator": false, "voice": false,
@@ -279,6 +305,7 @@ pub enum Command {
     Files(Files),
     Git(Git),
     Logs(Logs),
+    Pilot(Pilot),
     Records(Records),
     Sessions(Sessions),
     Sync(Sync),
@@ -333,6 +360,12 @@ impl From<Logs> for Command {
     }
 }
 
+impl From<Pilot> for Command {
+    fn from(pilot: Pilot) -> Self {
+        Command::Pilot(pilot)
+    }
+}
+
 impl From<Telemetry> for Command {
     fn from(telemetry: Telemetry) -> Self {
         Command::Telemetry(telemetry)
@@ -376,6 +409,9 @@ impl Command {
         if logs::ALL_METHODS.contains(&method) {
             return Logs::decode(method, params).map(Command::Logs);
         }
+        if pilot::ALL_METHODS.contains(&method) {
+            return Pilot::decode(method, params).map(Command::Pilot);
+        }
         if telemetry::ALL_METHODS.contains(&method) {
             return Telemetry::decode(method, params).map(Command::Telemetry);
         }
@@ -390,6 +426,7 @@ impl Command {
             Command::Files(f) => f.name(),
             Command::Git(g) => g.name(),
             Command::Logs(l) => l.name(),
+            Command::Pilot(p) => p.name(),
             Command::Records(r) => r.name(),
             Command::Sessions(s) => s.name(),
             Command::Sync(s) => s.name(),
@@ -405,6 +442,7 @@ impl Command {
             Command::Files(f) => f.wire(),
             Command::Git(g) => g.wire(),
             Command::Logs(l) => l.wire(),
+            Command::Pilot(p) => p.wire(),
             Command::Records(r) => r.wire(),
             Command::Sessions(s) => s.wire(),
             Command::Sync(s) => s.wire(),
@@ -425,6 +463,7 @@ impl Command {
             Command::Files(f) => f.capability(),
             Command::Git(g) => g.capability(),
             Command::Logs(l) => l.capability(),
+            Command::Pilot(p) => p.capability(),
             Command::Records(r) => r.capability(),
             Command::Sessions(s) => s.capability(),
             Command::Sync(s) => s.capability(),
@@ -450,6 +489,7 @@ impl Command {
             Command::Files(f) => f.prepare(host),
             Command::Git(g) => g.prepare(host),
             Command::Logs(l) => l.prepare(host),
+            Command::Pilot(p) => p.prepare(host),
             Command::Records(r) => r.prepare(host),
             Command::Sessions(s) => s.prepare(host),
             Command::Sync(s) => s.prepare(host),
@@ -482,6 +522,12 @@ pub enum Ready {
     Conduct(Conduct, Arc<Store>, Option<Arc<crate::pulse::Waiters>>),
     /// A telemetry command, with the runtime `prepare` resolved for it.
     Telemetry(Telemetry, Arc<TelemetryRuntime>),
+    /// A pilot command, with the store and the pilot runtime resolved for it.
+    ///
+    /// The one arm `run` cannot answer: the work is async, and `boite-core`
+    /// owns no executor. The host awaits it through
+    /// [`crate::pilot_host::execute`] on the runtime it already has.
+    Pilot(Box<PilotReady>),
 }
 
 impl Ready {
@@ -506,6 +552,16 @@ impl Ready {
             Ready::Work(Command::Telemetry(t)) => {
                 Err(format!("{} was not prepared with a telemetry runtime", t.name()))
             }
+            Ready::Work(Command::Pilot(p)) => {
+                Err(format!("{} was not prepared with a pilot runtime", p.name()))
+            }
+            // Deliberately not answered here. A pilot call awaits a child
+            // process, and this function blocks a thread of whatever pool the
+            // transport handed it to; the host runs it on its own executor.
+            Ready::Pilot(ready) => Err(format!(
+                "{} runs on the host's runtime, through boite_core::pilot_host::execute",
+                ready.call.name()
+            )),
             Ready::Records(r, store, telemetry) => r.run(&store, telemetry.as_deref()),
             Ready::Conduct(c, store, waiters) => c.run(&store, waiters),
             Ready::Telemetry(t, runtime) => t.run(&runtime),
@@ -819,6 +875,18 @@ mod tests {
             ("logs.level", MutateProject),
             ("logs.write", MutateProject),
             ("logs.subscribe", ReadProject),
+            ("pilot.catalog", ReadProject),
+            ("pilot.thread.open", MutateProject),
+            ("pilot.turn.start", MutateProject),
+            ("pilot.turn.interrupt", MutateProject),
+            ("pilot.request.respond", MutateProject),
+            ("pilot.model.set", MutateProject),
+            ("pilot.mode.set", MutateProject),
+            ("pilot.session.stop", MutateProject),
+            ("pilot.items", ReadProject),
+            ("pilot.events", ReadProject),
+            ("pilot.subscribe", ReadProject),
+            ("pilot.unsubscribe", ReadProject),
         ];
         let actual: Vec<(&str, Capability)> = every_command()
             .iter()

@@ -421,6 +421,11 @@ mod tests {
                 role: None,
                 orchestrator_scope: None,
                 accept_dispatch: true,
+                runtime: crate::model::default_runtime(),
+                pilot_driver: None,
+                pilot_instance: None,
+                pilot_model: None,
+                pilot_options: None,
             })
             .unwrap();
     }

@@ -668,7 +668,7 @@ impl Store {
         let conn = self.conn.lock();
         let mut stmt = conn
             .prepare(
-                "SELECT id, project_id, label, title, cmd, args, exit_code, session_id, icon_key, status, keep_awake, created_at, icon_color, worktree_path, settled_at, parent_thread_id, delegation_mode, delegation_status, role, orchestrator_scope, accept_dispatch
+                "SELECT id, project_id, label, title, cmd, args, exit_code, session_id, icon_key, status, keep_awake, created_at, icon_color, worktree_path, settled_at, parent_thread_id, delegation_mode, delegation_status, role, orchestrator_scope, accept_dispatch, runtime, pilot_driver, pilot_instance, pilot_model, pilot_options
                  FROM threads ORDER BY created_at ASC",
             )
             .map_err(|e| e.to_string())?;
@@ -700,6 +700,14 @@ impl Store {
                     role: r.get(18)?,
                     orchestrator_scope: r.get(19)?,
                     accept_dispatch: r.get::<_, i64>(20)? == 1,
+                    runtime: r
+                        .get::<_, Option<String>>(21)?
+                        .filter(|s| !s.is_empty())
+                        .unwrap_or_else(crate::model::default_runtime),
+                    pilot_driver: r.get(22)?,
+                    pilot_instance: r.get(23)?,
+                    pilot_model: r.get(24)?,
+                    pilot_options: r.get(25)?,
                 })
             })
             .map_err(|e| e.to_string())?;
@@ -709,7 +717,7 @@ impl Store {
     pub fn load_thread(&self, id: &str) -> Result<Option<Thread>, String> {
         let conn = self.conn.lock();
         conn.query_row(
-            "SELECT id, project_id, label, title, cmd, args, exit_code, session_id, icon_key, status, keep_awake, created_at, icon_color, worktree_path, settled_at, parent_thread_id, delegation_mode, delegation_status, role, orchestrator_scope, accept_dispatch
+            "SELECT id, project_id, label, title, cmd, args, exit_code, session_id, icon_key, status, keep_awake, created_at, icon_color, worktree_path, settled_at, parent_thread_id, delegation_mode, delegation_status, role, orchestrator_scope, accept_dispatch, runtime, pilot_driver, pilot_instance, pilot_model, pilot_options
              FROM threads WHERE id = ?1",
             [id],
             |r| {
@@ -739,6 +747,14 @@ impl Store {
                     role: r.get(18)?,
                     orchestrator_scope: r.get(19)?,
                     accept_dispatch: r.get::<_, i64>(20)? == 1,
+                    runtime: r
+                        .get::<_, Option<String>>(21)?
+                        .filter(|s| !s.is_empty())
+                        .unwrap_or_else(crate::model::default_runtime),
+                    pilot_driver: r.get(22)?,
+                    pilot_instance: r.get(23)?,
+                    pilot_model: r.get(24)?,
+                    pilot_options: r.get(25)?,
                 })
             },
         )
@@ -1328,14 +1344,16 @@ impl Store {
         let args = serde_json::to_string(&t.args).unwrap_or_else(|_| "[]".to_string());
         conn.execute(
             "INSERT OR REPLACE INTO threads
-             (id, project_id, label, title, cmd, args, exit_code, session_id, icon_key, status, keep_awake, created_at, icon_color, worktree_path, settled_at, parent_thread_id, delegation_mode, delegation_status, role, orchestrator_scope, accept_dispatch)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)",
+             (id, project_id, label, title, cmd, args, exit_code, session_id, icon_key, status, keep_awake, created_at, icon_color, worktree_path, settled_at, parent_thread_id, delegation_mode, delegation_status, role, orchestrator_scope, accept_dispatch, runtime, pilot_driver, pilot_instance, pilot_model, pilot_options)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26)",
             rusqlite::params![
                 t.id, t.project_id, t.label, t.title, t.cmd, args, t.exit_code,
                 t.session_id, t.icon_key, t.status, t.keep_awake as i64, t.created_at,
                 t.icon_color, t.worktree_path, t.settled_at, t.parent_thread_id,
                 t.delegation_mode, t.delegation_status, t.role, t.orchestrator_scope,
                 t.accept_dispatch as i64,
+                if t.runtime.is_empty() { crate::model::default_runtime() } else { t.runtime.clone() },
+                t.pilot_driver, t.pilot_instance, t.pilot_model, t.pilot_options,
             ],
         )
         .map_err(|e| e.to_string())?;
@@ -1396,6 +1414,13 @@ impl Store {
         conn.execute("DELETE FROM threads WHERE id = ?1", [id])
             .map_err(|e| e.to_string())?;
         conn.execute("DELETE FROM thread_keys WHERE thread_id = ?1", [id])
+            .map_err(|e| e.to_string())?;
+        // The pilot journal and its projection go with the row, the way the
+        // transcript does: they are that conversation and nothing else reads
+        // them, so a thread id reused later would inherit somebody's timeline.
+        conn.execute("DELETE FROM pilot_events WHERE thread_id = ?1", [id])
+            .map_err(|e| e.to_string())?;
+        conn.execute("DELETE FROM pilot_items WHERE thread_id = ?1", [id])
             .map_err(|e| e.to_string())?;
         Ok(())
     }
@@ -1684,6 +1709,223 @@ impl Store {
         )
         .map_err(|e| e.to_string())
     }
+
+    // ---- the pilot journal and its projection -----------------------------
+
+    /// Appends one canonical event to a thread's journal and hands back its
+    /// sequence number.
+    ///
+    /// The sequence is per thread and comes from the table rather than from a
+    /// counter in memory: two hosts, a restart and a resume all write into the
+    /// same journal, and a number held anywhere else would restart at one.
+    /// `MAX(seq) + 1` under the connection's own lock, so two events on one
+    /// thread cannot mint the same number.
+    ///
+    /// The caller decides what is journaled at all (`PilotEvent::is_journaled`);
+    /// a text delta never reaches here, which is the write this table exists to
+    /// not do.
+    pub fn pilot_append_event(
+        &self,
+        thread_id: &str,
+        kind: &str,
+        payload: &serde_json::Value,
+    ) -> Result<i64, String> {
+        let conn = self.conn.lock();
+        let seq: i64 = conn
+            .query_row(
+                "SELECT COALESCE(MAX(seq), 0) + 1 FROM pilot_events WHERE thread_id = ?1",
+                [thread_id],
+                |r| r.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        conn.execute(
+            "INSERT INTO pilot_events (thread_id, seq, ts_ms, kind, payload)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            rusqlite::params![thread_id, seq, now_ms(), kind, payload.to_string()],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(seq)
+    }
+
+    /// Writes an item, or updates the one that already carries its id.
+    ///
+    /// `created_ms` is kept from the first write: an item opens on
+    /// `item.started` and finishes several seconds later, and the timeline
+    /// orders on when a card appeared rather than on when it stopped changing.
+    pub fn pilot_upsert_item(&self, item: &PilotItemRow) -> Result<(), String> {
+        let conn = self.conn.lock();
+        conn.execute(
+            "INSERT INTO pilot_items
+             (id, thread_id, seq, turn_id, kind, state, body, created_ms, updated_ms)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+             ON CONFLICT(id) DO UPDATE SET
+                seq = excluded.seq,
+                turn_id = COALESCE(excluded.turn_id, pilot_items.turn_id),
+                kind = excluded.kind,
+                state = excluded.state,
+                body = excluded.body,
+                updated_ms = excluded.updated_ms",
+            rusqlite::params![
+                item.id,
+                item.thread_id,
+                item.seq,
+                item.turn_id,
+                item.kind,
+                item.state,
+                item.body,
+                item.created_ms,
+                item.updated_ms,
+            ],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    /// The timeline of a thread by cursor, oldest first.
+    ///
+    /// `after_seq` is exclusive, so a client arriving mid-turn reads what it
+    /// missed and then subscribes without a gap or a duplicate.
+    pub fn pilot_items(
+        &self,
+        thread_id: &str,
+        after_seq: i64,
+        limit: usize,
+    ) -> Result<Vec<PilotItemRow>, String> {
+        let conn = self.conn.lock();
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, thread_id, seq, turn_id, kind, state, body, created_ms, updated_ms
+                 FROM pilot_items WHERE thread_id = ?1 AND seq > ?2
+                 ORDER BY seq ASC LIMIT ?3",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map(rusqlite::params![thread_id, after_seq, limit as i64], |r| {
+                Ok(PilotItemRow {
+                    id: r.get(0)?,
+                    thread_id: r.get(1)?,
+                    seq: r.get(2)?,
+                    turn_id: r.get(3)?,
+                    kind: r.get(4)?,
+                    state: r.get(5)?,
+                    body: r.get(6)?,
+                    created_ms: r.get(7)?,
+                    updated_ms: r.get(8)?,
+                })
+            })
+            .map_err(|e| e.to_string())?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+    }
+
+    /// The raw journal by cursor, for whoever wants what the driver actually
+    /// said rather than what the projection made of it.
+    pub fn pilot_events(
+        &self,
+        thread_id: &str,
+        after_seq: i64,
+        limit: usize,
+    ) -> Result<Vec<PilotEventRow>, String> {
+        let conn = self.conn.lock();
+        let mut stmt = conn
+            .prepare(
+                "SELECT seq, ts_ms, kind, payload FROM pilot_events
+                 WHERE thread_id = ?1 AND seq > ?2 ORDER BY seq ASC LIMIT ?3",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map(rusqlite::params![thread_id, after_seq, limit as i64], |r| {
+                let raw: String = r.get(3)?;
+                Ok(PilotEventRow {
+                    seq: r.get(0)?,
+                    ts_ms: r.get(1)?,
+                    kind: r.get(2)?,
+                    payload: serde_json::from_str(&raw).unwrap_or(serde_json::Value::Null),
+                })
+            })
+            .map_err(|e| e.to_string())?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+    }
+
+    /// How many rows a thread's journal and timeline hold. Read by the test
+    /// that asserts a turn of two hundred deltas costs nothing.
+    pub fn pilot_counts(&self, thread_id: &str) -> Result<(i64, i64), String> {
+        let conn = self.conn.lock();
+        let events: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pilot_events WHERE thread_id = ?1",
+                [thread_id],
+                |r| r.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        let items: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pilot_items WHERE thread_id = ?1",
+                [thread_id],
+                |r| r.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        Ok((events, items))
+    }
+
+    /// The still-open approval a pilot request was mirrored into.
+    ///
+    /// Kept beside the other approvals rather than in a table of its own: the
+    /// dock, the notification and the phone all read `approvals`, and a second
+    /// table would mean a second reader in each of them. The request id lives
+    /// in `detail`, so answering one is a lookup rather than a scan.
+    pub fn pilot_approval_of_request(&self, thread_id: &str, request_id: &str) -> Option<String> {
+        let conn = self.conn.lock();
+        conn.query_row(
+            "SELECT id FROM approvals
+             WHERE thread_id = ?1 AND action = ?2 AND detail = ?3 AND verdict = 'pending'",
+            rusqlite::params![thread_id, PILOT_APPROVAL_ACTION, request_id],
+            |r| r.get(0),
+        )
+        .ok()
+    }
+}
+
+/// The `approvals.action` a pilot request is filed under.
+///
+/// One word rather than the tool's own name: the dock groups on it, and
+/// `pilot.request.respond` finds the row by it plus the request id.
+pub const PILOT_APPROVAL_ACTION: &str = "pilot.request";
+
+/// One row of `pilot_items`, as both hosts read and write it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PilotItemRow {
+    pub id: String,
+    pub thread_id: String,
+    /// The journal sequence the item was last written at, which is what a
+    /// cursor read orders and pages on.
+    pub seq: i64,
+    pub turn_id: Option<String>,
+    pub kind: String,
+    /// `started`, `completed`, `open`, `resolved`, `error`.
+    pub state: String,
+    /// The item body as JSON text. Per kind, and free on purpose: a tool card
+    /// and an assistant message share no fields.
+    pub body: String,
+    pub created_ms: i64,
+    pub updated_ms: i64,
+}
+
+/// One row of `pilot_events`, the raw journal.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PilotEventRow {
+    pub seq: i64,
+    pub ts_ms: i64,
+    pub kind: String,
+    pub payload: serde_json::Value,
+}
+
+/// Wall clock in milliseconds. The pilot rows stamp their own times, the way
+/// `journal` does, rather than making every caller pass one down.
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
 }
 
 /// One journal entry flattened into the words it could be found by.
@@ -1730,6 +1972,11 @@ pub enum ThreadCol {
     KeepAwake,
     SettledAt,
     WorktreePath,
+    Runtime,
+    PilotDriver,
+    PilotInstance,
+    PilotModel,
+    PilotOptions,
 }
 
 impl ThreadCol {
@@ -1744,6 +1991,11 @@ impl ThreadCol {
             ThreadCol::KeepAwake => "keep_awake",
             ThreadCol::SettledAt => "settled_at",
             ThreadCol::WorktreePath => "worktree_path",
+            ThreadCol::Runtime => "runtime",
+            ThreadCol::PilotDriver => "pilot_driver",
+            ThreadCol::PilotInstance => "pilot_instance",
+            ThreadCol::PilotModel => "pilot_model",
+            ThreadCol::PilotOptions => "pilot_options",
         }
     }
 }
