@@ -23,6 +23,7 @@
   import { openBrowserPane } from "./open-url";
   import { rankRows, sectionTitleKeyAt, type PaletteRow } from "./rank";
   import { paletteSearch } from "./search.svelte";
+  import Highlight from "./Highlight.svelte";
 
   // The local filter alone. The workspace query has its own, longer one in
   // `content.ts`: a fuzzy match over a few hundred strings is a frame, a round
@@ -327,17 +328,21 @@
               <span class="shrink-0 text-2xs font-semibold tracking-wider text-muted-2 uppercase">
                 {t(row.c.badgeKey)}
               </span>
-              <span class="min-w-0 flex-1 truncate text-sm">{row.label}</span>
+              <span class="min-w-0 flex-1 truncate text-sm">
+                <Highlight text={row.label} ranges={row.matchedField === "label" ? row.ranges : undefined} />
+              </span>
               {#if row.hint}
                 <span class="max-w-[40%] shrink-0 truncate text-xs text-muted-2">
-                  {row.hint}
+                  <Highlight text={row.hint} ranges={row.matchedField === "hint" ? row.ranges : undefined} />
                 </span>
               {/if}
             {:else}
-              <span class="min-w-0 truncate">{row.label}</span>
+              <span class="min-w-0 truncate">
+                <Highlight text={row.label} ranges={row.matchedField === "label" ? row.ranges : undefined} />
+              </span>
               {#if row.hint}
                 <span class="min-w-0 flex-1 truncate text-xs text-muted-2">
-                  {row.hint}
+                  <Highlight text={row.hint} ranges={row.matchedField === "hint" ? row.ranges : undefined} />
                 </span>
               {/if}
             {/if}

@@ -50,6 +50,17 @@ describe("with a query", () => {
     const rows = [row("t1", "threads", "Claude #1", "boite / shell")];
     expect(ids(rankRows(rows, "boite"))).toEqual(["t1"]);
   });
+
+  it("carries ranges and matchedField on the ranked rows", () => {
+    const rows = [row("t1", "threads", "Claude #1", "boite / shell")];
+    const hitLabel = rankRows(rows, "Claude");
+    expect(hitLabel[0].matchedField).toBe("label");
+    expect(hitLabel[0].ranges).toEqual([[0, 6]]);
+
+    const hitHint = rankRows(rows, "boite");
+    expect(hitHint[0].matchedField).toBe("hint");
+    expect(hitHint[0].ranges).toEqual([[0, 5]]);
+  });
 });
 
 describe("content hits", () => {
