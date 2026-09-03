@@ -114,15 +114,15 @@
       class="flex flex-1 flex-col items-center justify-center gap-2 text-muted-2"
     >
       <FileText class="size-8 opacity-40" />
-      <p class="text-xs">{t("editor.pickAFile")}</p>
+      <p class="text-sm">{t("editor.pickAFile")}</p>
     </div>
   {:else if active.loading}
-    <div class="flex flex-1 items-center justify-center text-xs text-muted-2">
+    <div class="flex flex-1 items-center justify-center text-sm text-muted-2">
       {t("common.loading")}
     </div>
   {:else if active.error}
     <div
-      class="flex flex-1 items-center justify-center px-4 text-center text-xs text-[var(--color-danger)]"
+      class="flex flex-1 items-center justify-center px-4 text-center text-sm text-[var(--color-danger)]"
     >
       {active.error}
     </div>
@@ -216,7 +216,7 @@
   {:else if active.kind === "diff"}
     {#if active.binary}
       <div
-        class="flex flex-1 items-center justify-center px-4 text-center text-xs text-muted-foreground"
+        class="flex flex-1 items-center justify-center px-4 text-center text-sm text-muted-foreground"
       >
         {t("editor.binaryDiff")}
       </div>
