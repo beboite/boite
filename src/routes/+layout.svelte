@@ -35,7 +35,8 @@
   import { captureWindowErrors } from "$lib/shared/services/logger.svelte";
   import { editorStore } from "$lib/features/editor/store.svelte";
   import { paneStore, threadLeavesOf } from "$lib/features/panes/store.svelte";
-  import { splitFocused } from "$lib/features/panes/open";
+  import { splitFocused, togglePanelPane } from "$lib/features/panes/open";
+  import { goHome } from "$lib/features/home/goHome";
   import { palette } from "$lib/features/palette/store.svelte";
   import { isDeviceMacOS, platform } from "$lib/storage/platform.svelte";
   import { updater } from "$lib/features/updater/store.svelte";
@@ -226,6 +227,18 @@
     },
     "pane.next": () => cyclePaneInGroup(1),
     "pane.previous": () => cyclePaneInGroup(-1),
+    "pane.toggleGit": () => {
+      togglePanelPane("git");
+    },
+    "pane.toggleFiles": () => {
+      togglePanelPane("explorer");
+    },
+    "pane.toggleTodo": () => {
+      togglePanelPane("todo");
+    },
+    "view.goHome": () => {
+      void goHome();
+    },
     ...Object.fromEntries(
       ([1, 2, 3, 4, 5, 6, 7, 8, 9] as const).map((n) => [
         `thread.jump${n}`,

@@ -28,6 +28,7 @@ const THREAD_SLOTS = [1, 2, 3, 4, 5, 6, 7, 8, 9] as const;
 export const KEY_COMMANDS: KeyCommandDef[] = [
   { id: "view.backToTerminal", group: "view", labelKey: "keybindings.cmd.backToTerminal" },
   { id: "view.toggleSettings", group: "view", labelKey: "keybindings.cmd.toggleSettings" },
+  { id: "view.goHome", group: "view", labelKey: "keybindings.cmd.goHome" },
   { id: "view.toggleSidebar", group: "view", labelKey: "keybindings.cmd.toggleSidebar" },
   { id: "view.closeFrontMost", group: "view", labelKey: "keybindings.cmd.closeFrontMost" },
   { id: "view.zoomIn", group: "view", labelKey: "keybindings.cmd.zoomIn" },
@@ -53,6 +54,9 @@ export const KEY_COMMANDS: KeyCommandDef[] = [
   { id: "pane.splitDown", group: "pane", labelKey: "keybindings.cmd.splitDown" },
   { id: "pane.next", group: "pane", labelKey: "keybindings.cmd.nextPane" },
   { id: "pane.previous", group: "pane", labelKey: "keybindings.cmd.previousPane" },
+  { id: "pane.toggleGit", group: "pane", labelKey: "keybindings.cmd.toggleGit" },
+  { id: "pane.toggleFiles", group: "pane", labelKey: "keybindings.cmd.toggleFiles" },
+  { id: "pane.toggleTodo", group: "pane", labelKey: "keybindings.cmd.toggleTodo" },
 ];
 
 export const KEY_COMMAND_BY_ID: Record<string, KeyCommandDef> = Object.fromEntries(

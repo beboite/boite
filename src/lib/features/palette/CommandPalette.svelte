@@ -25,6 +25,7 @@
   import { rankRows, sectionTitleKeyAt, type PaletteRow } from "./rank";
   import { paletteSearch } from "./search.svelte";
   import Highlight from "./Highlight.svelte";
+  import Check from "@lucide/svelte/icons/check";
 
   // The local filter alone. The workspace query has its own, longer one in
   // `content.ts`: a fuzzy match over a few hundred strings is a frame, a round
@@ -310,6 +311,7 @@
             id="palette-item-{i}"
             role="option"
             aria-selected={i === activeIndex}
+            aria-current={row.c.current ? "true" : undefined}
             class="flex w-full items-center gap-2 px-4 py-1.5 text-left text-base
               {i === activeIndex
                 ? 'bg-[var(--color-surface-3)] text-foreground'
@@ -348,6 +350,11 @@
                   <Highlight text={row.hint} ranges={row.matchedField === "hint" ? row.ranges : undefined} />
                 </span>
               {/if}
+            {/if}
+            {#if row.c.current}
+              <span class="ml-auto shrink-0 text-foreground" aria-hidden="true">
+                <Check class="size-3.5" />
+              </span>
             {/if}
           </button>
         {/each}

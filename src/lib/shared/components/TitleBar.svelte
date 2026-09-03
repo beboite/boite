@@ -6,12 +6,10 @@
   import { invoke } from "@tauri-apps/api/core";
   import { platform as detectPlatform } from "@tauri-apps/plugin-os";
   import { hasTauri } from "$lib/backend/env";
-  import { workspace } from "$lib/backend";
   import { app } from "$lib/app/store.svelte";
   import { settings } from "$lib/features/settings/store.svelte";
   import { homeAvailable } from "$lib/features/settings/homeAvailable";
-  import { addProjectByPath } from "$lib/features/project/api";
-  import { launchBlankTerminal } from "$lib/features/thread/api";
+  import { goHome } from "$lib/features/home/goHome";
   import { t } from "$lib/i18n/index.svelte";
   import WorkspaceToggle from "$lib/features/workspace/WorkspaceToggle.svelte";
   import Minus from "@lucide/svelte/icons/minus";
@@ -263,38 +261,6 @@
     app.threads.filter((thread) => !neverStarted(thread.status, !!thread.ptyId)).length,
   );
 
-  function showTerminal() {
-    app.view = "terminal";
-    app.mobileTab = "terminal";
-  }
-
-  function showHome() {
-    app.view = "home";
-    app.mobileTab = "home";
-  }
-
-  async function goHome() {
-    if (homeShown) {
-      if (onHome) showTerminal();
-      else showHome();
-      return;
-    }
-    if (app.view === "settings") {
-      showTerminal();
-      return;
-    }
-    if (workspace.mode === "local") return;
-    const root = await workspace
-      .backendFor("remote")
-      .scope.workspaceRoot()
-      .catch(() => null);
-    if (!root) return;
-    const project = await addProjectByPath(
-      root,
-      workspace.isDynamic ? "remote" : undefined,
-    );
-    if (project) await launchBlankTerminal(project.id);
-  }
 </script>
 
 <div

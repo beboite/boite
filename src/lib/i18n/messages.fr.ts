@@ -1007,7 +1007,12 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "palette.urlHint": "Entrée ouvre la page dans un volet.",
   "palette.noMatch": "Aucune commande correspondante",
   "palette.sectionActions": "Actions",
+  "palette.sectionSettings": "Réglages",
   "palette.sectionContent": "Trouvé dans cet espace",
+  "palette.setting": "Réglage : {label}",
+  "palette.theme": "Thème : {name}",
+  "palette.layout": "Disposition : {name}",
+  "palette.language": "Langue : {name}",
   "palette.hitTodo": "Tâche",
   "palette.hitJournal": "Journal",
   "palette.hitTerminal": "Terminal",
@@ -1358,6 +1363,7 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
 
   "keybindings.cmd.backToTerminal": "Revenir au terminal",
   "keybindings.cmd.toggleSettings": "Ouvrir ou fermer les réglages",
+  "keybindings.cmd.goHome": "Aller à l'accueil",
   "keybindings.cmd.toggleSidebar": "Afficher ou masquer la barre latérale",
   "keybindings.cmd.closeFrontMost": "Fermer l'onglet, le panneau ou le terminal au premier plan",
   "keybindings.cmd.zoomIn": "Agrandir",
@@ -1374,6 +1380,9 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "keybindings.cmd.splitDown": "Diviser en bas",
   "keybindings.cmd.nextPane": "Volet suivant",
   "keybindings.cmd.previousPane": "Volet précédent",
+  "keybindings.cmd.toggleGit": "Afficher ou masquer le volet Git",
+  "keybindings.cmd.toggleFiles": "Afficher ou masquer le volet Fichiers",
+  "keybindings.cmd.toggleTodo": "Afficher ou masquer le volet todo",
 
   // Emporter la configuration des agents d'un ordinateur à l'autre.
   "sync.enable": "Synchroniser à l'ouverture de Boite",

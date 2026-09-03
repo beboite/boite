@@ -56,6 +56,14 @@ export const DEFAULT_KEYBINDINGS: Keybinding[] = [
   { key: "mod+alt+arrowdown", command: "pane.next", when: TERMINAL_ONLY },
   { key: "mod+alt+arrowleft", command: "pane.previous", when: TERMINAL_ONLY },
   { key: "mod+alt+arrowup", command: "pane.previous", when: TERMINAL_ONLY },
+  // Git / files / todo / Home. `mod+shift+f` is Find in Windows Terminal, VS
+  // Code's terminal and most others, so files sits on J instead. G, L and H
+  // were free in this table and in the chords those terminals keep for
+  // themselves (copy, paste, find, new tab).
+  { key: "mod+shift+g", command: "pane.toggleGit", when: ANY_VIEW },
+  { key: "mod+shift+j", command: "pane.toggleFiles", when: ANY_VIEW },
+  { key: "mod+shift+l", command: "pane.toggleTodo", when: ANY_VIEW },
+  { key: "mod+shift+h", command: "view.goHome", when: ANY_VIEW },
   { key: "mod+shift+t", command: "thread.restoreClosed", when: ANY_VIEW },
   { key: "mod+t", command: "thread.new", when: ANY_VIEW },
   { key: "mod+w", command: "view.closeFrontMost", when: ANY_VIEW },

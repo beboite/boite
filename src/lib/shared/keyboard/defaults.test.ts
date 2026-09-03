@@ -128,4 +128,19 @@ describe("the shipped table reproduces the scope ladder", () => {
       "thread.restoreClosed",
     );
   });
+
+  it("toggles the three panels and goes Home from any view", () => {
+    for (const layer of ["terminal", "settings", "editor", "project", "home"] as const) {
+      expect(fire(layer, { key: "G", code: "KeyG", ctrl: true, shift: true })).toBe(
+        "pane.toggleGit",
+      );
+      expect(fire(layer, { key: "J", code: "KeyJ", ctrl: true, shift: true })).toBe(
+        "pane.toggleFiles",
+      );
+      expect(fire(layer, { key: "L", code: "KeyL", ctrl: true, shift: true })).toBe(
+        "pane.toggleTodo",
+      );
+      expect(fire(layer, { key: "H", code: "KeyH", ctrl: true, shift: true })).toBe("view.goHome");
+    }
+  });
 });
