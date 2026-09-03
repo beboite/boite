@@ -767,23 +767,12 @@
       });
       items.push({ separator: true });
     }
-    // Same call middle-click makes; the shortcut is undiscoverable, and on a
-    // trackpad there is no middle button to make it with. Already stopped
-    // means there is no PTY left to put down.
     items.push({
-      label: t("sidebar.putToSleep"),
-      action: () => {
-        void stopThread(thread.id);
-      },
-      disabled: !thread.ptyId,
-    });
-    items.push({
-      label: thread.keepAwake
-        ? t("sidebar.allowAutoSleep")
-        : t("sidebar.keepAwake"),
+      label: t("sidebar.stayAwake"),
       action: () => {
         app.toggleThreadKeepAwake(thread.id);
       },
+      checked: !!thread.keepAwake,
     });
     // The dispatch mute, user-only by construction: the bus refuses this
     // write to any agent grant, so this menu is the one way back on.

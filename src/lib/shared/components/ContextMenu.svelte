@@ -5,6 +5,7 @@
     separator?: boolean;
     danger?: boolean;
     disabled?: boolean;
+    checked?: boolean;
     /** Why an item is disabled. A greyed action that says nothing teaches nothing. */
     title?: string;
   }
@@ -177,13 +178,17 @@
         class:danger={item.danger}
         disabled={item.disabled}
         use:tip={item.title}
-        role="menuitem"
+        role={item.checked !== undefined ? "menuitemcheckbox" : "menuitem"}
+        aria-checked={item.checked !== undefined ? item.checked : undefined}
         onmousedown={(e) => e.preventDefault()}
         onclick={() => {
           item.action?.();
           onClose();
         }}
       >
+        {#if item.checked}
+          <span class="check" aria-hidden="true">✓</span>
+        {/if}
         <span class="label">{item.label}</span>
       </button>
     {/if}
@@ -236,6 +241,10 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  .check {
+    margin-right: 6px;
+    flex-shrink: 0;
   }
   .item:hover:not(:disabled),
   /* The keyboard highlight is the hover highlight: in a menu, focus is the
