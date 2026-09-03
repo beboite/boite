@@ -185,6 +185,21 @@
   }
 
   /**
+   * The same toggle from the keyboard, so the row is a control rather than a
+   * shape only a mouse can use.
+   *
+   * Guarded on the event's own target: the row wraps a checkbox, a title, two
+   * icon buttons and, once it is open, a field and a textarea, and a Space in
+   * the description would otherwise close the card it is being typed into.
+   */
+  function cardKeydown(item: TodoItem, e: KeyboardEvent) {
+    if (e.target !== e.currentTarget) return;
+    if (e.key !== "Enter" && e.key !== " ") return;
+    e.preventDefault();
+    toggleCard(item, true);
+  }
+
+  /**
    * Where the keyboard has to be after the next render.
    *
    * Opening a card replaces the title button with an input and closing it does
@@ -479,15 +494,16 @@
       {#if dropSlot === slotIndex && item.id !== draggingId}
         {@render dropLine()}
       {/if}
-      <!-- The row's click is a pointer convenience on top of the controls
-           inside it: the title is a button, so opening a card and reading its
-           description no longer needs a mouse, and a key handler here would
-           fight the fields the open card holds. -->
-      <!-- svelte-ignore a11y_click_events_have_key_events -->
-      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <!-- The whole row toggles the card, and says so: it was a bare div with a
+           click on it, which meant the pointer had a shortcut the keyboard and
+           a screen reader could not see. The name comes from the line inside
+           it, and `cardKeydown` ignores keys aimed at the controls it wraps. -->
       <div
         data-todo-row={item.id}
-        class="group cursor-pointer border-b border-border/50 px-3 py-1.5 transition {item.id ===
+        role="button"
+        tabindex="0"
+        aria-expanded={openId === item.id}
+        class="group cursor-pointer border-b border-border/50 px-3 py-1.5 transition focus-visible:focus-ring-inset {item.id ===
         draggingId
           ? 'opacity-40'
           : 'hover:bg-accent'} {item.state === 'claimed'
@@ -495,6 +511,7 @@
           : ''} {openId === item.id ? 'bg-[var(--color-surface-2)]/50' : ''}"
         onpointerdown={(e) => cardPointerDown(item, e)}
         onclick={(e) => cardClick(item, e)}
+        onkeydown={(e) => cardKeydown(item, e)}
       >
         <div class="flex items-center gap-2">
           <!-- The native control was the one white rectangle in the app: it
@@ -525,6 +542,7 @@
               type="text"
               value={item.title}
               placeholder={t("todo.titlePlaceholder")}
+              aria-label={t("todo.titleLabel")}
               use:keepFocus={`title:${item.id}`}
               onkeydown={(e) => fieldKeydown(item, e)}
               onchange={(e) =>
@@ -594,6 +612,7 @@
               value={item.description ?? ""}
               rows="2"
               placeholder={t("todo.descriptionPlaceholder")}
+              aria-label={t("todo.descriptionLabel")}
               use:descriptionBox
               onkeydown={(e) => fieldKeydown(item, e)}
               oninput={(e) => autosize(e.currentTarget as HTMLTextAreaElement)}

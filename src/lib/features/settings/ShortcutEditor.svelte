@@ -14,7 +14,8 @@
   import ShortcutIcon from "$lib/shared/icons/ShortcutIcon.svelte";
   import { resolveIconKey } from "$lib/shared/icons/detect";
   import { confirmDialog } from "$lib/shared/components/confirm.svelte";
-  import { registerEscape, restoreFocus } from "$lib/shared/keyboard/overlay";
+  import { registerEscape } from "$lib/shared/keyboard/overlay";
+  import { focusTrap } from "$lib/shared/actions/focusTrap";
   import Plus from "@lucide/svelte/icons/plus";
   import Check from "@lucide/svelte/icons/check";
   import Trash2 from "@lucide/svelte/icons/trash-2";
@@ -98,10 +99,13 @@
    * Escape through the shared stack, and a pointer landing anywhere else. It
    * used to be dismissed only by picking a colour, so tabbing away or opening
    * something else left it hanging over the rows below.
+   *
+   * Where the keyboard goes and comes back from is `use:focusTrap` on the box
+   * itself, not here: this effect runs on the id, and the element it would have
+   * to focus does not exist until the render that id causes.
    */
   $effect(() => {
     if (!colorPickerFor) return;
-    const previous = document.activeElement as HTMLElement | null;
     const release = registerEscape(() => (colorPickerFor = null));
     // Capture phase: the swatches stop their own click, and a pointerdown on the
     // trigger has to reach the trigger so it can toggle rather than reopen.
@@ -115,7 +119,6 @@
     return () => {
       release();
       window.removeEventListener("pointerdown", onPointerDown, true);
-      restoreFocus(previous, colorPopoverEl);
     };
   });
 
@@ -447,6 +450,7 @@
           <div
             bind:this={colorPopoverEl}
             class="surface-popover absolute left-0 top-7 z-[var(--z-popover)] w-max p-2"
+            use:focusTrap
           >
             <div class="grid grid-cols-6 gap-1">
               {#each iconColors as c (c)}
@@ -477,6 +481,7 @@
         type="text"
         value={shortcut.label}
         placeholder={t("shortcuts.labelPlaceholder")}
+        aria-label={t("shortcuts.labelName")}
         onchange={(e) =>
           onUpdate(shortcut.id, { label: (e.currentTarget as HTMLInputElement).value })}
         class="rounded-md border border-transparent bg-transparent px-2 py-1 text-xs text-foreground outline-none transition focus:border-border focus:bg-[var(--color-surface)]"
@@ -485,6 +490,7 @@
         type="text"
         value={shortcut.command}
         placeholder={t("shortcuts.commandPlaceholder")}
+        aria-label={t("shortcuts.commandName")}
         onchange={(e) =>
           onUpdate(shortcut.id, { command: (e.currentTarget as HTMLInputElement).value })}
         class="rounded-md border border-transparent bg-transparent px-2 py-1 font-mono text-sm text-foreground outline-none transition focus:border-border focus:bg-[var(--color-surface)]"

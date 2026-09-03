@@ -437,7 +437,7 @@
         type="text"
         autocomplete="off"
         spellcheck="false"
-        class="w-full bg-transparent text-xs text-foreground placeholder:text-muted-2 focus:outline-none"
+        class="w-full bg-transparent text-xs text-foreground placeholder:text-muted-2 focus:outline-none focus-visible:focus-ring-inset"
         placeholder={t("fastpick.search")}
         aria-label={t("fastpick.search")}
       />

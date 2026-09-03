@@ -209,7 +209,7 @@
     data-name={entry.name}
     data-dir={entry.isDir ? "1" : "0"}
     tabindex="-1"
-    class="group flex w-full items-center px-1 text-left transition hover:bg-accent focus-visible:bg-[var(--color-surface-2)] focus-visible:outline-none {current
+    class="group flex w-full items-center px-1 text-left transition hover:bg-accent focus-visible:bg-[var(--color-surface-2)] focus-visible:focus-ring-inset {current
       ? 'bg-[var(--color-surface-2)]'
       : ''} {mobile
       ? 'min-h-11 gap-2 py-2 text-base'

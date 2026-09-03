@@ -761,6 +761,15 @@
       box-shadow var(--dur-2) ease;
   }
 
+  /* The box is grabbed and dragged, so a pointer landing on it must not draw a
+     focus box around the thing being moved. The keyboard reaching it is the
+     other case entirely: it floats over a terminal, and without this there is
+     nothing on screen saying the keys now go to the card. */
+  .card:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--color-foreground) 45%, transparent);
+    outline-offset: 2px;
+  }
+
   .card.dragging {
     cursor: grabbing;
     transition: none;

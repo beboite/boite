@@ -150,7 +150,7 @@
   }
 
   const rowClass =
-    "flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-1 text-left text-xs text-foreground transition hover:bg-accent hover:text-foreground focus-visible:bg-accent focus-visible:text-foreground focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-40";
+    "flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-1 text-left text-xs text-foreground transition hover:bg-accent hover:text-foreground focus-visible:bg-accent focus-visible:text-foreground focus-visible:focus-ring-inset disabled:cursor-not-allowed disabled:opacity-40";
 </script>
 
 <!-- Compact carries no surface of its own: it is the contents of a popover, and

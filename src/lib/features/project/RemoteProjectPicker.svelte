@@ -4,6 +4,7 @@
   import { workspace } from "$lib/backend";
   import { device } from "$lib/features/settings/device.svelte";
   import { projectDisplayName } from "$lib/shared/project-label";
+  import { focusTrap } from "$lib/shared/actions/focusTrap";
   import { t } from "$lib/i18n/index.svelte";
   import Check from "@lucide/svelte/icons/check";
   import FolderPlus from "@lucide/svelte/icons/folder-plus";
@@ -77,6 +78,7 @@
   aria-modal="true"
   aria-labelledby="remote-projects-title"
   tabindex="-1"
+  use:focusTrap
   onclick={backdropClick}
   transition:fade={{ duration: 120 }}
 >

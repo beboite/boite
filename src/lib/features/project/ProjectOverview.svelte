@@ -284,7 +284,7 @@
            the choices. -->
       {#if settings.state.experimentWorkspace}
         <select
-          class="rounded-md border border-edge bg-[var(--color-surface-2)] px-1.5 py-0.5 text-xs text-muted-foreground outline-none focus:border-foreground/30"
+          class="rounded-md border border-edge bg-[var(--color-surface-2)] px-1.5 py-0.5 text-xs text-muted-foreground focus:outline-none focus-visible:focus-ring focus:border-foreground/30"
           aria-label={t("project.orchestrator")}
           value={settings.state.orchestratorByProject[project.id] ?? ""}
           onchange={(e) =>

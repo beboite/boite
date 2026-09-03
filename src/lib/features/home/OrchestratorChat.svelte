@@ -133,6 +133,7 @@
         rows="1"
         class="max-h-24 min-h-9 flex-1 resize-none rounded-md border border-edge bg-[var(--color-surface-2)] px-2.5 py-1.5 text-sm text-foreground outline-none placeholder:text-muted-2 focus:border-foreground/30"
         placeholder={t("orchestrator.placeholder")}
+        aria-label={t("orchestrator.inputLabel")}
         bind:value={draft}
         onkeydown={onKeydown}
         disabled={orchestrator.posting}

@@ -337,7 +337,8 @@
         oninput={onFilterInput}
         onkeydown={onFilterKey}
         disabled={!root}
-        class="min-w-0 flex-1 bg-transparent text-foreground outline-none placeholder:text-muted-2 disabled:opacity-40"
+        aria-label={t("explorer.filterLabel")}
+        class="min-w-0 flex-1 bg-transparent text-foreground focus:outline-none focus-visible:focus-ring-inset placeholder:text-muted-2 disabled:opacity-40"
       />
       {#if filterActive}
         <button
