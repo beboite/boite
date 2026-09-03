@@ -6,7 +6,13 @@
   import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
   import type { MessageKey } from "$lib/i18n/index.svelte";
   import { LOCALE_OPTIONS, t } from "$lib/i18n/index.svelte";
-  import type { MotionMode, ThemeId, ThemeMode } from "$lib/types";
+  import type {
+    MotionMode,
+    SmartSortBy,
+    SortDirection,
+    ThemeId,
+    ThemeMode,
+  } from "$lib/types";
   import { ACCENT_COLOR, type ModelAccent } from "$lib/features/fastpick/accent";
   import { THEMES } from "$lib/theme/themes";
   import {
@@ -50,6 +56,33 @@
     { id: "mobile", labelKey: "appearance.mobile" },
     { id: "pc", labelKey: "appearance.pc" },
   ];
+
+  /**
+   * How the sidebar orders its threads.
+   *
+   * These two rows used to hang under an "smart ordering" experiment switch.
+   * The ordering is no longer optional, so the switch is gone and the choice it
+   * guarded moved here, beside the other things that decide what the window
+   * looks like. `manual` is the dragged order and stays the default: the
+   * feature is that you can pick, not that something reorders behind you.
+   */
+  const SORT_MODES: { id: SmartSortBy; labelKey: MessageKey }[] = [
+    { id: "manual", labelKey: "appearance.sortManual" },
+    { id: "activity", labelKey: "appearance.sortActivity" },
+    { id: "alphabetical", labelKey: "appearance.sortAlpha" },
+  ];
+
+  const SORT_DIRECTIONS: { id: SortDirection; labelKey: MessageKey }[] = [
+    { id: "asc", labelKey: "appearance.sortAsc" },
+    { id: "desc", labelKey: "appearance.sortDescending" },
+  ];
+
+  const sortManual = $derived(settings.state.smartSortBy === "manual");
+
+  const RADIO =
+    "rounded-md border px-3 py-1 text-xs transition border-border bg-[var(--color-surface-2)] text-muted-foreground hover:border-foreground/30 hover:text-foreground";
+  const RADIO_ON =
+    "rounded-md border px-3 py-1 text-xs transition border-foreground/40 bg-[var(--color-surface-3)] text-foreground";
 
   const MOTION_MODES: { id: MotionMode; labelKey: MessageKey }[] = [
     { id: "system", labelKey: "appearance.motionSystem" },
@@ -322,6 +355,63 @@
         {t(mode.labelKey)}
       </button>
     {/each}
+  </div>
+</SettingsCard>
+
+<SettingsCard
+  title={t("appearance.sort")}
+  anchor="appearance.sort"
+  description={t("appearance.sortDesc")}
+>
+  <div class="flex flex-col gap-2">
+    <div
+      class="flex flex-wrap items-center gap-1.5"
+      role="radiogroup"
+      aria-label={t("appearance.sort")}
+    >
+      <span class="w-20 shrink-0 text-xs text-muted-foreground">
+        {t("appearance.sortOrder")}
+      </span>
+      {#each SORT_MODES as mode (mode.id)}
+        <button
+          type="button"
+          role="radio"
+          aria-checked={settings.state.smartSortBy === mode.id}
+          class={settings.state.smartSortBy === mode.id ? RADIO_ON : RADIO}
+          onclick={() => settings.setSmartSortBy(mode.id)}
+        >
+          {t(mode.labelKey)}
+        </button>
+      {/each}
+    </div>
+    <!-- Disabled rather than hidden while the order is manual: a row that
+         vanishes reads as lost. -->
+    <div
+      class="flex flex-wrap items-center gap-1.5"
+      class:opacity-50={sortManual}
+      role="radiogroup"
+      aria-label={t("appearance.sortDirection")}
+      use:tip={sortManual ? t("appearance.sortDirManual") : undefined}
+    >
+      <span class="w-20 shrink-0 text-xs text-muted-foreground">
+        {t("appearance.sortDirection")}
+      </span>
+      {#each SORT_DIRECTIONS as direction (direction.id)}
+        <button
+          type="button"
+          role="radio"
+          aria-checked={settings.state.smartSortDirection === direction.id}
+          aria-disabled={sortManual}
+          class={settings.state.smartSortDirection === direction.id ? RADIO_ON : RADIO}
+          onclick={() => {
+            if (sortManual) return;
+            settings.setSmartSortDirection(direction.id);
+          }}
+        >
+          {t(direction.labelKey)}
+        </button>
+      {/each}
+    </div>
   </div>
 </SettingsCard>
 

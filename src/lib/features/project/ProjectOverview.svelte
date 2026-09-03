@@ -201,9 +201,10 @@
     {/snippet}
     {#snippet actions()}
       <!-- The per-project override, three states: absent inherits the global
-           answer. Only drawn while that experiment is armed, so switching it
-           off restores one global orchestrator without erasing the choices. -->
-      {#if settings.state.experimentOrchestrator && settings.state.experimentOrchestratorPerProject}
+           answer. Only drawn while the workspace experiment is armed, and
+           switching that off restores one global orchestrator without erasing
+           the choices. -->
+      {#if settings.state.experimentWorkspace}
         <select
           class="rounded-md border border-border bg-[var(--color-surface-2)] px-1.5 py-0.5 text-xs text-muted-foreground outline-none focus:border-foreground/30"
           aria-label={t("project.orchestrator")}

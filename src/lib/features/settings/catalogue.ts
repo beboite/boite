@@ -108,6 +108,7 @@ export const SETTINGS_CATALOGUE: SettingEntry[] = [
     descKey: "appearance.terminalSizeDesc",
   },
   { tab: "appearance", key: "appearance.layout", descKey: "appearance.layoutDesc" },
+  { tab: "appearance", key: "appearance.sort", descKey: "appearance.sortDesc" },
   { tab: "appearance", key: "appearance.colorByModel", descKey: "appearance.colorByModelDesc" },
   { tab: "appearance", key: "appearance.animations", descKey: "appearance.animationsDesc" },
   { tab: "appearance", key: "appearance.language", descKey: "appearance.languageDesc" },
@@ -128,35 +129,16 @@ export const SETTINGS_CATALOGUE: SettingEntry[] = [
   { tab: "agents", key: "plugins.title", descKey: "plugins.movedDesc" },
 
 
-  { tab: "experiments", key: "experiments.home", descKey: "experiments.homeDesc" },
+  // One row for the whole workspace layer. The orchestrator's agent and the
+  // voice sub-controls hang under it, the latter in VoiceSettings.svelte and so
+  // outside this directory's scan, which makes this row the search's only
+  // landing spot for either.
   {
     tab: "experiments",
-    key: "experiments.orchestrator",
-    descKey: "experiments.orchestratorDesc",
+    key: "experiments.workspace",
+    descKey: "experiments.workspaceDesc",
   },
-  {
-    tab: "experiments",
-    key: "experiments.orchestratorPerProject",
-    descKey: "experiments.orchestratorPerProjectDesc",
-  },
-  // The voice sub-controls live in VoiceSettings.svelte, outside this
-  // directory's scan, so the experiment row is the search's landing spot.
-  { tab: "experiments", key: "experiments.voice", descKey: "experiments.voiceDesc" },
   { tab: "experiments", key: "experiments.infoBox", descKey: "experiments.infoBoxDesc" },
-  { tab: "experiments", key: "experiments.smartSort", descKey: "experiments.smartSortDesc" },
-  { tab: "experiments", key: "experiments.whip", descKey: "experiments.whipDesc" },
-  {
-    tab: "experiments",
-    key: "experiments.sidebarDesign",
-    descKey: "experiments.sidebarDesignDesc",
-  },
-  // The logo row's description changes with the design above it; search reads
-  // the glow one, which is the sentence that says what the setting does.
-  {
-    tab: "experiments",
-    key: "experiments.harnessLogos",
-    descKey: "experiments.harnessLogosDesc",
-  },
 
   { tab: "privacy", key: "privacy.stop", descKey: "privacy.stopDesc" },
   { tab: "privacy", key: "privacy.modeA", descKey: "privacy.modeADesc" },
@@ -165,6 +147,10 @@ export const SETTINGS_CATALOGUE: SettingEntry[] = [
   { tab: "privacy", key: "privacy.doc", descKey: "privacy.docDesc" },
 
   { tab: "about", key: "about.title" },
+  // The whip is a toy, not an experiment, and it followed the other one down
+  // here. Its key keeps the `experiments.` prefix: renaming a dictionary entry
+  // to match the page it moved to buys nothing and breaks every translation.
+  { tab: "about", key: "experiments.whip", descKey: "experiments.whipDesc" },
 ];
 
 /**

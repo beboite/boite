@@ -59,7 +59,7 @@ export function registerDispatchSink(threadId: string, sink: DispatchSink): () =
 }
 
 function enabled(): boolean {
-  return settings.state.experimentOrchestrator && !!backend().conduct;
+  return settings.state.experimentWorkspace && !!backend().conduct;
 }
 
 /**

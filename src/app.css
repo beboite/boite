@@ -756,33 +756,6 @@ kbd.kbd {
    redeclaring @keyframes in its own <style> gets a scoped name, so two
    copies of the same animation cannot stay in step. */
 
-/* A thread that finished and that nobody has read yet.
-
-   It cycles between the success green and the awake violet instead of draining
-   away, and it cycles for as long as the mark is on the row. Draining was
-   calibrated on a user sitting in front of the window: six seconds after the
-   agent stopped, a row that finished and a row that finished an hour ago drew
-   the same thing, which is exactly the question the column is scanned for. Two
-   hues rather than one because a single colour pulsing reads as a loading
-   state; the alternation reads as an unread mark, which is what it is.
-
-   `justFinished` takes the mark back the moment the row is opened, the thread
-   goes back to work, or the idle timer parks it, so nothing here has to decay
-   on a clock. */
-@keyframes boite-finish-blink {
-  0%,
-  100% {
-    box-shadow:
-      inset 0 0 0 1px color-mix(in srgb, var(--color-success) 70%, transparent),
-      0 0 12px 1px color-mix(in srgb, var(--color-success) 24%, transparent);
-  }
-  50% {
-    box-shadow:
-      inset 0 0 0 1px color-mix(in srgb, var(--color-awake) 70%, transparent),
-      0 0 12px 1px color-mix(in srgb, var(--color-awake) 24%, transparent);
-  }
-}
-
 /* An agent reached into Boite itself through the MCP. Deliberately not the
    success colour: this is not a thread finishing, it is the app being driven
    from the outside, and it gets the awake violet the keep-awake dot already

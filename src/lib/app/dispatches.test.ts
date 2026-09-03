@@ -31,7 +31,7 @@ vi.mock("$lib/backend/active.svelte", () => ({ backend: () => ({ conduct }) }));
 vi.mock("$lib/features/settings/store.svelte", () => ({
   settings: {
     get state() {
-      return { experimentOrchestrator: world.orchestratorOn };
+      return { experimentWorkspace: world.orchestratorOn };
     },
   },
 }));

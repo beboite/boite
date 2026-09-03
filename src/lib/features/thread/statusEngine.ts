@@ -452,7 +452,7 @@ export function settleUnread(
  * transition is written once, not once per window.
  */
 function recordPhase(backend: Backend, t: Thread, next: ThreadStatus): void {
-  if (!settings.state.experimentOrchestrator) return;
+  if (!settings.state.experimentWorkspace) return;
   backend.conduct
     ?.record({
       kind: "thread.phase",

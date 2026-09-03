@@ -21,12 +21,12 @@
   let list: HTMLUListElement | null = $state(null);
 
   // One thread per scope: the workspace, plus every project the orchestrator
-  // watches while the per-project experiment is armed. Switching scopes swaps
-  // the conversation shown; each keeps its own cursor in the store.
+  // watches. Switching scopes swaps the conversation shown; each keeps its own
+  // cursor in the store. No flag of its own any more: `enabledFor` already
+  // answers false for every project while the workspace experiment is off, so
+  // the list empties itself and this chat is not drawn at all.
   const scopes = $derived(
-    settings.state.experimentOrchestratorPerProject
-      ? app.projects.filter((p) => !p.archived && orchestrator.enabledFor(p.id))
-      : [],
+    app.projects.filter((p) => !p.archived && orchestrator.enabledFor(p.id)),
   );
 
   // A scope that vanished under the selector (project archived, override cut)
@@ -60,7 +60,7 @@
   });
 
   const voiceOn = $derived(
-    settings.state.experimentVoice && settings.state.voiceStt !== "off",
+    settings.state.experimentWorkspace && settings.state.voiceStt !== "off",
   );
 
   async function send() {

@@ -12,8 +12,12 @@ export async function reportSettingsSnapshot(): Promise<void> {
       animations: s.motionMode,
       mcpYolo: s.mcpYolo,
       idleAutoclose: s.idleTimeoutMinutes > 0,
-      orchestrator: s.experimentOrchestrator,
-      voice: s.experimentVoice,
+      // Two fields, one flag now: the orchestrator and its microphone were
+      // folded into a single switch, and the payload's shape is the core's,
+      // not this file's. Both read the folded flag rather than one of them
+      // going silent, so a Mode B series does not break at this commit.
+      orchestrator: s.experimentWorkspace,
+      voice: s.experimentWorkspace,
     });
   } catch {
     // No runtime, or the Worker is the invalid placeholder.

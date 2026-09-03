@@ -173,12 +173,12 @@ export class AppState {
   });
 
   /**
-   * What the smart-sort experiment asks for, or null while the sidebar is the
-   * user's own order — which is both the toggle being off and the toggle being
-   * on with `manual` still selected, so arming the experiment moves nothing.
+   * What the chosen order asks for, or null while the sidebar is the user's own
+   * order. `manual` is the default and the only value that means "do not touch
+   * the rows", which is why the experiment switch that used to guard this could
+   * go: it said nothing `manual` was not already saying.
    */
   #smartSort(): { by: "activity" | "alphabetical"; dir: 1 | -1 } | null {
-    if (!settings.state.experimentSmartSort) return null;
     const by = settings.state.smartSortBy;
     if (by === "manual") return null;
     return { by, dir: settings.state.smartSortDirection === "asc" ? 1 : -1 };

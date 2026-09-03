@@ -15,7 +15,6 @@ import type {
   RightPanelTab,
   Settings,
   Shortcut,
-  SidebarDesign,
   SmartSortBy,
   SortDirection,
   VoiceStt,
@@ -169,20 +168,15 @@ const DEFAULTS: Settings = {
   kebaccCodex: true,
   kebaccAntigravity: true,
   colorByModel: true,
-  sidebarDesign: "classic",
-  sidebarHarnessLogos: true,
   experimentInfoBox: false,
   infoBoxAnchor: "top-right",
   infoBoxCollapsed: false,
-  experimentSmartSort: false,
   experimentWhip: false,
   whipSound: "synth",
   smartSortBy: "manual",
   smartSortDirection: "desc",
-  experimentHome: false,
+  experimentWorkspace: false,
   openOnLaunch: "last",
-  experimentOrchestrator: false,
-  experimentOrchestratorPerProject: false,
   orchestratorAgent: null,
   orchestratorByProject: {},
   orchestratorAutonomy: "observer",
@@ -191,7 +185,6 @@ const DEFAULTS: Settings = {
   orchestratorSessionHours: 24,
   dispatchTtlMinutes: 60,
   orchestratorBlindProjects: [],
-  experimentVoice: false,
   voiceStt: "off",
   voiceTts: "webspeech",
   voiceName: null,
@@ -273,18 +266,44 @@ function readMinutes(value: unknown, fallback: number): number {
 }
 
 /**
- * The sidebar design, from a row that may predate it.
+ * Keys a stored blob may still carry that nothing reads any more.
  *
- * `sidebarThreadGlow` was the same choice spelled as a boolean, and a row
- * written while it was on means the user asked for the second design. Reading it
- * here rather than migrating the column keeps the fallback for a workspace that
- * never gets written again.
+ * The first four folded into `experimentWorkspace`; the last four graduated,
+ * their behaviour now unconditional (glow rows, agent logos, sidebar ordering)
+ * — `sidebarThreadGlow` is the boolean `sidebarDesign` itself replaced. Listed
+ * rather than merely ignored so `RETIRED_SETTINGS_KEYS` can be asserted absent
+ * from what a save writes: a key nothing reads is a key that ships forever.
  */
-function readSidebarDesign(stored: Record<string, unknown>): SidebarDesign {
-  if (stored.sidebarDesign === "classic" || stored.sidebarDesign === "glow") {
-    return stored.sidebarDesign;
-  }
-  return stored.sidebarThreadGlow === true ? "glow" : DEFAULTS.sidebarDesign;
+export const RETIRED_SETTINGS_KEYS = [
+  "experimentHome",
+  "experimentOrchestrator",
+  "experimentOrchestratorPerProject",
+  "experimentVoice",
+  "experimentSmartSort",
+  "sidebarDesign",
+  "sidebarThreadGlow",
+  "sidebarHarnessLogos",
+] as const;
+
+/**
+ * The workspace experiment, from a blob that may predate the fold.
+ *
+ * Home, the orchestrator, per-project orchestrators and voice were four
+ * switches over one feature, and a device that had armed any of them had asked
+ * for the surface this one flag draws. So the fold is an OR, taken once on
+ * load: anything else would silently disarm a workspace somebody was using.
+ * An explicit `experimentWorkspace` outranks all four, `false` included, or
+ * turning the folded switch off would be undone by the old keys beside it on
+ * the very next load.
+ */
+export function readExperimentWorkspace(stored: Record<string, unknown>): boolean {
+  if (typeof stored.experimentWorkspace === "boolean") return stored.experimentWorkspace;
+  return (
+    stored.experimentHome === true ||
+    stored.experimentOrchestrator === true ||
+    stored.experimentOrchestratorPerProject === true ||
+    stored.experimentVoice === true
+  );
 }
 
 // The column's own two rules live beside it, not in here: see right-panel.ts.
@@ -372,28 +391,22 @@ const DEVICE_FIELDS = [
   "terminalFontScalePercent",
   "locale",
   "colorByModel",
-  "sidebarDesign",
-  "sidebarHarnessLogos",
   "experimentInfoBox",
   "infoBoxAnchor",
   "infoBoxCollapsed",
-  "experimentSmartSort",
   "experimentWhip",
   "whipSound",
   "smartSortBy",
   "smartSortDirection",
   "confirmCloseThread",
-  "experimentHome",
   "openOnLaunch",
-  // Arming the orchestrator is a device gesture, like every experiment flag:
+  // Arming the workspace layer is a device gesture, like every experiment flag:
   // the phone opting in must not switch the desktop on. What the orchestrator
   // *is* once armed (agent, autonomy, caps) stays in the workspace blob, where
   // every device reads the same answer.
-  "experimentOrchestrator",
-  "experimentOrchestratorPerProject",
+  "experimentWorkspace",
   // The whole voice block is device: a microphone, a synthesis voice and the
   // right to speak unfocused are facts about this machine, not the workspace.
-  "experimentVoice",
   "voiceStt",
   "voiceTts",
   "voiceName",
@@ -408,7 +421,7 @@ const DEVICE_FIELDS = [
 // Stamped on the blob so an absent key can be told apart from a key that had
 // not been promoted yet. Bump it whenever a field joins DEVICE_FIELDS, and list
 // the newcomers in PROMOTED_TO_DEVICE so they migrate once.
-const DEVICE_BLOB_VERSION = 5;
+const DEVICE_BLOB_VERSION = 6;
 
 // Moved out of the workspace blob. A device blob whose `v` is missing or older
 // than DEVICE_BLOB_VERSION has no key for the newcomers, and the workspace
@@ -419,14 +432,11 @@ const DEVICE_BLOB_VERSION = 5;
 // joining the list.
 const PROMOTED_TO_DEVICE: readonly string[] = [
   "colorByModel",
-  "sidebarDesign",
-  "sidebarHarnessLogos",
   "confirmCloseThread",
-  "experimentHome",
   "openOnLaunch",
-  "experimentOrchestrator",
-  "experimentOrchestratorPerProject",
-  "experimentVoice",
+  // Joined the list at v6, replacing the four flags it folds. A v5 blob carries
+  // those four and no key for this one, and `applyDeviceOverrides` folds them.
+  "experimentWorkspace",
   "voiceStt",
   "voiceTts",
   "voiceName",
@@ -454,6 +464,13 @@ function loadDeviceOverrides(): DeviceBlob | null {
 function applyDeviceOverrides(state: Settings, dev: DeviceBlob): void {
   const target = state as unknown as Record<string, unknown>;
   const staleBlob = typeof dev.v !== "number" || dev.v < DEVICE_BLOB_VERSION;
+  // Read before the loop, because the loop is what would erase it. A blob
+  // written before the fold names none of `experimentWorkspace` and up to four
+  // of the flags it replaces; those four are gone from DEVICE_FIELDS, so
+  // nothing else here would ever look at them again.
+  const raw = dev as unknown as Record<string, unknown>;
+  const foldedOnThisDevice =
+    raw.experimentWorkspace === undefined && readExperimentWorkspace(raw);
   for (const k of DEVICE_FIELDS) {
     if (dev[k] !== undefined) {
       target[k] = dev[k];
@@ -475,21 +492,15 @@ function applyDeviceOverrides(state: Settings, dev: DeviceBlob): void {
   if (typeof state.infoBoxCollapsed !== "boolean") {
     state.infoBoxCollapsed = DEFAULTS.infoBoxCollapsed;
   }
-  if (typeof state.experimentHome !== "boolean") {
-    state.experimentHome = DEFAULTS.experimentHome;
-  }
   if (!isOpenOnLaunch(state.openOnLaunch)) {
     state.openOnLaunch = DEFAULTS.openOnLaunch;
   }
-  if (typeof state.experimentOrchestrator !== "boolean") {
-    state.experimentOrchestrator = DEFAULTS.experimentOrchestrator;
+  if (typeof state.experimentWorkspace !== "boolean") {
+    state.experimentWorkspace = DEFAULTS.experimentWorkspace;
   }
-  if (typeof state.experimentOrchestratorPerProject !== "boolean") {
-    state.experimentOrchestratorPerProject = DEFAULTS.experimentOrchestratorPerProject;
-  }
-  if (typeof state.experimentVoice !== "boolean") {
-    state.experimentVoice = DEFAULTS.experimentVoice;
-  }
+  // The one-shot fold, after the type guard above rather than before it: a
+  // device that had armed any of the four keeps the surface it was using.
+  if (foldedOnThisDevice) state.experimentWorkspace = true;
   if (!isVoiceStt(state.voiceStt)) state.voiceStt = DEFAULTS.voiceStt;
   if (!isVoiceTts(state.voiceTts)) state.voiceTts = DEFAULTS.voiceTts;
   if (state.voiceName !== null && typeof state.voiceName !== "string") {
@@ -652,11 +663,6 @@ class SettingsStore {
           typeof stored.colorByModel === "boolean"
             ? stored.colorByModel
             : DEFAULTS.colorByModel,
-        sidebarDesign: readSidebarDesign(raw),
-        sidebarHarnessLogos:
-          typeof stored.sidebarHarnessLogos === "boolean"
-            ? stored.sidebarHarnessLogos
-            : DEFAULTS.sidebarHarnessLogos,
         experimentInfoBox:
           typeof stored.experimentInfoBox === "boolean"
             ? stored.experimentInfoBox
@@ -668,10 +674,6 @@ class SettingsStore {
           typeof stored.infoBoxCollapsed === "boolean"
             ? stored.infoBoxCollapsed
             : DEFAULTS.infoBoxCollapsed,
-        experimentSmartSort:
-          typeof stored.experimentSmartSort === "boolean"
-            ? stored.experimentSmartSort
-            : DEFAULTS.experimentSmartSort,
         experimentWhip:
           typeof stored.experimentWhip === "boolean"
             ? stored.experimentWhip
@@ -683,23 +685,14 @@ class SettingsStore {
         smartSortDirection: isSortDirection(stored.smartSortDirection)
           ? stored.smartSortDirection
           : DEFAULTS.smartSortDirection,
-        experimentHome:
-          typeof stored.experimentHome === "boolean"
-            ? stored.experimentHome
-            : DEFAULTS.experimentHome,
+        // Device-scoped; this blob read only matters as the one-shot seed
+        // applyDeviceOverrides migrates from. `readExperimentWorkspace` is also
+        // the fold: a workspace blob written before it carries the four old
+        // flags and no key for this one.
+        experimentWorkspace: readExperimentWorkspace(raw),
         openOnLaunch: isOpenOnLaunch(stored.openOnLaunch)
           ? stored.openOnLaunch
           : DEFAULTS.openOnLaunch,
-        // The two arming flags are device-scoped; these blob reads only matter
-        // as the one-shot seed applyDeviceOverrides migrates from.
-        experimentOrchestrator:
-          typeof stored.experimentOrchestrator === "boolean"
-            ? stored.experimentOrchestrator
-            : DEFAULTS.experimentOrchestrator,
-        experimentOrchestratorPerProject:
-          typeof stored.experimentOrchestratorPerProject === "boolean"
-            ? stored.experimentOrchestratorPerProject
-            : DEFAULTS.experimentOrchestratorPerProject,
         orchestratorAgent:
           typeof stored.orchestratorAgent === "string" && stored.orchestratorAgent
             ? stored.orchestratorAgent
@@ -727,10 +720,6 @@ class SettingsStore {
         orchestratorBlindProjects: readStringList(stored.orchestratorBlindProjects),
         // Device-scoped end to end: these defaults only stand until
         // applyDeviceOverrides replays what this machine stored locally.
-        experimentVoice:
-          typeof stored.experimentVoice === "boolean"
-            ? stored.experimentVoice
-            : DEFAULTS.experimentVoice,
         voiceStt: isVoiceStt(stored.voiceStt) ? stored.voiceStt : DEFAULTS.voiceStt,
         voiceTts: isVoiceTts(stored.voiceTts) ? stored.voiceTts : DEFAULTS.voiceTts,
         voiceName:
@@ -1087,18 +1076,6 @@ class SettingsStore {
     this.persistDeviceNow();
   }
 
-  setSidebarDesign(value: SidebarDesign) {
-    if (this.state.sidebarDesign === value) return;
-    this.state.sidebarDesign = value;
-    this.persistDeviceNow();
-  }
-
-  setSidebarHarnessLogos(value: boolean) {
-    if (this.state.sidebarHarnessLogos === value) return;
-    this.state.sidebarHarnessLogos = value;
-    this.persistDeviceNow();
-  }
-
   setExperimentInfoBox(value: boolean) {
     if (this.state.experimentInfoBox === value) return;
     this.state.experimentInfoBox = value;
@@ -1114,12 +1091,6 @@ class SettingsStore {
   setInfoBoxCollapsed(value: boolean) {
     if (this.state.infoBoxCollapsed === value) return;
     this.state.infoBoxCollapsed = value;
-    this.persistDeviceNow();
-  }
-
-  setExperimentSmartSort(value: boolean) {
-    if (this.state.experimentSmartSort === value) return;
-    this.state.experimentSmartSort = value;
     this.persistDeviceNow();
   }
 
@@ -1147,29 +1118,17 @@ class SettingsStore {
     this.persistDeviceNow();
   }
 
-  setExperimentHome(value: boolean) {
-    if (this.state.experimentHome === value) return;
-    this.state.experimentHome = value;
-    this.persistDeviceNow();
-  }
-
   setOpenOnLaunch(value: OpenOnLaunch) {
     if (!isOpenOnLaunch(value) || this.state.openOnLaunch === value) return;
     this.state.openOnLaunch = value;
     this.persistDeviceNow();
   }
 
-  // Arming is device-scoped, configuring is workspace-scoped: the two flags
-  // below write localStorage, everything after them writes the shared blob.
-  setExperimentOrchestrator(value: boolean) {
-    if (this.state.experimentOrchestrator === value) return;
-    this.state.experimentOrchestrator = value;
-    this.persistDeviceNow();
-  }
-
-  setExperimentOrchestratorPerProject(value: boolean) {
-    if (this.state.experimentOrchestratorPerProject === value) return;
-    this.state.experimentOrchestratorPerProject = value;
+  // Arming is device-scoped, configuring is workspace-scoped: the flag below
+  // writes localStorage, everything after it writes the shared blob.
+  setExperimentWorkspace(value: boolean) {
+    if (this.state.experimentWorkspace === value) return;
+    this.state.experimentWorkspace = value;
     this.persistDeviceNow();
   }
 
@@ -1238,12 +1197,6 @@ class SettingsStore {
 
   // The voice block is device-scoped end to end (see DEVICE_FIELDS): every
   // setter below writes localStorage, never the workspace blob.
-  setExperimentVoice(value: boolean) {
-    if (this.state.experimentVoice === value) return;
-    this.state.experimentVoice = value;
-    this.persistDeviceNow();
-  }
-
   setVoiceStt(value: VoiceStt) {
     if (!isVoiceStt(value) || this.state.voiceStt === value) return;
     this.state.voiceStt = value;
