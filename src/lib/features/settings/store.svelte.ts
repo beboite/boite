@@ -346,6 +346,14 @@ function detectMobileDefault(): boolean {
 export const GIT_AUTOFETCH_MIN_SECONDS = 30;
 export const GIT_AUTOFETCH_MAX_SECONDS = 3600;
 
+// The two ranges a resize handle is a position on. Exported because the handle
+// has to say where it sits (`aria-valuemin`, `aria-valuemax`) and a second copy
+// of the numbers in the markup would drift from the clamp that enforces them.
+export const SIDEBAR_MIN_WIDTH = 180;
+export const SIDEBAR_MAX_WIDTH = 480;
+export const GIT_SPLIT_MIN = 0.15;
+export const GIT_SPLIT_MAX = 0.85;
+
 export function parseCommand(input: string): { cmd: string; args: string[] } {
   const tokens: string[] = [];
   let current = "";
@@ -895,7 +903,7 @@ class SettingsStore {
   }
 
   setSidebarWidth(px: number) {
-    const clamped = Math.max(180, Math.min(480, Math.round(px)));
+    const clamped = Math.max(SIDEBAR_MIN_WIDTH, Math.min(SIDEBAR_MAX_WIDTH, Math.round(px)));
     if (this.state.sidebarWidth === clamped) return;
     this.state.sidebarWidth = clamped;
     this.persistDeviceSoon();
@@ -1371,7 +1379,7 @@ class SettingsStore {
   }
 
   setGitSplitFraction(value: number) {
-    const clamped = Math.max(0.15, Math.min(0.85, value));
+    const clamped = Math.max(GIT_SPLIT_MIN, Math.min(GIT_SPLIT_MAX, value));
     if (Math.abs(this.state.gitSplitFraction - clamped) < 0.001) return;
     this.state.gitSplitFraction = clamped;
     this.persistDeviceSoon();

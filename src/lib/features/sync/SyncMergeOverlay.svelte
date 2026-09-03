@@ -13,7 +13,6 @@
    * what makes walking away safe: at every instant a file has either been
    * written with exactly what was on screen, or not touched at all.
    */
-  import { tick } from "svelte";
   import { fade, scale } from "svelte/transition";
   import Check from "@lucide/svelte/icons/check";
   import Minus from "@lucide/svelte/icons/minus";
@@ -21,11 +20,11 @@
   import X from "@lucide/svelte/icons/x";
 
   import { t } from "$lib/i18n/index.svelte";
+  import { focusTrap } from "$lib/shared/actions/focusTrap";
   import { syncStore } from "./store.svelte";
   import SyncMergeFile from "./SyncMergeFile.svelte";
   import type { Choice } from "./hunks";
 
-  let dialogEl: HTMLDivElement | null = $state(null);
   let confirmingClose = $state(false);
   /** Per file, so navigating away and coming back loses nothing. */
   let drafts = $state<Record<string, Choice[]>>({});
@@ -35,12 +34,6 @@
     conflicts.find((item) => item.path === syncStore.activePath) ?? conflicts[0] ?? null,
   );
   const decided = $derived(conflicts.filter((item) => syncStore.verdicts[item.path]).length);
-
-  $effect(() => {
-    const previous = document.activeElement as HTMLElement | null;
-    void tick().then(() => dialogEl?.focus());
-    return () => previous?.focus?.();
-  });
 
   function shortPath(path: string): string {
     const cut = path.indexOf("/");
@@ -71,7 +64,7 @@
   aria-modal="true"
   aria-labelledby="sync-merge-title"
   tabindex="-1"
-  bind:this={dialogEl}
+  use:focusTrap
   transition:fade={{ duration: 120 }}
 >
   <div

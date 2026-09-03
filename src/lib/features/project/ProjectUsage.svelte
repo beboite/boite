@@ -659,8 +659,15 @@
     box-shadow: 0 0 0 0 transparent;
     transition: box-shadow 80ms ease-out;
   }
+  /* A pointer on a square gets no box: the ring it already grows says which one
+     is being read. The keyboard gets one, because a 9px cell moving its own
+     shadow by a pixel is not something a caret can be found by. */
   .cal-cell:focus {
     outline: none;
+  }
+  .cal-cell:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--color-foreground) 45%, transparent);
+    outline-offset: 2px;
   }
   .cal-today {
     box-shadow: 0 0 0 1px var(--color-muted-foreground);

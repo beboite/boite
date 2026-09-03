@@ -708,6 +708,30 @@ html[data-motion="reduced"] *::after {
    their own transform, and a scale fighting a drag is worse than no feedback.
    The motion gate collapses the duration, and a 1.5% scale with no travel time
    is not perceived as movement. */
+/* The ring the app's own `outline-none` sites have to put back.
+
+   `outline-none` is how a control stops the browser drawing a box around it on
+   a mouse click, and twelve sites killed the keyboard ring along with it: the
+   editor host, the usage calendar, the info box card, the palette input, the
+   fastpick filter, the overview select, the explorer filter, the two git
+   fields, the shortcut rows, the shell menu and the file tree. A class wins
+   over the bare `:focus-visible` rule above on source order, so that rule had
+   nothing to say in any of them.
+
+   Worn as `focus-visible:focus-ring`, beside the `focus:outline-none` that
+   still hides the ring for a pointer. `focus-ring-inset` is the same ring for a
+   row that fills a clipping container: a positive offset there is drawn outside
+   the clip and never seen. */
+@utility focus-ring {
+  outline: 2px solid color-mix(in srgb, var(--color-foreground) 45%, transparent);
+  outline-offset: 2px;
+}
+
+@utility focus-ring-inset {
+  outline: 2px solid color-mix(in srgb, var(--color-foreground) 45%, transparent);
+  outline-offset: -2px;
+}
+
 @utility press {
   transition:
     transform var(--dur-1) var(--ease-out-quint),

@@ -3,7 +3,7 @@
   import { backend } from "$lib/backend";
   import { SETUP_STEPS, type SetupDraft } from "./steps";
   import BoiteLogo from "$lib/shared/components/BoiteLogo.svelte";
-  import { restoreFocus } from "$lib/shared/keyboard/overlay";
+  import { focusTrap } from "$lib/shared/actions/focusTrap";
   import { t, LOCALE_OPTIONS } from "$lib/i18n/index.svelte";
   import { reportSettingsSnapshot } from "./telemetry";
 
@@ -12,18 +12,7 @@
 
   const draft = $state<SetupDraft>({ shortcuts: [], modeB: false });
 
-  let dialogEl = $state<HTMLDivElement | null>(null);
   let nextBtn = $state<HTMLButtonElement | null>(null);
-
-  // Same shape as ConfirmDialog. The wizard is the whole screen on a first run,
-  // and it used to open with the keyboard on nothing: Tab started from the top of
-  // the document instead of inside the dialog.
-  $effect(() => {
-    const previous = document.activeElement as HTMLElement | null;
-    const surface = dialogEl;
-    (nextBtn ?? dialogEl)?.focus();
-    return () => restoreFocus(previous, surface);
-  });
 
   const total = SETUP_STEPS.length;
   const current = $derived(step > 0 ? (SETUP_STEPS[step - 1] ?? null) : null);
@@ -69,7 +58,6 @@
        own heading, so the dialog names itself there instead of pointing at an id
        that is no longer in the document. -->
   <div
-    bind:this={dialogEl}
     class="surface-dialog modal flex w-[min(94vw,540px)] flex-col gap-4 p-6 outline-none {current?.id ===
     'telemetry'
       ? 'deal-mode'
@@ -79,6 +67,7 @@
     aria-labelledby={step === 0 ? "setup-title" : undefined}
     aria-label={step === 0 ? undefined : t("setup.title")}
     tabindex="-1"
+    use:focusTrap={{ initial: nextBtn }}
   >
     <div class="flex justify-center gap-1.5" aria-hidden="true">
       {#each Array(total + 1) as _, i (i)}

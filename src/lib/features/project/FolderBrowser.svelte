@@ -172,6 +172,7 @@
           {t("folderBrowser.title")}
         </span>
         <button
+          type="button"
           class="text-muted-foreground transition hover:text-foreground"
           onclick={close}
           aria-label={t("titlebar.close")}>✕</button
@@ -185,6 +186,7 @@
       {:else}
         <div class="flex items-center gap-2 border-b border-border px-3 py-1.5">
           <button
+            type="button"
             class="rounded px-1.5 py-0.5 text-xs text-muted-foreground transition hover:text-foreground disabled:opacity-40"
             onclick={up}
             disabled={path === root}>↑ {t("folderBrowser.up")}</button
@@ -204,6 +206,7 @@
           {:else}
             {#each entries as e (e.path)}
               <button
+                type="button"
                 class="flex w-full items-center gap-2 rounded px-2 py-1 text-left text-xs text-foreground transition hover:bg-[var(--color-surface-2)]"
                 onclick={() => go(e.path)}
               >
@@ -216,11 +219,13 @@
 
         <div class="flex justify-end gap-2 border-t border-border px-3 py-2">
           <button
+            type="button"
             class="rounded px-2 py-1 text-xs text-muted-foreground transition hover:text-foreground"
             onclick={close}
             disabled={busy}>{t("common.cancel")}</button
           >
           <button
+            type="button"
             bind:this={addBtn}
             class="rounded bg-foreground px-2.5 py-1 text-xs font-medium text-background transition hover:bg-foreground/90 disabled:opacity-50"
             onclick={addHere}

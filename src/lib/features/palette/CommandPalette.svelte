@@ -1,6 +1,7 @@
 <script lang="ts">
   import { fade, scale } from "svelte/transition";
   import ShortcutIcon from "$lib/shared/icons/ShortcutIcon.svelte";
+  import { focusTrap } from "$lib/shared/actions/focusTrap";
   import { palette } from "./store.svelte";
   import { app } from "$lib/app/store.svelte";
   import { projectScripts } from "$lib/features/project/scripts.svelte";
@@ -264,6 +265,7 @@
       transition:scale={{ duration: 120, start: 0.98 }}
       onkeydown={handleKeydown}
       role="presentation"
+      use:focusTrap
     >
       <input
         bind:this={inputEl}
@@ -272,7 +274,8 @@
         placeholder={t(PLACEHOLDER[liveMode])}
         spellcheck="false"
         autocomplete="off"
-        class="w-full border-b border-edge bg-transparent px-4 py-3 text-sm text-foreground outline-none placeholder:text-muted-2"
+        class="w-full border-b border-edge bg-transparent px-4 py-3 text-sm text-foreground focus:outline-none focus-visible:focus-ring-inset placeholder:text-muted-2"
+        aria-label={t("palette.inputLabel")}
         role="combobox"
         aria-expanded="true"
         aria-controls="palette-list"

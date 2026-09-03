@@ -6,7 +6,11 @@
   import { app } from "$lib/app/store.svelte";
   import { visibleStatus } from "$lib/domain/thread-status";
   import { workspace } from "$lib/backend";
-  import { settings } from "$lib/features/settings/store.svelte";
+  import {
+    settings,
+    SIDEBAR_MAX_WIDTH,
+    SIDEBAR_MIN_WIDTH,
+  } from "$lib/features/settings/store.svelte";
   import { device } from "$lib/features/settings/device.svelte";
   import {
     paneStore,
@@ -48,6 +52,7 @@
   import RemoteProjectPicker from "./RemoteProjectPicker.svelte";
   import { confirmDialog } from "$lib/shared/components/confirm.svelte";
   import { resizeHandle } from "$lib/shared/actions/resizeHandle";
+  import { focusTrap } from "$lib/shared/actions/focusTrap";
   import { rowFlip } from "$lib/shared/actions/rowFlip.svelte";
   import { longPress } from "$lib/shared/actions/longPress";
   import ContextMenu from "$lib/shared/components/ContextMenu.svelte";
@@ -810,6 +815,21 @@
     if (!asideEl) return;
     const rect = asideEl.getBoundingClientRect();
     void settings.setSidebarWidth(e.clientX - rect.left);
+  }
+
+  // The handle was `tabindex="-1"`, so the sidebar's width was a pointer-only
+  // setting. 24px a press, 96 with Shift, which is roughly a word and roughly a
+  // column; the store clamps both ends.
+  const RESIZE_STEP_PX = 24;
+  const RESIZE_BIG_STEP_PX = 96;
+
+  function onResizeKeydown(e: KeyboardEvent) {
+    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+    e.preventDefault();
+    const step = e.shiftKey ? RESIZE_BIG_STEP_PX : RESIZE_STEP_PX;
+    void settings.setSidebarWidth(
+      settings.state.sidebarWidth + (e.key === "ArrowRight" ? step : -step),
+    );
   }
 
   function consumeDragClick(id: string): boolean {
@@ -1795,17 +1815,28 @@
     {/each}
   </div>
 
-  <button
-    type="button"
-    class="absolute -right-px top-0 z-10 h-full w-1 cursor-col-resize transition hover:bg-foreground/10 after:absolute after:inset-y-0 after:-inset-x-1.5 after:content-[''] {resizing ? 'bg-foreground/20' : 'bg-transparent'}"
+  <!-- A separator, not a button: it sits at a width between two bounds and the
+       arrows move it there. The two rules below read `separator` as
+       decoration; a separator with a value and bounds is the window-splitter
+       pattern, and it is focusable and keyboard-driven by definition. -->
+  <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+  <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+  <div
+    class="absolute -right-px top-0 z-10 h-full w-1 cursor-col-resize transition hover:bg-foreground/10 focus-visible:focus-ring-inset focus-visible:bg-foreground/20 after:absolute after:inset-y-0 after:-inset-x-1.5 after:content-[''] {resizing ? 'bg-foreground/20' : 'bg-transparent'}"
     use:resizeHandle={{
       onResize,
       onStateChange: (r) => (resizing = r),
     }}
+    role="separator"
+    aria-orientation="vertical"
+    aria-valuenow={settings.state.sidebarWidth}
+    aria-valuemin={SIDEBAR_MIN_WIDTH}
+    aria-valuemax={SIDEBAR_MAX_WIDTH}
     aria-label={t("sidebar.resizeSidebar")}
     use:tip={t("sidebar.resizeSidebar")}
-    tabindex="-1"
-  ></button>
+    tabindex="0"
+    onkeydown={onResizeKeydown}
+  ></div>
 </aside>
 
 {#if launcher}
@@ -1819,6 +1850,7 @@
     data-launcher-root
     role="menu"
     tabindex="-1"
+    use:focusTrap
     class="launcher-menu fixed z-[var(--z-popover)] flex flex-col overflow-hidden"
     style:left="{launcherPos.x}px"
     style:top="{launcherPos.y}px"

@@ -4,7 +4,11 @@
   import { workspace } from "$lib/backend";
   import { threadGitRoot } from "$lib/features/thread/cwd";
   import { isScratch } from "$lib/domain/project";
-  import { settings } from "$lib/features/settings/store.svelte";
+  import {
+    settings,
+    GIT_SPLIT_MAX,
+    GIT_SPLIT_MIN,
+  } from "$lib/features/settings/store.svelte";
   import { gitStore, gitScope } from "./store.svelte";
   import { editorStore } from "$lib/features/editor/store.svelte";
   import { revealEditor } from "$lib/features/editor/reveal";
@@ -312,6 +316,22 @@
     settings.setGitSplitFraction(fraction);
   }
 
+  // The handle was `tabindex="-1"`, so the two sections could only be resized
+  // with a pointer. 24px a press, 96 with Shift, turned into a fraction of the
+  // body it divides; the store clamps both ends.
+  const RESIZE_STEP_PX = 24;
+  const RESIZE_BIG_STEP_PX = 96;
+
+  function onResizeYKeydown(e: KeyboardEvent) {
+    if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
+    e.preventDefault();
+    const height = bodyEl?.getBoundingClientRect().height ?? 0;
+    if (height <= 0) return;
+    const step = e.shiftKey ? RESIZE_BIG_STEP_PX : RESIZE_STEP_PX;
+    const delta = (e.key === "ArrowDown" ? step : -step) / height;
+    settings.setGitSplitFraction(settings.state.gitSplitFraction + delta);
+  }
+
   function statusColor(s: string): string {
     if (s === "M") return "text-[var(--color-warning)]";
     if (s === "A") return "text-[var(--color-success)]";
@@ -411,7 +431,7 @@
             <form class="flex gap-1.5 border-b border-border p-2" onsubmit={createBranch}>
               <input
                 bind:this={newBranchInput}
-                class="min-w-0 flex-1 rounded border border-edge bg-[var(--color-background)] px-2 py-1 text-xs text-foreground placeholder:text-muted-2 focus:border-foreground/30 focus:outline-none"
+                class="min-w-0 flex-1 rounded border border-edge bg-[var(--color-background)] px-2 py-1 text-xs text-foreground placeholder:text-muted-2 focus:border-foreground/30 focus:outline-none focus-visible:focus-ring-inset"
                 placeholder={t("git.newBranchPlaceholder")}
                 aria-label={t("git.newBranchPlaceholder")}
                 bind:value={newBranchName}
@@ -612,9 +632,10 @@
 
         <div class="shrink-0 border-b border-border p-2">
           <textarea
-            class="w-full resize-none rounded-md border border-edge bg-[var(--color-background)] px-2 py-1.5 text-xs text-foreground placeholder:text-muted-2 focus:border-foreground/30 focus:outline-none"
+            class="w-full resize-none rounded-md border border-edge bg-[var(--color-background)] px-2 py-1.5 text-xs text-foreground placeholder:text-muted-2 focus:border-foreground/30 focus:outline-none focus-visible:focus-ring-inset"
             rows="2"
             placeholder={t("git.commitPlaceholder")}
+            aria-label={t("git.commitLabel")}
             bind:value={gs.message}
             onkeydown={commitKey}
             disabled={gs.committing}
@@ -691,17 +712,28 @@
       </section>
 
       {#if commitsOpen}
-        <!-- Splitter -->
-        <button
-          type="button"
+        <!-- A separator rather than a button: it sits at a fraction between two
+             bounds and the arrows move it, which is not what pressing a button
+             means. The two rules below read `separator` as decoration; a
+             separator with a value and bounds is the window-splitter pattern,
+             and it is focusable and keyboard-driven by definition. -->
+        <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+        <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+        <div
           use:resizeHandle={{
             onResize: onResizeY,
             onStateChange: (r) => (resizingY = r),
           }}
-          class="relative z-10 h-1 translate-y-[2px] cursor-row-resize transition hover:bg-foreground/10 after:absolute after:-inset-y-1.5 after:inset-x-0 after:content-[''] {resizingY ? 'bg-foreground/20' : 'bg-transparent'}"
+          class="relative z-10 h-1 translate-y-[2px] cursor-row-resize transition hover:bg-foreground/10 focus-visible:focus-ring-inset focus-visible:bg-foreground/20 after:absolute after:-inset-y-1.5 after:inset-x-0 after:content-[''] {resizingY ? 'bg-foreground/20' : 'bg-transparent'}"
+          role="separator"
+          aria-orientation="horizontal"
+          aria-valuenow={Math.round(settings.state.gitSplitFraction * 100)}
+          aria-valuemin={Math.round(GIT_SPLIT_MIN * 100)}
+          aria-valuemax={Math.round(GIT_SPLIT_MAX * 100)}
           aria-label={t("git.resizeSections")}
-          tabindex="-1"
-        ></button>
+          tabindex="0"
+          onkeydown={onResizeYKeydown}
+        ></div>
       {/if}
 
       <!-- Commits (bottom) -->
