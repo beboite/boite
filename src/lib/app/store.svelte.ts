@@ -23,6 +23,7 @@ import { settings } from "$lib/features/settings/store.svelte";
 import { device } from "$lib/features/settings/device.svelte";
 import { resolveLaunchView } from "$lib/features/settings/resolveLaunchView";
 import { logger } from "$lib/shared/services/logger.svelte";
+import { log } from "$lib/shared/log";
 import { t } from "$lib/i18n/index.svelte";
 import { platform } from "$lib/storage/platform.svelte";
 import {
@@ -593,7 +594,17 @@ export class AppState {
   upsertThread(thread: Thread): Promise<void> {
     const i = this.threads.findIndex((t) => t.id === thread.id);
     if (i >= 0) this.threads[i] = thread;
-    else this.threads.push(thread);
+    else {
+      // A row appearing is worth `info`: it is the start of everything a
+      // reader following one terminal will then look for, and it happens
+      // once per thread rather than on a timer.
+      log.info("app.thread", "thread.created", {
+        thread: thread.id,
+        project: thread.projectId,
+        cmd: thread.cmd,
+      });
+      this.threads.push(thread);
+    }
     return saveThread(thread);
   }
 
@@ -637,6 +648,7 @@ export class AppState {
   async removeThread(id: string) {
     this.#clearDelegationClose(id);
     const removed = this.threadById(id);
+    log.info("app.thread", "thread.deleted", { thread: id });
     this.threads = this.threads.filter((t) => t.id !== id);
     if (this.activeThreadId === id) {
       this.activeThreadId = null;
@@ -768,6 +780,10 @@ export class AppState {
     thread.settledAt = settled ? Date.now() : null;
     try {
       await setThreadSettled(id, thread.status, settled, thread.origin);
+      log.info("app.thread", settled ? "thread.settled" : "thread.unsettled", {
+        thread: id,
+        status: thread.status,
+      });
       return true;
     } catch (err) {
       logger.error("app", "setThreadSettled failed", err);

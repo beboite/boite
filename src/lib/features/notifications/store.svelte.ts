@@ -1,4 +1,5 @@
 import { uuid } from "$lib/shared/utils/uuid";
+import { log } from "$lib/shared/log";
 
 /**
  * `warning` is not a weaker error: an error is something that failed, a warning
@@ -88,6 +89,12 @@ class NotificationsStore {
   toasts = $state<Toast[]>([]);
 
   private push(message: string, opts: AddOptions = {}): string {
+    // A toast is how this app reports a failure, and it dismisses itself after
+    // a few seconds. `window.__boite.toasts()` keeps them for a dev build; this
+    // keeps them in the log, where a packaged install and a phone can be read
+    // back too. At `info` whatever the kind: an `error` toast is a failure the
+    // app already handled, and the line that says why is somewhere above it.
+    log.info("ui.toast", "toast.raised", { kind: opts.kind ?? "info", text: message });
     if (import.meta.env.DEV) {
       raised.push({ at: Date.now(), kind: opts.kind ?? "info", message });
       if (raised.length > MAX_RAISED) raised.shift();

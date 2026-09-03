@@ -4,6 +4,7 @@ import { paneStore, MAX_LEAVES, leafNodesOf, threadLeavesOf } from "./store.svel
 import type { DropSide, PaneContent, PaneKind, PanelKind } from "./types";
 import { notifications } from "$lib/features/notifications/store.svelte";
 import { t } from "$lib/i18n/index.svelte";
+import { log } from "$lib/shared/log";
 
 /**
  * The one way anything opens a pane.
@@ -38,6 +39,24 @@ export function openPane(
   content: PaneContent,
   side: DropSide = "right",
   ratio = panelRatio(),
+  anchor?: string | null,
+): string | null {
+  const paneId = openPaneInner(content, side, ratio, anchor);
+  // Debug rather than info: a pane opens on a click, a keybinding, a palette
+  // entry and an agent verb, several times a minute while somebody works, and
+  // the question it answers ("what was on screen when the frame stalled") is a
+  // debugging question.
+  log.debug("ui.pane", paneId ? "pane.opened" : "pane.refused", {
+    kind: content.kind,
+    ...(paneId ? { pane: paneId } : {}),
+  });
+  return paneId;
+}
+
+function openPaneInner(
+  content: PaneContent,
+  side: DropSide,
+  ratio: number,
   anchor?: string | null,
 ): string | null {
   const already = panePresence(content.kind);
