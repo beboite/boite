@@ -82,7 +82,7 @@
 
   <div class="max-h-[34%] shrink-0 overflow-y-auto rounded-lg border border-border">
     {#if hunks.length === 0}
-      <p class="p-3 text-xs text-muted-foreground">{t("syncMerge.noDifferences")}</p>
+      <p class="p-3 text-sm text-muted-foreground">{t("syncMerge.noDifferences")}</p>
     {:else}
       {#each hunks as hunk (hunk.id)}
         <div
@@ -105,7 +105,7 @@
                 type="button"
                 role="radio"
                 aria-checked={current[hunk.id] === option.choice}
-                class="rounded-md border px-2 py-0.5 text-xs transition"
+                class="rounded-md border px-2 py-0.5 text-sm transition"
                 class:border-foreground={current[hunk.id] === option.choice}
                 class:bg-foreground={current[hunk.id] === option.choice}
                 class:text-[var(--color-surface)]={current[hunk.id] === option.choice}
@@ -119,10 +119,10 @@
           </div>
           <div class="mt-1.5 grid gap-1 md:grid-cols-2">
             <pre
-              class="max-h-24 overflow-auto whitespace-pre-wrap break-words rounded bg-[var(--color-surface-2)] p-1.5 font-mono text-xs text-foreground">{hunk.mineText ||
+              class="max-h-24 overflow-auto whitespace-pre-wrap break-words rounded bg-[var(--color-surface-2)] p-1.5 font-mono text-sm text-foreground">{hunk.mineText ||
                 t("syncMerge.nothingHere")}</pre>
             <pre
-              class="max-h-24 overflow-auto whitespace-pre-wrap break-words rounded bg-[var(--color-surface-2)] p-1.5 font-mono text-xs text-foreground">{hunk.theirsText ||
+              class="max-h-24 overflow-auto whitespace-pre-wrap break-words rounded bg-[var(--color-surface-2)] p-1.5 font-mono text-sm text-foreground">{hunk.theirsText ||
                 t("syncMerge.nothingHere")}</pre>
           </div>
         </div>
@@ -137,12 +137,12 @@
       </span>
       <div class="flex items-center gap-2">
         {#if left > 0}
-          <span class="text-xs text-muted-foreground">
+          <span class="text-sm text-muted-foreground">
             {t("syncMerge.undecided", { count: left })}
           </span>
           <button
             type="button"
-            class="rounded-md border border-edge px-2 py-0.5 text-xs text-foreground transition hover:bg-[var(--color-surface-3)]"
+            class="rounded-md border border-edge px-2 py-0.5 text-sm text-foreground transition hover:bg-[var(--color-surface-3)]"
             onclick={() => onChoices(fillUndecided(current, "both"))}
           >
             {t("syncMerge.keepAllBoth")}
@@ -150,14 +150,14 @@
         {/if}
         <button
           type="button"
-          class="rounded-md border border-edge px-2 py-0.5 text-xs text-muted-foreground transition hover:bg-[var(--color-surface-3)]"
+          class="rounded-md border border-edge px-2 py-0.5 text-sm text-muted-foreground transition hover:bg-[var(--color-surface-3)]"
           onclick={onSkip}
         >
           {t("syncMerge.skip")}
         </button>
         <button
           type="button"
-          class="rounded-md bg-foreground px-2.5 py-0.5 text-xs text-[var(--color-surface)] transition disabled:opacity-50"
+          class="rounded-md bg-foreground px-2.5 py-0.5 text-sm text-[var(--color-surface)] transition disabled:opacity-50"
           disabled={!ready}
           onclick={() => onApply(merged)}
         >
@@ -168,14 +168,14 @@
     {#if !verdict.ok}
       <!-- The check that stops a stacked JSON object reaching ~/.claude and
            breaking the agent on every machine the repository touches. -->
-      <p class="mb-1.5 text-xs text-[var(--color-danger)]">
+      <p class="mb-1.5 text-sm text-[var(--color-danger)]">
         {verdict.line
           ? t("syncMerge.invalidAtLine", { line: verdict.line, error: verdict.message ?? "" })
           : t("syncMerge.invalid", { error: verdict.message ?? "" })}
       </p>
     {/if}
     <pre
-      class="max-h-28 overflow-auto whitespace-pre-wrap break-words rounded bg-[var(--color-surface-2)] p-2 font-mono text-xs text-foreground"
+      class="max-h-28 overflow-auto whitespace-pre-wrap break-words rounded bg-[var(--color-surface-2)] p-2 font-mono text-sm text-foreground"
       aria-label={t("syncMerge.result")}>{merged}</pre>
   </div>
 </div>
