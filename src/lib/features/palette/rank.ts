@@ -8,6 +8,8 @@ export interface PaletteRow {
   c: PaletteCommand;
   label: string;
   hint: string | null;
+  ranges?: [number, number][];
+  matchedField?: "label" | "hint";
 }
 
 /**
@@ -41,9 +43,28 @@ export function rankRows(rows: PaletteRow[], query: string): PaletteRow[] {
       content.push(r);
       continue;
     }
-    const target = r.hint ? `${r.label} ${r.hint}` : r.label;
-    const score = fuzzyScore(q, target);
-    if (score !== null) scored.push({ r, score: score + SECTION_BIAS[section] });
+    const labelRes = fuzzyScore(q, r.label, { fuzzy: true });
+    const hintRes = r.hint ? fuzzyScore(q, r.hint, { fuzzy: false }) : null;
+    if (labelRes === null && hintRes === null) continue;
+
+    let bestScore: number;
+    let matchedField: "label" | "hint";
+    let ranges: [number, number][];
+
+    if (labelRes !== null && (hintRes === null || labelRes.score >= hintRes.score)) {
+      bestScore = labelRes.score;
+      matchedField = "label";
+      ranges = labelRes.ranges;
+    } else {
+      bestScore = hintRes!.score;
+      matchedField = "hint";
+      ranges = hintRes!.ranges;
+    }
+
+    scored.push({
+      r: { ...r, ranges, matchedField },
+      score: bestScore + SECTION_BIAS[section],
+    });
   }
   scored.sort((a, b) => b.score - a.score);
   const out = scored.map((x) => x.r);

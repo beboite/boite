@@ -29,6 +29,7 @@
   import { t, type MessageKey } from "$lib/i18n/index.svelte";
   import Search from "@lucide/svelte/icons/search";
   import { fuzzyScore } from "$lib/features/palette/fuzzy";
+  import Highlight from "$lib/features/palette/Highlight.svelte";
   import { pushSupported } from "$lib/features/push/api";
   import { platform } from "$lib/storage/platform.svelte";
   import {
@@ -195,7 +196,14 @@
   const results = $derived.by(() => {
     const q = query.trim();
     if (!q) return [];
-    const scored: { entry: (typeof SETTINGS_CATALOGUE)[number]; label: string; desc: string; score: number }[] = [];
+    const scored: {
+      entry: (typeof SETTINGS_CATALOGUE)[number];
+      label: string;
+      desc: string;
+      score: number;
+      matchedField: "label" | "desc" | "tab";
+      ranges: [number, number][];
+    }[] = [];
     for (const entry of SETTINGS_CATALOGUE) {
       // A control this build never draws is not a result: a hit that jumps to a
       // page and points at nothing is worse than one hit fewer.
@@ -203,10 +211,34 @@
       const label = t(entry.key);
       const desc = entry.descKey ? t(entry.descKey) : "";
       const tab = t(TAB_LABELS[entry.tab]);
-      // The page name is searched too: somebody typing "terminal shell" is
-      // naming where it is as much as what it is.
-      const score = fuzzyScore(q, `${label} ${desc} ${tab}`);
-      if (score !== null) scored.push({ entry, label, desc, score });
+
+      const labelRes = fuzzyScore(q, label, { fuzzy: true });
+      const descRes = desc ? fuzzyScore(q, desc, { fuzzy: false }) : null;
+      const tabRes = fuzzyScore(q, tab, { fuzzy: false });
+
+      if (labelRes === null && descRes === null && tabRes === null) continue;
+
+      let bestScore = -Infinity;
+      let matchedField: "label" | "desc" | "tab" = "label";
+      let ranges: [number, number][] = [];
+
+      if (labelRes !== null && labelRes.score > bestScore) {
+        bestScore = labelRes.score;
+        matchedField = "label";
+        ranges = labelRes.ranges;
+      }
+      if (descRes !== null && descRes.score > bestScore) {
+        bestScore = descRes.score;
+        matchedField = "desc";
+        ranges = descRes.ranges;
+      }
+      if (tabRes !== null && tabRes.score > bestScore) {
+        bestScore = tabRes.score;
+        matchedField = "tab";
+        ranges = tabRes.ranges;
+      }
+
+      scored.push({ entry, label, desc, score: bestScore, matchedField, ranges });
     }
     scored.sort((a, b) => b.score - a.score);
     return scored;
@@ -459,15 +491,15 @@
             >
               <span class="flex w-full items-baseline gap-2">
                 <span class="min-w-0 truncate text-xs font-medium text-foreground">
-                  {hit.label}
+                  <Highlight text={hit.label} ranges={hit.matchedField === "label" ? hit.ranges : undefined} />
                 </span>
                 <span class="shrink-0 text-2xs uppercase tracking-wider text-muted-2">
-                  {t(TAB_LABELS[hit.entry.tab])}
+                  <Highlight text={t(TAB_LABELS[hit.entry.tab])} ranges={hit.matchedField === "tab" ? hit.ranges : undefined} />
                 </span>
               </span>
               {#if hit.desc}
                 <span class="line-clamp-2 text-xs leading-snug text-muted-foreground">
-                  {hit.desc}
+                  <Highlight text={hit.desc} ranges={hit.matchedField === "desc" ? hit.ranges : undefined} />
                 </span>
               {/if}
             </button>
