@@ -21,12 +21,21 @@ describe("with nothing typed", () => {
       row("a1", "actions", "New terminal"),
       row("n1", "panes", "Open editor"),
     ];
-    expect(ids(rankRows(rows, ""))).toEqual(["t1", "a1", "n1", "p1"]);
+    expect(ids(rankRows(rows, ""))).toEqual(["a1", "n1", "p1", "t1"]);
   });
 
   it("treats whitespace as nothing typed", () => {
     const rows = [row("p1", "projects", "boite"), row("t1", "threads", "Claude #1")];
-    expect(ids(rankRows(rows, "   "))).toEqual(["t1", "p1"]);
+    expect(ids(rankRows(rows, "   "))).toEqual(["p1", "t1"]);
+  });
+
+  it("holds settings rows back until something is typed", () => {
+    const rows = [
+      row("s1", "settings", "Setting: Theme"),
+      row("a1", "actions", "New terminal"),
+    ];
+    expect(ids(rankRows(rows, ""))).toEqual(["a1"]);
+    expect(ids(rankRows(rows, "Theme"))).toEqual(["s1"]);
   });
 });
 
@@ -104,9 +113,9 @@ describe("section headers", () => {
   );
 
   it("names a section on its first row and nowhere else in it", () => {
-    expect(sectionTitleKeyAt(ranked, 0)).toBe("project.threads");
-    expect(sectionTitleKeyAt(ranked, 1)).toBeNull();
-    expect(sectionTitleKeyAt(ranked, 2)).toBe("palette.sectionActions");
+    expect(sectionTitleKeyAt(ranked, 0)).toBe("palette.sectionActions");
+    expect(sectionTitleKeyAt(ranked, 1)).toBe("project.threads");
+    expect(sectionTitleKeyAt(ranked, 2)).toBeNull();
   });
 
   it("gives content hits a header of their own", () => {

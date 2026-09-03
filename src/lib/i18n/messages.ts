@@ -1006,7 +1006,12 @@ export const EN_MESSAGES = {
   "palette.urlHint": "Enter opens the page in a pane.",
   "palette.noMatch": "No matching command",
   "palette.sectionActions": "Actions",
+  "palette.sectionSettings": "Settings",
   "palette.sectionContent": "Found in this workspace",
+  "palette.setting": "Setting: {label}",
+  "palette.theme": "Theme: {name}",
+  "palette.layout": "Layout: {name}",
+  "palette.language": "Language: {name}",
   "palette.hitTodo": "Todo",
   "palette.hitJournal": "Journal",
   "palette.hitTerminal": "Terminal",
@@ -1358,6 +1363,7 @@ export const EN_MESSAGES = {
 
   "keybindings.cmd.backToTerminal": "Back to the terminal",
   "keybindings.cmd.toggleSettings": "Open or close settings",
+  "keybindings.cmd.goHome": "Go to Home",
   "keybindings.cmd.toggleSidebar": "Show or hide the sidebar",
   "keybindings.cmd.closeFrontMost": "Close the front-most tab, panel or terminal",
   "keybindings.cmd.zoomIn": "Zoom in",
@@ -1374,6 +1380,9 @@ export const EN_MESSAGES = {
   "keybindings.cmd.splitDown": "Split down",
   "keybindings.cmd.nextPane": "Next pane",
   "keybindings.cmd.previousPane": "Previous pane",
+  "keybindings.cmd.toggleGit": "Show or hide git",
+  "keybindings.cmd.toggleFiles": "Show or hide the files panel",
+  "keybindings.cmd.toggleTodo": "Show or hide the todo list",
 
   // Carrying the agent configuration between computers.
   "sync.enable": "Sync when Boite opens",

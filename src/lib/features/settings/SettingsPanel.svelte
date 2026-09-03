@@ -1,6 +1,6 @@
 <script lang="ts">
   import { app } from "$lib/app/store.svelte";
-  import { backend, workspace } from "$lib/backend";
+  import { workspace } from "$lib/backend";
   import { tip } from "$lib/shared/actions/tooltip";
   import { edgeFade } from "$lib/shared/actions/edgeFade";
   import SettingsGeneralTab from "./SettingsGeneralTab.svelte";
@@ -30,15 +30,13 @@
   import Search from "@lucide/svelte/icons/search";
   import { fuzzyScore } from "$lib/features/palette/fuzzy";
   import Highlight from "$lib/features/palette/Highlight.svelte";
-  import { pushSupported } from "$lib/features/push/api";
-  import { platform } from "$lib/storage/platform.svelte";
   import {
     SETTINGS_CATALOGUE,
     SETTINGS_TABS,
     settingAnchorId,
-    type SettingCondition,
     type SettingsTabId,
   } from "./catalogue";
+  import { goToSetting, settingEntryVisible, settingsNav } from "./navigate.svelte";
 
   /**
    * The settings, as a rail and a page rather than a strip and a form.
@@ -110,7 +108,7 @@
 
   const TABS = ALL_TABS;
 
-  let activeTab = $state<TabId>("general");
+  const activeTab = $derived(settingsNav.tab);
 
   /**
    * The boite these settings belong to, when it is not this device.
@@ -138,7 +136,7 @@
   // A page that stops applying under the user (a boite switch, a disconnect)
   // must not leave the rail pointing at nothing.
   $effect(() => {
-    if (!TABS.some((tab) => tab.id === activeTab)) activeTab = "general";
+    if (!TABS.some((tab) => tab.id === settingsNav.tab)) settingsNav.tab = "general";
   });
   let railEl: HTMLElement | null = $state(null);
   let stripEl: HTMLElement | null = $state(null);
@@ -168,20 +166,6 @@
   let landed = $state.raw<{ id: string } | null>(null);
   let landedTimer: ReturnType<typeof setTimeout> | null = null;
 
-  /**
-   * What has to be true for a page to draw a catalogue entry's control.
-   *
-   * The catalogue names its condition rather than holding a function, so the
-   * answers live here where the stores already are. Without this, "powershell"
-   * on a Linux desktop answered with three hits that changed page and
-   * highlighted nothing, because the card they name is inside an `{#if}`.
-   */
-  const CONDITIONS: Record<SettingCondition, () => boolean> = {
-    push: pushSupported,
-    windowsHost: () => platform.isHostWindows,
-    pairing: () => backend().pairing !== null,
-  };
-
   const TAB_LABELS: Record<TabId, MessageKey> = Object.fromEntries(
     ALL_TABS.map((tab) => [tab.id, tab.labelKey]),
   ) as Record<TabId, MessageKey>;
@@ -207,7 +191,7 @@
     for (const entry of SETTINGS_CATALOGUE) {
       // A control this build never draws is not a result: a hit that jumps to a
       // page and points at nothing is worse than one hit fewer.
-      if (entry.when && !CONDITIONS[entry.when]()) continue;
+      if (!settingEntryVisible(entry)) continue;
       const label = t(entry.key);
       const desc = entry.descKey ? t(entry.descKey) : "";
       const tab = t(TAB_LABELS[entry.tab]);
@@ -253,13 +237,16 @@
    * emptied by hand.
    */
   function showTab(id: TabId) {
-    activeTab = id;
+    settingsNav.tab = id;
+    settingsNav.land = null;
     query = "";
   }
 
-  async function goToSetting(tab: TabId, key: string) {
-    showTab(tab);
-    const id = settingAnchorId(key);
+  $effect(() => {
+    const land = settingsNav.land;
+    if (!land) return;
+    query = "";
+    const id = settingAnchorId(land.key);
     landed = { id };
     if (landedTimer) clearTimeout(landedTimer);
     landedTimer = setTimeout(() => (landed = null), 1600);
@@ -267,11 +254,10 @@
     // is on is the page being drawn. `tick()` is the promise that says so; a
     // microtask only ever worked because Svelte happened to have queued its
     // flush first, which is true today and is not a contract.
-    await tick();
-    // A jump the user asked for is still a jump, and `scrollIntoViewSmooth`
-    // is where reduced motion gets the position without the travel.
-    scrollIntoViewSmooth(document.getElementById(id), { block: "center" });
-  }
+    void tick().then(() => {
+      scrollIntoViewSmooth(document.getElementById(id), { block: "center" });
+    });
+  });
 
   // The timer outlives the panel otherwise, and fires into a component that is
   // no longer on screen.
