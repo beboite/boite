@@ -15,7 +15,7 @@ bun run dev:isolated
 A separate **"Boite Dev"** window on port `1430` under the `dev.boite.dev`
 identifier, with its own SQLite file and an empty project list.
 
-## The MCP bridge (dev only)
+## The dev MCP (dev only)
 
 `dev:isolated` also enables the `mcp-bridge` feature, so an agent can drive that
 window: screenshots, DOM reads, JS evaluation.
@@ -25,25 +25,112 @@ window: screenshots, DOM reads, JS evaluation.
 webview reaches the IPC that spawns PTYs. Never enable the feature for a build
 you hand to anyone. Plain `bun run tauri dev` leaves it out of the binary.
 
-The agent side is `@hypothesi/tauri-mcp-server`, pinned to the crate's version:
-they ship as one pair, and its binary is named `mcp-server-tauri`, which is not
-a package name and resolves to nothing through `npx`.
+The agent side is `boite-mcp --dev`, the same binary the app already ships as a
+sidecar, in a second mode. It replaces `@hypothesi/tauri-mcp-server`, which was
+pinned to the plugin's version, cost twenty tools and around 26 KB of schema per
+session, and could reach only the webview: the dev instance's log directory and
+its database were outside it, and those are what a check usually needs.
 
 ```json
 {
   "mcpServers": {
-    "boite-dev": { "command": "npx", "args": ["-y", "@hypothesi/tauri-mcp-server@0.12.0"] }
+    "boite-dev": {
+      "command": "D:/Dev/Collab/boite/target/debug/boite-mcp.exe",
+      "args": ["--dev", "--repo", "D:/Dev/Collab/boite"]
+    }
   }
 }
 ```
 
-Twenty tools, around 26 KB of schema per session, so register it only while
-actually driving the dev window. It is unrelated to the agent MCP endpoint in
-the README, which is scoped to the calling thread, and it is not the way to find
-out what the app is doing: it drives
-an instance it started itself, under another identifier and therefore another
+`--repo` is the checkout `bun run dev:isolated` runs in and defaults to the
+working directory; `--port` is the isolated config's vite port and defaults to
+`1430`. Register it only while actually driving the window.
+
+| Tool | What it does |
+|---|---|
+| `dev_window` | `start`, `stop`, `status`, `restart`. `fresh: true` wipes the dev database first, `env` hands the app variables |
+| `dev_inspect` | `overview`, `projects`, `threads`, `thread`, `read`, `mounted`, `toasts`, `panes`, `settings`, one `execute_js` of the matching `window.__boite` call |
+| `dev_drive` | `click`, `type`, `press`, `screenshot`, `eval` |
+| `dev_logs` | the `logs` tool pointed at `%LOCALAPPDATA%\dev.boite.dev\logs`, both actions reading the files |
+| `dev_db` | one read-only statement on `%APPDATA%\dev.boite.dev\boite.db` |
+
+`dev_scenario`, the sixth tool in [`pilot.md`](pilot.md), is not here yet: the
+`e2e/` runner it lists and runs does not exist. The seam it will use does:
+`dev_window`'s `env` is how a scenario run hands the app
+`BOITE_PILOT_CLAUDE_BIN` and `BOITE_PILOT_SCENARIO`, and `fresh: true` is how it
+starts from an empty database.
+
+Three rules it is built on.
+
+- **Only `dev.boite.dev`.** The identifier is a constant in `dev/paths.rs` and
+  is never taken from an argument, so no call can be pointed at
+  `com.boite.desktop`, whose database, scrollback and window state are open
+  while you work. A test asserts every path it answers.
+- **Only a pid captured at spawn.** `start` puts the whole `bun` → `tauri` →
+  `cargo` → app tree in a `boite_core::job::Job` with `KILL_ON_JOB_CLOSE`, and
+  `stop` closes that handle. Nothing is ever killed by name: this worktree's
+  path and the word "boite" are in the argv of the user's own threads and of
+  the app drawing them.
+- **The window never takes the screen.** `start` sets `BOITE_DEV_UNATTENDED=1`,
+  and `lib.rs` builds the window with `focus = false` when that variable is set
+  and only then, so a second app coming up does not take the keyboard from
+  whoever is using the machine. The console is `CREATE_NO_WINDOW` for the same
+  reason.
+
+`start` waits until port 1430 answers **and** the bridge accepts a connection,
+with a ten minute deadline that covers a cold debug build of `src-tauri`.
+`status` answers `down`, `building` or `up` with the pid, the elapsed time and,
+while building, the tail of what the build printed. A child that exits during
+the wait ends it at once with that tail, which is where the compile error is.
+
+`dev_db` takes `SELECT`, `PRAGMA` and `EXPLAIN` and refuses everything else,
+including a write hidden behind a read (`SELECT 1; DELETE FROM threads`), which
+is refused whole rather than truncated. The connection is opened
+`SQLITE_OPEN_READ_ONLY` as well; the first guard exists because the useful
+refusal is the one an agent reads before its statement reached anything.
+
+`dev_drive action=eval` is dev only and reaches the app's IPC, which is what
+spawns PTYs. It is the last thing to reach for, and never a way to run text
+somebody else wrote.
+
+This is not the way to find out what the user's boite is doing: it drives an
+instance it started itself, under another identifier and therefore another
 database. `workspace_snapshot` carries `screen` and `window.__boite` reads a
-terminal back as text. Reach for the bridge for what only a real pointer can do.
+terminal back as text.
+
+### The bridge wire, as pinned against the crate
+
+Read off `tauri-plugin-mcp-bridge` 0.12.0's source rather than its README, since
+this is now written against rather than through a package that shipped with it.
+
+- **The port is discovered, never published.** The plugin's `base_port` is
+  `9223` and `discovery::find_available_port` takes the first port it can bind
+  in `base_port..base_port + 100`, so the bridge is somewhere in **9223 to
+  9322**. The chosen port is logged and dropped, so a client scans the range and
+  identifies the window it found: `list_windows` carries every window's title,
+  and the dev window's is `Boite Dev`, the isolated config's `productName`. A
+  release boite has no bridge at all, the plugin sitting behind
+  `debug_assertions` and the feature.
+- **One text frame in, one out**, matched on an `id` the client chooses.
+  Request: `{"id", "command", "args"}`. Answer: `{"id", "success", "data"?,
+  "error"?}`, plus `windowContext` on the commands that resolve a window. The
+  same socket also carries broadcast events (the element picker), so a client
+  reads past any frame whose `id` is not its own.
+- **Ten verbs**, the whole of `dispatch_command`: `list_windows`,
+  `get_window_info`, `execute_js`, `capture_native_screenshot`, `resize_window`,
+  `register_script`, `remove_script`, `clear_scripts`, `get_scripts`, and
+  `invoke_tauri`, which proxies nine of the plugin's own IPC commands
+  (`get_window_info`, `get_backend_state`, `start_ipc_monitor`,
+  `stop_ipc_monitor`, `get_ipc_events`, `emit_event`) and refuses anything else.
+- **`execute_js` wraps the script in an async function body**, so it must
+  `return` and it may `await`. Its `data` is the returned value as JSON. On
+  Windows the answer comes back through a Tauri event rather than from the
+  webview call, so a script that never returns hangs until the client's own
+  timeout.
+- **`capture_native_screenshot` answers a base64 data URL**, PNG by default,
+  from WebView2's `CapturePreview`: the viewport only, and `maxWidth` resizes
+  it. The terminals render to a WebGL canvas, so what a screenshot shows of them
+  is a rectangle; `dev_inspect what=read` is their text.
 
 ## The browser pane, and what it is allowed to reach
 
