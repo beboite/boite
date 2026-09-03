@@ -428,6 +428,44 @@ pub const ALL: &[Migration] = &[
         "add_project_mcp_servers",
         "ALTER TABLE projects ADD COLUMN mcp_server_ids TEXT;",
     ),
+    // The second thread runtime. A row keeps every terminal column it had:
+    // `runtime` is what says which of the two drives it, and `terminal` is the
+    // default so every row that already exists reads as one.
+    both(
+        "add_thread_runtime",
+        "ALTER TABLE threads ADD COLUMN runtime TEXT NOT NULL DEFAULT 'terminal';
+         ALTER TABLE threads ADD COLUMN pilot_driver TEXT;
+         ALTER TABLE threads ADD COLUMN pilot_instance TEXT;
+         ALTER TABLE threads ADD COLUMN pilot_model TEXT;
+         ALTER TABLE threads ADD COLUMN pilot_options TEXT;",
+    ),
+    // The journal and the projected timeline of a pilot thread. `pilot_events`
+    // is every canonical event that is worth keeping, `pilot_items` is what the
+    // chat pane reads. A text delta is in neither, by design: one row per token
+    // is the cost `docs/pilot.md` forbids outright.
+    both(
+        "create_pilot_tables",
+        "CREATE TABLE IF NOT EXISTS pilot_events (
+            thread_id TEXT NOT NULL,
+            seq INTEGER NOT NULL,
+            ts_ms INTEGER NOT NULL,
+            kind TEXT NOT NULL,
+            payload TEXT NOT NULL,
+            PRIMARY KEY (thread_id, seq)
+        );
+        CREATE TABLE IF NOT EXISTS pilot_items (
+            id TEXT PRIMARY KEY,
+            thread_id TEXT NOT NULL,
+            seq INTEGER NOT NULL,
+            turn_id TEXT,
+            kind TEXT NOT NULL,
+            state TEXT NOT NULL,
+            body TEXT NOT NULL,
+            created_ms INTEGER NOT NULL,
+            updated_ms INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS pilot_items_thread ON pilot_items(thread_id, seq);",
+    ),
 ];
 
 /// The desktop's list: `(version, description, sql)`, versions from 1.
@@ -461,7 +499,7 @@ mod tests {
     #[test]
     fn the_shipped_order_is_preserved_on_both_sides() {
         let desktop = desktop();
-        assert_eq!(desktop.len(), 30);
+        assert_eq!(desktop.len(), 32);
         assert_eq!(desktop[0], (1, "create_projects", ALL[0].sql));
         assert_eq!(desktop[4].1, "add_thread_session_and_icon");
         assert_eq!(desktop[8].1, "add_project_git_root", "no push table here");
@@ -474,7 +512,7 @@ mod tests {
         assert_eq!(desktop[21].1, "add_thread_ageing");
 
         let server = server();
-        assert_eq!(server.len(), 30);
+        assert_eq!(server.len(), 32);
         assert_eq!(server[8].description, "create_push_subscriptions");
         assert_eq!(server[9].description, "add_project_git_root");
         assert_eq!(
@@ -582,7 +620,16 @@ mod tests {
         );
         assert_eq!(
             columns(&conn, "threads"),
-            ["id", "project_id", "label", "title", "cmd", "args", "exit_code", "created_at", "session_id", "icon_key", "status", "auto_slept", "keep_awake", "icon_color", "worktree_path", "pin_order", "settled_at", "snoozed_until", "parent_thread_id", "delegation_mode", "delegation_status", "role", "orchestrator_scope", "accept_dispatch"]
+            ["id", "project_id", "label", "title", "cmd", "args", "exit_code", "created_at", "session_id", "icon_key", "status", "auto_slept", "keep_awake", "icon_color", "worktree_path", "pin_order", "settled_at", "snoozed_until", "parent_thread_id", "delegation_mode", "delegation_status", "role", "orchestrator_scope", "accept_dispatch", "runtime", "pilot_driver", "pilot_instance", "pilot_model", "pilot_options"]
+        );
+        assert_eq!(
+            columns(&conn, "pilot_events"),
+            ["thread_id", "seq", "ts_ms", "kind", "payload"]
+        );
+        assert_eq!(
+            columns(&conn, "pilot_items"),
+            ["id", "thread_id", "seq", "turn_id", "kind", "state", "body", "created_ms",
+             "updated_ms"]
         );
         assert_eq!(
             columns(&conn, "moments"),
@@ -641,10 +688,11 @@ mod tests {
         for column in ["commit_sha", "claimed_by", "description"] {
             assert!(columns(&conn, "todos").contains(&column.to_string()), "{column}");
         }
-        for column in ["pin_order", "settled_at", "snoozed_until", "role", "orchestrator_scope", "accept_dispatch"] {
+        for column in ["pin_order", "settled_at", "snoozed_until", "role", "orchestrator_scope", "accept_dispatch", "runtime", "pilot_driver", "pilot_instance", "pilot_model", "pilot_options"] {
             assert!(columns(&conn, "threads").contains(&column.to_string()), "{column}");
         }
-        for table in ["moments", "orchestrator_messages", "dispatches", "orchestrator_actions"] {
+        for table in ["moments", "orchestrator_messages", "dispatches", "orchestrator_actions",
+                      "pilot_events", "pilot_items"] {
             assert!(!columns(&conn, table).is_empty(), "{table} must exist on a server too");
         }
         assert_eq!(

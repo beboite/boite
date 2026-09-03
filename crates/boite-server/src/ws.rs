@@ -205,6 +205,10 @@ pub async fn handle_socket(socket: WebSocket, state: Arc<AppState>, addr: Socket
                 // makes "fan out and let the client filter" the wrong shape.
                 Ok(AppEvent::LogRecords { .. })
                     if !state_ctrl.logs_subscribed(&my_pairing) => {}
+                // Same rule, per thread: a turn is hundreds of events and a
+                // device watching another chat has no use for them.
+                Ok(AppEvent::PilotEvent { thread_id, .. })
+                    if !state_ctrl.pilot_subscribed(&my_pairing, &thread_id) => {}
                 Ok(ev) => {
                     if let Ok(s) = serde_json::to_string(&ev.to_event()) {
                         if tx_ctrl.send(WsOut::Text(s)).await.is_err() {
@@ -384,6 +388,9 @@ pub async fn handle_socket(socket: WebSocket, state: Arc<AppState>, addr: Socket
         h.abort();
         state.registry.detach(&thread_id, client);
     }
+    // And the threads it was watching. Per thread rather than per device, so
+    // this set would otherwise grow one entry per chat anybody ever opened.
+    state.drop_pilot_subscriptions(session.pairing_id());
     control.abort();
     writer.abort();
 }

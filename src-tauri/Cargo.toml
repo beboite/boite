@@ -17,6 +17,8 @@ tauri-build = { version = "2", features = [] }
 boite-core = { path = "../crates/boite-core" }
 boite-agent-api = { path = "../crates/boite-agent-api" }
 boite-identity = { path = "../crates/boite-identity" }
+# The pilot runtime this host owns: the children, the drivers, stop_all.
+boite-pilot = { path = "../crates/boite-pilot" }
 tauri = { version = "2.11.0", features = [] }
 tauri-plugin-sql = { version = "2", features = ["sqlite"] }
 tauri-plugin-dialog = "2"
@@ -39,7 +41,7 @@ tracing = "0.1"
 # mcp-bridge: that one answers execute_js, this one answers three verbs on one
 # table.
 axum = "0.8"
-tokio = { version = "1", features = ["rt-multi-thread", "net", "sync"] }
+tokio = { version = "1", features = ["rt-multi-thread", "net", "sync", "time"] }
 rand = "0.10"
 # A browser pane's address is a document the app is about to host in its own
 # window, so it is parsed rather than prefix-matched: `http://evil.com@localhost`

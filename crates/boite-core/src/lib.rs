@@ -26,6 +26,8 @@ pub mod journal;
 pub mod migrations;
 pub mod model;
 pub mod pairing;
+pub mod pilot;
+pub mod pilot_host;
 pub mod orchestrator;
 pub mod project;
 pub mod pty;

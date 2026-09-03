@@ -7,6 +7,7 @@ mod events;
 mod http;
 mod notify;
 mod pairing_link;
+mod pilot;
 mod protocol;
 mod push;
 mod registry;
@@ -243,6 +244,11 @@ async fn main() {
     )
     .await;
 
+    // Built before the state, which holds it: the sink needs the store and the
+    // event channel and nothing else, and both exist by here.
+    let pilot_mcp = agent_api.as_ref().and_then(|api| api.mcp.clone());
+    let pilot = Some(pilot::runtime(store.clone(), events.clone()));
+
     let state = Arc::new(AppState {
         store,
         agent_api,
@@ -263,6 +269,9 @@ async fn main() {
         pulse,
         telemetry,
         log_subscribers: Default::default(),
+        pilot_subscribers: Default::default(),
+        pilot,
+        pilot_mcp,
     });
 
     spawn_log_fanout(state.clone());

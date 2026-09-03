@@ -251,6 +251,7 @@ pub fn run() {
         .manage(commands::app::LastScreen::default())
         .manage(agent_api::DeviceAnswers::default())
         .manage(commands::records::Rows::default())
+        .manage(commands::pilot::PilotRuntime::default())
         // One wait registry for the whole app: the window's conduct writes
         // wake the agent endpoint's `GET /v1/pulse` long-polls.
         .manage(commands::conduct::PulseWaiters::default())
@@ -415,6 +416,18 @@ pub fn run() {
             commands::logs::logs_level,
             commands::logs::logs_write,
             commands::logs::logs_subscribe,
+            commands::pilot::pilot_catalog,
+            commands::pilot::pilot_thread_open,
+            commands::pilot::pilot_turn_start,
+            commands::pilot::pilot_turn_interrupt,
+            commands::pilot::pilot_request_respond,
+            commands::pilot::pilot_model_set,
+            commands::pilot::pilot_mode_set,
+            commands::pilot::pilot_session_stop,
+            commands::pilot::pilot_items,
+            commands::pilot::pilot_events,
+            commands::pilot::pilot_subscribe,
+            commands::pilot::pilot_unsubscribe,
             commands::app::read_app_log,
             commands::app::workspace_timeline,
             commands::app::clear_app_log,
@@ -579,6 +592,10 @@ pub fn run() {
                 }
                 let manager = app_handle.state::<PtyManager>();
                 manager.kill_all();
+                // The pilot children next, and for the same reason: one left
+                // behind holds a session file open, and the next launch resumes
+                // into a conversation two processes are writing.
+                commands::pilot::stop_all(app_handle);
             }
         });
 }

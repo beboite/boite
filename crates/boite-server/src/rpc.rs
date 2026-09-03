@@ -780,6 +780,27 @@ pub async fn dispatch(state: &AppState, request: Authorized) -> Result<Value, St
             Ok(json!({ "revoked": revoked }))
         }
 
+        // The one bus domain whose work is async: a pilot call awaits a child
+        // process, so `Ready::run` refuses it on purpose and the executor
+        // `boite_core::pilot_host` gives both hosts runs it here instead. The
+        // boundary is still `prepare`, and which socket to push at is this
+        // side's own bookkeeping, the way `logs.subscribe` is.
+        m if boite_core::command::pilot::ALL_METHODS.contains(&m) => {
+            let command = Command::decode(m, &params)?;
+            let wire = command.wire();
+            if m == "pilot.subscribe" || m == "pilot.unsubscribe" {
+                if let Some(thread_id) = params.get("threadId").and_then(|v| v.as_str()) {
+                    state.subscribe_pilot(&device, thread_id, m == "pilot.subscribe");
+                }
+            }
+            let ready = command.prepare(&state.command_host(), Grant::Local)?;
+            let boite_core::command::Ready::Pilot(ready) = ready else {
+                return Err(format!("{m} did not prepare as a pilot call"));
+            };
+            let answer = boite_core::pilot_host::execute(*ready).await?;
+            Ok(wire.wrap(answer))
+        }
+
         // Every domain the desktop serves too — git, worktrees, the
         // filesystem, the editor, the folders a project lives in — is one bus
         // in `boite_core::command` rather than a list of arms here. What is

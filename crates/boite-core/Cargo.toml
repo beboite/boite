@@ -10,6 +10,10 @@ doctest = false
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
+# Types only: the canonical events, the item shapes and the open spec the bus
+# validates into. The runtime that owns the child processes stays on the hosts,
+# so this dependency brings no executor with it.
+boite-pilot = { path = "../boite-pilot" }
 serde_json = "1"
 toml = "1.1"
 portable-pty = "0.9"
@@ -60,6 +64,10 @@ flate2 = "1"
 # into a CI job that compiles `--all-targets`.
 [dev-dependencies]
 criterion = { version = "0.8", default-features = false }
+# The projection is proved against a real `boite_pilot::Runtime` driven by the
+# scripted driver, which is async. Tests only: nothing in this crate's own code
+# awaits anything.
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
 
 [[bench]]
 name = "hot_paths"

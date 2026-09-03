@@ -11,6 +11,10 @@ path = "src/main.rs"
 [dependencies]
 boite-core = { path = "../boite-core" }
 boite-agent-api = { path = "../boite-agent-api" }
+# The pilot runtime this host owns: the children, the drivers, stop_all.
+boite-pilot = { path = "../boite-pilot" }
+# The env names a spawned agent reads to know which thread it is.
+boite-identity = { path = "../boite-identity" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "signal", "net", "io-util"] }
 axum = { version = "0.8", features = ["ws"] }
 tower-http = { version = "0.7", features = ["fs", "trace", "set-header"] }
