@@ -18,7 +18,6 @@
   import type { ChangeEntry } from "./api";
   import CloudDownload from "@lucide/svelte/icons/cloud-download";
   import GitBranch from "@lucide/svelte/icons/git-branch";
-  import PanelDockActions from "$lib/features/panes/PanelDockActions.svelte";
   import Plus from "@lucide/svelte/icons/plus";
   import Minus from "@lucide/svelte/icons/minus";
   import Trash2 from "@lucide/svelte/icons/trash-2";
@@ -49,12 +48,8 @@
   // The pane's project when it has one, the selected project otherwise: the
   // mobile tab has no pane around it, and a panel in a pane belongs to the
   // group it was opened in rather than to whatever the sidebar points at.
-  // The two column verbs, passed only by SidePanel: see PanelDockActions.
-  type Props = {
-    projectId?: string | null;
-    onClose?: () => void;
-  };
-  let { projectId = null, onClose }: Props = $props();
+  type Props = { projectId?: string | null };
+  let { projectId = null }: Props = $props();
 
   const project = $derived.by(() => {
     const id = projectId ?? app.currentProjectId;
@@ -524,9 +519,6 @@
       >
         <CloudDownload class="size-3.5 {gs?.fetching ? 'animate-pulse' : ''}" />
       </button>
-      {#if onClose}
-        <PanelDockActions {onClose} />
-      {/if}
     </div>
   </header>
 

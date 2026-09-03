@@ -244,16 +244,12 @@ export function buildPaletteCommands(): PaletteCommand[] {
     });
   }
 
-  // Git, files and the todo list show in the docked column, which is where they
-  // live: asking for git from the palette means the same thing as clicking git
-  // in the titlebar, and neither should rearrange the panes.
-  //
-  // The info-box experiment replaces that column, and these three used to be
-  // dropped outright while it was on — the titlebar hides its buttons for the
-  // same reason, so turning the experiment on left no way at all to reach the
-  // todo list, the git panel or the files. Setting a panel nothing renders was
-  // the thing to avoid, not offering the three: with the column gone they open
-  // in a pane, which is where every other non-terminal surface already goes.
+  // Git, files and the todo list open as pane leaves, like every other
+  // non-terminal surface. There used to be a switch here: a docked column for
+  // most people and a pane under the info-box experiment, with the two commands
+  // meaning different things depending on a setting nobody had in mind while
+  // typing. The column is gone, so there is one answer and one place a panel
+  // can be.
   const panelCommands: [PanelKind, MessageKey][] = [
     ["git", "panes.openGit"],
     ["explorer", "panes.openExplorer"],
@@ -264,10 +260,9 @@ export function buildPaletteCommands(): PaletteCommand[] {
       id: `panel:${kind}`,
       section: "panes",
       labelKey,
-      run: () =>
-        settings.state.experimentInfoBox
-          ? void openPane({ kind })
-          : settings.setRightPanel(app.currentProjectId, kind),
+      run: () => {
+        openPane({ kind });
+      },
     });
   }
 

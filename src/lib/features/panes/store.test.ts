@@ -193,15 +193,40 @@ describe("openBeside", () => {
 
   it("refuses past the pane cap rather than splitting forever", () => {
     threads(["t1", "p"]);
-    // Two panels plus a browser pane: three distinct contents beside the
-    // thread, which is the cap.
-    expect(paneStore.openBeside("t1", { kind: "git" })).toBeTruthy();
-    expect(paneStore.openBeside("t1", { kind: "todo" })).toBeTruthy();
-    expect(
-      paneStore.openBeside("t1", { kind: "browser", url: "http://localhost:1/" }),
-    ).toBeTruthy();
+    // The thread is the first leaf, so the group fills one short of the cap.
+    // Distinct addresses: same-content calls focus the pane that is already
+    // open instead of adding one.
+    for (let i = 1; i < MAX_LEAVES; i++) {
+      expect(
+        paneStore.openBeside("t1", { kind: "browser", url: `http://localhost:${i}/` }),
+      ).toBeTruthy();
+    }
     expect(countLeaves(paneStore.groupOf("t1")!.root)).toBe(MAX_LEAVES);
     expect(paneStore.openBeside("t1", { kind: "dashboard" })).toBe(null);
+  });
+
+  it("stacks rather than opening a column too narrow to read", () => {
+    threads(["t1", "p"]);
+    // 600px wide: the 0.35 share is 208px, under the 240 a column needs.
+    paneStore.setRect("t1", { x: 0, y: 0, w: 600, h: 800 });
+    expect(paneStore.openBeside("t1", { kind: "git" })).toBeTruthy();
+    const root = paneStore.groupOf("t1")!.root;
+    expect(root.kind === "split" && root.dir).toBe("column");
+  });
+
+  it("still opens a column when the pane has the width for one", () => {
+    threads(["t1", "p"]);
+    paneStore.setRect("t1", { x: 0, y: 0, w: 1400, h: 800 });
+    expect(paneStore.openBeside("t1", { kind: "git" })).toBeTruthy();
+    const root = paneStore.groupOf("t1")!.root;
+    expect(root.kind === "split" && root.dir).toBe("row");
+  });
+
+  it("refuses when neither a column nor a stack has the room", () => {
+    threads(["t1", "p"]);
+    paneStore.setRect("t1", { x: 0, y: 0, w: 300, h: 200 });
+    expect(paneStore.openBeside("t1", { kind: "git" })).toBe(null);
+    expect(countLeaves(paneStore.groupOf("t1")!.root)).toBe(1);
   });
 
   it("refuses a target that is not in any group", () => {
@@ -317,10 +342,11 @@ describe("splitInto", () => {
 
   it("refuses a group that is already full", () => {
     threads(["t1", "p"], ["t2", "p"]);
-    for (const kind of ["git", "todo"] as const) {
-      paneStore.openBeside("t1", { kind });
+    // t2 has a group of its own until it is dropped, so t1's has to be full
+    // with t1 and panels alone.
+    for (let i = 1; i < MAX_LEAVES; i++) {
+      paneStore.openBeside("t1", { kind: "browser", url: `http://localhost:${i}/` });
     }
-    paneStore.openBeside("t1", { kind: "browser", url: "http://localhost:1/" });
     expect(paneStore.splitInto("t1", "t2", "right")).toBe(false);
     // And the thread it refused is still where it was.
     expect(paneStore.groupOf("t2")).toBeTruthy();

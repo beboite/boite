@@ -4,7 +4,6 @@
   import { app } from "$lib/app/store.svelte";
   import { gitStore, gitScope } from "$lib/features/git/store.svelte";
   import { todos } from "$lib/features/todo/store.svelte";
-  import { notifications } from "$lib/features/notifications/store.svelte";
   import { confirmDialog } from "$lib/shared/components/confirm.svelte";
   import TodoList from "$lib/features/todo/TodoList.svelte";
   import DashboardCard from "./DashboardCard.svelte";
@@ -24,7 +23,6 @@
   import GitBranch from "@lucide/svelte/icons/git-branch";
   import ListTodo from "@lucide/svelte/icons/list-todo";
   import Eraser from "@lucide/svelte/icons/eraser";
-  import Plus from "@lucide/svelte/icons/plus";
   import TerminalIcon from "@lucide/svelte/icons/terminal";
   import ArrowUp from "@lucide/svelte/icons/arrow-up";
   import ArrowDown from "@lucide/svelte/icons/arrow-down";
@@ -116,24 +114,6 @@
     const reloadLog = untrack(() => (gitStore.get(registered)?.log.length ?? 0) === 0);
     void gitStore.refresh(registered, { reloadLog }).catch(() => {});
   });
-
-  // The dashboard is where a task occurs to you, so it takes one here rather
-  // than sending you to the panel. Adding keeps the focus: a list is usually
-  // written as a burst of lines, not one. The input is emptied on submit so
-  // the next line can be typed without waiting; a failure has to put it back,
-  // otherwise the only copy of what was typed is gone and the list never grew.
-  let todoDraft = $state("");
-  async function addTodo() {
-    const title = todoDraft.trim();
-    if (!title) return;
-    todoDraft = "";
-    try {
-      await todos.add(project.id, title);
-    } catch {
-      todoDraft = title;
-      notifications.error(t("todo.saveFailed"));
-    }
-  }
 
   // Same door as a single remove: the rows do not come back, and the eraser
   // used to skip the question the rest of this surface asks.
@@ -325,11 +305,11 @@
 
   <!-- Todos. The list itself, not a summary of it: this card used to be six
        truncated titles with an input under them, which is the right shape only
-       while the docked column is one click away. The info-box experiment takes
-       that column away, and then this is the entire todo surface — so it draws
-       the same cards the panel does, with the same tick, confirm, edit, drag
-       and delete on every one. Claimed is still called out separately: it means
-       an agent says it is done and only the user can confirm that. -->
+       while a docked column is one click away. There is no column any more, so
+       this is a full todo surface — the same component the pane draws, with the
+       same tick, confirm, edit, drag and delete on every card. Claimed is still
+       called out separately: it means an agent says it is done and only the
+       user can confirm that. -->
   <DashboardCard title={t("project.todos")} badge={openTodos.length || null} flush>
     {#snippet icon()}<ListTodo class="size-3.5" />{/snippet}
     {#snippet lead()}
@@ -354,31 +334,7 @@
       </button>
     {/snippet}
     <div class="flex h-full min-h-0 flex-col">
-      <!-- Capped rather than free: the card sits in a grid row with two others,
-           and a project with forty todos would otherwise decide how tall every
-           card beside it is. -->
-      <TodoList
-        projectId={project.id}
-        class="max-h-80 min-h-0 flex-1 scroll-pane overflow-y-auto border-t border-border"
-      />
-      <!-- Creation lives on the card either way: an empty list is exactly where
-           the first todo gets written. -->
-      <form
-        class="flex shrink-0 items-center gap-1.5 border-t border-border px-3.5 py-2"
-        onsubmit={(e) => {
-          e.preventDefault();
-          void addTodo();
-        }}
-      >
-        <Plus class="size-3.5 shrink-0 text-muted-2" />
-        <input
-          type="text"
-          bind:value={todoDraft}
-          placeholder={t("project.addTodo")}
-          aria-label={t("project.addTodo")}
-          class="min-w-0 flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-2 focus:outline-none"
-        />
-      </form>
+      <TodoList projectId={project.id} compact />
     </div>
   </DashboardCard>
 

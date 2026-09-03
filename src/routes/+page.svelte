@@ -30,14 +30,13 @@
   import { statusEngine } from "$lib/features/thread/statusEngine";
   import { watchWindowFocus } from "$lib/app/focus.svelte";
   import PaneShell from "$lib/features/panes/PaneShell.svelte";
-  import SidePanel from "$lib/features/panes/SidePanel.svelte";
   import PaneOverlay from "$lib/features/panes/PaneOverlay.svelte";
   import { parseThreadLink } from "$lib/domain/awareness";
   import PaneDropOverlay from "$lib/features/panes/PaneDropOverlay.svelte";
   import GitPanel from "$lib/features/git/GitPanel.svelte";
   import ExplorerPanel from "$lib/features/explorer/ExplorerPanel.svelte";
-  // Already in the entry graph through SidePanel, so the phone's tab costs
-  // nothing the window was not downloading anyway.
+  // Already in the entry graph as a pane leaf, so the phone's tab costs nothing
+  // the window was not downloading anyway.
   import TodoPanel from "$lib/features/todo/TodoPanel.svelte";
   import MobileTopBar from "$lib/features/mobile/MobileTopBar.svelte";
   import MobileBottomBar from "$lib/features/mobile/MobileBottomBar.svelte";
@@ -468,7 +467,13 @@
   // the first throw, or the rope spawns wherever the pointer was at boot.
   $effect(() => {
     if (settings.state.experimentWhip) void WhipView.ensure();
-    if (settings.state.experimentInfoBox) void InfoBoxView.ensure();
+  });
+
+  // The info box is no longer behind a flag, so its chunk is fetched as soon as
+  // there is a terminal view to draw it over rather than when a switch is
+  // flipped.
+  $effect(() => {
+    if (!mobile) void InfoBoxView.ensure();
   });
 
   // The launch pull, and deliberately not part of the boot.
@@ -496,16 +501,9 @@
   });
 
   // Opening the Files or Git panel is the strongest signal that a file or a
-  // diff is about to be opened; warm the editor before the click lands. Read
-  // off the panes: whether one of those panels is up is a question the pane
-  // tree answers, and the titlebar's own memory of which one is up whether or
-  // not anything is open.
+  // diff is about to be opened; warm the editor before the click lands. The
+  // pane tree is the whole answer now that those panels have no other home.
   $effect(() => {
-    const docked = settings.rightPanelFor(app.currentProjectId);
-    if (docked === "git" || docked === "explorer") {
-      prefetchWhenIdle(EditorView);
-      return;
-    }
     if (panePresence("git") || panePresence("explorer")) {
       prefetchWhenIdle(EditorView);
     }
@@ -732,8 +730,7 @@
                     {focused}
                     offline={boiteDown && thread.origin === "remote"}
                   />
-                  <!-- The experiment that replaces the column, one per
-                       terminal: in split view each pane runs its own worktree,
+                  <!-- One box per terminal: in split view each pane runs its own worktree,
                        so a single box over the whole area could only ever
                        describe one of them. The box docks itself inside the
                        pane (corners and edge midpoints), so it takes the whole
@@ -741,7 +738,7 @@
                        overlay in the DOM and at the same z, so it draws over
                        the ring rather than under it. Panes too narrow to hold
                        it (it would cover the terminal it describes) get none. -->
-                  {#if !mobile && settings.state.experimentInfoBox && rect.w >= 420 && InfoBoxView.current}
+                  {#if !mobile && rect.w >= 420 && InfoBoxView.current}
                     {@const InfoBoxComp = InfoBoxView.current}
                     <InfoBoxComp {thread} {visible} {focused} />
                   {/if}
@@ -841,12 +838,6 @@
         {/if}
       {/if}
     </main>
-
-    <!-- Outside <main>, beside it: the column describes the project rather than
-         whatever view is up. -->
-    {#if !mobile && app.ready && !homeActive && !settings.state.experimentInfoBox && settings.rightPanelFor(app.currentProjectId)}
-      <SidePanel />
-    {/if}
   </div>
   {/if}
   {/key}

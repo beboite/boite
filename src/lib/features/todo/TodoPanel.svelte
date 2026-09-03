@@ -9,29 +9,22 @@
   import TodoList from "./TodoList.svelte";
   import ListTodo from "@lucide/svelte/icons/list-todo";
   import Eraser from "@lucide/svelte/icons/eraser";
-  import PanelDockActions from "$lib/features/panes/PanelDockActions.svelte";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
-  import Plus from "@lucide/svelte/icons/plus";
 
   /**
    * The todo list as a column: the cards, and the three things that only make
    * sense around a surface of its own.
    *
-   * Everything you can do to a card lives in `TodoList`, which the project
-   * dashboard draws too. What is left here is the header (whose project this
-   * is, and clearing what is done), the input that appends to it, and the agent
-   * section — a column has the room for a folding block of MCP rows and a
-   * dashboard card does not.
+   * The list, its input and its empty state live in `TodoList`, which the
+   * project dashboard draws too. What is left here is the header (whose project
+   * this is, and clearing what is done) and the agent section: a pane has the
+   * room for a folding block of MCP rows and a dashboard card does not.
    */
 
   // The pane's project when it has one, the selected project otherwise: the
   // mobile tab has no pane around it.
-  // The two column verbs, passed only by SidePanel: see PanelDockActions.
-  type Props = {
-    projectId?: string | null;
-    onClose?: () => void;
-  };
-  let { projectId: paneProjectId = null, onClose }: Props = $props();
+  type Props = { projectId?: string | null };
+  let { projectId: paneProjectId = null }: Props = $props();
 
   const projectId = $derived(paneProjectId ?? app.currentProjectId);
   const project = $derived(
@@ -39,8 +32,6 @@
   );
   const items = $derived(todos.forProject(projectId));
   const doneCount = $derived(items.filter((t) => t.state === "done").length);
-
-  let draft = $state("");
 
   // What the shared section says is still waiting on the user, so the folded
   // header can wear the count. Held here rather than derived: the state it
@@ -63,14 +54,6 @@
   onMount(() => {
     void todos.ensureLoaded();
   });
-
-  function submitDraft(e: Event) {
-    e.preventDefault();
-    if (!projectId) return;
-    const text = draft;
-    draft = "";
-    void todos.add(projectId, text);
-  }
 </script>
 
 <div class="flex h-full min-h-0 flex-col">
@@ -93,9 +76,6 @@
     >
       <Eraser class="size-3.5" />
     </button>
-    {#if onClose}
-      <PanelDockActions {onClose} />
-    {/if}
   </header>
 
   {#if !projectId}
@@ -103,24 +83,7 @@
       {t("todo.noProject")}
     </p>
   {:else}
-    <TodoList {projectId} class="min-h-0 flex-1 scroll-pane overflow-y-auto" />
-
-    <!-- Right under the list it appends to, not below the agent section: the
-         input parked at the very bottom of the panel read as chrome, and
-         "where do I add one" was the panel's most asked question. -->
-    <form
-      class="flex shrink-0 items-center gap-1.5 border-t border-border p-2"
-      onsubmit={submitDraft}
-    >
-      <Plus class="size-3.5 shrink-0 text-muted-2" />
-      <input
-        type="text"
-        bind:value={draft}
-        placeholder={t("todo.newItem")}
-        aria-label={t("todo.newItem")}
-        class="min-w-0 flex-1 rounded-md border border-edge bg-[var(--color-surface-2)] px-2 py-1 text-sm text-foreground outline-none transition placeholder:text-muted-2 focus:border-foreground/30"
-      />
-    </form>
+    <TodoList {projectId} />
 
     <section class="shrink-0 border-t border-border">
       <button

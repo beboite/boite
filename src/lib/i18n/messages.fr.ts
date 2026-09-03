@@ -201,9 +201,6 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "experiments.workspace": "Espace de travail",
   "experiments.workspaceDesc":
     "Active l'Accueil, l'orchestrateur auquel on y parle, ses orchestrateurs par projet, et la voix dans les deux sens de cette conversation.",
-  "experiments.infoBox": "Boîte d'infos du projet",
-  "experiments.infoBoxDesc":
-    "Remplace les onglets du panneau latéral par une boîte au-dessus des terminaux : la branche courante, le todo qu'un agent s'est attribué, le dernier commit — et les dix derniers au survol.",
 
   "infoBox.label": "Infos du projet",
   "infoBox.claimedTitle": "Attribué à {agent}",
@@ -497,7 +494,6 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "project.clean": "rien à committer",
   "project.changedFiles": "{count} modifiés",
   "project.todos": "Todos",
-  "project.addTodo": "Ajouter un todo…",
   "project.awaitingYou": "{count} en attente de votre confirmation",
   "project.repoAt": "dépôt dans {path}",
   "project.scratchNotice": "Temporaire. Rien ici n'est encore un projet.",
@@ -1260,7 +1256,7 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "panes.kindTodo": "Todo",
   "panes.kindEditor": "Éditeur",
   "panes.needProject": "Choisissez d'abord un projet : un pane appartient à un projet.",
-  "panes.groupFull": "Ce groupe contient déjà {count} panes.",
+  "panes.groupFull": "Plus de place pour un pane ici : {count} au maximum, et chacun a besoin de sa largeur.",
   "panes.openedOffScreen": "{agent} a ouvert {pane} à côté de son terminal",
   "panes.openGit": "Afficher git",
   "panes.openExplorer": "Afficher les fichiers",
@@ -1275,8 +1271,6 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "editor.pdfPages": "{count} page(s)",
   "editor.zoomIn": "Agrandir",
   "editor.zoomOut": "Réduire",
-  "panel.close": "Fermer le panneau",
-  "panel.resize": "Redimensionner le panneau",
   "project.tokensCalendar": "Tokens par jour, 12 derniers mois",
   "explorer.fileTree": "Arborescence des fichiers",
   "explorer.pickProject": "Choisissez un projet.",

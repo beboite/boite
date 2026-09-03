@@ -138,7 +138,6 @@ export const SETTINGS_CATALOGUE: SettingEntry[] = [
     key: "experiments.workspace",
     descKey: "experiments.workspaceDesc",
   },
-  { tab: "experiments", key: "experiments.infoBox", descKey: "experiments.infoBoxDesc" },
 
   { tab: "privacy", key: "privacy.stop", descKey: "privacy.stopDesc" },
   { tab: "privacy", key: "privacy.modeA", descKey: "privacy.modeADesc" },

@@ -86,10 +86,3 @@
   </div>
   <VoiceSettings />
 {/if}
-
-<ToggleSetting
-  label={t("experiments.infoBox")} anchor="experiments.infoBox"
-  description={t("experiments.infoBoxDesc")}
-  enabled={settings.state.experimentInfoBox}
-  onToggle={() => settings.setExperimentInfoBox(!settings.state.experimentInfoBox)}
-/>
