@@ -350,25 +350,25 @@
         {gs?.branch ?? t("git.detached")}
       </span>
       {#if (gs?.ahead ?? 0) > 0}
-        <span class="flex shrink-0 items-center text-2xs text-muted-foreground">
+        <span class="flex shrink-0 items-center text-xs text-muted-foreground">
           <ArrowUp class="size-3" />{gs?.ahead}
         </span>
       {/if}
       {#if (gs?.behind ?? 0) > 0}
-        <span class="flex shrink-0 items-center text-2xs text-muted-foreground">
+        <span class="flex shrink-0 items-center text-xs text-muted-foreground">
           <ArrowDown class="size-3" />{gs?.behind}
         </span>
       {/if}
 
       {#if conflictsCount > 0}
         <span
-          class="flex shrink-0 items-center gap-0.5 rounded bg-[var(--color-danger)]/15 px-1 text-2xs font-semibold text-[var(--color-danger)]"
+          class="flex shrink-0 items-center gap-0.5 rounded bg-[var(--color-danger)]/15 px-1 text-xs font-semibold text-[var(--color-danger)]"
           use:tip={t("infoBox.conflicts", { count: conflictsCount })}
         >
           <AlertTriangle class="size-2.5" />{conflictsCount}
         </span>
       {:else if stagedCount > 0 || unstagedCount > 0}
-        <span class="flex shrink-0 items-center gap-1 font-mono text-2xs">
+        <span class="flex shrink-0 items-center gap-1 font-mono text-xs">
           {#if stagedCount > 0}
             <span class="font-medium text-[var(--color-success)]">+{stagedCount}</span>
           {/if}
@@ -393,14 +393,14 @@
       {/if}
       <StatusDot status={threadStatus} />
       {#if !collapsed && statusLabel}
-        <span class="shrink-0 text-2xs text-muted-foreground">{statusLabel}</span>
+        <span class="shrink-0 text-xs text-muted-foreground">{statusLabel}</span>
       {/if}
     </span>
   {/if}
 
   {#if !collapsed && isWorktree}
     <span
-      class="cell rounded bg-[var(--color-surface-3)] px-1.5 text-2xs text-muted-foreground"
+      class="cell rounded bg-[var(--color-surface-3)] px-1.5 text-xs text-muted-foreground"
       use:tip={threadHere?.worktreePath ?? ""}
     >
       <FolderGit2 class="size-3 text-muted-2" />
@@ -433,13 +433,13 @@
         onkeydown={onKeyDown}
       >
         <GitCommitHorizontal class="size-3.5 shrink-0 text-muted-foreground" />
-        <span class="shrink-0 font-mono text-2xs text-muted-foreground">
+        <span class="shrink-0 font-mono text-xs text-muted-foreground">
           {commits[0].shortSha}
         </span>
         <span class="min-w-0 flex-1 truncate text-left text-foreground">
           {commits[0].summary}
         </span>
-        <span class="shrink-0 text-2xs text-muted-2">{ago(commits[0].time)}</span>
+        <span class="shrink-0 text-xs text-muted-2">{ago(commits[0].time)}</span>
       </button>
 
       {#if logOpen}
@@ -479,7 +479,7 @@
               {#if openTodos.length > 4}
                 <div class="line">
                   <Circle class="size-3 shrink-0 text-muted-2" />
-                  <span class="text-2xs text-muted-2">
+                  <span class="text-xs text-muted-2">
                     {t("infoBox.moreClaimed", { count: openTodos.length - 4 })}
                   </span>
                 </div>
@@ -490,7 +490,7 @@
           {#if allTodos.length > 0}
             <div class="section">
               <div class="line">
-                <span class="flex items-center gap-2 text-2xs text-muted-2">
+                <span class="flex items-center gap-2 text-xs text-muted-2">
                   <span>{claimed.length} {t("infoBox.claimedSummary")}</span>
                   <span>·</span>
                   <span>{openTodos.length} {t("infoBox.openSummary")}</span>
@@ -506,11 +506,11 @@
           <div class="section">
             {#each commits as commit (commit.sha)}
               <div class="line">
-                <span class="shrink-0 font-mono text-2xs text-muted-foreground">
+                <span class="shrink-0 font-mono text-xs text-muted-foreground">
                   {commit.shortSha}
                 </span>
                 <span class="min-w-0 flex-1 truncate text-foreground">{commit.summary}</span>
-                <span class="shrink-0 text-2xs text-muted-2">{ago(commit.time)}</span>
+                <span class="shrink-0 text-xs text-muted-2">{ago(commit.time)}</span>
               </div>
             {/each}
           </div>
@@ -518,12 +518,12 @@
           {#if totalTokens > 0}
             <div class="section">
               <div class="line justify-between">
-                <span class="flex items-center gap-1 text-2xs text-muted-foreground">
+                <span class="flex items-center gap-1 text-xs text-muted-foreground">
                   <Zap class="size-3 text-muted-foreground" />
                   <span>{t("infoBox.tokensUsed", { tokens: formatTokens(totalTokens) })}</span>
                 </span>
                 {#if (report?.sessions ?? 0) > 0}
-                  <span class="text-2xs text-muted-foreground">
+                  <span class="text-xs text-muted-foreground">
                     {report?.sessions} {t("stats.sessions")}
                   </span>
                 {/if}
@@ -666,7 +666,7 @@
     border-radius: var(--radius-xs);
     background: var(--color-surface-3);
     padding: 0 0.25rem;
-    font-size: var(--text-2xs);
+    font-size: var(--text-xs);
     color: var(--color-muted-foreground);
   }
 

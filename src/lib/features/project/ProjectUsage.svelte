@@ -457,12 +457,12 @@
          year of the lightest square is an assertion about every one of those
          days. The refresh in the header is the way out and is already there. -->
     <p class="text-sm text-muted-foreground">{t("project.tokensUnreachable")}</p>
-    <p class="mt-1 text-xs text-muted-2">
+    <p class="mt-1 text-sm text-muted-2">
       {t("project.tokensUnreachableHint")}
     </p>
   {:else if total === 0}
     <p class="text-sm text-muted-foreground">{t("project.tokensNone")}</p>
-    <p class="mt-1 text-xs text-muted-2">
+    <p class="mt-1 text-sm text-muted-2">
       {missingLabel
         ? t("project.tokensMissing", { agents: missingLabel })
         : t("project.tokensOnly")}
@@ -473,7 +473,7 @@
          put the headline figure at the bottom of the hole. -->
     <div class="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
       <p class="font-semibold tabular-nums text-2xl leading-none text-foreground">{fmt(total)}</p>
-      <p class="text-xs text-muted-2">{t("project.tokensRange")}</p>
+      <p class="text-sm text-muted-2">{t("project.tokensRange")}</p>
       <span class="flex-1"></span>
       {#if report.sessions > 0}
         <p class="tabular-nums text-xs text-muted-2">
@@ -532,7 +532,7 @@
     {#if sparse && !hideCalendar}
       <button
         type="button"
-        class="mt-2 text-xs text-muted-foreground underline-offset-2 transition hover:text-foreground hover:underline"
+        class="mt-2 text-sm text-muted-foreground underline-offset-2 transition hover:text-foreground hover:underline"
         onclick={() => (showYear = !showYear)}
         aria-expanded={showYear}
       >
@@ -547,12 +547,12 @@
       <span></span>
       <div class="cal-months" aria-hidden="true">
         {#each monthMarks as label, w (w)}
-          <span class="text-2xs whitespace-nowrap text-muted-2">{label ?? ""}</span>
+          <span class="text-xs whitespace-nowrap text-muted-2">{label ?? ""}</span>
         {/each}
       </div>
       <div class="cal-weekdays" aria-hidden="true">
         {#each weekdayMarks as label, row (row)}
-          <span class="text-2xs leading-none text-muted-2">{label ?? ""}</span>
+          <span class="text-xs leading-none text-muted-2">{label ?? ""}</span>
         {/each}
       </div>
       <!-- One listener for the year rather than 371. `pointerover` fires once
@@ -588,7 +588,7 @@
       </div>
     </div>
     <div
-      class="mt-1.5 flex items-center justify-end gap-1 text-2xs text-muted-2"
+      class="mt-1.5 flex items-center justify-end gap-1 text-xs text-muted-2"
       aria-hidden="true"
     >
       <span>{t("project.tokensLess")}</span>
@@ -599,7 +599,7 @@
     </div>
     {/if}
     {#if missingLabel}
-      <p class="mt-1 text-xs text-muted-2">
+      <p class="mt-1 text-sm text-muted-2">
         {t("project.tokensMissing", { agents: missingLabel })}
       </p>
     {/if}
@@ -616,7 +616,7 @@
     style:top="{cardTop}px"
     style:left="{cardLeft}px"
   >
-    <p class="whitespace-nowrap text-2xs text-muted-foreground">{cardDay}</p>
+    <p class="whitespace-nowrap text-xs text-muted-foreground">{cardDay}</p>
     <p class="whitespace-nowrap tabular-nums text-sm font-medium text-foreground">
       {hovered.cell.total > 0
         ? t("project.tokensSpent", { total: fmt(hovered.cell.total) })

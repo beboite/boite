@@ -41,7 +41,7 @@
   {#snippet icon()}<Rocket class="size-3.5" />{/snippet}
   {#snippet lead()}
     {#if targetName}
-      <span class="text-2xs text-muted-2">{t("home.startTarget", { project: targetName })}</span>
+      <span class="text-xs text-muted-2">{t("home.startTarget", { project: targetName })}</span>
     {/if}
   {/snippet}
   {#if shortcuts.length === 0}

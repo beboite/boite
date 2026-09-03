@@ -141,7 +141,7 @@
     overflow-wrap: anywhere;
   }
   .detail {
-    font-size: var(--text-2xs);
+    font-size: var(--text-xs);
     line-height: 1.5;
     color: var(--color-muted-foreground);
     display: -webkit-box;

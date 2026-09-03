@@ -91,7 +91,7 @@
       type="button"
       role="switch"
       aria-checked={showWhen}
-      class="flex items-center gap-2 rounded-md px-2 py-1 text-xs text-muted-foreground transition hover:text-foreground"
+      class="flex items-center gap-2 rounded-md px-2 py-1 text-sm text-muted-foreground transition hover:text-foreground"
       onclick={() => (showWhen = !showWhen)}
     >
       {t("keyboard.showWhen")}
@@ -109,7 +109,7 @@
     </button>
     <button
       type="button"
-      class="shrink-0 rounded-md border border-edge px-2.5 py-1 text-xs text-muted-foreground transition hover:border-foreground/30 hover:text-foreground disabled:opacity-40"
+      class="shrink-0 rounded-md border border-edge px-2.5 py-1 text-sm text-muted-foreground transition hover:border-foreground/30 hover:text-foreground disabled:opacity-40"
       disabled={!keybindings.customized}
       onclick={resetAll}
     >
@@ -136,7 +136,7 @@
         <span class="min-w-0 flex-1 truncate text-sm">{commandLabel(command.id)}</span>
 
         {#if !shipped}
-          <span class="text-[0.65rem] text-muted-foreground">{t("keybindings.changed")}</span>
+          <span class="text-xs text-muted-foreground">{t("keybindings.changed")}</span>
         {/if}
 
         <button
@@ -163,7 +163,7 @@
         {#if recording}
           <button
             type="button"
-            class="rounded-md border border-edge px-2 py-0.5 text-xs text-muted-foreground transition hover:text-foreground"
+            class="rounded-md border border-edge px-2 py-0.5 text-sm text-muted-foreground transition hover:text-foreground"
             onclick={() => (keybindings.recording = null)}
           >
             {t("keybindings.recordCancel")}
@@ -182,7 +182,7 @@
         </button>
 
         {#if showWhen && rules.length > 0}
-          <span class="w-full pl-0 text-[0.65rem] text-muted-foreground">
+          <span class="w-full pl-0 text-sm text-muted-foreground">
             {rules[0].when
               ? t("keybindings.when", {
                   clause: whenSentence(rules[0].when, whenPhrases),
@@ -192,7 +192,7 @@
         {/if}
 
         {#each conflicts as conflict (conflict.other + conflict.key)}
-          <span class="flex w-full items-center gap-1 text-[0.65rem] text-[var(--color-warning)]">
+          <span class="flex w-full items-center gap-1 text-sm text-[var(--color-warning)]">
             <TriangleAlert class="size-3 shrink-0" />
             {conflict.shadowed
               ? t("keybindings.conflictShadowed", { other: commandLabel(conflict.other) })

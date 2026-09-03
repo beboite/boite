@@ -302,7 +302,7 @@
         {#each visible as row, i (row.c.id)}
           {@const title = sectionTitleAt(i)}
           {#if title}
-            <p class="px-4 pt-2.5 pb-1 text-2xs font-semibold tracking-wider text-muted-2 uppercase">
+            <p class="px-4 pt-2.5 pb-1 text-xs font-semibold tracking-wider text-muted-2 uppercase">
               {title}
             </p>
           {/if}
@@ -330,7 +330,7 @@
                  command's name, so the excerpt takes the room and the badge
                  says which of the three places it came from. -->
             {#if row.c.badgeKey}
-              <span class="shrink-0 text-2xs font-semibold tracking-wider text-muted-2 uppercase">
+              <span class="shrink-0 text-xs font-semibold tracking-wider text-muted-2 uppercase">
                 {t(row.c.badgeKey)}
               </span>
               <span class="min-w-0 flex-1 truncate text-sm">

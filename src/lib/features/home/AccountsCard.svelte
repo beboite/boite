@@ -119,7 +119,7 @@
         {#each enabled as id (id)}
           <button
             type="button"
-            class="rounded-sm px-1.5 py-0.5 text-2xs uppercase tracking-wider transition {tab === id
+            class="rounded-sm px-1.5 py-0.5 text-xs uppercase tracking-wider transition {tab === id
               ? 'bg-accent text-foreground'
               : 'text-muted-foreground hover:bg-accent hover:text-foreground'}"
             aria-pressed={tab === id}
@@ -137,7 +137,7 @@
     {:else}
       {#if columns.length > 0}
         <div
-          class="flex items-baseline gap-2 px-3.5 pb-1 text-2xs uppercase tracking-wider text-muted-2"
+          class="flex items-baseline gap-2 px-3.5 pb-1 text-xs uppercase tracking-wider text-muted-2"
         >
           <span class="min-w-0 flex-1 truncate">{t("home.accountsColumn")}</span>
           {#each columns as label (label)}

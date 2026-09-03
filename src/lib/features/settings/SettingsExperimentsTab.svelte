@@ -8,9 +8,9 @@
   import { CLI_PRESETS } from "$lib/features/settings/cliPresets";
 
   const RADIO =
-    "rounded-md border px-3 py-1 text-xs transition border-border bg-[var(--color-surface-2)] text-muted-foreground hover:border-foreground/30 hover:text-foreground";
+    "rounded-md border px-3 py-1 text-sm transition border-border bg-[var(--color-surface-2)] text-muted-foreground hover:border-foreground/30 hover:text-foreground";
   const RADIO_ON =
-    "rounded-md border px-3 py-1 text-xs transition border-foreground/40 bg-[var(--color-surface-3)] text-foreground";
+    "rounded-md border px-3 py-1 text-sm transition border-foreground/40 bg-[var(--color-surface-3)] text-foreground";
 
   /**
    * Turning the experiment off unmounts the surface, and asks once whether the
@@ -60,7 +60,7 @@
       role="radiogroup"
       aria-label={t("experiments.orchestratorAgent")}
     >
-      <span class="w-20 shrink-0 text-xs text-muted-foreground">
+      <span class="w-20 shrink-0 truncate text-sm text-muted-foreground">
         {t("experiments.orchestratorAgent")}
       </span>
       {#each CLI_PRESETS as preset (preset.id)}
@@ -81,7 +81,7 @@
     <!-- A shortcut can also name the agent, and a shortcut may point at a
          brokered endpoint; the warning follows the value, not the buttons. -->
     {#if settings.state.orchestratorAgent?.startsWith("fastpick:")}
-      <p class="text-xs text-amber-500">{t("experiments.orchestratorBrokered")}</p>
+      <p class="text-sm text-amber-500">{t("experiments.orchestratorBrokered")}</p>
     {/if}
   </div>
   <VoiceSettings />

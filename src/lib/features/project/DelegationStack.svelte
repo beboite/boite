@@ -61,7 +61,7 @@
     </span>
   {/if}
   <span
-    class="min-w-0 flex-1 truncate-safe text-2xs font-medium leading-[19px] text-foreground"
+    class="min-w-0 flex-1 truncate-safe text-sm font-medium text-foreground"
   >
     {label}
   </span>

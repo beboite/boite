@@ -117,7 +117,7 @@
               </span>
               <span class="flex w-full items-center justify-between gap-2">
                 <span class="truncate text-sm text-muted-2">{waitingLine(item)}</span>
-                <span class="shrink-0 text-2xs text-muted-2">
+                <span class="shrink-0 text-xs text-muted-2">
                   {projectName(item.thread.projectId)}
                 </span>
               </span>
@@ -127,7 +127,7 @@
               </span>
               <span class="flex w-full items-center justify-between gap-2">
                 <span class="truncate text-sm text-muted-2">{delegationLine(item)}</span>
-                <span class="shrink-0 text-2xs text-muted-2">
+                <span class="shrink-0 text-xs text-muted-2">
                   {projectName(item.thread.projectId)}
                 </span>
               </span>

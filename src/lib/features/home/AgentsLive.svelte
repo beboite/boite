@@ -54,12 +54,12 @@
                 <!-- The dispatch mute, visible from the dashboard: this row no
                      longer takes the orchestrator's lines. -->
                 <span
-                  class="rounded-sm border border-border px-1 text-2xs text-muted-2"
+                  class="rounded-sm border border-border px-1 text-xs text-muted-2"
                 >
                   {t("home.dispatchMuted")}
                 </span>
               {/if}
-              <span class="truncate text-2xs text-muted-2">
+              <span class="truncate text-xs text-muted-2">
                 {app.projectById(thread.projectId)?.name ?? ""}
               </span>
             </span>

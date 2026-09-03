@@ -40,7 +40,7 @@
   {/snippet}
 
   {#if cliManager.error}
-    <p class="text-xs leading-snug text-[var(--color-danger)]">{cliManager.error}</p>
+    <p class="text-sm text-[var(--color-danger)]">{cliManager.error}</p>
   {/if}
 
   <div class="flex flex-col gap-1.5">

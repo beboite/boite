@@ -26,9 +26,9 @@
 <div class={klass} role="status">
   <p class="text-sm text-muted-foreground">{t(line)}</p>
   <details class="mt-1">
-    <summary class="cursor-pointer text-xs text-muted-2 transition hover:text-muted-foreground">
+    <summary class="cursor-pointer text-sm text-muted-2 transition hover:text-muted-foreground">
       {t("common.details")}
     </summary>
-    <p class="mt-1 break-words font-mono text-xs leading-snug text-muted-2">{error}</p>
+    <p class="mt-1 break-words font-mono text-sm text-muted-2">{error}</p>
   </details>
 </div>

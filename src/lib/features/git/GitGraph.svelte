@@ -693,7 +693,7 @@
         </span>
         {#each row.refBadges as badge (badge.ref)}
           <span
-            class="shrink-0 rounded px-1.5 py-px text-2xs font-medium {badge.isHead
+            class="shrink-0 rounded px-1.5 py-px text-xs font-medium {badge.isHead
               ? 'bg-[var(--color-success)]/15 text-[var(--color-success)]'
               : 'bg-[var(--color-surface-3)] text-muted-foreground'}"
           >
@@ -701,12 +701,12 @@
           </span>
         {/each}
         {#if row.hiddenRefs > 0}
-          <span class="shrink-0 rounded bg-[var(--color-surface-3)] px-1.5 py-px tabular-nums text-2xs font-medium text-muted-2">
+          <span class="shrink-0 rounded bg-[var(--color-surface-3)] px-1.5 py-px tabular-nums text-xs font-medium text-muted-2">
             +{row.hiddenRefs}
           </span>
         {/if}
         <span
-          class="shrink-0 tabular-nums text-2xs text-muted-2"
+          class="shrink-0 tabular-nums text-xs text-muted-2"
         >
           {relTime(row.commit.time)}
         </span>
@@ -754,7 +754,7 @@
       </span>
     </div>
     {#if c.localOnly}
-      <div class="mt-1.5 flex items-center gap-1 text-2xs text-[var(--color-warning)]">
+      <div class="mt-1.5 flex items-center gap-1 text-xs text-[var(--color-warning)]">
         <span class="inline-block size-1.5 rounded-full bg-[var(--color-warning)]"></span>
         {t("git.localNotPushed")}
       </div>
@@ -765,7 +765,7 @@
           {@const clean = r.replace(/^HEAD -> /, "")}
           {@const isHead = r.startsWith("HEAD")}
           <span
-            class="rounded px-1.5 py-px text-2xs font-medium {isHead
+            class="rounded px-1.5 py-px text-xs font-medium {isHead
               ? 'bg-[var(--color-success)]/15 text-[var(--color-success)]'
               : 'bg-[var(--color-surface-3)] text-muted-foreground'}"
           >

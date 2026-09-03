@@ -74,7 +74,7 @@
       <Icon class="size-5" />
       <!-- Six tabs now, and a French label is half again as long as its English
            twin: the row has to give up the word rather than the tap target. -->
-      <span class="w-full truncate text-center text-2xs font-medium tracking-tight">
+      <span class="w-full truncate text-center text-xs font-medium tracking-tight">
         {t(tab.labelKey)}
       </span>
     </button>

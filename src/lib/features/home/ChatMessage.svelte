@@ -18,7 +18,7 @@
   >
     {message.text}
   </div>
-  <span class="px-1 text-2xs text-muted-2">
+  <span class="px-1 text-xs text-muted-2">
     {mine ? t("orchestrator.you") : t("orchestrator.them")} · {ago}
   </span>
 </li>

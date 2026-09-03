@@ -393,7 +393,7 @@
         <!-- The build every row below is compared against, spelled out rather
              than left implicit: "behind" is only meaningful next to it. -->
         <span
-          class="shrink-0 tabular-nums text-2xs text-muted-foreground"
+          class="shrink-0 tabular-nums text-xs text-muted-foreground"
           use:tip={t("workspace.versionThis")}
         >
           v{__APP_VERSION__}
@@ -459,7 +459,7 @@
                    showing a blank, which reads as "up to date". -->
               {#if version}
                 <span
-                  class={`shrink-0 tabular-nums text-2xs ${behind ? "rounded bg-warning/15 px-1 font-medium text-warning" : "text-muted-2"}`}
+                  class={`shrink-0 tabular-nums text-xs ${behind ? "rounded bg-warning/15 px-1 font-medium text-warning" : "text-muted-2"}`}
                   use:tip={behind
                     ? t("workspace.versionBehind", {
                         version,
@@ -470,14 +470,14 @@
                   v{version}
                 </span>
               {:else}
-                <span class="shrink-0 text-2xs text-muted-2">
+                <span class="shrink-0 text-xs text-muted-2">
                   {t("workspace.versionUnknown")}
                 </span>
               {/if}
             </span>
           </span>
           {#if active}
-            <span class="shrink-0 text-2xs uppercase tracking-wide text-muted-foreground">
+            <span class="shrink-0 text-xs uppercase tracking-wide text-muted-foreground">
               {#if connected}
                 {t("workspace.connStateConnected")}
               {:else if workspace.connection === "connecting"}
@@ -489,7 +489,7 @@
           {:else if b.enabled}
             <!-- The state of a connection this device holds without standing on
                  it, which is the only place that answers for one. -->
-            <span class="shrink-0 text-2xs uppercase tracking-wide text-muted-foreground">
+            <span class="shrink-0 text-xs uppercase tracking-wide text-muted-foreground">
               {environmentPhase(b.id)}
             </span>
           {/if}
@@ -530,7 +530,7 @@
 
       {#if active}
         <div class="mb-1 flex flex-col gap-2.5 rounded-lg bg-[var(--color-background)] px-2.5 py-2.5">
-          <label class="flex flex-col gap-1 text-2xs uppercase tracking-wide text-muted-foreground">
+          <label class="flex flex-col gap-1 text-xs uppercase tracking-wide text-muted-foreground">
             {t("workspace.name")}
             <input
               bind:value={nameDraft}
@@ -543,7 +543,7 @@
             />
           </label>
           <div class="flex flex-col gap-1.5">
-            <span class="text-2xs uppercase tracking-wide text-muted-foreground">
+            <span class="text-xs uppercase tracking-wide text-muted-foreground">
               {t("workspace.color")}
             </span>
             <div class={`flex flex-wrap ${mobile ? "gap-2.5" : "gap-2"}`}>
@@ -581,7 +581,7 @@
           <span class="text-base font-semibold text-foreground">{t("workspace.addServer")}</span>
         </div>
 
-        <label class="flex flex-col gap-1 text-2xs uppercase tracking-wide text-muted-foreground">
+        <label class="flex flex-col gap-1 text-xs uppercase tracking-wide text-muted-foreground">
           {t("workspace.serverUrl")}
           <input
             bind:value={addUrl}
@@ -592,7 +592,7 @@
             class="w-full rounded-md border border-edge bg-[var(--color-background)] px-3 py-2.5 font-mono text-sm normal-case tracking-normal text-foreground outline-none focus:border-foreground/40"
           />
         </label>
-        <label class="flex flex-col gap-1 text-2xs uppercase tracking-wide text-muted-foreground">
+        <label class="flex flex-col gap-1 text-xs uppercase tracking-wide text-muted-foreground">
           {t("workspace.token")}
           <input
             bind:value={addToken}

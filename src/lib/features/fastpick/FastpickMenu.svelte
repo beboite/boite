@@ -489,7 +489,7 @@
                before walking in: the model list is going to be the three of them at once. -->
           {#if keys.length > 1}
             <span
-              class="flex shrink-0 items-center gap-0.5 text-2xs text-muted-2"
+              class="flex shrink-0 items-center gap-0.5 text-xs text-muted-2"
               title={t("fastpick.keyCount", { count: keys.length })}
             >
               <KeyRound class="size-2.5" />
@@ -508,14 +508,14 @@
           {fastpick.modelsError[providerId]}
         </div>
       {:else if models}
-        <div class="px-2 pb-1 text-2xs text-muted-2">
+        <div class="px-2 pb-1 text-xs text-muted-2">
           {sourceLabel(models.source)}{query ? ` · ${shown.length}/${items.length}` : ""}
         </div>
         <!-- fastpick already writes which credential failed and why, so the line is shown
              rather than replaced: a key whose catalogue never arrived is a list that is
              quietly short, and the reason is usually the fix. -->
         {#each models.source.failed ?? [] as failure (failure)}
-          <div class="px-2 pb-1 text-2xs leading-snug text-[var(--color-warning)]">
+          <div class="px-2 pb-1 text-xs leading-snug text-[var(--color-warning)]">
             {failure}
           </div>
         {/each}
@@ -544,7 +544,7 @@
                 {@const key = keyForModel(usableKeys, m)}
                 {#if key}
                   <span
-                    class="min-w-0 max-w-28 shrink truncate text-2xs text-muted-2"
+                    class="min-w-0 max-w-28 shrink truncate text-xs text-muted-2"
                     class:text-danger={key.needsKey && !key.keyPresent}
                     title={key.needsKey && !key.keyPresent ? t("fastpick.noKey") : keyLabel(key)}
                   >
@@ -553,7 +553,7 @@
                 {/if}
               {/if}
               {#if m.contextWindow}
-                <span class="shrink-0 tabular-nums text-2xs font-medium text-muted-2">
+                <span class="shrink-0 tabular-nums text-xs font-medium text-muted-2">
                   {Math.round(m.contextWindow / 1000)}K
                 </span>
               {/if}
@@ -580,7 +580,7 @@
       {/if}
     {:else if pane === "options" && model}
       {#if harness?.supportsEffort && model.effort.length > 0}
-        <div class="px-2 pb-1 pt-1 text-2xs uppercase tracking-wide text-muted-2">
+        <div class="px-2 pb-1 pt-1 text-xs uppercase tracking-wide text-muted-2">
           {t("fastpick.effort")}
         </div>
         {#each model.effort as level (level)}
@@ -609,7 +609,7 @@
            section on an empty match hid the door with it. -->
       {#if harness?.supportsSystemPrompts && (promptStems.length > 0 || fastpick.allPrompts.length > 0)}
         <div
-          class="flex items-center gap-2 px-2 pb-1 pt-2 text-2xs uppercase tracking-wide text-muted-2"
+          class="flex items-center gap-2 px-2 pb-1 pt-2 text-xs uppercase tracking-wide text-muted-2"
         >
           <span>{t("fastpick.systemPrompt")}</span>
           <!-- The same door `a` opens in fastpick's own menu: the files matching the model
@@ -619,7 +619,7 @@
           {#if fastpick.allPrompts.length > model.prompts.length}
             <button
               type="button"
-              class="ml-auto rounded px-1 py-0.5 text-2xs normal-case transition hover:bg-accent hover:text-foreground"
+              class="ml-auto rounded px-1 py-0.5 text-xs normal-case transition hover:bg-accent hover:text-foreground"
               class:text-foreground={allPrompts}
               onclick={() => (allPrompts = !allPrompts)}
             >

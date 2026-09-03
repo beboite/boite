@@ -46,10 +46,10 @@
             <span class="min-w-0 flex-1 truncate text-sm text-foreground">
               {thread.title ?? thread.label}
             </span>
-            <span class="shrink-0 truncate text-2xs text-muted-2">
+            <span class="shrink-0 truncate text-xs text-muted-2">
               {app.projectById(thread.projectId)?.name ?? ""}
             </span>
-            <span class="w-12 shrink-0 text-right text-2xs tabular-nums text-muted-2">
+            <span class="w-12 shrink-0 text-right text-xs tabular-nums text-muted-2">
               {ago(thread)}
             </span>
           </button>

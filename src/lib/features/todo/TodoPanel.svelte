@@ -96,7 +96,7 @@
           class="size-3 shrink-0 text-muted-foreground transition {agentsShown ? '' : '-rotate-90'}"
         />
         <span
-          class="min-w-0 flex-1 truncate text-2xs font-semibold uppercase tracking-wider text-muted-foreground"
+          class="min-w-0 flex-1 truncate text-xs font-semibold uppercase tracking-wider text-muted-foreground"
         >
           {t("todo.agentAccess")}
         </span>
@@ -105,7 +105,7 @@
              a number. -->
         {#if agentsPending > 0}
           <span
-            class="shrink-0 rounded-full bg-[var(--color-surface-2)] px-1.5 text-2xs text-muted-foreground"
+            class="shrink-0 rounded-full bg-[var(--color-surface-2)] px-1.5 text-xs text-muted-foreground"
           >
             {agentsPending}
           </span>

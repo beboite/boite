@@ -180,38 +180,38 @@
       </div>
 
       {#if !root}
-        <p class="p-4 text-xs text-muted-foreground">
+        <p class="p-4 text-sm text-muted-foreground">
           {t("folderBrowser.noWorkspaceDir", { variable: "BOITE_WORKSPACE_DIR" })}
         </p>
       {:else}
         <div class="flex items-center gap-2 border-b border-border px-3 py-1.5">
           <button
             type="button"
-            class="rounded px-1.5 py-0.5 text-xs text-muted-foreground transition hover:text-foreground disabled:opacity-40"
+            class="rounded px-1.5 py-0.5 text-sm text-muted-foreground transition hover:text-foreground disabled:opacity-40"
             onclick={up}
             disabled={path === root}>↑ {t("folderBrowser.up")}</button
           >
-          <span class="truncate text-xs text-muted-foreground">{path}</span>
+          <span class="min-w-0 truncate text-sm text-muted-foreground">{path}</span>
         </div>
 
         <div class="min-h-0 flex-1 overflow-auto p-1">
           {#if loading}
-            <p class="p-3 text-xs text-muted-2">{t("common.loading")}</p>
+            <p class="p-3 text-sm text-muted-2">{t("common.loading")}</p>
           {:else if err}
-            <p class="p-3 text-xs text-danger">{err}</p>
+            <p class="p-3 text-sm text-danger">{err}</p>
           {:else if entries.length === 0}
-            <p class="p-3 text-xs text-muted-2">
+            <p class="p-3 text-sm text-muted-2">
               {t("folderBrowser.noSubfolders")}
             </p>
           {:else}
             {#each entries as e (e.path)}
               <button
                 type="button"
-                class="flex w-full items-center gap-2 rounded px-2 py-1 text-left text-xs text-foreground transition hover:bg-[var(--color-surface-2)]"
+                class="flex w-full min-w-0 items-center gap-2 rounded px-2 py-1 text-left text-sm text-foreground transition hover:bg-[var(--color-surface-2)]"
                 onclick={() => go(e.path)}
               >
                 <span class="text-muted-2">▸</span>
-                {e.name}
+                <span class="min-w-0 truncate">{e.name}</span>
               </button>
             {/each}
           {/if}
@@ -220,14 +220,14 @@
         <div class="flex justify-end gap-2 border-t border-border px-3 py-2">
           <button
             type="button"
-            class="rounded px-2 py-1 text-xs text-muted-foreground transition hover:text-foreground"
+            class="rounded px-2 py-1 text-sm text-muted-foreground transition hover:text-foreground"
             onclick={close}
             disabled={busy}>{t("common.cancel")}</button
           >
           <button
             type="button"
             bind:this={addBtn}
-            class="rounded bg-foreground px-2.5 py-1 text-xs font-medium text-background transition hover:bg-foreground/90 disabled:opacity-50"
+            class="rounded bg-foreground px-2.5 py-1 text-sm font-medium text-background transition hover:bg-foreground/90 disabled:opacity-50"
             onclick={addHere}
             disabled={busy || !path}
           >

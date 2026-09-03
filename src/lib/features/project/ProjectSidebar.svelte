@@ -1388,7 +1388,7 @@
         autocomplete="off"
         placeholder={t("sidebar.filterThreads")}
         aria-label={t("sidebar.filterThreads")}
-        class="w-full rounded-md border border-edge bg-[var(--color-surface-2)] px-2 py-1 text-xs text-foreground outline-none transition placeholder:text-muted-2 focus:border-foreground/30"
+        class="w-full rounded-md border border-edge bg-[var(--color-surface-2)] px-2 py-1 text-sm text-foreground outline-none transition placeholder:text-muted-2 focus:border-foreground/30"
         onkeydown={(e) => {
           if (e.key !== "Escape") return;
           e.stopPropagation();
@@ -1417,7 +1417,7 @@
   >
     {#if showArchived && visibleProjects.length === 0}
       <div
-        class="mx-1 mt-2 mb-2 flex w-[calc(100%-0.5rem)] flex-col items-center gap-2 rounded-lg border border-dashed border-border bg-transparent px-3 py-7 text-xs text-muted-foreground"
+        class="mx-1 mt-2 mb-2 flex w-[calc(100%-0.5rem)] flex-col items-center gap-2 rounded-lg border border-dashed border-border bg-transparent px-3 py-7 text-sm text-muted-foreground"
       >
         <FolderArchive class="size-5 opacity-70" />
         <span>{t("sidebar.noArchived")}</span>
@@ -1425,7 +1425,7 @@
     {:else if !showArchived && app.projects.every((p) => isScratch(p))}
       <button
         type="button"
-        class="mx-1 mt-2 mb-2 flex w-[calc(100%-0.5rem)] flex-col items-center gap-2 rounded-lg border border-dashed border-edge bg-transparent px-3 py-7 text-xs text-muted-foreground transition hover:border-foreground/30 hover:bg-accent/30 hover:text-foreground"
+        class="mx-1 mt-2 mb-2 flex w-[calc(100%-0.5rem)] flex-col items-center gap-2 rounded-lg border border-dashed border-edge bg-transparent px-3 py-7 text-sm text-muted-foreground transition hover:border-foreground/30 hover:bg-accent/30 hover:text-foreground"
         onclick={addProjectClick}
       >
         <FolderOpen class="size-5 opacity-70" />
@@ -1735,7 +1735,7 @@
                          the moment the modifier goes down, and a list that
                          jumps under a held key is worse than no hint. -->
                     <span
-                      class="pointer-events-none absolute left-1.5 z-[var(--z-chrome)] flex size-4 items-center justify-center rounded-xs bg-[var(--color-surface-3)] text-2xs font-semibold tabular-nums text-foreground shadow-e1"
+                      class="pointer-events-none absolute left-1.5 z-[var(--z-chrome)] flex size-[18px] items-center justify-center rounded-xs bg-[var(--color-surface-3)] text-xs font-semibold tabular-nums text-foreground shadow-e1"
                       aria-hidden="true"
                     >
                       {digit}
@@ -1865,7 +1865,7 @@
               <button
                 type="button"
                 data-drag-block
-                class="flex w-full items-center gap-1 rounded-sm px-1.5 py-1 text-2xs text-muted-foreground transition hover:bg-accent/40 hover:text-foreground"
+                class="flex w-full items-center gap-1 rounded-sm px-1.5 py-1 text-sm text-muted-foreground transition hover:bg-accent/40 hover:text-foreground"
                 class:text-foreground={fold.unfolded}
                 onclick={(e) => {
                   e.stopPropagation();
@@ -1903,7 +1903,7 @@
               <button
                 type="button"
                 data-drag-block
-                class="flex w-full items-center gap-1 rounded-sm px-1.5 py-1 text-2xs text-muted-foreground transition hover:bg-accent/40 hover:text-foreground"
+                class="flex w-full items-center gap-1 rounded-sm px-1.5 py-1 text-sm text-muted-foreground transition hover:bg-accent/40 hover:text-foreground"
                 class:text-foreground={open}
                 onclick={(e) => {
                   e.stopPropagation();
