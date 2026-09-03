@@ -53,9 +53,9 @@ logs action=query level=warn since=<now - 600000>
 logs action=query target=boite_core::pty text=pty. limit=200
 ```
 
-A spawn reads `pty.spawned [thread=… pty=… pid=… cwd=… cmd=…]` and its exit
-reads `pty.exited [thread=… pty=… pid=… code=…]`. The `pty` id is what pairs
-the two.
+A spawn reads `pty.spawned [thread=<id> pty=<id> pid=<pid> cwd=<dir> cmd=<argv>]`
+and its exit reads `pty.exited [thread=<id> pty=<id> pid=<pid> code=<code>]`. The
+`pty` id is what pairs the two.
 
 ## The record
 
@@ -66,7 +66,7 @@ the file, on the wire and in the tool's output:
 {"ts":1756000000000,"seq":12,"host":"server","level":"warn",
  "target":"boite_server::ws","msg":"rpc.failed",
  "thread":"t-7","device":"phone-1","span":"rpc",
- "fields":{"method":"git.commit","reason":"…"}}
+ "fields":{"method":"git.commit","reason":"not a repository"}}
 ```
 
 `ts` is unix milliseconds and `seq` is a per-process counter, so two records in
@@ -133,17 +133,17 @@ on by itself.
 Applied on the way in, to `msg` and to every string field, so what is in the
 file is already safe to paste into an issue:
 
-- anything shaped like an address becomes `<email>`, the local part included —
+- anything shaped like an address becomes `<email>`, the local part included:
   `firstname.lastname@` is a person;
 - a directory that is the user's becomes the name of the variable that holds it
-  (`%USERPROFILE%`, `%LOCALAPPDATA%`, `$HOME`, …), so a reader still sees which
-  directory it was without seeing whose.
+  (`%USERPROFILE%`, `%LOCALAPPDATA%`, `$HOME` and the others), so a reader still
+  sees which directory it was without seeing whose.
 
 ## The bus
 
 `logs.tail`, `logs.query`, `logs.level`, `logs.write`, `logs.subscribe`. The
 reads and `logs.subscribe` need `read`; `logs.write` and `logs.level` need
-`write` — a read-only device turning on `trace` costs every other device the
+`write`: a read-only device turning on `trace` costs every other device the
 bytes.
 
 `logs.subscribe` makes the server push `log.record` events at that device,
@@ -155,7 +155,7 @@ would put a broadcast on the log's own write path.
 Deliberately little. The sweep over the rest of the code is its own job.
 
 - Every command the bus refuses or fails, once, at the codec, at `warn`, with
-  the method — plus the thread and the device on the server, which knows both.
+  the method, plus the thread and the device on the server, which knows both.
 - Every RPC handler that fails on the server, at `warn`, with the device.
 - Every PTY spawned and every PTY that exited, at `info`, with the thread and
   the pid.

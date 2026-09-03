@@ -132,7 +132,7 @@ pub trait Session: Send + Sync {
 }
 ```
 
-### Sixteen events
+### Fourteen events
 
 | Kind | Carries | Stored |
 |---|---|---|
