@@ -139,7 +139,7 @@
   {#snippet icon()}<History class="size-3.5" />{/snippet}
   {#snippet lead()}
     {#if thread}
-      <span class="text-xs text-muted-2">
+      <span class="text-sm text-muted-2">
         {thread.title ?? thread.label}
       </span>
     {/if}
@@ -196,7 +196,7 @@
           </div>
           {#if expanded === turn.id}
             {#if files.length === 0}
-              <p class="px-3 pb-2 text-xs text-muted-2">{t("turns.empty")}</p>
+              <p class="px-3 pb-2 text-sm text-muted-2">{t("turns.empty")}</p>
             {:else}
               <ul class="mb-1 flex flex-col border-l border-border pl-2 ml-2">
                 {#each files as file (file.path)}
@@ -211,7 +211,7 @@
                       >
                         {file.status}
                       </span>
-                      <span class="min-w-0 flex-1 truncate text-xs text-foreground">
+                      <span class="min-w-0 flex-1 truncate text-sm text-foreground">
                         {file.path}
                       </span>
                     </button>
