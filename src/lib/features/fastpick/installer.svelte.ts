@@ -241,6 +241,11 @@ class FastpickInstaller {
     } catch (err) {
       if (run !== this.#run) return;
       this.#fail(String(err));
+      notifications.error(
+        t("fastpick.installFailed"),
+        undefined,
+        err instanceof Error ? err.message : String(err),
+      );
     }
   }
 

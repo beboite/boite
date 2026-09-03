@@ -423,6 +423,7 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "git.confirmDiscardMsg": "Les modifications de votre espace de travail sur {path} seront perdues. Les modifications indexées sont conservées.",
   "git.confirmDeleteLabel": "Supprimer",
   "git.confirmDiscardLabel": "Annuler",
+  "git.readFolderFailed": "Git n'a pas pu lire ce dossier.",
 
   "branchDialog.uncommittedChanges": "Vous avez des modifications non validées",
   "branchDialog.descriptionCreating": "Créer",
@@ -572,6 +573,7 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "approval.action.thread.move": "veut déplacer ce terminal dans {detail}",
   "approval.action.project.create": "veut créer le projet {detail}",
   "approval.action.thread.spawn": "veut ouvrir un terminal dans un autre projet ({detail})",
+  "approval.decideAllFailed": "Impossible d'appliquer la décision à toutes les demandes.",
 
   "worktree.title": "Worktrees",
   "worktree.refresh": "Relire le dépôt",
@@ -725,6 +727,7 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "fastpick.pathCopied": "Chemin copié",
   "fastpick.enable": "Proposer fastpick dans la barre",
   "fastpick.enableDesc": "Masqué de toute façon sur une machine sans fastpick.",
+  "fastpick.installFailed": "fastpick n'a pas pu être installé. Voir le journal dans À propos.",
   "plugin.kebaccTitle": "kebacc-switch",
   "plugin.kebaccDesc": "Sauve et change les logins Claude, Codex et Antigravity. L'accueil montre les comptes de chaque fournisseur que vous laissez allumé. Après un changement, Boite relance les threads de ce fournisseur.",
   "plugin.kebaccClaude": "Claude",
@@ -761,6 +764,7 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "plugin.switched": "Compte changé. Rechargement de {count} thread(s).",
   "plugin.switchedNone": "Compte changé. Aucun thread à recharger.",
   "plugin.current": "actuel",
+  "plugin.ptyKillFailed": "Le processus du plugin n'a pas pu être arrêté.",
   "cli.title": "CLI des agents",
   "cli.description": "Boite récupère le binaire publié par l'éditeur et le garde dans un dossier qui lui appartient, pour qu'une suppression n'emporte rien d'autre. Les agents distribués par un gestionnaire de paquets sont installés par lui, dans un terminal que vous pouvez lire.",
   "cli.recheck": "Vérifier à nouveau",
@@ -1194,6 +1198,7 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "thread.restoredNoWorktree":
     "{name} revient sans worktree : le sien a été rendu et aucun nouveau n'a pu être ouvert",
   "thread.noClosedThread": "Aucun terminal fermé à restaurer",
+  "thread.stopFailed": "Le terminal n'a pas pu être arrêté.",
   "thread.moveFailed": "Impossible de déplacer le terminal : {error}",
   "thread.movedTo": "{name} déplacé vers {project}",
   "thread.moveTranscriptFailed": "Déplacé, mais la conversation n'a pas pu suivre : {error}",

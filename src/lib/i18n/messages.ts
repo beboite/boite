@@ -421,6 +421,7 @@ export const EN_MESSAGES = {
   "git.confirmDiscardMsg": "Working-tree changes to {path} will be lost. Staged changes are kept.",
   "git.confirmDeleteLabel": "Delete",
   "git.confirmDiscardLabel": "Discard",
+  "git.readFolderFailed": "Git could not read this folder.",
 
   "todo.noProject": "Pick a project to keep notes against it.",
   "todo.empty": "Nothing noted for this project.",
@@ -565,6 +566,7 @@ export const EN_MESSAGES = {
   "approval.action.thread.move": "wants to move this terminal into {detail}",
   "approval.action.project.create": "wants to create the project {detail}",
   "approval.action.thread.spawn": "wants to open a terminal in another project ({detail})",
+  "approval.decideAllFailed": "Could not apply the decision to every request.",
 
   "worktree.title": "Worktrees",
   "worktree.refresh": "Read the repository again",
@@ -728,6 +730,7 @@ export const EN_MESSAGES = {
   "fastpick.pathCopied": "Path copied",
   "fastpick.enable": "Offer fastpick in the bar",
   "fastpick.enableDesc": "Hidden anyway on a machine without fastpick.",
+  "fastpick.installFailed": "fastpick could not be installed. See the log in About.",
   "plugin.kebaccTitle": "kebacc-switch",
   "plugin.kebaccDesc": "Saves and switches Claude, Codex and Antigravity logins. Home shows the accounts of each provider you keep on. After a switch, Boite reloads that provider's threads.",
   "plugin.kebaccClaude": "Claude",
@@ -764,6 +767,7 @@ export const EN_MESSAGES = {
   "plugin.switched": "Switched. Reloading {count} thread(s).",
   "plugin.switchedNone": "Switched. No thread needed a reload.",
   "plugin.current": "current",
+  "plugin.ptyKillFailed": "The plugin process could not be stopped.",
   "cli.title": "Agent CLIs",
   "cli.description": "Boite fetches the vendor's own binary and keeps it in a directory of its own, so removing one takes nothing else with it. The agents that ship on a package manager are installed by it, in a terminal you can read.",
   "cli.recheck": "Check again",
@@ -1202,6 +1206,7 @@ export const EN_MESSAGES = {
   "thread.restoredNoWorktree":
     "{name} comes back without a worktree: its own was given back and no new one could be opened",
   "thread.noClosedThread": "No closed thread to restore",
+  "thread.stopFailed": "The terminal could not be stopped.",
   "thread.moveFailed": "Could not move the thread: {error}",
   "thread.movedTo": "Moved {name} to {project}",
   "thread.moveTranscriptFailed": "Moved, but the conversation could not follow: {error}",

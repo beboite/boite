@@ -736,8 +736,13 @@ export async function stopThread(threadId: string) {
   if (previousPtyId) {
     try {
       await ptyKill(previousPtyId, true);
-    } catch {
+    } catch (err) {
       // already exited
+      notifications.error(
+        t("thread.stopFailed"),
+        undefined,
+        err instanceof Error ? err.message : String(err),
+      );
     }
   }
 }

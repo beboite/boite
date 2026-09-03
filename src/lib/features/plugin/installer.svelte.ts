@@ -222,6 +222,11 @@ class PluginInstaller {
     this.status = "cancelled";
     const closing = ptyKill(key).catch((err: unknown) => {
       logger.warn("plugin", "the install would not be killed", { error: String(err) });
+      notifications.error(
+        t("plugin.ptyKillFailed"),
+        undefined,
+        err instanceof Error ? err.message : String(err),
+      );
     });
     this.#closing = closing;
     await closing;

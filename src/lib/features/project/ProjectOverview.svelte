@@ -111,10 +111,17 @@
   // it, and forcing a reload on every visit walks the same commits this card
   // is about to draw. Untracked so filling the log does not fire the effect
   // again.
+  let lastGitError: string | null = null;
   $effect(() => {
     const registered = gitStore.ensure(project.id, project.gitRoot ?? project.cwd);
     const reloadLog = untrack(() => (gitStore.get(registered)?.log.length ?? 0) === 0);
-    void gitStore.refresh(registered, { reloadLog }).catch(() => {});
+    void gitStore.refresh(registered, { reloadLog, notifyErrors: true }).catch((err) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (lastGitError !== msg) {
+        lastGitError = msg;
+        notifications.error(t("git.readFolderFailed"), undefined, msg);
+      }
+    });
   });
 
   // The dashboard is where a task occurs to you, so it takes one here rather
