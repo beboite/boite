@@ -431,7 +431,7 @@
             <form class="flex gap-1.5 border-b border-border p-2" onsubmit={createBranch}>
               <input
                 bind:this={newBranchInput}
-                class="min-w-0 flex-1 rounded border border-edge bg-[var(--color-background)] px-2 py-1 text-xs text-foreground placeholder:text-muted-2 focus:border-foreground/30 focus:outline-none focus-visible:focus-ring-inset"
+                class="min-w-0 flex-1 rounded border border-edge bg-[var(--color-background)] px-2 py-1 text-sm text-foreground placeholder:text-muted-2 focus:border-foreground/30 focus:outline-none focus-visible:focus-ring-inset"
                 placeholder={t("git.newBranchPlaceholder")}
                 aria-label={t("git.newBranchPlaceholder")}
                 bind:value={newBranchName}
@@ -450,18 +450,18 @@
 
             <div class="max-h-64 scroll-pane overflow-y-auto py-1">
               {#if gs.branchesLoading && !gs.branchesLoaded}
-                <div class="px-3 py-3 text-center text-xs text-muted-foreground">
+                <div class="px-3 py-3 text-center text-sm text-muted-foreground">
                   {t("git.loadingBranches")}
                 </div>
               {:else if gs.branches.length === 0}
-                <div class="px-3 py-3 text-center text-xs text-muted-foreground">
+                <div class="px-3 py-3 text-center text-sm text-muted-foreground">
                   {t("git.noLocalBranches")}
                 </div>
               {:else}
                 {#each gs.branches as branch (branch.name)}
                   <button
                     type="button"
-                    class="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs transition hover:bg-accent focus-visible:bg-[var(--color-surface-2)] focus-visible:outline-none disabled:opacity-60"
+                    class="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm transition hover:bg-accent focus-visible:bg-[var(--color-surface-2)] focus-visible:outline-none disabled:opacity-60"
                     class:text-foreground={branch.current}
                     class:text-muted-foreground={!branch.current}
                     onclick={() => requestBranchChange(branch.name, false)}
@@ -470,7 +470,7 @@
                     use:tip={branch.name}
                   >
                     <Check class="size-3.5 shrink-0 {branch.current ? 'opacity-100' : 'opacity-0'}" />
-                    <span class="min-w-0 flex-1 truncate text-xs">{branch.name}</span>
+                    <span class="min-w-0 flex-1 truncate text-sm">{branch.name}</span>
                   </button>
                 {/each}
               {/if}
@@ -544,7 +544,7 @@
 
   {#if !project}
     <div
-      class="flex flex-1 items-center justify-center px-3 text-center text-xs text-muted-foreground"
+      class="flex flex-1 items-center justify-center px-3 text-center text-sm text-muted-foreground"
     >
       {t("git.pickProject")}
     </div>
@@ -559,17 +559,17 @@
   {:else if !gs.isRepo}
     <div class="flex flex-1 flex-col scroll-pane overflow-y-auto">
       <div
-        class="flex flex-col items-center gap-3 px-3 py-6 text-center text-xs text-muted-foreground"
+        class="flex flex-col items-center gap-3 px-3 py-6 text-center text-sm text-muted-foreground"
       >
         <span>{t("git.notRepoDesc")}</span>
         {#if gs.scanning}
-          <span class="text-xs text-muted-2">
+          <span class="text-sm text-muted-2">
             {t("git.scanningNested")}
           </span>
         {/if}
         <button
           type="button"
-          class="rounded-md border border-edge bg-[var(--color-surface-2)] px-3 py-1.5 text-xs text-foreground transition hover:bg-accent hover:text-foreground"
+          class="rounded-md border border-edge bg-[var(--color-surface-2)] px-3 py-1.5 text-sm text-foreground transition hover:bg-accent hover:text-foreground"
           onclick={initRepo}
         >
           {t("git.initRepo")}
@@ -593,12 +593,12 @@
         {#each gs.repos as repo (repo)}
           <button
             type="button"
-            class="flex items-center gap-2 px-3 py-1.5 text-left text-xs text-foreground transition hover:bg-accent hover:text-foreground"
+            class="flex items-center gap-2 px-3 py-1.5 text-left text-sm text-foreground transition hover:bg-accent hover:text-foreground"
             use:tip={repo}
             onclick={() => selectRepo(repo)}
           >
             <FolderGit2 class="size-3.5 shrink-0 text-muted-foreground" />
-            <span class="truncate">{repoLabel(repo)}</span>
+            <span class="min-w-0 truncate">{repoLabel(repo)}</span>
           </button>
         {/each}
       {/if}
@@ -632,7 +632,7 @@
 
         <div class="shrink-0 border-b border-border p-2">
           <textarea
-            class="w-full resize-none rounded-md border border-edge bg-[var(--color-background)] px-2 py-1.5 text-xs text-foreground placeholder:text-muted-2 focus:border-foreground/30 focus:outline-none focus-visible:focus-ring-inset"
+            class="w-full resize-none rounded-md border border-edge bg-[var(--color-background)] px-2 py-1.5 text-sm text-foreground placeholder:text-muted-2 focus:border-foreground/30 focus:outline-none focus-visible:focus-ring-inset"
             rows="2"
             placeholder={t("git.commitPlaceholder")}
             aria-label={t("git.commitLabel")}
@@ -643,7 +643,7 @@
           {#if totalChanges > 0}
             <button
               type="button"
-              class="mt-1.5 flex w-full items-center justify-center gap-1.5 rounded-md border border-edge bg-[var(--color-surface-2)] px-2 py-1 text-xs font-medium text-foreground transition hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+              class="mt-1.5 flex w-full items-center justify-center gap-1.5 rounded-md border border-edge bg-[var(--color-surface-2)] px-2 py-1 text-sm font-medium text-foreground transition hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
               onclick={doCommit}
               disabled={gs.committing ||
                 gs.staged.length === 0 ||
@@ -655,7 +655,7 @@
             {@const canPush = gs.upstream === null || gs.ahead > 0}
             <button
               type="button"
-              class="mt-1.5 flex w-full items-center justify-center gap-1.5 rounded-md border border-edge bg-[var(--color-surface-2)] px-2 py-1 text-xs font-medium text-foreground transition hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+              class="mt-1.5 flex w-full items-center justify-center gap-1.5 rounded-md border border-edge bg-[var(--color-surface-2)] px-2 py-1 text-sm font-medium text-foreground transition hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
               onclick={push}
               disabled={gs.pushing || !canPush}
             >
@@ -703,7 +703,7 @@
           {/if}
           {#if totalChanges === 0}
             <div
-              class="px-3 py-4 text-center text-xs text-muted-2"
+              class="px-3 py-4 text-center text-sm text-muted-2"
             >
               {t("git.workingTreeClean")}
             </div>
@@ -766,7 +766,7 @@
           <div class="flex min-h-0 min-w-0 w-full flex-1 flex-col scroll-pane overflow-y-auto overflow-x-hidden">
             {#if gs.log.length === 0}
               <div
-                class="px-3 py-4 text-center text-xs text-muted-2"
+                class="px-3 py-4 text-center text-sm text-muted-2"
               >
                 {t("git.noCommits")}
               </div>
@@ -776,7 +776,7 @@
                 <div class="border-t border-border p-2 shrink-0">
                   <button
                     type="button"
-                    class="w-full rounded-md border border-edge bg-[var(--color-surface-2)] px-2 py-1 text-xs text-muted-foreground transition hover:bg-accent hover:text-foreground disabled:opacity-50"
+                    class="w-full rounded-md border border-edge bg-[var(--color-surface-2)] px-2 py-1 text-sm text-muted-foreground transition hover:bg-accent hover:text-foreground disabled:opacity-50"
                     onclick={loadMoreCommits}
                     disabled={gs.logLoadingMore}
                   >
@@ -848,7 +848,7 @@
         <div
           class="group/row flex items-center gap-1.5 hover:bg-accent {mobile
             ? 'min-h-11 px-3 text-base'
-            : 'px-2 py-1 text-xs'}"
+            : 'px-2 py-1 text-sm'}"
           use:tip={entry.path}
         >
           <!-- The padding is on the button, not the row: it is what makes the

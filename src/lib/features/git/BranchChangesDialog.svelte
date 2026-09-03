@@ -87,7 +87,7 @@
       <h2 id="branch-changes-title" class="text-sm font-semibold text-foreground">
         {t("branchDialog.uncommittedChanges")}
       </h2>
-      <p class="mt-1.5 text-xs leading-relaxed text-muted-foreground">
+      <p class="mt-1.5 text-sm text-muted-foreground">
         {creating ? t("branchDialog.descriptionCreating") : t("branchDialog.descriptionSwitching")}
         <span class="font-medium text-foreground">{branch}</span> {t("branchDialog.descriptionSuffix")}
       </p>
@@ -102,8 +102,8 @@
         >
           <ArrowRight class="size-4 shrink-0 text-foreground" />
           <span class="min-w-0">
-            <span class="block text-xs font-medium text-foreground">{t("branchDialog.bringChanges")}</span>
-            <span class="mt-0.5 block text-xs leading-snug text-muted-foreground">
+            <span class="block text-sm font-medium text-foreground">{t("branchDialog.bringChanges")}</span>
+            <span class="mt-0.5 block text-sm text-muted-foreground">
               {t("branchDialog.bringChangesDesc", { branch })}
             </span>
           </span>
@@ -117,8 +117,8 @@
         >
           <Archive class="size-4 shrink-0 text-muted-foreground" />
           <span class="min-w-0">
-            <span class="block text-xs font-medium text-foreground">{t("branchDialog.leaveChanges")}</span>
-            <span class="mt-0.5 block text-xs leading-snug text-muted-foreground">
+            <span class="block text-sm font-medium text-foreground">{t("branchDialog.leaveChanges")}</span>
+            <span class="mt-0.5 block text-sm text-muted-foreground">
               {t("branchDialog.leaveChangesDesc", { command: "git stash pop" })}
             </span>
           </span>
@@ -129,7 +129,7 @@
     <footer class="flex justify-end border-t border-border bg-[var(--color-titlebar)] px-5 py-3">
       <button
         type="button"
-        class="rounded-md px-3 py-1.5 text-xs text-muted-foreground transition hover:bg-accent hover:text-foreground disabled:opacity-50"
+        class="rounded-md px-3 py-1.5 text-sm text-muted-foreground transition hover:bg-accent hover:text-foreground disabled:opacity-50"
         onclick={onCancel}
         disabled={busy}
       >
