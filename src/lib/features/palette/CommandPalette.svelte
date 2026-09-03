@@ -289,11 +289,11 @@
         class="scroll-pane overflow-y-auto py-1"
       >
         {#if liveMode === "url"}
-          <p class="px-4 py-6 text-center text-xs text-muted-foreground">
+          <p class="px-4 py-6 text-center text-sm text-muted-foreground">
             {t("palette.urlHint")}
           </p>
         {:else if visible.length === 0}
-          <p class="px-4 py-6 text-center text-xs text-muted-foreground">
+          <p class="px-4 py-6 text-center text-sm text-muted-foreground">
             {liveMode === "files" && parsed.term.trim().length < FILE_SEARCH_MIN
               ? t("palette.filesHint")
               : t("palette.noMatch")}
@@ -337,7 +337,7 @@
                 <Highlight text={row.label} ranges={row.matchedField === "label" ? row.ranges : undefined} />
               </span>
               {#if row.hint}
-                <span class="max-w-[40%] shrink-0 truncate text-xs text-muted-2">
+                <span class="max-w-[40%] shrink-0 truncate text-sm text-muted-2">
                   <Highlight text={row.hint} ranges={row.matchedField === "hint" ? row.ranges : undefined} />
                 </span>
               {/if}
@@ -346,7 +346,7 @@
                 <Highlight text={row.label} ranges={row.matchedField === "label" ? row.ranges : undefined} />
               </span>
               {#if row.hint}
-                <span class="min-w-0 flex-1 truncate text-xs text-muted-2">
+                <span class="min-w-0 flex-1 truncate text-sm text-muted-2">
                   <Highlight text={row.hint} ranges={row.matchedField === "hint" ? row.ranges : undefined} />
                 </span>
               {/if}
