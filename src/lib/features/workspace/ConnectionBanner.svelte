@@ -128,18 +128,18 @@
           {:else}{t("connection.offline", { name })}{/if}
         </p>
         {#if link === "lost"}
-          <p class="text-xs text-muted-2">{t("connection.lostDesc")}</p>
+          <p class="text-sm text-muted-2">{t("connection.lostDesc")}</p>
         {:else if link === "unreached"}
-          <p class="text-xs text-muted-2">{t("connection.offlineDesc")}</p>
+          <p class="text-sm text-muted-2">{t("connection.offlineDesc")}</p>
         {:else if link === "refused"}
-          <p class="text-xs text-muted-2">{t("connection.refusedDesc")}</p>
+          <p class="text-sm text-muted-2">{t("connection.refusedDesc")}</p>
         {/if}
       </div>
       {#if canRetry}
         <button
           type="button"
           disabled={retrying}
-          class="shrink-0 rounded-md border border-edge bg-[var(--color-surface-3)] px-2 py-1 text-xs text-foreground transition hover:bg-accent disabled:opacity-50"
+          class="shrink-0 rounded-md border border-edge bg-[var(--color-surface-3)] px-2 py-1 text-sm text-foreground transition hover:bg-accent disabled:opacity-50"
           onclick={retry}
         >
           {t("connection.retry")}

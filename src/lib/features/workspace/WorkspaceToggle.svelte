@@ -418,7 +418,7 @@
         <Layers class="size-4 shrink-0 text-muted-foreground" />
         <span class="flex min-w-0 flex-1 flex-col leading-tight">
           <span class="font-medium text-foreground">{t("workspace.dynamicMode")}</span>
-          <span class="truncate text-xs text-muted-foreground">
+          <span class="truncate text-sm text-muted-foreground">
             {t("workspace.dynamicDesc")}
           </span>
         </span>
@@ -451,7 +451,7 @@
           )}
           <span class="flex min-w-0 flex-1 flex-col leading-tight">
             <span class="truncate font-medium text-foreground">{labelOf(b)}</span>
-            <span class="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+            <span class="flex min-w-0 items-center gap-1.5 text-sm text-muted-foreground">
               <span class="truncate">{hostOf(b.url)}</span>
               <!-- A boite that is behind is worth seeing before switching to
                    it, so it is tinted rather than left as one number among
