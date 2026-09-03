@@ -66,7 +66,7 @@
             <span class="block truncate text-sm font-medium text-foreground">
               {shortcut.label}
             </span>
-            <span class="block truncate text-xs text-muted-2">
+            <span class="block truncate text-sm text-muted-2">
               {shortcut.command.trim()
                 ? shortcutAgentHint(shortcut.command)
                 : t("shortcuts.emptyCommand")}

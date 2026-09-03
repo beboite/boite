@@ -76,7 +76,7 @@
         <h2 id="sync-merge-title" class="text-sm font-medium text-foreground">
           {t("syncMerge.title")}
         </h2>
-        <p class="text-xs text-muted-foreground">
+        <p class="text-sm text-muted-foreground">
           {t("syncMerge.progress", { done: decided, total: conflicts.length })}
         </p>
       </div>
@@ -92,13 +92,13 @@
 
     {#if confirmingClose}
       <div class="shrink-0 border-b border-border bg-[var(--color-surface-2)] px-3 py-2">
-        <p class="text-xs text-foreground">
+        <p class="text-sm text-foreground">
           {t("syncMerge.abandonAsk", { count: syncStore.pending })}
         </p>
         <div class="mt-1.5 flex items-center gap-2">
           <button
             type="button"
-            class="rounded-md bg-foreground px-2 py-0.5 text-xs text-[var(--color-surface)]"
+            class="rounded-md bg-foreground px-2 py-0.5 text-sm text-[var(--color-surface)]"
             onclick={() => {
               confirmingClose = false;
               syncStore.closeMerge();
@@ -108,7 +108,7 @@
           </button>
           <button
             type="button"
-            class="rounded-md border border-edge px-2 py-0.5 text-xs text-foreground"
+            class="rounded-md border border-edge px-2 py-0.5 text-sm text-foreground"
             onclick={() => (confirmingClose = false)}
           >
             {t("syncMerge.abandonCancel")}
@@ -143,10 +143,10 @@
               {/if}
             </span>
             <span class="min-w-0">
-              <span class="block truncate font-mono text-xs text-foreground">
+              <span class="block truncate font-mono text-sm text-foreground">
                 {shortPath(item.path)}
               </span>
-              <span class="block text-xs text-muted-foreground">
+              <span class="block text-sm text-muted-foreground">
                 {verdict === "resolved"
                   ? t("syncMerge.statusResolved")
                   : verdict === "skipped"
@@ -162,30 +162,30 @@
 
       <div class="min-w-0 flex-1 overflow-hidden p-3">
         {#if !active}
-          <p class="text-xs text-muted-foreground">{t("syncMerge.nothingWaiting")}</p>
+          <p class="text-sm text-muted-foreground">{t("syncMerge.nothingWaiting")}</p>
         {:else if active.binary}
           <!-- Stacking bytes means nothing, so a side is offered instead of a
                merge, rather than showing mojibake and pretending. -->
           <div class="rounded-lg border border-border p-3">
-            <p class="text-xs text-foreground">{t("syncMerge.binary")}</p>
+            <p class="text-sm text-foreground">{t("syncMerge.binary")}</p>
             <div class="mt-2 flex items-center gap-2">
               <button
                 type="button"
-                class="rounded-md border border-edge px-2 py-0.5 text-xs text-foreground"
+                class="rounded-md border border-edge px-2 py-0.5 text-sm text-foreground"
                 onclick={() => void syncStore.resolve(active.path, active.local ?? "")}
               >
                 {t("syncMerge.keepMine")}
               </button>
               <button
                 type="button"
-                class="rounded-md border border-edge px-2 py-0.5 text-xs text-foreground"
+                class="rounded-md border border-edge px-2 py-0.5 text-sm text-foreground"
                 onclick={() => void syncStore.resolve(active.path, active.remote ?? "")}
               >
                 {t("syncMerge.takeTheirs")}
               </button>
               <button
                 type="button"
-                class="rounded-md border border-edge px-2 py-0.5 text-xs text-muted-foreground"
+                class="rounded-md border border-edge px-2 py-0.5 text-sm text-muted-foreground"
                 onclick={() => void syncStore.skip(active.path)}
               >
                 {t("syncMerge.skip")}
@@ -208,13 +208,13 @@
 
     <footer class="shrink-0 border-t border-border px-3 py-2">
       {#if syncStore.error}
-        <p class="mb-1.5 text-xs text-[var(--color-danger)]">{syncStore.error}</p>
+        <p class="mb-1.5 text-sm text-[var(--color-danger)]">{syncStore.error}</p>
       {/if}
       <div class="flex items-center justify-between gap-3">
-        <p class="text-xs text-muted-foreground">{t("syncMerge.sendNote")}</p>
+        <p class="text-sm text-muted-foreground">{t("syncMerge.sendNote")}</p>
         <button
           type="button"
-          class="rounded-md bg-foreground px-2.5 py-1 text-xs text-[var(--color-surface)] transition disabled:opacity-50"
+          class="rounded-md bg-foreground px-2.5 py-1 text-sm text-[var(--color-surface)] transition disabled:opacity-50"
           disabled={syncStore.pending > 0 || decided === 0}
           onclick={() => {
             void syncStore.push();

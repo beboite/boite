@@ -79,7 +79,7 @@
   </header>
 
   {#if !projectId}
-    <p class="px-3 py-6 text-center text-xs text-muted-foreground">
+    <p class="px-3 py-6 text-center text-sm text-muted-foreground">
       {t("todo.noProject")}
     </p>
   {:else}

@@ -31,24 +31,24 @@
 {#if !cliDetection.probed}
   <div class="flex flex-col items-center gap-3 py-8">
     <div class="size-6 animate-spin rounded-full border-2 border-border border-t-foreground"></div>
-    <p class="text-xs text-muted-foreground">{t("setup.agentsSearching")}</p>
+    <p class="text-sm text-muted-foreground">{t("setup.agentsSearching")}</p>
   </div>
 {:else if found.length > 0}
-  <p class="text-center text-xs text-muted-foreground">{t("setup.agentsFound")}</p>
+  <p class="text-center text-sm text-muted-foreground">{t("setup.agentsFound")}</p>
   <ul class="flex flex-wrap justify-center gap-2">
     {#each found as preset (preset.id)}
       <li
         class="flex items-center gap-2 rounded-full border border-border bg-[var(--color-surface-2)] py-1.5 pl-2 pr-3.5"
       >
         <ShortcutIcon iconKey={preset.iconKey as IconKey} size={16} />
-        <span class="text-xs font-semibold text-foreground">{preset.label}</span>
+        <span class="text-sm font-semibold text-foreground">{preset.label}</span>
       </li>
     {/each}
   </ul>
 {:else}
   <div class="flex flex-col items-center gap-2 py-4 text-center">
     <p class="text-sm text-foreground">{t("setup.agentsNone")}</p>
-    <p class="max-w-sm text-xs leading-relaxed text-muted-foreground">
+    <p class="max-w-sm text-sm text-muted-foreground">
       {t("setup.agentsNoneHint")}
     </p>
   </div>
@@ -60,7 +60,7 @@
       type="button"
       onclick={() => void cliDetection.refreshAll()}
       disabled={cliDetection.checking}
-      class="flex items-center gap-1.5 rounded-md border border-border bg-[var(--color-surface-2)] px-2.5 py-1.5 text-xs text-muted-foreground transition hover:border-foreground/30 hover:text-foreground disabled:cursor-wait disabled:opacity-60"
+      class="flex items-center gap-1.5 rounded-md border border-border bg-[var(--color-surface-2)] px-2.5 py-1.5 text-sm text-muted-foreground transition hover:border-foreground/30 hover:text-foreground disabled:cursor-wait disabled:opacity-60"
     >
       <RefreshCw class="size-3 {cliDetection.checking ? 'animate-spin' : ''}" />
       {t("setup.agentsRecheck")}

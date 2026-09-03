@@ -51,7 +51,7 @@
     {#if status.kind === "ready"}
       <button
         type="button"
-        class="flex items-center gap-1.5 rounded-md bg-foreground px-2.5 py-1.5 text-xs font-medium text-background transition hover:bg-foreground/90"
+        class="flex items-center gap-1.5 rounded-md bg-foreground px-2.5 py-1.5 text-sm font-medium text-background transition hover:bg-foreground/90"
         onclick={() => void updater.install()}
       >
         <ArrowUpCircle class="size-3" />
@@ -60,7 +60,7 @@
     {:else}
       <button
         type="button"
-        class="flex items-center gap-1.5 rounded-md border border-edge bg-[var(--color-surface-2)] px-2.5 py-1.5 text-xs text-muted-foreground transition hover:border-foreground/30 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+        class="flex items-center gap-1.5 rounded-md border border-edge bg-[var(--color-surface-2)] px-2.5 py-1.5 text-sm text-muted-foreground transition hover:border-foreground/30 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
         onclick={() => updater.checkNow()}
         disabled={updater.busy || !updater.enabled}
       >
@@ -72,7 +72,7 @@
 
   <div class="rounded-lg border border-border bg-[var(--color-surface-2)] px-3 py-2">
     <div class="flex items-baseline justify-between gap-3">
-      <span class="text-xs text-foreground">{t("updater.installed")}</span>
+      <span class="text-sm text-foreground">{t("updater.installed")}</span>
       <span class="tabular-nums text-xs text-muted-foreground">v{__APP_VERSION__}</span>
     </div>
 
@@ -133,7 +133,7 @@
 
     {#if status.kind === "ready" && status.notes}
       <pre
-        class="mt-2 max-h-32 scroll-pane overflow-y-auto whitespace-pre-wrap rounded-md bg-[var(--color-surface-3)] p-2 text-xs leading-relaxed text-muted-foreground">{status.notes}</pre>
+        class="mt-2 max-h-32 scroll-pane overflow-y-auto whitespace-pre-wrap rounded-md bg-[var(--color-surface-3)] p-2 text-sm text-muted-foreground">{status.notes}</pre>
     {/if}
   </div>
 </SettingsCard>

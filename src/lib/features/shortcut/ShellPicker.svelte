@@ -223,7 +223,7 @@
 <div bind:this={triggerRoot} class="relative flex shrink-0 items-stretch">
   <button
     type="button"
-    class="flex shrink-0 items-center gap-1.5 rounded-l-md border border-r-0 border-dashed border-edge px-2.5 py-1 text-xs text-muted-foreground transition hover:border-foreground/30 hover:bg-[var(--color-surface-2)] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+    class="flex shrink-0 items-center gap-1.5 rounded-l-md border border-r-0 border-dashed border-edge px-2.5 py-1 text-sm text-muted-foreground transition hover:border-foreground/30 hover:bg-[var(--color-surface-2)] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
     onclick={(e) => void launchDefault(e.shiftKey)}
     oncontextmenu={(e) => {
       e.preventDefault();
@@ -271,7 +271,7 @@
         </div>
       {/if}
       {#if shells.length === 0}
-        <div class="px-2 py-1.5 text-xs text-muted-foreground">
+        <div class="px-2 py-1.5 text-sm text-muted-foreground">
           {t("shell.noneDetected")}
         </div>
       {/if}

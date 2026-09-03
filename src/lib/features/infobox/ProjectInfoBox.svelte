@@ -658,7 +658,7 @@
     align-items: center;
     gap: 0.375rem;
     padding: 0.2rem 0.5rem;
-    font-size: var(--text-xs);
+    font-size: var(--text-sm);
   }
 
   .tag {

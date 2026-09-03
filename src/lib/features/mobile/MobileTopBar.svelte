@@ -78,7 +78,7 @@
       <span class="flex min-w-0 flex-col leading-tight">
         <span class="truncate text-base font-semibold text-foreground">{projectDisplayName(project)}</span>
         {#if onTerminal && activeTitle}
-          <span class="truncate text-xs text-muted-foreground">{activeTitle}</span>
+          <span class="truncate text-sm text-muted-foreground">{activeTitle}</span>
         {/if}
       </span>
     {:else}

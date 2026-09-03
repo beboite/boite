@@ -92,7 +92,7 @@
       <h1 class="text-sm text-muted-foreground">{t("workspace.loginTitle")}</h1>
     </div>
 
-    <label class="flex flex-col gap-1 text-xs text-muted-foreground">
+    <label class="flex flex-col gap-1 text-sm text-muted-foreground">
       {t("workspace.serverUrl")}
       <!-- type/inputmode url: this is the one screen where a phone user has to
            type a ws:// URL, and the stock keyboard has no slash or colon on its
@@ -110,7 +110,7 @@
       />
     </label>
 
-    <label class="flex flex-col gap-1 text-xs text-muted-foreground">
+    <label class="flex flex-col gap-1 text-sm text-muted-foreground">
       {t("workspace.pairingToken")}
       <input
         bind:this={tokenInput}
@@ -119,16 +119,16 @@
         bind:value={token}
         autocomplete="off"
       />
-      <span class="text-xs text-muted-2">{t("workspace.pairingHint")}</span>
+      <span class="text-sm text-muted-2">{t("workspace.pairingHint")}</span>
     </label>
 
     {#if pairError}
-      <p class="text-xs text-danger">{pairError}</p>
+      <p class="text-sm text-danger">{pairError}</p>
     {:else if failMessage}
       <div class="flex flex-col gap-1">
-        <p class="text-xs text-danger">{failMessage}</p>
+        <p class="text-sm text-danger">{failMessage}</p>
         {#if attempt?.detail}
-          <p class="text-xs text-muted-2">{attempt.detail}</p>
+          <p class="text-sm text-muted-2">{attempt.detail}</p>
         {/if}
       </div>
     {/if}

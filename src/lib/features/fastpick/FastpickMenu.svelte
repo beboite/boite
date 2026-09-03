@@ -437,7 +437,7 @@
         type="text"
         autocomplete="off"
         spellcheck="false"
-        class="w-full bg-transparent text-xs text-foreground placeholder:text-muted-2 focus:outline-none focus-visible:focus-ring-inset"
+        class="w-full bg-transparent text-sm text-foreground placeholder:text-muted-2 focus:outline-none focus-visible:focus-ring-inset"
         placeholder={t("fastpick.search")}
         aria-label={t("fastpick.search")}
       />
@@ -446,12 +446,12 @@
 
   <div class="flex min-h-0 flex-col scroll-pane overflow-y-auto p-1">
     {#if fastpick.loading}
-      <div class="px-2 py-1.5 text-xs text-muted-foreground">{t("common.loading")}</div>
+      <div class="px-2 py-1.5 text-sm text-muted-foreground">{t("common.loading")}</div>
     {:else if fastpick.error}
-      <div class="px-2 py-1.5 text-xs text-danger">{fastpick.error}</div>
+      <div class="px-2 py-1.5 text-sm text-danger">{fastpick.error}</div>
     {:else if pane === "harness"}
       {#if fastpick.harnesses.length === 0}
-        <div class="px-2 py-1.5 text-xs text-muted-foreground">
+        <div class="px-2 py-1.5 text-sm text-muted-foreground">
           {t("fastpick.noHarness")}
         </div>
       {/if}
@@ -502,9 +502,9 @@
       {/each}
     {:else if pane === "model"}
       {#if providerId && fastpick.loadingModels === providerId}
-        <div class="px-2 py-1.5 text-xs text-muted-foreground">{t("common.loading")}</div>
+        <div class="px-2 py-1.5 text-sm text-muted-foreground">{t("common.loading")}</div>
       {:else if providerId && fastpick.modelsError[providerId]}
-        <div class="px-2 py-1.5 text-xs text-danger">
+        <div class="px-2 py-1.5 text-sm text-danger">
           {fastpick.modelsError[providerId]}
         </div>
       {:else if models}
@@ -520,7 +520,7 @@
           </div>
         {/each}
         {#if shown.length === 0}
-          <div class="px-2 py-1.5 text-xs text-muted-foreground">
+          <div class="px-2 py-1.5 text-sm text-muted-foreground">
             {t("fastpick.noMatch")}
           </div>
         {/if}
@@ -645,7 +645,7 @@
                 <Check class="size-2.5 text-[var(--color-surface-2)]" strokeWidth={3} />
               {/if}
             </span>
-            <span class="min-w-0 truncate text-xs">{stem}</span>
+            <span class="min-w-0 truncate text-sm">{stem}</span>
           </button>
         {/each}
       {/if}

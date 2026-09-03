@@ -90,16 +90,16 @@
                 v{__APP_VERSION__}
               </span>
             </h2>
-            <p class="max-w-sm text-xs leading-relaxed text-muted-foreground">{t("setup.desc")}</p>
+            <p class="max-w-sm text-sm text-muted-foreground">{t("setup.desc")}</p>
           </div>
 
           <div class="flex items-center justify-center gap-2">
-            <span class="text-xs text-muted-foreground">{t("setup.language")}</span>
+            <span class="text-sm text-muted-foreground">{t("setup.language")}</span>
             <div class="flex gap-1.5">
               {#each LOCALE_OPTIONS as lang (lang.id)}
                 <button
                   type="button"
-                  class="rounded-md border px-2.5 py-1 text-xs transition {settings.state
+                  class="rounded-md border px-2.5 py-1 text-sm transition {settings.state
                     .locale === lang.id
                     ? 'border-foreground/40 bg-[var(--color-surface-3)] text-foreground'
                     : 'border-edge bg-[var(--color-surface-2)] text-muted-foreground hover:border-foreground/30 hover:text-foreground'}"
@@ -128,7 +128,7 @@
         <button
           type="button"
           onclick={() => void skipWizard()}
-          class="rounded-lg border border-border px-3.5 py-2 text-xs font-medium text-muted-foreground transition hover:border-foreground/30 hover:text-foreground"
+          class="rounded-lg border border-border px-3.5 py-2 text-sm font-medium text-muted-foreground transition hover:border-foreground/30 hover:text-foreground"
         >
           {t("setup.skip")}
         </button>
@@ -136,7 +136,7 @@
         <button
           type="button"
           onclick={() => (step -= 1)}
-          class="rounded-lg border border-border px-3.5 py-2 text-xs font-medium text-muted-foreground transition hover:border-foreground/30 hover:text-foreground"
+          class="rounded-lg border border-border px-3.5 py-2 text-sm font-medium text-muted-foreground transition hover:border-foreground/30 hover:text-foreground"
         >
           {t("setup.back")}
         </button>
@@ -145,7 +145,7 @@
         bind:this={nextBtn}
         type="button"
         onclick={next}
-        class="rounded-lg bg-foreground px-5 py-2.5 text-xs font-bold text-background transition hover:bg-foreground/90"
+        class="rounded-lg bg-foreground px-5 py-2.5 text-sm font-bold text-background transition hover:bg-foreground/90"
       >
         {isLast ? t("setup.finish") : t("setup.continue")}
       </button>

@@ -225,14 +225,14 @@
     color: color-mix(in srgb, var(--color-muted-foreground) 80%, transparent);
   }
   .deal-row-body {
-    font-size: var(--text-xs);
+    font-size: var(--text-sm);
     line-height: 1.5;
     color: var(--color-muted-foreground);
   }
 
   .opt-out-note {
     margin: 0;
-    font-size: var(--text-xs);
+    font-size: var(--text-sm);
     line-height: 1.5;
     color: color-mix(in srgb, var(--color-muted-foreground) 85%, transparent);
     text-align: center;

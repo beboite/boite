@@ -30,9 +30,9 @@
   onclick={onToggle}
 >
   <div class="min-w-0 flex-1">
-    <div class="text-xs font-medium text-foreground">{label}</div>
+    <div class="text-sm font-medium text-foreground">{label}</div>
     {#if description}
-      <div class="mt-0.5 text-xs leading-snug text-muted-foreground">
+      <div class="mt-0.5 text-sm text-muted-foreground">
         {description}
       </div>
     {/if}

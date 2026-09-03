@@ -381,11 +381,11 @@
     onfocusout={onTreeFocusOut}
   >
     {#if !project}
-      <div class="px-3 py-4 text-center text-xs text-muted-2">
+      <div class="px-3 py-4 text-center text-sm text-muted-2">
         {t("explorer.pickProject")}
       </div>
     {:else if err && !entries}
-      <div class="px-3 py-4 text-center text-xs text-[var(--color-danger)]">
+      <div class="px-3 py-4 text-center text-sm text-[var(--color-danger)]">
         {err}
       </div>
     {:else if !entries}
@@ -401,7 +401,7 @@
            only thing left to say the rows are still coming. -->
       <span class="sr-only">{t("common.loading")}</span>
     {:else if entries.length === 0}
-      <div class="px-3 py-4 text-center text-xs text-muted-2">
+      <div class="px-3 py-4 text-center text-sm text-muted-2">
         {t("explorer.emptyFolder")}
       </div>
     {:else}

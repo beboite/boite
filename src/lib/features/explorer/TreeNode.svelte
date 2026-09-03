@@ -257,14 +257,14 @@
     <div id={groupId} role="group">
       {#if isLoading && !children}
         <div
-          class="px-1 py-0.5 text-xs text-muted-2"
+          class="px-1 py-0.5 text-sm text-muted-2"
           style:padding-left="{depth * 12 + 24}px"
         >
           {t("common.loading")}
         </div>
       {:else if errMsg}
         <div
-          class="px-1 py-0.5 text-xs text-[var(--color-danger)]"
+          class="px-1 py-0.5 text-sm text-[var(--color-danger)]"
           style:padding-left="{depth * 12 + 24}px"
         >
           {errMsg}
@@ -275,7 +275,7 @@
         {/each}
         {#if children.length === 0}
           <div
-            class="px-1 py-0.5 text-xs text-muted-2 italic"
+            class="px-1 py-0.5 text-sm text-muted-2 italic"
             style:padding-left="{depth * 12 + 24}px"
           >
             {t("explorer.empty")}
