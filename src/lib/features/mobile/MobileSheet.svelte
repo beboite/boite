@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
   import { fade, fly } from "svelte/transition";
+  import { focusTrap } from "$lib/shared/actions/focusTrap";
   import { t } from "$lib/i18n/index.svelte";
 
   type Props = {
@@ -21,44 +22,10 @@
 
   let panel: HTMLDivElement | null = $state(null);
 
-  const FOCUSABLE =
-    'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
-
-  // Focus enters the sheet when it opens and goes back where it came from when it
-  // closes. Without this the keyboard stayed on whatever was behind, so the sheet
-  // was a wall a sighted pointer user could cross and nobody else could.
-  $effect(() => {
-    if (!open || !panel) return;
-    const previous = document.activeElement as HTMLElement | null;
-    const first = panel.querySelector<HTMLElement>(FOCUSABLE);
-    (first ?? panel).focus({ preventScroll: true });
-    return () => previous?.focus?.();
-  });
-
-  function trapTab(e: KeyboardEvent) {
-    if (!panel) return;
-    const items = [...panel.querySelectorAll<HTMLElement>(FOCUSABLE)].filter(
-      (el) => el.offsetParent !== null,
-    );
-    if (items.length === 0) {
-      e.preventDefault();
-      panel.focus({ preventScroll: true });
-      return;
-    }
-    const first = items[0];
-    const last = items[items.length - 1];
-    const active = document.activeElement;
-    if (!panel.contains(active)) {
-      e.preventDefault();
-      (e.shiftKey ? last : first).focus();
-    } else if (!e.shiftKey && active === last) {
-      e.preventDefault();
-      first.focus();
-    } else if (e.shiftKey && active === first) {
-      e.preventDefault();
-      last.focus();
-    }
-  }
+  // Focus, its restore and the Tab cycle are `use:focusTrap` below. The sheet
+  // used to carry its own copy of all three, which is the copy the shared
+  // action was written from: only the innermost open surface answers there, so a
+  // sheet opened over a popover no longer cycles the popover's buttons.
   let dragY = $state(0);
   let dragPointer: number | null = null;
   let dragStartY = 0;
@@ -106,9 +73,7 @@
       e.preventDefault();
       e.stopPropagation();
       onClose();
-      return;
     }
-    if (e.key === "Tab") trapTab(e);
   }
 </script>
 
@@ -142,6 +107,7 @@
       style:transform={dragY > 0 ? `translateY(${dragY}px)` : undefined}
       style:transition={dragY > 0 ? "none" : "transform var(--dur-2)"}
       transition:fly={{ y: 320, duration: 200 }}
+      use:focusTrap
       onpointerdown={dragStart}
       onpointermove={dragMove}
       onpointerup={dragEnd}

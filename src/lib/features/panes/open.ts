@@ -193,6 +193,30 @@ export function togglePanelPane(kind: PanelKind): void {
 }
 
 /**
+ * Close a pane from the phone's pane strip.
+ *
+ * The desktop closes a pane from the palette and never runs out of somewhere to
+ * look: another pane is already beside it. A phone draws one pane at a time, so
+ * closing the only one left drops the user on an empty Terminal tab with no way
+ * back — the dead end the strip exists to remove. The project's overview takes
+ * that slot, which is the phone's version of the welcome card the window shows
+ * when nothing is running.
+ *
+ * Thread panes never come through here: the strip offers no close on one, since
+ * removing a terminal from the group means moving it, not closing it, and the
+ * terminals sheet already closes a thread with a confirmation.
+ */
+export function closeMobilePane(paneId: string): boolean {
+  const group = paneStore.groupOf(paneId);
+  if (!group) return false;
+  const projectId = group.projectId;
+  const last = leafNodesOf(group.root).length <= 1;
+  if (!paneStore.closePane(paneId)) return false;
+  if (last) paneStore.openGroup(projectId, { kind: "dashboard" });
+  return true;
+}
+
+/**
  * Split the focused pane with a copy of the active thread's neighbour.
  *
  * What `Ctrl+Shift+E` and `Ctrl+Shift+O` do: there is nothing obvious to put in

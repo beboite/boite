@@ -1310,6 +1310,8 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "panes.resize": "Redimensionner les volets",
   "panes.maxReached": "{count} volets maximum",
   "panes.closePane": "Fermer le volet",
+  "panes.strip": "Volets de ce terminal",
+  "panes.showPane": "Afficher {name}",
   "panes.kindDashboard": "Vue d'ensemble",
   "panes.kindGit": "Git",
   "panes.kindExplorer": "Fichiers",

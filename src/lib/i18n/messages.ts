@@ -1318,6 +1318,8 @@ export const EN_MESSAGES = {
   "panes.resize": "Resize panes",
   "panes.maxReached": "Max {count} panes",
   "panes.closePane": "Close pane",
+  "panes.strip": "Panes of this terminal",
+  "panes.showPane": "Show {name}",
   "panes.kindDashboard": "Overview",
   "panes.kindGit": "Git",
   "panes.kindExplorer": "Files",

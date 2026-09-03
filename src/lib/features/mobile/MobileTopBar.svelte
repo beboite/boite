@@ -46,9 +46,19 @@
     : ''}"
   style="padding-top: env(safe-area-inset-top, 0px); padding-left: max(env(safe-area-inset-left, 0px), 0.5rem); padding-right: max(env(safe-area-inset-right, 0px), 0.5rem);"
 >
+  <!-- The workspace pill leads the bar, before the project name rather than
+       wedged between the thread buttons and the window controls: this is the
+       only bar the phone gets, and which boite the project is on is read before
+       the project, not after everything else. `select-text` because the header
+       doubles as the window drag region and a boite's URL is there to be read
+       and copied. -->
+  <div class="shrink-0 select-text">
+    <WorkspaceToggle />
+  </div>
+
   <button
     type="button"
-    class="flex min-w-0 flex-1 items-center gap-2 rounded-lg px-1.5 py-1 text-left transition active:bg-accent/40"
+    class="flex min-h-11 min-w-0 flex-1 items-center gap-2 rounded-lg px-1.5 py-1 text-left transition active:bg-accent/40"
     onclick={() => (app.mobileTab = "projects")}
     aria-label={t("mobile.switchProject")}
   >
@@ -101,13 +111,9 @@
     </button>
   {/if}
 
-  <!-- The header is `select-none` because it doubles as the window drag region,
-       but the workspace sheet opens inside it, and a boite's URL and name are
-       there to be read and copied. -->
-  <div class="shrink-0 select-text">
-    <WorkspaceToggle />
-  </div>
-
+  <!-- Minimise and close, and only under Tauri: the same layout is what a phone
+       browser gets from a boite-server, and there is no window there to close.
+       macOS draws its own traffic lights over this bar. -->
   {#if isTauri && !isMacOS}
     <button
       type="button"
