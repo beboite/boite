@@ -340,6 +340,12 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "sidebar.settledCount": "{count} rangé(s)",
   "sidebar.showSettled": "Voir ce que ce projet a rangé",
   "sidebar.hideSettled": "Masquer ce que ce projet a rangé",
+  "sidebar.showMore": "Afficher {count} de plus",
+  "sidebar.showMoreOne": "Afficher 1 de plus",
+  "sidebar.showFewer": "Afficher moins",
+  "sidebar.foldedRows":
+    "Ce projet a plus de threads que le volet n'en montre d'un coup",
+  "sidebar.threadRowJump": "{name}, {chord}",
   "sidebar.busyCannotSettle":
     "Ce thread travaille, il reste là où tu peux le voir",
   "sidebar.settleThreadFailed": "Impossible de ranger ce thread",
