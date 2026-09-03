@@ -1,77 +1,102 @@
 <script lang="ts">
+  /**
+   * The log, as the user reads it.
+   *
+   * Three bus calls and nothing else: `tail` on open (the ring this host keeps
+   * in memory, instant, no file read), `query` for anything older, and
+   * `subscribe` while Follow is on. The filters are sent rather than applied
+   * here, so a needle finds a record that is in the file and not in the ring —
+   * the old panel filtered an array it had already downloaded, which meant
+   * "search the log" only ever searched the last thousand lines of it.
+   */
   import { onDestroy, onMount } from "svelte";
   import { tip } from "$lib/shared/actions/tooltip";
-  import { logger, type LogEntry } from "$lib/shared/services/logger.svelte";
   import { notifications } from "$lib/features/notifications/store.svelte";
   import RotateCw from "@lucide/svelte/icons/rotate-cw";
   import Copy from "@lucide/svelte/icons/copy";
   import Trash2 from "@lucide/svelte/icons/trash-2";
-  import FolderOpen from "@lucide/svelte/icons/folder-open";
+  import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import { t, type MessageKey } from "$lib/i18n/index.svelte";
   import { debounce } from "$lib/shared/utils/debounce";
   import { confirmDialog } from "$lib/shared/components/confirm.svelte";
-  import { localBackend } from "$lib/backend";
+  import { backend, localBackend } from "$lib/backend";
   import { hasTauri } from "$lib/backend/env";
+  import type { LogRecord } from "$lib/backend/types";
+  import { app } from "$lib/app/store.svelte";
 
-  type Scope = "current" | "previous";
+  /** How much of the log the section opens on. */
+  const TAIL_LIMIT = 200;
 
-  // A session log runs to tens of thousands of entries, and every one of them is
-  // a row of five spans. Only the tail of the log answers a diagnostics question,
-  // so the rest is never handed to the DOM: the count line below says how much of
-  // the file is on screen.
-  const RENDER_LIMIT = 1000;
+  /** One press of "older" is worth this many records. */
+  const PAGE_LIMIT = 200;
 
-  // Long enough that a burst of keystrokes refilters once, short enough that the
-  // list still feels attached to the field.
-  const FILTER_DEBOUNCE_MS = 120;
+  /**
+   * The ceiling on what the DOM holds.
+   *
+   * A followed log runs to tens of thousands of records in a session and every
+   * one is a row of five spans. Only the tail answers a diagnostics question,
+   * so the head is dropped as live records arrive.
+   */
+  const RENDER_LIMIT = 2000;
 
-  // The `id` is the level as the log file writes it, never shown; the label is
-  // the only translated half.
+  /** Long enough that a burst of keystrokes queries once. */
+  const FILTER_DEBOUNCE_MS = 250;
+
+  // The `id` is what goes on the wire; the label is the only translated half.
   const LEVELS: { id: string; labelKey: MessageKey }[] = [
-    { id: "all", labelKey: "logs.levelAll" },
+    { id: "", labelKey: "logs.levelAll" },
     { id: "debug", labelKey: "logs.levelDebug" },
     { id: "info", labelKey: "logs.levelInfo" },
     { id: "warn", labelKey: "logs.levelWarn" },
     { id: "error", labelKey: "logs.levelError" },
   ];
 
-  let scope = $state<Scope>("current");
-  // What the logger reads is this device's own file, so the question is about the
-  // local backend and never about the active one. Asking `backend()` collapsed
-  // the tab to the notice below on a desktop whose file was right there, for as
-  // long as a boite was connected.
-  //
-  // Two halves, because caps alone cannot answer it: the local backend is a
-  // `TauriBackend` in every build, `appLogs: true` and all, and in a PWA there is
-  // no host behind it to invoke. Saying so beats an empty list, which reads as a
-  // bug in the logger.
-  const deviceLocal = !hasTauri() || !localBackend().caps.appLogs;
-  let entries = $state<LogEntry[]>([]);
-  let loading = $state(false);
-  let levelFilter = $state<string>("all");
-  // The needle is stored already lowercased: folding it per entry meant one
-  // allocation per line of the log per keystroke.
-  let sourceNeedle = $state<string>("");
-  let logPath = $state<string>("");
+  const HOSTS: { id: string; labelKey: MessageKey }[] = [
+    { id: "", labelKey: "logs.hostAll" },
+    { id: "desktop", labelKey: "logs.hostDesktop" },
+    { id: "server", labelKey: "logs.hostServer" },
+    { id: "mcp", labelKey: "logs.hostMcp" },
+    { id: "webview", labelKey: "logs.hostWebview" },
+  ];
 
-  const applySourceFilter = debounce((raw: string) => {
-    sourceNeedle = raw.trim().toLowerCase();
+  let records = $state<LogRecord[]>([]);
+  let loading = $state(false);
+  let older = $state(false);
+  let follow = $state(false);
+  let levelFilter = $state("");
+  let hostFilter = $state("");
+  let threadFilter = $state("");
+  let textFilter = $state("");
+  let logPath = $state("");
+  let exhausted = $state(false);
+
+  // The clear button truncates this device's own file through the desktop host.
+  // A browser talking to a server has no such file, and saying so beats a
+  // button that answers nothing.
+  const canClear = hasTauri() && localBackend().caps.appLogs;
+
+  const applyThread = debounce((raw: string) => {
+    threadFilter = raw.trim();
+  }, FILTER_DEBOUNCE_MS);
+  const applyText = debounce((raw: string) => {
+    textFilter = raw.trim();
   }, FILTER_DEBOUNCE_MS);
 
-  onDestroy(() => applySourceFilter.cancel());
+  onDestroy(() => {
+    applyThread.cancel();
+    applyText.cancel();
+    stopFollowing();
+  });
 
-  const filtered = $derived.by(() => {
-    const needle = sourceNeedle;
-    const level = levelFilter;
-    return entries.filter((e) => {
-      if (level !== "all" && e.level !== level) return false;
-      if (needle && !e.source.toLowerCase().includes(needle)) return false;
-      return true;
-    });
+  const filters = $derived({
+    level: levelFilter || undefined,
+    host: hostFilter || undefined,
+    thread: threadFilter || undefined,
+    text: textFilter || undefined,
   });
 
   const visible = $derived(
-    filtered.length > RENDER_LIMIT ? filtered.slice(filtered.length - RENDER_LIMIT) : filtered,
+    records.length > RENDER_LIMIT ? records.slice(records.length - RENDER_LIMIT) : records,
   );
 
   const levelClass: Record<string, string> = {
@@ -79,6 +104,13 @@
     info: "text-foreground",
     warn: "text-warning",
     error: "text-danger",
+  };
+
+  const chipClass: Record<string, string> = {
+    debug: "border-edge text-muted-2",
+    info: "border-edge text-muted-foreground",
+    warn: "border-warning/40 bg-warning/10 text-warning",
+    error: "border-danger/40 bg-danger/10 text-danger",
   };
 
   function formatTime(ms: number): string {
@@ -91,27 +123,114 @@
     return `${hh}:${mm}:${ss}.${millis}`;
   }
 
-  async function refresh() {
-    loading = true;
+  /** A thread id is a uuid; eight characters is enough to recognise one. */
+  function shortThread(id: string): string {
+    return id.length > 8 ? id.slice(0, 8) : id;
+  }
+
+  function threadLabel(id: string): string | null {
+    return app.threads.find((thread) => thread.id === id)?.label ?? null;
+  }
+
+  /** Whether a record still belongs on screen under the filters in force. */
+  function passes(record: LogRecord): boolean {
+    const f = filters;
+    if (f.host && record.host !== f.host) return false;
+    if (f.thread && record.thread !== f.thread) return false;
+    if (f.level && severity(record.level) < severity(f.level)) return false;
+    if (f.text) {
+      const needle = f.text.toLowerCase();
+      const hay = `${record.msg} ${record.target} ${JSON.stringify(record.fields ?? {})}`;
+      if (!hay.toLowerCase().includes(needle)) return false;
+    }
+    return true;
+  }
+
+  const ORDER = ["trace", "debug", "info", "warn", "error"];
+  function severity(level: string): number {
+    const at = ORDER.indexOf(level.toLowerCase());
+    return at === -1 ? ORDER.length : at;
+  }
+
+  function fieldsOf(record: LogRecord): string {
+    const entries = Object.entries(record.fields ?? {});
+    if (entries.length === 0) return "";
+    return entries.map(([key, value]) => `${key}=${stringify(value)}`).join(" ");
+  }
+
+  function stringify(value: unknown): string {
+    if (typeof value === "string") return value;
     try {
-      entries = await logger.read(scope);
+      return JSON.stringify(value) ?? String(value);
+    } catch {
+      return String(value);
+    }
+  }
+
+  async function reload() {
+    loading = true;
+    exhausted = false;
+    try {
+      // The ring first: it is this host's own memory, so it answers instantly
+      // and covers the case the section is opened for, which is "what just
+      // happened". Anything before it comes from `query` on demand.
+      records = await backend().logs.tail({ limit: TAIL_LIMIT, ...filters });
     } catch (err) {
       notifications.error(t("logs.readFailed", { error: String(err) }));
-      entries = [];
+      records = [];
     } finally {
       loading = false;
     }
   }
 
+  async function loadOlder() {
+    older = true;
+    try {
+      const until = records.length > 0 ? records[0].ts : Date.now();
+      const page = await backend().logs.query({ ...filters, until, limit: PAGE_LIMIT });
+      // `until` is inclusive, so the boundary record comes back a second time.
+      const seen = new Set(records.map(keyOf));
+      const fresh = page.filter((r) => !seen.has(keyOf(r)));
+      if (fresh.length === 0) exhausted = true;
+      records = [...fresh, ...records];
+    } catch (err) {
+      notifications.error(t("logs.readFailed", { error: String(err) }));
+    } finally {
+      older = false;
+    }
+  }
+
+  function keyOf(record: LogRecord): string {
+    return `${record.ts}:${record.seq ?? 0}:${record.host ?? ""}`;
+  }
+
+  let unfollow: (() => void) | null = null;
+
+  function startFollowing() {
+    if (unfollow) return;
+    unfollow = backend().logs.subscribe((batch) => {
+      const fresh = batch.filter(passes);
+      if (fresh.length === 0) return;
+      const next = [...records, ...fresh];
+      records = next.length > RENDER_LIMIT * 2 ? next.slice(next.length - RENDER_LIMIT) : next;
+    });
+  }
+
+  function stopFollowing() {
+    unfollow?.();
+    unfollow = null;
+  }
+
   function copyAll() {
-    const text = filtered
-      .map((e) => {
-        const head = `${formatTime(e.tsMs)} ${e.level.toUpperCase().padEnd(5)} [${e.source}] ${e.message}`;
-        return e.details ? `${head} ${e.details}` : head;
+    const text = visible
+      .map((r) => {
+        const head = `${formatTime(r.ts)} ${r.level.toUpperCase().padEnd(5)} [${r.target}] ${r.msg}`;
+        const extra = fieldsOf(r);
+        return extra ? `${head} ${extra}` : head;
       })
       .join("\n");
     void navigator.clipboard.writeText(text);
-    notifications.success(t("logs.copiedEntries", { count: filtered.length }));
+    notifications.success(t("logs.copiedEntries", { count: visible.length }));
   }
 
   async function clear() {
@@ -123,71 +242,45 @@
     });
     if (!ok) return;
     try {
-      await logger.clear();
+      await localBackend().log.clear();
       notifications.success(t("logs.cleared"));
-      await refresh();
+      await reload();
     } catch (err) {
       notifications.error(t("logs.clearFailed", { error: String(err) }));
     }
   }
 
-  async function copyPath() {
+  function copyPath() {
     if (!logPath) return;
     void navigator.clipboard.writeText(logPath);
     notifications.success(t("logs.pathCopied"));
   }
 
+  // Refetches whenever a filter moves, because the filters are sent rather than
+  // applied to what is already here.
   $effect(() => {
-    if (deviceLocal) {
-      entries = [];
-      return;
-    }
-    void refresh();
-    void scope;
+    void filters;
+    void reload();
+  });
+
+  $effect(() => {
+    if (follow) startFollowing();
+    else stopFollowing();
   });
 
   onMount(() => {
-    // Nothing to ask when there is no file: the call would reject and leave
-    // `logPath` empty, which is what already hides the path line below.
-    if (deviceLocal) return;
-    void logger
-      .filePath()
+    if (!canClear) return;
+    void localBackend()
+      .log.filePath()
       .then((p) => (logPath = p))
       .catch(() => {});
   });
 </script>
 
 <section class="flex flex-col gap-2">
-  <header class="flex items-center justify-between">
-    <div class="flex items-center gap-2">
-      <h3 class="text-sm font-semibold tracking-tight">{t("logs.title")}</h3>
-      {#if !deviceLocal}
-      <div class="flex rounded-md border border-border bg-[var(--color-surface)] p-0.5 text-xs">
-        <button
-          type="button"
-          aria-pressed={scope === "current"}
-          class="rounded-sm px-2 py-0.5 transition {scope === 'current'
-            ? 'bg-accent text-foreground'
-            : 'text-muted-foreground hover:text-foreground'}"
-          onclick={() => (scope = "current")}
-        >
-          {t("logs.scopeCurrent")}
-        </button>
-        <button
-          type="button"
-          aria-pressed={scope === "previous"}
-          class="rounded-sm px-2 py-0.5 transition {scope === 'previous'
-            ? 'bg-accent text-foreground'
-            : 'text-muted-foreground hover:text-foreground'}"
-          onclick={() => (scope = "previous")}
-        >
-          {t("logs.scopePrevious")}
-        </button>
-      </div>
-      {/if}
-    </div>
-    {#if !deviceLocal}
-    <div class="flex items-center gap-2">
+  <header class="flex flex-wrap items-center justify-between gap-2">
+    <h3 class="text-sm font-semibold tracking-tight">{t("logs.title")}</h3>
+    <div class="flex flex-wrap items-center gap-2">
       <select
         bind:value={levelFilter}
         aria-label={t("logs.levelAll")}
@@ -197,16 +290,36 @@
           <option value={level.id}>{t(level.labelKey)}</option>
         {/each}
       </select>
+      <select
+        bind:value={hostFilter}
+        aria-label={t("logs.hostFilter")}
+        class="rounded-md border border-edge bg-[var(--color-surface)] px-2 py-1 text-sm"
+      >
+        {#each HOSTS as host (host.id)}
+          <option value={host.id}>{t(host.labelKey)}</option>
+        {/each}
+      </select>
       <input
-        oninput={(e) => applySourceFilter(e.currentTarget.value)}
-        placeholder={t("logs.sourceFilter")}
-        aria-label={t("logs.sourceFilter")}
+        value={threadFilter}
+        oninput={(e) => applyThread(e.currentTarget.value)}
+        placeholder={t("logs.threadFilter")}
+        aria-label={t("logs.threadFilter")}
+        class="w-28 min-w-0 rounded-md border border-border bg-[var(--color-surface)] px-2 py-1 text-sm outline-none focus:border-foreground/30"
+      />
+      <input
+        oninput={(e) => applyText(e.currentTarget.value)}
+        placeholder={t("logs.textFilter")}
+        aria-label={t("logs.textFilter")}
         class="w-32 min-w-0 rounded-md border border-border bg-[var(--color-surface)] px-2 py-1 text-sm outline-none focus:border-foreground/30"
       />
+      <label class="flex items-center gap-1 text-sm text-muted-foreground">
+        <input type="checkbox" bind:checked={follow} class="accent-[var(--color-accent)]" />
+        {t("logs.follow")}
+      </label>
       <button
         type="button"
         class="flex items-center gap-1 rounded-md border border-edge px-2 py-1 text-sm text-muted-foreground transition hover:bg-accent hover:text-foreground"
-        onclick={refresh}
+        onclick={reload}
         use:tip={t("logs.refresh")}
       >
         <RotateCw class="size-3 {loading ? 'animate-spin' : ''}" />
@@ -221,7 +334,7 @@
         <Copy class="size-3" />
         {t("logs.copy")}
       </button>
-      {#if scope === "current"}
+      {#if canClear}
         <button
           type="button"
           class="flex items-center gap-1 rounded-md border border-edge px-2 py-1 text-sm text-muted-foreground transition hover:bg-danger/15 hover:text-danger"
@@ -233,32 +346,54 @@
         </button>
       {/if}
     </div>
-    {/if}
   </header>
 
   <div
     class="max-h-[60vh] min-h-[200px] scroll-pane overflow-y-auto rounded-md border border-border bg-[var(--color-titlebar)] p-2 font-mono text-sm"
   >
-    {#if deviceLocal}
-      <p class="py-4 text-center text-muted-2">{t("logs.deviceLocalOnly")}</p>
-    {:else if loading && entries.length === 0}
+    <div class="mb-1 flex justify-center">
+      <button
+        type="button"
+        disabled={older || exhausted}
+        class="flex items-center gap-1 rounded-md border border-edge px-2 py-0.5 text-xs text-muted-2 transition hover:text-foreground disabled:opacity-40"
+        onclick={loadOlder}
+      >
+        <ChevronDown class="size-3 rotate-180" />
+        {exhausted ? t("logs.noOlder") : t("logs.loadOlder")}
+      </button>
+    </div>
+    {#if loading && records.length === 0}
       <p class="py-4 text-center text-muted-2">{t("common.loading")}</p>
-    {:else if filtered.length === 0}
-      <p class="py-4 text-center text-muted-2">
-        {scope === "previous" ? t("logs.noPreviousSession") : t("logs.empty")}
-      </p>
+    {:else if records.length === 0}
+      <p class="py-4 text-center text-muted-2">{t("logs.empty")}</p>
     {:else}
-      {#each visible as entry, i (`${entry.tsMs}-${i}`)}
-        <div class="flex gap-2 py-0.5 {levelClass[entry.level] ?? 'text-foreground'}">
-          <span class="shrink-0 text-muted-2">{formatTime(entry.tsMs)}</span>
-          <span class="w-12 shrink-0 uppercase">{entry.level}</span>
-          <span class="w-32 shrink-0 truncate text-muted-foreground" use:tip={entry.source}>
-            [{entry.source}]
+      {#each visible as record, i (`${record.ts}-${record.seq ?? i}-${i}`)}
+        <div class="flex gap-2 py-0.5 {levelClass[record.level] ?? 'text-foreground'}">
+          <span class="shrink-0 text-muted-2">{formatTime(record.ts)}</span>
+          <span
+            class="shrink-0 rounded border px-1 text-[10px] uppercase leading-4 {chipClass[
+              record.level
+            ] ?? 'border-edge text-muted-2'}"
+          >
+            {record.level}
+          </span>
+          {#if record.thread}
+            <button
+              type="button"
+              class="shrink-0 text-muted-foreground underline decoration-dotted underline-offset-2 transition hover:text-foreground"
+              onclick={() => (threadFilter = record.thread ?? "")}
+              use:tip={threadLabel(record.thread) ?? record.thread}
+            >
+              {shortThread(record.thread)}
+            </button>
+          {/if}
+          <span class="w-40 shrink-0 truncate text-muted-foreground" use:tip={record.target}>
+            {record.target}
           </span>
           <span class="min-w-0 flex-1 break-words">
-            {entry.message}
-            {#if entry.details}
-              <span class="text-muted-2"> {entry.details}</span>
+            {record.msg}
+            {#if record.fields}
+              <span class="text-muted-2"> {fieldsOf(record)}</span>
             {/if}
           </span>
         </div>
@@ -267,7 +402,7 @@
   </div>
 
   <div class="flex items-center justify-between text-xs text-muted-2">
-    <span>{t("logs.entryCount", { shown: visible.length, total: entries.length })}</span>
+    <span>{t("logs.entryCount", { shown: visible.length, total: records.length })}</span>
     {#if logPath}
       <button
         type="button"
@@ -275,7 +410,6 @@
         onclick={copyPath}
         use:tip={t("logs.copyPath")}
       >
-        <FolderOpen class="size-3" />
         <span class="truncate">{logPath}</span>
       </button>
     {/if}

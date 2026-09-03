@@ -150,9 +150,66 @@ bytes.
 coalesced into batches of up to 50 records or every 250 ms. One event per record
 would put a broadcast on the log's own write path.
 
-## What is logged today
+## Writing to it, from the webview
 
-Deliberately little. The sweep over the rest of the code is its own job.
+`log` in `src/lib/shared/log.ts`, four levels and a `target` that reads like a
+module path:
+
+```ts
+import { log } from "$lib/shared/log";
+
+log.info("app.thread", "thread.created", { thread: id, project: projectId });
+```
+
+`fields` carries `thread`, `turn` and `request` as top-level record fields and
+everything else under `fields`, exactly as the Rust side does. `host` is forced
+to `webview` by whichever host answers, and so is `device` on the server: a
+client says what happened, never who it was.
+
+**Nothing goes out one line at a time.** Records are queued and flushed every
+500 ms, at once when fifty are waiting, and on `pagehide` — a window going away
+is when its last lines matter most. A flush that fails is dropped in silence,
+because a line about a failed flush rides the next flush, which fails for the
+same reason.
+
+`captureWebviewErrors()` runs once from `+layout.svelte` and adds three things:
+`window.onerror` and `unhandledrejection` become `error` records at
+`webview.unhandled`, keeping the first three stack frames rather than twenty
+`file:///` URLs of bundled chunks; and `console.error` and `console.warn` are
+**mirrored** at their own level under `webview.console`. Mirrored, not replaced —
+replacing the console costs the devtools their source location, which is the one
+thing a console line is good for.
+
+The bus is reached through `backend().logs`, which is `write`, `tail`, `query`,
+`level` and `subscribe` on both transports: `invoke` on the desktop, the
+`logs.*` RPCs on a `boite-server`. `subscribe` hands back its unsubscribe and
+tells the host to stop pushing when the last handler leaves.
+
+Live records reach the desktop as a Tauri event, `log://record`, batched at
+fifty records or 250 ms — the same numbers the server coalesces on, and for the
+same reason: one event per record would put the emit on the log's own write
+path. The `boite_core::log` subscriber clones the record onto a channel and
+returns; a thread drains it (`src-tauri/src/log_feed.rs`). Nothing is emitted
+until a `logs.subscribe` turns the feed on, so a window with the Logs section
+closed costs the log nothing.
+
+## The Logs section
+
+Settings, and three bus calls. It opens on `tail` (200 records out of this
+host's ring, instant, no file read), reads anything older through `query` with
+`until`, and appends live while Follow is on.
+
+**The filters go into the call, never over the answer.** Level, host, thread and
+text are sent, so a needle finds a record that is in the file and not in the
+ring; the panel this replaced filtered an array it had already downloaded, which
+meant "search the log" only ever searched the last thousand lines of it.
+
+A record draws its time in local hours, its level as a chip in the same warning
+and danger colours as the rest of the app, and its `thread` as a short id that
+filters the list down to that terminal, with the thread's own label under the
+pointer when the row still exists.
+
+## What is logged today
 
 - Every command the bus refuses or fails, once, at the codec, at `warn`, with
   the method, plus the thread and the device on the server, which knows both.
@@ -161,3 +218,19 @@ Deliberately little. The sweep over the rest of the code is its own job.
   the pid.
 - Everything the desktop already wrote through `logging::append_app_log`, and
   every panic.
+- Every `backend()` call the window makes that refuses, at `warn`, with the
+  method, from the one door each transport routes through (`backend/tauri/ipc.ts`
+  and `Socket.rpc`). Quiet for five seconds per method and reason: a command
+  that fails once fails again, and a panel on a timer would otherwise write one
+  message until the disk filled.
+- Every pane opened and closed, at `debug`, with its kind.
+- Every thread created, settled and deleted, at `info`, with the `thread`.
+- The remote link connecting, disconnecting and reconnecting, at `info`, with
+  the boite it was talking to.
+- Every toast raised, at `info`, whatever its kind: an `error` toast is a
+  failure the app already handled, and the line saying why is above it.
+- A thread's session binding and every status change, at `debug`, with the
+  `thread` — from `Store::update_thread_field`, the one write every host makes.
+- Approvals opened and resolved, at `info`, with the `thread` and the `request`.
+- Orchestrator dispatches queued, drained and expired, at `info`, with the
+  target `thread`.

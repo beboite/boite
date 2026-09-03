@@ -1122,6 +1122,89 @@ export interface LogApi {
   filePath(): Promise<string>;
 }
 
+/**
+ * One line of the log, as `boite_core::log` writes it and as every host hands
+ * it back. The names are the ones in the file and on the wire, single words on
+ * purpose: a filter never has to parse `fields`.
+ */
+export interface LogRecord {
+  /** Unix milliseconds. */
+  ts: number;
+  /** Per-process counter, so two records in one millisecond keep their order. */
+  seq?: number;
+  /** `desktop`, `server`, `mcp` or `webview`. */
+  host?: string;
+  level: string;
+  target: string;
+  msg: string;
+  thread?: string;
+  turn?: string;
+  request?: string;
+  device?: string;
+  span?: string;
+  fields?: Record<string, unknown>;
+}
+
+/** What the webview hands `logs.write`: a record with its own clock already on it. */
+export interface LogRecordInput {
+  ts: number;
+  level: LogLevel;
+  target: string;
+  msg: string;
+  thread?: string;
+  turn?: string;
+  request?: string;
+  device?: string;
+  fields?: Record<string, unknown>;
+}
+
+/** The ring this host keeps in memory. Never reaches the files. */
+export interface LogTailOptions {
+  limit?: number;
+  level?: string;
+  host?: string;
+}
+
+/** Every host's files, merged on one clock. The only way back past a restart. */
+export interface LogQueryOptions {
+  since?: number;
+  until?: number;
+  level?: string;
+  host?: string;
+  thread?: string;
+  turn?: string;
+  target?: string;
+  text?: string;
+  limit?: number;
+}
+
+/**
+ * The log, as the window reaches it: `logs.tail`, `logs.query`, `logs.level`,
+ * `logs.write` and `logs.subscribe` on the bus.
+ *
+ * Distinct from [`LogApi`], which is the older device-local diagnostics file
+ * and answers in `LogEntry`. This one is the same five methods on both hosts,
+ * so a phone reading a server's log and a desktop reading its own run the same
+ * code.
+ */
+export interface LogsApi {
+  /** Records this window produced. Batched by the caller, never one per call. */
+  write(records: LogRecordInput[]): Promise<void>;
+  tail(opts?: LogTailOptions): Promise<LogRecord[]>;
+  query(opts?: LogQueryOptions): Promise<LogRecord[]>;
+  /**
+   * The `EnvFilter` directive. Called with nothing it reads; called with a
+   * string it sets and answers what took effect.
+   */
+  level(directives?: string): Promise<string>;
+  /**
+   * Live records, in the batches the host coalesces them into. Returns the
+   * unsubscribe, which also tells the host to stop pushing when it was the
+   * last handler.
+   */
+  subscribe(handler: (records: LogRecord[]) => void): () => void;
+}
+
 export interface PushSubscriptionJson {
   endpoint: string;
   keys: { p256dh: string; auth: string };
@@ -1666,6 +1749,7 @@ export interface Backend {
   readonly scope: ScopeApi;
   readonly session: SessionApi;
   readonly log: LogApi;
+  readonly logs: LogsApi;
   readonly approvals: ApprovalsApi;
   readonly search: SearchApi;
   // The workspace pulse and the orchestrator conversation. Optional while the

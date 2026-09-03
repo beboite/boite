@@ -38,6 +38,8 @@ import type {
   AgentTurn,
   UsageReport,
   LogApi,
+  LogsApi,
+  LogRecord,
   McpApi,
   McpServerRow,
   PendingApproval,
@@ -119,6 +121,7 @@ export class RemoteBackend implements Backend {
   readonly sync: SyncApi;
   readonly telemetry: TelemetryApi;
   readonly log: LogApi;
+  readonly logs: LogsApi;
   readonly approvals: ApprovalsApi;
   readonly push: PushApi;
   readonly meta: WorkspaceMetaApi;
@@ -599,14 +602,54 @@ export class RemoteBackend implements Backend {
         ),
     };
 
-    // App-event logging is a device-local concern (the desktop writes a log
-    // file). Remote logging is a no-op for now, and `caps.appLogs: false` is how
-    // the panel knows to say so instead of drawing an empty list.
+    // The older device-local diagnostics file. It belongs to the desktop
+    // install, and `caps.appLogs: false` is how the panel knows to say so
+    // instead of drawing an empty list. `this.logs` below is the one that works
+    // over the wire.
     this.log = {
       event: () => Promise.resolve(),
       read: () => Promise.resolve([]),
       clear: () => Promise.resolve(),
       filePath: () => Promise.resolve(""),
+    };
+
+    // The bus's log, which is not device-local at all: a phone's records land
+    // on the server it is talking to, and a read merges every host's files on
+    // that machine. `logs.write` is stamped with this device by the server
+    // before the decode, so nothing here has to name it.
+    const logHandlers = new Set<(records: LogRecord[]) => void>();
+    let logFeedOff: (() => void) | null = null;
+    this.logs = {
+      write: (records) => rpc("logs.write", { records }).then(() => {}),
+      tail: (opts = {}) => rpc("logs.tail", opts).then((r) => (r.records ?? []) as LogRecord[]),
+      query: (opts = {}) => rpc("logs.query", opts).then((r) => (r.records ?? []) as LogRecord[]),
+      level: (directives) =>
+        rpc("logs.level", directives === undefined ? {} : { directives }).then(
+          (r) => (r.level as string) ?? "",
+        ),
+      // One `logs.subscribe` for the whole window rather than one per handler:
+      // the server keys the feed on the pairing id, so a second call says
+      // nothing new and a second unsubscribe would take the feed away from a
+      // handler still watching.
+      subscribe: (handler) => {
+        logHandlers.add(handler);
+        if (logHandlers.size === 1) {
+          void rpc("logs.subscribe", { on: true }).catch(() => {});
+          logFeedOff = this.subscribe((event) => {
+            if (event.event !== "log.record") return;
+            const records = (event.data as { records?: LogRecord[] } | null)?.records ?? [];
+            if (records.length === 0) return;
+            for (const cb of logHandlers) cb(records);
+          });
+        }
+        return () => {
+          logHandlers.delete(handler);
+          if (logHandlers.size > 0) return;
+          logFeedOff?.();
+          logFeedOff = null;
+          void rpc("logs.subscribe", { on: false }).catch(() => {});
+        };
+      },
     };
 
     // Failures answer empty rather than rejecting: this is fanned out over

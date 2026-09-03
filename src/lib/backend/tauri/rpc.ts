@@ -1,6 +1,8 @@
 import { invoke } from "./ipc";
 import type {
   ApprovalsApi,
+  LogsApi,
+  LogRecord,
   SyncApi,
   TelemetryApi,
   TelemetryState,
@@ -326,6 +328,68 @@ export const tauriLog: LogApi = {
   clear: () => invoke<void>("clear_app_log"),
   filePath: () => invoke<string>("log_file_path"),
 };
+
+/**
+ * The bus's log, through this app's five commands.
+ *
+ * Every one of them is `boite_core::command::logs` reached by name, so what the
+ * desktop reads and what a phone reads over the WebSocket is the same domain
+ * answering. The desktop reads the answers bare; the `records` envelope belongs
+ * to the WebSocket protocol.
+ */
+export const tauriLogs: LogsApi = {
+  write: (records) => invoke<void>("logs_write", { params: { records } }),
+  tail: (opts = {}) => invoke<LogRecord[]>("logs_tail", { params: opts }),
+  query: (opts = {}) => invoke<LogRecord[]>("logs_query", { params: opts }),
+  level: (directives) =>
+    invoke<{ level: string }>("logs_level", {
+      params: directives === undefined ? {} : { directives },
+    }).then((r) => r.level ?? ""),
+  // The host emits `log://record` in batches of fifty or every 250 ms, the same
+  // numbers the server coalesces on. Told to start on the first handler and to
+  // stop on the last: a window with the Logs section closed costs the log
+  // nothing.
+  subscribe: (handler) => {
+    const handlers = desktopLogHandlers;
+    handlers.add(handler);
+    if (handlers.size === 1) startDesktopLogFeed();
+    return () => {
+      handlers.delete(handler);
+      if (handlers.size === 0) stopDesktopLogFeed();
+    };
+  },
+};
+
+const desktopLogHandlers = new Set<(records: LogRecord[]) => void>();
+let desktopLogStop: (() => void) | null = null;
+let desktopLogEpoch = 0;
+
+function startDesktopLogFeed() {
+  const epoch = ++desktopLogEpoch;
+  void invoke<void>("logs_subscribe", { params: { on: true } }).catch(() => {});
+  void import("@tauri-apps/api/event")
+    .then(({ listen }) =>
+      listen<{ records?: LogRecord[] }>("log://record", (event) => {
+        const records = event.payload?.records ?? [];
+        if (records.length === 0) return;
+        for (const handler of desktopLogHandlers) handler(records);
+      }),
+    )
+    .then((un) => {
+      // Unsubscribed while the dynamic import was in flight: drop the listener
+      // rather than leaving one nothing can reach.
+      if (epoch !== desktopLogEpoch) un();
+      else desktopLogStop = un;
+    })
+    .catch(() => {});
+}
+
+function stopDesktopLogFeed() {
+  desktopLogEpoch += 1;
+  desktopLogStop?.();
+  desktopLogStop = null;
+  void invoke<void>("logs_subscribe", { params: { on: false } }).catch(() => {});
+}
 
 /**
  * Carrying the agent configuration between computers.

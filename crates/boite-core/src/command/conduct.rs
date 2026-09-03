@@ -257,6 +257,15 @@ pub fn dispatch(
     if let Some(waiters) = waiters {
         waiters.notify();
     }
+    // The `thread` is the target, not the orchestrator: "what happened to
+    // thread X" is asked about the worker, and the sender is a field beside it.
+    tracing::info!(
+        thread = %to_thread_id,
+        request = %id,
+        from = %thread_id,
+        mode,
+        "dispatch.queued"
+    );
     Ok(json!({ "dispatchId": id, "seq": seq }))
 }
 
@@ -841,7 +850,23 @@ impl Conduct {
                         waiters.notify();
                     }
                 }
-                value_of(store.open_dispatches()?)
+                let open = store.open_dispatches()?;
+                // A drain runs on every device that is watching, several times
+                // a minute, so the quiet case says nothing at all. What is
+                // worth a line is a line actually going somewhere, or one
+                // being given up on.
+                for row in &open {
+                    let text = |key: &str| row.get(key).and_then(|v| v.as_str()).unwrap_or("");
+                    tracing::info!(
+                        thread = %text("toThreadId"),
+                        request = %text("id"),
+                        "dispatch.drained"
+                    );
+                }
+                for id in &expired {
+                    tracing::info!(request = %id, "dispatch.expired");
+                }
+                value_of(open)
             }
             Conduct::SettleDispatch {
                 dispatch_id,

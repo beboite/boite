@@ -336,6 +336,15 @@ impl Store {
         pending: &approval::Pending,
         request: &serde_json::Value,
     ) -> Result<(), String> {
+        // A question put to the user, which is where a stalled agent usually
+        // is. Info rather than debug: it happens once per request and it is the
+        // one line that explains a thread doing nothing for ten minutes.
+        tracing::info!(
+            thread = %pending.thread_id,
+            request = %pending.id,
+            action = %pending.action,
+            "approval.opened"
+        );
         let conn = self.conn.lock();
         conn.execute(
             "INSERT INTO approvals
@@ -407,8 +416,11 @@ impl Store {
             )
             .map_err(|e| e.to_string())?;
         if changed == 0 {
+            // Somebody else answered first. Not worth a line: the second device
+            // to press a button is the normal case, not a failure.
             return Ok(None);
         }
+        tracing::info!(request = %id, verdict = %verdict.as_str(), "approval.resolved");
         conn.query_row(
             "SELECT id, project_id, thread_id, action, detail, request, created_at
              FROM approvals WHERE id = ?1",
@@ -1351,6 +1363,29 @@ impl Store {
         let conn = self.conn.lock();
         let column = column.as_str();
         let sql = format!("UPDATE threads SET {column} = ?1 WHERE id = ?2");
+        // Only the status, and only at debug. Every host writes a thread's
+        // status several times a turn, so this is the noisiest line in the
+        // sweep and the one a reader turns on deliberately
+        // (`BOITE_LOG=boite_core::store=debug`). The other columns are titles
+        // and layout, which say nothing about what a terminal was doing.
+        if column == "status" {
+            if let ColVal::Text(status) = &value {
+                tracing::debug!(thread = %id, status = %status, "thread.status");
+            }
+        }
+        // The one write that decides which conversation a thread relaunches
+        // into. Every host settles it the same way and each of them writes it
+        // here, so this is the only place that catches all of them: the
+        // registry's answer, the attribution guess, and a user picking a
+        // session by hand.
+        if column == "session_id" {
+            match &value {
+                ColVal::Text(session) => {
+                    tracing::debug!(thread = %id, session = %session, "thread.bound")
+                }
+                _ => tracing::debug!(thread = %id, "thread.unbound"),
+            }
+        }
         match value {
             ColVal::Text(v) => conn.execute(&sql, rusqlite::params![v, id]),
             ColVal::Int(v) => conn.execute(&sql, rusqlite::params![v, id]),

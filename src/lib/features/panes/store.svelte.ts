@@ -26,6 +26,7 @@ import {
   findSplit,
 } from "./tree";
 import { loadSavedGroups, panesKey } from "./layout";
+import { log } from "$lib/shared/log";
 import { workspace } from "$lib/backend";
 import { sameRect, unmeasuredRect, type PaneRect, type Viewport } from "./rect";
 import { uuid } from "$lib/shared/utils/uuid";
@@ -429,6 +430,15 @@ class PaneStore {
 
   /** Close a pane. A thread pane goes back to being a group of its own. */
   closePane(paneId: string): boolean {
+    // Every way out goes through here: the titlebar toggle, the palette, the
+    // phone's strip, an agent closing what it opened. Logged at the door rather
+    // than at each of them, and at debug for the same reason the open is.
+    const closed = this.#closePane(paneId);
+    log.debug("ui.pane", closed ? "pane.closed" : "pane.closeRefused", { pane: paneId });
+    return closed;
+  }
+
+  #closePane(paneId: string): boolean {
     const g = this.groupOf(paneId);
     if (!g) return false;
     const content = this.contentOf(paneId);

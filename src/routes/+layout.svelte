@@ -33,6 +33,7 @@
   import { watchScreen } from "$lib/app/screen.svelte";
   import { installInspector } from "$lib/features/devtools/inspect";
   import { captureWindowErrors } from "$lib/shared/services/logger.svelte";
+  import { captureWebviewErrors } from "$lib/shared/log";
   import { editorStore } from "$lib/features/editor/store.svelte";
   import { paneStore, threadLeavesOf } from "$lib/features/panes/store.svelte";
   import { splitFocused, togglePanelPane } from "$lib/features/panes/open";
@@ -300,6 +301,10 @@
   // own reached the devtools console and stopped there, which on a packaged
   // desktop app is nowhere at all.
   captureWindowErrors();
+  // The bus half of the same thing: unhandled errors and the console, batched
+  // onto whichever host is answering, so a phone talking to a server leaves a
+  // record too rather than only the desktop.
+  captureWebviewErrors();
 
   onMount(() => {
     // No Tauri runtime: this is a browser/PWA. The only backend is the server
