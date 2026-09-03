@@ -165,7 +165,7 @@
               <!-- The name was blurred until hover, unconditionally, on a card
                    whose whole job is saying which login is live. No privacy
                    setting ever gated it, so nothing is left to gate. -->
-              <span class="min-w-0 flex-1 truncate text-foreground">
+              <span class="min-w-0 flex-1 truncate text-sm text-foreground">
                 {account.email}
               </span>
               {#each columns as label (label)}

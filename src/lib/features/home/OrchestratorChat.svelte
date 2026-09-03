@@ -162,11 +162,11 @@
       </ul>
     {/if}
     {#if voice.pendingSend}
-      <p class="border-t border-border px-3 pt-1.5 text-xs text-muted-foreground">
+      <p class="border-t border-border px-3 pt-1.5 text-sm text-muted-foreground">
         {t("voice.sending")}
       </p>
     {:else if hint}
-      <p class="border-t border-border px-3 pt-1.5 text-xs text-muted-2">
+      <p class="border-t border-border px-3 pt-1.5 text-sm text-muted-2">
         {t("orchestrator.composerHint")}
       </p>
     {/if}

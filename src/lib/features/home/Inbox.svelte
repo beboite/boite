@@ -110,13 +110,13 @@
             {#if item.kind === "approval"}
               {@const line = approvalLine(item)}
               <span class="block w-full truncate text-base text-foreground">{line.title}</span>
-              <span class="block w-full truncate text-xs text-muted-2">{line.detail}</span>
+              <span class="block w-full truncate text-sm text-muted-2">{line.detail}</span>
             {:else if item.kind === "waiting"}
               <span class="block w-full truncate text-base text-foreground">
                 {item.thread.title ?? item.thread.label}
               </span>
               <span class="flex w-full items-center justify-between gap-2">
-                <span class="truncate text-xs text-muted-2">{waitingLine(item)}</span>
+                <span class="truncate text-sm text-muted-2">{waitingLine(item)}</span>
                 <span class="shrink-0 text-2xs text-muted-2">
                   {projectName(item.thread.projectId)}
                 </span>
@@ -126,7 +126,7 @@
                 {item.thread.title ?? item.thread.label}
               </span>
               <span class="flex w-full items-center justify-between gap-2">
-                <span class="truncate text-xs text-muted-2">{delegationLine(item)}</span>
+                <span class="truncate text-sm text-muted-2">{delegationLine(item)}</span>
                 <span class="shrink-0 text-2xs text-muted-2">
                   {projectName(item.thread.projectId)}
                 </span>
@@ -140,12 +140,12 @@
            dismissal brought back, both stamps on rows. -->
       {#each undoable as action (action.id)}
         <li class="flex items-center gap-2 rounded-sm px-1.5 py-1.5">
-          <span class="min-w-0 flex-1 truncate text-xs text-muted-2">
+          <span class="min-w-0 flex-1 truncate text-sm text-muted-2">
             {actionLine(action)}
           </span>
           <button
             type="button"
-            class="shrink-0 rounded-md border border-edge px-2 py-0.5 text-xs text-muted-foreground transition hover:border-foreground/30 hover:text-foreground disabled:opacity-40"
+            class="shrink-0 rounded-md border border-edge px-2 py-0.5 text-sm text-muted-foreground transition hover:border-foreground/30 hover:text-foreground disabled:opacity-40"
             disabled={undoing !== null}
             onclick={() => void undoAction(action)}
           >
