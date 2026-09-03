@@ -1,0 +1,4 @@
+{
+  "model": "claude-fable-5-1",
+  "steps": [{ "deltas": ["thinking"], "hang": true }]
+}

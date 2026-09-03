@@ -1,0 +1,44 @@
+[package]
+name = "boite-pilot"
+version = "1.3.4"
+description = "Protocol-driven agent sessions for boite: drivers, canonical events, child process control"
+edition = "2021"
+
+[lib]
+name = "boite_pilot"
+doctest = false
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# The bus stays synchronous; the runtime that owns the child processes is the
+# one place in the workspace that needs an executor, so it declares it here
+# rather than pushing one onto `boite-core`.
+tokio = { version = "1", features = [
+    "rt-multi-thread",
+    "macros",
+    "process",
+    "io-util",
+    "sync",
+    "time",
+] }
+async-trait = "0.1"
+thiserror = "2"
+uuid = { version = "1", features = ["v4"] }
+parking_lot = "0.12"
+# Field names match `boite_core::log`'s record shape (thread, turn, request), so
+# a pilot line filters the same way a bus line does.
+tracing = "0.1"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"] }
+
+[target.'cfg(windows)'.dependencies]
+# Same job object as `boite_core::pty`: a child assigned to one dies with the
+# session even when boite itself is killed without running its cleanup.
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_JobObjects",
+    "Win32_System_Threading",
+] }

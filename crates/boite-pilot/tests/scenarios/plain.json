@@ -1,0 +1,12 @@
+{
+  "native_session_id": "11111111-2222-3333-4444-555555555555",
+  "model": "claude-fable-5-1",
+  "slash_commands": ["init", "review"],
+  "steps": [
+    {
+      "deltas": ["o", "k"],
+      "duration_ms": 42,
+      "usage": { "input_tokens": 7, "output_tokens": 4 }
+    }
+  ]
+}

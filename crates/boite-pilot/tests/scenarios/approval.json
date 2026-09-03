@@ -1,0 +1,11 @@
+{
+  "model": "claude-fable-5-1",
+  "steps": [
+    {
+      "deltas": ["running it"],
+      "request": { "tool_name": "Bash", "input": { "command": "git status" } },
+      "duration_ms": 90,
+      "usage": { "input_tokens": 11, "output_tokens": 5 }
+    }
+  ]
+}
