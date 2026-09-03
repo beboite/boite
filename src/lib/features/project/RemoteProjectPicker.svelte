@@ -97,7 +97,7 @@
         >
           {t("sidebar.remoteProjectsTitle", { name: boiteName })}
         </h2>
-        <p class="mt-0.5 text-xs leading-snug text-muted-foreground">
+        <p class="mt-0.5 text-sm text-muted-foreground">
           {t("sidebar.remoteProjectsDesc")}
         </p>
       </div>
@@ -134,7 +134,7 @@
 
     <div class="min-h-0 flex-1 scroll-pane overflow-y-auto border-t border-border p-1.5">
       {#if remoteProjects.length === 0}
-        <p class="px-3 py-6 text-center text-xs text-muted-foreground">
+        <p class="px-3 py-6 text-center text-sm text-muted-foreground">
           {t("sidebar.remoteProjectsEmpty")}
         </p>
       {:else}
@@ -178,7 +178,7 @@
               <span class="block truncate text-base leading-tight text-foreground">
                 {projectDisplayName(project)}
               </span>
-              <span class="block truncate text-xs text-muted-2">
+              <span class="block truncate text-sm text-muted-2">
                 {project.cwd}
               </span>
             </span>
@@ -192,7 +192,7 @@
     >
       <button
         type="button"
-        class="flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs text-muted-foreground transition hover:text-foreground"
+        class="flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-sm text-muted-foreground transition hover:text-foreground"
         style:border-color={boiteColor}
         onclick={onAddRemote}
       >
@@ -201,7 +201,7 @@
       </button>
       <button
         type="button"
-        class="rounded-md px-3 py-1.5 text-xs text-muted-foreground transition hover:bg-accent hover:text-foreground"
+        class="rounded-md px-3 py-1.5 text-sm text-muted-foreground transition hover:bg-accent hover:text-foreground"
         onclick={onClose}
       >
         {t("common.close")}

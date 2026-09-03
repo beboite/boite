@@ -52,7 +52,7 @@ import { projectDisplayName } from "$lib/shared/project-label";
         {projectDisplayName(project)}
       </span>
       {#if isScratch(project)}
-        <span class="truncate text-xs text-muted-2">
+        <span class="truncate text-sm text-muted-2">
           {t("project.scratchNotice")}
         </span>
       {/if}

@@ -284,7 +284,7 @@
            the choices. -->
       {#if settings.state.experimentWorkspace}
         <select
-          class="rounded-md border border-edge bg-[var(--color-surface-2)] px-1.5 py-0.5 text-xs text-muted-foreground focus:outline-none focus-visible:focus-ring focus:border-foreground/30"
+          class="min-w-0 truncate rounded-md border border-edge bg-[var(--color-surface-2)] px-1.5 py-0.5 text-sm text-muted-foreground focus:outline-none focus-visible:focus-ring focus:border-foreground/30"
           aria-label={t("project.orchestrator")}
           value={settings.state.orchestratorByProject[project.id] ?? ""}
           onchange={(e) =>
@@ -484,7 +484,7 @@
   <!-- The paths, as a line rather than a card. They are the one thing here
        that never changes, and a card's worth of chrome around two static
        strings was room the rest of the page wanted. -->
-  <p class="col-span-full truncate px-1 text-xs text-muted-2" use:tip={pathTip}>
+  <p class="col-span-full truncate px-1 text-sm text-muted-2" use:tip={pathTip}>
     {project.cwd}{#if project.gitRoot && project.gitRoot !== project.cwd}
       · {t("project.repoAt", { path: project.gitRoot })}
     {/if}

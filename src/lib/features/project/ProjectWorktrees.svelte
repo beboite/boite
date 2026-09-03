@@ -344,7 +344,7 @@
        which also dimmed the delete controls and the warning badges. -->
   <div>
     {#if canToggle && !autoWorktrees}
-      <p class="px-3.5 pb-2 text-xs text-muted-foreground">{t("worktree.offNotice")}</p>
+      <p class="px-3.5 pb-2 text-sm text-muted-foreground">{t("worktree.offNotice")}</p>
     {/if}
     {#if !canToggle}
       <p class="px-3.5 pb-3 text-sm text-muted-foreground">
@@ -405,7 +405,7 @@
                 {/if}
               </div>
 
-              <div class="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs">
+              <div class="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-sm">
                 <span class="text-muted-foreground">
                   {w.branch ?? t("worktree.detachedAt", { head: w.head.slice(0, 7) })}
                 </span>
@@ -429,7 +429,7 @@
               </div>
 
               {#if holder}
-                <p class="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
+                <p class="mt-0.5 flex min-w-0 items-center gap-1.5 text-sm text-muted-foreground">
                   <ShortcutIcon iconKey={holder.iconKey} size={11} />
                   <span class="truncate">{t("worktree.heldBy", { thread: holder.label })}</span>
                 </p>
@@ -478,7 +478,7 @@
           {/if}
         </button>
         {#if !sweeping}
-          <p class="mt-1 text-center text-xs text-muted-2">
+          <p class="mt-1 text-center text-sm text-muted-2">
             {t("worktree.sweepHint", { count: sweepable.length })}
           </p>
         {/if}
