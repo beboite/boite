@@ -114,8 +114,14 @@ fn env_for(spec: &OpenSpec) -> BTreeMap<String, String> {
     let mut env = spec.env.clone();
     // A native instance is a config directory, never a `HOME`: moving `HOME`
     // would take the shell, git and ssh configuration with the account.
-    if let Instance::Native { config_dir: Some(dir) } = &spec.instance {
-        env.insert("CLAUDE_CONFIG_DIR".to_string(), dir.to_string_lossy().to_string());
+    if let Instance::Native {
+        config_dir: Some(dir),
+    } = &spec.instance
+    {
+        env.insert(
+            "CLAUDE_CONFIG_DIR".to_string(),
+            dir.to_string_lossy().to_string(),
+        );
     }
     env
 }
@@ -209,7 +215,10 @@ struct State {
     /// completion arrive exactly once.
     turn: Option<String>,
     turn_started_ms: u64,
-    open_requests: HashSet<String>,
+    /// Pending approval id -> CLI permission rules proposed for a session-wide
+    /// allow. Keeping the proposal here lets the UI answer "always allow"
+    /// without trusting it to round-trip opaque Claude policy objects.
+    open_requests: HashMap<String, Value>,
     /// Set between an accepted `interrupt` and the `result` that follows it, so
     /// the abort is emitted once and the late result is dropped.
     interrupting: bool,
@@ -285,14 +294,20 @@ impl ClaudeSession {
         let (started_tx, started_rx) = oneshot::channel();
         tokio::spawn(read_loop(Arc::clone(&shared), rx, started_tx));
 
-        let session = Self { shared, child: AsyncMutex::new(child), pid };
+        let session = Self {
+            shared,
+            child: AsyncMutex::new(child),
+            pid,
+        };
 
         match tokio::time::timeout(INIT_TIMEOUT, started_rx).await {
             Ok(Ok(Ok(()))) => Ok(session),
             Ok(Ok(Err(message))) => Err(PilotError::Spawn(message)),
             // The reader dropped the sender without answering: the child died
             // before it said anything.
-            Ok(Err(_)) => Err(PilotError::Spawn("the agent exited before init".to_string())),
+            Ok(Err(_)) => Err(PilotError::Spawn(
+                "the agent exited before init".to_string(),
+            )),
             Err(_) => Err(PilotError::Timeout),
         }
     }
@@ -350,7 +365,9 @@ impl Session for ClaudeSession {
         // The turn is announced before the write, not after: the child can
         // answer between the two, and a `busy` emitted on top of the reader's
         // `idle` would pin the sidebar on a turn that already ended.
-        self.shared.sink.emit(PilotEvent::TurnStarted { turn_id: turn_id.clone() });
+        self.shared.sink.emit(PilotEvent::TurnStarted {
+            turn_id: turn_id.clone(),
+        });
         self.shared.settle_status();
 
         let mut message = json!({
@@ -361,12 +378,19 @@ impl Session for ClaudeSession {
         if let Some(id) = session_id {
             message["session_id"] = Value::String(id);
         }
-        if let Err(error) = self.child.lock().await.write_line(&message.to_string()).await {
+        if let Err(error) = self
+            .child
+            .lock()
+            .await
+            .write_line(&message.to_string())
+            .await
+        {
             let turn = self.shared.state.lock().turn.take();
             if let Some(turn_id) = turn {
-                self.shared
-                    .sink
-                    .emit(PilotEvent::TurnAborted { turn_id, reason: Some(error.to_string()) });
+                self.shared.sink.emit(PilotEvent::TurnAborted {
+                    turn_id,
+                    reason: Some(error.to_string()),
+                });
             }
             self.shared.settle_status();
             return Err(error);
@@ -387,29 +411,43 @@ impl Session for ClaudeSession {
         // completion on top of it.
         let turn = self.shared.state.lock().turn.take();
         if let Some(turn_id) = turn {
-            self.shared
-                .sink
-                .emit(PilotEvent::TurnAborted { turn_id, reason: Some("interrupted".into()) });
+            self.shared.sink.emit(PilotEvent::TurnAborted {
+                turn_id,
+                reason: Some("interrupted".into()),
+            });
         }
         self.shared.settle_status();
         Ok(())
     }
 
     async fn respond(&self, request_id: &str, answer: RequestAnswer) -> Result<(), PilotError> {
-        {
+        let suggestions = {
             let state = self.shared.state.lock();
-            if !state.open_requests.contains(request_id) {
+            let Some(suggestions) = state.open_requests.get(request_id) else {
                 return Err(PilotError::NoRequest(request_id.to_string()));
-            }
-        }
+            };
+            suggestions.clone()
+        };
         let (payload, outcome) = match &answer {
-            RequestAnswer::Allow { updated_input, updated_permissions } => {
+            RequestAnswer::Allow {
+                updated_input,
+                updated_permissions,
+                for_session,
+                selected: _,
+            } => {
                 let mut payload = json!({ "behavior": "allow" });
                 if let Some(input) = updated_input {
                     payload["updatedInput"] = input.clone();
                 }
-                if !updated_permissions.is_null() {
-                    payload["updatedPermissions"] = updated_permissions.clone();
+                let permissions = if !updated_permissions.is_null() {
+                    updated_permissions.clone()
+                } else if *for_session {
+                    suggestions
+                } else {
+                    Value::Null
+                };
+                if !permissions.is_null() {
+                    payload["updatedPermissions"] = permissions;
                 }
                 (payload, RequestOutcome::Allowed)
             }
@@ -417,6 +455,11 @@ impl Session for ClaudeSession {
                 json!({ "behavior": "deny", "message": message }),
                 RequestOutcome::Denied,
             ),
+            RequestAnswer::Answers { .. } => {
+                return Err(PilotError::Unsupported(
+                    "structured answers in a Claude approval".into(),
+                ));
+            }
         };
         let frame = json!({
             "type": "control_response",
@@ -426,12 +469,17 @@ impl Session for ClaudeSession {
                 "response": payload,
             },
         });
-        self.child.lock().await.write_line(&frame.to_string()).await?;
+        self.child
+            .lock()
+            .await
+            .write_line(&frame.to_string())
+            .await?;
 
         self.shared.state.lock().open_requests.remove(request_id);
-        self.shared
-            .sink
-            .emit(PilotEvent::RequestResolved { request_id: request_id.to_string(), outcome });
+        self.shared.sink.emit(PilotEvent::RequestResolved {
+            request_id: request_id.to_string(),
+            outcome,
+        });
         self.shared.settle_status();
         Ok(())
     }
@@ -443,7 +491,8 @@ impl Session for ClaudeSession {
             return Ok(SwitchKind::Restart);
         }
         let model = selection.model.clone();
-        self.control(json!({ "subtype": "set_model", "model": model })).await?;
+        self.control(json!({ "subtype": "set_model", "model": model }))
+            .await?;
         if let Some(model) = model {
             self.shared.state.lock().model = Some(model.clone());
             self.shared.sink.emit(PilotEvent::ModelChanged { model });
@@ -468,6 +517,10 @@ impl Session for ClaudeSession {
 
     fn native_session_id(&self) -> Option<String> {
         self.shared.state.lock().native_session_id.clone()
+    }
+
+    fn model(&self) -> Option<String> {
+        self.shared.state.lock().model.clone()
     }
 
     fn status(&self) -> Status {
@@ -553,10 +606,11 @@ fn finish(shared: &Arc<Shared>) {
     for (_, tx) in shared.pending.lock().drain() {
         let _ = tx.send(Err("the agent exited".to_string()));
     }
-    for request_id in requests {
-        shared
-            .sink
-            .emit(PilotEvent::RequestResolved { request_id, outcome: RequestOutcome::Cancelled });
+    for (request_id, _) in requests {
+        shared.sink.emit(PilotEvent::RequestResolved {
+            request_id,
+            outcome: RequestOutcome::Cancelled,
+        });
     }
     // A turn still open when the pipe closed never completed, whatever killed
     // the child: the abort comes first so the timeline is not left mid-turn.
@@ -567,7 +621,11 @@ fn finish(shared: &Arc<Shared>) {
         });
     }
     shared.set_status(Status::Idle);
-    let reason = if stopping { ExitReason::Stopped } else { ExitReason::Crashed { code: None } };
+    let reason = if stopping {
+        ExitReason::Stopped
+    } else {
+        ExitReason::Crashed { code: None }
+    };
     shared.sink.emit(PilotEvent::SessionExited { reason });
 }
 
@@ -597,11 +655,22 @@ fn handle_system(shared: &Arc<Shared>, value: &Value) -> bool {
     let model = value["model"].as_str().map(str::to_string);
     let slash_commands: Vec<String> = value["slash_commands"]
         .as_array()
-        .map(|items| items.iter().filter_map(|i| i.as_str().map(str::to_string)).collect())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|i| i.as_str().map(str::to_string))
+                .collect()
+        })
         .unwrap_or_default();
 
     let mut extra = BTreeMap::new();
-    for key in ["claude_code_version", "permissionMode", "tools", "capabilities", "cwd"] {
+    for key in [
+        "claude_code_version",
+        "permissionMode",
+        "tools",
+        "capabilities",
+        "cwd",
+    ] {
         if let Some(found) = value.get(key) {
             extra.insert(key.to_string(), found.clone());
         }
@@ -632,7 +701,9 @@ fn handle_stream_event(shared: &Arc<Shared>, value: &Value) {
             state.open_blocks.clear();
         }
         "content_block_start" => {
-            let Some(kind) = block_item_kind(&event["content_block"]) else { return };
+            let Some(kind) = block_item_kind(&event["content_block"]) else {
+                return;
+            };
             let index = event["index"].as_u64().unwrap_or(0);
             let (item_id, turn_id) = {
                 let mut state = shared.state.lock();
@@ -640,7 +711,9 @@ fn handle_stream_event(shared: &Arc<Shared>, value: &Value) {
                 state.open_blocks.insert(id.clone());
                 (id, state.turn.clone())
             };
-            shared.sink.emit(PilotEvent::ItemStarted { item: Item::new(item_id, kind, turn_id) });
+            shared.sink.emit(PilotEvent::ItemStarted {
+                item: Item::new(item_id, kind, turn_id),
+            });
         }
         "content_block_delta" => {
             let delta = &event["delta"];
@@ -655,9 +728,10 @@ fn handle_stream_event(shared: &Arc<Shared>, value: &Value) {
                 let state = shared.state.lock();
                 block_id(state.message_id.as_deref(), index)
             };
-            shared
-                .sink
-                .emit(PilotEvent::ItemDelta { item_id, text: text.to_string() });
+            shared.sink.emit(PilotEvent::ItemDelta {
+                item_id,
+                text: text.to_string(),
+            });
         }
         _ => {}
     }
@@ -684,7 +758,9 @@ fn handle_assistant(shared: &Arc<Shared>, value: &Value) {
     let message = &value["message"];
     let message_id = message["id"].as_str().map(str::to_string);
     let turn_id = shared.state.lock().turn.clone();
-    let Some(blocks) = message["content"].as_array() else { return };
+    let Some(blocks) = message["content"].as_array() else {
+        return;
+    };
 
     for (index, block) in blocks.iter().enumerate() {
         let index = index as u64;
@@ -713,7 +789,9 @@ fn handle_assistant(shared: &Arc<Shared>, value: &Value) {
                 // A tool call is identified by its `tool_use_id` and not by the
                 // block index: the `tool_result` that completes it arrives in
                 // another message and names only that id.
-                let Some(id) = block["id"].as_str() else { continue };
+                let Some(id) = block["id"].as_str() else {
+                    continue;
+                };
                 let body = json!({
                     "name": block["name"].as_str().unwrap_or_default(),
                     "input": block["input"].clone(),
@@ -738,9 +816,9 @@ fn emit_completed(
 ) {
     let opened = shared.state.lock().open_blocks.remove(id);
     if !opened {
-        shared
-            .sink
-            .emit(PilotEvent::ItemStarted { item: Item::new(id, kind, turn_id.clone()) });
+        shared.sink.emit(PilotEvent::ItemStarted {
+            item: Item::new(id, kind, turn_id.clone()),
+        });
     }
     shared.sink.emit(PilotEvent::ItemCompleted {
         item: Item::new(id, kind, turn_id).with_body(body),
@@ -749,12 +827,16 @@ fn emit_completed(
 
 fn handle_user(shared: &Arc<Shared>, value: &Value) {
     let turn_id = shared.state.lock().turn.clone();
-    let Some(blocks) = value["message"]["content"].as_array() else { return };
+    let Some(blocks) = value["message"]["content"].as_array() else {
+        return;
+    };
     for block in blocks {
         if block["type"].as_str() != Some("tool_result") {
             continue;
         }
-        let Some(id) = block["tool_use_id"].as_str() else { continue };
+        let Some(id) = block["tool_use_id"].as_str() else {
+            continue;
+        };
         let body = json!({
             "content": block["content"].clone(),
             "is_error": block["is_error"].as_bool().unwrap_or(false),
@@ -769,7 +851,11 @@ fn handle_result(shared: &Arc<Shared>, value: &Value) {
     let usage = usage_from(value);
     let (turn, started_ms, interrupting) = {
         let mut state = shared.state.lock();
-        (state.turn.take(), state.turn_started_ms, std::mem::take(&mut state.interrupting))
+        (
+            state.turn.take(),
+            state.turn_started_ms,
+            std::mem::take(&mut state.interrupting),
+        )
     };
     let Some(turn_id) = turn else {
         // The turn was already closed, by an accepted interrupt or by an exit.
@@ -785,9 +871,15 @@ fn handle_result(shared: &Arc<Shared>, value: &Value) {
 
     if is_error || interrupting {
         let reason = value["subtype"].as_str().map(str::to_string);
-        shared.sink.emit(PilotEvent::TurnAborted { turn_id, reason });
+        shared
+            .sink
+            .emit(PilotEvent::TurnAborted { turn_id, reason });
     } else {
-        shared.sink.emit(PilotEvent::TurnCompleted { turn_id, duration_ms, usage: usage.clone() });
+        shared.sink.emit(PilotEvent::TurnCompleted {
+            turn_id,
+            duration_ms,
+            usage: usage.clone(),
+        });
     }
     shared.sink.emit(PilotEvent::UsageUpdated { usage });
     shared.settle_status();
@@ -810,7 +902,9 @@ fn usage_from(value: &Value) -> Usage {
 }
 
 fn handle_control_request(shared: &Arc<Shared>, value: &Value) {
-    let Some(request_id) = value["request_id"].as_str() else { return };
+    let Some(request_id) = value["request_id"].as_str() else {
+        return;
+    };
     let request = &value["request"];
     if request["subtype"].as_str() != Some("can_use_tool") {
         // Every other inbound subtype (hooks, MCP calls, dialogs) is a callback
@@ -826,15 +920,24 @@ fn handle_control_request(shared: &Arc<Shared>, value: &Value) {
 
     let suggestions = request["permission_suggestions"].clone();
     let mut options = vec![
-        RequestOption { value: "allow".to_string(), label: "Allow".to_string() },
-        RequestOption { value: "deny".to_string(), label: "Deny".to_string() },
+        RequestOption {
+            value: "allow".to_string(),
+            label: "Allow".to_string(),
+        },
+        RequestOption {
+            value: "deny".to_string(),
+            label: "Deny".to_string(),
+        },
     ];
     // The CLI says when a persistent allow rule would be broader than the ask,
     // and the dock must not offer one then.
     if !suggestions.is_null() && request["suppress_always_allow_rule"].as_bool() != Some(true) {
         options.insert(
             1,
-            RequestOption { value: "allow_always".to_string(), label: "Always allow".to_string() },
+            RequestOption {
+                value: "allow_always".to_string(),
+                label: "Always allow".to_string(),
+            },
         );
     }
 
@@ -847,19 +950,33 @@ fn handle_control_request(shared: &Arc<Shared>, value: &Value) {
         title: request["title"].as_str().map(str::to_string),
         description: request["description"].as_str().map(str::to_string),
         options,
-        suggestions,
+        questions: vec![],
+        suggestions: suggestions.clone(),
     };
-    shared.state.lock().open_requests.insert(request_id.to_string());
-    shared.sink.emit(PilotEvent::RequestOpened { request: opened });
+    shared
+        .state
+        .lock()
+        .open_requests
+        .insert(request_id.to_string(), suggestions);
+    shared
+        .sink
+        .emit(PilotEvent::RequestOpened { request: opened });
     shared.settle_status();
 }
 
 fn handle_control_response(shared: &Arc<Shared>, value: &Value) {
     let response = &value["response"];
-    let Some(request_id) = response["request_id"].as_str() else { return };
-    let Some(tx) = shared.pending.lock().remove(request_id) else { return };
+    let Some(request_id) = response["request_id"].as_str() else {
+        return;
+    };
+    let Some(tx) = shared.pending.lock().remove(request_id) else {
+        return;
+    };
     let answer = if response["subtype"].as_str() == Some("error") {
-        Err(response["error"].as_str().unwrap_or("control request failed").to_string())
+        Err(response["error"]
+            .as_str()
+            .unwrap_or("control request failed")
+            .to_string())
     } else {
         Ok(response["response"].clone())
     };
@@ -867,9 +984,11 @@ fn handle_control_response(shared: &Arc<Shared>, value: &Value) {
 }
 
 fn handle_control_cancel(shared: &Arc<Shared>, value: &Value) {
-    let Some(request_id) = value["request_id"].as_str() else { return };
+    let Some(request_id) = value["request_id"].as_str() else {
+        return;
+    };
     let removed = shared.state.lock().open_requests.remove(request_id);
-    if removed {
+    if removed.is_some() {
         shared.sink.emit(PilotEvent::RequestResolved {
             request_id: request_id.to_string(),
             outcome: RequestOutcome::Cancelled,
@@ -921,7 +1040,9 @@ mod tests {
         let mut yolo = spec();
         yolo.options.mode = ExecMode::Yolo;
         let argv = claude_argv(&yolo);
-        assert!(argv.windows(2).any(|w| w == ["--permission-mode", "bypassPermissions"]));
+        assert!(argv
+            .windows(2)
+            .any(|w| w == ["--permission-mode", "bypassPermissions"]));
         assert!(
             argv.contains(&"--allow-dangerously-skip-permissions".to_string()),
             "bypassPermissions is refused without it"
@@ -929,7 +1050,9 @@ mod tests {
 
         let mut edits = spec();
         edits.options.mode = ExecMode::EditAlone;
-        assert!(claude_argv(&edits).windows(2).any(|w| w == ["--permission-mode", "acceptEdits"]));
+        assert!(claude_argv(&edits)
+            .windows(2)
+            .any(|w| w == ["--permission-mode", "acceptEdits"]));
     }
 
     #[test]
@@ -950,12 +1073,17 @@ mod tests {
     #[test]
     fn a_fastpick_instance_wraps_the_whole_agent_line() {
         let mut route = spec();
-        route.instance = Instance::Fastpick { provider: "grok".into(), model: "grok-4-6".into() };
+        route.instance = Instance::Fastpick {
+            provider: "grok".into(),
+            model: "grok-4-6".into(),
+        };
         let argv = claude_argv(&route);
         assert_eq!(argv[0], "fastpick");
         let separator = argv.iter().position(|a| a == "--").expect("separator");
         assert_eq!(argv[separator + 1], "claude");
-        assert!(argv[..separator].iter().all(|a| !a.starts_with("--session-id")));
+        assert!(argv[..separator]
+            .iter()
+            .all(|a| !a.starts_with("--session-id")));
     }
 
     /// The fixture is one real `claude 2.1.259` turn, captured and redacted.
@@ -1001,15 +1129,29 @@ mod tests {
         let started = events
             .iter()
             .find_map(|event| match event {
-                PilotEvent::SessionStarted { native_session_id, model, slash_commands, extra } => {
-                    Some((native_session_id.clone(), model.clone(), slash_commands.len(), extra.clone()))
-                }
+                PilotEvent::SessionStarted {
+                    native_session_id,
+                    model,
+                    slash_commands,
+                    extra,
+                } => Some((
+                    native_session_id.clone(),
+                    model.clone(),
+                    slash_commands.len(),
+                    extra.clone(),
+                )),
                 _ => None,
             })
             .expect("session.started");
-        assert_eq!(started.0.as_deref(), Some("11111111-2222-3333-4444-555555555555"));
+        assert_eq!(
+            started.0.as_deref(),
+            Some("11111111-2222-3333-4444-555555555555")
+        );
         assert_eq!(started.1.as_deref(), Some("claude-fable-5-1"));
-        assert!(started.2 > 0, "the init frame advertises the slash commands");
+        assert!(
+            started.2 > 0,
+            "the init frame advertises the slash commands"
+        );
         assert_eq!(started.3["claude_code_version"], "2.1.259");
 
         let delta = events
@@ -1035,7 +1177,9 @@ mod tests {
     #[test]
     fn a_config_dir_moves_the_account_and_not_the_home() {
         let mut instance = spec();
-        instance.instance = Instance::Native { config_dir: Some(PathBuf::from("C:/accounts/a")) };
+        instance.instance = Instance::Native {
+            config_dir: Some(PathBuf::from("C:/accounts/a")),
+        };
         let env = env_for(&instance);
         assert!(env.contains_key("CLAUDE_CONFIG_DIR"));
         assert!(!env.contains_key("HOME"));

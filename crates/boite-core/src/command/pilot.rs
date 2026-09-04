@@ -14,6 +14,7 @@
 //! CLI, and every method here refuses with that sentence rather than pretending
 //! a thread has a session.
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -53,21 +54,28 @@ pub enum Pilot {
     /// The drivers this build ships with their capabilities, the instances the
     /// settings blob declares, and the fastpick routes merged in as virtual
     /// ones.
-    Catalog { refresh: bool },
+    Catalog {
+        refresh: bool,
+    },
     /// Start or resume the native session of a `runtime = pilot` row.
-    Open { thread_id: String },
+    Open {
+        thread_id: String,
+    },
     /// A user turn. A turn already running receives the text as steering.
     TurnStart {
         thread_id: String,
         text: String,
         model: Option<String>,
     },
-    TurnInterrupt { thread_id: String },
+    TurnInterrupt {
+        thread_id: String,
+    },
     /// The answer to an open request, by the option the driver offered.
     Respond {
         thread_id: String,
         request_id: String,
-        option: String,
+        option: Option<String>,
+        answers: Option<BTreeMap<String, Vec<String>>>,
     },
     ModelSet {
         thread_id: String,
@@ -76,10 +84,15 @@ pub enum Pilot {
         /// on, which is the only case a driver can do without stopping.
         instance: Option<Instance>,
     },
-    ModeSet { thread_id: String, mode: ExecMode },
+    ModeSet {
+        thread_id: String,
+        mode: ExecMode,
+    },
     /// Polite stop. The native session stays resumable, which is what makes
     /// auto-sleep safe for a pilot thread.
-    Stop { thread_id: String },
+    Stop {
+        thread_id: String,
+    },
     Items {
         thread_id: String,
         after_seq: i64,
@@ -92,7 +105,10 @@ pub enum Pilot {
     },
     /// A device asks to be pushed this thread's events. Which socket to push at
     /// is the transport's own bookkeeping; the bus answers whether it may.
-    Subscribe { thread_id: String, on: bool },
+    Subscribe {
+        thread_id: String,
+        on: bool,
+    },
 }
 
 /// A pilot call that has been through the boundary, with everything the host
@@ -144,7 +160,14 @@ impl Pilot {
             "pilot.request.respond" => Pilot::Respond {
                 thread_id: str_param(params, "threadId")?,
                 request_id: str_param(params, "requestId")?,
-                option: str_param(params, "option")?,
+                option: opt_str_param(params, "option"),
+                answers: match params.get("answers") {
+                    Some(value) if !value.is_null() => Some(
+                        serde_json::from_value(value.clone())
+                            .map_err(|_| "answers must map question ids to string arrays")?,
+                    ),
+                    _ => None,
+                },
             },
             "pilot.model.set" => Pilot::ModelSet {
                 thread_id: str_param(params, "threadId")?,
@@ -484,6 +507,7 @@ fn native_instance(name: &str, driver: &str, config_dir: Option<&str>) -> Value 
 fn native_models(driver: &str) -> Vec<&'static str> {
     match driver {
         "claude" => boite_pilot::claude::NATIVE_MODELS.to_vec(),
+        "codex" => boite_pilot::codex::NATIVE_MODELS.to_vec(),
         _ => Vec::new(),
     }
 }
@@ -608,7 +632,11 @@ pub fn turn_input(text: String, model: Option<String>, turn_id: Option<String>) 
 
 /// One MCP server entry, so a host builds the sidecar the same way on both
 /// sides.
-pub fn boite_mcp_server(command: String, args: Vec<String>, env: Vec<(String, String)>) -> McpServer {
+pub fn boite_mcp_server(
+    command: String,
+    args: Vec<String>,
+    env: Vec<(String, String)>,
+) -> McpServer {
     McpServer {
         name: "boite".to_string(),
         command,
@@ -833,8 +861,8 @@ mod tests {
                 crate::store::ColVal::Text("native-7".into()),
             )
             .unwrap();
-        let Ready::Pilot(ready) = ready(&host, "pilot.thread.open", json!({ "threadId": "t1" }))
-            .expect("prepared")
+        let Ready::Pilot(ready) =
+            ready(&host, "pilot.thread.open", json!({ "threadId": "t1" })).expect("prepared")
         else {
             panic!("not a pilot ready");
         };
@@ -925,7 +953,10 @@ mod tests {
         .expect("prepared") else {
             panic!("not a pilot ready");
         };
-        assert!(ready.spec.is_some(), "a restart has nothing to reopen without one");
+        assert!(
+            ready.spec.is_some(),
+            "a restart has nothing to reopen without one"
+        );
         let Pilot::ModelSet { instance, .. } = ready.call else {
             panic!("not a model set");
         };
@@ -987,10 +1018,10 @@ mod tests {
         assert_eq!(instances[1]["name"], "fastpick:codex-everywhere:grok-5");
     }
 
-    /// The claude driver's model list is the CLI's own, aliases included, and
-    /// carries none of the ids the CLI marks end-of-life.
+    /// Claude carries its aliases and live ids. Codex carries the offline T3
+    /// fallback so its picker is useful before App Server has authenticated.
     #[test]
-    fn the_claude_model_list_is_what_the_cli_answers_to() {
+    fn native_model_lists_cover_claude_and_codex() {
         let models = native_models("claude");
         for alias in ["fable", "opus", "sonnet", "haiku"] {
             assert!(models.contains(&alias), "{alias} is missing: {models:?}");
@@ -1000,7 +1031,10 @@ mod tests {
         for gone in ["claude-3-5-sonnet", "claude-3-7-sonnet", "claude-3-5-haiku"] {
             assert!(!models.contains(&gone), "{gone} is end of life: {models:?}");
         }
-        assert!(native_models("codex").is_empty(), "no list ships for codex");
+        let codex = native_models("codex");
+        assert!(codex.contains(&"gpt-5.6-sol"), "{codex:?}");
+        assert!(codex.contains(&"gpt-5.6-terra"), "{codex:?}");
+        assert!(native_models("acp:cursor").is_empty());
     }
 
     /// A cursor read is clamped rather than refused: a client asking for a

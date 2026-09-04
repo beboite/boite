@@ -417,7 +417,11 @@ export const tauriPilot: PilotApi = {
     invoke<unknown>("pilot_turn_interrupt", { params: { threadId } }).then(() => {}),
   respond: (threadId, requestId, answer) =>
     invoke<unknown>("pilot_request_respond", {
-      params: { threadId, requestId, option: answer },
+      params: {
+        threadId,
+        requestId,
+        ...(typeof answer === "string" ? { option: answer } : { answers: answer.answers }),
+      },
     }).then(() => {}),
   setModel: (threadId, selection) =>
     invoke<{ switch: PilotSwitchKind }>("pilot_model_set", {

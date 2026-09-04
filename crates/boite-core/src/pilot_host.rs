@@ -77,10 +77,13 @@ pub async fn execute(ready: PilotReady) -> Result<Value, String> {
             if runtime.status(&thread_id).is_some() {
                 runtime.emit(&thread_id, user_message(&turn, &text));
             }
-            let turn = runtime
-                .prompt(&thread_id, turn_input(text, model, Some(turn)))
-                .await
-                .map_err(|e| e.to_string())?;
+            let input = turn_input(text.clone(), model, Some(turn));
+            let turn = if text.trim() == "/compact" {
+                runtime.compact(&thread_id, input).await
+            } else {
+                runtime.prompt(&thread_id, input).await
+            }
+            .map_err(|e| e.to_string())?;
             tracing::debug!(thread = thread_id, turn = turn, "pilot.turn.start");
             Ok(json!({ "turnId": turn }))
         }
@@ -97,12 +100,23 @@ pub async fn execute(ready: PilotReady) -> Result<Value, String> {
             thread_id,
             request_id,
             option,
+            answers,
         } => {
-            // The options the driver offered are what the card was drawn from,
-            // so the vocabulary is checked against the stored request rather
-            // than against a list written here.
-            let offered = offered_options(&store, &thread_id, &request_id);
-            let answer = answer_of_option(&option, &offered);
+            let offered = offered_request(&store, &thread_id, &request_id);
+            let answer = if let Some(answers) = answers {
+                validate_question_answers(offered.as_ref(), &answers)?;
+                boite_pilot::RequestAnswer::answers(answers)
+            } else if let Some(option) = option.as_deref() {
+                answer_of_option(
+                    option,
+                    offered
+                        .as_ref()
+                        .map(|request| request.options.as_slice())
+                        .unwrap_or_default(),
+                )
+            } else {
+                return Err("pilot.request.respond needs option or answers".into());
+            };
             runtime
                 .respond(&thread_id, &request_id, answer)
                 .await
@@ -110,7 +124,7 @@ pub async fn execute(ready: PilotReady) -> Result<Value, String> {
             tracing::info!(
                 thread = thread_id,
                 request = request_id,
-                option = option,
+                option = option.as_deref().unwrap_or("structured"),
                 "pilot.request.respond"
             );
             Ok(json!({ "ok": true }))
@@ -406,21 +420,58 @@ fn item_json(row: &crate::store::PilotItemRow) -> Value {
 /// The options the driver offered for a request, read back off its item.
 ///
 /// An empty list is the honest answer for a request boite never saw, and
-/// [`answer_of_option`] then refuses anything but the two words it knows.
-fn offered_options(
+/// [`answer_of_option`] then refuses any opaque value it cannot verify.
+fn offered_request(
     store: &Store,
     thread_id: &str,
     request_id: &str,
-) -> Vec<boite_pilot::RequestOption> {
+) -> Option<boite_pilot::Request> {
     let id = crate::pilot::request_item_id(request_id);
-    let Ok(rows) = store.pilot_items(thread_id, 0, 1000) else {
-        return Vec::new();
-    };
+    let rows = store.pilot_items(thread_id, 0, 1000).ok()?;
     rows.into_iter()
         .find(|row| row.id == id)
-        .and_then(|row| serde_json::from_str::<boite_pilot::Request>(&row.body).ok())
-        .map(|request| request.options)
-        .unwrap_or_default()
+        .and_then(|row| serde_json::from_str(&row.body).ok())
+}
+
+fn validate_question_answers(
+    request: Option<&boite_pilot::Request>,
+    answers: &std::collections::BTreeMap<String, Vec<String>>,
+) -> Result<(), String> {
+    let request = request.ok_or_else(|| "the request is not in the pilot timeline".to_string())?;
+    if request.kind != boite_pilot::RequestKind::Question || request.questions.is_empty() {
+        return Err("structured answers need a structured question".into());
+    }
+    if answers.len() != request.questions.len() {
+        return Err("every provider question needs one answer".into());
+    }
+    for question in &request.questions {
+        let values = answers
+            .get(&question.id)
+            .ok_or_else(|| format!("question {} has no answer", question.id))?;
+        if values.is_empty() || values.iter().any(|value| value.trim().is_empty()) {
+            return Err(format!("question {} has an empty answer", question.id));
+        }
+        if !question.multi_select && values.len() != 1 {
+            return Err(format!("question {} accepts one answer", question.id));
+        }
+        if !question.allow_custom_answer
+            && values
+                .iter()
+                .any(|value| !question.options.iter().any(|option| option.value == *value))
+        {
+            return Err(format!(
+                "question {} received an option it did not offer",
+                question.id
+            ));
+        }
+    }
+    if answers
+        .keys()
+        .any(|id| !request.questions.iter().any(|question| question.id == *id))
+    {
+        return Err("answers contain an unknown provider question".into());
+    }
+    Ok(())
 }
 
 fn stored_options(store: &Store, thread_id: &str) -> boite_pilot::Options {
@@ -445,8 +496,8 @@ mod tests {
     use crate::model::{Thread, RUNTIME_PILOT};
 
     fn store(tag: &str) -> Arc<Store> {
-        let path = std::env::temp_dir()
-            .join(format!("boite-pilot-host-{}-{tag}.db", std::process::id()));
+        let path =
+            std::env::temp_dir().join(format!("boite-pilot-host-{}-{tag}.db", std::process::id()));
         let _ = std::fs::remove_file(&path);
         Arc::new(Store::open(&path).expect("open"))
     }
@@ -580,7 +631,11 @@ mod tests {
             .iter()
             .find(|item| item.kind == "notice")
             .expect("a notice on the timeline");
-        assert!(notice.body.contains("fastpick:crof:deepseek-v4-pro"), "{}", notice.body);
+        assert!(
+            notice.body.contains("fastpick:crof:deepseek-v4-pro"),
+            "{}",
+            notice.body
+        );
         assert!(notice.body.contains("opus"), "{}", notice.body);
 
         // The old session was stopped politely, not left running beside the new
@@ -651,7 +706,11 @@ mod tests {
         // Below the turn row and below the answer: the journal order is the
         // order things happened, and the user asked first.
         let seq_of = |kind: &str| {
-            items.iter().find(|row| row.kind == kind).map(|row| row.seq).expect(kind)
+            items
+                .iter()
+                .find(|row| row.kind == kind)
+                .map(|row| row.seq)
+                .expect(kind)
         };
         assert!(message.seq < seq_of("turn"), "the message opens the turn");
         assert!(
@@ -729,7 +788,11 @@ mod tests {
             coalescer.push("t2", "i9", "z");
         }
         let flushed = coalescer.drain();
-        assert_eq!(flushed.len(), 3, "one frame per thread and item, not per delta");
+        assert_eq!(
+            flushed.len(),
+            3,
+            "one frame per thread and item, not per delta"
+        );
         let text = |item: &str| {
             flushed
                 .iter()

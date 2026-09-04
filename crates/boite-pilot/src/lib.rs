@@ -10,9 +10,12 @@
 //! call, checks the grant and hands a `Ready` to the host, and the host owns
 //! the tokio runtime this crate needs. The bus itself takes no executor.
 
+pub mod acp;
 pub mod claude;
+pub mod codex;
 pub mod driver;
 pub mod event;
+pub mod opencode;
 pub mod proc;
 pub mod scripted;
 
@@ -23,11 +26,12 @@ use parking_lot::Mutex;
 
 pub use driver::{
     Capabilities, Driver, EventSink, ExecMode, Instance, McpServer, ModelSelection, OpenSpec,
-    Opened, Options, PilotError, RequestAnswer, Session, SessionSink, SwitchKind, TurnId, TurnInput,
+    Opened, Options, PilotError, RequestAnswer, Session, SessionSink, SwitchKind, TurnId,
+    TurnInput,
 };
 pub use event::{
     ExitReason, Item, ItemKind, PilotEvent, Request, RequestKind, RequestOption, RequestOutcome,
-    Status, Usage,
+    RequestQuestion, Status, Usage,
 };
 
 /// The sessions a host has open, one per thread.
@@ -46,16 +50,26 @@ pub struct Runtime {
 /// pair of pipes, and printing one would say nothing a caller can act on.
 impl std::fmt::Debug for Runtime {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Runtime").field("threads", &self.open_threads()).finish()
+        f.debug_struct("Runtime")
+            .field("threads", &self.open_threads())
+            .finish()
     }
 }
 
 impl Runtime {
     /// A runtime with the drivers this build ships.
     pub fn new(sink: Arc<dyn EventSink>) -> Self {
-        let runtime =
-            Self { sink, sessions: Mutex::new(HashMap::new()), drivers: Mutex::new(HashMap::new()) };
+        let runtime = Self {
+            sink,
+            sessions: Mutex::new(HashMap::new()),
+            drivers: Mutex::new(HashMap::new()),
+        };
         runtime.register(Arc::new(claude::ClaudeDriver));
+        runtime.register(Arc::new(codex::CodexDriver));
+        runtime.register(Arc::new(acp::AcpDriver::cursor()));
+        runtime.register(Arc::new(acp::AcpDriver::grok()));
+        runtime.register(Arc::new(acp::AcpDriver::antigravity()));
+        runtime.register(Arc::new(opencode::OpenCodeDriver));
         runtime.register(Arc::new(scripted::ScriptedDriver::from_env()));
         runtime
     }
@@ -68,7 +82,10 @@ impl Runtime {
 
     /// What a driver can do, asked before the interface offers it.
     pub fn capabilities(&self, driver: &str) -> Option<Capabilities> {
-        self.drivers.lock().get(driver).map(|driver| driver.capabilities())
+        self.drivers
+            .lock()
+            .get(driver)
+            .map(|driver| driver.capabilities())
     }
 
     /// The drivers this runtime knows, sorted.
@@ -103,7 +120,7 @@ impl Runtime {
         let opened = Opened {
             thread_id: thread_id.clone(),
             native_session_id: session.native_session_id(),
-            model: None,
+            model: session.model(),
             pid: session.pid(),
         };
         self.sessions.lock().insert(thread_id, session);
@@ -120,6 +137,10 @@ impl Runtime {
 
     pub async fn prompt(&self, thread_id: &str, input: TurnInput) -> Result<TurnId, PilotError> {
         self.session(thread_id)?.prompt(input).await
+    }
+
+    pub async fn compact(&self, thread_id: &str, input: TurnInput) -> Result<TurnId, PilotError> {
+        self.session(thread_id)?.compact(input).await
     }
 
     /// Puts an event of boite's own onto a thread's stream.
@@ -189,7 +210,9 @@ impl Runtime {
             }
             Err(_) => {
                 std::thread::spawn(move || {
-                    let built = tokio::runtime::Builder::new_current_thread().enable_all().build();
+                    let built = tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build();
                     if let Ok(runtime) = built {
                         runtime.block_on(async {
                             let _ = session.stop().await;
@@ -205,8 +228,12 @@ impl Runtime {
     /// Sequential rather than joined: each stop waits out its own grace, and a
     /// hundred children at once is not the shape this ever has.
     pub async fn stop_all(&self) {
-        let sessions: Vec<Arc<dyn Session>> =
-            self.sessions.lock().drain().map(|(_, session)| session).collect();
+        let sessions: Vec<Arc<dyn Session>> = self
+            .sessions
+            .lock()
+            .drain()
+            .map(|(_, session)| session)
+            .collect();
         for session in sessions {
             let _ = session.stop().await;
         }
@@ -217,17 +244,26 @@ impl Runtime {
     /// Synchronous on purpose: the sidebar asks once per pass per thread and
     /// must not be able to block on a child that stopped answering.
     pub fn status(&self, thread_id: &str) -> Option<Status> {
-        self.sessions.lock().get(thread_id).map(|session| session.status())
+        self.sessions
+            .lock()
+            .get(thread_id)
+            .map(|session| session.status())
     }
 
     /// The native session id to write onto `threads.session_id`.
     pub fn native_session_id(&self, thread_id: &str) -> Option<String> {
-        self.sessions.lock().get(thread_id).and_then(|session| session.native_session_id())
+        self.sessions
+            .lock()
+            .get(thread_id)
+            .and_then(|session| session.native_session_id())
     }
 
     /// The pid of a thread's child, the only pid anything may kill.
     pub fn pid(&self, thread_id: &str) -> Option<u32> {
-        self.sessions.lock().get(thread_id).and_then(|session| session.pid())
+        self.sessions
+            .lock()
+            .get(thread_id)
+            .and_then(|session| session.pid())
     }
 
     /// The threads with a live session.
@@ -275,8 +311,15 @@ mod tests {
         assert_eq!(runtime.open_threads(), vec!["t1"]);
         assert_eq!(runtime.status("t1"), Some(Status::Idle));
 
-        runtime.prompt("t1", TurnInput::text("hi")).await.expect("prompt");
-        assert_eq!(runtime.status("t1"), Some(Status::Idle), "the turn ran to its end");
+        runtime
+            .prompt("t1", TurnInput::text("hi"))
+            .await
+            .expect("prompt");
+        assert_eq!(
+            runtime.status("t1"),
+            Some(Status::Idle),
+            "the turn ran to its end"
+        );
 
         runtime.stop("t1").await.expect("stop");
         assert!(runtime.open_threads().is_empty());
@@ -287,7 +330,10 @@ mod tests {
     #[tokio::test]
     async fn a_call_on_a_thread_with_no_session_says_so() {
         let runtime = Runtime::new(Recorder::new());
-        let error = runtime.prompt("nope", TurnInput::text("hi")).await.unwrap_err();
+        let error = runtime
+            .prompt("nope", TurnInput::text("hi"))
+            .await
+            .unwrap_err();
         assert!(matches!(error, PilotError::NoSession(id) if id == "nope"));
     }
 
@@ -295,8 +341,8 @@ mod tests {
     async fn an_unknown_driver_is_refused_at_open() {
         let runtime = Runtime::new(Recorder::new());
         let mut spec = spec("t1");
-        spec.driver = "codex".into();
+        spec.driver = "missing".into();
         let error = runtime.open(spec).await.unwrap_err();
-        assert!(matches!(error, PilotError::UnknownDriver(name) if name == "codex"));
+        assert!(matches!(error, PilotError::UnknownDriver(name) if name == "missing"));
     }
 }

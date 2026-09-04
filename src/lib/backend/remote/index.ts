@@ -678,7 +678,11 @@ export class RemoteBackend implements Backend {
         ),
       interrupt: (threadId) => rpc("pilot.turn.interrupt", { threadId }).then(() => {}),
       respond: (threadId, requestId, answer) =>
-        rpc("pilot.request.respond", { threadId, requestId, option: answer }).then(() => {}),
+        rpc("pilot.request.respond", {
+          threadId,
+          requestId,
+          ...(typeof answer === "string" ? { option: answer } : { answers: answer.answers }),
+        }).then(() => {}),
       setModel: (threadId, selection) =>
         rpc("pilot.model.set", {
           threadId,

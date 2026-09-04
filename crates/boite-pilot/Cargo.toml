@@ -29,6 +29,7 @@ parking_lot = "0.12"
 # Field names match `boite_core::log`'s record shape (thread, turn, request), so
 # a pilot line filters the same way a bus line does.
 tracing = "0.1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"] }

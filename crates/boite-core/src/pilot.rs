@@ -195,7 +195,12 @@ pub fn project(
                     }
                 }
             }
-            write_item(store, thread_id, seq, &turn_item(turn_id, "completed", body))?;
+            write_item(
+                store,
+                thread_id,
+                seq,
+                &turn_item(turn_id, "completed", body),
+            )?;
             out.thread_updated = true;
         }
 
@@ -352,17 +357,17 @@ pub fn status_word(status: Status) -> &'static str {
 
 /// The answer a chosen option maps to.
 ///
-/// The vocabulary is closed here rather than at the transports: an option value
-/// is the driver's own opaque string, and the two words boite understands are
-/// what an approval card offers. Anything else is a deny carrying the label, so
-/// a driver that grows a third option refuses safely instead of running.
+/// Boite gives its own allow/deny values their semantic shortcuts. Any other
+/// value must appear in the stored request and then passes through untouched,
+/// which is how ACP gets its opaque `optionId` back. An unoffered value denies.
 pub fn answer_of_option(value: &str, options: &[RequestOption]) -> RequestAnswer {
     match value {
-        "allow" | "allow_always" | "yes" => RequestAnswer::allow(),
+        "allow_always" => RequestAnswer::allow_for_session(),
+        "allow" | "yes" => RequestAnswer::allow(),
         "deny" | "no" => RequestAnswer::deny("the user refused"),
         other => {
             if options.iter().any(|option| option.value == other) {
-                RequestAnswer::allow()
+                RequestAnswer::selected(other)
             } else {
                 RequestAnswer::deny("the user refused")
             }
@@ -560,12 +565,7 @@ fn request_row(request: &Request, state: &str, seq: Option<i64>) -> PilotItemRow
 }
 
 /// Fills in the two fields the callers above cannot know, then writes.
-fn write_item(
-    store: &Store,
-    thread_id: &str,
-    seq: i64,
-    row: &PilotItemRow,
-) -> Result<(), String> {
+fn write_item(store: &Store, thread_id: &str, seq: i64, row: &PilotItemRow) -> Result<(), String> {
     let mut row = row.clone();
     row.thread_id = thread_id.to_string();
     row.seq = seq;
@@ -797,8 +797,16 @@ mod tests {
         let turns: Vec<_> = items.iter().filter(|row| row.kind == "turn").collect();
         assert_eq!(turns.len(), 1, "one row per turn, not one per edge");
         assert_eq!(turns[0].state, "completed");
-        assert!(turns[0].body.contains("\"durationMs\":42"), "{}", turns[0].body);
-        assert!(turns[0].body.contains("\"input_tokens\":7"), "{}", turns[0].body);
+        assert!(
+            turns[0].body.contains("\"durationMs\":42"),
+            "{}",
+            turns[0].body
+        );
+        assert!(
+            turns[0].body.contains("\"input_tokens\":7"),
+            "{}",
+            turns[0].body
+        );
     }
 
     #[test]
@@ -817,6 +825,7 @@ mod tests {
                 value: "allow".into(),
                 label: "Allow".into(),
             }],
+            questions: vec![],
             suggestions: Value::Null,
         };
         let opened = apply(
@@ -875,6 +884,7 @@ mod tests {
                 value: "allow".into(),
                 label: "Allow".into(),
             }],
+            questions: vec![],
             suggestions: Value::Null,
         };
         apply(&store, &buffer, PilotEvent::RequestOpened { request });
@@ -928,7 +938,10 @@ mod tests {
         assert_eq!(projection.seq, None, "a reading is not a fact");
         assert_eq!(projection.status, Some(Status::Busy));
         assert!(projection.push, "the sidebar still reads it");
-        assert!(projection.thread_updated, "the row changed, so the sidebar is woken");
+        assert!(
+            projection.thread_updated,
+            "the row changed, so the sidebar is woken"
+        );
         assert_eq!(store.pilot_counts("t1").unwrap(), (0, 0));
         // The stored word, not `load_thread`'s: that one maps a row still
         // naming a run to `stopped` for a reader, and what is being checked
@@ -1195,23 +1208,21 @@ mod tests {
         });
         let runtime = Runtime::new(sink);
         runtime.register(Arc::new(
-            boite_pilot::scripted::ScriptedDriver::with_scenario(
-                boite_pilot::scripted::Scenario {
-                    native_session_id: Some("native-1".into()),
-                    model: Some("claude-fable-5-1".into()),
-                    slash_commands: vec![],
-                    steps: vec![boite_pilot::scripted::Step {
-                        deltas: vec!["o".into(), "k".into()],
-                        request: Some(boite_pilot::scripted::ScenarioRequest {
-                            tool_name: "Bash".into(),
-                            input: json!({ "command": "ls" }),
-                            title: None,
-                        }),
-                        duration_ms: 12,
-                        ..Default::default()
-                    }],
-                },
-            ),
+            boite_pilot::scripted::ScriptedDriver::with_scenario(boite_pilot::scripted::Scenario {
+                native_session_id: Some("native-1".into()),
+                model: Some("claude-fable-5-1".into()),
+                slash_commands: vec![],
+                steps: vec![boite_pilot::scripted::Step {
+                    deltas: vec!["o".into(), "k".into()],
+                    request: Some(boite_pilot::scripted::ScenarioRequest {
+                        tool_name: "Bash".into(),
+                        input: json!({ "command": "ls" }),
+                        title: None,
+                    }),
+                    duration_ms: 12,
+                    ..Default::default()
+                }],
+            }),
         ));
 
         runtime

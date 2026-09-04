@@ -139,7 +139,11 @@ pub struct TurnInput {
 
 impl TurnInput {
     pub fn text(text: impl Into<String>) -> Self {
-        Self { text: text.into(), selection: None, turn_id: None }
+        Self {
+            text: text.into(),
+            selection: None,
+            turn_id: None,
+        }
     }
 }
 
@@ -156,7 +160,10 @@ pub struct ModelSelection {
 
 impl ModelSelection {
     pub fn model(model: impl Into<String>) -> Self {
-        Self { model: Some(model.into()), instance: None }
+        Self {
+            model: Some(model.into()),
+            instance: None,
+        }
     }
 }
 
@@ -197,22 +204,69 @@ pub enum RequestAnswer {
         /// "always allow". Opaque here on purpose.
         #[serde(default, skip_serializing_if = "serde_json::Value::is_null")]
         updated_permissions: serde_json::Value,
+        /// Ask the provider to keep this decision for the live session.
+        ///
+        /// Codex calls this `acceptForSession`. Claude receives the permission
+        /// suggestions it supplied with the request. Keeping the intent here
+        /// avoids teaching the host about either native protocol.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        for_session: bool,
+        /// The selected value for a provider question. Approval requests leave
+        /// this empty; structured questions pass their answer through without
+        /// folding it into allow/deny.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        selected: Option<String>,
     },
     Deny {
         #[serde(default)]
         message: String,
+    },
+    /// Answers to a structured provider question, keyed by the provider's
+    /// question ids. A value is an array because ACP-compatible providers can
+    /// ask for a multi-select even though Codex currently sends single choice.
+    Answers {
+        answers: BTreeMap<String, Vec<String>>,
     },
 }
 
 impl RequestAnswer {
     /// Plain approval of the input as offered.
     pub fn allow() -> Self {
-        Self::Allow { updated_input: None, updated_permissions: serde_json::Value::Null }
+        Self::Allow {
+            updated_input: None,
+            updated_permissions: serde_json::Value::Null,
+            for_session: false,
+            selected: None,
+        }
+    }
+
+    pub fn allow_for_session() -> Self {
+        Self::Allow {
+            updated_input: None,
+            updated_permissions: serde_json::Value::Null,
+            for_session: true,
+            selected: None,
+        }
+    }
+
+    pub fn selected(value: impl Into<String>) -> Self {
+        Self::Allow {
+            updated_input: None,
+            updated_permissions: serde_json::Value::Null,
+            for_session: false,
+            selected: Some(value.into()),
+        }
+    }
+
+    pub fn answers(answers: BTreeMap<String, Vec<String>>) -> Self {
+        Self::Answers { answers }
     }
 
     /// Refusal with the sentence the model reads.
     pub fn deny(message: impl Into<String>) -> Self {
-        Self::Deny { message: message.into() }
+        Self::Deny {
+            message: message.into(),
+        }
     }
 }
 
@@ -260,7 +314,10 @@ pub struct SessionSink {
 
 impl SessionSink {
     pub fn new(thread_id: impl Into<Arc<str>>, sink: Arc<dyn EventSink>) -> Self {
-        Self { thread_id: thread_id.into(), sink }
+        Self {
+            thread_id: thread_id.into(),
+            sink,
+        }
     }
 
     pub fn thread_id(&self) -> &str {
@@ -275,7 +332,9 @@ impl SessionSink {
 
 impl std::fmt::Debug for SessionSink {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("SessionSink").field("thread_id", &self.thread_id).finish()
+        f.debug_struct("SessionSink")
+            .field("thread_id", &self.thread_id)
+            .finish()
     }
 }
 
@@ -296,12 +355,20 @@ pub trait Driver: Send + Sync {
 #[async_trait]
 pub trait Session: Send + Sync {
     async fn prompt(&self, input: TurnInput) -> Result<TurnId, PilotError>;
+    /// Compact the provider conversation. Drivers without a native operation
+    /// receive the provider's own `/compact` command through their prompt
+    /// wire; Codex overrides this with `thread/compact/start`.
+    async fn compact(&self, input: TurnInput) -> Result<TurnId, PilotError> {
+        self.prompt(input).await
+    }
     async fn interrupt(&self) -> Result<(), PilotError>;
     async fn respond(&self, request_id: &str, answer: RequestAnswer) -> Result<(), PilotError>;
     async fn set_model(&self, selection: ModelSelection) -> Result<SwitchKind, PilotError>;
     async fn set_mode(&self, mode: ExecMode) -> Result<(), PilotError>;
     async fn stop(&self) -> Result<(), PilotError>;
     fn native_session_id(&self) -> Option<String>;
+    /// The provider's active model after setup or an in-session switch.
+    fn model(&self) -> Option<String>;
     /// Read without awaiting: the sidebar asks this once per pass and must not
     /// be able to block on a child that stopped answering.
     fn status(&self) -> Status;
@@ -331,7 +398,10 @@ mod tests {
             ..Default::default()
         };
         let text = serde_json::to_string(&spec).expect("serialize");
-        assert!(!text.contains("resume"), "an absent option must not ship a null");
+        assert!(
+            !text.contains("resume"),
+            "an absent option must not ship a null"
+        );
         let back: OpenSpec = serde_json::from_str(&text).expect("deserialize");
         assert_eq!(back.thread_id, "t");
         assert_eq!(back.options.mode, ExecMode::Ask);

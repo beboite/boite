@@ -61,6 +61,17 @@ export interface PilotRequestOption {
 
 export type PilotRequestKind = "tool_approval" | "question" | "plan";
 
+/** One provider-owned prompt inside a structured input request. */
+export interface PilotRequestQuestion {
+  id: string;
+  header: string;
+  question: string;
+  options?: PilotRequestOption[];
+  allow_custom_answer?: boolean;
+  secret?: boolean;
+  multi_select?: boolean;
+}
+
 /** An open question, mirrored into the approvals dock. */
 export interface PilotRequest {
   id: string;
@@ -71,6 +82,7 @@ export interface PilotRequest {
   title?: string | null;
   description?: string | null;
   options?: PilotRequestOption[];
+  questions?: PilotRequestQuestion[];
   suggestions?: unknown;
 }
 
@@ -84,7 +96,7 @@ export type PilotRequestOutcome = "allowed" | "denied" | "cancelled";
  * carries `option`, and the machine holding the process maps it against what the
  * driver actually offered. This type is what a caller passes.
  */
-export type PilotRequestAnswer = string;
+export type PilotRequestAnswer = string | { answers: Record<string, string[]> };
 
 /** One entry of the driver's own event stream. */
 export interface PilotItem {

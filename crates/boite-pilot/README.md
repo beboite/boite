@@ -9,9 +9,12 @@ src/lib.rs      Runtime: thread_id -> Session, the drivers, stop_all
 src/driver.rs   Driver, Session, Capabilities, OpenSpec, the error type
 src/event.rs    PilotEvent and the item / request / usage / status types
 src/proc.rs     spawn, the Windows job object, the polite stop, fastpick
+src/codex/      the Codex App Server JSON-RPC driver
+src/acp/        ACP shared by Cursor, Grok and Antigravity
+src/opencode/   the OpenCode HTTP/SSE driver
 src/claude.rs   the stream-json driver
 src/scripted.rs a driver that replays a scenario file
-tests/          the fake claude binary, the scenarios, the captured wire
+tests/          fake binaries, scenarios and captured wires
 ```
 
 `boite-core` still takes no async runtime. This crate declares tokio, the host
@@ -53,13 +56,12 @@ implements against, `Driver` and `Session`, the two sinks it hands them,
 `Opened`, `Instance`, `Options`, `ExecMode`, `McpServer`, `ModelSelection`,
 `SwitchKind`, `Capabilities`, `RequestAnswer`, `TurnId`, `TurnInput`,
 `PilotError`. `event.rs` has the fourteen `PilotEvent` kinds and `Item`,
-`ItemKind`, `Request`, `RequestKind`, `RequestOption`, `RequestOutcome`,
-`Usage`, `Status`, `ExitReason`.
+`ItemKind`, `Request`, `RequestKind`, `RequestOption`, `RequestQuestion`,
+`RequestOutcome`, `Usage`, `Status`, `ExitReason`.
 
-Two drivers ship: `claude.rs`, the stream-json one, and `scripted.rs`, which
-replays a scenario file and is what every test that does not want a child
-process runs against. codex, ACP and opencode are phase 1 and none of them has
-a file here yet.
+Six production drivers ship: Claude stream-json, Codex App Server, OpenCode
+HTTP/SSE, and the ACP variants `acp:cursor`, `acp:grok` and
+`acp:antigravity`. `scripted.rs` replays a scenario without a child process.
 
 Two names to know outside the crate:
 
@@ -72,8 +74,37 @@ Two names to know outside the crate:
   for. A `const` slice to extend per release, never a fetch: the CLI has no
   endpoint that answers what an account may use, and a menu that opened on a
   network call would be empty whenever the network is. `pilot.catalog` reads it
-  for the `claude` driver and answers an empty list for a driver that ships
-  none.
+  for the `claude` driver. Codex carries a pinned offline fallback. ACP and
+  OpenCode model lists are account-specific and arrive in
+  `session.started.extra.availableModels`, then feed the live picker.
+
+## Codex App Server, ACP and OpenCode
+
+The port follows T3 Code revision `c75299ee2085a121bceb6df76796e971fe92b5b6`.
+Codex runs `codex app-server`, starts or resumes one native thread, streams
+items and usage, handles current and legacy approvals, accepts structured user
+input and uses `thread/compact/start` for `/compact`.
+
+ACP 1 runs as JSON-RPC 2.0 over JSONL. Cursor uses `cursor-agent acp`, Grok
+uses `grok agent stdio` with T3's permission flags, and Antigravity uses
+`agy-acp-server`. The shared reducer handles text, reasoning, tool calls,
+plans, usage, permission choices and form elicitation. Cursor and Grok load a
+session; Antigravity resumes without replay. Replayed load notifications are
+dropped because Boite already owns the durable timeline.
+
+OpenCode starts `opencode serve` on a loopback port, checks that the server is
+at least 1.14.19, creates or resumes one native session, and consumes `/event`
+as SSE. Prompts use `prompt_async`; permissions and questions keep their native
+ids; `/compact` uses `session.summarize`. The live `/provider` inventory feeds
+the model picker. Session permission rules match T3's Ask, edits-only and full
+access mappings. Local MCP servers are registered through `/mcp`. Set
+`OPENCODE_SERVER_URL` in the pilot environment to use an existing server, and
+set `OPENCODE_SERVER_PASSWORD` there when that server requires Basic auth.
+
+The Antigravity ACP executable and its harness/profile environment still have
+to be installed outside Boite. T3 manages that download itself. Boite accepts
+an explicit binary or `BOITE_PILOT_ANTIGRAVITY_BIN`; it does not download the
+Google package in this phase. Copilot ACP is not wired.
 
 ## Item identity
 
@@ -226,9 +257,11 @@ one of the two closes it.
   `interrupt` all exist across the supported range and are exercised against
   the fake.
 
-## The fake and the tests
+## The fakes and the tests
 
-`tests/fake-claude.mjs` speaks the frames above against a scenario file. A
+`tests/fake-claude.mjs`, `tests/fake-codex.mjs` and `tests/fake-acp.mjs` speak
+the three wires without credentials or model calls. The Claude fake reads a
+scenario file. A
 `.mjs` file is not executable on Windows, so it is launched as an explicit argv:
 
 ```rust

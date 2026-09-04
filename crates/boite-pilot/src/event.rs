@@ -70,7 +70,12 @@ impl Item {
     /// An item with an empty body, for the `item.started` edge where only the
     /// identity is known yet.
     pub fn new(id: impl Into<String>, kind: ItemKind, turn_id: Option<String>) -> Self {
-        Self { id: id.into(), turn_id, kind, body: serde_json::Value::Null }
+        Self {
+            id: id.into(),
+            turn_id,
+            kind,
+            body: serde_json::Value::Null,
+        }
     }
 
     /// The same item carrying a body.
@@ -103,6 +108,26 @@ pub struct RequestOption {
     pub label: String,
 }
 
+/// One prompt inside a structured user-input request.
+///
+/// Codex may block one tool call on several questions. Keeping those questions
+/// separate is what lets the client return an answer under each provider id
+/// instead of repeating the first choice for all of them.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RequestQuestion {
+    pub id: String,
+    pub header: String,
+    pub question: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub options: Vec<RequestOption>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub allow_custom_answer: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub secret: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub multi_select: bool,
+}
+
 /// An open question, carried by `request.opened` and mirrored into `approvals`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Request {
@@ -121,6 +146,10 @@ pub struct Request {
     /// The options the driver offered, in its own order.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub options: Vec<RequestOption>,
+    /// Provider questions, in their original order. Empty for approvals and
+    /// old drivers whose request is represented by the top-level options.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub questions: Vec<RequestQuestion>,
     /// The driver's own permission suggestions, passed through opaquely so an
     /// "always allow" answer can echo them back.
     #[serde(default, skip_serializing_if = "serde_json::Value::is_null")]
@@ -216,7 +245,10 @@ pub enum PilotEvent {
     #[serde(rename = "request.opened")]
     RequestOpened { request: Request },
     #[serde(rename = "request.resolved")]
-    RequestResolved { request_id: String, outcome: RequestOutcome },
+    RequestResolved {
+        request_id: String,
+        outcome: RequestOutcome,
+    },
 
     #[serde(rename = "status.changed")]
     StatusChanged { status: Status },
@@ -278,17 +310,31 @@ mod tests {
                 slash_commands: vec!["init".into()],
                 extra: BTreeMap::new(),
             },
-            PilotEvent::SessionExited { reason: ExitReason::Stopped },
-            PilotEvent::TurnStarted { turn_id: "t1".into() },
+            PilotEvent::SessionExited {
+                reason: ExitReason::Stopped,
+            },
+            PilotEvent::TurnStarted {
+                turn_id: "t1".into(),
+            },
             PilotEvent::TurnCompleted {
                 turn_id: "t1".into(),
                 duration_ms: 12,
                 usage: Usage::default(),
             },
-            PilotEvent::TurnAborted { turn_id: "t1".into(), reason: None },
-            PilotEvent::ItemStarted { item: Item::new("i1", ItemKind::AssistantText, None) },
-            PilotEvent::ItemDelta { item_id: "i1".into(), text: "ok".into() },
-            PilotEvent::ItemCompleted { item: Item::new("i1", ItemKind::AssistantText, None) },
+            PilotEvent::TurnAborted {
+                turn_id: "t1".into(),
+                reason: None,
+            },
+            PilotEvent::ItemStarted {
+                item: Item::new("i1", ItemKind::AssistantText, None),
+            },
+            PilotEvent::ItemDelta {
+                item_id: "i1".into(),
+                text: "ok".into(),
+            },
+            PilotEvent::ItemCompleted {
+                item: Item::new("i1", ItemKind::AssistantText, None),
+            },
             PilotEvent::RequestOpened {
                 request: Request {
                     id: "r1".into(),
@@ -299,6 +345,7 @@ mod tests {
                     title: None,
                     description: None,
                     options: vec![],
+                    questions: vec![],
                     suggestions: serde_json::Value::Null,
                 },
             },
@@ -306,12 +353,23 @@ mod tests {
                 request_id: "r1".into(),
                 outcome: RequestOutcome::Allowed,
             },
-            PilotEvent::StatusChanged { status: Status::Idle },
+            PilotEvent::StatusChanged {
+                status: Status::Idle,
+            },
             PilotEvent::ModelChanged { model: "m".into() },
-            PilotEvent::UsageUpdated { usage: Usage::default() },
-            PilotEvent::Error { message: "boom".into(), turn_id: None },
+            PilotEvent::UsageUpdated {
+                usage: Usage::default(),
+            },
+            PilotEvent::Error {
+                message: "boom".into(),
+                turn_id: None,
+            },
         ];
-        assert_eq!(cases.len(), 14, "the canonical set changed; the store reads these names");
+        assert_eq!(
+            cases.len(),
+            14,
+            "the canonical set changed; the store reads these names"
+        );
         for event in cases {
             let text = serde_json::to_string(&event).expect("serialize");
             let value: serde_json::Value = serde_json::from_str(&text).expect("parse");
@@ -323,8 +381,18 @@ mod tests {
 
     #[test]
     fn deltas_and_status_stay_out_of_the_journal() {
-        assert!(!PilotEvent::ItemDelta { item_id: "i".into(), text: "x".into() }.is_journaled());
-        assert!(!PilotEvent::StatusChanged { status: Status::Busy }.is_journaled());
-        assert!(PilotEvent::TurnStarted { turn_id: "t".into() }.is_journaled());
+        assert!(!PilotEvent::ItemDelta {
+            item_id: "i".into(),
+            text: "x".into()
+        }
+        .is_journaled());
+        assert!(!PilotEvent::StatusChanged {
+            status: Status::Busy
+        }
+        .is_journaled());
+        assert!(PilotEvent::TurnStarted {
+            turn_id: "t".into()
+        }
+        .is_journaled());
     }
 }

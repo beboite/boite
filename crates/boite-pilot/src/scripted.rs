@@ -115,7 +115,9 @@ impl ScriptedDriver {
 
     /// A driver carrying its scenario in memory, for a test with no file.
     pub fn with_scenario(scenario: Scenario) -> Self {
-        Self { scenario: Some(scenario) }
+        Self {
+            scenario: Some(scenario),
+        }
     }
 
     fn resolve(&self, spec: &OpenSpec) -> Result<Scenario, PilotError> {
@@ -227,8 +229,10 @@ impl ScriptedSession {
             let mut text = String::new();
             for delta in &step.deltas {
                 text.push_str(delta);
-                self.sink
-                    .emit(PilotEvent::ItemDelta { item_id: item_id.clone(), text: delta.clone() });
+                self.sink.emit(PilotEvent::ItemDelta {
+                    item_id: item_id.clone(),
+                    text: delta.clone(),
+                });
             }
             self.sink.emit(PilotEvent::ItemCompleted {
                 item: Item::new(&item_id, ItemKind::AssistantText, Some(turn_id.to_string()))
@@ -248,9 +252,16 @@ impl ScriptedSession {
                         title: request.title,
                         description: None,
                         options: vec![
-                            RequestOption { value: "allow".into(), label: "Allow".into() },
-                            RequestOption { value: "deny".into(), label: "Deny".into() },
+                            RequestOption {
+                                value: "allow".into(),
+                                label: "Allow".into(),
+                            },
+                            RequestOption {
+                                value: "deny".into(),
+                                label: "Deny".into(),
+                            },
                         ],
+                        questions: vec![],
                         suggestions: serde_json::Value::Null,
                     },
                 });
@@ -272,7 +283,8 @@ impl ScriptedSession {
                 usage: step.usage.clone(),
             });
         }
-        self.sink.emit(PilotEvent::UsageUpdated { usage: step.usage });
+        self.sink
+            .emit(PilotEvent::UsageUpdated { usage: step.usage });
         self.set_status(Status::Idle);
 
         if step.exit {
@@ -297,13 +309,18 @@ impl Session for ScriptedSession {
                 return Err(PilotError::SessionGone("the scenario ended".to_string()));
             }
             let Some((index, _)) = self.scenario.step_for(&input.text, &state.used) else {
-                return Err(PilotError::Protocol(format!("no scenario step for {:?}", input.text)));
+                return Err(PilotError::Protocol(format!(
+                    "no scenario step for {:?}",
+                    input.text
+                )));
             };
             state.used.push(index);
             state.turn = Some(turn_id.clone());
             index
         };
-        self.sink.emit(PilotEvent::TurnStarted { turn_id: turn_id.clone() });
+        self.sink.emit(PilotEvent::TurnStarted {
+            turn_id: turn_id.clone(),
+        });
         self.set_status(Status::Busy);
         self.play(index, &turn_id, false);
         Ok(turn_id)
@@ -312,8 +329,10 @@ impl Session for ScriptedSession {
     async fn interrupt(&self) -> Result<(), PilotError> {
         let turn = self.state.lock().turn.take();
         if let Some(turn_id) = turn {
-            self.sink
-                .emit(PilotEvent::TurnAborted { turn_id, reason: Some("interrupted".to_string()) });
+            self.sink.emit(PilotEvent::TurnAborted {
+                turn_id,
+                reason: Some("interrupted".to_string()),
+            });
         }
         self.set_status(Status::Idle);
         Ok(())
@@ -333,11 +352,13 @@ impl Session for ScriptedSession {
             }
         };
         let outcome = match answer {
-            RequestAnswer::Allow { .. } => RequestOutcome::Allowed,
+            RequestAnswer::Allow { .. } | RequestAnswer::Answers { .. } => RequestOutcome::Allowed,
             RequestAnswer::Deny { .. } => RequestOutcome::Denied,
         };
-        self.sink
-            .emit(PilotEvent::RequestResolved { request_id: request_id.to_string(), outcome });
+        self.sink.emit(PilotEvent::RequestResolved {
+            request_id: request_id.to_string(),
+            outcome,
+        });
         self.set_status(Status::Busy);
         self.play(index, &turn_id, true);
         Ok(())
@@ -361,13 +382,19 @@ impl Session for ScriptedSession {
     async fn stop(&self) -> Result<(), PilotError> {
         let already = std::mem::replace(&mut self.state.lock().exited, true);
         if !already {
-            self.sink.emit(PilotEvent::SessionExited { reason: ExitReason::Stopped });
+            self.sink.emit(PilotEvent::SessionExited {
+                reason: ExitReason::Stopped,
+            });
         }
         Ok(())
     }
 
     fn native_session_id(&self) -> Option<String> {
         self.state.lock().native_session_id.clone()
+    }
+
+    fn model(&self) -> Option<String> {
+        self.state.lock().model.clone()
     }
 
     fn status(&self) -> Status {
@@ -391,11 +418,19 @@ impl Recorder {
     }
 
     pub fn events(&self) -> Vec<PilotEvent> {
-        self.events.lock().iter().map(|(_, event)| event.clone()).collect()
+        self.events
+            .lock()
+            .iter()
+            .map(|(_, event)| event.clone())
+            .collect()
     }
 
     pub fn kinds(&self) -> Vec<&'static str> {
-        self.events.lock().iter().map(|(_, event)| event.kind()).collect()
+        self.events
+            .lock()
+            .iter()
+            .map(|(_, event)| event.kind())
+            .collect()
     }
 }
 

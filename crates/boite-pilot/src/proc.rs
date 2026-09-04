@@ -56,9 +56,7 @@ pub fn fastpick_argv(harness: &str, provider: &str, model: &str, inner: &[String
 pub fn argv_for_instance(harness: &str, instance: &Instance, inner: Vec<String>) -> Vec<String> {
     match instance {
         Instance::Native { .. } => inner,
-        Instance::Fastpick { provider, model } => {
-            fastpick_argv(harness, provider, model, &inner)
-        }
+        Instance::Fastpick { provider, model } => fastpick_argv(harness, provider, model, &inner),
     }
 }
 
@@ -94,14 +92,20 @@ impl Child {
             .split_first()
             .ok_or_else(|| PilotError::Spawn("empty argv".to_string()))?;
 
-        let mut command = Command::new(program);
+        let prepared = prepare_spawn(program, args, cwd);
+        let mut command = Command::new(&prepared.program);
         command
-            .args(args)
+            .args(&prepared.args)
             .current_dir(cwd)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(false);
+        #[cfg(target_os = "windows")]
+        {
+            use std::os::windows::process::CommandExt;
+            command.as_std_mut().creation_flags(0x08000000); // CREATE_NO_WINDOW
+        }
         for (key, value) in env {
             command.env(key, value);
         }
@@ -241,6 +245,69 @@ impl Child {
             _ => None,
         }
     }
+}
+
+struct PreparedSpawn {
+    program: String,
+    args: Vec<String>,
+}
+
+#[cfg(not(target_os = "windows"))]
+fn prepare_spawn(program: &str, args: &[String], _cwd: &Path) -> PreparedSpawn {
+    PreparedSpawn {
+        program: program.to_string(),
+        args: args.to_vec(),
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn prepare_spawn(program: &str, args: &[String], cwd: &Path) -> PreparedSpawn {
+    let Some(resolved) = resolve_windows_program(program, cwd) else {
+        return PreparedSpawn {
+            program: program.to_string(),
+            args: args.to_vec(),
+        };
+    };
+    // Let Rust apply its batch-file escaping, including refusal of characters
+    // that cannot be escaped safely. A hand-built cmd.exe /c string bypasses it.
+    PreparedSpawn {
+        program: resolved.to_string_lossy().to_string(),
+        args: args.to_vec(),
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn resolve_windows_program(program: &str, cwd: &Path) -> Option<PathBuf> {
+    let path = Path::new(program);
+    let has_directory = path.components().count() > 1;
+    let mut roots = Vec::new();
+    if !has_directory {
+        roots.push(cwd.to_path_buf());
+        if let Some(path) = std::env::var_os("PATH") {
+            roots.extend(std::env::split_paths(&path));
+        }
+    }
+    let candidates = if has_directory {
+        vec![if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            cwd.join(path)
+        }]
+    } else {
+        roots.into_iter().map(|root| root.join(path)).collect()
+    };
+    for candidate in candidates {
+        if candidate.extension().is_some() && candidate.is_file() {
+            return Some(candidate);
+        }
+        for extension in ["exe", "com", "cmd", "bat"] {
+            let with_extension = candidate.with_extension(extension);
+            if with_extension.is_file() {
+                return Some(with_extension);
+            }
+        }
+    }
+    None
 }
 
 impl Drop for Child {
@@ -409,7 +476,11 @@ mod tests {
     #[test]
     fn a_native_instance_launches_the_agent_directly() {
         let inner = vec!["claude".to_string(), "--print".to_string()];
-        let argv = argv_for_instance("claude", &Instance::Native { config_dir: None }, inner.clone());
+        let argv = argv_for_instance(
+            "claude",
+            &Instance::Native { config_dir: None },
+            inner.clone(),
+        );
         assert_eq!(argv, inner);
     }
 
@@ -425,7 +496,32 @@ mod tests {
     #[test]
     fn an_explicit_argv_outranks_the_env_override() {
         let explicit = vec!["node".to_string(), "fake.mjs".to_string()];
-        assert_eq!(resolve_bin(&explicit, "BOITE_PILOT_NOPE", "claude"), explicit);
-        assert_eq!(resolve_bin(&[], "BOITE_PILOT_NOPE", "claude"), vec!["claude"]);
+        assert_eq!(
+            resolve_bin(&explicit, "BOITE_PILOT_NOPE", "claude"),
+            explicit
+        );
+        assert_eq!(
+            resolve_bin(&[], "BOITE_PILOT_NOPE", "claude"),
+            vec!["claude"]
+        );
+    }
+
+    #[cfg(target_os = "windows")]
+    #[tokio::test]
+    async fn a_windows_cmd_shim_keeps_piped_output() {
+        let script = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fake-command.cmd");
+        let argv = vec![script.to_string_lossy().to_string()];
+        let (_child, mut rx) =
+            Child::spawn(&argv, &std::env::temp_dir(), &BTreeMap::new()).expect("spawn cmd shim");
+        let mut output = Vec::new();
+        let mut errors = Vec::new();
+        while let Some(line) = rx.recv().await {
+            match line {
+                Line::Out(line) => output.push(line),
+                Line::Eof => break,
+                Line::Err(line) => errors.push(line),
+            }
+        }
+        assert_eq!(output, ["fake-cmd-ok"], "stderr: {errors:?}");
     }
 }
