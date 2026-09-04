@@ -24,7 +24,6 @@
  *   would carry the report of the flush before it.
  */
 
-import { backend } from "$lib/backend";
 import type { LogRecordInput } from "$lib/backend/types";
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
@@ -67,6 +66,27 @@ let timer: ReturnType<typeof setTimeout> | null = null;
 let device: string | null = null;
 /** A flush is in flight; a second one would reorder the two batches. */
 let flushing = false;
+
+/** Where a batch goes: `backend().logs.write`, once there is a backend. */
+type Sink = (batch: LogRecordInput[]) => Promise<void>;
+let sink: Sink | null = null;
+
+/**
+ * Installs the sink. `$lib/backend` calls this when it loads.
+ *
+ * Handed over rather than imported: the transports under `$lib/backend` write
+ * records of their own, and `scripts/remote-smoke.ts` runs one of them under
+ * bun, with no `$lib` alias and no svelte runtime. An import of `backend()`
+ * from here would pull both into that script, which is what took CI red. Until
+ * a sink exists the queue simply holds, bounded by `MAX_QUEUE`, and the first
+ * flush after this call carries it.
+ */
+export function attach(next: Sink): void {
+  sink = next;
+  if (queue.length > 0 && timer === null) {
+    timer = setTimeout(() => void flush(), FLUSH_INTERVAL_MS);
+  }
+}
 
 /**
  * Names the device these records came from.
@@ -124,11 +144,14 @@ export async function flush(): Promise<void> {
     timer = null;
   }
   if (queue.length === 0 || flushing) return;
+  // Nothing to send to yet. The records stay queued, see `attach`.
+  const write = sink;
+  if (write === null) return;
   const batch = queue;
   queue = [];
   flushing = true;
   try {
-    await backend().logs.write(batch);
+    await write(batch);
   } catch {
     // Dropped on purpose. See the module comment: a line about a failed flush
     // rides the next flush, which fails for the same reason.
@@ -322,6 +345,7 @@ export function resetLogForTest(): void {
   timer = null;
   queue = [];
   flushing = false;
+  sink = null;
   device = null;
   installed = false;
   for (const [level, original] of consoleBefore) console[level] = original;

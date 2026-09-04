@@ -1,5 +1,7 @@
 import type { ControlEvent, ServerIdentity } from "../types";
-import { log } from "$lib/shared/log";
+// Relative on purpose: scripts/remote-smoke.ts runs this file under bun, where
+// `$lib` resolves to nothing (the note at the top of that script says why).
+import { log } from "../../shared/log";
 
 /**
  * Reporting a `logs.*` failure would come straight back through this door: the
