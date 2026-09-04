@@ -152,33 +152,7 @@ export async function enableChatExperiment(client: DevApp): Promise<void> {
     return el ? el.getAttribute("aria-checked") : null;
   `);
   if (already === "true") return;
-  // Settings is a view, not a dialog: its button toggles it, so it is clicked
-  // once on the way in and the close control is used on the way out. Clicked in
-  // a loop because the button is in the shortcut rail, which re-renders while
-  // the workspace settles, and a click on a replaced node does nothing at all.
-  // The tab is a rail on a wide window and a strip on a narrow one, and which
-  // of the two is drawn is not something a scenario should have to know.
-  const TAB = "#settings-tab-rail-experiments, #settings-tab-strip-experiments";
-  for (let attempt = 0; ; attempt++) {
-    await client.js<unknown>(`
-      if (!document.querySelector("${TAB}")) {
-        const button = document.querySelector("[aria-label='Settings']");
-        if (button) button.click();
-      }
-      return true;
-    `);
-    try {
-      await client.waitFor(`return !!document.querySelector("${TAB}")`, 8_000);
-      break;
-    } catch (err) {
-      if (attempt === 4) throw err;
-    }
-  }
-  await client.click(TAB);
-  await client.waitFor(
-    "return !!document.querySelector('#setting-experiments-pilot')",
-    20_000,
-  );
+  await openExperiments(client);
   const found = await client.js<boolean>(`
     const el = document.querySelector("#setting-experiments-pilot");
     if (!el) return false;
@@ -187,6 +161,46 @@ export async function enableChatExperiment(client: DevApp): Promise<void> {
   `);
   if (!found) throw new Error("no experiments switch for chat threads in this build");
   await sleep(400);
+  await closeSettings(client);
+}
+
+/**
+ * The Experiments tab, open and drawn.
+ *
+ * Settings is a view, not a dialog: its button toggles it, so it is clicked
+ * once on the way in and the close control is used on the way out. Clicked in
+ * a loop because the button is in the shortcut rail, which re-renders while the
+ * workspace settles, and a click on a replaced node does nothing at all. The
+ * tab is a rail on a wide window and a strip on a narrow one, and which of the
+ * two is drawn is not something a scenario should have to know.
+ */
+const EXPERIMENTS_TAB =
+  "#settings-tab-rail-experiments, #settings-tab-strip-experiments";
+
+async function openExperiments(client: DevApp): Promise<void> {
+  for (let attempt = 0; ; attempt++) {
+    await client.js<unknown>(`
+      if (!document.querySelector("${EXPERIMENTS_TAB}")) {
+        const button = document.querySelector("[aria-label='Settings']");
+        if (button) button.click();
+      }
+      return true;
+    `);
+    try {
+      await client.waitFor(`return !!document.querySelector("${EXPERIMENTS_TAB}")`, 8_000);
+      break;
+    } catch (err) {
+      if (attempt === 4) throw err;
+    }
+  }
+  await client.click(EXPERIMENTS_TAB);
+  await client.waitFor(
+    "return !!document.querySelector('#setting-experiments-pilot')",
+    20_000,
+  );
+}
+
+async function closeSettings(client: DevApp): Promise<void> {
   await client.js<unknown>(`
     const close = document.querySelector("[aria-label='Close settings']");
     if (close) close.click();
@@ -194,6 +208,79 @@ export async function enableChatExperiment(client: DevApp): Promise<void> {
   `);
   await client.waitFor("return !document.querySelector('#setting-experiments-pilot')", 20_000);
   await sleep(600);
+}
+
+/**
+ * Turn the workspace experiment on and point the orchestrator at claude.
+ *
+ * Two settings and one screen: the switch arms the Home card at all, and the
+ * agent row under it only exists while the switch is on, which is why the two
+ * cannot be written in one pass. Idempotent like the chat one, so a second
+ * scenario asking does not turn either of them back off.
+ */
+export async function enableOrchestrator(client: DevApp): Promise<void> {
+  await openExperiments(client);
+  await client.js<unknown>(`
+    const el = document.querySelector("#setting-experiments-workspace");
+    if (el && el.getAttribute("aria-checked") !== "true") el.click();
+    return !!el;
+  `);
+  await client.waitFor(
+    "return !!Array.from(document.querySelectorAll(\"[role='radio']\"))" +
+      ".find((b) => (b.textContent || '').trim() === 'Claude')",
+    20_000,
+  );
+  await client.js<unknown>(`
+    const button = Array.from(document.querySelectorAll("[role='radio']"))
+      .find((b) => (b.textContent || "").trim() === "Claude");
+    if (button && button.getAttribute("aria-checked") !== "true") button.click();
+    return !!button;
+  `);
+  await sleep(400);
+  await closeSettings(client);
+}
+
+/** Home, through the titlebar's own button, which is how a person gets there. */
+export async function openHome(client: DevApp): Promise<void> {
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const there = await client.js<boolean>(
+      "return !!document.querySelector(\"[data-testid='orchestrator-input']\")",
+    );
+    if (there) return;
+    await client.js<unknown>(`
+      const buttons = Array.from(document.querySelectorAll("[aria-label='Home']"));
+      const button = buttons[buttons.length - 1];
+      if (button) button.click();
+      return !!button;
+    `);
+    await sleep(700);
+  }
+  throw new Error("Home never drew the orchestrator composer");
+}
+
+/**
+ * Type a line into the Home composer and send it.
+ *
+ * The same prototype-setter dance `sendChat` does, for the same reason: a plain
+ * assignment fills the box and not the state Svelte binds to it.
+ */
+export async function postFromHome(client: DevApp, line: string): Promise<void> {
+  await client.js<unknown>(`
+    const box = document.querySelector("[data-testid='orchestrator-input']");
+    if (!box) throw new Error("no composer on Home");
+    box.focus();
+    const setter = Object.getOwnPropertyDescriptor(
+      window.HTMLTextAreaElement.prototype, "value").set;
+    setter.call(box, ${JSON.stringify(line)});
+    box.dispatchEvent(new Event("input", { bubbles: true }));
+    return true;
+  `);
+  await client.waitFor(
+    "const b = document.querySelector(\"[data-testid='orchestrator-send']\");" +
+      " return !!b && !b.disabled",
+    10_000,
+  );
+  await client.click("[data-testid='orchestrator-send']");
 }
 
 /**
