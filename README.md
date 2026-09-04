@@ -11,7 +11,7 @@
 
 <p align="center">
   <a href="https://github.com/beboite/boite-legacy/releases"><img src="https://img.shields.io/github/v/release/beboite/boite-legacy?display_name=tag" alt="Release" /></a>
-  <a href="./LICENSE"><img src="https://img.shields.io/github/license/beboite/boite" alt="License" /></a>
+  <a href="./LICENSE"><img src="https://img.shields.io/github/license/beboite/boite-legacy" alt="License" /></a>
   <a href="https://github.com/beboite/boite-legacy/stargazers"><img src="https://img.shields.io/github/stars/beboite/boite-legacy" alt="Stars" /></a>
   <a href="https://github.com/beboite/boite-legacy/issues"><img src="https://img.shields.io/github/issues/beboite/boite-legacy" alt="Issues" /></a>
   <a href="#platform-support"><img src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS%20%7C%20Android-0078D6" alt="Platform" /></a>
