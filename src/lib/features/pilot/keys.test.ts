@@ -55,4 +55,50 @@ describe("composerAction", () => {
       composerAction({ key: "Enter", shiftKey: false, composing: true }, "hi", "idle"),
     ).toEqual({ kind: "insert" });
   });
+
+  it("opens the model chip on Ctrl+M, and on Cmd+M for a mac", () => {
+    expect(composerAction({ key: "m", shiftKey: false, ctrlKey: true }, "", "idle")).toEqual({
+      kind: "picker",
+    });
+    expect(composerAction({ key: "M", shiftKey: false, metaKey: true }, "", "idle")).toEqual({
+      kind: "picker",
+    });
+    // Without the modifier it is a letter.
+    expect(composerAction({ key: "m", shiftKey: false }, "", "idle")).toEqual({
+      kind: "insert",
+    });
+  });
+
+  it("recalls the last prompt on Ctrl+Up", () => {
+    expect(
+      composerAction({ key: "ArrowUp", shiftKey: false, ctrlKey: true }, "", "idle"),
+    ).toEqual({ kind: "recall" });
+    // A bare arrow is a caret move and stays one.
+    expect(composerAction({ key: "ArrowUp", shiftKey: false }, "", "idle")).toEqual({
+      kind: "insert",
+    });
+  });
+
+  // With the hint row up, Tab and the arrows belong to the list. Enter still
+  // sends: the text goes to the driver either way.
+  it("gives Tab and the arrows to the slash hint while it is up", () => {
+    expect(composerAction({ key: "Tab", shiftKey: false }, "/re", "idle", true)).toEqual({
+      kind: "hint",
+    });
+    expect(composerAction({ key: "Tab", shiftKey: true }, "/re", "idle", true)).toEqual({
+      kind: "hintMove",
+      move: -1,
+    });
+    expect(composerAction({ key: "ArrowDown", shiftKey: false }, "/re", "idle", true)).toEqual({
+      kind: "hintMove",
+      move: 1,
+    });
+    expect(composerAction({ key: "Enter", shiftKey: false }, "/re", "idle", true)).toEqual({
+      kind: "send",
+      steering: false,
+    });
+    expect(composerAction({ key: "Tab", shiftKey: false }, "/re", "idle", false)).toEqual({
+      kind: "insert",
+    });
+  });
 });
