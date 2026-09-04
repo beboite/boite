@@ -340,15 +340,34 @@ A composer, a timeline, a model picker. Nothing else: git, explorer, editor and
 terminal are panes to open beside it, and a pilot thread has no shell of its
 own, which is the point.
 
-- Composer: multi-line, Enter sends, Escape interrupts. During a turn, sending
-  steers the turn instead of queuing. Slash commands declared at init pass
-  through untouched.
-- Picker: driver, instance, model, effort, mode in one menu, the fastpick menu
-  extended, with the model tint the sidebar already uses.
-- Timeline: virtualized list. Assistant text in light markdown, reasoning
-  folded, tool card with the command and the tail of its output, file card that
-  opens the diff, request card answerable in place, turn footer with duration,
-  tokens and diff.
+- Composer: one rounded surface, the box growing from one row to six and then
+  scrolling, with the model chip and the mode on the left of its bottom row and
+  send and stop on the right. Enter sends, Shift+Enter breaks the line, Escape
+  interrupts, Ctrl+M opens the chip, Ctrl+Up recalls the last sent line. During
+  a turn, sending steers the turn instead of queuing, and a quiet line above the
+  row says so rather than a dialog asking. Slash commands declared at init pass
+  through untouched; typing `/name` filters them into a hint row Tab takes from
+  (`slash.ts`), and boite never runs one itself.
+- Picker: one component (`ModelPicker.svelte`) drawn by the header compact and
+  by the composer at rest, so there is one idea of what the thread runs on. A
+  search field, the accounts grouped native first and fastpick routes after with
+  the labels the fastpick menu uses, the model tint the sidebar uses, and on
+  every row what `selection.ts` says the click will do. Arrows walk it, Enter
+  takes one, Escape closes. Effort draws the level in force until a driver
+  declares a list; mode is a segmented control with a line saying what each one
+  means.
+- Timeline: virtualized list, the column capped at 72ch and centred. The user's
+  line is the one row that leaves it, right-aligned as a bubble with no avatar.
+  Assistant text is `ChatText` with a caret while it grows, reasoning is a
+  folded "Thought for 3s", a tool call is one row (icon by kind, name, the
+  command or the path, a status dot) opening to the input and the tail with a
+  copy button, a file change is a chip that opens the diff, the request card is
+  answerable in place, and the footer carries duration, tokens and the files
+  behind a toggle. Scrolling up raises a "jump to latest" pill.
+- Nothing empty is drawn. `item.started` mints a row before the driver has said
+  anything and a driver's echo of the user's line often carries no body, so
+  `present.ts` gates every row on having something to show; without it the pane
+  draws a bordered bar of surface colour between two real cards.
 - Rendering: deltas accumulate in one string per item and paint on the next
   frame, never a render per token. A hidden pane or a phone receives buffered
   text, flushed at request boundaries. No CodeMirror on the boot path: the chat
