@@ -19,6 +19,7 @@
   import { t } from "$lib/i18n/index.svelte";
   import { log } from "$lib/shared/log";
   import RequestCard from "./RequestCard.svelte";
+  import { readingOrder } from "./order";
   import { atBottom, windowFor } from "./virtual";
   import type { PilotItemRow, PilotRequest, PilotTurnDiff, PilotUsage } from "./types";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
@@ -30,7 +31,12 @@
     repoPath: string | null;
     projectId: string;
   };
-  let { threadId, items, repoPath, projectId }: Props = $props();
+  let { threadId, items: journal, repoPath, projectId }: Props = $props();
+
+  // `turn.started` mints a turn's row before anything it produced, so the
+  // footer saying what the turn cost is drawn above its own answer unless the
+  // order is fixed here. See `order.ts`.
+  const items = $derived(readingOrder(journal));
 
   let scroller: HTMLDivElement | null = $state(null);
   let scrollTop = $state(0);
@@ -232,12 +238,17 @@
     <ul class="flex flex-col gap-2">
       {#each shown as row (row.id)}
         <li use:measure={row.id} class="flex flex-col gap-1">
+          <!-- An empty bubble is drawn as a bar of surface colour with nothing
+               in it, which is what a driver's own echo of the user's line looks
+               like when its body carries no text. Nothing to say means no card. -->
           {#if row.kind === "assistant_text"}
-            <ChatText text={text(row)} wide />
+            {#if text(row)}<ChatText text={text(row)} wide />{/if}
           {:else if row.kind === "user_message"}
-            <div class="flex justify-end">
-              <ChatText text={text(row)} mine />
-            </div>
+            {#if text(row)}
+              <div class="flex justify-end">
+                <ChatText text={text(row)} mine />
+              </div>
+            {/if}
           {:else if row.kind === "reasoning"}
             <!-- Folded by default: reasoning is the longest thing a turn
                  produces and the least often read. -->
