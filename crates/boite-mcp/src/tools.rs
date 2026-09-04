@@ -535,24 +535,36 @@ fn thread_tools() -> Value {
         },
         {
             "name": "thread_spawn",
-            "description": "Open another agent terminal, here or in another project, for work that \
+            "description": "Open another agent thread, here or in another project, for work that \
                             should run in parallel in its own worktree — not for a sub-task you \
                             could do this turn. Answers with its threadId. Read what it printed \
                             with terminal_transcript, and wait for it with thread_wait. In this \
                             project it opens at once; in another one it is the user's call, and \
                             `state: waiting-on-user` means the call worked and is queued for them, \
-                            not that it was refused.",
+                            not that it was refused. A runtime=pilot worker is a chat thread: it \
+                            is opened straight away and your prompt is sent as its first turn, so \
+                            there is nothing to type at and thread_wait reads its exact status \
+                            rather than guessing from a screen.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "agent": { "type": "string", "description": "claude, codex, opencode, cursor, copilot, grok, hermes, antigravity, pi, muse, or one of the user's shortcut labels. For fastpick agents, use the format 'fastpick:provider:model' (e.g., 'fastpick:crof:deepseek-v4-pro'), or 'fastpick:provider.key:model' to name one credential of a provider that holds several. A harness in front of the provider picks which agent runs on that endpoint: 'fastpick:pi:crof:deepseek-v4-pro', one of claude-code, opencode, codex or pi, claude-code when the name omits it. Defaults to yours." },
                     "project": { "type": "string", "description": "Id, name or folder. Defaults to this project." },
+                    "runtime": {
+                        "type": "string",
+                        "enum": ["terminal", "pilot"],
+                        "description": "How the worker is driven. 'terminal' is a shell Boite \
+                                        watches from the outside; 'pilot' is a chat thread Boite \
+                                        drives over the agent's own protocol, opened at once with \
+                                        your prompt as its first turn. Defaults to yours."
+                    },
                     "prompt": {
                         "type": "string",
                         "description": "Its opening instruction, written for someone who was not in \
                                         this conversation. claude, codex, pi, grok and antigravity \
                                         take one on the command line; the rest get it typed and \
-                                        submitted once the terminal is up."
+                                        submitted once the terminal is up. A runtime=pilot worker \
+                                        receives it as the first turn of its conversation."
                     }
                 },
                 "additionalProperties": false

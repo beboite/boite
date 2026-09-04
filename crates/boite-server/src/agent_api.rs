@@ -81,6 +81,10 @@ struct ServerWorkspace {
     /// The same wait registry the RPC's `conduct.record` notifies, so an
     /// orchestrator sleeping on `GET /v1/pulse` wakes on a device's write.
     pulse: Arc<boite_core::pulse::Waiters>,
+    /// This server's pilot runtime, the only thing that knows what a chat
+    /// thread is doing. The same `Arc` the state holds, so `thread_wait` and
+    /// the RPC read one set of sessions.
+    pilot: Arc<boite_pilot::Runtime>,
 }
 
 impl Workspace for ServerWorkspace {
@@ -189,6 +193,12 @@ impl Workspace for ServerWorkspace {
     fn pulse_waiters(&self) -> Option<Arc<boite_core::pulse::Waiters>> {
         Some(self.pulse.clone())
     }
+
+    fn pilot_status(&self, thread_id: &str) -> Option<String> {
+        self.pilot
+            .status(thread_id)
+            .map(|status| boite_core::pilot::status_word(status).to_string())
+    }
 }
 
 /// Binds an ephemeral loopback port and returns what the PTY spawn path stamps
@@ -202,6 +212,7 @@ pub async fn start(
     devices: Arc<AtomicUsize>,
     registry: Arc<crate::registry::Registry>,
     pulse: Arc<boite_core::pulse::Waiters>,
+    pilot: Arc<boite_pilot::Runtime>,
 ) -> Option<AgentApi> {
     let workspace_dir = config.workspace_dir.clone();
     let data_dir = config.data_dir.clone();
@@ -237,6 +248,7 @@ pub async fn start(
         registry,
         pending: pending.clone(),
         pulse,
+        pilot,
     });
     let router = boite_agent_api::router(workspace.clone());
 

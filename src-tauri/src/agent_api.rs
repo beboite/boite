@@ -171,6 +171,19 @@ impl Workspace for DesktopWorkspace {
             .map(|dir| dir.join("transcripts"))
     }
 
+    /// What a chat thread is doing, from the only thing that knows.
+    ///
+    /// `peek` and never `get`: an app that has never opened a chat thread has
+    /// no runtime and nothing to say, and building one here to answer a status
+    /// question would open the database from a route that only wanted to read.
+    fn pilot_status(&self, thread_id: &str) -> Option<String> {
+        self.app
+            .try_state::<crate::commands::pilot::PilotRuntime>()?
+            .peek()?
+            .status(thread_id)
+            .map(|status| boite_core::pilot::status_word(status).to_string())
+    }
+
     fn live_ptys(&self) -> Vec<boite_core::snapshot::LivePty> {
         let Some(sessions) = self.app.try_state::<crate::local_pty::LocalSessions>() else {
             return Vec::new();

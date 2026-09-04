@@ -1309,6 +1309,47 @@ struct SpawnIn {
     agent: Option<String>,
     project: Option<String>,
     prompt: Option<String>,
+    /// `terminal` or `pilot`. Absent replays the caller's own, the way an
+    /// absent `agent` replays the caller's fastpick combo: an agent splitting
+    /// its work reaches for another of itself, and that includes how the
+    /// worker is driven.
+    runtime: Option<String>,
+}
+
+/// Which runtime a spawn opens on, or the sentence saying why it cannot.
+///
+/// The default is the caller's row rather than `terminal`, so an agent working
+/// in a chat thread gets a chat worker without naming one. A caller Boite did
+/// not launch has no row, and a terminal is the honest default there: it is
+/// what every client can draw.
+fn spawn_runtime(
+    workspace: &dyn Workspace,
+    caller_thread: &str,
+    asked: Option<&str>,
+) -> Result<String, String> {
+    let asked = asked.map(str::trim).filter(|value| !value.is_empty());
+    if let Some(asked) = asked {
+        return match asked {
+            boite_core::model::RUNTIME_TERMINAL | boite_core::model::RUNTIME_PILOT => {
+                Ok(asked.to_string())
+            }
+            other => Err(format!(
+                "BAD_RUNTIME: '{other}' is not a runtime. It is 'terminal' (a shell Boite \
+                 watches) or 'pilot' (a chat thread Boite drives over the agent's own \
+                 protocol)."
+            )),
+        };
+    }
+    if caller_thread.is_empty() {
+        return Ok(boite_core::model::RUNTIME_TERMINAL.to_string());
+    }
+    Ok(workspace
+        .store()
+        .load_thread(caller_thread)
+        .ok()
+        .flatten()
+        .map(|thread| thread.runtime)
+        .unwrap_or_else(boite_core::model::default_runtime))
 }
 
 /// Opens a second agent terminal.
@@ -1380,6 +1421,10 @@ async fn thread_spawn(
             )));
         }
     }
+    let runtime = match spawn_runtime(&*workspace, &asking_thread, body.runtime.as_deref()) {
+        Ok(runtime) => runtime,
+        Err(reason) => return Ok(refused(reason)),
+    };
     let request = json!({
         "kind": "thread.spawn",
         "projectId": project_id,
@@ -1391,6 +1436,10 @@ async fn thread_spawn(
         "delegationMode": "delegation",
         "agent": body.agent,
         "prompt": body.prompt,
+        // Which runtime drives the worker. The device mints the row, so this is
+        // what it reads: a `pilot` spawn is opened at once and the prompt is
+        // sent as its first turn, a `terminal` one is the argv it always was.
+        "runtime": runtime,
     });
     if elsewhere {
         return Ok(ask_the_user(
@@ -1533,6 +1582,14 @@ struct ThreadWaitIn {
 
 /// A sibling's status, optionally waited on until it is no longer live or
 /// its raw status is settled.
+///
+/// Two runtimes, two sources, and they are not interchangeable. A terminal
+/// thread is measured from the outside, so what this can say about one is
+/// whether a PTY is still there and what the row records; a pilot thread
+/// declares its own status over the wire, so the runtime is asked and the
+/// answer is exact. Reading the row for a pilot thread would answer off the
+/// `running` mark, which says only that the thread was on during this run of
+/// the app and never comes back down.
 async fn thread_wait(
     State(workspace): State<Shared>,
     Extension(caller): Extension<Caller>,
@@ -1555,21 +1612,33 @@ async fn thread_wait(
         if thread.project_id != caller.project_id {
             return Ok(refused("that thread is in another project"));
         }
-        // The row's own column, not the loaded thread's: `load_thread` answers
-        // with the display status, which maps a live mark to `stopped` and
-        // would make wait return while the PTY is still up. Same read as
-        // `thread_close`.
-        let status = workspace
-            .store()
-            .thread_status(&id)
-            .map(|(status, _)| status)
-            .unwrap_or_else(|| "idle".to_string());
-        let live = workspace
-            .live_ptys()
-            .iter()
-            .any(|p| p.thread_id == id);
+        let pilot = thread.runtime == boite_core::model::RUNTIME_PILOT;
+        let (status, live, done) = if pilot {
+            // The exact word, from the only thing that knows it. No session is
+            // a session that was stopped or never opened, which for a caller
+            // waiting on a worker is the same answer as a finished turn.
+            match workspace.pilot_status(&id) {
+                Some(word) => {
+                    let running = word == "busy" || word == "waiting";
+                    (word, true, !running)
+                }
+                None => ("idle".to_string(), false, true),
+            }
+        } else {
+            // The row's own column, not the loaded thread's: `load_thread`
+            // answers with the display status, which maps a live mark to
+            // `stopped` and would make wait return while the PTY is still up.
+            // Same read as `thread_close`.
+            let status = workspace
+                .store()
+                .thread_status(&id)
+                .map(|(status, _)| status)
+                .unwrap_or_else(|| "idle".to_string());
+            let live = workspace.live_ptys().iter().any(|p| p.thread_id == id);
+            let done = !live || boite_core::settle::can_settle(&status);
+            (status, live, done)
+        };
         let waited = started.elapsed().as_millis() as u64;
-        let done = !live || boite_core::settle::can_settle(&status);
         if done || waited >= timeout {
             return Ok(Json(json!({
                 "threadId": id,

@@ -233,6 +233,12 @@ async fn main() {
     // One wait registry for the whole process: the RPC's writes wake the agent
     // endpoint's long-polls, so the two must hold the same one.
     let pulse = boite_core::pulse::Waiters::new();
+    // Built before the agent endpoint, which reads it: `thread_wait` asks the
+    // runtime what a chat thread is doing, and a copy built afterwards would be
+    // a second set of sessions answering about the first one's threads. The
+    // sink needs the store and the event channel and nothing else, and both
+    // exist by here.
+    let pilot = pilot::runtime(store.clone(), events.clone());
     let agent_api = agent_api::start(
         store.clone(),
         events.clone(),
@@ -241,13 +247,12 @@ async fn main() {
         devices.clone(),
         registry.clone(),
         pulse.clone(),
+        pilot.clone(),
     )
     .await;
 
-    // Built before the state, which holds it: the sink needs the store and the
-    // event channel and nothing else, and both exist by here.
     let pilot_mcp = agent_api.as_ref().and_then(|api| api.mcp.clone());
-    let pilot = Some(pilot::runtime(store.clone(), events.clone()));
+    let pilot = Some(pilot);
 
     let state = Arc::new(AppState {
         store,
@@ -385,6 +390,7 @@ async fn main() {
 
     let registry_for_shutdown = state.registry.clone();
     let telemetry_for_shutdown = state.telemetry.clone();
+    let pilot_for_shutdown = state.pilot.clone();
     let app = app.with_state(state.clone());
 
     let listener = match tokio::net::TcpListener::bind(&config.bind).await {
@@ -409,6 +415,14 @@ async fn main() {
     if let Err(e) = serve
         .with_graceful_shutdown(async move {
             shutdown_signal().await;
+            // Before the PTYs, and awaited: a pilot child left behind holds its
+            // session file open, and the next launch resumes into a
+            // conversation two processes are writing. `stop_all` is the polite
+            // stop, so the native session stays resumable.
+            if let Some(pilot) = pilot_for_shutdown {
+                tracing::info!("shutdown: stopping pilot sessions");
+                pilot.stop_all().await;
+            }
             tracing::info!("shutdown: killing PTYs");
             // kill_all spawns + joins one OS thread per PTY; keep it off the
             // async worker so a slow killer syscall can't stall the runtime.

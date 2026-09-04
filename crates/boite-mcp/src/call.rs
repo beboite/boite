@@ -255,7 +255,7 @@ pub fn call_tool<B: Backend>(host: &B, name: &str, args: &Value) -> Result<Strin
         }
         "thread_spawn" => {
             let mut body = json!({});
-            for key in ["agent", "project", "prompt"] {
+            for key in ["agent", "project", "prompt", "runtime"] {
                 if let Some(v) = args.get(key).and_then(|v| v.as_str()) {
                     body[key] = json!(v);
                 }

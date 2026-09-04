@@ -159,6 +159,25 @@ pub trait Workspace: Send + Sync + 'static {
         Vec::new()
     }
 
+    /// What the pilot runtime says about one `runtime = 'pilot'` thread.
+    ///
+    /// The word, not the enum, so this crate takes no dependency on
+    /// `boite-pilot` for one question: `busy` while a turn is in flight,
+    /// `waiting` while a request is open, `idle` otherwise, which is
+    /// `boite_core::pilot::status_word`'s vocabulary.
+    ///
+    /// `None` means there is no session for that thread on this host: it was
+    /// never opened, it was put to sleep, or this host runs no pilot at all.
+    /// Which is also the answer for every terminal row, and why a caller asks
+    /// the row's `runtime` first rather than reading absence as "stopped".
+    ///
+    /// The default is honest for a host with no runtime. Both of Boite's
+    /// implement it, because for a pilot thread this is the only status source
+    /// there is: no pid registry, no screen rows, no clock.
+    fn pilot_status(&self, _thread_id: &str) -> Option<String> {
+        None
+    }
+
     /// Where this host keeps what its terminals printed.
     ///
     /// `None` means it keeps none. Answered rather than assumed, because "no

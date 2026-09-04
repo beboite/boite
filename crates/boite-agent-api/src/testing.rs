@@ -35,6 +35,10 @@ pub struct Fake {
     /// the honest answer for a workspace with none; a wait test that needs a
     /// live worker fills this, because the stored `running` mark is not that.
     pub live_ptys: Mutex<Vec<boite_core::snapshot::LivePty>>,
+    /// What the pilot runtime would say about a chat thread, by thread id.
+    /// Empty is a host with no session open, which is the trait's own default
+    /// and what every terminal-only workspace answers.
+    pub pilot_status: Mutex<std::collections::HashMap<String, String>>,
     dir: PathBuf,
 }
 
@@ -56,6 +60,7 @@ impl Fake {
             screen: Mutex::new(None),
             answer_with: Mutex::new(None),
             live_ptys: Mutex::new(Vec::new()),
+            pilot_status: Mutex::new(std::collections::HashMap::new()),
             dir,
         }
     }
@@ -90,6 +95,33 @@ impl Fake {
         let mut thread = thread_row(id, project_id);
         thread.parent_thread_id = Some(parent.into());
         self.store.save_thread(&thread).unwrap();
+        self
+    }
+
+    /// A chat worker, with what its runtime would say about it.
+    ///
+    /// The row carries the stored `running` mark a launch leaves behind on
+    /// either runtime, so a test proving the pilot branch reads the runtime is
+    /// proving it against a row that says the other thing.
+    pub fn with_pilot_child(
+        self,
+        id: &str,
+        project_id: &str,
+        parent: &str,
+        status: Option<&str>,
+    ) -> Fake {
+        let mut thread = thread_row(id, project_id);
+        thread.parent_thread_id = Some(parent.into());
+        thread.status = "running".into();
+        thread.runtime = boite_core::model::RUNTIME_PILOT.to_string();
+        thread.pilot_driver = Some("claude".into());
+        self.store.save_thread(&thread).unwrap();
+        if let Some(status) = status {
+            self.pilot_status
+                .lock()
+                .unwrap()
+                .insert(id.to_string(), status.to_string());
+        }
         self
     }
 
@@ -227,6 +259,10 @@ impl Workspace for Fake {
 
     fn live_ptys(&self) -> Vec<boite_core::snapshot::LivePty> {
         self.live_ptys.lock().unwrap().clone()
+    }
+
+    fn pilot_status(&self, thread_id: &str) -> Option<String> {
+        self.pilot_status.lock().unwrap().get(thread_id).cloned()
     }
 
     fn touched(&self, thread_id: &str, surface: &str) {

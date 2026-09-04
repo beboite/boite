@@ -440,6 +440,9 @@ impl Records {
         if let Records::ProjectCreate { project } = &self {
             host.ensure_new_project_path(&project.cwd)?;
         }
+        if let Records::ThreadCreate { thread } = &self {
+            check_runtime(thread, host)?;
+        }
         if let Records::Search { transcripts, .. } = &mut self {
             *transcripts = host.transcripts_dir();
         }
@@ -660,6 +663,58 @@ impl Records {
             }
         })
     }
+}
+
+/// Whether the runtime a new row names is one this Boite can actually drive.
+///
+/// A row is the only place the five pilot columns come from: `pilot.thread.open`
+/// reads them back and refuses a row that names no driver, so a create that
+/// took the caller's word for it would leave a chat thread in the sidebar that
+/// nothing can open, with the failure arriving one click later and somewhere
+/// else. Checked here rather than in the store because the answer is the
+/// host's: a driver list belongs to the runtime, and a host without one has no
+/// chat threads at all.
+///
+/// A `terminal` row is not checked: it has no columns to check, and the
+/// default is what every row written before the pilot carries.
+fn check_runtime(thread: &Thread, host: &dyn Host) -> Result<(), String> {
+    if thread.runtime == crate::model::RUNTIME_TERMINAL {
+        return Ok(());
+    }
+    if thread.runtime != crate::model::RUNTIME_PILOT {
+        return Err(format!(
+            "'{}' is not a runtime: a thread is 'terminal' or 'pilot'",
+            thread.runtime
+        ));
+    }
+    let driver = thread
+        .pilot_driver
+        .as_deref()
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .ok_or("a chat thread names the driver that answers on it, and this row names none")?;
+    let runtime = host
+        .pilot()
+        .ok_or("this Boite has no pilot runtime, so it cannot open a chat thread")?;
+    let known = runtime.drivers();
+    if !known.iter().any(|id| id == driver) {
+        return Err(format!(
+            "no pilot driver called '{driver}' here. This build drives {}.",
+            known.join(", ")
+        ));
+    }
+    // The two blobs are read back with `serde_json::from_str` at open. A row
+    // carrying text neither parses is a thread that opens once and then never
+    // again, so it is refused at the write instead.
+    if let Some(text) = thread.pilot_instance.as_deref().filter(|t| !t.is_empty()) {
+        serde_json::from_str::<boite_pilot::Instance>(text)
+            .map_err(|e| format!("this chat thread's instance is not one: {e}"))?;
+    }
+    if let Some(text) = thread.pilot_options.as_deref().filter(|t| !t.is_empty()) {
+        serde_json::from_str::<boite_pilot::Options>(text)
+            .map_err(|e| format!("this chat thread's options are not options: {e}"))?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]
