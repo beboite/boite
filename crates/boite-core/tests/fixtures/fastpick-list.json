@@ -1,0 +1,85 @@
+{
+  "fastpick": "0.4.2",
+  "schema": 3,
+  "harnesses": [
+    {
+      "id": "claude-code",
+      "name": "Claude Code",
+      "kind": "claude-code",
+      "bin": "claude",
+      "supportsSystemPrompts": true,
+      "supportsEffort": true,
+      "installed": true,
+      "providers": [
+        "anthropic",
+        "codex-everywhere",
+        "crof"
+      ]
+    },
+    {
+      "id": "codex",
+      "name": "Codex",
+      "kind": "codex",
+      "bin": "codex",
+      "supportsSystemPrompts": false,
+      "supportsEffort": false,
+      "installed": true,
+      "providers": [
+        "codex-everywhere"
+      ]
+    }
+  ],
+  "providers": [
+    {
+      "id": "anthropic",
+      "name": "Anthropic",
+      "group": "native",
+      "keys": [
+        {
+          "id": "anthropic",
+          "label": null,
+          "needsKey": false,
+          "keyPresent": false
+        }
+      ]
+    },
+    {
+      "id": "codex-everywhere",
+      "name": "Codex Everywhere",
+      "group": null,
+      "keys": [
+        {
+          "id": "anthropic",
+          "label": "anthropic",
+          "needsKey": true,
+          "keyPresent": true
+        },
+        {
+          "id": "xai",
+          "label": "xai",
+          "needsKey": true,
+          "keyPresent": true
+        },
+        {
+          "id": "openai",
+          "label": "openai",
+          "needsKey": true,
+          "keyPresent": true
+        }
+      ]
+    },
+    {
+      "id": "crof",
+      "name": "crof.ai",
+      "group": null,
+      "keys": [
+        {
+          "id": "crof",
+          "label": null,
+          "needsKey": true,
+          "keyPresent": true
+        }
+      ]
+    }
+  ]
+}

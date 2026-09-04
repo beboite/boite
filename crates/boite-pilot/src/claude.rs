@@ -124,16 +124,52 @@ fn env_for(spec: &OpenSpec) -> BTreeMap<String, String> {
 ///
 /// A list to extend per release, not a fetch: the CLI has no endpoint that
 /// answers what an account may use, and a menu that opened on a network call
-/// would be empty whenever the network is. The three aliases are what the CLI
-/// itself accepts, and the full ids are the ones the SDK's `sdk.d.ts` names for
-/// the same generation.
+/// would be empty whenever the network is.
+///
+/// Source, read 2026-09-04, in this order because the first two disagree with
+/// what a menu needs:
+///
+/// - `@anthropic-ai/claude-agent-sdk` 0.3.259 carries no model id union at all.
+///   `sdk.d.ts` types `model?: string` with three examples in a doc comment and
+///   answers the real list at runtime through `Query.supportedModels()`, which
+///   is a network call. So the SDK is the wrong source for a static list and
+///   the previous one, written from memory against it, named three ids the CLI
+///   no longer offers.
+/// - `claude --help` on 2.1.260 documents the alias form: "Provide an alias for
+///   the latest model (e.g. 'fable', 'opus', or 'sonnet') or a model's full name
+///   (e.g. 'claude-fable-5')". That is where the aliases below come from.
+/// - The CLI's own baked catalogue, inside the 2.1.260 executable, is where the
+///   full ids come from: `aliases` maps opus to `claude-opus-5`, sonnet to
+///   `claude-sonnet-5`, haiku to `claude-haiku-4-5` and fable to
+///   `claude-fable-5-1`, and the catalogue's `{id, family, display_name}` rows
+///   are the nineteen models it knows.
+///
+/// Four of those nineteen are left out on purpose: `claude-3-5-haiku`,
+/// `claude-3-5-sonnet` and `claude-3-7-sonnet` are in the CLI's own deprecation
+/// table with an end-of-life date, and the two `claude-mythos-5*` rows are a
+/// preview an ordinary account cannot ask for.
 pub const NATIVE_MODELS: &[&str] = &[
+    // The aliases first: they are what the picker should offer by default,
+    // being the only names that follow the account onto the next release.
+    "fable",
     "opus",
     "sonnet",
     "haiku",
-    "claude-opus-4-1-20250805",
-    "claude-sonnet-4-5-20250929",
-    "claude-haiku-4-5-20251001",
+    // Then the full ids, newest family first.
+    "claude-fable-5-1",
+    "claude-fable-5",
+    "claude-opus-5",
+    "claude-opus-4-8",
+    "claude-opus-4-7",
+    "claude-opus-4-6",
+    "claude-opus-4-5",
+    "claude-opus-4-1",
+    "claude-opus-4-0",
+    "claude-sonnet-5",
+    "claude-sonnet-4-6",
+    "claude-sonnet-4-5",
+    "claude-sonnet-4-0",
+    "claude-haiku-4-5",
 ];
 
 pub struct ClaudeDriver;

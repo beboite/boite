@@ -1,0 +1,67 @@
+{
+  "fastpick": "0.4.2",
+  "schema": 3,
+  "models": {
+    "provider": "crof",
+    "source": {
+      "kind": "cache",
+      "count": 6,
+      "ageSecs": 957
+    },
+    "items": [
+      {
+        "id": "crof-deepseek-v4-flash",
+        "key": "crof",
+        "label": "DeepSeek v4 Flash",
+        "contextWindow": 1000000,
+        "effort": [],
+        "effortDefault": null,
+        "prompts": [
+          "deepseek-v4"
+        ]
+      },
+      {
+        "id": "crof-deepseek-v4-flash-0731",
+        "key": "crof",
+        "label": "DeepSeek v4 Flash 0731",
+        "contextWindow": 1000000,
+        "effort": [],
+        "effortDefault": null,
+        "prompts": [
+          "deepseek-v4"
+        ]
+      },
+      {
+        "id": "crof-deepseek-v4-pro",
+        "key": "crof",
+        "label": "DeepSeek v4 Pro",
+        "contextWindow": 1000000,
+        "effort": [],
+        "effortDefault": null,
+        "prompts": [
+          "deepseek-v4"
+        ]
+      },
+      {
+        "id": "crof-glm-5-2",
+        "key": "crof",
+        "label": "GLM 5.2",
+        "contextWindow": null,
+        "effort": [],
+        "effortDefault": null,
+        "prompts": []
+      },
+      {
+        "id": "crof-kimi-k3",
+        "key": "crof",
+        "label": "Kimi K3",
+        "contextWindow": 1000000,
+        "effort": [],
+        "effortDefault": null,
+        "prompts": [
+          "kimi-k3"
+        ]
+      }
+    ]
+  }
+}

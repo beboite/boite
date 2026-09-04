@@ -487,57 +487,93 @@ fn fastpick_instances(refresh: bool) -> Vec<Value> {
     let Ok(listing) = serde_json::from_str::<Value>(&listing) else {
         return Vec::new();
     };
-    let providers = listing
-        .get("providers")
-        .and_then(|v| v.as_array())
-        .cloned()
-        .unwrap_or_default();
-
     let mut out = Vec::new();
-    for provider in providers {
-        let Some(id) = provider.get("id").and_then(|v| v.as_str()) else {
-            continue;
-        };
-        let name = provider
-            .get("name")
-            .and_then(|v| v.as_str())
-            .unwrap_or(id)
-            .to_string();
+    for id in fastpick_providers(&listing) {
         // One call per provider: fastpick answers a model list from its own
         // cache unless `refresh` is set, and the minute of cache above is what
         // keeps a menu opening twice from paying for it twice.
-        let Ok(models) = crate::fastpick::list_blocking(Some(id.to_string()), refresh) else {
+        let Ok(models) = crate::fastpick::list_blocking(Some(id.clone()), refresh) else {
             continue;
         };
         let Ok(models) = serde_json::from_str::<Value>(&models) else {
             continue;
         };
-        let items = models
-            .get("models")
-            .and_then(|v| v.get("items"))
-            .or_else(|| models.get("items"))
-            .and_then(|v| v.as_array())
-            .cloned()
-            .unwrap_or_default();
-        for model in items {
-            let Some(model_id) = model.get("id").and_then(|v| v.as_str()) else {
-                continue;
-            };
-            let label = model
-                .get("label")
-                .and_then(|v| v.as_str())
-                .unwrap_or(model_id);
-            out.push(json!({
-                "name": format!("fastpick:{id}:{model_id}"),
-                "driver": "claude",
-                "kind": "fastpick",
-                "provider": id,
-                "model": model_id,
-                "label": format!("{name} {label}"),
-            }));
-        }
+        out.extend(fastpick_models(&id, &models));
     }
     out
+}
+
+/// Which providers a `--list --json` answer declares, in the order it wrote
+/// them.
+///
+/// `providers[].id` on schema 3, which is what `fastpick 0.4.2` prints. Read
+/// off the document rather than assumed, so a provider fastpick grows appears
+/// in the menu without a boite release.
+fn fastpick_providers(listing: &Value) -> Vec<String> {
+    listing
+        .get("providers")
+        .and_then(|v| v.as_array())
+        .map(|providers| {
+            providers
+                .iter()
+                .filter_map(|provider| provider.get("id").and_then(|v| v.as_str()))
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// One provider's models, as instances the picker can open a thread on.
+///
+/// The document `fastpick --list --json --provider <p>` prints carries them
+/// under `models.items`, each `{ id, key, label, contextWindow, effort,
+/// effortDefault, prompts }`. `items` at the root is accepted too, which is
+/// what a fastpick older than schema 3 wrote.
+///
+/// Two strings come out of this and both are somebody else's:
+///
+/// - `name` is `fastpick:<provider>:<model>`, the string `parseFastpickAgent`
+///   reads in `fastpick/combo.ts`, so one name works in this menu, in the
+///   launcher and in a `thread_spawn` an agent writes.
+/// - `label` is what `comboLabel` composes for the fastpick menu, `<model> ·
+///   <where>`, with `where` the provider alone unless the row names a
+///   credential of its own. Matched rather than reinvented: two menus offering
+///   the same route under two names is the drift this whole naming exists to
+///   avoid. The model id and not fastpick's own label, because `comboLabel`
+///   uses the id and a label is a hand-written config field two rows can share.
+fn fastpick_models(provider: &str, models: &Value) -> Vec<Value> {
+    let items = models
+        .get("models")
+        .and_then(|v| v.get("items"))
+        .or_else(|| models.get("items"))
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    items
+        .iter()
+        .filter_map(|model| {
+            let model_id = model.get("id").and_then(|v| v.as_str())?;
+            // The credential of a provider that holds several. Left out when it
+            // repeats the provider, which is what a single-key provider names
+            // its only key, exactly as `comboLabel` does.
+            let key = model
+                .get("key")
+                .and_then(|v| v.as_str())
+                .filter(|key| !key.is_empty() && *key != provider);
+            let where_it_runs = match key {
+                Some(key) => format!("{provider}.{key}"),
+                None => provider.to_string(),
+            };
+            Some(json!({
+                "name": format!("fastpick:{provider}:{model_id}"),
+                "driver": "claude",
+                "kind": "fastpick",
+                "provider": provider,
+                "model": model_id,
+                "label": format!("{model_id} \u{b7} {where_it_runs}"),
+            }))
+        })
+        .collect()
 }
 
 /// The turn input a `pilot.turn.start` carries.
@@ -872,6 +908,77 @@ mod tests {
             panic!("not a model set");
         };
         assert!(matches!(instance, Some(Instance::Fastpick { .. })));
+    }
+
+    /// The two documents an installed fastpick really printed, kept as
+    /// fixtures so a schema move fails a test rather than an open menu.
+    ///
+    /// Captured from `fastpick 0.4.2`, schema 3, on 2026-09-04. Trimmed to the
+    /// providers and models one assertion needs, and with the two fields that
+    /// name a machine (`config`, `systemPromptsDir`) dropped: they say nothing
+    /// about the shape and everything about one install.
+    const FASTPICK_LIST: &str = include_str!("../../tests/fixtures/fastpick-list.json");
+    const FASTPICK_MODELS: &str = include_str!("../../tests/fixtures/fastpick-models-crof.json");
+
+    #[test]
+    fn the_providers_of_a_real_fastpick_listing_are_read_off_it() {
+        let listing: Value = serde_json::from_str(FASTPICK_LIST).expect("fixture parses");
+        assert_eq!(
+            fastpick_providers(&listing),
+            vec!["anthropic", "codex-everywhere", "crof"],
+        );
+    }
+
+    /// The name is the launcher's combo string and the label is what
+    /// `comboLabel` composes, so one route reads the same in both menus.
+    #[test]
+    fn a_fastpick_model_becomes_the_instance_the_launcher_would_name() {
+        let models: Value = serde_json::from_str(FASTPICK_MODELS).expect("fixture parses");
+        let instances = fastpick_models("crof", &models);
+        assert_eq!(instances.len(), 5, "{instances:?}");
+        let first = &instances[0];
+        assert_eq!(first["name"], "fastpick:crof:crof-deepseek-v4-flash");
+        assert_eq!(first["kind"], "fastpick");
+        assert_eq!(first["driver"], "claude");
+        assert_eq!(first["provider"], "crof");
+        assert_eq!(first["model"], "crof-deepseek-v4-flash");
+        // Not "crof.crof": a key that repeats its provider is the only key of a
+        // provider, and `comboLabel` leaves it out.
+        assert_eq!(first["label"], "crof-deepseek-v4-flash \u{b7} crof");
+    }
+
+    /// A provider holding several credentials names the one that answers, the
+    /// way `comboLabel` writes `<provider>.<key>`.
+    #[test]
+    fn a_second_credential_of_one_provider_is_named_in_the_label() {
+        let models = json!({
+            "models": { "items": [
+                { "id": "gpt-6", "key": "openai", "label": "GPT 6" },
+                { "id": "grok-5", "key": "xai", "label": "Grok 5" },
+            ]}
+        });
+        let instances = fastpick_models("codex-everywhere", &models);
+        assert_eq!(
+            instances[0]["label"],
+            "gpt-6 \u{b7} codex-everywhere.openai"
+        );
+        assert_eq!(instances[1]["name"], "fastpick:codex-everywhere:grok-5");
+    }
+
+    /// The claude driver's model list is the CLI's own, aliases included, and
+    /// carries none of the ids the CLI marks end-of-life.
+    #[test]
+    fn the_claude_model_list_is_what_the_cli_answers_to() {
+        let models = native_models("claude");
+        for alias in ["fable", "opus", "sonnet", "haiku"] {
+            assert!(models.contains(&alias), "{alias} is missing: {models:?}");
+        }
+        assert!(models.contains(&"claude-opus-5"), "{models:?}");
+        assert!(models.contains(&"claude-sonnet-5"), "{models:?}");
+        for gone in ["claude-3-5-sonnet", "claude-3-7-sonnet", "claude-3-5-haiku"] {
+            assert!(!models.contains(&gone), "{gone} is end of life: {models:?}");
+        }
+        assert!(native_models("codex").is_empty(), "no list ships for codex");
     }
 
     /// A cursor read is clamped rather than refused: a client asking for a
