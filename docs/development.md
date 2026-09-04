@@ -150,8 +150,12 @@ this is now written against rather than through a package that shipped with it.
 asserts on three things at once: what the window shows, what
 `%APPDATA%\dev.boite.dev\boite.db` holds and what the log says. It needs a
 display, takes about two minutes on a warm `target/debug`, and the first run
-pays for the debug build of `src-tauri`. It is not in `bun run test`, which is
-the unit run and has its own config.
+pays for the debug build of `src-tauri`. A fresh worktree needs two builds
+before that first run: `cargo build -p boite-mcp`, the binary the harness
+drives, and `bun run build:sidecar`, the copy `dev:isolated` resolves
+`externalBin` to (without it the window dies on `resource path
+binaries\boite-mcp-<triple>.exe doesn't exist`). It is not in `bun run test`,
+which is the unit run and has its own config.
 
 ```
 bun run e2e                        # every scenario
