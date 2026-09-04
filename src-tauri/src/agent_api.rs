@@ -36,6 +36,25 @@ use boite_core::store::Store;
 /// emits, and lets the app do the work.
 const AGENT_REQUEST: &str = "boite://agent-request";
 
+/// The one name this host gives "the open approvals changed".
+///
+/// The webview listens for it in `features/approvals/store.svelte.ts`. Spelled
+/// out at a call site rather than read from here, a rename lands on one side
+/// and the dock stops refreshing with nothing failing.
+pub const APPROVALS_CHANGED: &str = "boite://approvals-changed";
+
+/// Tells the window to re-read the open approvals.
+///
+/// Two paths write that table and both come through here: the agent endpoint,
+/// when a tool call asks the user something, and the pilot projection, which
+/// opens an `approvals` row of kind `pilot` for every request a chat thread
+/// raises and closes it when the answer comes back. The second one had no
+/// emitter at all, so a chat thread's question reached the dock only when the
+/// webview happened to reload for some other reason.
+pub fn announce_approvals_changed(app: &tauri::AppHandle) {
+    let _ = app.emit(APPROVALS_CHANGED, ());
+}
+
 /// The answers the window owes, by request id.
 ///
 /// A browser question (`browser.snapshot`, `browser.click`, ...) is emitted to
@@ -137,7 +156,12 @@ impl Workspace for DesktopWorkspace {
         let _ = match change {
             Change::Todos => self.app.emit("boite://todos-changed", ()),
             Change::Worktrees => self.app.emit("boite://worktrees-changed", ()),
-            Change::Approvals => self.app.emit("boite://approvals-changed", ()),
+            // Through the shared emitter, which the pilot sink also calls: one
+            // function names this event on this host, not two.
+            Change::Approvals => {
+                announce_approvals_changed(&self.app);
+                Ok(())
+            }
             Change::Orchestrator => self.app.emit("boite://orchestrator-changed", ()),
             // Carries the ids: the window that owns the target PTY flushes,
             // every other one ignores it.
@@ -489,4 +513,22 @@ pub fn start(app: &tauri::AppHandle) {
             crate::logging::warn_to_log(&served, "agent-api", &format!("serve ended: {e}"));
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::APPROVALS_CHANGED;
+
+    /// The name is half of an event: the other half is a webview listening for
+    /// it, and nothing else in this crate can check that the two agree.
+    ///
+    /// What a real emit does needs an `AppHandle`, which needs a running app,
+    /// which is why the behaviour is asserted on the server's sink instead
+    /// (`boite-server/src/pilot.rs`) and on the projection both hosts read
+    /// (`boite_core::pilot`). What is left here is the string, pinned against
+    /// the listener in `src/lib/features/approvals/store.svelte.ts`.
+    #[test]
+    fn the_approvals_event_keeps_the_name_the_window_listens_for() {
+        assert_eq!(APPROVALS_CHANGED, "boite://approvals-changed");
+    }
 }

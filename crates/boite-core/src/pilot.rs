@@ -831,7 +831,7 @@ mod tests {
         assert_eq!(store.open_approvals().unwrap().len(), 1);
         assert!(store.pilot_approval_of_request("t1", "r1").is_some());
 
-        apply(
+        let resolved = apply(
             &store,
             &buffer,
             PilotEvent::RequestResolved {
@@ -839,6 +839,10 @@ mod tests {
                 outcome: RequestOutcome::Allowed,
             },
         );
+        // Both edges, not only the opening one: a dock that is never told the
+        // question was answered keeps drawing it, and the answer it then sends
+        // is for a request the driver has already moved past.
+        assert!(resolved.approvals_changed);
         assert!(store.open_approvals().unwrap().is_empty(), "answered once");
         let items = store.pilot_items("t1", 0, 10).unwrap();
         let card = items

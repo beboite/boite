@@ -1,4 +1,17 @@
+use tokio::sync::broadcast;
+
 use crate::protocol::Event;
+
+/// Tells every connected device that the open approvals changed.
+///
+/// The server's one emitter of it. Two paths write that table: the agent API,
+/// when a tool call asks the user something, and the pilot projection, which
+/// opens an `approvals` row of kind `pilot` for every request a chat thread
+/// raises and closes it when the answer comes back. Written out at both call
+/// sites they drift, and the half nobody watches is the one that stops firing.
+pub fn announce_approvals_changed(events: &broadcast::Sender<AppEvent>) {
+    let _ = events.send(AppEvent::ApprovalsChanged);
+}
 
 // Server-side events fanned out to every connected client and consumed by the
 // persistence task. Structured (not pre-serialized JSON) so the persistence

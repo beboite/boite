@@ -3,6 +3,7 @@ import {
   gitFailure,
   gitFailureKey,
   projectHealth,
+  refreshLogLevel,
   repoCardsVisible,
   type HealthProbe,
 } from "./health";
@@ -52,6 +53,21 @@ describe("gitFailureKey", () => {
     expect(gitFailureKey("pathMissing")).toBe("project.folderGone");
     expect(gitFailureKey("notARepo")).toBe("project.notARepo");
     expect(gitFailureKey("detached")).toBe("git.detachedHead");
+  });
+});
+
+describe("refreshLogLevel", () => {
+  it("keeps a folder that is not a repository out of the error log", () => {
+    // A fresh install's Scratch project sits on the home directory and is
+    // refreshed every ten seconds. At `error` that is six lines a minute about
+    // a folder nobody ever said was a repository.
+    expect(refreshLogLevel("notARepo")).toBe("debug");
+    expect(refreshLogLevel("pathMissing")).toBe("debug");
+  });
+
+  it("still reports a failure nothing on the page explains", () => {
+    expect(refreshLogLevel("unknown")).toBe("error");
+    expect(refreshLogLevel("detached")).toBe("error");
   });
 });
 

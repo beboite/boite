@@ -98,7 +98,22 @@ export function release(threadId: string): void {
   feeds.delete(threadId);
   pending.delete(threadId);
   states.delete(threadId);
-  delete views[threadId];
+  // The open questions stay, the timeline goes.
+  //
+  // A pane is not the only reader: the approvals dock draws its card out of
+  // this view, and closing the pane is exactly how a user puts a chat thread's
+  // question aside without answering it. Dropping the view whole took the card
+  // with it and left the word "Loading" over a thread that was waiting. The
+  // items are the expensive half and a pane that opens again reads them back
+  // from the host, so what is kept is a handful of requests and nothing else.
+  // Nothing is subscribed for them: the answer closes the `approvals` row, and
+  // that is what takes the card off the dock.
+  const open = views[threadId]?.requests.filter((request) => request.outcome === null) ?? [];
+  if (open.length === 0) {
+    delete views[threadId];
+    return;
+  }
+  views[threadId] = { ...emptyState(), requests: open };
 }
 
 /** Every loaded thread lets go, for a disconnect or a window teardown. */

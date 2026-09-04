@@ -247,13 +247,13 @@ export async function openChat(client: DevApp, driver = "Claude"): Promise<strin
   const pane = chatPaneSelector(opened);
   // The session, retried through the composer's own button.
   //
-  // `launchChat` fires `pilot.open` without waiting for the row to be written
-  // (`src/lib/features/thread/api.ts`), so on a machine under load the open is
-  // refused with "no thread <id>" and the pane comes up with no session. The
-  // way back in is the button the pane draws for exactly that state, and by the
-  // time it is clicked the row is there. Kept as a retry rather than a longer
-  // wait: the race is the app's and is reported as one, and a scenario that
-  // slept through it would only hide it.
+  // `launchChat` used to fire `pilot.open` without waiting for the row to be
+  // written, so on a machine under load the open was refused with "no thread
+  // <id>" and the pane came up with no session; it awaits the write now
+  // (`src/lib/features/thread/api.ts`). The retry stays because the button is
+  // the way back in from every other reason an open can fail, a driver that is
+  // not installed included, and a scenario that could not use it would fail
+  // with a timeout instead of a sentence.
   for (let attempt = 0; attempt < 6; attempt++) {
     try {
       await client.waitFor(

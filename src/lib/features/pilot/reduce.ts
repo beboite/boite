@@ -18,10 +18,24 @@ import type {
   PilotItem,
   PilotItemRow,
   PilotRequest,
+  PilotRequestOption,
+  PilotRequestOutcome,
   PilotStatus,
   PilotTurnDiff,
   PilotUsage,
 } from "./types";
+
+/**
+ * A request as the timeline carries it: what was asked, and how it ended.
+ *
+ * The outcome is not on the wire type, a driver having no word for it when it
+ * asks. It is the row's own, which is why a state rebuilt from rows is the only
+ * place it can come from.
+ */
+export interface PilotStoredRequest extends PilotRequest {
+  /** Null while the question is open. */
+  outcome: PilotRequestOutcome | null;
+}
 
 /** One thread's timeline and everything drawn beside it. */
 export interface PilotThreadState {
@@ -29,8 +43,15 @@ export interface PilotThreadState {
   items: PilotItemRow[];
   /** Item id to its position in `items`, so a completion is not a scan. */
   index: Map<string, number>;
-  /** The requests still waiting for an answer, oldest first. */
-  requests: PilotRequest[];
+  /**
+   * Every question this thread has asked, oldest first, answered ones kept.
+   *
+   * The dock draws a card by looking its request id up here, and it keeps
+   * drawing it for the moment between the answer being sent and the approvals
+   * row closing. Dropped on resolve, that moment is a card that reads
+   * "Loading". `status` is decided on the open ones alone (`openRequests`).
+   */
+  requests: PilotStoredRequest[];
   status: PilotStatus;
   model: string | null;
   mode: PilotExecMode;
@@ -77,7 +98,74 @@ export function emptyState(): PilotThreadState {
  */
 export function fromRows(rows: PilotItemRow[], into = emptyState()): PilotThreadState {
   for (const row of rows) put(into, row);
+  // Rebuilt whole rather than appended to: a page of rows may update a request
+  // this state already carries, and the row is what says how it ended.
+  into.requests = requestsOf(into.items);
   return into;
+}
+
+/** The open questions, which are the ones a status is decided on. */
+export function openRequests(state: PilotThreadState): PilotStoredRequest[] {
+  return state.requests.filter((request) => request.outcome === null);
+}
+
+/**
+ * The questions a page of rows carries, in the order they were asked.
+ *
+ * A request row's body is the request as the driver sent it, and an answer adds
+ * `outcome` to that body rather than replacing it (`boite_core::pilot`). So the
+ * tool name, the input and the options the driver offered all survive a reload,
+ * which is what the dock draws its card out of: it looks a request id up in
+ * `requests` and has nothing else to fall back on.
+ */
+function requestsOf(items: PilotItemRow[]): PilotStoredRequest[] {
+  const requests: PilotStoredRequest[] = [];
+  for (const row of items) {
+    if (row.kind !== "request") continue;
+    const request = storedRequest(row);
+    if (request) requests.push(request);
+  }
+  return requests;
+}
+
+function storedRequest(row: PilotItemRow): PilotStoredRequest | null {
+  const body = row.body;
+  if (!body) return null;
+  const id = text(body.id) ?? text(body.requestId);
+  if (!id) return null;
+  return {
+    id,
+    kind: (text(body.kind) as PilotRequest["kind"] | null) ?? "tool_approval",
+    tool_name: text(body.tool_name),
+    tool_use_id: text(body.tool_use_id),
+    input: body.input,
+    title: text(body.title),
+    description: text(body.description),
+    options: options(body.options),
+    suggestions: body.suggestions,
+    outcome: outcomeOf(row),
+  };
+}
+
+/** The verdict on the row, or null while the question is still open. */
+function outcomeOf(row: PilotItemRow): PilotRequestOutcome | null {
+  const word = row.state === "open" ? text(row.body?.outcome) : row.state;
+  if (word === "allowed" || word === "denied" || word === "cancelled") return word;
+  return null;
+}
+
+function text(value: unknown): string | null {
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function options(value: unknown): PilotRequestOption[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  return value.filter(
+    (option): option is PilotRequestOption =>
+      !!option &&
+      typeof (option as PilotRequestOption).value === "string" &&
+      typeof (option as PilotRequestOption).label === "string",
+  );
 }
 
 /** Applies one event. Answers whether anything a pane draws changed. */
@@ -97,7 +185,9 @@ export function reduce(state: PilotThreadState, event: PilotEvent): boolean {
       state.status = "idle";
       // A process that went takes its open questions with it: nothing is left
       // to answer them, and a card that cannot be answered must not stay up.
-      state.requests = [];
+      // What was answered stays: it is history, and the dock may still be
+      // drawing the card the answer closed.
+      state.requests = state.requests.filter((request) => request.outcome !== null);
       return true;
     }
     case "turn.started": {
@@ -167,13 +257,18 @@ export function reduce(state: PilotThreadState, event: PilotEvent): boolean {
       return true;
     }
     case "request.opened": {
-      state.requests = [...state.requests, event.request];
+      state.requests = [...state.requests, { ...event.request, outcome: null }];
       put(state, requestRow(state, event.request, "open"));
       state.status = "waiting";
       return true;
     }
     case "request.resolved": {
-      state.requests = state.requests.filter((request) => request.id !== event.request_id);
+      // Marked, not dropped. The dock finds its card by request id, and a
+      // request that leaves the list between the answer and the approvals row
+      // closing takes the card with it and leaves the word "Loading".
+      state.requests = state.requests.map((request) =>
+        request.id === event.request_id ? { ...request, outcome: event.outcome } : request,
+      );
       const id = `request:${event.request_id}`;
       const body = existingBody(state, id);
       put(state, {
@@ -181,7 +276,7 @@ export function reduce(state: PilotThreadState, event: PilotEvent): boolean {
         body: { ...body, requestId: event.request_id, outcome: event.outcome },
       });
       // Back to work, unless another question is still up.
-      state.status = state.requests.length > 0 ? "waiting" : "busy";
+      state.status = openRequests(state).length > 0 ? "waiting" : "busy";
       return true;
     }
     case "status.changed": {

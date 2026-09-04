@@ -132,6 +132,13 @@ impl EventSink for DesktopSink {
                 json!({ "threadId": thread_id, "status": status_word(status) }),
             );
         }
+        // The dock, which learned of a chat thread's question from a reload and
+        // from nothing else: `boite://approvals-changed` was emitted by the
+        // agent endpoint alone, and the `approvals` row this projection writes
+        // is the same row from the same table.
+        if projected.approvals_changed {
+            crate::agent_api::announce_approvals_changed(&self.app);
+        }
         match &event {
             // Held for the tick. Nothing else is: a complete item, a request and
             // a turn edge go out at once, and the thread's pending text goes

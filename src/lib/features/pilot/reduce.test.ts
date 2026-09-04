@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { emptyState, fromRows, reduce, turnDiff } from "./reduce";
+import { emptyState, fromRows, openRequests, reduce, turnDiff } from "./reduce";
 import type { PilotEvent, PilotItemRow } from "./types";
 
 function row(over: Partial<PilotItemRow> & Pick<PilotItemRow, "id" | "seq">): PilotItemRow {
@@ -140,7 +140,10 @@ describe("the pilot reduction", () => {
     expect(cards).toHaveLength(1);
 
     reduce(state, { kind: "request.resolved", request_id: "r1", outcome: "allowed" });
-    expect(state.requests).toHaveLength(0);
+    // Marked rather than dropped: the dock draws its card out of this list and
+    // the approvals row it is mounted on closes a moment later.
+    expect(openRequests(state)).toHaveLength(0);
+    expect(state.requests.map((request) => request.outcome)).toEqual(["allowed"]);
     expect(state.status).toBe("busy");
     expect(state.items.filter((item) => item.kind === "request")).toHaveLength(1);
     expect(state.items.find((item) => item.kind === "request")?.state).toBe("allowed");
@@ -153,7 +156,7 @@ describe("the pilot reduction", () => {
       { kind: "request.resolved", request_id: "r1", outcome: "allowed" },
     ]);
     expect(state.status).toBe("waiting");
-    expect(state.requests.map((request) => request.id)).toEqual(["r2"]);
+    expect(openRequests(state).map((request) => request.id)).toEqual(["r2"]);
   });
 
   it("takes a session that went as the end of every open question", () => {
@@ -162,6 +165,7 @@ describe("the pilot reduction", () => {
       { kind: "session.exited", reason: { reason: "stopped" } },
     ]);
     expect(state.requests).toHaveLength(0);
+    expect(openRequests(state)).toHaveLength(0);
     expect(state.status).toBe("idle");
   });
 
@@ -254,6 +258,75 @@ describe("the pilot reduction", () => {
     expect(state.items[0].kind).toBe("turn");
     expect(state.items[0].state).toBe("completed");
     expect(state.items[1].body?.text).toBe("half done");
+  });
+
+  it("rebuilds the open questions off the rows, with what the driver asked", () => {
+    const state = fromRows([
+      row({
+        id: "request:r1",
+        seq: 1,
+        kind: "request",
+        state: "open",
+        body: {
+          id: "r1",
+          kind: "tool_approval",
+          tool_name: "Bash",
+          input: { command: "git status" },
+          options: [
+            { value: "allow", label: "Allow" },
+            { value: "deny", label: "Deny" },
+          ],
+        },
+      }),
+    ]);
+    // The card the dock is drawing survives the reload that dropped it: it
+    // looks its request id up here and has nothing else to draw from.
+    expect(state.requests).toHaveLength(1);
+    const request = state.requests[0];
+    expect(request.id).toBe("r1");
+    expect(request.tool_name).toBe("Bash");
+    expect(request.input).toEqual({ command: "git status" });
+    expect(request.options?.map((option) => option.value)).toEqual(["allow", "deny"]);
+    expect(request.outcome).toBeNull();
+    expect(openRequests(state)).toHaveLength(1);
+  });
+
+  it("rebuilds an answered question too, outcome and all", () => {
+    const state = fromRows([
+      row({
+        id: "request:r1",
+        seq: 1,
+        kind: "request",
+        state: "allowed",
+        body: {
+          id: "r1",
+          requestId: "r1",
+          kind: "tool_approval",
+          tool_name: "Bash",
+          outcome: "allowed",
+          options: [{ value: "allow", label: "Allow" }],
+        },
+      }),
+    ]);
+    expect(state.requests.map((request) => request.outcome)).toEqual(["allowed"]);
+    expect(state.requests[0].tool_name).toBe("Bash");
+    expect(openRequests(state)).toHaveLength(0);
+  });
+
+  it("answers a question that was only ever read back off the rows", () => {
+    const state = fromRows([
+      row({
+        id: "request:r1",
+        seq: 1,
+        kind: "request",
+        state: "open",
+        body: { id: "r1", kind: "tool_approval", tool_name: "Bash" },
+      }),
+    ]);
+    reduce(state, { kind: "request.resolved", request_id: "r1", outcome: "denied" });
+    expect(state.requests[0].outcome).toBe("denied");
+    expect(openRequests(state)).toHaveLength(0);
+    expect(state.items.filter((item) => item.kind === "request")).toHaveLength(1);
   });
 
   it("a completed card keeps the position it opened at", () => {
