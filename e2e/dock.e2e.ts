@@ -42,11 +42,10 @@ describe("dock", () => {
       60_000,
     );
     // The pane goes, the question stays: that is the whole point of a dock.
-    // `pilot.close` is what the header's button is labelled, in English
-    // "Close the pane"; the scenario was written against a "Close chat" that
-    // never existed and could only ever have refused.
+    // Selected by its test id rather than its label: the label changed once
+    // already and took the scenario down with it.
     await dev.click(
-      `[data-testid='chat-pane'][data-thread='${thread}'] [aria-label='Close the pane']`,
+      `[data-testid='chat-pane'][data-thread='${thread}'] [data-testid='chat-close']`,
     );
     await sleep(500);
     const panes = await dev.js<number>(

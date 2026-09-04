@@ -262,6 +262,7 @@
       class="press ml-auto shrink-0 rounded p-1 text-muted-foreground transition hover:bg-[var(--color-surface-2)] hover:text-foreground focus:outline-none focus-visible:focus-ring"
       onclick={() => paneStore.closePane(paneId)}
       aria-label={t("pilot.close")}
+      data-testid="chat-close"
     >
       <X class="size-3.5" />
     </button>
