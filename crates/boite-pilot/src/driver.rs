@@ -124,11 +124,22 @@ pub struct TurnInput {
     /// that is an in-session switch or a restart before it gets here.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub selection: Option<ModelSelection>,
+    /// The turn id the caller has already minted, when it has.
+    ///
+    /// A driver mints its own when this is empty, which is every call that has
+    /// nothing to say before the turn opens. The host names one when it has to
+    /// write a row *before* the prompt goes out: the user's own message is the
+    /// first card of a turn, and an item is filed under the turn it belongs to,
+    /// so the id has to exist on this side of the call. Without it the message
+    /// could only be written once `prompt` returned, which for a driver that
+    /// answers inside `prompt` is after the whole turn.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turn_id: Option<String>,
 }
 
 impl TurnInput {
     pub fn text(text: impl Into<String>) -> Self {
-        Self { text: text.into(), selection: None }
+        Self { text: text.into(), selection: None, turn_id: None }
     }
 }
 

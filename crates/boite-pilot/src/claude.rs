@@ -330,7 +330,12 @@ impl Session for ClaudeSession {
         if let Some(selection) = input.selection.clone() {
             self.set_model(selection).await?;
         }
-        let turn_id = format!("turn_{}", uuid::Uuid::new_v4());
+        // The caller's id when it named one, so a row it wrote before the
+        // prompt is filed under the same turn this opens.
+        let turn_id = input
+            .turn_id
+            .clone()
+            .unwrap_or_else(|| format!("turn_{}", uuid::Uuid::new_v4()));
         let session_id = {
             let mut state = self.shared.state.lock();
             if state.exited {

@@ -287,7 +287,10 @@ impl ScriptedSession {
 #[async_trait]
 impl Session for ScriptedSession {
     async fn prompt(&self, input: TurnInput) -> Result<TurnId, PilotError> {
-        let turn_id = format!("turn_{}", uuid::Uuid::new_v4());
+        let turn_id = input
+            .turn_id
+            .clone()
+            .unwrap_or_else(|| format!("turn_{}", uuid::Uuid::new_v4()));
         let index = {
             let mut state = self.state.lock();
             if state.exited {

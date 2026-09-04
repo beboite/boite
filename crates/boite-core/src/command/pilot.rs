@@ -577,10 +577,14 @@ fn fastpick_models(provider: &str, models: &Value) -> Vec<Value> {
 }
 
 /// The turn input a `pilot.turn.start` carries.
-pub fn turn_input(text: String, model: Option<String>) -> TurnInput {
+///
+/// `turn_id` is the host's when the host had to write a row before the prompt,
+/// and `None` everywhere else, which leaves the driver to mint its own.
+pub fn turn_input(text: String, model: Option<String>, turn_id: Option<String>) -> TurnInput {
     TurnInput {
         text,
         selection: model.map(ModelSelection::model),
+        turn_id,
     }
 }
 

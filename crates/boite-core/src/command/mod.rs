@@ -515,7 +515,15 @@ pub enum Ready {
     /// `prepare` and travels here rather than being fetched later — which keeps
     /// "a host that keeps no records" a refusal at the boundary instead of an
     /// error thrown from inside the work.
-    Records(Records, Arc<Store>, Option<Arc<TelemetryRuntime>>),
+    /// The pilot runtime rides along for the two verbs that end a thread:
+    /// settling a row and deleting one both have to stop the child a chat
+    /// thread is, and neither is a pilot call.
+    Records(
+        Records,
+        Arc<Store>,
+        Option<Arc<TelemetryRuntime>>,
+        Option<Arc<boite_pilot::Runtime>>,
+    ),
     /// An orchestration command, with the store and the live-wait registry the
     /// host resolved for it. Same reasoning as [`Ready::Records`]; the registry
     /// is optional because a host with no long-poll answers honestly without.
@@ -562,7 +570,9 @@ impl Ready {
                 "{} runs on the host's runtime, through boite_core::pilot_host::execute",
                 ready.call.name()
             )),
-            Ready::Records(r, store, telemetry) => r.run(&store, telemetry.as_deref()),
+            Ready::Records(r, store, telemetry, pilot) => {
+                r.run(&store, telemetry.as_deref(), pilot.as_ref())
+            }
             Ready::Conduct(c, store, waiters) => c.run(&store, waiters),
             Ready::Telemetry(t, runtime) => t.run(&runtime),
         }

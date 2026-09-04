@@ -246,15 +246,24 @@ pub fn project(
                 RequestOutcome::Cancelled => "cancelled",
             };
             // The item keeps the request's own id, so this updates the card the
-            // dock is drawing rather than opening a second one.
+            // dock is drawing rather than opening a second one. And it keeps
+            // what the request *was*: the kind, the tool, its input, the title,
+            // the description and the options the driver offered. Written as
+            // the outcome alone, an answered card read "Question" after a
+            // reload whatever tool had asked, because the only thing left on
+            // the row was the word `allowed`.
+            let id = request_item_id(request_id);
+            let mut body = existing_body(store, &id);
+            body.insert("requestId".to_string(), json!(request_id));
+            body.insert("outcome".to_string(), json!(state));
             let row = PilotItemRow {
-                id: request_item_id(request_id),
+                id,
                 thread_id: thread_id.to_string(),
                 seq,
                 turn_id: None,
                 kind: "request".to_string(),
                 state: state.to_string(),
-                body: json!({ "requestId": request_id, "outcome": state }).to_string(),
+                body: Value::Object(body).to_string(),
                 created_ms: crate::pilot::now_ms(),
                 updated_ms: crate::pilot::now_ms(),
             };
@@ -276,10 +285,20 @@ pub fn project(
             );
         }
 
-        // Live only, and the host feeds it the same place a terminal thread's
-        // status is fed. No TTL and no screen reading: for a pilot row this is
-        // the only source there is.
+        // The only status source a pilot row has: no TTL, no screen reading, no
+        // pid registry. Written onto the same column the terminal runtime uses
+        // (`thread.started` writes `running` there), because that is the field
+        // the sidebar reads. Written here rather than by the chat pane, which
+        // was the whole defect: a status that only reached the sidebar while
+        // somebody had the pane open, and a chat thread working in a hidden
+        // group that read `ready` for as long as nobody looked at it.
         PilotEvent::StatusChanged { status } => {
+            store.update_thread_field(
+                thread_id,
+                ThreadCol::Status,
+                ColVal::Text(status_word(*status).to_string()),
+            )?;
+            out.thread_updated = true;
             out.status = Some(*status);
         }
 
@@ -355,6 +374,33 @@ pub fn answer_of_option(value: &str, options: &[RequestOption]) -> RequestAnswer
 /// `request.resolved` finds the row `request.opened` wrote.
 pub fn request_item_id(request_id: &str) -> String {
     format!("request:{request_id}")
+}
+
+/// The item id the user's own message of a turn carries.
+///
+/// Derived from the turn rather than minted, so the host can write the card
+/// before the prompt goes out and a resend of the same turn updates one row
+/// instead of stacking two.
+pub fn user_message_item_id(turn_id: &str) -> String {
+    format!("{turn_id}#user")
+}
+
+/// The body a row already carries, as an object.
+///
+/// Empty for a row that is not there yet or whose body is not an object, which
+/// is the honest answer: an update merges onto what it finds, and finding
+/// nothing means writing what it was given.
+fn existing_body(store: &Store, item_id: &str) -> serde_json::Map<String, Value> {
+    store
+        .pilot_item(item_id)
+        .ok()
+        .flatten()
+        .and_then(|row| serde_json::from_str::<Value>(&row.body).ok())
+        .and_then(|value| match value {
+            Value::Object(map) => Some(map),
+            _ => None,
+        })
+        .unwrap_or_default()
 }
 
 /// Writes one boite-authored line onto a thread's timeline.
@@ -665,10 +711,8 @@ mod tests {
         assert!(row.body.contains(&"x".repeat(200)), "{}", row.body);
     }
 
-    #[test]
-    fn a_session_start_writes_the_native_id_and_the_model() {
-        let store = store();
-        let buffer = DeltaBuffer::new();
+    /// The chat row the projection writes onto.
+    fn chat_row(store: &Store) {
         store
             .save_thread(&crate::model::Thread {
                 id: "t1".into(),
@@ -701,6 +745,13 @@ mod tests {
                 pilot_options: None,
             })
             .unwrap();
+    }
+
+    #[test]
+    fn a_session_start_writes_the_native_id_and_the_model() {
+        let store = store();
+        let buffer = DeltaBuffer::new();
+        chat_row(&store);
         let projection = apply(
             &store,
             &buffer,
@@ -797,10 +848,72 @@ mod tests {
         assert_eq!(card.state, "allowed");
     }
 
+    /// An answered card still says what was asked.
+    ///
+    /// The outcome used to replace the body rather than be added to it, so
+    /// after a reload every resolved request read "Question" whatever tool had
+    /// asked: the kind, the tool name, the input and the options the driver
+    /// offered were all gone, and the dock's own vocabulary check
+    /// (`offered_options`) had nothing left to read either.
     #[test]
-    fn a_status_change_is_live_only() {
+    fn an_answered_request_keeps_what_it_was() {
         let store = store();
         let buffer = DeltaBuffer::new();
+        let request = Request {
+            id: "r2".into(),
+            kind: RequestKind::ToolApproval,
+            tool_name: Some("Bash".into()),
+            tool_use_id: None,
+            input: json!({ "command": "ls -la" }),
+            title: Some("run a command".into()),
+            description: Some("in the worktree".into()),
+            options: vec![RequestOption {
+                value: "allow".into(),
+                label: "Allow".into(),
+            }],
+            suggestions: Value::Null,
+        };
+        apply(&store, &buffer, PilotEvent::RequestOpened { request });
+        apply(
+            &store,
+            &buffer,
+            PilotEvent::RequestResolved {
+                request_id: "r2".into(),
+                outcome: RequestOutcome::Denied,
+            },
+        );
+        let card = store
+            .pilot_item(&request_item_id("r2"))
+            .unwrap()
+            .expect("the request card");
+        assert_eq!(card.state, "denied");
+        let body: Value = serde_json::from_str(&card.body).expect("readable");
+        assert_eq!(body["outcome"], "denied");
+        assert_eq!(body["kind"], "tool_approval");
+        assert_eq!(body["tool_name"], "Bash");
+        assert_eq!(body["input"]["command"], "ls -la");
+        assert_eq!(body["title"], "run a command");
+        assert_eq!(body["description"], "in the worktree");
+        assert_eq!(body["options"][0]["value"], "allow");
+        // The whole card parses back as the request it was, which is what the
+        // host reads to check an answer against the options the driver offered.
+        let read: Request = serde_json::from_str(&card.body).expect("still a request");
+        assert_eq!(read.tool_name.as_deref(), Some("Bash"));
+    }
+
+    /// A status is journaled nowhere and lands on the row all the same.
+    ///
+    /// The two halves are separate facts. Nothing is written to `pilot_events`
+    /// or `pilot_items`, a reading not being a thing that happened; but the
+    /// `threads.status` column is the field the sidebar reads and the field the
+    /// terminal runtime writes, so the projection is what fills it. It used to
+    /// be the chat pane, which meant a chat thread reported its status only
+    /// while somebody had its pane mounted.
+    #[test]
+    fn a_status_change_writes_the_row_and_journals_nothing() {
+        let store = store();
+        let buffer = DeltaBuffer::new();
+        chat_row(&store);
         let projection = apply(
             &store,
             &buffer,
@@ -811,7 +924,36 @@ mod tests {
         assert_eq!(projection.seq, None, "a reading is not a fact");
         assert_eq!(projection.status, Some(Status::Busy));
         assert!(projection.push, "the sidebar still reads it");
+        assert!(projection.thread_updated, "the row changed, so the sidebar is woken");
         assert_eq!(store.pilot_counts("t1").unwrap(), (0, 0));
+        // The stored word, not `load_thread`'s: that one maps a row still
+        // naming a run to `stopped` for a reader, and what is being checked
+        // here is the column itself.
+        let stored = || store.thread_status("t1").map(|(status, _)| status);
+        assert_eq!(
+            stored().as_deref(),
+            Some("running"),
+            "the same word the terminal runtime writes"
+        );
+
+        // And back, so a turn that ended clears the dot without anything else
+        // having to notice it did.
+        apply(
+            &store,
+            &buffer,
+            PilotEvent::StatusChanged {
+                status: Status::Waiting,
+            },
+        );
+        assert_eq!(stored().as_deref(), Some("waiting"));
+        apply(
+            &store,
+            &buffer,
+            PilotEvent::StatusChanged {
+                status: Status::Idle,
+            },
+        );
+        assert_eq!(stored().as_deref(), Some("ready"));
     }
 
     #[test]

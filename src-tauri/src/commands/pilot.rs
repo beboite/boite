@@ -16,7 +16,7 @@ use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager};
 
 use boite_core::command::{Command, Pilot};
-use boite_core::pilot::{project, DeltaBuffer};
+use boite_core::pilot::{project, status_word, DeltaBuffer};
 use boite_core::pilot_host::{execute, Coalescer};
 use boite_core::scope::ProjectRoots;
 use boite_core::store::Store;
@@ -31,6 +31,15 @@ use super::records::Rows;
 /// on the id it is drawing. A channel per pane would mean the sink knowing
 /// which panes exist, which is the window's business and not this side's.
 pub const PILOT_EVENT: &str = "pilot://event";
+
+/// The Tauri event the sidebar's status listener reads.
+///
+/// A chat thread's status is told rather than measured, and it has to reach the
+/// window whether or not its pane is mounted: an agent's own thread lives in a
+/// hidden group, and the one thing the user watches from outside it is the dot.
+/// The name mirrors the `thread.status` the server pushes over its socket, so
+/// the two hosts say the same thing in the same words.
+pub const THREAD_STATUS: &str = "boite://thread-status";
 
 /// How long a delta waits for the ones behind it.
 const COALESCE_MS: u64 = 30;
@@ -105,8 +114,23 @@ impl EventSink for DesktopSink {
     fn emit(&self, thread_id: &str, event: PilotEvent) {
         // The projection first and always: a push the rows never learned about
         // is a timeline that disagrees with itself the moment a client reloads.
-        if let Err(failure) = project(&self.store, thread_id, &event, &self.buffer) {
-            tracing::warn!(thread = thread_id, reason = %failure, "pilot.project.failed");
+        let projected = match project(&self.store, thread_id, &event, &self.buffer) {
+            Ok(projected) => projected,
+            Err(failure) => {
+                tracing::warn!(thread = thread_id, reason = %failure, "pilot.project.failed");
+                Default::default()
+            }
+        };
+        // The sidebar, and it goes out whatever pane is mounted. A chat pane
+        // used to derive this from its own store, so a thread working in a
+        // hidden group, which is where an agent's own thread nearly always is,
+        // reported nothing at all. The server's sink already answers this on
+        // its own channel; this is the same fact on the desktop's.
+        if let Some(status) = projected.status {
+            let _ = self.app.emit(
+                THREAD_STATUS,
+                json!({ "threadId": thread_id, "status": status_word(status) }),
+            );
         }
         match &event {
             // Held for the tick. Nothing else is: a complete item, a request and

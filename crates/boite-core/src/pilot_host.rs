@@ -63,8 +63,22 @@ pub async fn execute(ready: PilotReady) -> Result<Value, String> {
             text,
             model,
         } => {
+            // The turn is named here rather than by the driver, and the whole
+            // reason is the card below. The user's own message is the first
+            // item of a turn and an item is filed under its turn, so the id has
+            // to exist before the prompt goes out. Written after `prompt`
+            // returned it would land behind the answer for a driver that
+            // answers inside the call, and the timeline would open on a reply
+            // to a question that is nowhere on it.
+            let turn = format!("turn_{}", uuid::Uuid::new_v4());
+            // Only for a thread that has a session. `prompt` refuses one that
+            // does not, and a message written for a turn nothing will run is a
+            // card the user cannot get rid of.
+            if runtime.status(&thread_id).is_some() {
+                runtime.emit(&thread_id, user_message(&turn, &text));
+            }
             let turn = runtime
-                .prompt(&thread_id, turn_input(text, model))
+                .prompt(&thread_id, turn_input(text, model, Some(turn)))
                 .await
                 .map_err(|e| e.to_string())?;
             tracing::debug!(thread = thread_id, turn = turn, "pilot.turn.start");
@@ -192,6 +206,33 @@ pub async fn execute(ready: PilotReady) -> Result<Value, String> {
         // the call reached here, and the bus's answer is whether it was allowed
         // to. Same shape as `logs.subscribe`.
         Pilot::Subscribe { .. } => Ok(json!(null)),
+    }
+}
+
+/// The user's own line, as a completed timeline item.
+///
+/// `item.completed` rather than a row written straight at the store: the card
+/// is journaled, sequenced and pushed exactly like one the agent sent, so a
+/// reload finds it in order and a pane that is already open paints it at once.
+fn user_message(turn_id: &str, text: &str) -> boite_pilot::PilotEvent {
+    let item = boite_pilot::Item::new(
+        crate::pilot::user_message_item_id(turn_id),
+        boite_pilot::ItemKind::UserMessage,
+        Some(turn_id.to_string()),
+    )
+    .with_body(json!({ "text": text }));
+    boite_pilot::PilotEvent::ItemCompleted { item }
+}
+
+/// Stops the session a settled or deleted row leaves behind.
+///
+/// The records domain is synchronous and this is what it can call: the session
+/// is closed at once and only the child's grace waits. A host with no pilot
+/// runtime has nothing to stop, which is every host that never opened a chat
+/// thread.
+pub fn stop_detached(runtime: Option<&std::sync::Arc<boite_pilot::Runtime>>, thread_id: &str) {
+    if let Some(runtime) = runtime {
+        runtime.stop_detached(thread_id);
     }
 }
 
@@ -445,6 +486,21 @@ mod tests {
         }
     }
 
+    /// A sink that does what a host's does: project, and nothing else.
+    ///
+    /// The tests that care about rows need the real projection, since that is
+    /// what writes them; `Recorder` keeps the events and writes nothing.
+    struct Projecting {
+        store: Arc<Store>,
+        buffer: crate::pilot::DeltaBuffer,
+    }
+
+    impl boite_pilot::EventSink for Projecting {
+        fn emit(&self, thread_id: &str, event: PilotEvent) {
+            let _ = crate::pilot::project(&self.store, thread_id, &event, &self.buffer);
+        }
+    }
+
     fn spec() -> OpenSpec {
         OpenSpec {
             thread_id: "t1".into(),
@@ -535,6 +591,101 @@ mod tests {
             .filter(|event| matches!(event, PilotEvent::SessionExited { .. }))
             .count();
         assert_eq!(exits, 1, "the session that was replaced said goodbye once");
+    }
+
+    /// The user's own line is the first card of the turn it opened.
+    ///
+    /// Two things are asserted and both were wrong on the first live run. The
+    /// message is on the timeline at all, which it was not: the driver echoes
+    /// nothing and the pane drew an answer to a question nowhere on screen. And
+    /// it is written *before* the prompt, so its sequence is below the turn's
+    /// and below everything the turn produced. The scripted driver plays a
+    /// whole turn inside `prompt`, which is exactly the case that would put the
+    /// message last if it were written off the id `prompt` answered with.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_turn_opens_on_the_users_own_message() {
+        let store = store("usermsg");
+        store.save_thread(&row(None)).expect("row");
+
+        // The real sink, so the event goes through the projection the way it
+        // does on a host: a card written anywhere else would not be journaled.
+        let sink = Arc::new(Projecting {
+            store: store.clone(),
+            buffer: crate::pilot::DeltaBuffer::new(),
+        });
+        let runtime = Arc::new(Runtime::new(sink));
+        runtime.register(Arc::new(ScriptedDriver::with_scenario(Scenario {
+            steps: vec![boite_pilot::scripted::Step {
+                deltas: vec!["done".into()],
+                ..Default::default()
+            }],
+            ..Default::default()
+        })));
+        runtime.open(spec()).await.expect("a session");
+
+        let answer = execute(PilotReady {
+            call: Pilot::TurnStart {
+                thread_id: "t1".into(),
+                text: "rename the function".into(),
+                model: None,
+            },
+            store: store.clone(),
+            runtime: runtime.clone(),
+            spec: None,
+        })
+        .await
+        .expect("the turn");
+        let turn = answer["turnId"].as_str().expect("a turn id").to_string();
+
+        let items = store.pilot_items("t1", 0, 50).expect("items");
+        let message = items
+            .iter()
+            .find(|row| row.kind == "user_message")
+            .expect("the user's own message");
+        assert_eq!(message.id, crate::pilot::user_message_item_id(&turn));
+        assert_eq!(message.turn_id.as_deref(), Some(turn.as_str()));
+        assert_eq!(message.state, "completed");
+        let body: Value = serde_json::from_str(&message.body).expect("readable");
+        assert_eq!(body["text"], "rename the function");
+
+        // Below the turn row and below the answer: the journal order is the
+        // order things happened, and the user asked first.
+        let seq_of = |kind: &str| {
+            items.iter().find(|row| row.kind == kind).map(|row| row.seq).expect(kind)
+        };
+        assert!(message.seq < seq_of("turn"), "the message opens the turn");
+        assert!(
+            message.seq < seq_of("assistant_text"),
+            "the message comes before the answer to it"
+        );
+    }
+
+    /// A thread with no session writes no message.
+    ///
+    /// `prompt` refuses it, and a card for a turn nothing will ever run is one
+    /// the user cannot get rid of.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_turn_on_a_closed_session_leaves_no_card() {
+        let store = store("usermsg-closed");
+        store.save_thread(&row(None)).expect("row");
+        let sink = Arc::new(Projecting {
+            store: store.clone(),
+            buffer: crate::pilot::DeltaBuffer::new(),
+        });
+        let runtime = Arc::new(Runtime::new(sink));
+        execute(PilotReady {
+            call: Pilot::TurnStart {
+                thread_id: "t1".into(),
+                text: "hello".into(),
+                model: None,
+            },
+            store: store.clone(),
+            runtime,
+            spec: None,
+        })
+        .await
+        .expect_err("no session");
+        assert_eq!(store.pilot_counts("t1").unwrap(), (0, 0));
     }
 
     /// A driver that cannot change model at all is an error the picker shows,

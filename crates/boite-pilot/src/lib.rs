@@ -42,6 +42,14 @@ pub struct Runtime {
     drivers: Mutex<HashMap<String, Arc<dyn Driver>>>,
 }
 
+/// The threads it holds and nothing else: a session is a child process and a
+/// pair of pipes, and printing one would say nothing a caller can act on.
+impl std::fmt::Debug for Runtime {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Runtime").field("threads", &self.open_threads()).finish()
+    }
+}
+
 impl Runtime {
     /// A runtime with the drivers this build ships.
     pub fn new(sink: Arc<dyn EventSink>) -> Self {
@@ -114,6 +122,17 @@ impl Runtime {
         self.session(thread_id)?.prompt(input).await
     }
 
+    /// Puts an event of boite's own onto a thread's stream.
+    ///
+    /// The same door the drivers write through, on purpose: the sink projects
+    /// and pushes in one call, so a card boite authored is journaled, ordered
+    /// and painted exactly like one the agent sent. The user's own message is
+    /// the one that matters today, and it has to land before the prompt goes
+    /// out or the timeline opens on an answer to a question nobody can see.
+    pub fn emit(&self, thread_id: &str, event: PilotEvent) {
+        self.sink.emit(thread_id, event);
+    }
+
     pub async fn interrupt(&self, thread_id: &str) -> Result<(), PilotError> {
         self.session(thread_id)?.interrupt().await
     }
@@ -146,6 +165,38 @@ impl Runtime {
         match session {
             Some(session) => session.stop().await,
             None => Err(PilotError::NoSession(thread_id.to_string())),
+        }
+    }
+
+    /// The polite stop a synchronous caller can make.
+    ///
+    /// The records domain is the caller: settling a row and deleting one are
+    /// plain store writes with no executor under them, and a chat thread whose
+    /// row went while its child stayed is an agent working for nobody. The
+    /// session leaves the map here, so the thread is closed the moment this
+    /// returns and a second call finds nothing; only the grace the child is
+    /// owed is what waits, on the host's runtime when there is one and on a
+    /// thread of its own when the caller is not on an executor at all.
+    pub fn stop_detached(&self, thread_id: &str) {
+        let Some(session) = self.sessions.lock().remove(thread_id) else {
+            return;
+        };
+        match tokio::runtime::Handle::try_current() {
+            Ok(handle) => {
+                handle.spawn(async move {
+                    let _ = session.stop().await;
+                });
+            }
+            Err(_) => {
+                std::thread::spawn(move || {
+                    let built = tokio::runtime::Builder::new_current_thread().enable_all().build();
+                    if let Ok(runtime) = built {
+                        runtime.block_on(async {
+                            let _ = session.stop().await;
+                        });
+                    }
+                });
+            }
         }
     }
 
