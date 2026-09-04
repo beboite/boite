@@ -300,7 +300,11 @@ pub fn run() {
             {
                 main_window.transparent = false;
             }
+            // An automated launch shares the machine with whoever is working on
+            // it, and a window that takes the focus takes their keystrokes.
+            let unattended = std::env::var_os("BOITE_DEV_UNATTENDED").is_some();
             tauri::WebviewWindowBuilder::from_config(app, &main_window)?
+                .focused(!unattended)
                 .initialization_script_for_all_frames(include_str!(
                     "../scripts/pane-driver.js"
                 ))

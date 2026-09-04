@@ -6,7 +6,8 @@
   import { t } from "$lib/i18n/index.svelte";
   import { settings } from "$lib/features/settings/store.svelte";
   import { DUR, easeOutQuint } from "$lib/theme/motion";
-  import { approvals, MAX_VISIBLE, type ApprovalItem } from "./store.svelte";
+  import { approvals, MAX_VISIBLE, PILOT_ACTION, type ApprovalItem } from "./store.svelte";
+  import { lazyComponent } from "$lib/shared/lazy.svelte";
 
   // Bottom centre, arriving from off-screen. The corners are taken: toasts own
   // the right one and the keyboard FAB the left, and both of those are things
@@ -44,6 +45,26 @@
     const key = ACTIONS[action as keyof typeof ACTIONS];
     return key ? t(key, { detail }) : t("approval.action.other", { action, detail });
   };
+
+  /**
+   * The chat runtime's own card, fetched only when one arrives.
+   *
+   * Lazy for the same reason the chat pane is: the dock is drawn by the layout
+   * before first paint, and a static import here would put the pilot store and
+   * its reducer back on the boot path of every window, experiment or no
+   * experiment. A row of kind `pilot.request` is rare and the chunk is small,
+   * so the fetch happens while the card is animating in.
+   */
+  const PilotCard = lazyComponent(
+    () => import("$lib/features/pilot/PilotApproval.svelte"),
+  );
+
+  const isPilot = (item: ApprovalItem) =>
+    item.source === "agent" && item.row.action === PILOT_ACTION;
+
+  $effect(() => {
+    if (approvals.items.some(isPilot)) void PilotCard.ensure();
+  });
 
   /** The words a card shows, from whichever half of the store it came from. */
   function view(item: ApprovalItem) {
@@ -100,6 +121,10 @@
 
     {#each shown as item (item.id)}
       {@const card = view(item)}
+      {@const pilot = isPilot(item) && item.source === "agent" ? item.row : null}
+      <!-- One box per card whichever source it came from: `animate:` has to be
+           the only child of the keyed block, so the two shapes are a branch
+           inside it rather than two boxes beside it. -->
       <div
         class="surface-dialog pointer-events-auto overflow-hidden"
         animate:flip={{ duration: DUR.base }}
@@ -108,6 +133,23 @@
         role="alertdialog"
         aria-label={card.title}
       >
+        {#if pilot}
+          <!-- The same card as the pane's, compact. Answering goes through
+               `pilot.request.respond` rather than `approvals.decide`: the
+               driver's options are a vocabulary of its own, and yes-or-no
+               cannot carry "always allow". -->
+          <div class="p-2">
+            <p class="px-1 pb-1 text-xs text-muted-foreground">
+              {threadName(pilot.threadId)} · {projectName(pilot.projectId)}
+            </p>
+            {#if PilotCard.current}
+              {@const PilotComp = PilotCard.current}
+              <PilotComp threadId={pilot.threadId} requestId={pilot.detail} />
+            {:else}
+              <p class="px-1 text-sm text-muted-2">{t("common.loading")}</p>
+            {/if}
+          </div>
+        {:else}
         <div class="flex gap-3 px-4 pb-3 pt-3.5">
           <span
             class="mt-px flex size-7 shrink-0 items-center justify-center rounded-full border {card.tone ===
@@ -153,6 +195,7 @@
             {card.allowLabel}
           </button>
         </footer>
+        {/if}
       </div>
     {/each}
 

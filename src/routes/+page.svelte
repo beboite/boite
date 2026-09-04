@@ -714,7 +714,12 @@
                    the floating card did to the first four lines. Panes too
                    narrow for a readable row get neither. -->
               {@const stripShown = Boolean(!mobile && rect && rect.w >= 420)}
-              {#if activated[thread.id] && rect && group}
+              <!-- A pilot row has no PTY, so nothing is overlaid on its
+                   rectangle: its pane is a component in the tree and the shell
+                   already drew it. Mounting a Terminal here is what spawns a
+                   PTY, so this guard is what keeps a chat thread from starting
+                   a shell nobody asked for. -->
+              {#if activated[thread.id] && rect && group && thread.runtime !== "pilot"}
                 <div
                   class="absolute"
                   style:left="{rect.x}px"

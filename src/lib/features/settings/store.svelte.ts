@@ -164,6 +164,7 @@ const DEFAULTS: Settings = {
   smartSortBy: "manual",
   smartSortDirection: "desc",
   experimentWorkspace: false,
+  experimentPilot: false,
   openOnLaunch: "last",
   orchestratorAgent: null,
   orchestratorByProject: {},
@@ -422,6 +423,10 @@ const DEVICE_FIELDS = [
   // *is* once armed (agent, autonomy, caps) stays in the workspace blob, where
   // every device reads the same answer.
   "experimentWorkspace",
+  // Same gesture, same scope: this glass offering the Chat button. New in this
+  // blob rather than promoted, so it is absent from PROMOTED_TO_DEVICE and an
+  // older blob simply reads the default.
+  "experimentPilot",
   // The whole voice block is device: a microphone, a synthesis voice and the
   // right to speak unfocused are facts about this machine, not the workspace.
   "voiceStt",
@@ -688,6 +693,10 @@ class SettingsStore {
         // the fold: a workspace blob written before it carries the four old
         // flags and no key for this one.
         experimentWorkspace: readExperimentWorkspace(raw),
+        experimentPilot:
+          typeof stored.experimentPilot === "boolean"
+            ? stored.experimentPilot
+            : DEFAULTS.experimentPilot,
         openOnLaunch: isOpenOnLaunch(stored.openOnLaunch)
           ? stored.openOnLaunch
           : DEFAULTS.openOnLaunch,
@@ -1081,6 +1090,20 @@ class SettingsStore {
   setExperimentWorkspace(value: boolean) {
     if (this.state.experimentWorkspace === value) return;
     this.state.experimentWorkspace = value;
+    this.persistDeviceNow();
+  }
+
+  /**
+   * Arms the chat runtime on this device.
+   *
+   * No confirm and nothing to clean up on the way out: turning it off hides the
+   * Chat button of the launcher and leaves open chat threads exactly where they
+   * are, which is what `docs/pilot.md` asks for. A thread already running is
+   * the workspace's, not this switch's.
+   */
+  setExperimentPilot(value: boolean) {
+    if (this.state.experimentPilot === value) return;
+    this.state.experimentPilot = value;
     this.persistDeviceNow();
   }
 

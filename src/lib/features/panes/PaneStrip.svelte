@@ -4,10 +4,12 @@
   import { paneStore } from "./store.svelte";
   import { closeMobilePane } from "./open";
   import { paneLabel } from "./label";
+  import { threadIdOf } from "./types";
   import type { LayoutNode, PaneGroup, PaneKind } from "./types";
   import { edgeFade } from "$lib/shared/actions/edgeFade";
   import { t } from "$lib/i18n/index.svelte";
   import SquareTerminal from "@lucide/svelte/icons/square-terminal";
+  import MessageSquare from "@lucide/svelte/icons/message-square";
   import GitBranch from "@lucide/svelte/icons/git-branch";
   import FolderTree from "@lucide/svelte/icons/folder-tree";
   import ListTodo from "@lucide/svelte/icons/list-todo";
@@ -41,11 +43,13 @@
    */
   function show(leaf: Leaf) {
     paneStore.setFocused(group.id, leaf.paneId);
-    if (leaf.content.kind === "thread") app.activeThreadId = leaf.content.threadId;
+    const threadId = threadIdOf(leaf.content);
+    if (threadId) app.activeThreadId = threadId;
   }
 
   const ICONS: Record<PaneKind, Component> = {
     thread: SquareTerminal,
+    chat: MessageSquare,
     dashboard: LayoutDashboard,
     git: GitBranch,
     explorer: FolderTree,

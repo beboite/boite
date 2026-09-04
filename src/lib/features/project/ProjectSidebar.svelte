@@ -5,7 +5,7 @@
   import { DUR, easeOutQuint } from "$lib/theme/motion";
   import { app } from "$lib/app/store.svelte";
   import { visibleStatus } from "$lib/domain/thread-status";
-  import { workspace } from "$lib/backend";
+  import { backend, workspace } from "$lib/backend";
   import {
     settings,
     SIDEBAR_MAX_WIDTH,
@@ -31,6 +31,7 @@
   } from "$lib/app/dispatches";
   import { orchestrator } from "$lib/features/orchestrator/store.svelte";
   import { notifications } from "$lib/features/notifications/store.svelte";
+  import { log } from "$lib/shared/log";
   import { refreshProjectIcon } from "$lib/features/project/api";
   import { openProjectDashboard } from "$lib/features/project/dashboard";
   import { isScratch } from "$lib/domain/project";
@@ -799,6 +800,30 @@
     open();
   }
 
+  /**
+   * The polite stop of a chat thread's process.
+   *
+   * The native session stays resumable, which is the whole difference from
+   * closing the thread: "Open" below brings it back on the same conversation.
+   */
+  async function stopPilotSession(threadId: string) {
+    try {
+      await backend().pilot.stop(threadId);
+    } catch (err) {
+      log.warn("sidebar", "pilot.stop.failed", { thread: threadId, reason: String(err) });
+      notifications.error(t("pilot.openFailed"));
+    }
+  }
+
+  async function openPilotSession(threadId: string) {
+    try {
+      await backend().pilot.open(threadId);
+    } catch (err) {
+      log.warn("sidebar", "pilot.open.failed", { thread: threadId, reason: String(err) });
+      notifications.error(t("pilot.openFailed"));
+    }
+  }
+
   function openThreadMenuAt(thread: Thread, x: number, y: number) {
     const group = paneStore.groupOf(thread.id);
     const inMultiPane = !!group && countLeaves(group.root) > 1;
@@ -869,12 +894,27 @@
       });
     }
     items.push({ separator: true });
-    items.push({
-      label: t("sidebar.reloadThread"),
-      action: () => {
-        void reloadThread(thread.id);
-      },
-    });
+    // A pilot row has no PTY, so the terminal-only half of this menu describes
+    // nothing: a reload is a kill and a respawn of a process that is not there.
+    // Its two verbs go in the same slot instead, which is the way in and the
+    // way out the same way `settle` and `unsettle` are.
+    if (thread.runtime === "pilot") {
+      items.push({
+        label: t("pilot.stopSession"),
+        action: () => void stopPilotSession(thread.id),
+      });
+      items.push({
+        label: t("pilot.open"),
+        action: () => void openPilotSession(thread.id),
+      });
+    } else {
+      items.push({
+        label: t("sidebar.reloadThread"),
+        action: () => {
+          void reloadThread(thread.id);
+        },
+      });
+    }
     items.push({ separator: true });
     items.push({
       label: t("sidebar.closeThread"),

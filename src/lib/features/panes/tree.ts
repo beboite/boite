@@ -1,3 +1,4 @@
+import { threadIdOf } from "./types";
 import type { LayoutNode, PaneContent, SplitDir } from "./types";
 
 /**
@@ -39,7 +40,7 @@ export function leafNodesOf(
  */
 export function threadLeavesOf(node: LayoutNode): string[] {
   return leafNodesOf(node)
-    .map((l) => (l.content.kind === "thread" ? l.content.threadId : null))
+    .map((l) => threadIdOf(l.content))
     .filter((id): id is string => id !== null);
 }
 

@@ -5,10 +5,12 @@ import { projectDisplayName } from "$lib/shared/project-label";
 import {
   closeThreadWithConfirm,
   launchBlankTerminalHere,
+  launchChat,
   launchShortcut,
   launchTargetProjectId,
   restoreLastClosedThread,
 } from "$lib/features/thread/api";
+import { chatChoice } from "$lib/features/pilot/catalog.svelte";
 import { openProjectDashboard } from "$lib/features/project/dashboard";
 import { projectScripts } from "$lib/features/project/scripts.svelte";
 import { resolveIconKey } from "$lib/shared/icons/detect";
@@ -155,6 +157,27 @@ export function buildPaletteCommands(): PaletteCommand[] {
         if (projectId) await launchShortcut(shortcut, projectId);
       },
     });
+    // A second entry rather than a modifier key: the palette has no shift-click
+    // and no submenu, so a runtime the user cannot type the name of is one the
+    // palette does not have. Only for the presets the catalog has a protocol
+    // for, since there is nothing here to grey out.
+    if (chatChoice(shortcut.command).enabled) {
+      commands.push({
+        id: `action:chat:${shortcut.id}`,
+        section: "actions",
+        labelKey: "palette.launchChat",
+        labelParams: { label: shortcut.label },
+        hint: shortcutAgentHint(shortcut.command),
+        icon: {
+          key: resolveIconKey(shortcut.iconKey, shortcut.label, shortcut.command),
+          color: shortcut.iconColor ?? null,
+        },
+        run: async () => {
+          const projectId = await launchTargetProjectId();
+          if (projectId) await launchChat(shortcut, projectId);
+        },
+      });
+    }
   }
   commands.push({
     id: "action:restore-thread",

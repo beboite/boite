@@ -1,5 +1,5 @@
 import { app } from "$lib/app/store.svelte";
-import { backendForPath } from "$lib/backend";
+import { backend, backendForPath } from "$lib/backend";
 import { ptyKill } from "$lib/storage/pty";
 import { getDefaultShell } from "$lib/storage/shell";
 import { saveThread } from "$lib/storage/db";
@@ -19,6 +19,7 @@ import {
   FASTPICK_CMD,
   type FastpickCombo,
 } from "$lib/features/fastpick/combo";
+import { chatLaunchFor, optionsJson, type ChatLaunch } from "$lib/features/pilot/launch";
 import { dropThreadCheckpoints, forgetThreadTurns } from "./checkpoints.svelte";
 import { samePromotion, type Promotion } from "./promote";
 import { carryTranscript, releaseClaudeSession } from "./session";
@@ -405,7 +406,7 @@ function createThread(
   args: string[],
   labelPrefix: string,
   iconKey: IconKey,
-  opts: { fresh?: boolean; iconColor?: string | null; focus?: boolean; parentThreadId?: string | null; delegationMode?: 'normal' | 'delegation'; deferActivation?: boolean } = {},
+  opts: { fresh?: boolean; iconColor?: string | null; focus?: boolean; parentThreadId?: string | null; delegationMode?: 'normal' | 'delegation'; deferActivation?: boolean; pilot?: ChatLaunch | null } = {},
 ): Thread {
   const count = nextLabelSuffix(project.id, labelPrefix);
   const thread = buildThread(
@@ -418,6 +419,16 @@ function createThread(
     opts.parentThreadId,
     opts.delegationMode,
   );
+  // The five columns, written before the row is upserted so the INSERT carries
+  // them: the pane store reads `runtime` to decide which kind of pane this
+  // thread gets, and it does that in the same frame the row lands in.
+  if (opts.pilot) {
+    thread.runtime = "pilot";
+    thread.pilotDriver = opts.pilot.driver;
+    thread.pilotInstance = JSON.stringify(opts.pilot.instance);
+    thread.pilotModel = opts.pilot.model;
+    thread.pilotOptions = optionsJson(opts.pilot.mode);
+  }
   if (opts.fresh) app.markFresh(thread.id);
   // Opening a thread here is the user starting work on this project, and it is
   // the one bump that does not wait for an agent to pick anything up: a blank
@@ -466,6 +477,50 @@ export async function launchShortcut(
     fresh: true,
     iconColor: shortcut.iconColor ?? null,
   });
+}
+
+/**
+ * The same shortcut, launched as a chat thread.
+ *
+ * The row is the terminal one plus five columns, and that is deliberate: the
+ * worktree, the checkpoints, the sidebar, `settle` and the grace all apply
+ * unchanged, which is what "one thread, two runtimes" means. `cmd` and `args`
+ * are kept as written even though nothing spawns them, because they are what
+ * "open this conversation in a terminal" will replay and what the model tint is
+ * derived from (`fastpick/threadAccent.ts` reads the argv, never the row).
+ *
+ * `pilot.open` comes after the row exists and is not awaited by the caller: the
+ * pane mounts, reads its timeline and subscribes on its own, and a launcher
+ * held open for a process spawn is the round trip the terminal path spent years
+ * removing.
+ */
+export async function launchChat(
+  shortcut: Shortcut,
+  projectId: string | null,
+): Promise<Thread | null> {
+  const project = requireProject(projectId);
+  if (!project) return null;
+  const command = shortcut.command || shortcut.label;
+  const parsed = parseCommand(command);
+  if (!parsed.cmd) {
+    notifications.error(t("thread.emptyCommand", { label: shortcut.label }));
+    return null;
+  }
+  const spec = chatLaunchFor(command);
+  if (!spec) return null;
+  const iconKey = resolveIconKey(shortcut.iconKey, shortcut.label, shortcut.command);
+  const thread = createThread(project, parsed.cmd, parsed.args, shortcut.label, iconKey, {
+    fresh: true,
+    iconColor: shortcut.iconColor ?? null,
+    pilot: spec,
+  });
+  void backend()
+    .pilot.open(thread.id)
+    .catch((err: unknown) => {
+      logger.warn("pilot", `${thread.id}: session did not open`, String(err));
+      notifications.error(t("pilot.openFailed"));
+    });
+  return thread;
 }
 
 /**

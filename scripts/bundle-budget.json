@@ -87,9 +87,24 @@
     "of the Backend contract, so the remote transport builds its twelve calls and",
     "its per-thread feed in the constructor, before anything is drawn. The store",
     "and the reducer stay off it, the chat pane being lazy. Measured at 920.6 KB,",
-    "9.4 KB spare."
+    "9.4 KB spare.",
+    "",
+    "eagerBytes moved to 960512 for the chat pane's launcher half: the sidebar,",
+    "the home start card, the palette and the phone's sheet each decide whether a",
+    "shortcut may be started as a chat, and all four are drawn before first paint,",
+    "so `pilot/launch.ts` and `pilot/catalog.svelte.ts` are on the boot path by",
+    "construction. Measured at 931.2 KB, 6.8 KB spare.",
+    "",
+    "What stays behind import(), and this is the line to check when this number",
+    "next moves: the chat pane itself. `pilot/ChatPane.svelte` pulls the timeline,",
+    "the composer, the picker, the request card, the pilot store and its reducer,",
+    "and it is reached only through `PaneContentView`'s lazyComponent and the",
+    "dock's `PilotApproval.svelte`. A boite with the experiment off never fetches",
+    "that chunk. A static import of any of those files from a component the layout",
+    "draws is the regression this ceiling exists to catch, and it costs about",
+    "20 KB rather than the 1.2 KB above."
   ],
-  "eagerBytes": 952320,
+  "eagerBytes": 960512,
   "totalBytes": 6553600,
   "largestEagerChunkBytes": 262144
 }
