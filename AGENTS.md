@@ -190,6 +190,21 @@ different questions.
   opencode's incomplete parent message all look like a terminal that has printed
   nothing for ten minutes, which is what used to get the PTY reclaimed.
 
+## A chat thread is a second runtime, not a second app
+
+`pilot` in code (the crate `boite-pilot`, the bus domain `pilot.*`, the column
+`threads.runtime = 'pilot'`), "Chat" in the interface. Same row, same worktree
+and same sidebar as a terminal thread, with a chat pane where the terminal pane
+would be. The contract is [docs/pilot.md](docs/pilot.md); the isolated dev
+window, its MCP bridge and `e2e/chat.e2e.ts` are in
+[docs/development.md](docs/development.md).
+
+**A pilot row is never fed by the screen readers or the TTL clock.** It has one
+source, the `status.changed` its driver sent, and the host writes it: left in
+`statusEngine.ts`'s sweep it would be demoted to `idle` on every pass, a chat
+thread having no PTY by construction. Auto-sleep is the one thing it keeps, and
+every pilot event is a `pilot.*` message carrying the `thread`.
+
 ## A PTY is stopped politely or instantly, never both
 
 `PtyManager::kill` reads its `wait` flag as which of the two the caller needs.
