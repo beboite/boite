@@ -2,9 +2,13 @@
   /**
    * A pilot thread, drawn.
    *
-   * Three parts and nothing else: the header with the status and the picker,
-   * the timeline, the composer. Git, explorer, editor and terminal are panes to
+   * Three parts and nothing else: the header with the status and the chip, the
+   * timeline, the composer. Git, explorer, editor and terminal are panes to
    * open beside it, which is the point of a thread with no shell of its own.
+   *
+   * The header and the composer draw the same `ModelPicker`, one compact and
+   * one not: what a thread is running on is the thing a chat pane is switched
+   * on for, and two components saying it would be two things to keep matching.
    *
    * Behind `import()` from `PaneContentView`, so none of this is in the graph
    * the window fetches before it can paint: a boite with the experiment off
@@ -21,10 +25,12 @@
   import Composer from "./Composer.svelte";
   import ModelPicker from "./ModelPicker.svelte";
   import Timeline from "./Timeline.svelte";
+  import { shortSession } from "./present";
   import { openPilotSession, pilotSessionOpenedHere } from "./session";
   import { load, pilotThread, release } from "./store.svelte";
   import type { PilotCatalog } from "./types";
   import Copy from "@lucide/svelte/icons/copy";
+  import GitBranch from "@lucide/svelte/icons/git-branch";
   import X from "@lucide/svelte/icons/x";
 
   type Props = { threadId: string; projectId: string; paneId: string };
@@ -32,6 +38,8 @@
 
   let catalog = $state<PilotCatalog | null>(null);
   let opening = $state(false);
+  /** True until the first read of the timeline has come back. */
+  let loading = $state(true);
 
   const thread = $derived(app.threadById(threadId));
   const view = $derived(pilotThread(threadId));
@@ -51,9 +59,7 @@
    * things to say, and nobody reads one; the copy button is what makes the
    * short form enough.
    */
-  const shortSession = $derived(
-    view.nativeSessionId ? view.nativeSessionId.slice(0, 8) : null,
-  );
+  const short = $derived(shortSession(view.nativeSessionId));
 
   const instanceName = $derived.by(() => {
     const raw = thread?.pilotInstance;
@@ -81,10 +87,40 @@
     }
   });
 
+  const driver = $derived(thread?.pilotDriver ?? "claude");
+  const model = $derived(view.model ?? thread?.pilotModel ?? null);
+  /**
+   * The branch this thread's worktree is standing on, when it is on one.
+   *
+   * Asked once per mount and only for a thread that has a worktree of its own:
+   * `worktree.list` spawns git, and the header is not worth a poll. Boite opens
+   * every worktree detached, so the usual answer is null and the header draws
+   * nothing rather than a placeholder saying so.
+   */
+  let branch = $state<string | null>(null);
+  /** A fresh thread: a session is up and nothing has been said in it. */
+  const fresh = $derived(!loading && view.items.length === 0 && view.nativeSessionId !== null);
+
   // The timeline first, then the catalog: one is what the pane is for and the
   // other only fills a menu nobody has opened yet.
   $effect(() => {
-    void load(threadId);
+    void load(threadId).finally(() => {
+      loading = false;
+    });
+  });
+
+  $effect(() => {
+    const own = thread?.worktreePath;
+    const repo = project?.cwd;
+    if (!own || !repo) return;
+    void backend()
+      .worktree.list(repo)
+      .then((entries) => {
+        branch = entries.find((entry) => entry.path === own)?.branch ?? null;
+      })
+      .catch(() => {
+        // A repository git refused to describe is not worth a line in a header.
+      });
   });
 
   $effect(() => {
@@ -157,55 +193,145 @@
   data-thread={threadId}
 >
   <header
-    class="flex h-8 shrink-0 items-center gap-2 border-b border-border bg-[var(--color-titlebar)] px-2"
+    class="flex h-9 shrink-0 items-center gap-2 border-b border-border bg-[var(--color-titlebar)] px-2"
   >
-    <span class="min-w-0 truncate text-xs font-medium text-foreground">
-      {thread?.title ?? thread?.label ?? ""}
+    <ModelPicker
+      {threadId}
+      {catalog}
+      {driver}
+      instance={instanceName}
+      {model}
+      {mode}
+      compact
+      placement="down"
+      align="left"
+    />
+
+    <!-- The status pill: one word, and the colour that says whether it is the
+         thread's turn or the user's. `waiting` is the app's warning, which is
+         the only one of the three worth catching an eye across a workspace. -->
+    <span
+      class="flex shrink-0 items-center gap-1.5 rounded-full px-2 py-0.5 text-xs {view.status ===
+      'waiting'
+        ? 'text-[var(--color-warning)]'
+        : 'text-muted-foreground'}"
+      data-testid="chat-status"
+      data-status={view.status}
+    >
+      <span
+        class="size-1.5 rounded-full {view.status === 'busy'
+          ? 'pilot-breathe bg-[var(--color-muted-foreground)]'
+          : view.status === 'waiting'
+            ? 'bg-[var(--color-warning)]'
+            : 'bg-[var(--color-success)]'}"
+        aria-hidden="true"
+      ></span>
+      {t(STATUS[view.status])}
     </span>
-    <span class="shrink-0 text-xs text-muted-foreground">{t(STATUS[view.status])}</span>
-    {#if shortSession}
+
+    {#if short}
       <button
         type="button"
-        class="flex shrink-0 items-center gap-1 rounded px-1 text-xs text-muted-2 transition hover:bg-[var(--color-surface-2)] hover:text-foreground"
+        class="press flex shrink-0 items-center gap-1 rounded px-1 py-0.5 text-xs text-muted-foreground transition hover:bg-[var(--color-surface-2)] hover:text-foreground focus:outline-none focus-visible:focus-ring"
         onclick={() => void copySession()}
         aria-label={t("pilot.copySession")}
         data-testid="chat-session"
         data-session={view.nativeSessionId}
       >
-        <span class="font-mono">{shortSession}</span>
+        <span class="font-mono">{short}</span>
         <Copy class="size-3" />
       </button>
     {:else}
-      <span class="shrink-0 text-xs text-muted-2" data-testid="chat-no-session">
+      <span class="shrink-0 text-xs text-muted-foreground" data-testid="chat-no-session">
         {t("pilot.noSession")}
       </span>
     {/if}
-    <div class="ml-auto flex shrink-0 items-center gap-1">
+
+    {#if branch}
+      <span
+        class="hidden min-w-0 shrink items-center gap-1 text-xs text-muted-foreground sm:flex"
+        title={branch}
+      >
+        <GitBranch class="size-3 shrink-0" />
+        <span class="min-w-0 truncate font-mono">{branch}</span>
+      </span>
+    {/if}
+
+    <button
+      type="button"
+      class="press ml-auto shrink-0 rounded p-1 text-muted-foreground transition hover:bg-[var(--color-surface-2)] hover:text-foreground focus:outline-none focus-visible:focus-ring"
+      onclick={() => paneStore.closePane(paneId)}
+      aria-label={t("pilot.close")}
+    >
+      <X class="size-3.5" />
+    </button>
+  </header>
+
+  {#if loading}
+    <!-- A skeleton rather than a spinner on a blank page: the shape of what is
+         coming is worth more than a wheel, and a thread of two thousand rows
+         takes several pages to read back. -->
+    <div class="min-h-0 flex-1 px-3 py-3" aria-label={t("common.loading")} aria-busy="true">
+      <div class="mx-auto flex w-full max-w-[72ch] flex-col gap-3">
+        <div class="pilot-skeleton h-4 w-2/5 self-end rounded-full"></div>
+        <div class="pilot-skeleton h-3 w-full rounded-full"></div>
+        <div class="pilot-skeleton h-3 w-4/5 rounded-full"></div>
+        <div class="pilot-skeleton h-8 w-full rounded-lg"></div>
+        <div class="pilot-skeleton h-3 w-3/5 rounded-full"></div>
+      </div>
+    </div>
+  {:else if fresh}
+    <!-- A fresh thread opens on the one choice that matters, large, with the
+         composer already able to take a line. -->
+    <div class="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-6">
       <ModelPicker
         {threadId}
         {catalog}
-        driver={thread?.pilotDriver ?? "claude"}
+        {driver}
         instance={instanceName}
-        model={view.model ?? thread?.pilotModel ?? null}
+        {model}
         {mode}
+        placement="down"
+        align="left"
       />
-      <button
-        type="button"
-        class="rounded p-0.5 text-muted-2 transition hover:bg-[var(--color-surface-2)] hover:text-foreground"
-        onclick={() => paneStore.closePane(paneId)}
-        aria-label={t("pilot.close")}
-      >
-        <X class="size-3.5" />
-      </button>
+      <p class="max-w-[42ch] text-center text-sm text-muted-foreground">{t("pilot.empty")}</p>
     </div>
-  </header>
-
-  <Timeline {threadId} items={view.items} {repoPath} {projectId} />
+  {:else}
+    <Timeline {threadId} items={view.items} {repoPath} {projectId} status={view.status} />
+  {/if}
 
   <Composer
     {threadId}
     status={view.status}
     open={view.nativeSessionId !== null}
     onOpen={() => void openSession()}
+    commands={view.slashCommands}
+    {catalog}
+    {driver}
+    instance={instanceName}
+    {model}
+    {mode}
   />
 </div>
+
+<style>
+  /* A soft pulse rather than a spinner: the pane already says "Working", and a
+     dot that breathes is the half of that a reader catches out of the corner of
+     an eye. */
+  .pilot-breathe {
+    animation: pilot-breathe 1.8s var(--ease-in-out-quad) infinite;
+  }
+  @keyframes pilot-breathe {
+    50% {
+      opacity: 0.3;
+    }
+  }
+  .pilot-skeleton {
+    background: var(--color-surface-2);
+    animation: pilot-breathe 1.4s var(--ease-in-out-quad) infinite;
+  }
+  :global(html[data-motion="reduced"]) .pilot-breathe,
+  :global(html[data-motion="reduced"]) .pilot-skeleton {
+    animation: none;
+  }
+</style>

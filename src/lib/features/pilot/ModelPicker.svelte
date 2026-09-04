@@ -1,23 +1,36 @@
 <script lang="ts">
   /**
-   * Driver, account, model, effort and mode, in one menu.
+   * The model chip, and the menu behind it.
+   *
+   * One component for the two places that need it, the pane header and the
+   * composer, because a chip that looked different in the two would be two
+   * ideas of what the thread is running on. `compact` is the header's; the
+   * composer's is the resting size, and `placement` is which way the popover
+   * hangs.
    *
    * The rule the menu is built around: **it says what the click will do before
-   * the click.** `selection.ts` answers that off the catalog, and the row wears
+   * the click.** `selection.ts` answers that off the catalog and the row wears
    * the answer, so picking another account reads "restarts on the same session"
    * rather than going quiet for a second. Another driver is a graft and is
-   * phase 4, so its rows are disabled and say "later" rather than being hidden.
+   * phase 4, so its rows are disabled and say "later" rather than being hidden:
+   * a menu that hides what it cannot do yet teaches the user the driver does
+   * not exist.
    *
    * The tint is the sidebar's own (`fastpick/accent.ts`): a fastpick route is
    * coloured by what is actually answering, which is the one thing a model name
    * on its own does not say.
+   *
+   * Keyboard: the arrows walk the enabled rows, Enter takes one, Escape closes
+   * and hands focus back to the chip. The list is built flat for exactly that
+   * reason, with the group headings drawn from each row's own `group`.
    */
   import { backend } from "$lib/backend";
   import { notifications } from "$lib/features/notifications/store.svelte";
   import { log } from "$lib/shared/log";
   import { t } from "$lib/i18n/index.svelte";
   import { ACCENT_COLOR, modelFamily } from "$lib/features/fastpick/accent";
-  import { instancesOf, switchOutcome } from "./selection";
+  import { shortModel } from "./present";
+  import { instancesOf, switchOutcome, type SwitchOutcome } from "./selection";
   import type {
     PilotCatalog,
     PilotExecMode,
@@ -25,6 +38,7 @@
     PilotInstanceEntry,
   } from "./types";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
+  import Search from "@lucide/svelte/icons/search";
 
   type Props = {
     threadId: string;
@@ -34,30 +48,139 @@
     instance: string | null;
     model: string | null;
     mode: PilotExecMode;
+    /** The header's size. The composer takes the resting one. */
+    compact?: boolean;
+    /** Which way the popover hangs off the chip. */
+    placement?: "up" | "down";
+    /** The header aligns its menu to the right edge, the composer to the left. */
+    align?: "left" | "right";
+    /** Held by the pane so Ctrl+M can open this from the composer. */
+    open?: boolean;
   };
-  let { threadId, catalog, driver, instance, model, mode }: Props = $props();
+  let {
+    threadId,
+    catalog,
+    driver,
+    instance,
+    model,
+    mode,
+    compact = false,
+    placement = "down",
+    align = "left",
+    open = $bindable(false),
+  }: Props = $props();
 
-  let open = $state(false);
   let busy = $state(false);
+  let query = $state("");
+  let cursor = $state(0);
+  let trigger: HTMLButtonElement | null = $state(null);
+  let field: HTMLInputElement | null = $state(null);
+  /** The chip and its menu together, so a click outside is one containment test. */
+  let root: HTMLDivElement | null = $state(null);
 
-  const MODES: { value: PilotExecMode; key: "pilot.modeAsk" | "pilot.modeEditAlone" | "pilot.modeYolo" }[] = [
-    { value: "ask", key: "pilot.modeAsk" },
-    { value: "edit_alone", key: "pilot.modeEditAlone" },
-    { value: "yolo", key: "pilot.modeYolo" },
+  const MODES: {
+    value: PilotExecMode;
+    key: "pilot.modeAsk" | "pilot.modeEditAlone" | "pilot.modeYolo";
+    hint: "pilot.modeAskDesc" | "pilot.modeEditAloneDesc" | "pilot.modeYoloDesc";
+  }[] = [
+    { value: "ask", key: "pilot.modeAsk", hint: "pilot.modeAskDesc" },
+    { value: "edit_alone", key: "pilot.modeEditAlone", hint: "pilot.modeEditAloneDesc" },
+    { value: "yolo", key: "pilot.modeYolo", hint: "pilot.modeYoloDesc" },
   ];
 
   const drivers = $derived(catalog?.drivers ?? []);
-  const capabilities = $derived(
-    drivers.find((entry) => entry.id === driver)?.capabilities ?? null,
-  );
+  const capabilities = $derived(drivers.find((entry) => entry.id === driver)?.capabilities ?? null);
   const accounts = $derived(instancesOf(catalog?.instances ?? [], driver));
   const models = $derived(drivers.find((entry) => entry.id === driver)?.models ?? []);
+  /**
+   * The effort levels the driver declared, which is none of them today.
+   *
+   * `PilotCapabilities` carries no such field yet, so the control draws the
+   * level in force and says so rather than offering a choice nothing on the
+   * other side would honour. The read is optional on purpose: the day a driver
+   * declares them, this becomes a real segmented control with no edit here.
+   */
+  const efforts = $derived(
+    (capabilities as { effort?: string[] } | null)?.effort ?? [],
+  );
 
   /** The tint a row wears, off the model it names. */
   const tint = (name: string | null): string | null =>
     name ? ACCENT_COLOR[modelFamily(name)] : null;
 
-  const label = $derived(model ?? t("pilot.picker"));
+  const label = $derived(shortModel(model) ?? t("pilot.picker"));
+
+  /** One choosable line of the menu: an account, a model, and what it will do. */
+  interface Row {
+    key: string;
+    entry: PilotInstanceEntry;
+    model: string | null;
+    label: string;
+    group: string;
+    outcome: SwitchOutcome;
+  }
+
+  /**
+   * The menu, flat.
+   *
+   * Native accounts first and fastpick routes after, each labelled the way the
+   * fastpick menu labels it, because a user reading two lists reads them in the
+   * order the rest of the app already taught them. A native account offers the
+   * driver's model list; a fastpick route is one model by construction and
+   * offers itself.
+   */
+  const rows = $derived.by((): Row[] => {
+    const ordered = [
+      ...accounts.filter((entry) => entry.kind === "native"),
+      ...accounts.filter((entry) => entry.kind !== "native"),
+    ];
+    const out: Row[] = [];
+    for (const entry of ordered) {
+      const outcome = switchOutcome(
+        { driver, instance },
+        { driver: entry.driver, instance: entry.name },
+        capabilities,
+      );
+      const names = entry.kind === "native" ? models : [entry.model ?? entry.name];
+      if (names.length === 0) {
+        out.push({
+          key: entry.name,
+          entry,
+          model: null,
+          label: entry.label,
+          group: entry.label,
+          outcome,
+        });
+        continue;
+      }
+      for (const name of names) {
+        out.push({
+          key: `${entry.name}::${name}`,
+          entry,
+          model: name,
+          label: shortModel(name) ?? name,
+          group: entry.label,
+          outcome,
+        });
+      }
+    }
+    return out;
+  });
+
+  const shown = $derived.by(() => {
+    const needle = query.trim().toLowerCase();
+    if (!needle) return rows;
+    return rows.filter(
+      (row) =>
+        row.label.toLowerCase().includes(needle) || row.group.toLowerCase().includes(needle),
+    );
+  });
+
+  /** The rows a key can land on. A disabled row is read, never selected. */
+  const reachable = $derived(shown.filter((row) => row.outcome.enabled));
+
+  const isCurrent = (row: Row): boolean =>
+    row.entry.name === instance && (row.model === null || row.model === model);
 
   function instanceValue(entry: PilotInstanceEntry): PilotInstance {
     return entry.kind === "fastpick"
@@ -65,20 +188,28 @@
       : { type: "native", config_dir: entry.configDir ?? null };
   }
 
-  async function pick(entry: PilotInstanceEntry, nextModel: string | null) {
-    const outcome = switchOutcome(
-      { driver, instance },
-      { driver: entry.driver, instance: entry.name },
-      capabilities,
-    );
-    if (!outcome.enabled || busy) return;
+  function toggle() {
+    open = !open;
+    if (open) {
+      query = "";
+      cursor = 0;
+    }
+  }
+
+  function close(focusBack = true) {
+    open = false;
+    if (focusBack) trigger?.focus();
+  }
+
+  async function pick(row: Row) {
+    if (!row.outcome.enabled || busy) return;
     busy = true;
     try {
       await backend().pilot.setModel(threadId, {
-        model: nextModel,
-        instance: instanceValue(entry),
+        model: row.model,
+        instance: instanceValue(row.entry),
       });
-      open = false;
+      close();
     } catch (err) {
       log.warn("pilot.picker", "pilot.setModel.failed", {
         thread: threadId,
@@ -95,7 +226,6 @@
     busy = true;
     try {
       await backend().pilot.setMode(threadId, next);
-      open = false;
     } catch (err) {
       log.warn("pilot.picker", "pilot.setMode.failed", {
         thread: threadId,
@@ -107,113 +237,198 @@
     }
   }
 
-  /** The sentence a row wears, so the user reads it before pressing it. */
-  function says(entry: PilotInstanceEntry) {
-    return switchOutcome(
-      { driver, instance },
-      { driver: entry.driver, instance: entry.name },
-      capabilities,
-    );
+  function onMenuKey(event: KeyboardEvent) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      close();
+      return;
+    }
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      const count = reachable.length;
+      if (count === 0) return;
+      const step = event.key === "ArrowDown" ? 1 : -1;
+      cursor = (((cursor + step) % count) + count) % count;
+      return;
+    }
+    if (event.key === "Enter") {
+      event.preventDefault();
+      const row = reachable[cursor];
+      if (row) void pick(row);
+    }
   }
+
+  // The field takes focus so the first keystroke filters rather than being
+  // eaten by whatever had it. A menu opened from Ctrl+M has to do the same,
+  // which is why this watches `open` rather than living in the click handler.
+  $effect(() => {
+    if (open) field?.focus();
+  });
+
+  // A filter that shortened the list under the cursor would leave it pointing
+  // past the end, and Enter would take nothing.
+  $effect(() => {
+    if (cursor >= reachable.length) cursor = 0;
+  });
 </script>
 
-<div class="relative">
+<svelte:window
+  onpointerdown={(event) => {
+    if (!open) return;
+    const target = event.target as Node | null;
+    if (target && !root?.contains(target)) close(false);
+  }}
+/>
+
+<div class="relative" bind:this={root}>
   <button
+    bind:this={trigger}
     type="button"
-    class="flex max-w-[14rem] items-center gap-1 rounded-md px-1.5 py-0.5 text-xs text-muted-foreground transition hover:bg-[var(--color-surface-2)] hover:text-foreground"
-    onclick={() => (open = !open)}
+    class="press flex max-w-[15rem] items-center gap-1.5 rounded-full border border-border bg-[var(--color-surface-2)] text-muted-foreground transition hover:border-edge hover:text-foreground focus:outline-none focus-visible:focus-ring {compact
+      ? 'h-6 px-2 text-xs'
+      : 'h-7 px-2.5 text-xs'}"
+    onclick={toggle}
     aria-expanded={open}
-    aria-label={t("pilot.picker")}
+    aria-haspopup="menu"
+    aria-label={t("pilot.pickerOpen")}
+    data-testid="chat-model-chip"
   >
     <span
-      class="size-1.5 shrink-0 rounded-full"
-      style:background={tint(model) ?? "var(--color-muted-2)"}
+      class="size-2 shrink-0 rounded-full"
+      style:background={tint(model) ?? "var(--color-muted-foreground)"}
     ></span>
-    <span class="min-w-0 truncate">{label}</span>
-    <ChevronDown class="size-3 shrink-0 opacity-60" />
+    <span class="min-w-0 truncate font-medium">{label}</span>
+    <ChevronDown class="size-3 shrink-0 opacity-70" />
   </button>
 
   {#if open}
-    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
     <div
-      class="surface-popover absolute right-0 top-full z-30 mt-1 flex max-h-80 w-72 flex-col gap-1 scroll-pane overflow-y-auto p-1.5"
+      class="surface-popover pilot-pop absolute z-30 flex w-80 max-w-[calc(100vw-1.5rem)] flex-col {placement ===
+      'up'
+        ? 'bottom-full mb-1.5'
+        : 'top-full mt-1.5'} {align === 'right' ? 'right-0' : 'left-0'}"
+      role="menu"
+      tabindex="-1"
+      onkeydown={onMenuKey}
+      data-testid="chat-model-menu"
     >
-      <p class="px-1.5 pt-0.5 text-xs font-medium text-muted-2">{t("pilot.pickerDriver")}</p>
-      {#each drivers as entry (entry.id)}
-        <div
-          class="flex items-center justify-between gap-2 rounded px-1.5 py-1 text-sm {entry.id ===
-          driver
-            ? 'text-foreground'
-            : 'text-muted-2'}"
-        >
-          <span class="min-w-0 truncate">{entry.id}</span>
-          {#if entry.id !== driver}
-            <span class="shrink-0 text-xs text-muted-2">{t("pilot.switchLater")}</span>
-          {/if}
-        </div>
-      {/each}
+      <div class="flex items-center gap-1.5 border-b border-border px-2.5 py-2">
+        <Search class="size-3.5 shrink-0 text-muted-foreground" />
+        <input
+          bind:this={field}
+          bind:value={query}
+          type="text"
+          class="min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
+          placeholder={t("pilot.pickerSearch")}
+          aria-label={t("pilot.pickerSearch")}
+        />
+      </div>
 
-      <p class="px-1.5 pt-1 text-xs font-medium text-muted-2">{t("pilot.pickerInstance")}</p>
-      {#each accounts as entry (entry.name)}
-        {@const outcome = says(entry)}
-        <button
-          type="button"
-          class="flex w-full items-center justify-between gap-2 rounded px-1.5 py-1 text-left text-sm transition hover:bg-accent disabled:cursor-not-allowed disabled:opacity-40 {entry.name ===
-          instance
-            ? 'text-foreground'
-            : 'text-muted-foreground'}"
-          disabled={!outcome.enabled || busy}
-          onclick={() => void pick(entry, model)}
-        >
-          <span class="min-w-0 truncate">{entry.label}</span>
-          <span class="shrink-0 text-xs text-muted-2">{t(outcome.key)}</span>
-        </button>
-      {/each}
-
-      {#if models.length > 0}
-        <p class="px-1.5 pt-1 text-xs font-medium text-muted-2">{t("pilot.pickerModel")}</p>
-        {#each models as name (name)}
-          {@const own = accounts.find((entry) => entry.name === instance) ?? accounts[0]}
-          <button
-            type="button"
-            class="flex w-full items-center gap-1.5 rounded px-1.5 py-1 text-left text-sm transition hover:bg-accent disabled:opacity-40 {name ===
-            model
-              ? 'text-foreground'
-              : 'text-muted-foreground'}"
-            disabled={!own || busy}
-            onclick={() => own && void pick(own, name)}
-          >
-            <span
-              class="size-1.5 shrink-0 rounded-full"
-              style:background={tint(name) ?? "var(--color-muted-2)"}
-            ></span>
-            <span class="min-w-0 flex-1 truncate">{name}</span>
-            {#if own}
-              <span class="shrink-0 text-xs text-muted-2">{t(says(own).key)}</span>
+      <div class="max-h-64 scroll-pane overflow-y-auto py-1">
+        {#if shown.length === 0}
+          <p class="px-2.5 py-3 text-center text-sm text-muted-foreground">
+            {t("pilot.pickerNoMatch")}
+          </p>
+        {:else}
+          {#each shown as row, at (row.key)}
+            {#if at === 0 || shown[at - 1].group !== row.group}
+              <p
+                class="px-2.5 pt-2 pb-1 text-xs font-medium tracking-wide text-muted-foreground uppercase"
+              >
+                {row.group}
+              </p>
             {/if}
-          </button>
-        {/each}
-      {/if}
+            <button
+              type="button"
+              role="menuitemradio"
+              aria-checked={isCurrent(row)}
+              class="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-sm transition focus:outline-none disabled:cursor-not-allowed disabled:opacity-50 {reachable[
+                cursor
+              ] === row
+                ? 'bg-[var(--color-surface-3)]'
+                : ''} {isCurrent(row) ? 'text-foreground' : 'text-muted-foreground'} hover:bg-[var(--color-surface-3)] hover:text-foreground"
+              disabled={!row.outcome.enabled || busy}
+              onclick={() => void pick(row)}
+              onpointerenter={() => {
+                const at2 = reachable.indexOf(row);
+                if (at2 >= 0) cursor = at2;
+              }}
+            >
+              <span
+                class="size-2 shrink-0 rounded-full"
+                style:background={tint(row.model) ?? "var(--color-muted-foreground)"}
+              ></span>
+              <span class="min-w-0 flex-1 truncate">{row.label}</span>
+              <span class="shrink-0 text-xs text-muted-foreground">{t(row.outcome.key)}</span>
+            </button>
+          {/each}
+        {/if}
+      </div>
 
       <!-- Effort has no list to offer until a driver declares one, so the menu
            says which one is in force rather than pretending to a choice. -->
-      <p class="px-1.5 pt-1 text-xs font-medium text-muted-2">{t("pilot.pickerEffort")}</p>
-      <p class="px-1.5 pb-0.5 text-sm text-muted-2">{t("pilot.effortDefault")}</p>
+      <div class="border-t border-border px-2.5 py-2">
+        <p class="pb-1 text-xs font-medium text-muted-foreground">{t("pilot.pickerEffort")}</p>
+        {#if efforts.length === 0}
+          <p class="text-sm text-muted-foreground">{t("pilot.effortDefault")}</p>
+        {:else}
+          <div class="flex gap-1 rounded-md bg-[var(--color-surface)] p-0.5">
+            {#each efforts as level (level)}
+              <span
+                class="flex-1 rounded px-2 py-1 text-center text-xs text-muted-foreground capitalize"
+              >
+                {level}
+              </span>
+            {/each}
+          </div>
+        {/if}
+      </div>
 
-      <p class="px-1.5 pt-1 text-xs font-medium text-muted-2">{t("pilot.pickerMode")}</p>
-      {#each MODES as row (row.value)}
-        <button
-          type="button"
-          class="flex w-full items-center justify-between gap-2 rounded px-1.5 py-1 text-left text-sm transition hover:bg-accent disabled:opacity-40 {row.value ===
-          mode
-            ? 'text-foreground'
-            : 'text-muted-foreground'}"
-          disabled={busy || (capabilities ? !capabilities.modes.includes(row.value) : false)}
-          onclick={() => void setMode(row.value)}
-        >
-          <span class="min-w-0 truncate">{t(row.key)}</span>
-        </button>
-      {/each}
+      <div class="border-t border-border px-2.5 py-2">
+        <p class="pb-1 text-xs font-medium text-muted-foreground">{t("pilot.pickerMode")}</p>
+        <div class="flex gap-1 rounded-md bg-[var(--color-surface)] p-0.5">
+          {#each MODES as row (row.value)}
+            <button
+              type="button"
+              class="press flex-1 rounded px-2 py-1 text-xs transition focus:outline-none focus-visible:focus-ring-inset disabled:opacity-40 {row.value ===
+              mode
+                ? 'bg-[var(--color-surface-3)] text-foreground'
+                : 'text-muted-foreground hover:text-foreground'}"
+              disabled={busy || (capabilities ? !capabilities.modes.includes(row.value) : false)}
+              onclick={() => void setMode(row.value)}
+              title={t(row.hint)}
+              aria-label={`${t(row.key)} ${t(row.hint)}`}
+              aria-pressed={row.value === mode}
+            >
+              {t(row.key)}
+            </button>
+          {/each}
+        </div>
+        <p class="pt-1.5 text-xs text-muted-foreground">
+          {t(MODES.find((row) => row.value === mode)?.hint ?? "pilot.modeAskDesc")}
+        </p>
+      </div>
     </div>
   {/if}
 </div>
+
+<style>
+  /* 120ms, and nothing at all where the user asked for nothing: the app's own
+     motion gate is an attribute on <html>, so a media query alone would ignore
+     the setting in Appearance. */
+  .pilot-pop {
+    animation: pilot-pop var(--dur-2) var(--ease-out-quint);
+    transform-origin: top center;
+  }
+  @keyframes pilot-pop {
+    from {
+      opacity: 0;
+      transform: translateY(-2px) scale(0.985);
+    }
+  }
+  :global(html[data-motion="reduced"]) .pilot-pop {
+    animation: none;
+  }
+</style>

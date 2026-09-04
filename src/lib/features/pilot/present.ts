@@ -106,8 +106,11 @@ export function hasBody(row: PilotItemRow): boolean {
     case "assistant_text":
     case "user_message":
     case "reasoning":
-    case "notice":
       return textOf(row).trim().length > 0;
+    case "notice":
+      // A notice boite wrote itself carries a field rather than a sentence, so
+      // the key stays a literal at the call site that draws it.
+      return textOf(row).trim().length > 0 || typeof row.body?.model === "string";
     case "plan":
       return textOf(row).trim().length > 0 || hasKeys(row.body);
     case "tool_call":
@@ -188,6 +191,21 @@ export function jumpVisible(stick: boolean, rows: number): boolean {
 /** The eight characters that tell one session from another. */
 export function shortSession(id: string | null): string | null {
   return id ? id.slice(0, 8) : null;
+}
+
+/**
+ * The model name as a chip wears it.
+ *
+ * A route id carries its provider (`anthropic/claude-fable-5-1`) and a chip has
+ * room for one of the two; the sidebar's tint already says which family is
+ * answering, so the segment after the last slash is the half worth the space.
+ * Never shortened past a name somebody could confuse with another: this trims a
+ * prefix and nothing else.
+ */
+export function shortModel(model: string | null): string | null {
+  if (!model) return null;
+  const last = model.split("/").pop()?.trim();
+  return last && last.length > 0 ? last : model;
 }
 
 function pickString(

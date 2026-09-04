@@ -38,6 +38,15 @@ export interface PilotThreadState {
   usage: PilotUsage | null;
   /** The native session the thread resumes on, once the driver named one. */
   nativeSessionId: string | null;
+  /**
+   * The slash commands the driver declared at init, for the composer's hint.
+   *
+   * Kept rather than dropped because it is the one list that says what this
+   * session understands, and it arrives once: a pane that missed it has no
+   * second chance short of a restart. Boite never runs one, so the names go no
+   * further than the hint row.
+   */
+  slashCommands: string[];
   /** The highest sequence read, which is what a reconnect pages from. */
   cursor: number;
 }
@@ -52,6 +61,7 @@ export function emptyState(): PilotThreadState {
     mode: "ask",
     usage: null,
     nativeSessionId: null,
+    slashCommands: [],
     cursor: 0,
   };
 }
@@ -76,6 +86,11 @@ export function reduce(state: PilotThreadState, event: PilotEvent): boolean {
     case "session.started": {
       state.nativeSessionId = event.native_session_id ?? state.nativeSessionId;
       if (event.model) state.model = event.model;
+      // A restart declares them again; an empty list is a driver that has none
+      // and must not wipe what the previous init said.
+      if (event.slash_commands && event.slash_commands.length > 0) {
+        state.slashCommands = [...event.slash_commands];
+      }
       return true;
     }
     case "session.exited": {
@@ -170,7 +185,17 @@ export function reduce(state: PilotThreadState, event: PilotEvent): boolean {
     }
     case "model.changed": {
       if (state.model === event.model) return false;
+      // The first one of a session is the driver naming what it opened on, not
+      // a switch: a notice there would open every thread with a line saying
+      // nothing happened.
+      const switched = state.model !== null;
       state.model = event.model;
+      if (switched) {
+        put(state, {
+          ...blank(state, `notice:model:${state.cursor + 1}`, "notice", "completed"),
+          body: { model: event.model },
+        });
+      }
       return true;
     }
     case "usage.updated": {
