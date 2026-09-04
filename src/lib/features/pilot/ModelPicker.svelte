@@ -30,6 +30,7 @@
   import { t } from "$lib/i18n/index.svelte";
   import { ACCENT_COLOR, modelFamily } from "$lib/features/fastpick/accent";
   import { shortModel } from "./present";
+  import ModeControl from "./ModeControl.svelte";
   import { instancesOf, switchOutcome, type SwitchOutcome } from "./selection";
   import type {
     PilotCatalog,
@@ -78,20 +79,25 @@
   /** The chip and its menu together, so a click outside is one containment test. */
   let root: HTMLDivElement | null = $state(null);
 
-  const MODES: {
-    value: PilotExecMode;
-    key: "pilot.modeAsk" | "pilot.modeEditAlone" | "pilot.modeYolo";
-    hint: "pilot.modeAskDesc" | "pilot.modeEditAloneDesc" | "pilot.modeYoloDesc";
-  }[] = [
-    { value: "ask", key: "pilot.modeAsk", hint: "pilot.modeAskDesc" },
-    { value: "edit_alone", key: "pilot.modeEditAlone", hint: "pilot.modeEditAloneDesc" },
-    { value: "yolo", key: "pilot.modeYolo", hint: "pilot.modeYoloDesc" },
-  ];
-
   const drivers = $derived(catalog?.drivers ?? []);
   const capabilities = $derived(drivers.find((entry) => entry.id === driver)?.capabilities ?? null);
   const accounts = $derived(instancesOf(catalog?.instances ?? [], driver));
   const models = $derived(drivers.find((entry) => entry.id === driver)?.models ?? []);
+
+  /**
+   * The account name the row actually carries, as the catalog spells it.
+   *
+   * A thread row stores its instance as JSON and the pane turns a native one
+   * into the word `native`, which is not what the catalog calls it. Compared
+   * raw, the account the thread is already on never matches itself, and every
+   * row of the menu read "restarts on the same session" including the one
+   * already selected. Resolved here rather than in the pane because this is
+   * the component holding the catalog.
+   */
+  const here = $derived.by(() => {
+    if (instance !== "native") return instance;
+    return accounts.find((entry) => entry.kind === "native")?.name ?? instance;
+  });
   /**
    * The effort levels the driver declared, which is none of them today.
    *
@@ -130,18 +136,28 @@
    * offers itself.
    */
   const rows = $derived.by((): Row[] => {
+    // Another driver is a graft and is phase 4. Its accounts are listed and
+    // disabled rather than hidden: a menu that hides what it cannot do yet
+    // teaches the user the driver does not exist.
+    const others = (catalog?.instances ?? []).filter((entry) => entry.driver !== driver);
     const ordered = [
       ...accounts.filter((entry) => entry.kind === "native"),
       ...accounts.filter((entry) => entry.kind !== "native"),
+      ...others,
     ];
     const out: Row[] = [];
     for (const entry of ordered) {
       const outcome = switchOutcome(
-        { driver, instance },
+        { driver, instance: here },
         { driver: entry.driver, instance: entry.name },
         capabilities,
       );
-      const names = entry.kind === "native" ? models : [entry.model ?? entry.name];
+      const names =
+        entry.driver !== driver
+          ? [entry.model ?? entry.name]
+          : entry.kind === "native"
+            ? models
+            : [entry.model ?? entry.name];
       if (names.length === 0) {
         out.push({
           key: entry.name,
@@ -180,7 +196,7 @@
   const reachable = $derived(shown.filter((row) => row.outcome.enabled));
 
   const isCurrent = (row: Row): boolean =>
-    row.entry.name === instance && (row.model === null || row.model === model);
+    row.entry.name === here && (row.model === null || row.model === model);
 
   function instanceValue(entry: PilotInstanceEntry): PilotInstance {
     return entry.kind === "fastpick"
@@ -212,22 +228,6 @@
       close();
     } catch (err) {
       log.warn("pilot.picker", "pilot.setModel.failed", {
-        thread: threadId,
-        reason: String(err),
-      });
-      notifications.error(t("pilot.switchFailed"));
-    } finally {
-      busy = false;
-    }
-  }
-
-  async function setMode(next: PilotExecMode) {
-    if (busy || next === mode) return;
-    busy = true;
-    try {
-      await backend().pilot.setMode(threadId, next);
-    } catch (err) {
-      log.warn("pilot.picker", "pilot.setMode.failed", {
         thread: threadId,
         reason: String(err),
       });
@@ -388,27 +388,7 @@
 
       <div class="border-t border-border px-2.5 py-2">
         <p class="pb-1 text-xs font-medium text-muted-foreground">{t("pilot.pickerMode")}</p>
-        <div class="flex gap-1 rounded-md bg-[var(--color-surface)] p-0.5">
-          {#each MODES as row (row.value)}
-            <button
-              type="button"
-              class="press flex-1 rounded px-2 py-1 text-xs transition focus:outline-none focus-visible:focus-ring-inset disabled:opacity-40 {row.value ===
-              mode
-                ? 'bg-[var(--color-surface-3)] text-foreground'
-                : 'text-muted-foreground hover:text-foreground'}"
-              disabled={busy || (capabilities ? !capabilities.modes.includes(row.value) : false)}
-              onclick={() => void setMode(row.value)}
-              title={t(row.hint)}
-              aria-label={`${t(row.key)} ${t(row.hint)}`}
-              aria-pressed={row.value === mode}
-            >
-              {t(row.key)}
-            </button>
-          {/each}
-        </div>
-        <p class="pt-1.5 text-xs text-muted-foreground">
-          {t(MODES.find((row) => row.value === mode)?.hint ?? "pilot.modeAskDesc")}
-        </p>
+        <ModeControl {threadId} {mode} {capabilities} />
       </div>
     </div>
   {/if}

@@ -149,11 +149,17 @@ export function reduce(state: PilotThreadState, event: PilotEvent): boolean {
       return true;
     }
     case "item.completed": {
-      // A driver that streamed its text and completed the item with an empty
-      // body means what the deltas carried, not an empty card.
+      // The completion is what the item *ended* with, not everything it was:
+      // claude names a tool and its input on `item.started` and sends the
+      // result alone on `item.completed`, so a body that replaced rather than
+      // merged turned "Bash git status" into a card saying nothing. The
+      // completion still wins field by field, which is what makes a corrected
+      // value stick.
       const at = state.index.get(event.item.id);
-      const streamed = at === undefined ? undefined : state.items[at].body?.text;
+      const previous = at === undefined ? null : state.items[at].body;
+      const streamed = previous?.text;
       const row = itemRow(state, event.item, "completed");
+      row.body = { ...previous, ...row.body };
       if (!row.body?.text && typeof streamed === "string" && streamed.length > 0) {
         row.body = { ...row.body, text: streamed };
       }

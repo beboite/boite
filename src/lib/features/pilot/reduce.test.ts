@@ -204,6 +204,25 @@ describe("the pilot reduction", () => {
     expect(switched.items[0].body?.model).toBe("opus");
   });
 
+  // claude names a tool and its input when the item starts and sends the
+  // result alone when it ends. Replacing the body turned "Bash git status"
+  // into a card with nothing on it.
+  it("keeps what an item started with when it completes", () => {
+    const state = run([
+      {
+        kind: "item.started",
+        item: {
+          id: "i1",
+          kind: "tool_call",
+          body: { name: "Bash", input: { command: "git status" } },
+        },
+      },
+      { kind: "item.completed", item: { id: "i1", kind: "tool_call", body: { output: "clean" } } },
+    ]);
+    expect(state.items[0].body?.name).toBe("Bash");
+    expect(state.items[0].body?.output).toBe("clean");
+  });
+
   it("keeps the slash commands the driver declared at init", () => {
     const state = run([
       { kind: "session.started", native_session_id: "s1", slash_commands: ["init", "review"] },

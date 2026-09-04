@@ -24,6 +24,7 @@
   import { log } from "$lib/shared/log";
   import { t } from "$lib/i18n/index.svelte";
   import { composerAction } from "./keys";
+  import ModeControl from "./ModeControl.svelte";
   import ModelPicker from "./ModelPicker.svelte";
   import { applyHint, moveHint, slashHints } from "./slash";
   import type { PilotCatalog, PilotExecMode, PilotStatus } from "./types";
@@ -67,6 +68,9 @@
 
   const hints = $derived(slashHints(text, commands));
   const busy = $derived(status === "busy");
+  const capabilities = $derived(
+    catalog?.drivers.find((entry) => entry.id === driver)?.capabilities ?? null,
+  );
 
   /** One line at rest, six at most, then the box scrolls. */
   const MAX_ROWS = 6;
@@ -232,7 +236,7 @@
       {/if}
 
       <div
-        class="flex flex-col gap-1.5 rounded-xl border border-border bg-[var(--color-surface)] px-2 pt-2 pb-1.5 transition focus-within:border-edge"
+        class="composer-surface flex flex-col gap-1.5 rounded-xl border border-border bg-[var(--color-surface)] px-2 pt-2 pb-1.5 transition"
       >
         <textarea
           bind:this={box}
@@ -257,6 +261,13 @@
             align="left"
             bind:open={pickerOpen}
           />
+          <!-- The mode is the other thing a user changes between two turns, so
+               it sits beside the chip rather than behind it. Effort has no list
+               to offer until a driver declares one, and a control with one
+               segment is not a control. -->
+          <div class="hidden sm:block">
+            <ModeControl {threadId} {mode} capabilities={capabilities} compact />
+          </div>
           <div class="ml-auto flex shrink-0 items-center gap-1.5">
             {#if busy}
               <button
@@ -289,6 +300,19 @@
 </div>
 
 <style>
+  /* The ring belongs to the surface, not to the box inside it.
+     `:focus-visible` in app.css is unlayered, so it beats the `outline-none`
+     utility on the textarea and drew a hard rectangle inside the rounded
+     card every time somebody clicked to type. The indicator is kept: it moves
+     to the edge the reader already reads as the composer. */
+  .composer-surface:focus-within {
+    outline: 2px solid color-mix(in srgb, var(--color-foreground) 28%, transparent);
+    outline-offset: -1px;
+  }
+  .composer-surface textarea:focus-visible {
+    outline: none;
+  }
+
   .pilot-rise {
     animation: pilot-rise var(--dur-2) var(--ease-out-quint);
   }
