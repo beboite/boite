@@ -349,8 +349,16 @@ impl Drop for Bridge {
 }
 
 /// Whether `list_windows` answered a window with this title.
-fn windows_titled(data: &Value, title: &str) -> bool {
-    let Some(windows) = data.get("windows").and_then(|v| v.as_array()) else {
+///
+/// Its `data` is a **bare array** of `{label, title, url, visible, focused,
+/// isMain}`, not an object wrapping one. Both shapes are read because the
+/// wrapped one is the obvious guess and cost a run to disprove; a version that
+/// wrapped it would otherwise report every window as absent.
+pub fn windows_titled(data: &Value, title: &str) -> bool {
+    let windows = data
+        .as_array()
+        .or_else(|| data.get("windows").and_then(|v| v.as_array()));
+    let Some(windows) = windows else {
         return false;
     };
     windows.iter().any(|w| {
@@ -428,13 +436,31 @@ mod tests {
         assert!(decode_data_url("iVBORw0KGgo=").is_err());
     }
 
+    /// The record is the one 0.12.0 really sends, copied off the wire rather
+    /// than written from the struct: `data` is a bare array, which is what the
+    /// first live run got wrong.
     #[test]
-    fn the_dev_window_is_recognised_by_its_title() {
-        let listed = json!({ "windows": [{ "label": "main", "title": "Boite Dev" }] });
+    fn the_dev_window_is_recognised_in_the_shape_the_plugin_sends() {
+        let listed = json!([{
+            "focused": false,
+            "isMain": true,
+            "label": "main",
+            "title": "Boite Dev",
+            "url": "http://localhost:1430/",
+            "visible": true
+        }]);
         assert!(windows_titled(&listed, "Boite Dev"));
-        let other = json!({ "windows": [{ "label": "main", "title": "Some Other App" }] });
+        let other = json!([{ "label": "main", "title": "Some Other App" }]);
         assert!(!windows_titled(&other, "Boite Dev"));
         assert!(!windows_titled(&json!({}), "Boite Dev"));
+    }
+
+    /// A version that wrapped the array would otherwise report every window as
+    /// absent, and the failure reads as "the window is not up".
+    #[test]
+    fn a_wrapped_array_is_read_as_well() {
+        let listed = json!({ "windows": [{ "label": "main", "title": "Boite Dev" }] });
+        assert!(windows_titled(&listed, "Boite Dev"));
     }
 
     #[test]

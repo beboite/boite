@@ -150,10 +150,24 @@ pub(crate) fn paint_frame_gap(win: &tauri::WebviewWindow) {
 #[cfg(not(windows))]
 pub(crate) fn paint_frame_gap(_win: &tauri::WebviewWindow) {}
 
+/// Whether this launch is allowed to take the keyboard.
+///
+/// `boite-mcp --dev` starts the isolated window while somebody is working on
+/// the machine, and a second app grabbing focus mid-sentence is an
+/// interruption no agent may cause. It is one variable read in two places,
+/// because there are two ways in: the window is *built* focused, and it is
+/// *shown* focused once the frontend has painted. Guarding one and not the
+/// other steals the keyboard a second later instead of at once.
+pub(crate) fn unattended() -> bool {
+    std::env::var("BOITE_DEV_UNATTENDED").is_ok_and(|v| !v.is_empty() && v != "0")
+}
+
 fn show_main_window(handle: &tauri::AppHandle) {
     if let Some(win) = handle.get_webview_window("main") {
         let _ = win.show();
-        let _ = win.set_focus();
+        if !unattended() {
+            let _ = win.set_focus();
+        }
         paint_frame_gap(&win);
     }
 }
@@ -299,12 +313,10 @@ pub fn run() {
             {
                 main_window.transparent = false;
             }
-            // An unattended launch takes no focus. `boite-mcp --dev` starts
-            // this window while somebody is working on the machine, and a
-            // window that grabs the keyboard mid-sentence is an interruption
-            // no agent is allowed to cause. Read only from the environment and
-            // only when it is set, so a launch by a person is untouched.
-            if std::env::var("BOITE_DEV_UNATTENDED").is_ok_and(|v| !v.is_empty() && v != "0") {
+            // An unattended launch is built unfocused; `show_main_window` is
+            // the other half, and both read `unattended()`. Only when the
+            // variable is set, so a launch by a person is untouched.
+            if unattended() {
                 main_window.focus = false;
             }
             tauri::WebviewWindowBuilder::from_config(app, &main_window)?

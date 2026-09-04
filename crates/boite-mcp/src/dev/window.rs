@@ -312,18 +312,26 @@ pub struct StopReport {
     pub survived: bool,
 }
 
-/// Whether something accepts a connection on `127.0.0.1:port`.
+/// Whether something accepts a connection on loopback at `port`.
+///
+/// **Both loopback families, and this is not defensive.** Vite binds `::1`
+/// alone on Windows, so a probe of `127.0.0.1` never sees it: the window came
+/// up, the bridge answered, and `start` waited out its ten minutes on a port
+/// that had been listening the whole time. The bridge itself is the other way
+/// round, the plugin taking the literal `127.0.0.1` boite passes it, so a
+/// probe of one family only is wrong for one of the two whichever family it
+/// picks.
 pub fn port_answers(port: u16) -> bool {
-    let Ok(addr) = format!("127.0.0.1:{port}").parse() else {
-        return false;
-    };
-    match TcpStream::connect_timeout(&addr, Duration::from_millis(300)) {
-        Ok(stream) => {
+    for host in ["127.0.0.1", "[::1]"] {
+        let Ok(addr) = format!("{host}:{port}").parse() else {
+            continue;
+        };
+        if let Ok(stream) = TcpStream::connect_timeout(&addr, Duration::from_millis(300)) {
             let _ = stream.shutdown(Shutdown::Both);
-            true
+            return true;
         }
-        Err(_) => false,
     }
+    false
 }
 
 fn wait_for_exit(child: &mut Child, patience: Duration) -> bool {
