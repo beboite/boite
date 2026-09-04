@@ -227,7 +227,7 @@ function hasKeys(body: Record<string, unknown> | null | undefined): boolean {
 
 function clamp(value: string, limit: number): string {
   const flat = value.replace(/\s+/g, " ").trim();
-  return flat.length > limit ? `${flat.slice(0, limit - 1)}…` : flat;
+  return flat.length > limit ? `${flat.slice(0, limit - 3)}...` : flat;
 }
 
 function json(value: unknown): string {

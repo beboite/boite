@@ -39,20 +39,27 @@ Two events are live only and `is_journaled()` says so: `item.delta` (one row per
 token is the cost the design forbids) and `status.changed` (a reading, not a
 fact).
 
-**Fourteen kinds, not sixteen.** `docs/pilot.md` calls the section "Sixteen
-events" and its own table lists fourteen: `session.started`, `session.exited`,
-`turn.started`, `turn.completed`, `turn.aborted`, `item.started`, `item.delta`,
-`item.completed`, `request.opened`, `request.resolved`, `status.changed`,
-`model.changed`, `usage.updated`, `error`. The fourteen in the table are what is
-implemented; the heading is the thing that is wrong.
+**Fourteen kinds**, the same fourteen `docs/pilot.md` tables:
+`session.started`, `session.exited`, `turn.started`, `turn.completed`,
+`turn.aborted`, `item.started`, `item.delta`, `item.completed`,
+`request.opened`, `request.resolved`, `status.changed`, `model.changed`,
+`usage.updated`, `error`.
 
 ## What exists
 
-`lib.rs` exports `Runtime`, and `driver.rs` the traits and the value types the
-bus builds: `OpenSpec`, `Opened`, `Instance`, `Options`, `ExecMode`,
-`ModelSelection`, `SwitchKind`, `Capabilities`, `RequestAnswer`, `PilotError`.
-`event.rs` has the fourteen `PilotEvent` kinds and `Item`, `ItemKind`,
-`Request`, `RequestOption`, `RequestOutcome`, `Usage`, `Status`, `ExitReason`.
+`lib.rs` exports `Runtime`. `driver.rs` exports the two traits a host
+implements against, `Driver` and `Session`, the two sinks it hands them,
+`EventSink` and `SessionSink`, and the value types the bus builds: `OpenSpec`,
+`Opened`, `Instance`, `Options`, `ExecMode`, `McpServer`, `ModelSelection`,
+`SwitchKind`, `Capabilities`, `RequestAnswer`, `TurnId`, `TurnInput`,
+`PilotError`. `event.rs` has the fourteen `PilotEvent` kinds and `Item`,
+`ItemKind`, `Request`, `RequestKind`, `RequestOption`, `RequestOutcome`,
+`Usage`, `Status`, `ExitReason`.
+
+Two drivers ship: `claude.rs`, the stream-json one, and `scripted.rs`, which
+replays a scenario file and is what every test that does not want a child
+process runs against. codex, ACP and opencode are phase 1 and none of them has
+a file here yet.
 
 Two names to know outside the crate:
 
@@ -86,11 +93,19 @@ Verified 2026-09-03 on this machine.
 | What | Value |
 |---|---|
 | CLI | `claude 2.1.259 (Claude Code)`, from `claude --version` |
+| Supported range | 2.1.259 to 2.1.260 |
 | SDK read for the shapes | `@anthropic-ai/claude-agent-sdk` 0.3.259, `sdk.d.ts` and `sdk.mjs` |
 | Real CLI run | yes, one turn, captured in `tests/fixtures/claude-2.1.259-hello.jsonl` |
 
 The SDK version tracks the CLI version, which is why 0.3.259 is the one read
 against 2.1.259.
+
+**The supported range is 2.1.259 to 2.1.260.** The lower bound is the capture in
+`tests/fixtures/`, which is the one CI replays. The upper bound is the CLI
+installed on this machine today, and it is inside the range because no line of
+`claude.rs` has had to change for it. Neither bound moves without a capture on
+the new version: the argv and the two frame tables below are what a release is
+free to break, and a fixture is the only thing that notices.
 
 ### The argv
 
@@ -200,8 +215,6 @@ one of the two closes it.
 
 ### Gaps against `docs/pilot.md`
 
-- The event count in the design's heading is sixteen; its own table and this
-  crate have fourteen. See above.
 - Rollback is declared unsupported. The wire has `rewind_files`, which restores
   files rather than the conversation, so declaring it would promise the wrong
   undo.
@@ -210,7 +223,8 @@ one of the two closes it.
   are read at launch, so another account is another process.
 - Everything else the phase-0 section asks of this crate is implemented:
   `--include-partial-messages`, `set_model`, `set_permission_mode` and
-  `interrupt` all exist on 2.1.259 and are exercised against the fake.
+  `interrupt` all exist across the supported range and are exercised against
+  the fake.
 
 ## The fake and the tests
 
@@ -228,6 +242,12 @@ and the e2e runner use, and `proc::resolve_bin` covers it in a unit test.
 
 The scenario file is the same JSON `scripted.rs` reads, so one file can be
 pointed at either the fake or the scripted driver and the two must agree.
+`tests/scenarios/` holds four: `plain.json` (a turn with assistant text),
+`approval.json` (a turn that opens a tool request), `crash.json` (a child that
+dies mid-turn) and `hang.json` (one that stops answering mid-turn). The
+end-to-end run
+adds `e2e/fixtures/e2e.json` and looks its scenarios up in that directory
+first, then in this one.
 
 ```bash
 cargo test -p boite-pilot

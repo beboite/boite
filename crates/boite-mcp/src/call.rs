@@ -591,7 +591,7 @@ fn awaiting(out: &Value) -> Option<String> {
 
 /// A POST whose refusals arrive as a 200 carrying an `error`.
 ///
-/// The endpoint answers that way whenever the reason is the agent's to act on —
+/// The endpoint answers that way whenever the reason is the agent's to act on:
 /// a project that does not exist, a name that matches two of them. A transport
 /// failure is something else and stays a transport failure.
 fn refusable<B: Backend>(host: &B, path: &str, body: Value) -> Result<Value, String> {

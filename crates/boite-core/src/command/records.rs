@@ -10,8 +10,8 @@
 //! the server refuses to take a client's word for a thread's runtime state and
 //! the desktop did not, so a stale snapshot in the window could put `running`
 //! back on a thread whose process had ended. The desktop knew about the shape of
-//! the problem — `updateThreadTitle` exists precisely because a whole-row
-//! `REPLACE` clobbers concurrent writes — and had solved it for one column.
+//! the problem, `updateThreadTitle` exists precisely because a whole-row
+//! `REPLACE` clobbers concurrent writes, and had solved it for one column.
 //!
 //! Reading across those rows lives here too. [`Records::Search`] answers over
 //! the todos and the journal at once, and the store is what it needs; that it
@@ -190,7 +190,7 @@ pub enum Records {
     /// turn and none of them is worth a write. What the row records is that the
     /// thread was on during this run of the app, which is the only way a later
     /// launch can tell a thread that was cut off from one that has never been
-    /// started — and drawing those two the same way is what made every row on
+    /// started, and drawing those two the same way is what made every row on
     /// screen asleep on every boot.
     ///
     /// The exit code goes with it: it belongs to the run that ended, and a
@@ -838,8 +838,8 @@ mod tests {
         let created = ask(&host, "thread.create", row("running", json!(null))).unwrap();
         assert_eq!(created["status"], json!("idle"));
 
-        // The process ends. That is written by whatever was watching it — the
-        // registry on the server, the PTY reader on the desktop — through the
+        // The process ends. That is written by whatever was watching it, the
+        // registry on the server, the PTY reader on the desktop, through the
         // two columns no patch exposes, which is why `ThreadPatch` does not
         // carry them.
         let store = host.store().unwrap();
@@ -860,8 +860,8 @@ mod tests {
     /// The one status the window writes, and what a re-save does to it.
     ///
     /// The mark has to survive everything the window writes about a thread while
-    /// it runs, because a session id captured a second after launch is a re-save
-    /// — and a re-save that stored what the row *reads as* would turn the mark
+    /// it runs, because a session id captured a second after launch is a re-save,
+    /// and a re-save that stored what the row *reads as* would turn the mark
     /// into `stopped`, which the next boot would then decay to nothing. The
     /// thread would have been on and would come back drawn as one that never ran.
     #[test]

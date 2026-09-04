@@ -63,7 +63,7 @@ describe("the batch", () => {
   /**
    * The whole reason this module exists. One IPC hop per line was measured as a
    * couple of file writes a second, forever, for a thread that had simply got
-   * stuck — and the callers that produce the most lines are the ones on timers.
+   * stuck, and the callers that produce the most lines are the ones on timers.
    */
   it("holds a record for the window rather than sending it at once", async () => {
     log.info("ui.pane", "pane.opened");

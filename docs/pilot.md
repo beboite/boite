@@ -488,14 +488,19 @@ database. It never touches `com.boite.desktop`.
 End-to-end scenarios live in `e2e/`, run by `bun run e2e` (vitest, one dev
 window per run, reused). A `DevApp` client in `e2e/lib/` talks to the same
 three doors. The pilot scenarios run the real claude driver against
-`e2e/fake-claude.mjs`, a Node script that speaks stream-json and replays a
-scenario; the dev window is started with `BOITE_PILOT_CLAUDE_BIN` pointing at
-it, so no scenario spends tokens or needs a credential. First scenarios: the
-window boots and lists no project; a project is created; a chat thread on claude
-opens, receives a prompt, shows the assistant text, opens a tool request that
-is approved from the dock, shows the turn diff; the window restarts and the
-thread resumes on the same session; the same turn from a remote client against
-a `boite-server`.
+`crates/boite-pilot/tests/fake-claude.mjs`, the same Node script the crate's
+own tests use: it speaks stream-json and replays a scenario file. The dev
+window is started with `BOITE_PILOT_CLAUDE_BIN` set to `node <that path>`, so
+no scenario spends a token or needs a credential. A scenario name is looked up
+in `e2e/fixtures/` first and in `crates/boite-pilot/tests/scenarios/` second,
+and `e2e.json` is the one every test runs against unless it asks for another.
+
+Five scenario files today: `boot` (the window comes up and lists no project),
+`project` (one is created), `chat` (a chat thread on claude opens, takes a
+prompt and shows the assistant text), `dock` (a tool request answered from the
+approval dock) and `resume` (the window restarts and the thread comes back on
+the same session). The same turn from a remote client against a `boite-server`
+is not written yet.
 
 ## The orchestrator on the pilot
 
@@ -513,21 +518,31 @@ for terminal workers.
 Each phase ships behind the experiment, on both hosts, with a proof that opens
 and can be looked at.
 
-0. Spike claude: the crate with the claude and scripted drivers, the fake claude,
-   the `pilot.*` domain, the migration, `Host::pilot()` in both hosts, a minimal
-   chat pane, the toggle. Proof: a turn with a tool approval answered from the
-   dock, the app closed and reopened, the thread resumed on the same session,
-   the exact status in the sidebar, the same from the PWA on a boite-server.
-   Logging and the dev MCP land in this phase too, since the proof runs on them.
+0. **Done.** Spike claude: the crate with the claude and scripted drivers, the
+   fake claude, the `pilot.*` domain, the migration, `Host::pilot()` in both
+   hosts, the chat pane, the toggle. Proof: a turn with a tool approval
+   answered from the dock, the app closed and reopened, the thread resumed on
+   the same session, the exact status in the sidebar, the same from the PWA on
+   a boite-server. Logging and the dev MCP landed with it, since the proof runs
+   on them.
 1. Drivers: codex app-server, generic ACP with its four files of particulars,
    opencode. A fake binary per protocol in CI replays a turn, a request, a
-   switch, a resume.
+   switch, a resume. **Not started**: `boite-pilot/src` has `claude.rs` and
+   `scripted.rs` and no third file, so `pilot.catalog` answers `claude` and the
+   scripted stand-in and nothing else.
 2. Models: catalog, picker, instances, fastpick routes, in-session and restart
    switch, modes, checkpoints and diff per turn, `thread_spawn` with runtime.
+   **Mostly here already**, because phase 0's proof needed it: `pilot.catalog`
+   with `claude::NATIVE_MODELS` and the fastpick routes, `ModelPicker.svelte`
+   and `ModeControl.svelte`, `pilot.model.set` on both switch kinds,
+   `pilot.mode.set`, a checkpoint and a diff per turn, and `thread_spawn`
+   taking a runtime. What is left is the other drivers' half of it.
 3. Phone and orchestrator: approval from the notification, buffered delivery,
-   push on `request.opened`, the orchestrator as a chat thread.
+   push on `request.opened`, the orchestrator as a chat thread. **Not started**;
+   the dock and the PWA path are phase 0's, the notification and the push are
+   not.
 4. Graft: cross-driver switch, conversation rollback where declared, generated
-   titles, the terminal to chat bridge and back.
+   titles, the terminal to chat bridge and back. **Not started.**
 
 ## Budgets
 
@@ -542,10 +557,13 @@ and can be looked at.
 ## Risks
 
 - The stream-json wire of claude is documented only through the SDK. The
-  control messages are pinned against the installed CLI version, replayed by
-  the fake in CI, and the supported range is written in the crate README. The
-  fallback if the wire moves too much: a compiled sidecar embedding the SDK
-  behind the same `Driver`.
+  control messages are pinned against a captured CLI turn, replayed by the fake
+  in CI, and the supported range is what
+  [the crate README](../crates/boite-pilot/README.md) declares: 2.1.259, which
+  is the capture, through 2.1.260, which is what is installed today. Moving the
+  upper bound means capturing a turn on the new version. The fallback if the
+  wire moves too much: a compiled sidecar embedding the SDK behind the same
+  `Driver`.
 - fastpick has to pass stdio through to the harness.
 - Three ACP modes to confirm on installed versions: `opencode acp`,
   `copilot --acp`, an acp mode of antigravity. Each has a fallback.

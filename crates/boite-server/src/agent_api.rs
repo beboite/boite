@@ -6,8 +6,8 @@
 //! it knows there may be none, and it takes its port from the OS on loopback.
 //!
 //! It gets its own listener rather than routes on the main router, and its own
-//! secret. The main server may be bound to a routable interface — that is the
-//! whole point of a remote workspace — and nothing here belongs on a network.
+//! secret. The main server may be bound to a routable interface, that is the
+//! whole point of a remote workspace, and nothing here belongs on a network.
 //! The client token and this secret are also different things: a device that can
 //! drive the workspace is not the same principal as an agent that may append to
 //! a checklist.

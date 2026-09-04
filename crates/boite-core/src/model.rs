@@ -21,7 +21,7 @@ pub struct Todo {
     #[serde(default)]
     pub note: Option<String>,
     /// The commit an agent reported with its claim, stored as given. The client
-    /// resolves it against the repository — which lives here — before showing
+    /// resolves it against the repository, which lives here, before showing
     /// it, so a sha nothing backs reads as unknown rather than as done.
     #[serde(default)]
     pub commit_sha: Option<String>,
@@ -113,7 +113,7 @@ pub struct Thread {
     pub delegation_status: Option<String>,
     /// `"orchestrator"` on a thread Boite spawned as one, `None` on every
     /// worker. Stamped by Boite at creation; `thread.update` cannot reach it
-    /// and `thread.create` ignores what a caller claims — it is what selects
+    /// and `thread.create` ignores what a caller claims: it is what selects
     /// the orchestrator tool tier, so it must not be claimable.
     #[serde(default)]
     pub role: Option<String>,

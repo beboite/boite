@@ -229,8 +229,8 @@ export class RemoteBackend implements Backend {
       // resolving anyway told every caller the bytes had landed. The dispatch
       // queue believed it and settled the row `delivered`; the terminal
       // believed it and drew nothing. The frame is not queued for later on
-      // purpose — replaying a keystroke into a live agent minutes afterwards is
-      // worse than losing it — so this rejection IS the news.
+      // purpose, replaying a keystroke into a live agent minutes afterwards is
+      // worse than losing it, so this rejection IS the news.
       write: (key, data) => {
         if (!socket.sendInput(threadIdOf(key), data)) {
           return Promise.reject(
@@ -618,8 +618,6 @@ export class RemoteBackend implements Backend {
     // instead of drawing an empty list. `this.logs` below is the one that works
     // over the wire.
     this.log = {
-      event: () => Promise.resolve(),
-      read: () => Promise.resolve([]),
       clear: () => Promise.resolve(),
       filePath: () => Promise.resolve(""),
     };
@@ -917,7 +915,7 @@ export class RemoteBackend implements Backend {
   }
 
   // An older server has no answer for this, and the caller treats a failure as
-  // "not mine" — which drops the request rather than running a move that a
+  // "not mine", which drops the request rather than running a move that a
   // second device may be running at the same time.
   claimAgentRequest(requestId: string): Promise<boolean> {
     return this.#socket

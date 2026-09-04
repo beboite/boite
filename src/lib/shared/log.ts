@@ -8,9 +8,9 @@
  * has to include what the window did, and a `console.log` nobody keeps is not
  * an answer.
  *
- * Distinct from `services/logger.svelte.ts`, which writes this device's own
- * diagnostics file through the desktop host and is on its way out. This one is
- * the same five bus methods on both transports.
+ * `services/logger.svelte.ts` is a shim over this module and nothing else, so
+ * the thirty call sites written against the old signature take this road too.
+ * There is one webview log path.
  *
  * Two things it is careful about, because both have bitten this codebase:
  *
@@ -55,7 +55,7 @@ const MAX_QUEUE = 500;
 /**
  * How many stack frames of an unhandled error are worth keeping.
  *
- * The host redacts user directories, so a full stack is safe — it is just
+ * The host redacts user directories, so a full stack is safe: it is just
  * useless. Every frame past the third is framework, and a webview stack is
  * twenty `file:///` URLs of bundled chunks. The first three name the code that
  * actually threw.
@@ -270,6 +270,28 @@ function mirrorConsole(): void {
       }
     };
   }
+}
+
+/**
+ * One console line the mirror does not see.
+ *
+ * For code that writes its own record and wants a devtools line as well:
+ * printing through the wrapped console would have the mirror write a second
+ * record about the line, so the same call site would land in the file twice,
+ * once with its own target and once under `webview.console`.
+ *
+ * Only `error` and `warn` are wrapped, so the other two are the console's own.
+ */
+export function printUnmirrored(level: LogLevel, ...args: unknown[]): void {
+  if (typeof console === "undefined") return;
+  if (level === "error" || level === "warn") {
+    const original = consoleBefore.get(level);
+    if (original) original.apply(console, args);
+    else console[level](...args);
+    return;
+  }
+  if (level === "debug") console.debug(...args);
+  else console.log(...args);
 }
 
 /** One line out of whatever was handed to the console. */

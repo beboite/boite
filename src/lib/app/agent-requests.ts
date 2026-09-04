@@ -128,7 +128,7 @@ interface PaneOpenRequest {
  * Three verbs and one shape, because they differ only in what they do once the
  * pane is found and every check before that is the same one. The endpoint has
  * usually run those checks already, off the window's own description; this runs
- * them again because the endpoint cannot see a window it does not have — a
+ * them again because the endpoint cannot see a window it does not have: a
  * headless boite dispatches these blind, and the device is the only side that
  * knows which panes exist. Same reasoning as `paneContentOf`: the frame is
  * created here, so the last word belongs here.
@@ -151,7 +151,7 @@ interface BrowserDriveRequest {
  * Unlike the drive verbs these carry a `requestId` and OWE an answer: the
  * host keeps the asking HTTP handler on the line until the webview resolves
  * it through the answer channel of the transport that carried the question
- * here (`answerBackend`). Every refusal therefore answers too — a dropped
+ * here (`answerBackend`). Every refusal therefore answers too: a dropped
  * question here is an agent staring at a timeout.
  */
 interface BrowserAskRequest {
@@ -211,7 +211,7 @@ function writtenOnThisMachine(from: RequestSource): boolean {
  * user's own shortcuts (matched on its label, because that is the name they see
  * and would tell an agent), a built-in CLI preset, and an icon key. Nothing
  * matching means falling back to the caller's own agent, which is nearly always
- * the one meant — an agent splitting its work reaches for another of itself.
+ * the one meant: an agent splitting its work reaches for another of itself.
  */
 export function resolveLaunch(
   agent: string | null | undefined,
@@ -476,12 +476,12 @@ async function handleClose(req: CloseRequest, from: RequestSource) {
  * Show the user something beside the terminal that asked.
  *
  * The one agent request that changes nothing: it arranges panes. Which is
- * exactly why it is worth having — an agent that has just started a dev server
+ * exactly why it is worth having: an agent that has just started a dev server
  * or written a diff knows what is worth looking at, and printing a path and
  * hoping was the only way to say so.
  *
  * **It lands beside the caller and moves nothing else.** This used to make the
- * caller active first — its thread, its project, the terminal view — so that
+ * caller active first, its thread, its project, the terminal view, so that
  * the anchor below would resolve to it. That is a pane the user never clicked
  * taking the screen away from what they were reading, and an agent working in
  * the background did it every time it had something to show. The same
@@ -575,7 +575,7 @@ async function showFile(path: string, projectId: string): Promise<string | null>
  * host in its own window, so the address is checked here and not only at the
  * endpoint that received it: the same event also arrives from a remote boite,
  * which never went through that endpoint. Anything off this machine is the
- * user's call — the agent chose the page, and it is not the agent's window.
+ * user's call: the agent chose the page, and it is not the agent's window.
  */
 async function paneContentOf(
   req: PaneOpenRequest,
@@ -617,7 +617,7 @@ async function paneContentOf(
  * This used to read the group the page is drawing, which was the same rule as
  * "the user has to be looking at it". An agent's pane sits beside that agent's
  * own terminal and the user is very often reading another thread, or another
- * project, by the time the next call lands — and since every group stays
+ * project, by the time the next call lands, and since every group stays
  * mounted, that pane is loaded, driven and answering the whole time. Refusing
  * it left an agent that had just opened a page unable to read the page it had
  * just opened.
@@ -766,7 +766,7 @@ async function handleBrowserAsk(req: BrowserAskRequest, from: RequestSource) {
     // else here goes through the frame, which answers from a hidden group as
     // readily as from the drawn one; this photographs a rectangle of the
     // window, and that rectangle currently holds whatever group the user IS
-    // looking at. A wrong picture is worse than a refusal — an agent acts on
+    // looking at. A wrong picture is worse than a refusal: an agent acts on
     // it.
     if (!paneIsShown(pane.paneId)) {
       answer({
@@ -854,7 +854,7 @@ async function handle(req: AgentRequest, from: RequestSource) {
  * The same requests, arriving from a boite instead of from this machine.
  *
  * Every connected device gets the event, because the server has no way to know
- * which one is looking — so the first thing to do is find out whether this is
+ * which one is looking, so the first thing to do is find out whether this is
  * the device that acts on it. `agent.claimRequest` answers true exactly once
  * per id; two devices running the same move would kill one PTY twice and leave
  * a second worktree behind.

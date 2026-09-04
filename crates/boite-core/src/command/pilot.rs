@@ -2,16 +2,16 @@
 //!
 //! Same shape as every other domain, with one difference the whole design
 //! turns on: the work is async and `boite-core` takes no executor. So this file
-//! does what a bus does and stops there — decode, declare what the call needs,
+//! does what a bus does and stops there: decode, declare what the call needs,
 //! check the caller's grant and the roots of the thread's own directory, read
-//! the row and build the [`boite_pilot::OpenSpec`] out of it — and hands the
+//! the row and build the [`boite_pilot::OpenSpec`] out of it, and hands the
 //! host a [`PilotReady`]. The host owns the tokio runtime and runs it through
 //! [`crate::pilot_host::execute`], which is the same shape as `pulse_waiters`
 //! and `child_pid`: a capability the bus validates and a resource only a host
 //! has.
 //!
-//! `Host::pilot()` answers `None` on a host with no runtime — a test, a headless
-//! CLI — and every method here refuses with that sentence rather than pretending
+//! `Host::pilot()` answers `None` on a host with no runtime, a test, a headless
+//! CLI, and every method here refuses with that sentence rather than pretending
 //! a thread has a session.
 
 use std::path::PathBuf;
@@ -306,7 +306,7 @@ fn thread_cwd(store: &Store, thread_id: &str) -> Result<PathBuf, String> {
 ///
 /// `resume` comes from `threads.session_id`: set means the conversation already
 /// exists, and the claude driver then passes `--resume` instead of
-/// `--session-id`, which are exclusive. `bin` is deliberately left empty — the
+/// `--session-id`, which are exclusive. `bin` is deliberately left empty: the
 /// driver resolves its own binary, and naming one here would freeze a path into
 /// a row.
 fn open_spec(

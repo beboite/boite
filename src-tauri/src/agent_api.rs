@@ -9,14 +9,14 @@
 //!
 //! Bound to loopback. That narrowness is the whole security argument: the
 //! dev-only `mcp-bridge` could already do this through `invoke_tauri`, which is
-//! exactly why it cannot ship — a door that does everything cannot be defended.
+//! exactly why it cannot ship: a door that does everything cannot be defended.
 //!
 //! Who may ask for what is `boite_agent_api::auth`, and it is the same on both
 //! hosts. An agent Boite launched signs with a key minted for its thread; an
 //! agent registered from a credentials file presents a token derived for one
-//! project and cannot reach another. The desktop used to accept a third thing —
-//! a working directory, with the project resolved to whichever one contained it
-//! — and that is gone.
+//! project and cannot reach another. The desktop used to accept a third thing,
+//! a working directory, with the project resolved to whichever one contained it,
+//! and that is gone.
 
 use std::sync::Arc;
 
@@ -32,7 +32,7 @@ use boite_core::store::Store;
 /// Moving a thread, creating a project and opening a second terminal all mean
 /// killing or spawning a PTY, opening or releasing a worktree, and writing rows
 /// the front end owns. None of that belongs behind an HTTP handler holding a
-/// second connection to the database — so the endpoint checks what it can see,
+/// second connection to the database, so the endpoint checks what it can see,
 /// emits, and lets the app do the work.
 const AGENT_REQUEST: &str = "boite://agent-request";
 
@@ -380,7 +380,7 @@ fn write_project_credentials(app: &tauri::AppHandle, store: &Store, api: &AgentA
 ///
 /// Public because the loop above only covers what existed at startup. A project
 /// added since has no file, and the panel offering to wire an agent for it is
-/// exactly when that becomes visible — so the command behind that panel writes
+/// exactly when that becomes visible, so the command behind that panel writes
 /// it then. Late or early is the same act: the file names a port that lives and
 /// dies with this process.
 ///
@@ -443,7 +443,7 @@ pub fn start(app: &tauri::AppHandle) {
 
     // Bound here, not inside the task: the address has to be known before the
     // first thread can spawn. Registering it from the task left a window where
-    // pty_open found no state and launched an agent with no credentials — the
+    // pty_open found no state and launched an agent with no credentials: the
     // shim then exits, and the agent reports only that its MCP server closed the
     // connection. Small window, but it is exactly the moment someone starts a
     // terminal: right after the app opens.

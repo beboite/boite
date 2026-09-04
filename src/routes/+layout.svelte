@@ -33,7 +33,6 @@
   import { watchPilotStatus } from "$lib/features/pilot/threadStatus";
   import { watchScreen } from "$lib/app/screen.svelte";
   import { installInspector } from "$lib/features/devtools/inspect";
-  import { captureWindowErrors } from "$lib/shared/services/logger.svelte";
   import { captureWebviewErrors } from "$lib/shared/log";
   import { editorStore } from "$lib/features/editor/store.svelte";
   import { paneStore, threadLeavesOf } from "$lib/features/panes/store.svelte";
@@ -306,11 +305,9 @@
 
   // Before anything else has a chance to throw. What the window raises on its
   // own reached the devtools console and stopped there, which on a packaged
-  // desktop app is nowhere at all.
-  captureWindowErrors();
-  // The bus half of the same thing: unhandled errors and the console, batched
-  // onto whichever host is answering, so a phone talking to a server leaves a
-  // record too rather than only the desktop.
+  // desktop app is nowhere at all. Batched onto whichever host is answering, so
+  // a phone talking to a server leaves a record too rather than only the
+  // desktop.
   captureWebviewErrors();
 
   onMount(() => {

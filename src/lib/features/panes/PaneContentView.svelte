@@ -33,7 +33,7 @@
   );
   // The chat pane and everything under it: the timeline, the picker and the
   // request card. Off the boot path by construction, which is the line
-  // `docs/pilot.md` budgets for it — a boite with the experiment off never
+  // `docs/pilot.md` budgets for it: a boite with the experiment off never
   // fetches the chunk at all.
   const ChatView = lazyComponent(() => import("$lib/features/pilot/ChatPane.svelte"));
 

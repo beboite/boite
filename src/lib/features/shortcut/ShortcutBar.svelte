@@ -33,8 +33,8 @@
   import TerminalIcon from "@lucide/svelte/icons/terminal";
   import Sparkles from "@lucide/svelte/icons/sparkles";
 
-  // A plain click on no project already lands in Scratch; the menu — and the
-  // shift-click behind it — is how you get there without giving up the project
+  // A plain click on no project already lands in Scratch; the menu, and the
+  // shift-click behind it, is how you get there without giving up the project
   // you are on. Except when the launcher was opened from a project's own row:
   // that project IS the answer, and asking again would be asking twice.
   async function launch(shortcutId: string, forceScratch: boolean, chat = false) {
@@ -65,7 +65,7 @@
    *
    * It used to be a 40px strip across the top of the main area, permanently
    * offering something you do a handful of times a session, in the space the
-   * agent's own output wants — and it owned the slot the editor needs for its
+   * agent's own output wants, and it owned the slot the editor needs for its
    * tabs. It is a popover off a project's `+` now.
    *
    * `compact` is that popover, and it is one menu that walks between panes, not a

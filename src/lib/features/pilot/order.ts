@@ -18,7 +18,7 @@ import type { PilotItemRow } from "./types";
  *
  * Stable by construction rather than by a sort: the items are walked once in
  * journal order and a turn row is emitted when its last item has gone past.
- * A turn nothing names yet — one still running with no output — comes out where
+ * A turn nothing names yet, one still running with no output, comes out where
  * it was, which is what draws the "running" line under a prompt that has just
  * been sent.
  */

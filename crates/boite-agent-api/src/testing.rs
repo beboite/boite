@@ -2,7 +2,7 @@
 //!
 //! The endpoint used to be testable on one side only: the desktop copy carried
 //! three test modules and the server copy carried none, so the half that runs
-//! headless — the half a remote agent talks to — was the untested one. There is
+//! headless, the half a remote agent talks to, was the untested one. There is
 //! one implementation now, and this is what it is tested against.
 
 use std::path::PathBuf;

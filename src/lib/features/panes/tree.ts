@@ -33,8 +33,8 @@ export function leafNodesOf(
  * Thread ids under this node.
  *
  * Distinct from `leavesOf` now that a leaf need not be a thread: the callers
- * that ask "which terminals are on screen" — the status engine's visibility
- * sweep, the page's activation bookkeeping, Ctrl+Tab — mean this one, and
+ * that ask "which terminals are on screen", the status engine's visibility
+ * sweep, the page's activation bookkeeping, Ctrl+Tab, mean this one, and
  * handing them the pane id of a git panel has them looking up a thread that
  * does not exist.
  */

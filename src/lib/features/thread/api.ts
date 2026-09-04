@@ -140,7 +140,7 @@ function requireProject(projectId: string | null): Project | null {
  *
  * Two ways to reach Scratch, because it is no longer a row to click: being on
  * no project at all, which is what the sidebar's empty space leaves you with,
- * or asking for it outright — shift-click or right-click on a shortcut, which
+ * or asking for it outright: shift-click or right-click on a shortcut, which
  * works without giving up the project you are on.
  *
  * Async because Scratch is made on demand, so every launch path awaits it
@@ -177,7 +177,7 @@ export async function launchBlankTerminalHere(
  * out from under them on a relaunch would lose that.
  *
  * Detached, so nothing is named and no branch appears until the agent claims
- * one. Every refusal below falls back to the project folder — a thread that
+ * one. Every refusal below falls back to the project folder: a thread that
  * cannot be isolated still has to start.
  */
 export async function openWorktreeFor(
@@ -225,7 +225,7 @@ export async function openWorktreeFor(
 
 // Repositories already asked for a spare, and when they were asked. The backend
 // refills after every thread that takes one, so a project only has to be primed
-// once — but never for the whole session: a spare removed from the Worktrees
+// once, but never for the whole session: a spare removed from the Worktrees
 // tab, or dropped by the pool's own cap, has to be replaceable without a
 // restart.
 const warmed = new Map<string, number>();
@@ -241,8 +241,8 @@ function warmKey(project: Project): string {
 /**
  * Forgets that this project was warmed, so the next visit asks again.
  *
- * The one thing this side cannot observe is the pool losing a spare — removed
- * by hand from the Worktrees tab, or collected by the backend's own cap — and
+ * The one thing this side cannot observe is the pool losing a spare, removed
+ * by hand from the Worktrees tab, or collected by the backend's own cap, and
  * without this the project would go without one until a restart.
  */
 export function forgetWarmedWorktree(project: Project) {
@@ -298,8 +298,8 @@ const preparing = new Map<string, Promise<void>>();
  * output, which is tens of seconds on a large repository and is measured, not
  * hung. What this exists for is the dishonest case. The wait used to have no
  * end at all, so a `worktree_open` that never answered left the terminal black,
- * the reload a silent no-op — `spawn` returns early while `spawning` is still
- * latched — and the thread impossible to close, since closing waits here too.
+ * the reload a silent no-op, `spawn` returns early while `spawning` is still
+ * latched, and the thread impossible to close, since closing waits here too.
  * One unanswered call took three of the app's promises with it and said nothing
  * in a release build.
  */
@@ -357,16 +357,19 @@ function prepareWorktree(project: Project, thread: Thread, iconKey: IconKey) {
       // only place it can still be dealt with.
       logger.error(
         "worktree",
-        `${thread.id}: answered after ${took}ms, too late to use — ${path} belongs to nobody`,
+        `${thread.id}: answered after ${took}ms, too late to use, ${path} belongs to nobody`,
+        { threadId: thread.id },
       );
       return;
     }
     if (took >= WORKTREE_SLOW_MS) {
-      logger.info("worktree", `${thread.id}: ready after ${took}ms — ${path}`);
+      logger.info("worktree", `${thread.id}: ready after ${took}ms, ${path}`, {
+        threadId: thread.id,
+      });
     }
     // The store's thread, not the local one: that is the reactive object the
     // terminal reads its cwd from. It is gone when the thread was closed while
-    // the worktree was being made — the close path waits for us before
+    // the worktree was being made: the close path waits for us before
     // releasing, so there is nothing left to write to.
     const live = app.threadById(thread.id);
     if (!live) return;
@@ -376,8 +379,11 @@ function prepareWorktree(project: Project, thread: Thread, iconKey: IconKey) {
 
   const settled = work.catch((err) => {
     // A thread with no worktree runs in the project folder, which is the
-    // documented fallback — never a reason to fail the thread itself.
-    logger.warn("worktree", `prepare failed for ${thread.id}`, String(err));
+    // documented fallback, never a reason to fail the thread itself.
+    logger.warn("worktree", `prepare failed for ${thread.id}`, {
+      threadId: thread.id,
+      details: String(err),
+    });
   });
 
   let deadline: ReturnType<typeof setTimeout> | null = null;
@@ -414,8 +420,8 @@ function prepareWorktree(project: Project, thread: Thread, iconKey: IconKey) {
  * The row is what a restart reads, so without it the worktree opened for this
  * thread is registered in git and owned by nobody: no thread claims it, no
  * cleanup path knows it exists, and the Worktrees tab is the only place it can
- * still be found. Removing it here is not on offer — the terminal is starting
- * in it as this runs — so naming it is what is left, in the log and in the
+ * still be found. Removing it here is not on offer, the terminal is starting
+ * in it as this runs, so naming it is what is left, in the log and in the
  * toast, rather than losing it quietly.
  */
 async function recordUnsavedThread(thread: Thread, err: unknown) {
@@ -485,7 +491,7 @@ function createThread(
   );
   if (opts.deferActivation) {
     // Nothing mounts yet. Mounting the Terminal is what spawns the PTY, and the
-    // caller has a write that must land on the row before that spawn reads it —
+    // caller has a write that must land on the row before that spawn reads it:
     // the orchestrator role stamp. It calls `app.requestActivation` itself.
   } else if (opts.focus === false) {
     // Nobody clicked, so nobody moves. Mounting the Terminal is what spawns the
@@ -640,7 +646,7 @@ export async function promoteThread(
  * Starts an agent through fastpick, on a combination the user picked here.
  *
  * The thread's command carries all three answers, which is what makes fastpick resolve
- * without opening its own menu — and what makes a reload come back on the same endpoint and
+ * without opening its own menu, and what makes a reload come back on the same endpoint and
  * the same model instead of asking again. The label and the icon are the agent's, not
  * fastpick's: from here on it is a Claude thread that happens to run somewhere else, and
  * the status, the session monitor and the todo endpoint all key off that.
@@ -668,7 +674,7 @@ export async function launchFastpick(
  *
  * The door `thread_spawn` comes through. `launchShortcut` cannot serve it: what
  * an agent names is a CLI or one of the user's shortcuts, resolved before we
- * get here, and a project it may not be sitting in — while `launchShortcut`
+ * get here, and a project it may not be sitting in, while `launchShortcut`
  * looks a project up by id and complains to the user when it finds none, which
  * is the wrong conversation to have about a request nobody clicked.
  *
@@ -1010,7 +1016,7 @@ export async function reloadThread(threadId: string, opts?: { silent?: boolean }
 
   // Reload means "give me this conversation here, now". If a background agent
   // is still holding the session, claude would refuse to resume it and the
-  // thread would land in the agent picker instead — so release it first and let
+  // thread would land in the agent picker instead, so release it first and let
   // the relaunch below be an ordinary resume. Stopping is scoped to background
   // agents backend-side; an interactive session belongs to another terminal.
   // Best-effort: a failure just means the picker path is taken, as before.

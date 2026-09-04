@@ -219,7 +219,7 @@ class PaneStore {
       const orphans = threadLeavesOf(g.root).filter((id) => !valid.has(id));
       // Nothing died here. Worth saying out loud because the reaping below
       // keys on "no thread left", and a group that never had one is not a
-      // widow — it is the panels a user opened on a project with no terminal
+      // widow: it is the panels a user opened on a project with no terminal
       // running, which is most of a project's life.
       if (orphans.length === 0) continue;
       let root: LayoutNode | null = g.root;
@@ -263,7 +263,7 @@ class PaneStore {
    * The saved blob stays, and stays where it was: `panesKey` gives each
    * workspace its own, so the arrangement a machine had is still there when the
    * user comes back to it. Only the tree in memory is dropped. This used to
-   * delete the blob outright, which was the price of a single global key —
+   * delete the blob outright, which was the price of a single global key:
    * every machine lost its layout to stop them from mixing.
    *
    * `viewport` stays. It measures the window this app is drawn in, which is the
@@ -388,7 +388,7 @@ class PaneStore {
       // what it gets. On a narrow one the same call used to hand back two
       // unreadable strips, so the split turns on its side instead: the new pane
       // goes under its neighbour, where the width is the one thing it keeps.
-      // Neither fits, and the caller says the group is full — which it is, of
+      // Neither fits, and the caller says the group is full, which it is, of
       // this window.
       if (!room.row) {
         if (!room.column) return null;
@@ -416,7 +416,7 @@ class PaneStore {
    *
    * Panels used to hang off a rail that drew itself whatever was running, so
    * git, files and the todo list were reachable on a project nobody had opened
-   * a terminal in yet — which is how a project starts. Panes replaced the rail
+   * a terminal in yet, which is how a project starts. Panes replaced the rail
    * and inherited a rule the rail never had: every pane opens beside another
    * one. This is the seed that rule needs.
    *

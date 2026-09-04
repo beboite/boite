@@ -42,7 +42,7 @@ const MAX_TOASTS = 5;
  *
  * The floor is per kind, because a card is not read the same way: a success is
  * recognised, an error is read, a warning is read and then acted on. Every one
- * of them used to expire on a fixed count that assumed six words — long enough
+ * of them used to expire on a fixed count that assumed six words, long enough
  * for "Copié", and gone before a sentence naming three files had been found on
  * screen, let alone read.
  */
@@ -70,7 +70,7 @@ function dwellFor(kind: ToastKind, message: string, detail?: string): number {
  * Every toast raised this session, newest last. Development builds only.
  *
  * A toast is how this app reports a failure, and it dismisses itself after a
- * few seconds — so an agent driving the app through the MCP bridge, which is
+ * few seconds, so an agent driving the app through the MCP bridge, which is
  * how Boite is developed, arrives after the only account of what went wrong has
  * gone. Read through `window.__boite.toasts()`.
  *

@@ -3,7 +3,7 @@ import type { Keybinding } from "$lib/shared/keyboard/types";
 export type { Keybinding };
 
 // Which transport owns an entity in dynamic mode: the local desktop backend or
-// the connected boite. Runtime-only tag — never persisted (each store only
+// the connected boite. Runtime-only tag: never persisted (each store only
 // holds its own rows) and stripped before any RPC. Undefined outside dynamic
 // mode, where a single backend owns everything.
 export type WorkspaceOrigin = "local" | "remote";
@@ -176,7 +176,7 @@ export interface Settings {
   /**
    * Give every agent thread its own detached worktree instead of running them
    * all in the project folder. On by default: the heavy directories
-   * (`node_modules`, `target`, …) are linked to the main checkout rather than
+   * (`node_modules`, `target`, ...) are linked to the main checkout rather than
    * rebuilt, so a worktree costs its source tree and nothing else.
    */
   threadWorktrees: boolean;
@@ -238,7 +238,7 @@ export interface Settings {
    * Where the configuration sync pushes and pulls. Null: not set up.
    *
    * In this blob rather than the device one because it describes the machine the
-   * threads run on — whose ~/.claude is read, whose git credentials are used —
+   * threads run on, whose ~/.claude is read, whose git credentials are used,
    * not the glass in front of the user. A phone on a boite-server that kept its
    * own copy here would push an empty address over the server's.
    */
@@ -247,7 +247,7 @@ export interface Settings {
   syncOnLaunch: boolean;
   /**
    * Per source: an agent id, or `agents` for the shared instruction tree. An id
-   * that is absent is off, so nothing syncs until it is asked for — the only
+   * that is absent is off, so nothing syncs until it is asked for, the only
    * safe default for something that writes into a home directory.
    */
   syncSources: Record<string, boolean>;
@@ -318,7 +318,7 @@ export interface Settings {
   infoBoxCollapsed: boolean;
   /**
    * Experiment: a whip over the whole window, thrown from a titlebar button.
-   * Purely cosmetic — it cracks, it makes a noise, and it reaches no terminal:
+   * Purely cosmetic. It cracks, it makes a noise, and it reaches no terminal:
    * no interrupt, no keystroke, no prompt.
    */
   experimentWhip: boolean;
@@ -333,15 +333,15 @@ export interface Settings {
   /**
    * Experiment: the workspace layer, as one switch.
    *
-   * It was four — home, orchestrator, per-project orchestrators, voice — and
+   * It was four, home, orchestrator, per-project orchestrators, voice, and
    * they were one feature seen from four angles: the orchestrator's chat is
    * drawn inside home and nowhere else, voice is that chat's microphone, and
    * per-project scopes are the orchestrator's own roster. Arming any one of the
    * four alone produced a surface with no way in or a way in with no surface.
    *
    * Device-scoped on purpose: arming is a per-device decision (this glass shows
-   * the chat), while everything the orchestrator *is* — its agent, its autonomy,
-   * its caps — is workspace configuration below, because the thread runs on the
+   * the chat), while everything the orchestrator *is*, its agent, its autonomy,
+   * its caps, is workspace configuration below, because the thread runs on the
    * workspace and every device must agree on what it may do.
    */
   experimentWorkspace: boolean;
@@ -503,7 +503,7 @@ export interface TodoItem {
   commitSha: string | null;
   /**
    * The agent that claimed it, as an icon key. Set only when Boite launched the
-   * terminal it was claimed from — an agent wired through a credentials file
+   * terminal it was claimed from: an agent wired through a credentials file
    * names a project and no thread, so it stays anonymous.
    */
   claimedBy: IconKey;

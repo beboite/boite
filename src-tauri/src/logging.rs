@@ -1,7 +1,7 @@
 //! The desktop's half of the log.
 //!
-//! Everything that used to be here — the JSON format, the redaction, the
-//! rotation, the bounded tail read — is now `boite_core::log`, because the
+//! Everything that used to be here, the JSON format, the redaction, the
+//! rotation, the bounded tail read, is now `boite_core::log`, because the
 //! desktop is one host of four and a rule written on this side never reached
 //! `boite-server`, `boite-mcp` or the webview. What is left is what only this
 //! process can answer: where Tauri puts the log directory, and the shape the
@@ -69,14 +69,6 @@ pub fn log_file_path(handle: &AppHandle) -> Result<PathBuf, String> {
     Ok(log_root(handle)?.join(format!("{HOST}.jsonl")))
 }
 
-/// The generation before the current one.
-///
-/// The panel offers "this session" and "the previous one"; a rotation is what
-/// that boundary is made of, and `boite_core::log` keeps two of them.
-pub fn previous_log_file_path(handle: &AppHandle) -> Result<PathBuf, String> {
-    Ok(log_root(handle)?.join(format!("{HOST}.1.jsonl")))
-}
-
 /// Brings the log up for this process.
 ///
 /// Called once, from `setup`. Installs the `tracing` layer, so everything the
@@ -101,8 +93,8 @@ pub fn begin_log_session(handle: &AppHandle) -> Result<(), String> {
 
 /// One record from this side of the app.
 ///
-/// The `handle` is no longer read — the log directory is settled at
-/// [`begin_log_session`] — and stays in the signature because thirty call sites
+/// The `handle` is no longer read, the log directory is settled at
+/// [`begin_log_session`], and stays in the signature because thirty call sites
 /// pass it and none of them would read better without it.
 pub fn append_app_log(
     _handle: &AppHandle,
@@ -112,28 +104,6 @@ pub fn append_app_log(
     details: Option<&str>,
 ) -> Result<(), String> {
     let mut record = Record::new(HOST, level, source, message);
-    if let Some(details) = details {
-        record
-            .fields
-            .insert("details".to_string(), serde_json::Value::String(details.to_string()));
-    }
-    log::write(record);
-    Ok(())
-}
-
-/// One record the webview produced.
-///
-/// Tagged `webview` rather than `desktop`, so a reader can tell a frame that
-/// stalled from a Rust command that refused. It lands in this process's file:
-/// the browser has no file of its own, which is the whole reason it goes
-/// through here.
-pub fn append_webview_log(
-    level: &str,
-    source: &str,
-    message: &str,
-    details: Option<&str>,
-) -> Result<(), String> {
-    let mut record = Record::new("webview", level, source, message);
     if let Some(details) = details {
         record
             .fields

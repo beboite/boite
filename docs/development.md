@@ -35,12 +35,19 @@ its database were outside it, and those are what a check usually needs.
 {
   "mcpServers": {
     "boite-dev": {
-      "command": "D:/Dev/Collab/boite/target/debug/boite-mcp.exe",
+      "command": "D:/Dev/Collab/boite/src-tauri/binaries/boite-mcp-x86_64-pc-windows-msvc.exe",
       "args": ["--dev", "--repo", "D:/Dev/Collab/boite"]
     }
   }
 }
 ```
+
+That is the path `bun run build:sidecar` writes,
+`src-tauri/binaries/boite-mcp-<target triple>` with `.exe` on Windows, and the
+one Tauri resolves `externalBin` to, so it is the copy that exists after any
+build of the app. `bun run dev:isolated` does not build it: run the sidecar
+script once first. A `cargo build -p boite-mcp` puts a debug copy at
+`target/debug/boite-mcp` instead, and either answers.
 
 `--repo` is the checkout `bun run dev:isolated` runs in and defaults to the
 working directory; `--port` is the isolated config's vite port and defaults to

@@ -544,8 +544,8 @@ async fn handle_attach(
 ///
 /// **A ticket, never the device's own credential.** The ticket was bought over
 /// authenticated HTTP seconds ago (`http::ticket`), is good for one connection
-/// and expires in five minutes, so what travels through this frame — and
-/// through whatever proxy is in front of it — is worth nothing by the time
+/// and expires in five minutes, so what travels through this frame, and
+/// through whatever proxy is in front of it, is worth nothing by the time
 /// anybody could replay it. A long-lived credential presented here is refused
 /// like any other wrong secret, on purpose: accepting both would leave the old
 /// shape working under a new name.
@@ -563,7 +563,7 @@ async fn authenticate(
     // A frame that is not a well-formed auth request still has to reach
     // auth.spend_ticket: routing malformed or wrong-method first frames around
     // it left the per-IP lockout untrippable by exactly the traffic a prober
-    // sends. Timeouts and closes are NOT counted — a client that hangs up
+    // sends. Timeouts and closes are NOT counted: a client that hangs up
     // before authenticating (tab closed, network blip) is not an attempt, and
     // counting it would lock out a legitimate device after five reconnects.
     let attempt: Option<(u64, String)> = match &first {
@@ -584,7 +584,7 @@ async fn authenticate(
                 // A text frame that is not a usable auth request is still an
                 // attempt: that is what a prober sends. So is one carrying
                 // `token` instead of `ticket`, which is what a client built
-                // before this sends — it reads the empty string and is refused,
+                // before this sends: it reads the empty string and is refused,
                 // rather than being quietly accepted on the old path.
                 .unwrap_or((0, String::new())),
         ),
@@ -592,7 +592,7 @@ async fn authenticate(
         // Close/Ping/Pong and the timeout are NOT attempts. A client that hangs
         // up before authenticating (tab closed, network blip, connectivity
         // probe) sends a Close frame, and counting it locked the IP out after
-        // five reconnects — a PWA banning its own device.
+        // five reconnects, a PWA banning its own device.
         _ => None,
     };
 

@@ -2,7 +2,7 @@
   "note": [
     "Ceilings for scripts/bundle-budget.mjs. Measured on 2026-08-03, then rounded up",
     "for headroom: a budget that fails on every unrelated commit is one somebody",
-    "raises without reading. Moving a number here is allowed and is the point — it",
+    "raises without reading. Moving a number here is allowed and is the point: it",
     "has to happen in the same commit as the growth, with the reason in the message.",
     "",
     "What they were when they were set:",

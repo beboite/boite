@@ -4,7 +4,7 @@ const tauri = vi.hoisted(() => ({ invoke: vi.fn() }));
 const log = vi.hoisted(() => ({ warn: vi.fn() }));
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: tauri.invoke }));
-vi.mock("$lib/shared/services/logger.svelte", () => ({ logger: log }));
+vi.mock("$lib/shared/log", () => ({ log }));
 
 const { invoke } = await import("./ipc");
 
@@ -38,7 +38,10 @@ describe("a command that refuses", () => {
   it("still reaches the caller", async () => {
     refuse("not a repository");
     await expect(invoke("git_status", { path: "/w" })).rejects.toThrow("not a repository");
-    expect(log.warn).toHaveBeenCalledWith("ipc", "git_status refused: not a repository");
+    expect(log.warn).toHaveBeenCalledWith("backend.call", "call.refused", {
+      method: "git_status",
+      reason: "not a repository",
+    });
   });
 
   /** A panel on a timer fails on every tick. Written every time, the log would
@@ -70,7 +73,7 @@ describe("a command that refuses", () => {
   /** Reporting one of these would come straight back through this door. */
   it("never reports the log's own commands", async () => {
     refuse("disk full");
-    for (const cmd of ["log_app_event", "read_app_log", "clear_app_log", "log_file_path"]) {
+    for (const cmd of ["clear_app_log", "log_file_path", "logs_write", "logs_tail"]) {
       await expect(invoke(cmd)).rejects.toThrow();
     }
     expect(log.warn).not.toHaveBeenCalled();
@@ -79,6 +82,9 @@ describe("a command that refuses", () => {
   it("reads a rejection that is not an Error", async () => {
     tauri.invoke.mockRejectedValue("plain string refusal");
     await expect(invoke("git_push")).rejects.toBe("plain string refusal");
-    expect(log.warn).toHaveBeenCalledWith("ipc", "git_push refused: plain string refusal");
+    expect(log.warn).toHaveBeenCalledWith("backend.call", "call.refused", {
+      method: "git_push",
+      reason: "plain string refusal",
+    });
   });
 });

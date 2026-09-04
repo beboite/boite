@@ -79,7 +79,7 @@ pub(crate) fn format_todos(host: &dyn Backend, out: &Value) -> String {
 
     // A column that says the same thing on every row, or nothing on any of
     // them, is paid for once per row and answers nothing. A list where every
-    // item is still open — which is most lists — says so on one line instead.
+    // item is still open, which is most lists, says so on one line instead.
     let uniform_state = rows
         .first()
         .map(|r| r[1].clone())
@@ -124,7 +124,7 @@ pub(crate) fn format_todos(host: &dyn Backend, out: &Value) -> String {
     if rows.is_empty() {
         w.hint("nothing on this project's list: todo_add title=<one line>");
     } else {
-        w.hint("todo_claim id=<id> note=<what changed> — the user confirms, not you");
+        w.hint("todo_claim id=<id> note=<what changed>. The user confirms, not you");
     }
     w.into_string()
 }
@@ -794,7 +794,7 @@ mod tests {
         assert_eq!(
             format_todos(&h, &out),
             "todos(2):\n  id state title note\n  1a5f3698 open \"opti mcp axi\" -\n  \
-             596ce966 claimed readme done\nhint: todo_claim id=<id> note=<what changed> — the user confirms, not you\n"
+             596ce966 claimed readme done\nhint: todo_claim id=<id> note=<what changed>. The user confirms, not you\n"
         );
     }
 
@@ -815,7 +815,7 @@ mod tests {
                 "  id title\n",
                 "  1a5f3698 \"opti mcp axi\"\n",
                 "  596ce966 readme\n",
-                "hint: todo_claim id=<id> note=<what changed> — the user confirms, not you\n",
+                "hint: todo_claim id=<id> note=<what changed>. The user confirms, not you\n",
             )
         );
     }
@@ -838,7 +838,7 @@ mod tests {
                 "  id title description\n",
                 "  1a5f3698 \"opti mcp axi\" \"drop reqwest\"\n",
                 "  596ce966 readme -\n",
-                "hint: todo_claim id=<id> note=<what changed> — the user confirms, not you\n",
+                "hint: todo_claim id=<id> note=<what changed>. The user confirms, not you\n",
             )
         );
     }

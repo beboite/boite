@@ -33,7 +33,7 @@ use vte::{Params, Parser, Perform};
 /// A desktop app started from Finder or the Dock gets launchd's environment,
 /// which carries no TERM at all, and nothing downstream supplies one: neither
 /// this crate nor portable-pty. A shell whose terminfo is unknown loses line
-/// editing — zsh answers a backspace with a bare space instead of the
+/// editing: zsh answers a backspace with a bare space instead of the
 /// backspace/space/backspace dance, so the deleted character stays on screen
 /// while the buffer behind it is correct. Agent CLIs escape it by driving the
 /// terminal in raw mode, which is why plain shells were the only ones bitten.
@@ -42,7 +42,7 @@ use vte::{Params, Parser, Perform};
 /// nothing about the terminal we actually render into, which is xterm.js.
 /// `TERM_PROGRAM` is how a process asks who is rendering it, the way it does for iTerm2 or
 /// VS Code. Boite answers, so a tool that has something to say to its terminal can check
-/// first and stay silent everywhere else — the OSC promotion sequence is the one that
+/// first and stay silent everywhere else, the OSC promotion sequence is the one that
 /// matters today.
 pub fn terminal_env_defaults() -> [(&'static str, &'static str); 3] {
     [

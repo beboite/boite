@@ -43,7 +43,7 @@ fn set_traffic_lights_hidden(window: tauri::WebviewWindow, hidden: bool) {
 /// A maximized borderless window is not given the whole monitor: tao holds a
 /// pixel back on any edge that has an auto-hide taskbar, otherwise the bar has
 /// nothing left to notice the pointer with. That pixel is outside the client
-/// area, so the webview never covers it and nothing else paints it either —
+/// area, so the webview never covers it and nothing else paints it either,
 /// which is the white line along the bottom of the screen, on every launch that
 /// came up maximized. Painting it the app's own background is what makes it
 /// disappear rather than merely move: the row has to be drawn by somebody, and
@@ -196,7 +196,7 @@ pub fn run() {
     // Before the builder, not inside `setup`: plugin setup hooks run first, and
     // the sql plugin preloads `sqlite:boite.db`. Opening it creates it, so from
     // an app-level hook this always found a database at the new identifier and
-    // refused to overwrite it — stranding the real one under the old name. The
+    // refused to overwrite it, stranding the real one under the old name. The
     // outcome is carried into `setup` because there is no log session yet.
     let data_move = app_data::migrate_before_plugins();
 
@@ -214,10 +214,10 @@ pub fn run() {
         // Everything but DECORATIONS and VISIBLE: both replay whatever the window
         // had last run, and both belong to the config, not to the restored
         // session. DECORATIONS: a state file written while the window was
-        // frameless keeps calling set_decorations(false) at every launch — which
+        // frameless keeps calling set_decorations(false) at every launch, which
         // on macOS strips the traffic lights the config just asked for. VISIBLE:
         // the plugin calls show() as it restores, at window creation, which
-        // defeats `"visible": false` and the whole finish_boot gate below — the
+        // defeats `"visible": false` and the whole finish_boot gate below: the
         // window came up before the frontend had painted, so every launch after
         // the first flashed the webview's blank backdrop.
         .plugin(
@@ -238,7 +238,7 @@ pub fn run() {
 
     // Self-update, desktop only. The updater refuses any payload whose minisign
     // signature does not match the public key baked into the config, so the
-    // endpoint is not a trusted input — losing the domain does not hand anyone
+    // endpoint is not a trusted input: losing the domain does not hand anyone
     // code execution. `process` is here purely for the relaunch that follows an
     // install on macOS and Linux.
     #[cfg(desktop)]
@@ -273,9 +273,9 @@ pub fn run() {
             // Built here rather than declared in tauri.conf.json, for exactly
             // one reason: an initialization script can only be attached to a
             // webview while it is being built, and the pane driver has to run
-            // in every frame — it is how an agent reads the browser pane, and
+            // in every frame: it is how an agent reads the browser pane, and
             // an iframe is a frame of this webview, not a webview of its own.
-            // The values mirror what the config used to say — including the
+            // The values mirror what the config used to say, including the
             // per-platform overrides that used to live in tauri.<os>.conf.json.
             // Those files declared a `main` window of their own, so the config
             // built one before this hook ran and the second build aborted the
@@ -368,7 +368,7 @@ pub fn run() {
             fullscreen::watch(&setup_handle);
 
             // The strip is a property of the frame, so it comes back white
-            // every time the frame is recomputed — maximizing, restoring,
+            // every time the frame is recomputed: maximizing, restoring,
             // crossing to a monitor of another scale. Painted on each of those
             // rather than once at startup.
             #[cfg(windows)]
@@ -430,7 +430,6 @@ pub fn run() {
             commands::pty::thread_reply,
             commands::pty::pty_kill,
             commands::app::finish_boot,
-            commands::app::log_app_event,
             commands::logs::logs_tail,
             commands::logs::logs_query,
             commands::logs::logs_level,
@@ -448,7 +447,6 @@ pub fn run() {
             commands::pilot::pilot_events,
             commands::pilot::pilot_subscribe,
             commands::pilot::pilot_unsubscribe,
-            commands::app::read_app_log,
             commands::app::workspace_timeline,
             commands::app::clear_app_log,
             commands::app::workspace_snapshot,

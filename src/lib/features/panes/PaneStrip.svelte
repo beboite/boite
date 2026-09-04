@@ -24,7 +24,7 @@
    * A window puts four panes side by side and the user picks one with their
    * eyes. 420px cannot: the same group squeezed every pane to a column one word
    * wide. So the phone draws one pane full width and this strip is what the eyes
-   * do instead — the group's panes as chips, the visible one filled.
+   * do instead: the group's panes as chips, the visible one filled.
    *
    * Only the active chip carries a close, and only when the pane is not a
    * terminal: closing a thread pane means moving the terminal to a group of its

@@ -9,8 +9,8 @@ import { log } from "$lib/shared/log";
 /**
  * The one way anything opens a pane.
  *
- * Splitting used to have exactly one entry point in the whole app — drag a
- * thread row from the sidebar onto a live terminal — with no shortcut, no
+ * Splitting used to have exactly one entry point in the whole app, drag a
+ * thread row from the sidebar onto a live terminal, with no shortcut, no
  * palette command, no menu item and no button. That is the other half of why
  * nobody used it: the feature worked, and could not be found. Everything that
  * wants a pane now comes through here: the keyboard, the palette, the titlebar,
@@ -22,7 +22,7 @@ import { log } from "$lib/shared/log";
  *
  * `anchor` is for the one caller that knows better than the screen does: an
  * agent asking for a pane beside its own terminal, which is very often not the
- * terminal the user is reading. Given one, **nothing here moves the view** —
+ * terminal the user is reading. Given one, **nothing here moves the view**:
  * no active thread, no selected project, no switch away from the project page.
  * The pane appears where it belongs and waits there, since every group stays
  * mounted whether or not it is the one being drawn.
@@ -124,7 +124,7 @@ export function panelRatio(): number {
  * The pane a new one should appear beside, or null when nothing is on screen.
  *
  * Only ever a pane of the group the page is drawing. The page shows the active
- * thread's group, and with no active thread the project's panel group — the one
+ * thread's group, and with no active thread the project's panel group, the one
  * with no terminal in it. Anchoring anywhere else opened the panel into a group
  * nothing renders: the titlebar button lit up, the pane existed, and there was
  * nothing to see anywhere on screen.
@@ -192,7 +192,7 @@ export function closePanelPane(kind: PanelKind): boolean {
  *
  * Three states rather than two, because a panel that is open is not necessarily
  * the panel you are looking at. Closed, it opens. Open and focused, a second
- * press closes it — which is what a toggle means. Open behind another pane, it
+ * press closes it, which is what a toggle means. Open behind another pane, it
  * takes the focus: closing it there would answer a press aimed at a panel the
  * user cannot see with the panel disappearing, and the column this replaced had
  * no such case to get wrong.
@@ -217,7 +217,7 @@ export function togglePanelPane(kind: PanelKind): void {
  * The desktop closes a pane from the palette and never runs out of somewhere to
  * look: another pane is already beside it. A phone draws one pane at a time, so
  * closing the only one left drops the user on an empty Terminal tab with no way
- * back — the dead end the strip exists to remove. The project's overview takes
+ * back: the dead end the strip exists to remove. The project's overview takes
  * that slot, which is the phone's version of the welcome card the window shows
  * when nothing is running.
  *

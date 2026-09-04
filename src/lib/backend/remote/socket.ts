@@ -112,7 +112,7 @@ export function httpBase(wsUrl: string): string {
  * A `401` is the one failure the login form can fix, so it is the only one that
  * raises the gate. Anything else is a boite that was not reached.
  *
- * `abandon` is the caller giving up on this dial — `close()`, or a newer dial
+ * `abandon` is the caller giving up on this dial: `close()`, or a newer dial
  * taking over. The round trip is cancelled rather than left to finish into a
  * socket nobody is waiting for, and the reason it reports is never "timeout":
  * only the timer above writes that word.
@@ -181,7 +181,7 @@ const RPC_TIMEOUTS: Record<string, number> = {
   hello: 5_000,
   // A year of transcripts, per directory: two directory walks and a JSON parse
   // per session that has moved since it was last read. `USAGE_DAYS` is 371, and
-  // a boite that has been worked in all year has thousands of them — a warm
+  // a boite that has been worked in all year has thousands of them: a warm
   // scan answers in milliseconds, but the first one on a cold cache reads the
   // whole year off the disk and that is what this ceiling is for.
   "session.usage": 180_000,
@@ -437,7 +437,7 @@ export class Socket {
       // The one door every remote call goes through, so a failure at the
       // boundary is written down once rather than at a hundred call sites. Most
       // callers catch and turn a rejection into an empty list, and the sentence
-      // the server wrote is then gone — which is the exact shape of problem an
+      // the server wrote is then gone, which is the exact shape of problem an
       // agent cannot solve without asking a human what they see.
       this.#pending.set(id, {
         resolve,
@@ -549,7 +549,7 @@ export class Socket {
     }
     // The ticket is in hand and the socket it was for is gone: `close()` ran
     // during the round trip, or a newer dial took over. Constructing a
-    // WebSocket here is the resurrection this guard exists to stop — it would
+    // WebSocket here is the resurrection this guard exists to stop: it would
     // reattach threads, publish states and run a backoff loop of its own.
     if (stale() || this.#closed) {
       if (!stale()) this.#dialing = false;
@@ -708,7 +708,7 @@ export class Socket {
       if (typeof msg.event === "string") {
         // Consumed here, not forwarded: the replay marker pairs with the binary
         // frame that follows it, not the app-level control plane. It goes
-        // through #binChain like the frames do — handling it synchronously let
+        // through #binChain like the frames do: handling it synchronously let
         // it overtake a binary frame still queued behind a gzip inflate, and
         // that stale live frame was then consumed as the replay body: terminal
         // cleared at the wrong point, offset left pointing at the wrong byte.
