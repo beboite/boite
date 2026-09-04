@@ -99,6 +99,17 @@ fn main() {
         std::process::exit(0);
     }
 
+    // The second mode. It has no boite behind it: it starts the isolated dev
+    // window and drives it, so it reads none of the environment above and is
+    // dispatched before `Host::resolve` would refuse for lack of it. `--dev`
+    // is looked for anywhere in the argv rather than at position one, a client
+    // being free to put `--log-dir` in front of it.
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.iter().any(|a| a == "--dev") {
+        boite_mcp::dev::run(&args);
+        return;
+    }
+
     // Resolved but not required. Exiting here would kill the connection during
     // the handshake, and a client can only report that as "connection closed" —
     // hiding a cause that is one sentence long. Answering initialize and failing

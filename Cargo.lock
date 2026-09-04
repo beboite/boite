@@ -675,8 +675,11 @@ dependencies = [
 name = "boite-mcp"
 version = "1.3.4"
 dependencies = [
+ "base64 0.23.1",
  "boite-core",
  "boite-identity",
+ "dirs",
+ "rusqlite",
  "serde",
  "serde_json",
  "tracing",

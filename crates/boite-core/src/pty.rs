@@ -180,75 +180,14 @@ fn parse_probe_output(text: &str, already_set: impl Fn(&str) -> bool) -> ShellPr
     ShellProbe { names, env }
 }
 
-// Each child is assigned to a Windows Job object with KILL_ON_JOB_CLOSE:
+// Each child is assigned to a Windows Job object with KILL_ON_JOB_CLOSE, so
 // TerminateJobObject kills the whole process tree in one syscall (the
 // taskkill shell-out it replaces took 0.5-2s per PTY and stalled app close),
 // and if boite dies without cleanup the OS closes the handle and reaps the
-// tree anyway.
+// tree anyway. The type is crate::job: the dev MCP starts a process tree of
+// its own and needs exactly this, and two copies of a raw handle drift.
 #[cfg(target_os = "windows")]
-mod job {
-    use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
-    use windows_sys::Win32::System::JobObjects::{
-        AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
-        SetInformationJobObject, TerminateJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
-        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
-    };
-    use windows_sys::Win32::System::Threading::{
-        OpenProcess, PROCESS_SET_QUOTA, PROCESS_TERMINATE,
-    };
-
-    pub struct Job(HANDLE);
-
-    unsafe impl Send for Job {}
-    unsafe impl Sync for Job {}
-
-    impl Job {
-        pub fn assign(pid: u32) -> Option<Self> {
-            unsafe {
-                let job = CreateJobObjectW(std::ptr::null(), std::ptr::null());
-                if job.is_null() {
-                    return None;
-                }
-                let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
-                info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-                if SetInformationJobObject(
-                    job,
-                    JobObjectExtendedLimitInformation,
-                    &info as *const _ as *const std::ffi::c_void,
-                    std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
-                ) == 0
-                {
-                    CloseHandle(job);
-                    return None;
-                }
-                let process = OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE, 0, pid);
-                if process.is_null() {
-                    CloseHandle(job);
-                    return None;
-                }
-                let assigned = AssignProcessToJobObject(job, process);
-                CloseHandle(process);
-                if assigned == 0 {
-                    CloseHandle(job);
-                    return None;
-                }
-                Some(Self(job))
-            }
-        }
-
-        pub fn terminate(&self) -> bool {
-            unsafe { TerminateJobObject(self.0, 1) != 0 }
-        }
-    }
-
-    impl Drop for Job {
-        fn drop(&mut self) {
-            unsafe {
-                CloseHandle(self.0);
-            }
-        }
-    }
-}
+use crate::job;
 
 struct PtyHandle {
     // Option so kill() can drop the master while the reader thread still owns
