@@ -23,6 +23,9 @@ import { sleep } from "./lib/devApp";
 let dev: DevApp;
 let thread = "";
 
+/** This file's own pane, which is not the only place a card is drawn. */
+const pane = () => `[data-testid='chat-pane'][data-thread='${thread}']`;
+
 beforeAll(async () => {
   dev = await app();
   await completeSetup(dev);
@@ -65,11 +68,17 @@ describe("chat", () => {
   it("opens a request card with the driver's own three options", async () => {
     await sendChat(dev, "run it", thread);
     await dev.waitFor(
-      "return !!document.querySelector(\"[data-testid='pilot-request'][data-outcome='']\")",
+      `return !!document.querySelector("${pane()} [data-testid='pilot-request'][data-outcome='']")`,
       60_000,
     );
+    // This pane's card, not every card on screen. The dock draws the same
+    // question the moment it is opened, so an unscoped query reads the two of
+    // them and finds six options where the driver offered three. It read three
+    // only while the dock was blind to a chat thread's request, which is one of
+    // the defects `dock.e2e.ts` was written against.
     const options = await dev.js<{ value: string; label: string }[]>(`
-      return Array.from(document.querySelectorAll("[data-testid='pilot-request-option']"))
+      return Array.from(document.querySelectorAll(
+        "${pane()} [data-testid='pilot-request-option']"))
         .map((b) => ({ value: b.getAttribute("data-value"), label: b.textContent.trim() }));
     `);
     // The driver's order, not one this window chose: `permission_suggestions`
@@ -79,18 +88,19 @@ describe("chat", () => {
 
   it("resolves the request on Allow, and says so on the card", async () => {
     await dev.js<unknown>(`
-      const button = Array.from(document.querySelectorAll("[data-testid='pilot-request-option']"))
+      const button = Array.from(document.querySelectorAll(
+        "${pane()} [data-testid='pilot-request-option']"))
         .find((b) => b.getAttribute("data-value") === "allow");
       if (!button) throw new Error("no Allow on this card");
       button.click();
       return true;
     `);
     await dev.waitFor(
-      "return !!document.querySelector(\"[data-testid='pilot-request'][data-outcome='allowed']\")",
+      `return !!document.querySelector("${pane()} [data-testid='pilot-request'][data-outcome='allowed']")`,
       60_000,
     );
     const answered = await dev.js<string>(`
-      const el = document.querySelector("[data-testid='pilot-request-answered']");
+      const el = document.querySelector("${pane()} [data-testid='pilot-request-answered']");
       return el ? el.innerText : "";
     `);
     expect(answered.toLowerCase()).toContain("allowed");
