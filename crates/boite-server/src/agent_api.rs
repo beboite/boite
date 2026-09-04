@@ -176,7 +176,12 @@ impl Workspace for ServerWorkspace {
     /// a request the user never sees is a request that never gets answered.
     fn announce(&self, change: Change) {
         let _ = self.events.send(match change {
-            Change::Approvals => AppEvent::ApprovalsChanged,
+            // Through the shared emitter, which the pilot sink also calls: one
+            // function names this event on this host, not two.
+            Change::Approvals => {
+                crate::events::announce_approvals_changed(&self.events);
+                return;
+            }
             Change::Todos | Change::Worktrees => AppEvent::TodosChanged,
             Change::Orchestrator => AppEvent::OrchestratorChanged,
             Change::DispatchQueued {
