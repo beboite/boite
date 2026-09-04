@@ -358,11 +358,14 @@ function prepareWorktree(project: Project, thread: Thread, iconKey: IconKey) {
       logger.error(
         "worktree",
         `${thread.id}: answered after ${took}ms, too late to use, ${path} belongs to nobody`,
+        { threadId: thread.id },
       );
       return;
     }
     if (took >= WORKTREE_SLOW_MS) {
-      logger.info("worktree", `${thread.id}: ready after ${took}ms, ${path}`);
+      logger.info("worktree", `${thread.id}: ready after ${took}ms, ${path}`, {
+        threadId: thread.id,
+      });
     }
     // The store's thread, not the local one: that is the reactive object the
     // terminal reads its cwd from. It is gone when the thread was closed while
@@ -377,7 +380,10 @@ function prepareWorktree(project: Project, thread: Thread, iconKey: IconKey) {
   const settled = work.catch((err) => {
     // A thread with no worktree runs in the project folder, which is the
     // documented fallback, never a reason to fail the thread itself.
-    logger.warn("worktree", `prepare failed for ${thread.id}`, String(err));
+    logger.warn("worktree", `prepare failed for ${thread.id}`, {
+      threadId: thread.id,
+      details: String(err),
+    });
   });
 
   let deadline: ReturnType<typeof setTimeout> | null = null;

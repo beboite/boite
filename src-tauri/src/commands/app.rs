@@ -20,7 +20,7 @@ use boite_core::telemetry::TelemetryRuntime;
 
 use crate::BootState;
 use crate::local_pty::LocalSessions;
-use crate::logging::{self, LogEntry};
+use crate::logging;
 
 use super::bus::on_bus;
 
@@ -131,18 +131,6 @@ pub(crate) fn report_boot_telemetry(app: &AppHandle) {
     }
 }
 
-#[tauri::command]
-pub fn log_app_event(
-    app: AppHandle,
-    level: String,
-    source: String,
-    message: String,
-    details: Option<String>,
-) -> Result<(), String> {
-    let _ = app;
-    logging::append_webview_log(&level, &source, &message, details.as_deref())
-}
-
 /// What happened here, newest first, with this app's own log merged in.
 ///
 /// The one place the whole timeline can actually be assembled. The database
@@ -186,15 +174,6 @@ pub fn workspace_timeline(
         .collect();
 
     Ok(boite_core::timeline::merge(vec![rows, logged], limit))
-}
-
-#[tauri::command]
-pub fn read_app_log(app: AppHandle, scope: String) -> Result<Vec<LogEntry>, String> {
-    let path = match scope.as_str() {
-        "previous" => logging::previous_log_file_path(&app)?,
-        _ => logging::log_file_path(&app)?,
-    };
-    logging::read_log_file(&path)
 }
 
 #[tauri::command]

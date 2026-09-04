@@ -347,6 +347,7 @@
       const rect = group ? paneStore.rectFor(id, group, visible) : null;
       if (activated[id] && group && rect) return;
       logger.warn("panes", `${app.threadById(id)?.label ?? id}: no terminal drawn`, {
+        threadId: id,
         activated: !!activated[id],
         group: group?.id ?? null,
         rect: !!rect,

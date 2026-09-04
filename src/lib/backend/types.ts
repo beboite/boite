@@ -40,7 +40,7 @@ import type {
 import type { FileVersions, TextFile } from "$lib/features/editor/api";
 import type { ThreadReply } from "$lib/domain/awareness";
 import type { Platform, ShellOption } from "$lib/storage/platform.svelte";
-import type { LogEntry, LogLevel } from "$lib/shared/services/logger.svelte";
+import type { LogLevel } from "$lib/shared/log";
 
 // Output arrives as raw bytes regardless of transport. The Tauri channel
 // carries base64 (decoded inside TauriBackend); the remote socket carries
@@ -1122,14 +1122,15 @@ export interface SessionApi {
   ): Promise<boolean>;
 }
 
+/**
+ * The device's own log file, as the Logs section reaches it.
+ *
+ * Two methods, and both are about the file rather than about a record: where
+ * it is, and emptying it. Writing used to be here too, one `invoke` per line;
+ * everything the window produces now goes through [`LogsApi.write`], which is
+ * batched and works on both transports.
+ */
 export interface LogApi {
-  event(
-    level: LogLevel,
-    source: string,
-    message: string,
-    details: string | null,
-  ): Promise<void>;
-  read(scope: "current" | "previous"): Promise<LogEntry[]>;
   clear(): Promise<void>;
   filePath(): Promise<string>;
 }
@@ -1194,10 +1195,9 @@ export interface LogQueryOptions {
  * The log, as the window reaches it: `logs.tail`, `logs.query`, `logs.level`,
  * `logs.write` and `logs.subscribe` on the bus.
  *
- * Distinct from [`LogApi`], which is the older device-local diagnostics file
- * and answers in `LogEntry`. This one is the same five methods on both hosts,
- * so a phone reading a server's log and a desktop reading its own run the same
- * code.
+ * The only road out of the webview. [`LogApi`] beside it is about the file,
+ * not about a record. The same five methods on both hosts, so a phone reading
+ * a server's log and a desktop reading its own run the same code.
  */
 export interface LogsApi {
   /** Records this window produced. Batched by the caller, never one per call. */

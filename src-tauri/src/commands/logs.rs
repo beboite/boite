@@ -5,10 +5,10 @@
 //! `boite_core::command::logs`, and what is left here is naming the method and
 //! handing over what the webview sent.
 //!
-//! The four older commands (`log_app_event`, `read_app_log`, `clear_app_log`,
-//! `log_file_path`) stay in [`super::app`] and now write through the same
-//! module, so the diagnostics panel keeps working while the webview moves onto
-//! these at its own pace.
+//! `logs.write` is the only road out of the webview now. What is left in
+//! [`super::app`] is `clear_app_log` and `log_file_path`, which are about the
+//! file rather than about a record: the Logs section still empties it and still
+//! says where it is.
 
 use serde_json::{json, Value};
 use tauri::State;

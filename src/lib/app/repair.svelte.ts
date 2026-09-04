@@ -48,7 +48,10 @@ export function dropGenericTitles(app: AppState) {
     thread.title = null;
     if (!workspace.backendFor(thread.origin).caps.clientStatus) continue;
     void updateThreadTitle(thread.id, null, thread.origin).catch((err) => {
-      logger.warn("app", `could not clear generic title for ${thread.id}`, String(err));
+      logger.warn("app", `could not clear generic title for ${thread.id}`, {
+        threadId: thread.id,
+        details: String(err),
+      });
     });
   }
 }
@@ -153,12 +156,15 @@ async function adoptForgotten(thread: Thread, project: Project): Promise<boolean
     if (!found) return false;
     thread.worktreePath = found;
     await saveThread($state.snapshot(thread) as Thread);
-    logger.info("worktree", `adopted ${found} back for ${thread.id}`);
+    logger.info("worktree", `adopted ${found} back for ${thread.id}`, { threadId: thread.id });
     return true;
   } catch (err) {
     // Nothing is lost by not answering: the thread keeps running in the project
     // folder, exactly as it did before this existed.
-    logger.warn("worktree", `could not look for a worktree for ${thread.id}`, String(err));
+    logger.warn("worktree", `could not look for a worktree for ${thread.id}`, {
+      threadId: thread.id,
+      details: String(err),
+    });
     return false;
   }
 }
@@ -173,7 +179,10 @@ async function moveIntoProject(thread: Thread, project: Project) {
     // forever. Forgotten, the thread runs in the project folder, which is what a
     // thread with no worktree has always done.
     if (answer.gone) {
-      logger.info("worktree", `forgot ${thread.worktreePath} for ${thread.id}`, "it is gone");
+      logger.info("worktree", `forgot ${thread.worktreePath} for ${thread.id}`, {
+        threadId: thread.id,
+        details: "it is gone",
+      });
       thread.worktreePath = null;
       await saveThread($state.snapshot(thread) as Thread);
       return;
@@ -186,6 +195,9 @@ async function moveIntoProject(thread: Thread, project: Project) {
   } catch (err) {
     // One that will not move keeps the path it has, and the thread starts in it
     // exactly as it did before. Never a reason to hold up boot.
-    logger.warn("worktree", `kept ${thread.worktreePath} for ${thread.id}`, String(err));
+    logger.warn("worktree", `kept ${thread.worktreePath} for ${thread.id}`, {
+      threadId: thread.id,
+      details: String(err),
+    });
   }
 }

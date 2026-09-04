@@ -618,8 +618,6 @@ export class RemoteBackend implements Backend {
     // instead of drawing an empty list. `this.logs` below is the one that works
     // over the wire.
     this.log = {
-      event: () => Promise.resolve(),
-      read: () => Promise.resolve([]),
       clear: () => Promise.resolve(),
       filePath: () => Promise.resolve(""),
     };

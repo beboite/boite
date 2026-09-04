@@ -75,7 +75,6 @@ import type {
 import type { ChangedPath, DirEntry, SearchHit } from "$lib/features/explorer/api";
 import type { FileVersions, TextFile } from "$lib/features/editor/api";
 import type { Platform, ShellOption } from "$lib/storage/platform.svelte";
-import type { LogEntry, LogLevel } from "$lib/shared/services/logger.svelte";
 
 export const tauriGit: GitApi = {
   repoInfo: (path) => invoke<RepoInfo>("git_repo_info", { path }),
@@ -332,9 +331,6 @@ export const tauriSearch: SearchApi = {
 };
 
 export const tauriLog: LogApi = {
-  event: (level: LogLevel, source, message, details) =>
-    invoke("log_app_event", { level, source, message, details }),
-  read: (scope) => invoke<LogEntry[]>("read_app_log", { scope }),
   clear: () => invoke<void>("clear_app_log"),
   filePath: () => invoke<string>("log_file_path"),
 };

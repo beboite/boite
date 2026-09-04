@@ -267,6 +267,7 @@ export class AppState {
     if (this.#indexMisses.size > 200) this.#indexMisses.clear();
     this.#indexMisses.add(id);
     logger.warn("app", `${id}: the thread index missed a row the list holds`, {
+      threadId: id,
       threads: this.threads.length,
       indexed: this.#threadById.size,
     });
@@ -852,7 +853,10 @@ export class AppState {
     // like. Remote rows are the server's to mark: it watches the PTYs it owns.
     if (!workspace.backendFor(t.origin).caps.clientStatus) return;
     void markThreadStarted(id, t.origin).catch((err) => {
-      logger.warn("app", `could not mark thread ${id} as started`, String(err));
+      logger.warn("app", `could not mark thread ${id} as started`, {
+        threadId: id,
+        details: String(err),
+      });
     });
   }
 

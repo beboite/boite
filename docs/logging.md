@@ -172,6 +172,13 @@ is when its last lines matter most. A flush that fails is dropped in silence,
 because a line about a failed flush rides the next flush, which fails for the
 same reason.
 
+`src/lib/shared/services/logger.svelte.ts` is a shim over the same four levels
+and nothing else, so the thirty call sites written against the older
+`logger.warn(scope, message, data)` signature take this road too. A bare scope
+becomes `app.<scope>` and a `data` object keeps its keys, `threadId` renamed to
+`thread`, which is what puts a legacy line on `thread=`. There is one webview
+log path.
+
 `captureWebviewErrors()` runs once from `+layout.svelte` and adds three things:
 `window.onerror` and `unhandledrejection` become `error` records at
 `webview.unhandled`, keeping the first three stack frames rather than twenty
@@ -218,6 +225,9 @@ pointer when the row still exists.
   the pid.
 - Everything the desktop already wrote through `logging::append_app_log`, and
   every panic.
+- Everything the window writes through `logger` in
+  `shared/services/logger.svelte.ts`, at `app.<scope>`, with the `thread` where
+  the call site has one.
 - Every `backend()` call the window makes that refuses, at `warn`, with the
   method, from the one door each transport routes through (`backend/tauri/ipc.ts`
   and `Socket.rpc`). Quiet for five seconds per method and reason: a command
