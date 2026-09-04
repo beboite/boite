@@ -1,7 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Boite",
-  "version": "1.3.4",
+  "productName": "Boite Legacy",
+  "mainBinaryName": "Boite",
+  "version": "1.4.0",
   "identifier": "com.boite.desktop",
   "build": {
     "beforeDevCommand": "bun run dev",
@@ -22,7 +23,7 @@
     },
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDc1NTgwNkUxNUM3NzNBNEMKUldSTU9uZGM0UVpZZFRlVm9qeTh4Y3plcjcyTEQ2WTgzSkxtVmVxc254cnp0Q1kybUZYT3hoVTIK",
-      "endpoints": ["https://github.com/beboite/boite/releases/latest/download/latest.json"],
+      "endpoints": ["https://github.com/beboite/boite-legacy/releases/latest/download/latest.json"],
       "windows": {
         "installMode": "passive"
       }

@@ -5,7 +5,7 @@
   import tradeOfferVideo from "./assets/trade-offer.webm";
   import noThanksVideo from "./assets/no-thanks.webm";
 
-  const DOC_URL = "https://github.com/beboite/boite/blob/master/docs/analytics.md";
+  const DOC_URL = "https://github.com/beboite/boite-legacy/blob/master/docs/analytics.md";
   const REJECT_TOTAL_MS = 2000;
 
   type Props = {

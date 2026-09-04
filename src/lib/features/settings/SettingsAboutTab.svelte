@@ -59,7 +59,7 @@
    */
   const canUpdate = hasTauri();
 
-  const REPO_URL = "https://github.com/beboite/boite";
+  const REPO_URL = "https://github.com/beboite/boite-legacy";
 
   /**
    * The boite's own identity, or null when there is no boite in play.

@@ -9,7 +9,7 @@
   import { writeText } from "$lib/platform/clipboard";
   import { openUrl } from "$lib/platform/opener";
 
-  const DOC_URL = "https://github.com/beboite/boite/blob/master/docs/analytics.md";
+  const DOC_URL = "https://github.com/beboite/boite-legacy/blob/master/docs/analytics.md";
 
   let telemetry = $state<TelemetryState | null>(null);
   let loadFailed = $state(false);
