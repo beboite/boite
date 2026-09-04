@@ -1,5 +1,7 @@
 # Pilot: threads driven by protocol
 
+Implementation status and remaining T3 parity work: [audit](t3code-audit.md).
+
 The design for the second thread runtime. A `terminal` thread is a PTY that
 boite watches from the outside; a `pilot` thread is an agent process boite
 talks to over the agent's own machine protocol. Same thread row, same worktree,
@@ -10,7 +12,7 @@ Words. In code, everywhere: `pilot` (the crate `boite-pilot`, the bus domain
 `pilot.*`, the column `threads.runtime = 'pilot'`). In the interface: "Chat".
 The launcher offers Terminal or Chat on every preset, the experiment is called
 "Chat threads" with a "new" badge. Not "agent": `thread.agent` already names the
-CLI (claude, codex, ...). Not "SDK": true for claude only.
+CLI (claude, codex, ...). Not "SDK": the drivers use several machine protocols.
 
 ## Why
 
@@ -27,11 +29,11 @@ Six of the ten agents already speak a machine protocol:
 |---|---|---|---|---|---|
 | claude | stream-json, the wire the official Agent SDK consumes | `claude --print --verbose --output-format stream-json --input-format stream-json --permission-prompt-tool stdio` | `--session-id`, `--resume` | `set_model` control request, in session | `can_use_tool` control request |
 | codex | app-server, JSON-RPC on stdio | `codex app-server` | `thread/start`, `thread/resume` | per turn | approval requests from the server |
-| cursor, grok, antigravity, copilot | ACP (Agent Client Protocol, the Zed spec), JSON-RPC on stdio | `cursor-agent acp`, `grok` in acp mode, `agy-acp-server`, `copilot --acp` | `session/new`, `session/load` | `session/set_model` | `session/request_permission` |
+| cursor, grok, antigravity | ACP (Agent Client Protocol, the Zed spec), JSON-RPC on stdio | `cursor-agent acp`, `grok agent stdio`, `agy-acp-server` | `session/new`, `session/load` or `session/resume` | model config or `session/set_model` | `session/request_permission`, `session/elicitation` |
 | opencode | HTTP + SSE, or ACP where `opencode acp` exists | `opencode serve` per thread | session | per message | session ruleset |
-| hermes, pi, muse | none | terminal only, the launcher greys the Chat button and says why | | | |
+| copilot, hermes, pi, muse | not connected to the pilot runtime | terminal only, the launcher greys the Chat button and says why | | | |
 
-Phase 0 ships claude. The others follow the same trait.
+Claude, Codex, OpenCode and the three ACP variants ship behind the experiment.
 
 ## Architecture
 
@@ -50,7 +52,7 @@ boite_core::command, one bus:   pty.* (existing)   pilot.* (new)
           |                                       |
           v                                       v
    ten CLIs in a TTY              stream-json | app-server | ACP | HTTP
-                                    claude      codex      4 agents  opencode
+                                    claude      codex      3 agents  opencode
 
 shared, and unaware of which runtime sits above it:
   the threads row, the worktree and its grace, checkpoints, boite-mcp at launch,
@@ -64,7 +66,7 @@ shared, and unaware of which runtime sits above it:
   same shape as `pulse_waiters` and `child_pid`. A host with no pilot says so.
 - Both hosts mount it: the desktop and `boite-server`. A phone reaches it
   through the WebSocket door it already uses for terminals.
-- Events are canonical (sixteen kinds, below), journaled once, projected once.
+- Events are canonical (fourteen kinds, below), journaled once, projected once.
   A text delta is never written to the database.
 
 ### The crate
@@ -75,9 +77,12 @@ crates/boite-pilot/
   src/driver.rs     trait Driver, trait Session, Capabilities
   src/event.rs      PilotEvent, Item, Request, Usage, Status
   src/claude.rs     the stream-json driver
+  src/codex/        Codex App Server transport and reducer
+  src/acp/          ACP transport, reducer and provider launch mappings
+  src/opencode/     OpenCode HTTP transport, SSE reducer and launch mapping
   src/scripted.rs   a driver that replays a scenario file, for tests and e2e
   src/proc.rs       spawn, Windows job object, polite kill, the fastpick wrapper
-  tests/            the fake claude binary (a Node script) and the wire tests
+  tests/            local fake binaries and wire tests
   README.md         the stream-json wire as pinned against the installed CLI
 ```
 
@@ -123,12 +128,14 @@ pub trait Driver: Send + Sync {
 #[async_trait]
 pub trait Session: Send + Sync {
     async fn prompt(&self, input: TurnInput) -> Result<TurnId, PilotError>;
+    async fn compact(&self, input: TurnInput) -> Result<TurnId, PilotError>;
     async fn interrupt(&self) -> Result<(), PilotError>;
     async fn respond(&self, request_id: &str, answer: RequestAnswer) -> Result<(), PilotError>;
     async fn set_model(&self, selection: ModelSelection) -> Result<SwitchKind, PilotError>;
     async fn set_mode(&self, mode: ExecMode) -> Result<(), PilotError>;
     async fn stop(&self) -> Result<(), PilotError>;
     fn native_session_id(&self) -> Option<String>;
+    fn model(&self) -> Option<String>;
 }
 ```
 
@@ -144,8 +151,8 @@ pub trait Session: Send + Sync {
 | `model.changed`, `usage.updated` | what actually answers, tokens and context left | `model.changed` yes |
 | `error` | a driver or process error the timeline shows | yes |
 
-**What exists.** `boite-pilot` is the crate above, minus `codex` and the ACP
-drivers: `lib.rs` holds `Runtime` with `open`, `prompt`, `interrupt`, `respond`,
+**What exists.** `boite-pilot` is the crate above. `lib.rs` holds `Runtime` with
+`open`, `prompt`, `compact`, `interrupt`, `respond`,
 `set_model`, `set_mode`, `stop`, `stop_all`, `stop_detached`, `status`,
 `drivers`, `capabilities`, `native_session_id`, `pid`, `open_threads` and
 `emit`, the door boite writes its own events through (the user's own message
@@ -155,9 +162,10 @@ today); `driver.rs` holds
 `PilotError`, with `TurnInput::turn_id` carrying the id the host minted so the
 user's own message can be filed under a turn the driver has not named yet; `event.rs` holds `PilotEvent` and its fourteen kinds, `Item`,
 `ItemKind` (with `notice`, boite's own line), `Request`, `Usage` and `Status`;
-`claude.rs` is the stream-json driver and carries `NATIVE_MODELS`;
-`scripted.rs` replays a scenario file. `proc.rs` owns the spawn, the Windows job
-object and the fastpick wrapper.
+`claude.rs` is the stream-json driver, `codex/` is the App Server driver,
+`acp/` is shared by Cursor, Grok and Antigravity, and `opencode/` owns the
+HTTP/SSE driver. `scripted.rs` replays a scenario file. `proc.rs` owns the
+spawn, Windows job object, Windows command-shim resolution and fastpick wrapper.
 
 ### Store
 
@@ -270,13 +278,17 @@ before the click:
 **What exists.** `pilot.catalog` answers `{ drivers: [{ id, capabilities,
 models }], instances: [{ name, driver, kind, configDir?, provider?, model?,
 label }] }`, built by `command::pilot::catalog` and cached for `CATALOG_TTL_MS`,
-which `refresh: true` walks past. Native models are
+which `refresh: true` walks past. Claude native models are
 `boite_pilot::claude::NATIVE_MODELS`, a list to extend per release: the four
 aliases the CLI documents (`fable`, `opus`, `sonnet`, `haiku`) and the full ids
 of the families it still offers. Not from the SDK, which carries no model union
 at all and answers the real list at runtime over the network, but from
 `claude --help` for the alias form and the CLI's own baked catalogue for the
-ids; the crate's comment names both.
+ids; the crate's comment names both. Codex has the pinned fallback from the T3
+manifest. ACP reads the account's models from session setup after
+authentication. OpenCode reads its connected providers through `/provider`.
+Both send the result in `session.started.extra.availableModels`, so the picker
+fills without a second frontend API.
 
 fastpick routes come from `boite_core::fastpick::list_blocking`, one call per
 provider, merged as `kind: "fastpick"` instances named
@@ -298,11 +310,11 @@ and one polite exit for the session that was replaced.
 
 ### Modes, requests, status, checkpoints
 
-| Boite mode | claude | codex | ACP |
-|---|---|---|---|
-| ask | `--permission-mode default` | on-request, workspace-write | the agent's default |
-| edit alone | `acceptEdits` | on-failure, workspace-write | `auto_edit` where declared |
-| yolo | `bypassPermissions` | never, danger-full-access | `yolo`, native requests still get an answer |
+| Boite mode | claude | codex | Cursor ACP | Grok ACP | Antigravity ACP | OpenCode |
+|---|---|---|---|---|---|---|
+| ask | `--permission-mode default` | untrusted, read-only | default | `--permission-mode default` | `default` | read allowed, edits and commands ask |
+| edit alone | `acceptEdits` | on-request, workspace-write | unsupported | `acceptEdits` | `auto_edit` | edits allowed, commands ask |
+| yolo | `bypassPermissions` | never, danger-full-access | `--force` | `--always-approve` | `yolo` | all permissions allowed |
 
 A request is an item with a state. `request.opened` also writes an `approvals`
 row of kind `pilot` carrying the options the driver offered, opaque. The
@@ -562,18 +574,25 @@ and can be looked at.
    the same session, the exact status in the sidebar, the same from the PWA on
    a boite-server. Logging and the dev MCP landed with it, since the proof runs
    on them.
-1. Drivers: codex app-server, generic ACP with its four files of particulars,
-   opencode. A fake binary per protocol in CI replays a turn, a request, a
-   switch, a resume. **Not started**: `boite-pilot/src` has `claude.rs` and
-   `scripted.rs` and no third file, so `pilot.catalog` answers `claude` and the
-   scripted stand-in and nothing else.
+1. **Done.** Drivers: Codex App Server, generic ACP with provider particulars,
+   and OpenCode HTTP/SSE.
+   A fake binary per protocol in CI replays a turn, a request, a switch and a
+   resume. `codex/` handles current and legacy approval
+   wires, structured questions, native compaction and App Server items. `acp/`
+   handles Cursor, Grok and Antigravity, including account model discovery,
+   load replay suppression, form elicitation and opaque permission ids.
+   `opencode/` owns one loopback server per thread, checks version 1.14.19,
+   resumes or creates a native session, consumes SSE, recovers pending requests,
+   and drives prompts, permissions, questions, models, modes and compaction over
+   HTTP.
 2. Models: catalog, picker, instances, fastpick routes, in-session and restart
    switch, modes, checkpoints and diff per turn, `thread_spawn` with runtime.
    **Mostly here already**, because phase 0's proof needed it: `pilot.catalog`
    with `claude::NATIVE_MODELS` and the fastpick routes, `ModelPicker.svelte`
    and `ModeControl.svelte`, `pilot.model.set` on both switch kinds,
    `pilot.mode.set`, a checkpoint and a diff per turn, and `thread_spawn`
-   taking a runtime. What is left is the other drivers' half of it.
+   taking a runtime. ACP and OpenCode add their live, account-specific model
+   lists after the session opens.
 3. Phone and orchestrator: approval from the notification, buffered delivery,
    push on `request.opened`, the orchestrator as a chat thread. **Not started**;
    the dock and the PWA path are phase 0's, the notification and the push are
@@ -602,8 +621,10 @@ and can be looked at.
   wire moves too much: a compiled sidecar embedding the SDK behind the same
   `Driver`.
 - fastpick has to pass stdio through to the harness.
-- Three ACP modes to confirm on installed versions: `opencode acp`,
-  `copilot --acp`, an acp mode of antigravity. Each has a fallback.
+- Antigravity needs the managed `agy-acp-server`, harness and profile. T3 Code
+  downloads and prepares them. Boite currently expects an external install and
+  accepts `BOITE_PILOT_ANTIGRAVITY_BIN`.
+- Copilot ACP still uses the terminal runtime.
 - Windows: stdio pipes and process trees. `pty.rs` already has job objects and
   the 1.5 s grace; `proc.rs` reuses them.
 - A pilot thread has no shell. Opening a terminal beside it is the existing
