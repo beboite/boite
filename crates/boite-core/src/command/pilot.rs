@@ -357,7 +357,25 @@ fn open_spec(
         // host mints the paths and the per-thread environment, because only it
         // knows where its own sidecar and key file are.
         mcp_servers: host.pilot_mcp(thread_id),
-        system_prompt_append: None,
+        // The orchestrator's own briefing, and only for the row that carries
+        // the role. It is instructions plus a snapshot — who this thread is,
+        // what its scope is, which workers are alive, the tail of the durable
+        // chat — so it goes in front of the conversation rather than as a first
+        // turn: sent as a turn it would spend a whole answer on a message the
+        // user never wrote, and the reply would open the chat.
+        //
+        // A terminal orchestrator gets the same text only when its session is
+        // restarted, because there is nowhere else to put it: a PTY has no
+        // system prompt to append to.
+        system_prompt_append: (thread.role.as_deref() == Some(crate::orchestrator::ROLE))
+            .then(|| {
+                crate::orchestrator::briefing::briefing(
+                    store,
+                    thread.orchestrator_scope.as_deref(),
+                    crate::orchestrator::briefing::DEFAULT_MESSAGES,
+                )
+            })
+            .transpose()?,
         env: Default::default(),
         bin: Vec::new(),
     })
