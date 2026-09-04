@@ -358,9 +358,9 @@ fn open_spec(
         // knows where its own sidecar and key file are.
         mcp_servers: host.pilot_mcp(thread_id),
         // The orchestrator's own briefing, and only for the row that carries
-        // the role. It is instructions plus a snapshot — who this thread is,
+        // the role. It is instructions plus a snapshot: who this thread is,
         // what its scope is, which workers are alive, the tail of the durable
-        // chat — so it goes in front of the conversation rather than as a first
+        // chat. It goes in front of the conversation rather than as a first
         // turn: sent as a turn it would spend a whole answer on a message the
         // user never wrote, and the reply would open the chat.
         //

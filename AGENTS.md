@@ -392,7 +392,7 @@ user, because a question asked to the user is the user's.
 changes rule.** With the pilot experiment on and the agent carrying a driver,
 the orchestrator is a `runtime = pilot` row, and `Conduct::prepare` turns
 `orchestrator.post` and a dispatch into a chat worker into a prepared
-`pilot.turn.start` — after the same static guards, so the same names still
+`pilot.turn.start`, after the same static guards, so the same names still
 refuse. `orchestrator.messages` then reads the two conversation kinds of
 `pilot_items` and `orchestrator.say` is refused by name, the answer being an
 item already. Everything above holds unchanged for a terminal orchestrator,

@@ -99,7 +99,7 @@ pub fn pilot_thread(store: &Store, thread_id: &str) -> bool {
 ///
 /// The rows are `pilot_items`, filtered to the two kinds that are a
 /// conversation: the user's own line and what the agent answered. Everything
-/// else on that timeline — tool calls, requests, turn footers — belongs to the
+/// else on that timeline, tool calls, requests and turn footers, belongs to the
 /// chat pane, and the Home card asks for the conversation.
 ///
 /// Answered on the host rather than assembled in the webview, so a phone
@@ -747,7 +747,7 @@ impl Conduct {
         // Two verbs change shape when the thread on the other end is a chat
         // one: a line into it is a turn, not a row somebody types later. The
         // static guards are run here, where the store is in hand, and what
-        // comes back is a prepared `pilot.turn.start` — the same value the
+        // comes back is a prepared `pilot.turn.start`, the same value the
         // `pilot.*` door builds, so the roots check, the driver check and the
         // refusals are the pilot domain's own rather than a second copy.
         //
@@ -959,7 +959,7 @@ impl Conduct {
             // already here. A chat orchestrator's status has one source, the
             // column `pilot::project` writes on every `status.changed`, so the
             // exact word is on the row rather than measured from a screen; a
-            // terminal one keeps answering `null` there, which is honest — its
+            // terminal one keeps answering `null` there, which is honest: its
             // status is the status engine's and expires on a clock.
             Conduct::Status { scope } => match store.find_orchestrator(scope.as_deref()) {
                 Some(id) => {
