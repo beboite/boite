@@ -41,7 +41,6 @@
   import MobileTopBar from "$lib/features/mobile/MobileTopBar.svelte";
   import MobileBottomBar from "$lib/features/mobile/MobileBottomBar.svelte";
   import MobileProjectsPage from "$lib/features/mobile/MobileProjectsPage.svelte";
-  import { infoBoxInset } from "$lib/features/infobox/strip";
   import { lazyComponent, prefetchWhenIdle } from "$lib/shared/lazy.svelte";
   import { syncStore } from "$lib/features/sync/store.svelte";
   import { t } from "$lib/i18n/index.svelte";
@@ -108,8 +107,8 @@
   const WhipView = lazyComponent(
     () => import("$lib/features/whip/WhipOverlay.svelte"),
   );
-  // The strip above every terminal. Behind import() so it lands with the
-  // terminal chunk rather than in the first paint, and never at all on a phone.
+  // The anchored info box, for an experiment that is off by default. Behind
+  // import(), a boot that never switches it on never fetches it.
   const InfoBoxView = lazyComponent(
     () => import("$lib/features/infobox/ProjectInfoBox.svelte"),
   );
@@ -708,13 +707,6 @@
               {@const focused =
                 visible && group?.focusedPaneId === thread.id}
               {@const rect = group ? paneStore.rectFor(thread.id, group, visible) : null}
-              <!-- The info box is a strip across the top of this column, so the
-                   terminal starts under it rather than beside it. Decided here
-                   and not inside the box: the row and the inset have to be the
-                   same number or output ends up under it again, which is what
-                   the floating card did to the first four lines. Panes too
-                   narrow for a readable row get neither. -->
-              {@const stripShown = Boolean(!mobile && rect && rect.w >= 420)}
               <!-- A pilot row has no PTY, so nothing is overlaid on its
                    rectangle: its pane is a component in the tree and the shell
                    already drew it. Mounting a Terminal here is what spawns a
@@ -742,17 +734,12 @@
                        ones whose handles came from it: one environment's. A
                        boite going down no longer tears down the local terminals
                        it has nothing to do with. -->
-                  <div
-                    class="absolute inset-x-0 bottom-0"
-                    style:top="{infoBoxInset(stripShown)}px"
-                  >
-                    {#key workspace.epochOf(thread.origin)}
-                      {#if TerminalView.current}
-                        {@const TerminalComp = TerminalView.current}
-                        <TerminalComp {thread} {visible} {focused} />
-                      {/if}
-                    {/key}
-                  </div>
+                  {#key workspace.epochOf(thread.origin)}
+                    {#if TerminalView.current}
+                      {@const TerminalComp = TerminalView.current}
+                      <TerminalComp {thread} {visible} {focused} />
+                    {/if}
+                  {/key}
                   <!-- A thread that lives on the dropped boite: what is typed
                        into it is going nowhere, and the pane is the only place
                        that can say so about this thread rather than about the
@@ -763,14 +750,15 @@
                     {focused}
                     offline={boiteDown && thread.origin === "remote"}
                   />
-                  <!-- One strip per terminal: in split view each pane runs its
-                       own worktree, so a single row over the whole area could
-                       only ever describe one of them, and a git pane opened
-                       beside the terminal leaves the row spanning the terminal
-                       column alone. After the pane overlay in the DOM and at
-                       the same z, so it draws over the ring rather than under
-                       it. -->
-                  {#if stripShown && InfoBoxView.current}
+                  <!-- One box per terminal: in split view each pane runs its own worktree,
+                       so a single box over the whole area could only ever
+                       describe one of them. The box docks itself inside the
+                       pane (corners and edge midpoints), so it takes the whole
+                       pane area rather than a corner of it. After the pane
+                       overlay in the DOM and at the same z, so it draws over
+                       the ring rather than under it. Panes too narrow to hold
+                       it (it would cover the terminal it describes) get none. -->
+                  {#if !mobile && rect.w >= 420 && InfoBoxView.current}
                     {@const InfoBoxComp = InfoBoxView.current}
                     <InfoBoxComp {thread} {visible} {focused} />
                   {/if}
