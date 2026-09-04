@@ -1,25 +1,22 @@
 /**
  * A request answered in the approvals dock, with the chat pane out of the way.
  *
- * Skipped, and kept: two defects in the app stop it, both found by writing it.
+ * Written while both halves of that were broken, and it is what proves they are
+ * not any more.
  *
- * 1. Nothing tells the window that a chat thread opened an approval row.
- *    `boite://approvals-changed` is emitted from `src-tauri/src/agent_api.rs`
- *    alone, so `approvals.watch()` never fires for a `pilot.request` row and
- *    the dock stays empty until the webview is reloaded for some other reason.
- * 2. After that reload the dock's card never resolves:
- *    `src/lib/features/pilot/reduce.ts::fromRows` rebuilds `items` from the
- *    stored rows and leaves `state.requests` empty, so `PilotApproval` looks up
- *    its request id, finds nothing and draws "Loading" forever. Its own comment
- *    promises the opposite ("an open request is one whose row still reads
- *    open, which is how a client that reloaded mid-approval still draws the
- *    card the dock is drawing").
+ * 1. Nothing told the window that a chat thread had opened an approval row.
+ *    `boite://approvals-changed` came from `src-tauri/src/agent_api.rs` alone,
+ *    so `approvals.watch()` never fired for a `pilot.request` row and the dock
+ *    stayed empty until the webview reloaded for some other reason. Both hosts
+ *    now emit it off the projection that writes the row.
+ * 2. The card then never resolved: `fromRows` rebuilt `items` and left
+ *    `state.requests` empty, so `PilotApproval` looked its request id up, found
+ *    nothing and drew "Loading". The list is rebuilt from the request rows,
+ *    which is what its own comment promised.
  *
- * Both were watched happening on the live dev window: the row is in
- * `approvals` (`dev_db`) and the log carries `approval.opened ...
- * action=pilot.request`, while the dock shows the thread's name over the word
- * "Loading". Unskip when either is fixed; the assertions below are what a fixed
- * dock has to satisfy.
+ * The three cases are one story and run in order: the pane opens the question
+ * and goes away, the dock draws the same card, and the answer given there is
+ * the answer on the row.
  */
 
 import { beforeAll, describe, expect, it } from "vitest";
@@ -36,7 +33,7 @@ beforeAll(async () => {
   await enableChatExperiment(dev);
 }, 180_000);
 
-describe.skip("dock", () => {
+describe("dock", () => {
   it("opens a request from a chat pane, then hides the pane", async () => {
     thread = await openChat(dev, "Claude");
     await sendChat(dev, "run it", thread);
