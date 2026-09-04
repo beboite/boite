@@ -1,4 +1,14 @@
+import { log } from "$lib/shared/log";
 import type {
+  PilotCatalog,
+  PilotEvent,
+  PilotEventRow,
+  PilotItemRow,
+  PilotOpened,
+  PilotSwitchKind,
+} from "$lib/features/pilot/types";
+import type {
+  PilotApi,
   ApprovalsApi,
   SyncApi,
   TelemetryApi,
@@ -38,6 +48,8 @@ import type {
   AgentTurn,
   UsageReport,
   LogApi,
+  LogsApi,
+  LogRecord,
   McpApi,
   McpServerRow,
   PendingApproval,
@@ -119,6 +131,8 @@ export class RemoteBackend implements Backend {
   readonly sync: SyncApi;
   readonly telemetry: TelemetryApi;
   readonly log: LogApi;
+  readonly logs: LogsApi;
+  readonly pilot: PilotApi;
   readonly approvals: ApprovalsApi;
   readonly push: PushApi;
   readonly meta: WorkspaceMetaApi;
@@ -215,8 +229,8 @@ export class RemoteBackend implements Backend {
       // resolving anyway told every caller the bytes had landed. The dispatch
       // queue believed it and settled the row `delivered`; the terminal
       // believed it and drew nothing. The frame is not queued for later on
-      // purpose — replaying a keystroke into a live agent minutes afterwards is
-      // worse than losing it — so this rejection IS the news.
+      // purpose, replaying a keystroke into a live agent minutes afterwards is
+      // worse than losing it, so this rejection IS the news.
       write: (key, data) => {
         if (!socket.sendInput(threadIdOf(key), data)) {
           return Promise.reject(
@@ -599,14 +613,130 @@ export class RemoteBackend implements Backend {
         ),
     };
 
-    // App-event logging is a device-local concern (the desktop writes a log
-    // file). Remote logging is a no-op for now, and `caps.appLogs: false` is how
-    // the panel knows to say so instead of drawing an empty list.
+    // The older device-local diagnostics file. It belongs to the desktop
+    // install, and `caps.appLogs: false` is how the panel knows to say so
+    // instead of drawing an empty list. `this.logs` below is the one that works
+    // over the wire.
     this.log = {
-      event: () => Promise.resolve(),
-      read: () => Promise.resolve([]),
       clear: () => Promise.resolve(),
       filePath: () => Promise.resolve(""),
+    };
+
+    // The bus's log, which is not device-local at all: a phone's records land
+    // on the server it is talking to, and a read merges every host's files on
+    // that machine. `logs.write` is stamped with this device by the server
+    // before the decode, so nothing here has to name it.
+    const logHandlers = new Set<(records: LogRecord[]) => void>();
+    let logFeedOff: (() => void) | null = null;
+    this.logs = {
+      write: (records) => rpc("logs.write", { records }).then(() => {}),
+      tail: (opts = {}) => rpc("logs.tail", opts).then((r) => (r.records ?? []) as LogRecord[]),
+      query: (opts = {}) => rpc("logs.query", opts).then((r) => (r.records ?? []) as LogRecord[]),
+      level: (directives) =>
+        rpc("logs.level", directives === undefined ? {} : { directives }).then(
+          (r) => (r.level as string) ?? "",
+        ),
+      // One `logs.subscribe` for the whole window rather than one per handler:
+      // the server keys the feed on the pairing id, so a second call says
+      // nothing new and a second unsubscribe would take the feed away from a
+      // handler still watching.
+      subscribe: (handler) => {
+        logHandlers.add(handler);
+        if (logHandlers.size === 1) {
+          void rpc("logs.subscribe", { on: true }).catch(() => {});
+          logFeedOff = this.subscribe((event) => {
+            if (event.event !== "log.record") return;
+            const records = (event.data as { records?: LogRecord[] } | null)?.records ?? [];
+            if (records.length === 0) return;
+            for (const cb of logHandlers) cb(records);
+          });
+        }
+        return () => {
+          logHandlers.delete(handler);
+          if (logHandlers.size > 0) return;
+          logFeedOff?.();
+          logFeedOff = null;
+          void rpc("logs.subscribe", { on: false }).catch(() => {});
+        };
+      },
+    };
+
+    // The chat runtime. Every method is the `pilot.*` command of the same
+    // name, so a phone drives a chat thread through the door the desktop drives
+    // it through, and the host holding the process is the one that checks an
+    // answer against what the driver offered.
+    const pilotHandlers = new Map<string, Set<(event: PilotEvent) => void>>();
+    let pilotFeedOff: (() => void) | null = null;
+    this.pilot = {
+      catalog: (refresh = false) => rpc("pilot.catalog", { refresh }) as Promise<PilotCatalog>,
+      open: (threadId) => rpc("pilot.thread.open", { threadId }) as Promise<PilotOpened>,
+      startTurn: (threadId, text, selection) =>
+        rpc("pilot.turn.start", { threadId, text, model: selection ?? null }).then(
+          (r) => (r.turnId as string) ?? "",
+        ),
+      interrupt: (threadId) => rpc("pilot.turn.interrupt", { threadId }).then(() => {}),
+      respond: (threadId, requestId, answer) =>
+        rpc("pilot.request.respond", { threadId, requestId, option: answer }).then(() => {}),
+      setModel: (threadId, selection) =>
+        rpc("pilot.model.set", {
+          threadId,
+          model: selection.model ?? null,
+          instance: selection.instance ?? null,
+        }).then((r) => r.switch as PilotSwitchKind),
+      setMode: (threadId, mode) => rpc("pilot.mode.set", { threadId, mode }).then(() => {}),
+      stop: (threadId) => rpc("pilot.session.stop", { threadId }).then(() => {}),
+      items: (threadId, afterSeq = 0, limit) =>
+        rpc("pilot.items", { threadId, afterSeq, limit }).then(
+          (r) => (r.items ?? []) as PilotItemRow[],
+        ),
+      events: (threadId, afterSeq = 0, limit) =>
+        rpc("pilot.events", { threadId, afterSeq, limit }).then(
+          (r) => (r.events ?? []) as PilotEventRow[],
+        ),
+      // One `pilot.subscribe` per thread, not per handler: the server keys the
+      // feed on the pairing id and the thread, so a second call says nothing
+      // new and a second unsubscribe would take the feed away from a pane still
+      // drawing it.
+      subscribe: (threadId, handler) => {
+        let handlers = pilotHandlers.get(threadId);
+        if (!handlers) {
+          handlers = new Set();
+          pilotHandlers.set(threadId, handlers);
+          void rpc("pilot.subscribe", { threadId }).catch((err) => {
+            log.warn("backend.pilot", "pilot.subscribe.refused", {
+              thread: threadId,
+              reason: String(err),
+            });
+          });
+        }
+        handlers.add(handler);
+        if (!pilotFeedOff) {
+          pilotFeedOff = this.subscribe((event) => {
+            if (event.event !== "pilot.event") return;
+            const data = event.data as { threadId?: string; event?: PilotEvent } | null;
+            const id = data?.threadId;
+            const payload = data?.event;
+            if (!id || !payload) return;
+            for (const cb of pilotHandlers.get(id) ?? []) cb(payload);
+          });
+        }
+        return () => {
+          const held = pilotHandlers.get(threadId);
+          if (!held) return;
+          held.delete(handler);
+          if (held.size > 0) return;
+          pilotHandlers.delete(threadId);
+          void rpc("pilot.unsubscribe", { threadId }).catch((err) => {
+            log.warn("backend.pilot", "pilot.unsubscribe.refused", {
+              thread: threadId,
+              reason: String(err),
+            });
+          });
+          if (pilotHandlers.size > 0) return;
+          pilotFeedOff?.();
+          pilotFeedOff = null;
+        };
+      },
     };
 
     // Failures answer empty rather than rejecting: this is fanned out over
@@ -785,7 +915,7 @@ export class RemoteBackend implements Backend {
   }
 
   // An older server has no answer for this, and the caller treats a failure as
-  // "not mine" — which drops the request rather than running a move that a
+  // "not mine", which drops the request rather than running a move that a
   // second device may be running at the same time.
   claimAgentRequest(requestId: string): Promise<boolean> {
     return this.#socket

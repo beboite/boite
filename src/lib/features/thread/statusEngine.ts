@@ -14,6 +14,7 @@ import { notifyWhenUnfocused } from "$lib/storage/notify";
 import { t as translate } from "$lib/i18n/index.svelte";
 import { detectIconKey } from "$lib/shared/icons/detect";
 import { ptyKill } from "$lib/storage/pty";
+import { forgetPilotSession } from "$lib/features/pilot/session";
 import { logger } from "$lib/shared/services/logger.svelte";
 import { agentTurns } from "./agent-turns";
 import { noticeDeclaredCwd } from "./agent-cwd";
@@ -203,9 +204,14 @@ function maybeAutoClose(threadId: string, iconKey: string | null | undefined) {
   const enabled = settings.state.idleAutocloseByIcon[iconKey] === true;
   if (!enabled) return;
   const t = app.threadById(threadId);
-  if (!t || !t.ptyId) return;
+  if (!t) return;
+  // A chat thread has no PTY and never will: what auto-sleep stops there is the
+  // native session, and the row's own id is what names it. Every check below is
+  // the same one, which is the point of it being one function.
+  const pilot = t.runtime === "pilot";
+  if (!pilot && !t.ptyId) return;
   if (t.keepAwake) return;
-  if (!t.sessionId) {
+  if (!pilot && !t.sessionId) {
     logger.debug("idle", `skip auto-sleep for ${t.label}: no session captured yet`, {
       iconKey,
     });
@@ -242,7 +248,27 @@ function maybeAutoClose(threadId: string, iconKey: string | null | undefined) {
   }
   const idleMs = now - armed;
   if (idleMs < timeoutMs) return;
+  if (pilot) {
+    app.setThreadStatus(t.id, "stopped", null);
+    app.setThreadAutoSlept(t.id, true);
+    // The window no longer holds this row's session, so the next pane to open
+    // on it resumes rather than assuming somebody else already did.
+    forgetPilotSession(t.id);
+    // Polite, and that is what makes this sleep rather than a close: the native
+    // session stays resumable, so opening the pane again picks the conversation
+    // up where it was. Asked of the machine the thread runs on, which in dynamic
+    // mode is not this one.
+    void workspace
+      .backendFor(t.origin)
+      .pilot.stop(t.id)
+      .catch((err: unknown) => {
+        logger.warn("idle", `failed to stop ${t.label} during auto-sleep`, String(err));
+      });
+    logger.info("idle", `auto-slept ${t.label} after ${minutes}m idle`, { iconKey, idleMs });
+    return;
+  }
   const pid = t.ptyId;
+  if (!pid) return;
   app.setThreadPtyId(t.id, null);
   // In memory only, and deliberately: the row already carries the mark of this
   // run, and a sleep written down would have the next boot read it as the run
@@ -484,6 +510,23 @@ function tick() {
     // branch further down can leave the pass early, this one cannot.
     if (t.status === "running" || t.status === "waiting") drivenPaneSince.delete(t.id);
     else maybeCloseDrivenPanes(t.id, now);
+    // A pilot row has one source and it is `status.changed`: no pid registry,
+    // no screen rows, no clock (`docs/pilot.md`). Left in the sweep below it
+    // would be demoted to `idle` by the `!t.ptyId` arm on every single pass,
+    // since a chat thread has no PTY by construction, and the exact status the
+    // protocol just reported would last a hundred milliseconds. The host writes
+    // it instead, off the event the driver sent.
+    //
+    // Auto-sleep is the one thing it does keep, and for the same reason a
+    // terminal has it: a worker nobody is reading is a child process nobody is
+    // reading. It is the user's per-agent setting, so it applies to whichever
+    // runtime that agent was started on.
+    if (t.runtime === "pilot") {
+      if (t.status === "running" || t.status === "waiting") lastWorkingAt.set(t.id, now);
+      if (t.status === "ready" && !visible.has(t.id)) maybeAutoClose(t.id, t.iconKey);
+      else idleSince.delete(t.id);
+      continue;
+    }
     // Server-owned threads (remote origin in dynamic mode) get their status
     // pushed as control events; ticking them would clobber it.
     const backend = workspace.backendFor(t.origin);

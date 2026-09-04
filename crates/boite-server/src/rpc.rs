@@ -29,8 +29,8 @@ fn u16_param(params: &Value, key: &str) -> Result<u16, String> {
 
 /// A thread id, or a refusal.
 ///
-/// Boite mints uuids for these — `crypto.randomUUID` on the client,
-/// `Uuid::new_v4` on every side that makes one without a client — and the
+/// Boite mints uuids for these, `crypto.randomUUID` on the client,
+/// `Uuid::new_v4` on every side that makes one without a client, and the
 /// binary input frames on this protocol already pack the id as sixteen raw
 /// bytes, so anything that is not a uuid could never have addressed a terminal
 /// anyway. What it can do is name something else: a key file, a ref namespace, a
@@ -52,7 +52,7 @@ fn checked_thread_id(id: &str) -> Result<(), String> {
 /// those defends itself differently. A shape checked once at the door is what
 /// makes those agree.
 ///
-/// A method that carries no id at all is not this function's business — the arm
+/// A method that carries no id at all is not this function's business: the arm
 /// that needs one says so itself, with the error it has always given.
 fn checked_thread_ids(method: &str, params: &Value) -> Result<(), String> {
     let id = match method {
@@ -131,7 +131,7 @@ where
 /// Runs a record command on the bus and hands back the bare answer.
 ///
 /// The rows are `boite_core::command::records`; what stays on this side is what
-/// this host does *about* a row changing — broadcasting to every connected
+/// this host does *about* a row changing: broadcasting to every connected
 /// device, refreshing the roots, killing a PTY. Those are not the capability,
 /// and a bus that owned them would need a `Host` method per host quirk.
 ///
@@ -153,7 +153,18 @@ async fn on_bus(state: &AppState, method: &str, params: &Value) -> Result<Value,
 pub async fn dispatch(state: &AppState, request: Authorized) -> Result<Value, String> {
     let method = request.method().to_string();
     let caller = request.caller();
-    let params = request.into_params();
+    let device = request.device().to_string();
+    let mut params = request.into_params();
+    // Who wrote a record is the socket's answer, never the body's: a client
+    // naming another device would file its lines under that device, and a
+    // filter by device would then be a lie. Stamped before the decode, so the
+    // bus reads it the same way it reads everything else.
+    if method == "logs.write" {
+        if let Some(object) = params.as_object_mut() {
+            object.insert("device".to_string(), json!(device));
+        }
+    }
+    let params = params;
     checked_thread_ids(&method, &params)?;
     match method.as_str() {
         // Who answered, not just that something did. The protocol number keeps
@@ -424,7 +435,7 @@ pub async fn dispatch(state: &AppState, request: Authorized) -> Result<Value, St
         }
 
         // An agent request reaches every connected device; this decides which
-        // one carries it out. True for exactly one caller per id — two devices
+        // one carries it out. True for exactly one caller per id: two devices
         // running the same move would kill one PTY twice and leave a second
         // worktree behind.
         // Everything at once, for whoever has to work out why something is
@@ -549,7 +560,7 @@ pub async fn dispatch(state: &AppState, request: Authorized) -> Result<Value, St
             let who = state.store.thread_context(&thread_id);
             // A real awareness value rather than a hand-made pair of strings, so
             // what a fresh deployment receives is shaped exactly like what it
-            // will receive in anger — the link included, which is the half most
+            // will receive in anger, the link included, which is the half most
             // likely to be misconfigured.
             let aware = boite_core::awareness::derive(&boite_core::awareness::Facts {
                 thread_id: &thread_id,
@@ -687,8 +698,8 @@ pub async fn dispatch(state: &AppState, request: Authorized) -> Result<Value, St
         // deleted row answers nothing.
         "pairing.list" => Ok(json!({ "pairings": state.store.list_pairings()? })),
 
-        // Invites one device. What comes back is the only copy of the token —
-        // the table keeps a hash — so it is drawn once, as a link and a QR, and
+        // Invites one device. What comes back is the only copy of the token,
+        // the table keeps a hash, so it is drawn once, as a link and a QR, and
         // never fetched again.
         //
         // `base` is the client's own origin, because a server behind a reverse
@@ -769,19 +780,57 @@ pub async fn dispatch(state: &AppState, request: Authorized) -> Result<Value, St
             Ok(json!({ "revoked": revoked }))
         }
 
-        // Every domain the desktop serves too — git, worktrees, the
-        // filesystem, the editor, the folders a project lives in — is one bus
+        // The one bus domain whose work is async: a pilot call awaits a child
+        // process, so `Ready::run` refuses it on purpose and the executor
+        // `boite_core::pilot_host` gives both hosts runs it here instead. The
+        // boundary is still `prepare`, and which socket to push at is this
+        // side's own bookkeeping, the way `logs.subscribe` is.
+        m if boite_core::command::pilot::ALL_METHODS.contains(&m) => {
+            let command = Command::decode(m, &params)?;
+            let wire = command.wire();
+            if m == "pilot.subscribe" || m == "pilot.unsubscribe" {
+                if let Some(thread_id) = params.get("threadId").and_then(|v| v.as_str()) {
+                    state.subscribe_pilot(&device, thread_id, m == "pilot.subscribe");
+                }
+            }
+            let ready = command.prepare(&state.command_host(), Grant::Local)?;
+            let boite_core::command::Ready::Pilot(ready) = ready else {
+                return Err(format!("{m} did not prepare as a pilot call"));
+            };
+            let answer = boite_core::pilot_host::execute(*ready).await?;
+            Ok(wire.wrap(answer))
+        }
+
+        // Every domain the desktop serves too, git, worktrees, the
+        // filesystem, the editor, the folders a project lives in, is one bus
         // in `boite_core::command` rather than a list of arms here. What is
         // left on this side is the decoding and the envelope this protocol
         // wraps an answer in.
         m if command::handles(m) => {
             let command = Command::decode(m, &params)?;
             let wire = command.wire();
+            // The one bus method whose effect is on this side: which socket to
+            // push at is a property of the connection, so the bus says whether
+            // the device may subscribe and the registration happens here.
+            if m == "logs.subscribe" {
+                let on = params.get("on").and_then(|v| v.as_bool()).unwrap_or(true);
+                state.subscribe_logs(&device, on);
+            }
             // `Local`: this is a device that authenticated on the workspace's
             // own token, which is the user, not an agent. Agents reach the bus
             // through their own endpoint and carry a narrower grant.
             let ready = command.prepare(&state.command_host(), Grant::Local)?;
-            let answer = blocking(move || ready.run()).await??;
+            // A conduct verb prepares as a pilot call when the thread on the
+            // other end is a chat one (`Conduct::as_pilot_turn`), and that work
+            // awaits a child process rather than blocking a pool thread. The
+            // same executor the pilot arm above uses, so one conversion has one
+            // implementation on both hosts.
+            let answer = match ready {
+                boite_core::command::Ready::Pilot(ready) => {
+                    boite_core::pilot_host::execute(*ready).await?
+                }
+                ready => blocking(move || ready.run()).await??,
+            };
             // A moment is what an orchestrator's long-poll wakes on, and the
             // event is what a chat pane refreshes on. Fanned out here because
             // the bus itself owns no event channel. Every conduct write that
@@ -812,6 +861,9 @@ pub async fn dispatch(state: &AppState, request: Authorized) -> Result<Value, St
                     }
                 }
             }
+            // A handler that refused has already answered; one that failed
+            // says so here with the device attached, because "it works from my
+            // phone" is the whole of what a bug report usually carries.
             Ok(wire.wrap(answer))
         }
 
@@ -1065,7 +1117,7 @@ mod tests {
     }
 
     /// The client is not authoritative for runtime state. `thread.create`
-    /// doubles as create and re-save — a session id captured, a label edited —
+    /// doubles as create and re-save, a session id captured, a label edited,
     /// and taking the client's word on the second call would let a reload
     /// rewrite how a thread ended.
     ///
@@ -1105,7 +1157,7 @@ mod tests {
         assert_eq!(again["thread"]["exitCode"], json!(3));
 
         // And a stored `running` reads back as stopped: the process it named is
-        // gone, so keeping the word would be a thread that is busy with nothing —
+        // gone, so keeping the word would be a thread that is busy with nothing,
         // and answering `idle` would be a thread that was working when the last
         // server went away drawn like one nobody has ever started.
         state
@@ -1120,7 +1172,7 @@ mod tests {
     /// A thread id off the wire is spent as a filename, as a git ref namespace
     /// and as a row key, and each of those defends itself differently. Boite
     /// mints uuids and this protocol already packs the id as sixteen raw bytes
-    /// on its binary frames, so anything else was never a thread — it was a
+    /// on its binary frames, so anything else was never a thread: it was a
     /// name for something else.
     #[tokio::test]
     async fn a_thread_id_that_is_not_a_uuid_never_reaches_a_handler() {

@@ -43,13 +43,13 @@ pub struct AppState {
     /// said (`BOITE_PUBLIC_URL`).
     ///
     /// Only ever used to build the text of a pairing link. A server behind a
-    /// reverse proxy cannot work its own public name out — the `Host` header is
-    /// whatever the caller sent — so the choice is this or a client-supplied
+    /// reverse proxy cannot work its own public name out, the `Host` header is
+    /// whatever the caller sent, so the choice is this or a client-supplied
     /// origin, and a configured value wins over one. It decides what the link
     /// says, never what the token opens.
     pub public_url: Option<String>,
     /// Agent requests already spoken for. An `AgentRequest` reaches every
-    /// connected device and exactly one of them may act on it — two clients
+    /// connected device and exactly one of them may act on it: two clients
     /// running the same move would kill one PTY twice and leave a second
     /// worktree behind.
     pub claimed_requests: parking_lot::Mutex<std::collections::VecDeque<String>>,
@@ -59,6 +59,33 @@ pub struct AppState {
     pub pulse: Arc<boite_core::pulse::Waiters>,
     /// Process-wide telemetry queue. None in tests, which never send.
     pub telemetry: Option<Arc<boite_core::telemetry::TelemetryRuntime>>,
+    /// The devices that asked to be pushed log records, by pairing id.
+    ///
+    /// Server-side rather than on the bus, because who to push to is a property
+    /// of the socket rather than of the call: the bus answers whether a device
+    /// may subscribe, and this is where the answer is kept. A device that
+    /// disconnects stays in the set until it says otherwise, which costs one
+    /// string: the fanout is filtered per connection, so a stale id pushes to
+    /// nobody.
+    pub log_subscribers: parking_lot::Mutex<std::collections::HashSet<String>>,
+    /// Which threads each device asked to be pushed pilot events for, by
+    /// pairing id.
+    ///
+    /// Per thread rather than per device: a turn is hundreds of events and a
+    /// phone watching one chat has no use for another's. Cleared when the
+    /// connection drops, which is the difference from `log_subscribers`: that
+    /// set costs one string per stale id, this one would grow a set per thread
+    /// a device ever looked at.
+    pub pilot_subscribers:
+        parking_lot::Mutex<std::collections::HashMap<String, std::collections::HashSet<String>>>,
+    /// This server's pilot runtime, built at startup beside the registry.
+    ///
+    /// `None` in the tests that never open a chat thread, and the domain
+    /// refuses by name there rather than pretending a thread has no session.
+    pub pilot: Option<std::sync::Arc<boite_pilot::Runtime>>,
+    /// Where this server wrote the sidecar, so a pilot thread is launched with
+    /// the same boite-mcp a terminal thread gets.
+    pub pilot_mcp: Option<boite_core::mcp_launch::McpPaths>,
 }
 
 /// How many claims are remembered. Each is a uuid a client either took or lost
@@ -68,6 +95,53 @@ pub struct AppState {
 const CLAIM_MEMORY: usize = 256;
 
 impl AppState {
+    /// Starts or stops pushing `log.record` at one device.
+    pub fn subscribe_logs(&self, device: &str, on: bool) {
+        let mut subscribers = self.log_subscribers.lock();
+        if on {
+            subscribers.insert(device.to_string());
+        } else {
+            subscribers.remove(device);
+        }
+    }
+
+    /// Whether this device asked for live records.
+    pub fn logs_subscribed(&self, device: &str) -> bool {
+        self.log_subscribers.lock().contains(device)
+    }
+
+    /// Starts or stops pushing one thread's pilot events at one device.
+    pub fn subscribe_pilot(&self, device: &str, thread_id: &str, on: bool) {
+        let mut subscribers = self.pilot_subscribers.lock();
+        if on {
+            subscribers
+                .entry(device.to_string())
+                .or_default()
+                .insert(thread_id.to_string());
+        } else if let Some(threads) = subscribers.get_mut(device) {
+            threads.remove(thread_id);
+        }
+    }
+
+    /// Whether this device asked for this thread.
+    pub fn pilot_subscribed(&self, device: &str, thread_id: &str) -> bool {
+        self.pilot_subscribers
+            .lock()
+            .get(device)
+            .is_some_and(|threads| threads.contains(thread_id))
+    }
+
+    /// Forgets everything a device was watching, on disconnect.
+    pub fn drop_pilot_subscriptions(&self, device: &str) {
+        self.pilot_subscribers.lock().remove(device);
+    }
+
+    /// Whether anybody at all did, which is what the coalescing task asks
+    /// before building a batch nobody would read.
+    pub fn anyone_reads_logs(&self) -> bool {
+        !self.log_subscribers.lock().is_empty()
+    }
+
     /// Whether this caller is the one that carries the request out.
     ///
     /// True exactly once per id. Every other device asking gets false and drops
@@ -149,7 +223,7 @@ impl AppState {
 
     /// What a command on the bus is allowed to reach on this side.
     ///
-    /// Cheap enough to build per call, and built per call on purpose — a host
+    /// Cheap enough to build per call, and built per call on purpose: a host
     /// held somewhere would be a second place for the boundary to go stale after
     /// `refresh_roots`.
     pub fn command_host(&self) -> ServerHost<'_> {
@@ -161,7 +235,7 @@ impl AppState {
 ///
 /// It differs from a desktop's in one way: a server can be bound to a workspace
 /// directory, and then a folder outside it may not become a project however the
-/// caller spells it. A desktop has no equivalent — the user's own folder dialog
+/// caller spells it. A desktop has no equivalent: the user's own folder dialog
 /// is the gate.
 pub struct ServerHost<'a> {
     state: &'a AppState,
@@ -203,6 +277,26 @@ impl boite_core::command::Host for ServerHost<'_> {
             return Ok(());
         }
         Err("path is outside workspace root".into())
+    }
+
+    fn pilot(&self) -> Option<std::sync::Arc<boite_pilot::Runtime>> {
+        self.state.pilot.clone()
+    }
+
+    /// boite-mcp first, with the environment this server stamps into a PTY so
+    /// the sidecar knows which thread is calling it.
+    fn pilot_mcp(&self, thread_id: &str) -> Vec<boite_pilot::McpServer> {
+        let Some(paths) = &self.state.pilot_mcp else {
+            return Vec::new();
+        };
+        vec![boite_core::command::pilot::boite_mcp_server(
+            paths.sidecar.to_string_lossy().into_owned(),
+            Vec::new(),
+            vec![(
+                boite_identity::env::THREAD.to_string(),
+                thread_id.to_string(),
+            )],
+        )]
     }
 
     fn extra_project_parents(&self) -> Vec<String> {
@@ -284,6 +378,10 @@ pub fn state_for_test(dir: &Path) -> AppState {
         claimed_requests: Default::default(),
         pulse: boite_core::pulse::Waiters::new(),
         telemetry: None,
+        log_subscribers: Default::default(),
+        pilot_subscribers: Default::default(),
+        pilot: None,
+        pilot_mcp: None,
     };
     // The dispatcher tests drive real calls, and a real call reads the pairing
     // row behind the session that sent it. `Session::for_test` names this one.
@@ -377,6 +475,10 @@ mod tests {
             claimed_requests: Default::default(),
         pulse: boite_core::pulse::Waiters::new(),
             telemetry: None,
+            log_subscribers: Default::default(),
+        pilot_subscribers: Default::default(),
+        pilot: None,
+        pilot_mcp: None,
         };
 
         state.refresh_roots().unwrap();
@@ -419,9 +521,42 @@ mod tests {
             claimed_requests: Default::default(),
         pulse: boite_core::pulse::Waiters::new(),
             telemetry: None,
+            log_subscribers: Default::default(),
+        pilot_subscribers: Default::default(),
+        pilot: None,
+        pilot_mcp: None,
         };
 
         assert!(state.ensure_project_path(inside.to_str().unwrap()).is_ok());
         assert!(state.ensure_project_path(outside.to_str().unwrap()).is_err());
+    }
+    /// A `pilot.event` reaches the device that asked for that thread and
+    /// nobody else.
+    ///
+    /// The set is what `ws.rs` filters the fanout on, so this is the whole of
+    /// the rule: a turn is hundreds of events, and a phone watching one chat
+    /// would otherwise pay for every other chat on the workspace. The
+    /// disconnect sweep is the second half, because the set is per thread and
+    /// would grow one entry per chat anybody ever opened.
+    #[test]
+    fn a_pilot_event_reaches_only_the_device_that_asked_for_that_thread() {
+        let dir = std::env::temp_dir().join(format!("boite-pilot-subs-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let state = state_for_test(&dir);
+
+        state.subscribe_pilot("phone", "t1", true);
+        assert!(state.pilot_subscribed("phone", "t1"));
+        assert!(!state.pilot_subscribed("phone", "t2"), "one thread, not the workspace");
+        assert!(!state.pilot_subscribed("laptop", "t1"), "one device, not everyone");
+
+        // Unsubscribing is per thread too: a device watching two chats and
+        // closing one keeps the other.
+        state.subscribe_pilot("phone", "t2", true);
+        state.subscribe_pilot("phone", "t1", false);
+        assert!(!state.pilot_subscribed("phone", "t1"));
+        assert!(state.pilot_subscribed("phone", "t2"));
+
+        state.drop_pilot_subscriptions("phone");
+        assert!(!state.pilot_subscribed("phone", "t2"), "a socket that went away watches nothing");
     }
 }

@@ -62,7 +62,7 @@
     observer = new ResizeObserver(schedule);
     observer.observe(el);
     // Straight away, not on the next frame. The element is in the document by
-    // the time an action runs, so its box is one forced layout away — and this
+    // the time an action runs, so its box is one forced layout away, and this
     // measurement is what lets the terminal mount, so deferring it cost a frame
     // of black pane on every thread that opened.
     update();
@@ -223,6 +223,9 @@
 
 {#snippet renderNode(node: LayoutNode)}
   {#if node.kind === "leaf"}
+    <!-- Only a terminal draws nothing here: its canvas arrives from the page as
+         an overlay over this rectangle. A chat pane is ordinary DOM and lives
+         in the tree like every panel. -->
     {@const isThread = node.content.kind === "thread"}
     <!-- No chrome of its own, on any pane. The strip that used to name each one
          repeated the sidebar over a terminal and the panel's own header over a
@@ -307,7 +310,7 @@
              nearest one, so a pane the phone has switched away from answers no
              to the screenshot and to the window's description of itself, while
              the one on screen carries nothing and the question reaches the
-             group wrapper — which is where "is this group the one being drawn"
+             group wrapper, which is where "is this group the one being drawn"
              is still answered. -->
         <div
           class="mobile-pane"
@@ -341,7 +344,7 @@
   /* Nothing between the viewport and a lone leaf: no padding, no border, no
      gap. `unmeasuredRect` places that leaf at 0,0 over the whole viewport
      before anything has been measured, and an inset of any kind here would make
-     the first frame the wrong size — the terminal would fit itself twice, once
+     the first frame the wrong size: the terminal would fit itself twice, once
      against a rect that was never true. */
   .pane-shell-root {
     width: 100%;

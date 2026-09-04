@@ -11,9 +11,9 @@ import { t } from "$lib/i18n/index.svelte";
  *
  * Two sources, one dock. An agent asking through the endpoint is a row in the
  * workspace database, which is what makes it survive the app being closed and
- * reach a second window. Anything the front end wants answered the same way —
+ * reach a second window. Anything the front end wants answered the same way,
  * without stealing focus, without a scrim, while the terminal underneath keeps
- * running — calls {@link ApprovalStore.ask} and gets a promise back.
+ * running, calls {@link ApprovalStore.ask} and gets a promise back.
  *
  * The difference from `shared/components/confirm.svelte.ts` is who is waiting.
  * A confirm dialog is the answer to something the user just did, so it owns the
@@ -25,6 +25,17 @@ import { t } from "$lib/i18n/index.svelte";
  * no and the host replays what was stored. A card that rebuilt the request from
  * what it was rendering would be a second idea of what the user agreed to.
  */
+
+/**
+ * The `action` a chat thread's question carries.
+ *
+ * `boite_core::store::PILOT_APPROVAL_ACTION`, and the one string that decides
+ * which card the dock draws: a pilot row's `detail` is the request id rather
+ * than a sentence, and the options are the driver's own, so yes-or-no cannot
+ * answer it. Nothing filters kinds out of the dock, which is why arriving here
+ * needed no change on the notification path.
+ */
+export const PILOT_ACTION = "pilot.request";
 
 /** How loud a card is. `danger` is for an answer that cannot be taken back. */
 export type ApprovalTone = "normal" | "danger";

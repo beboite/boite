@@ -23,6 +23,7 @@ import { settings } from "$lib/features/settings/store.svelte";
 import { device } from "$lib/features/settings/device.svelte";
 import { resolveLaunchView } from "$lib/features/settings/resolveLaunchView";
 import { logger } from "$lib/shared/services/logger.svelte";
+import { log } from "$lib/shared/log";
 import { t } from "$lib/i18n/index.svelte";
 import { platform } from "$lib/storage/platform.svelte";
 import {
@@ -266,6 +267,7 @@ export class AppState {
     if (this.#indexMisses.size > 200) this.#indexMisses.clear();
     this.#indexMisses.add(id);
     logger.warn("app", `${id}: the thread index missed a row the list holds`, {
+      threadId: id,
       threads: this.threads.length,
       indexed: this.#threadById.size,
     });
@@ -273,14 +275,14 @@ export class AppState {
 
   /**
    * Every lookup used to be a linear scan, and the status engine does one per
-   * thread twice a second — quadratic in the number of open threads.
+   * thread twice a second, quadratic in the number of open threads.
    *
    * Falls back to that scan when the index misses, because the index is a
    * `$derived` and everything here treats a null as "this thread does not
    * exist". An index one beat behind the list therefore did not slow anything
    * down, it made the app deny threads that were right there: the pane stayed
    * empty (activation is gated on `hasThread`), closing refused (`closeThread`
-   * returns early on a null), and only a restart — which rebuilds the index —
+   * returns early on a null), and only a restart, which rebuilds the index,
    * gave them back. The scan costs a pass over the list on a miss, and a miss
    * is either that bug or an id that is genuinely gone.
    */
@@ -328,7 +330,7 @@ export class AppState {
   }
 
   // Both of these return the index's own arrays. Callers iterate and map, they
-  // never mutate — a fresh copy per call would defeat the reference equality
+  // never mutate: a fresh copy per call would defeat the reference equality
   // consumers rely on to skip work.
   threadsByProject(projectId: string): Thread[] {
     return this.#threadsByProject.get(projectId) ?? EMPTY_THREADS;
@@ -364,7 +366,7 @@ export class AppState {
     // while the user was doing nothing but tidying up. The ledger only ever
     // moves forward, so closing a thread moves nothing.
     //
-    // The fallback covers a project nothing has been recorded against yet — a
+    // The fallback covers a project nothing has been recorded against yet: a
     // rank it holds until its first turn, since `seedProjectWork` writes down
     // whatever history the threads carry as soon as the rows land.
     const activityOf = (p: Project): number => {
@@ -383,7 +385,7 @@ export class AppState {
       .filter((p) => !p.archived && !this.#hiddenRemote(p))
       // Scratch stays listed even with nothing in it. It was hidden while empty,
       // on the reading that a door nobody has walked through is not a project
-      // the user has — but the launcher hangs off a card's own `+`, so hiding
+      // the user has, but the launcher hangs off a card's own `+`, so hiding
       // the card removed the only way to start a thread with no project at all,
       // and the door was shut from the outside.
       .sort((a, b) => {
@@ -581,7 +583,7 @@ export class AppState {
    *
    * Not async on purpose: the store write has to happen at call time, in the
    * click's own task, while the returned promise is only the row reaching
-   * SQLite. A launch does not await it — the sidebar entry and the terminal are
+   * SQLite. A launch does not await it: the sidebar entry and the terminal are
    * what the user clicked for, and an IPC round trip plus a WAL commit in front
    * of them is a wait for nothing. A caller that has to know the row landed
    * (a move, which reports failure and gives up) still awaits.
@@ -593,7 +595,17 @@ export class AppState {
   upsertThread(thread: Thread): Promise<void> {
     const i = this.threads.findIndex((t) => t.id === thread.id);
     if (i >= 0) this.threads[i] = thread;
-    else this.threads.push(thread);
+    else {
+      // A row appearing is worth `info`: it is the start of everything a
+      // reader following one terminal will then look for, and it happens
+      // once per thread rather than on a timer.
+      log.info("app.thread", "thread.created", {
+        thread: thread.id,
+        project: thread.projectId,
+        cmd: thread.cmd,
+      });
+      this.threads.push(thread);
+    }
     return saveThread(thread);
   }
 
@@ -602,7 +614,7 @@ export class AppState {
    *
    * It used to go nowhere: the active thread was cleared and the view stayed on
    * the terminal, so whatever pane the project happened to have open took the
-   * whole screen — closing the last thread of a project with the git panel
+   * whole screen: closing the last thread of a project with the git panel
    * docked left the user staring at a full-window diff nobody asked for.
    *
    * A sibling still running wins, because that is a terminal to look at. With
@@ -637,6 +649,7 @@ export class AppState {
   async removeThread(id: string) {
     this.#clearDelegationClose(id);
     const removed = this.threadById(id);
+    log.info("app.thread", "thread.deleted", { thread: id });
     this.threads = this.threads.filter((t) => t.id !== id);
     if (this.activeThreadId === id) {
       this.activeThreadId = null;
@@ -668,8 +681,8 @@ export class AppState {
     t.exitCode = exitCode;
     if (status !== "stopped" && t.autoSlept) {
       // Drop the sleep badge as soon as the thread leaves "stopped". The flag
-      // is in-memory only (see setThreadAutoSlept), so this clear — not any
-      // write — is the whole reason a woken thread stops animating.
+      // is in-memory only (see setThreadAutoSlept), so this clear, not any
+      // write, is the whole reason a woken thread stops animating.
       this.setThreadAutoSlept(id, false);
     }
 
@@ -727,7 +740,7 @@ export class AppState {
    * Optimistic like every other mutator here, and the one that genuinely has to
    * roll back: the boite refuses to put away a thread that is working or has a
    * dialog up, and it is the only party that answers for a remote row. So the
-   * refusal is checked here too — the menu should never have offered it — and
+   * refusal is checked here too, the menu should never have offered it, and
    * the write is undone if the boite disagrees anyway.
    *
    * Returns whether it went through, so a caller can say so.
@@ -768,6 +781,10 @@ export class AppState {
     thread.settledAt = settled ? Date.now() : null;
     try {
       await setThreadSettled(id, thread.status, settled, thread.origin);
+      log.info("app.thread", settled ? "thread.settled" : "thread.unsettled", {
+        thread: id,
+        status: thread.status,
+      });
       return true;
     } catch (err) {
       logger.error("app", "setThreadSettled failed", err);
@@ -804,7 +821,7 @@ export class AppState {
 
   // Manual rename. Unlike setThreadTitle this persists on every backend: the
   // remote server only writes back titles it parsed itself, so a name typed
-  // here would never reach its row. Passing null drops the manual name — the
+  // here would never reach its row. Passing null drops the manual name: the
   // thread falls back to its label and the agent gets to title it again.
   async renameThread(id: string, name: string | null) {
     // Named `thread`, not `t`: this file uses `t` for a thread almost everywhere,
@@ -836,7 +853,10 @@ export class AppState {
     // like. Remote rows are the server's to mark: it watches the PTYs it owns.
     if (!workspace.backendFor(t.origin).caps.clientStatus) return;
     void markThreadStarted(id, t.origin).catch((err) => {
-      logger.warn("app", `could not mark thread ${id} as started`, String(err));
+      logger.warn("app", `could not mark thread ${id} as started`, {
+        threadId: id,
+        details: String(err),
+      });
     });
   }
 

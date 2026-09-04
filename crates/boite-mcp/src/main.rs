@@ -3,7 +3,7 @@
 //! It holds no configuration of its own. Boite stamps `BOITE_MCP_URL`,
 //! `BOITE_KEY_FILE` and `BOITE_THREAD_ID` into every PTY it spawns, so this
 //! reads its whole identity from the environment. Launched anywhere else, those
-//! variables are absent and it refuses to start — which is the point: an agent
+//! variables are absent and it refuses to start, which is the point: an agent
 //! outside Boite has nothing to present.
 //!
 //! The key arrives as a path rather than a value, because an environment is
@@ -50,7 +50,46 @@ fn run_stop_hook() {
     }
 }
 
+/// Where this shim logs, when anywhere.
+///
+/// `--log-dir` first, then `BOITE_LOG_DIR`, then the directory the desktop app
+/// uses on this machine, so one boite's four hosts land in one place. `None`
+/// means this machine has no such directory, which is honest and is not a
+/// reason to fail: a sidecar that refuses to start because it could not open a
+/// log takes every tool call with it.
+fn log_dir() -> Option<std::path::PathBuf> {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if let Some(at) = args.iter().position(|a| a == "--log-dir") {
+        if let Some(dir) = args.get(at + 1).filter(|d| !d.starts_with("--")) {
+            return Some(std::path::PathBuf::from(dir));
+        }
+    }
+    if let Ok(dir) = std::env::var("BOITE_LOG_DIR") {
+        if !dir.trim().is_empty() {
+            return Some(std::path::PathBuf::from(dir));
+        }
+    }
+    boite_core::log::desktop_log_dir()
+}
+
+/// Brings the log up, or does not, and says nothing either way.
+///
+/// Nothing here may print: this process speaks JSON-RPC on stdout and a line
+/// of its own would break the client's parse. A directory that cannot be
+/// written is the ordinary case on a machine with no desktop install, and it
+/// leaves the shim exactly as capable as it was before this existed.
+fn start_log() {
+    let Some(dir) = log_dir() else { return };
+    let _ = boite_core::log::init(boite_core::log::LogConfig {
+        dir,
+        host: "mcp".to_string(),
+        extra_stderr: false,
+    });
+}
+
 fn main() {
+    start_log();
+
     // Stop is the one hook this binary answers. Anything else (or a stop we
     // cannot reach the endpoint for) prints nothing and exits 0: a hook that
     // errors is a slower way of saying "carry on", and a hook that can fire
@@ -60,8 +99,19 @@ fn main() {
         std::process::exit(0);
     }
 
+    // The second mode. It has no boite behind it: it starts the isolated dev
+    // window and drives it, so it reads none of the environment above and is
+    // dispatched before `Host::resolve` would refuse for lack of it. `--dev`
+    // is looked for anywhere in the argv rather than at position one, a client
+    // being free to put `--log-dir` in front of it.
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.iter().any(|a| a == "--dev") {
+        boite_mcp::dev::run(&args);
+        return;
+    }
+
     // Resolved but not required. Exiting here would kill the connection during
-    // the handshake, and a client can only report that as "connection closed" —
+    // the handshake, and a client can only report that as "connection closed",
     // hiding a cause that is one sentence long. Answering initialize and failing
     // at the call instead puts that sentence in front of the agent, which is the
     // only place anyone will read it.

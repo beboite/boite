@@ -4,10 +4,12 @@
   import { paneStore } from "./store.svelte";
   import { closeMobilePane } from "./open";
   import { paneLabel } from "./label";
+  import { threadIdOf } from "./types";
   import type { LayoutNode, PaneGroup, PaneKind } from "./types";
   import { edgeFade } from "$lib/shared/actions/edgeFade";
   import { t } from "$lib/i18n/index.svelte";
   import SquareTerminal from "@lucide/svelte/icons/square-terminal";
+  import MessageSquare from "@lucide/svelte/icons/message-square";
   import GitBranch from "@lucide/svelte/icons/git-branch";
   import FolderTree from "@lucide/svelte/icons/folder-tree";
   import ListTodo from "@lucide/svelte/icons/list-todo";
@@ -22,7 +24,7 @@
    * A window puts four panes side by side and the user picks one with their
    * eyes. 420px cannot: the same group squeezed every pane to a column one word
    * wide. So the phone draws one pane full width and this strip is what the eyes
-   * do instead — the group's panes as chips, the visible one filled.
+   * do instead: the group's panes as chips, the visible one filled.
    *
    * Only the active chip carries a close, and only when the pane is not a
    * terminal: closing a thread pane means moving the terminal to a group of its
@@ -41,11 +43,13 @@
    */
   function show(leaf: Leaf) {
     paneStore.setFocused(group.id, leaf.paneId);
-    if (leaf.content.kind === "thread") app.activeThreadId = leaf.content.threadId;
+    const threadId = threadIdOf(leaf.content);
+    if (threadId) app.activeThreadId = threadId;
   }
 
   const ICONS: Record<PaneKind, Component> = {
     thread: SquareTerminal,
+    chat: MessageSquare,
     dashboard: LayoutDashboard,
     git: GitBranch,
     explorer: FolderTree,

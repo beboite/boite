@@ -24,8 +24,8 @@ use super::bus::{through, DesktopHost};
 
 /// This app's connection to its own database.
 ///
-/// Attached once and shared. Every earlier caller opened its own — a
-/// `Connection::open` plus three pragmas each time — which was affordable for a
+/// Attached once and shared. Every earlier caller opened its own, a
+/// `Connection::open` plus three pragmas each time, which was affordable for a
 /// snapshot somebody asks for and is not for row reads that happen on every
 /// boot and every keystroke that renames a thread.
 ///
@@ -83,6 +83,15 @@ async fn on_rows(
     let mut host = DesktopHost::new(scope).with_store(store).with_transcripts(app);
     if let Some(runtime) = app.try_state::<Arc<boite_core::telemetry::TelemetryRuntime>>() {
         host = host.with_telemetry(runtime.inner().clone());
+    }
+    // The pilot runtime travels with a record command too, built on first use
+    // rather than only `peek`ed: `records::check_runtime` refuses a chat row
+    // whose driver the runtime does not list, and on a fresh app no runtime
+    // existed yet, so the first chat thread the window tried to save was
+    // refused before its session ever opened. Settling or deleting a chat
+    // thread needs the same handle to stop its child. Built once, then cached.
+    if let Ok(runtime) = app.state::<super::pilot::PilotRuntime>().get(app) {
+        host = host.with_pilot(runtime);
     }
     through(host, command.into()).await
 }

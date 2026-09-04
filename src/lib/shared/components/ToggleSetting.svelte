@@ -4,6 +4,12 @@
   type Props = {
     label: string;
     description?: string;
+    /**
+     * A word beside the label, in the app's own tag shape (`DashboardCard`).
+     * For a row that is new rather than for one that carries a count, so it is
+     * a caller's string: the dictionary key belongs where the row is declared.
+     */
+    badge?: string;
     /** See SettingsCard: the key this is labelled with, for settings search. */
     anchor?: string;
     enabled: boolean;
@@ -12,6 +18,7 @@
   let {
     label,
     description = "",
+    badge = "",
     anchor,
     enabled,
     onToggle,
@@ -30,7 +37,16 @@
   onclick={onToggle}
 >
   <div class="min-w-0 flex-1">
-    <div class="text-sm font-medium text-foreground">{label}</div>
+    <div class="flex items-center gap-1.5">
+      <span class="text-sm font-medium text-foreground">{label}</span>
+      {#if badge}
+        <span
+          class="shrink-0 rounded-full bg-[var(--color-surface-2)] px-1.5 py-px text-xs font-medium text-muted-foreground"
+        >
+          {badge}
+        </span>
+      {/if}
+    </div>
     {#if description}
       <div class="mt-0.5 text-sm text-muted-foreground">
         {description}

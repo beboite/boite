@@ -34,7 +34,7 @@ pub struct AgentMcpConfig {
 ///
 /// A file rather than an inline JSON argument: Boite often launches through a
 /// wrap shell, where arguments are re-quoted into a command line. That quoting
-/// escapes `"` as `\"`, which POSIX shells accept and PowerShell does not — so
+/// escapes `"` as `\"`, which POSIX shells accept and PowerShell does not, so
 /// a JSON string would break on the platform this app targets first. A path
 /// carries neither quotes nor braces and survives every shell.
 ///
@@ -73,7 +73,7 @@ pub async fn agent_mcp_args(
     )
 }
 
-fn local_mcp_paths(app: &AppHandle) -> Result<boite_core::mcp_launch::McpPaths, String> {
+pub(super) fn local_mcp_paths(app: &AppHandle) -> Result<boite_core::mcp_launch::McpPaths, String> {
     let exe = std::env::current_exe().map_err(|e| format!("current_exe: {e}"))?;
     let dir = exe
         .parent()
@@ -171,15 +171,15 @@ fn agent_config_files(key: &str, home: &Path, cwd: Option<&Path>) -> Vec<PathBuf
 
 /// Whether an agent can already reach this project's list.
 ///
-/// `"this"` — a boite server is registered. `"none"` — nothing. There is no
+/// `"this"`: a boite server is registered. `"none"`: nothing. There is no
 /// third state any more: the shim sends the directory it runs in and the
 /// endpoint answers for the project that owns it, so an entry made from any
 /// project serves every project. What the file names is now only the fallback
 /// for a directory no project claims.
 ///
 /// Matched by searching for the path rather than by parsing: the six formats
-/// here are JSON, JSONC, TOML and YAML, and the question asked — does this file
-/// name that file — does not need a parser for any of them. Windows paths are
+/// here are JSON, JSONC, TOML and YAML, and the question asked, does this file
+/// name that file, does not need a parser for any of them. Windows paths are
 /// searched for in their JSON-escaped form too, which is the one difference a
 /// JSON document actually makes.
 #[tauri::command]
@@ -219,7 +219,7 @@ fn registration_in(texts: &[String], creds: &str) -> &'static str {
         }
         // Matched on the binary, not on the server name: an entry the user
         // called something else still counts as registered. Which project's
-        // file it names no longer decides anything — the directory does.
+        // file it names no longer decides anything: the directory does.
         if text.contains("boite-mcp") {
             return "this";
         }
@@ -363,7 +363,7 @@ mod grok_mcp_tests {
 /// anything at launch.
 ///
 /// Startup writes one per project it finds, which leaves out every project
-/// created since — and those are the ones someone is most likely to be wiring
+/// created since, and those are the ones someone is most likely to be wiring
 /// an agent for right now. So a missing file is written rather than reported:
 /// the endpoint is already up, and its address is the only thing the file says.
 #[tauri::command]

@@ -1,156 +1,113 @@
-import { localBackend } from "$lib/backend";
-import { hasTauri } from "$lib/backend/env";
+/**
+ * The old desktop-diagnostics writer, now a shim over `$lib/shared/log`.
+ *
+ * It used to be a second log: one `invoke` per line into a mutex-guarded
+ * synchronous append, tagged with a free-form `scope`, readable only on a
+ * desktop and only from the file that window happened to own. A phone talking
+ * to a `boite-server` saw none of it, and "what happened to thread X" needed
+ * two answers.
+ *
+ * There is one road now. Every call below becomes a `$lib/shared/log` record,
+ * so it is batched, carries a `target` a filter can match on, lifts a thread
+ * id to the top level of the record, and lands in whichever host answered.
+ * The thirty call sites keep their shape: `logger.warn(scope, message, data)`
+ * still reads the way it did, and [`logTarget`] and [`logFields`] are the whole
+ * of the translation.
+ *
+ * Kept rather than replaced at each call site because the two signatures do not
+ * line up: the old one takes a sentence and a loose payload, the new one an
+ * event name and named fields. Rewriting thirty call sites into event names is
+ * a separate job, and this shim is what makes it optional.
+ */
 
-export type LogLevel = "debug" | "info" | "warn" | "error";
+import { log, printUnmirrored, shortStack, type LogFields, type LogLevel } from "$lib/shared/log";
 
-export interface LogEntry {
-  tsMs: number;
-  level: string;
-  source: string;
-  message: string;
-  details: string | null;
-}
-
-function serializeDetails(value: unknown): string {
-  if (value instanceof Error) {
-    return JSON.stringify({
-      name: value.name,
-      message: value.message,
-      stack: value.stack,
-      cause: value.cause ?? undefined,
-    });
-  }
-  if (typeof value === "string") return value;
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return String(value);
-  }
-}
+export type { LogLevel };
 
 /**
  * Whether `debug` does anything. Off in a release build.
  *
- * Every call is a console write plus an IPC hop into a mutex-guarded synchronous
- * append, and two callers sit on timers: the status engine ticks every 500ms per
- * agent thread waiting for a session id, and the session monitor every 12s per
- * thread. Ungated that was a couple of file writes a second, forever, for a
- * thread that had simply got stuck.
+ * Two callers sit on timers: the status engine ticks every 500ms per agent
+ * thread waiting for a session id, and the session monitor every 12s per
+ * thread. Batching made a debug line cheap, not free, and a release build has
+ * nobody to read one.
  */
 const DEBUG_ENABLED = import.meta.env.DEV;
 
 /**
- * The log is written by this window, about this window, so it never follows the
- * workspace: every call below goes to `localBackend()` rather than `backend()`.
- * Routed through the active transport, a connected boite put the whole thing on
- * `RemoteBackend`'s stub, where an event resolves into nothing: the desktop's own
- * log file stopped recording, `captureWindowErrors` included, for as long as the
- * link was up.
+ * The old `scope` as a `target`.
+ *
+ * A target reads as a module path, and the old scopes are single words picked
+ * per call site (`app`, `worktree`, `ipc`). Prefixing them keeps them apart
+ * from the targets written against the new API (`webview.console`,
+ * `backend.call`) while staying greppable: `target=app.` answers "everything
+ * the window said through the old writer".
+ *
+ * A scope that already reads as a path is left alone, so a call site that has
+ * been rewritten does not get prefixed twice.
  */
-class Logger {
-  private send(level: LogLevel, scope: string, message: string, data?: unknown) {
-    const tag = `[${scope}]`;
-    if (level === "error") console.error(tag, message, data ?? "");
-    else if (level === "warn") console.warn(tag, message, data ?? "");
-    else if (level === "debug") console.debug(tag, message, data ?? "");
-    else console.log(tag, message, data ?? "");
-
-    // The local transport is a `TauriBackend` in every build, so on a PWA there
-    // is no IPC behind it and the console line above is the whole log. Gated
-    // rather than left to the catch: an invoke that throws on every line is a
-    // rejected promise per log call, forever, for a file that cannot exist.
-    if (!hasTauri()) return;
-    void localBackend()
-      .log.event(level, scope, message, data == null ? null : serializeDetails(data))
-      .catch(() => {});
-  }
-
-  debug(scope: string, message: string, data?: unknown) {
-    if (!DEBUG_ENABLED) return;
-    this.send("debug", scope, message, data);
-  }
-  info(scope: string, message: string, data?: unknown) {
-    this.send("info", scope, message, data);
-  }
-  warn(scope: string, message: string, data?: unknown) {
-    this.send("warn", scope, message, data);
-  }
-  error(scope: string, message: string, data?: unknown) {
-    this.send("error", scope, message, data);
-  }
-
-  read(scope: "current" | "previous" = "current"): Promise<LogEntry[]> {
-    return localBackend().log.read(scope);
-  }
-
-  clear(): Promise<void> {
-    return localBackend().log.clear();
-  }
-
-  filePath(): Promise<string> {
-    return localBackend().log.filePath();
-  }
+export function logTarget(scope: string): string {
+  const trimmed = scope.trim();
+  if (!trimmed) return "app";
+  return trimmed.includes(".") ? trimmed : `app.${trimmed}`;
 }
-
-export const logger = new Logger();
 
 /**
- * Sends what the window throws on its own to the same log as everything else.
+ * The old `data` argument as record fields.
  *
- * Anything an `await` never caught, a listener that threw, a rejected promise
- * nobody handled: none of it went anywhere. It reached the devtools console,
- * which a packaged desktop app does not open, and then it was gone. The symptom
- * a user reports is "a panel stopped updating"; the cause was one line in a
- * console that no longer exists.
- *
- * Idempotent, because hot reload calls it again and two handlers would write
- * every error twice.
+ * It was serialized to one JSON string and stored under a single column, which
+ * meant a thread id in it was invisible to a filter. Here an object keeps its
+ * keys, so `thread`, `turn` and `request` reach the top level of the record,
+ * and `threadId` is renamed on the way because that is what the call sites in
+ * this app spell it.
  */
-let capturing = false;
+export function logFields(data: unknown): LogFields | undefined {
+  if (data === undefined || data === null) return undefined;
+  if (data instanceof Error) {
+    const stack = shortStack(data.stack);
+    return {
+      kind: data.name,
+      error: data.message,
+      ...(stack ? { stack } : {}),
+    };
+  }
+  if (typeof data === "string") return data ? { details: data } : undefined;
+  if (typeof data !== "object") return { details: String(data) };
 
-export function captureWindowErrors() {
-  if (capturing || typeof window === "undefined") return;
-  capturing = true;
-
-  // A failure inside the logger itself would come back through here and loop.
-  // One record about the loop is worth having; the rest are not.
-  let reporting = false;
-  const report = (source: string, message: string, data: unknown) => {
-    if (reporting) return;
-    reporting = true;
-    try {
-      logger.error(source, message, data);
-    } finally {
-      reporting = false;
+  const fields: LogFields = {};
+  for (const [key, value] of Object.entries(data as Record<string, unknown>)) {
+    if (value === undefined) continue;
+    if (key === "threadId") {
+      if (typeof value === "string" && value) fields.thread = value;
+      continue;
     }
-  };
-
-  window.addEventListener("error", (event) => {
-    // `error` also fires for an <img> or a <script> that failed to load, and
-    // those carry no Error — the element is the target. Worth recording: a
-    // missing asset is exactly the kind of thing that renders as nothing.
-    if (event.error instanceof Error) {
-      report("window.error", event.error.message, event.error);
-      return;
-    }
-    const target = event.target as { tagName?: string; src?: string } | null;
-    if (target?.tagName) {
-      report("window.resource", `${target.tagName.toLowerCase()} failed to load`, target.src ?? "");
-      return;
-    }
-    report("window.error", event.message || "unknown error", {
-      filename: event.filename,
-      line: event.lineno,
-      column: event.colno,
-    });
-  }, true);
-
-  window.addEventListener("unhandledrejection", (event) => {
-    const reason = event.reason;
-    report(
-      "window.rejection",
-      reason instanceof Error ? reason.message : String(reason),
-      reason,
-    );
-  });
+    fields[key] = value;
+  }
+  return Object.keys(fields).length > 0 ? fields : undefined;
 }
+
+function send(level: LogLevel, scope: string, message: string, data?: unknown): void {
+  // Through `printUnmirrored`, because `captureWebviewErrors` mirrors
+  // `console.error` and `console.warn` into the log: a plain `console.warn`
+  // here would file this call site twice, once with its target and once under
+  // `webview.console` with the sentence flattened.
+  printUnmirrored(level, `[${scope}]`, message, data ?? "");
+  log[level](logTarget(scope), message, logFields(data));
+}
+
+/** The four levels, with the old signature. */
+export const logger = {
+  debug(scope: string, message: string, data?: unknown) {
+    if (!DEBUG_ENABLED) return;
+    send("debug", scope, message, data);
+  },
+  info(scope: string, message: string, data?: unknown) {
+    send("info", scope, message, data);
+  },
+  warn(scope: string, message: string, data?: unknown) {
+    send("warn", scope, message, data);
+  },
+  error(scope: string, message: string, data?: unknown) {
+    send("error", scope, message, data);
+  },
+};

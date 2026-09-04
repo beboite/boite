@@ -9,14 +9,14 @@
 //!
 //! Bound to loopback. That narrowness is the whole security argument: the
 //! dev-only `mcp-bridge` could already do this through `invoke_tauri`, which is
-//! exactly why it cannot ship — a door that does everything cannot be defended.
+//! exactly why it cannot ship: a door that does everything cannot be defended.
 //!
 //! Who may ask for what is `boite_agent_api::auth`, and it is the same on both
 //! hosts. An agent Boite launched signs with a key minted for its thread; an
 //! agent registered from a credentials file presents a token derived for one
-//! project and cannot reach another. The desktop used to accept a third thing —
-//! a working directory, with the project resolved to whichever one contained it
-//! — and that is gone.
+//! project and cannot reach another. The desktop used to accept a third thing,
+//! a working directory, with the project resolved to whichever one contained it,
+//! and that is gone.
 
 use std::sync::Arc;
 
@@ -32,9 +32,28 @@ use boite_core::store::Store;
 /// Moving a thread, creating a project and opening a second terminal all mean
 /// killing or spawning a PTY, opening or releasing a worktree, and writing rows
 /// the front end owns. None of that belongs behind an HTTP handler holding a
-/// second connection to the database — so the endpoint checks what it can see,
+/// second connection to the database, so the endpoint checks what it can see,
 /// emits, and lets the app do the work.
 const AGENT_REQUEST: &str = "boite://agent-request";
+
+/// The one name this host gives "the open approvals changed".
+///
+/// The webview listens for it in `features/approvals/store.svelte.ts`. Spelled
+/// out at a call site rather than read from here, a rename lands on one side
+/// and the dock stops refreshing with nothing failing.
+pub const APPROVALS_CHANGED: &str = "boite://approvals-changed";
+
+/// Tells the window to re-read the open approvals.
+///
+/// Two paths write that table and both come through here: the agent endpoint,
+/// when a tool call asks the user something, and the pilot projection, which
+/// opens an `approvals` row of kind `pilot` for every request a chat thread
+/// raises and closes it when the answer comes back. The second one had no
+/// emitter at all, so a chat thread's question reached the dock only when the
+/// webview happened to reload for some other reason.
+pub fn announce_approvals_changed(app: &tauri::AppHandle) {
+    let _ = app.emit(APPROVALS_CHANGED, ());
+}
 
 /// The answers the window owes, by request id.
 ///
@@ -137,7 +156,12 @@ impl Workspace for DesktopWorkspace {
         let _ = match change {
             Change::Todos => self.app.emit("boite://todos-changed", ()),
             Change::Worktrees => self.app.emit("boite://worktrees-changed", ()),
-            Change::Approvals => self.app.emit("boite://approvals-changed", ()),
+            // Through the shared emitter, which the pilot sink also calls: one
+            // function names this event on this host, not two.
+            Change::Approvals => {
+                announce_approvals_changed(&self.app);
+                Ok(())
+            }
             Change::Orchestrator => self.app.emit("boite://orchestrator-changed", ()),
             // Carries the ids: the window that owns the target PTY flushes,
             // every other one ignores it.
@@ -169,6 +193,19 @@ impl Workspace for DesktopWorkspace {
             .app_config_dir()
             .ok()
             .map(|dir| dir.join("transcripts"))
+    }
+
+    /// What a chat thread is doing, from the only thing that knows.
+    ///
+    /// `peek` and never `get`: an app that has never opened a chat thread has
+    /// no runtime and nothing to say, and building one here to answer a status
+    /// question would open the database from a route that only wanted to read.
+    fn pilot_status(&self, thread_id: &str) -> Option<String> {
+        self.app
+            .try_state::<crate::commands::pilot::PilotRuntime>()?
+            .peek()?
+            .status(thread_id)
+            .map(|status| boite_core::pilot::status_word(status).to_string())
     }
 
     fn live_ptys(&self) -> Vec<boite_core::snapshot::LivePty> {
@@ -343,7 +380,7 @@ fn write_project_credentials(app: &tauri::AppHandle, store: &Store, api: &AgentA
 ///
 /// Public because the loop above only covers what existed at startup. A project
 /// added since has no file, and the panel offering to wire an agent for it is
-/// exactly when that becomes visible — so the command behind that panel writes
+/// exactly when that becomes visible, so the command behind that panel writes
 /// it then. Late or early is the same act: the file names a port that lives and
 /// dies with this process.
 ///
@@ -406,7 +443,7 @@ pub fn start(app: &tauri::AppHandle) {
 
     // Bound here, not inside the task: the address has to be known before the
     // first thread can spawn. Registering it from the task left a window where
-    // pty_open found no state and launched an agent with no credentials — the
+    // pty_open found no state and launched an agent with no credentials: the
     // shim then exits, and the agent reports only that its MCP server closed the
     // connection. Small window, but it is exactly the moment someone starts a
     // terminal: right after the app opens.
@@ -476,4 +513,22 @@ pub fn start(app: &tauri::AppHandle) {
             crate::logging::warn_to_log(&served, "agent-api", &format!("serve ended: {e}"));
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::APPROVALS_CHANGED;
+
+    /// The name is half of an event: the other half is a webview listening for
+    /// it, and nothing else in this crate can check that the two agree.
+    ///
+    /// What a real emit does needs an `AppHandle`, which needs a running app,
+    /// which is why the behaviour is asserted on the server's sink instead
+    /// (`boite-server/src/pilot.rs`) and on the projection both hosts read
+    /// (`boite_core::pilot`). What is left here is the string, pinned against
+    /// the listener in `src/lib/features/approvals/store.svelte.ts`.
+    #[test]
+    fn the_approvals_event_keeps_the_name_the_window_listens_for() {
+        assert_eq!(APPROVALS_CHANGED, "boite://approvals-changed");
+    }
 }

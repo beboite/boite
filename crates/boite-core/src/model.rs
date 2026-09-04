@@ -21,7 +21,7 @@ pub struct Todo {
     #[serde(default)]
     pub note: Option<String>,
     /// The commit an agent reported with its claim, stored as given. The client
-    /// resolves it against the repository — which lives here — before showing
+    /// resolves it against the repository, which lives here, before showing
     /// it, so a sha nothing backs reads as unknown rather than as done.
     #[serde(default)]
     pub commit_sha: Option<String>,
@@ -113,7 +113,7 @@ pub struct Thread {
     pub delegation_status: Option<String>,
     /// `"orchestrator"` on a thread Boite spawned as one, `None` on every
     /// worker. Stamped by Boite at creation; `thread.update` cannot reach it
-    /// and `thread.create` ignores what a caller claims — it is what selects
+    /// and `thread.create` ignores what a caller claims: it is what selects
     /// the orchestrator tool tier, so it must not be claimable.
     #[serde(default)]
     pub role: Option<String>,
@@ -126,7 +126,38 @@ pub struct Thread {
     /// write carries it.
     #[serde(default = "default_accept_dispatch")]
     pub accept_dispatch: bool,
+    /// Which runtime drives this thread: `"terminal"` (a PTY boite watches) or
+    /// `"pilot"` (an agent process it talks to over the agent's own protocol).
+    ///
+    /// Defaulted rather than optional: every row that existed before the pilot
+    /// is a terminal, and a client that says nothing is asking for one too.
+    #[serde(default = "default_runtime")]
+    pub runtime: String,
+    /// The pilot driver id (`"claude"`, later `"codex"`, `"acp:cursor"`).
+    /// Absent on a terminal row, which is why all four are optional and skipped.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pilot_driver: Option<String>,
+    /// `boite_pilot::Instance` as JSON: a native config directory, or a
+    /// fastpick route. Kept as a string here so `boite-core`'s row model does
+    /// not have to move whenever the crate grows an instance kind.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pilot_instance: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pilot_model: Option<String>,
+    /// `boite_pilot::Options` as JSON: effort and execution mode.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pilot_options: Option<String>,
 }
+
+/// What a row with nothing to say about its runtime is.
+pub fn default_runtime() -> String {
+    RUNTIME_TERMINAL.to_string()
+}
+
+/// A thread boite watches from the outside, through a PTY.
+pub const RUNTIME_TERMINAL: &str = "terminal";
+/// A thread boite talks to over the agent's own machine protocol.
+pub const RUNTIME_PILOT: &str = "pilot";
 
 fn default_status() -> String {
     "idle".to_string()

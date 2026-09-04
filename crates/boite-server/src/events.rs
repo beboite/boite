@@ -1,4 +1,17 @@
+use tokio::sync::broadcast;
+
 use crate::protocol::Event;
+
+/// Tells every connected device that the open approvals changed.
+///
+/// The server's one emitter of it. Two paths write that table: the agent API,
+/// when a tool call asks the user something, and the pilot projection, which
+/// opens an `approvals` row of kind `pilot` for every request a chat thread
+/// raises and closes it when the answer comes back. Written out at both call
+/// sites they drift, and the half nobody watches is the one that stops firing.
+pub fn announce_approvals_changed(events: &broadcast::Sender<AppEvent>) {
+    let _ = events.send(AppEvent::ApprovalsChanged);
+}
 
 // Server-side events fanned out to every connected client and consumed by the
 // persistence task. Structured (not pre-serialized JSON) so the persistence
@@ -21,7 +34,7 @@ pub enum AppEvent {
     },
     ProjectChanged,
     SettingsChanged,
-    /// Someone wrote the todo table — a connected client, or an agent through
+    /// Someone wrote the todo table: a connected client, or an agent through
     /// the MCP endpoint. Clients reload rather than receive the row, since the
     /// writer may not be a client at all.
     TodosChanged,
@@ -38,7 +51,7 @@ pub enum AppEvent {
     /// and the client does the work.
     ///
     /// Fanned out to every connected device, because the server has no way to
-    /// know which of them is looking — but carried out by exactly one: each
+    /// know which of them is looking, but carried out by exactly one: each
     /// request carries an id, and a client claims it through
     /// `agent.claimRequest` before acting. Two devices running the same move
     /// would kill one PTY twice and open two worktrees for one thread.
@@ -52,7 +65,7 @@ pub enum AppEvent {
     MomentAppended {
         seq: i64,
     },
-    /// The orchestrator conversation moved — a reply through `/v1/say`, or a
+    /// The orchestrator conversation moved: a reply through `/v1/say`, or a
     /// role stamped by `orchestrator.start`. Chats re-read by cursor.
     OrchestratorChanged,
     /// A line was queued for a thread's prompt. The device that owns the
@@ -64,6 +77,26 @@ pub enum AppEvent {
     /// An orchestrator put a finished worker away. Thread lists re-read.
     ThreadDismissed {
         thread_id: String,
+    },
+    /// Records this process just wrote, for the devices that asked.
+    ///
+    /// Coalesced upstream, in batches of at most fifty or every 250 ms: one
+    /// event per record would put a broadcast on the log's own write path, and
+    /// a busy second writes hundreds. Fanned out like everything else, and
+    /// filtered per connection: a device that never called `logs.subscribe`
+    /// pays nothing for the ones that did.
+    LogRecords {
+        records: std::sync::Arc<Vec<serde_json::Value>>,
+    },
+    /// One canonical pilot event, for the devices watching that thread.
+    ///
+    /// Beside `thread.updated` and filtered the way `LogRecords` is: a turn
+    /// emits hundreds of these and a device that never called
+    /// `pilot.subscribe` for that thread pays nothing for the ones that did.
+    /// Text deltas are already coalesced when they get here.
+    PilotEvent {
+        thread_id: String,
+        event: std::sync::Arc<serde_json::Value>,
     },
     /// One device is out, as of now.
     ///
@@ -128,6 +161,14 @@ impl AppEvent {
             AppEvent::ThreadDismissed { thread_id } => Event::new(
                 "thread.dismissed",
                 serde_json::json!({ "threadId": thread_id }),
+            ),
+            AppEvent::LogRecords { records } => Event::new(
+                "log.record",
+                serde_json::json!({ "records": records.as_ref() }),
+            ),
+            AppEvent::PilotEvent { thread_id, event } => Event::new(
+                "pilot.event",
+                serde_json::json!({ "threadId": thread_id, "event": event.as_ref() }),
             ),
             // Named on the wire so every *other* device can refresh its list.
             // The one being revoked never reads it: its socket is closed by the

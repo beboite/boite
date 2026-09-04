@@ -1,3 +1,4 @@
+import { threadIdOf } from "./types";
 import type { LayoutNode, PaneContent, SplitDir } from "./types";
 
 /**
@@ -32,14 +33,14 @@ export function leafNodesOf(
  * Thread ids under this node.
  *
  * Distinct from `leavesOf` now that a leaf need not be a thread: the callers
- * that ask "which terminals are on screen" — the status engine's visibility
- * sweep, the page's activation bookkeeping, Ctrl+Tab — mean this one, and
+ * that ask "which terminals are on screen", the status engine's visibility
+ * sweep, the page's activation bookkeeping, Ctrl+Tab, mean this one, and
  * handing them the pane id of a git panel has them looking up a thread that
  * does not exist.
  */
 export function threadLeavesOf(node: LayoutNode): string[] {
   return leafNodesOf(node)
-    .map((l) => (l.content.kind === "thread" ? l.content.threadId : null))
+    .map((l) => threadIdOf(l.content))
     .filter((id): id is string => id !== null);
 }
 

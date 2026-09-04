@@ -2,8 +2,11 @@
 
 The rules that are easy to break without noticing, and the file that owns each
 one. Stack and build commands: [README.md](README.md). Isolated dev window and
-MCP bridge: [docs/development.md](docs/development.md). Tags and signing:
-[docs/releasing.md](docs/releasing.md).
+MCP bridge, and the end-to-end scenarios in `e2e/`:
+[docs/development.md](docs/development.md). Tags and signing:
+[docs/releasing.md](docs/releasing.md). Reading what any host logged, and the
+`logs` tool that answers "what happened to thread X":
+[docs/logging.md](docs/logging.md).
 
 Everything here is a good default rather than a law, and the person asking
 outranks it. The four rules below are the exception: break one and something
@@ -187,6 +190,21 @@ different questions.
   opencode's incomplete parent message all look like a terminal that has printed
   nothing for ten minutes, which is what used to get the PTY reclaimed.
 
+## A chat thread is a second runtime, not a second app
+
+`pilot` in code (the crate `boite-pilot`, the bus domain `pilot.*`, the column
+`threads.runtime = 'pilot'`), "Chat" in the interface. Same row, same worktree
+and same sidebar as a terminal thread, with a chat pane where the terminal pane
+would be. The contract is [docs/pilot.md](docs/pilot.md); the isolated dev
+window, its MCP bridge and `e2e/chat.e2e.ts` are in
+[docs/development.md](docs/development.md).
+
+**A pilot row is never fed by the screen readers or the TTL clock.** It has one
+source, the `status.changed` its driver sent, and the host writes it: left in
+`statusEngine.ts`'s sweep it would be demoted to `idle` on every pass, a chat
+thread having no PTY by construction. Auto-sleep is the one thing it keeps, and
+every pilot event is a `pilot.*` message carrying the `thread`.
+
 ## A PTY is stopped politely or instantly, never both
 
 `PtyManager::kill` reads its `wait` flag as which of the two the caller needs.
@@ -361,14 +379,25 @@ orchestrator's scope. Arming is device-side (the user's own window writes the
 stamp); which projects carry one is workspace-side configuration
 (`orchestratorEnabledFor`). Undoing what one caused is Local-only too
 (`orchestrator.undo`): taking an action back is the user's, and nothing
-committed is ever destroyed — a spawn is put away, a dismissal brought back,
+committed is ever destroyed: a spawn is put away, a dismissal brought back,
 both stamps on rows.
 
 A dispatch is a line, not a byte: `thread.dispatch` writes a row the target's
 own device drains and types at its prompt (`dispatch.drain`), never a write to
-the PTY from the bus — `crate::reply` forbids that on purpose, and the queue
+the PTY from the bus: `crate::reply` forbids that on purpose, and the queue
 does not go around it. The line never lands while the worker is waiting on the
 user, because a question asked to the user is the user's.
+
+**A chat thread has no prompt to type at, so both change shape and neither
+changes rule.** With the pilot experiment on and the agent carrying a driver,
+the orchestrator is a `runtime = pilot` row, and `Conduct::prepare` turns
+`orchestrator.post` and a dispatch into a chat worker into a prepared
+`pilot.turn.start`, after the same static guards, so the same names still
+refuse. `orchestrator.messages` then reads the two conversation kinds of
+`pilot_items` and `orchestrator.say` is refused by name, the answer being an
+item already. Everything above holds unchanged for a terminal orchestrator,
+which is what an agent with no driver and a boite with the experiment off both
+get.
 
 `home` is not a pane an agent can open: the orchestrator chat lives there, and
 an agent that could put its own conversation on screen would be an agent
@@ -388,7 +417,7 @@ and none of which the compiler will remind you about.
 - **A file is parsed only if it declares a field rule, and it is never written
   back.** `serde_json` here has no `preserve_order`, so a parse and reserialise
   alphabetises every object, and `~/.copilot/config.json` is JSONC. Redaction
-  substitutes a value's own text — in its *escaped* form, because the bytes in
+  substitutes a value's own text, in its *escaped* form, because the bytes in
   the file are not the parsed value. `commands/agents.rs` already states this
   refusal for the same class of file; this extends it rather than departing.
 - **Create atomically, update in place.** `~/.agents/AGENTS.md` is one inode with
@@ -402,7 +431,7 @@ and none of which the compiler will remind you about.
   `is_dir() == false`. `remove_dir_all` appears nowhere in the module.
 - **A divergence is the frontend's to merge.** Rust reports three sides and
   applies whatever bytes come back. There is no pick-a-side path and no automatic
-  overwrite, the first sync on a machine with existing configuration included —
+  overwrite, the first sync on a machine with existing configuration included,
   which falls out of the base ref being absent rather than from a special case.
 
 Two more that are not in `sync` and belong to it. Nothing in `boite-mcp` names a
@@ -495,3 +524,8 @@ bun run budget
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 ```
+
+`bun run e2e` is optional and worth it when the change touched the window or the
+chat runtime: it drives the isolated dev window for real, so it needs a display
+and a couple of minutes. [docs/development.md](docs/development.md) has how to
+write one.

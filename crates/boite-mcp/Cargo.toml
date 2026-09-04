@@ -15,3 +15,16 @@ path = "src/main.rs"
 boite-identity = { path = "../boite-identity" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# The log. This shim is one of the four hosts writing into a boite's log
+# directory, and the format, the redaction and the rotation are decided in one
+# place rather than reimplemented for a sidecar. It costs this binary the rest
+# of `boite-core`, which is the price of not having a fourth log format.
+boite-core = { path = "../boite-core" }
+tracing = "0.1"
+# `--dev` only, and all three already in the tree behind `boite-core`, so the
+# sidecar links nothing new: `dirs` for the dev instance's own directories,
+# `base64` for the screenshot the bridge sends as a data URL, and `rusqlite`
+# for the read-only SQL on its database.
+dirs = "6"
+base64 = "0.23"
+rusqlite = { version = "0.32", features = ["bundled"] }

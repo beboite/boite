@@ -6,7 +6,7 @@
 //! Tauri command that remembered to ask.
 //!
 //! `Grant::Local` throughout: this door is the user's own window. An agent never
-//! reaches it — it goes through the agent endpoint, which carries its own grant
+//! reaches it: it goes through the agent endpoint, which carries its own grant
 //! and its own capability check.
 
 use std::path::PathBuf;
@@ -37,6 +37,8 @@ pub(super) struct DesktopHost<'a> {
     store: Option<Arc<Store>>,
     pulse: Option<Arc<boite_core::pulse::Waiters>>,
     telemetry: Option<Arc<TelemetryRuntime>>,
+    pilot: Option<Arc<boite_pilot::Runtime>>,
+    mcp: Option<boite_core::mcp_launch::McpPaths>,
 }
 
 impl<'a> DesktopHost<'a> {
@@ -49,7 +51,26 @@ impl<'a> DesktopHost<'a> {
             store: None,
             pulse: None,
             telemetry: None,
+            pilot: None,
+            mcp: None,
         }
+    }
+
+    /// This app's pilot runtime, attached by the pilot codec and by the conduct
+    /// one, which is where a post or a dispatch becomes a turn when the thread
+    /// on the other end is a chat one. Every other command answers `None` and
+    /// the domain refuses by name, which is what keeps a chat call off a host
+    /// that has no children to drive.
+    pub(super) fn with_pilot(mut self, pilot: Arc<boite_pilot::Runtime>) -> Self {
+        self.pilot = Some(pilot);
+        self
+    }
+
+    /// Where this app wrote the sidecar and its generated config, so a pilot
+    /// thread is launched with the same boite-mcp a terminal thread gets.
+    pub(super) fn with_mcp(mut self, paths: boite_core::mcp_launch::McpPaths) -> Self {
+        self.mcp = Some(paths);
+        self
     }
 
     /// The app's wait registry, so a conduct write here wakes the agent
@@ -123,6 +144,26 @@ impl boite_core::command::Host for DesktopHost<'_> {
     fn telemetry(&self) -> Option<Arc<TelemetryRuntime>> {
         self.telemetry.clone()
     }
+
+    fn pilot(&self) -> Option<Arc<boite_pilot::Runtime>> {
+        self.pilot.clone()
+    }
+
+    /// boite-mcp first, with the environment this app already stamps into a
+    /// PTY so the sidecar knows which thread is calling it.
+    fn pilot_mcp(&self, thread_id: &str) -> Vec<boite_pilot::McpServer> {
+        let Some(paths) = &self.mcp else {
+            return Vec::new();
+        };
+        vec![boite_core::command::pilot::boite_mcp_server(
+            paths.sidecar.to_string_lossy().into_owned(),
+            Vec::new(),
+            vec![(
+                boite_identity::env::THREAD.to_string(),
+                thread_id.to_string(),
+            )],
+        )]
+    }
 }
 
 /// Puts a command through the bus and hands back its answer.
@@ -130,16 +171,40 @@ impl boite_core::command::Host for DesktopHost<'_> {
 /// Every git, worktree, filesystem and session capability on this side is one of
 /// these: the trust boundary, the work and the refusals all live in
 /// `boite_core::command`, and what is left here is naming the command and
-/// handing over the arguments the webview sent. The desktop reads an answer bare
-/// — the envelopes in `command::Wire` are the WebSocket protocol's, and `invoke`
+/// handing over the arguments the webview sent. The desktop reads an answer bare:
+/// the envelopes in `command::Wire` are the WebSocket protocol's, and `invoke`
 /// already carries the shape the frontend types.
 pub(super) async fn through(host: DesktopHost<'_>, command: Command) -> Result<Value, String> {
-    // `Local`: this door is the user's own window. An agent never reaches it —
+    let method = command.name();
+    // `Local`: this door is the user's own window. An agent never reaches it:
     // it goes through the agent endpoint, which carries its own grant.
-    let ready = command.prepare(&host, Grant::Local)?;
-    tauri::async_runtime::spawn_blocking(move || ready.run())
-        .await
-        .map_err(|e| format!("command task failed: {e}"))?
+    let ready = match command.prepare(&host, Grant::Local) {
+        Ok(ready) => ready,
+        Err(refusal) => {
+            // Once, at the codec, so a refusal is on the same clock as whatever
+            // the window did next. `src/lib/backend/tauri/ipc.ts` already writes
+            // its own `warn` on this side of the boundary; this is the half
+            // that says which command and why, in Rust's own words.
+            tracing::warn!(method, reason = %refusal, "bus.refused");
+            return Err(refusal);
+        }
+    };
+    // Two verbs of the conduct domain prepare as a pilot call when the thread
+    // on the other end is a chat one (`Conduct::as_pilot_turn`), and that work
+    // awaits a child process rather than blocking a pool thread. The same
+    // executor the pilot door uses, so one conversion has one implementation.
+    let answer = match ready {
+        boite_core::command::Ready::Pilot(ready) => {
+            boite_core::pilot_host::execute(*ready).await
+        }
+        ready => tauri::async_runtime::spawn_blocking(move || ready.run())
+            .await
+            .map_err(|e| format!("command task failed: {e}"))?,
+    };
+    if let Err(failure) = &answer {
+        tracing::warn!(method, reason = %failure, "bus.failed");
+    }
+    answer
 }
 
 /// The common form: a command that needs nothing but the roots.

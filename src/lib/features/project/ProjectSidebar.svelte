@@ -5,7 +5,7 @@
   import { DUR, easeOutQuint } from "$lib/theme/motion";
   import { app } from "$lib/app/store.svelte";
   import { visibleStatus } from "$lib/domain/thread-status";
-  import { workspace } from "$lib/backend";
+  import { backend, workspace } from "$lib/backend";
   import {
     settings,
     SIDEBAR_MAX_WIDTH,
@@ -31,6 +31,7 @@
   } from "$lib/app/dispatches";
   import { orchestrator } from "$lib/features/orchestrator/store.svelte";
   import { notifications } from "$lib/features/notifications/store.svelte";
+  import { log } from "$lib/shared/log";
   import { refreshProjectIcon } from "$lib/features/project/api";
   import { openProjectDashboard } from "$lib/features/project/dashboard";
   import { isScratch } from "$lib/domain/project";
@@ -203,7 +204,7 @@
     siblings: RowSnapshot[];
     slotIndex: number | null;
     // Another project the card is currently over. Set only while it is over one
-    // that is not its own — hovering the source project is a reorder, and the
+    // that is not its own: hovering the source project is a reorder, and the
     // two are mutually exclusive with `slotIndex`.
     dropProjectId: string | null;
   };
@@ -276,7 +277,7 @@
   }
 
   // Clicking a project opens its page. It used to drop you on the terminal
-  // view, which showed whatever thread happened to be active — or a list of
+  // view, which showed whatever thread happened to be active, or a list of
   // keyboard shortcuts when none was. The project's own page is the answer to
   // the click that asked for it; a thread is one click further, from there or
   // from this list.
@@ -516,7 +517,7 @@
    * Letting go after a drag still fires a click, and where it lands is not the
    * row it started on: the browser targets the nearest common ancestor of the
    * press and the release, so carrying a project card past its neighbours ends
-   * on the scrolling list itself — whose click handler means "you clicked the
+   * on the scrolling list itself, whose click handler means "you clicked the
    * empty space", clears the selection and takes the window off the project the
    * user was looking at. `suppressClickFor` could not catch that one, because it
    * is only consulted by the row handlers the click never reaches.
@@ -571,7 +572,7 @@
 
   // While a computed order is picked, the rendered order IS that order, so
   // persisting it through setProjectOrder/setThreadOrder would overwrite the
-  // hand-made order with a computed one — silently, since the visible list is
+  // hand-made order with a computed one, silently, since the visible list is
   // re-sorted right back. The choice is device-scoped and the orders are
   // workspace-scoped, so one device would clobber every other's arrangement.
   function smartSortArmed(): boolean {
@@ -799,6 +800,30 @@
     open();
   }
 
+  /**
+   * The polite stop of a chat thread's process.
+   *
+   * The native session stays resumable, which is the whole difference from
+   * closing the thread: "Open" below brings it back on the same conversation.
+   */
+  async function stopPilotSession(threadId: string) {
+    try {
+      await backend().pilot.stop(threadId);
+    } catch (err) {
+      log.warn("sidebar", "pilot.stop.failed", { thread: threadId, reason: String(err) });
+      notifications.error(t("pilot.openFailed"));
+    }
+  }
+
+  async function openPilotSession(threadId: string) {
+    try {
+      await backend().pilot.open(threadId);
+    } catch (err) {
+      log.warn("sidebar", "pilot.open.failed", { thread: threadId, reason: String(err) });
+      notifications.error(t("pilot.openFailed"));
+    }
+  }
+
   function openThreadMenuAt(thread: Thread, x: number, y: number) {
     const group = paneStore.groupOf(thread.id);
     const inMultiPane = !!group && countLeaves(group.root) > 1;
@@ -869,12 +894,27 @@
       });
     }
     items.push({ separator: true });
-    items.push({
-      label: t("sidebar.reloadThread"),
-      action: () => {
-        void reloadThread(thread.id);
-      },
-    });
+    // A pilot row has no PTY, so the terminal-only half of this menu describes
+    // nothing: a reload is a kill and a respawn of a process that is not there.
+    // Its two verbs go in the same slot instead, which is the way in and the
+    // way out the same way `settle` and `unsettle` are.
+    if (thread.runtime === "pilot") {
+      items.push({
+        label: t("pilot.stopSession"),
+        action: () => void stopPilotSession(thread.id),
+      });
+      items.push({
+        label: t("pilot.open"),
+        action: () => void openPilotSession(thread.id),
+      });
+    } else {
+      items.push({
+        label: t("sidebar.reloadThread"),
+        action: () => {
+          void reloadThread(thread.id);
+        },
+      });
+    }
     items.push({ separator: true });
     items.push({
       label: t("sidebar.closeThread"),
@@ -1017,12 +1057,12 @@
    * The launcher, one project at a time.
    *
    * It used to be a 40px strip across the top of the main area offering every
-   * agent at all times, in the space the agent's own output wants — and it said
+   * agent at all times, in the space the agent's own output wants, and it said
    * nothing about where a launch would land, so the answer had to be a second
    * menu behind a right-click. Asking from the project's own row answers that
    * question by construction: this project, the one whose `+` you pressed.
    *
-   * A menu beside the button, on the app's own dropdown recipe — the same
+   * A menu beside the button, on the app's own dropdown recipe: the same
    * `surface-popover` box, scale transition and fixed placement the shell and
    * fastpick pickers use. Two earlier attempts sat it directly under the card,
    * card-width: however exactly it lined up it read as a second rectangle
@@ -1054,7 +1094,7 @@
    * to it without touching it. A sidebar dragged wide enough to leave no room
    * there flips the menu to the card's left instead, the way a submenu does.
    * Vertically it hangs from the button's own top line and rides up when the
-   * pane behind fastpick is taller than the room under it — those panes are
+   * pane behind fastpick is taller than the room under it: those panes are
    * several times the height of the list they replace, so the cap and the
    * shift are both needed.
    *
@@ -1221,7 +1261,7 @@
    * A drawer that has emptied stops being open.
    *
    * Without this the flag outlives the last thread in it, and the *next* thread
-   * put away in that project would land in a drawer that is already open —
+   * put away in that project would land in a drawer that is already open,
    * which is the gesture doing nothing visible, in the one project where the
    * user had looked inside once. Only projects the sidebar is currently drawing
    * are pruned, so a term that hides a project does not quietly close it.
@@ -1765,7 +1805,7 @@
                     <!-- Same line box the rename input uses. Left to the font,
                          this height is SF Pro on macOS and Segoe UI on Windows,
                          and the row would resize on edit wherever the two
-                         disagree — Inter is only a preference here, nothing
+                         disagree: Inter is only a preference here, nothing
                          ships it. -->
                     <!-- Painted over the row button, and inert to the cursor so a
                          click on the name is still a click on the row. Hidden
@@ -1969,7 +2009,7 @@
   <!-- The dropdown recipe, spelled the way ShellPicker and FastpickPicker spell
        it: `surface-popover`, fixed, scale-in from the corner it hangs off.
        `transition:scale` rather than a CSS keyframe because an animation that
-       never ticks — an unfocused window throttles them — leaves the box frozen
+       never ticks, an unfocused window throttles them, leaves the box frozen
        at 96% of its own size, which is its own kind of wrong. -->
   <div
     bind:this={launcherEl}
@@ -2067,8 +2107,8 @@
      statement, and it is why the dashed rail down the thread list could go. */
   /* An open launcher pins both buttons visible.
      Reaching the popover means leaving the card, and the card is what reveals
-     them — so the `+` you just pressed faded out from under your own pointer,
-     taking the `…` next to it along. Written here rather than as a conditional
+     them, so the `+` you just pressed faded out from under your own pointer,
+     taking the `...` next to it along. Written here rather than as a conditional
      utility because it has to beat `text-muted-2`, and two Tailwind
      classes setting the same property are resolved by stylesheet order, not by
      the order they appear in the attribute. */
@@ -2081,8 +2121,8 @@
   }
 
   /* The project card's own recipe, not `surface-popover`.
-     Every `--shadow-e*` step is two lines — a `0 0 0 1px` ring outside and a
-     top-only `inset 0 1px 0` highlight — so a bordered popover reads as light /
+     Every `--shadow-e*` step is two lines, a `0 0 0 1px` ring outside and a
+     top-only `inset 0 1px 0` highlight, so a bordered popover reads as light /
      dark / light along its top edge whatever the border is set to. The cards
      this menu belongs to draw one flat 1px line and no shadow at all, so it
      draws the same one, and keeps only the diffuse half of the elevation to say
@@ -2206,7 +2246,7 @@
      underneath already uses background to mean "selected", and two meanings on
      one property read as one.
      The colour used to be `var(--color-primary, #6366f1)`, and there is no
-     --color-primary in this palette — so the one time the app drew a drop
+     --color-primary in this palette, so the one time the app drew a drop
      target it drew it in an indigo that appears nowhere else. */
   .project-block.drop-target {
     outline: 2px dashed var(--color-foreground);
@@ -2214,7 +2254,7 @@
   }
 
   /* The thread that is open. A white line around the card and the bloom that
-     goes with it, where there used to be a filled background — under the glow
+     goes with it, where there used to be a filled background: under the glow
      design the card's area is already the state's, and "this thread is open"
      written on the background was the same property saying two things at once.
      A line is free of that: no state draws one in white.
@@ -2222,7 +2262,7 @@
      Its own layer for two reasons. The card's own box-shadow is animated by
      `mcp-touch`, which would blow the selection away for a second and a half;
      and ::before belongs to the state halo, which sets it per state. That
-     leaves ::after, which paints over the label rather than under it — fine for
+     leaves ::after, which paints over the label rather than under it: fine for
      a one-pixel perimeter, and it is also what keeps the white line above the
      tone line the two rules both draw at `inset 0 0 0 1px`.
 
@@ -2345,8 +2385,8 @@
      This is the one animation in the design that repaints, and it is the
      exception the rest of the file argues against on purpose: a hue cannot
      travel on the compositor. What keeps it affordable is how few rows can be
-     in this state at once — a row leaves it on the first click, on the next
-     turn, or when the idle timer parks it — against `working`, which is what
+     in this state at once, a row leaves it on the first click, on the next
+     turn, or when the idle timer parks it, against `working`, which is what
      the no-repaint rule was written for and can hold half a column. */
   .thread-card.glow.fresh[data-state="finished"]::before {
     animation: card-finish 2.4s ease-in-out infinite;
@@ -2393,7 +2433,7 @@
 
   /* Never run. Unlit, and the one state that is: the card is its label, its logo
      and the hover, with nothing painted over them. Half of `sleeping` would have
-     been the pattern the other states follow, and it is wrong here — the rule
+     been the pattern the other states follow, and it is wrong here: the rule
      "no row is unpainted" was written when every row after a restart landed in
      this state, which is exactly what stopped being true. A quiet row among lit
      ones reads as a row at rest; a column of them reads as the list this app

@@ -13,6 +13,7 @@ import {
   MIN_RATIO,
   SPLITTER_PX,
   sameContent,
+  threadIdOf,
   threadPane,
 } from "./types";
 import {
@@ -26,6 +27,7 @@ import {
   findSplit,
 } from "./tree";
 import { loadSavedGroups, panesKey } from "./layout";
+import { log } from "$lib/shared/log";
 import { workspace } from "$lib/backend";
 import { sameRect, unmeasuredRect, type PaneRect, type Viewport } from "./rect";
 import { uuid } from "$lib/shared/utils/uuid";
@@ -34,6 +36,17 @@ export type { PaneRect } from "./rect";
 
 function uid(): string {
   return uuid();
+}
+
+/**
+ * The pane a thread gets, terminal or chat, read off the row.
+ *
+ * One function so the answer cannot differ between the five places a pane is
+ * opened for a thread. A row the store has never heard of falls through to a
+ * terminal, which is what an id from a stale saved layout is.
+ */
+function paneForThread(threadId: string): LayoutNode {
+  return threadPane(threadId, app.threadById(threadId)?.runtime ?? null);
 }
 
 // Re-exported: the tree helpers are the store's public vocabulary as far as the
@@ -168,9 +181,25 @@ class PaneStore {
         this.groups.push({
           id: uid(),
           projectId: t.projectId,
-          root: threadPane(t.id),
+          root: paneForThread(t.id),
           focusedPaneId: t.id,
         });
+      }
+    }
+
+    // A saved layout is bytes written before the row it names was read back,
+    // and a layout persisted by a build that had no chat pane says `thread` for
+    // every one of them. Repaired here rather than at the render site: a pilot
+    // row drawn as a terminal is a pane with no PTY behind it, which is a blank
+    // rectangle and nothing else.
+    for (const g of this.groups) {
+      for (const leaf of leafNodesOf(g.root)) {
+        const threadId = threadIdOf(leaf.content);
+        if (!threadId) continue;
+        const wanted = valid.get(threadId)?.runtime === "pilot" ? "chat" : "thread";
+        if (leaf.content.kind !== wanted) {
+          leaf.content = { kind: wanted, threadId } as PaneContent;
+        }
       }
     }
 
@@ -190,7 +219,7 @@ class PaneStore {
       const orphans = threadLeavesOf(g.root).filter((id) => !valid.has(id));
       // Nothing died here. Worth saying out loud because the reaping below
       // keys on "no thread left", and a group that never had one is not a
-      // widow — it is the panels a user opened on a project with no terminal
+      // widow: it is the panels a user opened on a project with no terminal
       // running, which is most of a project's life.
       if (orphans.length === 0) continue;
       let root: LayoutNode | null = g.root;
@@ -234,7 +263,7 @@ class PaneStore {
    * The saved blob stays, and stays where it was: `panesKey` gives each
    * workspace its own, so the arrangement a machine had is still there when the
    * user comes back to it. Only the tree in memory is dropped. This used to
-   * delete the blob outright, which was the price of a single global key —
+   * delete the blob outright, which was the price of a single global key:
    * every machine lost its layout to stop them from mixing.
    *
    * `viewport` stays. It measures the window this app is drawn in, which is the
@@ -359,7 +388,7 @@ class PaneStore {
       // what it gets. On a narrow one the same call used to hand back two
       // unreadable strips, so the split turns on its side instead: the new pane
       // goes under its neighbour, where the width is the one thing it keeps.
-      // Neither fits, and the caller says the group is full — which it is, of
+      // Neither fits, and the caller says the group is full, which it is, of
       // this window.
       if (!room.row) {
         if (!room.column) return null;
@@ -387,7 +416,7 @@ class PaneStore {
    *
    * Panels used to hang off a rail that drew itself whatever was running, so
    * git, files and the todo list were reachable on a project nobody had opened
-   * a terminal in yet — which is how a project starts. Panes replaced the rail
+   * a terminal in yet, which is how a project starts. Panes replaced the rail
    * and inherited a rule the rail never had: every pane opens beside another
    * one. This is the seed that rule needs.
    *
@@ -429,6 +458,15 @@ class PaneStore {
 
   /** Close a pane. A thread pane goes back to being a group of its own. */
   closePane(paneId: string): boolean {
+    // Every way out goes through here: the titlebar toggle, the palette, the
+    // phone's strip, an agent closing what it opened. Logged at the door rather
+    // than at each of them, and at debug for the same reason the open is.
+    const closed = this.#closePane(paneId);
+    log.debug("ui.pane", closed ? "pane.closed" : "pane.closeRefused", { pane: paneId });
+    return closed;
+  }
+
+  #closePane(paneId: string): boolean {
     const g = this.groupOf(paneId);
     if (!g) return false;
     const content = this.contentOf(paneId);
@@ -491,7 +529,7 @@ class PaneStore {
     const next = injectSibling(
       targetGroup.root,
       targetPaneId,
-      threadPane(draggedThreadId),
+      paneForThread(draggedThreadId),
       dir,
       before,
       0.5,
@@ -527,7 +565,7 @@ class PaneStore {
       this.groups.push({
         id: uid(),
         projectId,
-        root: threadPane(threadId),
+        root: paneForThread(threadId),
         focusedPaneId: threadId,
       });
       this.saveSoon();
@@ -540,7 +578,7 @@ class PaneStore {
       dropped.push(leaf.paneId);
       root = root ? pruneLeaf(root, leaf.paneId) : null;
     }
-    g.root = root ?? threadPane(threadId);
+    g.root = root ?? paneForThread(threadId);
     g.projectId = projectId;
     g.focusedPaneId = threadId;
     for (const id of dropped) delete this.rects[id];
@@ -568,7 +606,7 @@ class PaneStore {
     this.groups.push({
       id: uid(),
       projectId: t.projectId,
-      root: threadPane(threadId),
+      root: paneForThread(threadId),
       focusedPaneId: threadId,
     });
     this.saveSoon();

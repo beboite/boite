@@ -57,6 +57,18 @@ argued in [docs/design-decisions.md](docs/design-decisions.md).
 A worktree per thread, Scratch, fastpick endpoints, remote workspaces and the
 phone layout each get their own section below.
 
+**Chat threads, an experiment.** A thread is normally a terminal, and Boite
+reads it the way you would: what is on the screen, a session file on disk, a
+dot that expires on a clock. A chat thread is the same row with the same
+worktree and the same sidebar entry, driven over the agent's own protocol
+instead: the status is what the agent said it was, a tool approval is a card in
+the dock or on your phone rather than a question buried in a TUI, and the model
+switches mid-conversation. Claude first, since it is the one whose wire is
+already public; the others follow the same trait. Turn it on in Settings,
+Experiments, "Chat threads", and the launcher grows a Chat button next to
+Terminal, greyed on a preset no driver covers yet. The design is
+[docs/pilot.md](docs/pilot.md).
+
 ## Supported agents
 
 Every agent ships as a shortcut with a brand icon. Boite runs whatever is on

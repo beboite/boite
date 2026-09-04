@@ -1,9 +1,9 @@
 //! The ten routes, once.
 //!
 //! Read this next to `crate::Workspace`: everything here is the same on both
-//! hosts by construction, and the three things that are not — where a request
+//! hosts by construction, and the three things that are not, where a request
 //! goes, who is told about a change, and what the host shows about an active
-//! agent — are trait calls.
+//! agent, are trait calls.
 //!
 //! Refusals an agent can act on come back `200` carrying an `error`, not a
 //! status code. An agent reads a sentence; a 409 with an empty body is a wall.
@@ -79,6 +79,7 @@ fn verbs() -> Router<Shared> {
         .route("/v1/transcript", get(transcript))
         .route("/v1/search", get(search))
         .route("/v1/timeline", get(timeline))
+        .route("/v1/logs", get(logs))
 }
 
 /// Every route an agent has. Bound by each host to its own listener: the two
@@ -270,8 +271,8 @@ fn reachable(
 /// the agent.
 ///
 /// The three calls that reach past the project an agent is in go through here.
-/// A credential with no terminal never gets this far — `permitted` refused it
-/// already — so what is left is the agent in a terminal the user opened, and the
+/// A credential with no terminal never gets this far, `permitted` refused it
+/// already, so what is left is the agent in a terminal the user opened, and the
 /// question is not whether it may ask but whether the user agrees.
 ///
 /// The agent does not wait for the answer. It is told the request is with the
@@ -498,7 +499,7 @@ async fn claim(
 /// Not scoped to the caller's project, and that is deliberate: the question this
 /// answers is "what is this workspace doing", and a thread in another project
 /// holding a dead PTY is exactly the kind of thing the caller needs to see. It
-/// carries no secret — no token, no environment, no file contents — so it is
+/// carries no secret, no token, no environment, no file contents, so it is
 /// meant to be pasted into an issue.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -508,8 +509,8 @@ struct PulseIn {
     project: Option<String>,
 }
 
-/// The orchestrator's wait. Anyone with a thread key may read the pulse — it
-/// is the same feed the timeline shows — but only the orchestrator tier is
+/// The orchestrator's wait. Anyone with a thread key may read the pulse, it
+/// is the same feed the timeline shows, but only the orchestrator tier is
 /// ever told the tool exists.
 async fn pulse(
     State(workspace): State<Shared>,
@@ -595,8 +596,8 @@ struct DispatchIn {
     mode: Option<String>,
 }
 
-/// One line queued for another thread's prompt. The static guards — role,
-/// mute, scope — are `boite_core::command::conduct::dispatch`'s; the live
+/// One line queued for another thread's prompt. The static guards, role,
+/// mute, scope, are `boite_core::command::conduct::dispatch`'s; the live
 /// ones belong to the device that flushes.
 async fn dispatch(
     State(workspace): State<Shared>,
@@ -716,8 +717,8 @@ struct TranscriptIn {
 ///
 /// Not scoped to the caller's own thread, and that is the point: an agent asked
 /// why another one stopped had nothing to read, because a PTY's output died
-/// with the process. It carries no credential — the key files are not in the
-/// workspace and a transcript is what was on somebody's screen — and it is the
+/// with the process. It carries no credential, the key files are not in the
+/// workspace and a transcript is what was on somebody's screen, and it is the
 /// single most useful thing an agent can be handed when something is wrong.
 ///
 /// Not scoped to the caller's own *project* either, for a terminal Boite
@@ -854,13 +855,63 @@ async fn timeline(
     Ok(Json(json!({ "moments": moments })))
 }
 
+#[derive(Deserialize)]
+struct LogsIn {
+    /// `tail` reads this host's memory, `query` reads every host's files.
+    action: Option<String>,
+    since: Option<u64>,
+    until: Option<u64>,
+    level: Option<String>,
+    host: Option<String>,
+    thread: Option<String>,
+    turn: Option<String>,
+    target: Option<String>,
+    text: Option<String>,
+    limit: Option<u32>,
+}
+
+/// What this boite logged, for an agent that has to work out what happened.
+///
+/// Deliberately not confined to a project: a log record names a thread and a
+/// host, never a project, and the question it answers, why did that terminal
+/// stop, is about a machine rather than a folder. What keeps it honest is the
+/// redaction, which happens on the way in: what is in the file is already safe
+/// to read, which is the only reason this route can exist at all.
+async fn logs(
+    State(workspace): State<Shared>,
+    axum::extract::Query(query): axum::extract::Query<LogsIn>,
+) -> Result<Json<Value>, StatusCode> {
+    let _ = &workspace;
+    let limit = query.limit.unwrap_or(100).clamp(1, 1_000) as usize;
+    let tailing = query.action.as_deref() == Some("tail");
+    let records = blocking(move || {
+        if tailing {
+            boite_core::log::tail(limit, query.level.as_deref(), query.host.as_deref())
+        } else {
+            boite_core::log::query(&boite_core::log::Query {
+                since: query.since,
+                until: query.until,
+                level: query.level,
+                host: query.host,
+                thread: query.thread,
+                turn: query.turn,
+                target: query.target,
+                text: query.text,
+                limit: Some(limit),
+            })
+        }
+    })
+    .await?;
+    Ok(Json(json!({ "records": records })))
+}
+
 // ------------------------------------------------------------ worktrees
 
 /// The worktree an agent is standing in, and what it could switch to.
 ///
 /// Three `git` processes, off the async runtime. This ran inline on the server
 /// and was the one place in that crate that did: with a few agents asking at
-/// once — and they ask on most turns — the threads carrying every client's own
+/// once, and they ask on most turns, the threads carrying every client's own
 /// commands end up inside `CreateProcess` instead.
 async fn worktree_status(
     State(workspace): State<Shared>,
@@ -1099,7 +1150,7 @@ struct MoveIn {
 /// kills the process that made it. A thread cannot change project while its PTY
 /// is alive, so the reply is written, the terminal goes down, and the agent comes
 /// back up in the new folder with its conversation resumed. What the endpoint
-/// does own is the refusal — an unknown or ambiguous project is settled here,
+/// does own is the refusal: an unknown or ambiguous project is settled here,
 /// while the agent is still running to read it.
 async fn thread_move(
     State(workspace): State<Shared>,
@@ -1258,6 +1309,47 @@ struct SpawnIn {
     agent: Option<String>,
     project: Option<String>,
     prompt: Option<String>,
+    /// `terminal` or `pilot`. Absent replays the caller's own, the way an
+    /// absent `agent` replays the caller's fastpick combo: an agent splitting
+    /// its work reaches for another of itself, and that includes how the
+    /// worker is driven.
+    runtime: Option<String>,
+}
+
+/// Which runtime a spawn opens on, or the sentence saying why it cannot.
+///
+/// The default is the caller's row rather than `terminal`, so an agent working
+/// in a chat thread gets a chat worker without naming one. A caller Boite did
+/// not launch has no row, and a terminal is the honest default there: it is
+/// what every client can draw.
+fn spawn_runtime(
+    workspace: &dyn Workspace,
+    caller_thread: &str,
+    asked: Option<&str>,
+) -> Result<String, String> {
+    let asked = asked.map(str::trim).filter(|value| !value.is_empty());
+    if let Some(asked) = asked {
+        return match asked {
+            boite_core::model::RUNTIME_TERMINAL | boite_core::model::RUNTIME_PILOT => {
+                Ok(asked.to_string())
+            }
+            other => Err(format!(
+                "BAD_RUNTIME: '{other}' is not a runtime. It is 'terminal' (a shell Boite \
+                 watches) or 'pilot' (a chat thread Boite drives over the agent's own \
+                 protocol)."
+            )),
+        };
+    }
+    if caller_thread.is_empty() {
+        return Ok(boite_core::model::RUNTIME_TERMINAL.to_string());
+    }
+    Ok(workspace
+        .store()
+        .load_thread(caller_thread)
+        .ok()
+        .flatten()
+        .map(|thread| thread.runtime)
+        .unwrap_or_else(boite_core::model::default_runtime))
 }
 
 /// Opens a second agent terminal.
@@ -1329,6 +1421,10 @@ async fn thread_spawn(
             )));
         }
     }
+    let runtime = match spawn_runtime(&*workspace, &asking_thread, body.runtime.as_deref()) {
+        Ok(runtime) => runtime,
+        Err(reason) => return Ok(refused(reason)),
+    };
     let request = json!({
         "kind": "thread.spawn",
         "projectId": project_id,
@@ -1340,6 +1436,10 @@ async fn thread_spawn(
         "delegationMode": "delegation",
         "agent": body.agent,
         "prompt": body.prompt,
+        // Which runtime drives the worker. The device mints the row, so this is
+        // what it reads: a `pilot` spawn is opened at once and the prompt is
+        // sent as its first turn, a `terminal` one is the argv it always was.
+        "runtime": runtime,
     });
     if elsewhere {
         return Ok(ask_the_user(
@@ -1482,6 +1582,14 @@ struct ThreadWaitIn {
 
 /// A sibling's status, optionally waited on until it is no longer live or
 /// its raw status is settled.
+///
+/// Two runtimes, two sources, and they are not interchangeable. A terminal
+/// thread is measured from the outside, so what this can say about one is
+/// whether a PTY is still there and what the row records; a pilot thread
+/// declares its own status over the wire, so the runtime is asked and the
+/// answer is exact. Reading the row for a pilot thread would answer off the
+/// `running` mark, which says only that the thread was on during this run of
+/// the app and never comes back down.
 async fn thread_wait(
     State(workspace): State<Shared>,
     Extension(caller): Extension<Caller>,
@@ -1504,21 +1612,33 @@ async fn thread_wait(
         if thread.project_id != caller.project_id {
             return Ok(refused("that thread is in another project"));
         }
-        // The row's own column, not the loaded thread's: `load_thread` answers
-        // with the display status, which maps a live mark to `stopped` and
-        // would make wait return while the PTY is still up. Same read as
-        // `thread_close`.
-        let status = workspace
-            .store()
-            .thread_status(&id)
-            .map(|(status, _)| status)
-            .unwrap_or_else(|| "idle".to_string());
-        let live = workspace
-            .live_ptys()
-            .iter()
-            .any(|p| p.thread_id == id);
+        let pilot = thread.runtime == boite_core::model::RUNTIME_PILOT;
+        let (status, live, done) = if pilot {
+            // The exact word, from the only thing that knows it. No session is
+            // a session that was stopped or never opened, which for a caller
+            // waiting on a worker is the same answer as a finished turn.
+            match workspace.pilot_status(&id) {
+                Some(word) => {
+                    let running = word == "busy" || word == "waiting";
+                    (word, true, !running)
+                }
+                None => ("idle".to_string(), false, true),
+            }
+        } else {
+            // The row's own column, not the loaded thread's: `load_thread`
+            // answers with the display status, which maps a live mark to
+            // `stopped` and would make wait return while the PTY is still up.
+            // Same read as `thread_close`.
+            let status = workspace
+                .store()
+                .thread_status(&id)
+                .map(|(status, _)| status)
+                .unwrap_or_else(|| "idle".to_string());
+            let live = workspace.live_ptys().iter().any(|p| p.thread_id == id);
+            let done = !live || boite_core::settle::can_settle(&status);
+            (status, live, done)
+        };
         let waited = started.elapsed().as_millis() as u64;
-        let done = !live || boite_core::settle::can_settle(&status);
         if done || waited >= timeout {
             return Ok(Json(json!({
                 "threadId": id,
@@ -1690,7 +1810,7 @@ async fn pane_open(
 /// The server has none, and a desktop whose webview has not described itself yet
 /// is the same answer. Said in full rather than as an empty list, because "no
 /// browser pane is open" and "I cannot see whether one is" send an agent to two
-/// different places — the same reason `transcripts_dir` answers `None` instead
+/// different places, the same reason `transcripts_dir` answers `None` instead
 /// of pretending.
 const NO_WINDOW_TO_LOOK_AT: &str = "this Boite has no window of its own to look at, so it cannot \
                                     say what is on the pane. The device drawing it can: navigate, \
@@ -1782,7 +1902,7 @@ fn which_pane(
 /// Read off the window's own description rather than asked for: see
 /// `boite_core::screen` for why the window pushes. That description is also the
 /// whole of what this endpoint can know about a page, which is why there are
-/// five browser routes and not fourteen — `screen::PAGE_IS_OPAQUE` is the
+/// five browser routes and not fourteen. `screen::PAGE_IS_OPAQUE` is the
 /// reason, and it goes out with every answer so an agent never has to guess at
 /// it.
 async fn browser_status(
@@ -1972,7 +2092,7 @@ async fn browser_close(
 /// rest to whoever is drawing the pane, and write down either way.
 ///
 /// The pane is resolved here **when the window can be seen**, and dispatched
-/// unresolved when it cannot. That is not a gap left open — the device applies
+/// unresolved when it cannot. That is not a gap left open: the device applies
 /// the same three checks before it touches anything, so a host with no window
 /// costs a round trip and never a wrong pane. Sending it anyway is what keeps
 /// these usable on a headless boite, where the pane is on somebody's phone.

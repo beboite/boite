@@ -64,6 +64,20 @@ export function gitFailureKey(kind: GitFailure): MessageKey {
   return "git.readFolderFailed";
 }
 
+/**
+ * At what level a failed git refresh is worth writing down.
+ *
+ * A folder that is not a repository, or is not there at all, is not news: a
+ * fresh install's Scratch project sits on the home directory, which is neither,
+ * and the refresh behind it runs every ten seconds for as long as the app is
+ * open. Both already have a banner with a button on it, so the log line is
+ * `debug` and compiled out of a release build. Anything else is a real failure
+ * and keeps `error`.
+ */
+export function refreshLogLevel(kind: GitFailure): "debug" | "error" {
+  return kind === "notARepo" || kind === "pathMissing" ? "debug" : "error";
+}
+
 export interface HealthProbe {
   /** What the folder probe answered, or null while it is still out. */
   folder: FolderState | null;

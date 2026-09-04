@@ -1,7 +1,7 @@
 //! What the endpoint refuses, and why.
 //!
 //! Ported from the desktop copy, which was the only one of the two that had
-//! tests. The half that runs headless — the half a remote agent talks to — was
+//! tests. The half that runs headless, the half a remote agent talks to, was
 //! the untested one, and it is the same code now.
 
 use super::*;
@@ -105,7 +105,7 @@ fn a_folder_with_files_in_it_is_refused_unless_it_is_adopted() {
 }
 
 /// A project already at that folder is a reuse, and a reuse asks none of the
-/// questions above — including the one about where a project may go, which is
+/// questions above, including the one about where a project may go, which is
 /// why a known folder outside every root is still not refused.
 #[test]
 fn a_project_already_there_is_reused_rather_than_refused() {
@@ -605,6 +605,7 @@ async fn spawn_answers_with_the_new_thread_id() {
             agent: Some("claude".into()),
             project: None,
             prompt: None,
+            runtime: None,
         }),
     )
     .await
@@ -624,6 +625,7 @@ async fn spawn_without_a_device_is_not_success() {
             agent: None,
             project: None,
             prompt: None,
+            runtime: None,
         }),
     )
     .await
@@ -776,6 +778,42 @@ async fn wait_does_not_treat_a_live_running_thread_as_done() {
     );
 }
 
+/// A chat thread declares its status, so wait answers it exactly instead of
+/// reading the row's `running` mark and a PTY list it will never appear in.
+///
+/// The row says `running` in all four cases below and there is no PTY for any
+/// of them, which under the terminal branch would have answered done on the
+/// first loop for a worker mid-turn.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn wait_reads_the_exact_status_of_a_chat_worker() {
+    for (declared, status, live, moves) in [
+        (Some("busy"), "busy", true, true),
+        (Some("waiting"), "waiting", true, true),
+        (Some("idle"), "idle", true, false),
+        (None, "idle", false, false),
+    ] {
+        let tag = format!("wait-pilot-{}", declared.unwrap_or("none"));
+        let fake = Fake::new(&tag)
+            .with_project("p1", "/w/one")
+            .with_pilot_child("w1", "p1", "t1", declared);
+        let shared: Shared = std::sync::Arc::new(fake);
+        let out = thread_wait(
+            State(shared),
+            Extension(agent("p1", "t1")),
+            axum::extract::Query(ThreadWaitIn {
+                thread_id: "w1".into(),
+                timeout_ms: Some(250),
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(out.0["status"], json!(status), "{declared:?} {:?}", out.0);
+        assert_eq!(out.0["live"], json!(live), "{declared:?} {:?}", out.0);
+        let waited = out.0["waitedMs"].as_u64().expect("waitedMs");
+        assert_eq!(waited > 0, moves, "{declared:?} waited {waited}ms");
+    }
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn whereami_names_this_thread_and_project() {
     let fake = Fake::new("where").with_project("p1", "/w/one").with_thread("t1", "p1");
@@ -825,6 +863,7 @@ async fn an_orchestrator_past_the_worker_cap_is_refused_by_name() {
                 agent: Some("claude".into()),
                 project: None,
                 prompt: None,
+                runtime: None,
             }),
         )
         .await
@@ -987,6 +1026,7 @@ async fn a_scoped_orchestrator_cannot_spawn_across() {
             agent: Some("claude".into()),
             project: Some("p2".into()),
             prompt: None,
+            runtime: None,
         }),
     )
     .await

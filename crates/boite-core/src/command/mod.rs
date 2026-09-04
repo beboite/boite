@@ -2,8 +2,8 @@
 //!
 //! Boite has two front doors: Tauri commands on the desktop and a WebSocket RPC
 //! on the server. Until this module existed, each one carried its own copy of
-//! every capability — the same scope check, the same call into the domain, the
-//! same refusal worded twice — and nothing checked that the two copies agreed.
+//! every capability, the same scope check, the same call into the domain, the
+//! same refusal worded twice, and nothing checked that the two copies agreed.
 //! Every divergence the audit found was a capability that existed on one side
 //! only, or a boundary applied on one side only.
 //!
@@ -43,6 +43,8 @@ pub mod checkpoint;
 pub mod conduct;
 pub mod files;
 pub mod git;
+pub mod logs;
+pub mod pilot;
 pub mod records;
 pub mod sessions;
 pub mod sync;
@@ -52,6 +54,8 @@ pub use checkpoint::Checkpoints;
 pub use conduct::Conduct;
 pub use files::Files;
 pub use git::Git;
+pub use logs::Logs;
+pub use pilot::{Pilot, PilotReady};
 pub use records::{Records, ThreadPatch};
 pub use sessions::Sessions;
 pub use sync::Sync;
@@ -99,8 +103,8 @@ pub trait Host {
     ///
     /// A different boundary from [`Host::roots`]: that one is "inside a project
     /// the user has", this one is "may become one". A desktop has no outer
-    /// boundary to apply — inspecting a folder is what produces the name a
-    /// project is created with, and the user's own folder dialog is the gate —
+    /// boundary to apply: inspecting a folder is what produces the name a
+    /// project is created with, and the user's own folder dialog is the gate,
     /// so its answer is yes. A server bound to a workspace directory has one.
     ///
     /// Note what this does *not* do: require the path to exist. The folder a
@@ -114,8 +118,8 @@ pub trait Host {
     ///
     /// A pid the caller sends could name anything on the machine; this is the
     /// host's own registry answering for an id it minted itself. The default is
-    /// `None`, which is honest for a host with no process registry — a test, or
-    /// a transport that never spawns anything — and costs the one command that
+    /// `None`, which is honest for a host with no process registry, a test, or
+    /// a transport that never spawns anything, and costs the one command that
     /// asks a tie-break rather than an answer.
     fn child_pid(&self, _pty_id: &str) -> Option<u32> {
         None
@@ -154,7 +158,7 @@ pub trait Host {
     /// The rows this host keeps: projects, threads, todos, settings.
     ///
     /// `None` means it keeps none, and the record commands say so rather than
-    /// answering an empty list — "there are no projects" and "this Boite keeps
+    /// answering an empty list: "there are no projects" and "this Boite keeps
     /// no rows" send whoever is reading to two different places.
     ///
     /// An `Arc` rather than a borrow because [`Ready`] outlives the host on
@@ -162,6 +166,28 @@ pub trait Host {
     /// would tie the whole bus to the lifetime of the call that built it.
     fn store(&self) -> Option<Arc<Store>> {
         None
+    }
+
+    /// The pilot runtime this host owns, when it owns one.
+    ///
+    /// Same shape as [`Host::pulse_waiters`] and [`Host::child_pid`]: the bus
+    /// validates a `pilot.*` call and the host is what actually holds the child
+    /// processes. `None` is honest for a test, for a headless CLI and for a
+    /// build without the experiment, and every method in that domain refuses by
+    /// name rather than pretending a thread has no session.
+    fn pilot(&self) -> Option<Arc<boite_pilot::Runtime>> {
+        None
+    }
+
+    /// The MCP servers a pilot thread is launched with, boite-mcp first.
+    ///
+    /// A host method rather than something the bus builds: the sidecar path and
+    /// the per-thread environment (`BOITE_MCP_URL`, `BOITE_KEY_FILE`,
+    /// `BOITE_THREAD_ID`) are what that host stamps into a terminal thread at
+    /// spawn, and only it knows where its own files are. An empty list is a
+    /// thread with no boite tools, which is what a host that mints none has.
+    fn pilot_mcp(&self, _thread_id: &str) -> Vec<boite_pilot::McpServer> {
+        Vec::new()
     }
 
     /// The process-wide telemetry runtime, when this host has one.
@@ -177,7 +203,7 @@ pub trait Host {
 /// Every method the bus serves, across every domain.
 ///
 /// What a transport asks before handing a method over, so a front door that
-/// still serves something itself cannot accidentally shadow a command — or be
+/// still serves something itself cannot accidentally shadow a command, or be
 /// shadowed by one. The lists are per domain and this is the only place they are
 /// read together.
 pub fn methods() -> impl Iterator<Item = &'static str> {
@@ -190,6 +216,8 @@ pub fn methods() -> impl Iterator<Item = &'static str> {
         .chain(conduct::ALL_METHODS)
         .chain(sync::ALL_METHODS)
         .chain(telemetry::ALL_METHODS)
+        .chain(logs::ALL_METHODS)
+        .chain(pilot::ALL_METHODS)
         .copied()
 }
 
@@ -201,7 +229,7 @@ pub fn handles(method: &str) -> bool {
 /// What each method needs, by name, without decoding a real call.
 ///
 /// A caller that has to answer "may this device ask for `git.commit`" before it
-/// has parameters in hand — a scope check on a front door — cannot build a
+/// has parameters in hand, a scope check on a front door, cannot build a
 /// [`Command`] to ask. Rather than a second hand-kept table, which is the exact
 /// failure this module exists to end, the map is built once by decoding every
 /// method in [`methods`] against parameters that satisfy all of them and reading
@@ -259,6 +287,7 @@ fn probe_params() -> Value {
         "provider": "claude", "email": "you@example.com",
         "enabled": true, "modeA": true, "modeB": false, "stage": "available",
         "targetVersion": "1.0.0", "errorCode": "io", "paneKind": "editor",
+        "requestId": "r", "option": "allow", "mode": "ask", "afterSeq": 0,
         "uiLanguage": "en", "theme": "dark", "threadWorktrees": true,
         "animations": "system", "mcpYolo": false, "idleAutoclose": true,
         "orchestrator": false, "voice": false,
@@ -275,6 +304,8 @@ pub enum Command {
     Conduct(Conduct),
     Files(Files),
     Git(Git),
+    Logs(Logs),
+    Pilot(Pilot),
     Records(Records),
     Sessions(Sessions),
     Sync(Sync),
@@ -323,6 +354,18 @@ impl From<Sessions> for Command {
     }
 }
 
+impl From<Logs> for Command {
+    fn from(logs: Logs) -> Self {
+        Command::Logs(logs)
+    }
+}
+
+impl From<Pilot> for Command {
+    fn from(pilot: Pilot) -> Self {
+        Command::Pilot(pilot)
+    }
+}
+
 impl From<Telemetry> for Command {
     fn from(telemetry: Telemetry) -> Self {
         Command::Telemetry(telemetry)
@@ -363,6 +406,12 @@ impl Command {
         if sync::ALL_METHODS.contains(&method) {
             return Sync::decode(method, params).map(Command::Sync);
         }
+        if logs::ALL_METHODS.contains(&method) {
+            return Logs::decode(method, params).map(Command::Logs);
+        }
+        if pilot::ALL_METHODS.contains(&method) {
+            return Pilot::decode(method, params).map(Command::Pilot);
+        }
         if telemetry::ALL_METHODS.contains(&method) {
             return Telemetry::decode(method, params).map(Command::Telemetry);
         }
@@ -376,6 +425,8 @@ impl Command {
             Command::Conduct(c) => c.name(),
             Command::Files(f) => f.name(),
             Command::Git(g) => g.name(),
+            Command::Logs(l) => l.name(),
+            Command::Pilot(p) => p.name(),
             Command::Records(r) => r.name(),
             Command::Sessions(s) => s.name(),
             Command::Sync(s) => s.name(),
@@ -390,6 +441,8 @@ impl Command {
             Command::Conduct(c) => c.wire(),
             Command::Files(f) => f.wire(),
             Command::Git(g) => g.wire(),
+            Command::Logs(l) => l.wire(),
+            Command::Pilot(p) => p.wire(),
             Command::Records(r) => r.wire(),
             Command::Sessions(s) => s.wire(),
             Command::Sync(s) => s.wire(),
@@ -409,6 +462,8 @@ impl Command {
             Command::Conduct(c) => c.capability(),
             Command::Files(f) => f.capability(),
             Command::Git(g) => g.capability(),
+            Command::Logs(l) => l.capability(),
+            Command::Pilot(p) => p.capability(),
             Command::Records(r) => r.capability(),
             Command::Sessions(s) => s.capability(),
             Command::Sync(s) => s.capability(),
@@ -433,6 +488,8 @@ impl Command {
             Command::Conduct(c) => c.prepare(host, grant),
             Command::Files(f) => f.prepare(host),
             Command::Git(g) => g.prepare(host),
+            Command::Logs(l) => l.prepare(host),
+            Command::Pilot(p) => p.prepare(host),
             Command::Records(r) => r.prepare(host),
             Command::Sessions(s) => s.prepare(host),
             Command::Sync(s) => s.prepare(host),
@@ -455,16 +512,30 @@ pub enum Ready {
     ///
     /// The one domain whose work needs something only the host can hand over.
     /// `Ready` is deliberately free of the host, so the store is resolved during
-    /// `prepare` and travels here rather than being fetched later — which keeps
+    /// `prepare` and travels here rather than being fetched later, which keeps
     /// "a host that keeps no records" a refusal at the boundary instead of an
     /// error thrown from inside the work.
-    Records(Records, Arc<Store>, Option<Arc<TelemetryRuntime>>),
+    /// The pilot runtime rides along for the two verbs that end a thread:
+    /// settling a row and deleting one both have to stop the child a chat
+    /// thread is, and neither is a pilot call.
+    Records(
+        Records,
+        Arc<Store>,
+        Option<Arc<TelemetryRuntime>>,
+        Option<Arc<boite_pilot::Runtime>>,
+    ),
     /// An orchestration command, with the store and the live-wait registry the
     /// host resolved for it. Same reasoning as [`Ready::Records`]; the registry
     /// is optional because a host with no long-poll answers honestly without.
     Conduct(Conduct, Arc<Store>, Option<Arc<crate::pulse::Waiters>>),
     /// A telemetry command, with the runtime `prepare` resolved for it.
     Telemetry(Telemetry, Arc<TelemetryRuntime>),
+    /// A pilot command, with the store and the pilot runtime resolved for it.
+    ///
+    /// The one arm `run` cannot answer: the work is async, and `boite-core`
+    /// owns no executor. The host awaits it through
+    /// [`crate::pilot_host::execute`] on the runtime it already has.
+    Pilot(Box<PilotReady>),
 }
 
 impl Ready {
@@ -475,6 +546,7 @@ impl Ready {
             Ready::Work(Command::Checkpoints(c)) => c.run(),
             Ready::Work(Command::Files(f)) => f.run(),
             Ready::Work(Command::Git(g)) => g.run(),
+            Ready::Work(Command::Logs(l)) => l.run(),
             Ready::Work(Command::Sessions(s)) => s.run(),
             Ready::Work(Command::Sync(s)) => s.run(),
             // `prepare` turns every record command into the arm below, so this
@@ -488,7 +560,19 @@ impl Ready {
             Ready::Work(Command::Telemetry(t)) => {
                 Err(format!("{} was not prepared with a telemetry runtime", t.name()))
             }
-            Ready::Records(r, store, telemetry) => r.run(&store, telemetry.as_deref()),
+            Ready::Work(Command::Pilot(p)) => {
+                Err(format!("{} was not prepared with a pilot runtime", p.name()))
+            }
+            // Deliberately not answered here. A pilot call awaits a child
+            // process, and this function blocks a thread of whatever pool the
+            // transport handed it to; the host runs it on its own executor.
+            Ready::Pilot(ready) => Err(format!(
+                "{} runs on the host's runtime, through boite_core::pilot_host::execute",
+                ready.call.name()
+            )),
+            Ready::Records(r, store, telemetry, pilot) => {
+                r.run(&store, telemetry.as_deref(), pilot.as_ref())
+            }
             Ready::Conduct(c, store, waiters) => c.run(&store, waiters),
             Ready::Telemetry(t, runtime) => t.run(&runtime),
         }
@@ -796,6 +880,23 @@ mod tests {
             ("telemetry.trackUpdate", MutateProject),
             ("telemetry.trackPane", MutateProject),
             ("telemetry.trackSettingsSnapshot", MutateProject),
+            ("logs.tail", ReadProject),
+            ("logs.query", ReadProject),
+            ("logs.level", MutateProject),
+            ("logs.write", MutateProject),
+            ("logs.subscribe", ReadProject),
+            ("pilot.catalog", ReadProject),
+            ("pilot.thread.open", MutateProject),
+            ("pilot.turn.start", MutateProject),
+            ("pilot.turn.interrupt", MutateProject),
+            ("pilot.request.respond", MutateProject),
+            ("pilot.model.set", MutateProject),
+            ("pilot.mode.set", MutateProject),
+            ("pilot.session.stop", MutateProject),
+            ("pilot.items", ReadProject),
+            ("pilot.events", ReadProject),
+            ("pilot.subscribe", ReadProject),
+            ("pilot.unsubscribe", ReadProject),
         ];
         let actual: Vec<(&str, Capability)> = every_command()
             .iter()
@@ -845,8 +946,8 @@ mod tests {
     /// the instructions every agent reads. Then the CLI manager brought two more,
     /// which do not reach past a project so much as past every project:
     /// installing a binary onto the machine, and deleting an agent's own data
-    /// directory. A grant scoped to one project — the credentials file the todo
-    /// panel hands to agents — must not reach them, and `Grant::Project.allows`
+    /// directory. A grant scoped to one project, the credentials file the todo
+    /// panel hands to agents, must not reach them, and `Grant::Project.allows`
     /// refusing each one is asserted below.
     ///
     /// The capability check is not the whole guard for sync, and is not meant to
@@ -886,7 +987,7 @@ mod tests {
     /// No method is claimed by two domains.
     ///
     /// [`Command::decode`] walks the domain lists in order and takes the first
-    /// that contains the name, so a duplicate would not be an error anywhere —
+    /// that contains the name, so a duplicate would not be an error anywhere:
     /// it would be a method that quietly decodes into the wrong domain, with a
     /// different capability and a different wire envelope. `project.` already
     /// means two things across two domains, which is how close this is.

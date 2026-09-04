@@ -1,6 +1,18 @@
 import { invoke } from "./ipc";
+import { log } from "$lib/shared/log";
+import type { PilotApi } from "../types";
+import type {
+  PilotCatalog,
+  PilotEvent,
+  PilotEventRow,
+  PilotItemRow,
+  PilotOpened,
+  PilotSwitchKind,
+} from "$lib/features/pilot/types";
 import type {
   ApprovalsApi,
+  LogsApi,
+  LogRecord,
   SyncApi,
   TelemetryApi,
   TelemetryState,
@@ -63,7 +75,6 @@ import type {
 import type { ChangedPath, DirEntry, SearchHit } from "$lib/features/explorer/api";
 import type { FileVersions, TextFile } from "$lib/features/editor/api";
 import type { Platform, ShellOption } from "$lib/storage/platform.svelte";
-import type { LogEntry, LogLevel } from "$lib/shared/services/logger.svelte";
 
 export const tauriGit: GitApi = {
   repoInfo: (path) => invoke<RepoInfo>("git_repo_info", { path }),
@@ -288,7 +299,7 @@ export const tauriSession: SessionApi = {
       return hit ? { id: hit.id, mtimeMs: hit.modifiedMs, title: hit.title } : null;
     }
     // The rest answer with an id and the activity timestamp their own store
-    // keeps, which is null when that store had none to give — never a zero,
+    // keeps, which is null when that store had none to give, never a zero,
     // which attribution would read as 1970 and refuse.
     const hit = await invoke<{ id: string; modifiedMs: number | null; title?: string | null } | null>(command, {
       cwd,
@@ -320,12 +331,179 @@ export const tauriSearch: SearchApi = {
 };
 
 export const tauriLog: LogApi = {
-  event: (level: LogLevel, source, message, details) =>
-    invoke("log_app_event", { level, source, message, details }),
-  read: (scope) => invoke<LogEntry[]>("read_app_log", { scope }),
   clear: () => invoke<void>("clear_app_log"),
   filePath: () => invoke<string>("log_file_path"),
 };
+
+/**
+ * The bus's log, through this app's five commands.
+ *
+ * Every one of them is `boite_core::command::logs` reached by name, so what the
+ * desktop reads and what a phone reads over the WebSocket is the same domain
+ * answering. The desktop reads the answers bare; the `records` envelope belongs
+ * to the WebSocket protocol.
+ */
+export const tauriLogs: LogsApi = {
+  write: (records) => invoke<void>("logs_write", { params: { records } }),
+  tail: (opts = {}) => invoke<LogRecord[]>("logs_tail", { params: opts }),
+  query: (opts = {}) => invoke<LogRecord[]>("logs_query", { params: opts }),
+  level: (directives) =>
+    invoke<{ level: string }>("logs_level", {
+      params: directives === undefined ? {} : { directives },
+    }).then((r) => r.level ?? ""),
+  // The host emits `log://record` in batches of fifty or every 250 ms, the same
+  // numbers the server coalesces on. Told to start on the first handler and to
+  // stop on the last: a window with the Logs section closed costs the log
+  // nothing.
+  subscribe: (handler) => {
+    const handlers = desktopLogHandlers;
+    handlers.add(handler);
+    if (handlers.size === 1) startDesktopLogFeed();
+    return () => {
+      handlers.delete(handler);
+      if (handlers.size === 0) stopDesktopLogFeed();
+    };
+  },
+};
+
+const desktopLogHandlers = new Set<(records: LogRecord[]) => void>();
+let desktopLogStop: (() => void) | null = null;
+let desktopLogEpoch = 0;
+
+function startDesktopLogFeed() {
+  const epoch = ++desktopLogEpoch;
+  void invoke<void>("logs_subscribe", { params: { on: true } }).catch(() => {});
+  void import("@tauri-apps/api/event")
+    .then(({ listen }) =>
+      listen<{ records?: LogRecord[] }>("log://record", (event) => {
+        const records = event.payload?.records ?? [];
+        if (records.length === 0) return;
+        for (const handler of desktopLogHandlers) handler(records);
+      }),
+    )
+    .then((un) => {
+      // Unsubscribed while the dynamic import was in flight: drop the listener
+      // rather than leaving one nothing can reach.
+      if (epoch !== desktopLogEpoch) un();
+      else desktopLogStop = un;
+    })
+    .catch(() => {});
+}
+
+function stopDesktopLogFeed() {
+  desktopLogEpoch += 1;
+  desktopLogStop?.();
+  desktopLogStop = null;
+  void invoke<void>("logs_subscribe", { params: { on: false } }).catch(() => {});
+}
+
+/**
+ * The chat runtime, through this app's twelve commands.
+ *
+ * Every one of them is `boite_core::command::pilot` reached by name, so what
+ * the desktop drives and what a phone drives over the WebSocket is the same
+ * domain answering. The desktop reads the answers bare; the envelopes belong to
+ * the WebSocket protocol.
+ */
+export const tauriPilot: PilotApi = {
+  catalog: (refresh = false) =>
+    invoke<PilotCatalog>("pilot_catalog", { params: { refresh } }),
+  open: (threadId) => invoke<PilotOpened>("pilot_thread_open", { params: { threadId } }),
+  startTurn: (threadId, text, selection) =>
+    invoke<{ turnId: string }>("pilot_turn_start", {
+      params: { threadId, text, model: selection ?? null },
+    }).then((r) => r.turnId ?? ""),
+  interrupt: (threadId) =>
+    invoke<unknown>("pilot_turn_interrupt", { params: { threadId } }).then(() => {}),
+  respond: (threadId, requestId, answer) =>
+    invoke<unknown>("pilot_request_respond", {
+      params: { threadId, requestId, option: answer },
+    }).then(() => {}),
+  setModel: (threadId, selection) =>
+    invoke<{ switch: PilotSwitchKind }>("pilot_model_set", {
+      params: {
+        threadId,
+        model: selection.model ?? null,
+        instance: selection.instance ?? null,
+      },
+    }).then((r) => r.switch),
+  setMode: (threadId, mode) =>
+    invoke<unknown>("pilot_mode_set", { params: { threadId, mode } }).then(() => {}),
+  stop: (threadId) =>
+    invoke<unknown>("pilot_session_stop", { params: { threadId } }).then(() => {}),
+  items: (threadId, afterSeq = 0, limit) =>
+    invoke<PilotItemRow[]>("pilot_items", { params: { threadId, afterSeq, limit } }),
+  events: (threadId, afterSeq = 0, limit) =>
+    invoke<PilotEventRow[]>("pilot_events", { params: { threadId, afterSeq, limit } }),
+  // One window event for every thread, carrying `{threadId, event}`: a pane
+  // filters on the id it draws. A channel per pane would mean the sink knowing
+  // which panes exist, which is the window's business and not the host's.
+  subscribe: (threadId, handler) => {
+    let handlers = pilotHandlers.get(threadId);
+    if (!handlers) {
+      handlers = new Set();
+      pilotHandlers.set(threadId, handlers);
+      void invoke<void>("pilot_subscribe", { params: { threadId } }).catch((err) => {
+        log.warn("backend.pilot", "pilot.subscribe.refused", {
+          thread: threadId,
+          reason: String(err),
+        });
+      });
+    }
+    handlers.add(handler);
+    startPilotFeed();
+    return () => {
+      const held = pilotHandlers.get(threadId);
+      if (!held) return;
+      held.delete(handler);
+      if (held.size > 0) return;
+      pilotHandlers.delete(threadId);
+      void invoke<void>("pilot_unsubscribe", { params: { threadId } }).catch((err) => {
+        log.warn("backend.pilot", "pilot.unsubscribe.refused", {
+          thread: threadId,
+          reason: String(err),
+        });
+      });
+      if (pilotHandlers.size === 0) stopPilotFeed();
+    };
+  },
+};
+
+/** Handlers per thread. The window listens once, whatever is open. */
+const pilotHandlers = new Map<string, Set<(event: PilotEvent) => void>>();
+let pilotStop: (() => void) | null = null;
+let pilotEpoch = 0;
+
+function startPilotFeed() {
+  if (pilotStop) return;
+  const epoch = ++pilotEpoch;
+  void import("@tauri-apps/api/event")
+    .then(({ listen }) =>
+      listen<{ threadId?: string; event?: PilotEvent }>("pilot://event", (message) => {
+        const threadId = message.payload?.threadId;
+        const event = message.payload?.event;
+        if (!threadId || !event) return;
+        const handlers = pilotHandlers.get(threadId);
+        if (!handlers) return;
+        for (const handler of handlers) handler(event);
+      }),
+    )
+    .then((un) => {
+      // Unsubscribed while the dynamic import was in flight: drop the listener
+      // rather than leaving one nothing can reach.
+      if (epoch !== pilotEpoch) un();
+      else pilotStop = un;
+    })
+    .catch((err) => {
+      log.warn("backend.pilot", "pilot.feed.failed", { reason: String(err) });
+    });
+}
+
+function stopPilotFeed() {
+  pilotEpoch += 1;
+  pilotStop?.();
+  pilotStop = null;
+}
 
 /**
  * Carrying the agent configuration between computers.

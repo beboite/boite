@@ -4,10 +4,14 @@
   import { t } from "$lib/i18n/index.svelte";
   import {
     launchFastpick,
+    launchFastpickChat,
     launchTargetProjectId,
     warmWorktreeFor,
   } from "$lib/features/thread/api";
   import { app } from "$lib/app/store.svelte";
+  import { settings } from "$lib/features/settings/store.svelte";
+  import { chatChoiceHarness, pilotCatalog } from "$lib/features/pilot/catalog.svelte";
+  import MessageSquare from "@lucide/svelte/icons/message-square";
   import ShortcutIcon from "$lib/shared/icons/ShortcutIcon.svelte";
   import { fastpick } from "./store.svelte";
   import { iconKeyForKind, modelLabels, type FastpickCombo } from "./combo";
@@ -27,7 +31,7 @@
   /**
    * The fastpick walk itself: harness, provider, model, options, and the launch.
    *
-   * No surface, no placement, no open state — those belong to whoever shows it.
+   * No surface, no placement, no open state: those belong to whoever shows it.
    * It is here rather than inside `FastpickPicker` because the launcher popover
    * shows the same walk in its own box: when this lived in the picker, reaching
    * fastpick from the launcher opened a second floating menu on top of the first,
@@ -80,6 +84,12 @@
   // Drawn on every model row once more than one of them is left: two keys of a site are two
   // accounts, often two bills, and can serve a model under the same name.
   const multiKey = $derived(usableKeys.length > 1);
+  // Whether this walk can end in a conversation rather than a terminal. Off the
+  // harness alone: the provider and the model are the account and the weights,
+  // and neither changes which protocol the program on the other end speaks.
+  const chat = $derived(
+    harness ? chatChoiceHarness(harness.id) : { offered: false, enabled: false },
+  );
   const models = $derived(providerId ? fastpick.models[providerId] ?? null : null);
   // The rows this harness could actually launch. fastpick lists a provider's whole
   // catalogue, credentials included that this harness has no binding for, and picking one
@@ -185,6 +195,13 @@
     void launch(forceScratch);
   }
 
+  /** The same row, opened as a conversation. The name button is the terminal. */
+  function chatModel(m: FastpickModel, e: MouseEvent) {
+    e.stopPropagation();
+    select(m);
+    void launch(e.shiftKey, true);
+  }
+
   function openOptions(m: FastpickModel, e: MouseEvent) {
     e.stopPropagation();
     select(m);
@@ -217,7 +234,7 @@
   // Lands where every other launcher does: the project you are on, or Scratch
   // when you are on none, with shift asking for Scratch outright. No right-click
   // menu though, unlike a shortcut: this walk owns the gesture already.
-  async function launch(forceScratch = false) {
+  async function launch(forceScratch = false, asChat = false) {
     if (!harness || !providerId || !model) return;
     const combo: FastpickCombo = {
       harness: harness.id,
@@ -238,7 +255,12 @@
     onLaunched?.();
     const target = own ?? (await launchTargetProjectId(forceScratch));
     if (!target) return;
-    await launchFastpick(combo, harness, target);
+    // The same combo, on the other runtime. The route travels into the row as
+    // the instance (`fastpick:<provider>:<model>`), which is the shape
+    // `pilot.catalog` answers, so the conversation opens on the endpoint the
+    // user just picked rather than on the driver's own account.
+    if (asChat) await launchFastpickChat(combo, harness, target);
+    else await launchFastpick(combo, harness, target);
   }
 
   function sourceLabel(source: FastpickSource): string {
@@ -376,9 +398,13 @@
     // This menu appearing is a launch that has not picked its combination yet, and
     // walking the panes takes long enough that the checkout is finished before the
     // click lands. The project switch is the other sign, but it never fires for the
-    // project the app came up on — reload, open this, launch, and the thread was
+    // project the app came up on: reload, open this, launch, and the thread was
     // paying for its own worktree in front of a black terminal.
     warmWorktreeFor(app.projects.find((p) => p.id === app.currentProjectId) ?? null);
+    // Which harnesses have a protocol, asked once and only when the experiment
+    // is armed: a boite with the switch off must not pay an IPC hop for a button
+    // it will never draw.
+    if (settings.state.experimentPilot) void pilotCatalog.ensure();
   });
 </script>
 
@@ -558,6 +584,18 @@
                 </span>
               {/if}
             </button>
+            {#if chat.offered}
+              <button
+                type="button"
+                class="flex shrink-0 items-center border-l border-border/60 px-1.5 text-muted-2 transition hover:bg-[var(--color-surface-3)] hover:text-foreground focus-visible:bg-[var(--color-surface-3)] focus-visible:text-foreground focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-40 group-hover:text-muted-foreground"
+                disabled={!chat.enabled}
+                onclick={(e) => chatModel(m, e)}
+                aria-label={t("pilot.chat")}
+                use:tip={chat.enabled ? t("pilot.chat") : t("pilot.noDriver")}
+              >
+                <MessageSquare class="size-3.5" />
+              </button>
+            {/if}
             <!-- A second target, and it has to look like one: clicking the name
                  launches, clicking here opens effort and prompts instead. It was
                  a bare chevron the same colour as the row it sat on, which reads
@@ -649,14 +687,33 @@
           </button>
         {/each}
       {/if}
-      <button
-        type="button"
-        role="menuitem"
-        class="mt-2 rounded bg-[var(--color-surface-3)] px-2 py-1.5 text-sm font-medium text-foreground transition hover:bg-accent focus-visible:bg-accent focus-visible:outline-none"
-        onclick={(e) => void launch(e.shiftKey)}
-      >
-        {t("fastpick.launch")}
-      </button>
+      <!-- Terminal or Chat on the same row, the way the shortcut bar offers the
+           two: the combination is one thing to launch and the runtime is how.
+           Greyed with the reason where the harness has no protocol yet, never
+           hidden, so the answer is the same wherever it is asked. -->
+      <div class="mt-2 flex items-stretch gap-0.5">
+        <button
+          type="button"
+          role="menuitem"
+          class="flex-1 rounded bg-[var(--color-surface-3)] px-2 py-1.5 text-sm font-medium text-foreground transition hover:bg-accent focus-visible:bg-accent focus-visible:outline-none"
+          onclick={(e) => void launch(e.shiftKey)}
+        >
+          {t("fastpick.launch")}
+        </button>
+        {#if chat.offered}
+          <button
+            type="button"
+            role="menuitem"
+            class="flex shrink-0 items-center rounded bg-[var(--color-surface-3)] px-2 text-muted-2 transition hover:bg-accent hover:text-foreground focus-visible:bg-accent focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-40"
+            disabled={!chat.enabled}
+            onclick={(e) => void launch(e.shiftKey, true)}
+            aria-label={t("pilot.chat")}
+            use:tip={chat.enabled ? t("pilot.chat") : t("pilot.noDriver")}
+          >
+            <MessageSquare class="size-3.5" />
+          </button>
+        {/if}
+      </div>
     {/if}
   </div>
 </div>

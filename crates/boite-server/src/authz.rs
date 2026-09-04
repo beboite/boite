@@ -1,8 +1,8 @@
 //! What a method needs, and the only way to reach a handler.
 //!
 //! Holding a socket used to be authorisation to call everything on it. The fix
-//! is not a line at the top of each arm in `rpc.rs` — that is a line a new arm
-//! forgets — but a type. [`Authorized`] carries a method and its parameters,
+//! is not a line at the top of each arm in `rpc.rs`, that is a line a new arm
+//! forgets, but a type. [`Authorized`] carries a method and its parameters,
 //! its fields are private, and [`Authorized::check`] is its only constructor.
 //! `rpc::dispatch` takes one. A transport therefore cannot dispatch work it did
 //! not first put through the scope check, in the same way `command::Ready` is
@@ -17,8 +17,8 @@
 //!   [`Capability`], read by name out of `boite_core::command::capabilities`.
 //!   There is no second copy to keep in step, so a capability that changes
 //!   there changes the device check with it;
-//! - everything `rpc.rs` still serves itself — the PTY registry, push
-//!   subscriptions, approvals, search, the snapshot, pairing — is in
+//! - everything `rpc.rs` still serves itself, the PTY registry, push
+//!   subscriptions, approvals, search, the snapshot, pairing, is in
 //!   [`NON_BUS`], which is this file's equivalent of T3 Code's
 //!   `RPC_REQUIRED_SCOPES`.
 //!
@@ -92,6 +92,23 @@ const NON_BUS: &[(&str, Option<Scope>)] = &[
     ("pairing.revoke", Some(Scope::Admin)),
 ];
 
+/// The bus methods whose device scope is not the one their capability implies.
+///
+/// The mapping below is total for everything else and deliberately so. These
+/// four are the pilot domain's, and they draw the same two distinctions
+/// [`NON_BUS`] draws for a PTY and for an approval: starting or stopping an
+/// agent process is [`Scope::Terminal`], because a child is arbitrary code on
+/// the machine rather than a change to a project; answering a request is
+/// [`Scope::Approve`], reachable from a locked screen the way a reply is. Both
+/// are narrower than the `Write` their `MutateProject` would otherwise map to.
+const BUS_SCOPE_OVERRIDES: &[(&str, Scope)] = &[
+    ("pilot.thread.open", Scope::Terminal),
+    ("pilot.turn.start", Scope::Terminal),
+    ("pilot.turn.interrupt", Scope::Terminal),
+    ("pilot.session.stop", Scope::Terminal),
+    ("pilot.request.respond", Scope::Approve),
+];
+
 /// The device scope a bus capability asks for.
 ///
 /// The whole mapping, and it is deliberately not a fourth vocabulary: the bus
@@ -110,6 +127,9 @@ pub fn scope_of(capability: Capability) -> Scope {
 pub fn required(method: &str) -> Result<Option<Scope>, String> {
     if let Some((_, scope)) = NON_BUS.iter().find(|(name, _)| *name == method) {
         return Ok(*scope);
+    }
+    if let Some((_, scope)) = BUS_SCOPE_OVERRIDES.iter().find(|(name, _)| *name == method) {
+        return Ok(Some(*scope));
     }
     if let Some(capability) = command::capability_of(method) {
         return Ok(Some(scope_of(capability)));
@@ -133,6 +153,13 @@ pub struct Authorized {
     /// the caller's own set travels with the call rather than being looked up
     /// again from a session the dispatcher does not have.
     caller: ScopeSet,
+    /// Which device sent it, by pairing id.
+    ///
+    /// The arms that tag what a client wrote need it, a record whose `device`
+    /// came out of the body would let one phone file its lines under another,
+    /// and it is read here rather than looked up again, because the dispatcher
+    /// does not hold the session.
+    device: String,
 }
 
 impl Authorized {
@@ -162,6 +189,7 @@ impl Authorized {
             method: method.to_string(),
             params,
             caller: session.scopes(),
+            device: session.pairing_id().to_string(),
         })
     }
 
@@ -176,6 +204,11 @@ impl Authorized {
     /// What the device that sent this call was paired with.
     pub fn caller(&self) -> ScopeSet {
         self.caller
+    }
+
+    /// Which device sent this call.
+    pub fn device(&self) -> &str {
+        &self.device
     }
 
     pub fn into_params(self) -> Value {
@@ -235,7 +268,7 @@ mod tests {
     }
 
     /// No method is declared twice. `NON_BUS` shadows the bus, so an entry that
-    /// names a bus method would quietly override the capability the bus pins —
+    /// names a bus method would quietly override the capability the bus pins,
     /// which is the drift this arrangement exists to prevent.
     #[test]
     fn nothing_in_the_local_table_shadows_the_bus() {

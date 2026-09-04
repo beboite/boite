@@ -36,6 +36,8 @@ pub mod conduct;
 pub mod files;
 pub mod git;
 pub mod pty;
+pub mod logs;
+pub mod pilot;
 pub mod records;
 pub mod sessions;
 pub mod sync;

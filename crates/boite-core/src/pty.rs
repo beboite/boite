@@ -33,7 +33,7 @@ use vte::{Params, Parser, Perform};
 /// A desktop app started from Finder or the Dock gets launchd's environment,
 /// which carries no TERM at all, and nothing downstream supplies one: neither
 /// this crate nor portable-pty. A shell whose terminfo is unknown loses line
-/// editing — zsh answers a backspace with a bare space instead of the
+/// editing: zsh answers a backspace with a bare space instead of the
 /// backspace/space/backspace dance, so the deleted character stays on screen
 /// while the buffer behind it is correct. Agent CLIs escape it by driving the
 /// terminal in raw mode, which is why plain shells were the only ones bitten.
@@ -42,7 +42,7 @@ use vte::{Params, Parser, Perform};
 /// nothing about the terminal we actually render into, which is xterm.js.
 /// `TERM_PROGRAM` is how a process asks who is rendering it, the way it does for iTerm2 or
 /// VS Code. Boite answers, so a tool that has something to say to its terminal can check
-/// first and stay silent everywhere else — the OSC promotion sequence is the one that
+/// first and stay silent everywhere else, the OSC promotion sequence is the one that
 /// matters today.
 pub fn terminal_env_defaults() -> [(&'static str, &'static str); 3] {
     [
@@ -86,6 +86,20 @@ pub struct PtySpawnArgs {
     /// a remote boite that machine is the server.
     #[serde(default)]
     pub wrap: Option<WrapSpec>,
+}
+
+/// Which thread a spawn belongs to, for the log.
+///
+/// Read out of the environment rather than taken as an argument: every host
+/// already stamps `BOITE_THREAD_ID` into a thread's PTY, and adding a field
+/// would mean every caller of `spawn` filling in something the environment
+/// already carries. Empty for a PTY nobody claimed, which is honest.
+fn thread_of(spec: &PtySpawnArgs) -> String {
+    spec.env
+        .as_ref()
+        .and_then(|env| env.get("BOITE_THREAD_ID"))
+        .cloned()
+        .unwrap_or_default()
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -166,75 +180,14 @@ fn parse_probe_output(text: &str, already_set: impl Fn(&str) -> bool) -> ShellPr
     ShellProbe { names, env }
 }
 
-// Each child is assigned to a Windows Job object with KILL_ON_JOB_CLOSE:
+// Each child is assigned to a Windows Job object with KILL_ON_JOB_CLOSE, so
 // TerminateJobObject kills the whole process tree in one syscall (the
 // taskkill shell-out it replaces took 0.5-2s per PTY and stalled app close),
 // and if boite dies without cleanup the OS closes the handle and reaps the
-// tree anyway.
+// tree anyway. The type is crate::job: the dev MCP starts a process tree of
+// its own and needs exactly this, and two copies of a raw handle drift.
 #[cfg(target_os = "windows")]
-mod job {
-    use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
-    use windows_sys::Win32::System::JobObjects::{
-        AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
-        SetInformationJobObject, TerminateJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
-        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
-    };
-    use windows_sys::Win32::System::Threading::{
-        OpenProcess, PROCESS_SET_QUOTA, PROCESS_TERMINATE,
-    };
-
-    pub struct Job(HANDLE);
-
-    unsafe impl Send for Job {}
-    unsafe impl Sync for Job {}
-
-    impl Job {
-        pub fn assign(pid: u32) -> Option<Self> {
-            unsafe {
-                let job = CreateJobObjectW(std::ptr::null(), std::ptr::null());
-                if job.is_null() {
-                    return None;
-                }
-                let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
-                info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-                if SetInformationJobObject(
-                    job,
-                    JobObjectExtendedLimitInformation,
-                    &info as *const _ as *const std::ffi::c_void,
-                    std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
-                ) == 0
-                {
-                    CloseHandle(job);
-                    return None;
-                }
-                let process = OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE, 0, pid);
-                if process.is_null() {
-                    CloseHandle(job);
-                    return None;
-                }
-                let assigned = AssignProcessToJobObject(job, process);
-                CloseHandle(process);
-                if assigned == 0 {
-                    CloseHandle(job);
-                    return None;
-                }
-                Some(Self(job))
-            }
-        }
-
-        pub fn terminate(&self) -> bool {
-            unsafe { TerminateJobObject(self.0, 1) != 0 }
-        }
-    }
-
-    impl Drop for Job {
-        fn drop(&mut self) {
-            unsafe {
-                CloseHandle(self.0);
-            }
-        }
-    }
-}
+use crate::job;
 
 struct PtyHandle {
     // Option so kill() can drop the master while the reader thread still owns
@@ -460,8 +413,21 @@ impl PtyManager {
         drop(pair.slave);
 
         let killer = child.clone_killer();
+        let pid = child.process_id();
 
         let id = Uuid::new_v4().to_string();
+        // Every child this process starts, with the pid it started as. The one
+        // fact that is impossible to recover afterwards: a PTY that died gives
+        // its exit code and nothing else, and "which process was that" is the
+        // first question anyone asks about a terminal that stopped.
+        tracing::info!(
+            thread = %thread_of(&spec),
+            pty = %id,
+            pid = pid.unwrap_or(0),
+            cwd = %spec.cwd,
+            cmd = %spec.cmd,
+            "pty.spawned"
+        );
 
         let mut writer = pair
             .master
@@ -508,6 +474,7 @@ impl PtyManager {
         let inner_clone = self.inner.clone();
         let id_clone = id.clone();
         let sink_clone = sink.clone();
+        let thread_for_exit = thread_of(&spec);
         std::thread::spawn(move || {
             read_loop(reader, sink_clone.clone());
             let exit_code = match child.wait() {
@@ -515,6 +482,13 @@ impl PtyManager {
                 Err(_) => -1,
             };
             inner_clone.lock().remove(&id_clone);
+            tracing::info!(
+                thread = %thread_for_exit,
+                pty = %id_clone,
+                pid = pid.unwrap_or(0),
+                code = exit_code,
+                "pty.exited"
+            );
             sink_clone.send(PtyEvent::Exit(Some(exit_code)));
         });
 

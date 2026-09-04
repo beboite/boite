@@ -32,7 +32,7 @@ import { CLI_PRESETS, type CliPreset } from "./cliPresets";
 // wizard seeds whatever `cliDetection` finds on the machine, and everything
 // after that is an add or a remove in Settings. A preset shipped later is
 // offered in the shortcut editor, never pushed into an install that never
-// asked for it — that backfill handed people agents whose binary they do not
+// asked for it: that backfill handed people agents whose binary they do not
 // have.
 function migrateShortcuts(raw: unknown): { shortcuts: Shortcut[]; changed: boolean } {
   if (!Array.isArray(raw)) {
@@ -101,9 +101,9 @@ export const DEFAULT_TODO_PROMPT = `Task from my Boite todo list (id {{id}}):
 
 {{task}}
 
-Before changing anything: restate what you understand, name the files involved, and propose a plan. When it is done, call the boite MCP tool todo_claim with that id, a one-line summary of what changed, and the commit sha if you committed — leave it out rather than guessing, Boite reads it back from the repository.
+Before changing anything: restate what you understand, name the files involved, and propose a plan. When it is done, call the boite MCP tool todo_claim with that id, a one-line summary of what changed, and the commit sha if you committed. Leave it out rather than guessing, Boite reads it back from the repository.
 
-You are working in your own detached worktree of this project, so nothing you do disturbs the other terminals. It is on no branch: if this turns into work worth keeping, call worktree_branch with a name that matches the repository's existing convention, or worktree_reserve to continue a branch that already exists. Do it once you know, not up front — a worktree nobody claimed is discarded when the thread closes, which is the right ending for a question you only answered.`;
+You are working in your own detached worktree of this project, so nothing you do disturbs the other terminals. It is on no branch: if this turns into work worth keeping, call worktree_branch with a name that matches the repository's existing convention, or worktree_reserve to continue a branch that already exists. Do it once you know, not up front: a worktree nobody claimed is discarded when the thread closes, which is the right ending for a question you only answered.`;
 
 const DEFAULTS: Settings = {
   // Empty on purpose: an install with no shortcuts has not run the wizard yet,
@@ -164,6 +164,7 @@ const DEFAULTS: Settings = {
   smartSortBy: "manual",
   smartSortDirection: "desc",
   experimentWorkspace: false,
+  experimentPilot: false,
   openOnLaunch: "last",
   orchestratorAgent: null,
   orchestratorByProject: {},
@@ -257,8 +258,8 @@ function readMinutes(value: unknown, fallback: number): number {
  * Keys a stored blob may still carry that nothing reads any more.
  *
  * The first four folded into `experimentWorkspace`; the next four graduated,
- * their behaviour now unconditional (glow rows, agent logos, sidebar ordering)
- * — `sidebarThreadGlow` is the boolean `sidebarDesign` itself replaced. The
+ * their behaviour now unconditional (glow rows, agent logos, sidebar ordering).
+ * `sidebarThreadGlow` is the boolean `sidebarDesign` itself replaced. The
  * last four went with the docked column: `experimentInfoBox` graduated, so git,
  * files and the todo list are pane leaves for everyone and there is no column
  * left for `rightPanel`, `rightPanelByProject` and `rightPanelWidth` to
@@ -289,7 +290,7 @@ export const RETIRED_SETTINGS_KEYS = [
  * A stored blob with the retired keys taken out of it.
  *
  * The field lists already decide what a save writes, so this changes no
- * behaviour on its own — it says the rule in code rather than leaving it to the
+ * behaviour on its own: it says the rule in code rather than leaving it to the
  * absence of a read, and it is what a test can hold onto. `experimentInfoBox`
  * is the case it was written for: the flag was a device field, so a blob
  * written by an older build still names it, and the answer is to forget it
@@ -422,6 +423,10 @@ const DEVICE_FIELDS = [
   // *is* once armed (agent, autonomy, caps) stays in the workspace blob, where
   // every device reads the same answer.
   "experimentWorkspace",
+  // Same gesture, same scope: this glass offering the Chat button. New in this
+  // blob rather than promoted, so it is absent from PROMOTED_TO_DEVICE and an
+  // older blob simply reads the default.
+  "experimentPilot",
   // The whole voice block is device: a microphone, a synthesis voice and the
   // right to speak unfocused are facts about this machine, not the workspace.
   "voiceStt",
@@ -688,6 +693,10 @@ class SettingsStore {
         // the fold: a workspace blob written before it carries the four old
         // flags and no key for this one.
         experimentWorkspace: readExperimentWorkspace(raw),
+        experimentPilot:
+          typeof stored.experimentPilot === "boolean"
+            ? stored.experimentPilot
+            : DEFAULTS.experimentPilot,
         openOnLaunch: isOpenOnLaunch(stored.openOnLaunch)
           ? stored.openOnLaunch
           : DEFAULTS.openOnLaunch,
@@ -1081,6 +1090,20 @@ class SettingsStore {
   setExperimentWorkspace(value: boolean) {
     if (this.state.experimentWorkspace === value) return;
     this.state.experimentWorkspace = value;
+    this.persistDeviceNow();
+  }
+
+  /**
+   * Arms the chat runtime on this device.
+   *
+   * No confirm and nothing to clean up on the way out: turning it off hides the
+   * Chat button of the launcher and leaves open chat threads exactly where they
+   * are, which is what `docs/pilot.md` asks for. A thread already running is
+   * the workspace's, not this switch's.
+   */
+  setExperimentPilot(value: boolean) {
+    if (this.state.experimentPilot === value) return;
+    this.state.experimentPilot = value;
     this.persistDeviceNow();
   }
 

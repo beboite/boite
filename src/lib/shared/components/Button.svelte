@@ -30,6 +30,8 @@
     /** The app tooltip, for a control whose label does not say what it does. */
     tip?: TipParam;
     ariaLabel?: string;
+    /** A handle for the end-to-end scenarios, when no label is stable enough. */
+    testid?: string;
     /** Toggle state, for a button that is on or off rather than an action. */
     pressed?: boolean;
     /** Something is running behind it, for a control that stays enabled. */
@@ -53,6 +55,7 @@
     title,
     tip,
     ariaLabel,
+    testid,
     pressed,
     busy,
     class: extra = "",
@@ -103,6 +106,7 @@
   {title}
   use:tooltip={tip}
   aria-label={ariaLabel}
+  data-testid={testid}
   aria-pressed={pressed}
   aria-busy={busy}
   class={classes}

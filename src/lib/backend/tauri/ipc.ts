@@ -1,5 +1,5 @@
 import { invoke as tauriInvoke, type InvokeArgs, type InvokeOptions } from "@tauri-apps/api/core";
-import { logger } from "$lib/shared/services/logger.svelte";
+import { log } from "$lib/shared/log";
 
 /**
  * The door every Tauri command goes through, so a failure at the boundary is
@@ -31,12 +31,23 @@ import { logger } from "$lib/shared/services/logger.svelte";
 const QUIET_FOR_MS = 5_000;
 
 /**
- * Reporting one of these would come straight back through this door. The log
- * call is the obvious one; `read_app_log` and its neighbours are here because a
- * log panel that cannot read the file polls, and each attempt would append the
- * reason it failed to the file it cannot read.
+ * Reporting one of these would come straight back through this door. The two
+ * file commands are here because a log panel that cannot read the file polls,
+ * and each attempt would append the reason it failed to the file it cannot
+ * read.
  */
-const OWN_DOOR = new Set(["log_app_event", "read_app_log", "clear_app_log", "log_file_path"]);
+const OWN_DOOR = new Set([
+  "clear_app_log",
+  "log_file_path",
+  // The bus's five. `logs_write` above all: a batch that fails would be
+  // reported through the batcher that just failed, and the next flush would
+  // carry the report of the flush before it.
+  "logs_write",
+  "logs_tail",
+  "logs_query",
+  "logs_level",
+  "logs_subscribe",
+]);
 
 const lastSaid = new Map<string, number>();
 
@@ -63,7 +74,9 @@ function say(cmd: string, err: unknown) {
   if (OWN_DOOR.has(cmd)) return;
   const message = err instanceof Error ? err.message : String(err);
   if (!worthSaying(`${cmd}:${message}`, Date.now())) return;
-  logger.warn("ipc", `${cmd} refused: ${message}`);
+  // One line, on the bus's log, where a reader filters it by method rather
+  // than by matching a sentence.
+  log.warn("backend.call", "call.refused", { method: cmd, reason: message });
 }
 
 /**

@@ -21,6 +21,7 @@ import { untrack } from "svelte";
 import { notifications } from "$lib/features/notifications/store.svelte";
 import { settings } from "$lib/features/settings/store.svelte";
 import { logger } from "$lib/shared/services/logger.svelte";
+import { gitFailure, refreshLogLevel, type GitFailure } from "$lib/features/project/health";
 import { t } from "$lib/i18n/index.svelte";
 
 const LOG_PAGE = 80;
@@ -139,6 +140,14 @@ class GitStore {
   // Base path last scanned per scope, so the effect that triggers the scan
   // doesn't loop; a changed base (project switch, root cleared) rescans.
   private scannedBase = new Map<GitScope, string>();
+  /**
+   * The kind of the last refresh failure written to the log, per checkout.
+   *
+   * Kept beside `state.error` rather than read off it: the two git calls a
+   * refresh makes race, so one poll's text is not the next one's even when
+   * nothing about the folder changed.
+   */
+  private lastFailure = new Map<GitScope, GitFailure>();
 
   /**
    * Register a checkout and return the scope naming it. Safe to call from an
@@ -168,6 +177,7 @@ class GitStore {
       this.lastFetchAt.delete(scope);
       this.fetchFails.delete(scope);
       this.scannedBase.delete(scope);
+      this.lastFailure.delete(scope);
     }
   }
 
@@ -180,6 +190,7 @@ class GitStore {
     this.lastFetchAt.clear();
     this.fetchFails.clear();
     this.scannedBase.clear();
+    this.lastFailure.clear();
   }
 
   // Scan the project folder for nested git repos so the panel can offer them
@@ -248,6 +259,7 @@ class GitStore {
           previous.refsVersion !== info.refsVersion;
         const log = info.isRepo && shouldLoadLog ? await gitLog(cwd, LOG_PAGE, 0) : null;
         state.error = null;
+        this.lastFailure.delete(scope);
         state.isRepo = info.isRepo;
         state.branch = info.branch;
         state.upstream = info.upstream;
@@ -277,13 +289,23 @@ class GitStore {
           state.logHasMore = false;
         }
       } catch (err) {
-        // Only when it changes. This refresh is on a ten-second poll, so a
-        // project whose folder stopped being a repository wrote the same line
-        // six times a minute for as long as the app was open, and the lines
-        // that mattered were somewhere in between. The panel reports the
+        // Once per kind, and at the level the kind is worth. This refresh is
+        // on a ten-second poll, and a fresh install's Scratch project sits on
+        // the home directory, which is not a repository: `repoInfo` and
+        // `status` are asked together and reject with two different sentences,
+        // so a check on the text alone never held and the same non-event went
+        // to the log at `error` six times a minute. The panel reports the
         // failure through `state.error` either way.
         const text = errorText(err);
-        if (state.error !== text) logger.error("git", "refresh failed", err);
+        const kind = gitFailure(text);
+        if (this.lastFailure.get(scope) !== kind) {
+          this.lastFailure.set(scope, kind);
+          if (refreshLogLevel(kind) === "debug") {
+            logger.debug("git", "refresh found no repository", { cwd, kind });
+          } else {
+            logger.error("git", "refresh failed", err);
+          }
+        }
         state.error = text;
         if (options.notifyErrors) throw err;
       } finally {

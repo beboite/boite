@@ -19,7 +19,7 @@
  */
 
 import { app } from "./store.svelte";
-import { workspace } from "$lib/backend";
+import { backend, workspace } from "$lib/backend";
 import { logger } from "$lib/shared/services/logger.svelte";
 import { notifications } from "$lib/features/notifications/store.svelte";
 import { t } from "$lib/i18n/index.svelte";
@@ -30,6 +30,9 @@ import { createProject } from "$lib/features/project/api";
 import { moveThreadToProject } from "$lib/features/thread/move";
 import { withUnattendedArgs } from "$lib/features/thread/session";
 import { closeThread, launchAgent } from "$lib/features/thread/api";
+import { pilotCatalog } from "$lib/features/pilot/catalog.svelte";
+import { chatSpawnDecision } from "$lib/features/pilot/launch";
+import { openPilotSession } from "$lib/features/pilot/session";
 import { canSettle } from "$lib/domain/thread-settle";
 import {
   comboArgs,
@@ -85,6 +88,13 @@ interface SpawnRequest {
   delegationMode?: 'normal' | 'delegation';
   agent?: string | null;
   prompt?: string | null;
+  /**
+   * `"terminal"` or `"pilot"`, decided at the endpoint (`spawn_runtime` in
+   * `boite-agent-api`): what the request asked for, or the caller's own when it
+   * asked for nothing. Absent on a request written before the pilot existed,
+   * which reads as terminal like every other absent runtime.
+   */
+  runtime?: string | null;
 }
 
 interface CloseRequest {
@@ -118,7 +128,7 @@ interface PaneOpenRequest {
  * Three verbs and one shape, because they differ only in what they do once the
  * pane is found and every check before that is the same one. The endpoint has
  * usually run those checks already, off the window's own description; this runs
- * them again because the endpoint cannot see a window it does not have — a
+ * them again because the endpoint cannot see a window it does not have: a
  * headless boite dispatches these blind, and the device is the only side that
  * knows which panes exist. Same reasoning as `paneContentOf`: the frame is
  * created here, so the last word belongs here.
@@ -141,7 +151,7 @@ interface BrowserDriveRequest {
  * Unlike the drive verbs these carry a `requestId` and OWE an answer: the
  * host keeps the asking HTTP handler on the line until the webview resolves
  * it through the answer channel of the transport that carried the question
- * here (`answerBackend`). Every refusal therefore answers too — a dropped
+ * here (`answerBackend`). Every refusal therefore answers too: a dropped
  * question here is an agent staring at a timeout.
  */
 interface BrowserAskRequest {
@@ -201,7 +211,7 @@ function writtenOnThisMachine(from: RequestSource): boolean {
  * user's own shortcuts (matched on its label, because that is the name they see
  * and would tell an agent), a built-in CLI preset, and an icon key. Nothing
  * matching means falling back to the caller's own agent, which is nearly always
- * the one meant — an agent splitting its work reaches for another of itself.
+ * the one meant: an agent splitting its work reaches for another of itself.
  */
 export function resolveLaunch(
   agent: string | null | undefined,
@@ -349,6 +359,28 @@ async function handleSpawn(req: SpawnRequest, from: RequestSource) {
   // often in another project, and a spawn they never clicked used to take the
   // screen away mid-sentence. The toast is what says it happened.
   const args = withUnattendedArgs(launch.cmd, launch.args, launch.iconKey);
+  // Which runtime the worker is driven on, decided before the row is written:
+  // the five pilot columns have to be in the INSERT, since `threadPane` reads
+  // `runtime` in the same frame to know whether this thread gets a terminal or
+  // a conversation. The catalog is asked first because the answer depends on
+  // which drivers this machine actually has.
+  await pilotCatalog.ensure();
+  const decision = chatSpawnDecision({
+    runtime: req.runtime,
+    cmd: launch.cmd,
+    args,
+    agent: req.agent?.trim() || launch.label,
+    catalog: pilotCatalog.current,
+    experiment: settings.state.experimentPilot,
+  });
+  // The agent reads the sentence and asks again with a runtime that works. Said
+  // to the user too, since a worker they were told about never appeared.
+  if (decision.kind === "refused") {
+    notifications.error(t("thread.spawnNoChat", { agent: req.agent ?? launch.label }));
+    await answerRequest(req, { error: decision.reason }, from);
+    return;
+  }
+  const chat = decision.kind === "chat" ? decision.launch : null;
   const thread = await launchAgent(
     project,
     { ...launch, args },
@@ -356,18 +388,46 @@ async function handleSpawn(req: SpawnRequest, from: RequestSource) {
       focus: false,
       parentThreadId: req.parentThreadId,
       delegationMode: req.delegationMode,
+      pilot: chat,
       // Mounting the Terminal is what builds the argv, and the argv is where
       // the briefing goes. Queueing the prompt after the mount hands it to
       // nobody: `withPendingPrompt` has already read an empty queue, and the
       // agent opens at a bare prompt while the caller is told the hand-off
       // worked. A worktree hid it, because that mount waits for git and the
       // staging below wins, so it only bit projects that spawn threads in
-      // place.
-      deferActivation: !!prompt,
+      // place. None of it applies to a chat worker: it has no argv to be typed
+      // at, and its briefing is the turn sent below.
+      deferActivation: !!prompt && !chat,
     },
   );
   if (!thread) {
     await answerRequest(req, { error: "the terminal did not open" }, from);
+    return;
+  }
+  if (chat) {
+    // Awaited, unlike every other launch: the turn below needs a session, and
+    // the caller is holding its call open for an answer it can act on.
+    await openPilotSession(thread.id);
+    if (prompt) {
+      try {
+        await backend().pilot.startTurn(thread.id, prompt);
+      } catch (err) {
+        logger.warn("agent-request", "the briefing did not reach the chat worker", String(err));
+        await answerRequest(
+          req,
+          { error: "the worker opened but its first turn did not start", threadId: thread.id },
+          from,
+        );
+        notifications.success(
+          t("thread.spawnedIn", { label: launch.label, project: project.name }),
+        );
+        return;
+      }
+    }
+    await answerRequest(req, { ok: true, threadId: thread.id }, from);
+    notifications.success(
+      t("thread.spawnedIn", { label: launch.label, project: project.name }),
+    );
     return;
   }
   if (prompt) {
@@ -416,12 +476,12 @@ async function handleClose(req: CloseRequest, from: RequestSource) {
  * Show the user something beside the terminal that asked.
  *
  * The one agent request that changes nothing: it arranges panes. Which is
- * exactly why it is worth having — an agent that has just started a dev server
+ * exactly why it is worth having: an agent that has just started a dev server
  * or written a diff knows what is worth looking at, and printing a path and
  * hoping was the only way to say so.
  *
  * **It lands beside the caller and moves nothing else.** This used to make the
- * caller active first — its thread, its project, the terminal view — so that
+ * caller active first, its thread, its project, the terminal view, so that
  * the anchor below would resolve to it. That is a pane the user never clicked
  * taking the screen away from what they were reading, and an agent working in
  * the background did it every time it had something to show. The same
@@ -515,7 +575,7 @@ async function showFile(path: string, projectId: string): Promise<string | null>
  * host in its own window, so the address is checked here and not only at the
  * endpoint that received it: the same event also arrives from a remote boite,
  * which never went through that endpoint. Anything off this machine is the
- * user's call — the agent chose the page, and it is not the agent's window.
+ * user's call: the agent chose the page, and it is not the agent's window.
  */
 async function paneContentOf(
   req: PaneOpenRequest,
@@ -557,7 +617,7 @@ async function paneContentOf(
  * This used to read the group the page is drawing, which was the same rule as
  * "the user has to be looking at it". An agent's pane sits beside that agent's
  * own terminal and the user is very often reading another thread, or another
- * project, by the time the next call lands — and since every group stays
+ * project, by the time the next call lands, and since every group stays
  * mounted, that pane is loaded, driven and answering the whole time. Refusing
  * it left an agent that had just opened a page unable to read the page it had
  * just opened.
@@ -706,7 +766,7 @@ async function handleBrowserAsk(req: BrowserAskRequest, from: RequestSource) {
     // else here goes through the frame, which answers from a hidden group as
     // readily as from the drawn one; this photographs a rectangle of the
     // window, and that rectangle currently holds whatever group the user IS
-    // looking at. A wrong picture is worse than a refusal — an agent acts on
+    // looking at. A wrong picture is worse than a refusal: an agent acts on
     // it.
     if (!paneIsShown(pane.paneId)) {
       answer({
@@ -794,7 +854,7 @@ async function handle(req: AgentRequest, from: RequestSource) {
  * The same requests, arriving from a boite instead of from this machine.
  *
  * Every connected device gets the event, because the server has no way to know
- * which one is looking — so the first thing to do is find out whether this is
+ * which one is looking, so the first thing to do is find out whether this is
  * the device that acts on it. `agent.claimRequest` answers true exactly once
  * per id; two devices running the same move would kill one PTY twice and leave
  * a second worktree behind.

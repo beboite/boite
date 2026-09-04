@@ -10,8 +10,8 @@
 //! the server refuses to take a client's word for a thread's runtime state and
 //! the desktop did not, so a stale snapshot in the window could put `running`
 //! back on a thread whose process had ended. The desktop knew about the shape of
-//! the problem — `updateThreadTitle` exists precisely because a whole-row
-//! `REPLACE` clobbers concurrent writes — and had solved it for one column.
+//! the problem, `updateThreadTitle` exists precisely because a whole-row
+//! `REPLACE` clobbers concurrent writes, and had solved it for one column.
 //!
 //! Reading across those rows lives here too. [`Records::Search`] answers over
 //! the todos and the journal at once, and the store is what it needs; that it
@@ -25,6 +25,7 @@
 //! `Host` method per host quirk.
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use serde_json::{json, Value};
 
@@ -189,7 +190,7 @@ pub enum Records {
     /// turn and none of them is worth a write. What the row records is that the
     /// thread was on during this run of the app, which is the only way a later
     /// launch can tell a thread that was cut off from one that has never been
-    /// started — and drawing those two the same way is what made every row on
+    /// started, and drawing those two the same way is what made every row on
     /// screen asleep on every boot.
     ///
     /// The exit code goes with it: it belongs to the run that ended, and a
@@ -440,19 +441,26 @@ impl Records {
         if let Records::ProjectCreate { project } = &self {
             host.ensure_new_project_path(&project.cwd)?;
         }
+        if let Records::ThreadCreate { thread } = &self {
+            check_runtime(thread, host)?;
+        }
         if let Records::Search { transcripts, .. } = &mut self {
             *transcripts = host.transcripts_dir();
         }
         let store = host
             .store()
             .ok_or("this Boite keeps no records, so there is nothing to read or write")?;
-        Ok(Ready::Records(self, store, host.telemetry()))
+        // Carried for the two verbs that end a chat thread. A row can be
+        // settled or deleted from any front door, and the child behind it is
+        // held by the host, not by the store.
+        Ok(Ready::Records(self, store, host.telemetry(), host.pilot()))
     }
 
     pub(super) fn run(
         self,
         store: &Store,
         telemetry: Option<&crate::telemetry::TelemetryRuntime>,
+        pilot: Option<&Arc<boite_pilot::Runtime>>,
     ) -> Result<Value, String> {
         Ok(match self {
             Records::ProjectList => value_of(store.load_projects()?),
@@ -557,6 +565,14 @@ impl Records {
                 if settled && !crate::settle::can_settle(&status) {
                     return Err(crate::settle::refusal(&status));
                 }
+                // Put away is put away for both runtimes. A terminal row's PTY
+                // is reclaimed by the window that settled it; a chat row's
+                // child is held here, and left running it would go on burning
+                // tokens for a thread nobody can see. The native session stays
+                // resumable, so bringing the thread back opens on it.
+                if settled {
+                    crate::pilot_host::stop_detached(pilot, &id);
+                }
                 store.update_thread_field(
                     &id,
                     ThreadCol::SettledAt,
@@ -569,6 +585,11 @@ impl Records {
                 json!(null)
             }
             Records::ThreadDelete { id } => {
+                // Before the row goes, not after: the purge takes the journal
+                // and the items with it, and a session still writing onto a
+                // thread that no longer exists is a child nothing can name any
+                // more, let alone stop.
+                crate::pilot_host::stop_detached(pilot, &id);
                 let kind = store.load_threads().ok().and_then(|threads| {
                     threads.into_iter().find(|t| t.id == id).map(|t| {
                         crate::telemetry::classify_thread(&t.cmd, t.icon_key.as_deref()).0
@@ -662,6 +683,58 @@ impl Records {
     }
 }
 
+/// Whether the runtime a new row names is one this Boite can actually drive.
+///
+/// A row is the only place the five pilot columns come from: `pilot.thread.open`
+/// reads them back and refuses a row that names no driver, so a create that
+/// took the caller's word for it would leave a chat thread in the sidebar that
+/// nothing can open, with the failure arriving one click later and somewhere
+/// else. Checked here rather than in the store because the answer is the
+/// host's: a driver list belongs to the runtime, and a host without one has no
+/// chat threads at all.
+///
+/// A `terminal` row is not checked: it has no columns to check, and the
+/// default is what every row written before the pilot carries.
+fn check_runtime(thread: &Thread, host: &dyn Host) -> Result<(), String> {
+    if thread.runtime == crate::model::RUNTIME_TERMINAL {
+        return Ok(());
+    }
+    if thread.runtime != crate::model::RUNTIME_PILOT {
+        return Err(format!(
+            "'{}' is not a runtime: a thread is 'terminal' or 'pilot'",
+            thread.runtime
+        ));
+    }
+    let driver = thread
+        .pilot_driver
+        .as_deref()
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .ok_or("a chat thread names the driver that answers on it, and this row names none")?;
+    let runtime = host
+        .pilot()
+        .ok_or("this Boite has no pilot runtime, so it cannot open a chat thread")?;
+    let known = runtime.drivers();
+    if !known.iter().any(|id| id == driver) {
+        return Err(format!(
+            "no pilot driver called '{driver}' here. This build drives {}.",
+            known.join(", ")
+        ));
+    }
+    // The two blobs are read back with `serde_json::from_str` at open. A row
+    // carrying text neither parses is a thread that opens once and then never
+    // again, so it is refused at the write instead.
+    if let Some(text) = thread.pilot_instance.as_deref().filter(|t| !t.is_empty()) {
+        serde_json::from_str::<boite_pilot::Instance>(text)
+            .map_err(|e| format!("this chat thread's instance is not one: {e}"))?;
+    }
+    if let Some(text) = thread.pilot_options.as_deref().filter(|t| !t.is_empty()) {
+        serde_json::from_str::<boite_pilot::Options>(text)
+            .map_err(|e| format!("this chat thread's options are not options: {e}"))?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -697,6 +770,24 @@ mod tests {
         }
         fn store(&self) -> Option<Arc<Store>> {
             Some(self.store.clone())
+        }
+    }
+
+    /// The same host, plus the pilot runtime the two ending verbs reach for.
+    struct RowsWithPilot {
+        rows: Rows,
+        pilot: Arc<boite_pilot::Runtime>,
+    }
+
+    impl Host for RowsWithPilot {
+        fn roots(&self) -> &ProjectRoots {
+            &self.rows.roots
+        }
+        fn store(&self) -> Option<Arc<Store>> {
+            Some(self.rows.store.clone())
+        }
+        fn pilot(&self) -> Option<Arc<boite_pilot::Runtime>> {
+            Some(self.pilot.clone())
         }
     }
 
@@ -747,8 +838,8 @@ mod tests {
         let created = ask(&host, "thread.create", row("running", json!(null))).unwrap();
         assert_eq!(created["status"], json!("idle"));
 
-        // The process ends. That is written by whatever was watching it — the
-        // registry on the server, the PTY reader on the desktop — through the
+        // The process ends. That is written by whatever was watching it, the
+        // registry on the server, the PTY reader on the desktop, through the
         // two columns no patch exposes, which is why `ThreadPatch` does not
         // carry them.
         let store = host.store().unwrap();
@@ -769,8 +860,8 @@ mod tests {
     /// The one status the window writes, and what a re-save does to it.
     ///
     /// The mark has to survive everything the window writes about a thread while
-    /// it runs, because a session id captured a second after launch is a re-save
-    /// — and a re-save that stored what the row *reads as* would turn the mark
+    /// it runs, because a session id captured a second after launch is a re-save,
+    /// and a re-save that stored what the row *reads as* would turn the mark
     /// into `stopped`, which the next boot would then decay to nothing. The
     /// thread would have been on and would come back drawn as one that never ran.
     #[test]
@@ -960,6 +1051,66 @@ mod tests {
         assert_eq!(read(json!(100_000)), SEARCH_LIMIT_MAX as usize);
         assert_eq!(read(json!(0)), 1);
         assert_eq!(read(Value::Null), SEARCH_LIMIT_DEFAULT as usize);
+    }
+
+    /// A chat thread put away or deleted takes its child with it.
+    ///
+    /// The row leaving the sidebar is what the user did; the process behind it
+    /// is what nobody could see afterwards. A settled pilot row used to keep its
+    /// agent running, answering nothing and spending tokens, and a deleted one
+    /// went further: the purge takes the journal and the items, so the child was
+    /// writing onto a thread that no longer existed and nothing could name it to
+    /// stop it.
+    ///
+    /// Driven with the scripted driver rather than a mock, so what is asserted
+    /// is a real session closing.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn settling_or_deleting_a_chat_row_stops_its_session() {
+        use boite_pilot::scripted::{Recorder, Scenario, ScriptedDriver};
+
+        let recorder = Recorder::new();
+        let pilot = Arc::new(boite_pilot::Runtime::new(recorder));
+        pilot.register(Arc::new(ScriptedDriver::with_scenario(Scenario::default())));
+        let host = RowsWithPilot {
+            rows: Rows::new("pilot-settle"),
+            pilot: pilot.clone(),
+        };
+        let open = |id: &str| boite_pilot::OpenSpec {
+            thread_id: id.to_string(),
+            cwd: std::env::temp_dir(),
+            driver: "scripted".into(),
+            ..Default::default()
+        };
+        pilot.open(open("settled")).await.expect("a session");
+        pilot.open(open("deleted")).await.expect("a session");
+        // A neighbour, so what is asserted is one session closing and not the
+        // runtime being emptied.
+        pilot.open(open("kept")).await.expect("a session");
+        assert_eq!(pilot.open_threads(), vec!["deleted", "kept", "settled"]);
+
+        ask(
+            &host,
+            "thread.settle",
+            json!({ "threadId": "settled", "status": "idle", "settled": true }),
+        )
+        .unwrap();
+        ask(&host, "thread.delete", json!({ "threadId": "deleted" })).unwrap();
+
+        assert_eq!(
+            pilot.open_threads(),
+            vec!["kept"],
+            "the thread that was neither settled nor deleted still answers"
+        );
+
+        // And bringing a thread back does not stop anything: the refusal to
+        // settle is the only direction that is guarded.
+        ask(
+            &host,
+            "thread.settle",
+            json!({ "threadId": "kept", "status": "idle", "settled": false }),
+        )
+        .unwrap();
+        assert_eq!(pilot.open_threads(), vec!["kept"]);
     }
 
     /// Deleting a thread takes its identity with it. The row is what a public key

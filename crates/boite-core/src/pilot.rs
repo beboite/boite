@@ -1,0 +1,1269 @@
+//! What one pilot event does to the rows.
+//!
+//! The crate owns the child processes and emits canonical events; this module
+//! is the only thing that turns one of those into a journal row, a timeline
+//! item, an approval card or a column on `threads`. Synchronous and free of any
+//! executor, so both hosts call it from whatever thread the sink runs on and
+//! `boite-core` keeps taking no async runtime.
+//!
+//! Two rules the shape enforces rather than documents:
+//!
+//! - **A text delta is never written.** `item.delta` appends to a
+//!   [`DeltaBuffer`] the host keeps in memory and nothing else; the body that
+//!   lands on the row is the one `item.completed` carries, falling back to the
+//!   buffer when the driver completed an item without repeating its text.
+//! - **What to push is the projection's answer, not the caller's guess.**
+//!   [`Projection`] says whether the event goes to subscribers and whether the
+//!   `threads` row changed enough for a `thread.updated`, so the desktop and
+//!   the server cannot drift on when a sidebar refreshes.
+
+use std::collections::HashMap;
+
+use parking_lot::Mutex;
+use serde_json::{json, Value};
+
+use boite_pilot::{
+    ExitReason, Item, ItemKind, PilotEvent, Request, RequestAnswer, RequestOption, RequestOutcome,
+    Status,
+};
+
+use crate::approval;
+use crate::checkpoint::{self, Edge};
+use crate::store::{ColVal, PilotItemRow, Store, ThreadCol, PILOT_APPROVAL_ACTION};
+
+/// The text a turn has streamed so far, per item, for one host.
+///
+/// In memory and nowhere else. A client that arrives mid-turn reads the items
+/// that are already complete and then subscribes, which is why losing this on a
+/// restart costs nothing: the completed body is on the row, and an item still
+/// streaming when the host went away has no final text to have kept.
+#[derive(Debug, Default)]
+pub struct DeltaBuffer {
+    text: Mutex<HashMap<String, String>>,
+}
+
+impl DeltaBuffer {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Appends and hands back nothing: the coalescing task reads the deltas off
+    /// the event it was given, and this is only what completes an item that
+    /// arrived without its text.
+    pub fn append(&self, item_id: &str, text: &str) {
+        let mut buffered = self.text.lock();
+        buffered
+            .entry(item_id.to_string())
+            .or_default()
+            .push_str(text);
+    }
+
+    /// Takes what an item streamed, leaving nothing behind.
+    pub fn take(&self, item_id: &str) -> Option<String> {
+        self.text.lock().remove(item_id)
+    }
+
+    /// Drops everything a thread buffered, at stop and at open.
+    pub fn clear(&self) {
+        self.text.lock().clear();
+    }
+}
+
+/// What one projected event asks the host to do next.
+#[derive(Debug, Default, Clone, PartialEq)]
+pub struct Projection {
+    /// The journal sequence written, or `None` for an event that is live only.
+    pub seq: Option<i64>,
+    /// Whether subscribers should receive the event itself.
+    ///
+    /// True for everything: a delta is what the chat pane paints and a status
+    /// is what the sidebar reads, and neither being stored is a fact about the
+    /// database rather than about the push.
+    pub push: bool,
+    /// Whether the `threads` row changed, so a `thread.updated` has something
+    /// to carry.
+    pub thread_updated: bool,
+    /// The open approvals table changed: a request opened, or was answered.
+    pub approvals_changed: bool,
+    /// What the thread's status now is, when this event decided one.
+    pub status: Option<Status>,
+    /// The native session id this event named, when it named one.
+    pub native_session_id: Option<String>,
+}
+
+/// Applies one event to the rows of one thread.
+///
+/// Errors are the store's own strings and are returned rather than swallowed:
+/// the sink logs them at `warn`, because a projection that silently failed is a
+/// timeline that quietly stops growing.
+pub fn project(
+    store: &Store,
+    thread_id: &str,
+    event: &PilotEvent,
+    buffer: &DeltaBuffer,
+) -> Result<Projection, String> {
+    let mut out = Projection {
+        push: true,
+        ..Default::default()
+    };
+
+    // The journal first, so the sequence it mints is the one the item carries.
+    // An item's `seq` is what a cursor read pages on, and taking it from
+    // anywhere else would let two items on one thread share a position.
+    if event.is_journaled() {
+        let payload = serde_json::to_value(event).map_err(|e| e.to_string())?;
+        out.seq = Some(store.pilot_append_event(thread_id, event.kind(), &payload)?);
+    }
+    let seq = out.seq.unwrap_or(0);
+
+    match event {
+        PilotEvent::SessionStarted {
+            native_session_id,
+            model,
+            ..
+        } => {
+            // The bridge between the two runtimes: with this written, "open in
+            // a terminal" is `claude --resume <id>` and nothing has to guess.
+            if let Some(id) = native_session_id {
+                store.update_thread_field(
+                    thread_id,
+                    ThreadCol::SessionId,
+                    ColVal::Text(id.clone()),
+                )?;
+                out.native_session_id = Some(id.clone());
+                out.thread_updated = true;
+            }
+            if let Some(model) = model {
+                store.update_thread_field(
+                    thread_id,
+                    ThreadCol::PilotModel,
+                    ColVal::Text(model.clone()),
+                )?;
+                out.thread_updated = true;
+            }
+        }
+
+        PilotEvent::SessionExited { reason } => {
+            let state = match reason {
+                ExitReason::Stopped => "stopped",
+                ExitReason::Crashed { .. } => "crashed",
+                ExitReason::Killed => "killed",
+            };
+            store.update_thread_field(
+                thread_id,
+                ThreadCol::Status,
+                ColVal::Text("stopped".to_string()),
+            )?;
+            out.thread_updated = true;
+            out.status = Some(Status::Idle);
+            tracing::debug!(thread = thread_id, reason = state, "pilot.session.exited");
+        }
+
+        PilotEvent::TurnStarted { turn_id } => {
+            // The checkpoint `start` edge: what the tree looked like before the
+            // agent touched anything. It rides on the turn item rather than in a
+            // second table, so `turn.completed` finds it by reading the row it
+            // is about to overwrite.
+            let mut body = json!({ "turnId": turn_id });
+            if let Some(sha) = capture(store, thread_id, Edge::Start) {
+                body["checkpointStart"] = json!(sha);
+            }
+            write_item(store, thread_id, seq, &turn_item(turn_id, "running", body))?;
+            out.thread_updated = true;
+        }
+
+        PilotEvent::TurnCompleted {
+            turn_id,
+            duration_ms,
+            usage,
+        } => {
+            let mut body = json!({
+                "turnId": turn_id,
+                "durationMs": duration_ms,
+                "usage": usage,
+            });
+            // The `end` edge, and what the two edges say the turn changed. The
+            // start is read back off the running row rather than held in memory:
+            // a host that restarted mid-turn still finds the edge its
+            // predecessor took.
+            if let Some(from) = started_at(store, turn_id) {
+                body["checkpointStart"] = json!(from);
+                if let Some(to) = capture(store, thread_id, Edge::End) {
+                    body["checkpointEnd"] = json!(to);
+                    if let Some(diff) = turn_diff(store, thread_id, &from, &to) {
+                        body["diff"] = diff;
+                    }
+                }
+            }
+            write_item(store, thread_id, seq, &turn_item(turn_id, "completed", body))?;
+            out.thread_updated = true;
+        }
+
+        PilotEvent::TurnAborted { turn_id, reason } => {
+            let body = json!({ "turnId": turn_id, "reason": reason });
+            write_item(store, thread_id, seq, &turn_item(turn_id, "aborted", body))?;
+            out.thread_updated = true;
+        }
+
+        PilotEvent::ItemStarted { item } => {
+            write_item(store, thread_id, seq, &row_of(item, "started", None))?;
+        }
+
+        // The one event that writes nothing. Appending to the buffer is the
+        // whole of it, and the push is what the pane paints.
+        PilotEvent::ItemDelta { item_id, text } => {
+            buffer.append(item_id, text);
+        }
+
+        PilotEvent::ItemCompleted { item } => {
+            // A driver that streamed the text and completed the item with an
+            // empty body means the buffer, not an empty card.
+            let streamed = buffer.take(&item.id);
+            write_item(store, thread_id, seq, &row_of(item, "completed", streamed))?;
+        }
+
+        PilotEvent::RequestOpened { request } => {
+            write_item(store, thread_id, seq, &request_row(request, "open", None))?;
+            open_approval(store, thread_id, request)?;
+            out.approvals_changed = true;
+            out.thread_updated = true;
+            out.status = Some(Status::Waiting);
+            tracing::info!(
+                thread = thread_id,
+                request = request.id,
+                tool = request.tool_name.as_deref().unwrap_or(""),
+                "pilot.request.opened"
+            );
+        }
+
+        PilotEvent::RequestResolved {
+            request_id,
+            outcome,
+        } => {
+            let state = match outcome {
+                RequestOutcome::Allowed => "allowed",
+                RequestOutcome::Denied => "denied",
+                RequestOutcome::Cancelled => "cancelled",
+            };
+            // The item keeps the request's own id, so this updates the card the
+            // dock is drawing rather than opening a second one. And it keeps
+            // what the request *was*: the kind, the tool, its input, the title,
+            // the description and the options the driver offered. Written as
+            // the outcome alone, an answered card read "Question" after a
+            // reload whatever tool had asked, because the only thing left on
+            // the row was the word `allowed`.
+            let id = request_item_id(request_id);
+            let mut body = existing_body(store, &id);
+            body.insert("requestId".to_string(), json!(request_id));
+            body.insert("outcome".to_string(), json!(state));
+            let row = PilotItemRow {
+                id,
+                thread_id: thread_id.to_string(),
+                seq,
+                turn_id: None,
+                kind: "request".to_string(),
+                state: state.to_string(),
+                body: Value::Object(body).to_string(),
+                created_ms: crate::pilot::now_ms(),
+                updated_ms: crate::pilot::now_ms(),
+            };
+            store.pilot_upsert_item(&row)?;
+            if let Some(approval_id) = store.pilot_approval_of_request(thread_id, request_id) {
+                let verdict = match outcome {
+                    RequestOutcome::Allowed => approval::Verdict::Allowed,
+                    _ => approval::Verdict::Refused,
+                };
+                store.decide_approval(&approval_id, verdict, now_ms())?;
+            }
+            out.approvals_changed = true;
+            out.thread_updated = true;
+            tracing::info!(
+                thread = thread_id,
+                request = request_id,
+                outcome = state,
+                "pilot.request.resolved"
+            );
+        }
+
+        // The only status source a pilot row has: no TTL, no screen reading, no
+        // pid registry. Written onto the same column the terminal runtime uses
+        // (`thread.started` writes `running` there), because that is the field
+        // the sidebar reads. Written here rather than by the chat pane, which
+        // was the whole defect: a status that only reached the sidebar while
+        // somebody had the pane open, and a chat thread working in a hidden
+        // group that read `ready` for as long as nobody looked at it.
+        PilotEvent::StatusChanged { status } => {
+            store.update_thread_field(
+                thread_id,
+                ThreadCol::Status,
+                ColVal::Text(status_word(*status).to_string()),
+            )?;
+            out.thread_updated = true;
+            out.status = Some(*status);
+        }
+
+        PilotEvent::ModelChanged { model } => {
+            store.update_thread_field(
+                thread_id,
+                ThreadCol::PilotModel,
+                ColVal::Text(model.clone()),
+            )?;
+            out.thread_updated = true;
+        }
+
+        // Kept in the journal for the usage panel to read back; nothing on the
+        // row depends on it, so the sidebar is not woken for one.
+        PilotEvent::UsageUpdated { .. } => {}
+
+        PilotEvent::Error { message, turn_id } => {
+            let id = format!("error-{seq}");
+            let row = PilotItemRow {
+                id,
+                thread_id: thread_id.to_string(),
+                seq,
+                turn_id: turn_id.clone(),
+                kind: "error".to_string(),
+                state: "completed".to_string(),
+                body: json!({ "message": message }).to_string(),
+                created_ms: now_ms(),
+                updated_ms: now_ms(),
+            };
+            store.pilot_upsert_item(&row)?;
+            out.thread_updated = true;
+            tracing::warn!(thread = thread_id, reason = %message, "pilot.error");
+        }
+    }
+
+    Ok(out)
+}
+
+/// The status a pilot row reads, worked out from what the projection saw.
+///
+/// `waiting` outranks `busy`, a question asked of the user being the user's,
+/// and the words are the ones `statusEngine.ts` already draws for a terminal
+/// thread so the sidebar needs no second vocabulary.
+pub fn status_word(status: Status) -> &'static str {
+    match status {
+        Status::Busy => "running",
+        Status::Waiting => "waiting",
+        Status::Idle => "ready",
+    }
+}
+
+/// The answer a chosen option maps to.
+///
+/// The vocabulary is closed here rather than at the transports: an option value
+/// is the driver's own opaque string, and the two words boite understands are
+/// what an approval card offers. Anything else is a deny carrying the label, so
+/// a driver that grows a third option refuses safely instead of running.
+pub fn answer_of_option(value: &str, options: &[RequestOption]) -> RequestAnswer {
+    match value {
+        "allow" | "allow_always" | "yes" => RequestAnswer::allow(),
+        "deny" | "no" => RequestAnswer::deny("the user refused"),
+        other => {
+            if options.iter().any(|option| option.value == other) {
+                RequestAnswer::allow()
+            } else {
+                RequestAnswer::deny("the user refused")
+            }
+        }
+    }
+}
+
+/// The item id a request's card carries. Derived from the request id so
+/// `request.resolved` finds the row `request.opened` wrote.
+pub fn request_item_id(request_id: &str) -> String {
+    format!("request:{request_id}")
+}
+
+/// The item id the user's own message of a turn carries.
+///
+/// Derived from the turn rather than minted, so the host can write the card
+/// before the prompt goes out and a resend of the same turn updates one row
+/// instead of stacking two.
+pub fn user_message_item_id(turn_id: &str) -> String {
+    format!("{turn_id}#user")
+}
+
+/// The body a row already carries, as an object.
+///
+/// Empty for a row that is not there yet or whose body is not an object, which
+/// is the honest answer: an update merges onto what it finds, and finding
+/// nothing means writing what it was given.
+fn existing_body(store: &Store, item_id: &str) -> serde_json::Map<String, Value> {
+    store
+        .pilot_item(item_id)
+        .ok()
+        .flatten()
+        .and_then(|row| serde_json::from_str::<Value>(&row.body).ok())
+        .and_then(|value| match value {
+            Value::Object(map) => Some(map),
+            _ => None,
+        })
+        .unwrap_or_default()
+}
+
+/// Writes one boite-authored line onto a thread's timeline.
+///
+/// Goes through [`project`] rather than straight at the store so the notice
+/// takes a journal sequence like every other item and a cursor read finds it in
+/// order. Nothing pushes it live, and nothing has to: the only thing that writes
+/// one is a restart, and the `session.started` right behind it is what wakes the
+/// pane.
+pub fn write_notice(store: &Store, thread_id: &str, text: &str) -> Result<(), String> {
+    let item = Item::new(format!("notice-{}", now_ms()), ItemKind::Notice, None)
+        .with_body(json!({ "text": text }));
+    project(
+        store,
+        thread_id,
+        &PilotEvent::ItemCompleted { item },
+        &DeltaBuffer::new(),
+    )
+    .map(|_| ())
+}
+
+/// The item id a turn's row carries, so both edges write the same row.
+pub fn turn_item_id(turn_id: &str) -> String {
+    format!("turn:{turn_id}")
+}
+
+/// The repository a thread's turns are checkpointed in.
+///
+/// Its own worktree when it has one, the project's folder otherwise: the same
+/// answer `command::pilot::thread_cwd` hands the child, so a turn is measured in
+/// the checkout it ran in.
+fn thread_repo(store: &Store, thread_id: &str) -> Option<String> {
+    let thread = store.load_thread(thread_id).ok().flatten()?;
+    if let Some(worktree) = thread.worktree_path.filter(|path| !path.is_empty()) {
+        return Some(worktree);
+    }
+    store
+        .load_projects()
+        .ok()?
+        .into_iter()
+        .find(|project| project.id == thread.project_id)
+        .map(|project| project.cwd)
+}
+
+/// Takes one edge of a turn, or answers that there was nothing to take.
+///
+/// A capture never blocks a turn: a directory that is not a repository answers
+/// `None` quietly, and anything that actually failed is logged and dropped. The
+/// turn item is written either way, without a summary under it.
+fn capture(store: &Store, thread_id: &str, edge: Edge) -> Option<String> {
+    let repo = thread_repo(store, thread_id)?;
+    match checkpoint::capture_blocking(&repo, thread_id, edge) {
+        Ok(taken) => taken.map(|point| point.sha),
+        Err(failure) => {
+            tracing::warn!(thread = thread_id, reason = %failure, "pilot.checkpoint.failed");
+            None
+        }
+    }
+}
+
+/// The `start` edge a running turn already recorded.
+fn started_at(store: &Store, turn_id: &str) -> Option<String> {
+    let row = store.pilot_item(&turn_item_id(turn_id)).ok().flatten()?;
+    serde_json::from_str::<Value>(&row.body)
+        .ok()?
+        .get("checkpointStart")
+        .and_then(|value| value.as_str())
+        .map(str::to_string)
+}
+
+/// What one turn changed, as the timeline footer reads it.
+///
+/// The three counts and the file list, and no patch: the footer draws names and
+/// a click opens the editor pane on `fileVersions`, which reads the contents
+/// itself. A whole unified diff through the IPC for every turn is what the
+/// budget table forbids.
+fn turn_diff(store: &Store, thread_id: &str, from: &str, to: &str) -> Option<Value> {
+    let repo = thread_repo(store, thread_id)?;
+    match checkpoint::diff_blocking(&repo, from, to, false) {
+        Ok(diff) => {
+            let additions: u32 = diff.files.iter().map(|file| file.additions).sum();
+            let deletions: u32 = diff.files.iter().map(|file| file.deletions).sum();
+            Some(json!({
+                "files": diff.files.len(),
+                "additions": additions,
+                "deletions": deletions,
+                "fileList": diff.files,
+            }))
+        }
+        Err(failure) => {
+            tracing::warn!(thread = thread_id, reason = %failure, "pilot.checkpoint.diff.failed");
+            None
+        }
+    }
+}
+
+fn turn_item(turn_id: &str, state: &str, body: Value) -> PilotItemRow {
+    PilotItemRow {
+        id: turn_item_id(turn_id),
+        thread_id: String::new(),
+        seq: 0,
+        turn_id: Some(turn_id.to_string()),
+        kind: "turn".to_string(),
+        state: state.to_string(),
+        body: body.to_string(),
+        created_ms: now_ms(),
+        updated_ms: now_ms(),
+    }
+}
+
+fn row_of(item: &Item, state: &str, streamed: Option<String>) -> PilotItemRow {
+    let mut body = item.body.clone();
+    if let Some(text) = streamed {
+        let empty = match &body {
+            Value::Null => true,
+            Value::Object(map) => map
+                .get("text")
+                .and_then(|v| v.as_str())
+                .map(str::is_empty)
+                .unwrap_or(!map.contains_key("text")),
+            _ => false,
+        };
+        if empty {
+            match &mut body {
+                Value::Object(map) => {
+                    map.insert("text".to_string(), json!(text));
+                }
+                other => *other = json!({ "text": text }),
+            }
+        }
+    }
+    PilotItemRow {
+        id: item.id.clone(),
+        thread_id: String::new(),
+        seq: 0,
+        turn_id: item.turn_id.clone(),
+        kind: item_kind(item.kind).to_string(),
+        state: state.to_string(),
+        body: body.to_string(),
+        created_ms: now_ms(),
+        updated_ms: now_ms(),
+    }
+}
+
+fn request_row(request: &Request, state: &str, seq: Option<i64>) -> PilotItemRow {
+    PilotItemRow {
+        id: request_item_id(&request.id),
+        thread_id: String::new(),
+        seq: seq.unwrap_or(0),
+        turn_id: None,
+        kind: "request".to_string(),
+        state: state.to_string(),
+        body: serde_json::to_string(request).unwrap_or_else(|_| "{}".to_string()),
+        created_ms: now_ms(),
+        updated_ms: now_ms(),
+    }
+}
+
+/// Fills in the two fields the callers above cannot know, then writes.
+fn write_item(
+    store: &Store,
+    thread_id: &str,
+    seq: i64,
+    row: &PilotItemRow,
+) -> Result<(), String> {
+    let mut row = row.clone();
+    row.thread_id = thread_id.to_string();
+    row.seq = seq;
+    store.pilot_upsert_item(&row)
+}
+
+/// Mirrors an open request into the approvals table.
+///
+/// The options travel in the request body, opaque, so the dock draws exactly
+/// what the driver offered and `pilot.request.respond` hands the chosen value
+/// back untouched.
+fn open_approval(store: &Store, thread_id: &str, request: &Request) -> Result<(), String> {
+    let project_id = store.project_of_thread(thread_id).unwrap_or_default();
+    let pending = approval::Pending {
+        id: format!("pilot-{}-{}", thread_id, request.id),
+        project_id,
+        thread_id: thread_id.to_string(),
+        action: PILOT_APPROVAL_ACTION.to_string(),
+        // The request id, so answering one is a lookup. What the card shows
+        // comes out of the stored request beside it.
+        detail: request.id.clone(),
+        created_at: now_ms(),
+    };
+    let body = serde_json::to_value(request).map_err(|e| e.to_string())?;
+    store.open_approval(&pending, &json!({ "threadId": thread_id, "request": body }))
+}
+
+fn item_kind(kind: ItemKind) -> &'static str {
+    match kind {
+        ItemKind::AssistantText => "assistant_text",
+        ItemKind::Reasoning => "reasoning",
+        ItemKind::ToolCall => "tool_call",
+        ItemKind::Command => "command",
+        ItemKind::FileChange => "file_change",
+        ItemKind::Plan => "plan",
+        ItemKind::UserMessage => "user_message",
+        ItemKind::Error => "error",
+        ItemKind::Notice => "notice",
+    }
+}
+
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use boite_pilot::{RequestKind, Usage};
+
+    fn store() -> Store {
+        let path = std::env::temp_dir().join(format!(
+            "boite-pilot-projection-{}-{:?}.db",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_file(&path);
+        Store::open(&path).expect("open")
+    }
+
+    fn apply(store: &Store, buffer: &DeltaBuffer, event: PilotEvent) -> Projection {
+        project(store, "t1", &event, buffer).expect("project")
+    }
+
+    /// A `runtime = pilot` row on project `p1`, for the tests that need the
+    /// projection to be able to find a directory.
+    fn pilot_thread_row() -> crate::model::Thread {
+        crate::model::Thread {
+            id: "t1".into(),
+            project_id: "p1".into(),
+            pty_id: None,
+            label: "chat".into(),
+            title: None,
+            cmd: "claude".into(),
+            args: vec![],
+            icon_key: None,
+            icon_color: None,
+            session_id: None,
+            status: "idle".into(),
+            exit_code: None,
+            created_at: 0,
+            auto_slept: false,
+            keep_awake: false,
+            worktree_path: None,
+            settled_at: None,
+            parent_thread_id: None,
+            delegation_mode: None,
+            delegation_status: None,
+            role: None,
+            orchestrator_scope: None,
+            accept_dispatch: true,
+            runtime: crate::model::RUNTIME_PILOT.into(),
+            pilot_driver: Some("claude".into()),
+            pilot_instance: None,
+            pilot_model: None,
+            pilot_options: None,
+        }
+    }
+
+    /// The assertion the budget table names: a turn of two hundred deltas costs
+    /// the database nothing at all.
+    #[test]
+    fn two_hundred_deltas_write_no_row() {
+        let store = store();
+        let buffer = DeltaBuffer::new();
+        apply(
+            &store,
+            &buffer,
+            PilotEvent::ItemStarted {
+                item: Item::new("i1", ItemKind::AssistantText, Some("turn-1".into())),
+            },
+        );
+        let (events_before, items_before) = store.pilot_counts("t1").unwrap();
+        for _ in 0..200 {
+            apply(
+                &store,
+                &buffer,
+                PilotEvent::ItemDelta {
+                    item_id: "i1".into(),
+                    text: "x".into(),
+                },
+            );
+        }
+        let (events_after, items_after) = store.pilot_counts("t1").unwrap();
+        assert_eq!(events_after, events_before, "a delta is never journaled");
+        assert_eq!(items_after, items_before, "a delta never touches an item");
+
+        // And the text was kept: completing with an empty body writes what the
+        // deltas carried rather than an empty card.
+        apply(
+            &store,
+            &buffer,
+            PilotEvent::ItemCompleted {
+                item: Item::new("i1", ItemKind::AssistantText, Some("turn-1".into())),
+            },
+        );
+        let items = store.pilot_items("t1", 0, 10).unwrap();
+        let row = items.iter().find(|row| row.id == "i1").expect("the item");
+        assert_eq!(row.state, "completed");
+        assert!(row.body.contains(&"x".repeat(200)), "{}", row.body);
+    }
+
+    /// The chat row the projection writes onto.
+    fn chat_row(store: &Store) {
+        store
+            .save_thread(&crate::model::Thread {
+                id: "t1".into(),
+                project_id: "p1".into(),
+                pty_id: None,
+                label: "chat".into(),
+                title: None,
+                cmd: "claude".into(),
+                args: vec![],
+                icon_key: None,
+                icon_color: None,
+                session_id: None,
+                status: "idle".into(),
+                exit_code: None,
+                created_at: 0,
+                auto_slept: false,
+                keep_awake: false,
+                worktree_path: None,
+                settled_at: None,
+                parent_thread_id: None,
+                delegation_mode: None,
+                delegation_status: None,
+                role: None,
+                orchestrator_scope: None,
+                accept_dispatch: true,
+                runtime: crate::model::RUNTIME_PILOT.into(),
+                pilot_driver: Some("claude".into()),
+                pilot_instance: None,
+                pilot_model: None,
+                pilot_options: None,
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn a_session_start_writes_the_native_id_and_the_model() {
+        let store = store();
+        let buffer = DeltaBuffer::new();
+        chat_row(&store);
+        let projection = apply(
+            &store,
+            &buffer,
+            PilotEvent::SessionStarted {
+                native_session_id: Some("native-1".into()),
+                model: Some("claude-fable-5-1".into()),
+                slash_commands: vec![],
+                extra: Default::default(),
+            },
+        );
+        assert!(projection.thread_updated);
+        assert_eq!(projection.native_session_id.as_deref(), Some("native-1"));
+        let row = store.load_thread("t1").unwrap().expect("the row");
+        assert_eq!(row.session_id.as_deref(), Some("native-1"));
+        assert_eq!(row.pilot_model.as_deref(), Some("claude-fable-5-1"));
+        assert_eq!(row.runtime, crate::model::RUNTIME_PILOT);
+    }
+
+    #[test]
+    fn a_turn_writes_one_item_that_gains_its_duration() {
+        let store = store();
+        let buffer = DeltaBuffer::new();
+        apply(
+            &store,
+            &buffer,
+            PilotEvent::TurnStarted {
+                turn_id: "turn-1".into(),
+            },
+        );
+        apply(
+            &store,
+            &buffer,
+            PilotEvent::TurnCompleted {
+                turn_id: "turn-1".into(),
+                duration_ms: 42,
+                usage: Usage {
+                    input_tokens: 7,
+                    ..Default::default()
+                },
+            },
+        );
+        let items = store.pilot_items("t1", 0, 10).unwrap();
+        let turns: Vec<_> = items.iter().filter(|row| row.kind == "turn").collect();
+        assert_eq!(turns.len(), 1, "one row per turn, not one per edge");
+        assert_eq!(turns[0].state, "completed");
+        assert!(turns[0].body.contains("\"durationMs\":42"), "{}", turns[0].body);
+        assert!(turns[0].body.contains("\"input_tokens\":7"), "{}", turns[0].body);
+    }
+
+    #[test]
+    fn a_request_opens_an_approval_and_the_answer_closes_it() {
+        let store = store();
+        let buffer = DeltaBuffer::new();
+        let request = Request {
+            id: "r1".into(),
+            kind: RequestKind::ToolApproval,
+            tool_name: Some("Bash".into()),
+            tool_use_id: None,
+            input: json!({ "command": "ls" }),
+            title: None,
+            description: None,
+            options: vec![RequestOption {
+                value: "allow".into(),
+                label: "Allow".into(),
+            }],
+            suggestions: Value::Null,
+        };
+        let opened = apply(
+            &store,
+            &buffer,
+            PilotEvent::RequestOpened {
+                request: request.clone(),
+            },
+        );
+        assert!(opened.approvals_changed);
+        assert_eq!(opened.status, Some(Status::Waiting));
+        assert_eq!(store.open_approvals().unwrap().len(), 1);
+        assert!(store.pilot_approval_of_request("t1", "r1").is_some());
+
+        let resolved = apply(
+            &store,
+            &buffer,
+            PilotEvent::RequestResolved {
+                request_id: "r1".into(),
+                outcome: RequestOutcome::Allowed,
+            },
+        );
+        // Both edges, not only the opening one: a dock that is never told the
+        // question was answered keeps drawing it, and the answer it then sends
+        // is for a request the driver has already moved past.
+        assert!(resolved.approvals_changed);
+        assert!(store.open_approvals().unwrap().is_empty(), "answered once");
+        let items = store.pilot_items("t1", 0, 10).unwrap();
+        let card = items
+            .iter()
+            .find(|row| row.id == request_item_id("r1"))
+            .expect("the request card");
+        assert_eq!(card.state, "allowed");
+    }
+
+    /// An answered card still says what was asked.
+    ///
+    /// The outcome used to replace the body rather than be added to it, so
+    /// after a reload every resolved request read "Question" whatever tool had
+    /// asked: the kind, the tool name, the input and the options the driver
+    /// offered were all gone, and the dock's own vocabulary check
+    /// (`offered_options`) had nothing left to read either.
+    #[test]
+    fn an_answered_request_keeps_what_it_was() {
+        let store = store();
+        let buffer = DeltaBuffer::new();
+        let request = Request {
+            id: "r2".into(),
+            kind: RequestKind::ToolApproval,
+            tool_name: Some("Bash".into()),
+            tool_use_id: None,
+            input: json!({ "command": "ls -la" }),
+            title: Some("run a command".into()),
+            description: Some("in the worktree".into()),
+            options: vec![RequestOption {
+                value: "allow".into(),
+                label: "Allow".into(),
+            }],
+            suggestions: Value::Null,
+        };
+        apply(&store, &buffer, PilotEvent::RequestOpened { request });
+        apply(
+            &store,
+            &buffer,
+            PilotEvent::RequestResolved {
+                request_id: "r2".into(),
+                outcome: RequestOutcome::Denied,
+            },
+        );
+        let card = store
+            .pilot_item(&request_item_id("r2"))
+            .unwrap()
+            .expect("the request card");
+        assert_eq!(card.state, "denied");
+        let body: Value = serde_json::from_str(&card.body).expect("readable");
+        assert_eq!(body["outcome"], "denied");
+        assert_eq!(body["kind"], "tool_approval");
+        assert_eq!(body["tool_name"], "Bash");
+        assert_eq!(body["input"]["command"], "ls -la");
+        assert_eq!(body["title"], "run a command");
+        assert_eq!(body["description"], "in the worktree");
+        assert_eq!(body["options"][0]["value"], "allow");
+        // The whole card parses back as the request it was, which is what the
+        // host reads to check an answer against the options the driver offered.
+        let read: Request = serde_json::from_str(&card.body).expect("still a request");
+        assert_eq!(read.tool_name.as_deref(), Some("Bash"));
+    }
+
+    /// A status is journaled nowhere and lands on the row all the same.
+    ///
+    /// The two halves are separate facts. Nothing is written to `pilot_events`
+    /// or `pilot_items`, a reading not being a thing that happened; but the
+    /// `threads.status` column is the field the sidebar reads and the field the
+    /// terminal runtime writes, so the projection is what fills it. It used to
+    /// be the chat pane, which meant a chat thread reported its status only
+    /// while somebody had its pane mounted.
+    #[test]
+    fn a_status_change_writes_the_row_and_journals_nothing() {
+        let store = store();
+        let buffer = DeltaBuffer::new();
+        chat_row(&store);
+        let projection = apply(
+            &store,
+            &buffer,
+            PilotEvent::StatusChanged {
+                status: Status::Busy,
+            },
+        );
+        assert_eq!(projection.seq, None, "a reading is not a fact");
+        assert_eq!(projection.status, Some(Status::Busy));
+        assert!(projection.push, "the sidebar still reads it");
+        assert!(projection.thread_updated, "the row changed, so the sidebar is woken");
+        assert_eq!(store.pilot_counts("t1").unwrap(), (0, 0));
+        // The stored word, not `load_thread`'s: that one maps a row still
+        // naming a run to `stopped` for a reader, and what is being checked
+        // here is the column itself.
+        let stored = || store.thread_status("t1").map(|(status, _)| status);
+        assert_eq!(
+            stored().as_deref(),
+            Some("running"),
+            "the same word the terminal runtime writes"
+        );
+
+        // And back, so a turn that ended clears the dot without anything else
+        // having to notice it did.
+        apply(
+            &store,
+            &buffer,
+            PilotEvent::StatusChanged {
+                status: Status::Waiting,
+            },
+        );
+        assert_eq!(stored().as_deref(), Some("waiting"));
+        apply(
+            &store,
+            &buffer,
+            PilotEvent::StatusChanged {
+                status: Status::Idle,
+            },
+        );
+        assert_eq!(stored().as_deref(), Some("ready"));
+    }
+
+    #[test]
+    fn an_error_lands_on_the_timeline() {
+        let store = store();
+        let buffer = DeltaBuffer::new();
+        apply(
+            &store,
+            &buffer,
+            PilotEvent::Error {
+                message: "the agent protocol broke".into(),
+                turn_id: Some("turn-1".into()),
+            },
+        );
+        let items = store.pilot_items("t1", 0, 10).unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].kind, "error");
+        assert!(items[0].body.contains("protocol broke"));
+    }
+
+    /// The two edges of a turn, against a repository that really exists.
+    ///
+    /// What is being checked is the seam: `turn.started` leaves a start edge on
+    /// the turn item, `turn.completed` takes the end edge and writes what the
+    /// two bound onto the same row. A scripted event pair rather than a driver,
+    /// because the driver's part of this is already covered and what can break
+    /// here is the projection reading its own row back.
+    #[test]
+    fn a_turn_carries_the_diff_its_two_edges_bound() {
+        let dir = std::env::temp_dir().join(format!(
+            "boite-pilot-ckpt-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let git = |args: &[&str]| {
+            let out = std::process::Command::new("git")
+                .current_dir(&dir)
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "git {args:?}: {out:?}");
+        };
+        git(&["init", "--quiet"]);
+        git(&["config", "user.name", "Boite Test"]);
+        git(&["config", "user.email", "boite@example.test"]);
+        git(&["config", "core.autocrlf", "false"]);
+        std::fs::write(dir.join("a.txt"), "one\n").unwrap();
+        git(&["add", "a.txt"]);
+        git(&["commit", "--quiet", "-m", "initial"]);
+
+        let store = store();
+        store
+            .save_project(
+                &crate::model::Project {
+                    id: "p1".into(),
+                    name: "p".into(),
+                    cwd: dir.to_string_lossy().to_string(),
+                    icon: None,
+                    archived: false,
+                    git_root: None,
+                    worktrees: None,
+                    mcp_server_ids: None,
+                },
+                0,
+            )
+            .unwrap();
+        let mut thread = pilot_thread_row();
+        thread.worktree_path = Some(dir.to_string_lossy().to_string());
+        store.save_thread(&thread).unwrap();
+
+        let buffer = DeltaBuffer::new();
+        apply(
+            &store,
+            &buffer,
+            PilotEvent::TurnStarted {
+                turn_id: "turn-1".into(),
+            },
+        );
+        let running = store.pilot_item("turn:turn-1").unwrap().expect("the turn");
+        let body: Value = serde_json::from_str(&running.body).unwrap();
+        let start = body["checkpointStart"]
+            .as_str()
+            .expect("the start edge")
+            .to_string();
+        assert!(!start.is_empty());
+
+        // What the agent did, from the checkpoint's point of view.
+        std::fs::write(dir.join("a.txt"), "one\ntwo\n").unwrap();
+        std::fs::write(dir.join("b.txt"), "new\n").unwrap();
+
+        apply(
+            &store,
+            &buffer,
+            PilotEvent::TurnCompleted {
+                turn_id: "turn-1".into(),
+                duration_ms: 5,
+                usage: Usage::default(),
+            },
+        );
+        let done = store.pilot_item("turn:turn-1").unwrap().expect("the turn");
+        assert_eq!(done.state, "completed");
+        let body: Value = serde_json::from_str(&done.body).unwrap();
+        assert_eq!(
+            body["checkpointStart"].as_str(),
+            Some(start.as_str()),
+            "the start edge survived the second write"
+        );
+        assert!(body["checkpointEnd"].is_string(), "{body}");
+        let diff = &body["diff"];
+        assert_eq!(diff["files"].as_u64(), Some(2), "{diff}");
+        assert_eq!(diff["additions"].as_u64(), Some(2), "{diff}");
+        assert_eq!(diff["deletions"].as_u64(), Some(0), "{diff}");
+        let names: Vec<&str> = diff["fileList"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|file| file["path"].as_str())
+            .collect();
+        assert!(names.contains(&"b.txt"), "{names:?}");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A turn in a directory that is not a repository still writes its item.
+    ///
+    /// A capture must never be able to stop a turn, so the absent summary is
+    /// the whole of the difference.
+    #[test]
+    fn a_turn_outside_a_repository_still_lands() {
+        let store = store();
+        let buffer = DeltaBuffer::new();
+        apply(
+            &store,
+            &buffer,
+            PilotEvent::TurnStarted {
+                turn_id: "turn-1".into(),
+            },
+        );
+        apply(
+            &store,
+            &buffer,
+            PilotEvent::TurnCompleted {
+                turn_id: "turn-1".into(),
+                duration_ms: 1,
+                usage: Usage::default(),
+            },
+        );
+        let row = store.pilot_item("turn:turn-1").unwrap().expect("the turn");
+        assert_eq!(row.state, "completed");
+        let body: Value = serde_json::from_str(&row.body).unwrap();
+        assert!(body.get("diff").is_none(), "{body}");
+    }
+
+    /// A notice is boite's own line: its own kind, on the timeline, in order.
+    #[test]
+    fn a_notice_lands_on_the_timeline_under_its_own_kind() {
+        let store = store();
+        write_notice(&store, "t1", "claude on fastpick:crof:x now answers").unwrap();
+        let items = store.pilot_items("t1", 0, 10).unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].kind, "notice");
+        assert!(items[0].body.contains("now answers"), "{}", items[0].body);
+    }
+
+    /// A cursor read is exclusive on both tables, so a client that subscribes
+    /// after reading neither misses an item nor draws one twice.
+    #[test]
+    fn a_cursor_read_is_exclusive_on_both_tables() {
+        let store = store();
+        let buffer = DeltaBuffer::new();
+        for index in 0..3 {
+            apply(
+                &store,
+                &buffer,
+                PilotEvent::ItemCompleted {
+                    item: Item::new(format!("i{index}"), ItemKind::AssistantText, None)
+                        .with_body(json!({ "text": "ok" })),
+                },
+            );
+        }
+        let all = store.pilot_items("t1", 0, 10).unwrap();
+        assert_eq!(all.len(), 3);
+        let rest = store.pilot_items("t1", all[0].seq, 10).unwrap();
+        assert_eq!(rest.len(), 2, "after_seq is exclusive");
+        let events = store.pilot_events("t1", 0, 10).unwrap();
+        assert_eq!(events.len(), 3);
+        assert_eq!(events[0].kind, "item.completed");
+    }
+
+    /// The option a driver offered is what may be answered; anything else is a
+    /// refusal rather than a tool that runs on a value nobody recognised.
+    #[test]
+    fn only_an_offered_option_allows() {
+        let options = vec![RequestOption {
+            value: "allow_once".into(),
+            label: "Allow once".into(),
+        }];
+        assert!(matches!(
+            answer_of_option("allow_once", &options),
+            RequestAnswer::Allow { .. }
+        ));
+        assert!(matches!(
+            answer_of_option("something-else", &options),
+            RequestAnswer::Deny { .. }
+        ));
+    }
+    /// The whole path, with a real runtime and no host in it: open a session,
+    /// run a turn that opens an approval, answer it from the store the way the
+    /// dock does, stop.
+    ///
+    /// Driven by the scripted driver rather than by hand-built events, because
+    /// what is being checked is that the runtime, the sink and the projection
+    /// agree on the order things happen in.
+    #[tokio::test]
+    async fn a_scripted_turn_lands_in_the_rows_through_a_runtime() {
+        use boite_pilot::{EventSink, OpenSpec, Runtime, TurnInput};
+        use std::sync::Arc;
+
+        struct Projecting {
+            store: Arc<Store>,
+            buffer: DeltaBuffer,
+        }
+        impl EventSink for Projecting {
+            fn emit(&self, thread_id: &str, event: PilotEvent) {
+                project(&self.store, thread_id, &event, &self.buffer).expect("project");
+            }
+        }
+
+        let store = Arc::new(store());
+        let sink = Arc::new(Projecting {
+            store: store.clone(),
+            buffer: DeltaBuffer::new(),
+        });
+        let runtime = Runtime::new(sink);
+        runtime.register(Arc::new(
+            boite_pilot::scripted::ScriptedDriver::with_scenario(
+                boite_pilot::scripted::Scenario {
+                    native_session_id: Some("native-1".into()),
+                    model: Some("claude-fable-5-1".into()),
+                    slash_commands: vec![],
+                    steps: vec![boite_pilot::scripted::Step {
+                        deltas: vec!["o".into(), "k".into()],
+                        request: Some(boite_pilot::scripted::ScenarioRequest {
+                            tool_name: "Bash".into(),
+                            input: json!({ "command": "ls" }),
+                            title: None,
+                        }),
+                        duration_ms: 12,
+                        ..Default::default()
+                    }],
+                },
+            ),
+        ));
+
+        runtime
+            .open(OpenSpec {
+                thread_id: "t1".into(),
+                cwd: std::env::temp_dir(),
+                driver: "scripted".into(),
+                ..Default::default()
+            })
+            .await
+            .expect("open");
+
+        runtime
+            .prompt("t1", TurnInput::text("hi"))
+            .await
+            .expect("prompt");
+
+        // The turn is parked on the approval, which is the state the dock draws.
+        assert_eq!(runtime.status("t1"), Some(Status::Waiting));
+        let open = store.open_approvals().expect("approvals");
+        assert_eq!(open.len(), 1, "one card, not one per event");
+        assert_eq!(open[0].action, PILOT_APPROVAL_ACTION);
+        let request_id = open[0].detail.clone();
+
+        runtime
+            .respond("t1", &request_id, boite_pilot::RequestAnswer::allow())
+            .await
+            .expect("respond");
+
+        assert!(store.open_approvals().unwrap().is_empty(), "answered once");
+        assert_eq!(runtime.status("t1"), Some(Status::Idle), "the turn ran on");
+
+        let items = store.pilot_items("t1", 0, 50).unwrap();
+        let kinds: Vec<&str> = items.iter().map(|row| row.kind.as_str()).collect();
+        assert!(kinds.contains(&"turn"), "{kinds:?}");
+        assert!(kinds.contains(&"assistant_text"), "{kinds:?}");
+        assert!(kinds.contains(&"request"), "{kinds:?}");
+        let text = items
+            .iter()
+            .find(|row| row.kind == "assistant_text")
+            .expect("the message");
+        assert!(text.body.contains("ok"), "{}", text.body);
+
+        // The journal kept the turn edges and no delta at all.
+        let events = store.pilot_events("t1", 0, 100).unwrap();
+        assert!(
+            !events.iter().any(|row| row.kind == "item.delta"),
+            "a delta is never journaled"
+        );
+        assert!(events.iter().any(|row| row.kind == "turn.completed"));
+
+        runtime.stop("t1").await.expect("stop");
+        assert_eq!(runtime.status("t1"), None);
+    }
+}

@@ -68,6 +68,101 @@ const MESSAGES_LIMIT_MAX: u32 = 500;
 const ACTIONS_LIMIT_DEFAULT: u32 = 50;
 const ACTIONS_LIMIT_MAX: u32 = 200;
 
+/// How many timeline rows one page of a pilot orchestrator's chat reads.
+///
+/// Two kinds out of a dozen are messages, so a page of items is never a page of
+/// lines: the read walks pages until it has what was asked for.
+const MESSAGES_PAGE: usize = 200;
+
+/// The live orchestrator of a scope, when it is a chat thread.
+///
+/// `None` says two things at once and both callers want the same answer from
+/// it: no orchestrator, or one running in a terminal. Either way the
+/// conversation is the `orchestrator_messages` table and the line goes to a
+/// prompt, which is exactly what this domain did before the pilot existed.
+pub fn pilot_orchestrator(store: &Store, scope: Option<&str>) -> Option<String> {
+    let id = store.find_orchestrator(scope)?;
+    pilot_thread(store, &id).then_some(id)
+}
+
+/// Whether a thread row is driven over a protocol rather than through a PTY.
+pub fn pilot_thread(store: &Store, thread_id: &str) -> bool {
+    store
+        .load_thread(thread_id)
+        .ok()
+        .flatten()
+        .is_some_and(|thread| thread.runtime == crate::model::RUNTIME_PILOT)
+}
+
+/// A pilot orchestrator's conversation, in the shape the Home chat already
+/// reads.
+///
+/// The rows are `pilot_items`, filtered to the two kinds that are a
+/// conversation: the user's own line and what the agent answered. Everything
+/// else on that timeline, tool calls, requests and turn footers, belongs to the
+/// chat pane, and the Home card asks for the conversation.
+///
+/// Answered on the host rather than assembled in the webview, so a phone
+/// talking to a `boite-server` reads the same list the desktop does.
+pub fn pilot_messages(
+    store: &Store,
+    thread_id: &str,
+    since_id: Option<&str>,
+    limit: usize,
+) -> Result<Value, String> {
+    // The cursor is an id from a previous read, resolved back to the sequence
+    // the timeline pages on. An id from another thread, or one purged with its
+    // turn, reads from the start rather than answering nothing at all.
+    let mut cursor = match since_id {
+        Some(id) => store
+            .pilot_item(id)?
+            .filter(|row| row.thread_id == thread_id)
+            .map(|row| row.seq)
+            .unwrap_or(0),
+        None => 0,
+    };
+    let mut out: Vec<Value> = Vec::new();
+    loop {
+        let rows = store.pilot_items(thread_id, cursor, MESSAGES_PAGE)?;
+        if rows.is_empty() {
+            break;
+        }
+        cursor = rows[rows.len() - 1].seq;
+        let page = rows.len();
+        for row in rows {
+            let role = match row.kind.as_str() {
+                "user_message" => "user",
+                "assistant_text" => crate::orchestrator::ROLE,
+                _ => continue,
+            };
+            // An item is minted before the driver has said anything, so a card
+            // still growing carries no text yet. Drawn it would be an empty
+            // bubble the next read fills in, which is the same rule the chat
+            // pane's `present.ts` applies.
+            let body: Value = serde_json::from_str(&row.body).unwrap_or(Value::Null);
+            let text = body.get("text").and_then(|v| v.as_str()).unwrap_or("");
+            if text.is_empty() {
+                continue;
+            }
+            out.push(json!({
+                "id": row.id,
+                "role": role,
+                "text": text,
+                "aloud": Value::Null,
+                "urgency": Value::Null,
+                "at": row.created_ms,
+            }));
+            if out.len() >= limit {
+                return Ok(Value::Array(out));
+            }
+        }
+        if page < MESSAGES_PAGE {
+            break;
+        }
+    }
+    Ok(Value::Array(out))
+}
+
 /// Reads the pulse, waiting when it is quiet.
 ///
 /// `pub` because the agent endpoint's `GET /v1/pulse` is the same read with a
@@ -137,6 +232,17 @@ pub fn say(
     if role.as_deref() != Some(crate::orchestrator::ROLE) {
         return Err(
             "only an orchestrator thread may say something here, and this thread is not one"
+                .to_string(),
+        );
+    }
+    // A chat orchestrator already answers on its own timeline: what it writes
+    // is an `assistant_text` item, and `orchestrator.messages` reads those. A
+    // line pushed through here too would draw the same answer twice, once as an
+    // item and once as a row nothing ever purges with the thread.
+    if pilot_thread(store, thread_id) {
+        return Err(
+            "PILOT_ORCHESTRATOR: this orchestrator is a chat thread, so its answer is the turn \
+             it is already writing; /v1/say is for an orchestrator running in a terminal"
                 .to_string(),
         );
     }
@@ -257,6 +363,15 @@ pub fn dispatch(
     if let Some(waiters) = waiters {
         waiters.notify();
     }
+    // The `thread` is the target, not the orchestrator: "what happened to
+    // thread X" is asked about the worker, and the sender is a field beside it.
+    tracing::info!(
+        thread = %to_thread_id,
+        request = %id,
+        from = %thread_id,
+        mode,
+        "dispatch.queued"
+    );
     Ok(json!({ "dispatchId": id, "seq": seq }))
 }
 
@@ -629,7 +744,69 @@ impl Conduct {
         let store = host
             .store()
             .ok_or("this Boite keeps no records, so there is no pulse to read or write")?;
+        // Two verbs change shape when the thread on the other end is a chat
+        // one: a line into it is a turn, not a row somebody types later. The
+        // static guards are run here, where the store is in hand, and what
+        // comes back is a prepared `pilot.turn.start`, the same value the
+        // `pilot.*` door builds, so the roots check, the driver check and the
+        // refusals are the pilot domain's own rather than a second copy.
+        //
+        // A host with no pilot runtime falls through to the terminal path,
+        // which is what a build without the experiment is.
+        if host.pilot().is_some() {
+            if let Some(turn) = self.as_pilot_turn(&store)? {
+                return turn.prepare(host);
+            }
+        }
         Ok(Ready::Conduct(self, store, host.pulse_waiters()))
+    }
+
+    /// The pilot turn this call is, when it is one.
+    ///
+    /// `Ok(None)` is the terminal path and is the answer for every method that
+    /// is not one of the two, for a scope whose orchestrator runs in a
+    /// terminal, and for a worker with a PTY. An `Err` is a guard refusing, and
+    /// it refuses with the same words the queued path uses: a dispatch that
+    /// lands as a turn is still a dispatch.
+    fn as_pilot_turn(&self, store: &Store) -> Result<Option<super::Pilot>, String> {
+        let turn = |thread_id: String, text: &str| super::Pilot::TurnStart {
+            thread_id,
+            text: text.to_string(),
+            model: None,
+        };
+        match self {
+            Conduct::Post { scope, text } => {
+                Ok(pilot_orchestrator(store, scope.as_deref()).map(|id| turn(id, text)))
+            }
+            Conduct::Dispatch {
+                thread_id,
+                to_thread_id,
+                text,
+                ..
+            } => {
+                if !pilot_thread(store, to_thread_id) {
+                    return Ok(None);
+                }
+                conducted_target(store, thread_id, to_thread_id)?;
+                let (_, _, to_accepts) = store
+                    .thread_orchestration(to_thread_id)
+                    .ok_or("unknown target thread")?;
+                if !to_accepts {
+                    return Err(
+                        "MUTED: the user muted dispatch into this thread, and only the user \
+                         rearms it"
+                            .to_string(),
+                    );
+                }
+                tracing::info!(
+                    thread = %to_thread_id,
+                    from = %thread_id,
+                    "dispatch.turn"
+                );
+                Ok(Some(turn(to_thread_id.clone(), text)))
+            }
+            _ => Ok(None),
+        }
     }
 
     pub(super) fn run(
@@ -712,11 +889,19 @@ impl Conduct {
                 scope,
                 since_id,
                 limit,
-            } => value_of(store.orchestrator_messages(
-                scope.as_deref(),
-                since_id.as_deref(),
-                limit,
-            )?),
+            } => match pilot_orchestrator(store, scope.as_deref()) {
+                // The conversation is the thread's own timeline, which is where
+                // both halves of it already are: the user's line was written as
+                // a `user_message` item by the turn that carried it.
+                Some(thread_id) => {
+                    pilot_messages(store, &thread_id, since_id.as_deref(), limit)?
+                }
+                None => value_of(store.orchestrator_messages(
+                    scope.as_deref(),
+                    since_id.as_deref(),
+                    limit,
+                )?),
+            },
             Conduct::Start { thread_id, scope } => {
                 store
                     .thread_orchestration(&thread_id)
@@ -770,8 +955,29 @@ impl Conduct {
                 }
                 json!({ "threadId": thread_id, "seq": seq })
             }
+            // `runtime` and `status` ride along with the answer that was
+            // already here. A chat orchestrator's status has one source, the
+            // column `pilot::project` writes on every `status.changed`, so the
+            // exact word is on the row rather than measured from a screen; a
+            // terminal one keeps answering `null` there, which is honest: its
+            // status is the status engine's and expires on a clock.
             Conduct::Status { scope } => match store.find_orchestrator(scope.as_deref()) {
-                Some(id) => json!({ "threadId": id, "state": "live" }),
+                Some(id) => {
+                    let pilot = pilot_thread(store, &id);
+                    let status = pilot
+                        .then(|| store.thread_status(&id).map(|(status, _)| status))
+                        .flatten();
+                    json!({
+                        "threadId": id,
+                        "state": "live",
+                        "runtime": if pilot {
+                            crate::model::RUNTIME_PILOT
+                        } else {
+                            crate::model::RUNTIME_TERMINAL
+                        },
+                        "status": status,
+                    })
+                }
                 None => json!({ "threadId": null, "state": "off" }),
             },
             Conduct::Actions { limit } => value_of(store.orchestrator_actions(limit)?),
@@ -841,7 +1047,23 @@ impl Conduct {
                         waiters.notify();
                     }
                 }
-                value_of(store.open_dispatches()?)
+                let open = store.open_dispatches()?;
+                // A drain runs on every device that is watching, several times
+                // a minute, so the quiet case says nothing at all. What is
+                // worth a line is a line actually going somewhere, or one
+                // being given up on.
+                for row in &open {
+                    let text = |key: &str| row.get(key).and_then(|v| v.as_str()).unwrap_or("");
+                    tracing::info!(
+                        thread = %text("toThreadId"),
+                        request = %text("id"),
+                        "dispatch.drained"
+                    );
+                }
+                for id in &expired {
+                    tracing::info!(request = %id, "dispatch.expired");
+                }
+                value_of(open)
             }
             Conduct::SettleDispatch {
                 dispatch_id,
@@ -1393,5 +1615,328 @@ mod tests {
         .unwrap()
         .prepare(&host, Grant::Conduct)
         .unwrap();
+    }
+}
+
+/// The orchestrator and the dispatch queue when the thread on the other end is
+/// a chat one, driven end to end against the scripted driver.
+///
+/// Its own module because everything here needs an executor and a pilot
+/// runtime, which is the one thing the plain `Rows` host above deliberately
+/// does not have: a build without the experiment has to keep answering the way
+/// it always did, and that is what the tests above pin.
+#[cfg(test)]
+mod pilot_tests {
+    use super::*;
+    use crate::capability::Grant;
+    use crate::command::{Command, Host, Ready};
+    use crate::scope::ProjectRoots;
+
+    use boite_pilot::scripted::{Scenario, ScriptedDriver, Step};
+    use boite_pilot::{PilotEvent, Runtime};
+
+    /// A scenario that answers any prompt with one word, a few times over.
+    ///
+    /// A step with no prompt of its own is the catch-all and is used once, so
+    /// the count is how many turns a test may take. What the answer says does
+    /// not matter here: these tests are about which door a call went through,
+    /// not about the wire, which `boite-pilot` pins on its own.
+    fn answers(turns: usize) -> Scenario {
+        Scenario {
+            steps: (0..turns)
+                .map(|_| Step {
+                    deltas: vec!["ok".to_string()],
+                    ..Step::default()
+                })
+                .collect(),
+            ..Scenario::default()
+        }
+    }
+
+    struct Chat {
+        roots: ProjectRoots,
+        store: Arc<Store>,
+        pilot: Arc<Runtime>,
+        cwd: std::path::PathBuf,
+    }
+
+    /// The projection, which is what writes the rows `orchestrator.messages`
+    /// reads back. A recorder would keep the events and write nothing.
+    struct Projecting {
+        store: Arc<Store>,
+        buffer: crate::pilot::DeltaBuffer,
+    }
+
+    impl boite_pilot::EventSink for Projecting {
+        fn emit(&self, thread_id: &str, event: PilotEvent) {
+            let _ = crate::pilot::project(&self.store, thread_id, &event, &self.buffer);
+        }
+    }
+
+    impl Chat {
+        fn new(name: &str) -> Self {
+            let dir = std::env::temp_dir().join(format!(
+                "boite-conduct-pilot-{}-{name}",
+                std::process::id()
+            ));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            let store = Arc::new(Store::open(&dir.join("rows.db")).unwrap());
+            let pilot = Arc::new(Runtime::new(Arc::new(Projecting {
+                store: store.clone(),
+                buffer: crate::pilot::DeltaBuffer::new(),
+            })));
+            // In memory rather than from a file: the driver's own `from_env`
+            // reads a process-global variable and these tests run in parallel.
+            pilot.register(Arc::new(ScriptedDriver::with_scenario(answers(6))));
+            let roots = ProjectRoots::default();
+            let cwd = std::fs::canonicalize(&dir).unwrap();
+            roots.replace(vec![cwd.to_string_lossy().to_string()]);
+            Chat {
+                roots,
+                store,
+                pilot,
+                cwd,
+            }
+        }
+
+        /// A chat row in the one directory the roots allow, so `prepare` gets
+        /// past the filesystem boundary the pilot domain applies.
+        fn chat_row(&self, id: &str, project: &str) -> Value {
+            json!({ "thread": {
+                "id": id, "projectId": project, "label": "chat", "cmd": "claude", "args": [],
+                "runtime": "pilot", "pilotDriver": "scripted",
+                "worktreePath": self.cwd.to_string_lossy(),
+            }})
+        }
+    }
+
+    impl Host for Chat {
+        fn roots(&self) -> &ProjectRoots {
+            &self.roots
+        }
+        fn store(&self) -> Option<Arc<Store>> {
+            Some(self.store.clone())
+        }
+        fn pilot(&self) -> Option<Arc<Runtime>> {
+            Some(self.pilot.clone())
+        }
+    }
+
+    /// One call, whichever half of the bus it turned into.
+    ///
+    /// The point of the conversion is that a caller says `orchestrator.post`
+    /// and never learns which runtime answered, so the test asks the same way
+    /// and lets the prepared value decide where the work runs.
+    async fn ask(host: &Chat, method: &str, params: Value) -> Result<Value, String> {
+        match Command::decode(method, &params)?.prepare(host, Grant::Local)? {
+            Ready::Pilot(ready) => crate::pilot_host::execute(*ready).await,
+            other => other.run(),
+        }
+    }
+
+    /// A started chat orchestrator with its session open, which is the shape
+    /// every test below opens on.
+    async fn armed(name: &str) -> Chat {
+        let host = Chat::new(name);
+        ask(&host, "thread.create", host.chat_row("boss", "p"))
+            .await
+            .unwrap();
+        ask(&host, "orchestrator.start", json!({ "threadId": "boss" }))
+            .await
+            .unwrap();
+        ask(&host, "pilot.thread.open", json!({ "threadId": "boss" }))
+            .await
+            .unwrap();
+        host
+    }
+
+    /// The whole of the read-and-post contract in one pass: the user's line is
+    /// a turn, the conversation is read off the timeline, and the status is the
+    /// exact word the projection wrote rather than a screen measured from
+    /// outside.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_post_to_a_chat_orchestrator_is_a_turn_read_back_off_its_timeline() {
+        let host = armed("post").await;
+
+        let posted = ask(&host, "orchestrator.post", json!({ "text": "hello" }))
+            .await
+            .unwrap();
+        assert!(
+            posted["turnId"].is_string(),
+            "a post on a chat orchestrator is a turn: {posted}"
+        );
+        // And nothing was written to the table the terminal path uses, or the
+        // same line would be drawn twice.
+        assert!(
+            host.store
+                .orchestrator_messages(None, None, 50)
+                .unwrap()
+                .is_empty(),
+            "the chat path writes items, never chat rows"
+        );
+
+        let messages = ask(&host, "orchestrator.messages", json!({})).await.unwrap();
+        let list = messages.as_array().unwrap().clone();
+        let mine = list
+            .iter()
+            .find(|m| m["role"] == json!("user"))
+            .expect("the user's own line");
+        assert_eq!(mine["text"], json!("hello"));
+        assert!(
+            list.iter().any(|m| m["role"] == json!("orchestrator")),
+            "the answer is an assistant item: {messages}"
+        );
+        // The cursor is an item id, and reading after the last one is empty.
+        let last = list[list.len() - 1]["id"].as_str().unwrap().to_string();
+        let after = ask(&host, "orchestrator.messages", json!({ "sinceId": last }))
+            .await
+            .unwrap();
+        assert!(after.as_array().unwrap().is_empty(), "{after}");
+
+        let status = ask(&host, "orchestrator.status", json!({})).await.unwrap();
+        assert_eq!(status["threadId"], json!("boss"));
+        assert_eq!(status["runtime"], json!("pilot"));
+        assert_eq!(
+            status["status"],
+            json!("ready"),
+            "the exact status is the column the projection writes: {status}"
+        );
+    }
+
+    /// `say` is the terminal orchestrator's door and stays shut for a chat one:
+    /// its answer is already an item on its own timeline.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn say_is_refused_to_a_chat_orchestrator() {
+        let host = armed("say").await;
+        let refusal = ask(
+            &host,
+            "orchestrator.say",
+            json!({ "threadId": "boss", "text": "done" }),
+        )
+        .await
+        .unwrap_err();
+        assert!(refusal.contains("PILOT_ORCHESTRATOR"), "{refusal}");
+    }
+
+    /// A dispatch into a chat worker is the turn itself, not a row a device
+    /// types later: the queue stays empty and the line is on the worker's own
+    /// timeline before the call answers.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_dispatch_into_a_chat_worker_is_a_turn_and_never_a_queued_line() {
+        let host = armed("dispatch").await;
+        ask(&host, "thread.create", host.chat_row("worker", "p"))
+            .await
+            .unwrap();
+        ask(&host, "pilot.thread.open", json!({ "threadId": "worker" }))
+            .await
+            .unwrap();
+
+        let sent = ask(
+            &host,
+            "thread.dispatch",
+            json!({ "threadId": "boss", "toThreadId": "worker", "text": "run the tests" }),
+        )
+        .await
+        .unwrap();
+        assert!(sent["turnId"].is_string(), "{sent}");
+
+        let open = ask(&host, "dispatch.drain", json!({})).await.unwrap();
+        assert!(
+            open.as_array().unwrap().is_empty(),
+            "a chat worker never gets a queued line: {open}"
+        );
+        let items = host.store.pilot_items("worker", 0, 50).unwrap();
+        assert!(
+            items
+                .iter()
+                .any(|item| item.kind == "user_message" && item.body.contains("run the tests")),
+            "the briefing is the worker's own turn"
+        );
+
+        // The static guards still refuse, with the same names the queued path
+        // uses: a dispatch that lands as a turn is still a dispatch.
+        ask(
+            &host,
+            "thread.acceptDispatch",
+            json!({ "threadId": "worker", "accept": false }),
+        )
+        .await
+        .unwrap();
+        let muted = ask(
+            &host,
+            "thread.dispatch",
+            json!({ "threadId": "boss", "toThreadId": "worker", "text": "again" }),
+        )
+        .await
+        .unwrap_err();
+        assert!(muted.contains("MUTED"), "{muted}");
+    }
+
+    /// The two verbs that are about the record rather than the runtime keep
+    /// working over a chat orchestrator, because nothing they touch is a PTY:
+    /// an action is a row and an undo is a stamp on another row.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn actions_and_undo_still_work_over_a_chat_orchestrator() {
+        let host = armed("undo").await;
+        ask(&host, "thread.create", host.chat_row("worker", "p"))
+            .await
+            .unwrap();
+        host.store
+            .update_thread_field(
+                "worker",
+                crate::store::ThreadCol::SettledAt,
+                crate::store::ColVal::Int(5),
+            )
+            .unwrap();
+        let action = host
+            .store
+            .record_orchestrator_action("boss", "thread.dismiss", Some("worker"), Some("p"), true, 5)
+            .unwrap();
+
+        let listed = ask(&host, "orchestrator.actions", json!({})).await.unwrap();
+        assert_eq!(listed[0]["undoable"], json!(true));
+
+        let done = ask(&host, "orchestrator.undo", json!({ "actionId": action }))
+            .await
+            .unwrap();
+        assert_eq!(done["done"], json!(true));
+        let worker = host.store.load_thread("worker").unwrap().unwrap();
+        assert_eq!(worker.settled_at, None, "the chat worker came back out");
+    }
+
+    /// The briefing is what the session opens on, and only for the row that
+    /// carries the role: a plain chat worker gets none.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn the_orchestrators_session_opens_on_its_own_briefing() {
+        let host = Chat::new("briefing");
+        ask(&host, "thread.create", host.chat_row("boss", "p"))
+            .await
+            .unwrap();
+        ask(&host, "thread.create", host.chat_row("worker", "p"))
+            .await
+            .unwrap();
+        ask(&host, "orchestrator.start", json!({ "threadId": "boss" }))
+            .await
+            .unwrap();
+
+        let spec = |id: &str| {
+            match Command::decode("pilot.thread.open", &json!({ "threadId": id }))
+                .unwrap()
+                .prepare(&host, Grant::Local)
+                .unwrap()
+            {
+                Ready::Pilot(ready) => ready.spec.expect("an open carries a spec"),
+                _ => panic!("pilot.thread.open is a pilot call"),
+            }
+        };
+        let briefed = spec("boss").system_prompt_append.expect("a briefing");
+        assert!(briefed.contains("workspace orchestrator"), "{briefed}");
+        assert!(briefed.contains("the whole workspace"), "{briefed}");
+        assert_eq!(
+            spec("worker").system_prompt_append,
+            None,
+            "a worker is not briefed as the orchestrator"
+        );
     }
 }

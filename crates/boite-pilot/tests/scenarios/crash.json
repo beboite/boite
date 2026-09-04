@@ -1,0 +1,4 @@
+{
+  "model": "claude-fable-5-1",
+  "steps": [{ "deltas": ["half"], "exit_mid_turn": true }]
+}

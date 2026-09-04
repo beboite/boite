@@ -1,3 +1,15 @@
+import type {
+  PilotCatalog,
+  PilotEvent,
+  PilotEventRow,
+  PilotExecMode,
+  PilotItemRow,
+  PilotModelSelection,
+  PilotOpened,
+  PilotRequestAnswer,
+  PilotSwitchKind,
+} from "$lib/features/pilot/types";
+
 // The single contract every workspace transport implements. TauriBackend
 // drives the local desktop via invoke; RemoteBackend (later) drives a
 // boite-server over a WebSocket. Façades under storage/ and features/*/api.ts
@@ -28,7 +40,7 @@ import type {
 import type { FileVersions, TextFile } from "$lib/features/editor/api";
 import type { ThreadReply } from "$lib/domain/awareness";
 import type { Platform, ShellOption } from "$lib/storage/platform.svelte";
-import type { LogEntry, LogLevel } from "$lib/shared/services/logger.svelte";
+import type { LogLevel } from "$lib/shared/log";
 
 // Output arrives as raw bytes regardless of transport. The Tauri channel
 // carries base64 (decoded inside TauriBackend); the remote socket carries
@@ -125,7 +137,7 @@ export interface DbApi {
    * off the row because the row does not hold it: what a thread row records is
    * that there *was* a run. The boite refuses the put-away half while that
    * status is `running` or `waiting`, so the rule holds for a caller that never
-   * drew a menu — and it rejects rather than answering, so the optimistic write
+   * drew a menu, and it rejects rather than answering, so the optimistic write
    * in the store has something to roll back to.
    */
   setThreadSettled(
@@ -170,7 +182,7 @@ export interface GitApi {
   /**
    * What the repository says about a sha an agent reported: whether it exists
    * at all, and whether it has left this machine. An unknown sha comes back
-   * with `known: false` rather than as an error — being unable to find it is
+   * with `known: false` rather than as an error: being unable to find it is
    * the answer, not a failure to get one.
    */
   commitState(path: string, sha: string): Promise<CommitStateAnswer>;
@@ -275,8 +287,8 @@ export interface WorktreeApi {
    * worktree add` and its shared directories out from in front of a terminal.
    *
    * Resolves once the spare exists. Callers do not wait for it: nothing depends
-   * on the answer, and a repository that cannot have one — not a repo, no
-   * commits — is not a failure to report.
+   * on the answer, and a repository that cannot have one, not a repo, no
+   * commits, is not a failure to report.
    */
   warm(repo: string): Promise<void>;
 
@@ -324,7 +336,7 @@ export interface WorktreeApi {
    */
   claim(path: string, name: string): Promise<void>;
   /**
-   * Moves the worktree onto a branch that already exists — continuing
+   * Moves the worktree onto a branch that already exists, continuing
    * something started earlier rather than naming something new. Rejects a
    * branch another worktree holds, naming which one.
    */
@@ -645,7 +657,7 @@ export interface FastpickModel {
 export interface FastpickApi {
   /**
    * The harnesses, providers and bindings fastpick declares. With `provider`, that
-   * provider's models too — a separate call because each one costs an HTTP request, and
+   * provider's models too: a separate call because each one costs an HTTP request, and
    * fastpick answers from its cache unless `refresh` is set.
    *
    * Rejects when fastpick is missing or its config is unusable, carrying fastpick's own
@@ -893,7 +905,7 @@ export interface SessionHit {
   /**
    * The agent's own registry tied this session to the process behind the
    * caller's PTY, rather than it being the likeliest transcript in the folder.
-   * Only claude keeps such a registry, so only its detector ever says true —
+   * Only claude keeps such a registry, so only its detector ever says true,
    * and where it does, the attribution guess is not asked for an opinion.
    */
   ownPid?: boolean;
@@ -975,7 +987,7 @@ export interface AgentTurnQuery {
  * number would read as twenty times the work that was actually done.
  */
 export interface ModelUsage {
-  /** Icon key of the agent that spent it — `claude` or `codex`. */
+  /** Icon key of the agent that spent it: `claude` or `codex`. */
   provider: string;
   model: string;
   input: number;
@@ -1037,7 +1049,7 @@ export interface SessionApi {
   usage(cwds: string[], days: number, orchestratorSessions?: string[]): Promise<UsageReport>;
   /**
    * `ptyId` names the PTY asking. Its process holds the session the caller is
-   * trying to bind, and that one alone is exempt from the liveness filter —
+   * trying to bind, and that one alone is exempt from the liveness filter:
    * without it, an agent is unbindable for exactly as long as it runs.
    * Omitted (a caller with no PTY of its own), every live session is skipped.
    */
@@ -1074,7 +1086,7 @@ export interface SessionApi {
   agentTurns(queries: AgentTurnQuery[]): Promise<AgentTurn[]>;
   /**
    * Releases a background agent holding a session, so `--resume` works on it
-   * again. Only ever stops a background agent — an interactive session is
+   * again. Only ever stops a background agent: an interactive session is
    * another terminal's, and taking it down is not ours to do. Returns whether
    * anything was stopped.
    */
@@ -1098,7 +1110,7 @@ export interface SessionApi {
    * out of reach. The other CLIs key their stores by time or by an internal
    * database, and answer `true` without anything being carried.
    *
-   * `false` means replaying the id over there would fail — the caller drops the
+   * `false` means replaying the id over there would fail: the caller drops the
    * session and lets the thread start a fresh conversation, rather than
    * launching with a `--resume` nothing backs.
    */
@@ -1110,16 +1122,99 @@ export interface SessionApi {
   ): Promise<boolean>;
 }
 
+/**
+ * The device's own log file, as the Logs section reaches it.
+ *
+ * Two methods, and both are about the file rather than about a record: where
+ * it is, and emptying it. Writing used to be here too, one `invoke` per line;
+ * everything the window produces now goes through [`LogsApi.write`], which is
+ * batched and works on both transports.
+ */
 export interface LogApi {
-  event(
-    level: LogLevel,
-    source: string,
-    message: string,
-    details: string | null,
-  ): Promise<void>;
-  read(scope: "current" | "previous"): Promise<LogEntry[]>;
   clear(): Promise<void>;
   filePath(): Promise<string>;
+}
+
+/**
+ * One line of the log, as `boite_core::log` writes it and as every host hands
+ * it back. The names are the ones in the file and on the wire, single words on
+ * purpose: a filter never has to parse `fields`.
+ */
+export interface LogRecord {
+  /** Unix milliseconds. */
+  ts: number;
+  /** Per-process counter, so two records in one millisecond keep their order. */
+  seq?: number;
+  /** `desktop`, `server`, `mcp` or `webview`. */
+  host?: string;
+  level: string;
+  target: string;
+  msg: string;
+  thread?: string;
+  turn?: string;
+  request?: string;
+  device?: string;
+  span?: string;
+  fields?: Record<string, unknown>;
+}
+
+/** What the webview hands `logs.write`: a record with its own clock already on it. */
+export interface LogRecordInput {
+  ts: number;
+  level: LogLevel;
+  target: string;
+  msg: string;
+  thread?: string;
+  turn?: string;
+  request?: string;
+  device?: string;
+  fields?: Record<string, unknown>;
+}
+
+/** The ring this host keeps in memory. Never reaches the files. */
+export interface LogTailOptions {
+  limit?: number;
+  level?: string;
+  host?: string;
+}
+
+/** Every host's files, merged on one clock. The only way back past a restart. */
+export interface LogQueryOptions {
+  since?: number;
+  until?: number;
+  level?: string;
+  host?: string;
+  thread?: string;
+  turn?: string;
+  target?: string;
+  text?: string;
+  limit?: number;
+}
+
+/**
+ * The log, as the window reaches it: `logs.tail`, `logs.query`, `logs.level`,
+ * `logs.write` and `logs.subscribe` on the bus.
+ *
+ * The only road out of the webview. [`LogApi`] beside it is about the file,
+ * not about a record. The same five methods on both hosts, so a phone reading
+ * a server's log and a desktop reading its own run the same code.
+ */
+export interface LogsApi {
+  /** Records this window produced. Batched by the caller, never one per call. */
+  write(records: LogRecordInput[]): Promise<void>;
+  tail(opts?: LogTailOptions): Promise<LogRecord[]>;
+  query(opts?: LogQueryOptions): Promise<LogRecord[]>;
+  /**
+   * The `EnvFilter` directive. Called with nothing it reads; called with a
+   * string it sets and answers what took effect.
+   */
+  level(directives?: string): Promise<string>;
+  /**
+   * Live records, in the batches the host coalesces them into. Returns the
+   * unsubscribe, which also tells the host to stop pushing when it was the
+   * last handler.
+   */
+  subscribe(handler: (records: LogRecord[]) => void): () => void;
 }
 
 export interface PushSubscriptionJson {
@@ -1370,7 +1465,7 @@ export interface OrchestratorMessage {
 /**
  * The conduct domain: the workspace pulse and the orchestrator conversation.
  *
- * `record` is fire-and-forget by design — the status engine writes a phase
+ * `record` is fire-and-forget by design: the status engine writes a phase
  * transition and moves on, and a moment lost to a torn connection is a moment
  * the next roster read covers anyway. `say` is not here: only the orchestrator
  * process speaks, through the agent API, never the window.
@@ -1389,7 +1484,28 @@ export interface ConductApi {
     project?: string | null;
     waiter?: string;
   }): Promise<PulseAnswer>;
-  post(params: { scope?: string | null; text: string }): Promise<{ messageId: string }>;
+  /**
+   * The user's line into a scope.
+   *
+   * The answer is the id of whatever the line became, and which one that is
+   * depends on the runtime the orchestrator runs on: a chat row answers a
+   * `turnId`, since the bus turns the post into `pilot.turn.start` on it. No
+   * caller reads either, and the two are named apart rather than merged so the
+   * shapes stay honest.
+   */
+  post(params: {
+    scope?: string | null;
+    text: string;
+  }): Promise<{ messageId?: string; turnId?: string }>;
+  /**
+   * One scope's conversation, oldest first, after a cursor.
+   *
+   * For a chat orchestrator these are the `user_message` and `assistant_text`
+   * items of its own timeline, mapped to this shape on the host, so a phone on
+   * a boite-server reads the same list the desktop does. The cursor is then an
+   * item id rather than a chat row id, which changes nothing here: it is
+   * whatever the previous read's last entry was called.
+   */
   messages(params: {
     scope?: string | null;
     sinceId?: string | null;
@@ -1401,13 +1517,26 @@ export interface ConductApi {
    * but an agent key is refused by the bus itself.
    */
   start(params: { threadId: string; scope?: string | null }): Promise<{ threadId: string }>;
-  status(params: { scope?: string | null }): Promise<{ threadId: string | null; state: string }>;
+  /**
+   * Which thread answers for a scope, and how it is driven.
+   *
+   * `runtime` and `status` are absent when nothing holds the scope. For a chat
+   * orchestrator `status` is the exact word the projection wrote on the row,
+   * which has one source; a terminal one answers null there, its status being
+   * the status engine's and expiring on a clock.
+   */
+  status(params: { scope?: string | null }): Promise<{
+    threadId: string | null;
+    state: string;
+    runtime?: string;
+    status?: string | null;
+  }>;
   /** What the orchestrators caused, newest first, for the inbox's undo list. */
   actions(params: { limit?: number }): Promise<OrchestratorAction[]>;
   /**
    * Un-does one recorded action. Local grant only on the bus: taking an
    * action back is the user's, never an agent covering its tracks. Nothing
-   * committed is destroyed — a spawn is put away, a dismissal brought back.
+   * committed is destroyed: a spawn is put away, a dismissal brought back.
    */
   undo(params: { actionId: string }): Promise<{ done: boolean }>;
   /**
@@ -1463,7 +1592,7 @@ export interface SyncSource {
    */
   supported: boolean;
   /**
-   * Whether anything is here now. Absence does not disable the switch — a
+   * Whether anything is here now. Absence does not disable the switch: a
    * configuration arriving before its agent is how a new machine is set up.
    */
   presentHere: boolean;
@@ -1576,7 +1705,7 @@ export interface SyncProbe {
  * polled rather than pushed, so a panel opened half way through sees where it
  * got to.
  *
- * The configuration itself — the address and the per-source switches — is not
+ * The configuration itself, the address and the per-source switches, is not
  * here. It lives in the settings blob both hosts already read, and the host
  * reads it out of that row on every call, so turning a source off stops the next
  * sync rather than the next session.
@@ -1592,7 +1721,7 @@ export interface SyncApi {
   /** What is still waiting, for a panel opened after the pull. */
   conflicts(): Promise<SyncConflict[]>;
   /**
-   * Arbitrary bytes for one file — the merge tool can keep both sides, so this
+   * Arbitrary bytes for one file: the merge tool can keep both sides, so this
    * is not a pick-a-side call. It writes that file and nothing else, which is
    * what makes an abandoned merge safe to walk away from.
    */
@@ -1641,6 +1770,60 @@ export interface TelemetryApi {
   }): Promise<void>;
 }
 
+/**
+ * The chat runtime, one door for both transports.
+ *
+ * Every method is a `pilot.*` command of `boite_core::command`: locally a
+ * `pilot_*` Tauri command, over the wire the RPC of the same name. The JSON
+ * types are the crate's own and are written once in
+ * `$lib/features/pilot/types.ts`, so a field the Rust renames is one edit there.
+ *
+ * `subscribe` is the only one that is not a call: it hands back the
+ * unsubscribe, and a caller that drops a thread must call it or the host keeps
+ * pushing at a pane nobody is drawing.
+ */
+export interface PilotApi {
+  /**
+   * The drivers installed, their models, and every account a thread can open
+   * on. Cached for a minute on the host; `refresh` is what the picker's own
+   * refresh button sends.
+   */
+  catalog(refresh?: boolean): Promise<PilotCatalog>;
+  /** Start or resume the native session of a `runtime = pilot` row. */
+  open(threadId: string): Promise<PilotOpened>;
+  /**
+   * A user turn. A turn already running receives the text as steering rather
+   * than queuing behind it. `selection` switches model before the turn runs.
+   */
+  startTurn(threadId: string, text: string, selection?: string): Promise<string>;
+  /** Escape. Reaches a running turn where the driver declares `interrupt`. */
+  interrupt(threadId: string): Promise<void>;
+  /**
+   * The answer to an open request, by the option value the driver offered.
+   * Anything the driver did not offer is a refusal on the machine holding the
+   * process, never a tool that runs on a value nobody recognised.
+   */
+  respond(threadId: string, requestId: string, answer: PilotRequestAnswer): Promise<void>;
+  /**
+   * Model, and optionally the account to answer on. Answers what the switch
+   * actually did: nothing stopped, or the session was reopened on the same
+   * native conversation.
+   */
+  setModel(threadId: string, selection: PilotModelSelection): Promise<PilotSwitchKind>;
+  setMode(threadId: string, mode: PilotExecMode): Promise<void>;
+  /** Polite stop. The native session stays resumable, which is what sleep is. */
+  stop(threadId: string): Promise<void>;
+  /** The projected timeline by cursor, oldest first. `afterSeq` is exclusive. */
+  items(threadId: string, afterSeq?: number, limit?: number): Promise<PilotItemRow[]>;
+  /** The raw journal by cursor, for what the driver actually said. */
+  events(threadId: string, afterSeq?: number, limit?: number): Promise<PilotEventRow[]>;
+  /**
+   * Live events for one thread. Returns the unsubscribe, which also tells the
+   * host to stop pushing when it was the last handler on that thread.
+   */
+  subscribe(threadId: string, handler: (event: PilotEvent) => void): () => void;
+}
+
 export interface Backend {
   readonly kind: "tauri" | "remote";
   readonly caps: BackendCaps;
@@ -1666,6 +1849,8 @@ export interface Backend {
   readonly scope: ScopeApi;
   readonly session: SessionApi;
   readonly log: LogApi;
+  readonly logs: LogsApi;
+  readonly pilot: PilotApi;
   readonly approvals: ApprovalsApi;
   readonly search: SearchApi;
   // The workspace pulse and the orchestrator conversation. Optional while the
@@ -1687,7 +1872,7 @@ export interface Backend {
    *
    * True exactly once per id, across every device connected to the boite. The
    * request itself is broadcast because the server cannot tell which device is
-   * watching — but a move run twice kills one PTY twice and leaves a second
+   * watching, but a move run twice kills one PTY twice and leaves a second
    * worktree behind, so acting on one is a claim, not a notification.
    *
    * Remote only: the desktop delivers these as a Tauri event to the one app

@@ -12,7 +12,8 @@ import type { PaneContent } from "./types";
  */
 export function paneLabel(content: PaneContent): string {
   switch (content.kind) {
-    case "thread": {
+    case "thread":
+    case "chat": {
       const thread = app.threadById(content.threadId);
       return thread?.title ?? thread?.label ?? "";
     }

@@ -1,7 +1,7 @@
 //! What Boite looks like right now, in one answer.
 //!
 //! Written for an agent asked to work out why something is wrong. Everything
-//! here was already readable, one call at a time, from four different places —
+//! here was already readable, one call at a time, from four different places,
 //! and an agent that has to make four calls to build a picture usually stops and
 //! asks a human instead. That is the failure this exists to remove.
 //!
@@ -12,8 +12,8 @@
 //! before it is shared is one nobody shares.
 //!
 //! Every count says what it counted. A snapshot that reports three threads when
-//! the database has three rows and the process table has one is not wrong — it
-//! is answering two different questions — so it reports both and names them.
+//! the database has three rows and the process table has one is not wrong: it
+//! is answering two different questions, so it reports both and names them.
 
 use std::collections::BTreeMap;
 
@@ -102,7 +102,7 @@ pub struct ThreadLine {
 /// Confined, every section is cut to that project on the way out rather than
 /// at the caller: a snapshot is one answer built from four reads, and a filter
 /// applied afterwards is a filter the next section added is written without.
-/// The window is left as it is — what is on the user's screen is the same thing
+/// The window is left as it is: what is on the user's screen is the same thing
 /// `browser_status` already answers to anyone, deliberately (see
 /// `crate::screen`).
 pub fn take(
@@ -421,6 +421,11 @@ mod tests {
                 role: None,
                 orchestrator_scope: None,
                 accept_dispatch: true,
+                runtime: crate::model::default_runtime(),
+                pilot_driver: None,
+                pilot_instance: None,
+                pilot_model: None,
+                pilot_options: None,
             })
             .unwrap();
     }

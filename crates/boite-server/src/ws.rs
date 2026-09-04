@@ -185,6 +185,7 @@ pub async fn handle_socket(socket: WebSocket, state: Arc<AppState>, addr: Socket
     // Fan control-plane events out to this client.
     let mut events_rx = state.events.subscribe();
     let tx_ctrl = tx.clone();
+    let state_ctrl = state.clone();
     let my_pairing = session.pairing_id().to_string();
     let liveness_ctrl = liveness.clone();
     let control = tokio::spawn(async move {
@@ -199,6 +200,15 @@ pub async fn handle_socket(socket: WebSocket, state: Arc<AppState>, addr: Socket
                     hang_up(&tx_ctrl).await;
                     break;
                 }
+                // A live log feed goes only to the devices that asked. Every
+                // other event is for everyone: this is the one whose volume
+                // makes "fan out and let the client filter" the wrong shape.
+                Ok(AppEvent::LogRecords { .. })
+                    if !state_ctrl.logs_subscribed(&my_pairing) => {}
+                // Same rule, per thread: a turn is hundreds of events and a
+                // device watching another chat has no use for them.
+                Ok(AppEvent::PilotEvent { thread_id, .. })
+                    if !state_ctrl.pilot_subscribed(&my_pairing, &thread_id) => {}
                 Ok(ev) => {
                     if let Ok(s) = serde_json::to_string(&ev.to_event()) {
                         if tx_ctrl.send(WsOut::Text(s)).await.is_err() {
@@ -313,9 +323,30 @@ pub async fn handle_socket(socket: WebSocket, state: Arc<AppState>, addr: Socket
                             .await;
                     }
                     _ => {
+                        // Which device, because "it works from my phone" is the
+                        // whole of what a bug report usually carries, and a
+                        // refusal with no device in it cannot be told from a
+                        // failure everyone is seeing.
+                        let refused_method = request.method().to_string();
+                        let refused_thread = request
+                            .params()
+                            .get("threadId")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        let refused_device = request.device().to_string();
                         let resp = match rpc::dispatch(&state, request).await {
                             Ok(v) => Response::ok(id, v),
-                            Err(e) => Response::err(id, e),
+                            Err(e) => {
+                                tracing::warn!(
+                                    method = %refused_method,
+                                    thread = %refused_thread,
+                                    device = %refused_device,
+                                    reason = %e,
+                                    "rpc.failed"
+                                );
+                                Response::err(id, e)
+                            }
                         };
                         let _ = tx.send(WsOut::Text(json_str(&resp))).await;
                     }
@@ -357,6 +388,9 @@ pub async fn handle_socket(socket: WebSocket, state: Arc<AppState>, addr: Socket
         h.abort();
         state.registry.detach(&thread_id, client);
     }
+    // And the threads it was watching. Per thread rather than per device, so
+    // this set would otherwise grow one entry per chat anybody ever opened.
+    state.drop_pilot_subscriptions(session.pairing_id());
     control.abort();
     writer.abort();
 }
@@ -510,8 +544,8 @@ async fn handle_attach(
 ///
 /// **A ticket, never the device's own credential.** The ticket was bought over
 /// authenticated HTTP seconds ago (`http::ticket`), is good for one connection
-/// and expires in five minutes, so what travels through this frame — and
-/// through whatever proxy is in front of it — is worth nothing by the time
+/// and expires in five minutes, so what travels through this frame, and
+/// through whatever proxy is in front of it, is worth nothing by the time
 /// anybody could replay it. A long-lived credential presented here is refused
 /// like any other wrong secret, on purpose: accepting both would leave the old
 /// shape working under a new name.
@@ -529,7 +563,7 @@ async fn authenticate(
     // A frame that is not a well-formed auth request still has to reach
     // auth.spend_ticket: routing malformed or wrong-method first frames around
     // it left the per-IP lockout untrippable by exactly the traffic a prober
-    // sends. Timeouts and closes are NOT counted — a client that hangs up
+    // sends. Timeouts and closes are NOT counted: a client that hangs up
     // before authenticating (tab closed, network blip) is not an attempt, and
     // counting it would lock out a legitimate device after five reconnects.
     let attempt: Option<(u64, String)> = match &first {
@@ -550,7 +584,7 @@ async fn authenticate(
                 // A text frame that is not a usable auth request is still an
                 // attempt: that is what a prober sends. So is one carrying
                 // `token` instead of `ticket`, which is what a client built
-                // before this sends — it reads the empty string and is refused,
+                // before this sends: it reads the empty string and is refused,
                 // rather than being quietly accepted on the old path.
                 .unwrap_or((0, String::new())),
         ),
@@ -558,7 +592,7 @@ async fn authenticate(
         // Close/Ping/Pong and the timeout are NOT attempts. A client that hangs
         // up before authenticating (tab closed, network blip, connectivity
         // probe) sends a Close frame, and counting it locked the IP out after
-        // five reconnects — a PWA banning its own device.
+        // five reconnects, a PWA banning its own device.
         _ => None,
     };
 

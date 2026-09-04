@@ -1,4 +1,47 @@
 import type { ControlEvent, ServerIdentity } from "../types";
+import { log } from "$lib/shared/log";
+
+/**
+ * Reporting a `logs.*` failure would come straight back through this door: the
+ * warn is queued, the next flush is a `logs.write` that fails for the same
+ * reason, and it queues a warn about itself.
+ */
+const OWN_DOOR = /^logs\./;
+
+/** How long the same failure stays quiet after being written down once. */
+const QUIET_FOR_MS = 5_000;
+const lastSaid = new Map<string, number>();
+
+/**
+ * Writes a line about a refused call and hands the rejection back untouched.
+ *
+ * Untouched matters: every caller already handles the reason it got, and a
+ * wrapper that reshaped one would turn a failure into a different failure
+ * further down. A command that fails once fails again (a panel on a timer, a
+ * poll waiting for something to come up), so the same reason is quiet for five
+ * seconds rather than filling the log with one message.
+ */
+function sayRefused(method: string, err: unknown): unknown {
+  if (OWN_DOOR.test(method)) return err;
+  const reason = err instanceof Error ? err.message : String(err);
+  const key = `${method}:${reason}`;
+  const now = Date.now();
+  const seen = lastSaid.get(key);
+  if (seen !== undefined && now - seen < QUIET_FOR_MS) return err;
+  if (lastSaid.size > 200) lastSaid.clear();
+  lastSaid.set(key, now);
+  log.warn("backend.call", "call.refused", { method, reason });
+  return err;
+}
+
+/** `host:port` out of a WebSocket URL, or the URL when it does not parse. */
+function hostOf(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
+  }
+}
 import type { Platform } from "$lib/storage/platform.svelte";
 
 export type ConnState = "connecting" | "connected" | "disconnected";
@@ -69,7 +112,7 @@ export function httpBase(wsUrl: string): string {
  * A `401` is the one failure the login form can fix, so it is the only one that
  * raises the gate. Anything else is a boite that was not reached.
  *
- * `abandon` is the caller giving up on this dial — `close()`, or a newer dial
+ * `abandon` is the caller giving up on this dial: `close()`, or a newer dial
  * taking over. The round trip is cancelled rather than left to finish into a
  * socket nobody is waiting for, and the reason it reports is never "timeout":
  * only the timer above writes that word.
@@ -138,7 +181,7 @@ const RPC_TIMEOUTS: Record<string, number> = {
   hello: 5_000,
   // A year of transcripts, per directory: two directory walks and a JSON parse
   // per session that has moved since it was last read. `USAGE_DAYS` is 371, and
-  // a boite that has been worked in all year has thousands of them — a warm
+  // a boite that has been worked in all year has thousands of them: a warm
   // scan answers in milliseconds, but the first one on a cold cache reads the
   // whole year off the disk and that is what this ceiling is for.
   "session.usage": 180_000,
@@ -389,9 +432,18 @@ export class Socket {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.#pending.delete(id);
-        reject(new Error(`rpc timeout: ${method} (${ceiling}ms)`));
+        reject(sayRefused(method, new Error(`rpc timeout: ${method} (${ceiling}ms)`)));
       }, ceiling);
-      this.#pending.set(id, { resolve, reject, timer });
+      // The one door every remote call goes through, so a failure at the
+      // boundary is written down once rather than at a hundred call sites. Most
+      // callers catch and turn a rejection into an empty list, and the sentence
+      // the server wrote is then gone, which is the exact shape of problem an
+      // agent cannot solve without asking a human what they see.
+      this.#pending.set(id, {
+        resolve,
+        reject: (e: unknown) => reject(sayRefused(method, e)),
+        timer,
+      });
       ws.send(JSON.stringify({ id, method, params }));
     });
   }
@@ -497,7 +549,7 @@ export class Socket {
     }
     // The ticket is in hand and the socket it was for is gone: `close()` ran
     // during the round trip, or a newer dial took over. Constructing a
-    // WebSocket here is the resurrection this guard exists to stop — it would
+    // WebSocket here is the resurrection this guard exists to stop: it would
     // reattach threads, publish states and run a backoff loop of its own.
     if (stale() || this.#closed) {
       if (!stale()) this.#dialing = false;
@@ -656,7 +708,7 @@ export class Socket {
       if (typeof msg.event === "string") {
         // Consumed here, not forwarded: the replay marker pairs with the binary
         // frame that follows it, not the app-level control plane. It goes
-        // through #binChain like the frames do — handling it synchronously let
+        // through #binChain like the frames do: handling it synchronously let
         // it overtake a binary frame still queued behind a gzip inflate, and
         // that stale live frame was then consumed as the replay body: terminal
         // cleared at the wrong point, offset left pointing at the wrong byte.
@@ -742,7 +794,16 @@ export class Socket {
 
   #setState(s: ConnState): void {
     if (this.#state === s) return;
+    const from = this.#state;
     this.#state = s;
+    // The link coming up, going down and coming back is the first thing anyone
+    // asks about when a phone stops answering, and until now the only record of
+    // it was a coloured dot the user had already stopped looking at. `from` is
+    // what separates a first connect from a reconnect.
+    // The host, never the whole URL: the server stamps the real device id on
+    // every record it accepts, and what this side can add is which boite it was
+    // talking to.
+    log.info("backend.remote", `conn.${s}`, { from, device: hostOf(this.#url) });
     this.#stateCb(s);
   }
 }

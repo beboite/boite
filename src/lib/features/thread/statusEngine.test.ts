@@ -22,6 +22,14 @@ const h = vi.hoisted(() => ({
   leaves: [] as Array<{ paneId: string; content: Record<string, unknown> }>,
   shown: new Set<string>(),
   closed: [] as string[],
+  // Auto-sleep is off by default, the way a fresh install is. The one test that
+  // wants it turns it on.
+  settings: {
+    idleTimeoutMinutes: 0,
+    idleAutocloseByIcon: {} as Record<string, boolean>,
+  },
+  /** The chat sessions `pilot.stop` was asked for. */
+  stopped: [] as string[],
 }));
 
 vi.mock("$lib/app/store.svelte", () => ({
@@ -46,11 +54,21 @@ vi.mock("$lib/app/store.svelte", () => ({
 }));
 
 vi.mock("$lib/backend", () => ({
-  workspace: { backendFor: () => ({ caps: { clientStatus: true } }) },
+  workspace: {
+    backendFor: () => ({
+      caps: { clientStatus: true },
+      pilot: {
+        stop: (id: string) => {
+          h.stopped.push(id);
+          return Promise.resolve();
+        },
+      },
+    }),
+  },
 }));
 
 vi.mock("$lib/features/settings/store.svelte", () => ({
-  settings: { state: { idleTimeoutMinutes: 0, idleAutocloseByIcon: {} } },
+  settings: { state: h.settings },
 }));
 
 vi.mock("$lib/features/panes/store.svelte", () => ({
@@ -138,6 +156,9 @@ beforeEach(async () => {
   h.leaves = [];
   h.shown = new Set();
   h.closed = [];
+  h.settings.idleTimeoutMinutes = 0;
+  h.settings.idleAutocloseByIcon = {};
+  h.stopped = [];
   vi.useFakeTimers();
   vi.setSystemTime(T0);
   vi.resetModules();
@@ -340,5 +361,53 @@ describe("the browser panes an agent leaves behind", () => {
     expect(h.closed).toEqual([]);
     vi.advanceTimersByTime(TICK_MS * 2);
     expect(h.closed).toEqual(["pane1"]);
+  });
+});
+
+describe("a chat thread", () => {
+  // Its status is the protocol's, pushed by the host: the sweep must not touch
+  // it, and every arm below would (no PTY reads as `idle`, no rows read as
+  // nothing to say at all). Auto-sleep is the one thing that still applies, and
+  // it stops the session rather than killing a process that does not exist.
+  it("keeps the status the host pushed, and is auto-slept politely", () => {
+    h.settings.idleTimeoutMinutes = 10;
+    h.settings.idleAutocloseByIcon = { claude: true };
+    const t = thread({
+      id: "c1",
+      runtime: "pilot",
+      ptyId: null,
+      iconKey: "claude",
+      cmd: "claude",
+      status: "ready",
+    });
+    h.threads = [t];
+    mod.statusEngine.start();
+
+    vi.advanceTimersByTime(TICK_MS * 4);
+    expect(t.status).toBe("ready");
+    expect(h.stopped).toEqual([]);
+
+    vi.advanceTimersByTime(11 * 60_000);
+    expect(h.stopped).toEqual(["c1"]);
+    expect(t.status).toBe("stopped");
+  });
+
+  it("is left alone while it is working", () => {
+    h.settings.idleTimeoutMinutes = 10;
+    h.settings.idleAutocloseByIcon = { claude: true };
+    const t = thread({
+      id: "c1",
+      runtime: "pilot",
+      ptyId: null,
+      iconKey: "claude",
+      cmd: "claude",
+      status: "running",
+    });
+    h.threads = [t];
+    mod.statusEngine.start();
+
+    vi.advanceTimersByTime(11 * 60_000);
+    expect(t.status).toBe("running");
+    expect(h.stopped).toEqual([]);
   });
 });

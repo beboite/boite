@@ -1,0 +1,31 @@
+{
+  "//": "One scenario for the whole run, because BOITE_PILOT_SCENARIO is one variable on one app process while several chat threads talk to their own fake at once. Each step names the prompt it answers, which is how the fake picks one (stepFor in crates/boite-pilot/tests/fake-claude.mjs). The two texts are the ones plain.json and approval.json replay, so a scenario file here and a wire test there stay one wire.",
+  "model": "claude-fable-5-1",
+  "slash_commands": ["init", "review"],
+  "steps": [
+    {
+      "prompt": "hello",
+      "deltas": ["o", "k"],
+      "duration_ms": 42,
+      "usage": { "input_tokens": 7, "output_tokens": 4 }
+    },
+    {
+      "prompt": "run it",
+      "deltas": ["running it"],
+      "request": { "tool_name": "Bash", "input": { "command": "git status" } },
+      "duration_ms": 90,
+      "usage": { "input_tokens": 11, "output_tokens": 5 }
+    },
+    {
+      "prompt": "again",
+      "deltas": ["still", " here"],
+      "duration_ms": 30,
+      "usage": { "input_tokens": 5, "output_tokens": 3 }
+    },
+    {
+      "deltas": ["ok"],
+      "duration_ms": 20,
+      "usage": { "input_tokens": 2, "output_tokens": 1 }
+    }
+  ]
+}

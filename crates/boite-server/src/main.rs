@@ -7,6 +7,7 @@ mod events;
 mod http;
 mod notify;
 mod pairing_link;
+mod pilot;
 mod protocol;
 mod push;
 mod registry;
@@ -41,14 +42,84 @@ use boite_core::store::{ColVal, Store, ThreadCol};
 const EVENT_CHANNEL_CAP: usize = 1024;
 const MAX_WS_MESSAGE: usize = 1024 * 1024;
 
+/// Where this server writes its log.
+///
+/// `--log-dir` when it is given, `BOITE_LOG_DIR` when it is set, and otherwise
+/// the directory the desktop app uses on this machine, so one boite's three
+/// hosts land in one place and a query merges them. A machine with no such
+/// directory falls back to the data directory, which is the one place a server
+/// is always allowed to write.
+fn log_dir_from(args: &[String]) -> std::path::PathBuf {
+    if let Some(at) = args.iter().position(|a| a == "--log-dir") {
+        if let Some(dir) = args.get(at + 1).filter(|d| !d.starts_with("--")) {
+            return std::path::PathBuf::from(dir);
+        }
+    }
+    if let Ok(dir) = std::env::var("BOITE_LOG_DIR") {
+        if !dir.trim().is_empty() {
+            return std::path::PathBuf::from(dir);
+        }
+    }
+    boite_core::log::desktop_log_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("./boite-data").join("logs"))
+}
+
+/// Pushes what this process logs at the devices that asked for it.
+///
+/// Two hops on purpose. The `boite_core::log` subscriber runs on whichever
+/// thread logged, inside the write path, so all it does is put the record on a
+/// channel. The task below is what batches: fifty records or 250 ms, whichever
+/// comes first, because one broadcast per record would put the fanout on the
+/// log's own write path and a busy second writes hundreds.
+fn spawn_log_fanout(state: Arc<AppState>) {
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<serde_json::Value>();
+    boite_core::log::subscribe(Box::new(move |record| {
+        // A record that will not serialize is dropped rather than logged
+        // about: logging from inside the log's own subscriber is a loop.
+        if let Ok(value) = serde_json::to_value(record) {
+            let _ = tx.send(value);
+        }
+    }));
+    tokio::spawn(async move {
+        const MAX_BATCH: usize = 50;
+        const WINDOW: std::time::Duration = std::time::Duration::from_millis(250);
+        let mut batch: Vec<serde_json::Value> = Vec::new();
+        loop {
+            let Some(first) = rx.recv().await else { break };
+            batch.clear();
+            batch.push(first);
+            let deadline = tokio::time::Instant::now() + WINDOW;
+            while batch.len() < MAX_BATCH {
+                match tokio::time::timeout_at(deadline, rx.recv()).await {
+                    Ok(Some(record)) => batch.push(record),
+                    // The channel is closed: send what is in hand and stop.
+                    Ok(None) => break,
+                    Err(_) => break,
+                }
+            }
+            if state.anyone_reads_logs() {
+                let _ = state.events.send(AppEvent::LogRecords {
+                    records: Arc::new(std::mem::take(&mut batch)),
+                });
+            }
+        }
+    });
+}
+
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "boite_server=info".into()),
-        )
-        .init();
+    // The same layer the desktop and the MCP shim install, so `logs.query`
+    // merges three hosts on one clock instead of one host and two stderrs. The
+    // compact `fmt` layer stays beside it: a server is watched from a console,
+    // and taking that away would be a regression for whoever is running it.
+    let log_dir = log_dir_from(&std::env::args().skip(1).collect::<Vec<_>>());
+    if let Err(e) = boite_core::log::init(boite_core::log::LogConfig {
+        dir: log_dir.clone(),
+        host: "server".to_string(),
+        extra_stderr: true,
+    }) {
+        eprintln!("[boite-server] the log could not be opened at {}: {e}", log_dir.display());
+    }
 
     // A headless box with nothing paired to it has no screen to pair the first
     // device from. These verbs are that screen; they touch the database and
@@ -162,6 +233,12 @@ async fn main() {
     // One wait registry for the whole process: the RPC's writes wake the agent
     // endpoint's long-polls, so the two must hold the same one.
     let pulse = boite_core::pulse::Waiters::new();
+    // Built before the agent endpoint, which reads it: `thread_wait` asks the
+    // runtime what a chat thread is doing, and a copy built afterwards would be
+    // a second set of sessions answering about the first one's threads. The
+    // sink needs the store and the event channel and nothing else, and both
+    // exist by here.
+    let pilot = pilot::runtime(store.clone(), events.clone());
     let agent_api = agent_api::start(
         store.clone(),
         events.clone(),
@@ -170,8 +247,12 @@ async fn main() {
         devices.clone(),
         registry.clone(),
         pulse.clone(),
+        pilot.clone(),
     )
     .await;
+
+    let pilot_mcp = agent_api.as_ref().and_then(|api| api.mcp.clone());
+    let pilot = Some(pilot);
 
     let state = Arc::new(AppState {
         store,
@@ -192,7 +273,13 @@ async fn main() {
         claimed_requests: Default::default(),
         pulse,
         telemetry,
+        log_subscribers: Default::default(),
+        pilot_subscribers: Default::default(),
+        pilot,
+        pilot_mcp,
     });
+
+    spawn_log_fanout(state.clone());
 
     if let Err(e) = state.refresh_roots() {
         tracing::warn!("failed to load project roots: {e}");
@@ -256,8 +343,8 @@ async fn main() {
     if let Some(dir) = &config.static_dir {
         let index = dir.join("index.html");
         let serve = ServeDir::new(dir).fallback(ServeFile::new(index));
-        // The same SPA the desktop window runs, served to a phone or a browser
-        // — and until now with none of the protection the desktop window has.
+        // The same SPA the desktop window runs, served to a phone or a browser,
+        // and until now with none of the protection the desktop window has.
         // Tauri hands the webview a strict CSP from tauri.conf.json; this door
         // sent the identical files with no CSP, no nosniff and no framing rule
         // at all.
@@ -269,7 +356,7 @@ async fn main() {
         // `script-src 'self'` here would leave a phone staring at a blank page
         // with the reason only in a console it cannot open. Locking the script
         // side down properly means SvelteKit's own `kit.csp` in hash mode, so
-        // the hash is generated with the file it covers — its own change, with
+        // the hash is generated with the file it covers, its own change, with
         // the desktop CSP checked against it, not a line snuck in here.
         //
         // `frame-ancestors 'none'` and `X-Frame-Options` say the same thing to
@@ -303,6 +390,7 @@ async fn main() {
 
     let registry_for_shutdown = state.registry.clone();
     let telemetry_for_shutdown = state.telemetry.clone();
+    let pilot_for_shutdown = state.pilot.clone();
     let app = app.with_state(state.clone());
 
     let listener = match tokio::net::TcpListener::bind(&config.bind).await {
@@ -327,6 +415,14 @@ async fn main() {
     if let Err(e) = serve
         .with_graceful_shutdown(async move {
             shutdown_signal().await;
+            // Before the PTYs, and awaited: a pilot child left behind holds its
+            // session file open, and the next launch resumes into a
+            // conversation two processes are writing. `stop_all` is the polite
+            // stop, so the native session stays resumable.
+            if let Some(pilot) = pilot_for_shutdown {
+                tracing::info!("shutdown: stopping pilot sessions");
+                pilot.stop_all().await;
+            }
             tracing::info!("shutdown: killing PTYs");
             // kill_all spawns + joins one OS thread per PTY; keep it off the
             // async worker so a slow killer syscall can't stall the runtime.
@@ -391,7 +487,7 @@ async fn assetlinks(State(state): State<Arc<AppState>>) -> Response {
 ///
 /// The query string of an upgrade request reaches the access log of whatever
 /// reverse proxy is in front, and nobody rotates those. Nothing here has ever
-/// read one — the credential arrives in the first frame — so a request carrying
+/// read one, the credential arrives in the first frame, so a request carrying
 /// `?token=` or `?ticket=` is either a client built against a design this
 /// server does not have or somebody trying the shape on. Both get the same
 /// answer, and it is a refusal rather than a silently ignored parameter: a
@@ -420,8 +516,8 @@ async fn ws_upgrade(
     // first frame on this socket arrives before the ticket is checked: an
     // unauthenticated peer could make the process buffer that much, times
     // `max_connections`, before anything decided who it was. Nothing a client
-    // sends is anywhere near it — the widest legitimate message is a paste on
-    // its way to a PTY — so a megabyte leaves room to spare and takes the
+    // sends is anywhere near it, the widest legitimate message is a paste on
+    // its way to a PTY, so a megabyte leaves room to spare and takes the
     // pre-auth cost down by a factor of sixty-four.
     ws.max_message_size(MAX_WS_MESSAGE)
         .max_frame_size(MAX_WS_MESSAGE)
@@ -445,7 +541,7 @@ fn make_event_emitter(
             } => {
                 // What the row keeps is how the run ended, or that there was one.
                 // `running`, `ready` and `waiting` all say the same thing to a
-                // later boot — this thread was on — so they store the one word,
+                // later boot, this thread was on, so they store the one word,
                 // and `stopped` stores nothing at all: an auto-sleep is this
                 // run's own bookkeeping, and writing it would make
                 // `settle_last_run` decay the mark one restart early, which is a

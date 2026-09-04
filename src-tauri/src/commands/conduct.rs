@@ -11,7 +11,7 @@
 use std::sync::Arc;
 
 use serde_json::{json, Value};
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 
 use boite_core::command::Conduct;
 use boite_core::pulse::Waiters;
@@ -48,13 +48,24 @@ macro_rules! conduct_command {
         ) -> Result<Value, String> {
             let command = decode($method, params.unwrap_or_else(|| json!({})))?;
             let store = rows.get(&app)?;
-            through(
-                DesktopHost::new(scope.inner())
-                    .with_store(store)
-                    .with_pulse(waiters.0.clone()),
-                command.into(),
-            )
-            .await
+            let mut host = DesktopHost::new(scope.inner())
+                .with_store(store)
+                .with_pulse(waiters.0.clone());
+            // The chat runtime, for the two verbs that become a turn when the
+            // thread on the other end is a chat one. Attached here rather than
+            // asked for inside the domain, because `Host` is what a command may
+            // reach and this app is what holds the children. A build with no
+            // runtime answers `None` and every conduct call stays what it was.
+            if let Ok(runtime) = app.state::<super::pilot::PilotRuntime>().get(&app) {
+                host = host.with_pilot(runtime);
+            }
+            // The same sidecar a chat thread opened from the launcher gets. A
+            // dev build that never built the shim has none, and a thread
+            // without boite tools is worth more than a refusal to open one.
+            if let Ok(paths) = super::agents::local_mcp_paths(&app) {
+                host = host.with_mcp(paths);
+            }
+            through(host, command.into()).await
         }
     };
 }
