@@ -364,12 +364,12 @@ orchestrator's scope. Arming is device-side (the user's own window writes the
 stamp); which projects carry one is workspace-side configuration
 (`orchestratorEnabledFor`). Undoing what one caused is Local-only too
 (`orchestrator.undo`): taking an action back is the user's, and nothing
-committed is ever destroyed — a spawn is put away, a dismissal brought back,
+committed is ever destroyed: a spawn is put away, a dismissal brought back,
 both stamps on rows.
 
 A dispatch is a line, not a byte: `thread.dispatch` writes a row the target's
 own device drains and types at its prompt (`dispatch.drain`), never a write to
-the PTY from the bus — `crate::reply` forbids that on purpose, and the queue
+the PTY from the bus: `crate::reply` forbids that on purpose, and the queue
 does not go around it. The line never lands while the worker is waiting on the
 user, because a question asked to the user is the user's.
 
@@ -391,7 +391,7 @@ and none of which the compiler will remind you about.
 - **A file is parsed only if it declares a field rule, and it is never written
   back.** `serde_json` here has no `preserve_order`, so a parse and reserialise
   alphabetises every object, and `~/.copilot/config.json` is JSONC. Redaction
-  substitutes a value's own text — in its *escaped* form, because the bytes in
+  substitutes a value's own text, in its *escaped* form, because the bytes in
   the file are not the parsed value. `commands/agents.rs` already states this
   refusal for the same class of file; this extends it rather than departing.
 - **Create atomically, update in place.** `~/.agents/AGENTS.md` is one inode with
@@ -405,7 +405,7 @@ and none of which the compiler will remind you about.
   `is_dir() == false`. `remove_dir_all` appears nowhere in the module.
 - **A divergence is the frontend's to merge.** Rust reports three sides and
   applies whatever bytes come back. There is no pick-a-side path and no automatic
-  overwrite, the first sync on a machine with existing configuration included —
+  overwrite, the first sync on a machine with existing configuration included,
   which falls out of the base ref being absent rather than from a special case.
 
 Two more that are not in `sync` and belong to it. Nothing in `boite-mcp` names a

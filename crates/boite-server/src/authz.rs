@@ -1,8 +1,8 @@
 //! What a method needs, and the only way to reach a handler.
 //!
 //! Holding a socket used to be authorisation to call everything on it. The fix
-//! is not a line at the top of each arm in `rpc.rs` — that is a line a new arm
-//! forgets — but a type. [`Authorized`] carries a method and its parameters,
+//! is not a line at the top of each arm in `rpc.rs`, that is a line a new arm
+//! forgets, but a type. [`Authorized`] carries a method and its parameters,
 //! its fields are private, and [`Authorized::check`] is its only constructor.
 //! `rpc::dispatch` takes one. A transport therefore cannot dispatch work it did
 //! not first put through the scope check, in the same way `command::Ready` is
@@ -17,8 +17,8 @@
 //!   [`Capability`], read by name out of `boite_core::command::capabilities`.
 //!   There is no second copy to keep in step, so a capability that changes
 //!   there changes the device check with it;
-//! - everything `rpc.rs` still serves itself — the PTY registry, push
-//!   subscriptions, approvals, search, the snapshot, pairing — is in
+//! - everything `rpc.rs` still serves itself, the PTY registry, push
+//!   subscriptions, approvals, search, the snapshot, pairing, is in
 //!   [`NON_BUS`], which is this file's equivalent of T3 Code's
 //!   `RPC_REQUIRED_SCOPES`.
 //!
@@ -155,8 +155,8 @@ pub struct Authorized {
     caller: ScopeSet,
     /// Which device sent it, by pairing id.
     ///
-    /// The arms that tag what a client wrote need it — a record whose `device`
-    /// came out of the body would let one phone file its lines under another —
+    /// The arms that tag what a client wrote need it, a record whose `device`
+    /// came out of the body would let one phone file its lines under another,
     /// and it is read here rather than looked up again, because the dispatcher
     /// does not hold the session.
     device: String,
@@ -268,7 +268,7 @@ mod tests {
     }
 
     /// No method is declared twice. `NON_BUS` shadows the bus, so an entry that
-    /// names a bus method would quietly override the capability the bus pins —
+    /// names a bus method would quietly override the capability the bus pins,
     /// which is the drift this arrangement exists to prevent.
     #[test]
     fn nothing_in_the_local_table_shadows_the_bus() {

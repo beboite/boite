@@ -272,8 +272,8 @@ fn redact_email_like_tokens(value: &str) -> String {
             cursor += 1;
             continue;
         }
-        // A `@` inside a run already redacted cannot happen — `written` only
-        // ever moves past a whole match — so `left` is never behind it.
+        // A `@` inside a run already redacted cannot happen, `written` only
+        // ever moves past a whole match, so `left` is never behind it.
         out.extend(chars[written..left].iter());
         out.push_str("<email>");
         written = right;
@@ -601,7 +601,7 @@ type Sink = Box<dyn Fn(&Record) + Send + Sync>;
 /// How a host pushes live: the desktop emits to its window, the server
 /// coalesces into a `log.record` event. The callback runs on the thread that
 /// logged, inside the write lock's neighbourhood, so it must not log itself and
-/// must not block — both hosts hand the record to a channel and return.
+/// must not block: both hosts hand the record to a channel and return.
 pub fn subscribe(sink: Sink) -> SubscriptionId {
     let subscribers = subscribers();
     let id = SubscriptionId(NEXT_SUBSCRIPTION.fetch_add(1, Ordering::Relaxed));
@@ -688,8 +688,8 @@ impl LogHandle {
 /// The filter this process starts with.
 ///
 /// `BOITE_LOG` in `EnvFilter` syntax when it is set. Otherwise `info`, plus the
-/// two targets a developer is nearly always asking about — the pilot and the
-/// bus — at `debug` in a debug build. A release build never turns those on by
+/// two targets a developer is nearly always asking about, the pilot and the
+/// bus, at `debug` in a debug build. A release build never turns those on by
 /// itself: a level is a cost paid on every event, and a packaged app has no
 /// console to justify it.
 pub fn default_directives() -> String {
@@ -821,7 +821,7 @@ pub fn dir() -> Option<PathBuf> {
 
 /// Writes one record: redacted, stamped, ringed, appended, fanned out.
 ///
-/// The door for records that did not come from a `tracing` macro — the
+/// The door for records that did not come from a `tracing` macro: the
 /// webview's own, and a host bridging an older API. A record whose `host` is
 /// empty is stamped with this process's; one that names `webview` keeps it,
 /// which is how a browser's records land in the desktop's file without

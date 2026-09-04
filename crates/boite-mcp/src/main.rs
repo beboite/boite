@@ -3,7 +3,7 @@
 //! It holds no configuration of its own. Boite stamps `BOITE_MCP_URL`,
 //! `BOITE_KEY_FILE` and `BOITE_THREAD_ID` into every PTY it spawns, so this
 //! reads its whole identity from the environment. Launched anywhere else, those
-//! variables are absent and it refuses to start — which is the point: an agent
+//! variables are absent and it refuses to start, which is the point: an agent
 //! outside Boite has nothing to present.
 //!
 //! The key arrives as a path rather than a value, because an environment is
@@ -111,7 +111,7 @@ fn main() {
     }
 
     // Resolved but not required. Exiting here would kill the connection during
-    // the handshake, and a client can only report that as "connection closed" —
+    // the handshake, and a client can only report that as "connection closed",
     // hiding a cause that is one sentence long. Answering initialize and failing
     // at the call instead puts that sentence in front of the agent, which is the
     // only place anyone will read it.

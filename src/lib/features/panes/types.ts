@@ -4,13 +4,13 @@ export type SplitDir = "row" | "column";
  * What is inside a pane.
  *
  * A leaf used to be `{ threadId }` and nothing else, which made the pane tree
- * structurally incapable of holding anything but a terminal — so the only thing
+ * structurally incapable of holding anything but a terminal, so the only thing
  * a split could ever give you was a second terminal, which `Ctrl+Tab` already
  * reached. The idea of splitting was never the problem; what could go in the
  * split was.
  *
  * `thread` keeps its identity: the pane id of a thread pane IS the thread id.
- * That is not a shortcut, it is the invariant — a thread lives in exactly one
+ * That is not a shortcut, it is the invariant: a thread lives in exactly one
  * pane, so the two identities were always the same one, and everything already
  * keyed on a thread id (the rects, the group index, the drop targets) keeps
  * working unchanged.
@@ -24,7 +24,7 @@ export type PaneContent =
    * terminal pane draws nothing here because xterm arrives from the page as an
    * overlay over the measured rectangle, and a chat pane is a component in the
    * tree like every panel. Which of the two a thread gets is decided once, off
-   * `thread.runtime`, in `threadPane` — so a pilot row can never be handed a
+   * `thread.runtime`, in `threadPane`, so a pilot row can never be handed a
    * terminal by a caller that forgot to ask.
    */
   | { kind: "chat"; threadId: string }
@@ -124,9 +124,9 @@ export const SPLITTER_PX = 4;
  * A thread pane is named by its thread. See `PaneContent`.
  *
  * `runtime` is the row's own, and it is the one place the two kinds are told
- * apart: every caller that opens a pane for a thread — the sidebar reopening
+ * apart: every caller that opens a pane for a thread, the sidebar reopening
  * one, the hydration that gives an unpanned row a group, a drop, a rehome, an
- * unsplit — comes through here, so a `runtime = pilot` row never gets a
+ * unsplit, comes through here, so a `runtime = pilot` row never gets a
  * terminal. Absent reads as terminal, which is every row written before the
  * pilot existed.
  */

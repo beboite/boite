@@ -315,7 +315,7 @@ pub async fn kebacc_switcher_version(scope: State<'_, ProjectRoots>) -> Result<V
 
 // The CLI manager. Every one of these answers for the machine the threads spawn
 // on, which for a remote boite is the server rather than the device drawing the
-// panel — the same rule `command_exists` follows.
+// panel, the same rule `command_exists` follows.
 #[tauri::command]
 pub async fn cli_catalog(
     scope: State<'_, ProjectRoots>,

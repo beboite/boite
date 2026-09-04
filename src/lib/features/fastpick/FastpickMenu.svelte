@@ -31,7 +31,7 @@
   /**
    * The fastpick walk itself: harness, provider, model, options, and the launch.
    *
-   * No surface, no placement, no open state — those belong to whoever shows it.
+   * No surface, no placement, no open state: those belong to whoever shows it.
    * It is here rather than inside `FastpickPicker` because the launcher popover
    * shows the same walk in its own box: when this lived in the picker, reaching
    * fastpick from the launcher opened a second floating menu on top of the first,
@@ -398,7 +398,7 @@
     // This menu appearing is a launch that has not picked its combination yet, and
     // walking the panes takes long enough that the checkout is finished before the
     // click lands. The project switch is the other sign, but it never fires for the
-    // project the app came up on — reload, open this, launch, and the thread was
+    // project the app came up on: reload, open this, launch, and the thread was
     // paying for its own worktree in front of a black terminal.
     warmWorktreeFor(app.projects.find((p) => p.id === app.currentProjectId) ?? null);
     // Which harnesses have a protocol, asked once and only when the experiment

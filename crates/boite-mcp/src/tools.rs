@@ -97,7 +97,7 @@ finished worker you are done with gets thread_dismiss.
 
 You wait by sleeping in workspace_pulse. Never a loop, never a timer. If \
 nothing happened, nothing happened. The pulse already carries each terminal's \
-phase; read a transcript only when the pulse is not enough — a transcript \
+phase; read a transcript only when the pulse is not enough: a transcript \
 costs a hundred pulses.
 
 If a worker is waiting on the user, tell the user instead of answering in \
@@ -163,8 +163,8 @@ fn orchestrator_tools() -> Value {
     json!([
         {
             "name": "workspace_pulse",
-            "description": "Wait here. Answers what changed since your cursor — worker phases, \
-                            user messages — or nothing when the wait ran out, which is an answer \
+            "description": "Wait here. Answers what changed since your cursor, worker phases, \
+                            user messages, or nothing when the wait ran out, which is an answer \
                             too. This is how you wait: never call anything in a loop. Pass the \
                             seq you were last given.",
             "inputSchema": {
@@ -200,7 +200,7 @@ fn orchestrator_tools() -> Value {
             "name": "thread_dispatch",
             "description": "Queue one line for a worker terminal's prompt. It is typed by the \
                             device that owns that terminal, only when the worker is at its \
-                            prompt, with a visible mark saying it came from you — never during \
+                            prompt, with a visible mark saying it came from you, never during \
                             a permission dialog, never into a muted thread, never into another \
                             orchestrator. You learn the outcome on the pulse as \
                             dispatch.settled: delivered, dropped or refused with the reason.",
@@ -219,7 +219,7 @@ fn orchestrator_tools() -> Value {
         {
             "name": "thread_dismiss",
             "description": "Put a finished worker away. Refused while the worker is running or \
-                            waiting on the user — the same rule as the user's own settle. The \
+                            waiting on the user, the same rule as the user's own settle. The \
                             terminal is not killed; it leaves the active list.",
             "inputSchema": {
                 "type": "object",
@@ -280,7 +280,7 @@ fn common_tools() -> Value {
                     "commit": {
                         "type": "string",
                         "description": "Sha the work landed in, if it was committed. Resolved against \
-                                        the repository, so one that does not exist reads as unknown — \
+                                        the repository, so one that does not exist reads as unknown, \
                                         omit rather than guess."
                     }
                 },
@@ -367,7 +367,7 @@ fn common_tools() -> Value {
         },
         {
             "name": "workspace_search",
-            "description": "Find text anywhere in this workspace: the todo list, the log of what                             agents did and were refused, and what the terminals printed. Use it                             before asking a human where something is, and before assuming a                             failure is new — the same error is often already in another                             terminal or already in the log with the reason attached.",
+            "description": "Find text anywhere in this workspace: the todo list, the log of what                             agents did and were refused, and what the terminals printed. Use it                             before asking a human where something is, and before assuming a                             failure is new: the same error is often already in another                             terminal or already in the log with the reason attached.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -394,7 +394,7 @@ fn common_tools() -> Value {
             "name": "worktree_branch",
             "description": "Create a NEW branch for the work in this terminal. Call it once the work \
                             is worth keeping: until then detached leaves no trace, and the worktree \
-                            is discarded when the thread closes. Fails if the name is taken — use \
+                            is discarded when the thread closes. Fails if the name is taken: use \
                             worktree_reserve for a branch that exists.",
             "inputSchema": {
                 "type": "object",
@@ -426,7 +426,7 @@ fn common_tools() -> Value {
             "description": "What this project gives each new worktree out of the user's checkout: \
                             the heavy directories, how each one is shared, and what is left out of \
                             it. Also says whether the rule is declared by the project or guessed \
-                            from its manifests — a guess is free to replace, a declared one was \
+                            from its manifests: a guess is free to replace, a declared one was \
                             somebody's decision. Read this before artifacts_set.",
             "inputSchema": { "type": "object" },
             "annotations": { "title": "Shared artifacts", "readOnlyHint": true, "idempotentHint": true, "openWorldHint": false }
@@ -536,7 +536,7 @@ fn thread_tools() -> Value {
         {
             "name": "thread_spawn",
             "description": "Open another agent thread, here or in another project, for work that \
-                            should run in parallel in its own worktree — not for a sub-task you \
+                            should run in parallel in its own worktree, not for a sub-task you \
                             could do this turn. Answers with its threadId. Read what it printed \
                             with terminal_transcript, and wait for it with thread_wait. In this \
                             project it opens at once; in another one it is the user's call, and \
@@ -576,7 +576,7 @@ fn thread_tools() -> Value {
             "description": "Close a terminal you spawned, once you have read what you needed from \
                             it. Do this every time: a worker nobody closes stays in the user's \
                             sidebar forever, and the ones you opened are yours to put away. Only \
-                            your own workers, and only when the worker has stopped — a running \
+                            your own workers, and only when the worker has stopped: a running \
                             one or one sitting on a permission dialog is refused, so wait for it \
                             with thread_wait first. The terminal goes, and its detached worktree \
                             with it, so claim a branch before closing anything that wrote code.",
@@ -750,7 +750,7 @@ mod tests {
     }
 
     /// Configuration sync is not something an agent may reach, and the reason it
-    /// cannot is that nothing here names it — not the capability check, which
+    /// cannot is that nothing here names it, not the capability check, which
     /// `Grant::Owner` passes.
     ///
     /// Three of the calls write into `~/.gemini/config/mcp_config.json`, which
@@ -762,7 +762,7 @@ mod tests {
     ///
     /// Reading is left out too. It is harmless on its own, and a tool list is
     /// paid for in every session that connects and again in the context window
-    /// that reads it — for an answer no agent workflow needs.
+    /// that reads it, for an answer no agent workflow needs.
     ///
     /// Deleting this test to add one is the point: it should take a sentence
     /// saying why.

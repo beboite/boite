@@ -24,8 +24,8 @@ use super::bus::{through, DesktopHost};
 
 /// This app's connection to its own database.
 ///
-/// Attached once and shared. Every earlier caller opened its own — a
-/// `Connection::open` plus three pragmas each time — which was affordable for a
+/// Attached once and shared. Every earlier caller opened its own, a
+/// `Connection::open` plus three pragmas each time, which was affordable for a
 /// snapshot somebody asks for and is not for row reads that happen on every
 /// boot and every keystroke that renames a thread.
 ///

@@ -1,7 +1,7 @@
 //! What the endpoint refuses, and why.
 //!
 //! Ported from the desktop copy, which was the only one of the two that had
-//! tests. The half that runs headless — the half a remote agent talks to — was
+//! tests. The half that runs headless, the half a remote agent talks to, was
 //! the untested one, and it is the same code now.
 
 use super::*;
@@ -105,7 +105,7 @@ fn a_folder_with_files_in_it_is_refused_unless_it_is_adopted() {
 }
 
 /// A project already at that folder is a reuse, and a reuse asks none of the
-/// questions above — including the one about where a project may go, which is
+/// questions above, including the one about where a project may go, which is
 /// why a known folder outside every root is still not refused.
 #[test]
 fn a_project_already_there_is_reused_rather_than_refused() {

@@ -11,9 +11,9 @@ import { t } from "$lib/i18n/index.svelte";
  *
  * Two sources, one dock. An agent asking through the endpoint is a row in the
  * workspace database, which is what makes it survive the app being closed and
- * reach a second window. Anything the front end wants answered the same way —
+ * reach a second window. Anything the front end wants answered the same way,
  * without stealing focus, without a scrim, while the terminal underneath keeps
- * running — calls {@link ApprovalStore.ask} and gets a promise back.
+ * running, calls {@link ApprovalStore.ask} and gets a promise back.
  *
  * The difference from `shared/components/confirm.svelte.ts` is who is waiting.
  * A confirm dialog is the answer to something the user just did, so it owns the

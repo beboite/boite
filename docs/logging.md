@@ -186,7 +186,7 @@ The bus is reached through `backend().logs`, which is `write`, `tail`, `query`,
 tells the host to stop pushing when the last handler leaves.
 
 Live records reach the desktop as a Tauri event, `log://record`, batched at
-fifty records or 250 ms — the same numbers the server coalesces on, and for the
+fifty records or 250 ms, the same numbers the server coalesces on, and for the
 same reason: one event per record would put the emit on the log's own write
 path. The `boite_core::log` subscriber clones the record onto a channel and
 returns; a thread drains it (`src-tauri/src/log_feed.rs`). Nothing is emitted
@@ -230,7 +230,7 @@ pointer when the row still exists.
 - Every toast raised, at `info`, whatever its kind: an `error` toast is a
   failure the app already handled, and the line saying why is above it.
 - A thread's session binding and every status change, at `debug`, with the
-  `thread` — from `Store::update_thread_field`, the one write every host makes.
+  `thread`, from `Store::update_thread_field`, the one write every host makes.
 - Approvals opened and resolved, at `info`, with the `thread` and the `request`.
 - Orchestrator dispatches queued, drained and expired, at `info`, with the
   target `thread`.

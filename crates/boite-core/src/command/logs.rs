@@ -3,7 +3,7 @@
 //! The one domain whose work is a process-wide singleton rather than a store or
 //! a path: `boite_core::log` owns the ring, the files and the filter, and these
 //! four methods are the bus's way in. So `prepare` has nothing to resolve and
-//! the refusals are the module's own — a host that never called
+//! the refusals are the module's own: a host that never called
 //! `log::init` answers an empty list rather than an error, because "this Boite
 //! keeps no log" is what a test and a headless CLI both look like.
 //!

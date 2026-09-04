@@ -1,7 +1,7 @@
 //! The desktop's half of the log.
 //!
-//! Everything that used to be here — the JSON format, the redaction, the
-//! rotation, the bounded tail read — is now `boite_core::log`, because the
+//! Everything that used to be here, the JSON format, the redaction, the
+//! rotation, the bounded tail read, is now `boite_core::log`, because the
 //! desktop is one host of four and a rule written on this side never reached
 //! `boite-server`, `boite-mcp` or the webview. What is left is what only this
 //! process can answer: where Tauri puts the log directory, and the shape the
@@ -101,8 +101,8 @@ pub fn begin_log_session(handle: &AppHandle) -> Result<(), String> {
 
 /// One record from this side of the app.
 ///
-/// The `handle` is no longer read — the log directory is settled at
-/// [`begin_log_session`] — and stays in the signature because thirty call sites
+/// The `handle` is no longer read, the log directory is settled at
+/// [`begin_log_session`], and stays in the signature because thirty call sites
 /// pass it and none of them would read better without it.
 pub fn append_app_log(
     _handle: &AppHandle,

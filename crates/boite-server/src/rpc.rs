@@ -29,8 +29,8 @@ fn u16_param(params: &Value, key: &str) -> Result<u16, String> {
 
 /// A thread id, or a refusal.
 ///
-/// Boite mints uuids for these — `crypto.randomUUID` on the client,
-/// `Uuid::new_v4` on every side that makes one without a client — and the
+/// Boite mints uuids for these, `crypto.randomUUID` on the client,
+/// `Uuid::new_v4` on every side that makes one without a client, and the
 /// binary input frames on this protocol already pack the id as sixteen raw
 /// bytes, so anything that is not a uuid could never have addressed a terminal
 /// anyway. What it can do is name something else: a key file, a ref namespace, a
@@ -52,7 +52,7 @@ fn checked_thread_id(id: &str) -> Result<(), String> {
 /// those defends itself differently. A shape checked once at the door is what
 /// makes those agree.
 ///
-/// A method that carries no id at all is not this function's business — the arm
+/// A method that carries no id at all is not this function's business: the arm
 /// that needs one says so itself, with the error it has always given.
 fn checked_thread_ids(method: &str, params: &Value) -> Result<(), String> {
     let id = match method {
@@ -131,7 +131,7 @@ where
 /// Runs a record command on the bus and hands back the bare answer.
 ///
 /// The rows are `boite_core::command::records`; what stays on this side is what
-/// this host does *about* a row changing — broadcasting to every connected
+/// this host does *about* a row changing: broadcasting to every connected
 /// device, refreshing the roots, killing a PTY. Those are not the capability,
 /// and a bus that owned them would need a `Host` method per host quirk.
 ///
@@ -435,7 +435,7 @@ pub async fn dispatch(state: &AppState, request: Authorized) -> Result<Value, St
         }
 
         // An agent request reaches every connected device; this decides which
-        // one carries it out. True for exactly one caller per id — two devices
+        // one carries it out. True for exactly one caller per id: two devices
         // running the same move would kill one PTY twice and leave a second
         // worktree behind.
         // Everything at once, for whoever has to work out why something is
@@ -560,7 +560,7 @@ pub async fn dispatch(state: &AppState, request: Authorized) -> Result<Value, St
             let who = state.store.thread_context(&thread_id);
             // A real awareness value rather than a hand-made pair of strings, so
             // what a fresh deployment receives is shaped exactly like what it
-            // will receive in anger — the link included, which is the half most
+            // will receive in anger, the link included, which is the half most
             // likely to be misconfigured.
             let aware = boite_core::awareness::derive(&boite_core::awareness::Facts {
                 thread_id: &thread_id,
@@ -698,8 +698,8 @@ pub async fn dispatch(state: &AppState, request: Authorized) -> Result<Value, St
         // deleted row answers nothing.
         "pairing.list" => Ok(json!({ "pairings": state.store.list_pairings()? })),
 
-        // Invites one device. What comes back is the only copy of the token —
-        // the table keeps a hash — so it is drawn once, as a link and a QR, and
+        // Invites one device. What comes back is the only copy of the token,
+        // the table keeps a hash, so it is drawn once, as a link and a QR, and
         // never fetched again.
         //
         // `base` is the client's own origin, because a server behind a reverse
@@ -801,8 +801,8 @@ pub async fn dispatch(state: &AppState, request: Authorized) -> Result<Value, St
             Ok(wire.wrap(answer))
         }
 
-        // Every domain the desktop serves too — git, worktrees, the
-        // filesystem, the editor, the folders a project lives in — is one bus
+        // Every domain the desktop serves too, git, worktrees, the
+        // filesystem, the editor, the folders a project lives in, is one bus
         // in `boite_core::command` rather than a list of arms here. What is
         // left on this side is the decoding and the envelope this protocol
         // wraps an answer in.
@@ -1107,7 +1107,7 @@ mod tests {
     }
 
     /// The client is not authoritative for runtime state. `thread.create`
-    /// doubles as create and re-save — a session id captured, a label edited —
+    /// doubles as create and re-save, a session id captured, a label edited,
     /// and taking the client's word on the second call would let a reload
     /// rewrite how a thread ended.
     ///
@@ -1147,7 +1147,7 @@ mod tests {
         assert_eq!(again["thread"]["exitCode"], json!(3));
 
         // And a stored `running` reads back as stopped: the process it named is
-        // gone, so keeping the word would be a thread that is busy with nothing —
+        // gone, so keeping the word would be a thread that is busy with nothing,
         // and answering `idle` would be a thread that was working when the last
         // server went away drawn like one nobody has ever started.
         state
@@ -1162,7 +1162,7 @@ mod tests {
     /// A thread id off the wire is spent as a filename, as a git ref namespace
     /// and as a row key, and each of those defends itself differently. Boite
     /// mints uuids and this protocol already packs the id as sixteen raw bytes
-    /// on its binary frames, so anything else was never a thread — it was a
+    /// on its binary frames, so anything else was never a thread: it was a
     /// name for something else.
     #[tokio::test]
     async fn a_thread_id_that_is_not_a_uuid_never_reaches_a_handler() {

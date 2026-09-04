@@ -45,7 +45,7 @@ impl Store {
     /// Opens the database and brings the schema up to date.
     ///
     /// For the process that owns the file. On the desktop the schema belongs to
-    /// tauri-plugin-sql, which keeps its own ledger — use [`Store::attach`]
+    /// tauri-plugin-sql, which keeps its own ledger: use [`Store::attach`]
     /// there, or two migration mechanisms race over the same tables.
     pub fn open(path: &Path) -> Result<Store, String> {
         let store = Store::attach(path)?;
@@ -783,7 +783,7 @@ impl Store {
     /// Raw, where the two `load_` readers answer with [`display_status`]. A
     /// re-save writes what this returns back onto the row, so translating here
     /// would turn the mark of a live run into `stopped` the next time the window
-    /// captured a session id — and the row would then have said "asleep" about a
+    /// captured a session id, and the row would then have said "asleep" about a
     /// thread that was working, one restart later.
     pub fn thread_status(&self, id: &str) -> Option<(String, Option<i32>)> {
         let conn = self.conn.lock();
@@ -822,7 +822,7 @@ impl Store {
     /// Read back on every re-save for the same reason as
     /// [`Store::thread_status`]: `save_thread` is an `INSERT OR REPLACE`, and
     /// `role` is what selects the orchestrator tool tier, so a caller's copy of
-    /// it is never trusted — the row's own answer is.
+    /// it is never trusted: the row's own answer is.
     pub fn thread_orchestration(&self, id: &str) -> Option<(Option<String>, Option<String>, bool)> {
         let conn = self.conn.lock();
         conn.query_row(
@@ -2030,7 +2030,7 @@ pub enum ColVal {
 
 /// Updatable `threads` columns. An enum rather than a `&str`, because
 /// update_thread_field interpolates the column into the SQL (it cannot be
-/// bound) — a caller-supplied string there is an injection one refactor away.
+/// bound), a caller-supplied string there is an injection one refactor away.
 #[derive(Clone, Copy)]
 pub enum ThreadCol {
     Label,
@@ -2082,8 +2082,8 @@ const LIVE_STATUSES: &[&str] = &["running", "ready", "waiting"];
 /// A row naming a process describes one that stopped existing when the host that
 /// spawned it did, so it never reads back as itself. It used to read as `idle`,
 /// which is what a row that has never been started says, and the sidebar then
-/// drew every thread asleep on every launch. It reads as `stopped` instead — the
-/// same word an auto-sleep leaves — because a thread cut off by the app closing
+/// drew every thread asleep on every launch. It reads as `stopped` instead, the
+/// same word an auto-sleep leaves, because a thread cut off by the app closing
 /// was cut off. `idle` is left to the rows that have nothing to say, and those
 /// draw nothing at all.
 ///
@@ -2105,7 +2105,7 @@ fn normalize_status(raw: Option<String>) -> String {
 /// The three states a todo can be in, and what anything else reads as.
 ///
 /// The agent endpoint writes this table too, so a row can carry a state this
-/// build does not know — an older Boite reading a database a newer one wrote, or
+/// build does not know: an older Boite reading a database a newer one wrote, or
 /// a value nothing here produced. Unknown reads as `open` rather than
 /// disappearing from the list, because a card nobody can see is a card nobody
 /// finishes.
@@ -2125,7 +2125,7 @@ mod tests {
 
     // Guards the migration transaction: user_version must be committed with the
     // statements it gates, or a reopen replays applied ALTERs and dies on
-    // "duplicate column name" — permanently, since the server restarts on exit.
+    // "duplicate column name", permanently, since the server restarts on exit.
     #[test]
     fn migrations_are_idempotent_across_reopen() {
         let dir = std::env::temp_dir().join(format!(

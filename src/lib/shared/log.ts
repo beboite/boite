@@ -55,7 +55,7 @@ const MAX_QUEUE = 500;
 /**
  * How many stack frames of an unhandled error are worth keeping.
  *
- * The host redacts user directories, so a full stack is safe — it is just
+ * The host redacts user directories, so a full stack is safe: it is just
  * useless. Every frame past the third is framework, and a webview stack is
  * twenty `file:///` URLs of bundled chunks. The first three name the code that
  * actually threw.

@@ -6,13 +6,13 @@
 //! could carry out and the other answered success; one side wrote every mutation
 //! to the project's log and the other wrote nothing; one side ran three `git`
 //! processes off the async runtime and the other ran them on it. None of that
-//! was a decision — the server binary is a crate nothing can depend on, so the
+//! was a decision: the server binary is a crate nothing can depend on, so the
 //! second copy was the only way to have the feature at all.
 //!
 //! What differs between the two hosts is real and small: where a request goes
 //! once it is understood, and who else is watching. That is the [`Workspace`]
-//! trait. Everything else — the token check, who the caller is, what a refusal
-//! says, what lands in the log — is here, once.
+//! trait. Everything else, the token check, who the caller is, what a refusal
+//! says, what lands in the log, is here, once.
 //!
 //! ```text
 //!   desktop Inner ─┐                                  ┌─ identify   one proof of who

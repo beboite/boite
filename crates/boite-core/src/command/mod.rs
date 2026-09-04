@@ -2,8 +2,8 @@
 //!
 //! Boite has two front doors: Tauri commands on the desktop and a WebSocket RPC
 //! on the server. Until this module existed, each one carried its own copy of
-//! every capability — the same scope check, the same call into the domain, the
-//! same refusal worded twice — and nothing checked that the two copies agreed.
+//! every capability, the same scope check, the same call into the domain, the
+//! same refusal worded twice, and nothing checked that the two copies agreed.
 //! Every divergence the audit found was a capability that existed on one side
 //! only, or a boundary applied on one side only.
 //!
@@ -103,8 +103,8 @@ pub trait Host {
     ///
     /// A different boundary from [`Host::roots`]: that one is "inside a project
     /// the user has", this one is "may become one". A desktop has no outer
-    /// boundary to apply — inspecting a folder is what produces the name a
-    /// project is created with, and the user's own folder dialog is the gate —
+    /// boundary to apply: inspecting a folder is what produces the name a
+    /// project is created with, and the user's own folder dialog is the gate,
     /// so its answer is yes. A server bound to a workspace directory has one.
     ///
     /// Note what this does *not* do: require the path to exist. The folder a
@@ -118,8 +118,8 @@ pub trait Host {
     ///
     /// A pid the caller sends could name anything on the machine; this is the
     /// host's own registry answering for an id it minted itself. The default is
-    /// `None`, which is honest for a host with no process registry — a test, or
-    /// a transport that never spawns anything — and costs the one command that
+    /// `None`, which is honest for a host with no process registry, a test, or
+    /// a transport that never spawns anything, and costs the one command that
     /// asks a tie-break rather than an answer.
     fn child_pid(&self, _pty_id: &str) -> Option<u32> {
         None
@@ -158,7 +158,7 @@ pub trait Host {
     /// The rows this host keeps: projects, threads, todos, settings.
     ///
     /// `None` means it keeps none, and the record commands say so rather than
-    /// answering an empty list — "there are no projects" and "this Boite keeps
+    /// answering an empty list: "there are no projects" and "this Boite keeps
     /// no rows" send whoever is reading to two different places.
     ///
     /// An `Arc` rather than a borrow because [`Ready`] outlives the host on
@@ -203,7 +203,7 @@ pub trait Host {
 /// Every method the bus serves, across every domain.
 ///
 /// What a transport asks before handing a method over, so a front door that
-/// still serves something itself cannot accidentally shadow a command — or be
+/// still serves something itself cannot accidentally shadow a command, or be
 /// shadowed by one. The lists are per domain and this is the only place they are
 /// read together.
 pub fn methods() -> impl Iterator<Item = &'static str> {
@@ -229,7 +229,7 @@ pub fn handles(method: &str) -> bool {
 /// What each method needs, by name, without decoding a real call.
 ///
 /// A caller that has to answer "may this device ask for `git.commit`" before it
-/// has parameters in hand — a scope check on a front door — cannot build a
+/// has parameters in hand, a scope check on a front door, cannot build a
 /// [`Command`] to ask. Rather than a second hand-kept table, which is the exact
 /// failure this module exists to end, the map is built once by decoding every
 /// method in [`methods`] against parameters that satisfy all of them and reading
@@ -512,7 +512,7 @@ pub enum Ready {
     ///
     /// The one domain whose work needs something only the host can hand over.
     /// `Ready` is deliberately free of the host, so the store is resolved during
-    /// `prepare` and travels here rather than being fetched later — which keeps
+    /// `prepare` and travels here rather than being fetched later, which keeps
     /// "a host that keeps no records" a refusal at the boundary instead of an
     /// error thrown from inside the work.
     /// The pilot runtime rides along for the two verbs that end a thread:
@@ -946,8 +946,8 @@ mod tests {
     /// the instructions every agent reads. Then the CLI manager brought two more,
     /// which do not reach past a project so much as past every project:
     /// installing a binary onto the machine, and deleting an agent's own data
-    /// directory. A grant scoped to one project — the credentials file the todo
-    /// panel hands to agents — must not reach them, and `Grant::Project.allows`
+    /// directory. A grant scoped to one project, the credentials file the todo
+    /// panel hands to agents, must not reach them, and `Grant::Project.allows`
     /// refusing each one is asserted below.
     ///
     /// The capability check is not the whole guard for sync, and is not meant to
@@ -987,7 +987,7 @@ mod tests {
     /// No method is claimed by two domains.
     ///
     /// [`Command::decode`] walks the domain lists in order and takes the first
-    /// that contains the name, so a duplicate would not be an error anywhere —
+    /// that contains the name, so a duplicate would not be an error anywhere:
     /// it would be a method that quietly decodes into the wrong domain, with a
     /// different capability and a different wire envelope. `project.` already
     /// means two things across two domains, which is how close this is.

@@ -343,8 +343,8 @@ async fn main() {
     if let Some(dir) = &config.static_dir {
         let index = dir.join("index.html");
         let serve = ServeDir::new(dir).fallback(ServeFile::new(index));
-        // The same SPA the desktop window runs, served to a phone or a browser
-        // — and until now with none of the protection the desktop window has.
+        // The same SPA the desktop window runs, served to a phone or a browser,
+        // and until now with none of the protection the desktop window has.
         // Tauri hands the webview a strict CSP from tauri.conf.json; this door
         // sent the identical files with no CSP, no nosniff and no framing rule
         // at all.
@@ -356,7 +356,7 @@ async fn main() {
         // `script-src 'self'` here would leave a phone staring at a blank page
         // with the reason only in a console it cannot open. Locking the script
         // side down properly means SvelteKit's own `kit.csp` in hash mode, so
-        // the hash is generated with the file it covers — its own change, with
+        // the hash is generated with the file it covers, its own change, with
         // the desktop CSP checked against it, not a line snuck in here.
         //
         // `frame-ancestors 'none'` and `X-Frame-Options` say the same thing to
@@ -487,7 +487,7 @@ async fn assetlinks(State(state): State<Arc<AppState>>) -> Response {
 ///
 /// The query string of an upgrade request reaches the access log of whatever
 /// reverse proxy is in front, and nobody rotates those. Nothing here has ever
-/// read one — the credential arrives in the first frame — so a request carrying
+/// read one, the credential arrives in the first frame, so a request carrying
 /// `?token=` or `?ticket=` is either a client built against a design this
 /// server does not have or somebody trying the shape on. Both get the same
 /// answer, and it is a refusal rather than a silently ignored parameter: a
@@ -516,8 +516,8 @@ async fn ws_upgrade(
     // first frame on this socket arrives before the ticket is checked: an
     // unauthenticated peer could make the process buffer that much, times
     // `max_connections`, before anything decided who it was. Nothing a client
-    // sends is anywhere near it — the widest legitimate message is a paste on
-    // its way to a PTY — so a megabyte leaves room to spare and takes the
+    // sends is anywhere near it, the widest legitimate message is a paste on
+    // its way to a PTY, so a megabyte leaves room to spare and takes the
     // pre-auth cost down by a factor of sixty-four.
     ws.max_message_size(MAX_WS_MESSAGE)
         .max_frame_size(MAX_WS_MESSAGE)
@@ -541,7 +541,7 @@ fn make_event_emitter(
             } => {
                 // What the row keeps is how the run ended, or that there was one.
                 // `running`, `ready` and `waiting` all say the same thing to a
-                // later boot — this thread was on — so they store the one word,
+                // later boot, this thread was on, so they store the one word,
                 // and `stopped` stores nothing at all: an auto-sleep is this
                 // run's own bookkeeping, and writing it would make
                 // `settle_last_run` decay the mark one restart early, which is a

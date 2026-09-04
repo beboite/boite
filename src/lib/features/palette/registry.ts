@@ -370,8 +370,8 @@ export function buildPaletteCommands(): PaletteCommand[] {
     });
   }
   // Panes carry no chrome of their own any more, so this is where a pane that
-  // is not one of the three panels — a dashboard, an editor, a page an agent
-  // opened — is closed from.
+  // is not one of the three panels, a dashboard, an editor, a page an agent
+  // opened, is closed from.
   commands.push({
     id: "pane:close",
     section: "panes",

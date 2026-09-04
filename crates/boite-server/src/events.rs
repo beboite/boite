@@ -34,7 +34,7 @@ pub enum AppEvent {
     },
     ProjectChanged,
     SettingsChanged,
-    /// Someone wrote the todo table — a connected client, or an agent through
+    /// Someone wrote the todo table: a connected client, or an agent through
     /// the MCP endpoint. Clients reload rather than receive the row, since the
     /// writer may not be a client at all.
     TodosChanged,
@@ -51,7 +51,7 @@ pub enum AppEvent {
     /// and the client does the work.
     ///
     /// Fanned out to every connected device, because the server has no way to
-    /// know which of them is looking — but carried out by exactly one: each
+    /// know which of them is looking, but carried out by exactly one: each
     /// request carries an id, and a client claims it through
     /// `agent.claimRequest` before acting. Two devices running the same move
     /// would kill one PTY twice and open two worktrees for one thread.
@@ -65,7 +65,7 @@ pub enum AppEvent {
     MomentAppended {
         seq: i64,
     },
-    /// The orchestrator conversation moved — a reply through `/v1/say`, or a
+    /// The orchestrator conversation moved: a reply through `/v1/say`, or a
     /// role stamped by `orchestrator.start`. Chats re-read by cursor.
     OrchestratorChanged,
     /// A line was queued for a thread's prompt. The device that owns the

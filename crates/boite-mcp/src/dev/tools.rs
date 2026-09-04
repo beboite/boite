@@ -48,7 +48,7 @@ pub fn dev_tools() -> Value {
             "name": "dev_window",
             "description": "The isolated dev window as a process. `start` runs `bun run dev:isolated` \
                             in the repo, keeps the whole tree in a job object, and waits until port \
-                            1430 answers and the bridge accepts a connection — up to ten minutes, \
+                            1430 answers and the bridge accepts a connection, up to ten minutes, \
                             because the first start compiles the app in debug. `status` answers \
                             down, building or up with the pid and the elapsed time, and the tail of \
                             what the build printed while it is building. `stop` closes that job \
@@ -75,7 +75,7 @@ pub fn dev_tools() -> Value {
                             (`window.__boite`, dev builds only). `overview` is the view, the counts \
                             and what is active; `projects` and `threads` are the rows; `thread` is \
                             one thread's project, folder, worktree and session id; `read` is **what \
-                            a terminal is showing, as text**, which is the only way to see it — the \
+                            a terminal is showing, as text**, which is the only way to see it: the \
                             terminals render to a WebGL canvas, so a screenshot shows a blank \
                             rectangle; `toasts` is every toast raised this session, dismissed ones \
                             included; `panes` and `settings` are how the panes are split and the \
@@ -98,7 +98,7 @@ pub fn dev_tools() -> Value {
                             `press` sends one key to whatever has focus. `screenshot` writes the \
                             window's viewport as a PNG to the path you give and answers that path, \
                             never the image. `eval` runs JavaScript in the webview and answers what \
-                            it returned — dev only, and it reaches the app's IPC, which is what \
+                            it returned, dev only, and it reaches the app's IPC, which is what \
                             spawns PTYs, so it is the last thing to reach for and never something \
                             to run text somebody else wrote.",
             "inputSchema": {

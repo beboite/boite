@@ -137,7 +137,7 @@ export interface DbApi {
    * off the row because the row does not hold it: what a thread row records is
    * that there *was* a run. The boite refuses the put-away half while that
    * status is `running` or `waiting`, so the rule holds for a caller that never
-   * drew a menu — and it rejects rather than answering, so the optimistic write
+   * drew a menu, and it rejects rather than answering, so the optimistic write
    * in the store has something to roll back to.
    */
   setThreadSettled(
@@ -182,7 +182,7 @@ export interface GitApi {
   /**
    * What the repository says about a sha an agent reported: whether it exists
    * at all, and whether it has left this machine. An unknown sha comes back
-   * with `known: false` rather than as an error — being unable to find it is
+   * with `known: false` rather than as an error: being unable to find it is
    * the answer, not a failure to get one.
    */
   commitState(path: string, sha: string): Promise<CommitStateAnswer>;
@@ -287,8 +287,8 @@ export interface WorktreeApi {
    * worktree add` and its shared directories out from in front of a terminal.
    *
    * Resolves once the spare exists. Callers do not wait for it: nothing depends
-   * on the answer, and a repository that cannot have one — not a repo, no
-   * commits — is not a failure to report.
+   * on the answer, and a repository that cannot have one, not a repo, no
+   * commits, is not a failure to report.
    */
   warm(repo: string): Promise<void>;
 
@@ -336,7 +336,7 @@ export interface WorktreeApi {
    */
   claim(path: string, name: string): Promise<void>;
   /**
-   * Moves the worktree onto a branch that already exists — continuing
+   * Moves the worktree onto a branch that already exists, continuing
    * something started earlier rather than naming something new. Rejects a
    * branch another worktree holds, naming which one.
    */
@@ -657,7 +657,7 @@ export interface FastpickModel {
 export interface FastpickApi {
   /**
    * The harnesses, providers and bindings fastpick declares. With `provider`, that
-   * provider's models too — a separate call because each one costs an HTTP request, and
+   * provider's models too: a separate call because each one costs an HTTP request, and
    * fastpick answers from its cache unless `refresh` is set.
    *
    * Rejects when fastpick is missing or its config is unusable, carrying fastpick's own
@@ -905,7 +905,7 @@ export interface SessionHit {
   /**
    * The agent's own registry tied this session to the process behind the
    * caller's PTY, rather than it being the likeliest transcript in the folder.
-   * Only claude keeps such a registry, so only its detector ever says true —
+   * Only claude keeps such a registry, so only its detector ever says true,
    * and where it does, the attribution guess is not asked for an opinion.
    */
   ownPid?: boolean;
@@ -987,7 +987,7 @@ export interface AgentTurnQuery {
  * number would read as twenty times the work that was actually done.
  */
 export interface ModelUsage {
-  /** Icon key of the agent that spent it — `claude` or `codex`. */
+  /** Icon key of the agent that spent it: `claude` or `codex`. */
   provider: string;
   model: string;
   input: number;
@@ -1049,7 +1049,7 @@ export interface SessionApi {
   usage(cwds: string[], days: number, orchestratorSessions?: string[]): Promise<UsageReport>;
   /**
    * `ptyId` names the PTY asking. Its process holds the session the caller is
-   * trying to bind, and that one alone is exempt from the liveness filter —
+   * trying to bind, and that one alone is exempt from the liveness filter:
    * without it, an agent is unbindable for exactly as long as it runs.
    * Omitted (a caller with no PTY of its own), every live session is skipped.
    */
@@ -1086,7 +1086,7 @@ export interface SessionApi {
   agentTurns(queries: AgentTurnQuery[]): Promise<AgentTurn[]>;
   /**
    * Releases a background agent holding a session, so `--resume` works on it
-   * again. Only ever stops a background agent — an interactive session is
+   * again. Only ever stops a background agent: an interactive session is
    * another terminal's, and taking it down is not ours to do. Returns whether
    * anything was stopped.
    */
@@ -1110,7 +1110,7 @@ export interface SessionApi {
    * out of reach. The other CLIs key their stores by time or by an internal
    * database, and answer `true` without anything being carried.
    *
-   * `false` means replaying the id over there would fail — the caller drops the
+   * `false` means replaying the id over there would fail: the caller drops the
    * session and lets the thread start a fresh conversation, rather than
    * launching with a `--resume` nothing backs.
    */
@@ -1465,7 +1465,7 @@ export interface OrchestratorMessage {
 /**
  * The conduct domain: the workspace pulse and the orchestrator conversation.
  *
- * `record` is fire-and-forget by design — the status engine writes a phase
+ * `record` is fire-and-forget by design: the status engine writes a phase
  * transition and moves on, and a moment lost to a torn connection is a moment
  * the next roster read covers anyway. `say` is not here: only the orchestrator
  * process speaks, through the agent API, never the window.
@@ -1502,7 +1502,7 @@ export interface ConductApi {
   /**
    * Un-does one recorded action. Local grant only on the bus: taking an
    * action back is the user's, never an agent covering its tracks. Nothing
-   * committed is destroyed — a spawn is put away, a dismissal brought back.
+   * committed is destroyed: a spawn is put away, a dismissal brought back.
    */
   undo(params: { actionId: string }): Promise<{ done: boolean }>;
   /**
@@ -1558,7 +1558,7 @@ export interface SyncSource {
    */
   supported: boolean;
   /**
-   * Whether anything is here now. Absence does not disable the switch — a
+   * Whether anything is here now. Absence does not disable the switch: a
    * configuration arriving before its agent is how a new machine is set up.
    */
   presentHere: boolean;
@@ -1671,7 +1671,7 @@ export interface SyncProbe {
  * polled rather than pushed, so a panel opened half way through sees where it
  * got to.
  *
- * The configuration itself — the address and the per-source switches — is not
+ * The configuration itself, the address and the per-source switches, is not
  * here. It lives in the settings blob both hosts already read, and the host
  * reads it out of that row on every call, so turning a source off stops the next
  * sync rather than the next session.
@@ -1687,7 +1687,7 @@ export interface SyncApi {
   /** What is still waiting, for a panel opened after the pull. */
   conflicts(): Promise<SyncConflict[]>;
   /**
-   * Arbitrary bytes for one file — the merge tool can keep both sides, so this
+   * Arbitrary bytes for one file: the merge tool can keep both sides, so this
    * is not a pick-a-side call. It writes that file and nothing else, which is
    * what makes an abandoned merge safe to walk away from.
    */
@@ -1838,7 +1838,7 @@ export interface Backend {
    *
    * True exactly once per id, across every device connected to the boite. The
    * request itself is broadcast because the server cannot tell which device is
-   * watching — but a move run twice kills one PTY twice and leaves a second
+   * watching, but a move run twice kills one PTY twice and leaves a second
    * worktree behind, so acting on one is a claim, not a notification.
    *
    * Remote only: the desktop delivers these as a Tauri event to the one app

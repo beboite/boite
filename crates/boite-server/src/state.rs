@@ -43,13 +43,13 @@ pub struct AppState {
     /// said (`BOITE_PUBLIC_URL`).
     ///
     /// Only ever used to build the text of a pairing link. A server behind a
-    /// reverse proxy cannot work its own public name out — the `Host` header is
-    /// whatever the caller sent — so the choice is this or a client-supplied
+    /// reverse proxy cannot work its own public name out, the `Host` header is
+    /// whatever the caller sent, so the choice is this or a client-supplied
     /// origin, and a configured value wins over one. It decides what the link
     /// says, never what the token opens.
     pub public_url: Option<String>,
     /// Agent requests already spoken for. An `AgentRequest` reaches every
-    /// connected device and exactly one of them may act on it — two clients
+    /// connected device and exactly one of them may act on it: two clients
     /// running the same move would kill one PTY twice and leave a second
     /// worktree behind.
     pub claimed_requests: parking_lot::Mutex<std::collections::VecDeque<String>>,
@@ -223,7 +223,7 @@ impl AppState {
 
     /// What a command on the bus is allowed to reach on this side.
     ///
-    /// Cheap enough to build per call, and built per call on purpose — a host
+    /// Cheap enough to build per call, and built per call on purpose: a host
     /// held somewhere would be a second place for the boundary to go stale after
     /// `refresh_roots`.
     pub fn command_host(&self) -> ServerHost<'_> {
@@ -235,7 +235,7 @@ impl AppState {
 ///
 /// It differs from a desktop's in one way: a server can be bound to a workspace
 /// directory, and then a folder outside it may not become a project however the
-/// caller spells it. A desktop has no equivalent — the user's own folder dialog
+/// caller spells it. A desktop has no equivalent: the user's own folder dialog
 /// is the gate.
 pub struct ServerHost<'a> {
     state: &'a AppState,

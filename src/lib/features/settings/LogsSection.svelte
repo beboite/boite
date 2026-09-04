@@ -5,7 +5,7 @@
    * Three bus calls and nothing else: `tail` on open (the ring this host keeps
    * in memory, instant, no file read), `query` for anything older, and
    * `subscribe` while Follow is on. The filters are sent rather than applied
-   * here, so a needle finds a record that is in the file and not in the ring —
+   * here, so a needle finds a record that is in the file and not in the ring:
    * the old panel filtered an array it had already downloaded, which meant
    * "search the log" only ever searched the last thousand lines of it.
    */

@@ -6,7 +6,7 @@
 //! Tauri command that remembered to ask.
 //!
 //! `Grant::Local` throughout: this door is the user's own window. An agent never
-//! reaches it — it goes through the agent endpoint, which carries its own grant
+//! reaches it: it goes through the agent endpoint, which carries its own grant
 //! and its own capability check.
 
 use std::path::PathBuf;
@@ -169,12 +169,12 @@ impl boite_core::command::Host for DesktopHost<'_> {
 /// Every git, worktree, filesystem and session capability on this side is one of
 /// these: the trust boundary, the work and the refusals all live in
 /// `boite_core::command`, and what is left here is naming the command and
-/// handing over the arguments the webview sent. The desktop reads an answer bare
-/// — the envelopes in `command::Wire` are the WebSocket protocol's, and `invoke`
+/// handing over the arguments the webview sent. The desktop reads an answer bare:
+/// the envelopes in `command::Wire` are the WebSocket protocol's, and `invoke`
 /// already carries the shape the frontend types.
 pub(super) async fn through(host: DesktopHost<'_>, command: Command) -> Result<Value, String> {
     let method = command.name();
-    // `Local`: this door is the user's own window. An agent never reaches it —
+    // `Local`: this door is the user's own window. An agent never reaches it:
     // it goes through the agent endpoint, which carries its own grant.
     let ready = match command.prepare(&host, Grant::Local) {
         Ok(ready) => ready,

@@ -100,8 +100,8 @@
   // Behind import(), a boot that never switches it on never fetches it.
   // Behind import(): a machine whose configuration never differs never fetches
   // the merge tool, and it drags @codemirror/merge and the language table in
-  // behind it. The sync store itself imports none of that, on purpose — a test
-  // asserts it — because the launch pull puts the store on the boot graph.
+  // behind it. The sync store itself imports none of that, on purpose, a test
+  // asserts it, because the launch pull puts the store on the boot graph.
   const SyncMergeView = lazyComponent(
     () => import("$lib/features/sync/SyncMergeOverlay.svelte"),
   );
@@ -140,7 +140,7 @@
   // Dynamic mode gets none of it, dropped included. Two sources are live at
   // once and only one of them went away: ringing the whole window says the app
   // is down while the local half keeps working, which is the loudest possible
-  // way to be wrong. What is unreachable is marked where it is instead — the
+  // way to be wrong. What is unreachable is marked where it is instead: the
   // imported project blocks in the sidebar, and the pane of an open remote
   // thread, both below.
   const outlineClass = $derived.by(() => {
@@ -155,8 +155,8 @@
   );
 
   $effect(() => {
-    // Which threads, not how many. A count cannot see a replacement — close
-    // four and launch four and it reads 60 both times — and a group this never
+    // Which threads, not how many. A count cannot see a replacement, close
+    // four and launch four and it reads 60 both times, and a group this never
     // made is a thread with no terminal drawn at all, since the wrapper below
     // needs a group and a rect. Nothing then mounts, nothing spawns, and
     // nothing is logged. `projectId` too: a move keeps the same id, and without
@@ -190,8 +190,8 @@
   // Selecting a thread focuses its pane, and that is all: the write is
   // untracked because it used to read the field it writes, which subscribed the
   // effect to its own output (AGENTS.md, rule 4). Every later focus change in
-  // that group — a panel opened beside the terminal, a chip tapped on the
-  // phone's pane strip — re-ran this and was put straight back on the thread.
+  // that group, a panel opened beside the terminal, a chip tapped on the
+  // phone's pane strip, re-ran this and was put straight back on the thread.
   $effect(() => {
     const id = app.activeThreadId;
     if (!id) return;
@@ -202,8 +202,8 @@
     });
   });
 
-  // The project the app came up on. Nobody asked for a thread in it — it is
-  // where the last session happened to stop — so warming it would make every
+  // The project the app came up on. Nobody asked for a thread in it, it is
+  // where the last session happened to stop, so warming it would make every
   // single start pay for a checkout and a copy of the build artifacts in the
   // background. `undefined` until the effect below has run once, which is how
   // that first value is told from a project the user moved to.
@@ -325,8 +325,8 @@
   /**
    * Says so when the thread the user is looking at has no terminal drawn.
    *
-   * A pane needs three things at once — an entry in `activated`, a group, and a
-   * rect — and failing any of them draws nothing at all. Nothing downstream then
+   * A pane needs three things at once, an entry in `activated`, a group, and a
+   * rect, and failing any of them draws nothing at all. Nothing downstream then
    * runs: no mount, no spawn, no error, and a release log that says the worktree
    * was handed over and stops. That silence is the whole reason this bug outlived
    * three releases, so the three flags are named here rather than reasoned about
@@ -890,7 +890,7 @@
   <ConnectionBanner />
 
   <!-- Over the whole window, login screen and setup wizard included: the whip
-       belongs to the app rather than to a view. Cosmetic in full — it sends
+       belongs to the app rather than to a view. Cosmetic in full: it sends
        nothing to any terminal. -->
   {#if settings.state.experimentWhip && WhipView.current}
     {@const WhipComp = WhipView.current}
@@ -920,7 +920,7 @@
     border-radius: 18px;
   }
   /* A glow hugging the edges rather than a line drawn on them. The 1.5px of
-     solid colour was a border the app did not have, and it read as chrome —
+     solid colour was a border the app did not have, and it read as chrome:
      something to look at instead of something to notice. A hairline at half
      strength with the light falling inward says the same thing at the edge of
      vision and disappears the moment you are reading a terminal. */
