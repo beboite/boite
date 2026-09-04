@@ -165,6 +165,7 @@ mod tests {
                 label: "Allow".into(),
             }],
             suggestions: serde_json::Value::Null,
+            questions: Vec::new(),
         }
     }
 
