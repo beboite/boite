@@ -31,6 +31,8 @@ printed: what=read is the only way to see a terminal's text.
 - dev_drive to act like a pointer, and only for what a pointer is needed for.
 - dev_logs and dev_db read the dev instance's own files, so they answer with \
 the window down as well as up.
+- dev_scenario for the end-to-end suite, which drives this same window through \
+these same tools. It starts a window of its own, so stop yours first.
 - dev_window action=stop when you are done. The window belongs to the process \
 that started it and goes away with this session either way, but a build left \
 running takes the machine's cores from whoever is using it.
@@ -39,7 +41,7 @@ Answers are TOON: `key: value` for a single record, and `name(N):` followed by \
 a header row then one row per item for a list. dev_inspect answers JSON, which \
 is what the inspector returns.";
 
-/// The five tools of `--dev`.
+/// The six tools of `--dev`.
 pub fn dev_tools() -> Value {
     json!([
         {
@@ -152,6 +154,26 @@ pub fn dev_tools() -> Value {
                 "required": ["sql"]
             },
             "annotations": { "title": "Dev database", "readOnlyHint": true, "openWorldHint": false }
+        },
+        {
+            "name": "dev_scenario",
+            "description": "The end-to-end suite: the files `e2e/*.e2e.ts`, driven through the five \
+                            tools above against a dev window of their own. `list` names them; `run` \
+                            spawns `bun run e2e` in the repo, with a name to run one and no name to \
+                            run all of them, and answers the vitest summary plus the assertions that \
+                            failed rather than the whole log. It waits up to twenty minutes, because \
+                            the first scenario waits out a cold debug build, and the whole `bun` \
+                            tree is held in a job object stopped by the pid captured at spawn if it \
+                            runs past that. The run starts its own window on port 1430, so stop \
+                            yours with dev_window action=stop before asking for one.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "action": { "type": "string", "description": "list or run. Default list." },
+                    "name": { "type": "string", "description": "For run: one scenario, such as chat. Omit for all of them." }
+                }
+            },
+            "annotations": { "title": "Dev scenario", "openWorldHint": false }
         }
     ])
 }
@@ -164,7 +186,7 @@ mod tests {
     fn every_tool_is_named_and_schemad() {
         let tools = dev_tools();
         let list = tools.as_array().expect("array");
-        assert_eq!(list.len(), 5);
+        assert_eq!(list.len(), 6);
         for tool in list {
             assert!(tool.get("name").and_then(|v| v.as_str()).is_some());
             assert!(tool.get("description").and_then(|v| v.as_str()).is_some());
@@ -175,7 +197,7 @@ mod tests {
     /// The names are the contract with `call_dev_tool`, and a typo in either
     /// is a tool that answers "unknown tool" forever.
     #[test]
-    fn the_names_are_the_five_the_dispatch_answers() {
+    fn the_names_are_the_six_the_dispatch_answers() {
         let tools = dev_tools();
         let names: Vec<&str> = tools
             .as_array()
@@ -185,7 +207,14 @@ mod tests {
             .collect();
         assert_eq!(
             names,
-            vec!["dev_window", "dev_inspect", "dev_drive", "dev_logs", "dev_db"]
+            vec![
+                "dev_window",
+                "dev_inspect",
+                "dev_drive",
+                "dev_logs",
+                "dev_db",
+                "dev_scenario"
+            ]
         );
     }
 

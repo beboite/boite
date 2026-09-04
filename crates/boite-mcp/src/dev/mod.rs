@@ -7,7 +7,7 @@
 //! reason it exists as a mode of the shipped binary rather than as a
 //! third-party server pinned to a plugin's version.
 //!
-//! Five tools, one door each:
+//! Six tools, one door each:
 //!
 //! | Tool | Door |
 //! |---|---|
@@ -16,6 +16,7 @@
 //! | `dev_drive` | the bridge's `execute_js` and `capture_native_screenshot` |
 //! | `dev_logs` | `dev.boite.dev`'s log directory, read as files |
 //! | `dev_db` | `dev.boite.dev`'s SQLite, opened read-only |
+//! | `dev_scenario` | the repo's `e2e/*.e2e.ts`, listed and run through `bun run e2e` |
 //!
 //! The state is a `DevWindow` behind a mutex, and the process lives as long as
 //! the MCP session: an agent that starts the window and asks nothing for ten
@@ -26,6 +27,7 @@ pub mod bridge;
 mod call;
 pub mod db;
 pub mod paths;
+pub mod scenario;
 mod tools;
 pub mod window;
 

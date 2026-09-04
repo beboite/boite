@@ -13,6 +13,7 @@
     "lint:fix": "oxlint --fix",
     "test": "vitest run",
     "test:watch": "vitest",
+    "e2e": "vitest run --config e2e/vitest.config.ts",
     "tauri": "tauri",
     "build:sidecar": "bun scripts/build-sidecar.mjs",
     "dev:isolated": "tauri dev --config src-tauri/tauri.dev-isolated.conf.json --features mcp-bridge",

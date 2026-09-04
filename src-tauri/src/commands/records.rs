@@ -84,6 +84,15 @@ async fn on_rows(
     if let Some(runtime) = app.try_state::<Arc<boite_core::telemetry::TelemetryRuntime>>() {
         host = host.with_telemetry(runtime.inner().clone());
     }
+    // The pilot runtime travels with a record command too, for
+    // `records::check_runtime` alone: a chat row names a driver and the driver
+    // list belongs to the runtime, so a host without one refused every chat
+    // thread the window tried to save. The write is what the launcher does
+    // first, so the refusal landed as "it will be gone on restart" with the
+    // session never opening. Cheap: the runtime is built once and cached.
+    if let Ok(runtime) = app.state::<super::pilot::PilotRuntime>().get(app) {
+        host = host.with_pilot(runtime);
+    }
     through(host, command.into()).await
 }
 
