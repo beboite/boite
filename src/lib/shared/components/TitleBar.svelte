@@ -21,7 +21,6 @@
   import GitBranch from "@lucide/svelte/icons/git-branch";
   import FolderTree from "@lucide/svelte/icons/folder-tree";
   import ListTodo from "@lucide/svelte/icons/list-todo";
-  import House from "@lucide/svelte/icons/house";
   import BoiteLogo from "$lib/shared/components/BoiteLogo.svelte";
   import UpdateBadge from "$lib/features/updater/UpdateBadge.svelte";
   import ContextMenu from "$lib/shared/components/ContextMenu.svelte";
@@ -35,7 +34,7 @@
   import { editorStore } from "$lib/features/editor/store.svelte";
   import { revealEditor } from "$lib/features/editor/reveal";
   import FileCode from "@lucide/svelte/icons/file-code";
-  import Lasso from "@lucide/svelte/icons/lasso";
+  import Spline from "@lucide/svelte/icons/spline";
   import { whip } from "$lib/features/whip/store.svelte";
   import { neverStarted } from "$lib/domain/thread-status";
   import type { MessageKey } from "$lib/i18n/messages";
@@ -284,20 +283,6 @@
     >
       <BoiteLogo size={17} />
     </button>
-    {#if homeShown}
-      <button
-        type="button"
-        class="press flex h-7 items-center justify-center rounded-md px-2 transition {onHome
-          ? 'bg-accent text-foreground'
-          : 'text-muted-foreground hover:bg-accent hover:text-foreground'}"
-        onclick={goHome}
-        use:tip={onHome ? t("common.backToTerminal") : t("titlebar.home")}
-        aria-label={onHome ? t("common.backToTerminal") : t("titlebar.home")}
-        aria-pressed={onHome}
-      >
-        <House class="size-[15px]" />
-      </button>
-    {/if}
     <button
       type="button"
       class="press flex h-7 items-center justify-center rounded-md px-2 transition {app.view ===
@@ -390,9 +375,7 @@
         <Icon class="size-[15px]" />
       </button>
     {/each}
-    <!-- The whip experiment's only handle, and the whip itself at rest: the
-         coil is where the rope lives between throws, so nothing is drawn
-         outside this box once a throw is over. Last in the row, and drawn only
+    <!-- The whip experiment's only handle. Last in the row, and drawn only
          while the experiment is on: it is the one button here that does
          nothing to the app. -->
     {#if settings.state.experimentWhip}
@@ -406,7 +389,7 @@
         aria-label={whip.active ? t("titlebar.whipDrop") : t("titlebar.whip")}
         aria-pressed={whip.active}
       >
-        <Lasso class="size-5" />
+        <Spline class="size-[15px]" />
       </button>
     {/if}
   </div>

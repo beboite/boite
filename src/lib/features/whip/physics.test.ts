@@ -84,22 +84,4 @@ describe("whip rope", () => {
     rope.dropping = true;
     expect(flick(rope, 240, 10_000)).toBe(0);
   });
-
-  it("is spent once the throw has run restMs", () => {
-    const rope = new WhipRope(800, 500, 1000);
-    expect(rope.spent(1000)).toBe(false);
-    expect(rope.spent(1000 + WHIP.restMs - 1)).toBe(false);
-    expect(rope.spent(1000 + WHIP.restMs)).toBe(true);
-    expect(rope.spent(1000 + WHIP.restMs * 10)).toBe(true);
-  });
-
-  it("leaves the crack room to happen before it is spent", () => {
-    expect(WHIP.firstCrackGraceMs).toBeLessThan(WHIP.restMs);
-  });
-
-  it("is spent on its own clock, whatever the pointer did", () => {
-    const rope = new WhipRope(800, 500, 0);
-    flick(rope, 240, 0);
-    expect(rope.spent(WHIP.restMs)).toBe(true);
-  });
 });

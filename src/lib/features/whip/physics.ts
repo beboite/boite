@@ -63,18 +63,6 @@ export const WHIP = {
   arcWidth: 260,
   arcHeight: 185,
 
-  /**
-   * How long a throw lasts, ms.
-   *
-   * The rope used to live until it was clicked, and nothing on screen said so:
-   * one click on an unlabelled title bar button left a 460 px line hanging
-   * over the sidebar text and the first thread rows for the ten minutes an
-   * audit session lasted (finding 4). A crack is an event, so it is timed like
-   * one. Past this the rope is gone and the whip is the coiled glyph in the
-   * title bar, which is the only place it is ever drawn at rest.
-   */
-  restMs: 600,
-
   // Drawing
   lineWidthHandle: 7,
   lineWidthTip: 5,
@@ -140,17 +128,6 @@ export class WhipRope {
   /** True once every point has fallen past the bottom edge. */
   gone(bounds: WhipBounds): boolean {
     return this.dropping && this.points.every((p) => p.y > bounds.height + 60);
-  }
-
-  /**
-   * True once the throw has run its course.
-   *
-   * Read before the step rather than after it, so the frame that crosses
-   * `restMs` draws nothing: the rest state is a glyph in the title bar, and
-   * anything outside that box is the animation still running.
-   */
-  spent(now: number): boolean {
-    return now - this.spawnedAt >= WHIP.restMs;
   }
 
   /**

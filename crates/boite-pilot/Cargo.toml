@@ -1,6 +1,6 @@
 [package]
 name = "boite-pilot"
-version = "1.4.0"
+version = "1.4.1"
 description = "Protocol-driven agent sessions for boite: drivers, canonical events, child process control"
 edition = "2021"
 

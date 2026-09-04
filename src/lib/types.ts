@@ -311,9 +311,12 @@ export interface Settings {
    */
   sidebarUnfoldedProjects: string[];
   /**
-   * Whether the info box strip is folded to its branch and state cells. One
-   * value for the window, not per thread: a fold on any pane is what the next
-   * pane draws too.
+   * Where the info box sits on every terminal. One value for the window, not per
+   * thread: a drag on any pane is the next pane's position too.
+   */
+  infoBoxAnchor: InfoBoxAnchor;
+  /**
+   * Whether the box is folded to its header. Same scope as the anchor.
    */
   infoBoxCollapsed: boolean;
   /**
@@ -438,6 +441,20 @@ export type SmartSortBy = "manual" | "activity" | "alphabetical";
 export type WhipSound = "synth" | "sampled" | "meme";
 
 export type SortDirection = "asc" | "desc";
+
+/**
+ * The eight docks the info box can snap to: four corners and the midpoint of
+ * each edge. Mid-top and mid-bottom are `top-center` / `bottom-center`.
+ */
+export type InfoBoxAnchor =
+  | "top-left"
+  | "top-center"
+  | "top-right"
+  | "mid-left"
+  | "mid-right"
+  | "bottom-left"
+  | "bottom-center"
+  | "bottom-right";
 
 // Animation preference: "system" follows prefers-reduced-motion, "on"/"off"
 // override the OS either way.
