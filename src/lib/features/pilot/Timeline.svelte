@@ -237,7 +237,13 @@
     <div style:height="{win.before}px"></div>
     <ul class="flex flex-col gap-2">
       {#each shown as row (row.id)}
-        <li use:measure={row.id} class="flex flex-col gap-1">
+        <li
+          use:measure={row.id}
+          class="flex flex-col gap-1"
+          data-testid="pilot-item"
+          data-kind={row.kind}
+          data-state={row.state ?? ""}
+        >
           <!-- An empty bubble is drawn as a bar of surface colour with nothing
                in it, which is what a driver's own echo of the user's line looks
                like when its body carries no text. Nothing to say means no card. -->
@@ -340,14 +346,17 @@
                  changed, with the diff a click away. -->
             {@const diff = diffOf(row)}
             {@const usage = usageOf(row)}
-            <div class="flex flex-wrap items-center gap-x-2.5 gap-y-1 px-1 text-xs text-muted-2">
+            <div
+              class="flex flex-wrap items-center gap-x-2.5 gap-y-1 px-1 text-xs text-muted-2"
+              data-testid="pilot-turn-footer"
+            >
               {#if row.state === "running"}
                 <span>{t("pilot.turnRunning")}</span>
               {:else}
                 <span>{t("pilot.turnDuration", { seconds: seconds(row) })}</span>
               {/if}
               {#if usage}
-                <span>
+                <span data-testid="pilot-turn-tokens">
                   {t("pilot.turnTokens", {
                     input: String(usage.input_tokens ?? 0),
                     output: String(usage.output_tokens ?? 0),

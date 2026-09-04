@@ -102,6 +102,7 @@
         type="button"
         class="shrink-0 rounded-md border border-edge bg-[var(--color-surface-2)] px-2.5 py-1 text-sm text-foreground transition hover:bg-[var(--color-surface-3)]"
         onclick={onOpen}
+        data-testid="chat-open-session"
       >
         {t("pilot.openSession")}
       </button>
@@ -116,6 +117,7 @@
         class="min-h-0 min-w-0 flex-1 resize-none rounded-md border border-edge bg-[var(--color-surface-2)] px-2.5 py-1.5 text-sm text-foreground outline-none transition focus:border-foreground/30"
         placeholder={t("pilot.placeholder")}
         aria-label={t("pilot.placeholder")}
+        data-testid="chat-input"
       ></textarea>
       {#if status === "busy"}
         <button
@@ -131,6 +133,7 @@
         class="shrink-0 rounded-md bg-foreground px-2.5 py-1.5 text-sm font-medium text-background transition hover:bg-foreground/90 disabled:opacity-50"
         disabled={sending || text.trim().length === 0}
         onclick={() => void send()}
+        data-testid="chat-send"
       >
         {t("pilot.send")}
       </button>

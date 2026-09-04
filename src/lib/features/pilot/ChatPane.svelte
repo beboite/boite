@@ -151,7 +151,11 @@
   }
 </script>
 
-<div class="flex h-full min-h-0 flex-col bg-[var(--color-background)]">
+<div
+  class="flex h-full min-h-0 flex-col bg-[var(--color-background)]"
+  data-testid="chat-pane"
+  data-thread={threadId}
+>
   <header
     class="flex h-8 shrink-0 items-center gap-2 border-b border-border bg-[var(--color-titlebar)] px-2"
   >
@@ -165,12 +169,16 @@
         class="flex shrink-0 items-center gap-1 rounded px-1 text-xs text-muted-2 transition hover:bg-[var(--color-surface-2)] hover:text-foreground"
         onclick={() => void copySession()}
         aria-label={t("pilot.copySession")}
+        data-testid="chat-session"
+        data-session={view.nativeSessionId}
       >
         <span class="font-mono">{shortSession}</span>
         <Copy class="size-3" />
       </button>
     {:else}
-      <span class="shrink-0 text-xs text-muted-2">{t("pilot.noSession")}</span>
+      <span class="shrink-0 text-xs text-muted-2" data-testid="chat-no-session">
+        {t("pilot.noSession")}
+      </span>
     {/if}
     <div class="ml-auto flex shrink-0 items-center gap-1">
       <ModelPicker

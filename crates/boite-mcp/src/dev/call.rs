@@ -28,6 +28,7 @@ pub fn call_dev_tool(dev: &Dev, name: &str, args: &Value) -> Result<String, Stri
                 .ok_or("dev_db needs sql")?;
             db::query(sql)
         }
+        "dev_scenario" => scenario_call(dev, args),
         other => Err(format!("unknown tool: {other}")),
     }
 }
@@ -102,6 +103,44 @@ fn window_call(dev: &Dev, args: &Value) -> Result<String, String> {
         other => Err(format!(
             "action is start, stop, status or restart, not {other}"
         )),
+    }
+}
+
+/// `list` or `run`, against the repo `--repo` named.
+///
+/// The lock is taken to read the repo and to see whether this shim is holding
+/// a window, then dropped: a run is twenty minutes, and holding the mutex
+/// across it would make `dev_window action=status` hang rather than answer.
+fn scenario_call(dev: &Dev, args: &Value) -> Result<String, String> {
+    let action = args
+        .get("action")
+        .and_then(|v| v.as_str())
+        .unwrap_or("list");
+    let name = args
+        .get("name")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.trim().is_empty());
+    let (repo, window_up) = {
+        let mut window = dev
+            .window
+            .lock()
+            .map_err(|_| "the dev window state is poisoned; restart the server".to_string())?;
+        let up = window.phase() != Phase::Down;
+        (window.repo().to_path_buf(), up)
+    };
+    match action {
+        "list" => super::scenario::list_call(&repo),
+        "run" => {
+            if window_up {
+                return Err(
+                    "a run starts its own window on port 1430 and this session is holding one; \
+                     dev_window action=stop first"
+                        .into(),
+                );
+            }
+            super::scenario::run_call(&repo, name)
+        }
+        other => Err(format!("action is list or run, not {other}")),
     }
 }
 

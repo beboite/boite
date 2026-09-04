@@ -2,7 +2,8 @@
 
 The rules that are easy to break without noticing, and the file that owns each
 one. Stack and build commands: [README.md](README.md). Isolated dev window and
-MCP bridge: [docs/development.md](docs/development.md). Tags and signing:
+MCP bridge, and the end-to-end scenarios in `e2e/`:
+[docs/development.md](docs/development.md). Tags and signing:
 [docs/releasing.md](docs/releasing.md). Reading what any host logged, and the
 `logs` tool that answers "what happened to thread X":
 [docs/logging.md](docs/logging.md).
@@ -497,3 +498,8 @@ bun run budget
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 ```
+
+`bun run e2e` is optional and worth it when the change touched the window or the
+chat runtime: it drives the isolated dev window for real, so it needs a display
+and a couple of minutes. [docs/development.md](docs/development.md) has how to
+write one.

@@ -53,12 +53,17 @@ working directory; `--port` is the isolated config's vite port and defaults to
 | `dev_drive` | `click`, `type`, `press`, `screenshot`, `eval` |
 | `dev_logs` | the `logs` tool pointed at `%LOCALAPPDATA%\dev.boite.dev\logs`, both actions reading the files |
 | `dev_db` | one read-only statement on `%APPDATA%\dev.boite.dev\boite.db` |
+| `dev_scenario` | `list` the files in `e2e/`, `run` one or all of them through `bun run e2e` |
 
-`dev_scenario`, the sixth tool in [`pilot.md`](pilot.md), is not here yet: the
-`e2e/` runner it lists and runs does not exist. The seam it will use does:
-`dev_window`'s `env` is how a scenario run hands the app
-`BOITE_PILOT_CLAUDE_BIN` and `BOITE_PILOT_SCENARIO`, and `fresh: true` is how it
-starts from an empty database.
+`dev_scenario` is the sixth, and it lists and runs the files in `e2e/` through
+`bun run e2e`. A run starts a window of its own, so it refuses while this
+session is holding one: `dev_window action=stop` first. The deadline is twenty
+minutes and the spawned tree goes in the same job object `dev_window` uses, so a
+run that hangs is stopped by the pid captured at spawn. What comes back is the
+vitest summary and the failing assertions, never the whole log. The seam under
+it is the same one an agent uses by hand: `dev_window`'s `env` hands the app
+`BOITE_PILOT_CLAUDE_BIN` and `BOITE_PILOT_SCENARIO`, and `fresh: true` starts
+from an empty database. See [End to end](#end-to-end).
 
 Three rules it is built on.
 
@@ -131,6 +136,69 @@ this is now written against rather than through a package that shipped with it.
   from WebView2's `CapturePreview`: the viewport only, and `maxWidth` resizes
   it. The terminals render to a WebGL canvas, so what a screenshot shows of them
   is a rectangle; `dev_inspect what=read` is their text.
+
+## End to end
+
+`bun run e2e` drives the isolated dev window through `boite-mcp --dev` and
+asserts on three things at once: what the window shows, what
+`%APPDATA%\dev.boite.dev\boite.db` holds and what the log says. It needs a
+display, takes about two minutes on a warm `target/debug`, and the first run
+pays for the debug build of `src-tauri`. It is not in `bun run test`, which is
+the unit run and has its own config.
+
+```
+bun run e2e                        # every scenario
+bun run e2e -- chat                # one of them, by filename
+BOITE_E2E_SHOT=C:\tmp\chat.png bun run e2e
+```
+
+The client is `e2e/lib/devApp.ts`. It spawns `boite-mcp --dev --repo <this
+checkout>`, speaks MCP over its stdio and exposes `start`, `stop`, `inspect`,
+`js`, `click`, `type`, `press`, `screenshot`, `logs`, `db` and a `waitFor` that
+polls `js`. It goes through the tool layer and never touches the bridge, so what
+an agent gets from `dev_inspect` is exactly what a scenario gets. `start` stamps
+`BOITE_DEV_UNATTENDED=1`, `CARGO_BUILD_JOBS=4`, and the two variables that make
+the run offline: `BOITE_PILOT_CLAUDE_BIN` pointing at
+`node crates/boite-pilot/tests/fake-claude.mjs` and `BOITE_PILOT_SCENARIO` at
+`e2e/fixtures/e2e.json`.
+
+**The fake claude** is `crates/boite-pilot/tests/fake-claude.mjs`, the same one
+the wire tests in `boite-pilot` use. It speaks real `stream-json` against a
+scenario file, so everything between the composer and the rows is the shipped
+code and only the model on the far end is a stand-in. Its steps are keyed by the
+prompt that triggers them, which is what lets one file answer several chat
+threads at once: one `BOITE_PILOT_SCENARIO` is one variable on one app process
+while every thread spawns its own fake.
+
+**One window per run, reused.** It is started lazily by `e2e/lib/harness.ts` on
+the first `app()` and stopped when the worker exits. Not in vitest's
+`globalSetup`, which is a different process: `dev_window stop` and `restart` act
+on the pid the shim captured at spawn, so the shim has to be a child of whatever
+issues them. That is also why `e2e/vitest.config.ts` pins the run to one worker
+with no isolation. Two workers would be two windows on port 1430.
+
+**Writing a scenario.** One file per scenario, `e2e/<name>.e2e.ts`, with a
+header comment saying what it proves and naming anything it had to work around.
+Take the window from `app()`, walk the first-run wizard with `completeSetup`,
+and use the helpers in `e2e/lib/harness.ts` rather than raw selectors:
+`enableChatExperiment`, `openChat`, `sendChat`, `pageText`, `count`. Files run
+in filename order on one window, so a scenario may read what an earlier one
+left; say so in the header when it does. A scenario blocked by a defect in the
+app rather than by the harness stays in the tree as `describe.skip` with the
+defect and the file that owns it written at the top: `e2e/dock.e2e.ts` is the
+worked example.
+
+**The `data-testid` convention.** A scenario asks for an attribute that survives
+a rewording, never for a class or an English label. The names are flat and
+prefixed by what they belong to (`chat-pane`, `chat-input`, `chat-send`,
+`chat-session`, `pilot-item`, `pilot-request`, `pilot-request-option`,
+`pilot-turn-tokens`), and the state travels beside them in `data-` attributes
+rather than in the text: `data-thread`, `data-kind`, `data-outcome`,
+`data-value`, `data-compact`. So `[data-testid='pilot-request'][data-outcome='']`
+is an open question and the same node with `data-outcome='allowed'` is an
+answered one, in any locale. Add one when a scenario has nothing stable to hold
+on to, not to make a selector shorter: `aria-label` and the ids the settings
+anchors already generate come first.
 
 ## The browser pane, and what it is allowed to reach
 

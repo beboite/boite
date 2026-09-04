@@ -108,6 +108,9 @@
   class="rounded-md border border-edge bg-[var(--color-surface-2)] {compact
     ? 'px-3 py-2'
     : 'px-3 py-2.5'} {outcome ? 'opacity-60' : ''}"
+  data-testid="pilot-request"
+  data-outcome={outcome ?? ""}
+  data-compact={compact}
 >
   <p class="truncate text-sm font-medium text-foreground">{title}</p>
   {#if detail && !compact}
@@ -118,7 +121,7 @@
   {/if}
 
   {#if outcome}
-    <p class="mt-1.5 text-xs text-muted-2">
+    <p class="mt-1.5 text-xs text-muted-2" data-testid="pilot-request-answered">
       {t("pilot.requestAnswered", { outcome: t(OUTCOME[outcome]) })}
     </p>
   {:else}
@@ -131,6 +134,8 @@
           class="rounded-md border border-edge bg-[var(--color-surface)] px-2.5 py-1 text-sm text-foreground transition hover:bg-[var(--color-surface-3)] disabled:opacity-50"
           disabled={sending}
           onclick={() => void answer(option.value)}
+          data-testid="pilot-request-option"
+          data-value={option.value}
         >
           {option.label}
         </button>
