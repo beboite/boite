@@ -213,7 +213,7 @@
     <span
       class="flex shrink-0 items-center gap-1.5 rounded-full px-2 py-0.5 text-xs {view.status ===
       'waiting'
-        ? 'text-[var(--color-warning)]'
+        ? 'bg-[var(--color-surface)] text-[var(--color-warning)]'
         : 'text-muted-foreground'}"
       data-testid="chat-status"
       data-status={view.status}

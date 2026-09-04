@@ -190,6 +190,29 @@ describe("the pilot reduction", () => {
     expect(state.usage?.context_window).toBe(200000);
   });
 
+  // A restart is invisible on the timeline otherwise, and the answers above and
+  // below the line came from two different models.
+  it("writes a notice when the model changes, and not for the first one", () => {
+    const opened = run([{ kind: "model.changed", model: "sonnet" }]);
+    expect(opened.items).toHaveLength(0);
+    const switched = run([
+      { kind: "model.changed", model: "sonnet" },
+      { kind: "model.changed", model: "opus" },
+    ]);
+    expect(switched.items).toHaveLength(1);
+    expect(switched.items[0].kind).toBe("notice");
+    expect(switched.items[0].body?.model).toBe("opus");
+  });
+
+  it("keeps the slash commands the driver declared at init", () => {
+    const state = run([
+      { kind: "session.started", native_session_id: "s1", slash_commands: ["init", "review"] },
+      // A restart that declares none must not wipe them.
+      { kind: "session.started", native_session_id: "s1", slash_commands: [] },
+    ]);
+    expect(state.slashCommands).toEqual(["init", "review"]);
+  });
+
   it("puts an error on the timeline with the turn it belongs to", () => {
     const state = run([{ kind: "error", message: "the agent protocol broke", turn_id: "turn-1" }]);
     expect(state.items).toHaveLength(1);

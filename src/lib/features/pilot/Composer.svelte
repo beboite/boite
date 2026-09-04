@@ -171,7 +171,12 @@
   });
 </script>
 
-<div class="shrink-0 border-t border-border bg-[var(--color-background)] px-3 pt-2 pb-3">
+<!-- The bottom padding is the phone's: a keyboard raises the visual viewport and
+     the pane's own flex column is what keeps this above it, but a phone with a
+     home bar and no keyboard needs the inset or the send button sits under it. -->
+<div
+  class="shrink-0 border-t border-border bg-[var(--color-background)] px-3 pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))]"
+>
   {#if !open}
     <!-- A session that is not up is not a box to type into: the sentence says
          why and the button is the way back, which is the reverse state the
