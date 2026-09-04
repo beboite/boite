@@ -98,8 +98,21 @@
    * nothing rather than a placeholder saying so.
    */
   let branch = $state<string | null>(null);
-  /** A fresh thread: a session is up and nothing has been said in it. */
-  const fresh = $derived(!loading && view.items.length === 0 && view.nativeSessionId !== null);
+  /** A thread nothing has been said in yet, session or no session. */
+  const empty = $derived(!loading && view.items.length === 0);
+  /**
+   * The question an empty thread opens on.
+   *
+   * The project it is standing in, because that is the one thing a chat pane
+   * knows about the work that the user has not just typed. A pane opened
+   * outside a project keeps the question and drops the place rather than
+   * printing an empty name into it.
+   */
+  const headline = $derived(
+    project?.name
+      ? t("pilot.headline", { project: project.name })
+      : t("pilot.headlineBare"),
+  );
 
   // The timeline first, then the catalog: one is what the pane is for and the
   // other only fills a menu nobody has opened yet.
@@ -201,7 +214,6 @@
       {driver}
       instance={instanceName}
       {model}
-      {mode}
       compact
       placement="down"
       align="left"
@@ -268,51 +280,59 @@
     </button>
   </header>
 
-  {#if loading}
-    <!-- A skeleton rather than a spinner on a blank page: the shape of what is
-         coming is worth more than a wheel, and a thread of two thousand rows
-         takes several pages to read back. -->
-    <div class="min-h-0 flex-1 px-3 py-3" aria-label={t("common.loading")} aria-busy="true">
-      <div class="mx-auto flex w-full max-w-[72ch] flex-col gap-3">
-        <div class="pilot-skeleton h-4 w-2/5 self-end rounded-full"></div>
-        <div class="pilot-skeleton h-3 w-full rounded-full"></div>
-        <div class="pilot-skeleton h-3 w-4/5 rounded-full"></div>
-        <div class="pilot-skeleton h-8 w-full rounded-lg"></div>
-        <div class="pilot-skeleton h-3 w-3/5 rounded-full"></div>
+  <!-- Timeline and composer are one column, centred on one axis at every state.
+       An empty thread puts the question and the box in the middle of it, the
+       way a new tab does, and the first turn slides the pair apart: the
+       composer is the same component in the same place either way, so the line
+       being typed survives the thread's first answer. -->
+  <div class="flex min-h-0 flex-1 flex-col">
+    {#if loading}
+      <!-- A skeleton rather than a spinner on a blank page: the shape of what is
+           coming is worth more than a wheel, and a thread of two thousand rows
+           takes several pages to read back. -->
+      <div class="min-h-0 flex-1 px-3 py-3" aria-label={t("common.loading")} aria-busy="true">
+        <div class="mx-auto flex w-full max-w-[52rem] flex-col gap-3">
+          <div class="pilot-skeleton h-4 w-2/5 self-end rounded-full"></div>
+          <div class="pilot-skeleton h-3 w-full rounded-full"></div>
+          <div class="pilot-skeleton h-3 w-4/5 rounded-full"></div>
+          <div class="pilot-skeleton h-8 w-full rounded-lg"></div>
+          <div class="pilot-skeleton h-3 w-3/5 rounded-full"></div>
+        </div>
       </div>
-    </div>
-  {:else if fresh}
-    <!-- A fresh thread opens on the one choice that matters, large, with the
-         composer already able to take a line. -->
-    <div class="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-6">
-      <ModelPicker
-        {threadId}
-        {catalog}
-        {driver}
-        instance={instanceName}
-        {model}
-        {mode}
-        placement="down"
-        align="left"
-      />
-      <p class="max-w-[42ch] text-center text-sm text-muted-foreground">{t("pilot.empty")}</p>
-    </div>
-  {:else}
-    <Timeline {threadId} items={view.items} {repoPath} {projectId} status={view.status} />
-  {/if}
+    {:else if empty}
+      <div class="flex flex-1 items-end justify-center px-6 pb-4">
+        <h2
+          class="max-w-[36ch] text-center text-lg font-medium text-balance text-foreground sm:text-xl"
+          data-testid="chat-headline"
+        >
+          {headline}
+        </h2>
+      </div>
+    {:else}
+      <Timeline {threadId} items={view.items} {repoPath} {projectId} status={view.status} />
+    {/if}
 
-  <Composer
-    {threadId}
-    status={view.status}
-    open={view.nativeSessionId !== null}
-    onOpen={() => void openSession()}
-    commands={view.slashCommands}
-    {catalog}
-    {driver}
-    instance={instanceName}
-    {model}
-    {mode}
-  />
+    <Composer
+      {threadId}
+      status={view.status}
+      open={view.nativeSessionId !== null}
+      onOpen={() => void openSession()}
+      commands={view.slashCommands}
+      {catalog}
+      {driver}
+      instance={instanceName}
+      {model}
+      {mode}
+      standalone={!loading && empty}
+    />
+
+    <!-- The second half of the empty state's centring: with an equal share of
+         the pane under the composer, the question and the box sit in the middle
+         of it rather than on its floor. -->
+    {#if !loading && empty}
+      <div class="flex-1"></div>
+    {/if}
+  </div>
 </div>
 
 <style>

@@ -14,11 +14,13 @@
    * browser has to answer: how tall a row turned out to be, where the container
    * is scrolled to, and whether the tail is on screen.
    *
-   * The column is capped at 72ch and centred, which is the width a paragraph is
-   * read at; the rows that are not prose (tool calls, the footer, file chips)
-   * share it so the eye has one left edge to come back to. The user's own line
-   * is the one thing that leaves it, right-aligned as a bubble, which is what
-   * makes a long thread scannable without an avatar per row.
+   * The column is capped at 52rem and centred, which is the cap the composer
+   * takes too: the two used to be different widths on different axes, so the
+   * answer and the box it was typed in did not line up. The rows that are not
+   * prose (tool calls, the footer, file chips) share it so the eye has one left
+   * edge to come back to. The user's own line is the one thing that leaves it,
+   * right-aligned as a bubble, which is what makes a long thread scannable
+   * without an avatar per row.
    */
   import { editorStore } from "$lib/features/editor/store.svelte";
   import { revealEditor } from "$lib/features/editor/reveal";
@@ -278,7 +280,7 @@
       <p class="px-1 py-6 text-center text-sm text-muted-foreground">{t("pilot.empty")}</p>
     {:else}
       <div style:height="{win.before}px"></div>
-      <ul class="mx-auto flex w-full max-w-[72ch] flex-col gap-3">
+      <ul class="mx-auto flex w-full max-w-[52rem] flex-col gap-3">
         {#each shown as row (row.id)}
           <li
             use:measure={row.id}

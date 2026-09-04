@@ -2,9 +2,15 @@
   /**
    * What the user says, and everything they can change about who answers it.
    *
-   * One rounded surface: the box on top, then a row carrying the model chip,
-   * the effort and the mode on the left and the send on the right. The
-   * decisions are `keys.ts` and `slash.ts` and have no DOM in them; what is
+   * One rounded surface: the box on top, then a row of chips saying who answers
+   * and under what rules, with the send on the right. Model, mode and effort are
+   * three chips of the same shape rather than a chip beside a segmented control,
+   * because they are three settings of one sentence and the eye should not have
+   * to learn two widgets to read it. Effort is drawn only where a driver
+   * declares levels: a chip reading "default" is a control that controls
+   * nothing, and the menu used to carry one.
+   *
+   * The decisions are `keys.ts` and `slash.ts` and have no DOM in them; what is
    * here is the textarea, the growth, and the two calls.
    *
    * Sending during a turn calls `startTurn` exactly as it does when the thread
@@ -44,6 +50,13 @@
     instance: string | null;
     model: string | null;
     mode: PilotExecMode;
+    /**
+     * True on an empty thread, where the composer sits under the headline in
+     * the middle of the pane rather than against its bottom edge. It carries no
+     * separating rule there: a full-width line across the middle of an empty
+     * pane would be drawing a floor under nothing.
+     */
+    standalone?: boolean;
   };
   let {
     threadId,
@@ -56,6 +69,7 @@
     instance,
     model,
     mode,
+    standalone = false,
   }: Props = $props();
 
   let text = $state("");
@@ -71,6 +85,15 @@
   const capabilities = $derived(
     catalog?.drivers.find((entry) => entry.id === driver)?.capabilities ?? null,
   );
+
+  /**
+   * The effort levels the driver declared, which is none of them today.
+   *
+   * `PilotCapabilities` carries no such field yet, so the chip is simply not
+   * drawn. The read is optional on purpose: the day a driver declares them,
+   * the chip appears with no edit here.
+   */
+  const efforts = $derived((capabilities as { effort?: string[] } | null)?.effort ?? []);
 
   /** One line at rest, six at most, then the box scrolls. */
   const MAX_ROWS = 6;
@@ -179,27 +202,32 @@
      the pane's own flex column is what keeps this above it, but a phone with a
      home bar and no keyboard needs the inset or the send button sits under it. -->
 <div
-  class="shrink-0 border-t border-border bg-[var(--color-background)] px-3 pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))]"
+  class="shrink-0 px-3 pt-2 {standalone
+    ? 'pb-3'
+    : 'border-t border-border bg-[var(--color-background)] pb-[max(0.75rem,env(safe-area-inset-bottom))]'}"
 >
-  {#if !open}
-    <!-- A session that is not up is not a box to type into: the sentence says
-         why and the button is the way back, which is the reverse state the
-         "way in needs a way out" rule asks for. -->
-    <div
-      class="flex items-center gap-2 rounded-xl border border-border bg-[var(--color-surface)] px-3 py-2.5"
-    >
-      <p class="min-w-0 flex-1 text-sm text-muted-foreground">{t("pilot.sessionClosed")}</p>
-      <button
-        type="button"
-        class="press shrink-0 rounded-md bg-[var(--color-foreground)] px-3 py-1.5 text-sm font-medium text-[var(--color-background)] transition focus:outline-none focus-visible:focus-ring"
-        onclick={onOpen}
-        data-testid="chat-open-session"
+  <!-- The one column of the pane: the timeline is capped at the same width and
+       centred on the same axis, so the eye keeps one left edge from the first
+       word of the conversation to the box it is answered in. -->
+  <div class="mx-auto w-full max-w-[52rem]">
+    {#if !open}
+      <!-- A session that is not up is not a box to type into: the sentence says
+           why and the button is the way back, which is the reverse state the
+           "way in needs a way out" rule asks for. -->
+      <div
+        class="flex items-center gap-2 rounded-xl border border-border bg-[var(--color-surface)] px-3 py-2.5"
       >
-        {t("pilot.openSession")}
-      </button>
-    </div>
-  {:else}
-    <div class="mx-auto w-full max-w-[72ch]">
+        <p class="min-w-0 flex-1 text-sm text-muted-foreground">{t("pilot.sessionClosed")}</p>
+        <button
+          type="button"
+          class="press shrink-0 rounded-md bg-[var(--color-foreground)] px-3 py-1.5 text-sm font-medium text-[var(--color-background)] transition focus:outline-none focus-visible:focus-ring"
+          onclick={onOpen}
+          data-testid="chat-open-session"
+        >
+          {t("pilot.openSession")}
+        </button>
+      </div>
+    {:else}
       {#if busy}
         <!-- In place and quiet: the backend steers, and a modal asking about it
              would be a question already answered. -->
@@ -236,7 +264,7 @@
       {/if}
 
       <div
-        class="composer-surface flex flex-col gap-1.5 rounded-xl border border-border bg-[var(--color-surface)] px-2 pt-2 pb-1.5 transition"
+        class="composer-surface flex flex-col gap-2 rounded-2xl border border-border bg-[var(--color-surface)] px-2.5 pt-2.5 pb-2 transition"
       >
         <textarea
           bind:this={box}
@@ -256,18 +284,22 @@
             {driver}
             {instance}
             {model}
-            {mode}
             placement="up"
             align="left"
             bind:open={pickerOpen}
           />
-          <!-- The mode is the other thing a user changes between two turns, so
-               it sits beside the chip rather than behind it. Effort has no list
-               to offer until a driver declares one, and a control with one
-               segment is not a control. -->
-          <div class="hidden sm:block">
-            <ModeControl {threadId} {mode} capabilities={capabilities} compact />
-          </div>
+          <!-- The other thing a user changes between two turns, so it sits
+               beside the model rather than behind it. -->
+          <ModeControl {threadId} {mode} {capabilities} placement="up" />
+          {#if efforts.length > 0}
+            <span
+              class="flex h-7 shrink-0 items-center rounded-full border border-border bg-[var(--color-surface-2)] px-2.5 text-xs text-muted-foreground"
+              aria-label={t("pilot.pickerEffort")}
+              data-testid="chat-effort"
+            >
+              {t("pilot.effortLevel", { level: efforts[0] })}
+            </span>
+          {/if}
           <div class="ml-auto flex shrink-0 items-center gap-1.5">
             {#if busy}
               <button
@@ -295,8 +327,8 @@
           </div>
         </div>
       </div>
-    </div>
-  {/if}
+    {/if}
+  </div>
 </div>
 
 <style>

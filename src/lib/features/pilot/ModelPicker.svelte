@@ -8,37 +8,44 @@
    * composer's is the resting size, and `placement` is which way the popover
    * hangs.
    *
-   * The rule the menu is built around: **it says what the click will do before
-   * the click.** `selection.ts` answers that off the catalog and the row wears
-   * the answer, so picking another account reads "restarts on the same session"
-   * rather than going quiet for a second. Another driver is a graft and is
-   * phase 4, so its rows are disabled and say "later" rather than being hidden:
-   * a menu that hides what it cannot do yet teaches the user the driver does
-   * not exist.
+   * What a row reads is `models.ts` and not the catalog: `pilot.catalog` hands
+   * over ids, and a menu drawn straight off them listed `fable`,
+   * `claude-fable-5-1` and `claude-fable-5` as three rows for what is one
+   * choice. Now the four aliases lead, named after the id each resolves to
+   * ("Claude Fable 5.1"), the newest family wears a badge, the first three take
+   * Ctrl+1 to Ctrl+3, and every pinned id folds under one "Legacy models" row
+   * that opens in place.
+   *
+   * The rule the menu is still built around: **it says what the click will do
+   * before the click.** `selection.ts` answers that off the catalog. It is one
+   * line under the search rather than a word on every row, because the answer
+   * is the same for every row of an account and repeating it fifteen times said
+   * nothing fifteen times. A row that cannot be clicked at all keeps its own
+   * word, since that one is a reason rather than a repetition.
    *
    * The tint is the sidebar's own (`fastpick/accent.ts`): a fastpick route is
    * coloured by what is actually answering, which is the one thing a model name
    * on its own does not say.
    *
-   * Keyboard: the arrows walk the enabled rows, Enter takes one, Escape closes
-   * and hands focus back to the chip. The list is built flat for exactly that
-   * reason, with the group headings drawn from each row's own `group`.
+   * Keyboard: the arrows walk the enabled rows, Enter takes one, Ctrl+1 to
+   * Ctrl+3 take the first three, Escape closes and hands focus back to the
+   * chip. The rows are built as three ordered lists and walked as their
+   * concatenation, so what a key lands on is what the eye is on.
    */
   import { backend } from "$lib/backend";
   import { notifications } from "$lib/features/notifications/store.svelte";
   import { log } from "$lib/shared/log";
   import { t } from "$lib/i18n/index.svelte";
   import { ACCENT_COLOR, modelFamily } from "$lib/features/fastpick/accent";
-  import { shortModel } from "./present";
-  import ModeControl from "./ModeControl.svelte";
+  import { groupModels, isCurrentModel, modelLabel, newestAlias, resolveAlias } from "./models";
   import { instancesOf, switchOutcome, type SwitchOutcome } from "./selection";
   import type {
     PilotCatalog,
-    PilotExecMode,
     PilotInstance,
     PilotInstanceEntry,
   } from "./types";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
+  import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import Search from "@lucide/svelte/icons/search";
 
   type Props = {
@@ -48,7 +55,6 @@
     /** The instance name the row carries, or null before one is known. */
     instance: string | null;
     model: string | null;
-    mode: PilotExecMode;
     /** The header's size. The composer takes the resting one. */
     compact?: boolean;
     /** Which way the popover hangs off the chip. */
@@ -64,7 +70,6 @@
     driver,
     instance,
     model,
-    mode,
     compact = false,
     placement = "down",
     align = "left",
@@ -74,6 +79,8 @@
   let busy = $state(false);
   let query = $state("");
   let cursor = $state(0);
+  /** Whether the pinned ids are unfolded. Folded is what the menu opens on. */
+  let foldOpen = $state(false);
   let trigger: HTMLButtonElement | null = $state(null);
   let field: HTMLInputElement | null = $state(null);
   /** The chip and its menu together, so a click outside is one containment test. */
@@ -98,105 +105,186 @@
     if (instance !== "native") return instance;
     return accounts.find((entry) => entry.kind === "native")?.name ?? instance;
   });
-  /**
-   * The effort levels the driver declared, which is none of them today.
-   *
-   * `PilotCapabilities` carries no such field yet, so the control draws the
-   * level in force and says so rather than offering a choice nothing on the
-   * other side would honour. The read is optional on purpose: the day a driver
-   * declares them, this becomes a real segmented control with no edit here.
-   */
-  const efforts = $derived(
-    (capabilities as { effort?: string[] } | null)?.effort ?? [],
-  );
 
   /** The tint a row wears, off the model it names. */
   const tint = (name: string | null): string | null =>
     name ? ACCENT_COLOR[modelFamily(name)] : null;
 
-  const label = $derived(shortModel(model) ?? t("pilot.picker"));
+  /**
+   * The chip's own label.
+   *
+   * A thread on the alias `fable` is on whatever `fable` answers today, so the
+   * chip says that rather than the bare family name: the version is the half a
+   * reader is checking when they look at it.
+   */
+  const label = $derived.by(() => {
+    if (!model) return t("pilot.picker");
+    const full = resolveAlias(model, models) ?? model;
+    return modelLabel(full) ?? t("pilot.picker");
+  });
 
   /** One choosable line of the menu: an account, a model, and what it will do. */
   interface Row {
     key: string;
     entry: PilotInstanceEntry;
+    /** What a click sends. Null for an account with no model list at all. */
     model: string | null;
     label: string;
+    /** The muted line under the name: the id this row names. */
+    sub: string;
     group: string;
     outcome: SwitchOutcome;
+    current: boolean;
+    /** The newest family, which is the one row worth pointing at. */
+    badge: boolean;
+    /** Ctrl+1 to Ctrl+3, assigned to the first three rows a key can land on. */
+    shortcut: number | null;
   }
 
+  function outcomeOf(entry: PilotInstanceEntry): SwitchOutcome {
+    return switchOutcome(
+      { driver, instance: here },
+      { driver: entry.driver, instance: entry.name },
+      capabilities,
+    );
+  }
+
+  /** A route or another driver's account: one model by construction. */
+  function singleRow(entry: PilotInstanceEntry, group: string): Row {
+    const id = entry.model ?? entry.name;
+    return {
+      key: `${entry.name}::${id}`,
+      entry,
+      model: id,
+      label: modelLabel(id) ?? id,
+      sub: id,
+      group,
+      outcome: outcomeOf(entry),
+      current: entry.name === here,
+      badge: false,
+      shortcut: null,
+    };
+  }
+
+  const native = $derived(accounts.filter((entry) => entry.kind === "native"));
+  const routes = $derived(accounts.filter((entry) => entry.kind !== "native"));
   /**
-   * The menu, flat.
-   *
-   * Native accounts first and fastpick routes after, each labelled the way the
-   * fastpick menu labels it, because a user reading two lists reads them in the
-   * order the rest of the app already taught them. A native account offers the
-   * driver's model list; a fastpick route is one model by construction and
-   * offers itself.
+   * Another driver is a graft and is phase 4. Its accounts are listed and
+   * disabled rather than hidden: a menu that hides what it cannot do yet
+   * teaches the user the driver does not exist.
    */
-  const rows = $derived.by((): Row[] => {
-    // Another driver is a graft and is phase 4. Its accounts are listed and
-    // disabled rather than hidden: a menu that hides what it cannot do yet
-    // teaches the user the driver does not exist.
-    const others = (catalog?.instances ?? []).filter((entry) => entry.driver !== driver);
-    const ordered = [
-      ...accounts.filter((entry) => entry.kind === "native"),
-      ...accounts.filter((entry) => entry.kind !== "native"),
-      ...others,
-    ];
+  const foreign = $derived((catalog?.instances ?? []).filter((entry) => entry.driver !== driver));
+
+  const split = $derived(groupModels(models));
+  const newest = $derived(newestAlias(models));
+
+  const primaryRows = $derived.by((): Row[] => {
     const out: Row[] = [];
-    for (const entry of ordered) {
-      const outcome = switchOutcome(
-        { driver, instance: here },
-        { driver: entry.driver, instance: entry.name },
-        capabilities,
-      );
-      const names =
-        entry.driver !== driver
-          ? [entry.model ?? entry.name]
-          : entry.kind === "native"
-            ? models
-            : [entry.model ?? entry.name];
-      if (names.length === 0) {
+    for (const entry of native) {
+      const outcome = outcomeOf(entry);
+      if (split.primary.length === 0) {
         out.push({
           key: entry.name,
           entry,
           model: null,
           label: entry.label,
+          sub: "",
           group: entry.label,
           outcome,
+          current: entry.name === here,
+          badge: false,
+          shortcut: null,
         });
         continue;
       }
-      for (const name of names) {
+      for (const choice of split.primary) {
         out.push({
-          key: `${entry.name}::${name}`,
+          key: `${entry.name}::${choice.id}`,
           entry,
-          model: name,
-          label: shortModel(name) ?? name,
+          model: choice.id,
+          label: choice.label,
+          sub: choice.resolved ?? choice.id,
           group: entry.label,
           outcome,
+          current: entry.name === here && isCurrentModel(choice, model),
+          badge: choice.id === newest,
+          shortcut: null,
         });
       }
     }
     return out;
   });
 
-  const shown = $derived.by(() => {
-    const needle = query.trim().toLowerCase();
-    if (!needle) return rows;
-    return rows.filter(
-      (row) =>
-        row.label.toLowerCase().includes(needle) || row.group.toLowerCase().includes(needle),
-    );
+  const legacyRows = $derived.by((): Row[] => {
+    const out: Row[] = [];
+    for (const entry of native) {
+      const outcome = outcomeOf(entry);
+      for (const choice of split.legacy) {
+        out.push({
+          key: `${entry.name}::${choice.id}`,
+          entry,
+          model: choice.id,
+          label: choice.label,
+          sub: choice.id,
+          group: entry.label,
+          outcome,
+          current: entry.name === here && isCurrentModel(choice, model),
+          badge: false,
+          shortcut: null,
+        });
+      }
+    }
+    return out;
   });
 
+  const otherRows = $derived([
+    // A route is grouped by the provider answering it, not by its own label:
+    // one group per row was fifteen headings over fifteen lines.
+    ...routes.map((entry) => singleRow(entry, entry.provider ?? entry.label)),
+    ...foreign.map((entry) => singleRow(entry, entry.driver)),
+  ]);
+
+  const needle = $derived(query.trim().toLowerCase());
+  const match = (row: Row): boolean =>
+    needle.length === 0 ||
+    row.label.toLowerCase().includes(needle) ||
+    row.sub.toLowerCase().includes(needle) ||
+    row.group.toLowerCase().includes(needle);
+
+  const primaryShown = $derived(primaryRows.filter(match));
+  const legacyMatched = $derived(legacyRows.filter(match));
+  const otherShown = $derived(otherRows.filter(match));
+
+  /**
+   * The fold, open when it has to be.
+   *
+   * A search that matched something inside it, or a thread pinned to one of the
+   * ids in it: both are cases where leaving it shut hides the very row the
+   * reader came for.
+   */
+  const unfolded = $derived(
+    foldOpen || needle.length > 0 || legacyRows.some((row) => row.current),
+  );
+  const legacyShown = $derived(unfolded ? legacyMatched : []);
+
+  /** The menu in reading order, which is also the order a key walks. */
+  const shown = $derived([...primaryShown, ...legacyShown, ...otherShown]);
   /** The rows a key can land on. A disabled row is read, never selected. */
   const reachable = $derived(shown.filter((row) => row.outcome.enabled));
+  /** Ctrl+1 to Ctrl+3, on the first three rows a key can land on. */
+  const shortcuts = $derived(reachable.slice(0, 3));
+  const shortcutOf = (row: Row): number | null => {
+    const at = shortcuts.indexOf(row);
+    return at === -1 ? null : at + 1;
+  };
 
-  const isCurrent = (row: Row): boolean =>
-    row.entry.name === here && (row.model === null || row.model === model);
+  /**
+   * The one line saying what a click will do.
+   *
+   * The cursored row's own answer, which is the row the pointer is over as well
+   * as the one the arrows are on: `onpointerenter` moves the same cursor.
+   */
+  const hint = $derived(reachable[cursor]?.outcome ?? reachable[0]?.outcome ?? null);
 
   function instanceValue(entry: PilotInstanceEntry): PilotInstance {
     return entry.kind === "fastpick"
@@ -209,6 +297,7 @@
     if (open) {
       query = "";
       cursor = 0;
+      foldOpen = false;
     }
   }
 
@@ -238,6 +327,14 @@
   }
 
   function onMenuKey(event: KeyboardEvent) {
+    if (event.ctrlKey || event.metaKey) {
+      const at = Number(event.key);
+      if (Number.isInteger(at) && at >= 1 && at <= shortcuts.length) {
+        event.preventDefault();
+        void pick(shortcuts[at - 1]);
+      }
+      return;
+    }
     if (event.key === "Escape") {
       event.preventDefault();
       event.stopPropagation();
@@ -281,6 +378,66 @@
   }}
 />
 
+{#snippet line(row: Row, heading: boolean)}
+  {#if heading}
+    <p class="px-2.5 pt-2 pb-1 text-xs font-medium tracking-wide text-muted-foreground uppercase">
+      {row.group}
+    </p>
+  {/if}
+  <button
+    type="button"
+    role="menuitemradio"
+    aria-checked={row.current}
+    class="flex w-full items-center gap-2 px-2.5 py-1.5 text-left transition focus:outline-none disabled:cursor-not-allowed disabled:opacity-50 {reachable[
+      cursor
+    ] === row
+      ? 'bg-[var(--color-surface-3)]'
+      : ''} hover:bg-[var(--color-surface-3)]"
+    disabled={!row.outcome.enabled || busy}
+    onclick={() => void pick(row)}
+    onpointerenter={() => {
+      const found = reachable.indexOf(row);
+      if (found >= 0) cursor = found;
+    }}
+    data-testid="chat-model-row"
+    data-model={row.model ?? ""}
+    data-current={row.current}
+  >
+    <span
+      class="size-2 shrink-0 rounded-full"
+      style:background={tint(row.model) ?? "var(--color-muted-foreground)"}
+    ></span>
+    <span class="min-w-0 flex-1">
+      <span class="flex items-center gap-1.5">
+        <span
+          class="min-w-0 truncate text-sm {row.current
+            ? 'font-medium text-foreground'
+            : 'text-foreground'}">{row.label}</span
+        >
+        {#if row.badge}
+          <span
+            class="shrink-0 rounded-sm bg-[var(--color-surface-3)] px-1 py-px text-[0.625rem] font-semibold tracking-wide text-foreground uppercase"
+          >
+            {t("pilot.modelNew")}
+          </span>
+        {/if}
+      </span>
+      {#if row.sub}
+        <span class="block truncate font-mono text-xs text-muted-foreground">{row.sub}</span>
+      {/if}
+    </span>
+    {#if !row.outcome.enabled}
+      <span class="shrink-0 text-xs text-muted-foreground">{t(row.outcome.key)}</span>
+    {:else if shortcutOf(row) !== null}
+      <kbd
+        class="shrink-0 rounded border border-border px-1 py-px font-mono text-[0.625rem] text-muted-foreground"
+      >
+        {t("pilot.modelShortcut", { n: String(shortcutOf(row)) })}
+      </kbd>
+    {/if}
+  </button>
+{/snippet}
+
 <div class="relative" bind:this={root}>
   <button
     bind:this={trigger}
@@ -293,6 +450,7 @@
     aria-haspopup="menu"
     aria-label={t("pilot.pickerOpen")}
     data-testid="chat-model-chip"
+    data-model={model ?? ""}
   >
     <span
       class="size-2 shrink-0 rounded-full"
@@ -323,72 +481,50 @@
           class="min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
           placeholder={t("pilot.pickerSearch")}
           aria-label={t("pilot.pickerSearch")}
+          data-testid="chat-model-search"
         />
       </div>
 
-      <div class="max-h-64 scroll-pane overflow-y-auto py-1">
-        {#if shown.length === 0}
+      <!-- Said once, about the row the reader is on, rather than fifteen times
+           about fifteen rows that all answer the same. -->
+      {#if hint}
+        <p class="border-b border-border px-2.5 py-1.5 text-xs text-muted-foreground">
+          {t(hint.key)}
+        </p>
+      {/if}
+
+      <div class="max-h-72 scroll-pane overflow-y-auto py-1">
+        {#if shown.length === 0 && legacyMatched.length === 0}
           <p class="px-2.5 py-3 text-center text-sm text-muted-foreground">
             {t("pilot.pickerNoMatch")}
           </p>
         {:else}
-          {#each shown as row, at (row.key)}
-            {#if at === 0 || shown[at - 1].group !== row.group}
-              <p
-                class="px-2.5 pt-2 pb-1 text-xs font-medium tracking-wide text-muted-foreground uppercase"
-              >
-                {row.group}
-              </p>
-            {/if}
+          {#each primaryShown as row, at (row.key)}
+            {@render line(row, at === 0 || primaryShown[at - 1].group !== row.group)}
+          {/each}
+
+          {#if legacyRows.length > 0}
             <button
               type="button"
-              role="menuitemradio"
-              aria-checked={isCurrent(row)}
-              class="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-sm transition focus:outline-none disabled:cursor-not-allowed disabled:opacity-50 {reachable[
-                cursor
-              ] === row
-                ? 'bg-[var(--color-surface-3)]'
-                : ''} {isCurrent(row) ? 'text-foreground' : 'text-muted-foreground'} hover:bg-[var(--color-surface-3)] hover:text-foreground"
-              disabled={!row.outcome.enabled || busy}
-              onclick={() => void pick(row)}
-              onpointerenter={() => {
-                const at2 = reachable.indexOf(row);
-                if (at2 >= 0) cursor = at2;
-              }}
+              class="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left text-xs text-muted-foreground transition hover:bg-[var(--color-surface-3)] hover:text-foreground focus:outline-none focus-visible:focus-ring-inset"
+              onclick={() => (foldOpen = !unfolded)}
+              aria-expanded={unfolded}
+              data-testid="chat-model-legacy"
             >
-              <span
-                class="size-2 shrink-0 rounded-full"
-                style:background={tint(row.model) ?? "var(--color-muted-foreground)"}
-              ></span>
-              <span class="min-w-0 flex-1 truncate">{row.label}</span>
-              <span class="shrink-0 text-xs text-muted-foreground">{t(row.outcome.key)}</span>
+              <ChevronRight
+                class="size-3 shrink-0 transition-transform {unfolded ? 'rotate-90' : ''}"
+              />
+              {t("pilot.legacyModels", { count: String(legacyRows.length) })}
             </button>
+            {#each legacyShown as row, at (row.key)}
+              {@render line(row, false)}
+            {/each}
+          {/if}
+
+          {#each otherShown as row, at (row.key)}
+            {@render line(row, at === 0 || otherShown[at - 1].group !== row.group)}
           {/each}
         {/if}
-      </div>
-
-      <!-- Effort has no list to offer until a driver declares one, so the menu
-           says which one is in force rather than pretending to a choice. -->
-      <div class="border-t border-border px-2.5 py-2">
-        <p class="pb-1 text-xs font-medium text-muted-foreground">{t("pilot.pickerEffort")}</p>
-        {#if efforts.length === 0}
-          <p class="text-sm text-muted-foreground">{t("pilot.effortDefault")}</p>
-        {:else}
-          <div class="flex gap-1 rounded-md bg-[var(--color-surface)] p-0.5">
-            {#each efforts as level (level)}
-              <span
-                class="flex-1 rounded px-2 py-1 text-center text-xs text-muted-foreground capitalize"
-              >
-                {level}
-              </span>
-            {/each}
-          </div>
-        {/if}
-      </div>
-
-      <div class="border-t border-border px-2.5 py-2">
-        <p class="pb-1 text-xs font-medium text-muted-foreground">{t("pilot.pickerMode")}</p>
-        <ModeControl {threadId} {mode} {capabilities} />
       </div>
     </div>
   {/if}
