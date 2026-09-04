@@ -252,9 +252,17 @@ Projects, threads and transcripts stay on disk next to the app config:
 
 | OS      | Path                                              |
 | ------- | ------------------------------------------------- |
-| Windows | `%APPDATA%\com.boite.desktop\boite.db`            |
-| Linux   | `~/.local/share/com.boite.desktop/boite.db`       |
-| macOS   | `~/Library/Application Support/com.boite.desktop/` |
+| Windows | `%APPDATA%\com.boite.legacy\boite.db`             |
+| Linux   | `~/.local/share/com.boite.legacy/boite.db`        |
+| macOS   | `~/Library/Application Support/com.boite.legacy/`  |
+
+1.4.0 renamed the bundle identifier, so an existing install moves itself on
+first start: from `com.boite.desktop`, and from `dev.boite.app` for an install
+older than 1.0.1. The webview's own storage, which holds the pane layouts and
+the device settings, moves with it. Every move is a rename, file by file, and
+nothing already sitting at the new name is overwritten. Nothing is deleted from
+a directory it could not empty either, so whatever stays behind is still where
+it was and can be recovered by hand.
 
 ## Keyboard
 

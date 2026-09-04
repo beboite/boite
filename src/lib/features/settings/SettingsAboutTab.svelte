@@ -144,7 +144,7 @@
           class="truncate text-foreground underline decoration-border underline-offset-2 transition hover:decoration-foreground"
           onclick={() => void openUrl(REPO_URL)}
         >
-          beboite/boite
+          beboite/boite-legacy
         </button>
       </dd>
     </dl>

@@ -474,7 +474,7 @@ ids that let it answer "what happened to thread X".
 speaks stdio MCP, and drives the isolated dev window (`bun run dev:isolated`,
 identifier `dev.boite.dev`, port 1430) through the `mcp-bridge` WebSocket that
 window already opens on `127.0.0.1`, plus the dev instance's log dir and
-database. It never touches `com.boite.desktop`.
+database. It never touches `com.boite.legacy`.
 
 | Tool | Actions |
 |---|---|

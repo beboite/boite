@@ -706,8 +706,11 @@ pub fn default_directives() -> String {
     }
 }
 
-/// The bundle identifier the desktop app ships under.
-const DESKTOP_IDENTIFIER: &str = "com.boite.desktop";
+/// The bundle identifier the desktop app ships under, `com.boite.desktop` up
+/// to 1.3.4 and `com.boite.legacy` since 1.4.0. `src-tauri/tauri.conf.json`
+/// owns it, and `app_data::migrate_before_plugins` moves an existing install
+/// across when it changes.
+const DESKTOP_IDENTIFIER: &str = "com.boite.legacy";
 
 /// Where the desktop app on this machine keeps its log.
 ///
