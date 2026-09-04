@@ -1,5 +1,31 @@
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
+import { BaseSequencer } from "vitest/node";
+
+/**
+ * The order the files themselves document, rather than the one their timings
+ * suggest.
+ *
+ * `chat` leaves two chat threads behind on the shared window: `resume` reads
+ * the first of them back after a restart and `dock` reads the second. Vitest
+ * orders files by how long each took on the last run, so the order changes
+ * under you as a file gets slower or is unskipped, and a run that opened with
+ * `dock` was reading a window `chat` had not set up yet. Anything not named
+ * here keeps its place behind the ones that are.
+ */
+const ORDER = ["chat.e2e.ts", "resume.e2e.ts", "dock.e2e.ts"];
+
+function rank(path: string): number {
+  const at = ORDER.findIndex((name) => path.endsWith(name));
+  return at === -1 ? ORDER.length : at;
+}
+
+class DocumentedOrder extends BaseSequencer {
+  async sort(files: Parameters<BaseSequencer["sort"]>[0]) {
+    const sorted = await super.sort(files);
+    return sorted.sort((a, b) => rank(a.moduleId) - rank(b.moduleId));
+  }
+}
 
 /**
  * The end-to-end run, which is not the unit run.
@@ -36,6 +62,6 @@ export default defineConfig({
     testTimeout: 3 * 60 * 1000,
     teardownTimeout: 60 * 1000,
     reporters: ["default"],
-    sequence: { concurrent: false },
+    sequence: { concurrent: false, sequencer: DocumentedOrder },
   },
 });
