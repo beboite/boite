@@ -4,6 +4,7 @@ import { TauriBackend } from "./tauri";
 import { RemoteBackend } from "./remote";
 import { ConnectError, connectFailReason, type ConnState } from "./remote/socket";
 import { hasTauri } from "./env";
+import { attach } from "$lib/shared/log";
 
 // The active workspace. backend() returns the current transport; mode/epoch/
 // connection are reactive so the titlebar toggle and outline track them. The
@@ -279,6 +280,12 @@ export const workspace = new Workspace();
 export function backend(): Backend {
   return workspace.current();
 }
+
+// The webview log writes through whatever `backend()` points at, and it is told
+// so here rather than importing this module: `$lib/shared/log` is imported by
+// the transports above, and one of them runs under bun in the remote smoke
+// with nothing of this file behind it.
+attach((batch) => backend().logs.write(batch));
 
 /** The transport for this device, never the boite. See `Workspace.local`. */
 export function localBackend(): Backend {

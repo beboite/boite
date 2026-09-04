@@ -96,6 +96,15 @@ impl Drop for Job {
 #[cfg(not(target_os = "windows"))]
 pub struct Job;
 
+/// Nothing to close. The impl exists so that a `drop(job)` at a call site
+/// means the same thing on every platform: on Windows it is the kill, and
+/// clippy on Linux would otherwise read the same line as dropping a value
+/// that has nothing to drop (`drop_non_drop`).
+#[cfg(not(target_os = "windows"))]
+impl Drop for Job {
+    fn drop(&mut self) {}
+}
+
 #[cfg(not(target_os = "windows"))]
 impl Job {
     /// Always `None`: elsewhere a process group carries the tree and the

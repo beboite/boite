@@ -1,28 +1,31 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LogRecordInput } from "$lib/backend/types";
+import {
+  attach,
+  captureWebviewErrors,
+  flush,
+  FLUSH_INTERVAL_MS,
+  log,
+  MAX_BATCH,
+  resetLogForTest,
+  shortStack,
+} from "./log";
 
 const written: LogRecordInput[][] = [];
 let writeFails = false;
 
-vi.mock("$lib/backend", () => ({
-  backend: () => ({
-    logs: {
-      write: (records: LogRecordInput[]) => {
-        if (writeFails) return Promise.reject(new Error("no host"));
-        written.push(records);
-        return Promise.resolve();
-      },
-    },
-  }),
-}));
-
-const { log, flush, captureWebviewErrors, resetLogForTest, shortStack, FLUSH_INTERVAL_MS, MAX_BATCH } =
-  await import("./log");
+/** What `$lib/backend` installs in the app: the host's `logs.write`. */
+function host(records: LogRecordInput[]): Promise<void> {
+  if (writeFails) return Promise.reject(new Error("no host"));
+  written.push(records);
+  return Promise.resolve();
+}
 
 beforeEach(() => {
   written.length = 0;
   writeFails = false;
   resetLogForTest();
+  attach(host);
   vi.useFakeTimers();
 });
 
@@ -123,6 +126,25 @@ describe("the batch", () => {
    * report in the batch that just failed, and the next flush would carry the
    * report of the flush before it.
    */
+  /**
+   * A transport logs before there is a backend to send through, and the
+   * remote smoke runs one with no backend at all. Neither must lose the line
+   * nor reach for `$lib/backend`: the records wait for the sink.
+   */
+  it("holds what it was handed until a sink is attached", async () => {
+    resetLogForTest();
+    log.info("backend.socket", "socket.opened");
+    vi.advanceTimersByTime(FLUSH_INTERVAL_MS);
+    await flush();
+    expect(written).toHaveLength(0);
+
+    attach(host);
+    vi.advanceTimersByTime(FLUSH_INTERVAL_MS);
+    await settle();
+    expect(written).toHaveLength(1);
+    expect(written[0][0].msg).toBe("socket.opened");
+  });
+
   it("says nothing about a flush that failed", async () => {
     writeFails = true;
     log.error("app", "boom");
