@@ -820,7 +820,17 @@ pub async fn dispatch(state: &AppState, request: Authorized) -> Result<Value, St
             // own token, which is the user, not an agent. Agents reach the bus
             // through their own endpoint and carry a narrower grant.
             let ready = command.prepare(&state.command_host(), Grant::Local)?;
-            let answer = blocking(move || ready.run()).await??;
+            // A conduct verb prepares as a pilot call when the thread on the
+            // other end is a chat one (`Conduct::as_pilot_turn`), and that work
+            // awaits a child process rather than blocking a pool thread. The
+            // same executor the pilot arm above uses, so one conversion has one
+            // implementation on both hosts.
+            let answer = match ready {
+                boite_core::command::Ready::Pilot(ready) => {
+                    boite_core::pilot_host::execute(*ready).await?
+                }
+                ready => blocking(move || ready.run()).await??,
+            };
             // A moment is what an orchestrator's long-poll wakes on, and the
             // event is what a chat pane refreshes on. Fanned out here because
             // the bus itself owns no event channel. Every conduct write that

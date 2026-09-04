@@ -388,6 +388,17 @@ the PTY from the bus: `crate::reply` forbids that on purpose, and the queue
 does not go around it. The line never lands while the worker is waiting on the
 user, because a question asked to the user is the user's.
 
+**A chat thread has no prompt to type at, so both change shape and neither
+changes rule.** With the pilot experiment on and the agent carrying a driver,
+the orchestrator is a `runtime = pilot` row, and `Conduct::prepare` turns
+`orchestrator.post` and a dispatch into a chat worker into a prepared
+`pilot.turn.start` — after the same static guards, so the same names still
+refuse. `orchestrator.messages` then reads the two conversation kinds of
+`pilot_items` and `orchestrator.say` is refused by name, the answer being an
+item already. Everything above holds unchanged for a terminal orchestrator,
+which is what an agent with no driver and a boite with the experiment off both
+get.
+
 `home` is not a pane an agent can open: the orchestrator chat lives there, and
 an agent that could put its own conversation on screen would be an agent
 taking the screen.

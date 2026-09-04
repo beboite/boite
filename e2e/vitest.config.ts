@@ -13,7 +13,16 @@ import { BaseSequencer } from "vitest/node";
  * `dock` was reading a window `chat` had not set up yet. Anything not named
  * here keeps its place behind the ones that are.
  */
-const ORDER = ["chat.e2e.ts", "resume.e2e.ts", "dock.e2e.ts"];
+const ORDER = [
+  "chat.e2e.ts",
+  "resume.e2e.ts",
+  "dock.e2e.ts",
+  // Last of the named ones on purpose: it turns the workspace experiment on and
+  // leaves an orchestrator thread behind, and neither is something the three
+  // above should find already there. It brings its own project rather than
+  // waiting on `project.e2e.ts`, which is unnamed here and runs after.
+  "orchestrator.e2e.ts",
+];
 
 function rank(path: string): number {
   const at = ORDER.findIndex((name) => path.endsWith(name));

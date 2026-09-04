@@ -513,6 +513,43 @@ terminal orchestrators. A dispatch to a pilot worker is a `pilot.turn.start`
 with the briefing instead of a line typed into a prompt; `dispatch.drain` stays
 for terminal workers.
 
+**What exists.** `orchestrator.start` writes the five pilot columns when both
+experiments are on and the orchestrator agent has a driver, native or through a
+fastpick route whose harness `driverOfHarness` reads as `claude`
+(`orchestrator/api.ts::orchestratorChatLaunch`, a pure function so the branch is
+testable). A chat orchestrator gets no activation and no pane: it has no PTY,
+its conversation is the Home card, and `home` is not a pane an agent may open,
+so `ensureOrchestrator` awaits `pilot.thread.open` instead of mounting a group.
+The session opens on the briefing `boite_core::orchestrator::briefing` builds,
+passed as `system_prompt_append` and only for the row carrying the role: it is
+instructions plus a snapshot, so it goes in front of the conversation rather
+than spending a turn on a message the user never wrote.
+
+`orchestrator.post` and `thread.dispatch` change shape in `Conduct::prepare`
+(`as_pilot_turn`): each is converted into a prepared `pilot.turn.start`, so the
+roots check, the driver check and the refusals are the pilot domain's own rather
+than a second copy, and a host with no pilot runtime falls through to the
+terminal path unchanged. The static guards run before the conversion, so a
+dispatch that lands as a turn still refuses with `MUTED`, `OUT_OF_SCOPE`,
+`SCOPE_TAKEN` and `NO_ORCHESTRATOR_TO_ORCHESTRATOR`. `orchestrator.messages`
+answers the `user_message` and `assistant_text` items of `pilot_items` in the
+shape the Home chat already read, on the host so a phone reads the same list;
+its cursor is an item id resolved back to a sequence. `orchestrator.status`
+carries `runtime` and, for a chat row, the exact status column the projection
+writes. `say` refuses a chat orchestrator by name (`PILOT_ORCHESTRATOR`): its
+answer is already an item, and a second copy in `orchestrator_messages` would
+draw it twice. `orchestrator.undo` and `orchestrator.actions` are unchanged and
+tested over a chat orchestrator, because nothing they touch is a PTY.
+
+`OrchestratorChat.svelte` draws `pilot/Conversation.svelte` for a chat
+orchestrator, which is `load` on mount, `release` on unmount and the pane's own
+`Timeline`, so one conversation does not look like two things depending on where
+it is read. Behind `import()` like the pane and the dock's request card: Home is
+drawn before first paint, and a static import of the timeline is the regression
+`bundle-budget.json`'s eager ceiling exists to catch. The composer stays what it
+was, voice included. `e2e/orchestrator.e2e.ts` drives the whole path against the
+fake claude.
+
 ## Phases
 
 Each phase ships behind the experiment, on both hosts, with a proof that opens

@@ -56,9 +56,11 @@ impl<'a> DesktopHost<'a> {
         }
     }
 
-    /// This app's pilot runtime, attached by the `pilot.*` codec alone. Every
-    /// other command answers `None` and the domain refuses by name, which is
-    /// what keeps a chat call off a host that has no children to drive.
+    /// This app's pilot runtime, attached by the pilot codec and by the conduct
+    /// one, which is where a post or a dispatch becomes a turn when the thread
+    /// on the other end is a chat one. Every other command answers `None` and
+    /// the domain refuses by name, which is what keeps a chat call off a host
+    /// that has no children to drive.
     pub(super) fn with_pilot(mut self, pilot: Arc<boite_pilot::Runtime>) -> Self {
         self.pilot = Some(pilot);
         self
@@ -187,9 +189,18 @@ pub(super) async fn through(host: DesktopHost<'_>, command: Command) -> Result<V
             return Err(refusal);
         }
     };
-    let answer = tauri::async_runtime::spawn_blocking(move || ready.run())
-        .await
-        .map_err(|e| format!("command task failed: {e}"))?;
+    // Two verbs of the conduct domain prepare as a pilot call when the thread
+    // on the other end is a chat one (`Conduct::as_pilot_turn`), and that work
+    // awaits a child process rather than blocking a pool thread. The same
+    // executor the pilot door uses, so one conversion has one implementation.
+    let answer = match ready {
+        boite_core::command::Ready::Pilot(ready) => {
+            boite_core::pilot_host::execute(*ready).await
+        }
+        ready => tauri::async_runtime::spawn_blocking(move || ready.run())
+            .await
+            .map_err(|e| format!("command task failed: {e}"))?,
+    };
     if let Err(failure) = &answer {
         tracing::warn!(method, reason = %failure, "bus.failed");
     }

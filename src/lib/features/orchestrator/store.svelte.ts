@@ -1,3 +1,4 @@
+import { app } from "$lib/app/store.svelte";
 import { backend } from "$lib/backend/active.svelte";
 import { settings } from "$lib/features/settings/store.svelte";
 import { orchestratorEnabledFor } from "$lib/features/settings/orchestratorEnabledFor";
@@ -41,6 +42,30 @@ class OrchestratorStore {
 
   get conversation(): Conversation {
     return this.conversationFor(this.scope);
+  }
+
+  /**
+   * The chat thread answering for a scope, when the orchestrator is one.
+   *
+   * `null` is the terminal orchestrator and the absence of one at all, which
+   * the card draws the same way it always did. Read off the row rather than
+   * from a flag of its own: the runtime is a column, and a window that decided
+   * from settings would draw a chat over a thread launched before the
+   * experiment was turned on.
+   */
+  pilotThreadIdFor(scope: string | null): string | null {
+    const held = app.threads.find(
+      (th) =>
+        th.role === "orchestrator" &&
+        (th.orchestratorScope ?? null) === (scope ?? null) &&
+        !th.settledAt,
+    );
+    return held?.runtime === "pilot" ? held.id : null;
+  }
+
+  /** The same, for the conversation the card is showing. */
+  get pilotThreadId(): string | null {
+    return this.pilotThreadIdFor(this.scope);
   }
 
   /** Whether the home card draws at all. Same resolver the tri-state uses. */
