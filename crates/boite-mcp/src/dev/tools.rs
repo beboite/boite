@@ -15,7 +15,7 @@ use serde_json::{json, Value};
 pub const DEV_INSTRUCTIONS: &str = "\
 You are driving boite's isolated dev window: a second app on port 1430 under \
 the identifier dev.boite.dev, with its own database and an empty project list. \
-It is not the user's boite. Nothing here reads or writes com.boite.desktop, \
+It is not the user's boite. Nothing here reads or writes com.boite.legacy, \
 which is open on this machine while you work.
 
 Order of operations:

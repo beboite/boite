@@ -150,7 +150,7 @@ impl DevWindow {
     ///
     /// `dev.boite.dev` only, ever. The identifier is a constant in
     /// [`super::paths`] and is never taken from an argument, so no call from
-    /// an agent can point this at `com.boite.desktop`.
+    /// an agent can point this at `com.boite.legacy`.
     pub fn wipe_database(&self) -> Result<Vec<String>, String> {
         let db = super::paths::dev_database()?;
         let mut removed = Vec::new();

@@ -19,6 +19,32 @@ against each other and against the tag before a single runner starts building.
 It globs the Cargo manifests rather than listing them, so a crate added to the
 workspace is covered the day it lands.
 
+## The product is "Boite Legacy" since 1.4.0
+
+1.4.0 renamed `productName` from `Boite` to `Boite Legacy` and the identifier
+from `com.boite.desktop` to `com.boite.legacy`, so that the next Boite, rebuilt
+at `beboite/boite`, can take both names. `mainBinaryName` stays `boite`: the
+executable, and with it the path every shortcut and process list already knows,
+does not move.
+
+Two things carry an existing install across, and both have to survive any
+later change here:
+
+- `src-tauri/src/app_data.rs` moves the data directories of the previous
+  identifiers into the current one on first start, before the database opens.
+- `src-tauri/windows/hooks.nsh` is wired through `bundle.windows.nsis.installerHooks`.
+  Tauri's NSIS installer keys the uninstall entry, the install directory and
+  the shortcuts on the product name, and the updater runs it with `/UPDATE`,
+  which uninstalls nothing and creates no shortcuts. Without the hooks a 1.x
+  "Boite" would stay installed beside "Boite Legacy", with the old shortcut
+  still launching it. The pre-install hook runs the 1.x uninstaller (passive,
+  app data kept), the post-install hook creates the shortcuts the update
+  skipped.
+
+The hook only removes a "Boite" whose `DisplayVersion` starts with `1.`. The
+next Boite must therefore not ship a 1.x version on Windows, or a later legacy
+update would uninstall it.
+
 ## The test suite, once
 
 Nothing gets signed without a green ci on that exact tree, and nothing runs it

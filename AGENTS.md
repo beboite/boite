@@ -35,7 +35,7 @@ ships broken without a check failing.
    often this worktree's path in their argv. Kill only a pid you captured at
    spawn.
 2. **Touching the live install.** The user's real database, scrollback and window
-   state sit in `com.boite.desktop`'s app data directory and are open while you
+   state sit in `com.boite.legacy`'s app data directory and are open while you
    work. Copying out of it is fine and is the only realistic test data. Never
    open it read-write, never point a server at it, never tidy it. That is what
    `bun run dev:isolated` is for: a separate window on port 1430 under

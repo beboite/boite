@@ -335,24 +335,36 @@ pub fn run() {
             // first record written after somebody clicked.
             log_feed::start(setup_handle.clone());
             match data_move {
-                Ok(app_data::Outcome::Nothing) => {}
-                Ok(app_data::Outcome::Moved { entries, from }) => {
-                    let _ = logging::append_app_log(
-                        &setup_handle,
-                        "info",
-                        "backend.appdata",
-                        "Moved app data from the pre-1.1.0 identifier",
-                        Some(&format!("{entries} entries from {}", from.display())),
-                    );
-                }
-                Ok(app_data::Outcome::KeptBoth { legacy }) => {
-                    let _ = logging::append_app_log(
-                        &setup_handle,
-                        "warn",
-                        "backend.appdata",
-                        "Found a database under the old identifier too; kept both",
-                        Some(&legacy.display().to_string()),
-                    );
+                // One outcome per directory that did something: the data
+                // directory of each identifier this app shipped under, and the
+                // webview profile beside it on Windows and macOS.
+                Ok(outcomes) => {
+                    for outcome in outcomes {
+                        match outcome {
+                            app_data::Outcome::Nothing => {}
+                            app_data::Outcome::Moved { entries, from } => {
+                                let _ = logging::append_app_log(
+                                    &setup_handle,
+                                    "info",
+                                    "backend.appdata",
+                                    "Moved data left under an older identifier",
+                                    Some(&format!(
+                                        "{entries} entries from {}",
+                                        from.display()
+                                    )),
+                                );
+                            }
+                            app_data::Outcome::KeptBoth { legacy } => {
+                                let _ = logging::append_app_log(
+                                    &setup_handle,
+                                    "warn",
+                                    "backend.appdata",
+                                    "Found a database under an older identifier too; kept both",
+                                    Some(&legacy.display().to_string()),
+                                );
+                            }
+                        }
+                    }
                 }
                 Err(e) => {
                     let _ = logging::append_app_log(

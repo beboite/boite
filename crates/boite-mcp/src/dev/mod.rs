@@ -3,7 +3,7 @@
 //! The normal mode is a door onto the boite that spawned it, and reads its
 //! whole identity from the environment. This one has no boite behind it: it
 //! *starts* one, the isolated dev window, and drives it. Everything it touches
-//! belongs to `dev.boite.dev` and nothing to `com.boite.desktop`, which is the
+//! belongs to `dev.boite.dev` and nothing to `com.boite.legacy`, which is the
 //! reason it exists as a mode of the shipped binary rather than as a
 //! third-party server pinned to a plugin's version.
 //!

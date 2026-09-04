@@ -3,7 +3,7 @@
 //!
 //! `DEV_IDENTIFIER` is a constant and is never taken from an argument. That is
 //! the whole guard: the user's real database, scrollback and window state sit
-//! under `com.boite.desktop` and are open while an agent works, so no call
+//! under `com.boite.legacy` and are open while an agent works, so no call
 //! reaching this module can be pointed at them.
 //!
 //! The layout is Tauri's own, the same rule `boite_core::log::desktop_log_dir`
@@ -66,7 +66,12 @@ mod tests {
         ] {
             let shown = path.display().to_string();
             assert!(shown.contains(DEV_IDENTIFIER), "{shown}");
-            assert!(!shown.contains("com.boite.desktop"), "{shown}");
+            // The identifier the release install ships under today, and the
+            // one it shipped under until 1.3.4: a machine can be holding
+            // either, and neither is this mode's to touch.
+            for release in ["com.boite.legacy", "com.boite.desktop"] {
+                assert!(!shown.contains(release), "{shown}");
+            }
         }
     }
 

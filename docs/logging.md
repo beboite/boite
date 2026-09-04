@@ -84,7 +84,7 @@ generations (`<host>.1.jsonl`, `<host>.2.jsonl`). So one host costs at most
 
 | Host | Log directory |
 |---|---|
-| `desktop` | The Tauri app log dir: `%LOCALAPPDATA%\com.boite.desktop\logs` on Windows, `~/Library/Logs/com.boite.desktop` on macOS, `$XDG_DATA_HOME/com.boite.desktop/logs` elsewhere. |
+| `desktop` | The Tauri app log dir: `%LOCALAPPDATA%\com.boite.legacy\logs` on Windows, `~/Library/Logs/com.boite.legacy` on macOS, `$XDG_DATA_HOME/com.boite.legacy/logs` elsewhere. |
 | `server` | `--log-dir`, else `BOITE_LOG_DIR`, else the desktop directory above. |
 | `mcp` | The same three, in the same order. A machine with no such directory logs nowhere rather than failing the sidecar. |
 | `webview` | No file of its own: its records go through the bus (`logs.write`) and land in whichever host answered. |

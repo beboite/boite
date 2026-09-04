@@ -76,7 +76,7 @@ Three rules it is built on.
 
 - **Only `dev.boite.dev`.** The identifier is a constant in `dev/paths.rs` and
   is never taken from an argument, so no call can be pointed at
-  `com.boite.desktop`, whose database, scrollback and window state are open
+  `com.boite.legacy`, whose database, scrollback and window state are open
   while you work. A test asserts every path it answers.
 - **Only a pid captured at spawn.** `start` puts the whole `bun` → `tauri` →
   `cargo` → app tree in a `boite_core::job::Job` with `KILL_ON_JOB_CLOSE`, and
