@@ -233,7 +233,10 @@ fn record_best_effort(done: &mut Vec<Outcome>, attempt: Result<Outcome, String>)
 /// thing that changed is the identifier that names it. The answer holds one
 /// outcome per directory that did something, in the order the moves happened,
 /// and is empty when there was nothing to move.
-pub fn migrate_before_plugins() -> Result<Vec<Outcome>, String> {
+pub fn migrate_before_plugins(identifier: &str) -> Result<Vec<Outcome>, String> {
+    if identifier != CURRENT_IDENTIFIER {
+        return Ok(Vec::new());
+    }
     let Some(data_root) = dirs::data_dir() else {
         return Ok(Vec::new());
     };
@@ -324,6 +327,13 @@ mod tests {
         let root = scratch("fresh");
         assert_eq!(migrate_chain(&root), vec![Outcome::Nothing, Outcome::Nothing]);
         assert!(!root.join(CURRENT_IDENTIFIER).exists());
+    }
+
+    #[test]
+    fn isolated_builds_do_not_migrate_production_data() {
+        for identifier in ["dev.boite.dev", "dev.boite.chat-preview"] {
+            assert!(migrate_before_plugins(identifier).unwrap().is_empty());
+        }
     }
 
     #[test]

@@ -16,6 +16,7 @@
     "e2e": "vitest run --config e2e/vitest.config.ts",
     "tauri": "tauri",
     "build:sidecar": "bun scripts/build-sidecar.mjs",
+    "build:chat-preview": "node scripts/build-chat-preview.mjs",
     "dev:isolated": "tauri dev --config src-tauri/tauri.dev-isolated.conf.json --features mcp-bridge",
     "typecheck:fast": "tsgo --noEmit",
     "prepare": "git config core.hooksPath .githooks || exit 0",

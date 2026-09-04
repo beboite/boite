@@ -198,7 +198,8 @@ pub fn run() {
     // an app-level hook this always found a database at the new identifier and
     // refused to overwrite it, stranding the real one under the old name. The
     // outcome is carried into `setup` because there is no log session yet.
-    let data_move = app_data::migrate_before_plugins();
+    let context = tauri::generate_context!();
+    let data_move = app_data::migrate_before_plugins(&context.config().identifier);
 
     let builder = tauri::Builder::default()
         // Must be the first plugin so a second launch is intercepted before
@@ -612,7 +613,7 @@ pub fn run() {
             commands::conduct::conduct_voice_transcribe,
             commands::window::set_keep_backdrop_active,
         ])
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("error while building tauri application")
         .run(|app_handle, event| {
             if let tauri::RunEvent::ExitRequested { .. } = event {

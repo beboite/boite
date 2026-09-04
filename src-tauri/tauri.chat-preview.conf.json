@@ -1,0 +1,14 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Boite Chat Preview",
+  "identifier": "dev.boite.chat-preview",
+  "build": {
+    "beforeBuildCommand": "",
+    "devUrl": null,
+    "frontendDist": "../build"
+  },
+  "bundle": {
+    "active": false,
+    "createUpdaterArtifacts": false
+  }
+}
