@@ -167,7 +167,7 @@ const DEFAULTS: Settings = {
   smartSortBy: "manual",
   smartSortDirection: "desc",
   experimentWorkspace: false,
-  experimentPilot: false,
+  experimentPilot: true,
   openOnLaunch: "last",
   orchestratorAgent: null,
   orchestratorByProject: {},

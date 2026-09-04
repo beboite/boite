@@ -209,6 +209,8 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
     "L'agent est piloté par son protocole plutôt que par un terminal : statut exact, approbations depuis le dock, un diff par tour. Claude d'abord, codex et les agents ACP ensuite.",
 
   "pilot.chat": "Chat",
+  "pilot.connecting": "Démarrage de l'agent en arrière-plan...",
+  "pilot.connectionFailed": "L'agent n'a pas démarré. Vérifiez son installation et sa connexion au compte, puis réessayez.",
   "pilot.noDriver": "Pas encore de protocole pour cet agent",
   "pilot.openSession": "Ouvrir la session",
   "pilot.sessionClosed": "Ce chat n'a pas de session ouverte. Ouvrez-en une pour envoyer un message.",
@@ -237,6 +239,8 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "pilot.requestTool": "{tool} veut s'exécuter",
   "pilot.requestQuestion": "Question",
   "pilot.requestPlan": "Plan à confirmer",
+  "pilot.requestCustomAnswer": "Saisir une autre réponse",
+  "pilot.requestSubmitAnswers": "Envoyer les réponses",
   "pilot.picker": "Modèle",
   "pilot.pickerEffort": "Effort",
   "pilot.pickerMode": "Mode",

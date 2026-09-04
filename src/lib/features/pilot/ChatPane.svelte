@@ -16,17 +16,19 @@
    */
   import { onDestroy } from "svelte";
   import { app } from "$lib/app/store.svelte";
-  import { backend } from "$lib/backend";
+  import { backend, workspace } from "$lib/backend";
   import { notifications } from "$lib/features/notifications/store.svelte";
   import { paneStore } from "$lib/features/panes/store.svelte";
   import { threadCwd } from "$lib/features/thread/cwd";
   import { log } from "$lib/shared/log";
   import { t } from "$lib/i18n/index.svelte";
   import Composer from "./Composer.svelte";
+  import { remoteDraftScope } from "./drafts";
   import ModelPicker from "./ModelPicker.svelte";
   import Timeline from "./Timeline.svelte";
   import { shortSession } from "./present";
   import { openPilotSession, pilotSessionOpenedHere } from "./session";
+  import { pilotConnections } from "./connection.svelte";
   import { load, pilotThread, release } from "./store.svelte";
   import type { PilotCatalog } from "./types";
   import Copy from "@lucide/svelte/icons/copy";
@@ -37,13 +39,18 @@
   let { threadId, projectId, paneId }: Props = $props();
 
   let catalog = $state<PilotCatalog | null>(null);
-  let opening = $state(false);
+  const connection = $derived(pilotConnections.get(threadId));
   /** True until the first read of the timeline has come back. */
   let loading = $state(true);
 
   const thread = $derived(app.threadById(threadId));
   const view = $derived(pilotThread(threadId));
   const project = $derived(app.projectById(projectId));
+  const draftScope = $derived(
+    thread?.origin === "remote" || (!thread?.origin && workspace.mode === "remote")
+      ? remoteDraftScope(workspace.activeBoiteId, workspace.remoteUrl)
+      : "local",
+  );
   const repoPath = $derived(thread ? threadCwd(thread, project) : null);
 
   const STATUS = {
@@ -180,13 +187,7 @@
   onDestroy(() => release(threadId));
 
   async function openSession() {
-    if (opening) return;
-    opening = true;
-    try {
-      await openPilotSession(threadId);
-    } finally {
-      opening = false;
-    }
+    await openPilotSession(threadId);
   }
 
   async function copySession() {
@@ -214,6 +215,7 @@
       {driver}
       instance={instanceName}
       {model}
+      availableModels={view.availableModels}
       compact
       placement="down"
       align="left"
@@ -313,15 +315,19 @@
     {/if}
 
     <Composer
+      {draftScope}
       {threadId}
       status={view.status}
       open={view.nativeSessionId !== null}
+      connecting={connection === "opening"}
+      connectionFailed={connection === "failed"}
       onOpen={() => void openSession()}
       commands={view.slashCommands}
       {catalog}
       {driver}
       instance={instanceName}
       {model}
+      availableModels={view.availableModels}
       {mode}
       standalone={!loading && empty}
     />

@@ -6,10 +6,10 @@ import {
   closeThreadWithConfirm,
   launchBlankTerminalHere,
   launchChat,
-  launchShortcut,
   launchTargetProjectId,
   restoreLastClosedThread,
 } from "$lib/features/thread/api";
+import { launchPreferredShortcut as launchShortcut } from "$lib/features/pilot/preferred";
 import { chatChoice } from "$lib/features/pilot/catalog.svelte";
 import { openProjectDashboard } from "$lib/features/project/dashboard";
 import { projectScripts } from "$lib/features/project/scripts.svelte";

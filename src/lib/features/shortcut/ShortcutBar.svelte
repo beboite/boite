@@ -9,11 +9,11 @@
   import { settings } from "$lib/features/settings/store.svelte";
   import {
     launchBlankTerminal,
-    launchChat,
     launchShell,
     launchShortcut,
     launchTargetProjectId,
   } from "$lib/features/thread/api";
+  import { launchPreferredShortcut } from "$lib/features/pilot/preferred";
   import { chatChoice, pilotCatalog } from "$lib/features/pilot/catalog.svelte";
   import MessageSquare from "@lucide/svelte/icons/message-square";
   import { launchTargetMenu } from "./launchMenu";
@@ -37,13 +37,13 @@
   // shift-click behind it, is how you get there without giving up the project
   // you are on. Except when the launcher was opened from a project's own row:
   // that project IS the answer, and asking again would be asking twice.
-  async function launch(shortcutId: string, forceScratch: boolean, chat = false) {
+  async function launch(shortcutId: string, forceScratch: boolean, terminal = false) {
     const shortcut = settings.state.shortcuts.find((s) => s.id === shortcutId);
     if (!shortcut) return;
     const target = projectId ?? (await launchTargetProjectId(forceScratch));
     if (!target) return;
-    if (chat) await launchChat(shortcut, target);
-    else await launchShortcut(shortcut, target);
+    if (terminal) await launchShortcut(shortcut, target);
+    else await launchPreferredShortcut(shortcut, target);
     onLaunched?.();
   }
 
@@ -251,17 +251,18 @@
             <!-- Truncated rather than wrapped: the popover is as wide as the project
                  card, and a two-line row would break the rhythm the list reads by. -->
             <span class="min-w-0 truncate font-medium">{shortcut.label}</span>
+            {#if choice.offered}<MessageSquare class="ml-auto size-3.5 shrink-0" aria-label={t("pilot.chat")} />{/if}
           </button>
           {#if choice.offered}
             <button
               type="button"
               class="flex shrink-0 items-center rounded-md px-1.5 text-muted-2 transition hover:bg-[var(--color-surface-3)] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
-              disabled={!choice.enabled || !shortcut.command.trim()}
+              disabled={!shortcut.command.trim()}
               onclick={(e) => void launch(shortcut.id, e.shiftKey, true)}
-              aria-label={t("pilot.chat")}
-              use:tip={choice.enabled ? t("pilot.chat") : t("pilot.noDriver")}
+              aria-label={t("shell.launchTerminal")}
+              use:tip={t("shell.launchTerminal")}
             >
-              <MessageSquare class="size-3.5" />
+              <TerminalIcon class="size-3.5" />
             </button>
           {/if}
         </div>

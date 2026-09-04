@@ -207,6 +207,8 @@ export const EN_MESSAGES = {
     "The agent is driven by its protocol instead of a terminal: exact status, approvals from the dock, a diff per turn. Claude first, codex and the ACP agents next.",
 
   "pilot.chat": "Chat",
+  "pilot.connecting": "Starting the agent in the background...",
+  "pilot.connectionFailed": "The agent could not start. Check that it is installed and signed in, then retry.",
   "pilot.noDriver": "No protocol for this agent yet",
   "pilot.openSession": "Open the session",
   "pilot.sessionClosed": "This chat has no session open. Open one to send a message.",
@@ -235,6 +237,8 @@ export const EN_MESSAGES = {
   "pilot.requestTool": "{tool} wants to run",
   "pilot.requestQuestion": "Question",
   "pilot.requestPlan": "Plan to confirm",
+  "pilot.requestCustomAnswer": "Type another answer",
+  "pilot.requestSubmitAnswers": "Send answers",
   "pilot.picker": "Model",
   "pilot.pickerEffort": "Effort",
   "pilot.pickerMode": "Mode",

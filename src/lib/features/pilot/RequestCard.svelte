@@ -31,7 +31,12 @@
   import { t } from "$lib/i18n/index.svelte";
   import { answerFor } from "./selection";
   import { toolKind } from "./present";
-  import type { PilotRequest, PilotRequestOutcome } from "./types";
+  import type {
+    PilotRequest,
+    PilotRequestAnswer,
+    PilotRequestOutcome,
+    PilotRequestQuestion,
+  } from "./types";
   import FilePen from "@lucide/svelte/icons/file-pen";
   import FilePlus from "@lucide/svelte/icons/file-plus";
   import FileText from "@lucide/svelte/icons/file-text";
@@ -50,6 +55,8 @@
 
   let sending = $state(false);
   let card: HTMLDivElement | null = $state(null);
+  let selectedAnswers = $state<Record<string, string[]>>({});
+  let customAnswers = $state<Record<string, string>>({});
 
   /**
    * The card takes focus when it opens, and only if nobody else has it.
@@ -137,13 +144,44 @@
         ],
   );
 
-  async function answer(value: string) {
+  const questions = $derived(request.questions ?? []);
+
+  function answerValues(question: PilotRequestQuestion): string[] {
+    const custom = customAnswers[question.id]?.trim();
+    return custom ? [custom] : (selectedAnswers[question.id] ?? []);
+  }
+
+  const structuredAnswer = $derived.by(() => {
+    if (questions.length === 0) return null;
+    const answers: Record<string, string[]> = {};
+    for (const question of questions) {
+      const values = answerValues(question);
+      if (values.length === 0) return null;
+      answers[question.id] = values;
+    }
+    return { answers } satisfies Extract<PilotRequestAnswer, object>;
+  });
+
+  function toggleOption(question: PilotRequestQuestion, value: string) {
+    customAnswers[question.id] = "";
+    const current = selectedAnswers[question.id] ?? [];
+    selectedAnswers[question.id] = question.multi_select
+      ? current.includes(value)
+        ? current.filter((entry) => entry !== value)
+        : [...current, value]
+      : [value];
+  }
+
+  function setCustom(question: PilotRequestQuestion, value: string) {
+    customAnswers[question.id] = value;
+    if (value.trim()) selectedAnswers[question.id] = [];
+  }
+
+  async function send(answer: PilotRequestAnswer) {
     if (sending || outcome) return;
-    const chosen = answerFor(options, value);
-    if (!chosen) return;
     sending = true;
     try {
-      await backend().pilot.respond(threadId, request.id, chosen);
+      await backend().pilot.respond(threadId, request.id, answer);
     } catch (err) {
       log.warn("pilot.request", "pilot.respond.failed", {
         thread: threadId,
@@ -156,8 +194,21 @@
     }
   }
 
+  async function answer(value: string) {
+    if (sending || outcome) return;
+    const chosen = answerFor(options, value);
+    if (!chosen) return;
+    await send(chosen);
+  }
+
+  async function answerQuestions() {
+    if (!structuredAnswer) return;
+    await send(structuredAnswer);
+  }
+
   function onKeydown(event: KeyboardEvent) {
     if (outcome || sending) return;
+    if (questions.length > 0) return;
     if (event.key === "Enter" && options[0]) {
       event.preventDefault();
       event.stopPropagation();
@@ -208,6 +259,60 @@
     <p class="mt-1.5 text-xs text-muted-foreground" data-testid="pilot-request-answered">
       {t("pilot.requestAnswered", { outcome: t(OUTCOME[outcome]) })}
     </p>
+  {:else if questions.length > 0}
+    <div class="mt-2 flex flex-col gap-3" data-testid="pilot-request-questions">
+      {#each questions as question (question.id)}
+        <fieldset class="min-w-0">
+          <legend class="text-xs font-medium text-foreground">{question.header}</legend>
+          <p class="mt-0.5 text-xs text-muted-foreground">{question.question}</p>
+          {#if question.options && question.options.length > 0}
+            <div class="mt-1.5 flex flex-col gap-1 sm:flex-row sm:flex-wrap">
+              {#each question.options as option (option.value)}
+                <button
+                  type="button"
+                  class="press rounded-md border px-2.5 py-1.5 text-left text-xs transition focus:outline-none focus-visible:focus-ring disabled:opacity-50 {selectedAnswers[
+                    question.id
+                  ]?.includes(option.value)
+                    ? 'border-[var(--color-foreground)] bg-[var(--color-foreground)] text-[var(--color-background)]'
+                    : 'border-border bg-[var(--color-surface)] text-foreground hover:bg-[var(--color-surface-3)]'}"
+                  disabled={sending}
+                  aria-pressed={selectedAnswers[question.id]?.includes(option.value) ?? false}
+                  onclick={() => toggleOption(question, option.value)}
+                  data-testid="pilot-question-option"
+                  data-question={question.id}
+                  data-value={option.value}
+                >
+                  {option.label}
+                </button>
+              {/each}
+            </div>
+          {/if}
+          {#if question.allow_custom_answer || !question.options || question.options.length === 0}
+            <input
+              type={question.secret ? "password" : "text"}
+              class="mt-1.5 w-full rounded-md border border-border bg-[var(--color-surface)] px-2.5 py-1.5 text-sm text-foreground outline-none placeholder:text-muted-foreground focus-visible:focus-ring"
+              value={customAnswers[question.id] ?? ""}
+              placeholder={t("pilot.requestCustomAnswer")}
+              aria-label={t("pilot.requestCustomAnswer")}
+              autocomplete="off"
+              disabled={sending}
+              oninput={(event) => setCustom(question, event.currentTarget.value)}
+              data-testid="pilot-question-custom"
+              data-question={question.id}
+            />
+          {/if}
+        </fieldset>
+      {/each}
+      <button
+        type="button"
+        class="press self-start rounded-md bg-[var(--color-foreground)] px-3 py-1.5 text-sm font-medium text-[var(--color-background)] transition focus:outline-none focus-visible:focus-ring disabled:opacity-50"
+        disabled={sending || !structuredAnswer}
+        onclick={() => void answerQuestions()}
+        data-testid="pilot-question-submit"
+      >
+        {t("pilot.requestSubmitAnswers")}
+      </button>
+    </div>
   {:else}
     <!-- The driver's order, never sorted. Full width on a phone, where a row of
          three small buttons is three targets nobody can hit. -->

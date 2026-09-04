@@ -13,14 +13,14 @@
   import { homeAvailable } from "$lib/features/settings/homeAvailable";
   import { platform } from "$lib/storage/platform.svelte";
   import {
-    launchChat,
     launchShortcut,
     launchShell,
     launchBlankTerminal,
     launchTargetProjectId,
   } from "$lib/features/thread/api";
+  import { launchPreferredShortcut } from "$lib/features/pilot/preferred";
   import { chatChoice, pilotCatalog } from "$lib/features/pilot/catalog.svelte";
-  import MessageSquare from "@lucide/svelte/icons/message-square";
+  import Terminal from "@lucide/svelte/icons/terminal";
   import { launchTargetMenu } from "$lib/features/shortcut/launchMenu";
   import { t } from "$lib/i18n/index.svelte";
   import { longPress } from "$lib/shared/actions/longPress";
@@ -70,15 +70,15 @@
     const projectId = await launchTargetProjectId(forceScratch);
     if (!shortcut || !projectId) return;
     goTerminal();
-    await launchShortcut(shortcut, projectId);
+    await launchPreferredShortcut(shortcut, projectId);
   }
 
-  async function runChat(id: string, forceScratch = false) {
+  async function runTerminal(id: string, forceScratch = false) {
     const shortcut = settings.state.shortcuts.find((s) => s.id === id);
     const projectId = await launchTargetProjectId(forceScratch);
     if (!shortcut || !projectId) return;
     goTerminal();
-    await launchChat(shortcut, projectId);
+    await launchShortcut(shortcut, projectId);
   }
 
   async function runShell(shell: ShellOption, forceScratch = false) {
@@ -104,7 +104,7 @@
   }
 </script>
 
-<MobileSheet {open} {onClose} title={t("mobile.newTerminal")}>
+<MobileSheet {open} {onClose} title={t("home.start")}>
   {#if homeAvailable(settings.state)}
     <button
       type="button"
@@ -142,11 +142,11 @@
             <button
               type="button"
               class="flex shrink-0 items-center rounded-r-xl border-l border-edge px-3 text-muted-2 transition active:bg-[var(--color-surface-3)] disabled:opacity-40"
-              disabled={!choice.enabled || !shortcut.command.trim()}
-              onclick={() => runChat(shortcut.id)}
-              aria-label={t("pilot.chat")}
+              disabled={!shortcut.command.trim()}
+              onclick={() => runTerminal(shortcut.id)}
+              aria-label={t("shell.launchTerminal")}
             >
-              <MessageSquare class="size-4" />
+              <Terminal class="size-4" />
             </button>
           {/if}
         </div>

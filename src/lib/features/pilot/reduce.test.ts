@@ -29,10 +29,12 @@ describe("the pilot reduction", () => {
         native_session_id: "native-1",
         model: "claude-fable-5-1",
         slash_commands: ["init"],
+        extra: { availableModels: ["claude-fable-5-1", "claude-sonnet-5"] },
       },
     ]);
     expect(state.nativeSessionId).toBe("native-1");
     expect(state.model).toBe("claude-fable-5-1");
+    expect(state.availableModels).toEqual(["claude-fable-5-1", "claude-sonnet-5"]);
   });
 
   it("writes one turn row for the two edges, not one per edge", () => {
@@ -276,6 +278,15 @@ describe("the pilot reduction", () => {
             { value: "allow", label: "Allow" },
             { value: "deny", label: "Deny" },
           ],
+          questions: [
+            {
+              id: "target",
+              header: "Target",
+              question: "Which target?",
+              options: [{ value: "web", label: "Web" }],
+              multi_select: false,
+            },
+          ],
         },
       }),
     ]);
@@ -287,6 +298,7 @@ describe("the pilot reduction", () => {
     expect(request.tool_name).toBe("Bash");
     expect(request.input).toEqual({ command: "git status" });
     expect(request.options?.map((option) => option.value)).toEqual(["allow", "deny"]);
+    expect(request.questions?.[0].id).toBe("target");
     expect(request.outcome).toBeNull();
     expect(openRequests(state)).toHaveLength(1);
   });

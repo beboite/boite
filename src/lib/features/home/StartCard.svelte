@@ -3,17 +3,19 @@
 
   The rows are the launcher shortcuts of the General tab, and the click is the
   one the sidebar's launcher menu makes: `launchTargetProjectId` picks the
-  selected project (Scratch when there is none) and `launchShortcut` opens the
-  terminal there. The hint under each label is `shortcutAgentHint`, so a row
+  selected project (Scratch when there is none). Agent shortcuts open chat;
+  the terminal button is explicit. The hint is `shortcutAgentHint`, so a row
   reading "pwsh -NoLogo -Command claude" names claude.
 -->
 <script lang="ts">
   import { app } from "$lib/app/store.svelte";
   import { settings } from "$lib/features/settings/store.svelte";
-  import { launchChat, launchShortcut, launchTargetProjectId } from "$lib/features/thread/api";
+  import { launchShortcut, launchTargetProjectId } from "$lib/features/thread/api";
+  import { launchPreferredShortcut } from "$lib/features/pilot/preferred";
   import { chatChoice, pilotCatalog } from "$lib/features/pilot/catalog.svelte";
   import { tip } from "$lib/shared/actions/tooltip";
   import MessageSquare from "@lucide/svelte/icons/message-square";
+  import Terminal from "@lucide/svelte/icons/terminal";
   import { onMount } from "svelte";
   import { shortcutAgentHint } from "$lib/features/shortcut/agent-hint";
   import DashboardCard from "$lib/features/project/DashboardCard.svelte";
@@ -30,11 +32,11 @@
   const target = $derived(app.projectById(app.currentProjectId));
   const targetName = $derived(target ? projectDisplayName(target) : null);
 
-  async function start(shortcut: Shortcut, chat = false) {
+  async function start(shortcut: Shortcut, terminal = false) {
     const projectId = await launchTargetProjectId(false);
     if (!projectId) return;
-    if (chat) await launchChat(shortcut, projectId);
-    else await launchShortcut(shortcut, projectId);
+    if (terminal) await launchShortcut(shortcut, projectId);
+    else await launchPreferredShortcut(shortcut, projectId);
   }
 
   onMount(() => {
@@ -65,9 +67,7 @@
       {#each shortcuts as shortcut (shortcut.id)}
         {@const iconKey = resolveIconKey(shortcut.iconKey, shortcut.label, shortcut.command)}
         {@const choice = chatChoice(shortcut.command)}
-        <!-- The card is the terminal launch and keeps the whole tile; Chat is a
-             modifier on it, so it is a strip on the right rather than a second
-             card that would double the length of this grid. -->
+        <!-- Agent cards open chat; the side button explicitly opens a terminal. -->
         <div class="flex min-w-0 items-stretch">
           <button
             type="button"
@@ -81,6 +81,7 @@
                 {shortcut.label}
               </span>
               <span class="block truncate text-sm text-muted-2">
+                {#if choice.offered}<MessageSquare class="mr-1 inline size-3" />{t("pilot.chat")} · {/if}
                 {shortcut.command.trim()
                   ? shortcutAgentHint(shortcut.command)
                   : t("shortcuts.emptyCommand")}
@@ -91,12 +92,12 @@
             <button
               type="button"
               class="ml-1 flex shrink-0 items-center rounded-md border border-edge bg-[var(--color-surface-2)] px-2 text-muted-2 transition hover:border-foreground/30 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
-              disabled={!choice.enabled || !shortcut.command.trim()}
+              disabled={!shortcut.command.trim()}
               onclick={() => void start(shortcut, true)}
-              aria-label={t("pilot.chat")}
-              use:tip={choice.enabled ? t("pilot.chat") : t("pilot.noDriver")}
+              aria-label={t("shell.launchTerminal")}
+              use:tip={t("shell.launchTerminal")}
             >
-              <MessageSquare class="size-4" />
+              <Terminal class="size-4" />
             </button>
           {/if}
         </div>

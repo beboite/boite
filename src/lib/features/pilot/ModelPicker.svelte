@@ -55,6 +55,8 @@
     /** The instance name the row carries, or null before one is known. */
     instance: string | null;
     model: string | null;
+    /** Models discovered only after an SDK session authenticates. */
+    availableModels?: readonly string[];
     /** The header's size. The composer takes the resting one. */
     compact?: boolean;
     /** Which way the popover hangs off the chip. */
@@ -70,6 +72,7 @@
     driver,
     instance,
     model,
+    availableModels = [],
     compact = false,
     placement = "down",
     align = "left",
@@ -89,7 +92,13 @@
   const drivers = $derived(catalog?.drivers ?? []);
   const capabilities = $derived(drivers.find((entry) => entry.id === driver)?.capabilities ?? null);
   const accounts = $derived(instancesOf(catalog?.instances ?? [], driver));
-  const models = $derived(drivers.find((entry) => entry.id === driver)?.models ?? []);
+  const models = $derived([
+    ...new Set([
+      ...(drivers.find((entry) => entry.id === driver)?.models ?? []),
+      ...availableModels,
+      ...(model ? [model] : []),
+    ]),
+  ]);
 
   /**
    * The account name the row actually carries, as the catalog spells it.

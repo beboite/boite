@@ -18,6 +18,10 @@ describe("driverOfCommand", () => {
   it("names the preset behind a plain command", () => {
     expect(driverOfCommand("claude")).toBe("claude");
     expect(driverOfCommand("codex --no-alt-screen")).toBe("codex");
+    expect(driverOfCommand("cursor-agent")).toBe("acp:cursor");
+    expect(driverOfCommand("grok")).toBe("acp:grok");
+    expect(driverOfCommand("agy")).toBe("acp:antigravity");
+    expect(driverOfCommand("opencode")).toBe("opencode");
   });
 
   it("peels a shell wrapper", () => {
@@ -92,6 +96,8 @@ describe("driverOfHarness", () => {
 
   it("leaves a harness already named after its wire alone", () => {
     expect(driverOfHarness("codex")).toBe("codex");
+    expect(driverOfHarness("cursor")).toBe("acp:cursor");
+    expect(driverOfHarness("opencode")).toBe("opencode");
   });
 });
 

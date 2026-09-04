@@ -20,6 +20,7 @@ import type {
   PilotRequest,
   PilotRequestOption,
   PilotRequestOutcome,
+  PilotRequestQuestion,
   PilotStatus,
   PilotTurnDiff,
   PilotUsage,
@@ -68,6 +69,8 @@ export interface PilotThreadState {
    * further than the hint row.
    */
   slashCommands: string[];
+  /** Models announced by a live SDK session, which ACP discovers after auth. */
+  availableModels: string[];
   /** The highest sequence read, which is what a reconnect pages from. */
   cursor: number;
 }
@@ -83,6 +86,7 @@ export function emptyState(): PilotThreadState {
     usage: null,
     nativeSessionId: null,
     slashCommands: [],
+    availableModels: [],
     cursor: 0,
   };
 }
@@ -142,6 +146,7 @@ function storedRequest(row: PilotItemRow): PilotStoredRequest | null {
     title: text(body.title),
     description: text(body.description),
     options: options(body.options),
+    questions: questions(body.questions),
     suggestions: body.suggestions,
     outcome: outcomeOf(row),
   };
@@ -168,6 +173,17 @@ function options(value: unknown): PilotRequestOption[] | undefined {
   );
 }
 
+function questions(value: unknown): PilotRequestQuestion[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  return value.filter(
+    (question): question is PilotRequestQuestion =>
+      !!question &&
+      typeof (question as PilotRequestQuestion).id === "string" &&
+      typeof (question as PilotRequestQuestion).header === "string" &&
+      typeof (question as PilotRequestQuestion).question === "string",
+  );
+}
+
 /** Applies one event. Answers whether anything a pane draws changed. */
 export function reduce(state: PilotThreadState, event: PilotEvent): boolean {
   switch (event.kind) {
@@ -178,6 +194,12 @@ export function reduce(state: PilotThreadState, event: PilotEvent): boolean {
       // and must not wipe what the previous init said.
       if (event.slash_commands && event.slash_commands.length > 0) {
         state.slashCommands = [...event.slash_commands];
+      }
+      const availableModels = event.extra?.availableModels;
+      if (Array.isArray(availableModels)) {
+        state.availableModels = availableModels.filter(
+          (entry): entry is string => typeof entry === "string" && entry.length > 0,
+        );
       }
       return true;
     }

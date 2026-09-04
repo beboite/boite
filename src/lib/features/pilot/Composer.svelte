@@ -26,6 +26,8 @@
    * keyboard-only feature, which is the phone with no way in.
    */
   import { backend } from "$lib/backend";
+  import { untrack } from "svelte";
+  import { composerDrafts, draftKey, restoreFailedDraft } from "./drafts";
   import { notifications } from "$lib/features/notifications/store.svelte";
   import { log } from "$lib/shared/log";
   import { t } from "$lib/i18n/index.svelte";
@@ -39,9 +41,12 @@
 
   type Props = {
     threadId: string;
+    draftScope?: string;
     status: PilotStatus;
     /** False until `session.started` has named a native session. */
     open: boolean;
+    connecting?: boolean;
+    connectionFailed?: boolean;
     onOpen: () => void;
     /** The commands the driver declared at init, for the hint row. */
     commands: readonly string[];
@@ -49,6 +54,7 @@
     driver: string;
     instance: string | null;
     model: string | null;
+    availableModels: readonly string[];
     mode: PilotExecMode;
     /**
      * True on an empty thread, where the composer sits under the headline in
@@ -60,14 +66,18 @@
   };
   let {
     threadId,
+    draftScope = "local",
     status,
     open,
+    connecting = false,
+    connectionFailed = false,
     onOpen,
     commands,
     catalog,
     driver,
     instance,
     model,
+    availableModels,
     mode,
     standalone = false,
   }: Props = $props();
@@ -79,6 +89,21 @@
   let hintAt = $state(0);
   /** The last line actually sent, which is what Ctrl+Up puts back. */
   let lastSent = $state("");
+  let activeDraftKey = $state("");
+
+  $effect(() => {
+    const key = draftKey(draftScope, threadId);
+    untrack(() => {
+      if (activeDraftKey) composerDrafts.write(activeDraftKey, text);
+      activeDraftKey = key;
+      text = composerDrafts.read(key);
+      lastSent = "";
+    });
+  });
+
+  $effect(() => {
+    if (activeDraftKey) composerDrafts.write(activeDraftKey, text);
+  });
 
   const hints = $derived(slashHints(text, commands));
   const busy = $derived(status === "busy");
@@ -102,21 +127,27 @@
 
   async function send() {
     const line = text.trim();
-    if (!line || sending) return;
+    if (!line || sending || !open || connecting) return;
+    const sentKey = activeDraftKey;
+    const sentThread = threadId;
     // Cleared before the call, not after: the round trip is a turn's worth of
     // latency and a box that stays full invites a second Enter.
     text = "";
+    composerDrafts.write(sentKey, "");
     lastSent = line;
     sending = true;
     try {
-      await backend().pilot.startTurn(threadId, line);
+      await backend().pilot.startTurn(sentThread, line);
     } catch (err) {
       log.warn("pilot.composer", "pilot.startTurn.failed", {
-        thread: threadId,
+        thread: sentThread,
         reason: String(err),
       });
       notifications.error(t("pilot.sendFailed"));
-      text = line;
+      const restored = restoreFailedDraft(line,
+        activeDraftKey === sentKey ? text : composerDrafts.read(sentKey));
+      composerDrafts.write(sentKey, restored);
+      if (activeDraftKey === sentKey) text = restored;
     } finally {
       sending = false;
     }
@@ -210,21 +241,24 @@
        centred on the same axis, so the eye keeps one left edge from the first
        word of the conversation to the box it is answered in. -->
   <div class="mx-auto w-full max-w-[52rem]">
-    {#if !open}
+    {#if !open || connecting || connectionFailed}
       <!-- A session that is not up is not a box to type into: the sentence says
            why and the button is the way back, which is the reverse state the
            "way in needs a way out" rule asks for. -->
       <div
         class="flex items-center gap-2 rounded-xl border border-border bg-[var(--color-surface)] px-3 py-2.5"
       >
-        <p class="min-w-0 flex-1 text-sm text-muted-foreground">{t("pilot.sessionClosed")}</p>
+        <p role="status" class="min-w-0 flex-1 text-sm text-muted-foreground">
+          {connecting ? t("pilot.connecting") : connectionFailed ? t("pilot.connectionFailed") : t("pilot.sessionClosed")}
+        </p>
         <button
           type="button"
           class="press shrink-0 rounded-md bg-[var(--color-foreground)] px-3 py-1.5 text-sm font-medium text-[var(--color-background)] transition focus:outline-none focus-visible:focus-ring"
           onclick={onOpen}
+          disabled={connecting}
           data-testid="chat-open-session"
         >
-          {t("pilot.openSession")}
+          {connecting ? t("common.loading") : t("pilot.openSession")}
         </button>
       </div>
     {:else}
@@ -284,6 +318,7 @@
             {driver}
             {instance}
             {model}
+            {availableModels}
             placement="up"
             align="left"
             bind:open={pickerOpen}

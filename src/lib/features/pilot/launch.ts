@@ -9,8 +9,8 @@
  * ideas of which preset has a driver.
  *
  * The driver id is not the preset id by accident: `pilot.catalog` names its
- * drivers with the same words `cliPresets.ts` does (`claude`, later `codex`),
- * which is what lets the answer be a lookup instead of a table that drifts.
+ * drivers with stable protocol ids. ACP drivers carry an `acp:` prefix because
+ * the same executable may still have a terminal mode.
  */
 
 import { parseCombo, type FastpickCombo } from "$lib/features/fastpick/combo";
@@ -39,7 +39,20 @@ export interface ChatLaunch {
  */
 const DRIVER_OF_HARNESS: Record<string, string> = {
   "claude-code": "claude",
+  cursor: "acp:cursor",
+  grok: "acp:grok",
+  antigravity: "acp:antigravity",
 };
+
+const DRIVER_OF_PRESET: Record<string, string> = {
+  cursor: "acp:cursor",
+  grok: "acp:grok",
+  antigravity: "acp:antigravity",
+};
+
+function driverOfPreset(id: string): string {
+  return DRIVER_OF_PRESET[id] ?? id;
+}
 
 const SHELL_CMD = /(?:^|[\\/])(?:pwsh|powershell|cmd|bash|zsh|sh)(?:\.exe)?$/i;
 const SKIP_FLAG = /^-nologo$/i;
@@ -116,7 +129,8 @@ export function driverOfArgv(cmd: string, args: readonly string[]): string | nul
   const inner = read(cmd, args);
   if (!inner) return null;
   if (inner.combo) return driverOfHarness(inner.combo.harness);
-  return findPresetForCommand(inner.line)?.id ?? null;
+  const preset = findPresetForCommand(inner.line);
+  return preset ? driverOfPreset(preset.id) : null;
 }
 
 /** The fastpick route a command carries, or null for a native launch. */
@@ -163,7 +177,10 @@ export function chatLaunchForArgv(cmd: string, args: readonly string[]): ChatLau
   const combo = inner.combo;
   const driver = combo
     ? driverOfHarness(combo.harness)
-    : findPresetForCommand(inner.line)?.id ?? null;
+    : (() => {
+        const found = findPresetForCommand(inner.line);
+        return found ? driverOfPreset(found.id) : null;
+      })();
   if (!driver) return null;
   const preset = findPresetForCommand(inner.line) ?? null;
   const yolo = preset ? hasYoloFlag(inner.line, preset.yoloFlag) : false;
