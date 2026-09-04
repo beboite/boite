@@ -1484,7 +1484,28 @@ export interface ConductApi {
     project?: string | null;
     waiter?: string;
   }): Promise<PulseAnswer>;
-  post(params: { scope?: string | null; text: string }): Promise<{ messageId: string }>;
+  /**
+   * The user's line into a scope.
+   *
+   * The answer is the id of whatever the line became, and which one that is
+   * depends on the runtime the orchestrator runs on: a chat row answers a
+   * `turnId`, since the bus turns the post into `pilot.turn.start` on it. No
+   * caller reads either, and the two are named apart rather than merged so the
+   * shapes stay honest.
+   */
+  post(params: {
+    scope?: string | null;
+    text: string;
+  }): Promise<{ messageId?: string; turnId?: string }>;
+  /**
+   * One scope's conversation, oldest first, after a cursor.
+   *
+   * For a chat orchestrator these are the `user_message` and `assistant_text`
+   * items of its own timeline, mapped to this shape on the host, so a phone on
+   * a boite-server reads the same list the desktop does. The cursor is then an
+   * item id rather than a chat row id, which changes nothing here: it is
+   * whatever the previous read's last entry was called.
+   */
   messages(params: {
     scope?: string | null;
     sinceId?: string | null;
@@ -1496,7 +1517,20 @@ export interface ConductApi {
    * but an agent key is refused by the bus itself.
    */
   start(params: { threadId: string; scope?: string | null }): Promise<{ threadId: string }>;
-  status(params: { scope?: string | null }): Promise<{ threadId: string | null; state: string }>;
+  /**
+   * Which thread answers for a scope, and how it is driven.
+   *
+   * `runtime` and `status` are absent when nothing holds the scope. For a chat
+   * orchestrator `status` is the exact word the projection wrote on the row,
+   * which has one source; a terminal one answers null there, its status being
+   * the status engine's and expiring on a clock.
+   */
+  status(params: { scope?: string | null }): Promise<{
+    threadId: string | null;
+    state: string;
+    runtime?: string;
+    status?: string | null;
+  }>;
   /** What the orchestrators caused, newest first, for the inbox's undo list. */
   actions(params: { limit?: number }): Promise<OrchestratorAction[]>;
   /**
