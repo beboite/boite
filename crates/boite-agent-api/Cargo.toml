@@ -1,6 +1,6 @@
 [package]
 name = "boite-agent-api"
-version = "1.3.4"
+version = "1.4.0"
 description = "The HTTP door an agent uses to reach its own workspace, shared by the desktop and the server"
 edition = "2021"
 

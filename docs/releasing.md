@@ -6,13 +6,13 @@ opens a **draft** release: clients see nothing until you publish it.
 
 ## Cutting a release
 
-Bump the version in the eight places that carry it:
+Bump the version in the nine places that carry it:
 
 - `package.json`
 - `src-tauri/tauri.conf.json`
 - `src-tauri/Cargo.toml`
 - every `crates/*/Cargo.toml`: `boite-core`, `boite-identity`,
-  `boite-agent-api`, `boite-server`, `boite-mcp`
+  `boite-agent-api`, `boite-server`, `boite-mcp`, `boite-pilot`
 
 Commit, then tag `vX.Y.Z` and push the tag. The `verify` job checks all of them
 against each other and against the tag before a single runner starts building.

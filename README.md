@@ -3,15 +3,17 @@
 
 <p align="center">Desktop on <a href="#install">Windows, Linux and macOS</a>, a phone via <a href="#remote-and-mobile">PWA</a>. It runs the CLIs you already have, on the subscriptions you already pay for: no account, nothing in between.</p>
 
+<p align="center">This repository is Boite Legacy. 1.4.0 is the last feature release of this code base: installs keep updating from <a href="https://github.com/beboite/boite-legacy/releases">beboite/boite-legacy</a> and still get fixes, while the next Boite is rebuilt at <a href="https://github.com/beboite/boite">beboite/boite</a>.</p>
+
 <p align="center">
   <img src="./static/icons/icon-512.png" alt="Boite logo" width="140" />
 </p>
 
 <p align="center">
-  <a href="https://github.com/beboite/boite/releases"><img src="https://img.shields.io/github/v/release/beboite/boite?display_name=tag" alt="Release" /></a>
+  <a href="https://github.com/beboite/boite-legacy/releases"><img src="https://img.shields.io/github/v/release/beboite/boite-legacy?display_name=tag" alt="Release" /></a>
   <a href="./LICENSE"><img src="https://img.shields.io/github/license/beboite/boite" alt="License" /></a>
-  <a href="https://github.com/beboite/boite/stargazers"><img src="https://img.shields.io/github/stars/beboite/boite" alt="Stars" /></a>
-  <a href="https://github.com/beboite/boite/issues"><img src="https://img.shields.io/github/issues/beboite/boite" alt="Issues" /></a>
+  <a href="https://github.com/beboite/boite-legacy/stargazers"><img src="https://img.shields.io/github/stars/beboite/boite-legacy" alt="Stars" /></a>
+  <a href="https://github.com/beboite/boite-legacy/issues"><img src="https://img.shields.io/github/issues/beboite/boite-legacy" alt="Issues" /></a>
   <a href="#platform-support"><img src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS%20%7C%20Android-0078D6" alt="Platform" /></a>
   <a href="https://tauri.app/"><img src="https://img.shields.io/badge/Tauri-2.x-24C8DB?logo=tauri" alt="Tauri" /></a>
   <a href="https://svelte.dev/"><img src="https://img.shields.io/badge/Svelte-5-FF3E00?logo=svelte" alt="Svelte" /></a>
@@ -224,7 +226,7 @@ back to the DOM renderer if xterm's WebGL one cannot initialize.
 
 ## Install
 
-From [Releases](https://github.com/beboite/boite/releases):
+From [Releases](https://github.com/beboite/boite-legacy/releases):
 
 - **Windows**: NSIS installer (per-user, no admin prompt)
 - **Linux**: deb, rpm or AppImage
