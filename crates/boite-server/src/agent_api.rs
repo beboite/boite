@@ -204,6 +204,10 @@ impl Workspace for ServerWorkspace {
 /// Binds an ephemeral loopback port and returns what the PTY spawn path stamps
 /// into each child. Returns None if the listener cannot start: the workspace
 /// still works, agents just have no todo access.
+/// Eight arguments, and each is a live thing this process already holds rather
+/// than configuration: bundling them into a struct would be one more name for
+/// the same list, built at the one call site that exists.
+#[allow(clippy::too_many_arguments)]
 pub async fn start(
     store: Arc<Store>,
     events: broadcast::Sender<AppEvent>,

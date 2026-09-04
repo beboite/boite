@@ -229,7 +229,13 @@ is `crates/boite-server/src/pilot.rs`, pushing `AppEvent::PilotEvent` as
 `tauriPilot` and in `backend/remote/index.ts`; the JSON types are
 `src/lib/features/pilot/types.ts`, the reduction is
 `src/lib/features/pilot/reduce.ts` and the live store is
-`src/lib/features/pilot/store.svelte.ts`.
+`src/lib/features/pilot/store.svelte.ts`. Both transports are tested on the
+mapping the way the logs domain is: `backend/tauri/pilot.test.ts` for the twelve
+Tauri commands and their bare answers, `backend/remote/pilot.test.ts` for the
+twelve bus methods, the `items` and `events` envelopes, and one subscribe per
+thread with the fan-out reaching only the thread an event names. The coalescing
+itself is asserted in `pilot_host`: two hundred deltas over two items leave as
+two frames, and one thread flushes without touching another's.
 
 ### Model selection, instances, fastpick
 
@@ -256,14 +262,30 @@ before the click:
 models }], instances: [{ name, driver, kind, configDir?, provider?, model?,
 label }] }`, built by `command::pilot::catalog` and cached for `CATALOG_TTL_MS`,
 which `refresh: true` walks past. Native models are
-`boite_pilot::claude::NATIVE_MODELS`, a list to extend per release. fastpick
-routes come from `boite_core::fastpick::list_blocking`, one call per provider,
-merged as `kind: "fastpick"` instances named `fastpick:<provider>:<model>`, the
-same string `fastpick/combo.ts` parses. A selection naming another instance
-answers `SwitchKind::Restart`, and `pilot_host::restart` stops politely,
-reopens on `threads.session_id`, writes `pilot_instance` and `pilot_model` and
-leaves an `ItemKind::Notice` on the timeline; `SwitchKind::Unsupported` is an
-error the picker shows.
+`boite_pilot::claude::NATIVE_MODELS`, a list to extend per release: the four
+aliases the CLI documents (`fable`, `opus`, `sonnet`, `haiku`) and the full ids
+of the families it still offers. Not from the SDK, which carries no model union
+at all and answers the real list at runtime over the network, but from
+`claude --help` for the alias form and the CLI's own baked catalogue for the
+ids; the crate's comment names both.
+
+fastpick routes come from `boite_core::fastpick::list_blocking`, one call per
+provider, merged as `kind: "fastpick"` instances named
+`fastpick:<provider>:<model>`, the same string `fastpick/combo.ts` parses. The
+label is what `comboLabel` composes for the fastpick menu, `<model> ·
+<provider>`, with the credential named as `<provider>.<key>` when a provider
+holds several and the model row says which one answers. Two documents an
+installed fastpick printed are kept as fixtures under
+`crates/boite-core/tests/fixtures/`, so a schema move fails a test rather than
+an open menu.
+
+A selection naming another instance answers `SwitchKind::Restart`, and
+`pilot_host::restart` stops politely, reopens on `threads.session_id`, writes
+`pilot_instance` and `pilot_model` and leaves an `ItemKind::Notice` on the
+timeline; `SwitchKind::Unsupported` is an error the picker shows. The whole
+path is driven end to end in `pilot_host`'s own tests against the scripted
+driver: the notice, the two columns, the resume onto the same native session,
+and one polite exit for the session that was replaced.
 
 ### Modes, requests, status, checkpoints
 
@@ -330,6 +352,23 @@ The `threads` row gains the five columns above and loses nothing:
 same row with the same model tint, `thread_spawn` takes a `runtime` and replays
 the caller's like it replays the fastpick combo, `thread_wait` reads an exact
 status instead of a TTL.
+
+**What exists.** `thread.create` refuses a chat row that names no driver, one
+this build does not have, or an instance or options blob that will not parse
+(`command::records::check_runtime`): all three used to land as a row in the
+sidebar nothing could open, with the failure arriving one click later and
+somewhere else. `POST /v1/threads` and the `thread_spawn` tool take an optional
+`runtime` of `terminal` or `pilot`, defaulting to the caller's own row, and
+carry it in the `thread.spawn` request the device mints from. `thread_wait`
+reads a pilot row's status off the runtime through `Workspace::pilot_status`,
+which both hosts implement: `busy` is a turn in flight, `waiting` an open
+request, `idle` a session that is stopped, never opened or between turns. The
+row's `running` mark and the PTY list are the terminal branch and are not
+consulted for a chat thread. `Store::delete_thread` purges `pilot_events` and
+`pilot_items` with the row, asserted against a neighbouring thread that keeps
+its own. Both hosts stop every session on the way out: the desktop through
+`commands::pilot::stop_all` on exit, the server through `Runtime::stop_all` in
+its graceful shutdown, before the PTYs.
 
 The bridge between the runtimes is the native session. A pilot claude thread
 opens with `--session-id <threadId>`, so "open in a terminal" launches

@@ -2246,6 +2246,55 @@ mod tests {
             .is_none());
     }
 
+    /// Deleting a chat thread takes its conversation with it.
+    ///
+    /// The journal and its projection are that conversation and nothing else
+    /// reads them, so a thread id reused later would inherit somebody's
+    /// timeline. The neighbouring thread is what makes this an assertion rather
+    /// than a tautology: a purge that dropped both tables wholesale would pass
+    /// every other check here.
+    #[test]
+    fn deleting_a_chat_thread_purges_its_journal_and_its_timeline() {
+        let (store, _dir) = scratch_store("pilot-purge");
+        for id in ["t1", "t2"] {
+            store
+                .conn
+                .lock()
+                .execute(
+                    "INSERT INTO threads (id, project_id, label, cmd, args, status, created_at,
+                                          runtime, pilot_driver)
+                     VALUES (?1, 'p1', 'chat', 'claude', '[]', 'idle', 0, 'pilot', 'claude')",
+                    rusqlite::params![id],
+                )
+                .unwrap();
+            let seq = store
+                .pilot_append_event(id, "turn.started", &serde_json::json!({}))
+                .unwrap();
+            store
+                .pilot_upsert_item(&PilotItemRow {
+                    id: format!("{id}-item"),
+                    thread_id: id.to_string(),
+                    seq,
+                    turn_id: None,
+                    kind: "assistant_text".into(),
+                    state: "completed".into(),
+                    body: "{}".into(),
+                    created_ms: 0,
+                    updated_ms: 0,
+                })
+                .unwrap();
+        }
+        assert_eq!(store.pilot_counts("t1").unwrap(), (1, 1));
+
+        store.delete_thread("t1").unwrap();
+        assert_eq!(store.pilot_counts("t1").unwrap(), (0, 0));
+        assert_eq!(
+            store.pilot_counts("t2").unwrap(),
+            (1, 1),
+            "the thread next door kept its conversation"
+        );
+    }
+
     /// The rule the sidebar is drawn from: a launch is remembered for exactly
     /// one restart.
     ///
