@@ -60,7 +60,7 @@ dirs = "6"
 # Dev-only agent bridge. Optional so a release build links none of it: the
 # plugin exposes execute_js and a screenshot command, and nothing gated by
 # cfg(debug_assertions) alone keeps it out of the shipped binary.
-tauri-plugin-mcp-bridge = { version = "0.12.0", optional = true }
+tauri-plugin-mcp-bridge = { version = "0.13.0", optional = true }
 
 [features]
 mcp-bridge = ["dep:tauri-plugin-mcp-bridge"]
