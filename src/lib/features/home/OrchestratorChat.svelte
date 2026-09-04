@@ -11,8 +11,22 @@
   import ChatMessage from "./ChatMessage.svelte";
   import VoiceButton from "$lib/features/voice/VoiceButton.svelte";
   import { voice } from "$lib/features/voice/store.svelte";
+  import { lazyComponent } from "$lib/shared/lazy.svelte";
   import MessageSquareIcon from "@lucide/svelte/icons/message-square";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
+
+  /**
+   * The chat runtime's own timeline, fetched only for an orchestrator that is
+   * one.
+   *
+   * Lazy for the same reason the chat pane and the dock's request card are:
+   * this card is drawn by Home before first paint, and a static import would
+   * put the pilot store, its reducer and the timeline back on the boot path of
+   * every window, experiment or no experiment.
+   */
+  const PilotConversation = lazyComponent(
+    () => import("$lib/features/pilot/Conversation.svelte"),
+  );
 
   /**
    * `fill` is home's layout asking for the whole column. Off, the card keeps the
@@ -48,8 +62,21 @@
     }
   });
 
+  // Which runtime is answering for the scope on screen. The row is the proof,
+  // never a setting: a thread launched before the experiment was turned on is
+  // still a terminal orchestrator, and the card has to draw it as one.
+  const pilotThreadId = $derived(orchestrator.pilotThreadId);
+
+  $effect(() => {
+    if (pilotThreadId) void PilotConversation.ensure();
+  });
+
   // Event-driven only: one catch-up read on mount, then the watch (desktop
   // Tauri event) or the control plane (remote) call in. No timer anywhere.
+  //
+  // Kept for the chat runtime too: the conversation the card reads is the
+  // timeline, but the pulse is still what says a scope changed hands, and the
+  // read is what the composer's optimistic bubble is replaced from.
   $effect(() => {
     orchestrator.onWorkspaceEvent();
     return orchestrator.watch();
@@ -147,7 +174,21 @@
     {/if}
   {/snippet}
   <div class="flex flex-col {fill ? 'h-full min-h-0' : 'max-h-80 min-h-40'}">
-    {#if orchestrator.conversation.messages.length === 0}
+    {#if pilotThreadId}
+      <!-- The same rows, the same rendering and the same tool cards the chat
+           pane draws, so one conversation does not look like two things
+           depending on where it is read. -->
+      <div class="flex min-h-0 flex-1 flex-col" data-testid="orchestrator-chat-pilot">
+        {#if PilotConversation.current}
+          {@const Conversation = PilotConversation.current}
+          <Conversation threadId={pilotThreadId} />
+        {:else}
+          <p class="px-3.5 pb-2 text-sm text-muted-foreground" aria-busy="true">
+            {t("common.loading")}
+          </p>
+        {/if}
+      </div>
+    {:else if orchestrator.conversation.messages.length === 0}
       <p class="flex-1 px-3.5 pb-2 text-sm text-muted-foreground">
         {t("orchestrator.empty")}
       </p>
@@ -193,6 +234,7 @@
       {/if}
       <textarea
         rows="1"
+        data-testid="orchestrator-input"
         class="max-h-24 min-h-9 flex-1 resize-none rounded-md border border-edge bg-[var(--color-surface-2)] px-2.5 py-1.5 text-sm text-foreground outline-none placeholder:text-muted-2 focus:border-foreground/30"
         placeholder={t("orchestrator.placeholder")}
         aria-label={t("orchestrator.inputLabel")}
@@ -203,6 +245,7 @@
       <Button
         variant="primary"
         size="lg"
+        testid="orchestrator-send"
         onclick={() => void send()}
         disabled={orchestrator.posting || !draft.trim()}
       >

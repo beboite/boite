@@ -5,9 +5,13 @@ import { settings } from "$lib/features/settings/store.svelte";
 import { launchAgent, reloadThread } from "$lib/features/thread/api";
 import { typeIntoOrchestrator } from "$lib/app/dispatches";
 import { withUnattendedArgs } from "$lib/features/thread/session";
+import { pilotCatalog } from "$lib/features/pilot/catalog.svelte";
+import { chatAvailable, chatLaunchForArgv, type ChatLaunch } from "$lib/features/pilot/launch";
+import { openPilotSession } from "$lib/features/pilot/session";
 import { logger } from "$lib/shared/services/logger.svelte";
 import { notifications } from "$lib/features/notifications/store.svelte";
 import { t } from "$lib/i18n/index.svelte";
+import type { PilotCatalog } from "$lib/features/pilot/types";
 import type { Thread } from "$lib/types";
 
 /**
@@ -20,6 +24,33 @@ import type { Thread } from "$lib/types";
  * with `deferActivation`, the row's INSERT is awaited, `orchestrator.start`
  * lands, and only then does the activation queue get the thread.
  */
+
+/**
+ * Whether this orchestrator would be a chat thread, and what it would run on.
+ *
+ * A pure function so the branch is testable without a window: the two
+ * experiments arm it at all, the argv names a driver, and the catalog decides
+ * whether this build talks to that driver over its own protocol. `null` is the
+ * terminal orchestrator, unchanged, which is what an agent with no driver and a
+ * boite with the experiment off both get.
+ */
+export function orchestratorChatLaunch(input: {
+  cmd: string;
+  args: readonly string[];
+  catalog: PilotCatalog | null;
+  workspace: boolean;
+  pilot: boolean;
+}): ChatLaunch | null {
+  if (!input.workspace || !input.pilot) return null;
+  const launch = chatLaunchForArgv(input.cmd, input.args);
+  if (!launch || !chatAvailable(input.catalog, launch.driver)) return null;
+  return launch;
+}
+
+/** Whether the thread answering for a scope is driven over a protocol. */
+export function isPilotOrchestrator(scope: string | null): boolean {
+  return findOrchestrator(scope)?.runtime === "pilot";
+}
 
 /** The live orchestrator for a scope, or null. The row is the proof. */
 export function findOrchestrator(scope: string | null): Thread | null {
@@ -74,10 +105,23 @@ export async function ensureOrchestrator(
   }
 
   const args = withUnattendedArgs(launch.cmd, launch.args, launch.iconKey);
+  // Which runtime this orchestrator is driven on, decided before the row is
+  // written: the five pilot columns have to be in the INSERT, since everything
+  // that reads the row afterwards branches on `runtime` in the same frame. The
+  // catalog is asked first because the answer depends on which drivers this
+  // machine actually has.
+  await pilotCatalog.ensure();
+  const chat = orchestratorChatLaunch({
+    cmd: launch.cmd,
+    args,
+    catalog: pilotCatalog.current,
+    workspace: settings.state.experimentWorkspace,
+    pilot: settings.state.experimentPilot,
+  });
   const thread = await launchAgent(
     project,
     { ...launch, args },
-    { focus: false, deferActivation: true },
+    { focus: false, deferActivation: true, pilot: chat },
   );
   if (!thread) return null;
 
@@ -100,6 +144,15 @@ export async function ensureOrchestrator(
   if (row) {
     row.role = "orchestrator";
     row.orchestratorScope = scope;
+  }
+  if (chat) {
+    // A chat orchestrator has no PTY and no pane of its own: its conversation
+    // is the Home card, and `home` is not a pane an agent may open. So the
+    // session is opened on the host instead of a group being mounted, and it is
+    // awaited, because the first post is a turn on it. The role is on the row
+    // by now, which is what puts the briefing in front of the conversation.
+    await openPilotSession(thread.id);
+    return app.threadById(thread.id) ?? thread;
   }
   // Now the row carries the role, the PTY may spawn and read it.
   app.requestActivation(thread.id);
@@ -134,6 +187,10 @@ export async function postToOrchestrator(
     notifications.error(t("orchestrator.postFailed"));
     return false;
   }
+  // A chat orchestrator has already been handed the line: the bus turned the
+  // post into its turn. Nothing is typed anywhere, and there is no prompt to
+  // wait for.
+  if (thread.runtime === "pilot") return true;
   if (!listening) {
     // Not awaited: the row is written and the chat has the user's bubble, so
     // the send is done. This waits on a prompt that may be twenty seconds
