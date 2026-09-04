@@ -484,6 +484,13 @@ function tick() {
     // branch further down can leave the pass early, this one cannot.
     if (t.status === "running" || t.status === "waiting") drivenPaneSince.delete(t.id);
     else maybeCloseDrivenPanes(t.id, now);
+    // A pilot row has one source and it is `status.changed`: no pid registry,
+    // no screen rows, no clock (`docs/pilot.md`). Left in this loop it would be
+    // demoted to `idle` by the `!t.ptyId` arm below on every single pass, since
+    // a chat thread has no PTY by construction, and the exact status the
+    // protocol just reported would last a hundred milliseconds. The pane writes
+    // it instead, off the event the driver sent.
+    if (t.runtime === "pilot") continue;
     // Server-owned threads (remote origin in dynamic mode) get their status
     // pushed as control events; ticking them would clobber it.
     const backend = workspace.backendFor(t.origin);

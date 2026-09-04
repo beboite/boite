@@ -17,6 +17,17 @@ export type SplitDir = "row" | "column";
  */
 export type PaneContent =
   | { kind: "thread"; threadId: string }
+  /**
+   * A pilot thread's conversation, drawn as ordinary DOM.
+   *
+   * The other half of `{ kind: "thread" }` rather than a variant of it: a
+   * terminal pane draws nothing here because xterm arrives from the page as an
+   * overlay over the measured rectangle, and a chat pane is a component in the
+   * tree like every panel. Which of the two a thread gets is decided once, off
+   * `thread.runtime`, in `threadPane` — so a pilot row can never be handed a
+   * terminal by a caller that forgot to ask.
+   */
+  | { kind: "chat"; threadId: string }
   /** The project's own page, so the dashboard can sit beside the agent. */
   | { kind: "dashboard" }
   | { kind: "git" }
@@ -109,18 +120,30 @@ export const MIN_PANE_PX = 120;
 /** Each splitter between two cells, in px. Must match `.splitter` flex-basis. */
 export const SPLITTER_PX = 4;
 
-/** A thread pane is named by its thread. See `PaneContent`. */
-export function threadPane(threadId: string): LayoutNode {
+/**
+ * A thread pane is named by its thread. See `PaneContent`.
+ *
+ * `runtime` is the row's own, and it is the one place the two kinds are told
+ * apart: every caller that opens a pane for a thread — the sidebar reopening
+ * one, the hydration that gives an unpanned row a group, a drop, a rehome, an
+ * unsplit — comes through here, so a `runtime = pilot` row never gets a
+ * terminal. Absent reads as terminal, which is every row written before the
+ * pilot existed.
+ */
+export function threadPane(threadId: string, runtime?: string | null): LayoutNode {
   return {
     kind: "leaf",
     paneId: threadId,
-    content: { kind: "thread", threadId },
+    content:
+      runtime === "pilot"
+        ? { kind: "chat", threadId }
+        : { kind: "thread", threadId },
   };
 }
 
 /** The thread in this pane, or null when the pane holds something else. */
 export function threadIdOf(content: PaneContent): string | null {
-  return content.kind === "thread" ? content.threadId : null;
+  return content.kind === "thread" || content.kind === "chat" ? content.threadId : null;
 }
 
 /**
@@ -134,6 +157,7 @@ export function sameContent(a: PaneContent, b: PaneContent): boolean {
   if (a.kind !== b.kind) return false;
   switch (a.kind) {
     case "thread":
+    case "chat":
       return a.threadId === (b as typeof a).threadId;
     case "browser":
       return a.url === (b as typeof a).url;

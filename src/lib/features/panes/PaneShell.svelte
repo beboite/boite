@@ -223,6 +223,9 @@
 
 {#snippet renderNode(node: LayoutNode)}
   {#if node.kind === "leaf"}
+    <!-- Only a terminal draws nothing here: its canvas arrives from the page as
+         an overlay over this rectangle. A chat pane is ordinary DOM and lives
+         in the tree like every panel. -->
     {@const isThread = node.content.kind === "thread"}
     <!-- No chrome of its own, on any pane. The strip that used to name each one
          repeated the sidebar over a terminal and the panel's own header over a

@@ -346,6 +346,16 @@ export interface Settings {
    */
   experimentWorkspace: boolean;
   /**
+   * Experiment: chat threads, the second thread runtime (`docs/pilot.md`).
+   *
+   * Device-scoped for the same reason as the one above: arming is this glass
+   * deciding to show the Chat button in its launcher, and nothing about a
+   * thread already running depends on it. Turning it off hides that button and
+   * leaves every open chat thread alive, which is why there is no confirm here
+   * and one on the workspace switch.
+   */
+  experimentPilot: boolean;
+  /**
    * Where the window goes when Boite starts. Resolved by `resolveLaunchView`.
    */
   openOnLaunch: OpenOnLaunch;

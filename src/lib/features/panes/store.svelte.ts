@@ -13,6 +13,7 @@ import {
   MIN_RATIO,
   SPLITTER_PX,
   sameContent,
+  threadIdOf,
   threadPane,
 } from "./types";
 import {
@@ -35,6 +36,17 @@ export type { PaneRect } from "./rect";
 
 function uid(): string {
   return uuid();
+}
+
+/**
+ * The pane a thread gets, terminal or chat, read off the row.
+ *
+ * One function so the answer cannot differ between the five places a pane is
+ * opened for a thread. A row the store has never heard of falls through to a
+ * terminal, which is what an id from a stale saved layout is.
+ */
+function paneForThread(threadId: string): LayoutNode {
+  return threadPane(threadId, app.threadById(threadId)?.runtime ?? null);
 }
 
 // Re-exported: the tree helpers are the store's public vocabulary as far as the
@@ -169,9 +181,25 @@ class PaneStore {
         this.groups.push({
           id: uid(),
           projectId: t.projectId,
-          root: threadPane(t.id),
+          root: paneForThread(t.id),
           focusedPaneId: t.id,
         });
+      }
+    }
+
+    // A saved layout is bytes written before the row it names was read back,
+    // and a layout persisted by a build that had no chat pane says `thread` for
+    // every one of them. Repaired here rather than at the render site: a pilot
+    // row drawn as a terminal is a pane with no PTY behind it, which is a blank
+    // rectangle and nothing else.
+    for (const g of this.groups) {
+      for (const leaf of leafNodesOf(g.root)) {
+        const threadId = threadIdOf(leaf.content);
+        if (!threadId) continue;
+        const wanted = valid.get(threadId)?.runtime === "pilot" ? "chat" : "thread";
+        if (leaf.content.kind !== wanted) {
+          leaf.content = { kind: wanted, threadId } as PaneContent;
+        }
       }
     }
 
@@ -501,7 +529,7 @@ class PaneStore {
     const next = injectSibling(
       targetGroup.root,
       targetPaneId,
-      threadPane(draggedThreadId),
+      paneForThread(draggedThreadId),
       dir,
       before,
       0.5,
@@ -537,7 +565,7 @@ class PaneStore {
       this.groups.push({
         id: uid(),
         projectId,
-        root: threadPane(threadId),
+        root: paneForThread(threadId),
         focusedPaneId: threadId,
       });
       this.saveSoon();
@@ -550,7 +578,7 @@ class PaneStore {
       dropped.push(leaf.paneId);
       root = root ? pruneLeaf(root, leaf.paneId) : null;
     }
-    g.root = root ?? threadPane(threadId);
+    g.root = root ?? paneForThread(threadId);
     g.projectId = projectId;
     g.focusedPaneId = threadId;
     for (const id of dropped) delete this.rects[id];
@@ -578,7 +606,7 @@ class PaneStore {
     this.groups.push({
       id: uid(),
       projectId: t.projectId,
-      root: threadPane(threadId),
+      root: paneForThread(threadId),
       focusedPaneId: threadId,
     });
     this.saveSoon();

@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { OrchestratorMessage } from "$lib/backend/types";
+  import ChatText from "$lib/shared/components/ChatText.svelte";
   import { t } from "$lib/i18n/index.svelte";
   import { relativeClock } from "$lib/shared/utils/clock.svelte";
   import { formatAgo } from "$lib/shared/utils/relative-time";
@@ -11,13 +12,7 @@
 </script>
 
 <li class="flex flex-col gap-0.5 {mine ? 'items-end' : 'items-start'}">
-  <div
-    class="max-w-[85%] rounded-md px-2.5 py-1.5 text-sm whitespace-pre-wrap break-words {mine
-      ? 'bg-accent text-foreground'
-      : 'bg-[var(--color-surface-2)] text-foreground'}"
-  >
-    {message.text}
-  </div>
+  <ChatText text={message.text} {mine} />
   <span class="px-1 text-xs text-muted-2">
     {mine ? t("orchestrator.you") : t("orchestrator.them")} · {ago}
   </span>

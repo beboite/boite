@@ -48,6 +48,17 @@
   onToggle={() => void toggleWorkspace()}
 />
 
+<!-- No confirm and nothing under it. Turning it off hides the Chat choice of
+     the launcher and leaves the chat threads already open exactly as they are:
+     a running agent belongs to the workspace, not to this glass's switch. -->
+<ToggleSetting
+  label={t("experiments.pilot")} anchor="experiments.pilot"
+  badge={t("experiments.new")}
+  description={t("experiments.pilotDesc")}
+  enabled={settings.state.experimentPilot}
+  onToggle={() => settings.setExperimentPilot(!settings.state.experimentPilot)}
+/>
+
 <!-- Everything the one switch turns on, under it: the agent the orchestrator
      runs and the microphone it listens on. Hidden rather than disabled while
      the switch is off, because neither describes anything that exists yet. The

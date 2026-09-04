@@ -26,6 +26,17 @@ import { t } from "$lib/i18n/index.svelte";
  * what it was rendering would be a second idea of what the user agreed to.
  */
 
+/**
+ * The `action` a chat thread's question carries.
+ *
+ * `boite_core::store::PILOT_APPROVAL_ACTION`, and the one string that decides
+ * which card the dock draws: a pilot row's `detail` is the request id rather
+ * than a sentence, and the options are the driver's own, so yes-or-no cannot
+ * answer it. Nothing filters kinds out of the dock, which is why arriving here
+ * needed no change on the notification path.
+ */
+export const PILOT_ACTION = "pilot.request";
+
 /** How loud a card is. `danger` is for an answer that cannot be taken back. */
 export type ApprovalTone = "normal" | "danger";
 

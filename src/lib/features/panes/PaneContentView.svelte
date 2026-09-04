@@ -31,10 +31,16 @@
   const OverviewView = lazyComponent(
     () => import("$lib/features/project/ProjectOverview.svelte"),
   );
+  // The chat pane and everything under it: the timeline, the picker and the
+  // request card. Off the boot path by construction, which is the line
+  // `docs/pilot.md` budgets for it — a boite with the experiment off never
+  // fetches the chunk at all.
+  const ChatView = lazyComponent(() => import("$lib/features/pilot/ChatPane.svelte"));
 
   $effect(() => {
     if (content.kind === "editor") void EditorView.ensure();
     if (content.kind === "dashboard") void OverviewView.ensure();
+    if (content.kind === "chat") void ChatView.ensure();
   });
 
   const project = $derived(app.projects.find((p) => p.id === projectId) ?? null);
@@ -54,6 +60,15 @@
     <TodoPanel {projectId} />
   {:else if content.kind === "browser"}
     <BrowserPane url={content.url} {paneId} drivenBy={content.drivenBy ?? null} />
+  {:else if content.kind === "chat"}
+    {#if ChatView.current}
+      {@const ChatComp = ChatView.current}
+      <ChatComp threadId={content.threadId} {projectId} {paneId} />
+    {:else}
+      <div class="flex h-full items-center justify-center text-sm text-muted-2">
+        {t("common.loading")}
+      </div>
+    {/if}
   {:else if content.kind === "editor"}
     {#if EditorView.current}
       {@const EditorComp = EditorView.current}
