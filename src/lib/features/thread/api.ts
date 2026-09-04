@@ -25,7 +25,11 @@ import {
   optionsJson,
   type ChatLaunch,
 } from "$lib/features/pilot/launch";
-import { forgetPilotSession, openPilotSession } from "$lib/features/pilot/session";
+import {
+  forgetPilotSession,
+  openChatThread,
+  openPilotSession,
+} from "$lib/features/pilot/session";
 import { dropThreadCheckpoints, forgetThreadTurns } from "./checkpoints.svelte";
 import { samePromotion, type Promotion } from "./promote";
 import { carryTranscript, releaseClaudeSession } from "./session";
@@ -36,6 +40,32 @@ import type { ShellOption } from "$lib/storage/platform.svelte";
 
 const closedThreads: Thread[] = [];
 const MAX_CLOSED_THREADS = 20;
+
+/**
+ * The insert each launched row is still waiting on, dropped once it lands.
+ *
+ * Bounded by construction: one entry per launch, removed by the write itself.
+ * A row nobody ever asks about leaves nothing behind but the microtask that
+ * deletes it.
+ */
+const pendingWrites = new Map<string, Promise<void>>();
+
+function rememberWrite(threadId: string, write: Promise<void>): void {
+  const settled = write.finally(() => {
+    if (pendingWrites.get(threadId) === settled) pendingWrites.delete(threadId);
+  });
+  pendingWrites.set(threadId, settled);
+}
+
+/**
+ * Resolves once a launched thread's row is in the database.
+ *
+ * Answers at once for a row nothing is writing, which is every row a reload
+ * read back: the map only ever holds the launch this window just made.
+ */
+export function threadRowWritten(threadId: string): Promise<void> {
+  return pendingWrites.get(threadId) ?? Promise.resolve();
+}
 
 function snapshotThread(thread: Thread): Thread {
   return {
@@ -446,7 +476,13 @@ function createThread(
   // put an IPC round trip and a WAL commit between the click and the pane. A
   // row that fails to land still gives a working thread for this session, and
   // says so.
-  void app.upsertThread(thread).catch((err) => recordUnsavedThread(thread, err));
+  // Kept, not only fired: a chat launch has to open a session on this row and
+  // the host refuses that while the insert is in flight. Every other launcher
+  // ignores it and pays nothing, the promise being the same one either way.
+  rememberWrite(
+    thread.id,
+    app.upsertThread(thread).catch((err) => recordUnsavedThread(thread, err)),
+  );
   if (opts.deferActivation) {
     // Nothing mounts yet. Mounting the Terminal is what spawns the PTY, and the
     // caller has a write that must land on the row before that spawn reads it —
@@ -495,10 +531,12 @@ export async function launchShortcut(
  * "open this conversation in a terminal" will replay and what the model tint is
  * derived from (`fastpick/threadAccent.ts` reads the argv, never the row).
  *
- * `pilot.open` comes after the row exists and is not awaited by the caller: the
- * pane mounts, reads its timeline and subscribes on its own, and a launcher
- * held open for a process spawn is the round trip the terminal path spent years
- * removing.
+ * `pilot.open` comes after the row exists, and after it in the strong sense:
+ * the write is awaited. The host reads the `threads` row to know what to
+ * launch, and an open fired beside the insert rather than behind it is refused
+ * with "no thread <id>" whenever the machine is busy enough for the round trip
+ * to lose the race. The pane follows the session for the same reason, so what
+ * mounts has something to read (`openChatThread`).
  */
 export async function launchChat(
   shortcut: Shortcut,
@@ -519,9 +557,26 @@ export async function launchChat(
     fresh: true,
     iconColor: shortcut.iconColor ?? null,
     pilot: spec,
+    deferActivation: true,
   });
-  void openPilotSession(thread.id);
+  void openChatThread({
+    created: () => threadRowWritten(thread.id),
+    opened: () => openPilotSession(thread.id),
+    shown: () => showThread(thread.id),
+  });
   return thread;
+}
+
+/**
+ * Puts a launched chat thread on screen.
+ *
+ * The same two writes `createThread` makes for a terminal launch, made later:
+ * a chat launch defers its activation so the pane mounts on a row whose
+ * session is already open.
+ */
+function showThread(threadId: string): void {
+  app.activeThreadId = threadId;
+  app.view = "terminal";
 }
 
 /**
@@ -548,9 +603,13 @@ export async function launchFastpickChat(
     args,
     harness.name,
     iconKeyForKind(harness.kind),
-    { fresh: true, pilot: spec },
+    { fresh: true, pilot: spec, deferActivation: true },
   );
-  void openPilotSession(thread.id);
+  void openChatThread({
+    created: () => threadRowWritten(thread.id),
+    opened: () => openPilotSession(thread.id),
+    shown: () => showThread(thread.id),
+  });
   return thread;
 }
 

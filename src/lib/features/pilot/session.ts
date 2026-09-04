@@ -40,6 +40,33 @@ export function openPilotSession(threadId: string): Promise<void> {
     });
 }
 
+/**
+ * The three steps a chat launch runs, in the one order that works.
+ *
+ * `pilot.open` reads the `threads` row and refuses with "no thread <id>" while
+ * the insert is still in flight. The launcher used to fire it beside the write
+ * rather than behind it, so on a machine under load the pane came up on a row
+ * whose session had never been opened, and the only way back in was the
+ * composer's own button. The row is awaited, the session is opened on it, and
+ * the pane is put on screen last.
+ *
+ * Its own function so the order is testable: the launchers it serves reach
+ * into the app store, the backend and the worktree pool, and none of that is
+ * what a test of the order needs to build.
+ */
+export async function openChatThread(steps: {
+  /** Resolves when the `threads` row is in the database. */
+  created: () => Promise<unknown>;
+  /** Resolves when the host has been asked for a session on that row. */
+  opened: () => Promise<unknown>;
+  /** Puts the pane on screen. Nothing waits on it. */
+  shown: () => void;
+}): Promise<void> {
+  await steps.created();
+  await steps.opened();
+  steps.shown();
+}
+
 /** Whether this window opened a session for this row and has not stopped it. */
 export function pilotSessionOpenedHere(threadId: string): boolean {
   return openedHere.has(threadId);
