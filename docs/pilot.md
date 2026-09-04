@@ -146,11 +146,14 @@ pub trait Session: Send + Sync {
 
 **What exists.** `boite-pilot` is the crate above, minus `codex` and the ACP
 drivers: `lib.rs` holds `Runtime` with `open`, `prompt`, `interrupt`, `respond`,
-`set_model`, `set_mode`, `stop`, `stop_all`, `status`, `drivers`,
-`capabilities`, `native_session_id`, `pid` and `open_threads`; `driver.rs` holds
+`set_model`, `set_mode`, `stop`, `stop_all`, `stop_detached`, `status`,
+`drivers`, `capabilities`, `native_session_id`, `pid`, `open_threads` and
+`emit`, the door boite writes its own events through (the user's own message
+today); `driver.rs` holds
 `Driver`, `Session`, `OpenSpec`, `Opened`, `Instance`, `Options`, `ExecMode`,
 `ModelSelection`, `SwitchKind`, `Capabilities`, `RequestAnswer` and
-`PilotError`; `event.rs` holds `PilotEvent` and its fourteen kinds, `Item`,
+`PilotError`, with `TurnInput::turn_id` carrying the id the host minted so the
+user's own message can be filed under a turn the driver has not named yet; `event.rs` holds `PilotEvent` and its fourteen kinds, `Item`,
 `ItemKind` (with `notice`, boite's own line), `Request`, `Usage` and `Status`;
 `claude.rs` is the stream-json driver and carries `NATIVE_MODELS`;
 `scripted.rs` replays a scenario file. `proc.rs` owns the spawn, the Windows job
@@ -191,7 +194,11 @@ and search is rendered from items, not a third store.
 `pilot_counts` and `pilot_approval_of_request`, and `delete_thread` purges both
 tables. `boite_core::pilot` is the projection: `project`, `Projection`,
 `DeltaBuffer`, `status_word`, `answer_of_option`, `request_item_id`,
-`turn_item_id` and `write_notice`. The five columns are on
+`turn_item_id`, `user_message_item_id` and `write_notice`. `status.changed`
+writes the thread's own status column there too, so the sidebar reads a chat
+row's dot whether or not its pane is mounted, and `request.resolved` merges the
+outcome onto the request's body rather than replacing it, or a reload would draw
+an answered tool call as a bare "Question". The five columns are on
 `boite_core::model::Thread` as `runtime`, `pilot_driver`, `pilot_instance`,
 `pilot_model` and `pilot_options`, with `RUNTIME_TERMINAL` and `RUNTIME_PILOT`
 beside them.
@@ -222,7 +229,9 @@ the 30 ms tick. The desktop's door is `src-tauri/src/commands/pilot.rs`
 (`pilot_catalog`, `pilot_thread_open`, `pilot_turn_start`,
 `pilot_turn_interrupt`, `pilot_request_respond`, `pilot_model_set`,
 `pilot_mode_set`, `pilot_session_stop`, `pilot_items`, `pilot_events`,
-`pilot_subscribe`, `pilot_unsubscribe`, pushing `pilot://event`); the server's
+`pilot_subscribe`, `pilot_unsubscribe`, pushing `pilot://event` and, for the
+sidebar, `boite://thread-status`, which `features/pilot/threadStatus.ts` applies;
+the server's
 is `crates/boite-server/src/pilot.rs`, pushing `AppEvent::PilotEvent` as
 `pilot.event`. The webview reaches both through `backend().pilot`
 (`src/lib/backend/types.ts`), implemented in `backend/tauri/rpc.ts` as
@@ -300,10 +309,15 @@ row of kind `pilot` carrying the options the driver offered, opaque. The
 existing dock draws them next to MCP approvals, the notification takes the same
 path, `pilot.request.respond` sends the chosen option back.
 
-For `runtime = pilot`, `statusEngine.ts` has one source: `status.changed`. No
-pid registry, no screen rows, no clock. `waiting` is an open request, `running`
-a turn in flight, `ready` the rest. Auto-sleep stops the process politely and
-keeps `session_id`; waking is `pilot.thread.open` with resume.
+For `runtime = pilot`, the status has one source: `status.changed`. No pid
+registry, no screen rows, no clock. `waiting` is an open request, `running` a
+turn in flight, `ready` the rest. The projection writes it onto the row and each
+host pushes it (`boite://thread-status`, `thread.status`), so a thread working
+in a group nobody is drawing still lights its dot; `statusEngine.ts` skips these
+rows rather than measuring them. Auto-sleep is the one thing it keeps for them:
+past the idle timeout it stops the process politely through `pilot.session.stop`
+and keeps `session_id`, and waking is `pilot.thread.open` with resume, which the
+chat pane calls itself when it opens on a row whose session is gone.
 
 `turn.started` captures the `start` edge, `turn.completed` captures `end` and
 writes what `checkpoint.diff` answers onto the turn item: files, additions,
@@ -359,7 +373,17 @@ this build does not have, or an instance or options blob that will not parse
 sidebar nothing could open, with the failure arriving one click later and
 somewhere else. `POST /v1/threads` and the `thread_spawn` tool take an optional
 `runtime` of `terminal` or `pilot`, defaulting to the caller's own row, and
-carry it in the `thread.spawn` request the device mints from. `thread_wait`
+carry it in the `thread.spawn` request the device mints from. The device decides
+what to do with it in `pilot/launch.ts::chatSpawnDecision`, which is a pure
+function so the branch is testable: a pilot spawn writes the five columns off
+the worker's own argv (the driver from the agent, the instance native or the
+fastpick route it carries, the mode from the yolo flag the spawn added),
+`handleSpawn` then opens the session and sends the briefing as the first turn
+rather than typing it, and a runtime no driver here can serve is answered with
+the sentence the agent reads instead of a row nothing can open.
+`Store::delete_thread` and `thread.settle` stop the native session through
+`Host::pilot` on their way, so a settled or deleted chat row never leaves a
+child running. `thread_wait`
 reads a pilot row's status off the runtime through `Workspace::pilot_status`,
 which both hosts implement: `busy` is a turn in flight, `waiting` an open
 request, `idle` a session that is stopped, never opened or between turns. The
@@ -377,6 +401,13 @@ reopens as a chat on its captured session. Codex has the same pair.
 
 In Experiments: "Chat threads", badge "new". Turning it off hides the Chat
 button of the launcher and leaves open chat threads alive.
+
+The Chat button is offered wherever a launch is: the shortcut bar, the home
+card, the phone's sheet and the fastpick menu, all through
+`pilot/catalog.svelte.ts` (`chatChoice`, `chatChoiceArgv`, `chatChoiceHarness`)
+so the four agree. A fastpick route asks by its harness, and `claude-code` is
+read as the `claude` driver (`driverOfHarness`): fastpick names the harness after
+the program, the catalog names the driver after the wire.
 
 ## Logging
 

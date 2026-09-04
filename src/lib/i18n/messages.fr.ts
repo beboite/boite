@@ -1321,6 +1321,7 @@ export const FR_MESSAGES: Record<MessageKey, string> = {
   "thread.moveTranscriptFailed": "Déplacé, mais la conversation n'a pas pu suivre : {error}",
   "thread.spawnProjectGone": "Un agent a demandé un terminal dans un projet qui n'existe plus",
   "thread.spawnNoAgent": "Aucun agent nommé « {agent} » à démarrer",
+  "thread.spawnNoChat": "« {agent} » ne peut pas être un chat ici, rien n'a démarré",
   "thread.spawnedIn": "{label} ouvert dans {project}",
   "thread.sessionCaptured": "Session capturée ({name})",
   "thread.sessionUpdated": "Session mise à jour ({name})",

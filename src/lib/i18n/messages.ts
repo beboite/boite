@@ -1329,6 +1329,7 @@ export const EN_MESSAGES = {
   "thread.moveTranscriptFailed": "Moved, but the conversation could not follow: {error}",
   "thread.spawnProjectGone": "An agent asked for a terminal in a project that is gone",
   "thread.spawnNoAgent": "No agent called '{agent}' to start",
+  "thread.spawnNoChat": "'{agent}' cannot be a chat thread here, so nothing was started",
   "thread.spawnedIn": "{label} opened in {project}",
   "thread.sessionCaptured": "Session captured ({name})",
   "thread.sessionUpdated": "Session updated ({name})",

@@ -19,7 +19,13 @@ import {
   FASTPICK_CMD,
   type FastpickCombo,
 } from "$lib/features/fastpick/combo";
-import { chatLaunchFor, optionsJson, type ChatLaunch } from "$lib/features/pilot/launch";
+import {
+  chatLaunchFor,
+  chatLaunchForArgv,
+  optionsJson,
+  type ChatLaunch,
+} from "$lib/features/pilot/launch";
+import { forgetPilotSession, openPilotSession } from "$lib/features/pilot/session";
 import { dropThreadCheckpoints, forgetThreadTurns } from "./checkpoints.svelte";
 import { samePromotion, type Promotion } from "./promote";
 import { carryTranscript, releaseClaudeSession } from "./session";
@@ -514,12 +520,37 @@ export async function launchChat(
     iconColor: shortcut.iconColor ?? null,
     pilot: spec,
   });
-  void backend()
-    .pilot.open(thread.id)
-    .catch((err: unknown) => {
-      logger.warn("pilot", `${thread.id}: session did not open`, String(err));
-      notifications.error(t("pilot.openFailed"));
-    });
+  void openPilotSession(thread.id);
+  return thread;
+}
+
+/**
+ * The fastpick route the user just picked, opened as a chat thread.
+ *
+ * The row is `launchFastpick`'s plus the five pilot columns, off the same
+ * combo: the instance is the route (`fastpick:<provider>:<model>`, which is the
+ * shape `pilot.catalog` answers), so a reload comes back on the same endpoint
+ * and the same model rather than on the driver's native account.
+ */
+export async function launchFastpickChat(
+  combo: FastpickCombo,
+  harness: { name: string; kind: string },
+  projectId: string | null,
+): Promise<Thread | null> {
+  const project = requireProject(projectId);
+  if (!project) return null;
+  const args = comboArgs(combo);
+  const spec = chatLaunchForArgv(FASTPICK_CMD, args);
+  if (!spec) return null;
+  const thread = createThread(
+    project,
+    FASTPICK_CMD,
+    args,
+    harness.name,
+    iconKeyForKind(harness.kind),
+    { fresh: true, pilot: spec },
+  );
+  void openPilotSession(thread.id);
   return thread;
 }
 
@@ -594,7 +625,18 @@ export async function launchAgent(
     iconKey: IconKey;
     iconColor?: string | null;
   },
-  opts: { focus?: boolean; parentThreadId?: string | null; delegationMode?: 'normal' | 'delegation'; deferActivation?: boolean } = {},
+  opts: {
+    focus?: boolean;
+    parentThreadId?: string | null;
+    delegationMode?: 'normal' | 'delegation';
+    deferActivation?: boolean;
+    /**
+     * The five pilot columns, when the spawn asked for `runtime = pilot`. The
+     * row is otherwise identical, which is what lets the worktree, the sidebar
+     * and `settle` treat a chat worker like any other.
+     */
+    pilot?: ChatLaunch | null;
+  } = {},
 ): Promise<Thread | null> {
   return createThread(
     project,
@@ -609,6 +651,7 @@ export async function launchAgent(
       parentThreadId: opts.parentThreadId,
       delegationMode: opts.delegationMode,
       deferActivation: opts.deferActivation,
+      pilot: opts.pilot ?? null,
     },
   );
 }
@@ -719,6 +762,11 @@ export async function closeThread(threadId: string) {
   gaveUpWaiting.delete(threadId);
   const thread = app.threadById(threadId);
   if (thread) rememberClosedThread(thread);
+  // A chat thread's child is stopped by the row's own deletion, on the records
+  // domain where the store is (`Store::delete_thread`), so nothing is asked for
+  // here. What this window has to drop is its claim on the session, or restoring
+  // the thread would find a row nobody opens.
+  forgetPilotSession(threadId);
   const kill = thread?.ptyId
     ? ptyKill(thread.ptyId, true).catch(() => {})
     : Promise.resolve();
@@ -780,6 +828,21 @@ export async function closeThreadWithConfirm(threadId: string): Promise<boolean>
 export async function stopThread(threadId: string) {
   const thread = app.threadById(threadId);
   if (!thread) return;
+
+  // A chat thread has no PTY to kill: what stops is the native session, and it
+  // stops politely so the conversation is still there to resume. Same status
+  // afterwards as a stopped terminal, which is what the sidebar and the
+  // composer's own resume button both read.
+  if (thread.runtime === "pilot") {
+    app.setThreadStatus(thread.id, "stopped", null);
+    forgetPilotSession(thread.id);
+    try {
+      await backend().pilot.stop(thread.id);
+    } catch (err) {
+      logger.warn("pilot", `${thread.id}: session did not stop`, String(err));
+    }
+    return;
+  }
 
   const previousPtyId = thread.ptyId;
   app.setThreadPtyId(thread.id, null);

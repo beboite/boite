@@ -29,7 +29,8 @@
   import { addProjectByPath } from "$lib/features/project/api";
   import { watchAgentRequests } from "$lib/app/agent-requests";
   import { watchDispatches } from "$lib/app/dispatches";
-    import { watchAgentActivity } from "$lib/features/thread/agentActivity.svelte";
+  import { watchAgentActivity } from "$lib/features/thread/agentActivity.svelte";
+  import { watchPilotStatus } from "$lib/features/pilot/threadStatus";
   import { watchScreen } from "$lib/app/screen.svelte";
   import { installInspector } from "$lib/features/devtools/inspect";
   import { captureWindowErrors } from "$lib/shared/services/logger.svelte";
@@ -286,6 +287,12 @@
   // own terminal. Mounted here for the same reason: the first call can land
   // during boot, and a mark laid on nobody is a mark nothing shows.
   onMount(() => watchAgentActivity());
+
+  // A chat thread's status, which is the one nothing can measure: the host says
+  // it and the sidebar draws it, whether or not the pane is mounted. Mounted
+  // with the other watchers, since a thread an agent spawned starts working
+  // before anybody opens it.
+  onMount(() => watchPilotStatus());
 
   // The window saying what is on it, so an agent debugging this app stops
   // having to ask a human what they see. It lands in workspace_snapshot; see

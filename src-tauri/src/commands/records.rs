@@ -84,6 +84,14 @@ async fn on_rows(
     if let Some(runtime) = app.try_state::<Arc<boite_core::telemetry::TelemetryRuntime>>() {
         host = host.with_telemetry(runtime.inner().clone());
     }
+    // Only if one was ever built, which is what `peek` is for: settling or
+    // deleting a chat thread has to stop its child, and every other record
+    // command has nothing to do with the pilot. Asking for the runtime instead
+    // would open the database from a records call and build a runtime for an app
+    // that has never had a chat thread.
+    if let Some(pilot) = app.state::<super::pilot::PilotRuntime>().peek() {
+        host = host.with_pilot(pilot);
+    }
     through(host, command.into()).await
 }
 

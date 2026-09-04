@@ -1,7 +1,7 @@
 import { backend } from "$lib/backend";
 import { settings } from "$lib/features/settings/store.svelte";
 import { log } from "$lib/shared/log";
-import { chatAvailable, driverOfCommand } from "./launch";
+import { chatAvailable, driverOfArgv, driverOfCommand, driverOfHarness } from "./launch";
 import type { PilotCatalog } from "./types";
 
 /**
@@ -52,8 +52,39 @@ export function chatChoice(command: string): {
   offered: boolean;
   enabled: boolean;
 } {
+  return choiceFor(driverOfCommand(command));
+}
+
+/**
+ * The same answer for a launcher that holds an argv rather than a line.
+ *
+ * The fastpick menu is the one: it builds `fastpick --harness ... --model ...`
+ * as arguments and never as a string, and joining them to split them again is
+ * how a model id with a space in it stops naming a driver.
+ */
+export function chatChoiceArgv(
+  cmd: string,
+  args: readonly string[],
+): { offered: boolean; enabled: boolean } {
+  return choiceFor(driverOfArgv(cmd, args));
+}
+
+/**
+ * The same answer for a fastpick harness, before a model has been picked.
+ *
+ * The fastpick menu asks this: whether a route can be a chat depends on the
+ * harness alone, since the provider and the model are the account and the
+ * weights and neither changes which protocol the program speaks.
+ */
+export function chatChoiceHarness(harness: string): {
+  offered: boolean;
+  enabled: boolean;
+} {
+  return choiceFor(driverOfHarness(harness));
+}
+
+function choiceFor(driver: string | null): { offered: boolean; enabled: boolean } {
   if (!settings.state.experimentPilot) return { offered: false, enabled: false };
-  const driver = driverOfCommand(command);
   if (!driver) return { offered: false, enabled: false };
   return { offered: true, enabled: chatAvailable(pilotCatalog.current, driver) };
 }

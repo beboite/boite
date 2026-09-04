@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { chatAvailable, chatLaunchFor, driverOfCommand, optionsJson } from "./launch";
+import {
+  chatAvailable,
+  chatLaunchFor,
+  chatSpawnDecision,
+  driverOfCommand,
+  driverOfHarness,
+  optionsJson,
+} from "./launch";
 import type { PilotCatalog } from "./types";
 
 const CATALOG: PilotCatalog = {
@@ -69,6 +76,77 @@ describe("chatLaunchFor", () => {
 
   it("has nothing to say about a shell", () => {
     expect(chatLaunchFor("pwsh")).toBeNull();
+  });
+});
+
+describe("driverOfHarness", () => {
+  // fastpick names the harness after the program, the catalog names the driver
+  // after the wire. Without the mapping every fastpick route in the menu asked
+  // for a driver called `claude-code` and had its Chat button greyed.
+  it("reads the claude-code harness as the claude driver", () => {
+    expect(driverOfHarness("claude-code")).toBe("claude");
+    expect(driverOfCommand("fastpick --harness claude-code --provider crof --model opus")).toBe(
+      "claude",
+    );
+  });
+
+  it("leaves a harness already named after its wire alone", () => {
+    expect(driverOfHarness("codex")).toBe("codex");
+  });
+});
+
+describe("chatSpawnDecision", () => {
+  const chat = (over: Partial<Parameters<typeof chatSpawnDecision>[0]> = {}) =>
+    chatSpawnDecision({
+      runtime: "pilot",
+      cmd: "claude",
+      args: [],
+      agent: "claude",
+      catalog: CATALOG,
+      experiment: true,
+      ...over,
+    });
+
+  it("leaves every other runtime on the terminal path", () => {
+    expect(chat({ runtime: "terminal" })).toEqual({ kind: "terminal" });
+    expect(chat({ runtime: null })).toEqual({ kind: "terminal" });
+  });
+
+  it("writes the five columns off the worker's own argv", () => {
+    const decided = chat({
+      cmd: "fastpick",
+      args: ["--harness", "claude-code", "--provider", "crof", "--model", "opus-5"],
+    });
+    expect(decided).toEqual({
+      kind: "chat",
+      launch: {
+        driver: "claude",
+        instance: { type: "fastpick", provider: "crof", model: "opus-5" },
+        model: "opus-5",
+        mode: "ask",
+      },
+    });
+  });
+
+  // The unattended flags are added before the decision, so the mode a spawned
+  // worker runs on is the one its own command line asked for.
+  it("takes the mode off the yolo flag the spawn added", () => {
+    const decided = chat({ args: ["--dangerously-skip-permissions"] });
+    expect(decided.kind === "chat" && decided.launch.mode).toBe("yolo");
+  });
+
+  it("refuses an agent no driver answers for, and says what to ask instead", () => {
+    const decided = chat({ cmd: "grok", agent: "grok" });
+    expect(decided.kind).toBe("refused");
+    expect(decided.kind === "refused" && decided.reason).toContain("terminal");
+  });
+
+  it("refuses while the experiment is off rather than opening a pane nobody draws", () => {
+    expect(chat({ experiment: false }).kind).toBe("refused");
+  });
+
+  it("refuses while the catalog has not answered", () => {
+    expect(chat({ catalog: null }).kind).toBe("refused");
   });
 });
 

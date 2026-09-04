@@ -21,6 +21,7 @@
   import Composer from "./Composer.svelte";
   import ModelPicker from "./ModelPicker.svelte";
   import Timeline from "./Timeline.svelte";
+  import { openPilotSession, pilotSessionOpenedHere } from "./session";
   import { load, pilotThread, release } from "./store.svelte";
   import type { PilotCatalog } from "./types";
   import Copy from "@lucide/svelte/icons/copy";
@@ -101,18 +102,28 @@
   });
 
   /**
-   * The status the sidebar draws, written from the one source a pilot row has.
+   * A row whose session is not running gets it back when its pane opens.
    *
-   * `statusEngine.ts` leaves these rows alone by construction (no pid registry,
-   * no screen rows, no clock), so this is where `status.changed` becomes the
-   * dot. Guarded on a real change rather than written every pass: the store
-   * publishes a new view per frame while text streams.
+   * Which is what "open the thread" means for a chat thread: the child is gone
+   * after an auto-sleep, a stop or a restart, and the conversation is not.
+   * `pilot.open` resumes off the native id the row kept, so the timeline
+   * already on screen goes on rather than starting again.
+   *
+   * Guarded four ways, because `Runtime::open` stops whatever it finds first:
+   * once per mount, never on a row this window already opened (a launch does it
+   * before the pane exists), never when this pane has already seen a session
+   * start, and never while the row is mid-turn. Without those, mounting a pane
+   * would kill the child answering in it.
    */
+  let resumed = false;
   $effect(() => {
-    const next =
-      view.status === "busy" ? "running" : view.status === "waiting" ? "waiting" : "ready";
+    if (resumed) return;
     const row = app.threadById(threadId);
-    if (row && row.status !== next) app.setThreadStatus(threadId, next);
+    if (!row || row.runtime !== "pilot") return;
+    if (pilotSessionOpenedHere(threadId) || view.nativeSessionId) return;
+    if (row.status === "running" || row.status === "waiting") return;
+    resumed = true;
+    void openSession();
   });
 
   // The host keeps pushing at a device that asked for a thread until it says
@@ -123,10 +134,7 @@
     if (opening) return;
     opening = true;
     try {
-      await backend().pilot.open(threadId);
-    } catch (err) {
-      log.warn("pilot.pane", "pilot.open.failed", { thread: threadId, reason: String(err) });
-      notifications.error(t("pilot.openFailed"));
+      await openPilotSession(threadId);
     } finally {
       opening = false;
     }

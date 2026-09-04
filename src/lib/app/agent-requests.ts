@@ -19,7 +19,7 @@
  */
 
 import { app } from "./store.svelte";
-import { workspace } from "$lib/backend";
+import { backend, workspace } from "$lib/backend";
 import { logger } from "$lib/shared/services/logger.svelte";
 import { notifications } from "$lib/features/notifications/store.svelte";
 import { t } from "$lib/i18n/index.svelte";
@@ -30,6 +30,9 @@ import { createProject } from "$lib/features/project/api";
 import { moveThreadToProject } from "$lib/features/thread/move";
 import { withUnattendedArgs } from "$lib/features/thread/session";
 import { closeThread, launchAgent } from "$lib/features/thread/api";
+import { pilotCatalog } from "$lib/features/pilot/catalog.svelte";
+import { chatSpawnDecision } from "$lib/features/pilot/launch";
+import { openPilotSession } from "$lib/features/pilot/session";
 import { canSettle } from "$lib/domain/thread-settle";
 import {
   comboArgs,
@@ -85,6 +88,13 @@ interface SpawnRequest {
   delegationMode?: 'normal' | 'delegation';
   agent?: string | null;
   prompt?: string | null;
+  /**
+   * `"terminal"` or `"pilot"`, decided at the endpoint (`spawn_runtime` in
+   * `boite-agent-api`): what the request asked for, or the caller's own when it
+   * asked for nothing. Absent on a request written before the pilot existed,
+   * which reads as terminal like every other absent runtime.
+   */
+  runtime?: string | null;
 }
 
 interface CloseRequest {
@@ -349,6 +359,28 @@ async function handleSpawn(req: SpawnRequest, from: RequestSource) {
   // often in another project, and a spawn they never clicked used to take the
   // screen away mid-sentence. The toast is what says it happened.
   const args = withUnattendedArgs(launch.cmd, launch.args, launch.iconKey);
+  // Which runtime the worker is driven on, decided before the row is written:
+  // the five pilot columns have to be in the INSERT, since `threadPane` reads
+  // `runtime` in the same frame to know whether this thread gets a terminal or
+  // a conversation. The catalog is asked first because the answer depends on
+  // which drivers this machine actually has.
+  await pilotCatalog.ensure();
+  const decision = chatSpawnDecision({
+    runtime: req.runtime,
+    cmd: launch.cmd,
+    args,
+    agent: req.agent?.trim() || launch.label,
+    catalog: pilotCatalog.current,
+    experiment: settings.state.experimentPilot,
+  });
+  // The agent reads the sentence and asks again with a runtime that works. Said
+  // to the user too, since a worker they were told about never appeared.
+  if (decision.kind === "refused") {
+    notifications.error(t("thread.spawnNoChat", { agent: req.agent ?? launch.label }));
+    await answerRequest(req, { error: decision.reason }, from);
+    return;
+  }
+  const chat = decision.kind === "chat" ? decision.launch : null;
   const thread = await launchAgent(
     project,
     { ...launch, args },
@@ -356,18 +388,46 @@ async function handleSpawn(req: SpawnRequest, from: RequestSource) {
       focus: false,
       parentThreadId: req.parentThreadId,
       delegationMode: req.delegationMode,
+      pilot: chat,
       // Mounting the Terminal is what builds the argv, and the argv is where
       // the briefing goes. Queueing the prompt after the mount hands it to
       // nobody: `withPendingPrompt` has already read an empty queue, and the
       // agent opens at a bare prompt while the caller is told the hand-off
       // worked. A worktree hid it, because that mount waits for git and the
       // staging below wins, so it only bit projects that spawn threads in
-      // place.
-      deferActivation: !!prompt,
+      // place. None of it applies to a chat worker: it has no argv to be typed
+      // at, and its briefing is the turn sent below.
+      deferActivation: !!prompt && !chat,
     },
   );
   if (!thread) {
     await answerRequest(req, { error: "the terminal did not open" }, from);
+    return;
+  }
+  if (chat) {
+    // Awaited, unlike every other launch: the turn below needs a session, and
+    // the caller is holding its call open for an answer it can act on.
+    await openPilotSession(thread.id);
+    if (prompt) {
+      try {
+        await backend().pilot.startTurn(thread.id, prompt);
+      } catch (err) {
+        logger.warn("agent-request", "the briefing did not reach the chat worker", String(err));
+        await answerRequest(
+          req,
+          { error: "the worker opened but its first turn did not start", threadId: thread.id },
+          from,
+        );
+        notifications.success(
+          t("thread.spawnedIn", { label: launch.label, project: project.name }),
+        );
+        return;
+      }
+    }
+    await answerRequest(req, { ok: true, threadId: thread.id }, from);
+    notifications.success(
+      t("thread.spawnedIn", { label: launch.label, project: project.name }),
+    );
     return;
   }
   if (prompt) {
