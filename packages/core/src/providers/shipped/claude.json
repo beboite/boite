@@ -1,0 +1,45 @@
+{
+  "id": "claude",
+  "schemaVersion": 1,
+  "name": "Claude Agent",
+  "shortName": "Claude",
+  "protocol": "claude-sdk",
+  "roots": ["{home}/.claude", "{isolationDir}"],
+  "profiles": {
+    "windows": {
+      "detect": {},
+      "executable": [
+        { "kind": "file", "value": "{home}/.local/bin/claude.exe" },
+        { "kind": "path", "value": "claude" }
+      ],
+      "isolation": { "CLAUDE_CONFIG_DIR": "{isolationDir}" },
+      "close": { "processes": ["claude.exe"] }
+    },
+    "linux": {
+      "detect": {},
+      "executable": [{ "kind": "path", "value": "claude" }],
+      "isolation": { "CLAUDE_CONFIG_DIR": "{isolationDir}" },
+      "close": { "processes": ["claude"] }
+    },
+    "macos": {
+      "detect": {},
+      "executable": [{ "kind": "path", "value": "claude" }],
+      "isolation": { "CLAUDE_CONFIG_DIR": "{isolationDir}" },
+      "close": { "processes": ["claude"] }
+    }
+  },
+  "auth": { "kind": "oauth-cli", "session": [".credentials.json"] },
+  "models": [
+    { "id": "claude-opus-5", "name": "Claude Opus 5", "default": true },
+    { "id": "claude-sonnet-5", "name": "Claude Sonnet 5" },
+    { "id": "claude-haiku-4-5-20251001", "name": "Claude Haiku 4.5" }
+  ],
+  "capabilities": {
+    "approvals": true,
+    "hooks": true,
+    "checkpoint": true,
+    "images": true,
+    "planMode": true,
+    "resume": true
+  }
+}

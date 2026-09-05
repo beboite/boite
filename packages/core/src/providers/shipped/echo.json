@@ -1,0 +1,23 @@
+{
+  "id": "echo",
+  "schemaVersion": 1,
+  "name": "Echo",
+  "shortName": "Echo",
+  "protocol": "echo",
+  "roots": ["{isolationDir}"],
+  "profiles": {
+    "windows": { "detect": {}, "executable": [], "isolation": {} },
+    "linux": { "detect": {}, "executable": [], "isolation": {} },
+    "macos": { "detect": {}, "executable": [], "isolation": {} }
+  },
+  "auth": { "kind": "none" },
+  "models": [{ "id": "echo", "name": "Echo", "default": true }],
+  "capabilities": {
+    "approvals": true,
+    "hooks": false,
+    "checkpoint": false,
+    "images": false,
+    "planMode": false,
+    "resume": true
+  }
+}
