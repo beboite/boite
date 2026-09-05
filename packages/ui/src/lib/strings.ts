@@ -34,6 +34,10 @@ export const strings = {
 
   sidebar: {
     newThread: 'New thread',
+    addProject: 'Add project',
+    projectPath: 'Folder',
+    projectPathPlaceholder: 'Absolute path of the folder',
+    addProjectSubmit: 'Add',
     noProjects: 'No project yet.',
     noThreads: 'No thread in this project.',
     unread: 'Unread',

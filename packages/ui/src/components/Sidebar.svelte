@@ -8,16 +8,61 @@
   let { store }: { store: Store } = $props();
 
   let creating = $state(false);
+  let addingProject = $state(false);
+  let projectPath = $state('');
+
+  async function addProject(event: SubmitEvent) {
+    event.preventDefault();
+    const path = projectPath.trim();
+    if (path.length === 0) return;
+    const project = await store.addProject(path);
+    if (!project) return;
+    projectPath = '';
+    addingProject = false;
+  }
 </script>
 
-<aside>
+<aside data-testid="sidebar">
   <div class="head">
-    <button class="new" onclick={() => (creating = !creating)}>
+    <button class="new" data-testid="new-thread" onclick={() => (creating = !creating)}>
       {strings.sidebar.newThread}
+    </button>
+    <button
+      class="quiet add"
+      data-testid="add-project"
+      onclick={() => (addingProject = !addingProject)}
+    >
+      {strings.sidebar.addProject}
     </button>
   </div>
 
   <div class="scroll">
+    {#if addingProject}
+      <form onsubmit={addProject} data-testid="add-project-form">
+        <label>
+          <span>{strings.sidebar.projectPath}</span>
+          <input
+            data-testid="project-path"
+            bind:value={projectPath}
+            placeholder={strings.sidebar.projectPathPlaceholder}
+          />
+        </label>
+        <div class="actions">
+          <button
+            type="submit"
+            class="primary"
+            data-testid="project-add"
+            disabled={projectPath.trim().length === 0}
+          >
+            {strings.sidebar.addProjectSubmit}
+          </button>
+          <button type="button" class="quiet" onclick={() => (addingProject = false)}>
+            {strings.newThread.cancel}
+          </button>
+        </div>
+      </form>
+    {/if}
+
     {#if creating}
       <NewThreadForm {store} done={() => (creating = false)} />
     {/if}
@@ -32,6 +77,8 @@
       <section>
         <button
           class="quiet project"
+          data-testid="project-row"
+          data-project-id={project.id}
           aria-expanded={!collapsed}
           title={project.path}
           onclick={() => store.toggleProject(project.id)}
@@ -50,6 +97,9 @@
               <li>
                 <button
                   class="quiet thread"
+                  data-testid="thread-row"
+                  data-thread-id={thread.id}
+                  data-status={thread.status}
                   class:open={store.openThread?.id === thread.id}
                   onclick={() => void store.open(thread.id)}
                 >
@@ -83,12 +133,14 @@
   }
 
   .head {
+    display: flex;
+    gap: 6px;
     padding: 6px;
     border-bottom: 1px solid var(--border);
   }
 
   .new {
-    width: 100%;
+    flex: 1;
     border-color: var(--accent);
     color: var(--accent);
     background: transparent;
@@ -96,6 +148,29 @@
 
   .new:hover {
     background: var(--accent-soft);
+  }
+
+  .add {
+    flex: none;
+  }
+
+  form {
+    display: grid;
+    gap: 6px;
+    padding: 8px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--panel);
+    margin-bottom: 8px;
+  }
+
+  form input {
+    width: 100%;
+  }
+
+  .actions {
+    display: flex;
+    gap: 6px;
   }
 
   .scroll {

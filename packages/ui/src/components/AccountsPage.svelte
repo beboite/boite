@@ -19,7 +19,7 @@
   }
 </script>
 
-<div class="page">
+<div class="page" data-testid="accounts-page">
   <header>
     <h1>{strings.accounts.heading}</h1>
     <button class="quiet" onclick={() => (adding = !adding)}>{strings.accounts.add}</button>
@@ -70,7 +70,7 @@
       </thead>
       <tbody>
         {#each store.accounts as account (account.id)}
-          <tr>
+          <tr data-testid="account-row" data-account-id={account.id}>
             <td>{account.label}</td>
             <td class="mono">{store.providerOf(account.providerId)?.shortName ?? account.providerId}</td>
             <td class="mono">{account.identity ?? strings.common.none}</td>

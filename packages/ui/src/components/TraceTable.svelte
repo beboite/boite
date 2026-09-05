@@ -11,14 +11,14 @@
 
 <div class="trace">
   {#if capability}
-    <p class="note">
+    <p class="note" data-testid="trace-note">
       <span class="mode mono">{capability.os} / {capability.mode}</span>
       {capability.note}
     </p>
   {/if}
 
   {#if records.length === 0}
-    <p class="empty">{strings.trace.empty}</p>
+    <p class="empty" data-testid="trace-empty">{strings.trace.empty}</p>
   {:else}
     <table>
       <thead>
@@ -33,8 +33,8 @@
         </tr>
       </thead>
       <tbody>
-        {#each records as record (record.pid)}
-          <tr class:live={record.exitedAt === null}>
+        {#each records as record (`${record.pid}-${record.startedAt}`)}
+          <tr class:live={record.exitedAt === null} data-testid="trace-row" data-pid={record.pid}>
             <td class="mono exe" title={record.commandLine ?? record.exe}>{record.exe}</td>
             <td class="mono">{record.pid}</td>
             <td class="mono">{time(record.startedAt)}</td>

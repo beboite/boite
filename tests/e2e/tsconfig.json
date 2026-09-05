@@ -1,0 +1,9 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "typeRoots": ["../../packages/core/node_modules/@types", "../../node_modules/@types"],
+    "types": ["bun"],
+    "lib": ["ES2023", "DOM"]
+  },
+  "include": ["**/*.ts"]
+}

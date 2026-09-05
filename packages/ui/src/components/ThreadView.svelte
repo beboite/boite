@@ -28,8 +28,8 @@
   {@const thread = store.openThread}
   <section class="thread">
     <header>
-      <h1>{thread.title}</h1>
-      <StatusPill status={thread.status} />
+      <h1 data-testid="thread-title">{thread.title}</h1>
+      <StatusPill status={thread.status} testid="thread-status" />
       <span class="mono muted cwd" title={thread.cwd}>{thread.cwd}</span>
       <span class="muted model">{thread.model ?? strings.thread.noModel}</span>
     </header>
@@ -38,6 +38,7 @@
       {#each tabs as tab (tab.id)}
         <button
           class="quiet"
+          data-testid="tab-{tab.id}"
           role="tab"
           aria-selected={store.tab === tab.id}
           class:active={store.tab === tab.id}
@@ -52,7 +53,7 @@
       <MessageList {store} threadId={thread.id} messages={thread.messages} />
       <Composer {store} {thread} />
     {:else}
-      <div class="scroll">
+      <div class="scroll" data-testid="trace-panel">
         <TraceTable records={store.trace} capability={store.core?.trace ?? null} />
       </div>
     {/if}

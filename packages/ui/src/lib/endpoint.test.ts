@@ -21,6 +21,16 @@ describe('resolveEndpoint', () => {
     expect(window.location.search).toBe('?keep=1');
   });
 
+  test('the core pairing link carries the token alone, on its own origin', async () => {
+    at('/?token=abc123');
+
+    const endpoint = await resolveEndpoint();
+
+    expect(endpoint).toEqual({ url: window.location.origin, token: 'abc123' });
+    expect(readStoredEndpoint()).toEqual({ url: window.location.origin, token: 'abc123' });
+    expect(window.location.search).toBe('');
+  });
+
   test('what a pairing link stored is used next time', async () => {
     storeEndpoint({ url: 'http://10.0.0.5:9000/', token: 'stored' });
 

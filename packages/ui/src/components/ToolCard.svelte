@@ -13,8 +13,13 @@
   let open = $state(false);
 </script>
 
-<div class="tool">
-  <button class="quiet head" aria-expanded={open} onclick={() => (open = !open)}>
+<div class="tool" data-testid="tool-card" data-status={status}>
+  <button
+    class="quiet head"
+    data-testid="tool-toggle"
+    aria-expanded={open}
+    onclick={() => (open = !open)}
+  >
     <span class="caret" class:open>&rsaquo;</span>
     <span class="mono name">{name}</span>
     <span class="status" class:done={status === 'done'} class:running={status === 'running'} class:error={status === 'error'} class:denied={status === 'denied'}>
@@ -25,9 +30,9 @@
   {#if open}
     <div class="body">
       <div class="label">{strings.chat.toolInput}</div>
-      <pre class="mono">{json(input)}</pre>
+      <pre class="mono" data-testid="tool-input">{json(input)}</pre>
       <div class="label">{strings.chat.toolOutput}</div>
-      <pre class="mono">{output ?? strings.chat.noOutput}</pre>
+      <pre class="mono" data-testid="tool-output">{output ?? strings.chat.noOutput}</pre>
     </div>
   {/if}
 </div>

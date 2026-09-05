@@ -16,7 +16,12 @@
   } = $props();
 </script>
 
-<div class="permission" class:resolved={decision !== null}>
+<div
+  class="permission"
+  class:resolved={decision !== null}
+  data-testid="permission-card"
+  data-decision={decision ?? 'pending'}
+>
   <div class="head">
     <strong>{strings.chat.permissionHeading}</strong>
     <span class="muted">{strings.chat.permissionBody}</span>
@@ -27,16 +32,20 @@
     <p class="muted">{request.description}</p>
   {/if}
   {#if request}
-    <pre class="mono">{json(request.input)}</pre>
+    <pre class="mono" data-testid="permission-input">{json(request.input)}</pre>
   {/if}
 
   {#if decision === null}
     <div class="actions">
-      <button class="primary" onclick={() => answer('allow')}>{strings.chat.allow}</button>
-      <button class="danger" onclick={() => answer('deny')}>{strings.chat.deny}</button>
+      <button class="primary" data-testid="permission-allow" onclick={() => answer('allow')}>
+        {strings.chat.allow}
+      </button>
+      <button class="danger" data-testid="permission-deny" onclick={() => answer('deny')}>
+        {strings.chat.deny}
+      </button>
     </div>
   {:else}
-    <div class="verdict" class:denied={decision === 'deny'}>
+    <div class="verdict" class:denied={decision === 'deny'} data-testid="permission-verdict">
       {decision === 'allow' ? strings.chat.allowed : strings.chat.denied}
     </div>
   {/if}

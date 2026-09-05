@@ -41,12 +41,12 @@
   }
 </script>
 
-<form onsubmit={submit}>
+<form onsubmit={submit} data-testid="new-thread-form">
   <h2>{strings.newThread.heading}</h2>
 
   <label>
     <span>{strings.newThread.project}</span>
-    <select bind:value={projectId}>
+    <select bind:value={projectId} data-testid="new-thread-project">
       {#each store.projects as project (project.id)}
         <option value={project.id}>{project.name}</option>
       {/each}
@@ -55,7 +55,7 @@
 
   <label>
     <span>{strings.newThread.provider}</span>
-    <select bind:value={providerId}>
+    <select bind:value={providerId} data-testid="new-thread-provider">
       {#each store.providers as provider (provider.id)}
         <option value={provider.id}>
           {provider.name}{provider.available ? '' : ` (${strings.newThread.unavailable})`}
@@ -67,6 +67,7 @@
   <label>
     <span>{strings.newThread.account}</span>
     <select
+      data-testid="new-thread-account"
       value={accountId}
       onchange={(event) => (chosenAccountId = event.currentTarget.value)}
       disabled={candidates.length === 0}
@@ -79,7 +80,7 @@
 
   <label>
     <span>{strings.newThread.permissionMode}</span>
-    <select bind:value={permissionMode}>
+    <select bind:value={permissionMode} data-testid="new-thread-mode">
       {#each modes as mode (mode)}
         <option value={mode}>{strings.permissionMode[mode]}</option>
       {/each}
@@ -88,7 +89,7 @@
 
   <label>
     <span>{strings.newThread.title}</span>
-    <input bind:value={title} placeholder={strings.newThread.titlePlaceholder} />
+    <input bind:value={title} data-testid="new-thread-title" placeholder={strings.newThread.titlePlaceholder} />
   </label>
 
   {#if candidates.length === 0}
@@ -96,7 +97,12 @@
   {/if}
 
   <div class="actions">
-    <button type="submit" class="primary" disabled={!projectId || !accountId}>
+    <button
+      type="submit"
+      class="primary"
+      data-testid="new-thread-create"
+      disabled={!projectId || !accountId}
+    >
       {strings.newThread.create}
     </button>
     <button type="button" class="quiet" onclick={done}>{strings.newThread.cancel}</button>

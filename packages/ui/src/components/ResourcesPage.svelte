@@ -15,7 +15,7 @@
   }
 </script>
 
-<div class="page">
+<div class="page" data-testid="resources-page">
   <header>
     <h1>{strings.resources.heading}</h1>
     <button class="quiet" onclick={() => void store.refreshResources()}>
@@ -28,7 +28,7 @@
   {/if}
 
   {#each store.resources as entry (entry.threadId)}
-    <section class="card">
+    <section class="card" data-testid="resource-row" data-thread-id={entry.threadId}>
       <div class="head">
         <button class="quiet title" onclick={() => void store.open(entry.threadId)}>
           {entry.title}

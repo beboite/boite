@@ -48,12 +48,20 @@ export function clearStoredEndpoint(): void {
   }
 }
 
+/**
+ * The core's own pairing link carries the token alone, on a page it serves
+ * itself, so an absent `core` parameter means the origin of this page.
+ */
 function takeFromQuery(): Endpoint | null {
   const params = new URLSearchParams(window.location.search);
   const core = params.get(CORE_QUERY_PARAM);
-  if (!core) return null;
+  const token = params.get(PAIR_QUERY_PARAM);
+  if (!core && !token) return null;
 
-  const endpoint: Endpoint = { url: normalise(core), token: params.get(PAIR_QUERY_PARAM) ?? '' };
+  const endpoint: Endpoint = {
+    url: normalise(core ?? window.location.origin),
+    token: token ?? ''
+  };
   storeEndpoint(endpoint);
 
   params.delete(CORE_QUERY_PARAM);

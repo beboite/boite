@@ -25,6 +25,7 @@
     {#each pages as page (page.id)}
       <button
         class="quiet"
+        data-testid="nav-{page.id}"
         class:active={store.page === page.id}
         aria-current={store.page === page.id ? 'page' : undefined}
         onclick={() => void go(page.id)}

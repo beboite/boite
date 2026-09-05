@@ -8,9 +8,9 @@
 </script>
 
 <footer>
-  <span class="state {store.connection}">{connection}</span>
+  <span class="state {store.connection}" data-testid="status-connection">{connection}</span>
   <span class="sep">/</span>
-  <span class="mono">
+  <span class="mono" data-testid="status-core">
     {#if store.core}
       {strings.app.name}
       {store.core.version}

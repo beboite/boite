@@ -31,7 +31,7 @@
   }
 </script>
 
-<div class="page">
+<div class="page" data-testid="settings-page">
   <header>
     <h1>{strings.settings.heading}</h1>
   </header>
@@ -41,7 +41,7 @@
     <div class="grid">
       <label>
         <span>{strings.settings.coreUrl}</span>
-        <input bind:value={url} placeholder="http://127.0.0.1:8777" />
+        <input bind:value={url} data-testid="settings-core-url" placeholder="http://127.0.0.1:8777" />
       </label>
       <label>
         <span>{strings.settings.token}</span>
@@ -89,7 +89,7 @@
     {#if store.core}
       <dl>
         <dt>{strings.settings.version}</dt>
-        <dd class="mono">{store.core.version}</dd>
+        <dd class="mono" data-testid="settings-version">{store.core.version}</dd>
         <dt>{strings.settings.protocol}</dt>
         <dd class="mono">{store.core.protocolVersion}</dd>
         <dt>{strings.settings.os}</dt>
@@ -97,7 +97,9 @@
         <dt>{strings.settings.pid}</dt>
         <dd class="mono">{store.core.pid}</dd>
         <dt>{strings.settings.endpoint}</dt>
-        <dd class="mono">{store.core.endpoint.host}:{store.core.endpoint.port}</dd>
+        <dd class="mono" data-testid="settings-endpoint">
+          {store.core.endpoint.host}:{store.core.endpoint.port}
+        </dd>
         <dt>{strings.settings.dataDir}</dt>
         <dd class="mono">{store.core.dataDir}</dd>
         <dt>{strings.settings.pairingUrl}</dt>

@@ -2,10 +2,12 @@
   import type { ThreadStatus } from '@boite/contracts';
   import { strings } from '../lib/strings';
 
-  let { status }: { status: ThreadStatus } = $props();
+  let { status, testid }: { status: ThreadStatus; testid?: string } = $props();
 </script>
 
-<span class="pill {status}">{strings.threadStatus[status]}</span>
+<span class="pill {status}" data-testid={testid} data-status={status}>
+  {strings.threadStatus[status]}
+</span>
 
 <style>
   .pill {

@@ -10,6 +10,7 @@ import type {
   ProviderId,
   ProviderRejected,
   ProviderSummary,
+  RequestId,
   RpcEventName,
   SchedulerState,
   Settings,
@@ -43,6 +44,11 @@ function observable(client: Client): client is ObservableClient {
   return 'onState' in client;
 }
 
+/** A pid alone is reused by the OS, so a trace row is a pid and its start. */
+function sameProcess(a: ProcessRecord, b: ProcessRecord): boolean {
+  return a.pid === b.pid && a.startedAt === b.startedAt;
+}
+
 export class Store {
   connection = $state<ClientState>('idle');
   core = $state<CoreInfo | null>(null);
@@ -63,6 +69,8 @@ export class Store {
   usage = $state<UsageReport | null>(null);
   trace = $state<ProcessRecord[]>([]);
   pendingPermissions = $state<PermissionRequest[]>([]);
+  /** Kept after the answer so a resolved card still shows what was asked. */
+  permissionRequests = $state<Record<RequestId, PermissionRequest>>({});
   collapsedProjects = $state<string[]>([]);
 
   #client: Client | null = null;
@@ -181,6 +189,7 @@ export class Store {
         ...this.pendingPermissions.filter((p) => p.id !== request.id),
         request
       ];
+      this.permissionRequests = { ...this.permissionRequests, [request.id]: request };
     });
     on('permission.resolved', ({ requestId }) => {
       this.pendingPermissions = this.pendingPermissions.filter((p) => p.id !== requestId);
@@ -188,11 +197,11 @@ export class Store {
 
     on('process.started', (record) => {
       if (this.openThread?.id !== record.threadId) return;
-      this.trace = [record, ...this.trace.filter((p) => p.pid !== record.pid)];
+      this.trace = [record, ...this.trace.filter((p) => !sameProcess(p, record))];
     });
     on('process.exited', (record) => {
       if (this.openThread?.id !== record.threadId) return;
-      this.trace = this.trace.map((p) => (p.pid === record.pid ? record : p));
+      this.trace = this.trace.map((p) => (sameProcess(p, record) ? record : p));
     });
 
     on('scheduler.updated', (state) => {
@@ -321,6 +330,20 @@ export class Store {
       }
     } catch (error) {
       this.#fail(error);
+    }
+  }
+
+  async addProject(path: string): Promise<Project | null> {
+    const client = this.#client;
+    if (!client) return null;
+    try {
+      const project = await client.call('projects.add', { path });
+      if (!this.projects.some((p) => p.id === project.id))
+        this.projects = [...this.projects, project];
+      return project;
+    } catch (error) {
+      this.#fail(error);
+      return null;
     }
   }
 

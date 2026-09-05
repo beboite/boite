@@ -14,7 +14,7 @@
   );
 </script>
 
-<div class="page">
+<div class="page" data-testid="usage-page">
   <header>
     <h1>{strings.usage.heading}</h1>
     <button class="quiet" onclick={() => void store.refreshUsage()}>{strings.common.refresh}</button>
@@ -38,7 +38,7 @@
       </thead>
       <tbody>
         {#each rows as row (row.threadId)}
-          <tr>
+          <tr data-testid="usage-row" data-thread-id={row.threadId}>
             <td>
               <button class="quiet" onclick={() => void store.open(row.threadId)}>{row.title}</button>
             </td>
@@ -52,7 +52,7 @@
       </tbody>
       {#if store.usage}
         <tfoot>
-          <tr>
+          <tr data-testid="usage-total">
             <td>{strings.usage.total}</td>
             <td class="mono">{tokens(store.usage.total.inputTokens)}</td>
             <td class="mono">{tokens(store.usage.total.outputTokens)}</td>

@@ -54,6 +54,7 @@
 
   <div class="input">
     <textarea
+      data-testid="composer-input"
       bind:value={draft}
       {onkeydown}
       rows="3"
@@ -62,9 +63,16 @@
     ></textarea>
     <div class="buttons">
       {#if busy}
-        <button class="danger" onclick={() => void store.stop()}>{strings.composer.stop}</button>
+        <button class="danger" data-testid="composer-stop" onclick={() => void store.stop()}>
+          {strings.composer.stop}
+        </button>
       {/if}
-      <button class="primary" disabled={draft.trim().length === 0} onclick={submit}>
+      <button
+        class="primary"
+        data-testid="composer-send"
+        disabled={draft.trim().length === 0}
+        onclick={submit}
+      >
         {strings.composer.send}
       </button>
     </div>

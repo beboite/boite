@@ -43,13 +43,13 @@
   });
 </script>
 
-<div class="timeline" bind:this={viewport}>
+<div class="timeline" bind:this={viewport} data-testid="timeline">
   {#if messages.length === 0}
     <p class="empty">{strings.thread.empty}</p>
   {/if}
 
   {#each messages as message (message.id)}
-    <article class="message {message.role}">
+    <article class="message {message.role}" data-testid="message" data-role={message.role}>
       <div class="meta">
         <span>{roleLabels[message.role]}</span>
         <span class="mono">{time(message.createdAt)}</span>
@@ -61,7 +61,9 @@
       <div class="bubble">
         {#each message.parts as part, index (index)}
           {#if part.type === 'text'}
-            <p class="text">{part.text}</p>
+            {#if part.text.length > 0}
+              <p class="text" data-testid="text-part">{part.text}</p>
+            {/if}
           {:else if part.type === 'tool'}
             <ToolCard
               name={part.name}
@@ -73,7 +75,7 @@
             <PermissionCard
               toolName={part.toolName}
               decision={part.decision}
-              request={store.pendingPermissions.find((p) => p.id === part.requestId) ?? null}
+              request={store.permissionRequests[part.requestId] ?? null}
               answer={(decision) => void store.answer(part.requestId, decision)}
             />
           {:else}
