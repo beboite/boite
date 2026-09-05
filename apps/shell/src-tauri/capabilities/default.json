@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "What the Boite UI needs: the core IPC, and nothing else. `core_endpoint` is an application command, which capabilities do not gate.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

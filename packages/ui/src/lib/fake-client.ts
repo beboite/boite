@@ -1,0 +1,1142 @@
+import {
+  PROTOCOL_VERSION,
+  RpcErrorCode,
+  type Account,
+  type CoreInfo,
+  type Message,
+  type MessagePart,
+  type PermissionRequest,
+  type ProcessRecord,
+  type Project,
+  type ProviderSummary,
+  type RpcEventName,
+  type RpcEvents,
+  type RpcMethodName,
+  type RpcParams,
+  type RpcResult,
+  type SchedulerState,
+  type Settings,
+  type Thread,
+  type ThreadId,
+  type ThreadResources,
+  type ThreadStatus,
+  type ThreadSummary,
+  type Turn,
+  type Usage
+} from '@boite/contracts';
+import { RpcFailure, type ClientState, type EventHandler, type ObservableClient } from './client';
+
+export interface FakeClientOptions {
+  /** Milliseconds between two streamed chunks. Tests pass 0. */
+  delayMs?: number;
+}
+
+const T0 = Date.UTC(2026, 8, 5, 9, 0, 0);
+const DATA_DIR = 'C:\\Users\\you\\AppData\\Local\\boite2';
+
+function toSummary(thread: Thread): ThreadSummary {
+  const { messages: _messages, turns: _turns, ...rest } = thread;
+  return { ...rest };
+}
+
+function emptyUsage(): Usage {
+  return {
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+    costUsdEquivalent: 0
+  };
+}
+
+function addUsage(a: Usage, b: Usage): Usage {
+  return {
+    inputTokens: a.inputTokens + b.inputTokens,
+    outputTokens: a.outputTokens + b.outputTokens,
+    cacheReadTokens: a.cacheReadTokens + b.cacheReadTokens,
+    cacheWriteTokens: a.cacheWriteTokens + b.cacheWriteTokens,
+    costUsdEquivalent: (a.costUsdEquivalent ?? 0) + (b.costUsdEquivalent ?? 0)
+  };
+}
+
+function chunkText(text: string, pieces: number): string[] {
+  if (text.length === 0) return [''];
+  const size = Math.max(1, Math.ceil(text.length / pieces));
+  const out: string[] = [];
+  for (let i = 0; i < text.length; i += size) out.push(text.slice(i, i + size));
+  return out;
+}
+
+const SPAWN_MARKER = /\[spawn:([^\]]+)\]/;
+
+/**
+ * The whole core in memory, contract-accurate: what `vite dev` uses behind
+ * `?fake=1` and what every test runs against.
+ */
+export class FakeClient implements ObservableClient {
+  #state: ClientState = 'idle';
+  #handlers = new Map<string, Set<(payload: unknown) => void>>();
+  #stateHandlers = new Set<(state: ClientState) => void>();
+  #subscribed = new Set<ThreadId>();
+
+  #projects: Project[] = [];
+  #providers: ProviderSummary[] = [];
+  #accounts: Account[] = [];
+  #threads = new Map<ThreadId, Thread>();
+  #processes: ProcessRecord[] = [];
+  #usage = new Map<ThreadId, Usage>();
+  #settings: Settings;
+  #scheduler: SchedulerState;
+  #core: CoreInfo;
+
+  #pendingPermissions = new Map<string, (decision: 'allow' | 'deny') => void>();
+  #inFlight = new Map<ThreadId, { cancelled: boolean; done: Promise<void> }>();
+  #seq = 0;
+  #delayMs: number;
+
+  constructor(options: FakeClientOptions = {}) {
+    this.#delayMs = options.delayMs ?? 18;
+    this.#settings = {
+      maxConcurrentTurns: 6,
+      perAccountConcurrency: 2,
+      warmProcessMinutes: 5,
+      listenOnLan: false
+    };
+    this.#core = {
+      version: '2.0.0-alpha.1',
+      protocolVersion: PROTOCOL_VERSION,
+      os: 'windows',
+      pid: 4242,
+      startedAt: T0,
+      endpoint: { host: '127.0.0.1', port: 8777 },
+      pairingUrl: 'http://192.168.1.20:8777/?core=http://192.168.1.20:8777&token=fake',
+      dataDir: DATA_DIR,
+      trace: {
+        os: 'windows',
+        mode: 'events',
+        note: 'Job object completion port: every process this thread launched is reported exactly, including the ones its children launched.'
+      }
+    };
+    this.#scheduler = {
+      maxConcurrentTurns: this.#settings.maxConcurrentTurns,
+      perAccountConcurrency: this.#settings.perAccountConcurrency,
+      running: [],
+      queued: []
+    };
+    this.#seed();
+  }
+
+  // -------------------------------------------------------------------------
+  // Client surface
+  // -------------------------------------------------------------------------
+
+  get state(): ClientState {
+    return this.#state;
+  }
+
+  get core(): CoreInfo | null {
+    return this.#state === 'ready' ? this.#core : null;
+  }
+
+  onState(handler: (state: ClientState) => void): () => void {
+    this.#stateHandlers.add(handler);
+    return () => this.#stateHandlers.delete(handler);
+  }
+
+  on<E extends RpcEventName>(event: E, handler: EventHandler<E>): () => void {
+    let set = this.#handlers.get(event);
+    if (!set) {
+      set = new Set();
+      this.#handlers.set(event, set);
+    }
+    const erased = handler as (payload: unknown) => void;
+    set.add(erased);
+    return () => {
+      set.delete(erased);
+    };
+  }
+
+  async connect(): Promise<CoreInfo> {
+    this.#setState('connecting');
+    await this.#tick();
+    this.#setState('ready');
+    return this.#core;
+  }
+
+  close(): void {
+    this.#setState('closed');
+  }
+
+  async call<M extends RpcMethodName>(method: M, params: RpcParams<M>): Promise<RpcResult<M>> {
+    if (this.#state !== 'ready' && method !== 'hello') {
+      throw new RpcFailure({ code: RpcErrorCode.Internal, message: 'not connected' });
+    }
+    await this.#tick();
+    return this.#dispatch(method, params) as RpcResult<M>;
+  }
+
+  /** Resolves when no turn is still streaming. A pending permission blocks it. */
+  async settled(): Promise<void> {
+    while (this.#inFlight.size > 0) {
+      await Promise.all([...this.#inFlight.values()].map((entry) => entry.done));
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Dispatch
+  // -------------------------------------------------------------------------
+
+  #dispatch(method: RpcMethodName, rawParams: unknown): unknown {
+    switch (method) {
+      case 'hello':
+        return { core: this.#core };
+
+      case 'projects.list':
+        return structuredClone(this.#projects);
+      case 'projects.add': {
+        const params = rawParams as RpcParams<'projects.add'>;
+        const project: Project = {
+          id: `p-${++this.#seq}`,
+          name: params.name ?? params.path.split(/[\\/]/).filter(Boolean).pop() ?? params.path,
+          path: params.path,
+          createdAt: this.#now()
+        };
+        this.#projects.push(project);
+        return structuredClone(project);
+      }
+      case 'projects.remove': {
+        const params = rawParams as RpcParams<'projects.remove'>;
+        this.#projects = this.#projects.filter((p) => p.id !== params.projectId);
+        for (const thread of [...this.#threads.values()]) {
+          if (thread.projectId !== params.projectId) continue;
+          this.#threads.delete(thread.id);
+          this.#emit('thread.removed', { threadId: thread.id });
+        }
+        return { ok: true };
+      }
+
+      case 'providers.list':
+      case 'providers.reload':
+        return { loaded: structuredClone(this.#providers), rejected: [] };
+      case 'providers.dryRun': {
+        const params = rawParams as RpcParams<'providers.dryRun'>;
+        const provider = this.#providers[0];
+        if (!params.file.endsWith('.json') || !provider) {
+          return {
+            ok: false,
+            rejected: {
+              file: params.file,
+              field: 'file',
+              expected: 'a path ending in .json',
+              message: 'not a descriptor file'
+            }
+          };
+        }
+        return {
+          ok: true,
+          summary: structuredClone(provider),
+          plan: { roots: [DATA_DIR], env: ['BOITE_ISOLATION_DIR'], closes: [] }
+        };
+      }
+
+      case 'accounts.list':
+        return structuredClone(this.#accounts);
+      case 'accounts.add': {
+        const params = rawParams as RpcParams<'accounts.add'>;
+        const id = `a-${++this.#seq}`;
+        const account: Account = {
+          id,
+          providerId: params.providerId,
+          label: params.label,
+          isolationDir: params.useDefaultLocation ? null : `${DATA_DIR}\\accounts\\${id}`,
+          status: 'unknown',
+          identity: null,
+          createdAt: this.#now()
+        };
+        this.#accounts.push(account);
+        this.#emit('accounts.updated', structuredClone(account));
+        return structuredClone(account);
+      }
+      case 'accounts.remove': {
+        const params = rawParams as RpcParams<'accounts.remove'>;
+        this.#accounts = this.#accounts.filter((a) => a.id !== params.accountId);
+        return { ok: true };
+      }
+      case 'accounts.check': {
+        const params = rawParams as RpcParams<'accounts.check'>;
+        const account = this.#accounts.find((a) => a.id === params.accountId);
+        if (!account) throw this.#notFound('account', params.accountId);
+        account.status = account.isolationDir === null ? 'ok' : 'unauthenticated';
+        account.identity = account.status === 'ok' ? 'you@example.com' : null;
+        this.#emit('accounts.updated', structuredClone(account));
+        return structuredClone(account);
+      }
+
+      case 'threads.list': {
+        const params = rawParams as RpcParams<'threads.list'>;
+        return [...this.#threads.values()]
+          .filter((t) => (params.projectId ? t.projectId === params.projectId : true))
+          .filter((t) => (params.includeArchived ? true : !t.archived))
+          .map((t) => structuredClone(toSummary(t)));
+      }
+      case 'threads.create': {
+        const params = rawParams as RpcParams<'threads.create'>;
+        const project = this.#projects.find((p) => p.id === params.projectId);
+        if (!project) throw this.#notFound('project', params.projectId);
+        const at = this.#now();
+        const thread: Thread = {
+          id: `t-${++this.#seq}`,
+          projectId: params.projectId,
+          title: params.title ?? 'Untitled thread',
+          providerId: params.providerId,
+          accountId: params.accountId,
+          model: params.model ?? null,
+          cwd: params.cwd ?? project.path,
+          permissionMode: params.permissionMode ?? 'default',
+          status: 'idle',
+          unread: false,
+          archived: false,
+          sessionId: null,
+          load: null,
+          createdAt: at,
+          updatedAt: at,
+          messages: [],
+          turns: []
+        };
+        this.#threads.set(thread.id, thread);
+        this.#emit('thread.created', structuredClone(toSummary(thread)));
+        return structuredClone(toSummary(thread));
+      }
+      case 'threads.get': {
+        const params = rawParams as RpcParams<'threads.get'>;
+        return structuredClone(this.#thread(params.threadId));
+      }
+      case 'threads.update': {
+        const params = rawParams as RpcParams<'threads.update'>;
+        const thread = this.#thread(params.threadId);
+        if (params.title !== undefined) thread.title = params.title;
+        if (params.model !== undefined) thread.model = params.model;
+        if (params.permissionMode !== undefined) thread.permissionMode = params.permissionMode;
+        return this.#touch(thread);
+      }
+      case 'threads.archive': {
+        const params = rawParams as RpcParams<'threads.archive'>;
+        const thread = this.#thread(params.threadId);
+        thread.archived = params.archived ?? true;
+        return this.#touch(thread);
+      }
+      case 'threads.markRead': {
+        const params = rawParams as RpcParams<'threads.markRead'>;
+        const thread = this.#thread(params.threadId);
+        thread.unread = false;
+        this.#touch(thread);
+        return { ok: true };
+      }
+      case 'threads.subscribe': {
+        const params = rawParams as RpcParams<'threads.subscribe'>;
+        this.#subscribed.add(params.threadId);
+        return { ok: true };
+      }
+      case 'threads.unsubscribe': {
+        const params = rawParams as RpcParams<'threads.unsubscribe'>;
+        this.#subscribed.delete(params.threadId);
+        return { ok: true };
+      }
+
+      case 'turns.start': {
+        const params = rawParams as RpcParams<'turns.start'>;
+        return this.#startTurn(params.threadId, params.prompt);
+      }
+      case 'turns.stop': {
+        const params = rawParams as RpcParams<'turns.stop'>;
+        const running = this.#inFlight.get(params.threadId);
+        if (!running) return { stopped: false };
+        running.cancelled = true;
+        for (const [requestId, resolve] of [...this.#pendingPermissions]) {
+          this.#pendingPermissions.delete(requestId);
+          resolve('deny');
+        }
+        return { stopped: true };
+      }
+
+      case 'permissions.answer': {
+        const params = rawParams as RpcParams<'permissions.answer'>;
+        const resolve = this.#pendingPermissions.get(params.requestId);
+        if (!resolve) throw this.#notFound('permission request', params.requestId);
+        this.#pendingPermissions.delete(params.requestId);
+        resolve(params.decision);
+        return { ok: true };
+      }
+
+      case 'trace.get': {
+        const params = rawParams as RpcParams<'trace.get'>;
+        const rows = this.#processes
+          .filter((p) => p.threadId === params.threadId)
+          .sort((a, b) => b.startedAt - a.startedAt);
+        return structuredClone(params.limit ? rows.slice(0, params.limit) : rows);
+      }
+      case 'resources.list':
+        return structuredClone(this.#resources());
+      case 'resources.killTree': {
+        const params = rawParams as RpcParams<'resources.killTree'>;
+        let killed = 0;
+        for (const record of this.#processes) {
+          if (record.threadId !== params.threadId || record.exitedAt !== null) continue;
+          record.exitedAt = this.#now();
+          record.exitCode = 1;
+          killed += 1;
+          this.#emit('process.exited', structuredClone(record));
+        }
+        const thread = this.#threads.get(params.threadId);
+        if (thread) {
+          thread.load = null;
+          this.#touch(thread);
+        }
+        return { killed };
+      }
+
+      case 'scheduler.get':
+        return structuredClone(this.#scheduler);
+      case 'usage.get': {
+        const params = rawParams as RpcParams<'usage.get'>;
+        const byThread: Record<ThreadId, Usage> = {};
+        let total = emptyUsage();
+        for (const [threadId, usage] of this.#usage) {
+          if (params.threadId && params.threadId !== threadId) continue;
+          byThread[threadId] = { ...usage };
+          total = addUsage(total, usage);
+        }
+        return { byThread, total };
+      }
+
+      case 'settings.get':
+        return { ...this.#settings };
+      case 'settings.set': {
+        const params = rawParams as RpcParams<'settings.set'>;
+        this.#settings = { ...this.#settings, ...params };
+        this.#scheduler = {
+          ...this.#scheduler,
+          maxConcurrentTurns: this.#settings.maxConcurrentTurns,
+          perAccountConcurrency: this.#settings.perAccountConcurrency
+        };
+        this.#emit('scheduler.updated', structuredClone(this.#scheduler));
+        return { ...this.#settings };
+      }
+
+      default: {
+        const unreachable: never = method;
+        throw new RpcFailure({
+          code: RpcErrorCode.MethodNotFound,
+          message: `unknown method ${String(unreachable)}`
+        });
+      }
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Turns
+  // -------------------------------------------------------------------------
+
+  #startTurn(threadId: ThreadId, prompt: string): Turn {
+    const thread = this.#thread(threadId);
+    const at = this.#now();
+    const turn: Turn = {
+      id: `turn-${++this.#seq}`,
+      threadId,
+      status: 'running',
+      queuedAt: at,
+      startedAt: at,
+      finishedAt: null,
+      usage: null,
+      error: null
+    };
+    thread.turns.push(turn);
+
+    const user: Message = {
+      id: `m-${++this.#seq}`,
+      threadId,
+      turnId: turn.id,
+      role: 'user',
+      parts: [{ type: 'text', text: prompt }],
+      state: 'complete',
+      createdAt: at
+    };
+    thread.messages.push(user);
+    this.#emitToThread(threadId, 'message.started', structuredClone(user));
+    this.#emitToThread(threadId, 'message.completed', {
+      threadId,
+      messageId: user.id,
+      state: 'complete'
+    });
+
+    thread.status = 'running';
+    thread.sessionId = thread.sessionId ?? `sess-${turn.id}`;
+    this.#touch(thread);
+    this.#emit('turn.started', structuredClone(turn));
+    this.#pushScheduler(turn, 'running');
+
+    const record = { cancelled: false, done: Promise.resolve() };
+    record.done = this.#stream(thread, turn, prompt, record);
+    this.#inFlight.set(threadId, record);
+
+    return structuredClone(turn);
+  }
+
+  async #stream(
+    thread: Thread,
+    turn: Turn,
+    prompt: string,
+    record: { cancelled: boolean }
+  ): Promise<void> {
+    const message: Message = {
+      id: `m-${++this.#seq}`,
+      threadId: thread.id,
+      turnId: turn.id,
+      role: 'assistant',
+      parts: [{ type: 'text', text: '' }],
+      state: 'streaming',
+      createdAt: this.#now()
+    };
+    thread.messages.push(message);
+    this.#emitToThread(thread.id, 'message.started', structuredClone(message));
+
+    for (const piece of chunkText(prompt, 5)) {
+      if (record.cancelled) break;
+      await this.#pause();
+      const part = message.parts[0];
+      if (part && part.type === 'text') part.text += piece;
+      this.#emitToThread(thread.id, 'message.delta', {
+        threadId: thread.id,
+        messageId: message.id,
+        partIndex: 0,
+        text: piece
+      });
+    }
+
+    if (!record.cancelled && prompt.includes('[permission]')) {
+      await this.#askPermission(thread, turn, message);
+    }
+    if (!record.cancelled && prompt.includes('[tool]')) {
+      await this.#runTool(thread, message);
+    }
+    const spawn = SPAWN_MARKER.exec(prompt);
+    if (!record.cancelled && spawn && spawn[1]) {
+      await this.#spawnProcess(thread, spawn[1]);
+    }
+
+    message.state = 'complete';
+    this.#emitToThread(thread.id, 'message.completed', {
+      threadId: thread.id,
+      messageId: message.id,
+      state: 'complete'
+    });
+
+    const usage: Usage = {
+      inputTokens: Math.max(1, Math.ceil(prompt.length / 4)),
+      outputTokens: Math.max(1, Math.ceil(prompt.length / 4)),
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      costUsdEquivalent: Math.round(prompt.length * 0.02) / 1000
+    };
+    turn.status = record.cancelled ? 'stopped' : 'done';
+    turn.finishedAt = this.#now();
+    turn.usage = usage;
+    this.#usage.set(thread.id, addUsage(this.#usage.get(thread.id) ?? emptyUsage(), usage));
+
+    this.#inFlight.delete(thread.id);
+    thread.status = 'idle';
+    thread.unread = !this.#subscribed.has(thread.id);
+    this.#touch(thread);
+    this.#emit('turn.finished', structuredClone(turn));
+    this.#pushScheduler(turn, 'finished');
+  }
+
+  async #askPermission(thread: Thread, turn: Turn, message: Message): Promise<void> {
+    const requestId = `req-${++this.#seq}`;
+    const partIndex = message.parts.length;
+    const part: MessagePart = {
+      type: 'permission',
+      requestId,
+      toolName: 'Write',
+      decision: null
+    };
+    message.parts.push(part);
+    this.#emitToThread(thread.id, 'message.part', {
+      threadId: thread.id,
+      messageId: message.id,
+      partIndex,
+      part: structuredClone(part)
+    });
+
+    const request: PermissionRequest = {
+      id: requestId,
+      threadId: thread.id,
+      turnId: turn.id,
+      toolName: 'Write',
+      input: { path: `${thread.cwd}\\notes.md`, contents: 'the thing you asked for' },
+      description: 'Write a file inside the working directory',
+      createdAt: this.#now()
+    };
+    thread.status = 'waiting';
+    this.#touch(thread);
+    this.#emit('permission.requested', structuredClone(request));
+
+    const decision = await new Promise<'allow' | 'deny'>((resolve) => {
+      this.#pendingPermissions.set(requestId, resolve);
+    });
+
+    const stored = message.parts[partIndex];
+    if (stored && stored.type === 'permission') stored.decision = decision;
+    this.#emitToThread(thread.id, 'message.part', {
+      threadId: thread.id,
+      messageId: message.id,
+      partIndex,
+      part: { type: 'permission', requestId, toolName: 'Write', decision }
+    });
+    this.#emit('permission.resolved', { requestId, threadId: thread.id, decision });
+
+    thread.status = 'running';
+    this.#touch(thread);
+  }
+
+  async #runTool(thread: Thread, message: Message): Promise<void> {
+    const partIndex = message.parts.length;
+    const toolId = `tool-${++this.#seq}`;
+    const input = { pattern: 'registerMethods', path: thread.cwd };
+    const running: MessagePart = {
+      type: 'tool',
+      toolId,
+      name: 'Grep',
+      input,
+      output: null,
+      status: 'running'
+    };
+    message.parts.push(running);
+    this.#emitToThread(thread.id, 'message.part', {
+      threadId: thread.id,
+      messageId: message.id,
+      partIndex,
+      part: structuredClone(running)
+    });
+
+    await this.#pause();
+
+    const done: MessagePart = {
+      type: 'tool',
+      toolId,
+      name: 'Grep',
+      input,
+      output: 'packages/core/src/modules.ts:12\npackages/core/src/server.ts:44',
+      status: 'done'
+    };
+    message.parts[partIndex] = done;
+    this.#emitToThread(thread.id, 'message.part', {
+      threadId: thread.id,
+      messageId: message.id,
+      partIndex,
+      part: structuredClone(done)
+    });
+  }
+
+  async #spawnProcess(thread: Thread, exe: string): Promise<void> {
+    const pid = 10_000 + ++this.#seq;
+    const record: ProcessRecord = {
+      pid,
+      parentPid: this.#core.pid,
+      threadId: thread.id,
+      exe,
+      commandLine: `${exe} --from boite`,
+      startedAt: this.#now(),
+      exitedAt: null,
+      exitCode: null,
+      cpuMs: null,
+      peakMemoryBytes: null,
+      ioBytes: null
+    };
+    this.#processes.push(record);
+    thread.load = { processes: 1, cpuPercent: 12, memoryBytes: 48 * 1024 * 1024 };
+    this.#touch(thread);
+    this.#emit('process.started', structuredClone(record));
+
+    await this.#pause();
+
+    record.exitedAt = this.#now();
+    record.exitCode = 0;
+    record.cpuMs = 120;
+    record.peakMemoryBytes = 48 * 1024 * 1024;
+    record.ioBytes = 32 * 1024;
+    thread.load = null;
+    this.#touch(thread);
+    this.#emit('process.exited', structuredClone(record));
+  }
+
+  // -------------------------------------------------------------------------
+  // Plumbing
+  // -------------------------------------------------------------------------
+
+  #now(): number {
+    return T0 + this.#seq * 1000;
+  }
+
+  #tick(): Promise<void> {
+    return Promise.resolve();
+  }
+
+  #pause(): Promise<void> {
+    if (this.#delayMs <= 0) return Promise.resolve();
+    return new Promise((resolve) => setTimeout(resolve, this.#delayMs));
+  }
+
+  #setState(state: ClientState): void {
+    if (this.#state === state) return;
+    this.#state = state;
+    for (const handler of this.#stateHandlers) handler(state);
+  }
+
+  #emit<E extends RpcEventName>(event: E, payload: RpcEvents[E]): void {
+    const set = this.#handlers.get(event);
+    if (!set) return;
+    for (const handler of [...set]) handler(payload);
+  }
+
+  #emitToThread<E extends RpcEventName>(threadId: ThreadId, event: E, payload: RpcEvents[E]): void {
+    if (!this.#subscribed.has(threadId)) return;
+    this.#emit(event, payload);
+  }
+
+  #thread(threadId: ThreadId): Thread {
+    const thread = this.#threads.get(threadId);
+    if (!thread) throw this.#notFound('thread', threadId);
+    return thread;
+  }
+
+  #notFound(what: string, id: string): RpcFailure {
+    return new RpcFailure({
+      code: RpcErrorCode.NotFound,
+      message: `no such ${what}: ${id}`,
+      data: { id }
+    });
+  }
+
+  #touch(thread: Thread): ThreadSummary {
+    thread.updatedAt = this.#now();
+    const summary = structuredClone(toSummary(thread));
+    this.#emit('thread.updated', summary);
+    return structuredClone(summary);
+  }
+
+  #pushScheduler(turn: Turn, phase: 'running' | 'finished'): void {
+    if (phase === 'running') {
+      this.#scheduler.running = [
+        ...this.#scheduler.running,
+        { turnId: turn.id, threadId: turn.threadId, startedAt: turn.startedAt ?? this.#now() }
+      ];
+    } else {
+      this.#scheduler.running = this.#scheduler.running.filter((r) => r.turnId !== turn.id);
+    }
+    this.#emit('scheduler.updated', structuredClone(this.#scheduler));
+  }
+
+  #resources(): ThreadResources[] {
+    const out: ThreadResources[] = [];
+    for (const thread of this.#threads.values()) {
+      const mine = this.#processes.filter((p) => p.threadId === thread.id);
+      if (mine.length === 0) continue;
+      out.push({
+        threadId: thread.id,
+        title: thread.title,
+        status: thread.status,
+        live: mine.filter((p) => p.exitedAt === null),
+        totals: {
+          processes: mine.length,
+          cpuMs: mine.reduce((sum, p) => sum + (p.cpuMs ?? 0), 0),
+          peakMemoryBytes: mine.reduce((max, p) => Math.max(max, p.peakMemoryBytes ?? 0), 0)
+        }
+      });
+    }
+    return out.sort((a, b) => b.live.length - a.live.length);
+  }
+
+  // -------------------------------------------------------------------------
+  // Seed: two projects, four threads, one of each interesting state.
+  // -------------------------------------------------------------------------
+
+  #seed(): void {
+    this.#projects = [
+      { id: 'p-boite', name: 'boite', path: 'D:\\Dev\\Collab\\boite', createdAt: T0 },
+      { id: 'p-brain', name: 'brain', path: 'D:\\Dev\\brain', createdAt: T0 }
+    ];
+
+    this.#providers = [
+      {
+        id: 'echo',
+        name: 'Echo',
+        shortName: 'echo',
+        protocol: 'echo',
+        source: 'shipped',
+        available: true,
+        executable: null,
+        models: [{ id: 'echo-1', name: 'Echo', default: true }],
+        capabilities: {
+          approvals: true,
+          hooks: false,
+          checkpoint: false,
+          images: false,
+          planMode: false,
+          resume: true
+        }
+      },
+      {
+        id: 'claude',
+        name: 'Claude Code',
+        shortName: 'claude',
+        protocol: 'claude-sdk',
+        source: 'shipped',
+        available: false,
+        executable: null,
+        models: [
+          { id: 'sonnet', name: 'Sonnet', default: true },
+          { id: 'opus', name: 'Opus' }
+        ],
+        capabilities: {
+          approvals: true,
+          hooks: true,
+          checkpoint: true,
+          images: true,
+          planMode: true,
+          resume: true
+        }
+      }
+    ];
+
+    this.#accounts = [
+      {
+        id: 'a-echo',
+        providerId: 'echo',
+        label: 'Echo',
+        isolationDir: `${DATA_DIR}\\accounts\\a-echo`,
+        status: 'ok',
+        identity: 'echo',
+        createdAt: T0
+      },
+      {
+        id: 'a-claude-main',
+        providerId: 'claude',
+        label: 'Default login',
+        isolationDir: null,
+        status: 'ok',
+        identity: 'you@example.com',
+        createdAt: T0
+      },
+      {
+        id: 'a-claude-side',
+        providerId: 'claude',
+        label: 'Second seat',
+        isolationDir: `${DATA_DIR}\\accounts\\a-claude-side`,
+        status: 'unauthenticated',
+        identity: null,
+        createdAt: T0
+      }
+    ];
+
+    const base = {
+      providerId: 'echo',
+      accountId: 'a-echo',
+      model: 'echo-1',
+      permissionMode: 'default' as const,
+      archived: false
+    };
+
+    const finished: Thread = {
+      ...base,
+      id: 't-trace',
+      projectId: 'p-boite',
+      title: 'Finish the trace tab',
+      cwd: 'D:\\Dev\\Collab\\boite',
+      status: 'idle',
+      unread: false,
+      sessionId: 'sess-trace',
+      load: null,
+      createdAt: T0,
+      updatedAt: T0 + 60_000,
+      turns: [
+        {
+          id: 'turn-seed-1',
+          threadId: 't-trace',
+          status: 'done',
+          queuedAt: T0,
+          startedAt: T0,
+          finishedAt: T0 + 41_000,
+          usage: {
+            inputTokens: 1840,
+            outputTokens: 520,
+            cacheReadTokens: 12_400,
+            cacheWriteTokens: 900,
+            costUsdEquivalent: 0.041
+          },
+          error: null
+        }
+      ],
+      messages: [
+        {
+          id: 'm-1',
+          threadId: 't-trace',
+          turnId: 'turn-seed-1',
+          role: 'user',
+          parts: [{ type: 'text', text: 'What does the trace tab need from the core?' }],
+          state: 'complete',
+          createdAt: T0
+        },
+        {
+          id: 'm-2',
+          threadId: 't-trace',
+          turnId: 'turn-seed-1',
+          role: 'assistant',
+          parts: [
+            {
+              type: 'text',
+              text: 'It needs trace.get for the table and the TraceCapability note above it. Let me look at what procs already reports.'
+            },
+            {
+              type: 'tool',
+              toolId: 'tool-seed-1',
+              name: 'Grep',
+              input: { pattern: 'process.started', path: 'packages/core/src' },
+              output: 'packages/core/src/procs.ts:88\npackages/core/src/trace.ts:20',
+              status: 'done'
+            },
+            {
+              type: 'text',
+              text: 'Both events carry the pid, the exe, the CPU time and the peak memory, so the table can be filled without a second call.'
+            }
+          ],
+          state: 'complete',
+          createdAt: T0 + 20_000
+        }
+      ]
+    };
+
+    const running: Thread = {
+      ...base,
+      id: 't-scheduler',
+      projectId: 'p-boite',
+      title: 'Port the scheduler',
+      cwd: 'D:\\Dev\\Collab\\boite',
+      status: 'running',
+      unread: false,
+      sessionId: 'sess-scheduler',
+      load: { processes: 2, cpuPercent: 34, memoryBytes: 412 * 1024 * 1024 },
+      createdAt: T0 + 100_000,
+      updatedAt: T0 + 180_000,
+      turns: [
+        {
+          id: 'turn-seed-2',
+          threadId: 't-scheduler',
+          status: 'running',
+          queuedAt: T0 + 170_000,
+          startedAt: T0 + 170_500,
+          finishedAt: null,
+          usage: null,
+          error: null
+        }
+      ],
+      messages: [
+        {
+          id: 'm-3',
+          threadId: 't-scheduler',
+          turnId: 'turn-seed-2',
+          role: 'user',
+          parts: [{ type: 'text', text: 'Count turns, never threads. Start with the caps.' }],
+          state: 'complete',
+          createdAt: T0 + 170_000
+        },
+        {
+          id: 'm-4',
+          threadId: 't-scheduler',
+          turnId: 'turn-seed-2',
+          role: 'assistant',
+          parts: [{ type: 'text', text: 'Reading the current caps and the queue order' }],
+          state: 'streaming',
+          createdAt: T0 + 171_000
+        }
+      ]
+    };
+
+    const queued: Thread = {
+      ...base,
+      id: 't-bench',
+      projectId: 'p-boite',
+      title: 'Bench against legacy',
+      cwd: 'D:\\Dev\\Collab\\boite',
+      status: 'queued',
+      unread: false,
+      sessionId: null,
+      load: null,
+      createdAt: T0 + 200_000,
+      updatedAt: T0 + 200_000,
+      turns: [
+        {
+          id: 'turn-seed-3',
+          threadId: 't-bench',
+          status: 'queued',
+          queuedAt: T0 + 200_000,
+          startedAt: null,
+          finishedAt: null,
+          usage: null,
+          error: null
+        }
+      ],
+      messages: [
+        {
+          id: 'm-5',
+          threadId: 't-bench',
+          turnId: 'turn-seed-3',
+          role: 'user',
+          parts: [{ type: 'text', text: 'Fifty echo threads, RSS and throughput.' }],
+          state: 'complete',
+          createdAt: T0 + 200_000
+        }
+      ]
+    };
+
+    const unread: Thread = {
+      ...base,
+      id: 't-descriptors',
+      projectId: 'p-brain',
+      title: 'Review the descriptor loader',
+      cwd: 'D:\\Dev\\brain',
+      status: 'idle',
+      unread: true,
+      sessionId: 'sess-descriptors',
+      load: null,
+      createdAt: T0 + 300_000,
+      updatedAt: T0 + 340_000,
+      turns: [
+        {
+          id: 'turn-seed-4',
+          threadId: 't-descriptors',
+          status: 'done',
+          queuedAt: T0 + 300_000,
+          startedAt: T0 + 300_000,
+          finishedAt: T0 + 340_000,
+          usage: {
+            inputTokens: 640,
+            outputTokens: 210,
+            cacheReadTokens: 0,
+            cacheWriteTokens: 0,
+            costUsdEquivalent: 0.008
+          },
+          error: null
+        }
+      ],
+      messages: [
+        {
+          id: 'm-6',
+          threadId: 't-descriptors',
+          turnId: 'turn-seed-4',
+          role: 'user',
+          parts: [{ type: 'text', text: 'Does an unknown field refuse the file?' }],
+          state: 'complete',
+          createdAt: T0 + 300_000
+        },
+        {
+          id: 'm-7',
+          threadId: 't-descriptors',
+          turnId: 'turn-seed-4',
+          role: 'assistant',
+          parts: [
+            {
+              type: 'text',
+              text: 'It does, with the file, the field and what was expected. One case is still silent: a roots entry that resolves outside the descriptor directory.'
+            }
+          ],
+          state: 'complete',
+          createdAt: T0 + 320_000
+        }
+      ]
+    };
+
+    for (const thread of [finished, running, queued, unread]) this.#threads.set(thread.id, thread);
+
+    this.#processes = [
+      {
+        pid: 21_140,
+        parentPid: 4242,
+        threadId: 't-trace',
+        exe: 'claude.exe',
+        commandLine: 'claude.exe --print --output-format stream-json',
+        startedAt: T0 + 1000,
+        exitedAt: T0 + 39_000,
+        exitCode: 0,
+        cpuMs: 4210,
+        peakMemoryBytes: 210 * 1024 * 1024,
+        ioBytes: 1_240_000
+      },
+      {
+        pid: 21_402,
+        parentPid: 21_140,
+        threadId: 't-trace',
+        exe: 'rg.exe',
+        commandLine: 'rg.exe --json process.started packages/core/src',
+        startedAt: T0 + 12_000,
+        exitedAt: T0 + 12_400,
+        exitCode: 0,
+        cpuMs: 90,
+        peakMemoryBytes: 18 * 1024 * 1024,
+        ioBytes: 82_000
+      },
+      {
+        pid: 22_800,
+        parentPid: 4242,
+        threadId: 't-scheduler',
+        exe: 'claude.exe',
+        commandLine: 'claude.exe --print --output-format stream-json',
+        startedAt: T0 + 170_500,
+        exitedAt: null,
+        exitCode: null,
+        cpuMs: 2100,
+        peakMemoryBytes: 380 * 1024 * 1024,
+        ioBytes: 640_000
+      },
+      {
+        pid: 22_912,
+        parentPid: 22_800,
+        threadId: 't-scheduler',
+        exe: 'bun.exe',
+        commandLine: 'bun.exe test packages/core/src/scheduler.test.ts',
+        startedAt: T0 + 176_000,
+        exitedAt: null,
+        exitCode: null,
+        cpuMs: 810,
+        peakMemoryBytes: 96 * 1024 * 1024,
+        ioBytes: 120_000
+      }
+    ];
+
+    this.#usage.set('t-trace', {
+      inputTokens: 1840,
+      outputTokens: 520,
+      cacheReadTokens: 12_400,
+      cacheWriteTokens: 900,
+      costUsdEquivalent: 0.041
+    });
+    this.#usage.set('t-descriptors', {
+      inputTokens: 640,
+      outputTokens: 210,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      costUsdEquivalent: 0.008
+    });
+
+    this.#scheduler = {
+      maxConcurrentTurns: this.#settings.maxConcurrentTurns,
+      perAccountConcurrency: this.#settings.perAccountConcurrency,
+      running: [{ turnId: 'turn-seed-2', threadId: 't-scheduler', startedAt: T0 + 170_500 }],
+      queued: [
+        { turnId: 'turn-seed-3', threadId: 't-bench', position: 1, queuedAt: T0 + 200_000 }
+      ]
+    };
+
+    this.#seq = 100;
+  }
+}

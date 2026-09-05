@@ -1,0 +1,41 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Boite",
+  "version": "2.0.0-alpha.1",
+  "identifier": "com.boite.two",
+  "build": {
+    "frontendDist": "../../../packages/ui/dist",
+    "devUrl": "http://localhost:5173",
+    "beforeDevCommand": "bun run --cwd ../../packages/ui dev",
+    "beforeBuildCommand": "bun run --cwd ../../packages/ui build"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Boite",
+        "width": 1280,
+        "height": 800,
+        "minWidth": 880,
+        "minHeight": 560,
+        "resizable": true,
+        "visible": true,
+        "focus": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  }
+}
