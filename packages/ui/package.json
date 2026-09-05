@@ -12,7 +12,10 @@
   },
   "dependencies": {
     "@boite/contracts": "workspace:*",
-    "@tauri-apps/api": "2.11.1"
+    "@lucide/svelte": "1.41.0",
+    "@tauri-apps/api": "2.11.1",
+    "@tauri-apps/plugin-dialog": "2.7.3",
+    "geist": "^1.7.2"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "7.3.0",

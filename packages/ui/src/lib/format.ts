@@ -54,3 +54,28 @@ export function json(value: unknown): string {
 export function percent(value: number): string {
   return `${Math.round(value)}%`;
 }
+
+const relative = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto', style: 'narrow' });
+const dayClock = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' });
+const calendar = new Intl.DateTimeFormat(undefined, { day: 'numeric', month: 'short' });
+
+/** "now", "5 min ago", "14:02", "3 Sep": what a sidebar row needs and nothing more. */
+export function ago(value: number, now = Date.now()): string {
+  const delta = now - value;
+  if (delta < 45_000) return strings.time.now;
+  if (delta < 3_600_000) return relative.format(-Math.round(delta / 60_000), 'minute');
+  const then = new Date(value);
+  const today = new Date(now);
+  const sameDay =
+    then.getFullYear() === today.getFullYear() &&
+    then.getMonth() === today.getMonth() &&
+    then.getDate() === today.getDate();
+  return sameDay ? dayClock.format(then) : calendar.format(then);
+}
+
+/** The first line of a prompt, cut for a sidebar row. */
+export function titleFrom(prompt: string, max = 60): string {
+  const line = prompt.trim().split('\n')[0]?.trim() ?? '';
+  if (line.length <= max) return line;
+  return line.slice(0, max).trimEnd();
+}

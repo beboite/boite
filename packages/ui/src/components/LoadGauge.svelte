@@ -21,8 +21,7 @@
     display: inline-block;
     width: 28px;
     height: 3px;
-    background: var(--panel-alt);
-    border: 1px solid var(--border);
+    background: var(--color-surface-3);
     border-radius: 2px;
     overflow: hidden;
     flex: none;
@@ -31,6 +30,7 @@
   .fill {
     display: block;
     height: 100%;
-    background: var(--accent);
+    background: var(--color-live);
+    transition: width var(--dur-3) var(--ease-out-quint);
   }
 </style>

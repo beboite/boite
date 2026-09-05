@@ -3,7 +3,7 @@
   import { bytes, duration, millis, time } from '../lib/format';
   import { strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
-  import StatusPill from './StatusPill.svelte';
+  import StatusMark from './StatusMark.svelte';
 
   let { store }: { store: Store } = $props();
 
@@ -33,7 +33,7 @@
         <button class="quiet title" onclick={() => void store.open(entry.threadId)}>
           {entry.title}
         </button>
-        <StatusPill status={entry.status} />
+        <StatusMark status={entry.status} />
         <span class="muted totals">
           {entry.totals.processes}
           {strings.resources.processes} / {millis(entry.totals.cpuMs)} / {bytes(

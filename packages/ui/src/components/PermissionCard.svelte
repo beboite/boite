@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { ShieldQuestion } from '@lucide/svelte';
   import type { PermissionRequest } from '@boite/contracts';
   import { json } from '../lib/format';
   import { strings } from '../lib/strings';
@@ -23,13 +24,18 @@
   data-decision={decision ?? 'pending'}
 >
   <div class="head">
-    <strong>{strings.chat.permissionHeading}</strong>
-    <span class="muted">{strings.chat.permissionBody}</span>
-    <span class="mono tool">{toolName}</span>
+    <span class="glyph"><ShieldQuestion size={15} strokeWidth={1.75} /></span>
+    <span class="muted">{strings.chat.permissionHeading}</span>
+    <span class="tool">{toolName}</span>
+    {#if decision !== null}
+      <span class="verdict" class:denied={decision === 'deny'} data-testid="permission-verdict">
+        {decision === 'allow' ? strings.chat.allowed : strings.chat.denied}
+      </span>
+    {/if}
   </div>
 
   {#if request?.description}
-    <p class="muted">{request.description}</p>
+    <p class="muted description">{request.description}</p>
   {/if}
   {#if request}
     <pre class="mono" data-testid="permission-input">{json(request.input)}</pre>
@@ -37,55 +43,76 @@
 
   {#if decision === null}
     <div class="actions">
-      <button class="primary" data-testid="permission-allow" onclick={() => answer('allow')}>
+      <button type="button" class="primary" data-testid="permission-allow" onclick={() => answer('allow')}>
         {strings.chat.allow}
       </button>
-      <button class="danger" data-testid="permission-deny" onclick={() => answer('deny')}>
+      <button type="button" class="danger" data-testid="permission-deny" onclick={() => answer('deny')}>
         {strings.chat.deny}
       </button>
-    </div>
-  {:else}
-    <div class="verdict" class:denied={decision === 'deny'} data-testid="permission-verdict">
-      {decision === 'allow' ? strings.chat.allowed : strings.chat.denied}
     </div>
   {/if}
 </div>
 
 <style>
   .permission {
-    border: 1px solid var(--warn);
-    border-radius: var(--radius);
-    background: var(--panel);
-    padding: 6px 8px;
-    margin: 4px 0;
+    border: 1px solid var(--color-border);
+    border-left: 3px solid var(--color-live);
+    border-radius: var(--radius-md);
+    background: var(--color-surface);
+    padding: 8px 12px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
   }
 
   .permission.resolved {
-    border-color: var(--border);
+    border-left-color: var(--color-edge);
   }
 
   .head {
     display: flex;
-    align-items: baseline;
+    align-items: center;
     gap: 6px;
     flex-wrap: wrap;
   }
 
-  .tool {
-    color: var(--accent);
+  .glyph {
+    display: inline-flex;
+    color: var(--color-live);
   }
 
-  p {
-    margin: 4px 0 0;
+  .resolved .glyph {
+    color: var(--color-subtle);
+  }
+
+  .tool {
+    font-weight: 600;
+  }
+
+  .verdict {
+    margin-left: auto;
+    font-size: var(--text-xs);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--color-success);
+  }
+
+  .verdict.denied {
+    color: var(--color-danger);
+  }
+
+  .description {
+    font-size: var(--text-sm);
   }
 
   pre {
-    margin: 4px 0 0;
-    padding: 4px 6px;
-    background: var(--panel-alt);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    max-height: 160px;
+    margin: 0;
+    padding: 8px 10px;
+    background: var(--color-background);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    max-height: 200px;
     overflow: auto;
     white-space: pre-wrap;
     word-break: break-word;
@@ -94,16 +121,6 @@
   .actions {
     display: flex;
     gap: 6px;
-    margin-top: 6px;
-  }
-
-  .verdict {
-    margin-top: 6px;
-    font-size: 11px;
-    color: var(--ok);
-  }
-
-  .verdict.denied {
-    color: var(--danger);
+    margin-top: 2px;
   }
 </style>

@@ -172,20 +172,22 @@ shellTest(
 shellTest(
   'a project, an echo thread and a turn go through the shell',
   async () => {
+    // The first-run card offers the native picker in the shell; the path field sits behind one click.
+    await page?.waitFor(`document.querySelector('${testid('first-run')}')`);
     await page?.click(testid('add-project'));
     await page?.type(testid('project-path'), projectDir);
     await clickWhenEnabled(testid('project-add'));
     await page?.waitFor(`${textOf('project-row')}.includes(${JSON.stringify(basename(projectDir))})`);
+    await page?.waitFor(`document.querySelector('${testid('draft-row')}')`);
 
-    await page?.click(testid('new-thread'));
-    await page?.choose(testid('new-thread-provider'), 'echo');
-    await page?.waitFor(`document.querySelectorAll('${testid('new-thread-account')} option').length > 0`);
-    await page?.type(testid('new-thread-title'), 'shell thread');
-    await clickWhenEnabled(testid('new-thread-create'));
-    await page?.waitFor(`${textOf('thread-title')} === 'shell thread'`);
+    await page?.click(testid('composer-provider'));
+    await page?.waitFor(`document.querySelector('${testid('composer-provider-menu')}')`);
+    await page?.click(`${testid('composer-provider-menu')} [data-value^="echo::"]`);
+    await page?.waitFor(`${textOf('composer-provider')}.startsWith('Echo')`);
 
     await page?.type(testid('composer-input'), 'shell turn');
     await clickWhenEnabled(testid('composer-send'));
+    await page?.waitFor(`${textOf('thread-title')} === 'shell turn'`, 30_000);
     await page?.waitFor(`${ASSISTANT_TEXT}.includes('shell turn')`, 30_000);
     await page?.waitFor(
       `document.querySelector('${testid('thread-status')}').dataset.status === 'idle'`,

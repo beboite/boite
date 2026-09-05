@@ -50,42 +50,42 @@ afterAll(async () => {
 });
 
 test(
-  'the threads page opens connected to the core it was paired with',
+  'a fresh core opens on the first-run card, connected to the core it was paired with',
   async () => {
     await page.waitFor(`${textOf('status-connection')} === 'Connected'`, 30_000);
-    const version = await page.evaluate<string>(textOf('status-core'));
-    expect(version).toBe(`Boite ${corePackage.version}`);
+    await page.waitFor(`document.querySelector('${testid('first-run')}')`);
     await page.waitFor(`document.querySelector('${testid('sidebar')}')`);
   },
   TIMEOUT,
 );
 
 test(
-  'a project and an echo thread are created through the UI',
+  'opening a folder makes a project and a draft thread, and the first send creates the thread',
   async () => {
-    await page.click(testid('add-project'));
     await page.type(testid('project-path'), projectDir);
     await clickWhenEnabled(testid('project-add'));
     await page.waitFor(`${textOf('project-row')}.includes(${JSON.stringify(basename(projectDir))})`);
+    await page.waitFor(`document.querySelector('${testid('draft-row')}')`);
+    expect(await page.evaluate<number>(`document.querySelectorAll('${testid('thread-row')}').length`)).toBe(0);
 
-    await page.click(testid('new-thread'));
-    await page.choose(testid('new-thread-provider'), 'echo');
-    await page.waitFor(`document.querySelectorAll('${testid('new-thread-account')} option').length > 0`);
-    await page.type(testid('new-thread-title'), 'browser thread');
-    await clickWhenEnabled(testid('new-thread-create'));
+    await page.click(testid('composer-provider'));
+    await page.waitFor(`document.querySelector('${testid('composer-provider-menu')}')`);
+    await page.click(`${testid('composer-provider-menu')} [data-value^="echo::"]`);
+    await page.waitFor(`${textOf('composer-provider')}.startsWith('Echo')`);
 
-    await page.waitFor(`${textOf('thread-title')} === 'browser thread'`);
+    await page.type(testid('composer-input'), 'browser thread [permission]');
+    await clickWhenEnabled(testid('composer-send'));
+
+    await page.waitFor(`${textOf('thread-title')} === 'browser thread [permission]'`, 30_000);
     await page.waitFor(`document.querySelectorAll('${testid('thread-row')}').length === 1`);
+    expect(await page.evaluate<boolean>(`!!document.querySelector('${testid('draft-row')}')`)).toBe(false);
   },
   TIMEOUT,
 );
 
 test(
-  'a turn streams, the permission is allowed, and the thread goes back to idle',
+  'the turn streams, the permission is allowed inline, and the thread goes back to idle',
   async () => {
-    await page.type(testid('composer-input'), 'browser turn [permission]');
-    await clickWhenEnabled(testid('composer-send'));
-
     await page.waitFor(`document.querySelector('${testid('permission-card')}')`, 30_000);
     expect(await page.text(testid('permission-input'))).toContain('echo');
 
@@ -99,7 +99,7 @@ test(
     const assistant = await page.evaluate<string>(
       `Array.from(document.querySelectorAll('${testid('message')}[data-role=assistant] ${testid('text-part')}')).map((node) => node.textContent).join(' ')`,
     );
-    expect(assistant).toContain('browser turn');
+    expect(assistant).toContain('browser thread');
     expect(assistant).toContain('allowed');
 
     await page.screenshot(SCREENSHOT);
@@ -109,7 +109,21 @@ test(
 );
 
 test(
-  'the settings page shows the core it is connected to',
+  'the trace panel lists what the turn launched, or says it launched nothing',
+  async () => {
+    await page.click(testid('tab-trace'));
+    await page.waitFor(`document.querySelector('${testid('trace-panel')}')`);
+    await page.waitFor(
+      `document.querySelector('${testid('trace-row')}') || document.querySelector('${testid('trace-empty')}')`,
+    );
+    await page.click(testid('tab-trace'));
+    await page.waitFor(`!document.querySelector('${testid('trace-panel')}')`);
+  },
+  TIMEOUT,
+);
+
+test(
+  'settings show the core the UI is connected to',
   async () => {
     await page.click(testid('nav-settings'));
     await page.waitFor(`document.querySelector('${testid('settings-page')}')`);
@@ -117,6 +131,10 @@ test(
     expect(url).toBe(core.url);
     expect(await page.evaluate<string>(textOf('settings-endpoint'))).toBe(`127.0.0.1:${core.port}`);
     expect(await page.evaluate<string>(textOf('settings-version'))).toBe(corePackage.version);
+
+    await page.click(testid('settings-back'));
+    await page.waitFor(`document.querySelector('${testid('chat')}')`);
+    expect(await page.evaluate<string>(textOf('thread-title'))).toBe('browser thread [permission]');
   },
   TIMEOUT,
 );

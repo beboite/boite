@@ -56,6 +56,8 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     include: ['src/**/*.test.ts'],
-    globals: false
+    globals: false,
+    /* lucide ships .svelte sources; inlined so the plugin above compiles them too */
+    server: { deps: { inline: ['@lucide/svelte'] } }
   }
 });

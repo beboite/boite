@@ -1,144 +1,329 @@
 <script lang="ts">
-  import type { PermissionMode, Thread } from '@boite/contracts';
+  import { ArrowUp, Bot, Cpu, ShieldCheck, Square } from '@lucide/svelte';
+  import type { PermissionMode } from '@boite/contracts';
   import { strings } from '../lib/strings';
-  import type { Store } from '../lib/store.svelte';
+  import type { Choice, Store } from '../lib/store.svelte';
+  import type { MenuItem } from '../lib/menu';
+  import Menu from './Menu.svelte';
 
-  let { store, thread }: { store: Store; thread: Thread } = $props();
+  let { store }: { store: Store } = $props();
 
-  const modes: PermissionMode[] = [
-    'default',
-    'acceptEdits',
-    'plan',
-    'bypassPermissions',
-    'dontAsk'
-  ];
+  const MODES: PermissionMode[] = ['default', 'acceptEdits', 'plan', 'bypassPermissions', 'dontAsk'];
+  const MAX_LINES = 8;
 
-  let draft = $state('');
-  let busy = $derived(
-    thread.status === 'running' || thread.status === 'queued' || thread.status === 'waiting'
+  let text = $state('');
+  let queued = $state<string | null>(null);
+  let choice = $state<Choice | null>(null);
+  let box = $state<HTMLTextAreaElement | undefined>(undefined);
+
+  /** The chips follow the open thread, or the remembered choice on a draft. */
+  $effect(() => {
+    const thread = store.openThread;
+    const draft = store.draft;
+    store.providers;
+    store.accounts;
+    if (thread) {
+      choice = {
+        providerId: thread.providerId,
+        accountId: thread.accountId,
+        permissionMode: thread.permissionMode,
+        model: thread.model
+      };
+    } else if (draft) {
+      choice = store.defaultChoice();
+    } else {
+      choice = null;
+    }
+  });
+
+  /** A new draft or thread gets the keyboard. */
+  $effect(() => {
+    store.openThread?.id;
+    store.draft;
+    box?.focus();
+  });
+
+  /** What was typed during a turn goes out once the turn ends. */
+  $effect(() => {
+    if (!store.busy && queued !== null && choice) {
+      const prompt = queued;
+      queued = null;
+      void store.submit(prompt, choice);
+    }
+  });
+
+  let provider = $derived(choice ? store.providerOf(choice.providerId) : null);
+  let account = $derived(choice ? store.accountOf(choice.accountId) : null);
+  let bound = $derived(store.openThread !== null);
+  let canSend = $derived(text.trim().length > 0 && choice !== null && !store.busy);
+
+  let placeholder = $derived(
+    store.openProject && provider
+      ? strings.composer.placeholder
+          .replace('{provider}', provider.name)
+          .replace('{project}', store.openProject.name)
+      : strings.composer.placeholderNoProject
   );
-  let provider = $derived(store.providerOf(thread.providerId));
-  let account = $derived(store.accountOf(thread.accountId));
+
+  let providerItems = $derived.by((): MenuItem[] => {
+    const items: MenuItem[] = [];
+    const ordered = [...store.providers].sort((a, b) => Number(b.available) - Number(a.available));
+    for (const entry of ordered) {
+      const accounts = store.accountsOf(entry.id);
+      if (accounts.length === 0) {
+        items.push({ id: `${entry.id}::`, label: entry.name, hint: strings.composer.noAccount, disabled: true });
+        continue;
+      }
+      for (const acc of accounts) {
+        const hints: string[] = [];
+        if (!entry.available) hints.push(strings.composer.unavailable);
+        if (acc.status === 'unauthenticated') hints.push(strings.accounts.status.unauthenticated);
+        items.push({
+          id: `${entry.id}::${acc.id}`,
+          label: `${entry.name} / ${acc.label}`,
+          hint: hints.join(', ') || (acc.identity ?? undefined),
+          active: choice?.providerId === entry.id && choice?.accountId === acc.id,
+          disabled: !entry.available
+        });
+      }
+    }
+    return items;
+  });
+
+  let modeItems = $derived(
+    MODES.map((mode) => ({
+      id: mode,
+      label: strings.permissionMode[mode],
+      hint: strings.permissionModeLong[mode],
+      active: choice?.permissionMode === mode
+    }))
+  );
+
+  let modelItems = $derived.by((): MenuItem[] => {
+    if (!provider || provider.models.length === 0) return [];
+    return [
+      { id: '', label: strings.thread.defaultModel, active: choice?.model === null },
+      ...provider.models.map((model) => ({ id: model.id, label: model.name, active: choice?.model === model.id }))
+    ];
+  });
+
+  let modelLabel = $derived(
+    provider?.models.find((m) => m.id === choice?.model)?.name ?? strings.thread.defaultModel
+  );
+
+  function pickProvider(id: string) {
+    const [providerId, accountId] = id.split('::');
+    if (!choice || !providerId || !accountId) return;
+    choice = { ...choice, providerId, accountId, model: null };
+  }
+
+  function pickMode(id: string) {
+    const mode = id as PermissionMode;
+    if (!choice) return;
+    choice = { ...choice, permissionMode: mode };
+    if (bound) void store.setPermissionMode(mode);
+    else store.remember(choice);
+  }
+
+  function pickModel(id: string) {
+    if (!choice) return;
+    const model = id === '' ? null : id;
+    choice = { ...choice, model };
+    const thread = store.openThread;
+    if (thread) void store.update(thread.id, { model: model ?? '' });
+    else store.remember(choice);
+  }
+
+  function grow() {
+    const el = box;
+    if (!el) return;
+    el.style.height = 'auto';
+    const line = parseFloat(getComputedStyle(el).lineHeight) || 20;
+    el.style.height = `${Math.min(el.scrollHeight, line * MAX_LINES + 16)}px`;
+  }
 
   function submit() {
-    const prompt = draft;
-    if (prompt.trim().length === 0) return;
-    draft = '';
-    void store.send(prompt);
+    const prompt = text;
+    if (prompt.trim().length === 0 || !choice) return;
+    text = '';
+    requestAnimationFrame(grow);
+    if (store.busy) {
+      queued = queued === null ? prompt : `${queued}\n${prompt}`;
+      return;
+    }
+    void store.submit(prompt, choice);
   }
 
   function onkeydown(event: KeyboardEvent) {
-    if (event.key !== 'Enter' || event.shiftKey || event.isComposing) return;
-    event.preventDefault();
-    submit();
+    if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
+      event.preventDefault();
+      submit();
+    } else if (event.key === 'Escape' && store.busy) {
+      event.preventDefault();
+      void store.stop();
+    }
   }
 </script>
 
-<div class="composer">
-  <div class="chips">
-    <span class="chip">{provider?.shortName ?? thread.providerId}</span>
-    <span class="chip">{account?.label ?? thread.accountId}</span>
-    <label class="chip mode">
-      <span class="sr">{strings.composer.permissionMode}</span>
-      <select
-        value={thread.permissionMode}
-        onchange={(event) =>
-          void store.setPermissionMode(event.currentTarget.value as PermissionMode)}
-      >
-        {#each modes as mode (mode)}
-          <option value={mode}>{strings.permissionMode[mode]}</option>
-        {/each}
-      </select>
-    </label>
-  </div>
-
-  <div class="input">
+<div class="composer-wrap">
+  <div class="composer" data-testid="composer">
+    {#if queued !== null}
+      <div class="queued subtle" data-testid="composer-queued">{strings.composer.queued}</div>
+    {/if}
     <textarea
-      data-testid="composer-input"
-      bind:value={draft}
+      bind:this={box}
+      bind:value={text}
+      oninput={grow}
       {onkeydown}
-      rows="3"
-      placeholder={strings.composer.placeholder}
-      aria-label={strings.composer.placeholder}
+      rows="1"
+      {placeholder}
+      aria-label={placeholder}
+      data-testid="composer-input"
+      spellcheck="true"
     ></textarea>
-    <div class="buttons">
-      {#if busy}
-        <button class="danger" data-testid="composer-stop" onclick={() => void store.stop()}>
-          {strings.composer.stop}
+
+    <div class="bar">
+      <div class="chips">
+        {#if bound}
+          <span class="chip" title={strings.composer.provider} data-testid="composer-provider">
+            <Bot size={13} strokeWidth={1.75} />
+            {provider?.name ?? choice?.providerId}<span class="sep">/</span>{account?.label ?? choice?.accountId}
+          </span>
+        {:else}
+          <Menu items={providerItems} onpick={pickProvider} label={strings.composer.provider} testid="composer-provider">
+            <Bot size={13} strokeWidth={1.75} />
+            {#if provider && account}
+              {provider.name}<span class="sep">/</span>{account.label}
+            {:else}
+              {strings.composer.noAccount}
+            {/if}
+          </Menu>
+        {/if}
+
+        <Menu items={modeItems} onpick={pickMode} label={strings.composer.mode} testid="composer-mode">
+          <ShieldCheck size={13} strokeWidth={1.75} />
+          {choice ? strings.permissionMode[choice.permissionMode] : strings.permissionMode.default}
+        </Menu>
+
+        {#if modelItems.length > 0}
+          <Menu items={modelItems} onpick={pickModel} label={strings.composer.model} testid="composer-model">
+            <Cpu size={13} strokeWidth={1.75} />
+            {modelLabel}
+          </Menu>
+        {/if}
+      </div>
+
+      <span class="hint subtle">{strings.composer.hint}</span>
+
+      {#if store.busy}
+        <button type="button" class="icon stop" data-testid="composer-stop" title={strings.composer.stop} aria-label={strings.composer.stop} onclick={() => void store.stop()}>
+          <Square size={12} strokeWidth={2.5} />
         </button>
       {/if}
       <button
-        class="primary"
+        type="button"
+        class="primary icon send"
         data-testid="composer-send"
-        disabled={draft.trim().length === 0}
+        title={strings.composer.send}
+        aria-label={strings.composer.send}
+        disabled={!canSend && !(store.busy && text.trim().length > 0)}
         onclick={submit}
       >
-        {strings.composer.send}
+        <ArrowUp size={16} strokeWidth={2.25} />
       </button>
     </div>
   </div>
 </div>
 
 <style>
+  .composer-wrap {
+    flex: none;
+    padding: 8px 20px 16px;
+  }
+
   .composer {
-    border-top: 1px solid var(--border);
-    background: var(--panel);
-    padding: 6px 12px 8px;
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    max-width: var(--content);
+    margin: 0 auto;
+    background: var(--color-surface);
+    border: 1px solid var(--color-edge);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-e1);
+    transition: border-color var(--dur-2) var(--ease-out-quint);
+  }
+
+  .composer:focus-within {
+    border-color: color-mix(in srgb, var(--color-foreground) 35%, var(--color-edge));
+  }
+
+  .queued {
+    padding: 6px 14px 0;
+    font-size: var(--text-xs);
+  }
+
+  textarea {
+    width: 100%;
+    min-height: 44px;
+    max-height: 200px;
+    padding: 12px 14px 6px;
+    border: none;
+    background: transparent;
+    font-size: var(--text-base);
+    line-height: 1.5;
+  }
+
+  textarea:focus {
+    outline: none;
+    border: none;
+  }
+
+  .bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 8px 8px 10px;
   }
 
   .chips {
     display: flex;
     align-items: center;
-    gap: 6px;
-    margin-bottom: 5px;
+    gap: 4px;
+    flex-wrap: wrap;
+    min-width: 0;
   }
 
-  .chip {
-    font-size: 11px;
-    color: var(--muted);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 0 7px;
-    background: var(--panel-alt);
+  .sep {
+    color: var(--color-subtle);
+    margin: 0 4px;
   }
 
-  .chip.mode {
-    padding: 0;
-    border: none;
-    background: none;
-  }
-
-  .chip.mode select {
-    font-size: 11px;
-    padding: 0 4px;
-    border-radius: 10px;
-  }
-
-  .sr {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip-path: inset(50%);
+  .hint {
+    margin-left: auto;
+    font-size: var(--text-xs);
     white-space: nowrap;
   }
 
-  .input {
-    display: flex;
-    gap: 6px;
-    align-items: flex-end;
+  .send,
+  .stop {
+    width: 30px;
+    height: 30px;
+    border-radius: var(--radius-md);
+    flex: none;
   }
 
-  textarea {
-    flex: 1;
-    resize: vertical;
-    min-height: 52px;
-    font-family: inherit;
+  .stop {
+    color: var(--color-foreground);
   }
 
-  .buttons {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
+  @media (max-width: 720px) {
+    .composer-wrap {
+      padding: 6px 10px 10px;
+    }
+
+    .hint {
+      display: none;
+    }
   }
 </style>

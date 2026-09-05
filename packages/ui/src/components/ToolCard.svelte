@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { Check, ChevronRight, CircleSlash, Wrench, X } from '@lucide/svelte';
   import type { ToolStatus } from '@boite/contracts';
   import { json } from '../lib/format';
   import { strings } from '../lib/strings';
@@ -11,27 +12,57 @@
   }: { name: string; input: unknown; output: string | null; status: ToolStatus } = $props();
 
   let open = $state(false);
+
+  const SUMMARY_KEYS = ['file_path', 'path', 'command', 'pattern', 'query', 'url', 'notebook_path', 'prompt', 'description'];
+
+  /** The one value a reader wants on the closed line: the path, the command, the pattern. */
+  function summary(value: unknown): string {
+    if (typeof value === 'string') return value;
+    if (typeof value !== 'object' || value === null) return '';
+    const record = value as Record<string, unknown>;
+    for (const key of SUMMARY_KEYS) {
+      const found = record[key];
+      if (typeof found === 'string' && found.length > 0) return found.split('\n')[0] ?? '';
+    }
+    const first = Object.values(record).find((entry) => typeof entry === 'string');
+    return typeof first === 'string' ? (first.split('\n')[0] ?? '') : '';
+  }
+
+  let line = $derived(summary(input));
 </script>
 
 <div class="tool" data-testid="tool-card" data-status={status}>
   <button
-    class="quiet head"
+    type="button"
+    class="ghost head"
     data-testid="tool-toggle"
     aria-expanded={open}
     onclick={() => (open = !open)}
   >
-    <span class="caret" class:open>&rsaquo;</span>
-    <span class="mono name">{name}</span>
-    <span class="status" class:done={status === 'done'} class:running={status === 'running'} class:error={status === 'error'} class:denied={status === 'denied'}>
-      {strings.chat.toolStatus[status]}
+    <span class="caret" class:open><ChevronRight size={13} strokeWidth={2} /></span>
+    <span class="glyph"><Wrench size={13} strokeWidth={1.75} /></span>
+    <span class="name">{name}</span>
+    {#if line}
+      <span class="line mono" title={line}>{line}</span>
+    {/if}
+    <span class="status {status}" title={strings.chat.toolStatus[status]}>
+      {#if status === 'running'}
+        <span class="spinner"></span>
+      {:else if status === 'done'}
+        <Check size={13} strokeWidth={2.25} />
+      {:else if status === 'denied'}
+        <CircleSlash size={13} strokeWidth={2} />
+      {:else}
+        <X size={13} strokeWidth={2.25} />
+      {/if}
     </span>
   </button>
 
   {#if open}
     <div class="body">
-      <div class="label">{strings.chat.toolInput}</div>
+      <div class="section-label">{strings.chat.toolInput}</div>
       <pre class="mono" data-testid="tool-input">{json(input)}</pre>
-      <div class="label">{strings.chat.toolOutput}</div>
+      <div class="section-label">{strings.chat.toolOutput}</div>
       <pre class="mono" data-testid="tool-output">{output ?? strings.chat.noOutput}</pre>
     </div>
   {/if}
@@ -39,74 +70,105 @@
 
 <style>
   .tool {
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    background: var(--panel-alt);
-    margin: 4px 0;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    background: var(--color-surface);
+    max-width: 100%;
+    overflow: hidden;
   }
 
   .head {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
     width: 100%;
-    padding: 2px 6px;
+    height: 30px;
+    padding: 0 10px 0 6px;
+    border-radius: 0;
+    color: var(--color-muted-foreground);
+    justify-content: flex-start;
+  }
+
+  .head:hover:not(:disabled) {
+    background: var(--color-surface-2);
   }
 
   .caret {
-    color: var(--muted);
-    transition: transform 80ms linear;
+    display: inline-flex;
+    color: var(--color-subtle);
+    transition: transform var(--dur-2) var(--ease-out-quint);
   }
 
   .caret.open {
     transform: rotate(90deg);
   }
 
+  .glyph {
+    display: inline-flex;
+    color: var(--color-subtle);
+  }
+
   .name {
+    font-weight: 600;
+    color: var(--color-foreground);
+    flex: none;
+  }
+
+  .line {
     flex: 1;
+    min-width: 0;
     text-align: left;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: var(--text-xs);
   }
 
   .status {
-    font-size: 10px;
-    text-transform: uppercase;
-    letter-spacing: 0.03em;
-    color: var(--muted);
+    display: inline-flex;
+    margin-left: auto;
+    color: var(--color-subtle);
   }
 
   .status.done {
-    color: var(--ok);
-  }
-
-  .status.running {
-    color: var(--warn);
+    color: var(--color-success);
   }
 
   .status.error,
   .status.denied {
-    color: var(--danger);
+    color: var(--color-danger);
+  }
+
+  .spinner {
+    width: 11px;
+    height: 11px;
+    border-radius: 50%;
+    border: 1.5px solid var(--color-edge);
+    border-top-color: var(--color-live);
+    animation: spin 0.9s linear infinite;
+  }
+
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
   }
 
   .body {
-    border-top: 1px solid var(--border);
-    padding: 6px;
-  }
-
-  .label {
-    font-size: 10px;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    color: var(--muted);
-    margin-bottom: 2px;
+    border-top: 1px solid var(--color-border);
+    padding: 8px 10px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
   }
 
   pre {
     margin: 0 0 6px;
-    padding: 4px 6px;
-    background: var(--panel);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    max-height: 220px;
+    padding: 8px 10px;
+    background: var(--color-background);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    max-height: 260px;
     overflow: auto;
     white-space: pre-wrap;
     word-break: break-word;

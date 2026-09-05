@@ -5,15 +5,14 @@ export const strings = {
     loading: 'Starting',
     noEndpointTitle: 'No core to connect to',
     noEndpointBody:
-      'Open the pairing link from the desktop app, or set the core URL and token in Settings.'
+      'Open the pairing link from the desktop app, or set the core URL and token in Settings.',
+    openSettings: 'Open settings'
   },
 
-  nav: {
-    threads: 'Threads',
-    resources: 'Resources',
-    accounts: 'Accounts',
-    usage: 'Usage',
-    settings: 'Settings'
+  titlebar: {
+    minimize: 'Minimize',
+    maximize: 'Maximize',
+    close: 'Close'
   },
 
   connection: {
@@ -28,55 +27,65 @@ export const strings = {
     idle: 'idle',
     queued: 'queued',
     running: 'running',
-    waiting: 'waiting',
+    waiting: 'waiting for you',
     error: 'error'
   },
 
-  sidebar: {
-    newThread: 'New thread',
-    addProject: 'Add project',
-    projectPath: 'Folder',
-    projectPathPlaceholder: 'Absolute path of the folder',
-    addProjectSubmit: 'Add',
-    noProjects: 'No project yet.',
-    noThreads: 'No thread in this project.',
-    unread: 'Unread',
-    collapse: 'Collapse project',
-    expand: 'Expand project',
-    loadTitle: 'Live load'
+  firstRun: {
+    heading: 'Open a project',
+    body: 'Pick the folder an agent will work in. Threads live inside it.',
+    pick: 'Choose a folder',
+    pathPlaceholder: 'Absolute path of the folder',
+    add: 'Open'
   },
 
-  newThread: {
-    heading: 'New thread',
-    project: 'Project',
-    provider: 'Provider',
-    account: 'Account',
-    permissionMode: 'Permissions',
-    title: 'Title',
-    titlePlaceholder: 'What is this thread for',
-    create: 'Create',
-    cancel: 'Cancel',
-    unavailable: 'unavailable',
-    noAccounts: 'No account for this provider yet. Add one on the Accounts page.'
+  sidebar: {
+    search: 'Search threads',
+    newThread: 'New thread',
+    addProject: 'Add a project',
+    noProjects: 'No project yet.',
+    noThreads: 'No thread yet.',
+    noMatch: 'Nothing matches.',
+    unread: 'Unread',
+    collapse: 'Collapse',
+    expand: 'Expand',
+    loadTitle: 'Live load',
+    settings: 'Settings',
+    projectMenu: 'Project actions',
+    removeProject: 'Remove from Boite',
+    removeProjectConfirm: 'Remove this project and its threads from Boite? Files on disk stay.',
+    threadMenu: 'Thread actions',
+    rename: 'Rename',
+    archive: 'Archive',
+    draft: 'New thread'
   },
 
   permissionMode: {
-    default: 'Ask every time',
+    default: 'Ask',
     acceptEdits: 'Accept edits',
-    bypassPermissions: 'Bypass permissions',
-    plan: 'Plan mode',
+    bypassPermissions: 'Bypass',
+    plan: 'Plan',
     dontAsk: 'Never ask'
   },
 
+  permissionModeLong: {
+    default: 'Ask before every tool call',
+    acceptEdits: 'Accept edits, ask for the rest',
+    bypassPermissions: 'Run everything without asking',
+    plan: 'Plan only, no changes',
+    dontAsk: 'Deny what would need asking'
+  },
+
   thread: {
-    chat: 'Chat',
-    trace: 'Trace',
     none: 'No thread open',
-    noneBody: 'Pick a thread on the left, or start a new one.',
-    empty: 'Nothing said yet. Type below.',
+    noneBody: 'Pick one on the left, or start a new one.',
+    trace: 'Trace',
+    traceHint: 'Processes this thread launched',
     cwd: 'Working directory',
     model: 'Model',
-    noModel: 'default model'
+    defaultModel: 'Default model',
+    renamePlaceholder: 'Thread title',
+    draftHint: 'Type a message to start this thread.'
   },
 
   chat: {
@@ -92,20 +101,30 @@ export const strings = {
       error: 'error',
       denied: 'denied'
     },
-    permissionHeading: 'Permission requested',
-    permissionBody: 'The agent wants to use',
+    permissionHeading: 'Wants to use',
     allow: 'Allow',
     deny: 'Deny',
     allowed: 'Allowed',
     denied: 'Denied',
-    streaming: 'writing'
+    streaming: 'writing',
+    jumpToLatest: 'Jump to latest',
+    copy: 'Copy',
+    copied: 'Copied',
+    error: 'Error'
   },
 
   composer: {
-    placeholder: 'Message the agent. Enter sends, Shift+Enter is a newline.',
+    placeholder: 'Message {provider} in {project}',
+    placeholderNoProject: 'Message the agent',
     send: 'Send',
     stop: 'Stop',
-    permissionMode: 'Permissions'
+    queued: 'Sent when the current turn ends',
+    provider: 'Provider and account',
+    mode: 'Permissions',
+    model: 'Model',
+    unavailable: 'unavailable',
+    noAccount: 'no account',
+    hint: 'Enter to send, Shift+Enter for a new line'
   },
 
   trace: {
@@ -166,11 +185,19 @@ export const strings = {
     cacheWrite: 'Cache write',
     cost: 'API equivalent',
     total: 'Total',
-    empty: 'No token spent yet.'
+    empty: 'No token spent yet.',
+    today: 'today'
   },
 
   settings: {
     heading: 'Settings',
+    tabs: {
+      general: 'General',
+      accounts: 'Accounts',
+      usage: 'Usage',
+      resources: 'Resources'
+    },
+    back: 'Back to threads',
     connection: 'Connection',
     coreUrl: 'Core URL',
     token: 'Token',
@@ -195,10 +222,8 @@ export const strings = {
     noCore: 'Not connected to a core.'
   },
 
-  statusBar: {
-    running: 'running',
-    queued: 'queued',
-    noCore: 'no core'
+  time: {
+    now: 'now'
   },
 
   errors: {
@@ -226,7 +251,9 @@ export const strings = {
     no: 'no',
     close: 'Close',
     refresh: 'Refresh',
-    dismiss: 'Dismiss'
+    dismiss: 'Dismiss',
+    cancel: 'Cancel',
+    confirm: 'Confirm'
   }
 } as const;
 
