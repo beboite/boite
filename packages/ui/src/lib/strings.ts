@@ -180,6 +180,8 @@ export const strings = {
     perAccountConcurrency: 'Per account concurrency',
     warmProcessMinutes: 'Warm process minutes',
     listenOnLan: 'Listen on the LAN so a phone can pair',
+    agentCpuCapPercent: 'CPU cap for all agents, percent of the machine (0 = none, Windows)',
+    threadMemoryCapMb: 'Memory cap per thread tree, MB (0 = none, Windows)',
     save: 'Save',
     saved: 'Saved',
     core: 'Core',

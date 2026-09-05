@@ -28,7 +28,8 @@ const DENIED = 'Denied in Boite';
 export type QueryFn = (params: { prompt: AsyncIterable<SDKUserMessage>; options: Options }) => Query;
 
 export interface ClaudeDeps {
-  query: QueryFn;
+  /** Resolved on the first turn: importing the SDK costs about 69 MB of resident memory. */
+  loadQuery: () => Promise<QueryFn>;
 }
 
 /** The JSON boundary: the SDK types these through the Anthropic API package. */
@@ -94,9 +95,14 @@ class ClaudeTurn {
   async run(): Promise<TurnResult> {
     let running: Query | null = null;
     try {
-      running = this.deps.query({ prompt: this.promptStream(), options: this.options() });
-      this.query = running;
-      for await (const message of running) this.handle(message);
+      const options = this.options();
+      const query = await this.deps.loadQuery();
+      // Loading the SDK is the first await of the turn, so a stop can land here.
+      if (!this.stopped) {
+        running = query({ prompt: this.promptStream(), options });
+        this.query = running;
+        for await (const message of running) this.handle(message);
+      }
     } catch (error) {
       if (!this.stopped) this.fail(messageOf(error));
     } finally {

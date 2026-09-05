@@ -66,6 +66,7 @@ export class Core {
     this.threads = new ThreadStore(this);
 
     registerModules(this);
+    this.procs.applySettings(this.settings.get());
     this.accounts.ensureDefaults();
   }
 
@@ -106,6 +107,7 @@ export class Core {
   async close(): Promise<void> {
     await this.scheduler.drain();
     this.procs.killAll();
+    this.procs.close();
     this.bus.dispose();
     this.journal.close();
   }

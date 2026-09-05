@@ -18,6 +18,8 @@
   let perAccountConcurrency = $state(untrack(() => store.settings?.perAccountConcurrency ?? 2));
   let warmProcessMinutes = $state(untrack(() => store.settings?.warmProcessMinutes ?? 5));
   let listenOnLan = $state(untrack(() => store.settings?.listenOnLan ?? false));
+  let agentCpuCapPercent = $state(untrack(() => store.settings?.agentCpuCapPercent ?? 75));
+  let threadMemoryCapMb = $state(untrack(() => store.settings?.threadMemoryCapMb ?? 0));
   let savedAt = $state<number | null>(null);
 
   async function save() {
@@ -25,7 +27,9 @@
       maxConcurrentTurns,
       perAccountConcurrency,
       warmProcessMinutes,
-      listenOnLan
+      listenOnLan,
+      agentCpuCapPercent,
+      threadMemoryCapMb
     });
     savedAt = Date.now();
   }
@@ -70,6 +74,14 @@
       <label>
         <span>{strings.settings.warmProcessMinutes}</span>
         <input type="number" min="0" max="120" bind:value={warmProcessMinutes} />
+      </label>
+      <label>
+        <span>{strings.settings.agentCpuCapPercent}</span>
+        <input type="number" min="0" max="100" bind:value={agentCpuCapPercent} />
+      </label>
+      <label>
+        <span>{strings.settings.threadMemoryCapMb}</span>
+        <input type="number" min="0" max="65536" bind:value={threadMemoryCapMb} />
       </label>
     </div>
     <label class="check">

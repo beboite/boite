@@ -405,9 +405,7 @@ export class ThreadStore {
   }
 
   private withLoad(thread: ThreadSummary): ThreadSummary {
-    const processes = this.core.procs.liveCount(thread.id);
-    if (processes === 0) return { ...thread, load: null };
-    return { ...thread, load: { processes, cpuPercent: 0, memoryBytes: 0 } };
+    return { ...thread, load: this.core.procs.loadOf(thread.id) };
   }
 }
 

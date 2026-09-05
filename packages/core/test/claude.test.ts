@@ -101,7 +101,7 @@ function scripted(script: (fake: FakeQuery, options: Options) => void): void {
     script(fake, options);
     return fake as unknown as Query;
   };
-  restore = setDriver('claude-sdk', createClaudeDriver({ query }));
+  restore = setDriver('claude-sdk', createClaudeDriver({ loadQuery: () => Promise.resolve(query) }));
 }
 
 // -- scripted messages, shaped like the CLI's own ---------------------------

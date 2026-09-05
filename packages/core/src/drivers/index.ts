@@ -1,4 +1,3 @@
-import { query } from '@anthropic-ai/claude-agent-sdk';
 import type { Account, Protocol, ProviderSummary } from '@boite/contracts';
 import { unavailable } from '../errors.ts';
 import { createClaudeDriver } from './claude.ts';
@@ -7,7 +6,12 @@ import type { Driver } from './types.ts';
 
 const DRIVERS = new Map<Protocol, Driver>([
   ['echo', echoDriver],
-  ['claude-sdk', createClaudeDriver({ query })],
+  [
+    'claude-sdk',
+    createClaudeDriver({
+      loadQuery: () => import('@anthropic-ai/claude-agent-sdk').then((module) => module.query),
+    }),
+  ],
 ]);
 
 const RUNNABLE = new Set<Protocol>(['echo', 'claude-sdk']);

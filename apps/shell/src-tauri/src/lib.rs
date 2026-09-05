@@ -370,6 +370,8 @@ fn start_core<R: Runtime>(app: &AppHandle<R>, state: &CoreState) {
 // Window and tray.
 // ---------------------------------------------------------------------------
 
+/// The window is created hidden by `tauri.conf.json` and only reaches the screen
+/// here, once the core endpoint resolved, so an empty frame never flashes.
 fn show_main<R: Runtime>(app: &AppHandle<R>) {
     if hidden() {
         return;
@@ -420,9 +422,6 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![core_endpoint])
         .setup(|app| {
             let handle = app.handle().clone();
-            if hidden() {
-                hide_main(&handle);
-            }
             build_tray(&handle)?;
             start_core(&handle, &app.state::<CoreState>());
 

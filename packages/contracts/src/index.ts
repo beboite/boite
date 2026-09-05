@@ -295,6 +295,18 @@ export interface Settings {
   warmProcessMinutes: number;
   /** Bind the RPC to every interface so a phone on the LAN can pair. */
   listenOnLan: boolean;
+  /**
+   * Hard CPU ceiling for every agent process together, as a percentage of the
+   * whole machine. 0 disables the cap. Windows only: it is the global job's
+   * CPU rate control, and other systems ignore it.
+   */
+  agentCpuCapPercent: number;
+  /**
+   * Memory ceiling for one thread's whole process tree, in megabytes. 0 means
+   * no cap. Windows only: it is the thread job's memory limit, and a tree that
+   * reaches it fails its next allocation.
+   */
+  threadMemoryCapMb: number;
 }
 
 export interface CoreInfo {

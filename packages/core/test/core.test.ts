@@ -46,6 +46,8 @@ describe('settings', () => {
       perAccountConcurrency: 2,
       warmProcessMinutes: 0,
       listenOnLan: false,
+      agentCpuCapPercent: 75,
+      threadMemoryCapMb: 0,
     });
 
     const next = await client.call('settings.set', { maxConcurrentTurns: 3 });

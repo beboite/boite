@@ -100,7 +100,9 @@ export class FakeClient implements ObservableClient {
       maxConcurrentTurns: 6,
       perAccountConcurrency: 2,
       warmProcessMinutes: 5,
-      listenOnLan: false
+      listenOnLan: false,
+      agentCpuCapPercent: 75,
+      threadMemoryCapMb: 0
     };
     this.#core = {
       version: '2.0.0-alpha.1',

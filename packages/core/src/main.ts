@@ -26,10 +26,15 @@ export function parseFlags(argv: string[]): Flags {
     const flag = argv[index];
     const value = argv[index + 1];
     switch (flag) {
-      case '--port':
-        flags.port = Number(value ?? '0');
+      case '--port': {
+        const port = Number(value);
+        if (!Number.isInteger(port) || port < 0 || port > 65535) {
+          throw new Error(`--port expects an integer between 0 and 65535, got ${value ?? '(nothing)'}`);
+        }
+        flags.port = port;
         index += 1;
         break;
+      }
       case '--host':
         flags.host = value ?? flags.host;
         index += 1;
@@ -38,6 +43,7 @@ export function parseFlags(argv: string[]): Flags {
         flags.host = '0.0.0.0';
         break;
       case '--data-dir':
+        if (value === undefined || value.startsWith('--')) throw new Error('--data-dir expects a path');
         flags.dataDir = value;
         index += 1;
         break;
