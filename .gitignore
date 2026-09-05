@@ -1,0 +1,16 @@
+node_modules/
+dist/
+build/
+target/
+.boite/
+.svelte-kit/
+*.db
+*.db-wal
+*.db-shm
+*.log
+.env
+.env.*
+.DS_Store
+Thumbs.db
+bench/results/*.json
+tests/e2e/.artifacts/

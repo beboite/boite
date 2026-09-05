@@ -1,0 +1,20 @@
+{
+  "name": "boite",
+  "private": true,
+  "version": "2.0.0-alpha.1",
+  "packageManager": "bun@1.3.11",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "core": "bun run --cwd packages/core start",
+    "dev:core": "bun run --cwd packages/core dev",
+    "dev:ui": "bun run --cwd packages/ui dev",
+    "build:ui": "bun run --cwd packages/ui build",
+    "check": "bun run --cwd packages/contracts check && bun run --cwd packages/core check && bun run --cwd packages/ui check",
+    "test": "bun run --cwd packages/core test && bun run --cwd packages/ui test",
+    "e2e": "bun test tests/e2e",
+    "bench": "bun run bench/run.ts"
+  }
+}
