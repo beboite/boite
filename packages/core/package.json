@@ -8,8 +8,10 @@
     "./client": "./src/client.ts"
   },
   "scripts": {
-    "start": "bun run src/main.ts",
+    "start": "bun run bin/core.ts",
     "dev": "bun run --watch src/main.ts",
+    "build": "bun build src/main.ts src/platform/jobs-worker.ts --target bun --outdir dist --splitting --sourcemap=none --entry-naming [name].[ext]",
+    "build:exe": "bun run build && bun build --compile src/main.ts --outfile dist/boite-core.exe",
     "check": "tsc -p tsconfig.json",
     "test": "bun test"
   },

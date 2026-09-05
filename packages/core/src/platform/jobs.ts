@@ -8,7 +8,10 @@
  * it, runs below normal priority and dies with the core (KILL_ON_JOB_CLOSE,
  * never BREAKAWAY_OK).
  */
+import { existsSync } from 'node:fs';
 import { cpus } from 'node:os';
+import { dirname, join } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dlopen, FFIType, ptr } from 'bun:ffi';
 import type { Pointer } from 'bun:ffi';
 import type { TraceCapability } from '@boite/contracts';
@@ -466,12 +469,32 @@ function ensureThreadJob(api: Native, threadId: string): ThreadJob | null {
 
 // -- the completion port drain ----------------------------------------------
 
+/**
+ * Where the worker file is on disk, which is not the same place in the three
+ * ways the core runs. A compiled core is checked first: its embedded copy is
+ * visible to `existsSync` but a Worker cannot read it, so `build:exe` leaves
+ * `jobs-worker.js` next to the executable and that copy is the only loadable
+ * one. Running under `bun`, nothing sits next to `bun.exe`, and the file beside
+ * this module is the source `.ts` or the bundled `.js`.
+ */
+function workerEntry(): string {
+  const besideExecutable = join(dirname(process.execPath), 'jobs-worker.js');
+  if (existsSync(besideExecutable)) return pathToFileURL(besideExecutable).href;
+  for (const name of ['./jobs-worker.ts', './jobs-worker.js']) {
+    const url = new URL(name, import.meta.url);
+    if (existsSync(fileURLToPath(url))) return url.href;
+  }
+  throw new Error(
+    `no jobs worker beside ${import.meta.url} and none next to ${process.execPath}`,
+  );
+}
+
 function ensureWorker(port: number): void {
   if (worker !== null || workerFailure !== null) return;
   const shared = new SharedArrayBuffer(4);
   stopFlag = new Int32Array(shared);
   try {
-    const created = new Worker(new URL('./jobs-worker.ts', import.meta.url).href);
+    const created = new Worker(workerEntry());
     created.onmessage = (event: { data: unknown }): void => {
       onWorkerMessage(event.data as JobsWorkerMessage);
     };

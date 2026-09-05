@@ -1,10 +1,12 @@
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { cpus } from 'node:os';
 import { join } from 'node:path';
 import {
   claudeTurn,
+  compiledCoreIdleRss,
   coreColdStart,
   coreIdleRss,
+  CORE_ENTRY,
   echoTurns,
   idleThreads,
   shellRun,
@@ -30,13 +32,18 @@ const NONE = 'n/a';
 
 interface Raw {
   boite2: {
+    /** Which core the rows below ran, written down because a bundle and the sources differ. */
+    coreEntry?: string | null;
     coldStart: ColdStart | null;
     coreIdleRssBytes: number | null;
+    compiledCoreIdleRssBytes?: number | null;
     threads: IdleThreads | null;
     echoAtDefault: EchoRun | null;
     echoAtFifty: EchoRun | null;
     shell: ShellRun | null;
     claude: ClaudeRun | null;
+    /** Set when the claude row was carried over from that date instead of measured. */
+    claudeFrom?: string | null;
   };
   legacy: {
     coldStartMs: number[] | null;
@@ -58,21 +65,57 @@ function step<T>(name: string, run: () => Promise<T>): Promise<T | null> {
   });
 }
 
+/**
+ * A real claude turn spends tokens on the user's account, so a run without
+ * `BOITE_BENCH_CLAUDE` keeps the last one that was measured rather than
+ * dropping the row from the table.
+ */
+function carriedClaude(): { run: ClaudeRun; date: string } | null {
+  let names: string[];
+  try {
+    names = readdirSync(RESULTS).filter((name) => name.endsWith('.json'));
+  } catch {
+    return null;
+  }
+  for (const name of names.sort().reverse()) {
+    try {
+      const previous = JSON.parse(readFileSync(join(RESULTS, name), 'utf8')) as Report;
+      const claude = (previous.raw as unknown as Raw).boite2.claude;
+      if (claude !== null && claude !== undefined) return { run: claude, date: previous.date };
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
+
 async function measure(): Promise<Raw> {
   const coldStart = await step<ColdStart>('boite2 core cold start', () => coreColdStart(5));
   const coreIdleRssBytes = await step<number>('boite2 core idle rss', () => coreIdleRss());
+  const compiledCoreIdleRssBytes = await step<number | null>('boite2 compiled core idle rss', () =>
+    compiledCoreIdleRss(),
+  );
   const threads = await step<IdleThreads>('boite2 idle threads', () => idleThreads());
   const echoAtDefault = await step<EchoRun>('boite2 50 echo turns at cap 6', () => echoTurns(6));
   const echoAtFifty = await step<EchoRun>('boite2 50 echo turns at cap 50', () => echoTurns(50));
   const shell = await step<ShellRun | null>('boite2 shell exe', () => shellRun());
 
   let claude: ClaudeRun | null = null;
+  let claudeFrom: string | null = null;
   if (process.env.BOITE_BENCH_CLAUDE === '1') {
     claude = await step<ClaudeRun>('boite2 one real claude turn', () => claudeTurn());
   } else {
+    const carried = carriedClaude();
+    if (carried !== null) {
+      claude = carried.run;
+      claudeFrom = carried.date;
+    }
     notMeasured.push({
       what: 'claude.turn',
-      why: 'BOITE_BENCH_CLAUDE was not 1, so no real account was used',
+      why:
+        carried === null
+          ? 'BOITE_BENCH_CLAUDE was not 1, so no real account was used'
+          : `BOITE_BENCH_CLAUDE was not 1, so no real account was used; the row below is the one measured on ${carried.date}`,
     });
   }
 
@@ -92,7 +135,18 @@ async function measure(): Promise<Raw> {
   const app = await step<LiveApp>('legacy desktop app, live', async () => liveApp());
 
   return {
-    boite2: { coldStart, coreIdleRssBytes, threads, echoAtDefault, echoAtFifty, shell, claude },
+    boite2: {
+      coreEntry: CORE_ENTRY,
+      coldStart,
+      coreIdleRssBytes,
+      compiledCoreIdleRssBytes,
+      threads,
+      echoAtDefault,
+      echoAtFifty,
+      shell,
+      claude,
+      claudeFrom,
+    },
     legacy: { coldStartMs, idleRssBytes, threads: legacyThreads, app },
   };
 }
@@ -100,6 +154,9 @@ async function measure(): Promise<Raw> {
 function buildRows(raw: Raw): Row[] {
   const rows: Row[] = [];
   const { coldStart, coreIdleRssBytes, threads, echoAtDefault, echoAtFifty, shell, claude } = raw.boite2;
+  const entry = raw.boite2.coreEntry ?? 'packages/core/src/main.ts';
+  const compiledIdle = raw.boite2.compiledCoreIdleRssBytes ?? null;
+  const claudeFrom = raw.boite2.claudeFrom ?? null;
   const legacy = raw.legacy;
   const app = legacy.app;
   const live = app !== null && app.found;
@@ -112,7 +169,7 @@ function buildRows(raw: Raw): Row[] {
     'core cold start, spawn to ready line',
     coldStart === null ? NONE : ms(median(coldStart.readyMs)),
     NONE,
-    'median of 5, fresh data dir each. Boite 2 prints `boite-core ready`, the legacy server prints no such line',
+    `median of 5, fresh data dir each, Boite 2 ran ${entry}. Boite 2 prints \`boite-core ready\`, the legacy server prints no such line`,
   );
   add(
     'core cold start, spawn to first HTTP answer',
@@ -124,7 +181,15 @@ function buildRows(raw: Raw): Row[] {
     'core idle RSS after 3 s',
     coreIdleRssBytes === null ? NONE : mb(coreIdleRssBytes),
     legacy.idleRssBytes === null ? NONE : mb(legacy.idleRssBytes),
-    'working set of the one server process. Boite 2 is bun running TypeScript, legacy is a compiled binary',
+    `working set of the one server process. Boite 2 is bun running ${entry}, legacy is a compiled binary`,
+  );
+  add(
+    'core idle RSS, compiled exe',
+    compiledIdle === null ? NONE : mb(compiledIdle),
+    legacy.idleRssBytes === null ? NONE : mb(legacy.idleRssBytes),
+    compiledIdle === null
+      ? 'packages/core/dist/boite-core.exe is missing, build it with bun run build:core:exe'
+      : 'the same core as `bun build --compile` output: one file, its own Bun runtime inside, no node_modules',
   );
   add(
     '50 idle threads, core RSS delta',
@@ -231,7 +296,9 @@ function buildRows(raw: Raw): Row[] {
     NONE,
     claude === null
       ? 'BOITE_BENCH_CLAUDE was not 1'
-      : `Default account, prompt: Reply with exactly the word: pong, answer: ${claude.text}`,
+      : `Default account, prompt: Reply with exactly the word: pong, answer: ${claude.text}${
+          claudeFrom === null ? '' : `. Measured on ${claudeFrom} and carried over, this run spent no tokens`
+        }`,
   );
   add('one real claude turn, total', claude === null ? NONE : ms(claude.totalMs), NONE, '');
   add(

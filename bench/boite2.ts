@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import type { Account, ThreadSummary } from '../packages/contracts/src/index.ts';
 import { connect, type CoreClient } from '../packages/core/src/client.ts';
 import {
+  CORE_SOURCE_COMMAND,
   freshDataDir,
   killProcessTree,
   removeDirectory,
@@ -24,7 +25,17 @@ import {
 const CLIENT = { name: 'bench', version: '2.0.0-alpha.1' };
 const ROOT = join(import.meta.dir, '..');
 const SHELL_EXE = join(ROOT, 'apps', 'shell', 'src-tauri', 'target', 'release', 'boite-shell.exe');
+const CORE_BUNDLE = join(ROOT, 'packages', 'core', 'dist', 'main.js');
+const CORE_EXE = join(ROOT, 'packages', 'core', 'dist', 'boite-core.exe');
 const HEALTH_TIMEOUT_MS = 30_000;
+
+/** What the core rows measure: the build when there is one, the sources otherwise. */
+export const CORE_COMMAND: readonly string[] = existsSync(CORE_BUNDLE)
+  ? ['bun', 'run', CORE_BUNDLE]
+  : CORE_SOURCE_COMMAND;
+export const CORE_ENTRY = existsSync(CORE_BUNDLE)
+  ? 'packages/core/dist/main.js'
+  : 'packages/core/src/main.ts';
 
 export function words(count: number): string {
   const parts: string[] = [];
@@ -56,7 +67,7 @@ export async function coreColdStart(runs = 5): Promise<ColdStart> {
   const healthMs: number[] = [];
   for (let index = 0; index < runs; index += 1) {
     const startedAt = performance.now();
-    const core = await startCore();
+    const core = await startCore({ command: CORE_COMMAND });
     readyMs.push(performance.now() - startedAt);
     await waitForHealth(core.url);
     healthMs.push(performance.now() - startedAt);
@@ -65,8 +76,10 @@ export async function coreColdStart(runs = 5): Promise<ColdStart> {
   return { readyMs, healthMs };
 }
 
-async function openCore(): Promise<{ core: RunningCore; client: CoreClient; pid: number }> {
-  const core = await startCore();
+async function openCore(
+  command: readonly string[] = CORE_COMMAND,
+): Promise<{ core: RunningCore; client: CoreClient; pid: number }> {
+  const core = await startCore({ command });
   const client = await connect(core.url, core.token, { client: CLIENT });
   return { core, client, pid: client.core.pid };
 }
@@ -78,6 +91,16 @@ async function closeCore(opened: { core: RunningCore; client: CoreClient }): Pro
 
 export async function coreIdleRss(): Promise<number> {
   const opened = await openCore();
+  await Bun.sleep(3_000);
+  const bytes = workingSet(opened.pid);
+  await closeCore(opened);
+  return bytes;
+}
+
+/** The same measurement on `bun build --compile` output, which carries its own runtime. */
+export async function compiledCoreIdleRss(): Promise<number | null> {
+  if (!existsSync(CORE_EXE)) return null;
+  const opened = await openCore([CORE_EXE]);
   await Bun.sleep(3_000);
   const bytes = workingSet(opened.pid);
   await closeCore(opened);

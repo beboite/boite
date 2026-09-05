@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { join, normalize, resolve, sep } from 'node:path';
+import { dirname, join, normalize, resolve, sep } from 'node:path';
 import type { ServerWebSocket } from 'bun';
 import { RPC_PATH, RpcCloseCode, RpcErrorCode } from '@boite/contracts';
 import type { RpcError, RpcEventName, RpcEvents, ThreadId } from '@boite/contracts';
@@ -10,8 +10,19 @@ import { newId } from './ids.ts';
 import type { Connection } from './router.ts';
 
 const DEFAULT_HELLO_TIMEOUT_MS = 5000;
-/** The UI build, resolved from the core package: `packages/core/src` -> `packages/ui/dist`. */
-export const UI_DIST = join(import.meta.dir, '..', '..', 'ui', 'dist');
+/**
+ * The UI build. `packages/core/src` and `packages/core/dist` are the same depth,
+ * so `../../ui/dist` is `packages/ui/dist` from either; a compiled core has no
+ * repository above it and carries the build in a `ui` directory next to itself.
+ */
+function resolveUiDist(): string {
+  const fromModule = join(import.meta.dir, '..', '..', 'ui', 'dist');
+  if (existsSync(fromModule)) return fromModule;
+  const besideExecutable = join(dirname(process.execPath), 'ui');
+  return existsSync(besideExecutable) ? besideExecutable : fromModule;
+}
+
+export const UI_DIST = resolveUiDist();
 export const PLACEHOLDER_HTML =
   '<!doctype html><meta charset="utf-8"><title>Boite core</title><p>Boite core is running; the UI is not built</p>';
 

@@ -4,6 +4,8 @@ import { join } from 'node:path';
 import { PAIR_QUERY_PARAM } from '../../../packages/contracts/src/index.ts';
 
 const MAIN = join(import.meta.dir, '..', '..', '..', 'packages', 'core', 'src', 'main.ts');
+/** The default: the end to end suite proves the sources, a bench may point elsewhere. */
+export const CORE_SOURCE_COMMAND: readonly string[] = ['bun', 'run', MAIN];
 const READY = /boite-core ready (\S+) pairing (\S+)/;
 const READY_TIMEOUT_MS = 30_000;
 
@@ -13,6 +15,8 @@ export interface StartCoreOptions {
   /** Reused across a restart so the same journal comes back. */
   dataDir?: string;
   env?: Record<string, string>;
+  /** Argv before `--port`: the sources, the bundle, or the compiled core. */
+  command?: readonly string[];
 }
 
 export interface RunningCore {
@@ -56,7 +60,7 @@ export async function startCore(options: StartCoreOptions = {}): Promise<Running
   const dataDir = options.dataDir ?? freshDataDir();
   const port = options.port ?? 0;
   const proc = Bun.spawn({
-    cmd: ['bun', 'run', MAIN, '--port', String(port)],
+    cmd: [...(options.command ?? CORE_SOURCE_COMMAND), '--port', String(port)],
     env: { ...process.env, BOITE_DATA_DIR: dataDir, ...(options.env ?? {}) },
     stdout: 'pipe',
     stderr: 'pipe',

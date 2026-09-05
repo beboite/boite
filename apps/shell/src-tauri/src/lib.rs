@@ -243,6 +243,8 @@ fn sidecar() -> Option<PathBuf> {
     path.exists().then_some(path)
 }
 
+/// In order: `BOITE_CORE_COMMAND`, the `boite-core` sidecar next to this
+/// executable, the core bundle a repository above it has built, its sources.
 fn core_command() -> Result<(String, Vec<String>, Option<PathBuf>), String> {
     if let Ok(raw) = std::env::var("BOITE_CORE_COMMAND") {
         let mut parts = raw.split_whitespace().map(str::to_string);
@@ -260,7 +262,13 @@ fn core_command() -> Result<(String, Vec<String>, Option<PathBuf>), String> {
         "no boite-core sidecar next to the executable, and no package.json named \"boite\" above it"
             .to_string()
     })?;
-    let entry = repo.join("packages").join("core").join("src").join("main.ts");
+    let core = repo.join("packages").join("core");
+    let bundle = core.join("dist").join("main.js");
+    let entry = if bundle.exists() {
+        bundle
+    } else {
+        core.join("src").join("main.ts")
+    };
     Ok((
         "bun".to_string(),
         vec!["run".to_string(), entry.display().to_string()],
