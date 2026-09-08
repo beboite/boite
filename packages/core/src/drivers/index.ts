@@ -42,6 +42,20 @@ function lazyDriver(protocol: Protocol, load: () => Promise<Driver>): Driver {
         },
       };
     },
+    // A probe is the other reason to load the module, so it awaits it like a
+    // turn does. The two synchronous ones never load anything: a module that
+    // has not run has probed nothing and caches nothing to forget.
+    async probe(ctx: ProbeContext): Promise<ProbeResult> {
+      const driver = await ready();
+      if (driver.probe === undefined) return { models: ctx.provider.models, probedAt: Date.now() };
+      return driver.probe(ctx);
+    },
+    probedModels(providerId: ProviderId, accountId: AccountId): ModelInfo[] | null {
+      return loaded?.probedModels?.(providerId, accountId) ?? null;
+    },
+    forgetProbes(filter: ProbeFilter): void {
+      loaded?.forgetProbes?.(filter);
+    },
     releaseThread(threadId: ThreadId): void {
       loaded?.releaseThread?.(threadId);
     },

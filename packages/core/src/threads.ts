@@ -7,6 +7,7 @@ import type {
   MessageRole,
   ModelInfo,
   PermissionRequest,
+  Protocol,
   ProviderDescriptor,
   RequestId,
   Thread,
@@ -437,10 +438,14 @@ export class ThreadStore {
   }
 }
 
+/** The protocols whose models come from the agent, not from the descriptor. */
+const PROBED_PROTOCOLS: readonly Protocol[] = ['acp', 'codex-appserver'];
+
 /**
  * What this account may run: the descriptor's models, plus the ones the last
- * probe read from the agent for an ACP provider. Nothing is probed here; a
- * model the agent could list but nobody asked for is not offered yet.
+ * probe read from the agent for a provider that owns its own list. Nothing is
+ * probed here; a model the agent could list but nobody asked for is not offered
+ * yet.
  */
 function modelsFor(provider: ProviderDescriptor, accountId: AccountId): ModelInfo[] {
   const probed = probedModelsOf(provider.protocol, provider.id, accountId);
@@ -458,7 +463,7 @@ function checkModel(provider: ProviderDescriptor, accountId: AccountId, model: s
   const models = modelsFor(provider, accountId);
   if (models.some((entry) => entry.id === model)) return model;
   throw refused(
-    provider.protocol === 'acp'
+    PROBED_PROTOCOLS.includes(provider.protocol)
       ? 'the agent has not listed this model: open the model picker so Boite reads its models first'
       : 'the provider does not offer this model',
     { providerId: provider.id, accountId, model, expected: models.map((entry) => entry.id) },

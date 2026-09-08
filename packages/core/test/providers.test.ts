@@ -59,7 +59,7 @@ describe('providers', () => {
     const { loaded, rejected } = await client.call('providers.list', {});
     expect(rejected).toEqual([]);
     const ids = loaded.map((provider) => provider.id).sort();
-    expect(ids).toEqual(['claude', 'echo', 'gemini', 'opencode']);
+    expect(ids).toEqual(['claude', 'codex', 'echo', 'gemini', 'opencode']);
 
     const echo = loaded.find((provider) => provider.id === 'echo');
     expect(echo?.source).toBe('shipped');
@@ -162,6 +162,57 @@ describe('providers', () => {
       return;
     }
     expect(gemini.executable?.toLowerCase()).toContain('node');
+  });
+
+  test('the shipped codex descriptor loads and is launched as the app-server', async () => {
+    const client = await harness.connect();
+    const { loaded, rejected } = await client.call('providers.list', {});
+    expect(rejected).toEqual([]);
+
+    const codex = loaded.find((provider) => provider.id === 'codex');
+    expect(codex?.source).toBe('shipped');
+    expect(codex?.protocol).toBe('codex-appserver');
+    expect(codex?.name).toBe('Codex');
+    // One model, "the agent keeps its own"; the rest comes from `model/list`.
+    expect(codex?.models).toEqual([{ id: 'default', name: 'Codex default', default: true }]);
+    expect(codex?.capabilities).toEqual({
+      approvals: true,
+      hooks: false,
+      checkpoint: false,
+      images: false,
+      planMode: true,
+      resume: true,
+    });
+
+    const descriptor = harness.core.providers.require('codex');
+    // `CODEX_HOME` is the whole home Codex works from, `auth.json` right under it.
+    expect(descriptor.auth).toEqual({ kind: 'oauth-cli', session: ['auth.json'] });
+    // The device-code login prints a link and a code instead of opening a browser.
+    expect(descriptor.login?.command).toEqual(['codex', 'login', '--device-auth']);
+
+    const profile = descriptor.profiles[process.platform === 'win32' ? 'windows' : 'linux'];
+    expect(profile?.launch?.args).toEqual(['app-server']);
+    expect(profile?.isolation).toEqual({ CODEX_HOME: '{isolationDir}' });
+
+    if (process.platform !== 'win32') {
+      expect(profile?.executable).toEqual([{ kind: 'path', value: 'codex' }]);
+      return;
+    }
+    // npm installs a `.cmd` shim Bun cannot spawn, so the real vendored exe is
+    // named first and `{appdata}` has to be a real path by the time it runs.
+    const candidate = profile?.executable[0];
+    expect(candidate?.kind).toBe('file');
+    expect(candidate?.value).not.toContain('{appdata}');
+    expect(candidate?.value.startsWith(process.env['APPDATA'] ?? '')).toBe(true);
+    expect(candidate?.value.toLowerCase()).toEndWith('codex.exe');
+    expect(profile?.executable.at(-1)).toEqual({ kind: 'path', value: 'codex' });
+    expect(profile?.close?.processes).toEqual(['codex.exe']);
+
+    if (codex?.available !== true) {
+      console.log('codex is not installed here, the executable assertion is skipped');
+      return;
+    }
+    expect(codex.executable?.toLowerCase()).toEndWith('codex.exe');
   });
 
   test('the shipped models carry the reasoning effort scale they are meant to', async () => {

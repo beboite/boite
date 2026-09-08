@@ -20,6 +20,7 @@ import type { Core } from '../core.ts';
 import { appDataPath, currentOs, homePath } from '../paths.ts';
 import { notFound } from '../errors.ts';
 import claudeShipped from './shipped/claude.json';
+import codexShipped from './shipped/codex.json';
 import geminiShipped from './shipped/gemini.json';
 import opencodeShipped from './shipped/opencode.json';
 import echoShipped from './shipped/echo.json';
@@ -44,6 +45,7 @@ const SHIPPED_DIR = join(import.meta.dir, 'shipped');
 
 const SHIPPED_SOURCES: { file: string; raw: unknown; when?: () => boolean }[] = [
   { file: 'shipped/claude.json', raw: claudeShipped },
+  { file: 'shipped/codex.json', raw: codexShipped },
   { file: 'shipped/gemini.json', raw: geminiShipped },
   { file: 'shipped/opencode.json', raw: opencodeShipped },
   { file: 'shipped/echo.json', raw: echoShipped, when: echoEnabled },

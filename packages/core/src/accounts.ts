@@ -18,10 +18,10 @@ const URL_IN_OUTPUT = /https:\/\/\S+/;
 /**
  * What an isolation variable means when it is not set, as segments under the
  * home directory. A descriptor that isolates an account through one of them
- * (OpenCode uses the XDG pair, Gemini CLI a home of its own) puts its session
- * file under that same variable, so the provider's own location is the
- * variable's own default, never `~/.<id>`. No segment at all means the home
- * directory itself, which is what `GEMINI_CLI_HOME` replaces.
+ * (OpenCode uses the XDG pair, Gemini CLI a home of its own, Codex `CODEX_HOME`)
+ * puts its session file under that same variable, so the provider's own location
+ * is the variable's own default, never `~/.<id>`. No segment at all means the
+ * home directory itself, which is what `GEMINI_CLI_HOME` replaces.
  */
 const ISOLATION_DEFAULTS: Record<string, string[]> = {
   XDG_DATA_HOME: ['.local', 'share'],
@@ -29,6 +29,7 @@ const ISOLATION_DEFAULTS: Record<string, string[]> = {
   XDG_STATE_HOME: ['.local', 'state'],
   XDG_CACHE_HOME: ['.cache'],
   GEMINI_CLI_HOME: [],
+  CODEX_HOME: ['.codex'],
 };
 
 interface LoginRun {

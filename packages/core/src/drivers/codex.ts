@@ -12,9 +12,14 @@
  * without a `jsonrpc` member, so nothing here may require one.
  */
 import type {
+  AccountId,
+  EffortLevel,
   MessageId,
   MessagePart,
+  ModelInfo,
   PermissionMode,
+  ProviderDescriptor,
+  ProviderId,
   ThreadId,
   ToolStatus,
   Usage,
@@ -23,12 +28,30 @@ import pkg from '../../package.json';
 import { messageOf, unavailable } from '../errors.ts';
 import type { SpawnedChild } from '../procs.ts';
 import { profileFor, resolveExecutable } from '../providers/loader.ts';
-import type { Driver, TurnContext, TurnHandle, TurnResult } from './types.ts';
+import type {
+  Driver,
+  ProbeContext,
+  ProbeFilter,
+  ProbeResult,
+  TurnContext,
+  TurnHandle,
+  TurnResult,
+} from './types.ts';
 
 /** What the agent sees as `clientInfo.name`. */
 const CLIENT_NAME = 'boite';
 const MINUTE_MS = 60_000;
 const STDERR_MAX = 400;
+/**
+ * The model id that means "the agent keeps its own", the same spelling the ACP
+ * driver uses. It is the descriptor's only model, and it is never sent on the
+ * wire: Codex would refuse it as a model name.
+ */
+const AGENT_OWN_MODEL = 'default';
+/** How long a probe waits for `initialize` and `model/list` before giving up. */
+const PROBE_TIMEOUT_MS = 20_000;
+/** `model/list` pages; a cursor loop that never ends is a bug, not a model list. */
+const PROBE_MAX_PAGES = 10;
 /** How long a failed request waits for the child's exit before blaming itself. */
 const EXIT_GRACE_MS = 500;
 /** Codex names no tool for a shell command, so the card carries the usual one. */
@@ -65,6 +88,28 @@ interface CodexTokenUsage {
   outputTokens?: number;
   cachedInputTokens?: number;
   cacheWriteInputTokens?: number;
+}
+
+/** `ReasoningEffortOption`: the effort id plus the sentence the server describes it with. */
+interface CodexReasoningEffortOption {
+  reasoningEffort?: string;
+  description?: string;
+}
+
+/** `Model`, the fields the probe reads. The rest of the record is not Boite's business. */
+interface CodexModel {
+  id?: string;
+  displayName?: string;
+  hidden?: boolean;
+  isDefault?: boolean;
+  supportedReasoningEfforts?: CodexReasoningEffortOption[];
+  defaultReasoningEffort?: string;
+}
+
+/** `ModelListResponse`. */
+interface CodexModelListResponse {
+  data?: CodexModel[];
+  nextCursor?: string | null;
 }
 
 /**
@@ -533,10 +578,11 @@ class CodexSession {
     this.current = turn;
     const ctx = turn.ctx;
     try {
+      const model = modelOf(ctx);
       const started = await rpc.request<{ turn: CodexTurnRecord }>('turn/start', {
         threadId,
         input: [{ type: 'text', text: ctx.prompt, text_elements: [] }],
-        ...(ctx.thread.model === null ? {} : { model: ctx.thread.model }),
+        ...(model === null ? {} : { model }),
         ...(ctx.thread.effort === null ? {} : { effort: ctx.thread.effort }),
       });
       turn.turnId = started.turn.id;
@@ -607,13 +653,14 @@ class CodexSession {
     rpc.notify('initialized', {});
 
     const policy = MODE_POLICY[ctx.thread.permissionMode];
+    const model = modelOf(ctx);
     if (ctx.sessionId !== null) {
       const resumed = await rpc.request<{ thread: { id: string } }>('thread/resume', {
         threadId: ctx.sessionId,
         cwd: ctx.thread.cwd,
         approvalPolicy: policy.approvalPolicy,
         sandbox: policy.sandbox,
-        ...(ctx.thread.model === null ? {} : { model: ctx.thread.model }),
+        ...(model === null ? {} : { model }),
         excludeTurns: true,
       });
       this.threadId = resumed.thread.id;
@@ -624,7 +671,7 @@ class CodexSession {
       cwd: ctx.thread.cwd,
       approvalPolicy: policy.approvalPolicy,
       sandbox: policy.sandbox,
-      ...(ctx.thread.model === null ? {} : { model: ctx.thread.model }),
+      ...(model === null ? {} : { model }),
     });
     this.threadId = created.thread.id;
   }
@@ -902,6 +949,17 @@ function mapUsage(last: CodexTokenUsage): Usage {
 }
 
 /**
+ * The model this turn asks for, or null for the agent's own. `default` is the
+ * descriptor's way of saying "whatever Codex is configured on", and Codex has
+ * no model by that name, so it never reaches the wire.
+ */
+function modelOf(ctx: TurnContext): string | null {
+  const model = ctx.thread.model;
+  if (model === null || model === AGENT_OWN_MODEL) return null;
+  return model;
+}
+
+/**
  * What a session was started with. A turn that differs on any of it needs its
  * own. The permission mode is in here, unlike the ACP driver's key: Codex takes
  * the pair on `thread/start` and `thread/resume` and has no call to change it
@@ -919,12 +977,232 @@ function sessionKey(ctx: TurnContext): string {
   });
 }
 
+// ---------------------------------------------------------------------------
+// The probe: the models the server itself lists
+// ---------------------------------------------------------------------------
+
+/** The words the picker shows for the effort ids Codex uses, its own spelling kept otherwise. */
+const EFFORT_LABELS: Record<string, string> = {
+  minimal: 'Minimal',
+  low: 'Low',
+  medium: 'Medium',
+  high: 'High',
+  xhigh: 'Extra high',
+  max: 'Max',
+  ultra: 'Ultra',
+};
+
+function effortLabel(id: string): string {
+  return EFFORT_LABELS[id] ?? `${id.slice(0, 1).toUpperCase()}${id.slice(1)}`;
+}
+
+/**
+ * `supportedReasoningEfforts` as a `ModelInfo.effort` block. Unlike ACP's
+ * `thought_level`, which is one scale for the whole session, Codex gives each
+ * model its own scale and its own default, so this is read per model.
+ */
+function effortOf(model: CodexModel): ModelInfo['effort'] | null {
+  const options = model.supportedReasoningEfforts ?? [];
+  const levels: EffortLevel[] = [];
+  const seen = new Set<string>();
+  for (const option of options) {
+    const id = option.reasoningEffort;
+    if (typeof id !== 'string' || id.length === 0 || seen.has(id)) continue;
+    seen.add(id);
+    levels.push({
+      id,
+      label: effortLabel(id),
+      ...(typeof option.description === 'string' && option.description.length > 0
+        ? { description: option.description }
+        : {}),
+    });
+  }
+  if (levels.length === 0) return null;
+  const wanted = model.defaultReasoningEffort ?? '';
+  return { levels, default: seen.has(wanted) ? wanted : (levels[0]?.id ?? '') };
+}
+
+/**
+ * A `model/list` answer as a model list. The descriptor's `default` stays first
+ * so the choice can always go back to Codex's own configuration, and it carries
+ * no effort of its own: the scale belongs to the model that is picked. A server
+ * that lists nothing leaves the descriptor's models standing.
+ */
+function modelsFrom(provider: ProviderDescriptor, data: CodexModel[]): ModelInfo[] {
+  const models: ModelInfo[] = [];
+  const seen = new Set<string>();
+  const own = provider.models.find((model) => model.id === AGENT_OWN_MODEL);
+  if (own !== undefined) {
+    models.push({ id: AGENT_OWN_MODEL, name: own.name, default: false });
+    seen.add(AGENT_OWN_MODEL);
+  }
+  for (const entry of data) {
+    const id = entry.id;
+    if (typeof id !== 'string' || id.length === 0 || seen.has(id)) continue;
+    seen.add(id);
+    const effort = effortOf(entry);
+    models.push({
+      id,
+      name: entry.displayName ?? id,
+      default: entry.isDefault === true,
+      ...(effort === null ? {} : { effort }),
+    });
+  }
+  // Only the descriptor's own entry came back: the server said nothing useful.
+  return models.length === (own === undefined ? 0 : 1) ? provider.models : models;
+}
+
+/**
+ * One short-lived `codex app-server`: `initialize`, the `initialized`
+ * notification, then `model/list` until the server stops handing back a cursor.
+ * The child goes through the registry that traced it on every path. Nothing of
+ * this process is kept; a turn opens its own.
+ */
+async function readModels(ctx: ProbeContext): Promise<ModelInfo[]> {
+  const profile = profileFor(ctx.provider);
+  const executable = profile === undefined ? null : resolveExecutable(profile);
+  if (executable === null) {
+    throw unavailable(`no ${ctx.provider.id} executable on this machine`, { providerId: ctx.provider.id });
+  }
+
+  let lastStderr = '';
+  const child = ctx.spawnChild(executable, profile?.launch?.args ?? [], {
+    cwd: ctx.cwd,
+    env: { ...process.env, ...ctx.accountEnv },
+  });
+  child.stderr.setEncoding('utf8');
+  child.stderr.on('data', (chunk: string) => {
+    for (const line of chunk.split(/\r?\n/)) {
+      const text = line.trim();
+      if (text.length > 0) lastStderr = text.slice(0, STDERR_MAX);
+    }
+  });
+
+  const say = (head: string): string => (lastStderr.length === 0 ? head : `${head}: ${lastStderr}`);
+  const detail = { providerId: ctx.provider.id, accountId: ctx.accountId };
+  let timer: Timer | null = null;
+  const rpc = new CodexRpc(child, {
+    // A probe draws nothing and answers nothing: the server has no turn to
+    // report on and no approval to ask for.
+    notification: () => undefined,
+    request: (method) => Promise.reject(new Error(`boite does not implement ${method}`)),
+    log: (level, message) => {
+      ctx.log(level, message);
+    },
+  });
+
+  try {
+    const died = new Promise<never>((_resolve, reject) => {
+      child.once('exit', (code) => {
+        reject(unavailable(say(`the ${ctx.provider.id} agent exited with code ${code ?? 'unknown'}`), detail));
+      });
+      child.once('error', (error) => {
+        reject(unavailable(say(`the ${ctx.provider.id} agent did not start: ${messageOf(error)}`), detail));
+      });
+    });
+    const expired = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => {
+        reject(
+          unavailable(
+            say(`the ${ctx.provider.id} agent did not list its models in ${PROBE_TIMEOUT_MS / 1000} s`),
+            detail,
+          ),
+        );
+      }, PROBE_TIMEOUT_MS);
+      timer.unref?.();
+    });
+
+    const read = (async (): Promise<CodexModel[]> => {
+      await rpc.request('initialize', {
+        clientInfo: { name: CLIENT_NAME, title: null, version: pkg.version },
+        capabilities: null,
+      });
+      rpc.notify('initialized', {});
+
+      const data: CodexModel[] = [];
+      let cursor: string | null = null;
+      for (let page = 0; page < PROBE_MAX_PAGES; page += 1) {
+        const answer: CodexModelListResponse = await rpc.request<CodexModelListResponse>(
+          'model/list',
+          cursor === null ? {} : { cursor },
+        );
+        data.push(...(answer.data ?? []));
+        cursor = answer.nextCursor ?? null;
+        if (cursor === null) break;
+      }
+      return data;
+    })();
+
+    return modelsFrom(ctx.provider, await Promise.race([read, died, expired]));
+  } finally {
+    if (timer !== null) clearTimeout(timer);
+    rpc.fail('the codex probe is over');
+    try {
+      child.stdin.end();
+    } catch {
+      // the pipe is already gone
+    }
+    ctx.killTree();
+  }
+}
+
+interface ProbeEntry {
+  providerId: ProviderId;
+  accountId: AccountId;
+  /** The one process in flight for this key, so two callers share it. */
+  running: Promise<ProbeResult> | null;
+  result: ProbeResult | null;
+}
+
 /** One `codex app-server` process per thread, kept between turns like the ACP one. */
 export function createCodexDriver(): Driver {
   const sessions = new Map<ThreadId, CodexSession>();
+  const probes = new Map<string, ProbeEntry>();
+
+  const keyOf = (providerId: ProviderId, accountId: AccountId): string => `${providerId}::${accountId}`;
 
   return {
     protocol: 'codex-appserver',
+
+    async probe(ctx: ProbeContext): Promise<ProbeResult> {
+      const key = keyOf(ctx.provider.id, ctx.accountId);
+      const entry: ProbeEntry = probes.get(key) ?? {
+        providerId: ctx.provider.id,
+        accountId: ctx.accountId,
+        running: null,
+        result: null,
+      };
+      probes.set(key, entry);
+      if (entry.result !== null) return entry.result;
+      if (entry.running !== null) return entry.running;
+
+      const running = readModels(ctx).then((models) => ({ models, probedAt: Date.now() }));
+      entry.running = running;
+      try {
+        const result = await running;
+        // A `providers.reload` during the probe dropped the entry: nothing is
+        // cached behind its back, the next caller probes again.
+        if (probes.get(key) === entry) entry.result = result;
+        return result;
+      } catch (error) {
+        if (probes.get(key) === entry) probes.delete(key);
+        throw error;
+      } finally {
+        entry.running = null;
+      }
+    },
+
+    probedModels(providerId: ProviderId, accountId: AccountId): ModelInfo[] | null {
+      return probes.get(keyOf(providerId, accountId))?.result?.models ?? null;
+    },
+
+    forgetProbes(filter: ProbeFilter = {}): void {
+      for (const [key, entry] of [...probes]) {
+        if (filter.providerId !== undefined && filter.providerId !== entry.providerId) continue;
+        if (filter.accountId !== undefined && filter.accountId !== entry.accountId) continue;
+        probes.delete(key);
+      }
+    },
 
     startTurn(ctx: TurnContext): TurnHandle {
       const threadId = ctx.thread.id;
@@ -967,6 +1245,7 @@ export function createCodexDriver(): Driver {
     shutdown(): void {
       const open = [...sessions.values()];
       sessions.clear();
+      probes.clear();
       for (const session of open) session.close(null);
     },
   };

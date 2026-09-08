@@ -1,0 +1,52 @@
+{
+  "id": "codex",
+  "schemaVersion": 1,
+  "name": "Codex",
+  "shortName": "Codex",
+  "protocol": "codex-appserver",
+  "roots": ["{home}/.codex", "{isolationDir}"],
+  "profiles": {
+    "windows": {
+      "detect": {},
+      "executable": [
+        {
+          "kind": "file",
+          "value": "{appdata}/npm/node_modules/@openai/codex/node_modules/@openai/codex-win32-x64/vendor/x86_64-pc-windows-msvc/bin/codex.exe"
+        },
+        {
+          "kind": "file",
+          "value": "{appdata}/npm/node_modules/@openai/codex/node_modules/@openai/codex-win32-arm64/vendor/aarch64-pc-windows-msvc/bin/codex.exe"
+        },
+        { "kind": "path", "value": "codex" }
+      ],
+      "launch": { "args": ["app-server"] },
+      "isolation": { "CODEX_HOME": "{isolationDir}" },
+      "close": { "processes": ["codex.exe"] }
+    },
+    "linux": {
+      "detect": {},
+      "executable": [{ "kind": "path", "value": "codex" }],
+      "launch": { "args": ["app-server"] },
+      "isolation": { "CODEX_HOME": "{isolationDir}" },
+      "close": { "processes": ["codex"] }
+    },
+    "macos": {
+      "detect": {},
+      "executable": [{ "kind": "path", "value": "codex" }],
+      "launch": { "args": ["app-server"] },
+      "isolation": { "CODEX_HOME": "{isolationDir}" },
+      "close": { "processes": ["codex"] }
+    }
+  },
+  "auth": { "kind": "oauth-cli", "session": ["auth.json"] },
+  "login": { "command": ["codex", "login", "--device-auth"] },
+  "models": [{ "id": "default", "name": "Codex default", "default": true }],
+  "capabilities": {
+    "approvals": true,
+    "hooks": false,
+    "checkpoint": false,
+    "images": false,
+    "planMode": true,
+    "resume": true
+  }
+}

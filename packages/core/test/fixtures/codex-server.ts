@@ -9,9 +9,9 @@
  * Run as `bun <this file>`. `CODEX_FAKE_LOG` names a file it appends one line
  * per incoming request to: `initialize`, `initialized`,
  * `thread/start approvalPolicy=<p> sandbox=<s> model=<m>`,
- * `thread/resume <threadId> ...`, `turn/start model=<m> effort=<e>` and
- * `turn/interrupt <turnId>`. One `initialize` line per process, so a test can
- * count the agent processes a warm session did or did not save.
+ * `thread/resume <threadId> ...`, `turn/start model=<m> effort=<e>`,
+ * `turn/interrupt <turnId>` and `model/list`. One `initialize` line per process,
+ * so a test can count the agent processes a warm session did or did not save.
  *
  * The wire is copied from the real server on purpose: responses and
  * notifications carry no `jsonrpc` member, which is what the driver has to
@@ -128,6 +128,56 @@ function turnRecord(turnId: string, status: string): unknown {
     durationMs: status === 'inProgress' ? null : 1,
   };
 }
+
+/**
+ * What `model/list` answers, shaped like the real `Model` record: an id, a
+ * display name, a per-model effort scale with its own default, and one model
+ * flagged `isDefault`. Three of them, so a probe test can tell the order and the
+ * flag apart. `fake-plain` lists no effort at all, which is the case a model
+ * with no reasoning control has to survive.
+ */
+const MODELS = [
+  {
+    id: 'fake-fast',
+    model: 'fake-fast',
+    displayName: 'Fake Fast',
+    description: 'the quick one',
+    hidden: false,
+    supportedReasoningEfforts: [
+      { reasoningEffort: 'low', description: 'quick' },
+      { reasoningEffort: 'medium', description: 'balanced' },
+    ],
+    defaultReasoningEffort: 'medium',
+    inputModalities: ['text'],
+    isDefault: false,
+  },
+  {
+    id: 'fake-smart',
+    model: 'fake-smart',
+    displayName: 'Fake Smart',
+    description: 'the slow one',
+    hidden: false,
+    supportedReasoningEfforts: [
+      { reasoningEffort: 'low', description: 'quick' },
+      { reasoningEffort: 'medium', description: 'balanced' },
+      { reasoningEffort: 'high', description: 'deep' },
+    ],
+    defaultReasoningEffort: 'high',
+    inputModalities: ['text'],
+    isDefault: true,
+  },
+  {
+    id: 'fake-plain',
+    model: 'fake-plain',
+    displayName: 'Fake Plain',
+    description: 'no reasoning control',
+    hidden: false,
+    supportedReasoningEfforts: [],
+    defaultReasoningEffort: 'medium',
+    inputModalities: ['text'],
+    isDefault: false,
+  },
+];
 
 function threadRecord(): unknown {
   return { id: threadId, sessionId: threadId, model: 'fake-codex', cwd: process.cwd(), turns: [] };
@@ -291,6 +341,10 @@ function handle(method: string, raw: unknown): unknown {
         platformFamily: process.platform === 'win32' ? 'windows' : 'unix',
         platformOs: process.platform === 'win32' ? 'windows' : 'linux',
       };
+    case 'model/list':
+      log('model/list');
+      // One page, and a null cursor: the driver stops asking on that.
+      return { data: MODELS, nextCursor: null };
     case 'thread/start': {
       threadCounter += 1;
       threadId = `codex-fake-${Math.random().toString(16).slice(2, 10)}-${threadCounter}`;

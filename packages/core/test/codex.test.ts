@@ -76,6 +76,9 @@ function writeDescriptor(dataDir: string): void {
             default: 'low',
           },
         },
+        // The shipped descriptor's one model: "the agent keeps its own". A probe
+        // keeps it first, and the driver never puts it on the wire.
+        { id: 'default', name: 'Agent default' },
       ],
       capabilities: {
         approvals: true,
@@ -376,6 +379,103 @@ describe('codex driver', () => {
     const looseThread = await codexThread(loose, 'bypassPermissions');
     await runTurn(loose, looseThread, 'first');
     expect(fakeLog()).toContain('thread/start approvalPolicy=never sandbox=danger-full-access');
+  });
+
+  test('a probe lists the models the server offers, each with its own effort scale', async () => {
+    const client = await startCore();
+    const { accountId } = await codexAccount(client);
+
+    const probed = client.next(
+      'providers.probed',
+      (event) => event.providerId === 'codex-fake' && event.accountId === accountId,
+      20000,
+    );
+    const result = await client.call('providers.probe', { providerId: 'codex-fake', accountId });
+
+    expect(result.models.map((model) => model.id)).toEqual(['default', 'fake-fast', 'fake-smart', 'fake-plain']);
+    // The descriptor's own entry stays first and never claims to be the default.
+    expect(result.models[0]).toEqual({ id: 'default', name: 'Agent default', default: false });
+    expect(result.models.find((model) => model.default === true)?.id).toBe('fake-smart');
+
+    // Unlike ACP's one session-wide scale, each Codex model carries its own.
+    expect(result.models[1]?.effort).toEqual({
+      levels: [
+        { id: 'low', label: 'Low', description: 'quick' },
+        { id: 'medium', label: 'Medium', description: 'balanced' },
+      ],
+      default: 'medium',
+    });
+    expect(result.models[2]?.effort?.default).toBe('high');
+    // A model with no reasoning control carries no effort block at all.
+    expect(result.models[3]?.effort).toBeUndefined();
+    expect(result.probedAt).toBeGreaterThan(0);
+
+    // A second client learns the same list from the event.
+    expect((await probed).models.map((model) => model.id)).toEqual([
+      'default',
+      'fake-fast',
+      'fake-smart',
+      'fake-plain',
+    ]);
+
+    // The agent process is gone: nothing is left running for a probe.
+    await waitFor(() => harness?.core.procs.liveCount(`probe:codex-fake:${accountId}`) === 0);
+    const trace = await client.call('trace.get', { threadId: `probe:codex-fake:${accountId}` });
+    expect(trace.every((row) => row.exitedAt !== null)).toBe(true);
+    expect(countLines('model/list')).toBe(1);
+  });
+
+  test('a thread on a probed model sends that model and its effort on turn/start', async () => {
+    const client = await startCore();
+    const { projectId, accountId } = await codexAccount(client);
+
+    let failure = 'none';
+    try {
+      await client.call('threads.create', {
+        projectId,
+        providerId: 'codex-fake',
+        accountId,
+        title: 'too early',
+        model: 'fake-smart',
+      });
+    } catch (error) {
+      failure = (error as Error).message;
+    }
+    expect(failure).toBe('the agent has not listed this model: open the model picker so Boite reads its models first');
+
+    await client.call('providers.probe', { providerId: 'codex-fake', accountId });
+    const thread = await client.call('threads.create', {
+      projectId,
+      providerId: 'codex-fake',
+      accountId,
+      title: 'after the probe',
+      model: 'fake-smart',
+      effort: 'high',
+    });
+    expect(thread.model).toBe('fake-smart');
+    expect(thread.effort).toBe('high');
+
+    await client.call('threads.subscribe', { threadId: thread.id });
+    await runTurn(client, thread.id, 'first');
+    expect(fakeLog()).toContain('turn/start model=fake-smart effort=high');
+  });
+
+  test('the model "default" means the agent keeps its own, so no model reaches the wire', async () => {
+    const client = await startCore();
+    const { projectId, accountId } = await codexAccount(client);
+    const thread = await client.call('threads.create', {
+      projectId,
+      providerId: 'codex-fake',
+      accountId,
+      title: 'agent default',
+      model: 'default',
+    });
+    await client.call('threads.subscribe', { threadId: thread.id });
+    await runTurn(client, thread.id, 'first');
+
+    expect(fakeLog()).toContain('thread/start approvalPolicy=on-request sandbox=workspace-write model=');
+    expect(fakeLog()).toContain('turn/start model= effort=');
+    expect(fakeLog()).not.toContain('model=default');
   });
 
   /** How many lines of the fake log are exactly this one. */
