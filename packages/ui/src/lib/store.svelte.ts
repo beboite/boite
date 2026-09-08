@@ -323,11 +323,7 @@ export class Store {
     });
 
     on('permission.requested', (request) => {
-      this.pendingPermissions = [
-        ...this.pendingPermissions.filter((p) => p.id !== request.id),
-        request
-      ];
-      this.permissionRequests = { ...this.permissionRequests, [request.id]: request };
+      this.#mergePermissions([request]);
     });
     on('permission.resolved', ({ requestId }) => {
       this.pendingPermissions = this.pendingPermissions.filter((p) => p.id !== requestId);
@@ -435,14 +431,16 @@ export class Store {
     const client = this.#client;
     if (!client) return;
     try {
-      const [projects, threads, providers, accounts, settings, scheduler] = await Promise.all([
+      const [projects, threads, providers, accounts, settings, scheduler, permissions] = await Promise.all([
         client.call('projects.list', {}),
         client.call('threads.list', {}),
         client.call('providers.list', {}),
         client.call('accounts.list', {}),
         client.call('settings.get', {}),
-        client.call('scheduler.get', {})
+        client.call('scheduler.get', {}),
+        client.call('permissions.list', {})
       ]);
+      this.#mergePermissions(permissions);
       this.projects = projects;
       this.threads = threads;
       this.providers = providers.loaded;
@@ -568,6 +566,8 @@ export class Store {
       this.page = 'chat';
       this.sidebarOpen = false;
       this.trace = await client.call('trace.get', { threadId });
+      // The thread may already be waiting on a request this page never saw.
+      this.#mergePermissions(await client.call('permissions.list', { threadId }));
       if (thread.unread) {
         await client.call('threads.markRead', { threadId });
         thread.unread = false;
@@ -645,6 +645,22 @@ export class Store {
     } catch (error) {
       this.#fail(error);
     }
+  }
+
+  /**
+   * `permission.requested` reaches a subscribed socket once and is gone. A page
+   * that loads while a turn waits gets the same request from `permissions.list`,
+   * so both paths land here and the same id never makes a second card.
+   */
+  #mergePermissions(requests: PermissionRequest[]): void {
+    if (requests.length === 0) return;
+    const byId = new Map(this.pendingPermissions.map((p) => [p.id, p] as const));
+    for (const request of requests) byId.set(request.id, request);
+    this.pendingPermissions = [...byId.values()].sort((a, b) => a.createdAt - b.createdAt);
+    this.permissionRequests = {
+      ...this.permissionRequests,
+      ...Object.fromEntries(requests.map((request) => [request.id, request] as const))
+    };
   }
 
   async answer(requestId: string, decision: 'allow' | 'deny'): Promise<void> {

@@ -265,6 +265,17 @@ export class ThreadStore {
     this.save(next, 'thread.finished');
   }
 
+  /**
+   * The requests still waiting for an answer, oldest first. Answering one or
+   * finishing its turn takes it out, so what this returns is what a client has
+   * to show, whether it was subscribed when the request fired or not.
+   */
+  listPermissions(threadId?: ThreadId): PermissionRequest[] {
+    const pending = [...this.permissions.values()].map((entry) => entry.request);
+    const scoped = threadId === undefined ? pending : pending.filter((r) => r.threadId === threadId);
+    return scoped.sort((a, b) => a.createdAt - b.createdAt);
+  }
+
   answerPermission(params: { requestId: RequestId; decision: 'allow' | 'deny' }): void {
     const pending = this.permissions.get(params.requestId);
     if (pending === undefined) throw notFound(`unknown permission request ${params.requestId}`, params);
@@ -468,6 +479,7 @@ export function registerThreadMethods(core: Core): void {
   });
   core.router.register('turns.start', (params) => core.threads.startTurn(params.threadId, params.prompt));
   core.router.register('turns.stop', (params) => ({ stopped: core.threads.stopTurn(params.threadId) }));
+  core.router.register('permissions.list', (params) => core.threads.listPermissions(params.threadId));
   core.router.register('permissions.answer', (params) => {
     core.threads.answerPermission({ requestId: params.requestId, decision: params.decision });
     return { ok: true } as const;

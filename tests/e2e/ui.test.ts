@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import corePackage from '../../packages/core/package.json';
+import { connect } from '../../packages/core/src/client.ts';
 import { BrowserPage } from './lib/cdp.ts';
 import { pairingUrlOf, removeDirectory, startCore, type RunningCore } from './lib/core.ts';
 
@@ -10,6 +11,7 @@ const TIMEOUT = 60_000;
 const ROOT = join(import.meta.dir, '..', '..');
 const UI_INDEX = join(ROOT, 'packages', 'ui', 'dist', 'index.html');
 const SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui.png');
+const RELOAD_SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui-permission-reload.png');
 
 let core: RunningCore;
 let page: BrowserPage;
@@ -138,6 +140,60 @@ test(
     await page.click(testid('settings-back'));
     await page.waitFor(`document.querySelector('${testid('chat')}')`);
     expect(await page.evaluate<string>(textOf('thread-title'))).toBe('browser thread [permission]');
+  },
+  TIMEOUT,
+);
+
+test(
+  'a permission asked before the page existed is still answerable after a fresh load',
+  async () => {
+    const client = await connect(core.url, core.token);
+    try {
+      const project = await client.call('projects.add', { path: projectDir });
+      const accounts = await client.call('accounts.list', {});
+      const account = accounts.find((entry) => entry.providerId === 'echo');
+      if (account === undefined) throw new Error('no echo account');
+      const thread = await client.call('threads.create', {
+        projectId: project.id,
+        providerId: 'echo',
+        accountId: account.id,
+        title: 'reloaded permission',
+      });
+
+      // Only a subscribed socket is told; that is the whole reason for the method.
+      await client.call('threads.subscribe', { threadId: thread.id });
+      const requested = client.next<'permission.requested'>(
+        'permission.requested',
+        (request) => request.threadId === thread.id,
+        TIMEOUT,
+      );
+      const finished = client.next<'turn.finished'>(
+        'turn.finished',
+        (turn) => turn.threadId === thread.id,
+        TIMEOUT,
+      );
+      await client.call('turns.start', { threadId: thread.id, prompt: 'reloaded [permission]' });
+      await requested;
+
+      // The page is thrown away and loaded again only now: `permission.requested`
+      // fired before this document existed, so the card can only come from
+      // `permissions.list`.
+      await page.navigate(pairingUrlOf(core));
+      await page.waitFor(`${textOf('thread-title')} === 'reloaded permission'`, 30_000);
+      await page.waitFor(`document.querySelector('${testid('permission-card')}')`, 30_000);
+      await page.waitFor(`document.querySelector('${testid('permission-input')}')`, 30_000);
+      expect(await page.text(testid('permission-input'))).toContain('echo');
+      await page.screenshot(RELOAD_SCREENSHOT);
+
+      await page.click(testid('permission-allow'));
+      expect((await finished).status).toBe('done');
+      await page.waitFor(
+        `document.querySelector('${testid('permission-card')}').dataset.decision === 'allow'`,
+        30_000,
+      );
+    } finally {
+      client.close();
+    }
   },
   TIMEOUT,
 );

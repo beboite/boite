@@ -26,8 +26,8 @@ describe('Store', () => {
     expect(store.threads.map((t) => t.status).sort()).toEqual([
       'idle',
       'idle',
-      'queued',
-      'running'
+      'running',
+      'waiting'
     ]);
     expect(store.unreadCount).toBe(1);
   });
@@ -91,7 +91,8 @@ describe('Store', () => {
     void store.send('[tool] and [permission] please');
     await Promise.resolve();
 
-    const pending = await waitFor(() => store.pendingPermissions[0]);
+    // The seeded core already waits on one elsewhere, so pick this thread's.
+    const pending = await waitFor(() => store.pendingPermissions.find((p) => p.threadId === 't-trace'));
     expect(pending.toolName).toBe('Write');
 
     await store.answer(pending.id, 'allow');

@@ -103,6 +103,36 @@ describe('echo driver', () => {
     expect(assistant?.parts[1]).toEqual({ type: 'text', text: 'allowed' });
   });
 
+  test('a pending permission is listed to a client that never subscribed, and gone once answered', async () => {
+    const client = await harness.connect();
+    const { threadId } = await echoThread(harness, client);
+    const other = await echoThread(harness, client, 'the thread nobody asked about');
+    await client.call('threads.subscribe', { threadId });
+
+    const requested = client.next('permission.requested', (request) => request.threadId === threadId, 10000);
+    const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 10000);
+    await client.call('turns.start', { threadId, prompt: '[permission]' });
+    const request = await requested;
+
+    // A second client, connected after the request and subscribed to nothing:
+    // the event never reached it, the method has to.
+    const latecomer = await harness.connect();
+    const pending = await latecomer.call('permissions.list', {});
+    expect(pending).toHaveLength(1);
+    expect(pending[0]?.id).toBe(request.id);
+    expect(pending[0]?.threadId).toBe(threadId);
+    expect(pending[0]?.turnId).toBe(request.turnId);
+    expect(pending[0]?.toolName).toBe('fake_tool');
+    expect(pending[0]?.input).toEqual({ echo: true });
+
+    expect(await latecomer.call('permissions.list', { threadId })).toHaveLength(1);
+    expect(await latecomer.call('permissions.list', { threadId: other.threadId })).toEqual([]);
+
+    await latecomer.call('permissions.answer', { requestId: request.id, decision: 'allow' });
+    expect((await finished).status).toBe('done');
+    expect(await latecomer.call('permissions.list', {})).toEqual([]);
+  });
+
   test('an unsubscribed connection gets thread.updated but no message.delta', async () => {
     const subscriber = await harness.connect();
     const watcher = await harness.connect();

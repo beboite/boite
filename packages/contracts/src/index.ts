@@ -409,6 +409,13 @@ export interface RpcMethods {
   'turns.start': { params: { threadId: ThreadId; prompt: string }; result: Turn };
   'turns.stop': { params: { threadId: ThreadId }; result: { stopped: boolean } };
 
+  /**
+   * The requests still unanswered, in the order they were created; every thread
+   * when `threadId` is omitted. A client that connects while a turn waits reads
+   * the card here, since `permission.requested` only reached the sockets that
+   * were subscribed when it fired.
+   */
+  'permissions.list': { params: { threadId?: ThreadId }; result: PermissionRequest[] };
   'permissions.answer': {
     params: { requestId: RequestId; decision: 'allow' | 'deny'; updatedInput?: unknown; message?: string };
     result: { ok: true };
@@ -448,6 +455,7 @@ export interface RpcEvents {
   'message.part': { threadId: ThreadId; messageId: MessageId; partIndex: number; part: MessagePart };
   'message.completed': { threadId: ThreadId; messageId: MessageId; state: Message['state'] };
 
+  /** A client that missed this one reads the request from `permissions.list`. */
   'permission.requested': PermissionRequest;
   'permission.resolved': { requestId: RequestId; threadId: ThreadId; decision: 'allow' | 'deny' };
 

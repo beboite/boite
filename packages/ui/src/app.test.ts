@@ -31,8 +31,11 @@ async function mountOnFake(): Promise<void> {
   window.history.replaceState(null, '', '/?fake=1');
   const target = document.createElement('div');
   document.body.appendChild(target);
+  // The store is a singleton and keeps the previous test's open thread, so
+  // `booted` is the only honest signal that this mount finished its own boot.
+  store.booted = false;
   running = mount(App, { target });
-  await waitFor(() => store.openThread !== null);
+  await waitFor(() => store.booted && store.openThread !== null);
 }
 
 test('the app mounts against the fake core, lists the seeded threads and opens the latest', async () => {
@@ -154,6 +157,24 @@ test('a right click on a thread row opens the context menu, and Archive removes 
   await waitFor(() => document.querySelector('[data-testid=context-menu]') === null);
   await waitFor(() => document.querySelectorAll('[data-testid=thread-row]').length === 3);
   expect(document.querySelector('[data-thread-id="t-bench"]')).toBeNull();
+});
+
+test('a permission left pending is read back on connect and answered from its card', async () => {
+  await mountOnFake();
+  // Nothing streamed here: the request comes from permissions.list, not the event.
+  await waitFor(() => store.pendingPermissions.some((p) => p.threadId === 't-bench'));
+  await waitFor(() => document.querySelector('[data-thread-id="t-bench"]') !== null);
+
+  query<HTMLButtonElement>('[data-thread-id="t-bench"]').click();
+  await waitFor(() => store.openThread?.id === 't-bench');
+  await waitFor(() => document.querySelector('[data-testid=permission-card]') !== null);
+  expect(query('[data-testid=permission-card]').getAttribute('data-decision')).toBe('pending');
+  expect(query('[data-testid=permission-input]').textContent).toContain('run.ts');
+
+  query<HTMLButtonElement>('[data-testid=permission-allow]').click();
+  await waitFor(() => query('[data-testid=permission-card]').getAttribute('data-decision') === 'allow');
+  expect(store.pendingPermissions.some((p) => p.threadId === 't-bench')).toBe(false);
+  expect(query('[data-testid=permission-verdict]').textContent?.trim()).toBe('Allowed');
 });
 
 test('the theme setting stamps the light palette and remembers the choice', async () => {

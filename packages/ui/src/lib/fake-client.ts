@@ -89,7 +89,11 @@ export class FakeClient implements ObservableClient {
   #scheduler: SchedulerState;
   #core: CoreInfo;
 
-  #pendingPermissions = new Map<string, (decision: 'allow' | 'deny') => void>();
+  /** The request itself is kept beside its resolver, which is what `permissions.list` answers with. */
+  #pendingPermissions = new Map<
+    string,
+    { request: PermissionRequest; resolve: (decision: 'allow' | 'deny') => void }
+  >();
   #inFlight = new Map<ThreadId, { cancelled: boolean; done: Promise<void> }>();
   #seq = 0;
   #delayMs: number;
@@ -356,19 +360,28 @@ export class FakeClient implements ObservableClient {
         const running = this.#inFlight.get(params.threadId);
         if (!running) return { stopped: false };
         running.cancelled = true;
-        for (const [requestId, resolve] of [...this.#pendingPermissions]) {
+        for (const [requestId, pending] of [...this.#pendingPermissions]) {
           this.#pendingPermissions.delete(requestId);
-          resolve('deny');
+          pending.resolve('deny');
         }
         return { stopped: true };
       }
 
+      case 'permissions.list': {
+        const params = rawParams as RpcParams<'permissions.list'>;
+        const requests = [...this.#pendingPermissions.values()]
+          .map((pending) => pending.request)
+          .filter((request) => params.threadId === undefined || request.threadId === params.threadId)
+          .sort((a, b) => a.createdAt - b.createdAt);
+        return structuredClone(requests);
+      }
+
       case 'permissions.answer': {
         const params = rawParams as RpcParams<'permissions.answer'>;
-        const resolve = this.#pendingPermissions.get(params.requestId);
-        if (!resolve) throw this.#notFound('permission request', params.requestId);
+        const pending = this.#pendingPermissions.get(params.requestId);
+        if (!pending) throw this.#notFound('permission request', params.requestId);
         this.#pendingPermissions.delete(params.requestId);
-        resolve(params.decision);
+        pending.resolve(params.decision);
         return { ok: true };
       }
 
@@ -586,21 +599,31 @@ export class FakeClient implements ObservableClient {
     this.#emit('permission.requested', structuredClone(request));
 
     const decision = await new Promise<'allow' | 'deny'>((resolve) => {
-      this.#pendingPermissions.set(requestId, resolve);
+      this.#pendingPermissions.set(requestId, { request, resolve });
     });
 
+    this.#settlePermission(thread, message, partIndex, request, decision);
+    thread.status = 'running';
+    this.#touch(thread);
+  }
+
+  /** Writes the answer into the part and tells everyone, whichever path asked. */
+  #settlePermission(
+    thread: Thread,
+    message: Message,
+    partIndex: number,
+    request: PermissionRequest,
+    decision: 'allow' | 'deny'
+  ): void {
     const stored = message.parts[partIndex];
     if (stored && stored.type === 'permission') stored.decision = decision;
     this.#emitToThread(thread.id, 'message.part', {
       threadId: thread.id,
       messageId: message.id,
       partIndex,
-      part: { type: 'permission', requestId, toolName: 'Write', decision }
+      part: { type: 'permission', requestId: request.id, toolName: request.toolName, decision }
     });
-    this.#emit('permission.resolved', { requestId, threadId: thread.id, decision });
-
-    thread.status = 'running';
-    this.#touch(thread);
+    this.#emit('permission.resolved', { requestId: request.id, threadId: thread.id, decision });
   }
 
   async #runTool(thread: Thread, message: Message): Promise<void> {
@@ -1036,15 +1059,17 @@ export class FakeClient implements ObservableClient {
       ]
     };
 
-    const queued: Thread = {
+    // Its turn is stopped on a permission nobody has answered, which is what a
+    // page that loads now shows without ever having seen `permission.requested`.
+    const waiting: Thread = {
       ...base,
       id: 't-bench',
       projectId: 'p-boite',
       title: 'Bench against legacy',
       cwd: 'D:\\Dev\\Collab\\boite',
-      status: 'queued',
+      status: 'waiting',
       unread: false,
-      sessionId: null,
+      sessionId: 'sess-bench',
       load: null,
       createdAt: T0 + 200_000,
       updatedAt: T0 + 200_000,
@@ -1052,9 +1077,9 @@ export class FakeClient implements ObservableClient {
         {
           id: 'turn-seed-3',
           threadId: 't-bench',
-          status: 'queued',
+          status: 'running',
           queuedAt: T0 + 200_000,
-          startedAt: null,
+          startedAt: T0 + 200_500,
           finishedAt: null,
           usage: null,
           error: null
@@ -1069,6 +1094,18 @@ export class FakeClient implements ObservableClient {
           parts: [{ type: 'text', text: 'Fifty echo threads, RSS and throughput.' }],
           state: 'complete',
           createdAt: T0 + 200_000
+        },
+        {
+          id: 'm-8',
+          threadId: 't-bench',
+          turnId: 'turn-seed-3',
+          role: 'assistant',
+          parts: [
+            { type: 'text', text: 'Writing the run script before the fifty threads go out.' },
+            { type: 'permission', requestId: 'req-seed-1', toolName: 'Write', decision: null }
+          ],
+          state: 'streaming',
+          createdAt: T0 + 201_000
         }
       ]
     };
@@ -1130,7 +1167,40 @@ export class FakeClient implements ObservableClient {
       ]
     };
 
-    for (const thread of [finished, running, queued, unread]) this.#threads.set(thread.id, thread);
+    for (const thread of [finished, running, waiting, unread]) this.#threads.set(thread.id, thread);
+
+    const seededRequest: PermissionRequest = {
+      id: 'req-seed-1',
+      threadId: waiting.id,
+      turnId: 'turn-seed-3',
+      toolName: 'Write',
+      input: { path: `${waiting.cwd}\\bench\\run.ts`, contents: 'fifty echo threads, one core' },
+      description: 'Write the bench runner inside the project',
+      createdAt: T0 + 201_500
+    };
+    const seededMessage = waiting.messages[1];
+    this.#pendingPermissions.set(seededRequest.id, {
+      request: seededRequest,
+      resolve: (decision) => {
+        if (seededMessage) {
+          this.#settlePermission(waiting, seededMessage, 1, seededRequest, decision);
+          seededMessage.state = 'complete';
+          this.#emitToThread(waiting.id, 'message.completed', {
+            threadId: waiting.id,
+            messageId: seededMessage.id,
+            state: 'complete'
+          });
+        }
+        const turn = waiting.turns[0];
+        if (turn) {
+          turn.status = 'done';
+          turn.finishedAt = this.#now();
+          this.#emit('turn.finished', structuredClone(turn));
+        }
+        waiting.status = 'idle';
+        this.#touch(waiting);
+      }
+    });
 
     this.#processes = [
       {
