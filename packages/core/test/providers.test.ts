@@ -1,5 +1,5 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { startTestCore } from './harness.ts';
 import type { TestCore } from './harness.ts';
@@ -59,7 +59,7 @@ describe('providers', () => {
     const { loaded, rejected } = await client.call('providers.list', {});
     expect(rejected).toEqual([]);
     const ids = loaded.map((provider) => provider.id).sort();
-    expect(ids).toEqual(['claude', 'echo']);
+    expect(ids).toEqual(['claude', 'echo', 'opencode']);
 
     const echo = loaded.find((provider) => provider.id === 'echo');
     expect(echo?.source).toBe('shipped');
@@ -73,6 +73,55 @@ describe('providers', () => {
     expect(claude?.models.find((model) => model.default)?.id).toBe('claude-sonnet-5');
     expect(claude?.models.some((model) => model.legacy)).toBe(true);
     expect(claude?.capabilities.planMode).toBe(true);
+  });
+
+  test('the shipped opencode descriptor loads, resolves its executable and offers one model', async () => {
+    const client = await harness.connect();
+    const { loaded, rejected } = await client.call('providers.list', {});
+    expect(rejected).toEqual([]);
+
+    const opencode = loaded.find((provider) => provider.id === 'opencode');
+    expect(opencode?.source).toBe('shipped');
+    expect(opencode?.protocol).toBe('acp');
+    expect(opencode?.name).toBe('OpenCode');
+    expect(opencode?.models).toEqual([{ id: 'default', name: 'OpenCode default', default: true }]);
+    expect(opencode?.capabilities).toEqual({
+      approvals: true,
+      hooks: false,
+      checkpoint: false,
+      images: false,
+      planMode: false,
+      resume: true,
+    });
+
+    // OpenCode is installed on this machine; elsewhere the descriptor still loads,
+    // it is just not available, and the test says which of the two it saw.
+    if (opencode?.available !== true) {
+      console.log('opencode is not installed here, the executable assertion is skipped');
+      return;
+    }
+    expect(opencode.executable?.toLowerCase()).toEndWith(process.platform === 'win32' ? 'opencode.exe' : 'opencode');
+  });
+
+  test('the opencode profile carries the acp launch arguments and the xdg isolation', async () => {
+    const descriptor = harness.core.providers.require('opencode');
+    const profile = descriptor.profiles[process.platform === 'win32' ? 'windows' : 'linux'];
+    expect(profile?.launch?.args).toEqual(['acp', '--port', '0']);
+    expect(profile?.isolation).toEqual({ XDG_DATA_HOME: '{isolationDir}', XDG_CONFIG_HOME: '{isolationDir}' });
+    expect(descriptor.auth).toEqual({ kind: 'oauth-cli', session: ['opencode/auth.json'] });
+    expect(descriptor.login?.command).toEqual(['opencode', 'auth', 'login']);
+  });
+
+  test('{appdata} expands at load, so the windows candidate is a real absolute path', () => {
+    const windows = harness.core.providers.require('opencode').profiles.windows;
+    const candidate = windows?.executable[0];
+    expect(candidate?.kind).toBe('file');
+    expect(candidate?.value).not.toContain('{appdata}');
+    if (process.platform === 'win32') {
+      expect(candidate?.value.startsWith(process.env['APPDATA'] ?? '')).toBe(true);
+    }
+    expect(candidate?.value).toContain(`opencode-ai${sep}bin`);
+    expect(candidate?.value.toLowerCase()).toEndWith('opencode.exe');
   });
 
   test('the shipped models carry the reasoning effort scale they are meant to', async () => {

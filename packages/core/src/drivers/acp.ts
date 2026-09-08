@@ -26,6 +26,12 @@ const MINUTE_MS = 60_000;
 const STDERR_MAX = 400;
 /** How long a failed prompt waits for the child's exit before blaming the error itself. */
 const EXIT_GRACE_MS = 500;
+/**
+ * The model id a descriptor carries when it has no model list of its own
+ * (OpenCode's shipped one does): the agent keeps whatever it is configured
+ * with, so no `session/set_config_option` goes out and nothing is warned about.
+ */
+const AGENT_OWN_MODEL = 'default';
 
 /** The whole SDK, loaded on the first ACP turn: nothing heavy loads at core start. */
 export type AcpSdk = typeof import('@agentclientprotocol/sdk');
@@ -399,6 +405,7 @@ class AcpSession {
     const agent = this.agent;
     const sessionId = this.sessionId;
     if (wanted === null || wanted.length === 0 || agent === null || sessionId === null) return;
+    if (category === 'model' && wanted === AGENT_OWN_MODEL) return;
     const option = options.find(
       (entry) => entry.category === category && selectValues(entry).includes(wanted),
     );

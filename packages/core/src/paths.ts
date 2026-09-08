@@ -31,3 +31,17 @@ export function resolveDataDir(override?: string | undefined): string {
 export function homePath(): string {
   return homedir();
 }
+
+/**
+ * What `{appdata}` becomes in a descriptor: Windows' roaming per-user directory,
+ * where npm puts its global installs. Only a windows profile ever names the
+ * token, so off Windows it expands to a path nothing exists at and a `file`
+ * candidate using it simply loses to the next candidate.
+ */
+export function appDataPath(): string {
+  if (currentOs() === 'windows') {
+    const roaming = process.env.APPDATA;
+    if (roaming !== undefined && roaming.length > 0) return roaming;
+  }
+  return join(homedir(), 'AppData', 'Roaming');
+}

@@ -59,6 +59,7 @@ function writeDescriptor(dataDir: string): void {
       models: [
         { id: 'fake-fast', name: 'Fast', default: true },
         { id: 'fake-smart', name: 'Smart' },
+        { id: 'default', name: 'Agent default' },
       ],
       capabilities: {
         approvals: true,
@@ -292,6 +293,18 @@ describe('acp driver', () => {
     await runTurn(client, threadId, 'second');
     await waitFor(() => fakeLog().includes(`loaded:${sessionId}`));
     expect((await client.call('threads.get', { threadId })).sessionId).toBe(sessionId);
+  });
+
+  test('a thread on the model "default" lets the agent keep its own', async () => {
+    const client = await startCore({ warmProcessMinutes: 0 });
+    const threadId = await acpThread(client, 'default');
+
+    await runTurn(client, threadId, 'first');
+    const thread = await client.call('threads.get', { threadId });
+    expect(thread.model).toBe('default');
+    // The fake offers `default` as a real model value, so a log with no
+    // set_config_option line is the driver skipping the call, not missing it.
+    expect(fakeLog()).not.toContain('set_config_option');
   });
 
   function countProcesses(

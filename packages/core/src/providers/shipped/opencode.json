@@ -1,0 +1,45 @@
+{
+  "id": "opencode",
+  "schemaVersion": 1,
+  "name": "OpenCode",
+  "shortName": "OpenCode",
+  "protocol": "acp",
+  "roots": ["{home}/.local/share/opencode", "{home}/.config/opencode", "{isolationDir}"],
+  "profiles": {
+    "windows": {
+      "detect": {},
+      "executable": [
+        { "kind": "file", "value": "{appdata}/npm/node_modules/opencode-ai/bin/opencode.exe" },
+        { "kind": "path", "value": "opencode" }
+      ],
+      "launch": { "args": ["acp", "--port", "0"] },
+      "isolation": { "XDG_DATA_HOME": "{isolationDir}", "XDG_CONFIG_HOME": "{isolationDir}" },
+      "close": { "processes": ["opencode.exe"] }
+    },
+    "linux": {
+      "detect": {},
+      "executable": [{ "kind": "path", "value": "opencode" }],
+      "launch": { "args": ["acp", "--port", "0"] },
+      "isolation": { "XDG_DATA_HOME": "{isolationDir}", "XDG_CONFIG_HOME": "{isolationDir}" },
+      "close": { "processes": ["opencode"] }
+    },
+    "macos": {
+      "detect": {},
+      "executable": [{ "kind": "path", "value": "opencode" }],
+      "launch": { "args": ["acp", "--port", "0"] },
+      "isolation": { "XDG_DATA_HOME": "{isolationDir}", "XDG_CONFIG_HOME": "{isolationDir}" },
+      "close": { "processes": ["opencode"] }
+    }
+  },
+  "auth": { "kind": "oauth-cli", "session": ["opencode/auth.json"] },
+  "login": { "command": ["opencode", "auth", "login"] },
+  "models": [{ "id": "default", "name": "OpenCode default", "default": true }],
+  "capabilities": {
+    "approvals": true,
+    "hooks": false,
+    "checkpoint": false,
+    "images": false,
+    "planMode": false,
+    "resume": true
+  }
+}

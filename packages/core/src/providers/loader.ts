@@ -17,9 +17,10 @@ import type {
   RpcResult,
 } from '@boite/contracts';
 import type { Core } from '../core.ts';
-import { currentOs, homePath } from '../paths.ts';
+import { appDataPath, currentOs, homePath } from '../paths.ts';
 import { notFound } from '../errors.ts';
 import claudeShipped from './shipped/claude.json';
+import opencodeShipped from './shipped/opencode.json';
 import echoShipped from './shipped/echo.json';
 
 /**
@@ -42,6 +43,7 @@ const SHIPPED_DIR = join(import.meta.dir, 'shipped');
 
 const SHIPPED_SOURCES: { file: string; raw: unknown; when?: () => boolean }[] = [
   { file: 'shipped/claude.json', raw: claudeShipped },
+  { file: 'shipped/opencode.json', raw: opencodeShipped },
   { file: 'shipped/echo.json', raw: echoShipped, when: echoEnabled },
 ];
 
@@ -324,9 +326,12 @@ function checkCapabilities(value: unknown, file: string): ProviderCapabilities {
   };
 }
 
+/** `{home}` and `{appdata}`, the two locations a descriptor may name at load time. */
 function substituteHome(value: string): string {
-  if (!value.includes('{home}')) return value;
-  return value.split('{home}').join(homePath());
+  let out = value;
+  if (out.includes('{home}')) out = out.split('{home}').join(homePath());
+  if (out.includes('{appdata}')) out = out.split('{appdata}').join(appDataPath());
+  return out;
 }
 
 /** Load-time tokens. `{isolationDir}` is not one of them: it is per account, substituted at spawn. */

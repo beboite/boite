@@ -15,6 +15,19 @@ export function loginThreadId(accountId: AccountId): string {
 
 const URL_IN_OUTPUT = /https:\/\/\S+/;
 
+/**
+ * What an XDG variable means when it is not set. A descriptor that isolates an
+ * account through one of them (OpenCode does) puts its session file under the
+ * same variable, so the provider's own location is that variable's own default,
+ * never `~/.<id>`.
+ */
+const XDG_DEFAULTS: Record<string, string[]> = {
+  XDG_DATA_HOME: ['.local', 'share'],
+  XDG_CONFIG_HOME: ['.config'],
+  XDG_STATE_HOME: ['.local', 'state'],
+  XDG_CACHE_HOME: ['.cache'],
+};
+
 interface LoginRun {
   spawned: SpawnedPipedProcess;
   /** The first https link the CLI printed, carried by every later event. */
@@ -241,13 +254,19 @@ export class AccountStore {
     return 'ok';
   }
 
-  /** The provider's own login directory: its isolation variable if the core has one, else `~/.<id>`. */
+  /**
+   * The provider's own login directory: its isolation variable if the environment
+   * carries one, that variable's own default when it is an XDG one, else
+   * `~/.<id>`.
+   */
   private defaultLocation(provider: ProviderDescriptor): string | null {
     const profile = profileFor(provider);
     if (profile !== undefined) {
       for (const key of Object.keys(profile.isolation)) {
         const value = process.env[key];
         if (value !== undefined && value.length > 0) return value;
+        const fallback = XDG_DEFAULTS[key];
+        if (fallback !== undefined) return join(homePath(), ...fallback);
       }
     }
     return join(homePath(), `.${provider.id}`);

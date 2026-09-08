@@ -24,6 +24,9 @@ const configOptions: SessionConfigOption[] = [
     name: 'Model',
     currentValue: 'fake-fast',
     options: [
+      // `default` is offered on purpose: the client must still send nothing for
+      // it, so the log proves the driver skipped the call rather than failed it.
+      { value: 'default', name: 'Agent default' },
       { value: 'fake-fast', name: 'Fast' },
       { value: 'fake-smart', name: 'Smart' },
     ],

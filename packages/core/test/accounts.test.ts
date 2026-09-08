@@ -1,4 +1,5 @@
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
@@ -70,6 +71,31 @@ describe('accounts', () => {
     expect(echo?.label).toBe('Default');
     expect(echo?.isolationDir).toBeNull();
     expect(echo?.status).toBe('ok');
+  });
+
+  test('the default opencode account reads its own login, an isolated one reads unauthenticated', async () => {
+    const client = await harness.connect();
+    const isolated = await client.call('accounts.add', {
+      providerId: 'opencode',
+      label: 'Isolated opencode',
+      useDefaultLocation: false,
+    });
+    // XDG_DATA_HOME points at the account directory, so opencode would write
+    // its auth.json under <isolationDir>/opencode/, and nothing is there yet.
+    expect(isolated.status).toBe('unauthenticated');
+    expect(harness.core.accounts.accountEnv(harness.core.accounts.require(isolated.id), harness.core.providers.require('opencode'))).toEqual({
+      XDG_DATA_HOME: isolated.isolationDir ?? '',
+      XDG_CONFIG_HOME: isolated.isolationDir ?? '',
+    });
+
+    const accounts = await client.call('accounts.list', {});
+    const fallback = accounts.find((entry) => entry.providerId === 'opencode' && entry.isolationDir === null);
+    const authFile = join(homedir(), '.local', 'share', 'opencode', 'auth.json');
+    if (fallback === undefined || !existsSync(authFile)) {
+      console.log(`no opencode login at ${authFile}, the default account assertion is skipped`);
+      return;
+    }
+    expect(fallback.status).toBe('ok');
   });
 
   test('an isolated account gets its own directory and is unauthenticated until the session file exists', async () => {
