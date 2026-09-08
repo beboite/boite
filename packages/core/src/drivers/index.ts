@@ -1,4 +1,4 @@
-import type { Account, Protocol, ProviderSummary } from '@boite/contracts';
+import type { Account, Protocol, ProviderSummary, ThreadId } from '@boite/contracts';
 import { unavailable } from '../errors.ts';
 import { createClaudeDriver } from './claude.ts';
 import { echoDriver } from './echo.ts';
@@ -41,6 +41,16 @@ export function assertDriverRunnable(
       providerId: account.providerId,
     });
   }
+}
+
+/** A thread that is archived or gone keeps no warm process: every driver drops it. */
+export function releaseThread(threadId: ThreadId): void {
+  for (const driver of DRIVERS.values()) driver.releaseThread?.(threadId);
+}
+
+/** Core shutdown: what a driver kept between turns goes before the journal closes. */
+export function shutdownDrivers(): void {
+  for (const driver of DRIVERS.values()) driver.shutdown?.();
 }
 
 /** Test seam: run a turn against a scripted driver instead of the registered one. */

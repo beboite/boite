@@ -7,6 +7,7 @@ import type {
   Protocol,
   ProviderDescriptor,
   RequestId,
+  ThreadId,
   ThreadSummary,
   Turn,
   Usage,
@@ -39,6 +40,12 @@ export interface TurnContext {
   sessionId: string | null;
   /** The isolation environment of this account, empty for the provider's own login. */
   accountEnv: Record<string, string>;
+  /**
+   * `warmProcessMinutes` as it stands when this turn starts. Zero means the
+   * driver drops its process with the turn; above zero it may keep it for that
+   * many minutes of idleness and give the next turn of the thread the same one.
+   */
+  warmProcessMinutes: number;
   emit: EmitSink;
   log(level: 'info' | 'warn' | 'error', message: string): void;
   requestPermission(toolName: string, input: unknown, description: string | null): PermissionTicket;
@@ -62,4 +69,8 @@ export interface TurnHandle {
 export interface Driver {
   protocol: Protocol;
   startTurn(ctx: TurnContext): TurnHandle;
+  /** Drop whatever this thread keeps alive between turns: a warm process, a session. */
+  releaseThread?(threadId: ThreadId): void;
+  /** Core shutdown: drop what every thread keeps alive between turns. */
+  shutdown?(): void;
 }

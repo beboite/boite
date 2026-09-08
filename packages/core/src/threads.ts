@@ -17,7 +17,7 @@ import type {
 import type { Core } from './core.ts';
 import { messageOf, notFound, refused } from './errors.ts';
 import { newId } from './ids.ts';
-import { assertDriverRunnable, getDriver } from './drivers/index.ts';
+import { assertDriverRunnable, getDriver, releaseThread } from './drivers/index.ts';
 import type { EmitSink, PermissionTicket, TurnContext, TurnHandle, TurnResult } from './drivers/types.ts';
 import type { SpawnOptions } from './procs.ts';
 
@@ -130,6 +130,8 @@ export class ThreadStore {
 
   archive(threadId: ThreadId, archived: boolean): ThreadSummary {
     const thread = this.require(threadId);
+    // An archived thread is not coming back this minute: its warm process goes now.
+    if (archived) releaseThread(threadId);
     return this.save({ ...thread, archived }, 'thread.archived');
   }
 
@@ -336,6 +338,7 @@ export class ThreadStore {
       prompt: this.lastUserPrompt(threadId, turn.id),
       sessionId: thread.sessionId,
       accountEnv: env,
+      warmProcessMinutes: this.core.settings.get().warmProcessMinutes,
       emit,
       log: (level, message) => {
         this.core.log(level, message);

@@ -18,9 +18,13 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  restore?.();
-  restore = null;
-  await harness.stop();
+  try {
+    // The core closes first, so its shutdown reaches the scripted driver's sessions.
+    await harness.stop();
+  } finally {
+    restore?.();
+    restore = null;
+  }
 });
 
 /** A logged-in claude account whose login is a file in the test data directory. */
@@ -92,28 +96,61 @@ class FakeQuery {
 }
 
 const queries: FakeQuery[] = [];
-/** What the driver handed the SDK, turn by turn: the options and the first user message. */
-const calls: { options: Options; prompt: Promise<string> }[] = [];
+/** What the driver handed the SDK, query by query: the options and every prompt it pushed. */
+const calls: { options: Options; prompts: string[] }[] = [];
 
-function scripted(script: (fake: FakeQuery, options: Options) => void): void {
+/**
+ * `script` runs when the driver opens a query, `reply` on every user message it
+ * pushes into that query's stream: a warm session takes several.
+ */
+function scripted(
+  script: (fake: FakeQuery, options: Options) => void,
+  reply?: (fake: FakeQuery, prompt: string, index: number) => void,
+): void {
   queries.length = 0;
   calls.length = 0;
   const query: QueryFn = ({ prompt, options }) => {
     const fake = new FakeQuery();
+    const call = { options, prompts: [] as string[] };
     queries.push(fake);
-    calls.push({ options, prompt: firstPrompt(prompt) });
+    calls.push(call);
+    void readPrompts(prompt, call.prompts, fake, reply);
     script(fake, options);
     return fake as unknown as Query;
   };
   restore = setDriver('claude-sdk', createClaudeDriver({ loadQuery: () => Promise.resolve(query) }));
 }
 
-/** The driver yields one user message and then keeps the stream open, so read only that one. */
-async function firstPrompt(stream: AsyncIterable<SDKUserMessage>): Promise<string> {
-  const first = await stream[Symbol.asyncIterator]().next();
-  if (first.done === true) return '';
-  const content = first.value.message.content;
-  return typeof content === 'string' ? content : JSON.stringify(content);
+/** The CLI exits when its input closes, so the fake ends with the prompt stream. */
+async function readPrompts(
+  stream: AsyncIterable<SDKUserMessage>,
+  into: string[],
+  fake: FakeQuery,
+  reply?: (fake: FakeQuery, prompt: string, index: number) => void,
+): Promise<void> {
+  for await (const message of stream) {
+    const content = message.message.content;
+    const text = typeof content === 'string' ? content : JSON.stringify(content);
+    reply?.(fake, text, into.length);
+    into.push(text);
+  }
+  fake.end();
+}
+
+/** Answers every prompt of a warm session with one assistant text and one result. */
+function answerEach(sessionId: string): (fake: FakeQuery, prompt: string, index: number) => void {
+  return (fake, _prompt, index) => {
+    fake.emit(init(sessionId));
+    fake.emit(assistant(sessionId, [{ type: 'text', text: `answer ${index}` }]));
+    fake.emit(success(sessionId));
+  };
+}
+
+/** One turn, from the call to `turn.finished`. */
+async function runTurn(client: CoreClient, threadId: string, prompt: string): Promise<string> {
+  const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 10000);
+  await client.call('turns.start', { threadId, prompt });
+  return (await finished).status;
 }
 
 // -- scripted messages, shaped like the CLI's own ---------------------------
@@ -376,7 +413,8 @@ describe('claude driver', () => {
 
     const call = calls[0];
     if (call === undefined) throw new Error('the driver never called the SDK');
-    return { options: call.options, prompt: await call.prompt };
+    await waitFor(() => call.prompts.length > 0);
+    return { options: call.options, prompt: call.prompts[0] ?? '' };
   }
 
   test('a named effort level goes to the SDK as an option and leaves the prompt alone', async () => {
@@ -395,5 +433,99 @@ describe('claude driver', () => {
     const { options, prompt } = await turnWithEffort(null);
     expect(options.effort).toBeUndefined();
     expect(prompt).toBe('ping');
+  });
+  // -- warm sessions --------------------------------------------------------
+
+  test('two turns on a warm thread share one query and one prompt stream', async () => {
+    const client = await harness.connect();
+    const threadId = await claudeThread(client);
+    await client.call('settings.set', { warmProcessMinutes: 5 });
+
+    scripted(() => undefined, answerEach('sess-warm'));
+
+    expect(await runTurn(client, threadId, 'first')).toBe('done');
+    expect(await runTurn(client, threadId, 'second')).toBe('done');
+
+    expect(queries).toHaveLength(1);
+    expect(calls[0]?.prompts).toEqual(['first', 'second']);
+    expect((await client.call('threads.get', { threadId })).sessionId).toBe('sess-warm');
+  });
+
+  test('warmProcessMinutes at zero keeps one query per turn', async () => {
+    const client = await harness.connect();
+    const threadId = await claudeThread(client);
+    expect((await client.call('settings.get', {})).warmProcessMinutes).toBe(0);
+
+    scripted(() => undefined, answerEach('sess-cold'));
+
+    expect(await runTurn(client, threadId, 'first')).toBe('done');
+    expect(await runTurn(client, threadId, 'second')).toBe('done');
+
+    expect(queries).toHaveLength(2);
+    expect(calls[0]?.prompts).toEqual(['first']);
+    expect(calls[1]?.prompts).toEqual(['second']);
+  });
+
+  test('a model changed between the turns starts a second query', async () => {
+    const client = await harness.connect();
+    const threadId = await claudeThread(client);
+    await client.call('settings.set', { warmProcessMinutes: 5 });
+
+    scripted(() => undefined, answerEach('sess-model'));
+
+    expect(await runTurn(client, threadId, 'first')).toBe('done');
+    await client.call('threads.update', { threadId, model: 'claude-opus-5' });
+    expect(await runTurn(client, threadId, 'second')).toBe('done');
+
+    expect(queries).toHaveLength(2);
+    expect(calls[0]?.options.model).toBe('claude-sonnet-5');
+    expect(calls[1]?.options.model).toBe('claude-opus-5');
+  });
+
+  test('the idle window ends the session and the next turn starts a new query', async () => {
+    const client = await harness.connect();
+    const threadId = await claudeThread(client);
+    // Fractions are minutes too: 0.002 is the 120 ms this test can afford to wait.
+    await client.call('settings.set', { warmProcessMinutes: 0.002 });
+
+    scripted(() => undefined, answerEach('sess-idle'));
+
+    expect(await runTurn(client, threadId, 'first')).toBe('done');
+    expect(queries).toHaveLength(1);
+    await waitFor(() => (queries[0]?.closes ?? 0) > 0);
+
+    expect(await runTurn(client, threadId, 'second')).toBe('done');
+    expect(queries).toHaveLength(2);
+    expect(calls[1]?.prompts).toEqual(['second']);
+  });
+
+  test('stop on a warm session closes it and the next turn starts a new query', async () => {
+    const client = await harness.connect();
+    const threadId = await claudeThread(client);
+    await client.call('settings.set', { warmProcessMinutes: 5 });
+
+    scripted(
+      (fake) => {
+        fake.emit(init('sess-warm-stop'));
+      },
+      (fake, prompt, index) => {
+        // The first prompt is the one the test stops: nothing answers it.
+        if (prompt === 'take your time') return;
+        fake.emit(init('sess-warm-again'));
+        fake.emit(assistant('sess-warm-again', [{ type: 'text', text: `answer ${index}` }]));
+        fake.emit(success('sess-warm-again'));
+      },
+    );
+
+    const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 10000);
+    await client.call('turns.start', { threadId, prompt: 'take your time' });
+    await waitFor(() => queries.length === 1);
+    expect(await client.call('turns.stop', { threadId })).toEqual({ stopped: true });
+    expect((await finished).status).toBe('stopped');
+    expect(queries[0]?.interrupts).toBe(1);
+
+    expect(await runTurn(client, threadId, 'again')).toBe('done');
+    expect(queries).toHaveLength(2);
+    expect(calls[1]?.prompts).toEqual(['again']);
   });
 });

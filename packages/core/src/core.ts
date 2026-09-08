@@ -5,6 +5,7 @@ import type { CoreInfo, ThreadId } from '@boite/contracts';
 import pkg from '../package.json';
 import { AccountStore } from './accounts.ts';
 import { Bus } from './bus.ts';
+import { shutdownDrivers } from './drivers/index.ts';
 import { Journal } from './journal.ts';
 import { registerModules } from './modules.ts';
 import { currentOs } from './paths.ts';
@@ -106,6 +107,7 @@ export class Core {
 
   async close(): Promise<void> {
     await this.scheduler.drain();
+    shutdownDrivers();
     this.procs.killAll();
     this.procs.close();
     this.bus.dispose();

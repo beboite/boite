@@ -12,7 +12,7 @@ import type {
   SDKUserMessage,
   SpawnOptions as SdkSpawnOptions,
 } from '@anthropic-ai/claude-agent-sdk';
-import type { MessageId, MessagePart, ToolStatus, Usage } from '@boite/contracts';
+import type { MessageId, MessagePart, ThreadId, ToolStatus, Usage } from '@boite/contracts';
 import { messageOf, unavailable } from '../errors.ts';
 import type { SpawnedChild } from '../procs.ts';
 import { profileFor, resolveExecutable } from '../providers/loader.ts';
@@ -20,10 +20,11 @@ import type { Driver, TurnContext, TurnHandle, TurnResult } from './types.ts';
 
 /** How long `stop()` lets the CLI end its turn before the abort signal takes it. */
 const STOP_GRACE_MS = 3_000;
-/** How long the CLI has to exit on its own once the turn's result has arrived. */
+/** How long the CLI has to exit on its own once the prompt stream is over. */
 const FINISH_GRACE_MS = 5_000;
 const STDERR_MAX = 400;
 const DENIED = 'Denied in Boite';
+const MINUTE_MS = 60_000;
 
 /** The effort levels the SDK takes as an option; see `Options['effort']`. */
 const SDK_EFFORTS: readonly string[] = ['low', 'medium', 'high', 'xhigh', 'max'];
@@ -66,16 +67,55 @@ interface ToolEntry {
 }
 
 type UserMessage = Extract<SDKMessage, { type: 'user' }>;
+type Timer = ReturnType<typeof setTimeout>;
 
+/**
+ * The user messages of a warm session, in order. The SDK reads this once and
+ * answers every message with its own `result`, so one generator carries every
+ * turn of the thread until the session ends.
+ */
+class PromptQueue {
+  private readonly items: SDKUserMessage[] = [];
+  private notify: (() => void) | null = null;
+  private ended = false;
+
+  push(text: string): void {
+    this.items.push({
+      type: 'user',
+      message: { role: 'user', content: text },
+      parent_tool_use_id: null,
+    } as SDKUserMessage);
+    this.wake();
+  }
+
+  end(): void {
+    this.ended = true;
+    this.wake();
+  }
+
+  async *stream(): AsyncGenerator<SDKUserMessage> {
+    for (;;) {
+      const next = this.items.shift();
+      if (next !== undefined) {
+        yield next;
+        continue;
+      }
+      if (this.ended) return;
+      await new Promise<void>((resolve) => {
+        this.notify = resolve;
+      });
+    }
+  }
+
+  private wake(): void {
+    const notify = this.notify;
+    this.notify = null;
+    notify?.();
+  }
+}
+
+/** One turn: what it wrote, what it cost, and the promise the scheduler waits on. */
 class ClaudeTurn {
-  private readonly abortController = new AbortController();
-  private readonly timers: ReturnType<typeof setTimeout>[] = [];
-  private endPrompt: () => void = () => undefined;
-  private readonly promptEnd = new Promise<void>((resolve) => {
-    this.endPrompt = resolve;
-  });
-
-  private query: Query | null = null;
   private messageId: MessageId | null = null;
   private nextIndex = 0;
   private textIndex: number | null = null;
@@ -88,157 +128,48 @@ class ClaudeTurn {
   private usage: Usage | null = null;
   private status: TurnResult['status'] = 'done';
   private error: string | null = null;
-  private stopped = false;
+  private resolve: (result: TurnResult) => void = () => undefined;
 
-  constructor(
-    private readonly ctx: TurnContext,
-    private readonly deps: ClaudeDeps,
-  ) {
+  readonly done: Promise<TurnResult>;
+  stopped = false;
+  settled = false;
+
+  constructor(readonly ctx: TurnContext) {
     this.sessionId = ctx.sessionId;
-  }
-
-  async run(): Promise<TurnResult> {
-    let running: Query | null = null;
-    try {
-      const options = this.options();
-      const query = await this.deps.loadQuery();
-      // Loading the SDK is the first await of the turn, so a stop can land here.
-      if (!this.stopped) {
-        running = query({ prompt: this.promptStream(), options });
-        this.query = running;
-        for await (const message of running) this.handle(message);
-      }
-    } catch (error) {
-      if (!this.stopped) this.fail(messageOf(error));
-    } finally {
-      this.endPrompt();
-      for (const timer of this.timers) clearTimeout(timer);
-      try {
-        running?.close();
-      } catch {
-        // the query is already closed
-      }
-    }
-
-    if (this.stopped) this.status = 'stopped';
-    if (this.messageId !== null) {
-      this.ctx.emit.complete(this.messageId, this.status === 'error' ? 'error' : 'complete');
-    }
-    return {
-      status: this.status,
-      sessionId: this.sessionId,
-      usage: this.usage,
-      error: this.error ?? undefined,
-    };
-  }
-
-  stop(): void {
-    if (this.stopped) return;
-    this.stopped = true;
-    const running = this.query;
-    if (running !== null) void running.interrupt().catch(() => undefined);
-    this.endPrompt();
-    this.timers.push(setTimeout(() => this.abortController.abort(), STOP_GRACE_MS));
-  }
-
-  // -- the query ------------------------------------------------------------
-
-  private options(): Options {
-    const profile = profileFor(this.ctx.provider);
-    const executable = profile === undefined ? null : resolveExecutable(profile);
-    if (executable === null) {
-      throw unavailable(`no ${this.ctx.provider.id} executable on this machine`, {
-        providerId: this.ctx.provider.id,
-      });
-    }
-    const effort = this.ctx.thread.effort;
-    return {
-      resume: this.ctx.sessionId ?? undefined,
-      cwd: this.ctx.thread.cwd,
-      model: this.ctx.thread.model ?? undefined,
-      // A level the CLI knows goes in the options; `ultrathink` goes in the prompt.
-      ...(effort !== null && SDK_EFFORTS.includes(effort) ? { effort: effort as Options['effort'] } : {}),
-      permissionMode: this.ctx.thread.permissionMode,
-      allowDangerouslySkipPermissions: this.ctx.thread.permissionMode === 'bypassPermissions',
-      pathToClaudeCodeExecutable: executable,
-      settingSources: ['user', 'project', 'local'],
-      includePartialMessages: true,
-      abortController: this.abortController,
-      env: childEnv(this.ctx.accountEnv),
-      canUseTool: this.canUseTool,
-      hooks: {
-        PreToolUse: [{ hooks: [this.preToolUse] }],
-        PostToolUse: [{ hooks: [this.postToolUse] }],
-      },
-      spawnClaudeCodeProcess: (options: SdkSpawnOptions): SpawnedChild => this.spawnCli(options),
-    };
-  }
-
-  /** One user message, then the stream stays open so `interrupt` and `canUseTool` work. */
-  private async *promptStream(): AsyncGenerator<SDKUserMessage> {
-    yield {
-      type: 'user',
-      message: { role: 'user', content: this.promptText() },
-      parent_tool_use_id: null,
-    };
-    await this.promptEnd;
+    this.done = new Promise<TurnResult>((resolve) => {
+      this.resolve = resolve;
+    });
   }
 
   /** `ultrathink` is not an option of the CLI: the word in the prompt is what asks for it. */
-  private promptText(): string {
+  promptText(): string {
     const text = this.ctx.prompt;
     if (this.ctx.thread.effort !== PROMPT_EFFORT) return text;
     return text.length === 0 ? PROMPT_EFFORT : `${text} ${PROMPT_EFFORT}`;
   }
 
-  private spawnCli(options: SdkSpawnOptions): SpawnedChild {
-    const child = this.ctx.spawnChild(options.command, options.args, {
-      cwd: options.cwd,
-      env: options.env,
-    });
-    // The SDK reads stderr only for the process it spawns itself, so with a
-    // custom spawner nothing drains that pipe unless we do it here.
-    child.stderr.setEncoding('utf8');
-    child.stderr.on('data', (chunk: string) => {
-      const text = chunk.trim();
-      if (text.length > 0) this.ctx.log('warn', `claude cli: ${text.slice(0, STDERR_MAX)}`);
-    });
-    return child;
+  noteSession(sessionId: string): void {
+    this.sessionId = sessionId;
   }
 
-  // -- permissions and tools ------------------------------------------------
-
-  /** Reached only when the CLI itself needs to ask. Every call is journalled by the hook. */
-  private readonly canUseTool: CanUseTool = async (toolName, input, options): Promise<PermissionResult> => {
-    const ticket = this.ctx.requestPermission(toolName, input, options.title ?? options.description ?? null);
-    const index = this.takeIndex();
-    this.part(index, { type: 'permission', requestId: ticket.requestId, toolName, decision: null });
-    const decision = await ticket;
-    this.part(index, { type: 'permission', requestId: ticket.requestId, toolName, decision });
-    if (decision === 'allow') return { behavior: 'allow', updatedInput: input };
-    return { behavior: 'deny', message: DENIED };
-  };
-
-  /** No matcher: this hook sees every tool call, which is what makes it the single gate. */
-  private readonly preToolUse = async (input: HookInput): Promise<HookJSONOutput> => {
-    if (input.hook_event_name === 'PreToolUse') {
-      this.upsertTool(input.tool_use_id, input.tool_name, input.tool_input);
+  settle(): void {
+    if (this.settled) return;
+    this.settled = true;
+    if (this.stopped) this.status = 'stopped';
+    if (this.messageId !== null) {
+      this.ctx.emit.complete(this.messageId, this.status === 'error' ? 'error' : 'complete');
     }
-    return {};
-  };
-
-  private readonly postToolUse = async (input: HookInput): Promise<HookJSONOutput> => {
-    if (input.hook_event_name === 'PostToolUse') {
-      this.finishTool(input.tool_use_id, stringify(input.tool_response), 'done');
-    }
-    return {};
-  };
+    this.resolve({
+      status: this.status,
+      sessionId: this.sessionId,
+      usage: this.usage,
+      error: this.error ?? undefined,
+    });
+  }
 
   // -- messages -------------------------------------------------------------
 
-  private handle(message: SDKMessage): void {
-    const sessionId = (message as { session_id?: string }).session_id;
-    if (typeof sessionId === 'string' && sessionId.length > 0) this.sessionId = sessionId;
+  handle(message: SDKMessage): void {
     switch (message.type) {
       case 'stream_event':
         this.handleStream(message.event as StreamEvent);
@@ -324,10 +255,6 @@ class ClaudeTurn {
     } else if (message.is_error) {
       this.fail(message.result.length > 0 ? message.result : 'the turn ended on an API error');
     }
-    // In streaming input mode the CLI waits for more input; ending the prompt
-    // is what lets it exit, and the abort is the guarantee that it does.
-    this.endPrompt();
-    this.timers.push(setTimeout(() => this.abortController.abort(), FINISH_GRACE_MS));
   }
 
   // -- parts ----------------------------------------------------------------
@@ -337,7 +264,7 @@ class ClaudeTurn {
     return this.messageId;
   }
 
-  private part(index: number, part: MessagePart): void {
+  part(index: number, part: MessagePart): void {
     this.ctx.emit.part(this.message(), index, part);
   }
 
@@ -349,14 +276,14 @@ class ClaudeTurn {
     return index;
   }
 
-  private takeIndex(): number {
+  takeIndex(): number {
     this.textIndex = null;
     const index = this.nextIndex;
     this.nextIndex += 1;
     return index;
   }
 
-  private upsertTool(toolId: string, name: string, input: unknown): void {
+  upsertTool(toolId: string, name: string, input: unknown): void {
     const entry = this.tools.get(toolId) ?? this.newTool(name);
     entry.name = name;
     entry.input = input;
@@ -364,7 +291,7 @@ class ClaudeTurn {
     this.emitTool(toolId, entry);
   }
 
-  private finishTool(toolId: string, output: string, status: ToolStatus): void {
+  finishTool(toolId: string, output: string, status: ToolStatus): void {
     const entry = this.tools.get(toolId) ?? this.newTool(toolId);
     entry.output = output;
     entry.status = status;
@@ -387,12 +314,285 @@ class ClaudeTurn {
     });
   }
 
-  private fail(reason: string): void {
+  fail(reason: string): void {
     if (this.status === 'error') return;
     this.status = 'error';
     this.error = reason;
     this.part(this.takeIndex(), { type: 'error', message: reason });
   }
+}
+
+/**
+ * One `query()` and one prompt stream for a thread. With `warmProcessMinutes`
+ * at zero it lives for one turn, which is what the driver did before warm
+ * sessions existed; above zero it takes the next turns of the thread too, and
+ * only an idle window, a stop, a changed setup or the core going down ends it.
+ */
+class ClaudeSession {
+  private readonly abortController = new AbortController();
+  private readonly prompts = new PromptQueue();
+  private readonly timers = new Set<Timer>();
+  private readonly waiting: ClaudeTurn[] = [];
+
+  private query: Query | null = null;
+  private ctx: TurnContext;
+  private sessionId: string | null;
+  private idle: Timer | null = null;
+  private started = false;
+  private closing = false;
+  private ended = false;
+
+  constructor(
+    readonly key: string,
+    private warmMs: number,
+    private readonly deps: ClaudeDeps,
+    private readonly onEnded: (session: ClaudeSession) => void,
+    ctx: TurnContext,
+  ) {
+    this.ctx = ctx;
+    this.sessionId = ctx.sessionId;
+  }
+
+  /** Reusable only while the CLI is up and the turn asks for the very same setup. */
+  usable(key: string, warmMs: number): boolean {
+    return !this.ended && !this.closing && this.key === key && warmMs > 0 && this.warmMs > 0;
+  }
+
+  /** A turn is running or queued on it, so nothing may take the CLI away yet. */
+  busy(): boolean {
+    return this.waiting.length > 0;
+  }
+
+  attach(turn: ClaudeTurn, warmMs: number): void {
+    this.warmMs = warmMs;
+    this.ctx = turn.ctx;
+    this.clearIdle();
+    this.waiting.push(turn);
+    this.prompts.push(turn.promptText());
+    if (this.started) return;
+    this.started = true;
+    void this.run(turn);
+  }
+
+  stopTurn(turn: ClaudeTurn): void {
+    if (turn.settled) return;
+    turn.stopped = true;
+    const index = this.waiting.indexOf(turn);
+    if (index < 0) {
+      turn.settle();
+      return;
+    }
+    // A turn the CLI has not reached yet leaves the queue on its own; the running
+    // one is interrupted, and a stopped turn always ends the session with it.
+    if (index > 0) {
+      this.waiting.splice(index, 1);
+      turn.settle();
+      return;
+    }
+    const running = this.query;
+    if (running !== null) void running.interrupt().catch(() => undefined);
+    this.close(null, STOP_GRACE_MS);
+  }
+
+  /** Archive, shutdown, a changed setup: end the CLI and settle whatever is left. */
+  close(reason: string | null, graceMs = FINISH_GRACE_MS): void {
+    if (this.closing || this.ended) return;
+    this.closing = true;
+    this.clearIdle();
+    if (reason !== null) this.ctx.log('warn', `claude session: ${reason}`);
+    this.prompts.end();
+    if (!this.started) {
+      this.finish(null);
+      return;
+    }
+    this.arm(graceMs, () => {
+      this.abortController.abort();
+      try {
+        this.query?.close();
+      } catch {
+        // the query is already closed
+      }
+    });
+  }
+
+  // -- the query ------------------------------------------------------------
+
+  private async run(first: ClaudeTurn): Promise<void> {
+    try {
+      const options = this.options(first.ctx);
+      const queryFn = await this.deps.loadQuery();
+      // Loading the SDK is the first await of the session, so a stop can land here.
+      if (!first.stopped && !this.closing) {
+        this.query = queryFn({ prompt: this.prompts.stream(), options });
+        for await (const message of this.query) this.receive(message);
+      }
+      this.finish(null);
+    } catch (error) {
+      this.finish(messageOf(error));
+    }
+  }
+
+  private receive(message: SDKMessage): void {
+    const sessionId = (message as { session_id?: string }).session_id;
+    if (typeof sessionId === 'string' && sessionId.length > 0) this.sessionId = sessionId;
+    const turn = this.head();
+    if (turn === null) return;
+    if (this.sessionId !== null) turn.noteSession(this.sessionId);
+    turn.handle(message);
+    // One result per user message: that is the end of this turn, not of the CLI.
+    if (message.type === 'result') this.endTurn(turn);
+  }
+
+  private endTurn(turn: ClaudeTurn): void {
+    this.waiting.shift();
+    turn.settle();
+    if (this.closing || this.waiting.length > 0) return;
+    if (this.warmMs > 0) this.armIdle();
+    else this.close(null);
+  }
+
+  /** The loop is over: the CLI is gone, so nothing of this session survives. */
+  private finish(reason: string | null): void {
+    if (this.ended) return;
+    this.ended = true;
+    this.clearIdle();
+    for (const timer of this.timers) clearTimeout(timer);
+    this.timers.clear();
+    try {
+      this.query?.close();
+    } catch {
+      // the query is already closed
+    }
+    const left = this.waiting.splice(0, this.waiting.length);
+    for (const turn of left) {
+      if (reason !== null && !turn.stopped) turn.fail(reason);
+      turn.settle();
+    }
+    // Between turns nobody is listening, so the reason goes to the core log.
+    if (reason !== null && left.length === 0) {
+      this.ctx.log('error', `the warm claude session ended: ${reason}`);
+    }
+    this.onEnded(this);
+  }
+
+  private head(): ClaudeTurn | null {
+    return this.waiting[0] ?? null;
+  }
+
+  private armIdle(): void {
+    this.idle = setTimeout(() => {
+      this.idle = null;
+      this.close(null);
+    }, this.warmMs);
+    this.idle.unref?.();
+  }
+
+  private clearIdle(): void {
+    if (this.idle === null) return;
+    clearTimeout(this.idle);
+    this.idle = null;
+  }
+
+  private arm(ms: number, run: () => void): void {
+    const timer = setTimeout(() => {
+      this.timers.delete(timer);
+      run();
+    }, ms);
+    timer.unref?.();
+    this.timers.add(timer);
+  }
+
+  private options(ctx: TurnContext): Options {
+    const profile = profileFor(ctx.provider);
+    const executable = profile === undefined ? null : resolveExecutable(profile);
+    if (executable === null) {
+      throw unavailable(`no ${ctx.provider.id} executable on this machine`, { providerId: ctx.provider.id });
+    }
+    const effort = ctx.thread.effort;
+    return {
+      resume: ctx.sessionId ?? undefined,
+      cwd: ctx.thread.cwd,
+      model: ctx.thread.model ?? undefined,
+      // A level the CLI knows goes in the options; `ultrathink` goes in the prompt.
+      ...(effort !== null && SDK_EFFORTS.includes(effort) ? { effort: effort as Options['effort'] } : {}),
+      permissionMode: ctx.thread.permissionMode,
+      allowDangerouslySkipPermissions: ctx.thread.permissionMode === 'bypassPermissions',
+      pathToClaudeCodeExecutable: executable,
+      settingSources: ['user', 'project', 'local'],
+      includePartialMessages: true,
+      abortController: this.abortController,
+      env: childEnv(ctx.accountEnv),
+      canUseTool: this.canUseTool,
+      hooks: {
+        PreToolUse: [{ hooks: [this.preToolUse] }],
+        PostToolUse: [{ hooks: [this.postToolUse] }],
+      },
+      spawnClaudeCodeProcess: (options: SdkSpawnOptions): SpawnedChild => this.spawnCli(options),
+    };
+  }
+
+  private spawnCli(options: SdkSpawnOptions): SpawnedChild {
+    const child = this.ctx.spawnChild(options.command, options.args, {
+      cwd: options.cwd,
+      env: options.env,
+    });
+    // The SDK reads stderr only for the process it spawns itself, so with a
+    // custom spawner nothing drains that pipe unless we do it here.
+    child.stderr.setEncoding('utf8');
+    child.stderr.on('data', (chunk: string) => {
+      const text = chunk.trim();
+      if (text.length > 0) this.ctx.log('warn', `claude cli: ${text.slice(0, STDERR_MAX)}`);
+    });
+    return child;
+  }
+
+  // -- permissions and tools ------------------------------------------------
+
+  /** Reached only when the CLI itself needs to ask. Every call is journalled by the hook. */
+  private readonly canUseTool: CanUseTool = async (toolName, input, options): Promise<PermissionResult> => {
+    const turn = this.head();
+    if (turn === null) {
+      this.ctx.log('warn', `claude asked for ${toolName} with no turn running: denied`);
+      return { behavior: 'deny', message: DENIED };
+    }
+    const ticket = turn.ctx.requestPermission(toolName, input, options.title ?? options.description ?? null);
+    const index = turn.takeIndex();
+    turn.part(index, { type: 'permission', requestId: ticket.requestId, toolName, decision: null });
+    const decision = await ticket;
+    turn.part(index, { type: 'permission', requestId: ticket.requestId, toolName, decision });
+    if (decision === 'allow') return { behavior: 'allow', updatedInput: input };
+    return { behavior: 'deny', message: DENIED };
+  };
+
+  /** No matcher: this hook sees every tool call, which is what makes it the single gate. */
+  private readonly preToolUse = async (input: HookInput): Promise<HookJSONOutput> => {
+    if (input.hook_event_name === 'PreToolUse') {
+      this.head()?.upsertTool(input.tool_use_id, input.tool_name, input.tool_input);
+    }
+    return {};
+  };
+
+  private readonly postToolUse = async (input: HookInput): Promise<HookJSONOutput> => {
+    if (input.hook_event_name === 'PostToolUse') {
+      this.head()?.finishTool(input.tool_use_id, stringify(input.tool_response), 'done');
+    }
+    return {};
+  };
+}
+
+/**
+ * What a session was started with. A turn that differs on any of it cannot land
+ * on the running CLI: it closes that session and starts its own.
+ */
+function sessionKey(ctx: TurnContext): string {
+  return JSON.stringify({
+    model: ctx.thread.model,
+    effort: ctx.thread.effort,
+    permissionMode: ctx.thread.permissionMode,
+    cwd: ctx.thread.cwd,
+    accountId: ctx.account.id,
+    env: ctx.accountEnv,
+  });
 }
 
 /**
@@ -480,18 +680,57 @@ function errorSentence(error: SDKAssistantMessageError): string {
   }
 }
 
-/** One `query()` per turn: the CLI process lives only while the turn runs. */
+/**
+ * One session per thread. `warmProcessMinutes` at zero keeps the old rule, one
+ * `query()` per turn and the CLI gone with it; above zero the next turn of the
+ * thread reuses the CLI that is already up, as long as nothing of its setup moved.
+ */
 export function createClaudeDriver(deps: ClaudeDeps): Driver {
+  const sessions = new Map<ThreadId, ClaudeSession>();
+
   return {
     protocol: 'claude-sdk',
+
     startTurn(ctx: TurnContext): TurnHandle {
-      const turn = new ClaudeTurn(ctx, deps);
+      const threadId = ctx.thread.id;
+      const warmMs = Math.max(0, ctx.warmProcessMinutes) * MINUTE_MS;
+      const key = sessionKey(ctx);
+      const turn = new ClaudeTurn(ctx);
+
+      let session = sessions.get(threadId) ?? null;
+      if (session !== null && !session.usable(key, warmMs)) {
+        sessions.delete(threadId);
+        session.close(session.key === key ? null : 'the thread changed model, account, mode or folder');
+        session = null;
+      }
+      if (session === null) {
+        session = new ClaudeSession(key, warmMs, deps, (ended) => {
+          if (sessions.get(threadId) === ended) sessions.delete(threadId);
+        }, ctx);
+        sessions.set(threadId, session);
+      }
+      const running = session;
+      running.attach(turn, warmMs);
       return {
-        done: turn.run(),
+        done: turn.done,
         stop: (): void => {
-          turn.stop();
+          running.stopTurn(turn);
         },
       };
+    },
+
+    releaseThread(threadId: ThreadId): void {
+      const session = sessions.get(threadId);
+      // A turn still running on it keeps it: the idle window ends it soon enough.
+      if (session === undefined || session.busy()) return;
+      sessions.delete(threadId);
+      session.close(null);
+    },
+
+    shutdown(): void {
+      const open = [...sessions.values()];
+      sessions.clear();
+      for (const session of open) session.close(null, 0);
     },
   };
 }
