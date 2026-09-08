@@ -9,6 +9,7 @@ import {
   type PermissionRequest,
   type ProcessRecord,
   type Project,
+  type ProviderInstallState,
   type ProviderSummary,
   type RpcEventName,
   type RpcEvents,
@@ -35,6 +36,15 @@ export interface FakeClientOptions {
 
 const T0 = Date.UTC(2026, 8, 5, 9, 0, 0);
 const DATA_DIR = 'C:\\Users\\you\\AppData\\Local\\boite2';
+
+/** The managed provider of the seed: a release Boite downloads, 468 MB of it. */
+const MANAGED_ID = 'antigravity';
+const MANAGED_VERSION = 'agy_acp_server_1.1.1';
+const MANAGED_ARCHIVE_BYTES = 468_238_392;
+const MANAGED_EXE = `${DATA_DIR}\\agents\\${MANAGED_ID}\\current\\agy_acp_server.exe`;
+/** Sixteen steps of 120 ms: about two seconds of download, long enough to be seen. */
+const INSTALL_STEPS = 16;
+const INSTALL_STEP_MS = 120;
 
 function toSummary(thread: Thread): ThreadSummary {
   const { messages: _messages, turns: _turns, ...rest } = thread;
@@ -309,6 +319,18 @@ export class FakeClient implements ObservableClient {
       case 'providers.probe': {
         const params = rawParams as RpcParams<'providers.probe'>;
         return this.#probe(params.providerId, params.accountId);
+      }
+      case 'providers.install': {
+        const params = rawParams as RpcParams<'providers.install'>;
+        return this.#startInstall(params.providerId);
+      }
+      case 'providers.installCancel': {
+        const params = rawParams as RpcParams<'providers.installCancel'>;
+        return this.#cancelInstall(params.providerId, params.operationId);
+      }
+      case 'providers.uninstall': {
+        const params = rawParams as RpcParams<'providers.uninstall'>;
+        return this.#uninstall(params.providerId);
       }
       case 'providers.dryRun': {
         const params = rawParams as RpcParams<'providers.dryRun'>;
@@ -1079,6 +1101,117 @@ export class FakeClient implements ObservableClient {
     return { models, probedAt };
   }
 
+  // -------------------------------------------------------------------------
+  // Managed installs
+  // -------------------------------------------------------------------------
+
+  #managed(providerId: string): ProviderSummary {
+    const provider = this.#providers.find((p) => p.id === providerId);
+    if (!provider || provider.install === null) {
+      throw new RpcFailure({
+        code: RpcErrorCode.Refused,
+        message: `${providerId} has nothing for Boite to install`
+      });
+    }
+    return provider;
+  }
+
+  #setInstall(provider: ProviderSummary, state: ProviderInstallState): void {
+    provider.install = state;
+    this.#emit('providers.installProgress', { ...state, providerId: provider.id });
+  }
+
+  #startInstall(providerId: string): ProviderInstallState {
+    const provider = this.#managed(providerId);
+    if (provider.install?.state === 'downloading') {
+      throw new RpcFailure({
+        code: RpcErrorCode.Refused,
+        message: `an install of ${providerId} is already running`
+      });
+    }
+    const operationId = `inst_${(this.#seq += 1)}`;
+    const state: ProviderInstallState = {
+      state: 'downloading',
+      version: MANAGED_VERSION,
+      receivedBytes: 0,
+      totalBytes: MANAGED_ARCHIVE_BYTES,
+      operationId
+    };
+    this.#setInstall(provider, state);
+    void this.#runInstall(provider, operationId);
+    return state;
+  }
+
+  /** The download ticks, then the two short states, then the files are there. */
+  async #runInstall(provider: ProviderSummary, operationId: string): Promise<void> {
+    const running = (): boolean =>
+      provider.install !== null &&
+      provider.install.state !== 'absent' &&
+      provider.install.state !== 'installed' &&
+      provider.install.state !== 'failed' &&
+      provider.install.operationId === operationId;
+
+    for (let step = 1; step <= INSTALL_STEPS; step += 1) {
+      await new Promise((resolve) => setTimeout(resolve, INSTALL_STEP_MS));
+      if (!running()) return;
+      this.#setInstall(provider, {
+        state: 'downloading',
+        version: MANAGED_VERSION,
+        receivedBytes: Math.round((MANAGED_ARCHIVE_BYTES * step) / INSTALL_STEPS),
+        totalBytes: MANAGED_ARCHIVE_BYTES,
+        operationId
+      });
+    }
+    for (const state of ['verifying', 'extracting'] as const) {
+      await new Promise((resolve) => setTimeout(resolve, INSTALL_STEP_MS));
+      if (!running()) return;
+      this.#setInstall(provider, { state, version: MANAGED_VERSION, operationId });
+    }
+    await new Promise((resolve) => setTimeout(resolve, INSTALL_STEP_MS));
+    if (!running()) return;
+    provider.available = true;
+    provider.executable = MANAGED_EXE;
+    this.#setInstall(provider, { state: 'installed', version: MANAGED_VERSION, installedAt: this.#now() });
+    this.#emit('providers.updated', { loaded: structuredClone(this.#providers), rejected: [] });
+  }
+
+  #cancelInstall(providerId: string, operationId: string): ProviderInstallState {
+    const provider = this.#managed(providerId);
+    const current = provider.install;
+    if (
+      current === null ||
+      current.state === 'absent' ||
+      current.state === 'installed' ||
+      current.state === 'failed'
+    ) {
+      throw new RpcFailure({ code: RpcErrorCode.Refused, message: `no install of ${providerId} is running` });
+    }
+    if (current.operationId !== operationId) {
+      throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'that operation is not the one running' });
+    }
+    const state: ProviderInstallState = {
+      state: 'absent',
+      version: MANAGED_VERSION,
+      archiveBytes: MANAGED_ARCHIVE_BYTES
+    };
+    this.#setInstall(provider, state);
+    return state;
+  }
+
+  #uninstall(providerId: string): ProviderInstallState {
+    const provider = this.#managed(providerId);
+    provider.available = false;
+    provider.executable = null;
+    const state: ProviderInstallState = {
+      state: 'absent',
+      version: MANAGED_VERSION,
+      archiveBytes: MANAGED_ARCHIVE_BYTES
+    };
+    this.#setInstall(provider, state);
+    this.#emit('providers.updated', { loaded: structuredClone(this.#providers), rejected: [] });
+    return state;
+  }
+
   #resources(): ThreadResources[] {
     const out: ThreadResources[] = [];
     for (const thread of this.#threads.values()) {
@@ -1178,6 +1311,7 @@ export class FakeClient implements ObservableClient {
             } },
           { id: 'claude-haiku-4-5-20251001', name: 'Claude Haiku 4.5', legacy: true }
         ],
+        install: null,
         capabilities: {
           approvals: true,
           hooks: true,
@@ -1209,6 +1343,7 @@ export class FakeClient implements ObservableClient {
             }
           }
         ],
+        install: null,
         capabilities: {
           approvals: true,
           hooks: false,
@@ -1228,6 +1363,31 @@ export class FakeClient implements ObservableClient {
         executable: 'C:\\Users\\you\\AppData\\Roaming\\npm\\opencode.exe',
         // One model in the descriptor: the agent owns the rest, and a probe reads them.
         models: [{ id: 'default', name: 'OpenCode default', default: true }],
+        install: null,
+        capabilities: {
+          approvals: true,
+          hooks: false,
+          checkpoint: false,
+          images: false,
+          planMode: false,
+          resume: true
+        }
+      },
+      {
+        id: MANAGED_ID,
+        name: 'Antigravity',
+        shortName: 'Antigravity',
+        protocol: 'acp',
+        source: 'shipped',
+        // Nothing runs until the release lands: the picker row offers the download.
+        available: false,
+        executable: null,
+        models: [{ id: 'default', name: 'Antigravity default', default: true }],
+        install: {
+          state: 'absent',
+          version: MANAGED_VERSION,
+          archiveBytes: MANAGED_ARCHIVE_BYTES
+        },
         capabilities: {
           approvals: true,
           hooks: false,
@@ -1238,7 +1398,6 @@ export class FakeClient implements ObservableClient {
         }
       }
     ];
-
     this.#accounts = [
       {
         id: 'a-echo',
@@ -1247,6 +1406,15 @@ export class FakeClient implements ObservableClient {
         isolationDir: `${DATA_DIR}\\accounts\\a-echo`,
         status: 'ok',
         identity: 'echo',
+        createdAt: T0
+      },
+      {
+        id: 'a-antigravity',
+        providerId: MANAGED_ID,
+        label: 'Antigravity',
+        isolationDir: `${DATA_DIR}\accounts\a-antigravity`,
+        status: 'ok',
+        identity: 'you@example.com',
         createdAt: T0
       },
       {

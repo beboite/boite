@@ -39,11 +39,41 @@ export interface ExecutableCandidate {
   value: string;
 }
 
+/**
+ * A release Boite downloads and unpacks itself, for an agent whose binary is
+ * not on the machine and has no installer of its own. The files land under
+ * `{agentsDir}`, which is what the profile's executable candidate names.
+ */
+export interface ProviderInstall {
+  /** A version string shown to the user and written beside the files. */
+  version: string;
+  /** A zip archive. */
+  url: string;
+  sha256: string;
+  archiveBytes: number;
+  /** Files expected inside the archive, relative paths inside it, with their sizes; the first one is the executable. */
+  files: { path: string; bytes: number }[];
+}
+
+/**
+ * Where a managed install stands. `absent` and `installed` are read from disk
+ * at core start; the three middle ones only exist while `providers.install`
+ * runs, and `failed` carries its reason until the next attempt.
+ */
+export type ProviderInstallState =
+  | { state: 'absent'; version: string; archiveBytes: number }
+  | { state: 'downloading'; version: string; receivedBytes: number; totalBytes: number; operationId: string }
+  | { state: 'verifying' | 'extracting'; version: string; operationId: string }
+  | { state: 'installed'; version: string; installedAt: Timestamp }
+  | { state: 'failed'; version: string; message: string };
+
 export interface OsProfile {
   /** The provider is offered only when one of these resolves. */
   detect: { command?: string; file?: string };
   executable: ExecutableCandidate[];
   launch?: { args?: string[] };
+  /** A release the core downloads on request. Absent when the agent ships another way. */
+  install?: ProviderInstall;
   /**
    * Environment that makes one account blind to the others. Values may use
    * `{isolationDir}`, replaced by the account's own directory.
@@ -128,6 +158,8 @@ export interface ProviderSummary {
   executable: string | null;
   models: ModelInfo[];
   capabilities: ProviderCapabilities;
+  /** Where the managed install stands, null when this profile has no `install` block. */
+  install: ProviderInstallState | null;
 }
 
 /** A descriptor that did not load. Always shown, never silent. */
@@ -411,6 +443,21 @@ export interface RpcMethods {
     params: { providerId: ProviderId; accountId: AccountId };
     result: { models: ModelInfo[]; probedAt: Timestamp };
   };
+  /**
+   * Download and unpack the release this profile's `install` block names.
+   * Refused when the profile carries no such block, when an install is already
+   * running for that provider, or when the free space under the data directory
+   * is under the archive plus the unpacked files plus a 256 MB margin. Progress
+   * arrives as `providers.installProgress`.
+   */
+  'providers.install': { params: { providerId: ProviderId }; result: ProviderInstallState };
+  /** Abort the running install. The operation id is the one its state carries. */
+  'providers.installCancel': {
+    params: { providerId: ProviderId; operationId: string };
+    result: ProviderInstallState;
+  };
+  /** Delete what a managed install put on disk. Refused while a process of that provider is alive. */
+  'providers.uninstall': { params: { providerId: ProviderId }; result: ProviderInstallState };
   /** Validate a user descriptor and show what it would do. Writes nothing. */
   'providers.dryRun': {
     params: { file: string };
@@ -553,6 +600,12 @@ export interface RpcEvents {
   'settings.updated': Settings;
   /** What `providers.reload` found: the descriptors that loaded and the ones refused. */
   'providers.updated': { loaded: ProviderSummary[]; rejected: ProviderRejected[] };
+  /**
+   * A managed install moved. Emitted on every state change, and while the
+   * archive downloads at most four times a second. `providers.updated` follows
+   * once the files land or are removed, so every client re-lists.
+   */
+  'providers.installProgress': ProviderInstallState & { providerId: ProviderId };
   /** Every `providers.probe` that completed, so a second client sees the same models. */
   'providers.probed': {
     providerId: ProviderId;

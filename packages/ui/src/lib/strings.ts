@@ -193,6 +193,26 @@ export const strings = {
     killed: 'Killed'
   },
 
+  /** A provider whose files Boite downloads itself: the picker row and the Accounts page share these. */
+  install: {
+    heading: 'Providers Boite installs',
+    action: 'Install',
+    actionWithSize: 'Install, {size}',
+    retry: 'Install again',
+    cancel: 'Cancel',
+    remove: 'Remove',
+    removeTitle: 'Remove {provider}?',
+    removeBody: 'The files Boite downloaded go with it. It can be installed again later.',
+    removeConfirm: 'Remove',
+    removeCancel: 'Keep',
+    absent: 'not installed, {size} to download',
+    downloading: 'Downloading {received} of {total}',
+    verifying: 'Checking the archive',
+    extracting: 'Unpacking',
+    installed: 'Installed, version {version}',
+    progress: 'Download progress'
+  },
+
   accounts: {
     heading: 'Accounts',
     empty: 'No account yet.',

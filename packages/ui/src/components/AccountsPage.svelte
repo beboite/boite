@@ -1,6 +1,7 @@
 <script lang="ts">
   import { untrack } from 'svelte';
-  import type { Account } from '@boite/contracts';
+  import type { Account, ProviderSummary } from '@boite/contracts';
+  import InstallControl from './InstallControl.svelte';
   import { strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
 
@@ -20,6 +21,9 @@
     label = '';
     adding = false;
   }
+
+  /** The providers whose files Boite downloads itself, install block and all. */
+  let managed = $derived(store.providers.filter((p: ProviderSummary) => store.installOf(p.id) !== null));
 
   /** The provider's own login is the user's to run; Boite only drives isolated accounts. */
   function canLogIn(account: Account): boolean {
@@ -68,6 +72,18 @@
         </button>
       </div>
     </form>
+  {/if}
+
+  {#if managed.length > 0}
+    <section class="managed" data-testid="managed-providers">
+      <h2>{strings.install.heading}</h2>
+      {#each managed as provider (provider.id)}
+        <div class="managed-row" data-testid="managed-provider" data-provider={provider.id}>
+          <span class="name">{provider.name}</span>
+          <InstallControl {store} {provider} removable />
+        </div>
+      {/each}
+    </section>
   {/if}
 
   {#if store.accounts.length === 0}
@@ -190,6 +206,38 @@
 
   table {
     background: var(--color-surface);
+  }
+
+  .managed {
+    display: grid;
+    gap: 6px;
+    margin-bottom: 12px;
+    padding: 8px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    background: var(--color-surface);
+    max-width: 560px;
+  }
+
+  .managed h2 {
+    margin: 0 0 2px;
+    font-size: var(--text-xs);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: var(--color-muted-foreground);
+  }
+
+  .managed-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 26px;
+  }
+
+  .managed-row .name {
+    flex: none;
+    font-weight: 500;
   }
 
   .path {

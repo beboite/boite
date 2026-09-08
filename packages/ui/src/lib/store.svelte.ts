@@ -9,6 +9,7 @@ import type {
   Project,
   ProjectId,
   ProviderId,
+  ProviderInstallState,
   ProviderRejected,
   ProviderSummary,
   RequestId,
@@ -90,6 +91,15 @@ function observable(client: Client): client is ObservableClient {
   return 'onState' in client;
 }
 
+/** What the summaries say about every managed install, as one map. */
+function installStatesOf(providers: ProviderSummary[]): Record<ProviderId, ProviderInstallState> {
+  const out: Record<ProviderId, ProviderInstallState> = {};
+  for (const provider of providers) {
+    if (provider.install !== null) out[provider.id] = provider.install;
+  }
+  return out;
+}
+
 /** One probe answer per provider and account, the key the core uses too. */
 export function probeKey(providerId: ProviderId, accountId: string): string {
   return `${providerId}::${accountId}`;
@@ -127,6 +137,12 @@ export class Store {
   prefs = $state<ComposerPrefs>(defaultPrefs());
   providers = $state<ProviderSummary[]>([]);
   rejectedProviders = $state<ProviderRejected[]>([]);
+  /**
+   * Where each managed install stands, keyed by provider. The summaries seed it
+   * and `providers.installProgress` moves it while a download runs, which is the
+   * only state a summary cannot carry between two `providers.list` calls.
+   */
+  installStates = $state<Record<ProviderId, ProviderInstallState>>({});
   /**
    * What an agent answered `providers.probe` with, keyed `providerId::accountId`.
    * An ACP agent owns its model list; the descriptor only carries `default`.
@@ -188,6 +204,11 @@ export class Store {
 
   providerOf(id: ProviderId): ProviderSummary | null {
     return this.providers.find((p) => p.id === id) ?? null;
+  }
+
+  /** Null when this provider ships no release for Boite to install. */
+  installOf(id: ProviderId): ProviderInstallState | null {
+    return this.installStates[id] ?? this.providerOf(id)?.install ?? null;
   }
 
   accountOf(id: string): Account | null {
@@ -438,9 +459,14 @@ export class Store {
     on('settings.updated', (settings) => {
       this.settings = settings;
     });
+    on('providers.installProgress', ({ providerId, ...state }) => {
+      this.installStates = { ...this.installStates, [providerId]: state as ProviderInstallState };
+    });
     on('providers.updated', ({ loaded, rejected }) => {
       this.providers = loaded;
       this.rejectedProviders = rejected;
+      // A summary that just landed is newer than any progress this client kept.
+      this.installStates = installStatesOf(loaded);
       // The core drops its own probes on a reload; holding stale ones would
       // offer a model it now refuses.
       this.probedModels = {};
@@ -554,6 +580,7 @@ export class Store {
       this.threads = threads;
       this.providers = providers.loaded;
       this.rejectedProviders = providers.rejected;
+      this.installStates = installStatesOf(providers.loaded);
       this.accounts = accounts;
       this.logins = {};
       this.settings = settings;
@@ -924,6 +951,46 @@ export class Store {
     try {
       const account = await client.call('accounts.check', { accountId });
       this.accounts = this.accounts.map((a) => (a.id === account.id ? account : a));
+    } catch (error) {
+      this.#fail(error);
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Managed installs
+  // -------------------------------------------------------------------------
+
+  /** Start the download. The rest arrives as `providers.installProgress`. */
+  async installProvider(providerId: ProviderId): Promise<void> {
+    const client = this.#client;
+    if (!client) return;
+    try {
+      const state = await client.call('providers.install', { providerId });
+      this.installStates = { ...this.installStates, [providerId]: state };
+    } catch (error) {
+      this.#fail(error);
+    }
+  }
+
+  async cancelInstall(providerId: ProviderId): Promise<void> {
+    const client = this.#client;
+    const state = this.installOf(providerId);
+    if (!client || state === null || state.state === 'absent' || state.state === 'installed' || state.state === 'failed')
+      return;
+    try {
+      await client.call('providers.installCancel', { providerId, operationId: state.operationId });
+    } catch (error) {
+      this.#fail(error);
+    }
+  }
+
+  /** Delete the files. Refused by the core while a process of that provider is alive. */
+  async uninstallProvider(providerId: ProviderId): Promise<void> {
+    const client = this.#client;
+    if (!client) return;
+    try {
+      const state = await client.call('providers.uninstall', { providerId });
+      this.installStates = { ...this.installStates, [providerId]: state };
     } catch (error) {
       this.#fail(error);
     }

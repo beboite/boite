@@ -19,8 +19,8 @@ afterEach(() => {
   openUrl.mockClear();
 });
 
-async function waitFor(check: () => boolean): Promise<void> {
-  for (let attempt = 0; attempt < 400; attempt++) {
+async function waitFor(check: () => boolean, attempts = 400): Promise<void> {
+  for (let attempt = 0; attempt < attempts; attempt++) {
     if (check()) return;
     await new Promise((resolve) => setTimeout(resolve, 2));
   }
@@ -116,11 +116,14 @@ test('the picker lists providers with their accounts and the models of the one s
   query<HTMLButtonElement>('[data-testid=composer-picker]').click();
   await waitFor(() => document.querySelector('[data-testid=composer-picker-menu]') !== null);
   const instances = Array.from(document.querySelectorAll('[data-instance]')).map((el) => el.getAttribute('data-instance'));
+  // Antigravity has an account too, but its release is not downloaded yet, so it
+  // gets one row of its own with the install in it rather than a row per account.
   expect(instances).toEqual([
     'claude::a-claude-main',
     'claude::a-claude-side',
     'echo::a-echo',
-    'opencode::a-opencode'
+    'opencode::a-opencode',
+    'antigravity::'
   ]);
   expect(shownModels()).toEqual(['claude-fable-5-1', 'claude-opus-5', 'claude-sonnet-5']);
 
@@ -636,4 +639,35 @@ test('a tool card shows the diff, the markdown and the image it produced', async
   const image = query<HTMLImageElement>('[data-testid=tool-document][data-kind=image] img');
   expect(image.getAttribute('src')?.startsWith('data:image/png;base64,iVBORw0KGgo')).toBe(true);
   expect(image.alt).toBe('one pixel');
+});
+
+test('a provider Boite installs offers the download in the picker, then becomes pickable', async () => {
+  await mountOnFake();
+  // An open thread locks its provider; a draft is where another one can be picked.
+  query<HTMLButtonElement>('[data-testid=new-thread]').click();
+  await waitFor(() => store.draft !== null);
+  query<HTMLButtonElement>('[data-testid=composer-picker]').click();
+  await waitFor(() => document.querySelector('[data-testid=composer-picker-menu]') !== null);
+
+  // Nothing is on the machine yet: one row for the provider, carrying its size.
+  const start = query<HTMLButtonElement>('[data-testid=install-start][data-provider=antigravity]');
+  expect(start.textContent).toContain('447 MB');
+  expect(document.querySelector('[data-instance="antigravity::a-antigravity"]')).toBeNull();
+
+  start.click();
+  await waitFor(
+    () => document.querySelector('[data-testid=install-progress][data-provider=antigravity]') !== null
+  );
+  const bar = query('[data-testid=install-progress][data-provider=antigravity] .bar');
+  await waitFor(() => (bar.getAttribute('style') ?? '').replace(/\s/g, '') !== 'width:0%');
+  expect(document.querySelector('[data-testid=install-cancel][data-provider=antigravity]')).not.toBeNull();
+
+  // The fake ticks for about two seconds, then the account row is a real one.
+  await waitFor(() => document.querySelector('[data-instance="antigravity::a-antigravity"]') !== null, 2000);
+  const row = query<HTMLButtonElement>('[data-instance="antigravity::a-antigravity"]');
+  expect(row.disabled).toBe(false);
+  expect(document.querySelector('[data-testid=install-start][data-provider=antigravity]')).toBeNull();
+
+  row.click();
+  await waitFor(() => (query('[data-testid=composer-picker]').textContent ?? '').includes('Antigravity'));
 });

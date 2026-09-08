@@ -32,6 +32,21 @@ export function homePath(): string {
   return homedir();
 }
 
+/** Everything a managed install of this provider owns: downloads, releases, the current link. */
+export function providerAgentDir(dataDir: string, providerId: string): string {
+  return join(dataDir, 'agents', providerId);
+}
+
+/**
+ * What `{agentsDir}` becomes in a descriptor: the release a managed install
+ * points at right now. A profile with an `install` block names its executable
+ * under this, so the candidate resolves the moment the files land and resolves
+ * to nothing before that.
+ */
+export function agentsDirPath(dataDir: string, providerId: string): string {
+  return join(providerAgentDir(dataDir, providerId), 'current');
+}
+
 /**
  * What `{appdata}` becomes in a descriptor: Windows' roaming per-user directory,
  * where npm puts its global installs. Only a windows profile ever names the

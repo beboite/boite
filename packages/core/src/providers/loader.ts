@@ -11,14 +11,16 @@ import type {
   ProviderCapabilities,
   ProviderDescriptor,
   ProviderId,
+  ProviderInstall,
   ProviderLogin,
   ProviderRejected,
   ProviderSummary,
   RpcResult,
 } from '@boite/contracts';
 import type { Core } from '../core.ts';
-import { appDataPath, currentOs, homePath } from '../paths.ts';
-import { notFound } from '../errors.ts';
+import { agentsDirPath, appDataPath, currentOs, homePath } from '../paths.ts';
+import { InstallManager } from './install.ts';
+import { notFound, refused } from '../errors.ts';
 import claudeShipped from './shipped/claude.json';
 import codexShipped from './shipped/codex.json';
 import geminiShipped from './shipped/gemini.json';
@@ -126,6 +128,13 @@ function asArray(value: unknown, file: string, field: string): unknown[] {
   return value;
 }
 
+function asPositiveInteger(value: unknown, file: string, field: string): number {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value <= 0) {
+    reject(file, field, 'a positive whole number of bytes', `${field} must be a positive whole number`);
+  }
+  return value;
+}
+
 function checkKeys(obj: Record<string, unknown>, allowed: readonly string[], file: string, path: string): void {
   for (const key of Object.keys(obj)) {
     if (allowed.includes(key)) continue;
@@ -166,9 +175,50 @@ function checkStringMap(value: unknown, file: string, field: string): Record<str
   return out;
 }
 
+/**
+ * A release Boite downloads itself: the archive, what it hashes to, and every
+ * file that has to come out of it with its exact size. The first file is the
+ * executable, and nothing outside the list is kept.
+ */
+function checkInstall(value: unknown, file: string, field: string): ProviderInstall {
+  const obj = asObject(value, file, field);
+  checkKeys(obj, ['version', 'url', 'sha256', 'archiveBytes', 'files'], file, field);
+
+  const url = asString(obj['url'], file, `${field}.url`);
+  if (!url.startsWith('http://') && !url.startsWith('https://')) {
+    reject(file, `${field}.url`, 'an http or https url', `${field}.url must be an http or https url`);
+  }
+  const sha256 = asString(obj['sha256'], file, `${field}.sha256`);
+  if (!/^[a-fA-F0-9]{64}$/.test(sha256)) {
+    reject(file, `${field}.sha256`, '64 hexadecimal characters', `${field}.sha256 is not a sha256 digest`);
+  }
+  const archiveBytes = asPositiveInteger(obj['archiveBytes'], file, `${field}.archiveBytes`);
+
+  const rawFiles = asArray(obj['files'], file, `${field}.files`);
+  if (rawFiles.length === 0) {
+    reject(file, `${field}.files`, 'at least one file', `${field}.files must name the executable at least`);
+  }
+  const files = rawFiles.map((entry, index) => {
+    const entryField = `${field}.files[${index}]`;
+    const item = asObject(entry, file, entryField);
+    checkKeys(item, ['path', 'bytes'], file, entryField);
+    const path = asString(item['path'], file, `${entryField}.path`);
+    for (const segment of path.split(/[\\/]/)) {
+      if (segment !== '..') continue;
+      reject(file, `${entryField}.path`, 'a path with no ".." segment', `${entryField}.path escapes the release: ${path}`);
+    }
+    if (path.startsWith('/') || path.startsWith('\\') || /^[a-zA-Z]:/.test(path)) {
+      reject(file, `${entryField}.path`, 'a relative path inside the archive', `${entryField}.path must be relative: ${path}`);
+    }
+    return { path, bytes: asPositiveInteger(item['bytes'], file, `${entryField}.bytes`) };
+  });
+
+  return { version: asString(obj['version'], file, `${field}.version`), url, sha256, archiveBytes, files };
+}
+
 function checkProfile(value: unknown, file: string, field: string): OsProfile {
   const obj = asObject(value, file, field);
-  checkKeys(obj, ['detect', 'executable', 'launch', 'isolation', 'close'], file, field);
+  checkKeys(obj, ['detect', 'executable', 'launch', 'install', 'isolation', 'close'], file, field);
 
   const detectRaw = asObject(obj['detect'] ?? {}, file, `${field}.detect`);
   checkKeys(detectRaw, ['command', 'file'], file, `${field}.detect`);
@@ -203,6 +253,8 @@ function checkProfile(value: unknown, file: string, field: string): OsProfile {
     );
     profile.close = { processes };
   }
+
+  if (obj['install'] !== undefined) profile.install = checkInstall(obj['install'], file, `${field}.install`);
 
   return profile;
 }
@@ -332,20 +384,26 @@ function checkCapabilities(value: unknown, file: string): ProviderCapabilities {
   };
 }
 
-/** `{home}` and `{appdata}`, the two locations a descriptor may name at load time. */
-function substituteHome(value: string): string {
+/**
+ * `{home}`, `{appdata}` and `{agentsDir}`, the three locations a descriptor may
+ * name at load time. The last one is where a managed install puts its files, so
+ * it needs the data directory and the provider's own id.
+ */
+function substituteHome(value: string, agentsDir: string): string {
   let out = value;
   if (out.includes('{home}')) out = out.split('{home}').join(homePath());
   if (out.includes('{appdata}')) out = out.split('{appdata}').join(appDataPath());
+  if (out.includes('{agentsDir}')) out = out.split('{agentsDir}').join(agentsDir);
   return out;
 }
 
 /** Load-time tokens. `{isolationDir}` is not one of them: it is per account, substituted at spawn. */
-function substitutePaths(value: string): string {
-  return substituteHome(value).split('{shippedDir}').join(SHIPPED_DIR);
+function substitutePaths(value: string, agentsDir: string): string {
+  return substituteHome(value, agentsDir).split('{shippedDir}').join(SHIPPED_DIR);
 }
 
-function expandDescriptor(descriptor: ProviderDescriptor): ProviderDescriptor {
+function expandDescriptor(descriptor: ProviderDescriptor, dataDir: string): ProviderDescriptor {
+  const agentsDir = agentsDirPath(dataDir, descriptor.id);
   const profiles: ProviderDescriptor['profiles'] = {};
   for (const os of OS_KEYS) {
     const profile = descriptor.profiles[os];
@@ -354,24 +412,39 @@ function expandDescriptor(descriptor: ProviderDescriptor): ProviderDescriptor {
       ...profile,
       executable: profile.executable.map((candidate) => ({
         kind: candidate.kind,
-        value: candidate.kind === 'file' ? normalize(substituteHome(candidate.value)) : substituteHome(candidate.value),
+        value:
+          candidate.kind === 'file'
+            ? normalize(substituteHome(candidate.value, agentsDir))
+            : substituteHome(candidate.value, agentsDir),
       })),
       // A CLI that npm installs as a `.cmd` shim is launched as `node <its js>`,
       // so a launch argument names a path like an executable candidate does and
       // takes the same tokens. Gemini CLI's descriptor is the one that needs it.
       ...(profile.launch === undefined
         ? {}
-        : { launch: { args: (profile.launch.args ?? []).map(substituteHome) } }),
+        : { launch: { args: (profile.launch.args ?? []).map((arg) => substituteHome(arg, agentsDir)) } }),
     };
   }
-  const expanded: ProviderDescriptor = { ...descriptor, roots: descriptor.roots.map(substituteHome), profiles };
+  const expanded: ProviderDescriptor = {
+    ...descriptor,
+    roots: descriptor.roots.map((root) => substituteHome(root, agentsDir)),
+    profiles,
+  };
   if (descriptor.login !== undefined) {
-    expanded.login = { ...descriptor.login, command: descriptor.login.command.map(substitutePaths) };
+    expanded.login = {
+      ...descriptor.login,
+      command: descriptor.login.command.map((arg) => substitutePaths(arg, agentsDir)),
+    };
   }
   return expanded;
 }
 
-export function validateDescriptor(raw: unknown, file: string, forbiddenIds: ReadonlySet<string>): ProviderDescriptor {
+export function validateDescriptor(
+  raw: unknown,
+  file: string,
+  forbiddenIds: ReadonlySet<string>,
+  dataDir: string,
+): ProviderDescriptor {
   const obj = asObject(raw, file, 'descriptor');
   checkRoots(obj['roots'], file);
   checkKeys(obj, DESCRIPTOR_KEYS, file, '');
@@ -402,19 +475,22 @@ export function validateDescriptor(raw: unknown, file: string, forbiddenIds: Rea
     reject(file, 'profiles', 'at least one of: windows, linux, macos', 'profiles must describe at least one OS');
   }
 
-  return expandDescriptor({
-    id,
-    schemaVersion: 1,
-    name: asString(obj['name'], file, 'name'),
-    shortName: asString(obj['shortName'], file, 'shortName'),
-    protocol: protocol as Protocol,
-    roots: checkRoots(obj['roots'], file),
-    profiles,
-    auth: checkAuth(obj['auth'], file),
-    ...(obj['login'] === undefined ? {} : { login: checkLogin(obj['login'], file) }),
-    models: checkModels(obj['models'], file),
-    capabilities: checkCapabilities(obj['capabilities'], file),
-  });
+  return expandDescriptor(
+    {
+      id,
+      schemaVersion: 1,
+      name: asString(obj['name'], file, 'name'),
+      shortName: asString(obj['shortName'], file, 'shortName'),
+      protocol: protocol as Protocol,
+      roots: checkRoots(obj['roots'], file),
+      profiles,
+      auth: checkAuth(obj['auth'], file),
+      ...(obj['login'] === undefined ? {} : { login: checkLogin(obj['login'], file) }),
+      models: checkModels(obj['models'], file),
+      capabilities: checkCapabilities(obj['capabilities'], file),
+    },
+    dataDir,
+  );
 }
 
 /** The same lookup `ProviderSummary.executable` reports, for a driver that needs the path. */
@@ -431,8 +507,8 @@ export function resolveExecutable(profile: OsProfile): string | null {
   return null;
 }
 
-function detectResolves(profile: OsProfile): boolean {
-  if (profile.detect.file !== undefined && !existsSync(substituteHome(profile.detect.file))) return false;
+function detectResolves(profile: OsProfile, agentsDir: string): boolean {
+  if (profile.detect.file !== undefined && !existsSync(substituteHome(profile.detect.file, agentsDir))) return false;
   if (profile.detect.command !== undefined && Bun.which(profile.detect.command) === null) return false;
   return true;
 }
@@ -441,12 +517,18 @@ export function profileFor(descriptor: ProviderDescriptor, os: Os = currentOs())
   return descriptor.profiles[os];
 }
 
-export function summarize(entry: LoadedProvider): ProviderSummary {
+/**
+ * A provider whose files Boite has to download is unavailable until they are
+ * there, and its summary says so through `install` rather than through a bare
+ * `available: false`: that is what lets the picker offer the download instead
+ * of a dead row.
+ */
+export function summarize(entry: LoadedProvider, installs: InstallManager): ProviderSummary {
   const profile = profileFor(entry.descriptor);
   const executable = profile === undefined ? null : resolveExecutable(profile);
   const available =
     profile !== undefined &&
-    detectResolves(profile) &&
+    detectResolves(profile, installs.currentDir(entry.descriptor.id)) &&
     (profile.executable.length === 0 || executable !== null);
   return {
     id: entry.descriptor.id,
@@ -458,15 +540,26 @@ export function summarize(entry: LoadedProvider): ProviderSummary {
     executable,
     models: entry.descriptor.models,
     capabilities: entry.descriptor.capabilities,
+    install: installs.stateOf(entry.descriptor.id, profile?.install),
   };
 }
 
 export class ProviderRegistry {
   private entries = new Map<ProviderId, LoadedProvider>();
   private rejected: ProviderRejected[] = [];
+  /** Managed installs: the state of each, the leases held on them, and the download itself. */
+  readonly installs: InstallManager;
 
   constructor(private readonly dataDir: string) {
+    this.installs = new InstallManager(dataDir);
     this.load();
+  }
+
+  /** The install block of this provider's profile for the OS the core runs on. */
+  installBlock(id: ProviderId): ProviderInstall | undefined {
+    const descriptor = this.get(id);
+    if (descriptor === undefined) return undefined;
+    return profileFor(descriptor)?.install;
   }
 
   load(): ProviderLoadResult {
@@ -476,7 +569,7 @@ export class ProviderRegistry {
     for (const shipped of SHIPPED_SOURCES) {
       if (shipped.when !== undefined && !shipped.when()) continue;
       try {
-        const descriptor = validateDescriptor(shipped.raw, shipped.file, new Set());
+        const descriptor = validateDescriptor(shipped.raw, shipped.file, new Set(), this.dataDir);
         entries.set(descriptor.id, { descriptor, source: 'shipped', file: shipped.file });
       } catch (error) {
         if (error instanceof Rejection) rejected.push(error.rejected);
@@ -488,7 +581,7 @@ export class ProviderRegistry {
     for (const file of this.userFiles()) {
       try {
         const raw: unknown = JSON.parse(readFileSync(file, 'utf8'));
-        const descriptor = validateDescriptor(raw, file, shippedIds);
+        const descriptor = validateDescriptor(raw, file, shippedIds, this.dataDir);
         if (entries.has(descriptor.id)) {
           rejected.push({
             file,
@@ -518,7 +611,7 @@ export class ProviderRegistry {
 
   list(): ProviderLoadResult {
     return {
-      loaded: [...this.entries.values()].map(summarize),
+      loaded: [...this.entries.values()].map((entry) => summarize(entry, this.installs)),
       rejected: [...this.rejected],
     };
   }
@@ -535,7 +628,7 @@ export class ProviderRegistry {
 
   summary(id: ProviderId): ProviderSummary | undefined {
     const entry = this.entries.get(id);
-    return entry === undefined ? undefined : summarize(entry);
+    return entry === undefined ? undefined : summarize(entry, this.installs);
   }
 
   available(): ProviderSummary[] {
@@ -548,12 +641,12 @@ export class ProviderRegistry {
       const shippedIds = new Set(
         [...this.entries.values()].filter((entry) => entry.source === 'shipped').map((entry) => entry.descriptor.id),
       );
-      const descriptor = validateDescriptor(raw, file, shippedIds);
+      const descriptor = validateDescriptor(raw, file, shippedIds, this.dataDir);
       const entry: LoadedProvider = { descriptor, source: 'user', file };
       const profile = profileFor(descriptor);
       return {
         ok: true,
-        summary: summarize(entry),
+        summary: summarize(entry, this.installs),
         plan: {
           roots: descriptor.roots,
           env: profile === undefined ? [] : Object.keys(profile.isolation),
@@ -585,11 +678,39 @@ export class ProviderRegistry {
 }
 
 export function registerProviderMethods(core: Core): void {
+  core.providers.installs.attach({
+    emit: (payload) => {
+      core.bus.emit('providers.installProgress', payload);
+    },
+    updated: () => {
+      core.bus.emit('providers.updated', core.providers.list());
+    },
+    log: (level, message) => {
+      core.log(level, message);
+    },
+  });
+
   core.router.register('providers.list', () => core.providers.list());
   core.router.register('providers.reload', () => {
     const result = core.providers.load();
     core.bus.emit('providers.updated', result);
     return result;
+  });
+  core.router.register('providers.install', (params) => {
+    const install = core.providers.installBlock(core.providers.require(params.providerId).id);
+    if (install === undefined) {
+      throw refused(`${params.providerId} has nothing for Boite to install on this platform`, {
+        providerId: params.providerId,
+      });
+    }
+    return core.providers.installs.start(params.providerId, install);
+  });
+  core.router.register('providers.installCancel', (params) =>
+    core.providers.installs.cancel(params.providerId, params.operationId),
+  );
+  core.router.register('providers.uninstall', (params) => {
+    const provider = core.providers.require(params.providerId);
+    return core.providers.installs.uninstall(provider.id, core.providers.installBlock(provider.id));
   });
   core.router.register('providers.dryRun', (params) => core.providers.dryRun(params.file));
 }

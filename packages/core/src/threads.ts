@@ -360,10 +360,36 @@ export class ThreadStore {
       },
       requestPermission: (toolName: string, input: unknown, description: string | null): PermissionTicket =>
         this.requestPermission(thread, turn, toolName, input, description),
-      spawn: (cmd: string, args: string[], opts?: SpawnOptions) =>
-        this.core.procs.spawn(threadId, cmd, args, { ...opts, env: { ...(opts?.env ?? {}), ...env } }),
-      spawnChild: (cmd: string, args: string[], opts?: SpawnOptions) =>
-        this.core.procs.spawnChild(threadId, cmd, args, opts),
+      // Every driver reaches the launcher through these two, so this is the one
+      // place a lease on the provider's managed files can be held for the life
+      // of an agent process, warm sessions included. `providers.uninstall`
+      // refuses while the count is above zero.
+      spawn: (cmd: string, args: string[], opts?: SpawnOptions) => {
+        const spawned = this.core.procs.spawn(threadId, cmd, args, {
+          ...opts,
+          env: { ...(opts?.env ?? {}), ...env },
+        });
+        const installs = this.core.providers.installs;
+        installs.acquire(provider.id);
+        void spawned.exited.finally(() => {
+          installs.release(provider.id);
+        });
+        return spawned;
+      },
+      spawnChild: (cmd: string, args: string[], opts?: SpawnOptions) => {
+        const child = this.core.procs.spawnChild(threadId, cmd, args, opts);
+        const installs = this.core.providers.installs;
+        installs.acquire(provider.id);
+        let released = false;
+        const drop = (): void => {
+          if (released) return;
+          released = true;
+          installs.release(provider.id);
+        };
+        child.once('exit', drop);
+        child.once('error', drop);
+        return child;
+      },
     };
   }
 

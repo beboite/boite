@@ -35,7 +35,22 @@ async function probeProvider(
     accountId: account.id,
     accountEnv: core.accounts.accountEnv(account, provider),
     cwd: core.dataDir,
-    spawnChild: (cmd, args, opts) => core.procs.spawnChild(threadId, cmd, args, opts),
+    // A probe runs the same executable a turn would, so it holds the same lease:
+    // removing a managed install under a probe would be the same crash.
+    spawnChild: (cmd, args, opts) => {
+      const child = core.procs.spawnChild(threadId, cmd, args, opts);
+      const installs = core.providers.installs;
+      installs.acquire(provider.id);
+      let released = false;
+      const drop = (): void => {
+        if (released) return;
+        released = true;
+        installs.release(provider.id);
+      };
+      child.once('exit', drop);
+      child.once('error', drop);
+      return child;
+    },
     killTree: () => {
       core.procs.killTree(threadId);
     },

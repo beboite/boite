@@ -1,6 +1,7 @@
 <script lang="ts">
   import { ChevronDown, ChevronRight, Search, Sparkles } from '@lucide/svelte';
-  import type { Account, ModelInfo, ProviderSummary } from '@boite/contracts';
+  import type { Account, ModelInfo, ProviderInstallState, ProviderSummary } from '@boite/contracts';
+  import InstallControl from './InstallControl.svelte';
   import { strings } from '../lib/strings';
   import type { Choice, PickPatch, Store } from '../lib/store.svelte';
 
@@ -39,6 +40,8 @@
     account: Account | null;
     disabled: boolean;
     hint: string | null;
+    /** Set on the one row a provider gets while its files are still to download. */
+    install: ProviderInstallState | null;
   }
 
   let provider = $derived(choice ? store.providerOf(choice.providerId) : null);
@@ -81,9 +84,16 @@
     const out: Row[] = [];
     const ordered = [...store.providers].sort((a, b) => Number(b.available) - Number(a.available));
     for (const entry of ordered) {
+      // A provider whose release is not on the machine yet gets one row with the
+      // download in it, whatever accounts it has: nothing can run until it lands.
+      const install = store.installOf(entry.id);
+      if (install !== null && install.state !== 'installed') {
+        out.push({ provider: entry, account: null, disabled: true, hint: null, install });
+        continue;
+      }
       const accounts = store.accountsOf(entry.id);
       if (accounts.length === 0) {
-        out.push({ provider: entry, account: null, disabled: true, hint: strings.composer.noAccount });
+        out.push({ provider: entry, account: null, disabled: true, hint: strings.composer.noAccount, install: null });
         continue;
       }
       for (const acc of accounts) {
@@ -95,7 +105,8 @@
           provider: entry,
           account: acc,
           disabled: !entry.available || (locked && !same),
-          hint: hints.join(', ') || null
+          hint: hints.join(', ') || null,
+          install: null
         });
       }
     }
@@ -320,6 +331,14 @@
                 <span class="sub">{row.hint ?? row.account.label}</span>
               </span>
             </button>
+          {:else if row.install}
+            <div class="row managed" data-instance="{row.provider.id}::">
+              <span class="mark"></span>
+              <span class="text">
+                <span class="name">{row.provider.name}</span>
+              </span>
+              <InstallControl {store} provider={row.provider} />
+            </div>
           {:else}
             <div class="row none" data-instance="{row.provider.id}::">
               <span class="mark"></span>
@@ -597,6 +616,25 @@
   .row.none {
     opacity: 0.5;
     cursor: default;
+  }
+
+  /* The download is the row's point, so it keeps full contrast and a line of its
+     own under the name: a bar squeezed beside it would cross the provider name. */
+  .row.managed {
+    flex-wrap: wrap;
+    row-gap: 5px;
+    padding-bottom: 6px;
+    cursor: default;
+  }
+
+  .row.managed .text {
+    flex: 1 0 auto;
+  }
+
+  .row.managed :global(.install) {
+    flex: 1 0 100%;
+    padding-left: 14px;
+    justify-content: flex-start;
   }
 
   .mark {
