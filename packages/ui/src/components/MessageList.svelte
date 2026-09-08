@@ -1,10 +1,10 @@
 <script lang="ts">
   import { ArrowDown } from '@lucide/svelte';
   import type { Message } from '@boite/contracts';
-  import { renderMarkdown } from '../lib/markdown';
   import { strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
   import PermissionCard from './PermissionCard.svelte';
+  import Prose from './Prose.svelte';
   import ToolCard from './ToolCard.svelte';
 
   let {
@@ -89,9 +89,7 @@
               {#each message.parts as part, index (index)}
                 {#if part.type === 'text'}
                   {#if part.text.length > 0 || index === caretAt}
-                    <div class="prose" data-testid="text-part">
-                      {@html renderMarkdown(part.text)}{#if index === caretAt}<span class="caret" aria-label={strings.chat.streaming}></span>{/if}
-                    </div>
+                    <Prose text={part.text} live={index === caretAt} />
                   {/if}
                 {:else if part.type === 'tool'}
                   <ToolCard name={part.name} input={part.input} output={part.output} status={part.status} />
@@ -141,6 +139,7 @@
     min-height: 0;
     overflow: auto;
     padding: 20px 20px 8px;
+    overscroll-behavior: contain;
   }
 
   .column {
@@ -156,6 +155,9 @@
     display: flex;
     flex-direction: column;
     animation: rise var(--dur-3) var(--ease-out-quint);
+    /* Off-screen messages of a long thread skip layout and paint until scrolled to. */
+    content-visibility: auto;
+    contain-intrinsic-size: auto 80px;
   }
 
   .message.user {
@@ -181,68 +183,6 @@
     flex-direction: column;
     gap: 6px;
     max-width: 100%;
-  }
-
-  .prose {
-    word-break: break-word;
-    line-height: 1.6;
-  }
-
-  .prose :global(p) {
-    white-space: pre-wrap;
-    margin: 0 0 8px;
-  }
-
-  .prose :global(p:last-child) {
-    margin-bottom: 0;
-  }
-
-  .prose :global(h3),
-  .prose :global(h4),
-  .prose :global(h5),
-  .prose :global(h6) {
-    font-size: var(--text-md);
-    margin: 12px 0 6px;
-  }
-
-  .prose :global(ul),
-  .prose :global(ol) {
-    margin: 0 0 8px;
-    padding-left: 22px;
-  }
-
-  .prose :global(li) {
-    margin: 2px 0;
-  }
-
-  .prose :global(code) {
-    font-family: var(--font-mono);
-    font-size: var(--text-sm);
-    padding: 1px 5px;
-    border-radius: 4px;
-    background: var(--color-surface-2);
-    border: 1px solid var(--color-border);
-  }
-
-  .prose :global(pre) {
-    margin: 6px 0 10px;
-    padding: 10px 12px;
-    border-radius: var(--radius-md);
-    background: var(--color-surface);
-    border: 1px solid var(--color-border);
-    overflow: auto;
-  }
-
-  .prose :global(pre code) {
-    padding: 0;
-    border: none;
-    background: transparent;
-    white-space: pre;
-  }
-
-  .prose :global(a) {
-    text-decoration: underline;
-    text-underline-offset: 2px;
   }
 
   .caret {

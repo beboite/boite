@@ -1,13 +1,16 @@
 <script lang="ts">
   import { ChevronRight, Ellipsis, Plus, Search, Settings } from '@lucide/svelte';
-  import type { ProjectId, ThreadId, ThreadSummary } from '@boite/contracts';
+  import type { Project, ProjectId, ThreadId, ThreadSummary } from '@boite/contracts';
   import { focusOnMount } from '../lib/actions';
+  import { confirm } from '../lib/confirm.svelte';
+  import { contextMenu } from '../lib/context-menu.svelte';
   import { ago, tokens } from '../lib/format';
-  import { strings } from '../lib/strings';
+  import { separator, type MenuItem } from '../lib/menu';
+  import { clampSidebar, SIDEBAR_DEFAULT } from '../lib/prefs';
+  import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
   import BoiteMark from './BoiteMark.svelte';
   import LoadGauge from './LoadGauge.svelte';
-  import Menu from './Menu.svelte';
   import StatusMark from './StatusMark.svelte';
 
   let { store }: { store: Store } = $props();
@@ -55,21 +58,98 @@
     }
   }
 
-  function threadAction(thread: ThreadSummary, action: string) {
-    if (action === 'rename') beginRename(thread);
-    else if (action === 'archive') void store.archive(thread.id);
+  // ---------------------------------------------------------------------------
+  // Menus: the right click and the hover button open the same one.
+  // ---------------------------------------------------------------------------
+
+  function threadItems(thread: ThreadSummary): MenuItem[] {
+    return [
+      { id: 'open', label: strings.sidebar.open, disabled: isOpen(thread) },
+      { id: 'rename', label: strings.sidebar.rename },
+      separator(),
+      { id: 'archive', label: strings.sidebar.archive, danger: true }
+    ];
   }
 
-  function projectAction(projectId: ProjectId, action: string) {
-    if (action === 'new') store.startDraft(projectId);
-    else if (action === 'remove' && window.confirm(strings.sidebar.removeProjectConfirm))
-      void store.removeProject(projectId);
+  function openThreadMenu(event: MouseEvent, thread: ThreadSummary) {
+    contextMenu.open(event, threadItems(thread), (action) => {
+      if (action === 'open') void store.open(thread.id);
+      else if (action === 'rename') beginRename(thread);
+      else if (action === 'archive') void store.archive(thread.id);
+    });
+  }
+
+  function projectItems(project: Project): MenuItem[] {
+    return [
+      { id: 'new', label: fill(strings.sidebar.newThreadIn, { project: project.name }) },
+      { id: 'copy', label: strings.sidebar.copyPath, hint: project.path },
+      separator(),
+      { id: 'remove', label: strings.sidebar.removeProject, danger: true }
+    ];
+  }
+
+  function openProjectMenu(event: MouseEvent, project: Project) {
+    contextMenu.open(event, projectItems(project), (action) => {
+      if (action === 'new') store.startDraft(project.id);
+      else if (action === 'copy') void store.copy(project.path);
+      else if (action === 'remove') void removeProject(project);
+    });
+  }
+
+  async function removeProject(project: Project) {
+    const ok = await confirm.ask({
+      title: fill(strings.sidebar.removeProjectTitle, { project: project.name }),
+      body: strings.sidebar.removeProjectBody,
+      confirmLabel: strings.sidebar.remove,
+      cancelLabel: strings.common.cancel,
+      danger: true
+    });
+    if (ok) await store.removeProject(project.id);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Width: dragged from the right edge, saved on release, double-click resets.
+  // ---------------------------------------------------------------------------
+
+  function startResize(event: PointerEvent) {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    const handle = event.currentTarget as HTMLElement;
+    handle.setPointerCapture(event.pointerId);
+    document.body.style.cursor = 'col-resize';
+    const move = (ev: PointerEvent) => {
+      store.sidebarWidth = clampSidebar(ev.clientX);
+    };
+    const stop = () => {
+      handle.removeEventListener('pointermove', move);
+      handle.removeEventListener('pointerup', stop);
+      handle.removeEventListener('pointercancel', stop);
+      document.body.style.cursor = '';
+      store.setSidebarWidth(store.sidebarWidth);
+    };
+    handle.addEventListener('pointermove', move);
+    handle.addEventListener('pointerup', stop);
+    handle.addEventListener('pointercancel', stop);
+  }
+
+  function onResizeKey(event: KeyboardEvent) {
+    if (event.key === 'ArrowLeft') store.setSidebarWidth(store.sidebarWidth - 16);
+    else if (event.key === 'ArrowRight') store.setSidebarWidth(store.sidebarWidth + 16);
+    else if (event.key === 'Home') store.setSidebarWidth(SIDEBAR_DEFAULT);
+    else return;
+    event.preventDefault();
   }
 
   let usageToday = $derived(store.usage ? store.usage.total.inputTokens + store.usage.total.outputTokens : null);
 </script>
 
-<aside class="sidebar" class:open={store.sidebarOpen} data-testid="sidebar">
+<aside
+  class="sidebar"
+  class:open={store.sidebarOpen}
+  class:collapsed={store.sidebarCollapsed}
+  style="--sidebar-width: {store.sidebarWidth}px"
+  data-testid="sidebar"
+>
   <div class="top">
     <label class="search">
       <Search size={14} strokeWidth={1.75} />
@@ -105,7 +185,8 @@
       {@const collapsed = store.isCollapsed(project.id)}
       {@const draftHere = store.draft?.projectId === project.id}
       <section class="project" data-testid="project" data-project-id={project.id}>
-        <div class="head">
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <div class="head" oncontextmenu={(event) => openProjectMenu(event, project)}>
           <button
             type="button"
             class="ghost toggle"
@@ -129,19 +210,16 @@
           >
             <Plus size={14} strokeWidth={1.75} />
           </button>
-          <span class="hover-only">
-            <Menu
-              label={strings.sidebar.projectMenu}
-              align="end"
-              items={[
-                { id: 'new', label: strings.sidebar.newThread },
-                { id: 'remove', label: strings.sidebar.removeProject, danger: true }
-              ]}
-              onpick={(id) => projectAction(project.id, id)}
-            >
-              <Ellipsis size={14} strokeWidth={1.75} />
-            </Menu>
-          </span>
+          <button
+            type="button"
+            class="ghost small icon hover-only"
+            title={strings.sidebar.projectMenu}
+            aria-label={strings.sidebar.projectMenu}
+            data-testid="project-menu"
+            onclick={(event) => openProjectMenu(event, project)}
+          >
+            <Ellipsis size={14} strokeWidth={1.75} />
+          </button>
         </div>
 
         {#if !collapsed}
@@ -166,7 +244,13 @@
                     use:focusOnMount
                   />
                 {:else}
-                  <div class="thread" class:open={isOpen(thread)} class:unread={thread.unread}>
+                  <!-- svelte-ignore a11y_no_static_element_interactions -->
+                  <div
+                    class="thread"
+                    class:open={isOpen(thread)}
+                    class:unread={thread.unread}
+                    oncontextmenu={(event) => openThreadMenu(event, thread)}
+                  >
                     <button
                       type="button"
                       class="ghost row"
@@ -184,19 +268,16 @@
                       {/if}
                       <span class="when subtle">{ago(thread.updatedAt, now)}</span>
                     </button>
-                    <span class="hover-only actions">
-                      <Menu
-                        label={strings.sidebar.threadMenu}
-                        align="end"
-                        items={[
-                          { id: 'rename', label: strings.sidebar.rename },
-                          { id: 'archive', label: strings.sidebar.archive, danger: true }
-                        ]}
-                        onpick={(id) => threadAction(thread, id)}
-                      >
-                        <Ellipsis size={14} strokeWidth={1.75} />
-                      </Menu>
-                    </span>
+                    <button
+                      type="button"
+                      class="ghost small icon hover-only actions"
+                      title={strings.sidebar.threadMenu}
+                      aria-label={strings.sidebar.threadMenu}
+                      data-testid="thread-menu"
+                      onclick={(event) => openThreadMenu(event, thread)}
+                    >
+                      <Ellipsis size={14} strokeWidth={1.75} />
+                    </button>
                   </div>
                 {/if}
               </li>
@@ -210,26 +291,6 @@
     {/each}
   </div>
 
-  <div class="foot">
-    <span class="conn {store.connection}" data-testid="status-connection">
-      <span class="dot"></span>
-      {strings.connection[store.connection]}
-    </span>
-    {#if usageToday !== null && usageToday > 0}
-      <span class="chip usage" title={strings.usage.heading}>{tokens(usageToday)} {strings.units.tokens}</span>
-    {/if}
-    <button
-      type="button"
-      class="ghost icon"
-      title={strings.sidebar.settings}
-      aria-label={strings.sidebar.settings}
-      data-testid="nav-settings"
-      onclick={() => store.showSettings()}
-    >
-      <Settings size={16} strokeWidth={1.75} />
-    </button>
-  </div>
-
   {#if store.projects.length > 0}
     <button
       type="button"
@@ -241,17 +302,76 @@
       {strings.sidebar.addProject}
     </button>
   {/if}
+
+  <div class="foot">
+    <span class="conn {store.connection}" data-testid="status-connection">
+      <span class="dot"></span>
+      {strings.connection[store.connection]}
+    </span>
+    {#if usageToday !== null && usageToday > 0}
+      <span class="chip usage" title={strings.usage.heading}>{tokens(usageToday)} {strings.units.tokens}</span>
+    {/if}
+    <button
+      type="button"
+      class="ghost icon"
+      title="{strings.sidebar.settings} (Ctrl+,)"
+      aria-label={strings.sidebar.settings}
+      data-testid="nav-settings"
+      onclick={() => store.showSettings()}
+    >
+      <Settings size={16} strokeWidth={1.75} />
+    </button>
+  </div>
+
+  <button
+    type="button"
+    class="resize"
+    aria-label={strings.sidebar.resize}
+    title={strings.sidebar.resize}
+    data-testid="sidebar-resize"
+    onpointerdown={startResize}
+    ondblclick={() => store.setSidebarWidth(SIDEBAR_DEFAULT)}
+    onkeydown={onResizeKey}
+  ></button>
 </aside>
 
 <style>
   .sidebar {
-    width: var(--sidebar);
+    position: relative;
+    width: var(--sidebar-width);
     flex: none;
     display: flex;
     flex-direction: column;
     min-height: 0;
     background: var(--color-surface);
     border-right: 1px solid var(--color-border);
+  }
+
+  .resize {
+    position: absolute;
+    top: 0;
+    right: -3px;
+    bottom: 0;
+    width: 6px;
+    height: auto;
+    padding: 0;
+    border: none;
+    border-radius: 0;
+    background: transparent;
+    cursor: col-resize;
+    z-index: 5;
+    transition: background var(--dur-2) var(--ease-out-quint);
+  }
+
+  .resize:hover,
+  .resize:focus-visible {
+    background: color-mix(in srgb, var(--color-foreground) 18%, transparent);
+    outline: none;
+  }
+
+  .resize:active {
+    transform: none;
+    background: color-mix(in srgb, var(--color-foreground) 28%, transparent);
   }
 
   .top {
@@ -520,23 +640,16 @@
   }
 
   .add-project {
-    order: 2;
     margin: 0 8px 6px;
     justify-content: flex-start;
     height: 26px;
     font-size: var(--text-sm);
   }
 
-  .scroll {
-    order: 1;
-  }
-
-  .top {
-    order: 0;
-  }
-
-  .foot {
-    order: 3;
+  @media (min-width: 721px) {
+    .sidebar.collapsed {
+      display: none;
+    }
   }
 
   @media (max-width: 720px) {
@@ -556,6 +669,10 @@
 
     .hover-only {
       opacity: 1;
+    }
+
+    .resize {
+      display: none;
     }
   }
 </style>

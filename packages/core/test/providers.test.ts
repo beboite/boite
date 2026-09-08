@@ -69,7 +69,9 @@ describe('providers', () => {
 
     const claude = loaded.find((provider) => provider.id === 'claude');
     expect(claude?.protocol).toBe('claude-sdk');
-    expect(claude?.models[0]?.id).toBe('claude-opus-5');
+    expect(claude?.models[0]?.id).toBe('claude-fable-5-1');
+    expect(claude?.models.find((model) => model.default)?.id).toBe('claude-sonnet-5');
+    expect(claude?.models.some((model) => model.legacy)).toBe(true);
     expect(claude?.capabilities.planMode).toBe(true);
   });
 

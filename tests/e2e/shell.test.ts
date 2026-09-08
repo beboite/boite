@@ -109,6 +109,7 @@ beforeAll(async () => {
   delete env.BOITE_CORE_COMMAND;
   env.BOITE_SHELL_HIDDEN = '1';
   env.BOITE_DATA_DIR = dataDir;
+  env.BOITE_ECHO = '1';
   env.WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = `--remote-debugging-port=${debugPort} --remote-allow-origins=*`;
 
   const startedAt = performance.now();
@@ -180,10 +181,12 @@ shellTest(
     await page?.waitFor(`${textOf('project-row')}.includes(${JSON.stringify(basename(projectDir))})`);
     await page?.waitFor(`document.querySelector('${testid('draft-row')}')`);
 
-    await page?.click(testid('composer-provider'));
-    await page?.waitFor(`document.querySelector('${testid('composer-provider-menu')}')`);
-    await page?.click(`${testid('composer-provider-menu')} [data-value^="echo::"]`);
-    await page?.waitFor(`${textOf('composer-provider')}.startsWith('Echo')`);
+    await page?.click(testid('composer-picker'));
+    await page?.waitFor(`document.querySelector('${testid('composer-picker-menu')}')`);
+    await page?.click(`${testid('composer-picker-menu')} [data-instance^="echo::"]`);
+    await page?.waitFor(`${textOf('composer-picker')}.startsWith('Echo')`);
+    await page?.click(`${testid('composer-picker-menu')} [data-model="echo"]`);
+    await page?.waitFor(`!document.querySelector('${testid('composer-picker-menu')}')`);
 
     await page?.type(testid('composer-input'), 'shell turn');
     await clickWhenEnabled(testid('composer-send'));

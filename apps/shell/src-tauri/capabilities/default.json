@@ -1,12 +1,13 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "What the Boite UI needs: the core IPC, the frameless window's own controls, and the folder picker. `core_endpoint` is an application command, which capabilities do not gate.",
+  "description": "What the Boite UI needs: the core IPC, the frameless window's own controls (drag, minimize, maximize state and toggle, close), the drag-and-drop events, and the folder picker. `core_endpoint` is an application command, which capabilities do not gate.",
   "windows": ["main"],
   "permissions": [
     "core:default",
     "core:window:allow-start-dragging",
     "core:window:allow-minimize",
+    "core:window:allow-is-maximized",
     "core:window:allow-toggle-maximize",
     "core:window:allow-close",
     "dialog:allow-open"

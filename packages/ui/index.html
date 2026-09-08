@@ -3,12 +3,30 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="color-scheme" content="light dark" />
-    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f6f5f2" />
-    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#161614" />
+    <meta name="color-scheme" content="dark light" />
+    <meta name="theme-color" content="#0a0a0a" />
     <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="icon" href="./icons/icon-192.png" />
+    <link rel="preload" href="./fonts/Geist-Variable.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="./fonts/GeistMono-Variable.woff2" as="font" type="font/woff2" crossorigin />
     <title>Boite</title>
+    <!-- Painted before the stylesheet arrives, so a reload never flashes white. -->
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #0a0a0a;
+        color: #fafafa;
+        overflow: hidden;
+      }
+    </style>
+    <script>
+      try {
+        var theme = localStorage.getItem('boite.theme');
+        if (theme === 'light') document.documentElement.dataset.theme = 'light';
+      } catch (e) {}
+    </script>
   </head>
   <body>
     <div id="app"></div>

@@ -61,7 +61,7 @@ export async function startCore(options: StartCoreOptions = {}): Promise<Running
   const port = options.port ?? 0;
   const proc = Bun.spawn({
     cmd: [...(options.command ?? CORE_SOURCE_COMMAND), '--port', String(port)],
-    env: { ...process.env, BOITE_DATA_DIR: dataDir, ...(options.env ?? {}) },
+    env: { ...process.env, BOITE_DATA_DIR: dataDir, BOITE_ECHO: '1', ...(options.env ?? {}) },
     stdout: 'pipe',
     stderr: 'pipe',
   });

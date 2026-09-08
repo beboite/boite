@@ -1,6 +1,8 @@
 <script lang="ts">
   import { Activity, PanelLeft } from '@lucide/svelte';
   import { focusOnMount } from '../lib/actions';
+  import { contextMenu } from '../lib/context-menu.svelte';
+  import { separator } from '../lib/menu';
   import { strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
   import Composer from './Composer.svelte';
@@ -34,6 +36,31 @@
     }
   }
 
+  function openTitleMenu(event: MouseEvent) {
+    const open = store.openThread;
+    if (!open) return;
+    contextMenu.open(
+      event,
+      [
+        { id: 'rename', label: strings.sidebar.rename },
+        { id: 'copy', label: strings.sidebar.copyPath, hint: open.cwd },
+        separator(),
+        { id: 'archive', label: strings.sidebar.archive, danger: true }
+      ],
+      (action) => {
+        if (action === 'rename') beginRename();
+        else if (action === 'copy') void store.copy(open.cwd);
+        else if (action === 'archive') void store.archive(open.id);
+      }
+    );
+  }
+
+  /** The drawer on a phone, the folded sidebar on a desktop. */
+  function toggleSidebar() {
+    if (window.matchMedia('(max-width: 720px)').matches) store.sidebarOpen = !store.sidebarOpen;
+    else store.toggleSidebar();
+  }
+
   let thread = $derived(store.openThread);
   let project = $derived(store.openProject);
 </script>
@@ -49,8 +76,11 @@
       <button
         type="button"
         class="ghost icon drawer"
+        class:shown={store.sidebarCollapsed}
+        title="{strings.sidebar.expand} (Ctrl+B)"
         aria-label={strings.sidebar.expand}
-        onclick={() => (store.sidebarOpen = !store.sidebarOpen)}
+        data-testid="sidebar-toggle"
+        onclick={toggleSidebar}
       >
         <PanelLeft size={16} strokeWidth={1.75} />
       </button>
@@ -68,7 +98,14 @@
             use:focusOnMount
           />
         {:else}
-          <button type="button" class="ghost title" data-testid="thread-title" title={strings.sidebar.rename} onclick={beginRename}>
+          <button
+            type="button"
+            class="ghost title"
+            data-testid="thread-title"
+            title={strings.sidebar.rename}
+            onclick={beginRename}
+            oncontextmenu={openTitleMenu}
+          >
             {thread.title}
           </button>
         {/if}
@@ -143,6 +180,11 @@
 
   .drawer {
     display: none;
+    margin-left: -6px;
+  }
+
+  .drawer.shown {
+    display: inline-flex;
   }
 
   .title {

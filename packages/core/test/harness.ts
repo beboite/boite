@@ -27,6 +27,8 @@ export interface TestCoreOptions {
 export async function startTestCore(options: TestCoreOptions = {}): Promise<TestCore> {
   const dataDir = mkdtempSync(join(tmpdir(), 'boite-core-'));
   process.env.BOITE_DATA_DIR = dataDir;
+  // The echo provider ships only when asked for; every test drives it.
+  process.env.BOITE_ECHO = '1';
 
   const token = newToken();
   const core = new Core({ dataDir, token });

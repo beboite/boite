@@ -771,9 +771,35 @@ export class FakeClient implements ObservableClient {
 
     this.#providers = [
       {
+        id: 'claude',
+        name: 'Claude',
+        shortName: 'Claude',
+        protocol: 'claude-sdk',
+        source: 'shipped',
+        available: true,
+        executable: 'C:\\Users\\you\\.local\\bin\\claude.exe',
+        models: [
+          { id: 'claude-fable-5-1', name: 'Claude Fable 5.1', badge: 'new' },
+          { id: 'claude-opus-5', name: 'Claude Opus 5' },
+          { id: 'claude-sonnet-5', name: 'Claude Sonnet 5', default: true },
+          { id: 'claude-fable-5', name: 'Claude Fable 5', legacy: true },
+          { id: 'claude-opus-4-8', name: 'Claude Opus 4.8', legacy: true },
+          { id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6', legacy: true },
+          { id: 'claude-haiku-4-5-20251001', name: 'Claude Haiku 4.5', legacy: true }
+        ],
+        capabilities: {
+          approvals: true,
+          hooks: true,
+          checkpoint: true,
+          images: true,
+          planMode: true,
+          resume: true
+        }
+      },
+      {
         id: 'echo',
         name: 'Echo',
-        shortName: 'echo',
+        shortName: 'Echo',
         protocol: 'echo',
         source: 'shipped',
         available: true,
@@ -785,27 +811,6 @@ export class FakeClient implements ObservableClient {
           checkpoint: false,
           images: false,
           planMode: false,
-          resume: true
-        }
-      },
-      {
-        id: 'claude',
-        name: 'Claude Code',
-        shortName: 'claude',
-        protocol: 'claude-sdk',
-        source: 'shipped',
-        available: false,
-        executable: null,
-        models: [
-          { id: 'sonnet', name: 'Sonnet', default: true },
-          { id: 'opus', name: 'Opus' }
-        ],
-        capabilities: {
-          approvals: true,
-          hooks: true,
-          checkpoint: true,
-          images: true,
-          planMode: true,
           resume: true
         }
       }

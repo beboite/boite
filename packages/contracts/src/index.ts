@@ -65,6 +65,10 @@ export interface ModelInfo {
   id: string;
   name: string;
   default?: boolean;
+  /** Still accepted by the provider, folded away in the picker. */
+  legacy?: boolean;
+  /** A small mark next to the name in the picker. */
+  badge?: 'new';
 }
 
 export interface ProviderCapabilities {

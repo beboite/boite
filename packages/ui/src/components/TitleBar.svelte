@@ -1,14 +1,68 @@
 <script lang="ts">
-  import { Minus, Square, X } from '@lucide/svelte';
+  import { onMount } from 'svelte';
+  import { Copy, Minus, Square, X } from '@lucide/svelte';
+  import type { Window as TauriWindow } from '@tauri-apps/api/window';
   import { strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
   import BoiteMark from './BoiteMark.svelte';
 
   let { store }: { store: Store } = $props();
 
-  async function windowOf() {
-    const { getCurrentWindow } = await import('@tauri-apps/api/window');
-    return getCurrentWindow();
+  let maximized = $state(false);
+
+  let cached: Promise<TauriWindow> | null = null;
+
+  function windowOf(): Promise<TauriWindow> {
+    cached ??= import('@tauri-apps/api/window').then(({ getCurrentWindow }) => getCurrentWindow());
+    return cached;
+  }
+
+  onMount(() => {
+    let disposed = false;
+    let stop: (() => void) | undefined;
+    void windowOf().then(async (win) => {
+      maximized = await win.isMaximized();
+      // onResized fires on every frame of a drag-resize. One query in flight,
+      // one trailing pass for the final size, never a round-trip per event.
+      let inFlight = false;
+      let pending = false;
+      stop = await win.onResized(async () => {
+        if (inFlight) {
+          pending = true;
+          return;
+        }
+        inFlight = true;
+        try {
+          do {
+            pending = false;
+            maximized = await win.isMaximized();
+          } while (pending);
+        } finally {
+          inFlight = false;
+        }
+      });
+      if (disposed) stop();
+    });
+    return () => {
+      disposed = true;
+      stop?.();
+    };
+  });
+
+  /**
+   * The bar itself is the drag region, by hand rather than through
+   * `data-tauri-drag-region`: that attribute only works on the exact element
+   * under the pointer, and it toggles maximize on its own double-click, so
+   * pairing it with a handler here would toggle twice.
+   */
+  function onmousedown(event: MouseEvent) {
+    if (event.button !== 0) return;
+    if (event.target instanceof Element && event.target.closest('button')) return;
+    if (event.detail === 2) {
+      void maximize();
+      return;
+    }
+    void windowOf().then((win) => win.startDragging());
   }
 
   async function minimize() {
@@ -27,20 +81,33 @@
   let title = $derived(store.openProject?.name ?? strings.app.name);
 </script>
 
-<header class="titlebar" data-tauri-drag-region>
-  <div class="left" data-tauri-drag-region>
+<!-- svelte-ignore a11y_no_static_element_interactions -->
+<header class="titlebar" {onmousedown} data-testid="titlebar">
+  <div class="left">
     <BoiteMark size={16} />
     <span class="state {store.connection}" title={strings.connection[store.connection]}></span>
   </div>
-  <div class="center" data-tauri-drag-region>{title}</div>
+  <div class="center">{title}</div>
   <div class="controls">
-    <button type="button" class="ctl" aria-label={strings.titlebar.minimize} onclick={() => void minimize()}>
+    <button type="button" class="ctl" aria-label={strings.titlebar.minimize} title={strings.titlebar.minimize} onclick={() => void minimize()}>
       <Minus size={14} strokeWidth={1.75} />
     </button>
-    <button type="button" class="ctl" aria-label={strings.titlebar.maximize} onclick={() => void maximize()}>
-      <Square size={11} strokeWidth={1.75} />
+    <button
+      type="button"
+      class="ctl"
+      aria-label={maximized ? strings.titlebar.restore : strings.titlebar.maximize}
+      title={maximized ? strings.titlebar.restore : strings.titlebar.maximize}
+      data-testid="titlebar-maximize"
+      data-maximized={maximized}
+      onclick={() => void maximize()}
+    >
+      {#if maximized}
+        <Copy size={11} strokeWidth={1.75} />
+      {:else}
+        <Square size={11} strokeWidth={1.75} />
+      {/if}
     </button>
-    <button type="button" class="ctl close" aria-label={strings.titlebar.close} onclick={() => void close()}>
+    <button type="button" class="ctl close" aria-label={strings.titlebar.close} title={strings.titlebar.close} onclick={() => void close()}>
       <X size={15} strokeWidth={1.75} />
     </button>
   </div>
@@ -57,6 +124,7 @@
     user-select: none;
     -webkit-user-select: none;
     flex: none;
+    cursor: default;
   }
 
   .left {

@@ -68,10 +68,13 @@ test(
     await page.waitFor(`document.querySelector('${testid('draft-row')}')`);
     expect(await page.evaluate<number>(`document.querySelectorAll('${testid('thread-row')}').length`)).toBe(0);
 
-    await page.click(testid('composer-provider'));
-    await page.waitFor(`document.querySelector('${testid('composer-provider-menu')}')`);
-    await page.click(`${testid('composer-provider-menu')} [data-value^="echo::"]`);
-    await page.waitFor(`${textOf('composer-provider')}.startsWith('Echo')`);
+    // The picker: the echo account on the left, then its one model on the right, which closes it.
+    await page.click(testid('composer-picker'));
+    await page.waitFor(`document.querySelector('${testid('composer-picker-menu')}')`);
+    await page.click(`${testid('composer-picker-menu')} [data-instance^="echo::"]`);
+    await page.waitFor(`${textOf('composer-picker')}.startsWith('Echo')`);
+    await page.click(`${testid('composer-picker-menu')} [data-model="echo"]`);
+    await page.waitFor(`!document.querySelector('${testid('composer-picker-menu')}')`);
 
     await page.type(testid('composer-input'), 'browser thread [permission]');
     await clickWhenEnabled(testid('composer-send'));

@@ -30,6 +30,7 @@
         <FolderOpen size={16} strokeWidth={1.75} />
         {strings.firstRun.pick}
       </button>
+      <p class="subtle drop-hint">{strings.firstRun.dropHint}</p>
     {/if}
 
     {#if typing}
@@ -98,6 +99,10 @@
     height: 36px;
     padding: 0 16px;
     margin-top: 10px;
+  }
+
+  .drop-hint {
+    font-size: var(--text-xs);
   }
 
   form {

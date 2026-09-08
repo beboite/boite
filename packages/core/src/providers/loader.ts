@@ -20,9 +20,19 @@ import { notFound } from '../errors.ts';
 import claudeShipped from './shipped/claude.json';
 import echoShipped from './shipped/echo.json';
 
-const SHIPPED_SOURCES: { file: string; raw: unknown }[] = [
+/**
+ * Echo is the fake agent the tests and the bench drive: no CLI, it repeats the
+ * prompt and obeys `[permission]`, `[tool]` and `[spawn:...]` directives. A
+ * user never picks it, so it ships only when `BOITE_ECHO=1` is in the
+ * environment, which the test harness, the e2e suite and the bench set.
+ */
+export function echoEnabled(): boolean {
+  return process.env['BOITE_ECHO'] === '1';
+}
+
+const SHIPPED_SOURCES: { file: string; raw: unknown; when?: () => boolean }[] = [
   { file: 'shipped/claude.json', raw: claudeShipped },
-  { file: 'shipped/echo.json', raw: echoShipped },
+  { file: 'shipped/echo.json', raw: echoShipped, when: echoEnabled },
 ];
 
 const PROTOCOLS: readonly Protocol[] = ['claude-sdk', 'codex-appserver', 'opencode', 'pi', 'acp', 'echo'];
@@ -220,12 +230,18 @@ function checkModels(value: unknown, file: string): ModelInfo[] {
   if (raw.length === 0) reject(file, 'models', 'at least one model', 'models must list at least one model');
   return raw.map((entry, index) => {
     const obj = asObject(entry, file, `models[${index}]`);
-    checkKeys(obj, ['id', 'name', 'default'], file, `models[${index}]`);
+    checkKeys(obj, ['id', 'name', 'default', 'legacy', 'badge'], file, `models[${index}]`);
     const model: ModelInfo = {
       id: asString(obj['id'], file, `models[${index}].id`),
       name: asString(obj['name'], file, `models[${index}].name`),
     };
     if (obj['default'] !== undefined) model.default = asBoolean(obj['default'], file, `models[${index}].default`);
+    if (obj['legacy'] !== undefined) model.legacy = asBoolean(obj['legacy'], file, `models[${index}].legacy`);
+    if (obj['badge'] !== undefined) {
+      const badge = asString(obj['badge'], file, `models[${index}].badge`);
+      if (badge !== 'new') reject(file, `models[${index}].badge`, '"new"', `unknown badge ${badge}`);
+      model.badge = 'new';
+    }
     return model;
   });
 }
@@ -366,6 +382,7 @@ export class ProviderRegistry {
     const rejected: ProviderRejected[] = [];
 
     for (const shipped of SHIPPED_SOURCES) {
+      if (shipped.when !== undefined && !shipped.when()) continue;
       try {
         const descriptor = validateDescriptor(shipped.raw, shipped.file, new Set());
         entries.set(descriptor.id, { descriptor, source: 'shipped', file: shipped.file });

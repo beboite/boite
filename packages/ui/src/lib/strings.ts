@@ -12,6 +12,7 @@ export const strings = {
   titlebar: {
     minimize: 'Minimize',
     maximize: 'Maximize',
+    restore: 'Restore',
     close: 'Close'
   },
 
@@ -35,26 +36,39 @@ export const strings = {
     heading: 'Open a project',
     body: 'Pick the folder an agent will work in. Threads live inside it.',
     pick: 'Choose a folder',
+    dropHint: 'or drop a folder anywhere in this window',
     pathPlaceholder: 'Absolute path of the folder',
     add: 'Open'
+  },
+
+  drop: {
+    title: 'Drop to add a project',
+    body: 'Each folder becomes a project. Files are refused.'
   },
 
   sidebar: {
     search: 'Search threads',
     newThread: 'New thread',
+    newThreadIn: 'New thread in {project}',
     addProject: 'Add a project',
     noProjects: 'No project yet.',
     noThreads: 'No thread yet.',
     noMatch: 'Nothing matches.',
     unread: 'Unread',
-    collapse: 'Collapse',
-    expand: 'Expand',
+    collapse: 'Hide sidebar',
+    expand: 'Show sidebar',
+    resize: 'Resize the sidebar, double-click to reset',
     loadTitle: 'Live load',
     settings: 'Settings',
     projectMenu: 'Project actions',
+    copyPath: 'Copy path',
+    copied: 'Copied',
     removeProject: 'Remove from Boite',
-    removeProjectConfirm: 'Remove this project and its threads from Boite? Files on disk stay.',
+    removeProjectTitle: 'Remove {project} from Boite?',
+    removeProjectBody: 'Its threads go with it. Files on disk stay where they are.',
+    remove: 'Remove',
     threadMenu: 'Thread actions',
+    open: 'Open',
     rename: 'Rename',
     archive: 'Archive',
     draft: 'New thread'
@@ -119,11 +133,17 @@ export const strings = {
     send: 'Send',
     stop: 'Stop',
     queued: 'Sent when the current turn ends',
-    provider: 'Provider and account',
+    picker: 'Provider and model',
+    providers: 'Providers',
+    models: 'Models',
+    legacyModels: 'Legacy models',
+    newBadge: 'new',
+    lockedHint: 'A thread keeps its provider and account',
     mode: 'Permissions',
     model: 'Model',
-    unavailable: 'unavailable',
+    unavailable: 'not installed',
     noAccount: 'no account',
+    noProvider: 'No provider',
     hint: 'Enter to send, Shift+Enter for a new line'
   },
 
@@ -229,7 +249,8 @@ export const strings = {
   errors: {
     prefix: 'Error',
     noEndpoint: 'No core endpoint could be resolved.',
-    connect: 'Could not connect to the core.'
+    connect: 'Could not connect to the core.',
+    clipboard: 'The clipboard refused the text.'
   },
 
   units: {
@@ -258,3 +279,8 @@ export const strings = {
 } as const;
 
 export type Strings = typeof strings;
+
+/** `fill('New thread in {project}', { project: 'boite' })`. */
+export function fill(template: string, values: Record<string, string>): string {
+  return template.replace(/\{(\w+)\}/g, (match, key: string) => values[key] ?? match);
+}

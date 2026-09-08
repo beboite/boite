@@ -1,4 +1,4 @@
-/** One row of a popover menu. */
+/** One row of a popover or context menu. A row with `separator` draws a rule and nothing else. */
 export interface MenuItem {
   id: string;
   label: string;
@@ -6,4 +6,9 @@ export interface MenuItem {
   active?: boolean;
   danger?: boolean;
   disabled?: boolean;
+  separator?: boolean;
+}
+
+export function separator(id = 'sep'): MenuItem {
+  return { id, label: '', separator: true };
 }

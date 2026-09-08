@@ -175,7 +175,7 @@ describe('echo driver', () => {
       providerId: 'claude',
       accountId: account.id,
     });
-    expect(thread.model).toBe('claude-opus-5');
+    expect(thread.model).toBe('claude-sonnet-5');
 
     let failure = 'none';
     try {

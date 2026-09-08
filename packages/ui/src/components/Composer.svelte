@@ -1,10 +1,10 @@
 <script lang="ts">
-  import { ArrowUp, Bot, Cpu, ShieldCheck, Square } from '@lucide/svelte';
+  import { ArrowUp, ShieldCheck, Square } from '@lucide/svelte';
   import type { PermissionMode } from '@boite/contracts';
-  import { strings } from '../lib/strings';
+  import { fill, strings } from '../lib/strings';
   import type { Choice, Store } from '../lib/store.svelte';
-  import type { MenuItem } from '../lib/menu';
   import Menu from './Menu.svelte';
+  import ModelPicker from './ModelPicker.svelte';
 
   let { store }: { store: Store } = $props();
 
@@ -53,42 +53,14 @@
   });
 
   let provider = $derived(choice ? store.providerOf(choice.providerId) : null);
-  let account = $derived(choice ? store.accountOf(choice.accountId) : null);
   let bound = $derived(store.openThread !== null);
   let canSend = $derived(text.trim().length > 0 && choice !== null && !store.busy);
 
   let placeholder = $derived(
     store.openProject && provider
-      ? strings.composer.placeholder
-          .replace('{provider}', provider.name)
-          .replace('{project}', store.openProject.name)
+      ? fill(strings.composer.placeholder, { provider: provider.name, project: store.openProject.name })
       : strings.composer.placeholderNoProject
   );
-
-  let providerItems = $derived.by((): MenuItem[] => {
-    const items: MenuItem[] = [];
-    const ordered = [...store.providers].sort((a, b) => Number(b.available) - Number(a.available));
-    for (const entry of ordered) {
-      const accounts = store.accountsOf(entry.id);
-      if (accounts.length === 0) {
-        items.push({ id: `${entry.id}::`, label: entry.name, hint: strings.composer.noAccount, disabled: true });
-        continue;
-      }
-      for (const acc of accounts) {
-        const hints: string[] = [];
-        if (!entry.available) hints.push(strings.composer.unavailable);
-        if (acc.status === 'unauthenticated') hints.push(strings.accounts.status.unauthenticated);
-        items.push({
-          id: `${entry.id}::${acc.id}`,
-          label: `${entry.name} / ${acc.label}`,
-          hint: hints.join(', ') || (acc.identity ?? undefined),
-          active: choice?.providerId === entry.id && choice?.accountId === acc.id,
-          disabled: !entry.available
-        });
-      }
-    }
-    return items;
-  });
 
   let modeItems = $derived(
     MODES.map((mode) => ({
@@ -99,22 +71,18 @@
     }))
   );
 
-  let modelItems = $derived.by((): MenuItem[] => {
-    if (!provider || provider.models.length === 0) return [];
-    return [
-      { id: '', label: strings.thread.defaultModel, active: choice?.model === null },
-      ...provider.models.map((model) => ({ id: model.id, label: model.name, active: choice?.model === model.id }))
-    ];
-  });
-
-  let modelLabel = $derived(
-    provider?.models.find((m) => m.id === choice?.model)?.name ?? strings.thread.defaultModel
-  );
-
-  function pickProvider(id: string) {
-    const [providerId, accountId] = id.split('::');
-    if (!choice || !providerId || !accountId) return;
-    choice = { ...choice, providerId, accountId, model: null };
+  /** On a thread only the model changes and it is saved at once; on a draft the whole choice is remembered. */
+  function pick(patch: { providerId: string; accountId: string; model: string | null }) {
+    if (!choice) return;
+    const thread = store.openThread;
+    if (thread) {
+      if (patch.model === choice.model) return;
+      choice = { ...choice, model: patch.model };
+      void store.update(thread.id, { model: patch.model ?? '' });
+      return;
+    }
+    choice = { ...choice, ...patch };
+    store.remember(choice);
   }
 
   function pickMode(id: string) {
@@ -122,15 +90,6 @@
     if (!choice) return;
     choice = { ...choice, permissionMode: mode };
     if (bound) void store.setPermissionMode(mode);
-    else store.remember(choice);
-  }
-
-  function pickModel(id: string) {
-    if (!choice) return;
-    const model = id === '' ? null : id;
-    choice = { ...choice, model };
-    const thread = store.openThread;
-    if (thread) void store.update(thread.id, { model: model ?? '' });
     else store.remember(choice);
   }
 
@@ -184,33 +143,12 @@
 
     <div class="bar">
       <div class="chips">
-        {#if bound}
-          <span class="chip" title={strings.composer.provider} data-testid="composer-provider">
-            <Bot size={13} strokeWidth={1.75} />
-            {provider?.name ?? choice?.providerId}<span class="sep">/</span>{account?.label ?? choice?.accountId}
-          </span>
-        {:else}
-          <Menu items={providerItems} onpick={pickProvider} label={strings.composer.provider} testid="composer-provider">
-            <Bot size={13} strokeWidth={1.75} />
-            {#if provider && account}
-              {provider.name}<span class="sep">/</span>{account.label}
-            {:else}
-              {strings.composer.noAccount}
-            {/if}
-          </Menu>
-        {/if}
+        <ModelPicker {store} {choice} locked={bound} onpick={pick} />
 
         <Menu items={modeItems} onpick={pickMode} label={strings.composer.mode} testid="composer-mode">
           <ShieldCheck size={13} strokeWidth={1.75} />
           {choice ? strings.permissionMode[choice.permissionMode] : strings.permissionMode.default}
         </Menu>
-
-        {#if modelItems.length > 0}
-          <Menu items={modelItems} onpick={pickModel} label={strings.composer.model} testid="composer-model">
-            <Cpu size={13} strokeWidth={1.75} />
-            {modelLabel}
-          </Menu>
-        {/if}
       </div>
 
       <span class="hint subtle">{strings.composer.hint}</span>
@@ -292,11 +230,6 @@
     gap: 4px;
     flex-wrap: wrap;
     min-width: 0;
-  }
-
-  .sep {
-    color: var(--color-subtle);
-    margin: 0 4px;
   }
 
   .hint {

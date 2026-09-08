@@ -30,7 +30,17 @@ import {
 } from './client';
 import { resolveEndpoint, storeEndpoint } from './endpoint';
 import { titleFrom } from './format';
-import { defaultPrefs, readPrefs, writePrefs, type ComposerPrefs } from './prefs';
+import {
+  clampSidebar,
+  defaultPrefs,
+  readLayout,
+  readPrefs,
+  SIDEBAR_DEFAULT,
+  writeLayout,
+  writePrefs,
+  type ComposerPrefs
+} from './prefs';
+import { strings } from './strings';
 
 export type Page = 'chat' | 'settings';
 export type SettingsTab = 'general' | 'accounts' | 'usage' | 'resources';
@@ -74,7 +84,13 @@ export class Store {
   page = $state<Page>('chat');
   settingsTab = $state<SettingsTab>('general');
   panelOpen = $state(false);
+  /** The phone drawer. */
   sidebarOpen = $state(false);
+  /** The desktop sidebar, folded with Ctrl+B. */
+  sidebarCollapsed = $state(false);
+  sidebarWidth = $state(SIDEBAR_DEFAULT);
+  /** A folder is being dragged over the window. */
+  dropping = $state(false);
   search = $state('');
   booted = $state(false);
 
@@ -153,6 +169,13 @@ export class Store {
       : [...this.collapsedProjects, projectId];
   }
 
+  /** The model a fresh thread on this provider gets: the flagged default, else the first current one. */
+  defaultModelOf(provider: ProviderSummary): string | null {
+    const flagged = provider.models.find((m) => m.default);
+    const current = provider.models.find((m) => !m.legacy);
+    return flagged?.id ?? current?.id ?? provider.models[0]?.id ?? null;
+  }
+
   /**
    * What the composer opens on: the remembered provider and account when they
    * still exist, else the first available provider and its first account.
@@ -174,13 +197,35 @@ export class Store {
     const model =
       this.prefs.model && provider.models.some((m) => m.id === this.prefs.model)
         ? this.prefs.model
-        : null;
+        : this.defaultModelOf(provider);
     return { providerId: provider.id, accountId: account.id, permissionMode: this.prefs.permissionMode, model };
   }
 
   remember(choice: Choice): void {
     this.prefs = { ...choice };
     writePrefs(this.prefs);
+  }
+
+  // -------------------------------------------------------------------------
+  // Layout
+  // -------------------------------------------------------------------------
+
+  setSidebarWidth(width: number): void {
+    this.sidebarWidth = clampSidebar(width);
+    writeLayout({ sidebarWidth: this.sidebarWidth, sidebarCollapsed: this.sidebarCollapsed });
+  }
+
+  toggleSidebar(): void {
+    this.sidebarCollapsed = !this.sidebarCollapsed;
+    writeLayout({ sidebarWidth: this.sidebarWidth, sidebarCollapsed: this.sidebarCollapsed });
+  }
+
+  async copy(text: string): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      this.error = strings.errors.clipboard;
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -192,6 +237,9 @@ export class Store {
     this.#client = client;
     this.connection = client.state;
     this.prefs = readPrefs();
+    const layout = readLayout();
+    this.sidebarWidth = layout.sidebarWidth;
+    this.sidebarCollapsed = layout.sidebarCollapsed;
 
     const on = <E extends RpcEventName>(event: E, handler: EventHandler<E>): void => {
       this.#off.push(client.on(event, handler));
@@ -210,12 +258,11 @@ export class Store {
       );
     }
 
-    on('thread.created', (summary) => {
-      if (!this.threads.some((t) => t.id === summary.id)) this.threads = [...this.threads, summary];
-    });
+    // Rows are patched in place: a load tick on one running thread must not
+    // hand the sidebar a new array and re-render every other row.
+    on('thread.created', (summary) => this.#upsertThread(summary));
     on('thread.updated', (summary) => {
-      this.threads = this.threads.map((t) => (t.id === summary.id ? summary : t));
-      if (!this.threads.some((t) => t.id === summary.id)) this.threads = [...this.threads, summary];
+      this.#upsertThread(summary);
       const open = this.openThread;
       if (open && open.id === summary.id) Object.assign(open, summary);
     });
@@ -445,6 +492,16 @@ export class Store {
     }
   }
 
+  /** Folders dropped on the window. The core refuses a file, and the toast says so. */
+  async addProjects(paths: string[]): Promise<void> {
+    let first: Project | null = null;
+    for (const path of paths) {
+      const project = await this.addProject(path);
+      first ??= project;
+    }
+    if (first) this.startDraft(first.id);
+  }
+
   async removeProject(projectId: ProjectId): Promise<void> {
     const client = this.#client;
     if (!client) return;
@@ -515,7 +572,7 @@ export class Store {
     if (!client) return null;
     try {
       const summary = await client.call('threads.create', input);
-      if (!this.threads.some((t) => t.id === summary.id)) this.threads = [...this.threads, summary];
+      this.#upsertThread(summary);
       await this.open(summary.id);
       return summary;
     } catch (error) {
@@ -589,7 +646,7 @@ export class Store {
     if (!client) return;
     try {
       const summary = await client.call('threads.update', { threadId, ...patch });
-      this.threads = this.threads.map((t) => (t.id === summary.id ? summary : t));
+      this.#upsertThread(summary);
       const open = this.openThread;
       if (open && open.id === threadId) Object.assign(open, summary);
     } catch (error) {
@@ -722,6 +779,12 @@ export class Store {
     } catch {
       /* the thread may already be gone */
     }
+  }
+
+  #upsertThread(summary: ThreadSummary): void {
+    const index = this.threads.findIndex((t) => t.id === summary.id);
+    if (index >= 0) this.threads[index] = summary;
+    else this.threads.push(summary);
   }
 
   #message(threadId: ThreadId, messageId: string): Message | null {

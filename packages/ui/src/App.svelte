@@ -1,6 +1,9 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import ChatView from './components/ChatView.svelte';
+  import ConfirmDialog from './components/ConfirmDialog.svelte';
+  import ContextMenu from './components/ContextMenu.svelte';
+  import DropOverlay from './components/DropOverlay.svelte';
   import FirstRun from './components/FirstRun.svelte';
   import SettingsShell from './components/SettingsShell.svelte';
   import Sidebar from './components/Sidebar.svelte';
@@ -14,6 +17,29 @@
 
   onMount(() => {
     void store.boot();
+    if (!inShell) return;
+
+    // A folder dragged from the Explorer: the shell reports it, the core
+    // refuses anything that is not a directory, the toast repeats why.
+    let unlisten: (() => void) | undefined;
+    let disposed = false;
+    void import('@tauri-apps/api/webview').then(async ({ getCurrentWebview }) => {
+      const stop = await getCurrentWebview().onDragDropEvent((event) => {
+        const payload = event.payload;
+        if (payload.type === 'enter') store.dropping = true;
+        else if (payload.type === 'leave') store.dropping = false;
+        else if (payload.type === 'drop') {
+          store.dropping = false;
+          void store.addProjects(payload.paths);
+        }
+      });
+      if (disposed) stop();
+      else unlisten = stop;
+    });
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
   });
 
   function onkeydown(event: KeyboardEvent) {
@@ -28,7 +54,11 @@
     } else if (event.key === 'k' || event.key === 'K') {
       event.preventDefault();
       store.showChat();
+      if (store.sidebarCollapsed) store.toggleSidebar();
       sidebar?.focusSearch();
+    } else if (event.key === 'b' || event.key === 'B') {
+      event.preventDefault();
+      store.toggleSidebar();
     } else if (event.key === ',') {
       event.preventDefault();
       store.showSettings();
@@ -40,7 +70,7 @@
 
 <svelte:window {onkeydown} />
 
-<div class="app" class:shell={inShell}>
+<div class="app" class:shell={inShell} class:ready={store.booted}>
   {#if inShell}
     <TitleBar {store} />
   {/if}
@@ -79,6 +109,10 @@
     {/if}
   </div>
 
+  {#if store.dropping}
+    <DropOverlay />
+  {/if}
+
   {#if store.error}
     <div class="toast" role="alert" data-testid="error-toast">
       <span class="text" title={store.error}>{strings.errors.prefix}: {store.error}</span>
@@ -87,12 +121,19 @@
   {/if}
 </div>
 
+<ContextMenu />
+<ConfirmDialog />
+
 <style>
   .app {
     display: flex;
     flex-direction: column;
     height: 100%;
     position: relative;
+  }
+
+  .app.ready {
+    animation: rise var(--dur-3) var(--ease-out-quint);
   }
 
   .body {

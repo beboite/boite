@@ -9,6 +9,7 @@ afterEach(() => {
   if (running) unmount(running, { outro: false });
   running = null;
   document.body.innerHTML = '';
+  window.localStorage.clear();
 });
 
 async function waitFor(check: () => boolean): Promise<void> {
@@ -19,16 +20,24 @@ async function waitFor(check: () => boolean): Promise<void> {
   throw new Error(`gave up waiting, body was:\n${document.body.textContent ?? ''}`);
 }
 
-test('the app mounts against the fake core, lists the seeded threads and opens the latest', async () => {
+function query<T extends Element = HTMLElement>(selector: string): T {
+  const found = document.querySelector<T>(selector);
+  if (!found) throw new Error(`nothing matches ${selector}`);
+  return found;
+}
+
+async function mountOnFake(): Promise<void> {
   window.history.replaceState(null, '', '/?fake=1');
   const target = document.createElement('div');
   document.body.appendChild(target);
-
   running = mount(App, { target });
+  await waitFor(() => store.openThread !== null);
+}
 
+test('the app mounts against the fake core, lists the seeded threads and opens the latest', async () => {
+  await mountOnFake();
   await waitFor(() => store.threads.length === 4);
   await waitFor(() => (document.body.textContent ?? '').includes('Finish the trace tab'));
-  await waitFor(() => store.openThread !== null);
 
   const text = document.body.textContent ?? '';
   expect(text).toContain('boite');
@@ -41,26 +50,86 @@ test('the app mounts against the fake core, lists the seeded threads and opens t
 });
 
 test('New thread opens a draft and the first send creates the thread titled from the prompt', async () => {
-  window.history.replaceState(null, '', '/?fake=1');
-  const target = document.createElement('div');
-  document.body.appendChild(target);
-  running = mount(App, { target });
-  await waitFor(() => store.openThread !== null);
+  await mountOnFake();
 
-  (document.querySelector('[data-testid=new-thread]') as HTMLButtonElement).click();
+  query<HTMLButtonElement>('[data-testid=new-thread]').click();
   await waitFor(() => store.draft !== null);
   expect(document.querySelector('[data-testid=draft-row]')).not.toBeNull();
   expect(store.openThread).toBeNull();
 
-  const input = document.querySelector('[data-testid=composer-input]') as HTMLTextAreaElement;
+  const input = query<HTMLTextAreaElement>('[data-testid=composer-input]');
   input.value = 'Rename the scheduler caps\nand nothing else';
   input.dispatchEvent(new Event('input', { bubbles: true }));
-  await waitFor(() => !(document.querySelector('[data-testid=composer-send]') as HTMLButtonElement).disabled);
-  (document.querySelector('[data-testid=composer-send]') as HTMLButtonElement).click();
+  await waitFor(() => !query<HTMLButtonElement>('[data-testid=composer-send]').disabled);
+  query<HTMLButtonElement>('[data-testid=composer-send]').click();
 
   await waitFor(() => store.openThread !== null && store.draft === null);
   expect(store.openThread?.title).toBe('Rename the scheduler caps');
   expect(store.threads.length).toBe(5);
   await waitFor(() => store.openThread?.messages.length === 2);
   expect(store.openThread?.messages[0]?.role).toBe('user');
+});
+
+test('the picker lists providers with their accounts and the models of the one shown, legacy folded', async () => {
+  await mountOnFake();
+  query<HTMLButtonElement>('[data-testid=new-thread]').click();
+  await waitFor(() => store.draft !== null);
+
+  // A draft opens on the first available provider, its default model.
+  await waitFor(() => query('[data-testid=composer-picker]').textContent?.includes('Claude Sonnet 5') === true);
+
+  query<HTMLButtonElement>('[data-testid=composer-picker]').click();
+  await waitFor(() => document.querySelector('[data-testid=composer-picker-menu]') !== null);
+  const instances = Array.from(document.querySelectorAll('[data-instance]')).map((el) => el.getAttribute('data-instance'));
+  expect(instances).toEqual(['claude::a-claude-main', 'claude::a-claude-side', 'echo::a-echo']);
+  const models = Array.from(document.querySelectorAll('[data-model]')).map((el) => el.getAttribute('data-model'));
+  expect(models).toEqual(['claude-fable-5-1', 'claude-opus-5', 'claude-sonnet-5']);
+
+  query<HTMLButtonElement>('[data-testid=picker-legacy]').click();
+  await waitFor(() => document.querySelectorAll('[data-model]').length === 7);
+
+  // The second account of the same provider, then a model: one thread with both.
+  query<HTMLButtonElement>('[data-instance="claude::a-claude-side"]').click();
+  query<HTMLButtonElement>('[data-model="claude-opus-5"]').click();
+  await waitFor(() => document.querySelector('[data-testid=composer-picker-menu]') === null);
+  expect(query('[data-testid=composer-picker]').textContent).toContain('Claude Opus 5 · Second seat');
+
+  const input = query<HTMLTextAreaElement>('[data-testid=composer-input]');
+  input.value = 'On the second seat';
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  await waitFor(() => !query<HTMLButtonElement>('[data-testid=composer-send]').disabled);
+  query<HTMLButtonElement>('[data-testid=composer-send]').click();
+  await waitFor(() => store.openThread !== null && store.draft === null);
+  expect(store.openThread?.accountId).toBe('a-claude-side');
+  expect(store.openThread?.model).toBe('claude-opus-5');
+});
+
+test('a right click on a thread row opens the context menu, and Archive removes the row', async () => {
+  await mountOnFake();
+  await waitFor(() => document.querySelectorAll('[data-testid=thread-row]').length === 4);
+
+  const row = query<HTMLButtonElement>('[data-thread-id="t-bench"]');
+  row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 40, clientY: 60 }));
+  await waitFor(() => document.querySelector('[data-testid=context-menu]') !== null);
+  const labels = Array.from(document.querySelectorAll('[data-testid=context-menu] [data-row]')).map((el) => el.textContent?.trim());
+  expect(labels).toEqual(['Open', 'Rename', 'Archive']);
+
+  query<HTMLButtonElement>('[data-testid=context-menu] [data-value=archive]').click();
+  await waitFor(() => document.querySelector('[data-testid=context-menu]') === null);
+  await waitFor(() => document.querySelectorAll('[data-testid=thread-row]').length === 3);
+  expect(document.querySelector('[data-thread-id="t-bench"]')).toBeNull();
+});
+
+test('removing a project asks first, and Cancel keeps it', async () => {
+  await mountOnFake();
+  const head = query('[data-project-id="p-brain"][data-testid=project-row]');
+  head.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 40, clientY: 30 }));
+  await waitFor(() => document.querySelector('[data-testid=context-menu]') !== null);
+  query<HTMLButtonElement>('[data-testid=context-menu] [data-value=remove]').click();
+  await waitFor(() => document.querySelector('[data-testid=confirm-dialog]') !== null);
+  expect(document.querySelector('[data-testid=confirm-dialog]')?.textContent).toContain('brain');
+
+  query<HTMLButtonElement>('[data-testid=confirm-cancel]').click();
+  await waitFor(() => document.querySelector('[data-testid=confirm-dialog]') === null);
+  expect(store.projects.length).toBe(2);
 });

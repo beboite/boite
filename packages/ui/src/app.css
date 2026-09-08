@@ -8,7 +8,7 @@
   font-family: 'Geist';
   font-style: normal;
   font-weight: 100 900;
-  font-display: swap;
+  font-display: block;
   src: url('./fonts/Geist-Variable.woff2') format('woff2');
 }
 
@@ -16,7 +16,7 @@
   font-family: 'Geist Mono';
   font-style: normal;
   font-weight: 100 900;
-  font-display: swap;
+  font-display: block;
   src: url('./fonts/GeistMono-Variable.woff2') format('woff2');
 }
 
@@ -70,6 +70,7 @@
   color-scheme: dark;
 }
 
+/* The light palette exists for a theme toggle that is not built yet; `index.html` reads `boite.theme` from storage. */
 [data-theme='light'] {
   --color-background: #fbfbfc;
   --color-titlebar: #f0f0f3;
