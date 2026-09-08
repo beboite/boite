@@ -23,6 +23,7 @@ import claudeShipped from './shipped/claude.json';
 import codexShipped from './shipped/codex.json';
 import geminiShipped from './shipped/gemini.json';
 import opencodeShipped from './shipped/opencode.json';
+import piShipped from './shipped/pi.json';
 import echoShipped from './shipped/echo.json';
 
 /**
@@ -48,6 +49,7 @@ const SHIPPED_SOURCES: { file: string; raw: unknown; when?: () => boolean }[] = 
   { file: 'shipped/codex.json', raw: codexShipped },
   { file: 'shipped/gemini.json', raw: geminiShipped },
   { file: 'shipped/opencode.json', raw: opencodeShipped },
+  { file: 'shipped/pi.json', raw: piShipped },
   { file: 'shipped/echo.json', raw: echoShipped, when: echoEnabled },
 ];
 

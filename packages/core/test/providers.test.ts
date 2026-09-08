@@ -59,7 +59,7 @@ describe('providers', () => {
     const { loaded, rejected } = await client.call('providers.list', {});
     expect(rejected).toEqual([]);
     const ids = loaded.map((provider) => provider.id).sort();
-    expect(ids).toEqual(['claude', 'codex', 'echo', 'gemini', 'opencode']);
+    expect(ids).toEqual(['claude', 'codex', 'echo', 'gemini', 'opencode', 'pi']);
 
     const echo = loaded.find((provider) => provider.id === 'echo');
     expect(echo?.source).toBe('shipped');
@@ -213,6 +213,49 @@ describe('providers', () => {
       return;
     }
     expect(codex.executable?.toLowerCase()).toEndWith('codex.exe');
+  });
+
+  test('the shipped pi descriptor loads and is launched as node with the cli entry in rpc mode', async () => {
+    const client = await harness.connect();
+    const { loaded, rejected } = await client.call('providers.list', {});
+    expect(rejected).toEqual([]);
+
+    const pi = loaded.find((provider) => provider.id === 'pi');
+    expect(pi?.source).toBe('shipped');
+    expect(pi?.protocol).toBe('pi');
+    expect(pi?.name).toBe('pi');
+    expect(pi?.models).toEqual([{ id: 'default', name: 'pi default', default: true }]);
+    // pi has no approval gate in rpc mode, so the descriptor says so.
+    expect(pi?.capabilities.approvals).toBe(false);
+
+    const descriptor = harness.core.providers.require('pi');
+    // One variable moves pi's whole config directory, `auth.json` included.
+    expect(descriptor.auth).toEqual({ kind: 'oauth-cli', session: ['auth.json'] });
+    // No login block: `/login` is a slash command inside the tui, not a cli one.
+    expect(descriptor.login).toBeUndefined();
+
+    const profile = descriptor.profiles[process.platform === 'win32' ? 'windows' : 'linux'];
+    expect(profile?.isolation).toEqual({ PI_CODING_AGENT_DIR: '{isolationDir}' });
+    const args = profile?.launch?.args ?? [];
+    expect(args.slice(-2)).toEqual(['--mode', 'rpc']);
+    if (process.platform !== 'win32') {
+      expect(args).toEqual(['--mode', 'rpc']);
+      return;
+    }
+    // npm installs a `.ps1` and a `.cmd` shim Bun cannot spawn, so the entry is
+    // node plus the package's own js, expanded to a real path by the time it runs.
+    expect(profile?.executable[0]).toEqual({ kind: 'path', value: 'node' });
+    const entry = args[0] ?? '';
+    expect(entry).not.toContain('{appdata}');
+    expect(entry.startsWith(process.env['APPDATA'] ?? '')).toBe(true);
+    expect(entry).toEndWith('cli.js');
+
+    if (pi?.available !== true) {
+      console.log('pi is not installed here, the executable assertion is skipped');
+      return;
+    }
+    expect(pi.executable?.toLowerCase()).toContain('node');
+>>>>>>> 89874a2 (feat(core): pi driver over pi --mode rpc, plus the shipped descriptor)
   });
 
   test('the shipped models carry the reasoning effort scale they are meant to', async () => {

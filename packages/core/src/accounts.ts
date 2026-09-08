@@ -30,6 +30,7 @@ const ISOLATION_DEFAULTS: Record<string, string[]> = {
   XDG_CACHE_HOME: ['.cache'],
   GEMINI_CLI_HOME: [],
   CODEX_HOME: ['.codex'],
+  PI_CODING_AGENT_DIR: ['.pi', 'agent'],
 };
 
 interface LoginRun {

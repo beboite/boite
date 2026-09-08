@@ -1,0 +1,47 @@
+{
+  "id": "pi",
+  "schemaVersion": 1,
+  "name": "pi",
+  "shortName": "pi",
+  "protocol": "pi",
+  "roots": ["{home}/.pi", "{isolationDir}"],
+  "profiles": {
+    "windows": {
+      "detect": { "file": "{appdata}/npm/node_modules/@earendil-works/pi-coding-agent/dist/cli.js" },
+      "executable": [{ "kind": "path", "value": "node" }],
+      "launch": {
+        "args": [
+          "{appdata}/npm/node_modules/@earendil-works/pi-coding-agent/dist/cli.js",
+          "--mode",
+          "rpc"
+        ]
+      },
+      "isolation": { "PI_CODING_AGENT_DIR": "{isolationDir}" },
+      "close": { "processes": [] }
+    },
+    "linux": {
+      "detect": { "command": "pi" },
+      "executable": [{ "kind": "path", "value": "pi" }],
+      "launch": { "args": ["--mode", "rpc"] },
+      "isolation": { "PI_CODING_AGENT_DIR": "{isolationDir}" },
+      "close": { "processes": [] }
+    },
+    "macos": {
+      "detect": { "command": "pi" },
+      "executable": [{ "kind": "path", "value": "pi" }],
+      "launch": { "args": ["--mode", "rpc"] },
+      "isolation": { "PI_CODING_AGENT_DIR": "{isolationDir}" },
+      "close": { "processes": [] }
+    }
+  },
+  "auth": { "kind": "oauth-cli", "session": ["auth.json"] },
+  "models": [{ "id": "default", "name": "pi default", "default": true }],
+  "capabilities": {
+    "approvals": false,
+    "hooks": false,
+    "checkpoint": false,
+    "images": false,
+    "planMode": false,
+    "resume": true
+  }
+}
