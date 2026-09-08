@@ -22,6 +22,7 @@ import {
   type ThreadResources,
   type ThreadStatus,
   type ThreadSummary,
+  type ToolDocument,
   type Turn,
   type Usage
 } from '@boite/contracts';
@@ -72,6 +73,22 @@ const SPAWN_MARKER = /\[spawn:([^\]]+)\]/;
 
 /** What `[tool-stream]` types one piece at a time before the parsed input lands. */
 const STREAMED_TOOL_INPUT = '{"command":"echo streamed","description":"a streamed input"}';
+
+/** The three tool documents, the same ones the core's echo driver produces. */
+const DIFF_PATH = 'src/app.ts';
+const DIFF_OLD = 'export function boot() {\n  return start();\n}';
+const DIFF_NEW = "export function boot() {\n  return start({ warm: true });\n  log('booted');\n}";
+const DOC_TITLE = 'README.md';
+const DOC_TEXT = [
+  '# README',
+  '- the first item',
+  '- the second item',
+  '```ts',
+  'export const answer = 42;',
+  '```'
+].join('\n');
+const IMAGE_BASE64 =
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
 
 /** How long the fake agent takes to answer a probe, so the picker shows it reading. */
 const PROBE_MS = 150;
@@ -675,6 +692,21 @@ export class FakeClient implements ObservableClient {
     if (!record.cancelled && prompt.includes('[tool]')) {
       await this.#runTool(thread, message);
     }
+    if (!record.cancelled && prompt.includes('[diff]')) {
+      await this.#documentTool(thread, message, 'Edit', { file_path: DIFF_PATH }, 'edited 1 file', [
+        { kind: 'diff', path: DIFF_PATH, oldText: DIFF_OLD, newText: DIFF_NEW }
+      ]);
+    }
+    if (!record.cancelled && prompt.includes('[doc]')) {
+      await this.#documentTool(thread, message, 'Read', { file_path: DOC_TITLE }, `read ${DOC_TITLE}`, [
+        { kind: 'markdown', title: DOC_TITLE, text: DOC_TEXT }
+      ]);
+    }
+    if (!record.cancelled && prompt.includes('[image]')) {
+      await this.#documentTool(thread, message, 'Screenshot', { region: 'window' }, 'captured the window', [
+        { kind: 'image', mimeType: 'image/png', data: IMAGE_BASE64, alt: 'one pixel' }
+      ]);
+    }
     const spawn = SPAWN_MARKER.exec(prompt);
     if (!record.cancelled && spawn && spawn[1]) {
       await this.#spawnProcess(thread, spawn[1]);
@@ -812,6 +844,46 @@ export class FakeClient implements ObservableClient {
       output: 'streamed',
       status: 'done'
     };
+    message.parts[partIndex] = done;
+    this.#emitToThread(thread.id, 'message.part', {
+      threadId: thread.id,
+      messageId: message.id,
+      partIndex,
+      part: structuredClone(done)
+    });
+  }
+
+  /** One tool that lands whole, carrying the documents it produced. */
+  async #documentTool(
+    thread: Thread,
+    message: Message,
+    name: string,
+    input: unknown,
+    output: string,
+    documents: ToolDocument[]
+  ): Promise<void> {
+    const partIndex = message.parts.length;
+    const toolId = `tool-${++this.#seq}`;
+    const running: MessagePart = {
+      type: 'tool',
+      toolId,
+      name,
+      input,
+      output: null,
+      status: 'running',
+      documents
+    };
+    message.parts.push(running);
+    this.#emitToThread(thread.id, 'message.part', {
+      threadId: thread.id,
+      messageId: message.id,
+      partIndex,
+      part: structuredClone(running)
+    });
+
+    await this.#pause();
+
+    const done: MessagePart = { ...running, output, status: 'done' };
     message.parts[partIndex] = done;
     this.#emitToThread(thread.id, 'message.part', {
       threadId: thread.id,

@@ -24,12 +24,30 @@ import type {
   Usage,
 } from '@agentclientprotocol/sdk';
 
-const DIRECTIVE = /\[(tool|permission|thought|usage|slow|refuse|crash)\]/g;
+const DIRECTIVE = /\[(tool|documents|big-image|permission|thought|usage|slow|refuse|crash)\]/g;
 /** `[mode-switch <id>]`: the agent changes mode on its own before it answers. */
 const MODE_SWITCH = /\[mode-switch ([\w-]+)\]/g;
 const CHUNKS = 3;
 
-type Directive = 'tool' | 'permission' | 'thought' | 'usage' | 'slow' | 'refuse' | 'crash';
+type Directive =
+  | 'tool'
+  | 'documents'
+  | 'big-image'
+  | 'permission'
+  | 'thought'
+  | 'usage'
+  | 'slow'
+  | 'refuse'
+  | 'crash';
+
+/** What `[documents]` writes: a file the call changed, then a note and a picture. */
+const DIFF_PATH = '/work/src/app.ts';
+const DIFF_NEW = 'const answer = 42;\n';
+/** A 1 by 1 PNG, base64 with no `data:` prefix, the way ACP carries an image block. */
+const TINY_PNG =
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+/** Over the core's 2 MB base64 cap, so `[big-image]` has to come back as a line of text. */
+const HUGE_IMAGE = 'A'.repeat(2 * 1024 * 1024 + 512 * 1024);
 
 const configOptions: SessionConfigOption[] = [
   {
@@ -199,6 +217,52 @@ const app = agent({ name: 'acp-fake' })
             toolCallId: 'fake-1',
             status: 'completed',
             rawOutput: 'ok',
+          });
+          break;
+        case 'documents':
+          // A file the call wrote, with no `oldText`: a new file.
+          await send({
+            sessionUpdate: 'tool_call',
+            toolCallId: 'fake-diff',
+            title: 'write a file',
+            name: 'write_file',
+            kind: 'edit',
+            status: 'in_progress',
+            rawInput: { path: DIFF_PATH },
+            content: [{ type: 'diff', path: DIFF_PATH, newText: DIFF_NEW }],
+          });
+          // No `content` on the update: the documents already sent must stand.
+          await send({
+            sessionUpdate: 'tool_call_update',
+            toolCallId: 'fake-diff',
+            status: 'completed',
+            rawOutput: 'written',
+          });
+          await send({
+            sessionUpdate: 'tool_call',
+            toolCallId: 'fake-shot',
+            title: 'take a shot',
+            name: 'screenshot',
+            kind: 'other',
+            status: 'completed',
+            rawInput: { region: 'window' },
+            rawOutput: 'captured',
+            content: [
+              { type: 'content', content: { type: 'text', text: '# the note\nwhat the tool saw' } },
+              { type: 'content', content: { type: 'image', data: TINY_PNG, mimeType: 'image/png' } },
+            ],
+          });
+          break;
+        case 'big-image':
+          await send({
+            sessionUpdate: 'tool_call',
+            toolCallId: 'fake-huge',
+            title: 'take a huge shot',
+            name: 'screenshot',
+            kind: 'other',
+            status: 'completed',
+            rawInput: { region: 'screen' },
+            content: [{ type: 'content', content: { type: 'image', data: HUGE_IMAGE, mimeType: 'image/png' } }],
           });
           break;
         case 'permission': {

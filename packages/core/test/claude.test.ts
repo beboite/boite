@@ -401,6 +401,79 @@ describe('claude driver', () => {
     });
   });
 
+  test('Edit, Write and MultiEdit inputs become diff documents on their tool parts', async () => {
+    const client = await harness.connect();
+    const threadId = await claudeThread(client);
+    await client.call('threads.subscribe', { threadId });
+
+    scripted((fake) => {
+      fake.emit(init('sess-docs'));
+      // A streamed input first: nothing to read a diff out of until it parses.
+      fake.emit(streamEvent('sess-docs', { type: 'message_start', message: { id: 'msg_1' } }));
+      fake.emit(
+        streamEvent('sess-docs', {
+          type: 'content_block_start',
+          index: 0,
+          content_block: { type: 'tool_use', id: 'toolu_edit', name: 'Edit', input: {} },
+        }),
+      );
+      fake.emit(
+        assistant('sess-docs', [
+          {
+            type: 'tool_use',
+            id: 'toolu_edit',
+            name: 'Edit',
+            input: { file_path: 'src/app.ts', old_string: 'const a = 1;', new_string: 'const a = 2;' },
+          },
+          {
+            type: 'tool_use',
+            id: 'toolu_write',
+            name: 'Write',
+            input: { file_path: 'src/new.ts', content: 'export const answer = 42;\n' },
+          },
+          {
+            type: 'tool_use',
+            id: 'toolu_multi',
+            name: 'MultiEdit',
+            input: {
+              file_path: 'src/many.ts',
+              edits: [
+                { old_string: 'one', new_string: 'ONE' },
+                { old_string: 'two', new_string: 'TWO' },
+              ],
+            },
+          },
+          { type: 'tool_use', id: 'toolu_bash', name: 'Bash', input: { command: 'echo hi' } },
+        ]),
+      );
+      fake.emit(toolResult('sess-docs', 'toolu_edit', 'edited'));
+      fake.emit(success('sess-docs'));
+      fake.end();
+    });
+
+    expect(await runTurn(client, threadId, 'ping')).toBe('done');
+
+    const thread = await client.call('threads.get', { threadId });
+    const tools = (thread.messages.at(-1)?.parts ?? []).filter((part) => part.type === 'tool');
+    const documentsOf = (toolId: string): unknown =>
+      tools.find((part) => part.type === 'tool' && part.toolId === toolId)?.documents;
+
+    expect(documentsOf('toolu_edit')).toEqual([
+      { kind: 'diff', path: 'src/app.ts', oldText: 'const a = 1;', newText: 'const a = 2;' },
+    ]);
+    // A written file is a diff against nothing.
+    expect(documentsOf('toolu_write')).toEqual([
+      { kind: 'diff', path: 'src/new.ts', oldText: '', newText: 'export const answer = 42;\n' },
+    ]);
+    // One document per edit, all on the same path.
+    expect(documentsOf('toolu_multi')).toEqual([
+      { kind: 'diff', path: 'src/many.ts', oldText: 'one', newText: 'ONE' },
+      { kind: 'diff', path: 'src/many.ts', oldText: 'two', newText: 'TWO' },
+    ]);
+    // No other tool describes a file change in its input.
+    expect(documentsOf('toolu_bash')).toBeUndefined();
+  });
+
   test('canUseTool routes to the permission gate and answers the CLI', async () => {
     const client = await harness.connect();
     const threadId = await claudeThread(client);

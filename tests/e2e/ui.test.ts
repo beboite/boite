@@ -15,6 +15,7 @@ const UI_INDEX = join(ROOT, 'packages', 'ui', 'dist', 'index.html');
 const SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui.png');
 const RELOAD_SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui-permission-reload.png');
 const TOOL_SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui-tool-input.png');
+const DIFF_SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui-tool-diff.png');
 /** What the echo provider's `[tool-stream]` directive types, one piece at a time. */
 const STREAMED_TOOL_INPUT = '{"command":"echo streamed","description":"a streamed input"}';
 
@@ -161,6 +162,45 @@ test(
 
     await page.screenshot(TOOL_SCREENSHOT);
     expect(existsSync(TOOL_SCREENSHOT)).toBe(true);
+  },
+  TIMEOUT,
+);
+
+test(
+  'a diff document is drawn under the tool card that produced it',
+  async () => {
+    await page.type(testid('composer-input'), 'now [diff] please');
+    await clickWhenEnabled(testid('composer-send'));
+    await page.waitFor(`document.querySelector('${testid('tool-document-chip')}')`, 30_000);
+    await page.waitFor(`document.querySelector('${testid('thread-status')}').dataset.status === 'idle'`, 30_000);
+
+    // The folded card says what it carries, and only opening it draws the diff.
+    expect(await page.text(testid('tool-document-chip'))).toBe('1 diff');
+    await page.click(
+      `${testid('tool-card')}:has(${testid('tool-document-chip')}) ${testid('tool-toggle')}`,
+    );
+    await page.waitFor(`document.querySelector('${testid('tool-document')}[data-kind=diff]')`);
+
+    const gutters = await page.evaluate<string[]>(
+      `Array.from(document.querySelectorAll('${testid('diff-row')}')).map((row) => row.querySelector('.gutter').textContent)`,
+    );
+    expect(gutters).toContain('-');
+    expect(gutters).toContain('+');
+
+    const removed = await page.evaluate<string>(
+      `document.querySelector('${testid('diff-row')}[data-kind=remove] .text').textContent`,
+    );
+    expect(removed).toContain('return start();');
+    const added = await page.evaluate<string>(
+      `document.querySelector('${testid('diff-row')}[data-kind=add] .text').textContent`,
+    );
+    expect(added).toContain('warm: true');
+    expect(
+      await page.evaluate<string>(`document.querySelector('${testid('diff-view')}').dataset.path`),
+    ).toBe('src/app.ts');
+
+    await page.screenshot(DIFF_SCREENSHOT);
+    expect(existsSync(DIFF_SCREENSHOT)).toBe(true);
   },
   TIMEOUT,
 );

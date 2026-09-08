@@ -108,6 +108,18 @@ export const strings = {
     system: 'System',
     toolInput: 'Input',
     toolOutput: 'Output',
+    toolDocuments: 'Documents',
+    /** The chip on a folded card: `1 diff`, `2 diffs`, `1 doc`, `3 docs`. */
+    documentChip: {
+      diff: '{count} diff',
+      diffs: '{count} diffs',
+      doc: '{count} doc',
+      docs: '{count} docs'
+    },
+    documentImage: 'What the tool produced',
+    diffHidden: '{count} unchanged lines',
+    diffAdded: '+{count}',
+    diffRemoved: '-{count}',
     noOutput: 'No output',
     toolStatus: {
       running: 'running',

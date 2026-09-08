@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import type { MessagePart, RpcEvents } from '@boite/contracts';
+import type { MessagePart, RpcEvents, ToolDocument } from '@boite/contracts';
 import { echoThread, startTestCore } from './harness.ts';
 import type { TestCore } from './harness.ts';
 
@@ -138,6 +138,49 @@ describe('echo driver', () => {
       output: 'streamed',
       status: 'done',
     });
+  });
+
+  test('the diff, doc and image directives each carry their document on the tool part', async () => {
+    const client = await harness.connect();
+    const { threadId } = await echoThread(harness, client);
+    await client.call('threads.subscribe', { threadId });
+
+    const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 10000);
+    await client.call('turns.start', { threadId, prompt: '[diff][doc][image]' });
+    expect((await finished).status).toBe('done');
+
+    const thread = await client.call('threads.get', { threadId });
+    const tools = (thread.messages[1]?.parts ?? []).filter((part) => part.type === 'tool');
+    expect(tools.map((part) => (part.type === 'tool' ? part.name : ''))).toEqual(['Edit', 'Read', 'Screenshot']);
+
+    const documentsOf = (at: number): ToolDocument[] => {
+      const part = tools[at];
+      return part?.type === 'tool' ? (part.documents ?? []) : [];
+    };
+
+    const diff = documentsOf(0)[0];
+    expect(diff?.kind).toBe('diff');
+    if (diff?.kind !== 'diff') throw new Error('the first document is not a diff');
+    expect(diff.path).toBe('src/app.ts');
+    expect(diff.oldText.split('\n')).toHaveLength(3);
+    // The middle line changed and one line was added.
+    expect(diff.newText.split('\n')).toHaveLength(4);
+    expect(diff.newText).toContain('warm: true');
+
+    const doc = documentsOf(1)[0];
+    expect(doc).toMatchObject({ kind: 'markdown', title: 'README.md' });
+    const text = doc?.kind === 'markdown' ? doc.text : '';
+    expect(text.split('\n')).toHaveLength(6);
+    expect(text).toContain('# README');
+    expect(text).toContain('- the first item');
+    expect(text).toContain('```ts');
+
+    const image = documentsOf(2)[0];
+    expect(image).toMatchObject({ kind: 'image', mimeType: 'image/png', alt: 'one pixel' });
+    // Base64 with no `data:` prefix, and a real PNG behind it.
+    const data = image?.kind === 'image' ? image.data : '';
+    expect(data.startsWith('data:')).toBe(false);
+    expect([...Buffer.from(data, 'base64').subarray(0, 4)]).toEqual([137, 80, 78, 71]);
   });
 
   test('a permission directive waits for the answer, then continues', async () => {

@@ -12,6 +12,7 @@ import type {
   SessionMode,
   SessionModeState,
   SessionNotification,
+  ToolCallContent,
   ToolCallStatus,
   Usage as AcpUsage,
 } from '@agentclientprotocol/sdk';
@@ -24,6 +25,7 @@ import type {
   ProviderDescriptor,
   ProviderId,
   ThreadId,
+  ToolDocument,
   ToolStatus,
   Usage,
 } from '@boite/contracts';
@@ -31,6 +33,7 @@ import pkg from '../../package.json';
 import { messageOf, unavailable } from '../errors.ts';
 import type { SpawnedChild } from '../procs.ts';
 import { profileFor, resolveExecutable } from '../providers/loader.ts';
+import { imageDocument } from './documents.ts';
 import type {
   Driver,
   ProbeContext,
@@ -97,6 +100,29 @@ interface ToolEntry {
   input: unknown;
   output: string | null;
   status: ToolStatus;
+  documents: ToolDocument[];
+}
+
+/**
+ * A tool call's `content` as documents. A `diff` member is a file the call
+ * wrote, a text block is markdown, an image block an image. `terminal`, audio
+ * and resource blocks have no document in the contract, so they are dropped.
+ * This is not the tool's output: `rawOutput` stays what it always was.
+ */
+function documentsOf(content: ToolCallContent[]): ToolDocument[] {
+  const documents: ToolDocument[] = [];
+  for (const entry of content) {
+    if (entry.type === 'diff') {
+      // No `oldText` is a file the call created.
+      documents.push({ kind: 'diff', path: entry.path, oldText: entry.oldText ?? '', newText: entry.newText });
+      continue;
+    }
+    if (entry.type !== 'content') continue;
+    const block = entry.content;
+    if (block.type === 'text') documents.push({ kind: 'markdown', title: null, text: block.text });
+    else if (block.type === 'image') documents.push(imageDocument(block.mimeType, block.data, null));
+  }
+  return documents;
 }
 
 /**
@@ -228,13 +254,18 @@ class AcpTurn {
     this.ctx.emit.delta(this.message(), this.thinkingIndex, text);
   }
 
-  /** `tool_call` opens the part, `tool_call_update` replaces the same one by id. */
+  /**
+   * `tool_call` opens the part, `tool_call_update` replaces the same one by id.
+   * `content` replaces the documents when the agent sends one, the protocol's
+   * own word for that field; null or absent leaves the ones already there.
+   */
   upsertTool(
     toolCallId: string,
     name: string | null,
     input: unknown,
     output: unknown,
     status: ToolCallStatus | null | undefined,
+    content: ToolCallContent[] | null | undefined,
   ): void {
     const entry = this.tools.get(toolCallId) ?? {
       index: this.takeIndex(),
@@ -242,11 +273,13 @@ class AcpTurn {
       input: null,
       output: null,
       status: 'running' as ToolStatus,
+      documents: [] as ToolDocument[],
     };
     if (name !== null && name.length > 0) entry.name = name;
     if (input !== undefined) entry.input = input;
     if (output !== undefined && output !== null) entry.output = stringify(output);
     if (status !== null && status !== undefined) entry.status = toolStatus(status);
+    if (content !== null && content !== undefined) entry.documents = documentsOf(content);
     this.tools.set(toolCallId, entry);
     this.part(entry.index, {
       type: 'tool',
@@ -255,6 +288,7 @@ class AcpTurn {
       input: entry.input,
       output: entry.output,
       status: entry.status,
+      ...(entry.documents.length > 0 ? { documents: entry.documents } : {}),
     });
   }
 }
@@ -639,7 +673,14 @@ class AcpSession {
         if (update.content.type === 'text') turn.writeThinking(update.content.text);
         break;
       case 'tool_call':
-        turn.upsertTool(update.toolCallId, update.name ?? update.title, update.rawInput, update.rawOutput, update.status);
+        turn.upsertTool(
+          update.toolCallId,
+          update.name ?? update.title,
+          update.rawInput,
+          update.rawOutput,
+          update.status,
+          update.content,
+        );
         break;
       case 'tool_call_update':
         turn.upsertTool(
@@ -648,6 +689,7 @@ class AcpSession {
           update.rawInput,
           update.rawOutput,
           update.status,
+          update.content,
         );
         break;
       case 'usage_update':

@@ -24,8 +24,11 @@
     const last = list.at(-1);
     const text = (last?.parts ?? []).reduce((total, part) => {
       if (part.type === 'text' || part.type === 'thinking') return total + part.text.length;
-      // A tool input grows the card too while the model types it.
-      if (part.type === 'tool') return total + 1 + (part.inputText?.length ?? 0);
+      // A tool input grows the card too while the model types it, and its
+      // documents land after it.
+      if (part.type === 'tool') {
+        return total + 1 + (part.inputText?.length ?? 0) + (part.documents?.length ?? 0);
+      }
       return total + 1;
     }, 0);
     return list.length + text;
@@ -110,6 +113,7 @@
                     inputText={part.inputText}
                     output={part.output}
                     status={part.status}
+                    documents={part.documents ?? []}
                   />
                 {:else if part.type === 'permission'}
                   <PermissionCard

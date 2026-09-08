@@ -191,6 +191,54 @@ describe('acp driver', () => {
     expect(tools[1]).toMatchObject({ toolId: 'fake-1', name: 'fake_tool', status: 'done', output: 'ok' });
   });
 
+  test("a tool call's content becomes the part's documents, and an update with none keeps them", async () => {
+    const client = await startCore();
+    const threadId = await acpThread(client);
+
+    const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 20000);
+    await client.call('turns.start', { threadId, prompt: '[documents]' });
+    expect((await finished).status).toBe('done');
+
+    const thread = await client.call('threads.get', { threadId });
+    const tools = (thread.messages[1]?.parts ?? []).filter((part) => part.type === 'tool');
+    expect(tools).toHaveLength(2);
+
+    // The diff survived the update that carried no content, and no `oldText`
+    // means a new file.
+    expect(tools[0]).toMatchObject({ toolId: 'fake-diff', status: 'done', output: 'written' });
+    expect(tools[0]?.type === 'tool' ? tools[0].documents : []).toEqual([
+      { kind: 'diff', path: '/work/src/app.ts', oldText: '', newText: 'const answer = 42;\n' },
+    ]);
+
+    // The text block is a document, not the output: the output stays `rawOutput`.
+    expect(tools[1]).toMatchObject({ toolId: 'fake-shot', status: 'done', output: 'captured' });
+    const documents = tools[1]?.type === 'tool' ? (tools[1].documents ?? []) : [];
+    expect(documents).toHaveLength(2);
+    expect(documents[0]).toEqual({ kind: 'markdown', title: null, text: '# the note\nwhat the tool saw' });
+    expect(documents[1]).toMatchObject({ kind: 'image', mimeType: 'image/png', alt: null });
+    expect(documents[1]?.kind === 'image' ? documents[1].data.startsWith('iVBORw0KGgo') : false).toBe(true);
+  });
+
+  test('an image over the 2 MB cap comes back as a line saying so, not as base64', async () => {
+    const client = await startCore();
+    const threadId = await acpThread(client);
+
+    const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 30000);
+    await client.call('turns.start', { threadId, prompt: '[big-image]' });
+    expect((await finished).status).toBe('done');
+
+    const thread = await client.call('threads.get', { threadId });
+    const tool = (thread.messages[1]?.parts ?? []).find((part) => part.type === 'tool');
+    const documents = tool?.type === 'tool' ? (tool.documents ?? []) : [];
+    expect(documents).toHaveLength(1);
+    expect(documents[0]?.kind).toBe('markdown');
+    const text = documents[0]?.kind === 'markdown' ? documents[0].text : '';
+    expect(text).toContain('too large');
+    expect(text).toContain('2.5 MB');
+    // Nothing of the payload was journalled.
+    expect(text).not.toContain('AAAA');
+  });
+
   test('a permission is asked, answered, and the answer reaches the agent', async () => {
     const client = await startCore();
     const threadId = await acpThread(client);

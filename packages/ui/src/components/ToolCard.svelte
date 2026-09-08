@@ -1,21 +1,24 @@
 <script lang="ts">
   import { Check, ChevronRight, CircleSlash, Wrench, X } from '@lucide/svelte';
-  import type { ToolStatus } from '@boite/contracts';
+  import type { ToolDocument, ToolStatus } from '@boite/contracts';
   import { json } from '../lib/format';
-  import { strings } from '../lib/strings';
+  import { fill, strings } from '../lib/strings';
+  import DocumentView from './DocumentView.svelte';
 
   let {
     name,
     input,
     inputText = null,
     output,
-    status
+    status,
+    documents = []
   }: {
     name: string;
     input: unknown;
     inputText?: string | null;
     output: string | null;
     status: ToolStatus;
+    documents?: ToolDocument[];
   } = $props();
 
   let open = $state(false);
@@ -45,11 +48,27 @@
     return value.length > 0 ? (value.split('\\n')[0] ?? '') : '';
   }
 
+  /** `2 diffs` when every document is one, `2 docs` when they are mixed. */
+  function chipFor(list: ToolDocument[]): string {
+    const count = String(list.length);
+    const diffs = list.every((entry) => entry.kind === 'diff');
+    const one = list.length === 1;
+    const template = diffs
+      ? one
+        ? strings.chat.documentChip.diff
+        : strings.chat.documentChip.diffs
+      : one
+        ? strings.chat.documentChip.doc
+        : strings.chat.documentChip.docs;
+    return fill(template, { count });
+  }
+
   let streaming = $derived(typeof inputText === 'string');
   // The body opens itself while the input is being typed: that is the whole point
   // of the stream. It folds back to the one line once the parsed input lands.
   let shown = $derived(open || streaming);
   let line = $derived(streaming ? partialSummary(inputText ?? '') : summary(input));
+  let chip = $derived(documents.length > 0 && !shown ? chipFor(documents) : '');
 </script>
 
 <div class="tool" data-testid="tool-card" data-status={status} data-streaming={streaming}>
@@ -65,6 +84,9 @@
     <span class="name">{name}</span>
     {#if line}
       <span class="line mono" title={line}>{line}</span>
+    {/if}
+    {#if chip}
+      <span class="chip" data-testid="tool-document-chip">{chip}</span>
     {/if}
     <span class="status {status}" title={strings.chat.toolStatus[status]}>
       {#if status === 'running'}
@@ -91,6 +113,14 @@
       {/if}
       <div class="section-label">{strings.chat.toolOutput}</div>
       <pre class="mono" data-testid="tool-output">{output ?? strings.chat.noOutput}</pre>
+      {#if documents.length > 0}
+        <div class="section-label">{strings.chat.toolDocuments}</div>
+        <div class="documents">
+          {#each documents as doc, index (index)}
+            <DocumentView {doc} />
+          {/each}
+        </div>
+      {/if}
     </div>
   {/if}
 </div>
@@ -151,6 +181,20 @@
     font-size: var(--text-xs);
   }
 
+  .chip {
+    flex: none;
+    height: 18px;
+    display: inline-flex;
+    align-items: center;
+    padding: 0 6px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    background: var(--color-surface-2);
+    color: var(--color-muted-foreground);
+    font-size: var(--text-xs);
+    font-variant-numeric: tabular-nums;
+  }
+
   .status {
     display: inline-flex;
     margin-left: auto;
@@ -203,6 +247,13 @@
 
   pre:last-child {
     margin-bottom: 0;
+  }
+
+  .documents {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 0;
   }
 
   /* The same blinking block a streaming text part ends on, so both read as one

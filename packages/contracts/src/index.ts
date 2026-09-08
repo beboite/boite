@@ -230,6 +230,14 @@ export type MessageRole = 'user' | 'assistant' | 'system';
 
 export type ToolStatus = 'running' | 'done' | 'error' | 'denied';
 
+/** What a tool call produced or changed, shown under the card's input and output. */
+export type ToolDocument =
+  /** A file the tool wrote: the two texts, the UI computes the line diff. */
+  | { kind: 'diff'; path: string; oldText: string; newText: string }
+  | { kind: 'markdown'; title: string | null; text: string }
+  /** `data` is base64 with no `data:` prefix. The core caps it before it is journalled. */
+  | { kind: 'image'; mimeType: string; data: string; alt: string | null };
+
 export type MessagePart =
   | { type: 'text'; text: string }
   /** The model's reasoning as the provider streams it, folded in the UI. */
@@ -243,6 +251,8 @@ export type MessagePart =
       inputText?: string | null;
       output: string | null;
       status: ToolStatus;
+      /** What the call produced or changed, under the input and the output. Absent on a journal row written before documents existed. */
+      documents?: ToolDocument[];
     }
   | { type: 'permission'; requestId: RequestId; toolName: string; decision: 'allow' | 'deny' | null }
   | { type: 'error'; message: string };

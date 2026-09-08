@@ -1,4 +1,4 @@
-import type { MessageId, Usage } from '@boite/contracts';
+import type { MessageId, ToolDocument, Usage } from '@boite/contracts';
 import { newId } from '../ids.ts';
 import type { Driver, TurnContext, TurnHandle, TurnResult } from './types.ts';
 
@@ -15,17 +15,39 @@ const TOOL_STREAM_INPUT = '{"command":"echo streamed","description":"a streamed 
 const TOOL_STREAM_PIECES = 4;
 const ERROR_MESSAGE = 'echo error requested';
 
+/** What `[diff]` edits: three lines in, four out, the middle one changed. */
+const DIFF_PATH = 'src/app.ts';
+const DIFF_OLD = 'export function boot() {\n  return start();\n}';
+const DIFF_NEW = "export function boot() {\n  return start({ warm: true });\n  log('booted');\n}";
+/** What `[doc]` reads: six lines with a heading, a list and a code fence. */
+const DOC_TITLE = 'README.md';
+const DOC_TEXT = [
+  '# README',
+  '- the first item',
+  '- the second item',
+  '```ts',
+  'export const answer = 42;',
+  '```',
+].join('\n');
+/** What `[image]` captures: a 1 by 1 PNG, base64 with no `data:` prefix. */
+const IMAGE_MIME = 'image/png';
+const IMAGE_BASE64 =
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+
 type Segment =
   | { kind: 'text'; text: string }
   | { kind: 'sleep'; ms: number }
   | { kind: 'tool' }
   | { kind: 'tool-stream' }
+  | { kind: 'diff' }
+  | { kind: 'doc' }
+  | { kind: 'image' }
   | { kind: 'permission' }
   | { kind: 'think' }
   | { kind: 'spawn'; command: string }
   | { kind: 'error' };
 
-const DIRECTIVE = /\[(?:sleep:\d+|tool-stream|tool|permission|think|spawn:[^\]]*|error)\]/g;
+const DIRECTIVE = /\[(?:sleep:\d+|tool-stream|tool|diff|doc|image|permission|think|spawn:[^\]]*|error)\]/g;
 
 export function parsePrompt(prompt: string): Segment[] {
   const segments: Segment[] = [];
@@ -38,6 +60,9 @@ export function parsePrompt(prompt: string): Segment[] {
     else if (body.startsWith('spawn:')) segments.push({ kind: 'spawn', command: body.slice('spawn:'.length) });
     else if (body === 'tool-stream') segments.push({ kind: 'tool-stream' });
     else if (body === 'tool') segments.push({ kind: 'tool' });
+    else if (body === 'diff') segments.push({ kind: 'diff' });
+    else if (body === 'doc') segments.push({ kind: 'doc' });
+    else if (body === 'image') segments.push({ kind: 'image' });
     else if (body === 'permission') segments.push({ kind: 'permission' });
     else if (body === 'think') segments.push({ kind: 'think' });
     else segments.push({ kind: 'error' });
@@ -154,6 +179,36 @@ async function run(ctx: TurnContext, state: RunState): Promise<TurnResult> {
     }
   };
 
+  /** One tool that lands whole, carrying the documents it produced. */
+  const documentTool = async (
+    name: string,
+    input: unknown,
+    output: string,
+    documents: ToolDocument[],
+  ): Promise<void> => {
+    const index = takeIndex();
+    const toolId = newId('tool_');
+    ctx.emit.part(messageId, index, {
+      type: 'tool',
+      toolId,
+      name,
+      input,
+      output: null,
+      status: 'running',
+      documents,
+    });
+    await sleep(TOOL_DELAY_MS, state);
+    ctx.emit.part(messageId, index, {
+      type: 'tool',
+      toolId,
+      name,
+      input,
+      output,
+      status: 'done',
+      documents,
+    });
+  };
+
   for (const segment of parsePrompt(ctx.prompt)) {
     if (state.stopped) break;
     switch (segment.kind) {
@@ -232,6 +287,24 @@ async function run(ctx: TurnContext, state: RunState): Promise<TurnResult> {
         });
         break;
       }
+      case 'diff':
+        await documentTool(
+          'Edit',
+          { file_path: DIFF_PATH, old_string: DIFF_OLD, new_string: DIFF_NEW },
+          'edited 1 file',
+          [{ kind: 'diff', path: DIFF_PATH, oldText: DIFF_OLD, newText: DIFF_NEW }],
+        );
+        break;
+      case 'doc':
+        await documentTool('Read', { file_path: DOC_TITLE }, `read ${DOC_TITLE}`, [
+          { kind: 'markdown', title: DOC_TITLE, text: DOC_TEXT },
+        ]);
+        break;
+      case 'image':
+        await documentTool('Screenshot', { region: 'window' }, 'captured the window', [
+          { kind: 'image', mimeType: IMAGE_MIME, data: IMAGE_BASE64, alt: 'one pixel' },
+        ]);
+        break;
       case 'permission': {
         const ticket = ctx.requestPermission('fake_tool', { echo: true }, 'the echo driver asks for a fake tool');
         const index = takeIndex();

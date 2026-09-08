@@ -591,3 +591,49 @@ test('a tool card shows the input as the model types it, then switches to the pa
   expect(shown).toContain('"command": "echo streamed"');
   expect(shown).not.toBe(STREAMED_TOOL_INPUT);
 });
+
+test('a tool card shows the diff, the markdown and the image it produced', async () => {
+  await mountOnFake();
+
+  const input = query<HTMLTextAreaElement>('[data-testid=composer-input]');
+  input.value = 'show me [diff] [doc] [image]';
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  await waitFor(() => !query<HTMLButtonElement>('[data-testid=composer-send]').disabled);
+  query<HTMLButtonElement>('[data-testid=composer-send]').click();
+
+  // Folded, each of the three cards says what it carries.
+  await waitFor(() => document.querySelectorAll('[data-testid=tool-document-chip]').length === 3);
+  expect(
+    Array.from(document.querySelectorAll('[data-testid=tool-document-chip]')).map((el) => el.textContent)
+  ).toEqual(['1 diff', '1 doc', '1 doc']);
+
+  // Open every card that carries documents.
+  for (const chip of Array.from(document.querySelectorAll('[data-testid=tool-document-chip]'))) {
+    chip.closest('[data-testid=tool-card]')?.querySelector<HTMLButtonElement>('[data-testid=tool-toggle]')?.click();
+  }
+  await waitFor(() => document.querySelectorAll('[data-testid=tool-document]').length === 3);
+  expect(
+    Array.from(document.querySelectorAll('[data-testid=tool-document]')).map((el) => el.getAttribute('data-kind'))
+  ).toEqual(['diff', 'markdown', 'image']);
+
+  // The diff: one removed line and one added line, each on its own gutter.
+  const diff = query('[data-testid=tool-document][data-kind=diff]');
+  const gutters = Array.from(diff.querySelectorAll('[data-testid=diff-row]')).map(
+    (row) => row.querySelector('.gutter')?.textContent ?? ''
+  );
+  expect(gutters).toContain('-');
+  expect(gutters).toContain('+');
+  expect(query('[data-testid=diff-row][data-kind=remove] .text').textContent).toContain('return start();');
+  expect(query('[data-testid=diff-row][data-kind=add] .text').textContent).toContain('warm: true');
+
+  // The markdown: its title above, its heading and its list rendered.
+  const markdown = query('[data-testid=tool-document][data-kind=markdown]');
+  expect(markdown.querySelector('.section-label')?.textContent).toBe('README.md');
+  expect(markdown.querySelector('h3')?.textContent).toBe('README');
+  expect(markdown.querySelector('li')?.textContent).toBe('the first item');
+
+  // The image: a data url built from the base64, and the alt the core sent.
+  const image = query<HTMLImageElement>('[data-testid=tool-document][data-kind=image] img');
+  expect(image.getAttribute('src')?.startsWith('data:image/png;base64,iVBORw0KGgo')).toBe(true);
+  expect(image.alt).toBe('one pixel');
+});

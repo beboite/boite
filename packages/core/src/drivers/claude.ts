@@ -12,7 +12,7 @@ import type {
   SDKUserMessage,
   SpawnOptions as SdkSpawnOptions,
 } from '@anthropic-ai/claude-agent-sdk';
-import type { MessageId, MessagePart, ThreadId, ToolStatus, Usage } from '@boite/contracts';
+import type { MessageId, MessagePart, ThreadId, ToolDocument, ToolStatus, Usage } from '@boite/contracts';
 import { messageOf, unavailable } from '../errors.ts';
 import type { SpawnedChild } from '../procs.ts';
 import { profileFor, resolveExecutable } from '../providers/loader.ts';
@@ -67,6 +67,49 @@ interface ToolEntry {
   inputText: string | null;
   output: string | null;
   status: ToolStatus;
+  documents: ToolDocument[];
+}
+
+function stringField(record: Record<string, unknown>, key: string): string | null {
+  const value = record[key];
+  return typeof value === 'string' ? value : null;
+}
+
+/**
+ * The diffs a file-writing tool's parsed input already carries, so the card
+ * shows the change without waiting for the tool result. `Edit` is one diff,
+ * `Write` a diff against nothing, `MultiEdit` one diff per edit on the same
+ * path. A tool whose input is still streaming has no parsed object to read, and
+ * no other Claude tool describes a file change in its input.
+ */
+function editDocuments(name: string, input: unknown): ToolDocument[] {
+  if (typeof input !== 'object' || input === null) return [];
+  const record = input as Record<string, unknown>;
+  const path = stringField(record, 'file_path');
+  if (path === null || path.length === 0) return [];
+  if (name === 'Edit') {
+    const oldText = stringField(record, 'old_string');
+    const newText = stringField(record, 'new_string');
+    if (oldText === null || newText === null) return [];
+    return [{ kind: 'diff', path, oldText, newText }];
+  }
+  if (name === 'Write') {
+    const content = stringField(record, 'content');
+    return content === null ? [] : [{ kind: 'diff', path, oldText: '', newText: content }];
+  }
+  if (name !== 'MultiEdit') return [];
+  const edits = record['edits'];
+  if (!Array.isArray(edits)) return [];
+  const documents: ToolDocument[] = [];
+  for (const edit of edits) {
+    if (typeof edit !== 'object' || edit === null) continue;
+    const one = edit as Record<string, unknown>;
+    const oldText = stringField(one, 'old_string');
+    const newText = stringField(one, 'new_string');
+    if (oldText === null || newText === null) continue;
+    documents.push({ kind: 'diff', path, oldText, newText });
+  }
+  return documents;
 }
 
 type UserMessage = Extract<SDKMessage, { type: 'user' }>;
@@ -346,6 +389,9 @@ class ClaudeTurn {
     entry.name = name;
     entry.input = input;
     entry.inputText = inputText;
+    // A streamed input is half-typed JSON: there is nothing to read a diff out
+    // of until the parsed object lands, and then it lands whole.
+    if (inputText === null) entry.documents = editDocuments(name, input);
     this.tools.set(toolId, entry);
     this.emitTool(toolId, entry);
   }
@@ -359,7 +405,15 @@ class ClaudeTurn {
   }
 
   private newTool(name: string): ToolEntry {
-    return { index: this.takeIndex(), name, input: {}, inputText: null, output: null, status: 'running' };
+    return {
+      index: this.takeIndex(),
+      name,
+      input: {},
+      inputText: null,
+      output: null,
+      status: 'running',
+      documents: [],
+    };
   }
 
   private emitTool(toolId: string, entry: ToolEntry): void {
@@ -371,6 +425,7 @@ class ClaudeTurn {
       inputText: entry.inputText,
       output: entry.output,
       status: entry.status,
+      ...(entry.documents.length > 0 ? { documents: entry.documents } : {}),
     });
   }
 
