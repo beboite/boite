@@ -9,12 +9,21 @@
   import Sidebar from './components/Sidebar.svelte';
   import TitleBar from './components/TitleBar.svelte';
   import TracePanel from './components/TracePanel.svelte';
+  import { installExternalLinks } from './lib/links';
   import { strings } from './lib/strings';
   import { store } from './lib/store.svelte';
   import { startTheme } from './lib/theme';
 
   const inShell = window.__TAURI_INTERNALS__ !== undefined;
   let sidebar = $state<Sidebar | undefined>(undefined);
+  let appRoot = $state<HTMLDivElement | undefined>(undefined);
+
+  // Every http(s) link the UI shows goes to the system browser, once, from here.
+  $effect(() => {
+    const root = appRoot;
+    if (!root) return;
+    return installExternalLinks(root);
+  });
 
   onMount(() => {
     void store.boot();
@@ -74,7 +83,7 @@
 
 <svelte:window {onkeydown} />
 
-<div class="app" class:shell={inShell} class:ready={store.booted}>
+<div class="app" class:shell={inShell} class:ready={store.booted} bind:this={appRoot}>
   {#if inShell}
     <TitleBar {store} />
   {/if}

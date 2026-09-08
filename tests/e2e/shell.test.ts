@@ -45,6 +45,8 @@ function textOf(id: string): string {
   return `document.querySelector('${testid(id)}')?.textContent.replace(/\\s+/g, ' ').trim()`;
 }
 
+const LINK = `${testid('message')}[data-role=assistant] ${testid('text-part')} a[href="https://example.invalid/docs"]`;
+
 const ASSISTANT_TEXT = `Array.from(document.querySelectorAll('${testid('message')}[data-role=assistant] ${testid('text-part')}')).map((node) => node.textContent).join(' ')`;
 
 async function clickWhenEnabled(selector: string): Promise<void> {
@@ -221,6 +223,60 @@ shellTest(
 
     await page?.screenshot(SCREENSHOT);
     expect(existsSync(SCREENSHOT)).toBe(true);
+  },
+  TIMEOUT,
+);
+
+shellTest(
+  'a markdown link in an answer is handed to the system browser, not the webview',
+  async () => {
+    // The real opener would put a browser window on the user's screen. The IPC
+    // is wrapped instead: `open_url` is recorded and answered as the custom
+    // protocol would, everything else still goes to the shell. `invoke`, `ipc`
+    // and `postMessage` on `__TAURI_INTERNALS__` are all defined non-writable
+    // and non-configurable, so the seam is the `fetch` that `sendIpcMessage`
+    // calls; a reply with `Tauri-Response: ok` and a JSON body resolves the
+    // promise `openUrl` is waiting on.
+    await page?.evaluate<null>(`(() => {
+      const real = window.fetch.bind(window);
+      const PREFIXES = ['http://ipc.localhost/', 'https://ipc.localhost/', 'ipc://localhost/'];
+      window.__boiteInvokes = [];
+      window.fetch = (input, init) => {
+        const url = typeof input === 'string' ? input : String(input && input.url);
+        const prefix = PREFIXES.find((candidate) => url.startsWith(candidate));
+        if (prefix) {
+          const cmd = decodeURIComponent(url.slice(prefix.length));
+          let args = null;
+          try { args = JSON.parse(String(init && init.body)); } catch (e) { args = null; }
+          window.__boiteInvokes.push([cmd, args]);
+          if (cmd === 'plugin:opener|open_url') {
+            return Promise.resolve(new Response('null', {
+              status: 200,
+              headers: { 'content-type': 'application/json', 'Tauri-Response': 'ok' }
+            }));
+          }
+        }
+        return real(input, init);
+      };
+      return null;
+    })()`);
+
+    // The echo driver streams the prompt back, so the answer carries the link.
+    await page?.type(testid('composer-input'), 'read [docs](https://example.invalid/docs) now');
+    await clickWhenEnabled(testid('composer-send'));
+    await page?.waitFor(`document.querySelector('${LINK}')`, 30_000);
+
+    await page?.evaluate<null>(`(() => { document.querySelector('${LINK}').click(); return null; })()`);
+    await page?.waitFor(
+      `window.__boiteInvokes.some(([cmd]) => cmd === 'plugin:opener|open_url')`,
+      10_000,
+    );
+
+    const call = await page?.evaluate<[string, { url?: string }] | undefined>(
+      `window.__boiteInvokes.find(([cmd]) => cmd === 'plugin:opener|open_url')`,
+    );
+    expect(call?.[0]).toBe('plugin:opener|open_url');
+    expect(call?.[1]?.url).toBe('https://example.invalid/docs');
   },
   TIMEOUT,
 );

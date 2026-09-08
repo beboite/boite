@@ -1,7 +1,11 @@
-import { afterEach, expect, test } from 'vitest';
+import { afterEach, expect, test, vi } from 'vitest';
 import { mount, unmount } from 'svelte';
 import App from './App.svelte';
 import { store } from './lib/store.svelte';
+
+// The opener plugin is the shell's system browser; nothing real may run here.
+const { openUrl } = vi.hoisted(() => ({ openUrl: vi.fn(async (_url: string) => {}) }));
+vi.mock('@tauri-apps/plugin-opener', () => ({ openUrl }));
 
 let running: Record<string, unknown> | null = null;
 
@@ -11,6 +15,8 @@ afterEach(() => {
   document.body.innerHTML = '';
   delete document.documentElement.dataset.theme;
   window.localStorage.clear();
+  delete window.__TAURI_INTERNALS__;
+  openUrl.mockClear();
 });
 
 async function waitFor(check: () => boolean): Promise<void> {
@@ -261,4 +267,80 @@ test('the trace panel shows the I/O a process moved, and none for a record that 
   // Nothing measured reads like an unmeasured peak memory, from the same formatter.
   expect(cellOf(21_460)).toBe('none');
   expect(query('[data-testid=trace-row][data-pid="21460"]').textContent).toContain('none');
+});
+
+/** Opens the Accounts page on the fake and returns the login link it shows. */
+async function loginLink(): Promise<HTMLAnchorElement> {
+  await mountOnFake();
+  query<HTMLButtonElement>('[data-testid=nav-settings]').click();
+  await waitFor(() => document.querySelector('[data-testid=settings-tab-accounts]') !== null);
+  query<HTMLButtonElement>('[data-testid=settings-tab-accounts]').click();
+  await waitFor(() => document.querySelector('[data-testid=accounts-page]') !== null);
+  query<HTMLButtonElement>('[data-testid=account-login]').click();
+  await waitFor(() => document.querySelector('[data-testid=account-login-url]') !== null);
+  return query<HTMLAnchorElement>('[data-testid=account-login-url]');
+}
+
+/** The store is one module-level singleton: leave the next test on the chat. */
+async function backToChat(): Promise<void> {
+  query<HTMLButtonElement>('[data-testid=settings-back]').click();
+  await waitFor(() => document.querySelector('[data-testid=settings]') === null);
+}
+
+const LOGIN_URL = 'https://example.invalid/login?code=fake';
+
+test('in the shell an external link goes to the system browser instead of the webview', async () => {
+  const link = await loginLink();
+  window.__TAURI_INTERNALS__ = {};
+
+  const click = new MouseEvent('click', { bubbles: true, cancelable: true });
+  link.dispatchEvent(click);
+
+  await waitFor(() => openUrl.mock.calls.length === 1);
+  expect(openUrl).toHaveBeenCalledWith(LOGIN_URL);
+  expect(click.defaultPrevented).toBe(true);
+  // The markup is untouched, so a right-click copy still works.
+  expect(link.getAttribute('href')).toBe(LOGIN_URL);
+  expect(link.getAttribute('target')).toBe('_blank');
+
+  await backToChat();
+});
+
+test('outside the shell the same link goes through window.open', async () => {
+  const opened = vi.fn(() => null);
+  const original = window.open;
+  window.open = opened as unknown as typeof window.open;
+  try {
+    const link = await loginLink();
+    link.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+
+    await waitFor(() => opened.mock.calls.length === 1);
+    expect(opened).toHaveBeenCalledWith(LOGIN_URL, '_blank', 'noopener,noreferrer');
+    expect(openUrl).not.toHaveBeenCalled();
+
+    await backToChat();
+  } finally {
+    window.open = original;
+  }
+});
+
+test('a ctrl-click on an external link is left alone', async () => {
+  const opened = vi.fn(() => null);
+  const original = window.open;
+  window.open = opened as unknown as typeof window.open;
+  try {
+    const link = await loginLink();
+    window.__TAURI_INTERNALS__ = {};
+    const click = new MouseEvent('click', { bubbles: true, cancelable: true, ctrlKey: true });
+    link.dispatchEvent(click);
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(openUrl).not.toHaveBeenCalled();
+    expect(opened).not.toHaveBeenCalled();
+    expect(click.defaultPrevented).toBe(false);
+
+    await backToChat();
+  } finally {
+    window.open = original;
+  }
 });

@@ -574,6 +574,7 @@ fn build_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_opener::init())
         .manage(CoreState::new())
         .invoke_handler(tauri::generate_handler![core_endpoint])
         .setup(|app| {
