@@ -16,16 +16,19 @@ export function loginThreadId(accountId: AccountId): string {
 const URL_IN_OUTPUT = /https:\/\/\S+/;
 
 /**
- * What an XDG variable means when it is not set. A descriptor that isolates an
- * account through one of them (OpenCode does) puts its session file under the
- * same variable, so the provider's own location is that variable's own default,
- * never `~/.<id>`.
+ * What an isolation variable means when it is not set, as segments under the
+ * home directory. A descriptor that isolates an account through one of them
+ * (OpenCode uses the XDG pair, Gemini CLI a home of its own) puts its session
+ * file under that same variable, so the provider's own location is the
+ * variable's own default, never `~/.<id>`. No segment at all means the home
+ * directory itself, which is what `GEMINI_CLI_HOME` replaces.
  */
-const XDG_DEFAULTS: Record<string, string[]> = {
+const ISOLATION_DEFAULTS: Record<string, string[]> = {
   XDG_DATA_HOME: ['.local', 'share'],
   XDG_CONFIG_HOME: ['.config'],
   XDG_STATE_HOME: ['.local', 'state'],
   XDG_CACHE_HOME: ['.cache'],
+  GEMINI_CLI_HOME: [],
 };
 
 interface LoginRun {
@@ -256,7 +259,7 @@ export class AccountStore {
 
   /**
    * The provider's own login directory: its isolation variable if the environment
-   * carries one, that variable's own default when it is an XDG one, else
+   * carries one, that variable's own default when Boite knows it, else
    * `~/.<id>`.
    */
   private defaultLocation(provider: ProviderDescriptor): string | null {
@@ -265,7 +268,7 @@ export class AccountStore {
       for (const key of Object.keys(profile.isolation)) {
         const value = process.env[key];
         if (value !== undefined && value.length > 0) return value;
-        const fallback = XDG_DEFAULTS[key];
+        const fallback = ISOLATION_DEFAULTS[key];
         if (fallback !== undefined) return join(homePath(), ...fallback);
       }
     }

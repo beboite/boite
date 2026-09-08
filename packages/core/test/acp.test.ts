@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, test } from 'bun:test';
-import type { MessagePart, RpcEvents, Settings } from '@boite/contracts';
+import type { MessagePart, PermissionMode, RpcEvents, Settings } from '@boite/contracts';
 import type { CoreClient } from '../src/client.ts';
 import { getDriver } from '../src/drivers/index.ts';
 import { startTestCore, waitFor } from './harness.ts';
@@ -18,6 +18,7 @@ afterEach(async () => {
   const open = harness;
   harness = null;
   delete process.env['ACP_FAKE_LOG'];
+  delete process.env['ACP_FAKE_NO_MODES'];
   if (open !== null) await open.stop();
 });
 
@@ -88,7 +89,7 @@ async function acpAccount(client: CoreClient): Promise<{ dataDir: string; projec
   return { dataDir, projectId: project.id, accountId: account.id };
 }
 
-async function acpThread(client: CoreClient, model?: string): Promise<string> {
+async function acpThread(client: CoreClient, model?: string, permissionMode?: PermissionMode): Promise<string> {
   const { projectId, accountId } = await acpAccount(client);
   // A model the descriptor does not carry is only accepted once the agent has
   // listed it, which is what the picker does before it offers it.
@@ -103,9 +104,26 @@ async function acpThread(client: CoreClient, model?: string): Promise<string> {
     accountId: account.id,
     title: 'acp thread',
     ...(model === undefined ? {} : { model }),
+    ...(permissionMode === undefined ? {} : { permissionMode }),
   });
   await client.call('threads.subscribe', { threadId: thread.id });
   return thread.id;
+}
+
+/** Everything the core logged on this connection, as `<level> <message>` lines. */
+function collectLogs(client: CoreClient): string[] {
+  const lines: string[] = [];
+  client.on('core.log', (entry) => {
+    lines.push(`${entry.level} ${entry.message}`);
+  });
+  return lines;
+}
+
+/** How many times the fake was told to switch to a given mode. */
+function setModeCount(modeId: string): number {
+  return fakeLog()
+    .split('\n')
+    .filter((line) => line === `set_mode ${modeId}`).length;
 }
 
 describe('acp driver', () => {
@@ -415,6 +433,103 @@ describe('acp driver', () => {
     });
     expect(thread.model).toBe('fake-smart');
     expect(thread.effort).toBe('high');
+  });
+
+  test('the thread permission mode becomes a session mode, and the one the agent is on sends nothing', async () => {
+    const client = await startCore();
+    const threadId = await acpThread(client, undefined, 'acceptEdits');
+
+    await runTurn(client, threadId, 'first');
+    // The fake spells it `accept_edits`; the mapping is what finds it.
+    await waitFor(() => setModeCount('accept_edits') === 1);
+    expect(fakeLog()).not.toContain('set_mode:refused');
+
+    await harness?.stop();
+    harness = null;
+
+    const plain = await startCore();
+    const plainThread = await acpThread(plain);
+    await runTurn(plain, plainThread, 'first');
+    // The agent already reports `default`: nothing to ask for.
+    expect(fakeLog()).not.toContain('set_mode');
+  });
+
+  test('bypassPermissions and dontAsk both land on the agent mode yolo', async () => {
+    const client = await startCore();
+    const threadId = await acpThread(client, undefined, 'bypassPermissions');
+    await runTurn(client, threadId, 'first');
+    await waitFor(() => setModeCount('yolo') === 1);
+
+    await harness?.stop();
+    harness = null;
+
+    const strict = await startCore();
+    const strictThread = await acpThread(strict, undefined, 'dontAsk');
+    await runTurn(strict, strictThread, 'first');
+    await waitFor(() => setModeCount('yolo') === 1);
+    expect(fakeLog()).not.toContain('set_mode:refused');
+  });
+
+  test('a warm session follows a mode change without starting a second process', async () => {
+    const client = await startCore({ warmProcessMinutes: 5 });
+    const threadId = await acpThread(client);
+    const counted = countProcesses(client, threadId);
+
+    await runTurn(client, threadId, 'first');
+    expect(fakeLog()).not.toContain('set_mode');
+
+    await client.call('threads.update', { threadId, permissionMode: 'plan' });
+    await runTurn(client, threadId, 'second');
+
+    await waitFor(() => setModeCount('plan') === 1);
+    // The mode is not part of the session key, so the same agent kept the turn.
+    expect(counted.started).toHaveLength(1);
+    expect(counted.exited).toHaveLength(0);
+  });
+
+  test('a session loaded back is put in the thread mode again', async () => {
+    const client = await startCore({ warmProcessMinutes: 0 });
+    const threadId = await acpThread(client, undefined, 'acceptEdits');
+
+    await runTurn(client, threadId, 'first');
+    const sessionId = (await client.call('threads.get', { threadId })).sessionId ?? '';
+    expect(sessionId).not.toBe('');
+    await waitFor(() => setModeCount('accept_edits') === 1);
+
+    // The process went with the turn, so the second one resumes through
+    // session/load, which does not reliably keep the mode.
+    await runTurn(client, threadId, 'second');
+    await waitFor(() => fakeLog().includes(`loaded:${sessionId}`));
+    await waitFor(() => setModeCount('accept_edits') === 2);
+  });
+
+  test('an agent that switched on its own is put back on the next turn', async () => {
+    const client = await startCore({ warmProcessMinutes: 5 });
+    const threadId = await acpThread(client);
+    const logs = collectLogs(client);
+
+    await runTurn(client, threadId, '[mode-switch yolo]drifting');
+    // Nothing was sent yet: the thread and the agent both started on `default`.
+    expect(fakeLog()).not.toContain('set_mode ');
+    await waitFor(() => logs.some((line) => line.includes('the agent switched to the session mode yolo')));
+
+    await runTurn(client, threadId, 'back to work');
+    await waitFor(() => setModeCount('default') === 1);
+  });
+
+  test('an agent with no modes at all is one warning, and the turn still runs', async () => {
+    const client = await startCore();
+    process.env['ACP_FAKE_NO_MODES'] = '1';
+    const threadId = await acpThread(client);
+    const logs = collectLogs(client);
+
+    await runTurn(client, threadId, 'first');
+    expect(fakeLog()).not.toContain('set_mode');
+    await waitFor(() =>
+      logs.some(
+        (line) => line === 'warn acp: no session mode matches the permission mode default; the agent offers none',
+      ),
+    );
   });
 
   /** One `initialize` per agent process, which is what the probe cache saves. */

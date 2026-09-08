@@ -20,6 +20,7 @@ import type { Core } from '../core.ts';
 import { appDataPath, currentOs, homePath } from '../paths.ts';
 import { notFound } from '../errors.ts';
 import claudeShipped from './shipped/claude.json';
+import geminiShipped from './shipped/gemini.json';
 import opencodeShipped from './shipped/opencode.json';
 import echoShipped from './shipped/echo.json';
 
@@ -43,6 +44,7 @@ const SHIPPED_DIR = join(import.meta.dir, 'shipped');
 
 const SHIPPED_SOURCES: { file: string; raw: unknown; when?: () => boolean }[] = [
   { file: 'shipped/claude.json', raw: claudeShipped },
+  { file: 'shipped/gemini.json', raw: geminiShipped },
   { file: 'shipped/opencode.json', raw: opencodeShipped },
   { file: 'shipped/echo.json', raw: echoShipped, when: echoEnabled },
 ];
@@ -350,6 +352,12 @@ function expandDescriptor(descriptor: ProviderDescriptor): ProviderDescriptor {
         kind: candidate.kind,
         value: candidate.kind === 'file' ? normalize(substituteHome(candidate.value)) : substituteHome(candidate.value),
       })),
+      // A CLI that npm installs as a `.cmd` shim is launched as `node <its js>`,
+      // so a launch argument names a path like an executable candidate does and
+      // takes the same tokens. Gemini CLI's descriptor is the one that needs it.
+      ...(profile.launch === undefined
+        ? {}
+        : { launch: { args: (profile.launch.args ?? []).map(substituteHome) } }),
     };
   }
   const expanded: ProviderDescriptor = { ...descriptor, roots: descriptor.roots.map(substituteHome), profiles };

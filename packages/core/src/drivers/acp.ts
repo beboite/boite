@@ -9,6 +9,8 @@ import type {
   RequestPermissionResponse,
   SessionConfigOption,
   SessionConfigOptionCategory,
+  SessionMode,
+  SessionModeState,
   SessionNotification,
   ToolCallStatus,
   Usage as AcpUsage,
@@ -18,6 +20,7 @@ import type {
   MessageId,
   MessagePart,
   ModelInfo,
+  PermissionMode,
   ProviderDescriptor,
   ProviderId,
   ThreadId,
@@ -52,6 +55,32 @@ const EXIT_GRACE_MS = 500;
 const AGENT_OWN_MODEL = 'default';
 /** How long a probe waits for the agent to answer `initialize` and `session/new`. */
 const PROBE_TIMEOUT_MS = 20_000;
+
+/**
+ * The thread's permission mode as candidate `session/set_mode` ids, best first.
+ * ACP standardises the call and the shape of `availableModes`, never the ids
+ * inside it: every agent names its own modes. So each Boite mode carries the
+ * spellings agents are known to use and the first one an agent lists wins.
+ * `matchMode` compares without case, `_` or `-`, so the two spellings of a name
+ * are one key; both are written out anyway, because the list is also what tells
+ * a reader which agent uses which.
+ *
+ * - `default`, `autoEdit`, `yolo`, `plan` are Gemini CLI's `ApprovalMode`.
+ * - `acceptEdits`, `bypassPermissions`, `plan`, `default` are Claude Code's
+ *   permission modes, which its ACP bridge hands over as mode ids.
+ * - `accept_edits`, `bypass_permissions`, `auto_edit`, `dont_ask` are the
+ *   snake_case spelling of those same names.
+ * - `build` is what OpenCode calls its plain mode, `normal` what several
+ *   smaller agents call theirs.
+ * - `auto` is the short name for a mode that approves everything.
+ */
+const MODE_CANDIDATES: Record<PermissionMode, readonly string[]> = {
+  default: ['default', 'build', 'normal'],
+  acceptEdits: ['acceptEdits', 'accept_edits', 'autoEdit', 'auto_edit'],
+  bypassPermissions: ['bypassPermissions', 'bypass_permissions', 'yolo', 'auto'],
+  plan: ['plan'],
+  dontAsk: ['dontAsk', 'dont_ask', 'bypassPermissions', 'bypass_permissions', 'yolo', 'auto'],
+};
 
 /** The whole SDK, loaded on the first ACP turn: nothing heavy loads at core start. */
 export type AcpSdk = typeof import('@agentclientprotocol/sdk');
@@ -246,6 +275,11 @@ class AcpSession {
   private sessionId: string | null = null;
   private canLoad = false;
   private configWarned = false;
+  /** What the last `session/new` or `session/load` said the agent can be in. */
+  private modes: SessionMode[] = [];
+  /** The mode the agent is in, as it last told us: an answer or a drift it announced. */
+  private currentModeId: string | null = null;
+  private modeWarned = false;
   private lastStderr = '';
   private exited: Promise<number | null> | null = null;
   private idle: Timer | null = null;
@@ -331,6 +365,9 @@ class AcpSession {
     }
 
     turn.noteSession(sessionId);
+    // Every turn, not only the first: a warm session outlives a mode change,
+    // and the agent may have switched on its own since the last prompt.
+    await this.applyMode(turn.ctx);
     this.current = turn;
     let response: PromptResponse;
     try {
@@ -410,12 +447,13 @@ class AcpSession {
     if (ctx.sessionId !== null && this.canLoad) {
       // Every `session/update` of a load is history replay: `current` is null,
       // so the update handler drops them.
-      await connection.agent.request('session/load', {
+      const loaded = await connection.agent.request('session/load', {
         sessionId: ctx.sessionId,
         cwd: ctx.thread.cwd,
         mcpServers: [],
       });
       this.sessionId = ctx.sessionId;
+      this.noteModes(loaded.modes);
       return;
     }
 
@@ -424,7 +462,48 @@ class AcpSession {
       mcpServers: [],
     });
     this.sessionId = created.sessionId;
+    this.noteModes(created.modes);
     await this.applyConfig(ctx, created.configOptions ?? null);
+  }
+
+  /** What a `session/new` or `session/load` answered about modes, if anything. */
+  private noteModes(state: SessionModeState | null | undefined): void {
+    if (state === null || state === undefined) return;
+    this.modes = state.availableModes;
+    this.currentModeId = state.currentModeId;
+  }
+
+  /**
+   * The thread's permission mode as one `session/set_mode`. Sent when the
+   * session opens (a loaded session does not reliably come back in the mode it
+   * was left in) and at the start of every turn, so a warm session follows a
+   * change and an agent that switched on its own is put back. Nothing goes out
+   * when the agent already reports that mode. A mode is a preference: an agent
+   * that lists none, offers no match or refuses the call is one warning in the
+   * core log, never a reason to fail the turn.
+   */
+  private async applyMode(ctx: TurnContext): Promise<void> {
+    const agent = this.agent;
+    const sessionId = this.sessionId;
+    if (agent === null || sessionId === null) return;
+    const wanted = ctx.thread.permissionMode;
+
+    const modeId = matchMode(wanted, this.modes);
+    if (modeId === null) {
+      if (this.modeWarned) return;
+      this.modeWarned = true;
+      const offered = this.modes.length === 0 ? 'none' : this.modes.map((mode) => mode.id).join(', ');
+      ctx.log('warn', `acp: no session mode matches the permission mode ${wanted}; the agent offers ${offered}`);
+      return;
+    }
+    if (this.currentModeId === modeId) return;
+
+    try {
+      await agent.request('session/set_mode', { sessionId, modeId });
+      this.currentModeId = modeId;
+    } catch (error) {
+      ctx.log('warn', `acp: the agent refused the session mode ${modeId}: ${messageOf(error)}`);
+    }
   }
 
   private async applyConfig(ctx: TurnContext, options: SessionConfigOption[] | null): Promise<void> {
@@ -574,11 +653,18 @@ class AcpSession {
       case 'usage_update':
         if (update.cost != null && update.cost.currency === 'USD') turn.costUsdEquivalent = update.cost.amount;
         break;
+      case 'current_mode_update':
+        // The agent switched on its own. Remembering it is what makes the next
+        // turn send the thread's mode again instead of trusting a stale one.
+        // The thread record is not touched: the mode the user picked stands.
+        this.currentModeId = update.currentModeId;
+        turn.ctx.log('info', `acp: the agent switched to the session mode ${update.currentModeId}`);
+        break;
       default:
         // user_message_chunk, plan, plan_update, plan_removed,
-        // available_commands_update, current_mode_update, config_option_update,
-        // session_info_update and the compaction updates have no MessagePart in
-        // the contract, so they are dropped.
+        // available_commands_update, config_option_update, session_info_update
+        // and the compaction updates have no MessagePart in the contract, so
+        // they are dropped.
         break;
     }
   }
@@ -601,7 +687,11 @@ class AcpSession {
   }
 }
 
-/** What a session was started with. A turn that differs on any of it needs its own. */
+/**
+ * What a session was started with. A turn that differs on any of it needs its
+ * own. The permission mode is deliberately not in here: `session/set_mode`
+ * changes it in place, so a warm session survives the change.
+ */
 function sessionKey(ctx: TurnContext): string {
   return JSON.stringify({
     model: ctx.thread.model,
@@ -626,6 +716,26 @@ function selectChoices(option: SessionConfigOption): { value: string; name: stri
 
 function selectValues(option: SessionConfigOption): string[] {
   return selectChoices(option).map((choice) => choice.value);
+}
+
+/** Mode ids are spelled every way there is: match without case, `_` or `-`. */
+function normalizeModeId(id: string): string {
+  return id.toLowerCase().replace(/[_-]/g, '');
+}
+
+/** The agent's own id for a Boite permission mode, or null when it offers none. */
+function matchMode(wanted: PermissionMode, modes: SessionMode[]): string | null {
+  const offered = new Map<string, string>();
+  for (const mode of modes) {
+    const key = normalizeModeId(mode.id);
+    // The agent's order decides: the first spelling it lists is the one sent.
+    if (!offered.has(key)) offered.set(key, mode.id);
+  }
+  for (const candidate of MODE_CANDIDATES[wanted]) {
+    const found = offered.get(normalizeModeId(candidate));
+    if (found !== undefined) return found;
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------------------

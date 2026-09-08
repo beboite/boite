@@ -59,7 +59,7 @@ describe('providers', () => {
     const { loaded, rejected } = await client.call('providers.list', {});
     expect(rejected).toEqual([]);
     const ids = loaded.map((provider) => provider.id).sort();
-    expect(ids).toEqual(['claude', 'echo', 'opencode']);
+    expect(ids).toEqual(['claude', 'echo', 'gemini', 'opencode']);
 
     const echo = loaded.find((provider) => provider.id === 'echo');
     expect(echo?.source).toBe('shipped');
@@ -122,6 +122,46 @@ describe('providers', () => {
     }
     expect(candidate?.value).toContain(`opencode-ai${sep}bin`);
     expect(candidate?.value.toLowerCase()).toEndWith('opencode.exe');
+  });
+
+  test('the shipped gemini descriptor loads and is launched as node with the cli entry', async () => {
+    const client = await harness.connect();
+    const { loaded, rejected } = await client.call('providers.list', {});
+    expect(rejected).toEqual([]);
+
+    const gemini = loaded.find((provider) => provider.id === 'gemini');
+    expect(gemini?.source).toBe('shipped');
+    expect(gemini?.protocol).toBe('acp');
+    expect(gemini?.name).toBe('Gemini CLI');
+    expect(gemini?.models).toEqual([{ id: 'default', name: 'Gemini default', default: true }]);
+
+    const descriptor = harness.core.providers.require('gemini');
+    // The CLI keeps everything under one home of its own, session file included.
+    expect(descriptor.auth).toEqual({ kind: 'oauth-cli', session: ['.gemini/oauth_creds.json'] });
+    // No login block: the first `gemini` run logs in, outside Boite.
+    expect(descriptor.login).toBeUndefined();
+
+    const profile = descriptor.profiles[process.platform === 'win32' ? 'windows' : 'linux'];
+    expect(profile?.isolation).toEqual({ GEMINI_CLI_HOME: '{isolationDir}' });
+    const args = profile?.launch?.args ?? [];
+    expect(args.at(-1)).toBe('--experimental-acp');
+    if (process.platform !== 'win32') {
+      expect(args).toEqual(['--experimental-acp']);
+      return;
+    }
+    // npm installs a `.cmd` shim Bun cannot spawn, so the entry is node plus the
+    // bundle's own js, and `{appdata}` has to be a real path by the time it runs.
+    expect(profile?.executable[0]).toEqual({ kind: 'path', value: 'node' });
+    const entry = args[0] ?? '';
+    expect(entry).not.toContain('{appdata}');
+    expect(entry.startsWith(process.env['APPDATA'] ?? '')).toBe(true);
+    expect(entry).toEndWith('gemini.js');
+
+    if (gemini?.available !== true) {
+      console.log('gemini cli is not installed here, the executable assertion is skipped');
+      return;
+    }
+    expect(gemini.executable?.toLowerCase()).toContain('node');
   });
 
   test('the shipped models carry the reasoning effort scale they are meant to', async () => {

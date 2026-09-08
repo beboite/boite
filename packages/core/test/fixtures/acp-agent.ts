@@ -4,16 +4,29 @@
  * directives, so the ACP client driver is proved without a real agent.
  *
  * Run as `bun <this file>`. `ACP_FAKE_LOG` names a file the agent appends what
- * a test needs to assert on: `initialize`, `loaded:<sessionId>` and
- * `set_config_option ...`. One `initialize` line per process, so a test can
- * count the agent processes a probe cache did or did not save.
+ * a test needs to assert on: `initialize`, `loaded:<sessionId>`,
+ * `set_config_option ...` and `set_mode ...`. One `initialize` line per
+ * process, so a test can count the agent processes a probe cache did or did not
+ * save.
+ *
+ * `ACP_FAKE_NO_MODES=1` makes it answer no `modes` at all, which is the agent
+ * the mode mapping has to survive without sending anything.
  */
 import { appendFileSync } from 'node:fs';
 import { Readable, Writable } from 'node:stream';
-import { agent, ndJsonStream, PROTOCOL_VERSION } from '@agentclientprotocol/sdk';
-import type { ContentBlock, SessionConfigOption, SessionUpdate, Usage } from '@agentclientprotocol/sdk';
+import { agent, ndJsonStream, PROTOCOL_VERSION, RequestError } from '@agentclientprotocol/sdk';
+import type {
+  ContentBlock,
+  SessionConfigOption,
+  SessionMode,
+  SessionModeState,
+  SessionUpdate,
+  Usage,
+} from '@agentclientprotocol/sdk';
 
 const DIRECTIVE = /\[(tool|permission|thought|usage|slow|refuse|crash)\]/g;
+/** `[mode-switch <id>]`: the agent changes mode on its own before it answers. */
+const MODE_SWITCH = /\[mode-switch ([\w-]+)\]/g;
 const CHUNKS = 3;
 
 type Directive = 'tool' | 'permission' | 'thought' | 'usage' | 'slow' | 'refuse' | 'crash';
@@ -47,6 +60,25 @@ const configOptions: SessionConfigOption[] = [
   },
 ];
 
+/**
+ * Ids spelled the three ways real agents spell them: one that matches a Boite
+ * mode exactly, one in snake_case, and one that shares no letter with it.
+ */
+const MODES: SessionMode[] = [
+  { id: 'default', name: 'Default' },
+  { id: 'accept_edits', name: 'Accept edits' },
+  { id: 'yolo', name: 'YOLO' },
+  { id: 'plan', name: 'Plan' },
+];
+
+/** An agent with no modes at all, so the driver's warning path has a subject. */
+const noModes = process.env['ACP_FAKE_NO_MODES'] === '1';
+let currentModeId = 'default';
+
+function modeState(): SessionModeState | undefined {
+  return noModes ? undefined : { currentModeId, availableModes: MODES };
+}
+
 /** The sessions this process handed out, so `session/load` can recognise one. */
 const known = new Set<string>();
 const cancels = new Map<string, () => void>();
@@ -73,7 +105,12 @@ function directivesOf(text: string): Directive[] {
 }
 
 function plainOf(text: string): string {
-  return text.replace(DIRECTIVE, '');
+  return text.replace(DIRECTIVE, '').replace(MODE_SWITCH, '');
+}
+
+function modeSwitchIn(text: string): string | null {
+  MODE_SWITCH.lastIndex = 0;
+  return MODE_SWITCH.exec(text)?.[1] ?? null;
 }
 
 function chunksOf(text: string): string[] {
@@ -95,16 +132,27 @@ const app = agent({ name: 'acp-fake' })
   .onRequest('session/new', () => {
     const sessionId = `acp-fake-${Math.random().toString(16).slice(2, 10)}`;
     known.add(sessionId);
-    return { sessionId, configOptions };
+    return { sessionId, configOptions, modes: modeState() };
   })
   .onRequest('session/load', ({ params }) => {
     known.add(params.sessionId);
     log(`loaded:${params.sessionId}`);
-    return {};
+    return { modes: modeState() };
   })
   .onRequest('session/set_config_option', ({ params }) => {
     log(`set_config_option ${params.configId} ${String(params.value)}`);
     return { configOptions };
+  })
+  .onRequest('session/set_mode', ({ params }) => {
+    // A mode nobody listed is refused, so a wrong mapping fails loudly instead
+    // of passing as a call that went out.
+    if (!MODES.some((mode) => mode.id === params.modeId)) {
+      log(`set_mode:refused ${params.modeId}`);
+      throw RequestError.invalidParams({ modeId: params.modeId }, `unknown mode ${params.modeId}`);
+    }
+    currentModeId = params.modeId;
+    log(`set_mode ${params.modeId}`);
+    return {};
   })
   .onNotification('session/cancel', ({ params }) => {
     cancels.get(params.sessionId)?.();
@@ -115,6 +163,13 @@ const app = agent({ name: 'acp-fake' })
     const send = (update: SessionUpdate): Promise<void> => client.notify('session/update', { sessionId, update });
     const say = (chunk: string): Promise<void> =>
       send({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: chunk } });
+
+    // The agent switching on its own, before anything else it says.
+    const switched = modeSwitchIn(text);
+    if (switched !== null) {
+      currentModeId = switched;
+      await send({ sessionUpdate: 'current_mode_update', currentModeId: switched });
+    }
 
     const directives = directivesOf(text);
     // A real agent reasons before it answers, so the thought chunks go first.
