@@ -14,10 +14,154 @@
     messages
   }: { store: Store; threadId: string; messages: Message[] } = $props();
 
+  /** Under this many messages the list renders whole: a window would cost more than it saves. */
+  const WINDOW_FROM = 60;
+  /** Messages kept rendered above and below the viewport, so a scroll finds them already there. */
+  const OVERSCAN = 8;
+  /** What a message's slot is worth before it has been measured. */
+  const ESTIMATE = 80;
+  /** The column's flex gap, which belongs to the slot a message takes. */
+  const GAP = 18;
+
   let viewport = $state<HTMLDivElement | undefined>(undefined);
   let pinned = $state(true);
   let behind = $state(false);
   let shown = '';
+
+  /** Measured slot heights by message id. What is not in here is worth ESTIMATE. */
+  const heights = new Map<string, number>();
+  /** Bumped by every measurement that moved a height, so the window recomputes on real numbers. */
+  let measured = $state(0);
+  /** Ids that already played the rise, so a message re-entering the window stays still. */
+  const risen = new Set<string>();
+  /** One observer for the viewport's height and for every rendered message. */
+  let boxes: ResizeObserver | undefined;
+
+  let scrollTop = $state(0);
+  let viewHeight = $state(0);
+
+  const windowed = $derived(messages.length > WINDOW_FROM);
+
+  function slotAt(list: Message[], index: number): number {
+    const message = list[index];
+    if (!message) return ESTIMATE;
+    return heights.get(message.id) ?? ESTIMATE;
+  }
+
+  /**
+   * The slice of messages that meets the viewport, the overscan added, and the
+   * two heights the spacers carry for everything left out. While pinned the
+   * window hangs off the end of the list instead of off `scrollTop`, so the
+   * bottom is right on the first frame rather than after a measurement.
+   */
+  const view = $derived.by(() => {
+    void measured;
+    const list = messages;
+    if (!windowed) {
+      return { start: 0, end: list.length, first: 0, above: 0, below: 0 };
+    }
+
+    let first: number;
+    let last: number;
+    if (pinned) {
+      last = list.length;
+      first = list.length;
+      let filled = 0;
+      while (first > 0 && filled < viewHeight) {
+        first -= 1;
+        filled += slotAt(list, first);
+      }
+    } else {
+      let offset = 0;
+      first = 0;
+      while (first < list.length && offset + slotAt(list, first) <= scrollTop) {
+        offset += slotAt(list, first);
+        first += 1;
+      }
+      last = first;
+      let bottom = offset;
+      while (last < list.length && bottom < scrollTop + viewHeight) {
+        bottom += slotAt(list, last);
+        last += 1;
+      }
+    }
+
+    const start = Math.max(0, first - OVERSCAN);
+    const end = Math.min(list.length, last + OVERSCAN);
+    let above = 0;
+    for (let i = 0; i < start; i += 1) above += slotAt(list, i);
+    let below = 0;
+    for (let i = end; i < list.length; i += 1) below += slotAt(list, i);
+    return { start, end, first, above, below };
+  });
+
+  const rendered = $derived(messages.slice(view.start, view.end));
+
+  function indexOf(id: string): number {
+    return messages.findIndex((message) => message.id === id);
+  }
+
+  /**
+   * A rendered message's real height replaces its estimate. One that sits above
+   * what the user is reading would push the text down as it lands, so the same
+   * delta goes back into `scrollTop` and the viewport does not move.
+   */
+  function onMeasured(entries: ResizeObserverEntry[]): void {
+    const box = viewport;
+    let shift = 0;
+    let moved = false;
+    for (const entry of entries) {
+      const node = entry.target as HTMLElement;
+      if (node === box) {
+        viewHeight = node.clientHeight;
+        continue;
+      }
+      const id = node.dataset['mid'];
+      if (!id) continue;
+      const next = Math.round(node.offsetHeight) + GAP;
+      const previous = heights.get(id) ?? ESTIMATE;
+      if (previous === next) continue;
+      heights.set(id, next);
+      moved = true;
+      if (indexOf(id) < view.first) shift += next - previous;
+    }
+    if (!moved) return;
+    measured += 1;
+    if (box && shift !== 0 && !pinned) box.scrollTop += shift;
+  }
+
+  /**
+   * Every rendered message reports its height here and says which id it is. The
+   * rise plays once per message: a second element for the same id, minted when
+   * the window scrolled back over it, opens with the animation off.
+   */
+  function track(node: HTMLElement, id: string): { destroy(): void } {
+    node.dataset['mid'] = id;
+    if (risen.has(id)) node.style.animation = 'none';
+    else risen.add(id);
+    boxes?.observe(node);
+    return {
+      destroy() {
+        boxes?.unobserve(node);
+      }
+    };
+  }
+
+  $effect(() => {
+    const box = viewport;
+    if (!box) return;
+    viewHeight = box.clientHeight;
+    scrollTop = box.scrollTop;
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(onMeasured);
+    boxes = observer;
+    observer.observe(box);
+    for (const node of box.querySelectorAll<HTMLElement>('[data-mid]')) observer.observe(node);
+    return () => {
+      observer.disconnect();
+      boxes = undefined;
+    };
+  });
 
   /** Reads everything that grows, so the effect below runs on every delta. */
   function growth(list: Message[]): number {
@@ -41,6 +185,8 @@
   function onscroll() {
     const box = viewport;
     if (!box) return;
+    scrollTop = box.scrollTop;
+    viewHeight = box.clientHeight;
     pinned = atBottom(box);
     if (pinned) behind = false;
   }
@@ -48,9 +194,10 @@
   function jump() {
     const box = viewport;
     if (!box) return;
-    box.scrollTop = box.scrollHeight;
     pinned = true;
     behind = false;
+    box.scrollTop = box.scrollHeight;
+    scrollTop = box.scrollTop;
   }
 
   $effect(() => {
@@ -61,11 +208,21 @@
     shown = threadId;
     if (opened || pinned) {
       box.scrollTop = box.scrollHeight;
+      scrollTop = box.scrollTop;
       pinned = true;
       behind = false;
     } else {
       behind = true;
     }
+  });
+
+  /** The window moving under a pinned viewport changes the spacers: take the bottom again. */
+  $effect(() => {
+    void view;
+    if (!pinned) return;
+    const box = viewport;
+    if (!box) return;
+    box.scrollTop = box.scrollHeight;
   });
 
   function lastTextIndex(message: Message): number {
@@ -85,8 +242,16 @@
 <div class="timeline-wrap">
   <div class="timeline" bind:this={viewport} {onscroll} data-testid="timeline">
     <div class="column">
-      {#each messages as message (message.id)}
-        <article class="message {message.role}" data-testid="message" data-role={message.role}>
+      {#if view.above > 0}
+        <div class="spacer" data-testid="timeline-above" style="height: {view.above}px"></div>
+      {/if}
+      {#each rendered as message (message.id)}
+        <article
+          use:track={message.id}
+          class="message {message.role}"
+          data-testid="message"
+          data-role={message.role}
+        >
           {#if message.role === 'user'}
             <div class="bubble">
               {#each message.parts as part, index (index)}
@@ -136,6 +301,9 @@
           {/if}
         </article>
       {/each}
+      {#if view.below > 0}
+        <div class="spacer" data-testid="timeline-below" style="height: {view.below}px"></div>
+      {/if}
     </div>
   </div>
 
@@ -173,13 +341,15 @@
     margin: 0 auto;
   }
 
+  /* What a long thread's unrendered messages weigh, above and below the window. */
+  .spacer {
+    flex: 0 0 auto;
+  }
+
   .message {
     display: flex;
     flex-direction: column;
     animation: rise var(--dur-3) var(--ease-out-quint);
-    /* Off-screen messages of a long thread skip layout and paint until scrolled to. */
-    content-visibility: auto;
-    contain-intrinsic-size: auto 80px;
   }
 
   .message.user {

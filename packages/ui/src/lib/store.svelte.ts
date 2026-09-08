@@ -499,7 +499,8 @@ export class Store {
       const params = new URLSearchParams(window.location.search);
       if (params.get('fake') === '1') {
         const { FakeClient } = await import('./fake-client');
-        this.attach(new FakeClient());
+        // `&long=1` adds the four-hundred-message thread the windowed list is looked at on.
+        this.attach(new FakeClient({ long: params.get('long') === '1' }));
       } else {
         const endpoint = await resolveEndpoint();
         if (!endpoint) {

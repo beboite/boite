@@ -32,6 +32,8 @@ import { RpcFailure, type ClientState, type EventHandler, type ObservableClient 
 export interface FakeClientOptions {
   /** Milliseconds between two streamed chunks. Tests pass 0. */
   delayMs?: number;
+  /** Seeds one thread of 400 messages, what `?fake=1&long=1` opens the list on. */
+  long?: boolean;
 }
 
 const T0 = Date.UTC(2026, 8, 5, 9, 0, 0);
@@ -99,6 +101,42 @@ const DOC_TEXT = [
 ].join('\n');
 const IMAGE_BASE64 =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+
+/** The questions the four-hundred-message thread repeats, so heights vary down the list. */
+const LONG_ASKS = [
+  'Where does the scheduler decide a turn may start?',
+  'Read the descriptor loader and tell me what it refuses',
+  'Why does the shell start its own core?',
+  'What does the Job Object give us that a pid list does not?',
+  'Show me the part of the journal that survives a crash'
+];
+
+/** The answers beside them, of deliberately uneven length. */
+const LONG_ANSWERS = [
+  'In `packages/core/src/scheduler.ts`: a turn leaves the queue when both caps hold, the global one and the one on its account.',
+  [
+    'The loader refuses four things, each with the file, the field and what was expected:',
+    '',
+    '- a `protocol` it does not know',
+    '- a `roots` entry that resolves outside the descriptor directory',
+    '- an `env` key it would have to invent a value for',
+    '- a `login` block on a provider whose account is the default one',
+    '',
+    'Nothing is dropped in silence, which is the rule the whole module is written to.'
+  ].join('\n'),
+  'Because the window is a client. The core is the host, and the shell owns it through a `KILL_ON_JOB_CLOSE` job so closing the window never leaves an agent running.',
+  'Exact start and exit events for every process a thread launched, grandchildren included, plus the CPU and the peak memory the kernel already counted. A pid list gives you a guess and a race.',
+  [
+    'The journal is SQLite in WAL mode, so the last committed write is what a restart reads:',
+    '',
+    '```ts',
+    "db.run('PRAGMA journal_mode = WAL');",
+    "db.run('PRAGMA synchronous = NORMAL');",
+    '```',
+    '',
+    'A turn that was running when the core died comes back as `stopped`, never as `running`.'
+  ].join('\n')
+];
 
 /** How long the fake agent takes to answer a probe, so the picker shows it reading. */
 const PROBE_MS = 150;
@@ -181,9 +219,11 @@ export class FakeClient implements ObservableClient {
   #logins = new Set<string>();
   #seq = 0;
   #delayMs: number;
+  #long: boolean;
 
   constructor(options: FakeClientOptions = {}) {
     this.#delayMs = options.delayMs ?? 18;
+    this.#long = options.long ?? false;
     this.#settings = {
       maxConcurrentTurns: 6,
       perAccountConcurrency: 2,
@@ -1683,6 +1723,10 @@ export class FakeClient implements ObservableClient {
     };
 
     for (const thread of [finished, running, waiting, unread]) this.#threads.set(thread.id, thread);
+    if (this.#long) {
+      const long = this.#longThread();
+      this.#threads.set(long.id, long);
+    }
 
     const seededRequest: PermissionRequest = {
       id: 'req-seed-1',
@@ -1811,5 +1855,84 @@ export class FakeClient implements ObservableClient {
     };
 
     this.#seq = 100;
+  }
+
+  /**
+   * Four hundred messages of uneven height in one thread: what the windowed
+   * list is looked at on, behind `?fake=1&long=1`.
+   */
+  #longThread(): Thread {
+    const messages: Message[] = [];
+    for (let index = 0; index < 400; index += 1) {
+      const at = T0 + 400_000 + index * 1000;
+      messages.push(
+        index % 2 === 0
+          ? {
+              id: `m-long-${index}`,
+              threadId: 't-long',
+              turnId: 'turn-long',
+              role: 'user',
+              parts: [
+                {
+                  type: 'text',
+                  text: `${LONG_ASKS[(index / 2) % LONG_ASKS.length] ?? ''} (${index})`
+                }
+              ],
+              state: 'complete',
+              createdAt: at
+            }
+          : {
+              id: `m-long-${index}`,
+              threadId: 't-long',
+              turnId: 'turn-long',
+              role: 'assistant',
+              parts: [
+                {
+                  type: 'text',
+                  text: LONG_ANSWERS[((index - 1) / 2) % LONG_ANSWERS.length] ?? ''
+                }
+              ],
+              state: 'complete',
+              createdAt: at
+            }
+      );
+    }
+    return {
+      id: 't-long',
+      projectId: 'p-boite',
+      providerId: 'echo',
+      accountId: 'a-echo',
+      model: 'echo-1',
+      effort: null,
+      permissionMode: 'default',
+      archived: false,
+      title: 'Four hundred messages',
+      cwd: 'D:\\Dev\\Collab\\boite',
+      status: 'idle',
+      unread: false,
+      sessionId: 'sess-long',
+      load: null,
+      createdAt: T0 + 400_000,
+      updatedAt: T0 + 800_000,
+      turns: [
+        {
+          id: 'turn-long',
+          threadId: 't-long',
+          status: 'done',
+          queuedAt: T0 + 400_000,
+          startedAt: T0 + 400_000,
+          finishedAt: T0 + 800_000,
+          usage: {
+            inputTokens: 41_200,
+            outputTokens: 18_400,
+            cacheReadTokens: 210_000,
+            cacheWriteTokens: 12_000,
+            costUsdEquivalent: 1.24
+          },
+          error: null
+        }
+      ],
+      messages
+    };
   }
 }
