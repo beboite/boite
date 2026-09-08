@@ -70,6 +70,9 @@ function chunkText(text: string, pieces: number): string[] {
 
 const SPAWN_MARKER = /\[spawn:([^\]]+)\]/;
 
+/** What `[tool-stream]` types one piece at a time before the parsed input lands. */
+const STREAMED_TOOL_INPUT = '{"command":"echo streamed","description":"a streamed input"}';
+
 /** How long the fake agent takes to answer a probe, so the picker shows it reading. */
 const PROBE_MS = 150;
 
@@ -666,6 +669,9 @@ export class FakeClient implements ObservableClient {
     if (!record.cancelled && prompt.includes('[permission]')) {
       await this.#askPermission(thread, turn, message);
     }
+    if (!record.cancelled && prompt.includes('[tool-stream]')) {
+      await this.#streamToolInput(thread, message);
+    }
     if (!record.cancelled && prompt.includes('[tool]')) {
       await this.#runTool(thread, message);
     }
@@ -757,6 +763,62 @@ export class FakeClient implements ObservableClient {
       part: { type: 'permission', requestId: request.id, toolName: request.toolName, decision }
     });
     this.#emit('permission.resolved', { requestId: request.id, threadId: thread.id, decision });
+  }
+
+  /**
+   * A tool whose input the model is still typing: the part opens with no input
+   * and an empty `inputText`, the JSON arrives as deltas, then the parsed input
+   * replaces it. The same shape the Claude driver's `input_json_delta` produces.
+   */
+  async #streamToolInput(thread: Thread, message: Message): Promise<void> {
+    const partIndex = message.parts.length;
+    const toolId = `tool-${++this.#seq}`;
+    const opening: MessagePart = {
+      type: 'tool',
+      toolId,
+      name: 'Bash',
+      input: {},
+      inputText: '',
+      output: null,
+      status: 'running'
+    };
+    message.parts.push(opening);
+    this.#emitToThread(thread.id, 'message.part', {
+      threadId: thread.id,
+      messageId: message.id,
+      partIndex,
+      part: structuredClone(opening)
+    });
+
+    for (const piece of chunkText(STREAMED_TOOL_INPUT, 4)) {
+      await this.#pause();
+      const part = message.parts[partIndex];
+      if (part && part.type === 'tool') part.inputText = (part.inputText ?? '') + piece;
+      this.#emitToThread(thread.id, 'message.delta', {
+        threadId: thread.id,
+        messageId: message.id,
+        partIndex,
+        text: piece
+      });
+    }
+
+    await this.#pause();
+    const done: MessagePart = {
+      type: 'tool',
+      toolId,
+      name: 'Bash',
+      input: JSON.parse(STREAMED_TOOL_INPUT) as unknown,
+      inputText: null,
+      output: 'streamed',
+      status: 'done'
+    };
+    message.parts[partIndex] = done;
+    this.#emitToThread(thread.id, 'message.part', {
+      threadId: thread.id,
+      messageId: message.id,
+      partIndex,
+      part: structuredClone(done)
+    });
   }
 
   async #runTool(thread: Thread, message: Message): Promise<void> {

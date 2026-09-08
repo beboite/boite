@@ -325,6 +325,82 @@ describe('claude driver', () => {
     ]);
   });
 
+  test('a tool input streams as partial json, then the assistant frame parses it', async () => {
+    const client = await harness.connect();
+    const threadId = await claudeThread(client);
+    await client.call('threads.subscribe', { threadId });
+
+    const parts: { partIndex: number; part: MessagePart }[] = [];
+    const deltas: { partIndex: number; text: string }[] = [];
+    client.on('message.part', (event) => {
+      if (event.threadId === threadId) parts.push({ partIndex: event.partIndex, part: event.part });
+    });
+    client.on('message.delta', (event) => {
+      if (event.threadId === threadId) deltas.push({ partIndex: event.partIndex, text: event.text });
+    });
+
+    scripted((fake) => {
+      fake.emit(init('sess-json'));
+      fake.emit(streamEvent('sess-json', { type: 'message_start', message: { id: 'msg_1' } }));
+      fake.emit(
+        streamEvent('sess-json', {
+          type: 'content_block_start',
+          index: 0,
+          content_block: { type: 'tool_use', id: 'toolu_json', name: 'Bash', input: {} },
+        }),
+      );
+      fake.emit(
+        streamEvent('sess-json', {
+          type: 'content_block_delta',
+          index: 0,
+          delta: { type: 'input_json_delta', partial_json: '{"command":"ech' },
+        }),
+      );
+      fake.emit(
+        streamEvent('sess-json', {
+          type: 'content_block_delta',
+          index: 0,
+          delta: { type: 'input_json_delta', partial_json: 'o hi"}' },
+        }),
+      );
+      fake.emit(streamEvent('sess-json', { type: 'content_block_stop', index: 0 }));
+      fake.emit(
+        assistant('sess-json', [{ type: 'tool_use', id: 'toolu_json', name: 'Bash', input: { command: 'echo hi' } }]),
+      );
+      fake.emit(toolResult('sess-json', 'toolu_json', 'hi'));
+      fake.emit(success('sess-json'));
+      fake.end();
+    });
+
+    expect(await runTurn(client, threadId, 'ping')).toBe('done');
+
+    // The block opens with no input and an empty streamed text.
+    const opened = parts[0];
+    expect(opened?.part).toMatchObject({ type: 'tool', toolId: 'toolu_json', input: {}, inputText: '' });
+    const at = opened?.partIndex ?? -1;
+
+    // Every delta lands on that part, and they concatenate to the whole json.
+    expect(deltas.filter((delta) => delta.partIndex === at).map((delta) => delta.text).join('')).toBe(
+      '{"command":"echo hi"}',
+    );
+
+    // The assistant frame replaces the streamed text with the parsed input.
+    const parsed = parts.find((entry) => entry.part.type === 'tool' && entry.part.inputText === null);
+    expect(parsed?.part).toMatchObject({ type: 'tool', input: { command: 'echo hi' }, inputText: null });
+
+    const thread = await client.call('threads.get', { threadId });
+    const tools = (thread.messages.at(-1)?.parts ?? []).filter((part) => part.type === 'tool');
+    expect(tools).toHaveLength(1);
+    expect(tools[0]).toMatchObject({
+      toolId: 'toolu_json',
+      name: 'Bash',
+      input: { command: 'echo hi' },
+      inputText: null,
+      output: 'hi',
+      status: 'done',
+    });
+  });
+
   test('canUseTool routes to the permission gate and answers the CLI', async () => {
     const client = await harness.connect();
     const threadId = await claudeThread(client);

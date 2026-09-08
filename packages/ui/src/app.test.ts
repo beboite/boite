@@ -542,3 +542,52 @@ test('a ctrl-click on an external link is left alone', async () => {
     window.open = original;
   }
 });
+
+const STREAMED_TOOL_INPUT = '{"command":"echo streamed","description":"a streamed input"}';
+
+test('a tool card shows the input as the model types it, then switches to the parsed one', async () => {
+  await mountOnFake();
+
+  const input = query<HTMLTextAreaElement>('[data-testid=composer-input]');
+  input.value = 'call [tool-stream] please';
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  await waitFor(() => !query<HTMLButtonElement>('[data-testid=composer-send]').disabled);
+  query<HTMLButtonElement>('[data-testid=composer-send]').click();
+
+  // The card opens itself while the json arrives, so sampling the pre catches
+  // the growth without racing a click on the toggle. The thread already holds
+  // seeded tool cards: only the streaming one is this test's.
+  await waitFor(() => document.querySelector('[data-testid=tool-card][data-streaming=true]') !== null);
+  const card = query('[data-testid=tool-card][data-streaming=true]');
+  const typed: string[] = [];
+  const lines: string[] = [];
+  while (card.dataset.streaming === 'true') {
+    typed.push(card.querySelector('[data-testid=tool-input]')?.textContent ?? '');
+    lines.push(card.querySelector('.line')?.textContent ?? '');
+    await new Promise((resolve) => setTimeout(resolve, 2));
+  }
+
+  // Every sample is a prefix of the json, and at least two of them differ: that
+  // is the input growing rather than landing whole.
+  const partials = typed.filter((text) => text.length > 0);
+  expect(partials.length).toBeGreaterThan(0);
+  for (const text of partials) expect(STREAMED_TOOL_INPUT.startsWith(text)).toBe(true);
+  expect(new Set(typed).size).toBeGreaterThan(1);
+  expect(partials.at(-1)).toBe(STREAMED_TOOL_INPUT);
+
+  // The summary reads the half-typed value, never the raw json.
+  const summaries = lines.filter((text) => text.length > 0);
+  expect(summaries.length).toBeGreaterThan(0);
+  for (const text of summaries) expect('echo streamed'.startsWith(text)).toBe(true);
+
+  // Once the parsed input lands the card folds back to its one line.
+  await waitFor(() => card.dataset.streaming === 'false');
+  expect(card.querySelector('[data-testid=tool-input]')).toBeNull();
+  expect(card.querySelector('.line')?.textContent).toBe('echo streamed');
+
+  card.querySelector<HTMLButtonElement>('[data-testid=tool-toggle]')?.click();
+  await waitFor(() => card.querySelector('[data-testid=tool-input]') !== null);
+  const shown = card.querySelector('[data-testid=tool-input]')?.textContent ?? '';
+  expect(shown).toContain('"command": "echo streamed"');
+  expect(shown).not.toBe(STREAMED_TOOL_INPUT);
+});

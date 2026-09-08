@@ -239,6 +239,8 @@ export type MessagePart =
       toolId: string;
       name: string;
       input: unknown;
+      /** The input's JSON as the model streams it, before `input` is complete. Absent or null once `input` is final. */
+      inputText?: string | null;
       output: string | null;
       status: ToolStatus;
     }

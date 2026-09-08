@@ -22,10 +22,12 @@
   /** Reads everything that grows, so the effect below runs on every delta. */
   function growth(list: Message[]): number {
     const last = list.at(-1);
-    const text = (last?.parts ?? []).reduce(
-      (total, part) => total + (part.type === 'text' || part.type === 'thinking' ? part.text.length : 1),
-      0
-    );
+    const text = (last?.parts ?? []).reduce((total, part) => {
+      if (part.type === 'text' || part.type === 'thinking') return total + part.text.length;
+      // A tool input grows the card too while the model types it.
+      if (part.type === 'tool') return total + 1 + (part.inputText?.length ?? 0);
+      return total + 1;
+    }, 0);
     return list.length + text;
   }
 
@@ -102,7 +104,13 @@
                 {:else if part.type === 'thinking'}
                   <ThinkingPart text={part.text} live={index === thinkingAt} />
                 {:else if part.type === 'tool'}
-                  <ToolCard name={part.name} input={part.input} output={part.output} status={part.status} />
+                  <ToolCard
+                    name={part.name}
+                    input={part.input}
+                    inputText={part.inputText}
+                    output={part.output}
+                    status={part.status}
+                  />
                 {:else if part.type === 'permission'}
                   <PermissionCard
                     toolName={part.toolName}

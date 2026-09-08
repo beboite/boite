@@ -14,6 +14,9 @@ const ROOT = join(import.meta.dir, '..', '..');
 const UI_INDEX = join(ROOT, 'packages', 'ui', 'dist', 'index.html');
 const SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui.png');
 const RELOAD_SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui-permission-reload.png');
+const TOOL_SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui-tool-input.png');
+/** What the echo provider's `[tool-stream]` directive types, one piece at a time. */
+const STREAMED_TOOL_INPUT = '{"command":"echo streamed","description":"a streamed input"}';
 
 let core: RunningCore;
 let page: BrowserPage;
@@ -111,6 +114,53 @@ test(
 
     await page.screenshot(SCREENSHOT);
     expect(existsSync(SCREENSHOT)).toBe(true);
+  },
+  TIMEOUT,
+);
+
+test(
+  'a tool input is shown growing in the card, then replaced by the parsed one',
+  async () => {
+    // The card is only open while the json arrives, so the page samples it on a
+    // timer of its own: polling from here would race a window of half a second.
+    await page.evaluate<null>(
+      `(() => {
+        window.__toolSamples = [];
+        window.__toolTimer = setInterval(() => {
+          const card = document.querySelector('${testid('tool-card')}[data-streaming=true]');
+          const pre = card?.querySelector('${testid('tool-input')}');
+          if (pre) window.__toolSamples.push(pre.textContent);
+        }, 10);
+        return null;
+      })()`,
+    );
+
+    await page.type(testid('composer-input'), 'now [tool-stream] please');
+    await clickWhenEnabled(testid('composer-send'));
+    await page.waitFor(`document.querySelector('${testid('tool-card')}')`, 30_000);
+    await page.waitFor(`document.querySelector('${testid('thread-status')}').dataset.status === 'idle'`, 30_000);
+    await page.evaluate<null>(`(() => { clearInterval(window.__toolTimer); return null; })()`);
+
+    const samples = await page.evaluate<string[]>('window.__toolSamples');
+    expect(samples.length).toBeGreaterThan(0);
+    for (const text of samples) expect(STREAMED_TOOL_INPUT.startsWith(text)).toBe(true);
+    // More than one distinct value is the whole point: it grew, it did not land whole.
+    expect(new Set(samples).size).toBeGreaterThan(1);
+    expect(samples.at(-1)).toBe(STREAMED_TOOL_INPUT);
+
+    // The parsed input took over and the card folded back to its one line.
+    expect(await page.evaluate<string>(`document.querySelector('${testid('tool-card')}').dataset.streaming`)).toBe(
+      'false',
+    );
+    expect(await page.evaluate<string>(`document.querySelector('${testid('tool-card')} .line').textContent`)).toBe(
+      'echo streamed',
+    );
+    await page.click(testid('tool-toggle'));
+    await page.waitFor(`document.querySelector('${testid('tool-input')}')`);
+    expect(await page.text(testid('tool-input'))).toContain('"command": "echo streamed"');
+
+    await page.screenshot(TOOL_SCREENSHOT);
+    expect(existsSync(TOOL_SCREENSHOT)).toBe(true);
   },
   TIMEOUT,
 );

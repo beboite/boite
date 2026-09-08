@@ -56,13 +56,15 @@ interface StreamEvent {
   index?: number;
   message?: { id?: string };
   content_block?: ContentBlock;
-  delta?: { type?: string; text?: string; thinking?: string };
+  delta?: { type?: string; text?: string; thinking?: string; partial_json?: string };
 }
 
 interface ToolEntry {
   index: number;
   name: string;
   input: unknown;
+  /** The JSON of `input` while the model types it; null once the parsed input has landed. */
+  inputText: string | null;
   output: string | null;
   status: ToolStatus;
 }
@@ -125,6 +127,8 @@ class ClaudeTurn {
   private readonly tools = new Map<string, ToolEntry>();
   private readonly textBlocks = new Map<number, number>();
   private readonly thinkingBlocks = new Map<number, number>();
+  /** Block index to tool id, so an `input_json_delta` reaches the part its block opened. */
+  private readonly toolBlocks = new Map<number, string>();
   private readonly streamedText = new Map<string, string>();
   private readonly streamedThinking = new Map<string, string>();
 
@@ -198,6 +202,7 @@ class ClaudeTurn {
         this.apiMessageId = event.message?.id ?? '';
         this.textBlocks.clear();
         this.thinkingBlocks.clear();
+        this.toolBlocks.clear();
         break;
       case 'content_block_start': {
         const block = event.content_block;
@@ -206,7 +211,10 @@ class ClaudeTurn {
         else if (block.type === 'thinking' && event.index !== undefined) {
           this.thinkingBlocks.set(event.index, this.openThinking());
         } else if (block.type === 'tool_use' && typeof block.id === 'string') {
-          this.upsertTool(block.id, block.name ?? 'tool', block.input ?? {});
+          // The input arrives as `input_json_delta` after this: an empty object now,
+          // and an empty `inputText` the deltas grow until the parsed input lands.
+          if (event.index !== undefined) this.toolBlocks.set(event.index, block.id);
+          this.upsertTool(block.id, block.name ?? 'tool', block.input ?? {}, '');
         }
         // `redacted_thinking` carries no readable text: nothing to show.
         break;
@@ -221,6 +229,16 @@ class ClaudeTurn {
           if (event.index !== undefined) this.thinkingBlocks.set(event.index, at);
           this.ctx.emit.delta(this.message(), at, thinking);
           this.streamedThinking.set(this.apiMessageId, (this.streamedThinking.get(this.apiMessageId) ?? '') + thinking);
+          break;
+        }
+        if (event.delta?.type === 'input_json_delta') {
+          const partial = event.delta.partial_json ?? '';
+          if (partial.length === 0 || event.index === undefined) break;
+          const toolId = this.toolBlocks.get(event.index);
+          const entry = toolId === undefined ? undefined : this.tools.get(toolId);
+          if (entry === undefined) break;
+          entry.inputText = (entry.inputText ?? '') + partial;
+          this.ctx.emit.delta(this.message(), entry.index, partial);
           break;
         }
         if (event.delta?.type !== 'text_delta') break;
@@ -319,10 +337,15 @@ class ClaudeTurn {
     return index;
   }
 
-  upsertTool(toolId: string, name: string, input: unknown): void {
+  /**
+   * `inputText` is the streamed JSON: an empty string when the block opens, null
+   * once `input` is the parsed object, which is what makes the card switch over.
+   */
+  upsertTool(toolId: string, name: string, input: unknown, inputText: string | null = null): void {
     const entry = this.tools.get(toolId) ?? this.newTool(name);
     entry.name = name;
     entry.input = input;
+    entry.inputText = inputText;
     this.tools.set(toolId, entry);
     this.emitTool(toolId, entry);
   }
@@ -336,7 +359,7 @@ class ClaudeTurn {
   }
 
   private newTool(name: string): ToolEntry {
-    return { index: this.takeIndex(), name, input: {}, output: null, status: 'running' };
+    return { index: this.takeIndex(), name, input: {}, inputText: null, output: null, status: 'running' };
   }
 
   private emitTool(toolId: string, entry: ToolEntry): void {
@@ -345,6 +368,7 @@ class ClaudeTurn {
       toolId,
       name: entry.name,
       input: entry.input,
+      inputText: entry.inputText,
       output: entry.output,
       status: entry.status,
     });

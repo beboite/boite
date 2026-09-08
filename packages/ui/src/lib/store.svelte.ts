@@ -368,6 +368,8 @@ export class Store {
       const part = message.parts[partIndex];
       // A delta appends to whatever kind of text part sits there: text or thinking.
       if (part && (part.type === 'text' || part.type === 'thinking')) part.text += text;
+      // On a tool part it is the input's JSON, still being typed by the model.
+      else if (part && part.type === 'tool') part.inputText = (part.inputText ?? '') + text;
       else if (!part) message.parts[partIndex] = { type: 'text', text };
     });
 

@@ -102,6 +102,44 @@ describe('echo driver', () => {
     expect(tools[1]).toMatchObject({ name: 'fake_tool', status: 'done', output: 'ok' });
   });
 
+  test('a tool-stream directive types the input as deltas before the parsed one lands', async () => {
+    const client = await harness.connect();
+    const { threadId } = await echoThread(harness, client);
+    await client.call('threads.subscribe', { threadId });
+
+    const parts: { partIndex: number; part: MessagePart }[] = [];
+    const deltas: { partIndex: number; text: string }[] = [];
+    client.on('message.part', (event) => {
+      if (event.threadId === threadId) parts.push({ partIndex: event.partIndex, part: event.part });
+    });
+    client.on('message.delta', (event) => {
+      if (event.threadId === threadId) deltas.push({ partIndex: event.partIndex, text: event.text });
+    });
+
+    const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 10000);
+    await client.call('turns.start', { threadId, prompt: 'run [tool-stream] now' });
+    expect((await finished).status).toBe('done');
+
+    const json = '{"command":"echo streamed","description":"a streamed input"}';
+    const opened = parts.find((entry) => entry.part.type === 'tool');
+    expect(opened?.part).toMatchObject({ type: 'tool', name: 'Bash', input: {}, inputText: '' });
+    const at = opened?.partIndex ?? -1;
+
+    const typed = deltas.filter((delta) => delta.partIndex === at);
+    expect(typed.length).toBeGreaterThan(1);
+    expect(typed.map((delta) => delta.text).join('')).toBe(json);
+
+    const thread = await client.call('threads.get', { threadId });
+    expect(thread.messages[1]?.parts[at]).toMatchObject({
+      type: 'tool',
+      name: 'Bash',
+      input: JSON.parse(json) as Record<string, unknown>,
+      inputText: null,
+      output: 'streamed',
+      status: 'done',
+    });
+  });
+
   test('a permission directive waits for the answer, then continues', async () => {
     const client = await harness.connect();
     const { threadId } = await echoThread(harness, client);

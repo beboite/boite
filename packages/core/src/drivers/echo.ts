@@ -5,18 +5,27 @@ import type { Driver, TurnContext, TurnHandle, TurnResult } from './types.ts';
 const CHUNK_SIZE = 16;
 const CHUNK_DELAY_MS = 5;
 const TOOL_DELAY_MS = 5;
+/**
+ * Between two pieces of a streamed tool input. Long enough that a client, a test
+ * or a capture sees the JSON half-typed, short enough to keep the turn under a second.
+ */
+const TOOL_STREAM_DELAY_MS = 120;
+/** What `[tool-stream]` types, one piece at a time, before the parsed input lands. */
+const TOOL_STREAM_INPUT = '{"command":"echo streamed","description":"a streamed input"}';
+const TOOL_STREAM_PIECES = 4;
 const ERROR_MESSAGE = 'echo error requested';
 
 type Segment =
   | { kind: 'text'; text: string }
   | { kind: 'sleep'; ms: number }
   | { kind: 'tool' }
+  | { kind: 'tool-stream' }
   | { kind: 'permission' }
   | { kind: 'think' }
   | { kind: 'spawn'; command: string }
   | { kind: 'error' };
 
-const DIRECTIVE = /\[(?:sleep:\d+|tool|permission|think|spawn:[^\]]*|error)\]/g;
+const DIRECTIVE = /\[(?:sleep:\d+|tool-stream|tool|permission|think|spawn:[^\]]*|error)\]/g;
 
 export function parsePrompt(prompt: string): Segment[] {
   const segments: Segment[] = [];
@@ -27,6 +36,7 @@ export function parsePrompt(prompt: string): Segment[] {
     const body = match[0].slice(1, -1);
     if (body.startsWith('sleep:')) segments.push({ kind: 'sleep', ms: Number(body.slice('sleep:'.length)) });
     else if (body.startsWith('spawn:')) segments.push({ kind: 'spawn', command: body.slice('spawn:'.length) });
+    else if (body === 'tool-stream') segments.push({ kind: 'tool-stream' });
     else if (body === 'tool') segments.push({ kind: 'tool' });
     else if (body === 'permission') segments.push({ kind: 'permission' });
     else if (body === 'think') segments.push({ kind: 'think' });
@@ -63,6 +73,14 @@ function sleep(ms: number, state: RunState): Promise<void> {
     const timer = setTimeout(wake, ms);
     state.waiters.add(wake);
   });
+}
+
+/** `text` in `count` pieces, the last one taking the remainder. */
+function splitInto(text: string, count: number): string[] {
+  const size = Math.ceil(text.length / count);
+  const pieces: string[] = [];
+  for (let at = 0; at < text.length; at += size) pieces.push(text.slice(at, at + size));
+  return pieces;
 }
 
 function shellFor(command: string): { cmd: string; args: string[] } {
@@ -166,6 +184,50 @@ async function run(ctx: TurnContext, state: RunState): Promise<TurnResult> {
           name: 'fake_tool',
           input: { echo: true },
           output: 'ok',
+          status: 'done',
+        });
+        break;
+      }
+      case 'tool-stream': {
+        // The Claude driver's shape: the block opens with no input, the JSON
+        // arrives as deltas, then the parsed input replaces the streamed text.
+        const index = takeIndex();
+        const toolId = newId('tool_');
+        ctx.emit.part(messageId, index, {
+          type: 'tool',
+          toolId,
+          name: 'Bash',
+          input: {},
+          inputText: '',
+          output: null,
+          status: 'running',
+        });
+        for (const piece of splitInto(TOOL_STREAM_INPUT, TOOL_STREAM_PIECES)) {
+          if (state.stopped) break;
+          await sleep(TOOL_STREAM_DELAY_MS, state);
+          ctx.emit.delta(messageId, index, piece);
+        }
+        // The whole json is on screen for one cadence before the parsed input
+        // takes its place, the way a block stop precedes the assistant frame.
+        await sleep(TOOL_STREAM_DELAY_MS, state);
+        const parsed: unknown = JSON.parse(TOOL_STREAM_INPUT);
+        ctx.emit.part(messageId, index, {
+          type: 'tool',
+          toolId,
+          name: 'Bash',
+          input: parsed,
+          inputText: null,
+          output: null,
+          status: 'running',
+        });
+        await sleep(TOOL_DELAY_MS, state);
+        ctx.emit.part(messageId, index, {
+          type: 'tool',
+          toolId,
+          name: 'Bash',
+          input: parsed,
+          inputText: null,
+          output: 'streamed',
           status: 'done',
         });
         break;

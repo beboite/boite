@@ -7,13 +7,23 @@
   let {
     name,
     input,
+    inputText = null,
     output,
     status
-  }: { name: string; input: unknown; output: string | null; status: ToolStatus } = $props();
+  }: {
+    name: string;
+    input: unknown;
+    inputText?: string | null;
+    output: string | null;
+    status: ToolStatus;
+  } = $props();
 
   let open = $state(false);
 
   const SUMMARY_KEYS = ['file_path', 'path', 'command', 'pattern', 'query', 'url', 'notebook_path', 'prompt', 'description'];
+
+  /** The first `"key": "value` of a half-typed JSON object, so the line reads before it closes. */
+  const PARTIAL_VALUE = /"[^"]*"\s*:\s*"((?:[^"\\]|\\.)*)/;
 
   /** The one value a reader wants on the closed line: the path, the command, the pattern. */
   function summary(value: unknown): string {
@@ -28,18 +38,29 @@
     return typeof first === 'string' ? (first.split('\n')[0] ?? '') : '';
   }
 
-  let line = $derived(summary(input));
+  /** While the JSON is still arriving the summary comes from it, else the tool name. */
+  function partialSummary(text: string): string {
+    const found = PARTIAL_VALUE.exec(text);
+    const value = found?.[1] ?? '';
+    return value.length > 0 ? (value.split('\\n')[0] ?? '') : '';
+  }
+
+  let streaming = $derived(typeof inputText === 'string');
+  // The body opens itself while the input is being typed: that is the whole point
+  // of the stream. It folds back to the one line once the parsed input lands.
+  let shown = $derived(open || streaming);
+  let line = $derived(streaming ? partialSummary(inputText ?? '') : summary(input));
 </script>
 
-<div class="tool" data-testid="tool-card" data-status={status}>
+<div class="tool" data-testid="tool-card" data-status={status} data-streaming={streaming}>
   <button
     type="button"
     class="ghost head"
     data-testid="tool-toggle"
-    aria-expanded={open}
+    aria-expanded={shown}
     onclick={() => (open = !open)}
   >
-    <span class="caret" class:open><ChevronRight size={13} strokeWidth={2} /></span>
+    <span class="caret" class:open={shown}><ChevronRight size={13} strokeWidth={2} /></span>
     <span class="glyph"><Wrench size={13} strokeWidth={1.75} /></span>
     <span class="name">{name}</span>
     {#if line}
@@ -58,10 +79,16 @@
     </span>
   </button>
 
-  {#if open}
+  {#if shown}
     <div class="body">
       <div class="section-label">{strings.chat.toolInput}</div>
-      <pre class="mono" data-testid="tool-input">{json(input)}</pre>
+      {#if streaming}
+        <pre
+          class="mono"
+          data-testid="tool-input">{inputText}<span class="caret" aria-label={strings.chat.streaming}></span></pre>
+      {:else}
+        <pre class="mono" data-testid="tool-input">{json(input)}</pre>
+      {/if}
       <div class="section-label">{strings.chat.toolOutput}</div>
       <pre class="mono" data-testid="tool-output">{output ?? strings.chat.noOutput}</pre>
     </div>
@@ -176,5 +203,17 @@
 
   pre:last-child {
     margin-bottom: 0;
+  }
+
+  /* The same caret a streaming text part ends on, so both read as one thing. */
+  .caret {
+    display: inline-block;
+    width: 7px;
+    height: 12px;
+    margin-left: 2px;
+    vertical-align: -2px;
+    background: var(--color-foreground);
+    border-radius: 1px;
+    animation: blink 1s steps(2, start) infinite;
   }
 </style>

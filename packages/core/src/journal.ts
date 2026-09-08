@@ -626,6 +626,9 @@ export class Journal {
     // A delta appends to whatever kind of text part sits there: text or thinking.
     if (part !== undefined && (part.type === 'text' || part.type === 'thinking')) {
       parts[partIndex] = { type: part.type, text: part.text + text };
+    } else if (part !== undefined && part.type === 'tool') {
+      // On a tool part a delta is the input's JSON, still being typed by the model.
+      parts[partIndex] = { ...part, inputText: (part.inputText ?? '') + text };
     } else parts[partIndex] = { type: 'text', text };
     this.db.query('UPDATE messages SET parts = ? WHERE id = ?').run(JSON.stringify(parts), messageId);
   }
