@@ -11,7 +11,45 @@ import { unavailable } from '../errors.ts';
 import { createAcpDriver } from './acp.ts';
 import { createClaudeDriver } from './claude.ts';
 import { echoDriver } from './echo.ts';
-import type { Driver, ProbeContext, ProbeFilter, ProbeResult } from './types.ts';
+import type { Driver, ProbeContext, ProbeFilter, ProbeResult, TurnContext, TurnHandle } from './types.ts';
+
+/**
+ * A driver whose module is imported on its first turn. The Claude and ACP
+ * drivers load their SDK that way; the Codex one carries its own transport, so
+ * the whole module is what stays out of core start.
+ */
+function lazyDriver(protocol: Protocol, load: () => Promise<Driver>): Driver {
+  let loaded: Driver | null = null;
+  const ready = async (): Promise<Driver> => {
+    if (loaded === null) loaded = await load();
+    return loaded;
+  };
+  return {
+    protocol,
+    startTurn(ctx: TurnContext): TurnHandle {
+      let inner: TurnHandle | null = null;
+      let stopped = false;
+      const done = ready().then((driver) => {
+        inner = driver.startTurn(ctx);
+        if (stopped) inner.stop();
+        return inner.done;
+      });
+      return {
+        done,
+        stop: (): void => {
+          stopped = true;
+          inner?.stop();
+        },
+      };
+    },
+    releaseThread(threadId: ThreadId): void {
+      loaded?.releaseThread?.(threadId);
+    },
+    shutdown(): void {
+      loaded?.shutdown?.();
+    },
+  };
+}
 
 const DRIVERS = new Map<Protocol, Driver>([
   ['echo', echoDriver],
@@ -27,9 +65,13 @@ const DRIVERS = new Map<Protocol, Driver>([
       loadSdk: () => import('@agentclientprotocol/sdk'),
     }),
   ],
+  [
+    'codex-appserver',
+    lazyDriver('codex-appserver', () => import('./codex.ts').then((module) => module.createCodexDriver())),
+  ],
 ]);
 
-const RUNNABLE = new Set<Protocol>(['echo', 'claude-sdk', 'acp']);
+const RUNNABLE = new Set<Protocol>(['echo', 'claude-sdk', 'acp', 'codex-appserver']);
 
 export function getDriver(protocol: Protocol): Driver {
   const driver = DRIVERS.get(protocol);
