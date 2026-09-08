@@ -1,0 +1,138 @@
+# Trace, caps and the two guards
+
+Boite claims to know what every thread launched and what it cost. That claim is
+only true because one launcher owns every spawn and, on Windows, puts the child
+in a kernel object before its first instruction. This page is what the claim
+covers, and where it stops.
+
+## One launcher, one Job Object per thread
+
+`packages/core/src/procs.ts` is the only place a process is created:
+`spawn`, `spawnChild` and `spawnPiped`. A driver that reached for `Bun.spawn`
+would produce a process nothing here can see.
+
+On Windows the first spawn of a thread creates that thread's Job Object, nested
+inside a global job named `boite-agents`. Both carry `KILL_ON_JOB_CLOSE` and
+neither carries `BREAKAWAY_OK`, so nothing a thread starts can leave the job, and
+a core that dies takes every agent process with it. The child is assigned right
+after spawn, and `windowsHide: true` is set on every one of them.
+
+A completion port on the job reports every process that enters or leaves it,
+grandchildren included, and a Worker drains it. The Worker is built on the first
+traced pid rather than at core start, like everything else heavy here. Those
+events become `process.started` and `process.exited` on the wire, each carrying
+pid, parent pid, thread, executable, the command line when it is readable, start
+and exit times, exit code, CPU milliseconds, peak memory and bytes moved.
+
+Two details are not obvious and are load-bearing. `TerminateJobObject` sends no
+per-process exit on the completion port, only the "no active processes" message,
+so a tree killed that way would stay marked live forever if nothing handled it.
+And `conhost.exe` joins the job the moment a child's stdout is piped, so console
+hosts are filtered out of the trace and the load while their CPU stays in the job
+totals.
+
+## What a client sees
+
+- `trace.get` gives one thread's processes, newest first.
+- `resources.list` gives every thread with its live processes and its totals.
+- `resources.killTree` kills one thread's tree, `TerminateJobObject` on Windows
+  and the process group elsewhere. It returns before the completion port has
+  reported the exits, so anything that then reads the trace on the next line
+  still sees them live: wait for the live count to reach zero instead.
+- `ThreadLoad` is sampled on a timer and carried on every thread summary: how
+  many processes, what percentage of CPU, how many bytes of memory. It is what
+  the gauge in the trace panel reads.
+
+The trace panel shows six columns at a fixed width, executable, duration, CPU,
+peak memory, I/O and exit, the four measurements right-aligned on tabular
+figures. It shows the base name of the executable, with the full path, the pid
+and the command line in the cell's tooltip. The Resources page under Settings
+keeps a wider table with a pid column of its own.
+
+## Caps
+
+Two settings turn the jobs into limits. Both are Windows only, both are ignored
+elsewhere, and both apply to jobs that already exist as well as to new ones.
+
+- `agentCpuCapPercent`: a hard ceiling for every agent process together, as a
+  percentage of the whole machine, applied as the global job's CPU rate control.
+  0 disables it.
+- `threadMemoryCapMb`: a ceiling for one thread's whole process tree, applied as
+  that thread's job memory limit. A tree that reaches it fails its next
+  allocation, which the agent reports as its own out-of-memory error. 0 means no
+  cap.
+
+## The focus guard
+
+An agent that opens a window takes the foreground, and the user loses whatever
+they were typing into. The guard is a second Worker holding a system-wide
+`SetWinEventHook` on `EVENT_SYSTEM_FOREGROUND`, out of context and skipping the
+core's own process, plus the message pump that hook needs, because an
+out-of-context event is delivered on the thread that installed the hook and only
+while that thread pumps. The main thread posts it the pid set and the setting.
+
+When the window that just took the foreground belongs to a pid a thread
+launched, two remedies fire in order. `SetWindowPos` to `HWND_BOTTOM` without
+activation, which needs no foreground right and always works. Then
+`AttachThreadInput` around `SetForegroundWindow` to give the focus back to the
+window the user was on, which a background process cannot do otherwise.
+`process.focusPushed` says which thread, which pid, which window title, and
+whether the restore took.
+
+Job Object UI limits are not the answer and are never set: none of them blocks
+showing a window or taking the foreground, and setting any would refuse the
+nested job the whole trace depends on.
+
+The decision itself is a pure logic class over an interface of the seven Win32
+calls, so every case is proved on a fake and no test creates a window. The one
+test that needs a real one steals the keyboard for a blink and is opt-in behind
+`BOITE_E2E_GUARD=1`.
+
+## The audio mute
+
+An agent that plays a sound reaches the user's speakers, and there is no
+notification to hook for it: the session-created callback wants an MTA thread and
+a COM object whose return values a thread-safe FFI callback cannot provide. So
+the sessions are polled instead, on the same Worker, over the same pid set.
+
+`CoInitializeEx` runs on the thread that already pumps. Every second, and right
+after every new pid, the sessions of the default render endpoint are walked over
+`bun:ffi`: the device enumerator to the default endpoint, the session manager,
+each session's process id, then its volume interface. A session whose process id
+is a traced pid and that is not muted already is muted, and its volume interface
+is held.
+
+Holding it is the point. Windows keeps a rendering session's mute across
+restarts, so a process that exited muted would come back muted. The mute is
+undone and the interface released when the pid exits, when the setting goes off
+and when the Worker stops. A session the user muted by hand in the mixer reads as
+muted already, so it is left alone and never unmuted on exit. `process.muted`
+says which thread and which pid, and a machine with no render endpoint says so
+once and keeps that half off for the Worker's life.
+
+Like the guard, the rule is a logic class decided on a fake. The one test that
+touches the real endpoint plays two seconds of zeroed PCM, which is a session in
+the mixer and silence in the speakers.
+
+## Turning them off
+
+Both live under Settings, General, Background, and both are on by default.
+
+| Setting | Effect when off |
+|---|---|
+| `focusGuard` | an agent's window keeps the foreground it took |
+| `muteAgents` | an agent's audio reaches the speakers, and anything muted is unmuted |
+
+## Linux and macOS
+
+There are no Job Objects, so `procs` polls a process group every second. That
+means direct children only: a grandchild the agent spawned and a process that
+lived less than the poll interval are both invisible, and the exit data is what
+the poll last saw rather than what the kernel reported.
+
+Nothing hides that. `TraceCapability` carries the operating system, a `mode` of
+`events`, `poll` or `none`, and a note saying why, and every client reads it
+before promising anything. Windows with a working FFI surface reports `events`;
+Windows where that surface failed to load reports `poll` with the error in the
+note. `resources.killTree` still works everywhere, and the focus guard and the
+audio mute simply do not exist off Windows.
