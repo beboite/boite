@@ -4,6 +4,7 @@ build/
 target/
 .boite/
 .svelte-kit/
+.svelte-check/
 *.db
 *.db-wal
 *.db-shm
