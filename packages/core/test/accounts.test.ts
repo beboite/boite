@@ -1,8 +1,55 @@
-import { writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { startTestCore } from './harness.ts';
+import type { CoreClient } from '../src/client.ts';
+import { startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
+
+const ECHO_LOGIN_SCRIPT = fileURLToPath(new URL('../src/providers/shipped/echo-login.ts', import.meta.url));
+
+/**
+ * The shipped echo provider needs no login (`auth.kind` is "none"), so it can
+ * never be unauthenticated. This user descriptor is the same fake agent with a
+ * session file to earn: it is what the login flow is proved on, and it drives
+ * the same script `echo.json` names.
+ */
+async function addLoginProvider(harness: TestCore, client: CoreClient): Promise<string> {
+  const dir = join(harness.dataDir, 'providers');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(
+    join(dir, 'echo-auth.json'),
+    JSON.stringify({
+      id: 'echo-auth',
+      schemaVersion: 1,
+      name: 'Echo with a login',
+      shortName: 'EchoAuth',
+      protocol: 'echo',
+      roots: ['{isolationDir}'],
+      profiles: {
+        windows: { detect: {}, executable: [], isolation: { BOITE_ECHO_CONFIG_DIR: '{isolationDir}' } },
+        linux: { detect: {}, executable: [], isolation: { BOITE_ECHO_CONFIG_DIR: '{isolationDir}' } },
+        macos: { detect: {}, executable: [], isolation: { BOITE_ECHO_CONFIG_DIR: '{isolationDir}' } },
+      },
+      auth: { kind: 'oauth-cli', session: ['.credentials.json'] },
+      login: { command: ['bun', ECHO_LOGIN_SCRIPT] },
+      models: [{ id: 'echo', name: 'Echo', default: true }],
+      capabilities: {
+        approvals: true,
+        hooks: false,
+        checkpoint: false,
+        images: false,
+        planMode: false,
+        resume: true,
+      },
+    }),
+    'utf8',
+  );
+  const loaded = await client.call('providers.reload', {});
+  expect(loaded.rejected).toEqual([]);
+  expect(loaded.loaded.some((provider) => provider.id === 'echo-auth')).toBe(true);
+  return 'echo-auth';
+}
 
 let harness: TestCore;
 
@@ -76,5 +123,120 @@ describe('accounts', () => {
     await client.call('accounts.remove', { accountId: account.id });
     const accounts = await client.call('accounts.list', {});
     expect(accounts.some((entry) => entry.id === account.id)).toBe(false);
+  });
+
+  test('accounts.login runs the provider command, takes a pasted code and leaves the account ok', async () => {
+    const client = await harness.connect();
+    const providerId = await addLoginProvider(harness, client);
+    const account = await client.call('accounts.add', {
+      providerId,
+      label: 'To log in',
+      useDefaultLocation: false,
+    });
+    expect(account.status).toBe('unauthenticated');
+
+    const lines: string[] = [];
+    client.on('account.login', (event) => {
+      if (event.accountId === account.id && event.output.length > 0) lines.push(event.output);
+    });
+    const started = client.next('account.login', (event) => event.accountId === account.id);
+    const withUrl = client.next(
+      'account.login',
+      (event) => event.accountId === account.id && event.url !== null,
+    );
+
+    expect(await client.call('accounts.login', { accountId: account.id })).toEqual({ ok: true });
+    expect((await started).state).toBe('running');
+    const link = await withUrl;
+    expect(link.url).toBe('https://example.invalid/login?code=echo');
+    expect(link.output).toContain('https://example.invalid/login?code=echo');
+
+    const finished = client.next('account.login', (event) => event.accountId === account.id && event.state !== 'running');
+    const updated = client.next('accounts.updated', (entry) => entry.id === account.id && entry.status === 'ok');
+    await client.call('accounts.loginInput', { accountId: account.id, text: 'pasted-code' });
+
+    const exit = await finished;
+    expect(exit.state).toBe('done');
+    expect(exit.exitCode).toBe(0);
+    expect((await updated).status).toBe('ok');
+    expect(existsSync(join(account.isolationDir ?? '', '.credentials.json'))).toBe(true);
+    expect(lines.some((line) => line.includes('Paste the code'))).toBe(true);
+
+    // The login process is a traced process of its own synthetic thread.
+    await waitFor(() => harness.core.journal.listProcesses(`login:${account.id}`, 10).length > 0);
+    const traced = await client.call('trace.get', { threadId: `login:${account.id}` });
+    expect(traced.length).toBe(1);
+    expect(traced[0]?.commandLine).toContain('echo-login.ts');
+  });
+
+  test('a second login while one runs is refused, and so is one on the default account', async () => {
+    const client = await harness.connect();
+    const providerId = await addLoginProvider(harness, client);
+    const account = await client.call('accounts.add', {
+      providerId,
+      label: 'Busy',
+      useDefaultLocation: false,
+    });
+
+    await client.call('accounts.login', { accountId: account.id });
+    let refusal = '';
+    try {
+      await client.call('accounts.login', { accountId: account.id });
+    } catch (error) {
+      refusal = error instanceof Error ? error.message : String(error);
+    }
+    expect(refusal).toContain('already running');
+
+    // The shipped echo descriptor resolves `{shippedDir}` to the script beside it.
+    const echo = harness.core.providers.require('echo');
+    expect(echo.login?.command[0]).toBe('bun');
+    expect(existsSync(echo.login?.command[1] ?? '')).toBe(true);
+
+    const accounts = await client.call('accounts.list', {});
+    const fallback = accounts.find((entry) => entry.providerId === 'echo' && entry.isolationDir === null);
+    expect(fallback).toBeDefined();
+    let onDefault = '';
+    try {
+      await client.call('accounts.login', { accountId: fallback?.id ?? '' });
+    } catch (error) {
+      onDefault = error instanceof Error ? error.message : String(error);
+    }
+    expect(onDefault).toContain('own Echo CLI, outside Boite');
+  });
+
+  test('a login command with no argv is refused at load, with the file and the field', async () => {
+    const client = await harness.connect();
+    const dir = join(harness.dataDir, 'providers');
+    mkdirSync(dir, { recursive: true });
+    const file = join(dir, 'broken-login.json');
+    writeFileSync(
+      file,
+      JSON.stringify({
+        id: 'broken-login',
+        schemaVersion: 1,
+        name: 'Broken',
+        shortName: 'Broken',
+        protocol: 'echo',
+        roots: ['{isolationDir}'],
+        profiles: { windows: { detect: {}, executable: [], isolation: {} } },
+        auth: { kind: 'none' },
+        login: { command: [] },
+        models: [{ id: 'echo', name: 'Echo', default: true }],
+        capabilities: {
+          approvals: false,
+          hooks: false,
+          checkpoint: false,
+          images: false,
+          planMode: false,
+          resume: false,
+        },
+      }),
+      'utf8',
+    );
+
+    const loaded = await client.call('providers.reload', {});
+    const rejected = loaded.rejected.find((entry) => entry.file === file);
+    expect(rejected?.field).toBe('login.command');
+    expect(rejected?.message).toContain('must name an executable');
   });
 });

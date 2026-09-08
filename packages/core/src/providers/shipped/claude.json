@@ -29,6 +29,7 @@
     }
   },
   "auth": { "kind": "oauth-cli", "session": [".credentials.json"] },
+  "login": { "command": ["claude", "auth", "login"] },
   "models": [
     {
       "id": "claude-fable-5-1",

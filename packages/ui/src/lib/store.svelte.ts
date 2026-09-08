@@ -45,6 +45,16 @@ import { strings } from './strings';
 export type Page = 'chat' | 'settings';
 export type SettingsTab = 'general' | 'accounts' | 'usage' | 'resources';
 
+/** A login process the core runs for one account, as `account.login` reports it. */
+export interface LoginState {
+  state: 'running' | 'failed';
+  /** The last line the provider CLI printed. */
+  output: string;
+  /** The first https link it printed, once there is one. */
+  url: string | null;
+  exitCode: number | null;
+}
+
 export interface UsageReport {
   byThread: Record<ThreadId, Usage>;
   total: Usage;
@@ -112,6 +122,8 @@ export class Store {
   providers = $state<ProviderSummary[]>([]);
   rejectedProviders = $state<ProviderRejected[]>([]);
   accounts = $state<Account[]>([]);
+  /** Keyed by account id: one entry while a login runs, and after one failed. */
+  logins = $state<Record<string, LoginState>>({});
   scheduler = $state<SchedulerState | null>(null);
   settings = $state<Settings | null>(null);
   resources = $state<ThreadResources[]>([]);
@@ -341,6 +353,22 @@ export class Store {
     on('scheduler.updated', (state) => {
       this.scheduler = state;
     });
+    on('account.login', (event) => {
+      if (event.state === 'done') {
+        const { [event.accountId]: _done, ...rest } = this.logins;
+        this.logins = rest;
+        return;
+      }
+      this.logins = {
+        ...this.logins,
+        [event.accountId]: {
+          state: event.state,
+          output: event.output,
+          url: event.url,
+          exitCode: event.exitCode
+        }
+      };
+    });
     on('accounts.updated', (account) => {
       this.accounts = this.accounts.some((a) => a.id === account.id)
         ? this.accounts.map((a) => (a.id === account.id ? account : a))
@@ -446,6 +474,7 @@ export class Store {
       this.providers = providers.loaded;
       this.rejectedProviders = providers.rejected;
       this.accounts = accounts;
+      this.logins = {};
       this.settings = settings;
       this.scheduler = scheduler;
       const open = this.openThread;
@@ -785,6 +814,28 @@ export class Store {
       const account = await client.call('accounts.add', input);
       if (!this.accounts.some((a) => a.id === account.id))
         this.accounts = [...this.accounts, account];
+    } catch (error) {
+      this.#fail(error);
+    }
+  }
+
+  /** Start the provider's login for this account; the rest arrives as `account.login`. */
+  async loginAccount(accountId: string): Promise<void> {
+    const client = this.#client;
+    if (!client) return;
+    try {
+      await client.call('accounts.login', { accountId });
+    } catch (error) {
+      this.#fail(error);
+    }
+  }
+
+  /** One line into the running login, for a CLI that asks for a code to paste. */
+  async sendLoginInput(accountId: string, text: string): Promise<void> {
+    const client = this.#client;
+    if (!client || text.trim().length === 0) return;
+    try {
+      await client.call('accounts.loginInput', { accountId, text: text.trim() });
     } catch (error) {
       this.#fail(error);
     }

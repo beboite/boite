@@ -211,3 +211,34 @@ test('removing a project asks first, and Cancel keeps it', async () => {
   await waitFor(() => document.querySelector('[data-testid=confirm-dialog]') === null);
   expect(store.projects.length).toBe(2);
 });
+
+test('an isolated account that is not logged in logs in from the Accounts page', async () => {
+  await mountOnFake();
+  query<HTMLButtonElement>('[data-testid=nav-settings]').click();
+  await waitFor(() => document.querySelector('[data-testid=settings-tab-accounts]') !== null);
+  query<HTMLButtonElement>('[data-testid=settings-tab-accounts]').click();
+  await waitFor(() => document.querySelector('[data-testid=accounts-page]') !== null);
+
+  // Only the isolated seat is unauthenticated; the default login has no button.
+  expect(document.querySelectorAll('[data-testid=account-login]').length).toBe(1);
+  expect(query('[data-testid=account-login]').getAttribute('data-account-id')).toBe('a-claude-side');
+
+  query<HTMLButtonElement>('[data-testid=account-login]').click();
+  await waitFor(() => document.querySelector('[data-testid=account-login-url]') !== null);
+  const link = query<HTMLAnchorElement>('[data-testid=account-login-url]');
+  expect(link.getAttribute('href')).toBe('https://example.invalid/login?code=fake');
+  expect(link.getAttribute('target')).toBe('_blank');
+
+  const code = query<HTMLInputElement>('[data-testid=account-login-input]');
+  code.value = 'pasted-code';
+  code.dispatchEvent(new Event('input', { bubbles: true }));
+  query<HTMLButtonElement>('[data-testid=account-login-send]').click();
+
+  await waitFor(() => store.accountOf('a-claude-side')?.status === 'ok');
+  await waitFor(() => document.querySelector('[data-testid=account-login-row]') === null);
+  expect(document.querySelector('[data-testid=account-login]')).toBeNull();
+
+  // The store is one module-level singleton: leave the next test on the chat.
+  query<HTMLButtonElement>('[data-testid=settings-back]').click();
+  await waitFor(() => document.querySelector('[data-testid=settings]') === null);
+});

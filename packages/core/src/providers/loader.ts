@@ -11,6 +11,7 @@ import type {
   ProviderCapabilities,
   ProviderDescriptor,
   ProviderId,
+  ProviderLogin,
   ProviderRejected,
   ProviderSummary,
   RpcResult,
@@ -30,6 +31,14 @@ import echoShipped from './shipped/echo.json';
 export function echoEnabled(): boolean {
   return process.env['BOITE_ECHO'] === '1';
 }
+
+/**
+ * Where the shipped descriptors and the scripts they name live. A login command
+ * writes `{shippedDir}/<script>` instead of a path nobody could write by hand.
+ * Only echo uses it, and echo ships from the sources alone (`BOITE_ECHO=1`); a
+ * command whose script is missing fails at spawn, with the path in the event.
+ */
+const SHIPPED_DIR = join(import.meta.dir, 'shipped');
 
 const SHIPPED_SOURCES: { file: string; raw: unknown; when?: () => boolean }[] = [
   { file: 'shipped/claude.json', raw: claudeShipped },
@@ -58,6 +67,7 @@ const DESCRIPTOR_KEYS = [
   'roots',
   'profiles',
   'auth',
+  'login',
   'models',
   'capabilities',
 ] as const;
@@ -226,6 +236,21 @@ function checkAuth(value: unknown, file: string): ProviderAuth {
   return auth;
 }
 
+/** The provider's login command: a non-empty argv of strings, plus optional environment. */
+function checkLogin(value: unknown, file: string): ProviderLogin {
+  const obj = asObject(value, file, 'login');
+  checkKeys(obj, ['command', 'env'], file, 'login');
+  const raw = asArray(obj['command'], file, 'login.command');
+  if (raw.length === 0) {
+    reject(file, 'login.command', 'at least one argument', 'login.command must name an executable');
+  }
+  const login: ProviderLogin = {
+    command: raw.map((entry, index) => asString(entry, file, `login.command[${index}]`)),
+  };
+  if (obj['env'] !== undefined) login.env = checkStringMap(obj['env'], file, 'login.env');
+  return login;
+}
+
 /** Reasoning effort: a non-empty scale of uniquely named levels, one of them the default. */
 function checkEffort(value: unknown, file: string, field: string): { levels: EffortLevel[]; default: string } {
   const obj = asObject(value, file, field);
@@ -304,6 +329,11 @@ function substituteHome(value: string): string {
   return value.split('{home}').join(homePath());
 }
 
+/** Load-time tokens. `{isolationDir}` is not one of them: it is per account, substituted at spawn. */
+function substitutePaths(value: string): string {
+  return substituteHome(value).split('{shippedDir}').join(SHIPPED_DIR);
+}
+
 function expandDescriptor(descriptor: ProviderDescriptor): ProviderDescriptor {
   const profiles: ProviderDescriptor['profiles'] = {};
   for (const os of OS_KEYS) {
@@ -317,7 +347,11 @@ function expandDescriptor(descriptor: ProviderDescriptor): ProviderDescriptor {
       })),
     };
   }
-  return { ...descriptor, roots: descriptor.roots.map(substituteHome), profiles };
+  const expanded: ProviderDescriptor = { ...descriptor, roots: descriptor.roots.map(substituteHome), profiles };
+  if (descriptor.login !== undefined) {
+    expanded.login = { ...descriptor.login, command: descriptor.login.command.map(substitutePaths) };
+  }
+  return expanded;
 }
 
 export function validateDescriptor(raw: unknown, file: string, forbiddenIds: ReadonlySet<string>): ProviderDescriptor {
@@ -360,6 +394,7 @@ export function validateDescriptor(raw: unknown, file: string, forbiddenIds: Rea
     roots: checkRoots(obj['roots'], file),
     profiles,
     auth: checkAuth(obj['auth'], file),
+    ...(obj['login'] === undefined ? {} : { login: checkLogin(obj['login'], file) }),
     models: checkModels(obj['models'], file),
     capabilities: checkCapabilities(obj['capabilities'], file),
   });

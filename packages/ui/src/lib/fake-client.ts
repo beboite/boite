@@ -95,6 +95,8 @@ export class FakeClient implements ObservableClient {
     { request: PermissionRequest; resolve: (decision: 'allow' | 'deny') => void }
   >();
   #inFlight = new Map<ThreadId, { cancelled: boolean; done: Promise<void> }>();
+  /** Account ids whose fake login is waiting for a code. */
+  #logins = new Set<string>();
   #seq = 0;
   #delayMs: number;
 
@@ -276,6 +278,46 @@ export class FakeClient implements ObservableClient {
         account.identity = account.status === 'ok' ? 'you@example.com' : null;
         this.#emit('accounts.updated', structuredClone(account));
         return structuredClone(account);
+      }
+      case 'accounts.login': {
+        const params = rawParams as RpcParams<'accounts.login'>;
+        const account = this.#accounts.find((a) => a.id === params.accountId);
+        if (!account) throw this.#notFound('account', params.accountId);
+        if (account.isolationDir === null) {
+          throw new RpcFailure({
+            code: RpcErrorCode.Refused,
+            message: `${account.label} uses the provider's own location: log it in with your own CLI, outside Boite`
+          });
+        }
+        if (this.#logins.has(account.id)) {
+          throw new RpcFailure({
+            code: RpcErrorCode.Refused,
+            message: `a login is already running for ${account.label}`
+          });
+        }
+        this.#logins.add(account.id);
+        this.#emit('account.login', {
+          accountId: account.id,
+          state: 'running',
+          output: '',
+          url: null,
+          exitCode: null
+        });
+        void this.#fakeLoginPrompt(account.id);
+        return { ok: true };
+      }
+      case 'accounts.loginInput': {
+        const params = rawParams as RpcParams<'accounts.loginInput'>;
+        const account = this.#accounts.find((a) => a.id === params.accountId);
+        if (!account) throw this.#notFound('account', params.accountId);
+        if (!this.#logins.has(account.id)) {
+          throw new RpcFailure({
+            code: RpcErrorCode.Refused,
+            message: `no login is running for ${account.id}`
+          });
+        }
+        void this.#finishFakeLogin(account);
+        return { ok: true };
       }
 
       case 'threads.list': {
@@ -695,6 +737,38 @@ export class FakeClient implements ObservableClient {
     thread.load = null;
     this.#touch(thread);
     this.#emit('process.exited', structuredClone(record));
+  }
+
+  // -------------------------------------------------------------------------
+  // Account login
+  // -------------------------------------------------------------------------
+
+  /** What a provider CLI prints first: a link to open, then a question. */
+  async #fakeLoginPrompt(accountId: string): Promise<void> {
+    await this.#pause();
+    if (!this.#logins.has(accountId)) return;
+    this.#emit('account.login', {
+      accountId,
+      state: 'running',
+      output: 'Open https://example.invalid/login?code=fake to continue',
+      url: 'https://example.invalid/login?code=fake',
+      exitCode: null
+    });
+  }
+
+  async #finishFakeLogin(account: Account): Promise<void> {
+    await this.#pause();
+    this.#logins.delete(account.id);
+    this.#emit('account.login', {
+      accountId: account.id,
+      state: 'done',
+      output: 'logged in',
+      url: 'https://example.invalid/login?code=fake',
+      exitCode: 0
+    });
+    account.status = 'ok';
+    account.identity = 'you@example.com';
+    this.#emit('accounts.updated', structuredClone(account));
   }
 
   // -------------------------------------------------------------------------

@@ -188,6 +188,11 @@ export const strings = {
     identity: 'Identity',
     isolation: 'Isolation directory',
     defaultLocation: 'provider default',
+    login: 'Log in',
+    loginStarting: 'Waiting for the provider CLI',
+    loginOpen: 'Open this link to log in',
+    loginInputPlaceholder: 'Paste the code the page gives you',
+    loginSend: 'Send',
     status: {
       unknown: 'unknown',
       ok: 'ok',

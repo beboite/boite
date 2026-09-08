@@ -22,12 +22,21 @@ export interface SpawnOptions {
 
 export type ChildProcess = Bun.Subprocess<'ignore', 'pipe', 'pipe'>;
 
+/** A child whose stdin stays open: the account login writes a pasted code into it. */
+export type PipedChildProcess = Bun.Subprocess<'pipe', 'pipe', 'pipe'>;
+
 /** What `spawnChild` returns: node's own child, which satisfies the SDK's `SpawnedProcess`. */
 export type SpawnedChild = ChildProcessByStdio<Writable, Readable, Readable>;
 
 export interface SpawnedProcess {
   record: ProcessRecord;
   proc: ChildProcess;
+  exited: Promise<number>;
+}
+
+export interface SpawnedPipedProcess {
+  record: ProcessRecord;
+  proc: PipedChildProcess;
   exited: Promise<number>;
 }
 
@@ -114,6 +123,41 @@ export class ProcRegistry {
         const usage = proc.resourceUsage();
         if (!usage) return null;
         // Bun reports cpuTime in microseconds, as BigInt on Windows.
+        return { cpuMs: Math.round(Number(usage.cpuTime.total) / 1000), peakMemoryBytes: Number(usage.maxRSS) };
+      },
+    });
+
+    const exited = proc.exited.then((code) => {
+      this.onExit(threadId, record.pid, code);
+      return code;
+    });
+
+    return { record, proc, exited };
+  }
+
+  /**
+   * `spawn` with stdin left open. The account login needs it: a provider CLI
+   * that cannot reach a browser asks for a code to be pasted back.
+   */
+  spawnPiped(threadId: ThreadId, cmd: string, args: string[], opts: SpawnOptions = {}): SpawnedPipedProcess {
+    const env: Record<string, string | undefined> = { ...process.env, ...(opts.env ?? {}) };
+    const proc = Bun.spawn({
+      cmd: [cmd, ...args],
+      cwd: opts.cwd,
+      env,
+      stdin: 'pipe',
+      stdout: 'pipe',
+      stderr: 'pipe',
+      windowsHide: true,
+    });
+
+    const record = this.register(threadId, proc.pid, cmd, args, {
+      kill: () => {
+        proc.kill();
+      },
+      usage: () => {
+        const usage = proc.resourceUsage();
+        if (!usage) return null;
         return { cpuMs: Math.round(Number(usage.cpuTime.total) / 1000), peakMemoryBytes: Number(usage.maxRSS) };
       },
     });

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { untrack } from 'svelte';
+  import type { Account } from '@boite/contracts';
   import { strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
 
@@ -9,6 +10,8 @@
   let providerId = $state(untrack(() => store.providers[0]?.id ?? ''));
   let label = $state('');
   let useDefaultLocation = $state(false);
+  /** One pending code per account, so two logins never share a field. */
+  let codes = $state<Record<string, string>>({});
 
   async function submit(event: SubmitEvent) {
     event.preventDefault();
@@ -16,6 +19,19 @@
     await store.addAccount({ providerId, label: label.trim(), useDefaultLocation });
     label = '';
     adding = false;
+  }
+
+  /** The provider's own login is the user's to run; Boite only drives isolated accounts. */
+  function canLogIn(account: Account): boolean {
+    return account.isolationDir !== null && account.status === 'unauthenticated' && !store.logins[account.id];
+  }
+
+  async function sendCode(event: SubmitEvent, accountId: string) {
+    event.preventDefault();
+    const text = codes[accountId] ?? '';
+    if (text.trim().length === 0) return;
+    codes = { ...codes, [accountId]: '' };
+    await store.sendLoginInput(accountId, text);
   }
 </script>
 
@@ -70,6 +86,7 @@
       </thead>
       <tbody>
         {#each store.accounts as account (account.id)}
+          {@const login = store.logins[account.id]}
           <tr data-testid="account-row" data-account-id={account.id}>
             <td>{account.label}</td>
             <td class="mono">{store.providerOf(account.providerId)?.shortName ?? account.providerId}</td>
@@ -86,12 +103,57 @@
                 {strings.accounts.status[account.status]}
               </span>
             </td>
-            <td>
+            <td class="row-actions">
+              {#if canLogIn(account)}
+                <button
+                  class="quiet"
+                  data-testid="account-login"
+                  data-account-id={account.id}
+                  onclick={() => void store.loginAccount(account.id)}
+                >
+                  {strings.accounts.login}
+                </button>
+              {/if}
               <button class="quiet" onclick={() => void store.checkAccount(account.id)}>
                 {strings.accounts.check}
               </button>
             </td>
           </tr>
+          {#if login}
+            <tr class="login" data-testid="account-login-row" data-account-id={account.id}>
+              <td colspan="6">
+                {#if login.url}
+                  <a
+                    class="link"
+                    href={login.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    data-testid="account-login-url"
+                    title={strings.accounts.loginOpen}
+                  >
+                    {login.url}
+                  </a>
+                {/if}
+                <p class="output" class:bad={login.state === 'failed'} data-testid="account-login-output">
+                  {login.output.length > 0 ? login.output : strings.accounts.loginStarting}
+                </p>
+                {#if login.state === 'running'}
+                  <form class="code" onsubmit={(event) => void sendCode(event, account.id)}>
+                    <input
+                      data-testid="account-login-input"
+                      placeholder={strings.accounts.loginInputPlaceholder}
+                      value={codes[account.id] ?? ''}
+                      oninput={(event) =>
+                        (codes = { ...codes, [account.id]: event.currentTarget.value })}
+                    />
+                    <button type="submit" class="quiet" data-testid="account-login-send">
+                      {strings.accounts.loginSend}
+                    </button>
+                  </form>
+                {/if}
+              </td>
+            </tr>
+          {/if}
         {/each}
       </tbody>
     </table>
@@ -125,7 +187,7 @@
   }
 
   table {
-    background: var(--panel);
+    background: var(--color-surface);
   }
 
   .path {
@@ -135,17 +197,59 @@
   }
 
   .status {
-    font-size: 10px;
+    font-size: var(--text-xs);
     text-transform: uppercase;
     letter-spacing: 0.03em;
-    color: var(--muted);
+    color: var(--color-muted-foreground);
   }
 
   .status.ok {
-    color: var(--ok);
+    color: var(--color-success);
   }
 
   .status.bad {
-    color: var(--danger);
+    color: var(--color-danger);
+  }
+
+  .row-actions {
+    display: flex;
+    gap: 6px;
+    justify-content: flex-end;
+  }
+
+  tr.login td {
+    display: grid;
+    gap: 6px;
+    background: var(--color-surface-2);
+    border-left: 2px solid var(--color-live);
+  }
+
+  tr.login .link {
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+    overflow-wrap: anywhere;
+  }
+
+  tr.login .output {
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+    color: var(--color-muted-foreground);
+    overflow-wrap: anywhere;
+  }
+
+  tr.login .output.bad {
+    color: var(--color-danger);
+  }
+
+  tr.login .code {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+  }
+
+  tr.login .code input {
+    flex: 1;
+    max-width: 360px;
   }
 </style>

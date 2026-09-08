@@ -3,11 +3,29 @@ import { join } from 'node:path';
 import type { Account, AccountId, ProviderDescriptor, ProviderId } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { newId } from './ids.ts';
-import { notFound, refused } from './errors.ts';
-import { profileFor } from './providers/loader.ts';
+import { invalidParams, messageOf, notFound, refused } from './errors.ts';
+import { profileFor, resolveExecutable } from './providers/loader.ts';
 import { homePath } from './paths.ts';
+import type { SpawnedPipedProcess } from './procs.ts';
+
+/** The thread a login process is traced under. It is a name, never a real thread. */
+export function loginThreadId(accountId: AccountId): string {
+  return `login:${accountId}`;
+}
+
+const URL_IN_OUTPUT = /https:\/\/\S+/;
+
+interface LoginRun {
+  spawned: SpawnedPipedProcess;
+  /** The first https link the CLI printed, carried by every later event. */
+  url: string | null;
+  /** The last line printed, what the exit event carries. */
+  lastLine: string;
+}
 
 export class AccountStore {
+  private readonly logins = new Map<AccountId, LoginRun>();
+
   constructor(private readonly core: Core) {}
 
   list(): Account[] {
@@ -87,6 +105,129 @@ export class AccountStore {
     }
   }
 
+  /**
+   * Run the provider's login command for this account. The process goes through
+   * `procs.spawnPiped` under the synthetic thread `login:<accountId>`, so it sits
+   * in a Job Object and shows in the trace like any other agent process.
+   */
+  login(accountId: AccountId): { ok: true } {
+    const account = this.require(accountId);
+    const provider = this.core.providers.require(account.providerId);
+    if (provider.login === undefined) {
+      throw refused(`${provider.name} has no login command Boite can run`, {
+        accountId,
+        providerId: provider.id,
+        field: 'login',
+      });
+    }
+    if (account.isolationDir === null) {
+      throw refused(
+        `${account.label} uses ${provider.name}'s own location: log it in with your own ${provider.shortName} CLI, outside Boite`,
+        { accountId, providerId: provider.id, field: 'isolationDir' },
+      );
+    }
+    if (this.logins.has(accountId)) {
+      throw refused(`a login is already running for ${account.label}`, { accountId });
+    }
+
+    const isolationDir = account.isolationDir;
+    const command = provider.login.command.map((part) => part.split('{isolationDir}').join(isolationDir));
+    const env: Record<string, string> = { ...this.accountEnv(account, provider) };
+    for (const [key, value] of Object.entries(provider.login.env ?? {})) {
+      env[key] = value.split('{isolationDir}').join(isolationDir);
+    }
+
+    const [first, ...args] = command;
+    if (first === undefined) throw refused('the login command is empty', { accountId, field: 'login.command' });
+    const executable = this.loginExecutable(provider, first);
+
+    mkdirSync(isolationDir, { recursive: true });
+    let spawned: SpawnedPipedProcess;
+    try {
+      spawned = this.core.procs.spawnPiped(loginThreadId(accountId), executable, args, { cwd: isolationDir, env });
+    } catch (error) {
+      throw refused(`the login command ${executable} did not start: ${messageOf(error)}`, {
+        accountId,
+        command: [executable, ...args].join(' '),
+      });
+    }
+
+    const run: LoginRun = { spawned, url: null, lastLine: '' };
+    this.logins.set(accountId, run);
+    this.emitLogin(accountId, 'running', '', run);
+    void this.readLogin(accountId, run);
+    return { ok: true };
+  }
+
+  /** One line into the running login's stdin, for a CLI that asks for a pasted code. */
+  loginInput(accountId: AccountId, text: string): { ok: true } {
+    const run = this.logins.get(accountId);
+    if (run === undefined) throw refused(`no login is running for ${accountId}`, { accountId });
+    try {
+      run.spawned.proc.stdin.write(`${text}\n`);
+      run.spawned.proc.stdin.flush();
+    } catch (error) {
+      throw refused(`the login process did not take the input: ${messageOf(error)}`, { accountId });
+    }
+    return { ok: true };
+  }
+
+  /** Every login still running, killed with the core. */
+  closeLogins(): void {
+    for (const [accountId, run] of this.logins) {
+      try {
+        run.spawned.proc.kill();
+      } catch {
+        // already gone
+      }
+      this.logins.delete(accountId);
+    }
+  }
+
+  /**
+   * A descriptor names its executable the way a shell would (`claude`). When the
+   * OS profile already resolved that same name to a real file, use the file: the
+   * CLI here is an install the PATH does not always carry.
+   */
+  private loginExecutable(provider: ProviderDescriptor, first: string): string {
+    const profile = profileFor(provider);
+    if (profile === undefined) return first;
+    const named = profile.executable.some((candidate) => candidate.kind === 'path' && candidate.value === first);
+    if (!named) return first;
+    return resolveExecutable(profile) ?? first;
+  }
+
+  private emitLogin(
+    accountId: AccountId,
+    state: 'running' | 'done' | 'failed',
+    output: string,
+    run: LoginRun,
+    exitCode: number | null = null,
+  ): void {
+    if (this.core.journal.isClosed()) return;
+    this.core.bus.emit('account.login', { accountId, state, output, url: run.url, exitCode });
+  }
+
+  /** stdout and stderr merged, one event per line, then the exit and a recheck. */
+  private async readLogin(accountId: AccountId, run: LoginRun): Promise<void> {
+    const onLine = (line: string): void => {
+      if (line.length === 0) return;
+      run.lastLine = line;
+      if (run.url === null) run.url = URL_IN_OUTPUT.exec(line)?.[0] ?? null;
+      this.emitLogin(accountId, 'running', line, run);
+    };
+    await Promise.all([pumpLines(run.spawned.proc.stdout, onLine), pumpLines(run.spawned.proc.stderr, onLine)]);
+    const exitCode = await run.spawned.exited;
+    this.logins.delete(accountId);
+    this.emitLogin(accountId, exitCode === 0 ? 'done' : 'failed', run.lastLine, run, exitCode);
+    if (this.core.journal.isClosed()) return;
+    try {
+      this.check(accountId);
+    } catch {
+      // the account was removed while its login ran
+    }
+  }
+
   private sessionStatus(account: Account, provider: ProviderDescriptor): Account['status'] {
     if (provider.auth.kind === 'none') return 'ok';
     const session = provider.auth.session ?? [];
@@ -123,4 +264,30 @@ export function registerAccountMethods(core: Core): void {
     return { ok: true } as const;
   });
   core.router.register('accounts.check', (params) => core.accounts.check(params.accountId));
+  core.router.register('accounts.login', (params) => core.accounts.login(params.accountId));
+  core.router.register('accounts.loginInput', (params) => {
+    if (typeof params.text !== 'string') throw invalidParams('a login input needs text', { field: 'text' });
+    return core.accounts.loginInput(params.accountId, params.text);
+  });
+}
+
+/** A stream read line by line, CRLF and LF alike, the tail counted as one more line. */
+async function pumpLines(stream: ReadableStream<Uint8Array>, onLine: (line: string) => void): Promise<void> {
+  const decoder = new TextDecoder();
+  let buffer = '';
+  try {
+    for await (const chunk of stream) {
+      buffer += decoder.decode(chunk, { stream: true });
+      let index = buffer.indexOf('\n');
+      while (index >= 0) {
+        onLine(buffer.slice(0, index).replace(/\r$/, ''));
+        buffer = buffer.slice(index + 1);
+        index = buffer.indexOf('\n');
+      }
+    }
+  } catch {
+    // the process died mid-read; the exit code is what reports that
+  }
+  const tail = buffer.trim();
+  if (tail.length > 0) onLine(tail);
 }

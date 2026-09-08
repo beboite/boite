@@ -61,6 +61,18 @@ export interface ProviderAuth {
   identity?: { source: { file: string; field: string } | { command: string[] }; format: string };
 }
 
+/**
+ * How the provider's CLI logs one account in. The core runs it under the
+ * account's isolation directory and streams its output back as
+ * `account.login`; the user answers a prompt with `accounts.loginInput`.
+ */
+export interface ProviderLogin {
+  /** The executable and its arguments. Never empty. */
+  command: string[];
+  /** Extra environment for the login process. Values may use `{isolationDir}`. */
+  env?: Record<string, string>;
+}
+
 /** One step of a model's reasoning effort scale, as the descriptor spells it. */
 export interface EffortLevel {
   id: string;
@@ -99,6 +111,8 @@ export interface ProviderDescriptor {
   roots: string[];
   profiles: Partial<Record<Os, OsProfile>>;
   auth: ProviderAuth;
+  /** Absent when the provider has no way to log an account in from Boite. */
+  login?: ProviderLogin;
   models: ModelInfo[];
   capabilities: ProviderCapabilities;
 }
@@ -374,6 +388,15 @@ export interface RpcMethods {
   };
   'accounts.remove': { params: { accountId: AccountId }; result: { ok: true } };
   'accounts.check': { params: { accountId: AccountId }; result: Account };
+  /**
+   * Start the provider's login command for this account. Refused when the
+   * provider has no `login` block, when the account uses the provider's own
+   * location, or when a login is already running for it. Progress arrives as
+   * `account.login`.
+   */
+  'accounts.login': { params: { accountId: AccountId }; result: { ok: true } };
+  /** One line into the running login's stdin, for a CLI that asks for a code. */
+  'accounts.loginInput': { params: { accountId: AccountId; text: string }; result: { ok: true } };
 
   'threads.list': { params: { projectId?: ProjectId; includeArchived?: boolean }; result: ThreadSummary[] };
   'threads.create': {
@@ -464,6 +487,18 @@ export interface RpcEvents {
 
   'scheduler.updated': SchedulerState;
   'accounts.updated': Account;
+  /**
+   * The login process starting, one line of its output, or its exit. `url`
+   * carries the first `https://` link seen in the output, once there is one.
+   * On exit the core rechecks the account and follows with `accounts.updated`.
+   */
+  'account.login': {
+    accountId: AccountId;
+    state: 'running' | 'done' | 'failed';
+    output: string;
+    url: string | null;
+    exitCode: number | null;
+  };
   'core.log': { level: 'info' | 'warn' | 'error'; message: string; at: Timestamp };
 }
 

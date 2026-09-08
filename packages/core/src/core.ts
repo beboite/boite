@@ -108,6 +108,7 @@ export class Core {
   async close(): Promise<void> {
     await this.scheduler.drain();
     shutdownDrivers();
+    this.accounts.closeLogins();
     this.procs.killAll();
     this.procs.close();
     this.bus.dispose();

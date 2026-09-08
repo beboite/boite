@@ -11,6 +11,7 @@
     "macos": { "detect": {}, "executable": [], "isolation": {} }
   },
   "auth": { "kind": "none" },
+  "login": { "command": ["bun", "{shippedDir}/echo-login.ts"] },
   "models": [
     {
       "id": "echo",
