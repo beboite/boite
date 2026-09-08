@@ -10,20 +10,7 @@
     "beforeBuildCommand": "bun run --cwd ../../packages/ui build"
   },
   "app": {
-    "windows": [
-      {
-        "label": "main",
-        "title": "Boite",
-        "width": 1280,
-        "height": 800,
-        "minWidth": 880,
-        "minHeight": 560,
-        "resizable": true,
-        "decorations": false,
-        "visible": false,
-        "focus": true
-      }
-    ],
+    "windows": [],
     "security": {
       "csp": null
     }

@@ -108,6 +108,8 @@ beforeAll(async () => {
   }
   delete env.BOITE_CORE_COMMAND;
   env.BOITE_SHELL_HIDDEN = '1';
+  // The shell puts its WebView2 profile under the data directory, so this run
+  // never shares a browser process with the installed app the user may have open.
   env.BOITE_DATA_DIR = dataDir;
   env.BOITE_ECHO = '1';
   env.WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = `--remote-debugging-port=${debugPort} --remote-allow-origins=*`;

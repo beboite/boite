@@ -103,6 +103,8 @@
 
   .drop-hint {
     font-size: var(--text-xs);
+    max-width: none;
+    white-space: nowrap;
   }
 
   form {

@@ -378,8 +378,31 @@ fn start_core<R: Runtime>(app: &AppHandle<R>, state: &CoreState) {
 // Window and tray.
 // ---------------------------------------------------------------------------
 
-/// The window is created hidden by `tauri.conf.json` and only reaches the screen
-/// here, once the core endpoint resolved, so an empty frame never flashes.
+/// The main window, built here rather than in `tauri.conf.json` so a run on its
+/// own data directory (a test, a bench) keeps its WebView2 profile there too.
+/// WebView2 runs one browser process per profile: on the default profile the
+/// test's shell would attach to the browser the installed app already started,
+/// which carries no debugging port.
+fn build_main_window<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<tauri::WebviewWindow<R>> {
+    let mut builder = tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::default())
+        .title("Boite")
+        .inner_size(1280.0, 800.0)
+        .min_inner_size(880.0, 560.0)
+        .resizable(true)
+        .decorations(false)
+        .visible(false)
+        .focused(true);
+    if let Ok(value) = std::env::var("BOITE_DATA_DIR") {
+        let trimmed = value.trim();
+        if !trimmed.is_empty() {
+            builder = builder.data_directory(PathBuf::from(trimmed).join("webview"));
+        }
+    }
+    builder.build()
+}
+
+/// The window is created hidden and only reaches the screen here, once the
+/// core endpoint resolved, so an empty frame never flashes.
 fn show_main<R: Runtime>(app: &AppHandle<R>) {
     if hidden() {
         return;
@@ -431,18 +454,17 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![core_endpoint])
         .setup(|app| {
             let handle = app.handle().clone();
+            let window = build_main_window(&handle)?;
             build_tray(&handle)?;
             start_core(&handle, &app.state::<CoreState>());
 
             let closing = handle.clone();
-            if let Some(window) = app.get_webview_window("main") {
-                window.on_window_event(move |event| {
-                    if let WindowEvent::CloseRequested { api, .. } = event {
-                        api.prevent_close();
-                        hide_main(&closing);
-                    }
-                });
-            }
+            window.on_window_event(move |event| {
+                if let WindowEvent::CloseRequested { api, .. } = event {
+                    api.prevent_close();
+                    hide_main(&closing);
+                }
+            });
             Ok(())
         })
         .build(tauri::generate_context!())
