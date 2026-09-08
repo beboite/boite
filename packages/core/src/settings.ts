@@ -56,6 +56,7 @@ export class SettingsStore {
     });
     this.core.scheduler.onSettingsChanged();
     this.core.procs.applySettings(next);
+    this.core.bus.emit('settings.updated', next);
     return next;
   }
 }

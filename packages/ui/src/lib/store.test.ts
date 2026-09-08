@@ -105,6 +105,29 @@ describe('Store', () => {
     const tool = parts[2];
     expect(tool?.type === 'tool' && tool.status).toBe('done');
   });
+
+  test('a project removed elsewhere drops it, its threads and the open thread', async () => {
+    const { store, client } = await ready();
+    await store.open('t-trace');
+    expect(store.openThread?.projectId).toBe('p-boite');
+
+    // Straight through the client, the way another connection's removal arrives.
+    await client.call('projects.remove', { projectId: 'p-boite' });
+
+    expect(store.projects.map((p) => p.id)).toEqual(['p-brain']);
+    expect(store.threads.every((t) => t.projectId !== 'p-boite')).toBe(true);
+    const reopened = await waitFor(() => store.openThread ?? undefined);
+    expect(reopened.projectId).toBe('p-brain');
+  });
+
+  test('settings changed elsewhere replace the ones the UI holds', async () => {
+    const { store, client } = await ready();
+    expect(store.settings?.maxConcurrentTurns).not.toBe(9);
+
+    await client.call('settings.set', { maxConcurrentTurns: 9 });
+
+    expect(store.settings?.maxConcurrentTurns).toBe(9);
+  });
 });
 
 async function waitFor<T>(read: () => T | undefined): Promise<T> {

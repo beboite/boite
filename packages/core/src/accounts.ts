@@ -70,6 +70,7 @@ export class AccountStore {
         this.core.journal.deleteAccount(accountId);
       },
     );
+    this.core.bus.emit('accounts.removed', { accountId });
   }
 
   check(accountId: AccountId): Account {

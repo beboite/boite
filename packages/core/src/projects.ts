@@ -40,6 +40,7 @@ export class ProjectStore {
     this.core.journal.append({ type: 'project.added', threadId: null, version: 1, payload: project }, () => {
       this.core.journal.putProject(project);
     });
+    this.core.bus.emit('project.added', project);
     return project;
   }
 
@@ -54,6 +55,7 @@ export class ProjectStore {
       },
     );
     for (const threadId of threadIds) this.core.bus.emit('thread.removed', { threadId });
+    this.core.bus.emit('project.removed', { projectId });
   }
 }
 

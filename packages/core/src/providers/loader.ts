@@ -569,6 +569,10 @@ export class ProviderRegistry {
 
 export function registerProviderMethods(core: Core): void {
   core.router.register('providers.list', () => core.providers.list());
-  core.router.register('providers.reload', () => core.providers.load());
+  core.router.register('providers.reload', () => {
+    const result = core.providers.load();
+    core.bus.emit('providers.updated', result);
+    return result;
+  });
   core.router.register('providers.dryRun', (params) => core.providers.dryRun(params.file));
 }

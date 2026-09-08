@@ -210,6 +210,7 @@ export class FakeClient implements ObservableClient {
           createdAt: this.#now()
         };
         this.#projects.push(project);
+        this.#emit('project.added', structuredClone(project));
         return structuredClone(project);
       }
       case 'projects.remove': {
@@ -220,12 +221,17 @@ export class FakeClient implements ObservableClient {
           this.#threads.delete(thread.id);
           this.#emit('thread.removed', { threadId: thread.id });
         }
+        this.#emit('project.removed', { projectId: params.projectId });
         return { ok: true };
       }
 
       case 'providers.list':
-      case 'providers.reload':
         return { loaded: structuredClone(this.#providers), rejected: [] };
+      case 'providers.reload': {
+        const result = { loaded: structuredClone(this.#providers), rejected: [] };
+        this.#emit('providers.updated', structuredClone(result));
+        return result;
+      }
       case 'providers.dryRun': {
         const params = rawParams as RpcParams<'providers.dryRun'>;
         const provider = this.#providers[0];
@@ -268,6 +274,7 @@ export class FakeClient implements ObservableClient {
       case 'accounts.remove': {
         const params = rawParams as RpcParams<'accounts.remove'>;
         this.#accounts = this.#accounts.filter((a) => a.id !== params.accountId);
+        this.#emit('accounts.removed', { accountId: params.accountId });
         return { ok: true };
       }
       case 'accounts.check': {
@@ -479,6 +486,7 @@ export class FakeClient implements ObservableClient {
           perAccountConcurrency: this.#settings.perAccountConcurrency
         };
         this.#emit('scheduler.updated', structuredClone(this.#scheduler));
+        this.#emit('settings.updated', { ...this.#settings });
         return { ...this.#settings };
       }
 

@@ -463,6 +463,11 @@ export type RpcParams<M extends RpcMethodName> = RpcMethods[M]['params'];
 export type RpcResult<M extends RpcMethodName> = RpcMethods[M]['result'];
 
 export interface RpcEvents {
+  /** A project `projects.add` created. A known path returns its project without one. */
+  'project.added': Project;
+  /** A project `projects.remove` deleted, after the `thread.removed` of each of its threads. */
+  'project.removed': { projectId: ProjectId };
+
   'thread.created': ThreadSummary;
   'thread.updated': ThreadSummary;
   'thread.removed': { threadId: ThreadId };
@@ -487,6 +492,12 @@ export interface RpcEvents {
 
   'scheduler.updated': SchedulerState;
   'accounts.updated': Account;
+  /** An account `accounts.remove` deleted. */
+  'accounts.removed': { accountId: AccountId };
+  /** The whole settings object, as `settings.set` wrote it. */
+  'settings.updated': Settings;
+  /** What `providers.reload` found: the descriptors that loaded and the ones refused. */
+  'providers.updated': { loaded: ProviderSummary[]; rejected: ProviderRejected[] };
   /**
    * The login process starting, one line of its output, or its exit. `url`
    * carries the first `https://` link seen in the output, once there is one.

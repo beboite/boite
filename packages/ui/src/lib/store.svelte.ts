@@ -374,6 +374,27 @@ export class Store {
         ? this.accounts.map((a) => (a.id === account.id ? account : a))
         : [...this.accounts, account];
     });
+    // The five below also reach the client that made the call, so every handler
+    // has to survive being applied twice.
+    on('accounts.removed', ({ accountId }) => {
+      this.accounts = this.accounts.filter((a) => a.id !== accountId);
+      const { [accountId]: _gone, ...rest } = this.logins;
+      this.logins = rest;
+    });
+    on('settings.updated', (settings) => {
+      this.settings = settings;
+    });
+    on('providers.updated', ({ loaded, rejected }) => {
+      this.providers = loaded;
+      this.rejectedProviders = rejected;
+    });
+    on('project.added', (project) => {
+      if (!this.projects.some((p) => p.id === project.id))
+        this.projects = [...this.projects, project];
+    });
+    on('project.removed', ({ projectId }) => {
+      void this.#dropProject(projectId);
+    });
     on('core.log', (entry) => {
       if (entry.level === 'error') this.error = entry.message;
     });
@@ -552,11 +573,7 @@ export class Store {
     if (!client) return;
     try {
       await client.call('projects.remove', { projectId });
-      this.projects = this.projects.filter((p) => p.id !== projectId);
-      this.threads = this.threads.filter((t) => t.projectId !== projectId);
-      if (this.openThread?.projectId === projectId) this.openThread = null;
-      if (this.draft?.projectId === projectId) this.draft = null;
-      await this.openWhereLeft();
+      await this.#dropProject(projectId);
     } catch (error) {
       this.#fail(error);
     }
@@ -855,6 +872,15 @@ export class Store {
   // -------------------------------------------------------------------------
   // Internals
   // -------------------------------------------------------------------------
+
+  /** What a project going away costs the UI, whether this client removed it or another did. */
+  async #dropProject(projectId: ProjectId): Promise<void> {
+    this.projects = this.projects.filter((p) => p.id !== projectId);
+    this.threads = this.threads.filter((t) => t.projectId !== projectId);
+    if (this.openThread?.projectId === projectId) this.openThread = null;
+    if (this.draft?.projectId === projectId) this.draft = null;
+    await this.openWhereLeft();
+  }
 
   async #unsubscribe(): Promise<void> {
     const client = this.#client;
