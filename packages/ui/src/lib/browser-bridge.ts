@@ -3,14 +3,13 @@
  * Svelte tree: the surface measures a slot and the bridge parks a view over
  * that rectangle, which is the shape a Tauri child `Webview` takes.
  *
- * One implementation ships here, the fake: on `?fake=1` it parks an iframe over
- * the slot so a capture shows something, and anywhere else it does nothing and
- * the slot keeps its one muted line.
- *
- * TODO: `lib/browser-bridge-tauri.ts`, the shell's child `Webview` created,
- * positioned and destroyed from Rust, is the next brief. It implements this
- * same interface and `pickBridge()` returns it inside the shell.
+ * Three implementations. In the shell, `lib/browser-bridge-tauri.ts` drives a
+ * real child webview the Rust side creates, moves and destroys. On `?fake=1` an
+ * iframe is parked over the slot so a capture shows something. Anywhere else,
+ * a phone or a plain browser, nothing paints and the slot keeps its one muted
+ * line.
  */
+import { TauriBridge } from './browser-bridge-tauri';
 
 /** A slot's place on the screen, in CSS pixels, the way `getBoundingClientRect` gives it. */
 export interface SurfaceRect {
@@ -24,7 +23,9 @@ export type BrowserEvent =
   | { type: 'url'; id: string; url: string }
   | { type: 'title'; id: string; title: string }
   | { type: 'loading'; id: string; loading: boolean }
-  | { type: 'failed'; id: string; reason: string };
+  | { type: 'failed'; id: string; reason: string }
+  /** A page asked for a window of its own. It gets a tab in the same panel. */
+  | { type: 'new-window'; id: string; url: string };
 
 export interface BrowserBridge {
   /** Whether this bridge paints anything at all. False keeps the slot's muted line. */
@@ -36,6 +37,8 @@ export interface BrowserBridge {
   reload(id: string): void;
   /** `null` parks the view: the surface is not the one showing. */
   setBounds(id: string, rect: SurfaceRect | null): void;
+  /** A rung of `ZOOM_STEPS`, which `Ctrl+=`, `Ctrl+-` and `Ctrl+0` walk. */
+  setZoom(id: string, factor: number): void;
   destroy(id: string): void;
   on(handler: (event: BrowserEvent) => void): () => void;
 }
@@ -122,6 +125,12 @@ class FakeBridge implements BrowserBridge {
     frame.style.height = `${Math.round(rect.height)}px`;
   }
 
+  setZoom(id: string, factor: number): void {
+    const frame = this.#views.get(id);
+    if (!frame) return;
+    frame.style.zoom = String(factor);
+  }
+
   destroy(id: string): void {
     this.#views.get(id)?.remove();
     this.#views.delete(id);
@@ -154,6 +163,7 @@ class NoBridge implements BrowserBridge {
   forward(): void {}
   reload(): void {}
   setBounds(): void {}
+  setZoom(): void {}
   destroy(): void {}
   on(): () => void {
     return () => {};
@@ -166,6 +176,9 @@ function pickBridge(): BrowserBridge {
   } catch {
     /* no location to read: the bridge paints nothing */
   }
+  // The shell is the only host with a webview to park, and `?fake=1` above wins
+  // over it so a capture of the fake client keeps working inside the shell.
+  if (window.__TAURI_INTERNALS__ !== undefined) return new TauriBridge();
   return new NoBridge();
 }
 

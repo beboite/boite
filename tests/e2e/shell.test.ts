@@ -104,6 +104,7 @@ interface CoreFile {
 }
 
 let shellPid = 0;
+let debugPort = 0;
 let dataDir = '';
 let projectDir = '';
 let page: BrowserPage | undefined;
@@ -253,7 +254,7 @@ beforeAll(async () => {
   if (exeMissing || staleReason !== null) return;
   dataDir = freshDataDir();
   projectDir = mkdtempSync(join(tmpdir(), 'boite-e2e-shell-project-'));
-  const debugPort = await freePort();
+  debugPort = await freePort();
 
   const startedAt = performance.now();
   shellPid = spawnHiddenShell(dataDir, debugPort);
@@ -383,6 +384,91 @@ shellTest(
     );
     expect(call?.[0]).toBe('plugin:opener|open_url');
     expect(call?.[1]?.url).toBe('https://example.invalid/docs');
+  },
+  TIMEOUT,
+);
+
+/**
+ * A child webview is its own CDP target on the same debugging port, which is
+ * exactly why every browser surface shares the main webview's user data folder:
+ * a second folder is a second WebView2 browser process, and only the first one
+ * can hold `--remote-debugging-port`.
+ */
+async function browserTargets(url: string): Promise<{ type: string; url: string }[]> {
+  try {
+    const response = await fetch(`http://127.0.0.1:${debugPort}/json/list`, {
+      signal: AbortSignal.timeout(2_000),
+    });
+    const targets = (await response.json()) as { type: string; url: string }[];
+    return targets.filter((target) => target.type === 'page' && target.url === url);
+  } catch {
+    return [];
+  }
+}
+
+async function waitForTargets(url: string, wanted: number, timeoutMs: number): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const found = await browserTargets(url);
+    if (found.length === wanted) return;
+    if (Date.now() > deadline) {
+      throw new Error(`the debugging port listed ${found.length} targets on ${url}, wanted ${wanted}`);
+    }
+    await Bun.sleep(POLL_MS);
+  }
+}
+
+/** `invoke` from the shell's own page, with the promise it returns awaited. */
+async function invokeShell(command: string, args: Record<string, unknown> = {}): Promise<void> {
+  await page?.waitFor(TAURI_READY);
+  await page?.evaluate<null>(
+    `window.__TAURI_INTERNALS__.invoke(${JSON.stringify(command)}, ${JSON.stringify(args)}).then(() => null)`,
+  );
+}
+
+shellTest(
+  'a browser surface is a child webview the shell parks over the slot and destroys',
+  async () => {
+    const health = `http://127.0.0.1:${coreFile?.port ?? 0}/health`;
+    expect(await browserTargets(health)).toHaveLength(0);
+
+    await invokeShell('browser_create', { id: 't1', url: health });
+    await invokeShell('browser_set_bounds', {
+      id: 't1',
+      rect: { x: 400, y: 100, width: 600, height: 400 },
+    });
+
+    // The child is a page of its own on this port, and it really loaded.
+    await waitForTargets(health, 1, 20_000);
+    const child = (await browserTargets(health))[0];
+    expect(child?.url).toBe(health);
+
+    await invokeShell('browser_destroy', { id: 't1' });
+    await waitForTargets(health, 0, 20_000);
+  },
+  TIMEOUT,
+);
+
+shellTest(
+  'a browser surface refuses a scheme that is not http, https or about',
+  async () => {
+    const health = `http://127.0.0.1:${coreFile?.port ?? 0}/health`;
+    await invokeShell('browser_create', { id: 't2', url: health });
+    await waitForTargets(health, 1, 20_000);
+
+    let refusal = '';
+    try {
+      await invokeShell('browser_navigate', { id: 't2', url: 'file:///C:/Windows/win.ini' });
+    } catch (error) {
+      refusal = error instanceof Error ? error.message : String(error);
+    }
+    expect(refusal).toContain('file');
+    expect(refusal).toContain('t2');
+    // The page it was already on is the page it stayed on.
+    expect(await browserTargets(health)).toHaveLength(1);
+
+    await invokeShell('browser_destroy', { id: 't2' });
+    await waitForTargets(health, 0, 20_000);
   },
   TIMEOUT,
 );

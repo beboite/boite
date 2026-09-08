@@ -38,6 +38,27 @@
     return strings.rightPanel.untitled;
   }
 
+  // What the pages report. Only the thread showing has browser views, because a
+  // thread that leaves takes them with it in the effect below, so one listener
+  // on the bound panel is the whole story.
+  $effect(() => {
+    const bound = panel;
+    return browserBridge.on((event) => {
+      if (event.type === 'new-window') {
+        // A page asked for a window of its own and was refused one: it opens
+        // beside the tab that asked, which is where the user is looking.
+        bound.open('browser', event.url);
+      } else if (event.type === 'url') {
+        // A blank tab is a tab with no address, not one pointed at `about:blank`.
+        if (event.url !== 'about:blank') bound.update(event.id, { url: event.url });
+      } else if (event.type === 'title') {
+        bound.update(event.id, { title: event.title });
+      } else if (event.type === 'failed') {
+        console.warn(`[browser] the surface ${event.id} refused: ${event.reason}`);
+      }
+    });
+  });
+
   // A browser tab that left the strip takes its view with it. The surface's own
   // teardown only parks the view, because a tab keeps its page while it is hidden.
   let known = new Set<string>();

@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "What the Boite UI needs: the core IPC, the frameless window's own controls (drag, minimize, maximize state and toggle, close), the drag-and-drop events, the folder picker, and handing an external link to the system browser. `core_endpoint` and `quit_shell` are application commands, which capabilities do not gate.",
+  "description": "What the Boite UI needs: the core IPC, the frameless window's own controls (drag, minimize, maximize state and toggle, close), the drag-and-drop events, the folder picker, handing an external link to the system browser, and listening for `browser://event`, which `core:default` already covers through `core:event:default`. This capability names the `main` window and no remote origin, so a page a browser surface loaded resolves none of it. The application commands (`core_endpoint`, `quit_shell` and the eight `browser_*` ones) are gated by nothing here, which is why each of them refuses any caller but the `main` webview in `src/browser.rs`.",
   "windows": ["main"],
   "permissions": [
     "core:default",

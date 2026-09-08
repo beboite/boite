@@ -5,7 +5,10 @@ import {
   PANEL_STORAGE_KEY,
   PANEL_WIDTH_KEY,
   RightPanelStore,
-  clampPanel
+  ZOOM_DEFAULT,
+  ZOOM_STEPS,
+  clampPanel,
+  stepZoom
 } from './right-panel.svelte';
 
 function panel(threadId = 't-1') {
@@ -164,6 +167,30 @@ describe('the right panel', () => {
     expect(clampPanel(2000, 900, 280)).toBe(PANEL_MIN);
     expect(clampPanel(10, 1400, 280)).toBe(PANEL_MIN);
     expect(clampPanel(400, 1400, 280)).toBe(400);
+  });
+
+  test('the zoom walks the ladder and stops at both ends', () => {
+    expect(stepZoom(1, 1)).toBe(1.1);
+    expect(stepZoom(1, -1)).toBe(0.9);
+    expect(stepZoom(ZOOM_STEPS[0] as number, -1)).toBe(ZOOM_STEPS[0]);
+    expect(stepZoom(ZOOM_STEPS[ZOOM_STEPS.length - 1] as number, 1)).toBe(2);
+    // A factor that is on no rung starts the walk from 1 rather than nowhere.
+    expect(stepZoom(1.37, 1)).toBe(1.1);
+    expect(stepZoom(1.37, -1)).toBe(0.9);
+  });
+
+  test('a browser tab remembers its zoom, and only a real rung of the ladder', () => {
+    const { bound } = panel('t-1');
+    const tab = bound.open('browser');
+
+    bound.update(tab.id, { zoom: 1.25 });
+    expect(new RightPanelStore().for('t-1').surfaces[0]?.zoom).toBe(1.25);
+
+    bound.update(tab.id, { zoom: 3.3 });
+    expect(bound.surfaces[0]?.zoom).toBe(3.3);
+    // What is written back is trusted only when it is one of the rungs.
+    expect(new RightPanelStore().for('t-1').surfaces[0]?.zoom).toBe(undefined);
+    expect(ZOOM_DEFAULT).toBe(1);
   });
 
   test('a thread that leaves takes its panel with it', () => {

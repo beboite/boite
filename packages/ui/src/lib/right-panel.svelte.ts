@@ -14,6 +14,8 @@ export interface Surface {
   title?: string;
   /** A browser tab's current address. */
   url?: string;
+  /** A browser tab's zoom, one rung of `ZOOM_STEPS`. Absent means 1. */
+  zoom?: number;
 }
 
 /** What one thread remembers about its panel. */
@@ -35,6 +37,18 @@ export const SIBLING_MIN = 360;
 export const PANEL_INLINE_MIN_VIEWPORT = 981;
 
 export const TRACE_SURFACE_ID = 'trace';
+
+/** The rungs `Ctrl+=`, `Ctrl+-` and `Ctrl+0` walk on a browser surface. */
+export const ZOOM_STEPS = [0.5, 0.67, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2];
+export const ZOOM_DEFAULT = 1;
+
+/** The rung after this one in that direction, or the end of the ladder. */
+export function stepZoom(current: number, direction: -1 | 1): number {
+  const at = ZOOM_STEPS.findIndex((step) => Math.abs(step - current) < 0.001);
+  const from = at < 0 ? ZOOM_STEPS.indexOf(ZOOM_DEFAULT) : at;
+  const next = Math.min(ZOOM_STEPS.length - 1, Math.max(0, from + direction));
+  return ZOOM_STEPS[next] ?? ZOOM_DEFAULT;
+}
 
 interface Persisted {
   version: number;
@@ -64,15 +78,19 @@ function parse(raw: string): Record<string, PanelState> {
     const surfaces: Surface[] = [];
     for (const surface of raws) {
       if (typeof surface !== 'object' || surface === null) continue;
-      const { id, kind, title, url } = surface as Surface;
+      const { id, kind, title, url, zoom } = surface as Surface;
       if (typeof id !== 'string') continue;
       if (kind !== 'trace' && kind !== 'browser') continue;
       if (surfaces.some((kept) => kept.id === id)) continue;
+      // A zoom that is not one of the ladder's rungs is dropped, not clamped:
+      // the ladder is the whole vocabulary here.
+      const stored = typeof zoom === 'number' && ZOOM_STEPS.includes(zoom) ? { zoom } : {};
       surfaces.push({
         id,
         kind,
         ...(typeof title === 'string' ? { title } : {}),
-        ...(typeof url === 'string' ? { url } : {})
+        ...(typeof url === 'string' ? { url } : {}),
+        ...stored
       });
     }
     const active = (value as PanelState).activeSurfaceId;
@@ -266,15 +284,17 @@ export class BoundPanel {
     this.#write({ ...current, isOpen: true, activeSurfaceId: id });
   }
 
-  /** What a browser tab learns from the page: its title, its address. */
-  update(id: string, patch: { title?: string; url?: string }): void {
+  /** What a browser tab learns from the page, plus the zoom the user set. */
+  update(id: string, patch: { title?: string; url?: string; zoom?: number }): void {
     const current = this.state;
     const index = current.surfaces.findIndex((surface) => surface.id === id);
     if (index < 0) return;
     const surface = current.surfaces[index];
     if (!surface) return;
     const next = { ...surface, ...patch };
-    if (next.title === surface.title && next.url === surface.url) return;
+    if (next.title === surface.title && next.url === surface.url && next.zoom === surface.zoom) {
+      return;
+    }
     const surfaces = [...current.surfaces];
     surfaces[index] = next;
     this.#write({ ...current, surfaces });

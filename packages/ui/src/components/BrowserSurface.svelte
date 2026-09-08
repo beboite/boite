@@ -1,8 +1,10 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
   import { ArrowLeft, ArrowRight, ExternalLink, RotateCw } from '@lucide/svelte';
   import { browserBridge, normalizeUrl } from '../lib/browser-bridge';
   import { openExternal } from '../lib/links';
   import { strings } from '../lib/strings';
+  import { ZOOM_DEFAULT, stepZoom } from '../lib/right-panel.svelte';
   import type { BoundPanel, Surface } from '../lib/right-panel.svelte';
 
   let { surface, panel }: { surface: Surface; panel: BoundPanel } = $props();
@@ -14,33 +16,52 @@
   let id = $derived(surface.id);
   let url = $derived(surface.url ?? '');
   let shown = $derived(draft ?? url);
+  let zoom = $derived(surface.zoom ?? ZOOM_DEFAULT);
 
   // The page is not a child of this tree: the slot is measured and the bridge
   // parks its view over that rectangle, which is what a Tauri child webview does.
+  //
+  // Only the slot and the surface id are read reactively. The url and the zoom
+  // are read once, untracked: the page reports its own address as it navigates,
+  // and a view torn down and rebuilt on every one of those would hide, show and
+  // lose its history for nothing.
   $effect(() => {
     const node = slot;
     const surfaceId = id;
     if (!node) return;
-    browserBridge.create(surfaceId, surface.url ?? '');
+    untrack(() => {
+      browserBridge.create(surfaceId, surface.url ?? '');
+      // The tab remembered a zoom; the view it is about to get has not.
+      if (zoom !== ZOOM_DEFAULT) browserBridge.setZoom(surfaceId, zoom);
+    });
 
+    // The slot moves for more reasons than it resizes: the sidebar folds, the
+    // panel is dragged or maximized, a sheet slides in, the window is resized.
+    // A `ResizeObserver` misses every move that keeps the size, so the frame is
+    // what drives this. One `getBoundingClientRect` per frame, and the bridge
+    // only hears about a rectangle that actually changed.
+    // jsdom without a visual pretence has no frames; the surface still renders.
+    const framed = typeof requestAnimationFrame === 'function';
+    let last = '';
+    let frame = 0;
     const report = (): void => {
       const rect = node.getBoundingClientRect();
-      browserBridge.setBounds(surfaceId, {
-        x: rect.x,
-        y: rect.y,
-        width: rect.width,
-        height: rect.height
-      });
+      const key = `${rect.x},${rect.y},${rect.width},${rect.height}`;
+      if (key !== last) {
+        last = key;
+        browserBridge.setBounds(surfaceId, {
+          x: rect.x,
+          y: rect.y,
+          width: rect.width,
+          height: rect.height
+        });
+      }
+      if (framed) frame = requestAnimationFrame(report);
     };
     report();
-    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(report);
-    observer?.observe(node);
-    window.addEventListener('resize', report);
-    window.addEventListener('scroll', report, true);
+
     return () => {
-      observer?.disconnect();
-      window.removeEventListener('resize', report);
-      window.removeEventListener('scroll', report, true);
+      if (framed && frame !== 0) cancelAnimationFrame(frame);
       // The tab lives on; it is only this surface that stopped showing.
       browserBridge.setBounds(surfaceId, null);
     };
@@ -62,7 +83,24 @@
     draft = null;
     field?.blur();
   }
+
+  /** `Ctrl+=`, `Ctrl+-` and `Ctrl+0` while this surface is the one showing. */
+  function onZoomKey(event: KeyboardEvent): void {
+    if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
+    const key = event.key;
+    let next: number | null = null;
+    if (key === '=' || key === '+') next = stepZoom(zoom, 1);
+    else if (key === '-' || key === '_') next = stepZoom(zoom, -1);
+    else if (key === '0') next = ZOOM_DEFAULT;
+    if (next === null) return;
+    event.preventDefault();
+    if (next === zoom) return;
+    browserBridge.setZoom(id, next);
+    panel.update(id, { zoom: next });
+  }
 </script>
+
+<svelte:window onkeydown={onZoomKey} />
 
 <div class="browser-surface" data-testid="browser-surface" data-surface-id={id}>
   <div class="chrome">

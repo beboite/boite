@@ -14,7 +14,10 @@ crate-type = ["lib", "cdylib", "staticlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["tray-icon"] }
+# `unstable` is what makes a child webview possible: `Window::add_child`,
+# `Manager::get_webview` and `WebviewBuilder` are all behind that flag, and the
+# browser surface is a child webview parked over the slot the UI measures.
+tauri = { version = "2", features = ["tray-icon", "unstable"] }
 tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }

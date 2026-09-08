@@ -88,6 +88,22 @@ and the release shell executable driven over the WebView2 debugging port. The
 shell part runs with `BOITE_SHELL_HIDDEN=1`, which is the only way an agent may
 ever start that executable: a window on the user's screen is forbidden.
 
+## Rebuilding the shell executable
+
+The end to end run drives
+`apps/shell/src-tauri/target/release/boite-shell.exe`, and the only command that
+produces a working one is:
+
+```bash
+bun run --cwd apps/shell tauri build --no-bundle
+```
+
+`cargo build --release` in `src-tauri` compiles the same code and writes the
+same path, but the executable it leaves there never reaches its own IPC: every
+`invoke` came back with `Origin header is not a valid URL` and the UI never
+connected, seven of the ten shell tests failing on it (2026-09-08). Use cargo to
+find compile errors fast, never to produce the executable a test runs.
+
 ## Staging the sidecar
 
 The shell test drives whatever `boite-core.exe` sits beside

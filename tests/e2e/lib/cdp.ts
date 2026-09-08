@@ -172,11 +172,22 @@ export class BrowserPage {
       awaitPromise: true,
     })) as {
       result?: { value?: unknown };
-      exceptionDetails?: { text?: string; exception?: { description?: string } };
+      exceptionDetails?: {
+        text?: string;
+        exception?: { description?: string; value?: unknown };
+      };
     };
     const failure = raw.exceptionDetails;
     if (failure !== undefined) {
-      const detail = failure.exception?.description ?? failure.text ?? 'unknown';
+      // A Tauri command rejects with a plain string, which devtools reports as a
+      // value and not as a description: without this line every refusal read
+      // "Uncaught (in promise)" and said nothing about what was refused.
+      const thrown = failure.exception?.value;
+      const detail =
+        failure.exception?.description ??
+        (thrown === undefined ? undefined : JSON.stringify(thrown)) ??
+        failure.text ??
+        'unknown';
       throw new Error(`evaluate failed: ${detail}\nexpression: ${expression}`);
     }
     return raw.result?.value as T;

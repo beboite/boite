@@ -13,8 +13,12 @@ use serde::{Deserialize, Serialize};
 use tauri::{
     menu::{Menu, MenuItem},
     tray::TrayIconBuilder,
-    AppHandle, Manager, Runtime, State, WindowEvent,
+    AppHandle, Manager, Runtime, State, Webview, WindowEvent,
 };
+
+mod browser;
+
+use browser::MAIN_LABEL;
 
 /// The line the core prints on stdout once its RPC server accepts connections.
 const READY_LINE: &str = "boite-core ready";
@@ -196,12 +200,20 @@ impl CoreState {
 /// was the only way out and `kill_child` could be reached from no test at all.
 /// `tests/e2e/shell.test.ts` invokes this.
 #[tauri::command]
-fn quit_shell(app: AppHandle) {
+fn quit_shell(app: AppHandle, webview: Webview) -> Result<(), String> {
+    browser::only_main(&webview)?;
     quit(&app);
+    Ok(())
 }
 
+/// The core token rides in this answer, so the caller is checked like every
+/// other: a page a browser surface loaded asks and is told no.
 #[tauri::command]
-async fn core_endpoint(state: State<'_, CoreState>) -> Result<CoreEndpoint, String> {
+async fn core_endpoint(
+    webview: Webview,
+    state: State<'_, CoreState>,
+) -> Result<CoreEndpoint, String> {
+    browser::only_main(&webview)?;
     let slot = state.slot.clone();
     tauri::async_runtime::spawn_blocking(move || wait_for_endpoint(&slot))
         .await
@@ -276,6 +288,18 @@ fn data_dir() -> Result<PathBuf, String> {
         Ok(value) if !value.trim().is_empty() => Ok(PathBuf::from(value.trim())),
         _ => default_data_dir(),
     }
+}
+
+/// The WebView2 profile the main window and every browser surface share. `None`
+/// leaves it to Tauri, which puts it under the app's own local data directory.
+/// One profile means one browser process for the whole shell.
+fn webview_profile() -> Option<PathBuf> {
+    let value = std::env::var("BOITE_DATA_DIR").ok()?;
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    Some(PathBuf::from(trimmed).join("webview"))
 }
 
 fn read_core_file(path: &Path) -> Result<Option<CoreFile>, String> {
@@ -518,19 +542,24 @@ fn start_core<R: Runtime>(app: &AppHandle<R>, state: &CoreState) {
 /// test's shell would attach to the browser the installed app already started,
 /// which carries no debugging port.
 fn build_main_window<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<tauri::WebviewWindow<R>> {
-    let mut builder = tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::default())
-        .title("Boite")
-        .inner_size(1280.0, 800.0)
-        .min_inner_size(880.0, 560.0)
-        .resizable(true)
-        .decorations(false)
-        .visible(false)
-        .focused(true);
-    if let Ok(value) = std::env::var("BOITE_DATA_DIR") {
-        let trimmed = value.trim();
-        if !trimmed.is_empty() {
-            builder = builder.data_directory(PathBuf::from(trimmed).join("webview"));
-        }
+    let mut builder =
+        tauri::WebviewWindowBuilder::new(app, MAIN_LABEL, tauri::WebviewUrl::default())
+            .title("Boite")
+            .inner_size(1280.0, 800.0)
+            .min_inner_size(880.0, 560.0)
+            .resizable(true)
+            .decorations(false)
+            .visible(false)
+            .focused(true)
+            // The browser surfaces belong to the page that asked for them: a
+            // reload of the UI takes every child webview with it.
+            .on_page_load(|window, payload| {
+                if matches!(payload.event(), tauri::webview::PageLoadEvent::Started) {
+                    browser::close_all(window.app_handle());
+                }
+            });
+    if let Some(directory) = webview_profile() {
+        builder = builder.data_directory(directory);
     }
     builder.build()
 }
@@ -541,14 +570,14 @@ fn show_main<R: Runtime>(app: &AppHandle<R>) {
     if hidden() {
         return;
     }
-    if let Some(window) = app.get_webview_window("main") {
+    if let Some(window) = app.get_webview_window(MAIN_LABEL) {
         let _ = window.show();
         let _ = window.set_focus();
     }
 }
 
 fn hide_main<R: Runtime>(app: &AppHandle<R>) {
-    if let Some(window) = app.get_webview_window("main") {
+    if let Some(window) = app.get_webview_window(MAIN_LABEL) {
         let _ = window.hide();
     }
 }
@@ -586,7 +615,18 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .manage(CoreState::new())
-        .invoke_handler(tauri::generate_handler![core_endpoint, quit_shell])
+        .invoke_handler(tauri::generate_handler![
+            core_endpoint,
+            quit_shell,
+            browser::browser_create,
+            browser::browser_navigate,
+            browser::browser_back,
+            browser::browser_forward,
+            browser::browser_reload,
+            browser::browser_set_bounds,
+            browser::browser_set_zoom,
+            browser::browser_destroy,
+        ])
         .setup(|app| {
             let handle = app.handle().clone();
             let window = build_main_window(&handle)?;
