@@ -255,7 +255,6 @@ describe('providers', () => {
       return;
     }
     expect(pi.executable?.toLowerCase()).toContain('node');
->>>>>>> 89874a2 (feat(core): pi driver over pi --mode rpc, plus the shipped descriptor)
   });
 
   test('the shipped models carry the reasoning effort scale they are meant to', async () => {
