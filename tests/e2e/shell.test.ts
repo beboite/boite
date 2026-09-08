@@ -1,6 +1,6 @@
-import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { basename, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { BrowserPage, freePort } from './lib/cdp.ts';
 import { freshDataDir, killProcessTree, removeDirectory } from './lib/core.ts';
@@ -15,13 +15,87 @@ const ROOT = join(import.meta.dir, '..', '..');
 const EXE = join(ROOT, 'apps', 'shell', 'src-tauri', 'target', 'release', 'boite-shell.exe');
 const SCREENSHOT = join(import.meta.dir, '.artifacts', 'shell.png');
 
+const CORE_SUFFIX = process.platform === 'win32' ? '.exe' : '';
+const SOURCE_ROOTS = [
+  join(ROOT, 'packages', 'core', 'src'),
+  join(ROOT, 'packages', 'contracts', 'src'),
+];
+const SOURCE_EXTENSIONS = ['.ts', '.json'];
+
 const exeMissing = !existsSync(EXE);
 if (exeMissing) {
   console.log(
     `[shell.test] skipped: ${EXE} does not exist. Build it with \`bun run --cwd apps/shell tauri build --no-bundle\`.`,
   );
 }
-const shellTest = exeMissing ? test.skip : test;
+
+interface SourceFile {
+  path: string;
+  mtimeMs: number;
+}
+
+/** The most recently touched `.ts` or `.json` the compiled core is built from. */
+function newestCoreSource(): SourceFile | null {
+  let newest: SourceFile | null = null;
+  const walk = (directory: string): void => {
+    let entries;
+    try {
+      entries = readdirSync(directory, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const full = join(directory, entry.name);
+      if (entry.isDirectory()) {
+        walk(full);
+        continue;
+      }
+      if (!SOURCE_EXTENSIONS.some((extension) => entry.name.endsWith(extension))) continue;
+      const mtimeMs = statSync(full).mtimeMs;
+      if (newest === null || mtimeMs > newest.mtimeMs) newest = { path: full, mtimeMs };
+    }
+  };
+  for (const root of SOURCE_ROOTS) walk(root);
+  return newest;
+}
+
+/**
+ * The shell runs whatever core `resolve_core` finds, in this order:
+ * `BOITE_CORE_COMMAND`, the `boite-core` sidecar beside its exe,
+ * `packages/core/dist/main.js`, then the sources. The two middle ones are built
+ * artefacts, and a stale one answers this suite's UI with an old contract: the
+ * turn tests then time out on the picker with nothing saying why (2026-09-08).
+ * The sources cannot go stale, and a `BOITE_CORE_COMMAND` points wherever its
+ * author meant, so neither is checked.
+ */
+function staleCoreReason(): string | null {
+  if ((process.env.BOITE_CORE_COMMAND ?? '') !== '') return null;
+  const sidecar = join(dirname(EXE), `boite-core${CORE_SUFFIX}`);
+  const built = existsSync(sidecar) ? sidecar : join(ROOT, 'packages', 'core', 'dist', 'main.js');
+  if (!existsSync(built)) return null;
+  const builtAtMs = statSync(built).mtimeMs;
+  const newest = newestCoreSource();
+  if (newest === null || builtAtMs >= newest.mtimeMs) return null;
+  return [
+    `the core the shell would start is older than the sources it is built from:`,
+    `  core:   ${built}`,
+    `          modified ${new Date(builtAtMs).toISOString()}`,
+    `  newest: ${newest.path}`,
+    `          modified ${new Date(newest.mtimeMs).toISOString()}`,
+    `Refresh it before trusting this file: bun run stage:core`,
+  ].join('\n');
+}
+
+const staleReason = exeMissing ? null : staleCoreReason();
+const shellTest = exeMissing || staleReason !== null ? test.skip : test;
+
+// One failure, right away, instead of two turn tests timing out in two minutes.
+if (staleReason !== null) {
+  const reason = staleReason;
+  test('the core the shell would start is not older than the core sources', () => {
+    throw new Error(reason);
+  });
+}
 
 interface CoreFile {
   port: number;
@@ -116,7 +190,7 @@ function parentOf(pid: number): number | null {
 }
 
 beforeAll(async () => {
-  if (exeMissing) return;
+  if (exeMissing || staleReason !== null) return;
   dataDir = freshDataDir();
   projectDir = mkdtempSync(join(tmpdir(), 'boite-e2e-shell-project-'));
   const debugPort = await freePort();

@@ -8,6 +8,8 @@ import { BrowserPage } from './lib/cdp.ts';
 import { pairingUrlOf, removeDirectory, startCore, type RunningCore } from './lib/core.ts';
 
 const TIMEOUT = 60_000;
+/** The reconnect has its own budget: a backoff that needs a minute is a bug. */
+const RECONNECT_TIMEOUT_MS = 30_000;
 const ROOT = join(import.meta.dir, '..', '..');
 const UI_INDEX = join(ROOT, 'packages', 'ui', 'dist', 'index.html');
 const SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui.png');
@@ -24,6 +26,8 @@ function testid(id: string): string {
 function textOf(id: string): string {
   return `document.querySelector('${testid(id)}')?.textContent.replace(/\\s+/g, ' ').trim()`;
 }
+
+const ASSISTANT_TEXT = `Array.from(document.querySelectorAll('${testid('message')}[data-role=assistant] ${testid('text-part')}')).map((node) => node.textContent).join(' ')`;
 
 async function clickWhenEnabled(selector: string): Promise<void> {
   await page.waitFor(`document.querySelector('${selector}') && !document.querySelector('${selector}').disabled`);
@@ -101,9 +105,7 @@ test(
     );
     await page.waitFor(`document.querySelector('${testid('thread-status')}').dataset.status === 'idle'`, 30_000);
 
-    const assistant = await page.evaluate<string>(
-      `Array.from(document.querySelectorAll('${testid('message')}[data-role=assistant] ${testid('text-part')}')).map((node) => node.textContent).join(' ')`,
-    );
+    const assistant = await page.evaluate<string>(ASSISTANT_TEXT);
     expect(assistant).toContain('browser thread');
     expect(assistant).toContain('allowed');
 
@@ -196,4 +198,44 @@ test(
     }
   },
   TIMEOUT,
+);
+
+test(
+  'the page reconnects on its own to a core restarted on the same port, and the next turn streams',
+  async () => {
+    // Survives a reconnect and nothing else: this is what tells one apart from
+    // a reload, which would take the marker and the navigation entry with it.
+    await page.evaluate<null>(`(() => { window.__boiteAlive = 'before the drop'; return null; })()`);
+    const rows = await page.evaluate<number>(`document.querySelectorAll('${testid('thread-row')}').length`);
+    expect(rows).toBe(2);
+
+    // Same port, same data directory, so the same journal and the same token:
+    // `core.json` holds the token and `main.ts` reads it back instead of
+    // minting one, which is what lets the page's own `hello` land again.
+    const { port, dataDir, token } = core;
+    await core.stop({ keepDataDir: true });
+    await page.waitFor(`${textOf('status-connection')} !== 'Connected'`, RECONNECT_TIMEOUT_MS);
+    core = await startCore({ port, dataDir });
+    expect(core.port).toBe(port);
+    expect(core.token).toBe(token);
+
+    // Nobody is awaiting this: the client's own backoff reopens the socket,
+    // says `hello` again, resubscribes the open thread, and the store reloads
+    // on `ready`.
+    await page.waitFor(`${textOf('status-connection')} === 'Connected'`, RECONNECT_TIMEOUT_MS);
+    expect(await page.evaluate<string>('window.__boiteAlive')).toBe('before the drop');
+    expect(await page.evaluate<number>(`performance.getEntriesByType('navigation').length`)).toBe(1);
+
+    await page.waitFor(`document.querySelectorAll('${testid('thread-row')}').length === ${rows}`);
+    expect(await page.evaluate<string>(textOf('thread-title'))).toBe('reloaded permission');
+
+    await page.type(testid('composer-input'), 'after the restart');
+    await clickWhenEnabled(testid('composer-send'));
+    await page.waitFor(`${ASSISTANT_TEXT}.includes('after the restart')`, RECONNECT_TIMEOUT_MS);
+    await page.waitFor(
+      `document.querySelector('${testid('thread-status')}').dataset.status === 'idle'`,
+      RECONNECT_TIMEOUT_MS,
+    );
+  },
+  RECONNECT_TIMEOUT_MS,
 );
