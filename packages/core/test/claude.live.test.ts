@@ -83,4 +83,60 @@ live('claude driver, live', () => {
     },
     TURN_TIMEOUT_MS,
   );
+
+  test(
+    'a warm thread answers two turns on one CLI process',
+    async () => {
+      const client = await harness.connect();
+      await client.call('settings.set', { warmProcessMinutes: 2 });
+      const project = await client.call('projects.add', { path: projectDir, name: 'live warm' });
+      const accounts = await client.call('accounts.list', {});
+      const account = accounts.find((entry) => entry.providerId === 'claude' && entry.label === 'Default');
+      if (account === undefined) throw new Error('no default claude account on this machine');
+
+      const thread = await client.call('threads.create', {
+        projectId: project.id,
+        providerId: 'claude',
+        accountId: account.id,
+        cwd: projectDir,
+        permissionMode: 'default',
+        title: 'live warm claude',
+      });
+      const threadId = thread.id;
+      await client.call('threads.subscribe', { threadId });
+
+      const started: RpcEvents['process.started'][] = [];
+      const exited: RpcEvents['process.exited'][] = [];
+      client.on('process.started', (record) => {
+        if (record.threadId === threadId) started.push(record);
+      });
+      client.on('process.exited', (record) => {
+        if (record.threadId === threadId) exited.push(record);
+      });
+
+      const first = client.next('turn.finished', (turn) => turn.threadId === threadId, TURN_TIMEOUT_MS);
+      await client.call('turns.start', { threadId, prompt: 'Reply with exactly the word: ping' });
+      expect((await first).status).toBe('done');
+      // The first process of the thread is the CLI the core spawned; the rest are its own helpers,
+      // dozens of them, short-lived, so only the CLI itself is what the warm window keeps.
+      const cli = started[0];
+      if (cli === undefined) throw new Error('no process started for the thread');
+      const isCli = (record: RpcEvents['process.started']): boolean =>
+        record.exe === cli.exe && record.parentPid === cli.parentPid;
+      expect(started.filter(isCli).length).toBe(1);
+      expect(exited.some((record) => record.pid === cli.pid)).toBe(false);
+
+      const second = client.next('turn.finished', (turn) => turn.threadId === threadId, TURN_TIMEOUT_MS);
+      await client.call('turns.start', { threadId, prompt: 'Repeat the word you just said, nothing else.' });
+      expect((await second).status).toBe('done');
+      // Same CLI: the core spawned no second one, and the first never exited.
+      expect(started.filter(isCli).length).toBe(1);
+      expect(exited.some((record) => record.pid === cli.pid)).toBe(false);
+
+      const full = await client.call('threads.get', { threadId });
+      expect(full.sessionId).not.toBeNull();
+      expect(assistantText(full.messages).toLowerCase()).toContain('ping');
+    },
+    TURN_TIMEOUT_MS * 2,
+  );
 });
