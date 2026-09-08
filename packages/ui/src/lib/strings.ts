@@ -167,6 +167,39 @@ export const strings = {
     hint: 'Enter to send, Shift+Enter for a new line'
   },
 
+  /** The panel on the right of the chat: its tab strip, its launcher, its surfaces. */
+  rightPanel: {
+    label: 'Panel',
+    toggle: 'Show or hide the panel',
+    resize: 'Resize the panel, double-click to reset',
+    maximize: 'Maximize the panel',
+    restore: 'Restore the panel',
+    newSurface: 'Open a surface',
+    scrollLeft: 'Scroll the tabs left',
+    scrollRight: 'Scroll the tabs right',
+    close: 'Close',
+    closeTab: 'Close {title}',
+    closeOthers: 'Close others',
+    closeToRight: 'Close to the right',
+    closeAll: 'Close all',
+    trace: 'Trace',
+    traceHint: 'Processes this thread launched',
+    browser: 'Browser',
+    browserHint: 'A page beside the thread',
+    desktopOnly: 'Only in the desktop app',
+    launcher: 'Open a surface in this panel',
+    untitled: 'Browser'
+  },
+
+  browser: {
+    back: 'Back',
+    forward: 'Forward',
+    reload: 'Reload',
+    urlPlaceholder: 'Search or enter URL',
+    openExternal: 'Open in the system browser',
+    slotEmpty: 'The page opens here once the shell provides the webview'
+  },
+
   trace: {
     exe: 'Executable',
     pid: 'PID',

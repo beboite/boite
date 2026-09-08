@@ -6,6 +6,8 @@
     items,
     onpick,
     align = 'start',
+    placement = 'top',
+    variant = 'chip',
     label,
     testid,
     children
@@ -13,6 +15,9 @@
     items: MenuItem[];
     onpick: (id: string) => void;
     align?: 'start' | 'end';
+    /** Where the popover sits: above the trigger, the composer's way, or under it. */
+    placement?: 'top' | 'bottom';
+    variant?: 'chip' | 'ghost';
     label: string;
     testid?: string;
     children: Snippet;
@@ -51,7 +56,9 @@
 <div class="menu" bind:this={root}>
   <button
     type="button"
-    class="chip trigger"
+    class="trigger"
+    class:chip={variant === 'chip'}
+    class:ghost={variant === 'ghost'}
     aria-haspopup="menu"
     aria-expanded={open}
     aria-label={label}
@@ -64,7 +71,7 @@
   </button>
 
   {#if open}
-    <div class="popover" class:end={align === 'end'} role="menu" tabindex="-1" {onkeydown} data-testid={testid ? `${testid}-menu` : undefined}>
+    <div class="popover" class:end={align === 'end'} class:below={placement === 'bottom'} role="menu" tabindex="-1" {onkeydown} data-testid={testid ? `${testid}-menu` : undefined}>
       {#each items as item (item.id)}
         <button
           type="button"
@@ -95,9 +102,19 @@
   .trigger {
     cursor: pointer;
     height: 24px;
+    justify-content: center;
     transition:
       background var(--dur-2) var(--ease-out-quint),
       color var(--dur-2) var(--ease-out-quint);
+  }
+
+  .trigger.ghost {
+    width: 24px;
+    padding: 0;
+    border-color: transparent;
+    background: transparent;
+    color: var(--color-muted-foreground);
+    border-radius: var(--radius-md);
   }
 
   .trigger:hover,
@@ -129,6 +146,16 @@
     left: auto;
     right: 0;
     transform-origin: bottom right;
+  }
+
+  .popover.below {
+    bottom: auto;
+    top: calc(100% + 6px);
+    transform-origin: top left;
+  }
+
+  .popover.below.end {
+    transform-origin: top right;
   }
 
   .item {

@@ -5,12 +5,13 @@
   import ContextMenu from './components/ContextMenu.svelte';
   import DropOverlay from './components/DropOverlay.svelte';
   import FirstRun from './components/FirstRun.svelte';
+  import RightPanel from './components/RightPanel.svelte';
   import SettingsShell from './components/SettingsShell.svelte';
   import Sidebar from './components/Sidebar.svelte';
   import TitleBar from './components/TitleBar.svelte';
-  import TracePanel from './components/TracePanel.svelte';
   import { installExternalLinks } from './lib/links';
   import { strings } from './lib/strings';
+  import { rightPanel } from './lib/right-panel.svelte';
   import { store } from './lib/store.svelte';
   import { startTheme } from './lib/theme';
 
@@ -55,23 +56,56 @@
     };
   });
 
+  /** A key that belongs to whatever the user is typing in, not to the app. */
+  function typing(event: KeyboardEvent): boolean {
+    const target = event.target;
+    return (
+      target instanceof HTMLElement &&
+      (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))
+    );
+  }
+
   function onkeydown(event: KeyboardEvent) {
     const meta = event.ctrlKey || event.metaKey;
     if (!meta) {
       if (event.key === 'Escape' && store.sidebarOpen) store.sidebarOpen = false;
       return;
     }
-    if (event.key === 'n' || event.key === 'N') {
+    const key = event.key.toLowerCase();
+    if (event.altKey) {
+      // Ctrl+Alt+B is the panel; Ctrl+B alone stays the sidebar.
+      if (key === 'b' && store.openThread) {
+        event.preventDefault();
+        store.panel.toggle();
+      }
+      return;
+    }
+    if (event.shiftKey) {
+      if (key === 'j' && store.openThread && window.__TAURI_INTERNALS__ !== undefined) {
+        event.preventDefault();
+        const open = store.panel.surfaces.find((surface) => surface.kind === 'browser');
+        if (open) store.panel.activate(open.id);
+        else store.panel.open('browser');
+      }
+      return;
+    }
+    if (key === 'n') {
       event.preventDefault();
       store.startDraft();
-    } else if (event.key === 'k' || event.key === 'K') {
+    } else if (key === 'k') {
       event.preventDefault();
       store.showChat();
       if (store.sidebarCollapsed) store.toggleSidebar();
       sidebar?.focusSearch();
-    } else if (event.key === 'b' || event.key === 'B') {
+    } else if (key === 'b') {
       event.preventDefault();
       store.toggleSidebar();
+    } else if (key === 'w') {
+      // The active surface, never the window: only while the panel is showing.
+      const active = store.panel.activeSurfaceId;
+      if (!store.panelOpen || !active || typing(event)) return;
+      event.preventDefault();
+      store.panel.close(active);
     } else if (event.key === ',') {
       event.preventDefault();
       store.showSettings();
@@ -88,7 +122,7 @@
     <TitleBar {store} />
   {/if}
 
-  <div class="body">
+  <div class="body" class:panel-maximized={rightPanel.maximized && store.panelOpen}>
     {#if !store.booted}
       <p class="empty boot">{strings.app.loading}</p>
     {:else if store.connection === 'closed' && !store.core}
@@ -117,7 +151,7 @@
         {/if}
       </main>
       {#if store.panelOpen && store.openThread}
-        <TracePanel {store} />
+        <RightPanel {store} panel={store.panel} />
       {/if}
     {/if}
   </div>
@@ -162,6 +196,13 @@
     min-height: 0;
     display: flex;
     flex-direction: column;
+  }
+
+  /* Maximized, the panel takes the room and the chat column keeps none. */
+  .body.panel-maximized main {
+    flex: none;
+    width: 0;
+    overflow: hidden;
   }
 
   .boot {

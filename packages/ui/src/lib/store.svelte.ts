@@ -42,6 +42,7 @@ import {
   writePrefs,
   type ComposerPrefs
 } from './prefs';
+import { rightPanel, type BoundPanel } from './right-panel.svelte';
 import { strings } from './strings';
 
 export type Page = 'chat' | 'settings';
@@ -119,7 +120,6 @@ export class Store {
   error = $state<string | null>(null);
   page = $state<Page>('chat');
   settingsTab = $state<SettingsTab>('general');
-  panelOpen = $state(false);
   /** The phone drawer. */
   sidebarOpen = $state(false);
   /** The desktop sidebar, folded with Ctrl+B. */
@@ -367,6 +367,8 @@ export class Store {
     on('thread.removed', ({ threadId }) => {
       this.threads = this.threads.filter((t) => t.id !== threadId);
       if (this.openThread?.id === threadId) this.openThread = null;
+      // A thread that left Boite takes its panel layout with it.
+      rightPanel.forget(threadId);
     });
 
     on('turn.started', (turn) => this.#upsertTurn(turn.threadId, turn));
@@ -608,8 +610,19 @@ export class Store {
     this.page = 'chat';
   }
 
+  /** The right panel of the thread that is open, surfaces and all. */
+  get panel(): BoundPanel {
+    return rightPanel.for(this.openThread?.id ?? null);
+  }
+
+  /** Whether that panel is showing. The chat header's button reads it. */
+  get panelOpen(): boolean {
+    return this.panel.isOpen;
+  }
+
+  /** The header's Trace button: the panel opens on trace, or shuts on it. */
   togglePanel(): void {
-    this.panelOpen = !this.panelOpen;
+    this.panel.toggleTrace();
     if (this.panelOpen) void this.refreshTrace();
   }
 
