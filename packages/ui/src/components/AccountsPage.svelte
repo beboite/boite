@@ -122,6 +122,7 @@
           {#if login}
             <tr class="login" data-testid="account-login-row" data-account-id={account.id}>
               <td colspan="6">
+                <div class="login-box">
                 {#if login.url}
                   <a
                     class="link"
@@ -151,6 +152,7 @@
                     </button>
                   </form>
                 {/if}
+                </div>
               </td>
             </tr>
           {/if}
@@ -217,11 +219,15 @@
     justify-content: flex-end;
   }
 
+  /* The cell stays a table cell so the colspan holds; the grid lives inside it. */
   tr.login td {
-    display: grid;
-    gap: 6px;
     background: var(--color-surface-2);
     border-left: 2px solid var(--color-live);
+  }
+
+  tr.login .login-box {
+    display: grid;
+    gap: 6px;
   }
 
   tr.login .link {
