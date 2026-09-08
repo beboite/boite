@@ -17,6 +17,7 @@ import {
   type ShellRun,
 } from './boite2.ts';
 import {
+  LEGACY_APP,
   liveApp,
   serverBuilt,
   serverColdStart,
@@ -325,7 +326,7 @@ function closingNotes(raw: Raw): void {
   if (raw.legacy.app !== null && !raw.legacy.app.found) {
     notMeasured.push({
       what: 'the live legacy app',
-      why: 'no process was running at C:\\Users\\mtsu\\AppData\\Local\\Boite Legacy\\boite.exe',
+      why: `no process was running at ${LEGACY_APP}`,
     });
   }
 }

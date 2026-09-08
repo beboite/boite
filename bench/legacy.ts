@@ -1,13 +1,21 @@
 import { existsSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { homedir } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
 import { freePort } from '../tests/e2e/lib/cdp.ts';
 import { killProcessTree, removeDirectory } from '../tests/e2e/lib/core.ts';
 import { findByExecutable, snapshot, sumByName, tree, treeBytes, workingSet } from './lib/proc.ts';
 
-export const LEGACY_ROOT = 'D:\\Dev\\Collab\\boite-legacy';
+/** The Boite Legacy checkout: `BOITE_LEGACY_ROOT`, or the `boite-legacy` directory beside this repo. */
+export const LEGACY_ROOT =
+  process.env.BOITE_LEGACY_ROOT ?? join(dirname(resolve(import.meta.dir, '..')), 'boite-legacy');
 export const LEGACY_SERVER = join(LEGACY_ROOT, 'target', 'release', 'boite-server.exe');
-export const LEGACY_APP = 'C:\\Users\\mtsu\\AppData\\Local\\Boite Legacy\\boite.exe';
+/** The installed Boite Legacy app, per user under `%LOCALAPPDATA%`. */
+export const LEGACY_APP = join(
+  process.env.LOCALAPPDATA ?? join(homedir(), 'AppData', 'Local'),
+  'Boite Legacy',
+  'boite.exe',
+);
 
 const BOOTSTRAP = 'bench';
 const SCOPES = ['read', 'write', 'terminal', 'approve', 'admin'];
