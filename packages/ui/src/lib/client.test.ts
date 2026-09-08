@@ -3,7 +3,7 @@ import { RpcErrorCode, type CoreInfo } from '@boite/contracts';
 import { RpcFailure, WsClient, rpcUrl, type SocketLike } from './client';
 
 const CORE: CoreInfo = {
-  version: '2.0.0-alpha.1',
+  version: '2.0.0-beta.1',
   protocolVersion: 1,
   os: 'windows',
   pid: 99,
@@ -90,7 +90,7 @@ describe('WsClient', () => {
       url: 'http://127.0.0.1:8777',
       token: 'secret',
       clientName: 'shell',
-      version: '2.0.0-alpha.1',
+      version: '2.0.0-beta.1',
       socketFactory: () => {
         const socket = new FakeSocket();
         sockets.push(socket);
@@ -108,7 +108,7 @@ describe('WsClient', () => {
     expect(hello.method).toBe('hello');
     expect(hello.params).toEqual({
       token: 'secret',
-      client: { name: 'shell', version: '2.0.0-alpha.1' }
+      client: { name: 'shell', version: '2.0.0-beta.1' }
     });
 
     live.receive({ jsonrpc: '2.0', id: hello.id, result: { core: CORE } });

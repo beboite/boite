@@ -22,7 +22,7 @@ import {
   workingSet,
 } from './lib/proc.ts';
 
-const CLIENT = { name: 'bench', version: '2.0.0-alpha.1' };
+const CLIENT = { name: 'bench', version: '2.0.0-beta.1' };
 const ROOT = join(import.meta.dir, '..');
 const SHELL_EXE = join(ROOT, 'apps', 'shell', 'src-tauri', 'target', 'release', 'boite-shell.exe');
 const CORE_BUNDLE = join(ROOT, 'packages', 'core', 'dist', 'main.js');

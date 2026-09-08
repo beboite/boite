@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Boite",
-  "version": "2.0.0-alpha.1",
+  "version": "2.0.0-beta.1",
   "identifier": "com.boite.two",
   "build": {
     "frontendDist": "../../../packages/ui/dist",

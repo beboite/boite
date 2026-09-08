@@ -249,7 +249,7 @@ export class FakeClient implements ObservableClient {
       muteAgents: true
     };
     this.#core = {
-      version: '2.0.0-alpha.1',
+      version: '2.0.0-beta.1',
       protocolVersion: PROTOCOL_VERSION,
       os: 'windows',
       pid: 4242,

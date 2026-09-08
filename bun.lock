@@ -7,21 +7,21 @@
     },
     "apps/shell": {
       "name": "@boite/shell",
-      "version": "2.0.0-alpha.1",
+      "version": "2.0.0-beta.1",
       "devDependencies": {
         "@tauri-apps/cli": "2.11.4",
       },
     },
     "packages/contracts": {
       "name": "@boite/contracts",
-      "version": "2.0.0-alpha.1",
+      "version": "2.0.0-beta.1",
       "devDependencies": {
         "typescript": "^7.0.2",
       },
     },
     "packages/core": {
       "name": "@boite/core",
-      "version": "2.0.0-alpha.1",
+      "version": "2.0.0-beta.1",
       "dependencies": {
         "@agentclientprotocol/sdk": "1.4.0",
         "@anthropic-ai/claude-agent-sdk": "0.3.263",
@@ -35,7 +35,7 @@
     },
     "packages/ui": {
       "name": "@boite/ui",
-      "version": "2.0.0-alpha.1",
+      "version": "2.0.0-beta.1",
       "dependencies": {
         "@boite/contracts": "workspace:*",
         "@lucide/svelte": "1.42.0",

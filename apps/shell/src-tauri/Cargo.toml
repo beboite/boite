@@ -1,6 +1,6 @@
 [package]
 name = "boite-shell"
-version = "2.0.0-alpha.1"
+version = "2.0.0-beta.1"
 description = "Boite desktop shell: window, tray, and the local core"
 edition = "2021"
 rust-version = "1.82"

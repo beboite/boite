@@ -102,7 +102,7 @@ export async function connect(url: string, token: string, options: ConnectOption
 
   const hello = (await send('hello', {
     token,
-    client: options.client ?? { name: 'test', version: '2.0.0-alpha.1' },
+    client: options.client ?? { name: 'test', version: '2.0.0-beta.1' },
   })) as { core: CoreInfo };
 
   const on = (event: string, handler: (payload: unknown) => void): (() => void) => {

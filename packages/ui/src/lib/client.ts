@@ -123,7 +123,7 @@ export class WsClient implements ObservableClient {
       url: options.url,
       token: options.token,
       clientName: options.clientName ?? 'shell',
-      version: options.version ?? '2.0.0-alpha.1',
+      version: options.version ?? '2.0.0-beta.1',
       socketFactory: options.socketFactory ?? browserSocket,
       reconnect: options.reconnect ?? true,
       backoff: options.backoff ?? defaultBackoff

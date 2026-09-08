@@ -20,7 +20,7 @@ describe('Store', () => {
     const { store } = await ready();
 
     expect(store.connection).toBe('ready');
-    expect(store.core?.version).toBe('2.0.0-alpha.1');
+    expect(store.core?.version).toBe('2.0.0-beta.1');
     expect(store.projects.map((p) => p.id)).toEqual(['p-boite', 'p-brain']);
     expect(store.threads).toHaveLength(4);
     // Two seeded threads wait: one on a permission, one on a question.

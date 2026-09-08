@@ -87,7 +87,7 @@ export interface PickPatch {
   effort?: string | null;
 }
 
-export const UI_VERSION = '2.0.0-alpha.1';
+export const UI_VERSION = '2.0.0-beta.1';
 
 function observable(client: Client): client is ObservableClient {
   return 'onState' in client;
