@@ -1,5 +1,6 @@
 import type { Account, Protocol, ProviderSummary, ThreadId } from '@boite/contracts';
 import { unavailable } from '../errors.ts';
+import { createAcpDriver } from './acp.ts';
 import { createClaudeDriver } from './claude.ts';
 import { echoDriver } from './echo.ts';
 import type { Driver } from './types.ts';
@@ -12,9 +13,15 @@ const DRIVERS = new Map<Protocol, Driver>([
       loadQuery: () => import('@anthropic-ai/claude-agent-sdk').then((module) => module.query),
     }),
   ],
+  [
+    'acp',
+    createAcpDriver({
+      loadSdk: () => import('@agentclientprotocol/sdk'),
+    }),
+  ],
 ]);
 
-const RUNNABLE = new Set<Protocol>(['echo', 'claude-sdk']);
+const RUNNABLE = new Set<Protocol>(['echo', 'claude-sdk', 'acp']);
 
 export function getDriver(protocol: Protocol): Driver {
   const driver = DRIVERS.get(protocol);
