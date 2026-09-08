@@ -29,8 +29,8 @@ bun run test                # bun test in packages/core, vitest in packages/ui
 bun run e2e                 # core over WS, UI in a hidden Chromium, the shell over CDP
 ```
 
-The core takes `--port`, `--host`, `--lan` and `--data-dir`. Pass them to the
-entry point directly when you need one:
+The core takes `--port`, `--host`, `--lan`, `--data-dir` and `--channel`
+(`stable` or `dev`). Pass them to the entry point directly when you need one:
 
 ```bash
 bun packages/core/src/main.ts --lan --data-dir /tmp/boite-scratch
@@ -44,12 +44,15 @@ bun run build:core          # packages/core/dist: main.js, the two workers, the 
 bun run build:core:exe      # packages/core/dist/boite-core.exe, the shell's sidecar
 bun run stage:core          # compile the core and put it where the bundler and the e2e look
 bun run build:shell         # the NSIS installer, sidecar and UI included
+bun run build:shell:dev     # the same installer as "Boite Dev", beside the stable app
 ```
 
 The installer is per user and asks for no elevation. It puts
 `boite-shell.exe`, the `boite-core.exe` sidecar, `jobs-worker.js`,
-`guard-worker.js` and `ui/` under `%LOCALAPPDATA%\Boite`. Step by step:
-[docs/releasing.md](docs/releasing.md).
+`guard-worker.js` and `ui/` under `%LOCALAPPDATA%\Boite`. `build:shell:dev`
+builds the same thing under a second identifier, a second product name and a
+second data directory, so a beta installs beside the app in daily use rather
+than over it. Step by step: [docs/releasing.md](docs/releasing.md).
 
 ## Layout
 

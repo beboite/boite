@@ -1,6 +1,6 @@
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import type { Os } from '@boite/contracts';
+import type { Channel, Os } from '@boite/contracts';
 
 export function currentOs(): Os {
   if (process.platform === 'win32') return 'windows';
@@ -8,24 +8,40 @@ export function currentOs(): Os {
   return 'linux';
 }
 
-export function defaultDataDir(): string {
+/**
+ * The one directory name a channel owns, on every OS. The dev install writes
+ * next to the stable one rather than into it, which is the whole point of the
+ * channel: a beta build a user tries out cannot touch the journal, the accounts
+ * or the managed installs of the app they work in.
+ */
+export function dataDirName(channel: Channel): string {
+  return channel === 'dev' ? 'boite2-dev' : 'boite2';
+}
+
+export function defaultDataDir(channel: Channel = 'stable'): string {
+  const name = dataDirName(channel);
   switch (currentOs()) {
     case 'windows': {
       const local = process.env.LOCALAPPDATA ?? join(homedir(), 'AppData', 'Local');
-      return join(local, 'boite2');
+      return join(local, name);
     }
     case 'macos':
-      return join(homedir(), 'Library', 'Application Support', 'boite2');
+      return join(homedir(), 'Library', 'Application Support', name);
     default:
-      return join(homedir(), '.local', 'share', 'boite2');
+      return join(homedir(), '.local', 'share', name);
   }
 }
 
-export function resolveDataDir(override?: string | undefined): string {
+/**
+ * `--data-dir` first, then `BOITE_DATA_DIR`, then the channel's own default.
+ * The channel only ever decides the last of the three: a run that names a
+ * directory means it, whichever install started it.
+ */
+export function resolveDataDir(override?: string | undefined, channel: Channel = 'stable'): string {
   const fromEnv = process.env.BOITE_DATA_DIR;
   if (override && override.length > 0) return override;
   if (fromEnv && fromEnv.length > 0) return fromEnv;
-  return defaultDataDir();
+  return defaultDataDir(channel);
 }
 
 export function homePath(): string {

@@ -30,6 +30,59 @@ const POLL_INTERVAL: Duration = Duration::from_millis(120);
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 // ---------------------------------------------------------------------------
+// The install channel.
+// ---------------------------------------------------------------------------
+
+/// Which install of Boite this executable is. Stable and dev are two installs
+/// on one machine, and three things separate them: the bundle identifier, the
+/// product name, and the data directory. Only the identifier decides, read once
+/// from the compiled config, so no environment variable can move a build to
+/// another channel and no dev shell can adopt the stable core.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Channel {
+    Stable,
+    Dev,
+}
+
+impl Channel {
+    /// `com.boite.two` is stable, `com.boite.two.dev` is dev.
+    pub fn of_identifier(identifier: &str) -> Self {
+        if identifier.ends_with(".dev") {
+            Channel::Dev
+        } else {
+            Channel::Stable
+        }
+    }
+
+    /// The directory name under the OS data root. It is the same name
+    /// `dataDirName` returns in `packages/core/src/paths.ts`: the shell reads
+    /// `core.json` where the core writes it, or it adopts the wrong core.
+    pub fn data_dir_name(self) -> &'static str {
+        match self {
+            Channel::Stable => "boite2",
+            Channel::Dev => "boite2-dev",
+        }
+    }
+
+    /// What the window title and the tray tooltip read.
+    pub fn product_name(self) -> &'static str {
+        match self {
+            Channel::Stable => "Boite",
+            Channel::Dev => "Boite Dev",
+        }
+    }
+
+    /// What this shell appends to the core's argv, so the core it starts picks
+    /// the same default data directory the shell will look in.
+    pub fn core_args(self) -> Vec<String> {
+        match self {
+            Channel::Stable => Vec::new(),
+            Channel::Dev => vec!["--channel".to_string(), "dev".to_string()],
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // The Job Object that owns the core.
 // ---------------------------------------------------------------------------
 
@@ -162,14 +215,18 @@ pub struct CoreState {
     child: Arc<Mutex<Option<Child>>>,
     /// Held for the life of the shell process: see `job::CoreJob`.
     job: Arc<Mutex<Option<CoreJob>>>,
+    /// Read once from the bundle identifier, then carried everywhere the data
+    /// directory and the core's argv are decided.
+    channel: Channel,
 }
 
 impl CoreState {
-    fn new() -> Self {
+    fn new(channel: Channel) -> Self {
         Self {
             slot: Arc::new((Mutex::new(Slot::default()), Condvar::new())),
             child: Arc::new(Mutex::new(None)),
             job: Arc::new(Mutex::new(None)),
+            channel,
         }
     }
 
@@ -257,36 +314,36 @@ fn hidden() -> bool {
 }
 
 #[cfg(windows)]
-fn default_data_dir() -> Result<PathBuf, String> {
+fn default_data_dir(channel: Channel) -> Result<PathBuf, String> {
     let local = std::env::var("LOCALAPPDATA")
         .map_err(|_| "LOCALAPPDATA is not set, so the data directory cannot be found".to_string())?;
-    Ok(PathBuf::from(local).join("boite2"))
+    Ok(PathBuf::from(local).join(channel.data_dir_name()))
 }
 
 #[cfg(target_os = "macos")]
-fn default_data_dir() -> Result<PathBuf, String> {
+fn default_data_dir(channel: Channel) -> Result<PathBuf, String> {
     let home = std::env::var("HOME")
         .map_err(|_| "HOME is not set, so the data directory cannot be found".to_string())?;
     Ok(PathBuf::from(home)
         .join("Library")
         .join("Application Support")
-        .join("boite2"))
+        .join(channel.data_dir_name()))
 }
 
 #[cfg(all(not(windows), not(target_os = "macos")))]
-fn default_data_dir() -> Result<PathBuf, String> {
+fn default_data_dir(channel: Channel) -> Result<PathBuf, String> {
     let home = std::env::var("HOME")
         .map_err(|_| "HOME is not set, so the data directory cannot be found".to_string())?;
     Ok(PathBuf::from(home)
         .join(".local")
         .join("share")
-        .join("boite2"))
+        .join(channel.data_dir_name()))
 }
 
-fn data_dir() -> Result<PathBuf, String> {
+fn data_dir(channel: Channel) -> Result<PathBuf, String> {
     match std::env::var("BOITE_DATA_DIR") {
         Ok(value) if !value.trim().is_empty() => Ok(PathBuf::from(value.trim())),
-        _ => default_data_dir(),
+        _ => default_data_dir(channel),
     }
 }
 
@@ -390,7 +447,16 @@ fn sidecar() -> Option<PathBuf> {
 
 /// In order: `BOITE_CORE_COMMAND`, the `boite-core` sidecar next to this
 /// executable, the core bundle a repository above it has built, its sources.
-fn core_command() -> Result<(String, Vec<String>, Option<PathBuf>), String> {
+/// Whatever the source, the channel rides on the argv: a dev shell starts a dev
+/// core, which writes its `core.json` in the directory this shell then reads.
+fn core_command(channel: Channel) -> Result<(String, Vec<String>, Option<PathBuf>), String> {
+    let (program, mut args, working_directory) = core_program()?;
+    args.extend(channel.core_args());
+    Ok((program, args, working_directory))
+}
+
+/// Where the core comes from, with no opinion on the channel.
+fn core_program() -> Result<(String, Vec<String>, Option<PathBuf>), String> {
     if let Ok(raw) = std::env::var("BOITE_CORE_COMMAND") {
         let mut parts = raw.split_whitespace().map(str::to_string);
         let program = parts
@@ -421,8 +487,8 @@ fn core_command() -> Result<(String, Vec<String>, Option<PathBuf>), String> {
     ))
 }
 
-fn spawn_core() -> Result<(Child, Arc<AtomicBool>, CoreJob), String> {
-    let (program, args, working_directory) = core_command()?;
+fn spawn_core(channel: Channel) -> Result<(Child, Arc<AtomicBool>, CoreJob), String> {
+    let (program, args, working_directory) = core_command(channel)?;
     let job = job::create_core_job()?;
 
     let mut command = Command::new(&program);
@@ -467,10 +533,11 @@ fn spawn_core() -> Result<(Child, Arc<AtomicBool>, CoreJob), String> {
 }
 
 fn resolve_core(
+    channel: Channel,
     child_slot: &Mutex<Option<Child>>,
     job_slot: &Mutex<Option<CoreJob>>,
 ) -> Result<CoreEndpoint, String> {
-    let directory = data_dir()?;
+    let directory = data_dir(channel)?;
     let file = directory.join("core.json");
 
     match read_core_file(&file) {
@@ -479,7 +546,7 @@ fn resolve_core(
         Err(error) => eprintln!("[shell] {error}"),
     }
 
-    let (child, ready, job) = spawn_core()?;
+    let (child, ready, job) = spawn_core(channel)?;
     if let Ok(mut guard) = child_slot.lock() {
         *guard = Some(child);
     }
@@ -510,10 +577,11 @@ fn start_core<R: Runtime>(app: &AppHandle<R>, state: &CoreState) {
     let slot = state.slot.clone();
     let child_slot = state.child.clone();
     let job_slot = state.job.clone();
+    let channel = state.channel;
     let handle = app.clone();
 
     std::thread::spawn(move || {
-        let outcome = resolve_core(&child_slot, &job_slot);
+        let outcome = resolve_core(channel, &child_slot, &job_slot);
         {
             let (lock, ready) = &*slot;
             if let Ok(mut guard) = lock.lock() {
@@ -541,10 +609,13 @@ fn start_core<R: Runtime>(app: &AppHandle<R>, state: &CoreState) {
 /// WebView2 runs one browser process per profile: on the default profile the
 /// test's shell would attach to the browser the installed app already started,
 /// which carries no debugging port.
-fn build_main_window<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<tauri::WebviewWindow<R>> {
+fn build_main_window<R: Runtime>(
+    app: &AppHandle<R>,
+    channel: Channel,
+) -> tauri::Result<tauri::WebviewWindow<R>> {
     let mut builder =
         tauri::WebviewWindowBuilder::new(app, MAIN_LABEL, tauri::WebviewUrl::default())
-            .title("Boite")
+            .title(channel.product_name())
             .inner_size(1280.0, 800.0)
             .min_inner_size(880.0, 560.0)
             .resizable(true)
@@ -589,13 +660,13 @@ fn quit<R: Runtime>(app: &AppHandle<R>) {
     app.exit(0);
 }
 
-fn build_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
+fn build_tray<R: Runtime>(app: &AppHandle<R>, channel: Channel) -> tauri::Result<()> {
     let show = MenuItem::with_id(app, "show", "Show", true, None::<&str>)?;
     let leave = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&show, &leave])?;
 
     let mut builder = TrayIconBuilder::with_id("boite")
-        .tooltip("Boite")
+        .tooltip(channel.product_name())
         .menu(&menu)
         .show_menu_on_left_click(true)
         .on_menu_event(|app, event| match event.id().as_ref() {
@@ -611,10 +682,15 @@ fn build_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
 }
 
 pub fn run() {
+    // The channel is read here and nowhere else: the compiled bundle identifier
+    // is the only thing that says which install this executable is.
+    let context = tauri::generate_context!();
+    let channel = Channel::of_identifier(&context.config().identifier);
+
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
-        .manage(CoreState::new())
+        .manage(CoreState::new(channel))
         .invoke_handler(tauri::generate_handler![
             core_endpoint,
             quit_shell,
@@ -627,10 +703,10 @@ pub fn run() {
             browser::browser_set_zoom,
             browser::browser_destroy,
         ])
-        .setup(|app| {
+        .setup(move |app| {
             let handle = app.handle().clone();
-            let window = build_main_window(&handle)?;
-            build_tray(&handle)?;
+            let window = build_main_window(&handle, channel)?;
+            build_tray(&handle, channel)?;
             start_core(&handle, &app.state::<CoreState>());
 
             let closing = handle.clone();
@@ -642,7 +718,7 @@ pub fn run() {
             });
             Ok(())
         })
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("the Boite shell could not be built")
         .run(|app, event| {
             if let tauri::RunEvent::Exit = event {
@@ -651,4 +727,31 @@ pub fn run() {
                 }
             }
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Channel;
+
+    #[test]
+    fn the_identifier_is_the_only_thing_that_names_the_channel() {
+        assert_eq!(Channel::of_identifier("com.boite.two"), Channel::Stable);
+        assert_eq!(Channel::of_identifier("com.boite.two.dev"), Channel::Dev);
+        // A name that merely mentions dev is not a channel: only the suffix is.
+        assert_eq!(Channel::of_identifier("com.boite.devtwo"), Channel::Stable);
+    }
+
+    #[test]
+    fn a_channel_names_its_own_data_directory_and_product() {
+        assert_eq!(Channel::Stable.data_dir_name(), "boite2");
+        assert_eq!(Channel::Dev.data_dir_name(), "boite2-dev");
+        assert_eq!(Channel::Stable.product_name(), "Boite");
+        assert_eq!(Channel::Dev.product_name(), "Boite Dev");
+    }
+
+    #[test]
+    fn only_the_dev_channel_puts_anything_on_the_cores_argv() {
+        assert!(Channel::Stable.core_args().is_empty());
+        assert_eq!(Channel::Dev.core_args(), vec!["--channel", "dev"]);
+    }
 }

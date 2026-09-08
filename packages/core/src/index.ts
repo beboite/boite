@@ -6,6 +6,6 @@ export { connect } from './client.ts';
 export type { ConnectOptions, CoreClient } from './client.ts';
 export { RpcFailure } from './errors.ts';
 export { newId, newToken } from './ids.ts';
-export { currentOs, defaultDataDir, resolveDataDir } from './paths.ts';
+export { currentOs, dataDirName, defaultDataDir, resolveDataDir } from './paths.ts';
 export { getDriver, assertDriverRunnable } from './drivers/index.ts';
 export type { Driver, TurnContext, TurnHandle, TurnResult } from './drivers/types.ts';

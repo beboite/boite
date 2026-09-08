@@ -2,6 +2,9 @@
 export const strings = {
   app: {
     name: 'Boite',
+    /** The tag the title bar shows when the core is the dev install. */
+    channelDev: 'Dev',
+    channelDevTitle: 'The dev channel, on its own data directory',
     loading: 'Starting',
     noEndpointTitle: 'No core to connect to',
     noEndpointBody:

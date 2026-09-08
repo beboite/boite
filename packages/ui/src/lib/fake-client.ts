@@ -252,6 +252,7 @@ export class FakeClient implements ObservableClient {
       version: '2.0.0-beta.1',
       protocolVersion: PROTOCOL_VERSION,
       os: 'windows',
+      channel: 'stable',
       pid: 4242,
       startedAt: T0,
       endpoint: { host: '127.0.0.1', port: 8777 },

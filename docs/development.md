@@ -23,16 +23,20 @@ first start and kept in `<dataDir>/core.json` with the port and the pid, so a
 restart on the same data directory keeps the same pairing link.
 
 Flags: `--port` (0 asks the OS for a free one), `--host`, `--lan` (which is
-`--host 0.0.0.0`) and `--data-dir`. `bun run dev:core` passes none of them, so
-reach the entry point directly when you need one:
+`--host 0.0.0.0`) and `--data-dir`. There is a fifth, `--channel`, which takes
+`stable` or `dev` and nothing else: it picks the default data directory,
+`boite2` or `boite2-dev`, and it is what the dev shell passes so the two installs
+never share a journal ([docs/releasing.md](releasing.md)). `bun run dev:core`
+passes none of them, so reach the entry point directly when you need one:
 
 ```bash
 bun packages/core/src/main.ts --port 0 --data-dir /tmp/boite-scratch
 ```
 
-The data directory is `BOITE_DATA_DIR` when set, else `%LOCALAPPDATA%\boite2` on
-Windows, `~/.local/share/boite2` on Linux and
-`~/Library/Application Support/boite2` on macOS. It holds `core.json`,
+The data directory is `--data-dir` when given, else `BOITE_DATA_DIR` when set,
+else `%LOCALAPPDATA%\boite2` on Windows, `~/.local/share/boite2` on Linux and
+`~/Library/Application Support/boite2` on macOS. On `--channel dev` that last
+name becomes `boite2-dev`. It holds `core.json`,
 `journal.db`, `accounts/`, `providers/` and the files of any managed install.
 Never point a scratch run at the real one.
 

@@ -495,10 +495,20 @@ export interface Settings {
   muteAgents: boolean;
 }
 
+/**
+ * Which install of Boite this is. `stable` is the app the user works in every
+ * day; `dev` is a second install beside it, with its own identifier, its own
+ * product name and its own data directory, so a beta build never overwrites
+ * the stable one nor reads its journal.
+ */
+export type Channel = 'stable' | 'dev';
+
 export interface CoreInfo {
   version: string;
   protocolVersion: typeof PROTOCOL_VERSION;
   os: Os;
+  /** The install this core belongs to. `--channel` on its command line decides. */
+  channel: Channel;
   pid: number;
   startedAt: Timestamp;
   endpoint: { host: string; port: number };

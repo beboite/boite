@@ -51,7 +51,8 @@ that nothing in `bun run check` or `bun run test` will notice.
 ## The four ways to hurt yourself
 
 1. Touching the real data directory or a real login. `%LOCALAPPDATA%\boite2` (or
-   its Linux and macOS equivalents) holds the user's journal, projects and
+   its Linux and macOS equivalents, and `boite2-dev` beside it once the dev
+   channel is installed) holds the user's journal, projects and
    accounts, and the accounts point at real CLI logins that cost money and can
    be revoked. Every test and every bench sets `BOITE_DATA_DIR` to a fresh
    temporary directory. The opt-in live tests are the deliberate exception and
@@ -102,7 +103,10 @@ The shell starts a local core and adopts one that already answers, and it can
 point at a core on another machine instead; the phone only ever points at one.
 The shell holds its core in a `KILL_ON_JOB_CLOSE` Job Object, so a shell killed
 hard takes its core down with it rather than leaving an orphan holding the
-installed executable open.
+installed executable open. It also carries a channel, read once from its own
+bundle identifier: `Boite` and `Boite Dev` are two installs on one machine, and
+the channel is what keeps their data directories, and so their cores, apart.
+[docs/releasing.md](docs/releasing.md).
 
 ## One WebSocket, one contract
 

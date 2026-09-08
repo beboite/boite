@@ -6,6 +6,7 @@ const CORE: CoreInfo = {
   version: '2.0.0-beta.1',
   protocolVersion: 1,
   os: 'windows',
+  channel: 'stable',
   pid: 99,
   startedAt: 0,
   endpoint: { host: '127.0.0.1', port: 8777 },

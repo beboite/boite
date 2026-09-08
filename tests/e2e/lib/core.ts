@@ -17,6 +17,8 @@ export interface StartCoreOptions {
   env?: Record<string, string>;
   /** Argv before `--port`: the sources, the bundle, or the compiled core. */
   command?: readonly string[];
+  /** Flags appended after `--port`, `--channel dev` being the one that has a caller. */
+  args?: readonly string[];
 }
 
 export interface RunningCore {
@@ -60,7 +62,12 @@ export async function startCore(options: StartCoreOptions = {}): Promise<Running
   const dataDir = options.dataDir ?? freshDataDir();
   const port = options.port ?? 0;
   const proc = Bun.spawn({
-    cmd: [...(options.command ?? CORE_SOURCE_COMMAND), '--port', String(port)],
+    cmd: [
+      ...(options.command ?? CORE_SOURCE_COMMAND),
+      '--port',
+      String(port),
+      ...(options.args ?? []),
+    ],
     env: { ...process.env, BOITE_DATA_DIR: dataDir, BOITE_ECHO: '1', ...(options.env ?? {}) },
     stdout: 'pipe',
     stderr: 'pipe',

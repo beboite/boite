@@ -1,4 +1,4 @@
-import { mkdtempSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, expect, test } from 'bun:test';
@@ -40,12 +40,40 @@ test(
   'hello answers with a core that can trace',
   () => {
     expect(client.core.protocolVersion).toBe(1);
+    expect(client.core.channel).toBe('stable');
     expect(client.core.pid).toBeGreaterThan(0);
     expect(client.core.endpoint.port).toBe(core.port);
     expect(client.core.dataDir).toBe(core.dataDir);
     expect(['events', 'poll', 'none']).toContain(client.core.trace.mode);
     expect(client.core.trace.note.length).toBeGreaterThan(0);
     expect(client.core.trace.os).toBe(process.platform === 'win32' ? 'windows' : client.core.trace.os);
+  },
+  TIMEOUT,
+);
+
+// The dev channel proved where it is cheap: a second `tauri build` for a dev
+// shell executable costs minutes, while the flag, the `CoreInfo` it fills and
+// the `core.json` a dev shell then reads all live in the core. The rest of the
+// channel, an identifier mapped to a directory name, is `cargo test --lib` in
+// `apps/shell/src-tauri`.
+test(
+  'a core started with --channel dev says so and writes its core.json where a dev shell looks',
+  async () => {
+    const dev = await startCore({ args: ['--channel', 'dev'] });
+    const devClient = await connect(dev.url, dev.token);
+    try {
+      expect(devClient.core.channel).toBe('dev');
+      expect(devClient.core.dataDir).toBe(dev.dataDir);
+
+      const file = join(dev.dataDir, 'core.json');
+      expect(existsSync(file)).toBe(true);
+      const written = JSON.parse(readFileSync(file, 'utf8')) as { port: number; token: string };
+      expect(written.port).toBe(dev.port);
+      expect(written.token).toBe(dev.token);
+    } finally {
+      devClient.close();
+      await dev.stop();
+    }
   },
   TIMEOUT,
 );

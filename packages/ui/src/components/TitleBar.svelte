@@ -79,6 +79,8 @@
   }
 
   let title = $derived(store.openProject?.name ?? strings.app.name);
+  /** The dev install runs beside the stable one, so the bar has to say which is open. */
+  let dev = $derived(store.core?.channel === 'dev');
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -87,7 +89,14 @@
     <BoiteMark size={16} />
     <span class="state {store.connection}" title={strings.connection[store.connection]}></span>
   </div>
-  <div class="center">{title}</div>
+  <div class="center">
+    <span class="name">{title}</span>
+    {#if dev}
+      <span class="channel" title={strings.app.channelDevTitle} data-testid="titlebar-channel">
+        {strings.app.channelDev}
+      </span>
+    {/if}
+  </div>
   <div class="controls">
     <button type="button" class="ctl" aria-label={strings.titlebar.minimize} title={strings.titlebar.minimize} onclick={() => void minimize()}>
       <Minus size={14} strokeWidth={1.75} />
@@ -162,6 +171,17 @@
     height: 100%;
     display: flex;
     align-items: center;
+    gap: 8px;
+  }
+
+  .channel {
+    font-size: var(--text-xs);
+    font-weight: 600;
+    line-height: 1;
+    padding: 3px 6px;
+    border-radius: var(--radius-sm);
+    background: var(--color-surface-3);
+    color: var(--color-muted-foreground);
   }
 
   .controls {

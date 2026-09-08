@@ -1,7 +1,7 @@
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { PAIR_QUERY_PARAM, PROTOCOL_VERSION } from '@boite/contracts';
-import type { CoreInfo, ThreadId } from '@boite/contracts';
+import type { Channel, CoreInfo, ThreadId } from '@boite/contracts';
 import pkg from '../package.json';
 import { AccountStore } from './accounts.ts';
 import { Bus } from './bus.ts';
@@ -27,12 +27,15 @@ export interface SubscriptionSink {
 export interface CoreOptions {
   dataDir: string;
   token: string;
+  /** Which install this core belongs to. Absent means the stable one. */
+  channel?: Channel;
 }
 
 export class Core {
   readonly version = CORE_VERSION;
   readonly dataDir: string;
   readonly token: string;
+  readonly channel: Channel;
   readonly startedAt = Date.now();
 
   readonly bus: Bus;
@@ -53,6 +56,7 @@ export class Core {
   constructor(options: CoreOptions) {
     this.dataDir = options.dataDir;
     this.token = options.token;
+    this.channel = options.channel ?? 'stable';
     mkdirSync(this.dataDir, { recursive: true });
 
     this.bus = new Bus();
@@ -95,6 +99,7 @@ export class Core {
       version: this.version,
       protocolVersion: PROTOCOL_VERSION,
       os: currentOs(),
+      channel: this.channel,
       pid: process.pid,
       startedAt: this.startedAt,
       endpoint: { ...this.endpoint },

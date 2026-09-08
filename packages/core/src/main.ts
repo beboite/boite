@@ -1,10 +1,12 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { Settings } from '@boite/contracts';
+import type { Channel, Settings } from '@boite/contracts';
 import { Core } from './core.ts';
 import { newToken } from './ids.ts';
 import { resolveDataDir } from './paths.ts';
 import { startServer } from './server.ts';
+
+const CHANNELS: readonly Channel[] = ['stable', 'dev'];
 
 interface CoreFile {
   port: number;
@@ -21,10 +23,18 @@ export interface Flags {
   /** True once `--host` or `--lan` named an address, so the setting no longer decides. */
   hostExplicit: boolean;
   dataDir: string | undefined;
+  /** Which install this core belongs to. The dev shell passes `--channel dev`. */
+  channel: Channel;
 }
 
 export function parseFlags(argv: string[]): Flags {
-  const flags: Flags = { port: 0, host: '127.0.0.1', hostExplicit: false, dataDir: undefined };
+  const flags: Flags = {
+    port: 0,
+    host: '127.0.0.1',
+    hostExplicit: false,
+    dataDir: undefined,
+    channel: 'stable',
+  };
   for (let index = 0; index < argv.length; index += 1) {
     const flag = argv[index];
     const value = argv[index + 1];
@@ -52,6 +62,16 @@ export function parseFlags(argv: string[]): Flags {
         flags.dataDir = value;
         index += 1;
         break;
+      case '--channel': {
+        if (value === undefined || !CHANNELS.includes(value as Channel)) {
+          throw new Error(
+            `--channel expects ${CHANNELS.join(' or ')}, got ${value ?? '(nothing)'}`,
+          );
+        }
+        flags.channel = value as Channel;
+        index += 1;
+        break;
+      }
       default:
         break;
     }
@@ -82,12 +102,12 @@ export function resolveHost(flags: Flags, settings: Settings): string {
 
 export function main(argv: string[]): void {
   const flags = parseFlags(argv);
-  const dataDir = resolveDataDir(flags.dataDir);
+  const dataDir = resolveDataDir(flags.dataDir, flags.channel);
   mkdirSync(dataDir, { recursive: true });
 
   const coreFile = join(dataDir, 'core.json');
   const token = readToken(coreFile) ?? newToken();
-  const core = new Core({ dataDir, token });
+  const core = new Core({ dataDir, token, channel: flags.channel });
   const settings = core.settings.get();
   const host = resolveHost(flags, settings);
   const server = startServer({ core, host, port: flags.port });

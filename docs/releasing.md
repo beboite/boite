@@ -81,6 +81,51 @@ key is a directory copies the whole tree under the target name, which is why the
 UI arrives as `ui/index.html` and needs no glob. A glob key would flatten the
 tree instead.
 
+## Channels
+
+A channel is one install of Boite. There are two, and they sit side by side on
+the same machine so the user can try a beta without losing the app they work in
+every day.
+
+Three things differ, and nothing else:
+
+- the bundle identifier, `com.boite.two` against `com.boite.two.dev`;
+- the product name, `Boite` against `Boite Dev`, which is the install directory,
+  the window title and the tray tooltip;
+- the data directory, `boite2` against `boite2-dev` under the same OS root.
+
+The two build commands:
+
+```bash
+bun run build:shell         # Boite, com.boite.two, boite2
+bun run build:shell:dev     # Boite Dev, com.boite.two.dev, boite2-dev
+```
+
+The dev one passes a second overlay, `apps/shell/src-tauri/tauri.dev.conf.json`,
+after the bundle one. The Tauri CLI takes `--config` more than once and merges
+in the order given, so the dev overlay carries only what differs: the product
+name, the identifier and `bundle.icon` pointing at `icons-dev/`, which is the
+same mark inverted, white on black, rendered from
+`packages/ui/public/icons/icon-dev.svg`. Two identifiers mean two NSIS product
+codes, so the second installer installs beside the first instead of over it.
+
+The separate data directory is not a nicety. The shell finds its core by reading
+`<dataDir>/core.json` and adopting whatever answers on the port it names: on one
+shared directory a dev shell would adopt the stable core, run the beta window on
+the stable journal and the stable accounts, and report nothing wrong. So the
+channel rides all the way down. The shell reads it once from
+`app.config().identifier` (a `.dev` suffix and nothing else decides it), uses it
+for its own data directory, and appends `--channel dev` to the core's argv; the
+core's `--channel` picks the same default directory and fills `CoreInfo.channel`,
+which is what puts the small "Dev" tag beside the title in the title bar. The
+mapping is pure on both sides and tested on both: `cargo test --lib` in
+`apps/shell/src-tauri` for the identifier, `packages/core/test/core.test.ts` for
+the flag and the directory name.
+
+On Windows the WebView2 profile needs nothing: with no `BOITE_DATA_DIR` set the
+shell leaves it to Tauri, which puts it under `%LOCALAPPDATA%\<identifier>`, so
+the two channels already have one each.
+
 ## What the installer holds
 
 The bundle target is NSIS, the identifier is `com.boite.two` and the product
@@ -124,6 +169,16 @@ The app icon is one drawing, `packages/ui/public/icons/icon.svg`. The shell icon
 set and the two PWA pngs are rendered from it, the first through the Tauri CLI's
 own icon command from `apps/shell`. Nothing else draws the mark, and the UI's own
 copy of it is a Svelte component using `currentColor`.
+
+The dev channel gets the same drawing inverted,
+`packages/ui/public/icons/icon-dev.svg`, so the two apps are told apart in the
+taskbar and the tray at a glance. Its set is rendered the same way, into a
+directory of its own, and the android and ios output the command also writes is
+deleted, as it is for the stable set:
+
+```bash
+bun run --cwd apps/shell tauri icon ../../packages/ui/public/icons/icon-dev.svg -o src-tauri/icons-dev
+```
 
 ## Version numbers
 

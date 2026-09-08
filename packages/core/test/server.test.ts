@@ -139,6 +139,8 @@ describe('server', () => {
     const client = await harness.connect();
     expect(client.core.pid).toBe(process.pid);
     expect(client.core.protocolVersion).toBe(1);
+    // A core nobody told otherwise is the stable install.
+    expect(client.core.channel).toBe('stable');
     expect(await client.call('projects.list', {})).toEqual([]);
   });
 
