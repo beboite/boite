@@ -145,6 +145,8 @@ each one is skipped unless its variable is set. Run them from
 | `BOITE_E2E_OPENCODE=1` | `test/opencode.live.test.ts` | an ACP turn, then a resume on a new process |
 | `BOITE_E2E_CODEX=1` | `test/codex.live.test.ts` | a Codex app-server turn and its resume |
 | `BOITE_E2E_PI=1` | `test/pi.live.test.ts` | a pi turn and its resume |
+| `BOITE_E2E_ANTIGRAVITY_INSTALL=1` | `test/antigravity.install.live.test.ts` | the managed install for real: 468 MB from Google, the sha256 and every file size checked, `initialize` answered. No sign-in |
+| `BOITE_E2E_ANTIGRAVITY=1` | `test/antigravity.live.test.ts` | the whole Google sign-in, in your browser, then one turn. Only a person runs this one |
 | `BOITE_BENCH_CLAUDE=1` | `bun run bench` | the Claude turn row of the bench |
 
 One more is opt-in for a different reason. `BOITE_E2E_GUARD=1` runs

@@ -20,3 +20,6 @@ build commands in [../README.md](../README.md).
 - [releasing.md](releasing.md): the build chain from the UI to the NSIS
   installer, what the installer holds, where it installs, and the order the
   shell looks for a core in.
+- [releases/](releases/): one page per build handed to someone, what is inside,
+  the known gaps and the resource tables of that build.
+  [2.0.0-beta.1](releases/2.0.0-beta.1.md) is the first.
