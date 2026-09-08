@@ -398,6 +398,37 @@ test('the trace panel shows the I/O a process moved, and none for a record that 
   expect(query('[data-testid=trace-row][data-pid="21460"]').textContent).toContain('none');
 });
 
+test('the trace table fits the panel: base names, no pid column, nothing scrolling sideways', async () => {
+  await mountOnFake();
+  await waitFor(() => document.querySelector('[data-thread-id="t-trace"]') !== null);
+  query<HTMLButtonElement>('[data-thread-id="t-trace"]').click();
+  await waitFor(() => store.openThread?.id === 't-trace');
+
+  if (!store.panelOpen) query<HTMLButtonElement>('[data-testid=tab-trace]').click();
+  await waitFor(() => document.querySelectorAll('[data-testid=trace-row]').length === 3);
+
+  // The pid is not a column any more, only an attribute and a line of the tooltip.
+  const headers = Array.from(query('[data-testid=trace-panel] thead').querySelectorAll('th')).map(
+    (th) => th.textContent?.trim() ?? ''
+  );
+  expect(headers).toEqual(['Executable', 'Duration', 'CPU', 'Peak memory', 'I/O', 'Exit']);
+
+  const exe = query('[data-testid=trace-row][data-pid="21140"] td.exe');
+  expect(exe.textContent?.trim()).toBe('claude.exe');
+  expect(exe.getAttribute('data-exe')).toBe('C:\\tools\\claude\\claude.exe');
+  expect(exe.getAttribute('title')).toContain('C:\\tools\\claude\\claude.exe');
+  expect(exe.getAttribute('title')).toContain('pid 21140');
+
+  // Every measurement is right-aligned on tabular figures.
+  const row = query('[data-testid=trace-row][data-pid="21402"]');
+  expect(row.querySelectorAll('td.num').length).toBe(4);
+
+  // jsdom lays nothing out, so both are 0 here: the real widths are in
+  // scratchpad/trace-width-capture.ts and its capture.
+  const table = query<HTMLTableElement>('[data-testid=trace-table]');
+  expect(table.scrollWidth).toBe(table.clientWidth);
+});
+
 const SEEDED_THINKING = 'The table wants a row per process';
 
 test('a thinking part is folded, opens on its toggle, and a new turn shows it before the answer', async () => {

@@ -11,6 +11,14 @@
   function name(exe: string): string {
     return exe.split(/[\\/]/).pop() ?? exe;
   }
+
+  // The column is too narrow for a path, so everything it drops lives in the
+  // tooltip: the full path, the pid the column no longer shows, the command line.
+  function tip(record: ProcessRecord): string {
+    const lines = [record.exe, `pid ${record.pid}`];
+    if (record.commandLine && record.commandLine !== record.exe) lines.push(record.commandLine);
+    return lines.join('\n');
+  }
 </script>
 
 <div class="trace">
@@ -24,27 +32,33 @@
   {#if records.length === 0}
     <p class="empty" data-testid="trace-empty">{strings.trace.empty}</p>
   {:else}
-    <table>
+    <table data-testid="trace-table">
+      <colgroup>
+        <col />
+        <col class="c-duration" />
+        <col class="c-cpu" />
+        <col class="c-memory" />
+        <col class="c-io" />
+        <col class="c-exit" />
+      </colgroup>
       <thead>
         <tr>
           <th>{strings.trace.exe}</th>
-          <th>{strings.trace.pid}</th>
-          <th>{strings.trace.duration}</th>
-          <th>{strings.trace.cpu}</th>
-          <th>{strings.trace.memory}</th>
-          <th>{strings.trace.io}</th>
+          <th class="num">{strings.trace.duration}</th>
+          <th class="num">{strings.trace.cpu}</th>
+          <th class="num">{strings.trace.memory}</th>
+          <th class="num">{strings.trace.io}</th>
           <th>{strings.trace.exit}</th>
         </tr>
       </thead>
       <tbody>
         {#each records as record (`${record.pid}-${record.startedAt}`)}
           <tr class:live={record.exitedAt === null} data-testid="trace-row" data-pid={record.pid}>
-            <td class="mono exe" title={record.commandLine ?? record.exe}>{name(record.exe)}</td>
-            <td class="mono">{record.pid}</td>
-            <td class="mono">{duration(record.startedAt, record.exitedAt)}</td>
-            <td class="mono">{millis(record.cpuMs)}</td>
-            <td class="mono">{bytes(record.peakMemoryBytes)}</td>
-            <td class="mono" data-testid="trace-io">{bytes(record.ioBytes)}</td>
+            <td class="mono exe" data-exe={record.exe} title={tip(record)}>{name(record.exe)}</td>
+            <td class="mono num">{duration(record.startedAt, record.exitedAt)}</td>
+            <td class="mono num">{millis(record.cpuMs)}</td>
+            <td class="mono num">{bytes(record.peakMemoryBytes)}</td>
+            <td class="mono num" data-testid="trace-io">{bytes(record.ioBytes)}</td>
             <td class="mono">
               {#if record.exitedAt === null}
                 <span class="running">{strings.trace.live}</span>
@@ -75,19 +89,61 @@
     font-size: var(--text-xs);
   }
 
+  /* The panel is 360 px and never scrolls sideways: the columns are fixed and
+     the executable takes whatever is left of them. */
+  table {
+    table-layout: fixed;
+    width: 100%;
+  }
+
+  .c-duration {
+    width: 74px;
+  }
+
+  .c-cpu {
+    width: 44px;
+  }
+
+  .c-memory {
+    width: 60px;
+  }
+
+  .c-io {
+    width: 44px;
+  }
+
+  .c-exit {
+    width: 50px;
+  }
+
   th,
   td {
-    padding: 5px 8px;
+    padding: 5px 5px;
     font-size: var(--text-xs);
+  }
+
+  th {
+    letter-spacing: 0.03em;
+    white-space: normal;
+    overflow-wrap: anywhere;
   }
 
   th:first-child,
   td:first-child {
-    padding-left: 14px;
+    padding-left: 10px;
+  }
+
+  th:last-child,
+  td:last-child {
+    padding-right: 10px;
+  }
+
+  .num {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
   }
 
   .exe {
-    max-width: 150px;
     overflow: hidden;
     text-overflow: ellipsis;
   }
