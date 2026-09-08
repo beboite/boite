@@ -67,6 +67,36 @@ describe('server', () => {
     else expect(body).toBe(PLACEHOLDER_HTML);
   });
 
+  // Without `bun run build:ui` there is nothing to serve and nothing to assert;
+  // the end to end suite builds the UI before it starts, and proves the same three.
+  test.skipIf(!existsSync(UI_DIST))(
+    'the shell, the worker and a hashed asset carry the headers the PWA needs',
+    async () => {
+      const index = await fetch(`${harness.url}/`);
+      expect(index.status).toBe(200);
+      expect(index.headers.get('cache-control')).toBe('no-cache');
+      const html = await index.text();
+
+      const worker = await fetch(`${harness.url}/sw.js`);
+      expect(worker.status).toBe(200);
+      expect(worker.headers.get('cache-control')).toBe('no-cache');
+      // Without it a worker served from `/sw.js` may only claim `/`, which is
+      // the same scope here, but the header is what makes that explicit.
+      expect(worker.headers.get('service-worker-allowed')).toBe('/');
+
+      const manifest = await fetch(`${harness.url}/manifest.webmanifest`);
+      expect(manifest.status).toBe(200);
+      expect(manifest.headers.get('cache-control')).toBe('no-cache');
+
+      // The hashed name is read out of the build rather than guessed.
+      const hashed = /assets\/[A-Za-z0-9._-]+/.exec(html)?.[0];
+      expect(hashed).toBeDefined();
+      const asset = await fetch(`${harness.url}/${hashed}`);
+      expect(asset.status).toBe(200);
+      expect(asset.headers.get('cache-control')).toBe('public, max-age=31536000, immutable');
+    },
+  );
+
   test('a foreign origin gets 403', async () => {
     const response = await fetch(`${harness.url}${RPC_PATH}`, {
       headers: { origin: 'http://evil.example' },

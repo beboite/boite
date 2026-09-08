@@ -150,6 +150,26 @@ function isAllowedOrigin(origin: string | null, port: number, host: string): boo
   }
 }
 
+const IMMUTABLE_FOR_A_YEAR = 'public, max-age=31536000, immutable';
+
+/**
+ * What the PWA's service worker needs from the host that serves it. Vite's
+ * files under `/assets/` carry their content hash in their name, so the name
+ * is the version and a phone never fetches one twice. The shell, the worker
+ * and the manifest decide what the next load caches, so all three are
+ * revalidated every time; `Service-Worker-Allowed` is what lets `/sw.js` claim
+ * the whole origin rather than its own directory. Everything else keeps the
+ * headers `Bun.file` gives it.
+ */
+function cacheHeaders(pathname: string): Record<string, string> {
+  if (pathname.startsWith('/assets/')) return { 'cache-control': IMMUTABLE_FOR_A_YEAR };
+  if (pathname === '/sw.js') return { 'cache-control': 'no-cache', 'service-worker-allowed': '/' };
+  if (pathname === '/' || pathname === '/index.html' || pathname === '/manifest.webmanifest') {
+    return { 'cache-control': 'no-cache' };
+  }
+  return {};
+}
+
 function staticFile(pathname: string): string | null {
   if (!existsSync(UI_DIST)) return null;
   const relative = pathname === '/' ? 'index.html' : pathname.replace(/^\/+/, '');
@@ -189,7 +209,7 @@ export function startServer(options: ServerOptions): RunningServer {
       }
 
       const file = staticFile(url.pathname);
-      if (file !== null) return new Response(Bun.file(file));
+      if (file !== null) return new Response(Bun.file(file), { headers: cacheHeaders(url.pathname) });
       if (url.pathname === '/') {
         return new Response(PLACEHOLDER_HTML, { headers: { 'content-type': 'text/html; charset=utf-8' } });
       }

@@ -16,6 +16,9 @@ const SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui.png');
 const RELOAD_SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui-permission-reload.png');
 const TOOL_SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui-tool-input.png');
 const DIFF_SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui-tool-diff.png');
+const OFFLINE_SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui-offline-shell.png');
+/** The one name `public/sw.js` opens; every other cache is deleted on activate. */
+const UI_CACHE = 'boite-ui-v1';
 /** What the echo provider's `[tool-stream]` directive types, one piece at a time. */
 const STREAMED_TOOL_INPUT = '{"command":"echo streamed","description":"a streamed input"}';
 
@@ -328,4 +331,56 @@ test(
     );
   },
   RECONNECT_TIMEOUT_MS,
+);
+
+test(
+  'the service worker caches the shell, and the app still paints when the core is gone',
+  async () => {
+    // Registered after the first paint by `lib/sw.ts`, so it is installed and
+    // controlling this page long before the suite reaches this test.
+    await page.waitFor('navigator.serviceWorker.controller !== null', RECONNECT_TIMEOUT_MS);
+    await page.evaluate<null>('navigator.serviceWorker.ready.then(() => null)');
+    expect(await page.evaluate<string[]>('caches.keys()')).toEqual([UI_CACHE]);
+
+    // The hashed files of the first load were fetched before the worker took
+    // control, so they only reach the cache on the load after it: which is
+    // exactly the phone that opens Boite a second time.
+    await page.navigate(`${core.url}/`);
+    await page.waitFor(`${textOf('status-connection')} === 'Connected'`, RECONNECT_TIMEOUT_MS);
+    const cachedPaths = `caches.open(${JSON.stringify(UI_CACHE)})
+      .then((cache) => cache.keys())
+      .then((keys) => keys.map((request) => new URL(request.url).pathname))`;
+    await page.waitFor(`${cachedPaths}.then((paths) => paths.some((path) => path.startsWith('/assets/')))`, 30_000);
+    const entries = await page.evaluate<string[]>(cachedPaths);
+    expect(entries).toContain('/');
+    expect(entries.filter((path) => path.startsWith('/assets/')).length).toBeGreaterThan(0);
+
+    // The core goes away, and the reload has nothing but that cache to load from.
+    const { port, dataDir, token } = core;
+    await core.stop({ keepDataDir: true });
+    await page.waitFor(`${textOf('status-connection')} !== 'Connected'`, RECONNECT_TIMEOUT_MS);
+    await page.navigate(`${core.url}/`);
+
+    // A browser with no worker gets its own error page here: no shell, no title.
+    await page.waitFor(`document.querySelector('${testid('sidebar')}')`, RECONNECT_TIMEOUT_MS);
+    expect(await page.evaluate<string>('document.title')).toBe('Boite');
+    // The threads are the core's, so with no answer the shell opens on its
+    // first-run card: the point is that it is the app drawing it, not Chromium.
+    expect(
+      await page.evaluate<boolean>(
+        `!!document.querySelector('${testid('first-run')}') || !!document.querySelector('${testid('chat')}')`,
+      ),
+    ).toBe(true);
+    const offline = await page.evaluate<string>(textOf('status-connection'));
+    expect(offline).not.toBe('Connected');
+    expect(['Connecting', 'Disconnected', 'Not connected']).toContain(offline);
+    await page.screenshot(OFFLINE_SCREENSHOT);
+    expect(existsSync(OFFLINE_SCREENSHOT)).toBe(true);
+
+    // Back on the same port: the page finds the core again with no help.
+    core = await startCore({ port, dataDir });
+    expect(core.token).toBe(token);
+    await page.waitFor(`${textOf('status-connection')} === 'Connected'`, RECONNECT_TIMEOUT_MS);
+  },
+  TIMEOUT,
 );
