@@ -160,7 +160,8 @@ export class FakeClient implements ObservableClient {
       warmProcessMinutes: 5,
       listenOnLan: false,
       agentCpuCapPercent: 75,
-      threadMemoryCapMb: 0
+      threadMemoryCapMb: 0,
+      focusGuard: true
     };
     this.#core = {
       version: '2.0.0-alpha.1',

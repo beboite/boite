@@ -3,9 +3,10 @@
  *
  * `tauri build --config src-tauri/tauri.bundle.conf.json` wants
  * `src-tauri/binaries/boite-core-<target triple>.exe` for `bundle.externalBin`,
- * and `src-tauri/binaries/jobs-worker.js` for the `bundle.resources` entry that
- * lands it beside the installed sidecar (without it the trace degrades from
- * `events` to `poll`).
+ * and `src-tauri/binaries/jobs-worker.js` plus
+ * `src-tauri/binaries/guard-worker.js` for the `bundle.resources` entries that
+ * land them beside the installed sidecar (without the first the trace degrades
+ * from `events` to `poll`, without the second the focus guard never starts).
  *
  * The shell exe in `src-tauri/target/release` runs whatever `boite-core.exe`
  * sits beside it (`resolve_core` in `src-tauri/src/lib.rs`), which is what the
@@ -46,28 +47,35 @@ function sizeOf(path: string, missing: string): number {
   }
 }
 
+/** The Worker files the compiled core loads by name from beside its executable. */
+const WORKERS = ['jobs-worker.js', 'guard-worker.js'];
+
 /**
  * The one copy both destinations share: the compiled core under `exeName`, and
- * `jobs-worker.js` beside it under its own name, which is the only name the
- * core looks for.
+ * every Worker beside it under its own name, which is the only name the core
+ * looks for.
  */
 export function stageCore(targetDir: string, exeName: string): void {
   const exeSource = join(coreDist, process.platform === 'win32' ? 'boite-core.exe' : 'boite-core');
-  const workerSource = join(coreDist, 'jobs-worker.js');
   const exeBytes = sizeOf(exeSource, `${exeSource} does not exist. Build it first: bun run build:core:exe`);
-  const workerBytes = sizeOf(
-    workerSource,
-    `${workerSource} does not exist. Build it first: bun run build:core:exe`,
-  );
+  const workers = WORKERS.map((name) => {
+    const source = join(coreDist, name);
+    return {
+      name,
+      source,
+      bytes: sizeOf(source, `${source} does not exist. Build it first: bun run build:core:exe`),
+    };
+  });
 
   mkdirSync(targetDir, { recursive: true });
   const exeTarget = join(targetDir, exeName);
-  const workerTarget = join(targetDir, 'jobs-worker.js');
   copyFileSync(exeSource, exeTarget);
-  copyFileSync(workerSource, workerTarget);
-
   console.log(`stage-sidecar: ${exeTarget} (${exeBytes} bytes)`);
-  console.log(`stage-sidecar: ${workerTarget} (${workerBytes} bytes)`);
+  for (const worker of workers) {
+    const target = join(targetDir, worker.name);
+    copyFileSync(worker.source, target);
+    console.log(`stage-sidecar: ${target} (${worker.bytes} bytes)`);
+  }
 }
 
 const triple = TRIPLES[process.platform]?.[process.arch];

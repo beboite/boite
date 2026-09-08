@@ -36,7 +36,14 @@
   let listenOnLan = $state(untrack(() => store.settings?.listenOnLan ?? false));
   let agentCpuCapPercent = $state(untrack(() => store.settings?.agentCpuCapPercent ?? 75));
   let threadMemoryCapMb = $state(untrack(() => store.settings?.threadMemoryCapMb ?? 0));
+  let focusGuard = $state(untrack(() => store.settings?.focusGuard ?? true));
   let savedAt = $state<number | null>(null);
+
+  // The switch is the whole control, so it writes on its own rather than
+  // waiting behind the scheduler card's Save button.
+  async function saveFocusGuard() {
+    await store.saveSettings({ focusGuard });
+  }
 
   async function save() {
     await store.saveSettings({
@@ -45,7 +52,8 @@
       warmProcessMinutes,
       listenOnLan,
       agentCpuCapPercent,
-      threadMemoryCapMb
+      threadMemoryCapMb,
+      focusGuard
     });
     savedAt = Date.now();
   }
@@ -111,6 +119,23 @@
         {/each}
       </div>
     </div>
+  </section>
+
+  <section class="card">
+    <h2>{strings.settings.background}</h2>
+    <label class="switch-row">
+      <span class="text">
+        {strings.settings.focusGuard}
+        <span class="hint">{strings.settings.focusGuardHint}</span>
+      </span>
+      <input
+        type="checkbox"
+        role="switch"
+        data-testid="setting-focus-guard"
+        bind:checked={focusGuard}
+        onchange={() => void saveFocusGuard()}
+      />
+    </label>
   </section>
 
   <section class="card">
@@ -261,7 +286,15 @@
     margin: 0;
   }
 
+  .switch-row .hint {
+    display: block;
+    color: var(--color-muted-foreground);
+    font-size: var(--text-xs);
+    margin-top: 2px;
+  }
+
   .switch-row input {
+    flex: none;
     width: 28px;
     height: 16px;
     margin: 0;

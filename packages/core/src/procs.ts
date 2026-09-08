@@ -14,6 +14,15 @@ import {
   terminateThreadJob,
 } from './platform/jobs.ts';
 import type { JobProcessExit, JobProcessInfo } from './platform/jobs.ts';
+import {
+  guardPidAdded,
+  guardPidRemoved,
+  guardStatus,
+  releaseGuard,
+  retainGuard,
+  setGuardEnabled,
+} from './platform/guard.ts';
+import type { GuardStatus } from './platform/guard.ts';
 
 export interface SpawnOptions {
   cwd?: string | undefined;
@@ -81,6 +90,19 @@ export class ProcRegistry {
         this.bus.emit('core.log', { level: 'warn', message: `thread ${threadId}: ${message}`, at: Date.now() });
       },
     });
+    retainGuard({
+      pushed: (threadId, pid, title, restored) => {
+        this.bus.emit('process.focusPushed', { threadId, pid, title, restored, at: Date.now() });
+        this.bus.emit('core.log', {
+          level: 'info',
+          message: `thread ${threadId}: a window of pid ${pid} (${title}) was pushed back`,
+          at: Date.now(),
+        });
+      },
+      note: (message) => {
+        this.bus.emit('core.log', { level: 'warn', message, at: Date.now() });
+      },
+    });
     this.loadTimer = setInterval(() => {
       this.sampleLoad();
     }, LOAD_INTERVAL_MS);
@@ -96,11 +118,18 @@ export class ProcRegistry {
       agentCpuCapPercent: settings.agentCpuCapPercent,
       threadMemoryCapMb: settings.threadMemoryCapMb,
     });
+    setGuardEnabled(settings.focusGuard);
+  }
+
+  /** What the focus guard Worker is doing. Read by the tests, not by a client. */
+  guardStatus(): GuardStatus {
+    return guardStatus();
   }
 
   close(): void {
     clearInterval(this.loadTimer);
     releaseJobs();
+    releaseGuard();
   }
 
   spawn(threadId: ThreadId, cmd: string, args: string[], opts: SpawnOptions = {}): SpawnedProcess {
@@ -236,6 +265,9 @@ export class ProcRegistry {
       this.live.set(threadId, byPid);
     }
     byPid.set(record.pid, { record, ...control });
+    // Both spawn paths and the job's own grandchild events land here, so this is
+    // the one place the guard learns a pid whose windows it has to push back.
+    guardPidAdded(threadId, record.pid);
 
     let seen = this.known.get(threadId);
     if (seen === undefined) {
@@ -340,6 +372,7 @@ export class ProcRegistry {
     const entry = this.live.get(threadId)?.get(pid);
     if (entry === undefined) return;
     this.live.get(threadId)?.delete(pid);
+    guardPidRemoved(threadId, pid);
     if (this.journal.isClosed()) return;
     const record = entry.record;
     const usage = entry.usage();

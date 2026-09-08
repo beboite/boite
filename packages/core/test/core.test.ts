@@ -48,6 +48,7 @@ describe('settings', () => {
       listenOnLan: false,
       agentCpuCapPercent: 75,
       threadMemoryCapMb: 0,
+      focusGuard: true,
     });
 
     const next = await client.call('settings.set', { maxConcurrentTurns: 3 });
@@ -62,6 +63,25 @@ describe('settings', () => {
       failure = (error as Error).message;
     }
     expect(failure).toContain('maxConcurrentTurns');
+  });
+
+  test('focusGuard is a boolean, on by default, and a change reaches every client', async () => {
+    const client = await harness.connect();
+    expect((await client.call('settings.get', {})).focusGuard).toBe(true);
+
+    const updated = client.next('settings.updated', (settings) => settings.focusGuard === false, 5000);
+    const next = await client.call('settings.set', { focusGuard: false });
+    expect(next.focusGuard).toBe(false);
+    expect((await updated).focusGuard).toBe(false);
+    expect((await client.call('settings.get', {})).focusGuard).toBe(false);
+
+    let failure = 'none';
+    try {
+      await client.call('settings.set', { focusGuard: 'yes' as unknown as boolean });
+    } catch (error) {
+      failure = (error as Error).message;
+    }
+    expect(failure).toBe('focusGuard must be a boolean');
   });
 });
 

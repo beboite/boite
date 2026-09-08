@@ -338,6 +338,12 @@ export interface Settings {
    * reaches it fails its next allocation.
    */
   threadMemoryCapMb: number;
+  /**
+   * Windows of agent processes never keep the foreground: one that takes it is
+   * sent to the bottom without activation and the window the user was on gets
+   * the focus back. Windows only, ignored elsewhere.
+   */
+  focusGuard: boolean;
 }
 
 export interface CoreInfo {
@@ -503,6 +509,18 @@ export interface RpcEvents {
 
   'process.started': ProcessRecord;
   'process.exited': ProcessRecord;
+  /**
+   * A window of a process this thread launched took the foreground and was sent
+   * back behind everything without activation. `restored` says whether the
+   * window the user was on got the focus back. Windows only.
+   */
+  'process.focusPushed': {
+    threadId: ThreadId;
+    pid: number;
+    title: string;
+    restored: boolean;
+    at: Timestamp;
+  };
 
   'scheduler.updated': SchedulerState;
   'accounts.updated': Account;

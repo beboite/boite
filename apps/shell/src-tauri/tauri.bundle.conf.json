@@ -4,6 +4,7 @@
     "externalBin": ["binaries/boite-core"],
     "resources": {
       "binaries/jobs-worker.js": "jobs-worker.js",
+      "binaries/guard-worker.js": "guard-worker.js",
       "../../../packages/ui/dist": "ui"
     }
   }
