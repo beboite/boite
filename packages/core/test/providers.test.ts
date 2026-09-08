@@ -59,7 +59,7 @@ describe('providers', () => {
     const { loaded, rejected } = await client.call('providers.list', {});
     expect(rejected).toEqual([]);
     const ids = loaded.map((provider) => provider.id).sort();
-    expect(ids).toEqual(['claude', 'codex', 'echo', 'gemini', 'opencode', 'pi']);
+    expect(ids).toEqual(['antigravity', 'claude', 'codex', 'echo', 'opencode', 'pi']);
 
     const echo = loaded.find((provider) => provider.id === 'echo');
     expect(echo?.source).toBe('shipped');
@@ -124,44 +124,68 @@ describe('providers', () => {
     expect(candidate?.value.toLowerCase()).toEndWith('opencode.exe');
   });
 
-  test('the shipped gemini descriptor loads and is launched as node with the cli entry', async () => {
+  test('the shipped antigravity descriptor carries its release, its environment and its acp login', async () => {
     const client = await harness.connect();
     const { loaded, rejected } = await client.call('providers.list', {});
     expect(rejected).toEqual([]);
 
-    const gemini = loaded.find((provider) => provider.id === 'gemini');
-    expect(gemini?.source).toBe('shipped');
-    expect(gemini?.protocol).toBe('acp');
-    expect(gemini?.name).toBe('Gemini CLI');
-    expect(gemini?.models).toEqual([{ id: 'default', name: 'Gemini default', default: true }]);
+    const antigravity = loaded.find((provider) => provider.id === 'antigravity');
+    expect(antigravity?.source).toBe('shipped');
+    expect(antigravity?.protocol).toBe('acp');
+    expect(antigravity?.name).toBe('Antigravity');
+    // `default` is Boite's own spelling for "the agent keeps its own model": the
+    // real list comes from the agent, through the probe.
+    expect(antigravity?.models).toEqual([{ id: 'default', name: 'Antigravity default', default: true }]);
+    // Nothing is downloaded here, so the summary is what the picker turns into
+    // an Install button, with the archive's size on it.
+    expect(antigravity?.install?.state).toBe('absent');
+    expect(antigravity?.install?.version).toBe('agy_acp_server_1.1.1');
+    expect(antigravity?.available).toBe(false);
 
-    const descriptor = harness.core.providers.require('gemini');
-    // The CLI keeps everything under one home of its own, session file included.
-    expect(descriptor.auth).toEqual({ kind: 'oauth-cli', session: ['.gemini/oauth_creds.json'] });
-    // No login block: the first `gemini` run logs in, outside Boite.
-    expect(descriptor.login).toBeUndefined();
+    const descriptor = harness.core.providers.require('antigravity');
+    expect(descriptor.auth).toEqual({ kind: 'oauth-cli', session: ['antigravity-acp/acp_token.json'] });
+    // The login is an ACP call, not a command: `authenticate` with this method.
+    expect(descriptor.login).toEqual({ acp: { methodId: 'oauth-personal' } });
+    // T3 Code never uses the user's own IDE login, and neither does Boite.
+    expect(descriptor.isolation).toEqual({ alwaysIsolated: true });
+    expect(descriptor.seedFiles).toEqual({ 'antigravity-acp/settings.json': '{"auth":{"type":"oauth-personal"}}' });
+    expect(descriptor.quirks).toEqual(['antigravity']);
+
+    const windows = descriptor.profiles['windows'];
+    expect(windows?.install?.url).toContain('dl.google.com');
+    expect(windows?.install?.sha256).toHaveLength(64);
+    expect(windows?.install?.archiveBytes).toBe(468238392);
+    expect(windows?.install?.files.map((file) => file.path)).toEqual([
+      'agy_acp_server.exe',
+      'localharness_external.exe',
+    ]);
+    expect(windows?.isolation).toEqual({ GEMINI_HOME: '{isolationDir}' });
 
     const profile = descriptor.profiles[process.platform === 'win32' ? 'windows' : 'linux'];
-    expect(profile?.isolation).toEqual({ GEMINI_CLI_HOME: '{isolationDir}' });
-    const args = profile?.launch?.args ?? [];
-    expect(args.at(-1)).toBe('--experimental-acp');
-    if (process.platform !== 'win32') {
-      expect(args).toEqual(['--experimental-acp']);
-      return;
-    }
-    // npm installs a `.cmd` shim Bun cannot spawn, so the entry is node plus the
-    // bundle's own js, and `{appdata}` has to be a real path by the time it runs.
-    expect(profile?.executable[0]).toEqual({ kind: 'path', value: 'node' });
-    const entry = args[0] ?? '';
-    expect(entry).not.toContain('{appdata}');
-    expect(entry.startsWith(process.env['APPDATA'] ?? '')).toBe(true);
-    expect(entry).toEndWith('gemini.js');
+    // Every process of this provider carries these, the default account's too.
+    const env = profile?.env ?? {};
+    expect(env['AGY_ACP_FORCE_FILE_STORAGE']).toBe('1');
+    expect(env['PYTHONUNBUFFERED']).toBe('1');
+    expect(env['ELECTRON_RUN_AS_NODE']).toBe('1');
+    // Both are load-time tokens, so they are real paths by the time a spawn reads them.
+    expect(env['ANTIGRAVITY_HARNESS_PATH']).toContain('localharness_external');
+    expect(env['ANTIGRAVITY_HARNESS_PATH']).not.toContain('{agentsDir}');
+    expect(env['BROWSER']).not.toContain('{browserNoop}');
+    expect(env['BROWSER']).toContain('browser-noop');
+    // A variable the user set for their own Gemini or Cloud login cannot redirect this agent.
+    expect(profile?.unsetEnv).toContain('GEMINI_API_KEY');
+    expect(profile?.unsetEnv).toContain('GOOGLE_APPLICATION_CREDENTIALS');
+    expect(profile?.unsetEnv).toContain('GEMINI_HOME');
 
-    if (gemini?.available !== true) {
-      console.log('gemini cli is not installed here, the executable assertion is skipped');
-      return;
+    const executable = profile?.executable[0];
+    expect(executable?.kind).toBe('file');
+    // `{agentsDir}` resolves under the data directory, so nothing outside it is ever launched.
+    expect(executable?.value.startsWith(join(harness.dataDir, 'agents', 'antigravity'))).toBe(true);
+    if (process.platform !== 'win32') {
+      expect(profile?.launch?.args).toEqual(['--uid=']);
+    } else {
+      expect(profile?.launch?.args).toEqual([]);
     }
-    expect(gemini.executable?.toLowerCase()).toContain('node');
   });
 
   test('the shipped codex descriptor loads and is launched as the app-server', async () => {

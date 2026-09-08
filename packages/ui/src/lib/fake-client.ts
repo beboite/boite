@@ -1452,9 +1452,11 @@ export class FakeClient implements ObservableClient {
         id: 'a-antigravity',
         providerId: MANAGED_ID,
         label: 'Antigravity',
-        isolationDir: `${DATA_DIR}\accounts\a-antigravity`,
-        status: 'ok',
-        identity: 'you@example.com',
+        isolationDir: `${DATA_DIR}\\accounts\\a-antigravity`,
+        // A managed provider is signed into from the Accounts page, once its
+        // files are down: nothing on this machine has logged it in yet.
+        status: 'unauthenticated',
+        identity: null,
         createdAt: T0
       },
       {

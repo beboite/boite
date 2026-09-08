@@ -48,6 +48,22 @@ export function agentsDirPath(dataDir: string, providerId: string): string {
 }
 
 /**
+ * What `{browserNoop}` becomes in a descriptor: a launcher that takes a URL and
+ * exits without opening anything. An agent that would otherwise pop the user's
+ * browser mid-turn is pointed at it through `BROWSER`, and the link it printed
+ * reaches the user through Boite instead. Written by `AccountStore` before the
+ * first spawn, never by the loader.
+ */
+export function browserNoopPath(dataDir: string): string {
+  return join(dataDir, currentOs() === 'windows' ? 'browser-noop.cmd' : 'browser-noop.sh');
+}
+
+/** What that launcher holds: a script that ignores its argument and succeeds. */
+export function browserNoopScript(): string {
+  return currentOs() === 'windows' ? '@echo off\r\nexit /b 0\r\n' : '#!/bin/sh\nexit 0\n';
+}
+
+/**
  * What `{appdata}` becomes in a descriptor: Windows' roaming per-user directory,
  * where npm puts its global installs. Only a windows profile ever names the
  * token, so off Windows it expands to a path nothing exists at and a `file`

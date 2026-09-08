@@ -24,7 +24,7 @@ import type {
   Usage,
 } from '@agentclientprotocol/sdk';
 
-const DIRECTIVE = /\[(tool|documents|big-image|permission|thought|usage|slow|refuse|crash)\]/g;
+const DIRECTIVE = /\[(tool|documents|big-image|permission|thought|usage|slow|refuse|crash|noise)\]/g;
 /** `[mode-switch <id>]`: the agent changes mode on its own before it answers. */
 const MODE_SWITCH = /\[mode-switch ([\w-]+)\]/g;
 const CHUNKS = 3;
@@ -38,7 +38,15 @@ type Directive =
   | 'usage'
   | 'slow'
   | 'refuse'
-  | 'crash';
+  | 'crash'
+  | 'noise';
+
+/**
+ * What `[noise]` writes straight to stdout, in the middle of the protocol
+ * stream: Antigravity's server prints its sign-in link exactly like this, so
+ * the driver has to keep a line that is not JSON out of the parser.
+ */
+const NOISE_LINE = 'Open the following link to authenticate the ACP server: https://accounts.google.com/o/oauth2/fake';
 
 /** What `[documents]` writes: a file the call changed, then a note and a picture. */
 const DIFF_PATH = '/work/src/app.ts';
@@ -195,6 +203,11 @@ const app = agent({ name: 'acp-fake' })
       if (directive !== 'thought') continue;
       await send({ sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: 'thinking about it' } });
     }
+    // The line that is not JSON, before the answer, so the turn has to survive it.
+    for (const directive of directives) {
+      if (directive !== 'noise') continue;
+      process.stdout.write(`${NOISE_LINE}\n`);
+    }
 
     const plain = plainOf(text);
     for (const chunk of chunksOf(plain)) await say(chunk);
@@ -279,6 +292,7 @@ const app = agent({ name: 'acp-fake' })
           break;
         }
         case 'thought':
+        case 'noise':
           // Already sent above, before the answer.
           break;
         case 'usage':

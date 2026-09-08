@@ -215,8 +215,8 @@ describe('accounts', () => {
 
     // The shipped echo descriptor resolves `{shippedDir}` to the script beside it.
     const echo = harness.core.providers.require('echo');
-    expect(echo.login?.command[0]).toBe('bun');
-    expect(existsSync(echo.login?.command[1] ?? '')).toBe(true);
+    expect(echo.login?.command?.[0]).toBe('bun');
+    expect(existsSync(echo.login?.command?.[1] ?? '')).toBe(true);
 
     const accounts = await client.call('accounts.list', {});
     const fallback = accounts.find((entry) => entry.providerId === 'echo' && entry.isolationDir === null);

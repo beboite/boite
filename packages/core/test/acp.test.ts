@@ -157,6 +157,21 @@ describe('acp driver', () => {
     expect(thread.messages[1]?.parts).toEqual([{ type: 'text', text: prompt }]);
   });
 
+  test('a line that is not json on stdout is logged, and the turn goes through anyway', async () => {
+    const client = await startCore();
+    const logs = collectLogs(client);
+    const threadId = await acpThread(client);
+
+    const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 20000);
+    await client.call('turns.start', { threadId, prompt: '[noise]the answer' });
+    expect((await finished).status).toBe('done');
+
+    // The sign-in link Antigravity prints in the middle of its ndjson stream.
+    expect(logs.some((line) => line.includes('acp agent: Open the following link'))).toBe(true);
+    const thread = await client.call('threads.get', { threadId });
+    expect(thread.messages[1]?.parts).toEqual([{ type: 'text', text: 'the answer' }]);
+  });
+
   test('a thought chunk becomes a thinking part ahead of the answer', async () => {
     const client = await startCore();
     const threadId = await acpThread(client);

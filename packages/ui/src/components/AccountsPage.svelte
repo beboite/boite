@@ -25,8 +25,13 @@
   /** The providers whose files Boite downloads itself, install block and all. */
   let managed = $derived(store.providers.filter((p: ProviderSummary) => store.installOf(p.id) !== null));
 
-  /** The provider's own login is the user's to run; Boite only drives isolated accounts. */
-  function canLogIn(account: Account): boolean {
+  /**
+   * The provider's own login is the user's to run; Boite only drives isolated
+   * accounts. A provider whose files are not on the machine yet has nothing to
+   * log in with either: that row offers the install instead.
+   */
+  function canLogIn(account: Account, provider: ProviderSummary | null): boolean {
+    if (provider !== null && !provider.available) return false;
     return account.isolationDir !== null && account.status === 'unauthenticated' && !store.logins[account.id];
   }
 
@@ -103,6 +108,7 @@
       <tbody>
         {#each store.accounts as account (account.id)}
           {@const login = store.logins[account.id]}
+          {@const provider = store.providerOf(account.providerId)}
           <tr data-testid="account-row" data-account-id={account.id}>
             <td>{account.label}</td>
             <td class="mono">{store.providerOf(account.providerId)?.shortName ?? account.providerId}</td>
@@ -120,7 +126,10 @@
               </span>
             </td>
             <td class="row-actions">
-              {#if canLogIn(account)}
+              {#if provider && !provider.available && store.installOf(provider.id)}
+                <InstallControl {store} {provider} />
+              {/if}
+              {#if canLogIn(account, provider)}
                 <button
                   class="quiet"
                   data-testid="account-login"

@@ -1,0 +1,153 @@
+{
+  "id": "antigravity",
+  "schemaVersion": 1,
+  "name": "Antigravity",
+  "shortName": "Antigravity",
+  "protocol": "acp",
+  "roots": ["{agentsDir}", "{isolationDir}"],
+  "profiles": {
+    "windows": {
+      "detect": { "file": "{agentsDir}/agy_acp_server.exe" },
+      "executable": [{ "kind": "file", "value": "{agentsDir}/agy_acp_server.exe" }],
+      "launch": { "args": [] },
+      "install": {
+        "version": "agy_acp_server_1.1.1",
+        "url": "https://dl.google.com/agy-extensions/releases/windows/agy-acp-server-agy_acp_server_1.1.1-windows-x86_64.zip",
+        "sha256": "47cb50eef14f0a4655d78cfcfda869bcea7aaee5f9787e936bc2935ea612c3b8",
+        "archiveBytes": 468238392,
+        "files": [
+          { "path": "agy_acp_server.exe", "bytes": 430801616 },
+          { "path": "localharness_external.exe", "bytes": 130971800 }
+        ]
+      },
+      "isolation": { "GEMINI_HOME": "{isolationDir}" },
+      "env": {
+        "AGY_ACP_FORCE_FILE_STORAGE": "1",
+        "ANTIGRAVITY_HARNESS_PATH": "{agentsDir}/localharness_external.exe",
+        "PYTHONUNBUFFERED": "1",
+        "ELECTRON_RUN_AS_NODE": "1",
+        "BROWSER": "{browserNoop}"
+      },
+      "unsetEnv": [
+        "GEMINI_API_KEY",
+        "GOOGLE_API_KEY",
+        "GOOGLE_APPLICATION_CREDENTIALS",
+        "GOOGLE_CLOUD_PROJECT",
+        "GOOGLE_CLOUD_LOCATION",
+        "GOOGLE_CLOUD_QUOTA_PROJECT",
+        "GOOGLE_GENAI_USE_VERTEXAI",
+        "GCLOUD_PROJECT",
+        "CLOUDSDK_CORE_PROJECT",
+        "AGY_ACP_CCPA_PROJECT",
+        "AGY_ACP_ENABLE_OAUTH",
+        "GEMINI_HOME",
+        "AGY_ACP_FORCE_FILE_STORAGE",
+        "ANTIGRAVITY_HARNESS_PATH",
+        "BROWSER",
+        "PYTHONUNBUFFERED",
+        "ELECTRON_RUN_AS_NODE"
+      ],
+      "close": { "processes": ["agy_acp_server.exe", "localharness_external.exe"] }
+    },
+    "linux": {
+      "detect": { "file": "{agentsDir}/agy_acp_server.par" },
+      "executable": [{ "kind": "file", "value": "{agentsDir}/agy_acp_server.par" }],
+      "launch": { "args": ["--uid="] },
+      "install": {
+        "version": "agy_acp_server_1.1.1",
+        "url": "https://dl.google.com/agy-extensions/releases/linux/agy-acp-server-agy_acp_server_1.1.1-linux-x86_64.zip",
+        "sha256": "38f62d01b32deb0907b3d39a71ec301fd36369f6ffd1cf262d4af385177f79df",
+        "archiveBytes": 681969407,
+        "files": [
+          { "path": "agy_acp_server.par", "bytes": 1880360328 },
+          { "path": "localharness_external", "bytes": 128966920 }
+        ]
+      },
+      "isolation": { "GEMINI_HOME": "{isolationDir}" },
+      "env": {
+        "AGY_ACP_FORCE_FILE_STORAGE": "1",
+        "ANTIGRAVITY_HARNESS_PATH": "{agentsDir}/localharness_external",
+        "PYTHONUNBUFFERED": "1",
+        "ELECTRON_RUN_AS_NODE": "1",
+        "BROWSER": "{browserNoop}"
+      },
+      "unsetEnv": [
+        "GEMINI_API_KEY",
+        "GOOGLE_API_KEY",
+        "GOOGLE_APPLICATION_CREDENTIALS",
+        "GOOGLE_CLOUD_PROJECT",
+        "GOOGLE_CLOUD_LOCATION",
+        "GOOGLE_CLOUD_QUOTA_PROJECT",
+        "GOOGLE_GENAI_USE_VERTEXAI",
+        "GCLOUD_PROJECT",
+        "CLOUDSDK_CORE_PROJECT",
+        "AGY_ACP_CCPA_PROJECT",
+        "AGY_ACP_ENABLE_OAUTH",
+        "GEMINI_HOME",
+        "AGY_ACP_FORCE_FILE_STORAGE",
+        "ANTIGRAVITY_HARNESS_PATH",
+        "BROWSER",
+        "PYTHONUNBUFFERED",
+        "ELECTRON_RUN_AS_NODE"
+      ],
+      "close": { "processes": ["agy_acp_server.par", "localharness_external"] }
+    },
+    "macos": {
+      "detect": { "file": "{agentsDir}/agy_acp_server.par" },
+      "executable": [{ "kind": "file", "value": "{agentsDir}/agy_acp_server.par" }],
+      "launch": { "args": [] },
+      "install": {
+        "version": "agy_acp_server_1.1.1",
+        "url": "https://dl.google.com/agy-extensions/releases/macos/agy-acp-server-agy_acp_server_1.1.1-darwin-arm64.zip",
+        "sha256": "fdfa915652cdb7ba8085cc8fffed072cbe009251aa2c951aabdda07a8c28a189",
+        "archiveBytes": 316014828,
+        "files": [
+          { "path": "agy_acp_server.par", "bytes": 802163856 },
+          { "path": "localharness_external", "bytes": 116766704 }
+        ]
+      },
+      "isolation": { "GEMINI_HOME": "{isolationDir}" },
+      "env": {
+        "AGY_ACP_FORCE_FILE_STORAGE": "1",
+        "ANTIGRAVITY_HARNESS_PATH": "{agentsDir}/localharness_external",
+        "PYTHONUNBUFFERED": "1",
+        "ELECTRON_RUN_AS_NODE": "1",
+        "BROWSER": "{browserNoop}"
+      },
+      "unsetEnv": [
+        "GEMINI_API_KEY",
+        "GOOGLE_API_KEY",
+        "GOOGLE_APPLICATION_CREDENTIALS",
+        "GOOGLE_CLOUD_PROJECT",
+        "GOOGLE_CLOUD_LOCATION",
+        "GOOGLE_CLOUD_QUOTA_PROJECT",
+        "GOOGLE_GENAI_USE_VERTEXAI",
+        "GCLOUD_PROJECT",
+        "CLOUDSDK_CORE_PROJECT",
+        "AGY_ACP_CCPA_PROJECT",
+        "AGY_ACP_ENABLE_OAUTH",
+        "GEMINI_HOME",
+        "AGY_ACP_FORCE_FILE_STORAGE",
+        "ANTIGRAVITY_HARNESS_PATH",
+        "BROWSER",
+        "PYTHONUNBUFFERED",
+        "ELECTRON_RUN_AS_NODE"
+      ],
+      "close": { "processes": ["agy_acp_server.par", "localharness_external"] }
+    }
+  },
+  "auth": { "kind": "oauth-cli", "session": ["antigravity-acp/acp_token.json"] },
+  "login": { "acp": { "methodId": "oauth-personal" } },
+  "isolation": { "alwaysIsolated": true },
+  "seedFiles": { "antigravity-acp/settings.json": "{\"auth\":{\"type\":\"oauth-personal\"}}" },
+  "quirks": ["antigravity"],
+  "models": [{ "id": "default", "name": "Antigravity default", "default": true }],
+  "capabilities": {
+    "approvals": true,
+    "hooks": false,
+    "checkpoint": false,
+    "images": true,
+    "planMode": false,
+    "resume": true
+  }
+}

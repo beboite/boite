@@ -79,6 +79,20 @@ export interface OsProfile {
    * `{isolationDir}`, replaced by the account's own directory.
    */
   isolation: Record<string, string>;
+  /**
+   * Environment every process of this provider carries, the default account's
+   * included, unlike `isolation` which only applies to an isolated one. Values
+   * take `{isolationDir}` and the load-time tokens, `{agentsDir}` and
+   * `{browserNoop}` among them. Antigravity is what needs it: its harness path
+   * and its browser suppression are not about isolation.
+   */
+  env?: Record<string, string>;
+  /**
+   * Names removed from the inherited environment before a process of this
+   * provider starts, so a variable the user set for their own CLI cannot
+   * redirect the agent Boite runs.
+   */
+  unsetEnv?: string[];
   /** Process names the core closes when an account is removed. */
   close?: { processes?: string[] };
 }
@@ -92,16 +106,42 @@ export interface ProviderAuth {
 }
 
 /**
- * How the provider's CLI logs one account in. The core runs it under the
- * account's isolation directory and streams its output back as
- * `account.login`; the user answers a prompt with `accounts.loginInput`.
+ * How the provider logs one account in, in one of two shapes and never both.
+ *
+ * `command` is a CLI Boite runs under the account's isolation directory,
+ * streaming its output back as `account.login`; the user answers a prompt with
+ * `accounts.loginInput`.
+ *
+ * `acp` is the protocol's own `authenticate` call: the core starts the agent
+ * like a turn would, sends `initialize` then `authenticate` with that method
+ * id, and streams what the agent prints outside the ndjson stream, the sign-in
+ * link included. A redirect URL pasted with `accounts.loginInput` is fetched
+ * once, which is how a phone finishes a sign-in the desktop browser started.
  */
 export interface ProviderLogin {
   /** The executable and its arguments. Never empty. */
-  command: string[];
+  command?: string[];
   /** Extra environment for the login process. Values may use `{isolationDir}`. */
   env?: Record<string, string>;
+  /** The ACP `authenticate` method id, for an agent that logs in over the protocol. */
+  acp?: { methodId: string };
 }
+
+/** How this provider's accounts are kept apart, whatever the OS profile does. */
+export interface ProviderIsolation {
+  /**
+   * Every account of this provider gets a directory of its own, the default one
+   * included, so nothing ever reaches the user's own login. Antigravity is the
+   * case: its IDE credentials are never Boite's to use.
+   */
+  alwaysIsolated: boolean;
+}
+
+/**
+ * Quirks a driver applies to one agent's dialect of a protocol. A value the
+ * core does not know is refused at load time rather than ignored.
+ */
+export type ProviderQuirk = 'antigravity';
 
 /** One step of a model's reasoning effort scale, as the descriptor spells it. */
 export interface EffortLevel {
@@ -143,6 +183,17 @@ export interface ProviderDescriptor {
   auth: ProviderAuth;
   /** Absent when the provider has no way to log an account in from Boite. */
   login?: ProviderLogin;
+  /** Absent means the default account uses the provider's own location. */
+  isolation?: ProviderIsolation;
+  /**
+   * Files the core writes under an account's isolation directory before the
+   * agent ever runs: a relative path to the exact content it must hold. Written
+   * when the account is created and checked again before every spawn; a file
+   * already there is left alone, because the agent owns it afterwards.
+   */
+  seedFiles?: Record<string, string>;
+  /** Dialect fixes the driver of this protocol applies for this agent only. */
+  quirks?: ProviderQuirk[];
   models: ModelInfo[];
   capabilities: ProviderCapabilities;
 }

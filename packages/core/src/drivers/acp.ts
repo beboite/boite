@@ -31,8 +31,9 @@ import type {
 } from '@boite/contracts';
 import pkg from '../../package.json';
 import { messageOf, unavailable } from '../errors.ts';
-import type { SpawnedChild } from '../procs.ts';
-import { profileFor, resolveExecutable } from '../providers/loader.ts';
+import type { SpawnedChild, SpawnOptions } from '../procs.ts';
+import { agentEnv, profileFor, resolveExecutable } from '../providers/loader.ts';
+import { normalizeAntigravityTool, isAntigravityQuestion } from './antigravity.ts';
 import { imageDocument } from './documents.ts';
 import type {
   Driver,
@@ -68,7 +69,8 @@ const PROBE_TIMEOUT_MS = 20_000;
  * are one key; both are written out anyway, because the list is also what tells
  * a reader which agent uses which.
  *
- * - `default`, `autoEdit`, `yolo`, `plan` are Gemini CLI's `ApprovalMode`.
+ * - `default`, `auto_edit` and `yolo` are Antigravity's three session modes,
+ *   which is what the mapping was written against; it has no plan mode.
  * - `acceptEdits`, `bypassPermissions`, `plan`, `default` are Claude Code's
  *   permission modes, which its ACP bridge hands over as mode ids.
  * - `accept_edits`, `bypass_permissions`, `auto_edit`, `dont_ask` are the
@@ -84,6 +86,68 @@ const MODE_CANDIDATES: Record<PermissionMode, readonly string[]> = {
   plan: ['plan'],
   dontAsk: ['dontAsk', 'dont_ask', 'bypassPermissions', 'bypass_permissions', 'yolo', 'auto'],
 };
+
+/** A stdout line longer than this is a protocol line nobody should be buffering. */
+const STDOUT_LINE_MAX = 16 * 1024 * 1024;
+
+/**
+ * The agent's stdout with everything that is not a JSON-RPC line taken out of
+ * it. Antigravity prints its Google sign-in link on stdout, in the middle of
+ * the ndjson stream, and a real agent may print a warning there too; either one
+ * would break the SDK's parser. A line that does not start with `{` never
+ * reaches it: it goes to `onOther` instead, which is what carries the sign-in
+ * link to the Accounts page and every other line to the core log.
+ */
+export function jsonLinesOnly(
+  source: ReadableStream<Uint8Array>,
+  onOther: (line: string) => void,
+): ReadableStream<Uint8Array> {
+  const reader = source.getReader();
+  const decoder = new TextDecoder();
+  const encoder = new TextEncoder();
+  let buffer = '';
+  const take = (line: string, controller: ReadableStreamDefaultController<Uint8Array>): void => {
+    const text = line.replace(/\r$/, '');
+    if (text.trimStart().startsWith('{')) {
+      controller.enqueue(encoder.encode(`${text}\n`));
+      return;
+    }
+    if (text.trim().length > 0) onOther(text.trim());
+  };
+  return new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) {
+          if (buffer.length > 0) {
+            const tail = buffer;
+            buffer = '';
+            take(tail, controller);
+          }
+          controller.close();
+          return;
+        }
+        buffer += decoder.decode(value, { stream: true });
+        if (buffer.length > STDOUT_LINE_MAX) {
+          buffer = '';
+          onOther('the agent sent a stdout line too large to be a protocol line');
+          continue;
+        }
+        let index = buffer.indexOf('\n');
+        if (index < 0) continue;
+        while (index >= 0) {
+          take(buffer.slice(0, index), controller);
+          buffer = buffer.slice(index + 1);
+          index = buffer.indexOf('\n');
+        }
+        return;
+      }
+    },
+    cancel(reason) {
+      void reader.cancel(reason);
+    },
+  });
+}
 
 /** The whole SDK, loaded on the first ACP turn: nothing heavy loads at core start. */
 export type AcpSdk = typeof import('@agentclientprotocol/sdk');
@@ -153,7 +217,11 @@ class AcpTurn {
   isStopped = false;
   settled = false;
 
+  /** This agent's dialect fixes, read once from the descriptor. */
+  readonly antigravity: boolean;
+
   constructor(readonly ctx: TurnContext) {
+    this.antigravity = ctx.provider.quirks?.includes('antigravity') === true;
     this.sessionId = ctx.sessionId;
     this.done = new Promise<TurnResult>((resolve) => {
       this.resolve = resolve;
@@ -276,8 +344,17 @@ class AcpTurn {
       documents: [] as ToolDocument[],
     };
     if (name !== null && name.length > 0) entry.name = name;
-    if (input !== undefined) entry.input = input;
-    if (output !== undefined && output !== null) entry.output = stringify(output);
+    // Antigravity carries a shell call's command, its cwd and its combined
+    // output under half a dozen spellings, and pads `_meta` with base64
+    // images: the quirk folds those into what the card already draws.
+    const native = this.antigravity ? normalizeAntigravityTool(input, output) : null;
+    if (native !== null) {
+      if (native.input !== undefined) entry.input = native.input;
+      if (native.output !== undefined) entry.output = native.output;
+    } else {
+      if (input !== undefined) entry.input = input;
+      if (output !== undefined && output !== null) entry.output = stringify(output);
+    }
     if (status !== null && status !== undefined) entry.status = toolStatus(status);
     if (content !== null && content !== undefined) entry.documents = documentsOf(content);
     this.tools.set(toolCallId, entry);
@@ -450,14 +527,16 @@ class AcpSession {
 
     const child = ctx.spawnChild(executable, profile?.launch?.args ?? [], {
       cwd: ctx.thread.cwd,
-      env: { ...process.env, ...ctx.accountEnv },
+      env: agentEnv(ctx.provider, ctx.accountEnv),
     });
     this.child = child;
     this.watch(child, ctx);
 
     const stream = sdk.ndJsonStream(
       Writable.toWeb(child.stdin) as unknown as WritableStream<Uint8Array>,
-      Readable.toWeb(child.stdout) as unknown as ReadableStream<Uint8Array>,
+      jsonLinesOnly(Readable.toWeb(child.stdout) as unknown as ReadableStream<Uint8Array>, (line) => {
+        ctx.log('warn', `acp agent: ${line.slice(0, STDERR_MAX)}`);
+      }),
     );
     const connection = sdk
       .client({ name: CLIENT_NAME })
@@ -716,14 +795,24 @@ class AcpSession {
     // `RequestPermissionResponse.outcome` is itself the tagged outcome object.
     if (turn === null) return { outcome: { outcome: 'cancelled' } };
     const call = params.toolCall;
-    const toolName = call.name ?? call.title ?? call.toolCallId;
+    // Antigravity sends its free-form questions through the permission method,
+    // under a `interaction_` id and with its own choices rather than the
+    // protocol's allow and reject kinds. The contract has no part for a
+    // question, so it is drawn as the permission card it arrived as: allowing
+    // takes the agent's first choice, denying cancels the question.
+    const question = turn.antigravity && isAntigravityQuestion(params);
+    const toolName = question
+      ? (call.title ?? 'Antigravity asks')
+      : (call.name ?? call.title ?? call.toolCallId);
     const ticket = turn.ctx.requestPermission(toolName, call.rawInput ?? null, call.title ?? null);
     const index = turn.takeIndex();
     turn.part(index, { type: 'permission', requestId: ticket.requestId, toolName, decision: null });
     const answer = await Promise.race([ticket, turn.stopped.then(() => 'cancelled' as const)]);
     if (answer === 'cancelled') return { outcome: { outcome: 'cancelled' } };
     turn.part(index, { type: 'permission', requestId: ticket.requestId, toolName, decision: answer });
-    const optionId = pickOption(params.options, answer);
+    const optionId = question
+      ? (answer === 'allow' ? (params.options[0]?.optionId ?? null) : null)
+      : pickOption(params.options, answer);
     if (optionId === null) return { outcome: { outcome: 'cancelled' } };
     return { outcome: { outcome: 'selected', optionId } };
   }
@@ -848,7 +937,7 @@ async function readModels(ctx: ProbeContext, deps: AcpDeps): Promise<ModelInfo[]
   let lastStderr = '';
   const child = ctx.spawnChild(executable, profile?.launch?.args ?? [], {
     cwd: ctx.cwd,
-    env: { ...process.env, ...ctx.accountEnv },
+    env: agentEnv(ctx.provider, ctx.accountEnv),
   });
   child.stdin.on('error', () => undefined);
   child.stderr.setEncoding('utf8');
@@ -889,7 +978,9 @@ async function readModels(ctx: ProbeContext, deps: AcpDeps): Promise<ModelInfo[]
 
     const stream = sdk.ndJsonStream(
       Writable.toWeb(child.stdin) as unknown as WritableStream<Uint8Array>,
-      Readable.toWeb(child.stdout) as unknown as ReadableStream<Uint8Array>,
+      jsonLinesOnly(Readable.toWeb(child.stdout) as unknown as ReadableStream<Uint8Array>, (line) => {
+        lastStderr = line.slice(0, STDERR_MAX);
+      }),
     );
     // No update handler and no permission handler: nothing of this session is
     // drawn, and a prompt never goes out on it.
@@ -921,6 +1012,125 @@ async function readModels(ctx: ProbeContext, deps: AcpDeps): Promise<ModelInfo[]
     }
     ctx.killTree();
   }
+}
+
+// ---------------------------------------------------------------------------
+// The login: `initialize` then `authenticate`, for an agent that has no CLI
+// ---------------------------------------------------------------------------
+
+export interface AcpLoginInput {
+  /** The `authenticate` method id the descriptor names. */
+  methodId: string;
+  executable: string;
+  args: string[];
+  cwd: string;
+  env: Record<string, string | undefined>;
+  spawnChild(cmd: string, args: string[], opts?: SpawnOptions): SpawnedChild;
+  /** Every line the agent wrote outside the ndjson stream, the sign-in link included. */
+  onLine(line: string): void;
+}
+
+export interface AcpLoginRun {
+  /** Resolves when `authenticate` answered, rejects with what the agent refused. */
+  done: Promise<void>;
+  /** The process and the connection go, on success and on failure alike. */
+  kill(): void;
+}
+
+/** How long the whole sign-in has to finish, the user's time at the Google page included. */
+const LOGIN_TIMEOUT_MS = 5 * MINUTE_MS;
+
+/**
+ * One agent process whose only job is the protocol's `authenticate`. It is
+ * started like a turn's, so it sits in the login thread's Job Object and in the
+ * trace; what it prints outside the protocol goes to `onLine`, which is how the
+ * Google sign-in link reaches the Accounts page.
+ */
+export function runAcpLogin(input: AcpLoginInput): AcpLoginRun {
+  const child = input.spawnChild(input.executable, input.args, { cwd: input.cwd, env: input.env });
+  child.stdin.on('error', () => undefined);
+  child.stderr.setEncoding('utf8');
+  let stderrBuffer = '';
+  child.stderr.on('data', (chunk: string) => {
+    stderrBuffer += chunk;
+    let index = stderrBuffer.indexOf('\n');
+    while (index >= 0) {
+      const line = stderrBuffer.slice(0, index).replace(/\r$/, '').trim();
+      stderrBuffer = stderrBuffer.slice(index + 1);
+      index = stderrBuffer.indexOf('\n');
+      if (line.length > 0) input.onLine(line.slice(0, STDERR_MAX));
+    }
+  });
+
+  let connection: ClientConnection | null = null;
+  let timer: Timer | null = null;
+  let killed = false;
+  const kill = (): void => {
+    if (killed) return;
+    killed = true;
+    if (timer !== null) clearTimeout(timer);
+    try {
+      connection?.close();
+    } catch {
+      // already closed
+    }
+    try {
+      child.stdin.end();
+    } catch {
+      // the pipe is already gone
+    }
+    try {
+      child.kill();
+    } catch {
+      // already exited
+    }
+  };
+
+  const done = (async (): Promise<void> => {
+    const sdk = await import('@agentclientprotocol/sdk');
+    const died = new Promise<never>((_resolve, reject) => {
+      child.once('exit', (code) => {
+        reject(new Error(`the agent exited with code ${code ?? 'unknown'} before it authenticated`));
+      });
+      child.once('error', (error) => {
+        reject(new Error(`the agent did not start: ${messageOf(error)}`));
+      });
+    });
+    const expired = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => {
+        reject(new Error(`the sign-in was not finished within ${LOGIN_TIMEOUT_MS / MINUTE_MS} minutes`));
+      }, LOGIN_TIMEOUT_MS);
+      timer.unref?.();
+    });
+
+    const stream = sdk.ndJsonStream(
+      Writable.toWeb(child.stdin) as unknown as WritableStream<Uint8Array>,
+      jsonLinesOnly(Readable.toWeb(child.stdout) as unknown as ReadableStream<Uint8Array>, input.onLine),
+    );
+    const open = sdk.client({ name: CLIENT_NAME }).connect(stream);
+    connection = open;
+
+    const run = (async (): Promise<void> => {
+      const init = await open.agent.request('initialize', {
+        protocolVersion: sdk.PROTOCOL_VERSION,
+        clientCapabilities: {},
+        clientInfo: { name: CLIENT_NAME, version: pkg.version },
+      });
+      const offered = (init.authMethods ?? []).map((method) => method.id);
+      if (offered.length > 0 && !offered.includes(input.methodId)) {
+        throw new Error(`the agent offers no ${input.methodId} sign-in, only ${offered.join(', ')}`);
+      }
+      await open.agent.request('authenticate', { methodId: input.methodId });
+    })();
+
+    try {
+      await Promise.race([run, died, expired]);
+    } finally {
+      if (timer !== null) clearTimeout(timer);
+    }
+  })();
+
+  return { done, kill };
 }
 
 function pickOption(options: PermissionOption[], decision: 'allow' | 'deny'): string | null {

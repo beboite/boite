@@ -12,18 +12,20 @@ import type {
   ProviderDescriptor,
   ProviderId,
   ProviderInstall,
+  ProviderIsolation,
   ProviderLogin,
+  ProviderQuirk,
   ProviderRejected,
   ProviderSummary,
   RpcResult,
 } from '@boite/contracts';
 import type { Core } from '../core.ts';
-import { agentsDirPath, appDataPath, currentOs, homePath } from '../paths.ts';
+import { agentsDirPath, appDataPath, browserNoopPath, currentOs, homePath } from '../paths.ts';
 import { InstallManager } from './install.ts';
 import { notFound, refused } from '../errors.ts';
+import antigravityShipped from './shipped/antigravity.json';
 import claudeShipped from './shipped/claude.json';
 import codexShipped from './shipped/codex.json';
-import geminiShipped from './shipped/gemini.json';
 import opencodeShipped from './shipped/opencode.json';
 import piShipped from './shipped/pi.json';
 import echoShipped from './shipped/echo.json';
@@ -47,9 +49,9 @@ export function echoEnabled(): boolean {
 const SHIPPED_DIR = join(import.meta.dir, 'shipped');
 
 const SHIPPED_SOURCES: { file: string; raw: unknown; when?: () => boolean }[] = [
+  { file: 'shipped/antigravity.json', raw: antigravityShipped },
   { file: 'shipped/claude.json', raw: claudeShipped },
   { file: 'shipped/codex.json', raw: codexShipped },
-  { file: 'shipped/gemini.json', raw: geminiShipped },
   { file: 'shipped/opencode.json', raw: opencodeShipped },
   { file: 'shipped/pi.json', raw: piShipped },
   { file: 'shipped/echo.json', raw: echoShipped, when: echoEnabled },
@@ -59,6 +61,7 @@ const PROTOCOLS: readonly Protocol[] = ['claude-sdk', 'codex-appserver', 'openco
 const OS_KEYS: readonly Os[] = ['windows', 'linux', 'macos'];
 const AUTH_KINDS: readonly ProviderAuth['kind'][] = ['oauth-cli', 'api-key', 'none'];
 const CANDIDATE_KINDS: readonly ExecutableCandidate['kind'][] = ['path', 'file', 'registry', 'acp-registry'];
+const QUIRKS: readonly ProviderQuirk[] = ['antigravity'];
 const CAPABILITY_KEYS: readonly (keyof ProviderCapabilities)[] = [
   'approvals',
   'hooks',
@@ -78,6 +81,9 @@ const DESCRIPTOR_KEYS = [
   'profiles',
   'auth',
   'login',
+  'isolation',
+  'seedFiles',
+  'quirks',
   'models',
   'capabilities',
 ] as const;
@@ -218,7 +224,7 @@ function checkInstall(value: unknown, file: string, field: string): ProviderInst
 
 function checkProfile(value: unknown, file: string, field: string): OsProfile {
   const obj = asObject(value, file, field);
-  checkKeys(obj, ['detect', 'executable', 'launch', 'install', 'isolation', 'close'], file, field);
+  checkKeys(obj, ['detect', 'executable', 'launch', 'install', 'isolation', 'env', 'unsetEnv', 'close'], file, field);
 
   const detectRaw = asObject(obj['detect'] ?? {}, file, `${field}.detect`);
   checkKeys(detectRaw, ['command', 'file'], file, `${field}.detect`);
@@ -252,6 +258,14 @@ function checkProfile(value: unknown, file: string, field: string): OsProfile {
       asString(entry, file, `${field}.close.processes[${index}]`),
     );
     profile.close = { processes };
+  }
+
+  if (obj['env'] !== undefined) profile.env = checkStringMap(obj['env'], file, `${field}.env`);
+
+  if (obj['unsetEnv'] !== undefined) {
+    profile.unsetEnv = asArray(obj['unsetEnv'], file, `${field}.unsetEnv`).map((entry, index) =>
+      asString(entry, file, `${field}.unsetEnv[${index}]`),
+    );
   }
 
   if (obj['install'] !== undefined) profile.install = checkInstall(obj['install'], file, `${field}.install`);
@@ -296,19 +310,82 @@ function checkAuth(value: unknown, file: string): ProviderAuth {
   return auth;
 }
 
-/** The provider's login command: a non-empty argv of strings, plus optional environment. */
+/**
+ * The provider's login: either a non-empty argv with optional environment, or
+ * the protocol's own `authenticate` call. Exactly one of the two, because a
+ * descriptor that named both would leave the core picking on its own.
+ */
 function checkLogin(value: unknown, file: string): ProviderLogin {
   const obj = asObject(value, file, 'login');
-  checkKeys(obj, ['command', 'env'], file, 'login');
-  const raw = asArray(obj['command'], file, 'login.command');
-  if (raw.length === 0) {
-    reject(file, 'login.command', 'at least one argument', 'login.command must name an executable');
+  checkKeys(obj, ['command', 'env', 'acp'], file, 'login');
+  const hasCommand = obj['command'] !== undefined;
+  const hasAcp = obj['acp'] !== undefined;
+  if (hasCommand === hasAcp) {
+    reject(
+      file,
+      'login',
+      'exactly one of: command, acp',
+      hasCommand ? 'login names both a command and an acp method' : 'login names neither a command nor an acp method',
+    );
   }
-  const login: ProviderLogin = {
-    command: raw.map((entry, index) => asString(entry, file, `login.command[${index}]`)),
-  };
+
+  const login: ProviderLogin = {};
+  if (hasCommand) {
+    const raw = asArray(obj['command'], file, 'login.command');
+    if (raw.length === 0) {
+      reject(file, 'login.command', 'at least one argument', 'login.command must name an executable');
+    }
+    login.command = raw.map((entry, index) => asString(entry, file, `login.command[${index}]`));
+  }
+  if (hasAcp) {
+    const acp = asObject(obj['acp'], file, 'login.acp');
+    checkKeys(acp, ['methodId'], file, 'login.acp');
+    login.acp = { methodId: asString(acp['methodId'], file, 'login.acp.methodId') };
+  }
   if (obj['env'] !== undefined) login.env = checkStringMap(obj['env'], file, 'login.env');
   return login;
+}
+
+/** Isolation policy for every account of the provider, whatever the OS profile does. */
+function checkIsolation(value: unknown, file: string): ProviderIsolation {
+  const obj = asObject(value, file, 'isolation');
+  checkKeys(obj, ['alwaysIsolated'], file, 'isolation');
+  return { alwaysIsolated: asBoolean(obj['alwaysIsolated'], file, 'isolation.alwaysIsolated') };
+}
+
+/**
+ * Files the core writes under an account's isolation directory before the agent
+ * runs. A path that climbs out of that directory is refused by name, the same
+ * way an archive member is.
+ */
+function checkSeedFiles(value: unknown, file: string): Record<string, string> {
+  const obj = asObject(value, file, 'seedFiles');
+  const out: Record<string, string> = {};
+  for (const [path, content] of Object.entries(obj)) {
+    const field = `seedFiles.${path}`;
+    if (path.length === 0) reject(file, 'seedFiles', 'a non-empty relative path', 'a seed file has no path');
+    if (path.startsWith('/') || path.startsWith('\\') || /^[a-zA-Z]:/.test(path)) {
+      reject(file, field, 'a relative path inside the isolation directory', `${field} must be relative: ${path}`);
+    }
+    for (const segment of path.split(/[\\/]/)) {
+      if (segment !== '..') continue;
+      reject(file, field, 'a path with no ".." segment', `${field} escapes the isolation directory: ${path}`);
+    }
+    if (typeof content !== 'string') reject(file, field, 'a string of file content', `${field} must be a string`);
+    out[path] = content;
+  }
+  return out;
+}
+
+/** Dialect fixes, each one a name the core knows how to apply. */
+function checkQuirks(value: unknown, file: string): ProviderQuirk[] {
+  return asArray(value, file, 'quirks').map((entry, index) => {
+    const quirk = asString(entry, file, `quirks[${index}]`);
+    if (!QUIRKS.includes(quirk as ProviderQuirk)) {
+      reject(file, `quirks[${index}]`, `one of: ${QUIRKS.join(', ')}`, `unknown quirk ${quirk}`);
+    }
+    return quirk as ProviderQuirk;
+  });
 }
 
 /** Reasoning effort: a non-empty scale of uniquely named levels, one of them the default. */
@@ -389,21 +466,28 @@ function checkCapabilities(value: unknown, file: string): ProviderCapabilities {
  * name at load time. The last one is where a managed install puts its files, so
  * it needs the data directory and the provider's own id.
  */
-function substituteHome(value: string, agentsDir: string): string {
+function substituteHome(value: string, agentsDir: string, dataDir: string): string {
   let out = value;
   if (out.includes('{home}')) out = out.split('{home}').join(homePath());
   if (out.includes('{appdata}')) out = out.split('{appdata}').join(appDataPath());
   if (out.includes('{agentsDir}')) out = out.split('{agentsDir}').join(agentsDir);
+  if (out.includes('{browserNoop}')) out = out.split('{browserNoop}').join(browserNoopPath(dataDir));
   return out;
 }
 
 /** Load-time tokens. `{isolationDir}` is not one of them: it is per account, substituted at spawn. */
-function substitutePaths(value: string, agentsDir: string): string {
-  return substituteHome(value, agentsDir).split('{shippedDir}').join(SHIPPED_DIR);
+function substitutePaths(value: string, agentsDir: string, dataDir: string): string {
+  return substituteHome(value, agentsDir, dataDir).split('{shippedDir}').join(SHIPPED_DIR);
 }
 
 function expandDescriptor(descriptor: ProviderDescriptor, dataDir: string): ProviderDescriptor {
   const agentsDir = agentsDirPath(dataDir, descriptor.id);
+  const expand = (value: string): string => substituteHome(value, agentsDir, dataDir);
+  const expandMap = (map: Record<string, string>): Record<string, string> => {
+    const out: Record<string, string> = {};
+    for (const [key, value] of Object.entries(map)) out[key] = expand(value);
+    return out;
+  };
   const profiles: ProviderDescriptor['profiles'] = {};
   for (const os of OS_KEYS) {
     const profile = descriptor.profiles[os];
@@ -412,31 +496,49 @@ function expandDescriptor(descriptor: ProviderDescriptor, dataDir: string): Prov
       ...profile,
       executable: profile.executable.map((candidate) => ({
         kind: candidate.kind,
-        value:
-          candidate.kind === 'file'
-            ? normalize(substituteHome(candidate.value, agentsDir))
-            : substituteHome(candidate.value, agentsDir),
+        value: candidate.kind === 'file' ? normalize(expand(candidate.value)) : expand(candidate.value),
       })),
       // A CLI that npm installs as a `.cmd` shim is launched as `node <its js>`,
       // so a launch argument names a path like an executable candidate does and
-      // takes the same tokens. Gemini CLI's descriptor is the one that needs it.
-      ...(profile.launch === undefined
-        ? {}
-        : { launch: { args: (profile.launch.args ?? []).map((arg) => substituteHome(arg, agentsDir)) } }),
+      // takes the same tokens.
+      ...(profile.launch === undefined ? {} : { launch: { args: (profile.launch.args ?? []).map(expand) } }),
+      // The fixed environment names the harness beside the executable and the
+      // browser launcher under the data directory, so it takes the same tokens.
+      ...(profile.env === undefined ? {} : { env: expandMap(profile.env) }),
     };
   }
   const expanded: ProviderDescriptor = {
     ...descriptor,
-    roots: descriptor.roots.map((root) => substituteHome(root, agentsDir)),
+    roots: descriptor.roots.map(expand),
     profiles,
   };
-  if (descriptor.login !== undefined) {
+  if (descriptor.login?.command !== undefined) {
     expanded.login = {
       ...descriptor.login,
-      command: descriptor.login.command.map((arg) => substitutePaths(arg, agentsDir)),
+      command: descriptor.login.command.map((arg) => substitutePaths(arg, agentsDir, dataDir)),
     };
   }
   return expanded;
+}
+
+/**
+ * The environment a process of this provider runs under: what it inherited,
+ * minus the names the profile unsets, plus the account's own. `unsetEnv` is
+ * matched without case, because Windows treats a variable name that way and an
+ * alias would otherwise slip through.
+ */
+export function agentEnv(
+  descriptor: ProviderDescriptor,
+  accountEnv: Record<string, string>,
+  base: Record<string, string | undefined> = process.env,
+): Record<string, string | undefined> {
+  const unset = new Set((profileFor(descriptor)?.unsetEnv ?? []).map((name) => name.toUpperCase()));
+  const env: Record<string, string | undefined> = {};
+  for (const [key, value] of Object.entries(base)) {
+    if (unset.has(key.toUpperCase())) continue;
+    env[key] = value;
+  }
+  return { ...env, ...accountEnv };
 }
 
 export function validateDescriptor(
@@ -486,6 +588,9 @@ export function validateDescriptor(
       profiles,
       auth: checkAuth(obj['auth'], file),
       ...(obj['login'] === undefined ? {} : { login: checkLogin(obj['login'], file) }),
+      ...(obj['isolation'] === undefined ? {} : { isolation: checkIsolation(obj['isolation'], file) }),
+      ...(obj['seedFiles'] === undefined ? {} : { seedFiles: checkSeedFiles(obj['seedFiles'], file) }),
+      ...(obj['quirks'] === undefined ? {} : { quirks: checkQuirks(obj['quirks'], file) }),
       models: checkModels(obj['models'], file),
       capabilities: checkCapabilities(obj['capabilities'], file),
     },
@@ -507,8 +612,10 @@ export function resolveExecutable(profile: OsProfile): string | null {
   return null;
 }
 
-function detectResolves(profile: OsProfile, agentsDir: string): boolean {
-  if (profile.detect.file !== undefined && !existsSync(substituteHome(profile.detect.file, agentsDir))) return false;
+function detectResolves(profile: OsProfile, agentsDir: string, dataDir: string): boolean {
+  if (profile.detect.file !== undefined && !existsSync(substituteHome(profile.detect.file, agentsDir, dataDir))) {
+    return false;
+  }
   if (profile.detect.command !== undefined && Bun.which(profile.detect.command) === null) return false;
   return true;
 }
@@ -523,12 +630,12 @@ export function profileFor(descriptor: ProviderDescriptor, os: Os = currentOs())
  * `available: false`: that is what lets the picker offer the download instead
  * of a dead row.
  */
-export function summarize(entry: LoadedProvider, installs: InstallManager): ProviderSummary {
+export function summarize(entry: LoadedProvider, installs: InstallManager, dataDir: string): ProviderSummary {
   const profile = profileFor(entry.descriptor);
   const executable = profile === undefined ? null : resolveExecutable(profile);
   const available =
     profile !== undefined &&
-    detectResolves(profile, installs.currentDir(entry.descriptor.id)) &&
+    detectResolves(profile, installs.currentDir(entry.descriptor.id), dataDir) &&
     (profile.executable.length === 0 || executable !== null);
   return {
     id: entry.descriptor.id,
@@ -611,7 +718,7 @@ export class ProviderRegistry {
 
   list(): ProviderLoadResult {
     return {
-      loaded: [...this.entries.values()].map((entry) => summarize(entry, this.installs)),
+      loaded: [...this.entries.values()].map((entry) => summarize(entry, this.installs, this.dataDir)),
       rejected: [...this.rejected],
     };
   }
@@ -628,7 +735,7 @@ export class ProviderRegistry {
 
   summary(id: ProviderId): ProviderSummary | undefined {
     const entry = this.entries.get(id);
-    return entry === undefined ? undefined : summarize(entry, this.installs);
+    return entry === undefined ? undefined : summarize(entry, this.installs, this.dataDir);
   }
 
   available(): ProviderSummary[] {
@@ -646,7 +753,7 @@ export class ProviderRegistry {
       const profile = profileFor(descriptor);
       return {
         ok: true,
-        summary: summarize(entry, this.installs),
+        summary: summarize(entry, this.installs, this.dataDir),
         plan: {
           roots: descriptor.roots,
           env: profile === undefined ? [] : Object.keys(profile.isolation),

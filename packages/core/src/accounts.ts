@@ -1,11 +1,12 @@
-import { existsSync, mkdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { chmodSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import type { Account, AccountId, ProviderDescriptor, ProviderId } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { newId } from './ids.ts';
 import { invalidParams, messageOf, notFound, refused } from './errors.ts';
-import { profileFor, resolveExecutable } from './providers/loader.ts';
-import { homePath } from './paths.ts';
+import { runAcpLogin, type AcpLoginRun } from './drivers/acp.ts';
+import { agentEnv, profileFor, resolveExecutable } from './providers/loader.ts';
+import { browserNoopPath, browserNoopScript, currentOs, homePath } from './paths.ts';
 import type { SpawnedPipedProcess } from './procs.ts';
 
 /** The thread a login process is traced under. It is a name, never a real thread. */
@@ -15,30 +16,39 @@ export function loginThreadId(accountId: AccountId): string {
 
 const URL_IN_OUTPUT = /https:\/\/\S+/;
 
+/** How long the one GET on a pasted redirect URL waits before it is called failed. */
+const CALLBACK_TIMEOUT_MS = 10_000;
+
 /**
  * What an isolation variable means when it is not set, as segments under the
  * home directory. A descriptor that isolates an account through one of them
- * (OpenCode uses the XDG pair, Gemini CLI a home of its own, Codex `CODEX_HOME`)
+ * (OpenCode uses the XDG pair, Codex `CODEX_HOME`, pi `PI_CODING_AGENT_DIR`)
  * puts its session file under that same variable, so the provider's own location
- * is the variable's own default, never `~/.<id>`. No segment at all means the
- * home directory itself, which is what `GEMINI_CLI_HOME` replaces.
+ * is the variable's own default, never `~/.<id>`.
  */
 const ISOLATION_DEFAULTS: Record<string, string[]> = {
   XDG_DATA_HOME: ['.local', 'share'],
   XDG_CONFIG_HOME: ['.config'],
   XDG_STATE_HOME: ['.local', 'state'],
   XDG_CACHE_HOME: ['.cache'],
-  GEMINI_CLI_HOME: [],
   CODEX_HOME: ['.codex'],
   PI_CODING_AGENT_DIR: ['.pi', 'agent'],
 };
 
 interface LoginRun {
-  spawned: SpawnedPipedProcess;
-  /** The first https link the CLI printed, carried by every later event. */
+  /** The CLI form: a piped process whose stdin takes a pasted code. */
+  spawned: SpawnedPipedProcess | null;
+  /** The ACP form: one `authenticate` call over the agent's own stdio. */
+  acp: AcpLoginRun | null;
+  /** The first https link the agent printed, carried by every later event. */
   url: string | null;
   /** The last line printed, what the exit event carries. */
   lastLine: string;
+}
+
+/** A loopback callback a phone or a remote client pasted back into Boite. */
+function isLoopbackCallback(text: string): boolean {
+  return /^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?\//.test(text.trim());
 }
 
 export class AccountStore {
@@ -59,7 +69,9 @@ export class AccountStore {
   add(params: { providerId: ProviderId; label: string; useDefaultLocation?: boolean }): Account {
     const provider = this.core.providers.require(params.providerId);
     const id = newId('acc_');
-    const useDefault = params.useDefaultLocation === true;
+    // A provider that is always isolated has no default location to fall back
+    // on: its own login belongs to the user's IDE and is never Boite's to use.
+    const useDefault = params.useDefaultLocation === true && provider.isolation?.alwaysIsolated !== true;
     let isolationDir: string | null = null;
     if (!useDefault) {
       isolationDir = join(this.core.dataDir, 'accounts', id);
@@ -77,6 +89,7 @@ export class AccountStore {
     this.core.journal.append({ type: 'account.added', threadId: null, version: 1, payload: account }, () => {
       this.core.journal.putAccount(account);
     });
+    this.prepare(account, provider);
     return this.check(account.id);
   }
 
@@ -103,16 +116,58 @@ export class AccountStore {
     return next;
   }
 
-  /** Environment that makes this account blind to the others. Empty for the provider's own login. */
+  /**
+   * Environment for a process of this account: the profile's fixed `env`, which
+   * every account carries, plus the isolation variables, which only an account
+   * with a directory of its own does. Preparing the account is part of it, so
+   * the seed files and the browser launcher are on disk before any spawn.
+   */
   accountEnv(account: Account, provider: ProviderDescriptor): Record<string, string> {
-    if (account.isolationDir === null) return {};
     const profile = profileFor(provider);
     if (profile === undefined) return {};
-    const env: Record<string, string> = {};
-    for (const [key, value] of Object.entries(profile.isolation)) {
-      env[key] = value.split('{isolationDir}').join(account.isolationDir);
+    this.prepare(account, provider);
+    const isolationDir = account.isolationDir;
+    const env: Record<string, string> = { ...(profile.env ?? {}) };
+    if (isolationDir !== null) {
+      for (const [key, value] of Object.entries(profile.isolation)) {
+        env[key] = value.split('{isolationDir}').join(isolationDir);
+      }
+    }
+    for (const [key, value] of Object.entries(env)) {
+      env[key] = isolationDir === null ? value : value.split('{isolationDir}').join(isolationDir);
     }
     return env;
+  }
+
+  /**
+   * What has to exist before the agent ever runs: the descriptor's seed files
+   * under the isolation directory, and the browser launcher `BROWSER` points at
+   * when the profile names one. Both are idempotent, so this runs before every
+   * spawn as well as at account creation; a seed file already there is the
+   * agent's own and is left alone.
+   */
+  prepare(account: Account, provider: ProviderDescriptor): void {
+    const profile = profileFor(provider);
+    if (profile === undefined) return;
+    if (Object.values(profile.env ?? {}).some((value) => value === browserNoopPath(this.core.dataDir))) {
+      this.writeBrowserNoop();
+    }
+    const isolationDir = account.isolationDir;
+    if (isolationDir === null) return;
+    for (const [path, content] of Object.entries(provider.seedFiles ?? {})) {
+      const target = join(isolationDir, path);
+      if (existsSync(target)) continue;
+      mkdirSync(dirname(target), { recursive: true });
+      writeFileSync(target, content, 'utf8');
+    }
+  }
+
+  private writeBrowserNoop(): void {
+    const file = browserNoopPath(this.core.dataDir);
+    if (existsSync(file)) return;
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, browserNoopScript(), 'utf8');
+    if (currentOs() !== 'windows') chmodSync(file, 0o755);
   }
 
   /** One "Default" account per available provider, created on first start only. */
@@ -150,7 +205,12 @@ export class AccountStore {
     }
 
     const isolationDir = account.isolationDir;
-    const command = provider.login.command.map((part) => part.split('{isolationDir}').join(isolationDir));
+    mkdirSync(isolationDir, { recursive: true });
+    if (provider.login.acp !== undefined) return this.acpLogin(account, provider, provider.login.acp.methodId);
+
+    const argv = provider.login.command;
+    if (argv === undefined) throw refused('the login command is empty', { accountId, field: 'login.command' });
+    const command = argv.map((part) => part.split('{isolationDir}').join(isolationDir));
     const env: Record<string, string> = { ...this.accountEnv(account, provider) };
     for (const [key, value] of Object.entries(provider.login.env ?? {})) {
       env[key] = value.split('{isolationDir}').join(isolationDir);
@@ -160,7 +220,6 @@ export class AccountStore {
     if (first === undefined) throw refused('the login command is empty', { accountId, field: 'login.command' });
     const executable = this.loginExecutable(provider, first);
 
-    mkdirSync(isolationDir, { recursive: true });
     let spawned: SpawnedPipedProcess;
     try {
       spawned = this.core.procs.spawnPiped(loginThreadId(accountId), executable, args, { cwd: isolationDir, env });
@@ -171,36 +230,138 @@ export class AccountStore {
       });
     }
 
-    const run: LoginRun = { spawned, url: null, lastLine: '' };
+    const run: LoginRun = { spawned, acp: null, url: null, lastLine: '' };
     this.logins.set(accountId, run);
     this.emitLogin(accountId, 'running', '', run);
     void this.readLogin(accountId, run);
     return { ok: true };
   }
 
-  /** One line into the running login's stdin, for a CLI that asks for a pasted code. */
+  /**
+   * The ACP form of a login: the agent is started the way a turn starts it,
+   * under `login:<accountId>`, then `initialize` and `authenticate` with the
+   * descriptor's method id. Everything the agent writes outside the ndjson
+   * stream, the Google sign-in link included, streams back as `account.login`.
+   */
+  private acpLogin(account: Account, provider: ProviderDescriptor, methodId: string): { ok: true } {
+    const accountId = account.id;
+    const profile = profileFor(provider);
+    const executable = profile === undefined ? null : resolveExecutable(profile);
+    if (executable === null) {
+      throw refused(`${provider.name} is not installed on this machine yet`, {
+        accountId,
+        providerId: provider.id,
+        field: 'executable',
+      });
+    }
+    const env = agentEnv(provider, this.accountEnv(account, provider));
+
+    let acp: AcpLoginRun;
+    try {
+      acp = runAcpLogin({
+        methodId,
+        executable,
+        args: profile?.launch?.args ?? [],
+        cwd: account.isolationDir ?? this.core.dataDir,
+        env,
+        spawnChild: (cmd, args, opts) => this.core.procs.spawnChild(loginThreadId(accountId), cmd, args, opts),
+        onLine: (line) => {
+          this.onLoginLine(accountId, line);
+        },
+      });
+    } catch (error) {
+      throw refused(`the ${provider.name} agent did not start: ${messageOf(error)}`, {
+        accountId,
+        command: executable,
+      });
+    }
+
+    const run: LoginRun = { spawned: null, acp, url: null, lastLine: '' };
+    this.logins.set(accountId, run);
+    this.emitLogin(accountId, 'running', '', run);
+    void this.finishAcpLogin(accountId, run, acp);
+    return { ok: true };
+  }
+
+  private async finishAcpLogin(accountId: AccountId, run: LoginRun, acp: AcpLoginRun): Promise<void> {
+    let failure: string | null = null;
+    try {
+      await acp.done;
+    } catch (error) {
+      failure = messageOf(error);
+    }
+    acp.kill();
+    this.logins.delete(accountId);
+    if (failure !== null) run.lastLine = failure;
+    this.emitLogin(accountId, failure === null ? 'done' : 'failed', run.lastLine, run, failure === null ? 0 : 1);
+    if (this.core.journal.isClosed()) return;
+    try {
+      this.check(accountId);
+    } catch {
+      // the account was removed while its login ran
+    }
+  }
+
+  /**
+   * One line into the running login: a CLI login takes it on stdin, an ACP one
+   * takes the redirect URL the Google page came back to and fetches it once,
+   * which is how a phone or a remote client finishes a sign-in whose loopback
+   * listener runs on this machine.
+   */
   loginInput(accountId: AccountId, text: string): { ok: true } {
     const run = this.logins.get(accountId);
     if (run === undefined) throw refused(`no login is running for ${accountId}`, { accountId });
+    if (run.acp !== null) {
+      if (!isLoopbackCallback(text)) {
+        throw refused('paste the whole redirect URL the Google sign-in page came back to', {
+          accountId,
+          field: 'text',
+        });
+      }
+      void this.forwardCallback(accountId, text.trim());
+      return { ok: true };
+    }
+    const spawned = run.spawned;
+    if (spawned === null) throw refused(`no login is running for ${accountId}`, { accountId });
     try {
-      run.spawned.proc.stdin.write(`${text}\n`);
-      run.spawned.proc.stdin.flush();
+      spawned.proc.stdin.write(`${text}\n`);
+      spawned.proc.stdin.flush();
     } catch (error) {
       throw refused(`the login process did not take the input: ${messageOf(error)}`, { accountId });
     }
     return { ok: true };
   }
 
+  /** One GET on the loopback callback the agent is listening on. No redirect followed, no retry. */
+  private async forwardCallback(accountId: AccountId, url: string): Promise<void> {
+    try {
+      const response = await fetch(url, { redirect: 'manual', signal: AbortSignal.timeout(CALLBACK_TIMEOUT_MS) });
+      this.onLoginLine(accountId, `the sign-in response was delivered (${response.status})`);
+    } catch (error) {
+      this.onLoginLine(accountId, `the sign-in response was not delivered: ${messageOf(error)}`);
+    }
+  }
+
   /** Every login still running, killed with the core. */
   closeLogins(): void {
     for (const [accountId, run] of this.logins) {
       try {
-        run.spawned.proc.kill();
+        run.spawned?.proc.kill();
+        run.acp?.kill();
       } catch {
         // already gone
       }
       this.logins.delete(accountId);
     }
+  }
+
+  /** One line of a login's output, whichever form it takes. */
+  private onLoginLine(accountId: AccountId, line: string): void {
+    const run = this.logins.get(accountId);
+    if (run === undefined || line.length === 0) return;
+    run.lastLine = line;
+    if (run.url === null) run.url = URL_IN_OUTPUT.exec(line)?.[0] ?? null;
+    this.emitLogin(accountId, 'running', line, run);
   }
 
   /**
@@ -229,14 +390,13 @@ export class AccountStore {
 
   /** stdout and stderr merged, one event per line, then the exit and a recheck. */
   private async readLogin(accountId: AccountId, run: LoginRun): Promise<void> {
+    const spawned = run.spawned;
+    if (spawned === null) return;
     const onLine = (line: string): void => {
-      if (line.length === 0) return;
-      run.lastLine = line;
-      if (run.url === null) run.url = URL_IN_OUTPUT.exec(line)?.[0] ?? null;
-      this.emitLogin(accountId, 'running', line, run);
+      this.onLoginLine(accountId, line);
     };
-    await Promise.all([pumpLines(run.spawned.proc.stdout, onLine), pumpLines(run.spawned.proc.stderr, onLine)]);
-    const exitCode = await run.spawned.exited;
+    await Promise.all([pumpLines(spawned.proc.stdout, onLine), pumpLines(spawned.proc.stderr, onLine)]);
+    const exitCode = await spawned.exited;
     this.logins.delete(accountId);
     this.emitLogin(accountId, exitCode === 0 ? 'done' : 'failed', run.lastLine, run, exitCode);
     if (this.core.journal.isClosed()) return;
