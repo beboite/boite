@@ -59,7 +59,7 @@ describe('providers', () => {
     const { loaded, rejected } = await client.call('providers.list', {});
     expect(rejected).toEqual([]);
     const ids = loaded.map((provider) => provider.id).sort();
-    expect(ids).toEqual(['antigravity', 'claude', 'codex', 'echo', 'opencode', 'pi']);
+    expect(ids).toEqual(['antigravity', 'claude', 'codex', 'echo', 'grok', 'opencode', 'pi']);
 
     const echo = loaded.find((provider) => provider.id === 'echo');
     expect(echo?.source).toBe('shipped');

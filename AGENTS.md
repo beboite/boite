@@ -25,8 +25,8 @@ that nothing in `bun run check` or `bun run test` will notice.
   serves it over HTTP. Same build, two hosts.
 - contract: `packages/contracts/src/index.ts`. Every RPC method, every event,
   every shared type. A method that is not there does not exist.
-- provider: an agent Boite can run (Claude, OpenCode, Antigravity, Codex, pi,
-  and the echo fake). descriptor: the JSON file that describes one, shipped in
+- provider: an agent Boite can run (Claude, OpenCode, Antigravity, Grok, Codex,
+  pi, and the echo fake). descriptor: the JSON file that describes one, shipped in
   `packages/core/src/providers/shipped/` or dropped by the user under
   `<dataDir>/providers/`.
 - account: a descriptor plus an isolation directory. isolation directory:

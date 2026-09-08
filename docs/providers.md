@@ -96,6 +96,13 @@ descriptor folder, so a shipped login command can name a script beside it.
 `{isolationDir}` is deliberately none of them: it is per account and substituted
 at spawn, in the `isolation` map and in a login command's `env`.
 
+There is no token for the thread's model, effort or permission mode: a descriptor
+declares one launch line and the driver is what changes it. Grok is the only one
+that needs that today, and only for the permission mode: the `grok` quirk splices
+`--permission-mode <mode>` before the `agent` subcommand, or `--always-approve`
+after it, on the way to the spawn. A probe has no thread, so it launches the
+declared line as it is.
+
 ## Managed installs
 
 An `install` block is how Boite ships an agent whose binary is not on the machine
@@ -122,7 +129,7 @@ is held, and one is held for every process a thread or a probe launched.
 
 ## What ships
 
-Six descriptors ship, and only the first five are ever visible to a user: `echo`
+Seven descriptors ship, and only the first six are ever visible to a user: `echo`
 is the deterministic fake the tests and the bench run on, loaded only under
 `BOITE_ECHO=1`.
 
@@ -131,15 +138,17 @@ is the deterministic fake the tests and the bench run on, loaded only under
 | Claude | `claude-sdk` | the SDK drives the CLI | `CLAUDE_CONFIG_DIR` | `.credentials.json` | `claude auth login` |
 | OpenCode | `acp` | `opencode acp --port 0` | `XDG_DATA_HOME`, `XDG_CONFIG_HOME` | `opencode/auth.json` | `opencode auth login` |
 | Antigravity | `acp` | `agy_acp_server.exe` from the managed install | `GEMINI_HOME`, every account | `antigravity-acp/acp_token.json` | the protocol's `authenticate` |
+| Grok | `acp` | `grok [--permission-mode <mode>] agent [--always-approve] stdio` | `GROK_HOME` | `auth.json` | `grok login --device-auth` |
 | Codex | `codex-appserver` | `codex app-server` | `CODEX_HOME` | `auth.json` | `codex login --device-auth` |
 | pi | `pi` | `pi --mode rpc` | `PI_CODING_AGENT_DIR` | `auth.json` | none |
 | Echo | `echo` | nothing | nothing | none | a script beside the descriptor |
 
 Claude is the one whose model list is entirely in the descriptor, current and
-legacy, each with its own effort scale; the other four carry `default` alone and
+legacy, each with its own effort scale; the other five carry `default` alone and
 let the probe fill the rest. On Windows, Codex and pi are both reached around an
 npm shim Bun cannot spawn, one through a vendored executable and the other
-through `node`.
+through `node`; Grok is reached through the binary its own installer puts under
+`{home}/.grok/bin`, with PATH behind it.
 
 Antigravity is the one on the managed install: its binary is nowhere until
 `providers.install` downloads Google's release, so the picker offers Install
@@ -165,10 +174,27 @@ runs on. Four descriptor fields exist for it and are open to any provider:
   a phone finishes a sign-in whose loopback listener runs on the core's machine.
   [accounts.md](accounts.md) has the flow.
 
-`quirks: ["antigravity"]` turns on the one dialect the ACP driver knows: a tool
-call's command, working directory and output folded under one spelling, and an
-`interaction_` permission request drawn as the agent's own question. Its modes
-are `default`, `auto_edit` and `yolo`, with no plan mode.
+`quirks` turns on a dialect the ACP driver knows, and there are two.
+`quirks: ["antigravity"]` folds a tool call's command, working directory and
+output under one spelling and draws an `interaction_` permission request as the
+agent's own question; its modes are `default`, `auto_edit` and `yolo`, with no
+plan mode. `quirks: ["grok"]` says three things
+(`packages/core/src/drivers/grok.ts`). The probe reads each model's own effort
+scale out of its `_meta.reasoningEfforts`, which is where Grok writes a per-model
+scale. The thread's model and effort go out as one
+`session/set_model { sessionId, modelId, _meta: { reasoningEffort } }` right
+after the session opens, never as a `session/set_config_option`, which Grok
+answers with method-not-found; the call is skipped when the thread is on the
+agent's own model with no effort set, and skipped again when the session answer
+already reports that model and that effort. And the permission mode rides on the
+command line, because Grok advertises no `availableModes` for a
+`session/set_mode` to match: `default`, `acceptEdits` and `plan` become
+`--permission-mode <name>` before the `agent` subcommand, `bypassPermissions` and
+`dontAsk` become `--always-approve` after it. A mode is fixed for the life of the
+process, so it joins the session key the way Codex's approval pair does and a
+change drops the process. Nothing ever sends `authenticate` to Grok: an account
+with no `auth.json` is refused before a turn starts, and `authenticate` on an
+empty home opens a browser.
 
 ## The models probe
 
@@ -177,9 +203,13 @@ are `default`, `auto_edit` and `yolo`, with no plan mode.
 a Job Object and in the trace like any other, then asks the protocol's own
 question:
 
-- ACP: `initialize` and `session/new`, then the `configOptions` whose category is
-  `model` and `thought_level`. One effort scale for the whole session, shared by
-  every model.
+- ACP: `initialize` and `session/new`, then whichever of two answers the agent
+  sent. `models.availableModels` wins when it is there: each entry is a model of
+  its own, and under the `grok` quirk it carries its own effort scale out of
+  `_meta.reasoningEfforts`, the level flagged `default: true` the one preselected.
+  Otherwise the `configOptions` whose category is `model` and `thought_level` are
+  read, and that gives one effort scale for the whole session, shared by every
+  model. An agent that sends neither leaves the descriptor's models standing.
 - Codex: `initialize`, the `initialized` notification, then `model/list` until no
   cursor comes back. Each model carries its own efforts and its own default, so
   two models on one account can offer two different scales, and it answers before

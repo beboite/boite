@@ -21,6 +21,7 @@ import type {
   MessageId,
   MessagePart,
   ModelInfo,
+  OsProfile,
   PermissionMode,
   ProviderDescriptor,
   ProviderId,
@@ -34,6 +35,7 @@ import { messageOf, unavailable } from '../errors.ts';
 import type { SpawnedChild, SpawnOptions } from '../procs.ts';
 import { agentEnv, profileFor, resolveExecutable } from '../providers/loader.ts';
 import { normalizeAntigravityTool, isAntigravityQuestion } from './antigravity.ts';
+import { grokEffortOf, grokLaunchArgs, grokReasoningEffortOf } from './grok.ts';
 import { imageDocument } from './documents.ts';
 import type {
   Driver,
@@ -59,6 +61,26 @@ const EXIT_GRACE_MS = 500;
 const AGENT_OWN_MODEL = 'default';
 /** How long a probe waits for the agent to answer `initialize` and `session/new`. */
 const PROBE_TIMEOUT_MS = 20_000;
+
+/**
+ * The one dialect that lists its models itself, carries a per-model effort
+ * scale, takes both through `session/set_model`, and takes its permission mode
+ * on the command line because it advertises no session modes.
+ */
+function isGrok(provider: ProviderDescriptor): boolean {
+  return provider.quirks?.includes('grok') === true;
+}
+
+/**
+ * The argv a turn spawns with: the descriptor's `launch.args` as they are, plus
+ * the thread's permission mode spliced in for an agent whose mode is a command
+ * line option rather than a `session/set_mode`. A probe has no thread and no
+ * mode, so it launches the declared line untouched.
+ */
+function launchArgs(profile: OsProfile | undefined, provider: ProviderDescriptor, mode: PermissionMode): string[] {
+  const declared = profile?.launch?.args ?? [];
+  return isGrok(provider) ? grokLaunchArgs(declared, mode) : [...declared];
+}
 
 /**
  * The thread's permission mode as candidate `session/set_mode` ids, best first.
@@ -525,7 +547,7 @@ class AcpSession {
       throw unavailable(`no ${ctx.provider.id} executable on this machine`, { providerId: ctx.provider.id });
     }
 
-    const child = ctx.spawnChild(executable, profile?.launch?.args ?? [], {
+    const child = ctx.spawnChild(executable, launchArgs(profile, ctx.provider, ctx.thread.permissionMode), {
       cwd: ctx.thread.cwd,
       env: agentEnv(ctx.provider, ctx.accountEnv),
     });
@@ -567,6 +589,7 @@ class AcpSession {
       });
       this.sessionId = ctx.sessionId;
       this.noteModes(loaded.modes);
+      await this.applyModel(ctx, loaded);
       return;
     }
 
@@ -576,7 +599,44 @@ class AcpSession {
     });
     this.sessionId = created.sessionId;
     this.noteModes(created.modes);
+    await this.applyModel(ctx, created);
     await this.applyConfig(ctx, created.configOptions ?? null);
+  }
+
+  /**
+   * The thread's model and reasoning effort as one `session/set_model`, for the
+   * agents that take them there rather than through `session/set_config_option`
+   * (Grok, today). It goes out right after the session opens and never again:
+   * both are in the session key, so a changed one ends the session and the next
+   * process sends a fresh pair. A thread on the agent's own model with no
+   * effort set says nothing, and neither does one the session answer already
+   * reports as current.
+   */
+  private async applyModel(ctx: TurnContext, answer: unknown): Promise<void> {
+    if (!isGrok(ctx.provider)) return;
+    const agent = this.agent;
+    const sessionId = this.sessionId;
+    if (agent === null || sessionId === null) return;
+
+    const wanted = ctx.thread.model === AGENT_OWN_MODEL ? null : ctx.thread.model;
+    const effort = ctx.thread.effort !== null && ctx.thread.effort.length > 0 ? ctx.thread.effort : null;
+    if (wanted === null && effort === null) return;
+
+    const listed = agentModelsOf(answer);
+    const modelId = wanted ?? listed?.currentModelId ?? null;
+    if (modelId === null) return;
+
+    if (listed !== null && listed.currentModelId === modelId) {
+      const entry = listed.available.find((model) => model.modelId === modelId) ?? null;
+      const current = entry === null ? null : grokReasoningEffortOf(entry.meta);
+      if (effort === null || effort === current) return;
+    }
+
+    await agent.request('session/set_model', {
+      sessionId,
+      modelId,
+      ...(effort === null ? {} : { _meta: { reasoningEffort: effort } }),
+    });
   }
 
   /** What a `session/new` or `session/load` answered about modes, if anything. */
@@ -596,6 +656,9 @@ class AcpSession {
    * core log, never a reason to fail the turn.
    */
   private async applyMode(ctx: TurnContext): Promise<void> {
+    // Grok's mode went on the command line at spawn and it advertises no
+    // `availableModes`: there is nothing to match and nothing to warn about.
+    if (isGrok(ctx.provider)) return;
     const agent = this.agent;
     const sessionId = this.sessionId;
     if (agent === null || sessionId === null) return;
@@ -620,6 +683,10 @@ class AcpSession {
   }
 
   private async applyConfig(ctx: TurnContext, options: SessionConfigOption[] | null): Promise<void> {
+    // Grok took its model and its effort through `session/set_model` and
+    // answers `session/set_config_option` with method-not-found: nothing goes
+    // out.
+    if (isGrok(ctx.provider)) return;
     if (options === null || options.length === 0) return;
     await this.setOption(ctx, options, 'model', ctx.thread.model);
     await this.setOption(ctx, options, 'thought_level', ctx.thread.effort);
@@ -820,13 +887,16 @@ class AcpSession {
 
 /**
  * What a session was started with. A turn that differs on any of it needs its
- * own. The permission mode is deliberately not in here: `session/set_mode`
- * changes it in place, so a warm session survives the change.
+ * own. The permission mode is deliberately not in here for an agent that takes
+ * it as a `session/set_mode`, which changes it in place, so a warm session
+ * survives the change; it is in here for Grok, whose mode is a command line
+ * option, so a change there drops the process the way it does for Codex.
  */
 function sessionKey(ctx: TurnContext): string {
   return JSON.stringify({
     model: ctx.thread.model,
     effort: ctx.thread.effort,
+    permissionMode: isGrok(ctx.provider) ? ctx.thread.permissionMode : null,
     cwd: ctx.thread.cwd,
     accountId: ctx.account.id,
     providerId: ctx.provider.id,
@@ -873,6 +943,50 @@ function matchMode(wanted: PermissionMode, modes: SessionMode[]): string | null 
 // The probe: the models the agent itself lists
 // ---------------------------------------------------------------------------
 
+/**
+ * The model list a `session/new` may answer with, beside or instead of its
+ * `configOptions`. It is the protocol's own shape, but the SDK's generated
+ * `NewSessionResponse` does not carry it yet, so it is read off the raw answer
+ * and every field is checked rather than trusted.
+ */
+interface AgentModel {
+  modelId: string;
+  name: string | null;
+  meta: unknown;
+}
+
+interface AgentModels {
+  currentModelId: string | null;
+  available: AgentModel[];
+}
+
+function plainObject(value: unknown): Record<string, unknown> | null {
+  return typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+}
+
+function nonEmptyString(value: unknown): string | null {
+  return typeof value === 'string' && value.length > 0 ? value : null;
+}
+
+/** `session/new`'s `models`, or null when the agent sent none Boite can read. */
+function agentModelsOf(created: unknown): AgentModels | null {
+  const models = plainObject(plainObject(created)?.['models']);
+  if (models === null) return null;
+  const listed = models['availableModels'];
+  if (!Array.isArray(listed)) return null;
+
+  const available: AgentModel[] = [];
+  for (const entry of listed) {
+    const model = plainObject(entry);
+    if (model === null) continue;
+    const modelId = nonEmptyString(model['modelId']);
+    if (modelId === null) continue;
+    available.push({ modelId, name: nonEmptyString(model['name']), meta: model['_meta'] });
+  }
+  if (available.length === 0) return null;
+  return { currentModelId: nonEmptyString(models['currentModelId']), available };
+}
+
 function categoryOption(
   options: SessionConfigOption[] | null,
   category: SessionConfigOptionCategory,
@@ -893,13 +1007,58 @@ function effortFrom(option: SessionConfigOption | null): ModelInfo['effort'] | n
 }
 
 /**
+ * What a `session/new` said about models, as a model list. An agent that
+ * answers with the protocol's `models.availableModels` is read there, an agent
+ * that answers with a `model` config option is read there, and one that answers
+ * with neither leaves the descriptor's models standing.
+ */
+function modelsFrom(
+  provider: ProviderDescriptor,
+  options: SessionConfigOption[] | null,
+  listed: AgentModels | null,
+): ModelInfo[] {
+  if (listed !== null) return modelsFromList(provider, listed);
+  return modelsFromConfig(provider, options);
+}
+
+/**
+ * `models.availableModels` as a model list. The descriptor's `default` stays
+ * first, without an effort scale: it means the agent keeps its own model, and
+ * the effort of a model nobody named is nobody's to pick. Under the `grok`
+ * quirk each model carries the scale out of its own `_meta`, which is the one
+ * place a per-model scale is written in this protocol.
+ */
+function modelsFromList(provider: ProviderDescriptor, listed: AgentModels): ModelInfo[] {
+  const grok = isGrok(provider);
+  const models: ModelInfo[] = [];
+  const seen = new Set<string>();
+  const own = provider.models.find((model) => model.id === AGENT_OWN_MODEL);
+  if (own !== undefined) {
+    models.push({ id: AGENT_OWN_MODEL, name: own.name, default: false });
+    seen.add(AGENT_OWN_MODEL);
+  }
+  for (const entry of listed.available) {
+    if (seen.has(entry.modelId)) continue;
+    seen.add(entry.modelId);
+    const effort = grok ? grokEffortOf(entry.meta) : null;
+    models.push({
+      id: entry.modelId,
+      name: entry.name ?? entry.modelId,
+      default: entry.modelId === listed.currentModelId,
+      ...(effort === null ? {} : { effort }),
+    });
+  }
+  return models;
+}
+
+/**
  * The `configOptions` of a `session/new` as a model list. The descriptor's
  * `default` model stays first so the user can always hand the choice back to
  * the agent; the agent's own values follow in its order, the current one
  * flagged. No `model` option means the agent has nothing to say: the
  * descriptor's models stand.
  */
-function modelsFrom(provider: ProviderDescriptor, options: SessionConfigOption[] | null): ModelInfo[] {
+function modelsFromConfig(provider: ProviderDescriptor, options: SessionConfigOption[] | null): ModelInfo[] {
   const option = categoryOption(options, 'model');
   if (option === null) return provider.models;
   const effort = effortFrom(categoryOption(options, 'thought_level'));
@@ -935,6 +1094,8 @@ async function readModels(ctx: ProbeContext, deps: AcpDeps): Promise<ModelInfo[]
   }
 
   let lastStderr = '';
+  // No thread here, so no permission mode either: the probe launches the line
+  // the descriptor declares and reads the agent on its own defaults.
   const child = ctx.spawnChild(executable, profile?.launch?.args ?? [], {
     cwd: ctx.cwd,
     env: agentEnv(ctx.provider, ctx.accountEnv),
@@ -987,17 +1148,18 @@ async function readModels(ctx: ProbeContext, deps: AcpDeps): Promise<ModelInfo[]
     const open = sdk.client({ name: CLIENT_NAME }).connect(stream);
     connection = open;
 
-    const read = (async (): Promise<SessionConfigOption[] | null> => {
+    const read = (async (): Promise<{ options: SessionConfigOption[] | null; listed: AgentModels | null }> => {
       await open.agent.request('initialize', {
         protocolVersion: sdk.PROTOCOL_VERSION,
         clientCapabilities: {},
         clientInfo: { name: CLIENT_NAME, version: pkg.version },
       });
       const created = await open.agent.request('session/new', { cwd: ctx.cwd, mcpServers: [] });
-      return created.configOptions ?? null;
+      return { options: created.configOptions ?? null, listed: agentModelsOf(created) };
     })();
 
-    return modelsFrom(ctx.provider, await Promise.race([read, died, expired]));
+    const answer = await Promise.race([read, died, expired]);
+    return modelsFrom(ctx.provider, answer.options, answer.listed);
   } finally {
     if (timer !== null) clearTimeout(timer);
     try {

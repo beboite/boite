@@ -1,0 +1,94 @@
+{
+  "id": "grok",
+  "schemaVersion": 1,
+  "name": "Grok",
+  "shortName": "Grok",
+  "protocol": "acp",
+  "roots": ["{home}/.grok", "{isolationDir}"],
+  "profiles": {
+    "windows": {
+      "detect": {},
+      "executable": [
+        { "kind": "file", "value": "{home}/.grok/bin/grok.exe" },
+        { "kind": "path", "value": "grok" }
+      ],
+      "launch": { "args": ["agent", "stdio"] },
+      "isolation": { "GROK_HOME": "{isolationDir}" },
+      "env": { "NO_COLOR": "1", "GROK_FEEDBACK_ENABLED": "0" },
+      "unsetEnv": [
+        "XAI_API_KEY",
+        "GROK_AUTH_PROVIDER_COMMAND",
+        "GROK_AUTH_TOKEN_TTL",
+        "GROK_OIDC_ISSUER",
+        "GROK_OIDC_CLIENT_ID",
+        "GROK_CLI_CHAT_PROXY_BASE_URL",
+        "GROK_MODELS_BASE_URL",
+        "GROK_MODELS_LIST_URL",
+        "GROK_AGENT",
+        "GROK_SANDBOX",
+        "GROK_DEPLOYMENT_KEY"
+      ],
+      "close": { "processes": ["grok.exe"] }
+    },
+    "linux": {
+      "detect": {},
+      "executable": [
+        { "kind": "file", "value": "{home}/.grok/bin/grok" },
+        { "kind": "path", "value": "grok" }
+      ],
+      "launch": { "args": ["agent", "stdio"] },
+      "isolation": { "GROK_HOME": "{isolationDir}" },
+      "env": { "NO_COLOR": "1", "GROK_FEEDBACK_ENABLED": "0" },
+      "unsetEnv": [
+        "XAI_API_KEY",
+        "GROK_AUTH_PROVIDER_COMMAND",
+        "GROK_AUTH_TOKEN_TTL",
+        "GROK_OIDC_ISSUER",
+        "GROK_OIDC_CLIENT_ID",
+        "GROK_CLI_CHAT_PROXY_BASE_URL",
+        "GROK_MODELS_BASE_URL",
+        "GROK_MODELS_LIST_URL",
+        "GROK_AGENT",
+        "GROK_SANDBOX",
+        "GROK_DEPLOYMENT_KEY"
+      ],
+      "close": { "processes": ["grok"] }
+    },
+    "macos": {
+      "detect": {},
+      "executable": [
+        { "kind": "file", "value": "{home}/.grok/bin/grok" },
+        { "kind": "path", "value": "grok" }
+      ],
+      "launch": { "args": ["agent", "stdio"] },
+      "isolation": { "GROK_HOME": "{isolationDir}" },
+      "env": { "NO_COLOR": "1", "GROK_FEEDBACK_ENABLED": "0" },
+      "unsetEnv": [
+        "XAI_API_KEY",
+        "GROK_AUTH_PROVIDER_COMMAND",
+        "GROK_AUTH_TOKEN_TTL",
+        "GROK_OIDC_ISSUER",
+        "GROK_OIDC_CLIENT_ID",
+        "GROK_CLI_CHAT_PROXY_BASE_URL",
+        "GROK_MODELS_BASE_URL",
+        "GROK_MODELS_LIST_URL",
+        "GROK_AGENT",
+        "GROK_SANDBOX",
+        "GROK_DEPLOYMENT_KEY"
+      ],
+      "close": { "processes": ["grok"] }
+    }
+  },
+  "auth": { "kind": "oauth-cli", "session": ["auth.json"] },
+  "login": { "command": ["grok", "login", "--device-auth"] },
+  "quirks": ["grok"],
+  "models": [{ "id": "default", "name": "Grok default", "default": true }],
+  "capabilities": {
+    "approvals": true,
+    "hooks": false,
+    "checkpoint": false,
+    "images": false,
+    "planMode": true,
+    "resume": true
+  }
+}

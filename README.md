@@ -82,8 +82,8 @@ bench                measurements against Boite Legacy
 ## Status
 
 Beta, version 2.0.0-beta.1. The core, the UI, the shell, the installer and
-five drivers (Claude, ACP for OpenCode and Antigravity, Codex, pi and the echo
-fake used by the tests) all run. The plugin host is not written, and the trace
+five drivers (Claude, ACP for OpenCode, Antigravity and Grok, Codex, pi and the
+echo fake used by the tests) all run. The plugin host is not written, and the trace
 outside Windows polls a process group instead of reading exact process events.
 What the build holds, its gaps and its resource figures:
 [docs/releases/2.0.0-beta.1.md](docs/releases/2.0.0-beta.1.md).

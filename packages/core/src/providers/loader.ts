@@ -26,6 +26,7 @@ import { notFound, refused } from '../errors.ts';
 import antigravityShipped from './shipped/antigravity.json';
 import claudeShipped from './shipped/claude.json';
 import codexShipped from './shipped/codex.json';
+import grokShipped from './shipped/grok.json';
 import opencodeShipped from './shipped/opencode.json';
 import piShipped from './shipped/pi.json';
 import echoShipped from './shipped/echo.json';
@@ -52,6 +53,7 @@ const SHIPPED_SOURCES: { file: string; raw: unknown; when?: () => boolean }[] = 
   { file: 'shipped/antigravity.json', raw: antigravityShipped },
   { file: 'shipped/claude.json', raw: claudeShipped },
   { file: 'shipped/codex.json', raw: codexShipped },
+  { file: 'shipped/grok.json', raw: grokShipped },
   { file: 'shipped/opencode.json', raw: opencodeShipped },
   { file: 'shipped/pi.json', raw: piShipped },
   { file: 'shipped/echo.json', raw: echoShipped, when: echoEnabled },
@@ -61,7 +63,7 @@ const PROTOCOLS: readonly Protocol[] = ['claude-sdk', 'codex-appserver', 'openco
 const OS_KEYS: readonly Os[] = ['windows', 'linux', 'macos'];
 const AUTH_KINDS: readonly ProviderAuth['kind'][] = ['oauth-cli', 'api-key', 'none'];
 const CANDIDATE_KINDS: readonly ExecutableCandidate['kind'][] = ['path', 'file', 'registry', 'acp-registry'];
-const QUIRKS: readonly ProviderQuirk[] = ['antigravity'];
+const QUIRKS: readonly ProviderQuirk[] = ['antigravity', 'grok'];
 const CAPABILITY_KEYS: readonly (keyof ProviderCapabilities)[] = [
   'approvals',
   'hooks',
