@@ -61,6 +61,13 @@ export interface ProviderAuth {
   identity?: { source: { file: string; field: string } | { command: string[] }; format: string };
 }
 
+/** One step of a model's reasoning effort scale, as the descriptor spells it. */
+export interface EffortLevel {
+  id: string;
+  label: string;
+  description?: string;
+}
+
 export interface ModelInfo {
   id: string;
   name: string;
@@ -69,6 +76,8 @@ export interface ModelInfo {
   legacy?: boolean;
   /** A small mark next to the name in the picker. */
   badge?: 'new';
+  /** Reasoning effort this model offers. A model without it has no effort control. */
+  effort?: { levels: EffortLevel[]; default: string };
 }
 
 export interface ProviderCapabilities {
@@ -167,6 +176,8 @@ export interface ThreadSummary {
   providerId: ProviderId;
   accountId: AccountId;
   model: string | null;
+  /** One of the model's effort level ids. Null means the model's own default. */
+  effort: string | null;
   cwd: string;
   permissionMode: PermissionMode;
   status: ThreadStatus;
@@ -373,13 +384,20 @@ export interface RpcMethods {
       title?: string;
       cwd?: string;
       model?: string;
+      effort?: string | null;
       permissionMode?: PermissionMode;
     };
     result: ThreadSummary;
   };
   'threads.get': { params: { threadId: ThreadId }; result: Thread };
   'threads.update': {
-    params: { threadId: ThreadId; title?: string; model?: string; permissionMode?: PermissionMode };
+    params: {
+      threadId: ThreadId;
+      title?: string;
+      model?: string;
+      effort?: string | null;
+      permissionMode?: PermissionMode;
+    };
     result: ThreadSummary;
   };
   'threads.archive': { params: { threadId: ThreadId; archived?: boolean }; result: ThreadSummary };

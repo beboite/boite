@@ -75,6 +75,135 @@ describe('providers', () => {
     expect(claude?.capabilities.planMode).toBe(true);
   });
 
+  test('the shipped models carry the reasoning effort scale they are meant to', async () => {
+    const client = await harness.connect();
+    const { loaded } = await client.call('providers.list', {});
+    const models = loaded.find((provider) => provider.id === 'claude')?.models ?? [];
+
+    const sonnet = models.find((model) => model.id === 'claude-sonnet-5');
+    expect(sonnet?.effort?.default).toBe('high');
+    expect(sonnet?.effort?.levels.map((level) => level.id)).toEqual([
+      'low',
+      'medium',
+      'high',
+      'xhigh',
+      'max',
+      'ultrathink',
+    ]);
+    expect(sonnet?.effort?.levels.find((level) => level.id === 'xhigh')?.label).toBe('Extra high');
+    expect(sonnet?.effort?.levels.find((level) => level.id === 'ultrathink')?.description).toBe(
+      'Extended thinking, asked for in the prompt',
+    );
+
+    const legacy = models.find((model) => model.id === 'claude-sonnet-4-6');
+    expect(legacy?.effort?.levels.map((level) => level.id)).toEqual(['low', 'medium', 'high']);
+
+    // Haiku has no scale at all, so the picker shows no Reasoning row for it.
+    expect(models.find((model) => model.id === 'claude-haiku-4-5-20251001')?.effort).toBeUndefined();
+
+    const echo = loaded.find((provider) => provider.id === 'echo')?.models[0];
+    expect(echo?.effort).toEqual({
+      levels: [
+        { id: 'low', label: 'Low' },
+        { id: 'high', label: 'High' },
+      ],
+      default: 'high',
+    });
+  });
+
+  test('a user descriptor with a well formed effort scale loads', async () => {
+    const models = [
+      {
+        id: 'mine-1',
+        name: 'Mine 1',
+        default: true,
+        effort: {
+          levels: [
+            { id: 'low', label: 'Low' },
+            { id: 'high', label: 'High', description: 'The slow one' },
+          ],
+          default: 'low',
+        },
+      },
+    ];
+    writeUserDescriptor('effort-ok.json', { ...validDescriptor(), models });
+    const client = await harness.connect();
+    const { loaded, rejected } = await client.call('providers.reload', {});
+    expect(rejected).toEqual([]);
+    expect(loaded.find((provider) => provider.id === 'mine')?.models[0]?.effort).toEqual(models[0]!.effort);
+  });
+
+  test('an empty effort level list is refused', async () => {
+    const model = { id: 'mine-1', name: 'Mine 1', default: true, effort: { levels: [], default: 'low' } };
+    writeUserDescriptor('effort-empty.json', { ...validDescriptor(), models: [model] });
+    const client = await harness.connect();
+    const { rejected } = await client.call('providers.reload', {});
+    expect(rejected).toHaveLength(1);
+    expect(rejected[0]?.field).toBe('models[0].effort.levels');
+    expect(rejected[0]?.expected).toBe('at least one level');
+  });
+
+  test('two effort levels with the same id are refused', async () => {
+    const model = {
+      id: 'mine-1',
+      name: 'Mine 1',
+      default: true,
+      effort: {
+        levels: [
+          { id: 'low', label: 'Low' },
+          { id: 'low', label: 'Low again' },
+        ],
+        default: 'low',
+      },
+    };
+    writeUserDescriptor('effort-dup.json', { ...validDescriptor(), models: [model] });
+    const client = await harness.connect();
+    const { rejected } = await client.call('providers.reload', {});
+    expect(rejected).toHaveLength(1);
+    expect(rejected[0]?.field).toBe('models[0].effort.levels[1].id');
+    expect(rejected[0]?.message).toContain('twice');
+  });
+
+  test('an effort level with an empty label is refused', async () => {
+    const model = { id: 'mine-1', name: 'Mine 1', default: true, effort: { levels: [{ id: 'low', label: '' }], default: 'low' } };
+    writeUserDescriptor('effort-label.json', { ...validDescriptor(), models: [model] });
+    const client = await harness.connect();
+    const { rejected } = await client.call('providers.reload', {});
+    expect(rejected).toHaveLength(1);
+    expect(rejected[0]?.field).toBe('models[0].effort.levels[0].label');
+    expect(rejected[0]?.expected).toBe('a non-empty string');
+  });
+
+  test('an effort default that names no level is refused with the level ids', async () => {
+    const model = {
+      id: 'mine-1',
+      name: 'Mine 1',
+      default: true,
+      effort: { levels: [{ id: 'low', label: 'Low' }], default: 'turbo' },
+    };
+    writeUserDescriptor('effort-default.json', { ...validDescriptor(), models: [model] });
+    const client = await harness.connect();
+    const { rejected } = await client.call('providers.reload', {});
+    expect(rejected).toHaveLength(1);
+    expect(rejected[0]?.field).toBe('models[0].effort.default');
+    expect(rejected[0]?.expected).toBe('one of: low');
+    expect(rejected[0]?.message).toContain('turbo');
+  });
+
+  test('an unknown field inside an effort level is refused with its name', async () => {
+    const model = {
+      id: 'mine-1',
+      name: 'Mine 1',
+      default: true,
+      effort: { levels: [{ id: 'low', label: 'Low', colour: 'green' }], default: 'low' },
+    };
+    writeUserDescriptor('effort-field.json', { ...validDescriptor(), models: [model] });
+    const client = await harness.connect();
+    const { rejected } = await client.call('providers.reload', {});
+    expect(rejected).toHaveLength(1);
+    expect(rejected[0]?.field).toBe('models[0].effort.levels[0].colour');
+  });
+
   test('an unknown field is refused with its name', async () => {
     writeUserDescriptor('bad-field.json', { ...validDescriptor(), mysteryField: 'nope' });
     const client = await harness.connect();

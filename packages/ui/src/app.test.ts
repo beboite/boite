@@ -104,6 +104,41 @@ test('the picker lists providers with their accounts and the models of the one s
   expect(store.openThread?.model).toBe('claude-opus-5');
 });
 
+test('the Reasoning row sets the effort of the picked model, and the default level clears the suffix', async () => {
+  await mountOnFake();
+  query<HTMLButtonElement>('[data-testid=new-thread]').click();
+  await waitFor(() => store.draft !== null);
+  await waitFor(() => query('[data-testid=composer-picker]').textContent?.includes('Claude Sonnet 5') === true);
+
+  query<HTMLButtonElement>('[data-testid=composer-picker]').click();
+  await waitFor(() => document.querySelector('[data-testid=picker-effort]') !== null);
+  const levels = Array.from(document.querySelectorAll('[data-effort]')).map((el) => el.getAttribute('data-effort'));
+  expect(levels).toEqual(['low', 'medium', 'high', 'xhigh', 'max', 'ultrathink']);
+  // Nothing chosen yet, so the model's own default reads as the active one.
+  expect(query('[data-effort=high]').getAttribute('aria-pressed')).toBe('true');
+
+  query<HTMLButtonElement>('[data-effort=xhigh]').click();
+  await waitFor(() => query('[data-effort=xhigh]').getAttribute('aria-pressed') === 'true');
+  // Picking a level keeps the popover open: it is a setting of the model, not a choice of its own.
+  expect(document.querySelector('[data-testid=composer-picker-menu]')).not.toBeNull();
+  expect(query('[data-testid=composer-picker]').textContent).toContain('Claude Sonnet 5 · Extra high');
+
+  query<HTMLButtonElement>('[data-effort=high]').click();
+  await waitFor(() => query('[data-effort=high]').getAttribute('aria-pressed') === 'true');
+  expect(query('[data-testid=composer-picker]').textContent).not.toContain('Extra high');
+
+  // The draft carries the effort into the thread the first send creates.
+  query<HTMLButtonElement>('[data-effort=xhigh]').click();
+  await waitFor(() => query('[data-effort=xhigh]').getAttribute('aria-pressed') === 'true');
+  const input = query<HTMLTextAreaElement>('[data-testid=composer-input]');
+  input.value = 'Think harder about the caps';
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  await waitFor(() => !query<HTMLButtonElement>('[data-testid=composer-send]').disabled);
+  query<HTMLButtonElement>('[data-testid=composer-send]').click();
+  await waitFor(() => store.openThread !== null && store.draft === null);
+  expect(store.openThread?.effort).toBe('xhigh');
+});
+
 test('a right click on a thread row opens the context menu, and Archive removes the row', async () => {
   await mountOnFake();
   await waitFor(() => document.querySelectorAll('[data-testid=thread-row]').length === 4);

@@ -1,7 +1,7 @@
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import type { Options, PermissionResult, Query, SDKMessage } from '@anthropic-ai/claude-agent-sdk';
+import type { Options, PermissionResult, Query, SDKMessage, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { MessagePart, RpcEvents } from '@boite/contracts';
 import type { CoreClient } from '../src/client.ts';
 import { createClaudeDriver } from '../src/drivers/claude.ts';
@@ -92,16 +92,28 @@ class FakeQuery {
 }
 
 const queries: FakeQuery[] = [];
+/** What the driver handed the SDK, turn by turn: the options and the first user message. */
+const calls: { options: Options; prompt: Promise<string> }[] = [];
 
 function scripted(script: (fake: FakeQuery, options: Options) => void): void {
   queries.length = 0;
-  const query: QueryFn = ({ options }) => {
+  calls.length = 0;
+  const query: QueryFn = ({ prompt, options }) => {
     const fake = new FakeQuery();
     queries.push(fake);
+    calls.push({ options, prompt: firstPrompt(prompt) });
     script(fake, options);
     return fake as unknown as Query;
   };
   restore = setDriver('claude-sdk', createClaudeDriver({ loadQuery: () => Promise.resolve(query) }));
+}
+
+/** The driver yields one user message and then keeps the stream open, so read only that one. */
+async function firstPrompt(stream: AsyncIterable<SDKUserMessage>): Promise<string> {
+  const first = await stream[Symbol.asyncIterator]().next();
+  if (first.done === true) return '';
+  const content = first.value.message.content;
+  return typeof content === 'string' ? content : JSON.stringify(content);
 }
 
 // -- scripted messages, shaped like the CLI's own ---------------------------
@@ -343,5 +355,45 @@ describe('claude driver', () => {
     const trace = await client.call('trace.get', { threadId });
     expect(trace).toHaveLength(1);
     expect(trace[0]?.exitCode).toBe(0);
+  });
+
+  /** One plain turn on a thread set to `effort`, so the test can read what the SDK got. */
+  async function turnWithEffort(effort: string | null): Promise<{ options: Options; prompt: string }> {
+    const client = await harness.connect();
+    const threadId = await claudeThread(client);
+    const updated = await client.call('threads.update', { threadId, effort });
+    expect(updated.effort).toBe(effort);
+
+    scripted((fake) => {
+      fake.emit(init('sess-effort'));
+      fake.emit(success('sess-effort'));
+      fake.end();
+    });
+
+    const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 10000);
+    await client.call('turns.start', { threadId, prompt: 'ping' });
+    expect((await finished).status).toBe('done');
+
+    const call = calls[0];
+    if (call === undefined) throw new Error('the driver never called the SDK');
+    return { options: call.options, prompt: await call.prompt };
+  }
+
+  test('a named effort level goes to the SDK as an option and leaves the prompt alone', async () => {
+    const { options, prompt } = await turnWithEffort('xhigh');
+    expect(options.effort).toBe('xhigh');
+    expect(prompt).toBe('ping');
+  });
+
+  test('ultrathink passes no effort option and appends the word to the prompt once', async () => {
+    const { options, prompt } = await turnWithEffort('ultrathink');
+    expect(options.effort).toBeUndefined();
+    expect(prompt).toBe('ping ultrathink');
+  });
+
+  test('a thread with no effort sends none, so the CLI keeps its own default', async () => {
+    const { options, prompt } = await turnWithEffort(null);
+    expect(options.effort).toBeUndefined();
+    expect(prompt).toBe('ping');
   });
 });

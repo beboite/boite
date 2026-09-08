@@ -12,7 +12,7 @@ import type {
   Usage,
 } from '@boite/contracts';
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 const DELTA_WINDOW_MS = 16;
 
 export interface JournalEvent {
@@ -44,6 +44,7 @@ interface ThreadRow {
   provider_id: string;
   account_id: string;
   model: string | null;
+  effort: string | null;
   cwd: string;
   permission_mode: string;
   status: string;
@@ -188,12 +189,21 @@ CREATE TABLE IF NOT EXISTS settings (
 );
 `;
 
+/** Reasoning effort per thread. NULL is the model's own default. */
+const SCHEMA_V2 = `
+ALTER TABLE threads ADD COLUMN effort TEXT;
+`;
+
 function migrate(db: Database): void {
   const row = db.query('PRAGMA user_version').get() as { user_version: number } | null;
   let version = row?.user_version ?? 0;
   if (version < 1) {
     db.exec(SCHEMA_V1);
     version = 1;
+  }
+  if (version < 2) {
+    db.exec(SCHEMA_V2);
+    version = 2;
   }
   db.exec(`PRAGMA user_version = ${version}`);
 }
@@ -218,6 +228,7 @@ function toThread(row: ThreadRow): ThreadSummary {
     providerId: row.provider_id,
     accountId: row.account_id,
     model: row.model,
+    effort: row.effort,
     cwd: row.cwd,
     permissionMode: row.permission_mode as ThreadSummary['permissionMode'],
     status: row.status as ThreadSummary['status'],
@@ -392,8 +403,8 @@ export class Journal {
     this.db
       .query(
         `INSERT OR REPLACE INTO threads
-         (id, project_id, title, provider_id, account_id, model, cwd, permission_mode, status, unread, archived, session_id, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (id, project_id, title, provider_id, account_id, model, effort, cwd, permission_mode, status, unread, archived, session_id, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         thread.id,
@@ -402,6 +413,7 @@ export class Journal {
         thread.providerId,
         thread.accountId,
         thread.model,
+        thread.effort,
         thread.cwd,
         thread.permissionMode,
         thread.status,

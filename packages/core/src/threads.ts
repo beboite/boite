@@ -65,6 +65,7 @@ export class ThreadStore {
     title?: string;
     cwd?: string;
     model?: string;
+    effort?: string | null;
     permissionMode?: ThreadSummary['permissionMode'];
   }): ThreadSummary {
     const project = this.core.projects.require(params.projectId);
@@ -79,13 +80,15 @@ export class ThreadStore {
     }
 
     const now = Date.now();
+    const model = params.model ?? defaultModel(provider);
     const thread: ThreadSummary = {
       id: newId('thr_'),
       projectId: project.id,
       title: params.title !== undefined && params.title.length > 0 ? params.title : 'New thread',
       providerId: provider.id,
       accountId: account.id,
-      model: params.model ?? defaultModel(provider),
+      model,
+      effort: checkEffort(provider, model, params.effort ?? null),
       cwd: params.cwd !== undefined && params.cwd.length > 0 ? params.cwd : project.path,
       permissionMode: params.permissionMode ?? 'default',
       status: 'idle',
@@ -107,6 +110,7 @@ export class ThreadStore {
     threadId: ThreadId;
     title?: string;
     model?: string;
+    effort?: string | null;
     permissionMode?: ThreadSummary['permissionMode'];
   }): ThreadSummary {
     const thread = this.require(params.threadId);
@@ -114,6 +118,9 @@ export class ThreadStore {
     if (params.title !== undefined && params.title.length > 0) next.title = params.title;
     if (params.model !== undefined) next.model = params.model;
     if (params.permissionMode !== undefined) next.permissionMode = params.permissionMode;
+    if (params.effort !== undefined) next.effort = params.effort;
+    // The model may have changed in the same call, so the scale is the new one's.
+    next.effort = checkEffort(this.core.providers.require(thread.providerId), next.model, next.effort);
     return this.save(next, 'thread.updated');
   }
 
@@ -407,6 +414,22 @@ export class ThreadStore {
   private withLoad(thread: ThreadSummary): ThreadSummary {
     return { ...thread, load: this.core.procs.loadOf(thread.id) };
   }
+}
+
+/**
+ * Null is always allowed and means the model's own default. Anything else must
+ * be one of the levels that model's descriptor lists, or the call is refused.
+ */
+function checkEffort(provider: ProviderDescriptor, model: string | null, effort: string | null): string | null {
+  if (effort === null) return null;
+  const levels = provider.models.find((entry) => entry.id === model)?.effort?.levels ?? [];
+  if (levels.some((level) => level.id === effort)) return effort;
+  throw refused('the model does not offer this reasoning effort', {
+    providerId: provider.id,
+    model,
+    effort,
+    expected: levels.length === 0 ? 'null: this model has no effort levels' : levels.map((level) => level.id),
+  });
 }
 
 function defaultModel(provider: ProviderDescriptor): string | null {

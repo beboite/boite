@@ -2,7 +2,7 @@
   import { ArrowUp, ShieldCheck, Square } from '@lucide/svelte';
   import type { PermissionMode } from '@boite/contracts';
   import { fill, strings } from '../lib/strings';
-  import type { Choice, Store } from '../lib/store.svelte';
+  import type { Choice, PickPatch, Store } from '../lib/store.svelte';
   import Menu from './Menu.svelte';
   import ModelPicker from './ModelPicker.svelte';
 
@@ -27,7 +27,8 @@
         providerId: thread.providerId,
         accountId: thread.accountId,
         permissionMode: thread.permissionMode,
-        model: thread.model
+        model: thread.model,
+        effort: thread.effort
       };
     } else if (draft) {
       choice = store.defaultChoice();
@@ -71,17 +72,28 @@
     }))
   );
 
-  /** On a thread only the model changes and it is saved at once; on a draft the whole choice is remembered. */
-  function pick(patch: { providerId: string; accountId: string; model: string | null }) {
+  /** On a thread only the model and the effort change and they are saved at once; on a draft the whole choice is remembered. */
+  function pick(patch: PickPatch) {
     if (!choice) return;
     const thread = store.openThread;
-    if (thread) {
-      if (patch.model === choice.model) return;
-      choice = { ...choice, model: patch.model };
-      void store.update(thread.id, { model: patch.model ?? '' });
+
+    // An effort alone: the model stays, so nothing else moves.
+    if (patch.effort !== undefined) {
+      if (patch.effort === choice.effort) return;
+      choice = { ...choice, effort: patch.effort };
+      if (thread) void store.update(thread.id, { effort: patch.effort });
+      else store.remember(choice);
       return;
     }
-    choice = { ...choice, ...patch };
+
+    // Another model runs on its own scale, so the effort goes back to that model's default.
+    if (thread) {
+      if (patch.model === choice.model) return;
+      choice = { ...choice, model: patch.model ?? null, effort: null };
+      void store.update(thread.id, { model: patch.model ?? '', effort: null });
+      return;
+    }
+    choice = { ...choice, ...patch, effort: null };
     store.remember(choice);
   }
 

@@ -25,6 +25,11 @@ const FINISH_GRACE_MS = 5_000;
 const STDERR_MAX = 400;
 const DENIED = 'Denied in Boite';
 
+/** The effort levels the SDK takes as an option; see `Options['effort']`. */
+const SDK_EFFORTS: readonly string[] = ['low', 'medium', 'high', 'xhigh', 'max'];
+/** The one level the CLI has no option for: it is a word in the prompt. */
+const PROMPT_EFFORT = 'ultrathink';
+
 export type QueryFn = (params: { prompt: AsyncIterable<SDKUserMessage>; options: Options }) => Query;
 
 export interface ClaudeDeps {
@@ -146,10 +151,13 @@ class ClaudeTurn {
         providerId: this.ctx.provider.id,
       });
     }
+    const effort = this.ctx.thread.effort;
     return {
       resume: this.ctx.sessionId ?? undefined,
       cwd: this.ctx.thread.cwd,
       model: this.ctx.thread.model ?? undefined,
+      // A level the CLI knows goes in the options; `ultrathink` goes in the prompt.
+      ...(effort !== null && SDK_EFFORTS.includes(effort) ? { effort: effort as Options['effort'] } : {}),
       permissionMode: this.ctx.thread.permissionMode,
       allowDangerouslySkipPermissions: this.ctx.thread.permissionMode === 'bypassPermissions',
       pathToClaudeCodeExecutable: executable,
@@ -170,10 +178,17 @@ class ClaudeTurn {
   private async *promptStream(): AsyncGenerator<SDKUserMessage> {
     yield {
       type: 'user',
-      message: { role: 'user', content: this.ctx.prompt },
+      message: { role: 'user', content: this.promptText() },
       parent_tool_use_id: null,
     };
     await this.promptEnd;
+  }
+
+  /** `ultrathink` is not an option of the CLI: the word in the prompt is what asks for it. */
+  private promptText(): string {
+    const text = this.ctx.prompt;
+    if (this.ctx.thread.effort !== PROMPT_EFFORT) return text;
+    return text.length === 0 ? PROMPT_EFFORT : `${text} ${PROMPT_EFFORT}`;
   }
 
   private spawnCli(options: SdkSpawnOptions): SpawnedChild {

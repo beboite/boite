@@ -2,7 +2,7 @@
   import { ChevronDown, ChevronRight, Sparkles } from '@lucide/svelte';
   import type { Account, ModelInfo, ProviderSummary } from '@boite/contracts';
   import { strings } from '../lib/strings';
-  import type { Choice, Store } from '../lib/store.svelte';
+  import type { Choice, PickPatch, Store } from '../lib/store.svelte';
 
   /**
    * T3 Code's picker: providers and their accounts on the left, the models of
@@ -19,7 +19,7 @@
     choice: Choice | null;
     /** A thread keeps its provider and account; only the model may change. */
     locked?: boolean;
-    onpick: (patch: { providerId: string; accountId: string; model: string | null }) => void;
+    onpick: (patch: PickPatch) => void;
   } = $props();
 
   let open = $state(false);
@@ -45,8 +45,11 @@
     if (!choice || !provider) return strings.composer.noProvider;
     const model = provider.models.find((m) => m.id === choice.model);
     const name = model?.name ?? provider.name;
+    const level = model?.effort?.levels.find((l) => l.id === choice.effort);
+    // The default level is what the model does anyway, so only a change is worth the room.
+    const withEffort = level && level.id !== model?.effort?.default ? `${name} · ${level.label}` : name;
     const siblings = store.accountsOf(provider.id);
-    return siblings.length > 1 && account ? `${name} · ${account.label}` : name;
+    return siblings.length > 1 && account ? `${withEffort} · ${account.label}` : withEffort;
   });
 
   let rows = $derived.by((): Row[] => {
@@ -76,6 +79,14 @@
 
   let currentModels = $derived(shown ? shown.models.filter((m) => !m.legacy) : []);
   let legacyModels = $derived(shown ? shown.models.filter((m) => m.legacy) : []);
+
+  /** The Reasoning row belongs to the model the choice is on, legacy ones included. */
+  let effortModel = $derived.by((): ModelInfo | null => {
+    if (!shown || !choice || choice.providerId !== shown.id) return null;
+    return shown.models.find((m) => m.id === choice.model && m.effort) ?? null;
+  });
+  let effortLevels = $derived(effortModel?.effort?.levels ?? []);
+  let activeEffort = $derived(choice?.effort ?? effortModel?.effort?.default ?? null);
 
   function isCurrentInstance(row: Row): boolean {
     return row.account !== null && choice?.providerId === row.provider.id && choice?.accountId === row.account.id;
@@ -112,6 +123,12 @@
     open = false;
   }
 
+  /** The popover stays open: an effort is a setting of the model just picked, not a choice of its own. */
+  function pickEffort(id: string) {
+    if (id === activeEffort) return;
+    onpick({ effort: id });
+  }
+
   function firstInstanceOf(providerId: string): { providerId: string; accountId: string } | null {
     const row = rows.find((r) => r.provider.id === providerId && r.account && !r.disabled);
     return row && row.account ? { providerId, accountId: row.account.id } : null;
@@ -126,6 +143,15 @@
     if (event.key === 'Escape') {
       event.stopPropagation();
       open = false;
+      return;
+    }
+    if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+      const steps = root ? Array.from(root.querySelectorAll<HTMLElement>('.popover [data-effort]')) : [];
+      const here = steps.indexOf(document.activeElement as HTMLElement);
+      if (here === -1) return;
+      event.preventDefault();
+      const step = event.key === 'ArrowRight' ? 1 : -1;
+      steps[(here + step + steps.length) % steps.length]?.focus();
       return;
     }
     if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
@@ -250,6 +276,26 @@
         {/if}
         {#if shown && shown.models.length === 0}
           <p class="none subtle">{strings.thread.defaultModel}</p>
+        {/if}
+
+        {#if effortLevels.length > 0}
+          <div class="effort" data-testid="picker-effort">
+            <span class="section-label">{strings.composer.reasoning}</span>
+            <div class="steps" role="group" aria-label={strings.composer.reasoning}>
+              {#each effortLevels as level (level.id)}
+                <button
+                  type="button"
+                  class="step"
+                  data-effort={level.id}
+                  aria-pressed={level.id === activeEffort}
+                  title={level.description ?? level.label}
+                  onclick={() => pickEffort(level.id)}
+                >
+                  {level.label}
+                </button>
+              {/each}
+            </div>
+          </div>
         {/if}
       </div>
     </div>
@@ -437,6 +483,54 @@
   p.none {
     padding: 6px 8px;
     font-size: var(--text-sm);
+  }
+
+  .effort {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-top: 6px;
+    padding: 8px 8px 2px;
+    border-top: 1px solid var(--color-border);
+  }
+
+  .steps {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px;
+    padding: 2px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    background: var(--color-surface);
+  }
+
+  .step {
+    flex: 1 1 auto;
+    min-height: 22px;
+    padding: 2px 8px;
+    border: none;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--color-muted-foreground);
+    font-size: var(--text-xs);
+    font-weight: 500;
+    white-space: nowrap;
+    transition:
+      background var(--dur-2) var(--ease-out-quint),
+      color var(--dur-2) var(--ease-out-quint);
+  }
+
+  .step:hover,
+  .step:focus-visible {
+    background: var(--color-surface-3);
+    color: var(--color-foreground);
+    outline: none;
+  }
+
+  .step[aria-pressed='true'] {
+    background: var(--color-surface-3);
+    color: var(--color-foreground);
+    box-shadow: var(--shadow-e1);
   }
 
   @media (max-width: 720px) {

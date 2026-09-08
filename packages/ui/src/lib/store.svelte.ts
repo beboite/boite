@@ -61,6 +61,16 @@ export interface Choice {
   accountId: string;
   permissionMode: PermissionMode;
   model: string | null;
+  /** A level id of that model, or null for the model's own default. */
+  effort: string | null;
+}
+
+/** What the picker hands back: the instance and model together, or an effort alone. */
+export interface PickPatch {
+  providerId?: ProviderId;
+  accountId?: string;
+  model?: string | null;
+  effort?: string | null;
 }
 
 export const UI_VERSION = '2.0.0-alpha.1';
@@ -198,7 +208,15 @@ export class Store {
       this.prefs.model && provider.models.some((m) => m.id === this.prefs.model)
         ? this.prefs.model
         : this.defaultModelOf(provider);
-    return { providerId: provider.id, accountId: account.id, permissionMode: this.prefs.permissionMode, model };
+    const levels = provider.models.find((m) => m.id === model)?.effort?.levels ?? [];
+    const effort = levels.some((level) => level.id === this.prefs.effort) ? this.prefs.effort : null;
+    return {
+      providerId: provider.id,
+      accountId: account.id,
+      permissionMode: this.prefs.permissionMode,
+      model,
+      effort
+    };
   }
 
   remember(choice: Choice): void {
@@ -567,6 +585,7 @@ export class Store {
     title?: string;
     permissionMode?: PermissionMode;
     model?: string;
+    effort?: string | null;
   }): Promise<ThreadSummary | null> {
     const client = this.#client;
     if (!client) return null;
@@ -600,6 +619,7 @@ export class Store {
       accountId: choice.accountId,
       permissionMode: choice.permissionMode,
       title: titleFrom(prompt) || undefined,
+      effort: choice.effort,
       ...(choice.model ? { model: choice.model } : {})
     });
     if (created) await this.send(prompt);
@@ -640,7 +660,7 @@ export class Store {
 
   async update(
     threadId: ThreadId,
-    patch: { title?: string; model?: string; permissionMode?: PermissionMode }
+    patch: { title?: string; model?: string; effort?: string | null; permissionMode?: PermissionMode }
   ): Promise<void> {
     const client = this.#client;
     if (!client) return;

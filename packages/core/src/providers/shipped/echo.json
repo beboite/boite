@@ -11,7 +11,20 @@
     "macos": { "detect": {}, "executable": [], "isolation": {} }
   },
   "auth": { "kind": "none" },
-  "models": [{ "id": "echo", "name": "Echo", "default": true }],
+  "models": [
+    {
+      "id": "echo",
+      "name": "Echo",
+      "default": true,
+      "effort": {
+        "levels": [
+          { "id": "low", "label": "Low" },
+          { "id": "high", "label": "High" }
+        ],
+        "default": "high"
+      }
+    }
+  ],
   "capabilities": {
     "approvals": true,
     "hooks": false,

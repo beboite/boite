@@ -293,6 +293,7 @@ export class FakeClient implements ObservableClient {
           providerId: params.providerId,
           accountId: params.accountId,
           model: params.model ?? null,
+          effort: params.effort ?? null,
           cwd: params.cwd ?? project.path,
           permissionMode: params.permissionMode ?? 'default',
           status: 'idle',
@@ -318,6 +319,7 @@ export class FakeClient implements ObservableClient {
         const thread = this.#thread(params.threadId);
         if (params.title !== undefined) thread.title = params.title;
         if (params.model !== undefined) thread.model = params.model;
+        if (params.effort !== undefined) thread.effort = params.effort;
         if (params.permissionMode !== undefined) thread.permissionMode = params.permissionMode;
         return this.#touch(thread);
       }
@@ -779,12 +781,63 @@ export class FakeClient implements ObservableClient {
         available: true,
         executable: 'C:\\Users\\you\\.local\\bin\\claude.exe',
         models: [
-          { id: 'claude-fable-5-1', name: 'Claude Fable 5.1', badge: 'new' },
-          { id: 'claude-opus-5', name: 'Claude Opus 5' },
-          { id: 'claude-sonnet-5', name: 'Claude Sonnet 5', default: true },
-          { id: 'claude-fable-5', name: 'Claude Fable 5', legacy: true },
-          { id: 'claude-opus-4-8', name: 'Claude Opus 4.8', legacy: true },
-          { id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6', legacy: true },
+          { id: 'claude-fable-5-1', name: 'Claude Fable 5.1', badge: 'new', effort: {
+              levels: [
+                { id: 'low', label: 'Low' },
+                { id: 'medium', label: 'Medium' },
+                { id: 'high', label: 'High' },
+                { id: 'xhigh', label: 'Extra high' },
+                { id: 'max', label: 'Max' },
+                { id: 'ultrathink', label: 'Ultrathink', description: 'Extended thinking, asked for in the prompt' }
+              ],
+              default: 'high'
+            } },
+          { id: 'claude-opus-5', name: 'Claude Opus 5', effort: {
+              levels: [
+                { id: 'low', label: 'Low' },
+                { id: 'medium', label: 'Medium' },
+                { id: 'high', label: 'High' },
+                { id: 'xhigh', label: 'Extra high' },
+                { id: 'max', label: 'Max' },
+                { id: 'ultrathink', label: 'Ultrathink', description: 'Extended thinking, asked for in the prompt' }
+              ],
+              default: 'high'
+            } },
+          { id: 'claude-sonnet-5', name: 'Claude Sonnet 5', default: true, effort: {
+              levels: [
+                { id: 'low', label: 'Low' },
+                { id: 'medium', label: 'Medium' },
+                { id: 'high', label: 'High' },
+                { id: 'xhigh', label: 'Extra high' },
+                { id: 'max', label: 'Max' },
+                { id: 'ultrathink', label: 'Ultrathink', description: 'Extended thinking, asked for in the prompt' }
+              ],
+              default: 'high'
+            } },
+          { id: 'claude-fable-5', name: 'Claude Fable 5', legacy: true, effort: {
+              levels: [
+                { id: 'low', label: 'Low' },
+                { id: 'medium', label: 'Medium' },
+                { id: 'high', label: 'High' }
+              ],
+              default: 'high'
+            } },
+          { id: 'claude-opus-4-8', name: 'Claude Opus 4.8', legacy: true, effort: {
+              levels: [
+                { id: 'low', label: 'Low' },
+                { id: 'medium', label: 'Medium' },
+                { id: 'high', label: 'High' }
+              ],
+              default: 'high'
+            } },
+          { id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6', legacy: true, effort: {
+              levels: [
+                { id: 'low', label: 'Low' },
+                { id: 'medium', label: 'Medium' },
+                { id: 'high', label: 'High' }
+              ],
+              default: 'high'
+            } },
           { id: 'claude-haiku-4-5-20251001', name: 'Claude Haiku 4.5', legacy: true }
         ],
         capabilities: {
@@ -804,7 +857,20 @@ export class FakeClient implements ObservableClient {
         source: 'shipped',
         available: true,
         executable: null,
-        models: [{ id: 'echo-1', name: 'Echo', default: true }],
+        models: [
+          {
+            id: 'echo-1',
+            name: 'Echo',
+            default: true,
+            effort: {
+              levels: [
+                { id: 'low', label: 'Low' },
+                { id: 'high', label: 'High' }
+              ],
+              default: 'high'
+            }
+          }
+        ],
         capabilities: {
           approvals: true,
           hooks: false,
@@ -850,6 +916,7 @@ export class FakeClient implements ObservableClient {
       providerId: 'echo',
       accountId: 'a-echo',
       model: 'echo-1',
+      effort: null,
       permissionMode: 'default' as const,
       archived: false
     };

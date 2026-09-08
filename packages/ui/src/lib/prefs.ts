@@ -1,11 +1,13 @@
 import type { PermissionMode } from '@boite/contracts';
 
-/** What the composer remembers between threads: the last provider, account, mode and model. */
+/** What the composer remembers between threads: the last provider, account, mode, model and effort. */
 export interface ComposerPrefs {
   providerId: string | null;
   accountId: string | null;
   permissionMode: PermissionMode;
   model: string | null;
+  /** A level id of that model, or null for the model's own default. */
+  effort: string | null;
 }
 
 /** What the window remembers: the sidebar's width and whether it is folded. */
@@ -24,7 +26,7 @@ export const SIDEBAR_MAX = 440;
 const MODES: PermissionMode[] = ['default', 'acceptEdits', 'plan', 'bypassPermissions', 'dontAsk'];
 
 export function defaultPrefs(): ComposerPrefs {
-  return { providerId: null, accountId: null, permissionMode: 'default', model: null };
+  return { providerId: null, accountId: null, permissionMode: 'default', model: null, effort: null };
 }
 
 export function defaultLayout(): LayoutPrefs {
@@ -60,7 +62,8 @@ export function readPrefs(): ComposerPrefs {
       providerId: typeof parsed.providerId === 'string' ? parsed.providerId : null,
       accountId: typeof parsed.accountId === 'string' ? parsed.accountId : null,
       permissionMode: mode !== undefined && MODES.includes(mode) ? mode : 'default',
-      model: typeof parsed.model === 'string' ? parsed.model : null
+      model: typeof parsed.model === 'string' ? parsed.model : null,
+      effort: typeof parsed.effort === 'string' ? parsed.effort : null
     };
   });
 }
