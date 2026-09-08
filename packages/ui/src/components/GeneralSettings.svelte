@@ -203,8 +203,11 @@
       </label>
     </div>
     <label class="switch-row">
-      <span class="text">{strings.settings.listenOnLan}</span>
-      <input type="checkbox" role="switch" bind:checked={listenOnLan} />
+      <span class="text">
+        {strings.settings.listenOnLan}
+        <span class="hint">{strings.settings.listenOnLanHint}</span>
+      </span>
+      <input type="checkbox" role="switch" data-testid="setting-listen-on-lan" bind:checked={listenOnLan} />
     </label>
     <div class="actions">
       <button type="button" class="primary" onclick={() => void save()}>{strings.settings.save}</button>

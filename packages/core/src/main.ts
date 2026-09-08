@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import type { Settings } from '@boite/contracts';
 import { Core } from './core.ts';
 import { newToken } from './ids.ts';
 import { resolveDataDir } from './paths.ts';
@@ -14,14 +15,16 @@ interface CoreFile {
   version: string;
 }
 
-interface Flags {
+export interface Flags {
   port: number;
   host: string;
+  /** True once `--host` or `--lan` named an address, so the setting no longer decides. */
+  hostExplicit: boolean;
   dataDir: string | undefined;
 }
 
 export function parseFlags(argv: string[]): Flags {
-  const flags: Flags = { port: 0, host: '127.0.0.1', dataDir: undefined };
+  const flags: Flags = { port: 0, host: '127.0.0.1', hostExplicit: false, dataDir: undefined };
   for (let index = 0; index < argv.length; index += 1) {
     const flag = argv[index];
     const value = argv[index + 1];
@@ -37,10 +40,12 @@ export function parseFlags(argv: string[]): Flags {
       }
       case '--host':
         flags.host = value ?? flags.host;
+        flags.hostExplicit = true;
         index += 1;
         break;
       case '--lan':
         flags.host = '0.0.0.0';
+        flags.hostExplicit = true;
         break;
       case '--data-dir':
         if (value === undefined || value.startsWith('--')) throw new Error('--data-dir expects a path');
@@ -64,6 +69,17 @@ function readToken(file: string): string | null {
   }
 }
 
+/**
+ * Where the core binds. A `--host` or a `--lan` on the command line always wins,
+ * because the person who typed it meant it; with neither, the stored
+ * `listenOnLan` setting decides, which is what the switch in General settings
+ * changes. The address is read once, at start: a running core never rebinds.
+ */
+export function resolveHost(flags: Flags, settings: Settings): string {
+  if (flags.hostExplicit) return flags.host;
+  return settings.listenOnLan ? '0.0.0.0' : '127.0.0.1';
+}
+
 export function main(argv: string[]): void {
   const flags = parseFlags(argv);
   const dataDir = resolveDataDir(flags.dataDir);
@@ -72,11 +88,16 @@ export function main(argv: string[]): void {
   const coreFile = join(dataDir, 'core.json');
   const token = readToken(coreFile) ?? newToken();
   const core = new Core({ dataDir, token });
-  const server = startServer({ core, host: flags.host, port: flags.port });
+  const settings = core.settings.get();
+  const host = resolveHost(flags, settings);
+  const server = startServer({ core, host, port: flags.port });
+  if (!flags.hostExplicit) {
+    core.log('info', `listening on ${host} because listenOnLan is ${settings.listenOnLan ? 'on' : 'off'}`);
+  }
 
   const state: CoreFile = {
     port: server.port,
-    host: flags.host,
+    host,
     token,
     pid: process.pid,
     startedAt: core.startedAt,

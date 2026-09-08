@@ -319,6 +319,7 @@ export const strings = {
     perAccountConcurrency: 'Per account concurrency',
     warmProcessMinutes: 'Warm process minutes',
     listenOnLan: 'Listen on the LAN so a phone can pair',
+    listenOnLanHint: 'Takes effect the next time the core starts, and a --host or --lan flag wins over it',
     agentCpuCapPercent: 'CPU cap for all agents, percent of the machine (0 = none, Windows)',
     threadMemoryCapMb: 'Memory cap per thread tree, MB (0 = none, Windows)',
     background: 'Background',

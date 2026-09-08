@@ -14,11 +14,14 @@ binds `0.0.0.0` instead, and `--host` takes a specific address:
 bun packages/core/src/main.ts --lan
 ```
 
-The bind is decided when the core starts and a running core never rebinds.
-General settings carries a `listenOnLan` switch, which is stored with the rest of
-the settings and read by clients; the process itself takes its address from the
-flag it was launched with, so changing the switch is not what opens the port
-today.
+The `listenOnLan` switch in General settings is the same decision without a
+command line: the core reads it from the journal at start, before it binds, and
+`0.0.0.0` is what it binds when the switch is on. A `--host` or a `--lan` on the
+command line always wins over it, because the person who typed the flag meant it.
+The address is read once and a running core never rebinds, so a switch flipped
+while the core is up takes effect the next time it starts. That is what the line
+under the switch says, and one `core.log` line at start names the address and the
+setting that chose it.
 
 Two things guard the socket whatever it is bound to. The `Origin` header must be
 absent, one of the shell origins, or the core's own HTTP origin, and the first

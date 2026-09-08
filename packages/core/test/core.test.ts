@@ -3,7 +3,8 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { echoThread, startTestCore } from './harness.ts';
 import type { TestCore } from './harness.ts';
 import { newId } from '../src/ids.ts';
-import { parseFlags } from '../src/main.ts';
+import { parseFlags, resolveHost } from '../src/main.ts';
+import { DEFAULT_SETTINGS } from '../src/settings.ts';
 
 let harness: TestCore;
 
@@ -129,16 +130,32 @@ describe('ids and flags', () => {
   });
 
   test('the flags follow the documented defaults', () => {
-    expect(parseFlags([])).toEqual({ port: 0, host: '127.0.0.1', dataDir: undefined });
+    expect(parseFlags([])).toEqual({ port: 0, host: '127.0.0.1', hostExplicit: false, dataDir: undefined });
     expect(parseFlags(['--port', '8080', '--lan'])).toEqual({
       port: 8080,
       host: '0.0.0.0',
+      hostExplicit: true,
       dataDir: undefined,
     });
     expect(parseFlags(['--host', '10.0.0.2', '--data-dir', 'D:/data'])).toEqual({
       port: 0,
       host: '10.0.0.2',
+      hostExplicit: true,
       dataDir: 'D:/data',
     });
+  });
+
+  // Nothing here binds anything: resolveHost is the whole decision, and a test
+  // that actually listened on 0.0.0.0 would ask the user for a firewall dialog.
+  test('with no flag the listenOnLan setting decides the bind', () => {
+    expect(resolveHost(parseFlags([]), { ...DEFAULT_SETTINGS, listenOnLan: false })).toBe('127.0.0.1');
+    expect(resolveHost(parseFlags([]), { ...DEFAULT_SETTINGS, listenOnLan: true })).toBe('0.0.0.0');
+  });
+
+  test('an explicit --host or --lan wins over the setting', () => {
+    expect(
+      resolveHost(parseFlags(['--host', '127.0.0.1']), { ...DEFAULT_SETTINGS, listenOnLan: true }),
+    ).toBe('127.0.0.1');
+    expect(resolveHost(parseFlags(['--lan']), { ...DEFAULT_SETTINGS, listenOnLan: false })).toBe('0.0.0.0');
   });
 });
