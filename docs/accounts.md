@@ -18,6 +18,10 @@ environment variables, with `{isolationDir}` substituted at spawn:
 - pi moves with `PI_CODING_AGENT_DIR`, which is the whole config directory, so
   one variable is enough and the session file is `auth.json` under it.
 - Claude moves with `CLAUDE_CONFIG_DIR`, and files `.credentials.json`.
+- Antigravity moves with `GEMINI_HOME`, files `antigravity-acp/acp_token.json`
+  under it, and has no default account at all: its descriptor says
+  `isolation.alwaysIsolated`, so `accounts.add` gives every account a directory
+  of its own whatever the request asked for.
 
 The same environment goes to every process of that account: a turn, a probe, a
 login. That is why the map lives on the OS profile rather than in a driver, and
@@ -76,8 +80,22 @@ open a terminal:
    rechecks the account, and `accounts.updated` follows.
 
 A device-code flow fits that shape exactly, which is why the Codex login block
-asks for one: it prints a link and a code and never opens a browser. A login that
-insists on opening a browser is a login Boite cannot run for the user.
+asks for one: it prints a link and a code and never opens a browser.
+
+The other shape is `login.acp`, for an ACP agent whose sign-in is the protocol's
+own `authenticate` call rather than a command. The core starts the agent itself
+under the same `login:<accountId>` thread, sends `initialize` then `authenticate`
+with the descriptor's method id, refuses a method the agent does not advertise,
+and gives up after five minutes. The sign-in link arrives as a line on the agent's
+stdout that is not JSON, and reaches the page the same way, in `url`. The agent
+holds a loopback listener for the redirect, so a browser on the core's machine
+finishes the flow on its own; from a phone, the redirect URL pasted into
+`accounts.loginInput` is fetched once by the core, and only an `http://127.0.0.1`
+or `http://localhost` URL is accepted. Antigravity is the shipped example.
+
+A login that insists on opening a browser window of its own is one Boite points at
+a launcher that does nothing, through the profile's `BROWSER` variable, so the link
+goes to the page and never to a window over the user's work.
 
 ## What the core refuses, and why
 

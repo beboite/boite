@@ -55,9 +55,10 @@ OpenCode's descriptor, with the `linux` and `macos` profiles left out:
   files inside the isolation directory that carry the login, which is what the
   core reads to tell `ok` from `unauthenticated`. `auth.identity` says where the
   account name comes from.
-- `login` is the argv of the provider's own login command plus an optional `env`.
-  A provider without one cannot be logged in from Boite, and the Accounts page says
-  so instead of pretending.
+- `login` is either `command`, the argv of the provider's own login command plus
+  an optional `env`, or `acp: { methodId }`, the `authenticate` method of an ACP
+  agent whose sign-in has no command. A provider without one cannot be logged in
+  from Boite, and the Accounts page says so instead of pretending.
 - `models` is a `ModelInfo` list: `id`, `name`, an optional `default`, `legacy`
   (still accepted, folded away in the picker), `badge: "new"`, and an `effort`
   block of named levels with a default. An agent that owns its own list gets the
@@ -84,12 +85,13 @@ OpenCode's descriptor, with the `linux` and `macos` profiles left out:
 
 ## The tokens
 
-Three expand when the descriptor loads, in `roots`, in every executable candidate
-and in `launch.args`. `{home}` is the home directory, `{appdata}` the Windows
-roaming per-user directory, and `{agentsDir}` is
-`<dataDir>/agents/<providerId>/current`, where a managed install puts its files:
-it resolves to a path that does not exist until they land, which is what makes such
-a provider read as absent. A fourth, `{shippedDir}`, points at the shipped
+Four expand when the descriptor loads, in `roots`, in every executable candidate,
+in `launch.args` and in a profile's `env`. `{home}` is the home directory,
+`{appdata}` the Windows roaming per-user directory, `{agentsDir}` is
+`<dataDir>/agents/<providerId>/current`, where a managed install puts its files
+(it resolves to a path that does not exist until they land, which is what makes
+such a provider read as absent), and `{browserNoop}` is the launcher that does
+nothing, for a `BROWSER` variable. A fifth, `{shippedDir}`, points at the shipped
 descriptor folder, so a shipped login command can name a script beside it.
 `{isolationDir}` is deliberately none of them: it is per account and substituted
 at spawn, in the `isolation` map and in a login command's `env`.
@@ -120,7 +122,7 @@ is held, and one is held for every process a thread or a probe launched.
 
 ## What ships
 
-Five descriptors ship, and only the first four are ever visible to a user: `echo`
+Six descriptors ship, and only the first five are ever visible to a user: `echo`
 is the deterministic fake the tests and the bench run on, loaded only under
 `BOITE_ECHO=1`.
 
@@ -128,22 +130,45 @@ is the deterministic fake the tests and the bench run on, loaded only under
 |---|---|---|---|---|---|
 | Claude | `claude-sdk` | the SDK drives the CLI | `CLAUDE_CONFIG_DIR` | `.credentials.json` | `claude auth login` |
 | OpenCode | `acp` | `opencode acp --port 0` | `XDG_DATA_HOME`, `XDG_CONFIG_HOME` | `opencode/auth.json` | `opencode auth login` |
+| Antigravity | `acp` | `agy_acp_server.exe` from the managed install | `GEMINI_HOME`, every account | `antigravity-acp/acp_token.json` | the protocol's `authenticate` |
 | Codex | `codex-appserver` | `codex app-server` | `CODEX_HOME` | `auth.json` | `codex login --device-auth` |
 | pi | `pi` | `pi --mode rpc` | `PI_CODING_AGENT_DIR` | `auth.json` | none |
 | Echo | `echo` | nothing | nothing | none | a script beside the descriptor |
 
 Claude is the one whose model list is entirely in the descriptor, current and
-legacy, each with its own effort scale; the other three carry `default` alone and
+legacy, each with its own effort scale; the other four carry `default` alone and
 let the probe fill the rest. On Windows, Codex and pi are both reached around an
 npm shim Bun cannot spawn, one through a vendored executable and the other
 through `node`.
 
-Antigravity is landing as the sixth, an ACP provider on the managed install: the
-release is downloaded and checked the way any managed install is, each account
-gets a private agent home of its own, and the login is the protocol's own
-authenticate call with the sign-in link streamed to the Accounts page. It is on
-its own branch and its descriptor is not settled, so its fields are not written
-down yet.
+Antigravity is the one on the managed install: its binary is nowhere until
+`providers.install` downloads Google's release, so the picker offers Install
+first. It is also the one whose accounts are all isolated, the descriptor says
+`isolation.alwaysIsolated`, because the user's own IDE login is never what it
+runs on. Four descriptor fields exist for it and are open to any provider:
+
+- `env`, on an OS profile, is environment every process of the provider gets,
+  whatever its account, unlike `isolation`. Antigravity uses it for the harness
+  path and for a `BROWSER` pointed at `{browserNoop}`, a launcher that exits 0
+  which the core writes once under the data directory, so the agent never opens a
+  window on its own.
+- `unsetEnv`, on an OS profile, names variables taken out of the inherited
+  environment before the spawn, so a key the user set for their own tools cannot
+  redirect the agent Boite runs.
+- `seedFiles`, on the descriptor, maps a relative path to content written under
+  the isolation directory before anything starts. Antigravity needs
+  `antigravity-acp/settings.json` holding `{"auth":{"type":"oauth-personal"}}`.
+- `login.acp.methodId` is the other shape of the login block: instead of a
+  command, the core starts the agent itself, sends `initialize` then
+  `authenticate` with that method, and forwards the sign-in link the server
+  prints. The redirect URL pasted back is fetched once by the core, which is how
+  a phone finishes a sign-in whose loopback listener runs on the core's machine.
+  [accounts.md](accounts.md) has the flow.
+
+`quirks: ["antigravity"]` turns on the one dialect the ACP driver knows: a tool
+call's command, working directory and output folded under one spelling, and an
+`interaction_` permission request drawn as the agent's own question. Its modes
+are `default`, `auto_edit` and `yolo`, with no plan mode.
 
 ## The models probe
 
