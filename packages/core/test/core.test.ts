@@ -49,6 +49,7 @@ describe('settings', () => {
       agentCpuCapPercent: 75,
       threadMemoryCapMb: 0,
       focusGuard: true,
+      muteAgents: true,
     });
 
     const next = await client.call('settings.set', { maxConcurrentTurns: 3 });
@@ -82,6 +83,25 @@ describe('settings', () => {
       failure = (error as Error).message;
     }
     expect(failure).toBe('focusGuard must be a boolean');
+  });
+
+  test('muteAgents is a boolean, on by default, and a change reaches every client', async () => {
+    const client = await harness.connect();
+    expect((await client.call('settings.get', {})).muteAgents).toBe(true);
+
+    const updated = client.next('settings.updated', (settings) => settings.muteAgents === false, 5000);
+    const next = await client.call('settings.set', { muteAgents: false });
+    expect(next.muteAgents).toBe(false);
+    expect((await updated).muteAgents).toBe(false);
+    expect((await client.call('settings.get', {})).muteAgents).toBe(false);
+
+    let failure = 'none';
+    try {
+      await client.call('settings.set', { muteAgents: 'quiet' as unknown as boolean });
+    } catch (error) {
+      failure = (error as Error).message;
+    }
+    expect(failure).toBe('muteAgents must be a boolean');
   });
 });
 

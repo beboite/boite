@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import type { AudioSession } from '../src/platform/audio-sessions.ts';
 import { GuardLogic, HWND_BOTTOM, PUSH_BACK_FLAGS } from '../src/platform/guard-logic.ts';
 import type { GuardWin32, WindowOwner } from '../src/platform/guard-logic.ts';
+import { MuteLogic } from '../src/platform/mute-logic.ts';
 import { echoThread, startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
 
@@ -194,6 +196,163 @@ describe('the focus guard rule', () => {
     logic.onForeground(AGENT_HWND);
     expect(logic.takeEvents()).toHaveLength(1);
     expect(logic.events).toEqual([]);
+  });
+});
+
+// -- the audio mute rule, without a sound ----------------------------------
+
+/** One session of one process, with the mute state the fake mixer holds. */
+class FakeSession implements AudioSession {
+  released = false;
+  constructor(
+    readonly pid: number,
+    private readonly mixer: { muted: boolean; gone?: boolean },
+  ) {}
+
+  mute(on: boolean): boolean {
+    if (this.mixer.gone === true) return false;
+    this.mixer.muted = on;
+    return true;
+  }
+
+  getMute(): boolean | null {
+    if (this.mixer.gone === true) return null;
+    return this.mixer.muted;
+  }
+
+  release(): void {
+    this.released = true;
+  }
+}
+
+/**
+ * A fake endpoint: one mixer entry per pid, and a fresh handle on every walk,
+ * the way `IAudioSessionEnumerator` hands out a new reference each time.
+ */
+class FakeEndpoint {
+  readonly mixers = new Map<number, { muted: boolean; gone?: boolean }>();
+  readonly handed: FakeSession[] = [];
+  throws: string | null = null;
+
+  add(pid: number): { muted: boolean; gone?: boolean } {
+    const mixer = { muted: false };
+    this.mixers.set(pid, mixer);
+    return mixer;
+  }
+
+  list = (): AudioSession[] => {
+    if (this.throws !== null) throw new Error(this.throws);
+    const sessions: FakeSession[] = [];
+    for (const [pid, mixer] of this.mixers) sessions.push(new FakeSession(pid, mixer));
+    this.handed.push(...sessions);
+    return sessions;
+  };
+
+  /** Every handle the walk gave out and nobody is holding any more. */
+  releasedCount(): number {
+    return this.handed.filter((session) => session.released).length;
+  }
+}
+
+const MUTED_PID = 7001;
+const OTHER_PID = 7002;
+
+describe('the audio mute rule', () => {
+  test('a session of a traced pid is muted once and reported once', () => {
+    const endpoint = new FakeEndpoint();
+    const mixer = endpoint.add(MUTED_PID);
+    const mute = new MuteLogic(endpoint.list, true);
+
+    mute.addPid('thr_one', MUTED_PID);
+    expect(mixer.muted).toBe(true);
+    expect(mute.takeEvents()).toEqual([{ kind: 'session-muted', threadId: 'thr_one', pid: MUTED_PID }]);
+    expect(mute.mutedPids()).toEqual([MUTED_PID]);
+
+    // A second walk sees the same session, already muted, and keeps quiet.
+    mute.tick();
+    mute.tick();
+    expect(mute.takeEvents()).toEqual([]);
+    expect(mixer.muted).toBe(true);
+  });
+
+  test('a session nobody traced is left alone and its handle released', () => {
+    const endpoint = new FakeEndpoint();
+    const mixer = endpoint.add(OTHER_PID);
+    const mute = new MuteLogic(endpoint.list, true);
+
+    mute.tick();
+
+    expect(mixer.muted).toBe(false);
+    expect(mute.events).toEqual([]);
+    expect(mute.mutedPids()).toEqual([]);
+    expect(endpoint.releasedCount()).toBe(1);
+  });
+
+  test('a pid that exits is unmuted and its session released', () => {
+    const endpoint = new FakeEndpoint();
+    const mixer = endpoint.add(MUTED_PID);
+    const mute = new MuteLogic(endpoint.list, true);
+    mute.addPid('thr_one', MUTED_PID);
+    expect(mixer.muted).toBe(true);
+
+    mute.removePid(MUTED_PID);
+
+    expect(mixer.muted).toBe(false);
+    expect(mute.mutedPids()).toEqual([]);
+    expect(endpoint.handed.every((session) => session.released)).toBe(true);
+  });
+
+  test('turning the mute off gives every held session its sound back', () => {
+    const endpoint = new FakeEndpoint();
+    const one = endpoint.add(MUTED_PID);
+    const two = endpoint.add(OTHER_PID);
+    const mute = new MuteLogic(endpoint.list, true);
+    mute.addPid('thr_one', MUTED_PID);
+    mute.addPid('thr_two', OTHER_PID);
+    expect([one.muted, two.muted]).toEqual([true, true]);
+
+    mute.setEnabled(false);
+
+    expect([one.muted, two.muted]).toEqual([false, false]);
+    expect(mute.mutedPids()).toEqual([]);
+    // And a walk while it is off does nothing at all.
+    mute.tick();
+    expect([one.muted, two.muted]).toEqual([false, false]);
+  });
+
+  test('a listing that keeps failing is reported once per distinct message', () => {
+    const endpoint = new FakeEndpoint();
+    endpoint.add(MUTED_PID);
+    const mute = new MuteLogic(endpoint.list, true);
+
+    endpoint.throws = 'IAudioSessionManager2::GetSessionEnumerator failed with 0x88890004';
+    mute.tick();
+    mute.tick();
+    mute.tick();
+    expect(mute.events).toEqual([
+      { kind: 'audio-failed', message: 'IAudioSessionManager2::GetSessionEnumerator failed with 0x88890004' },
+    ]);
+
+    endpoint.throws = 'CoCreateInstance(MMDeviceEnumerator) failed with 0x80040154';
+    mute.tick();
+    mute.tick();
+    expect(mute.takeEvents()).toHaveLength(2);
+  });
+
+  test('a session that vanished before the pid exits is released without a throw', () => {
+    const endpoint = new FakeEndpoint();
+    const mixer = endpoint.add(MUTED_PID);
+    const mute = new MuteLogic(endpoint.list, true);
+    mute.addPid('thr_one', MUTED_PID);
+    mute.takeEvents();
+
+    // The process died: the mixer entry answers nothing any more.
+    mixer.gone = true;
+    mute.removePid(MUTED_PID);
+
+    expect(mute.mutedPids()).toEqual([]);
+    expect(endpoint.handed.every((session) => session.released)).toBe(true);
+    expect(mute.events).toEqual([]);
   });
 });
 

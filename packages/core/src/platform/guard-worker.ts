@@ -4,14 +4,25 @@
  * that takes the foreground is sent to the bottom without activation, and the
  * window the user was on gets the focus back.
  *
+ * The audio mute rides the same thread and the same pid set. There is no
+ * notification to hook for it: registering `IAudioSessionNotification` would
+ * need an MTA thread and a JS COM object, so the sessions of the default render
+ * endpoint are polled every second and right after every pid, and a session of
+ * a traced pid is muted until that pid exits.
+ *
  * It lives in a Worker because the hook is delivered on the thread that
  * installed it and only while that thread pumps messages: the main thread must
- * stay free to serve RPC. The rule itself is `GuardLogic`, which knows nothing
- * about Win32, so it is tested without ever creating a window.
+ * stay free to serve RPC. Both rules are plain classes, `GuardLogic` and
+ * `MuteLogic`, which know nothing about Win32 or COM, so they are tested
+ * without ever creating a window or making a sound.
  */
 import { dlopen, FFIType, JSCallback, ptr } from 'bun:ffi';
+import { coInitialize, coUninitialize, openSessions } from './audio-sessions.ts';
+import type { AudioSession, AudioSessions } from './audio-sessions.ts';
 import { GuardLogic } from './guard-logic.ts';
 import type { ForegroundPushed, GuardWin32 } from './guard-logic.ts';
+import { MuteLogic } from './mute-logic.ts';
+import type { MuteEvent } from './mute-logic.ts';
 
 export interface GuardWorkerStart {
   kind: 'start';
@@ -19,21 +30,24 @@ export interface GuardWorkerStart {
   stop: SharedArrayBuffer;
   /** Milliseconds one bounded wait on the message queue lasts. */
   waitMs: number;
+  /** The focus guard's own setting. `mute` is the audio one. */
   enabled: boolean;
+  mute: boolean;
 }
 
 export type GuardWorkerCommand =
   | GuardWorkerStart
   | { kind: 'pid-add'; threadId: string; pid: number }
   | { kind: 'pid-remove'; threadId: string; pid: number }
-  | { kind: 'set'; enabled: boolean };
+  | { kind: 'set'; enabled: boolean; mute: boolean };
 
 export type GuardWorkerMessage =
   /** `hook` is the `HWINEVENTHOOK` in decimal, never "0" once the hook is in. */
   | { kind: 'ready'; hook: string }
   | { kind: 'failed'; reason: string }
   | { kind: 'stopped' }
-  | ForegroundPushed;
+  | ForegroundPushed
+  | MuteEvent;
 
 // -- Win32 constants --------------------------------------------------------
 
@@ -48,6 +62,12 @@ const QS_ALLINPUT = 0x04ff;
 /** MSG on x64: hwnd, message, wParam, lParam, time, POINT, with the padding. */
 const MSG_SIZE = 64;
 const TITLE_CHARS = 256;
+/**
+ * How long between two walks of the audio sessions. A session that opens and
+ * closes inside one interval can play a burst; anything shorter is a COM walk
+ * every few hundred milliseconds for a case that barely exists.
+ */
+const AUDIO_INTERVAL_MS = 1000;
 
 const scope = globalThis as unknown as {
   onmessage: ((event: { data: unknown }) => void) | null;
@@ -121,6 +141,41 @@ function nativeWin32(u32: User32, k32: Kernel32): GuardWin32 {
 }
 
 let logic: GuardLogic | null = null;
+let mute: MuteLogic | null = null;
+/**
+ * The endpoint's session manager, opened on the first walk and reopened after a
+ * failure: a default device that changes invalidates the one that was held.
+ */
+let endpoint: AudioSessions | null = null;
+/** True once this machine has answered that it has no render endpoint at all. */
+let noEndpoint = false;
+/** True between a `CoInitializeEx` that took and its matching `CoUninitialize`. */
+let comReady = false;
+
+/**
+ * One walk of the endpoint's sessions, opening it if this is the first. A
+ * machine with no render endpoint turns the audio half off for the Worker's
+ * life, and the throw is what puts the reason in a single `audio-failed`.
+ */
+function listSessions(): AudioSession[] {
+  if (endpoint === null) {
+    const opened = openSessions();
+    if (opened === null) {
+      noEndpoint = true;
+      mute?.setEnabled(false);
+      throw new Error('this machine has no default audio render endpoint');
+    }
+    endpoint = opened;
+  }
+  try {
+    return endpoint.list();
+  } catch (error) {
+    // The device is gone or COM refused: drop it so the next walk opens a fresh one.
+    endpoint.release();
+    endpoint = null;
+    throw error;
+  }
+}
 
 scope.onmessage = (event: { data: unknown }): void => {
   const command = event.data as GuardWorkerCommand;
@@ -179,6 +234,19 @@ scope.onmessage = (event: { data: unknown }): void => {
   }
   send({ kind: 'ready', hook: hook.toString() });
 
+  // COM comes after the hook, on this same thread: the apartment is the
+  // message-pumping one, and only outgoing calls are ever made from it.
+  const audio = new MuteLogic(listSessions, command.mute);
+  mute = audio;
+  try {
+    coInitialize();
+    comReady = true;
+  } catch (error) {
+    audio.setEnabled(false);
+    noEndpoint = true;
+    send({ kind: 'audio-failed', message: error instanceof Error ? error.message : String(error) });
+  }
+
   const stop = new Int32Array(command.stop);
   const message = new Uint8Array(MSG_SIZE);
   const messagePtr = ptr(message);
@@ -188,11 +256,13 @@ scope.onmessage = (event: { data: unknown }): void => {
    * `while` loop on purpose: the pump has to give the JS event loop its turn or
    * `pid-add`, `pid-remove` and `set` would never reach this thread.
    */
+  let nextWalk = 0;
   const tick = (): void => {
     if (Atomics.load(stop, 0) !== 0) {
       u32.UnhookWinEvent(hook);
       callback.close();
       logic = null;
+      shutDownAudio(audio);
       send({ kind: 'stopped' });
       return;
     }
@@ -201,25 +271,55 @@ scope.onmessage = (event: { data: unknown }): void => {
       u32.TranslateMessage(messagePtr);
       u32.DispatchMessageW(messagePtr);
     }
+    // The wait above returns early on any message, so the walk is on the clock
+    // rather than on a count of turns.
+    const now = Date.now();
+    if (now >= nextWalk) {
+      nextWalk = now + AUDIO_INTERVAL_MS;
+      audio.tick();
+    }
     for (const pushed of guard.takeEvents()) send(pushed);
+    for (const muted of audio.takeEvents()) send(muted);
     setTimeout(tick, 0);
   };
   tick();
 };
+
+/** Give every muted process its sound back, then let this thread out of COM. */
+function shutDownAudio(audio: MuteLogic): void {
+  audio.releaseAll();
+  mute = null;
+  endpoint?.release();
+  endpoint = null;
+  if (!comReady) return;
+  comReady = false;
+  try {
+    coUninitialize();
+  } catch {
+    // The thread is going away; a refused CoUninitialize changes nothing.
+  }
+}
 
 function onCommand(command: Exclude<GuardWorkerCommand, GuardWorkerStart>): void {
   if (logic === null) return;
   switch (command.kind) {
     case 'pid-add':
       logic.addPid(command.threadId, command.pid);
-      return;
+      mute?.addPid(command.threadId, command.pid);
+      break;
     case 'pid-remove':
       logic.removePid(command.pid);
-      return;
+      mute?.removePid(command.pid);
+      break;
     case 'set':
       logic.setEnabled(command.enabled);
-      return;
+      // A machine that answered it has no endpoint stays off whatever the user asks.
+      if (!noEndpoint) mute?.setEnabled(command.mute);
+      break;
     default:
       return;
   }
+  // `addPid` walks the sessions on the spot, so its events are here already and
+  // waiting for the next pump tick would delay them by a whole wait.
+  if (mute !== null) for (const muted of mute.takeEvents()) send(muted);
 }

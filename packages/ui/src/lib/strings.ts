@@ -250,6 +250,8 @@ export const strings = {
     background: 'Background',
     focusGuard: 'Keep agent windows out of the foreground',
     focusGuardHint: 'Windows an agent opens are sent behind Boite instead of taking your focus',
+    muteAgents: 'Mute agent audio',
+    muteAgentsHint: 'Sounds an agent process plays never reach your speakers',
     save: 'Save',
     saved: 'Saved',
     core: 'Core',

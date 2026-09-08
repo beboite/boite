@@ -37,12 +37,17 @@
   let agentCpuCapPercent = $state(untrack(() => store.settings?.agentCpuCapPercent ?? 75));
   let threadMemoryCapMb = $state(untrack(() => store.settings?.threadMemoryCapMb ?? 0));
   let focusGuard = $state(untrack(() => store.settings?.focusGuard ?? true));
+  let muteAgents = $state(untrack(() => store.settings?.muteAgents ?? true));
   let savedAt = $state<number | null>(null);
 
-  // The switch is the whole control, so it writes on its own rather than
-  // waiting behind the scheduler card's Save button.
+  // A switch is the whole control, so it writes on its own rather than waiting
+  // behind the scheduler card's Save button.
   async function saveFocusGuard() {
     await store.saveSettings({ focusGuard });
+  }
+
+  async function saveMuteAgents() {
+    await store.saveSettings({ muteAgents });
   }
 
   async function save() {
@@ -53,7 +58,8 @@
       listenOnLan,
       agentCpuCapPercent,
       threadMemoryCapMb,
-      focusGuard
+      focusGuard,
+      muteAgents
     });
     savedAt = Date.now();
   }
@@ -134,6 +140,19 @@
         data-testid="setting-focus-guard"
         bind:checked={focusGuard}
         onchange={() => void saveFocusGuard()}
+      />
+    </label>
+    <label class="switch-row">
+      <span class="text">
+        {strings.settings.muteAgents}
+        <span class="hint">{strings.settings.muteAgentsHint}</span>
+      </span>
+      <input
+        type="checkbox"
+        role="switch"
+        data-testid="setting-mute-agents"
+        bind:checked={muteAgents}
+        onchange={() => void saveMuteAgents()}
       />
     </label>
   </section>

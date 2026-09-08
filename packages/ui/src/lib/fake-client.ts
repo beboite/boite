@@ -161,7 +161,8 @@ export class FakeClient implements ObservableClient {
       listenOnLan: false,
       agentCpuCapPercent: 75,
       threadMemoryCapMb: 0,
-      focusGuard: true
+      focusGuard: true,
+      muteAgents: true
     };
     this.#core = {
       version: '2.0.0-alpha.1',

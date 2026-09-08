@@ -344,6 +344,12 @@ export interface Settings {
    * the focus back. Windows only, ignored elsewhere.
    */
   focusGuard: boolean;
+  /**
+   * Audio sessions of agent processes are muted while they run, so a sound an
+   * agent plays never reaches the user's speakers. The mute is undone when the
+   * process exits. Windows only, ignored elsewhere.
+   */
+  muteAgents: boolean;
 }
 
 export interface CoreInfo {
@@ -521,6 +527,11 @@ export interface RpcEvents {
     restored: boolean;
     at: Timestamp;
   };
+  /**
+   * An audio session of a process this thread launched was muted, and stays
+   * muted until that process exits. Windows only.
+   */
+  'process.muted': { threadId: ThreadId; pid: number; at: Timestamp };
 
   'scheduler.updated': SchedulerState;
   'accounts.updated': Account;

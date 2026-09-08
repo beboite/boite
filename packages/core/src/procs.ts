@@ -21,6 +21,7 @@ import {
   releaseGuard,
   retainGuard,
   setGuardEnabled,
+  setGuardMute,
 } from './platform/guard.ts';
 import type { GuardStatus } from './platform/guard.ts';
 
@@ -99,6 +100,14 @@ export class ProcRegistry {
           at: Date.now(),
         });
       },
+      muted: (threadId, pid) => {
+        this.bus.emit('process.muted', { threadId, pid, at: Date.now() });
+        this.bus.emit('core.log', {
+          level: 'info',
+          message: `thread ${threadId}: the audio of pid ${pid} is muted`,
+          at: Date.now(),
+        });
+      },
       note: (message) => {
         this.bus.emit('core.log', { level: 'warn', message, at: Date.now() });
       },
@@ -119,9 +128,10 @@ export class ProcRegistry {
       threadMemoryCapMb: settings.threadMemoryCapMb,
     });
     setGuardEnabled(settings.focusGuard);
+    setGuardMute(settings.muteAgents);
   }
 
-  /** What the focus guard Worker is doing. Read by the tests, not by a client. */
+  /** What the guard Worker is doing, focus and audio. Read by the tests, not by a client. */
   guardStatus(): GuardStatus {
     return guardStatus();
   }

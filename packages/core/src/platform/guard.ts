@@ -1,11 +1,12 @@
 /**
- * The focus guard's main-thread half: it holds the pid set the Worker filters
- * on, forwards the setting, and turns what the Worker pushed back into events.
+ * The focus guard's main-thread half, and the audio mute's: it holds the pid set
+ * the Worker filters on, forwards both settings, and turns what the Worker
+ * pushed back into events.
  *
  * Nothing native happens here. The Worker is built on the first traced pid, the
  * same way the Job Object one is, so a core that never launches a process never
- * pays for a Worker, a `user32.dll` handle or a system-wide hook. Off Windows
- * every function is a no-op.
+ * pays for a Worker, a `user32.dll` handle, a system-wide hook or a COM
+ * apartment. Off Windows every function is a no-op.
  */
 import { workerEntry } from './worker-entry.ts';
 import type { GuardWorkerCommand, GuardWorkerMessage } from './guard-worker.ts';
@@ -13,16 +14,24 @@ import type { GuardWorkerCommand, GuardWorkerMessage } from './guard-worker.ts';
 /** What the registry wants to hear about. Set once by `ProcRegistry`. */
 export interface GuardEventSink {
   pushed(threadId: string, pid: number, title: string, restored: boolean): void;
+  muted(threadId: string, pid: number): void;
   note(message: string): void;
 }
 
-/** What a test reads to know the hook is really in. */
+/** What a test reads to know the hook is really in and what is muted. */
 export interface GuardStatus {
   /** True between the first traced pid and the core's own teardown. */
   running: boolean;
   /** The `HWINEVENTHOOK` in decimal, once the Worker answered `ready`. */
   hook: string | null;
   failure: string | null;
+  /**
+   * `on` while agent audio is being muted, `off` when the setting is off, and
+   * `failed` when Core Audio refused: no render endpoint, no COM, no device.
+   */
+  audio: 'on' | 'off' | 'failed';
+  /** Every pid whose audio session this core is holding muted. */
+  mutedPids: number[];
 }
 
 /** One bounded wait on the message queue before the stop flag is read again. */
@@ -37,6 +46,10 @@ let stopFlag: Int32Array | null = null;
 let hook: string | null = null;
 let failure: string | null = null;
 let enabled = true;
+let muteEnabled = true;
+let audioFailure: string | null = null;
+/** The pids the Worker said it muted, minus the ones that have since exited. */
+const mutedPids = new Set<number>();
 
 export function retainGuard(events: GuardEventSink): void {
   refCount += 1;
@@ -52,7 +65,15 @@ export function releaseGuard(): void {
 
 export function setGuardEnabled(next: boolean): void {
   enabled = next;
-  post({ kind: 'set', enabled: next });
+  post({ kind: 'set', enabled: next, mute: muteEnabled });
+}
+
+export function setGuardMute(next: boolean): void {
+  muteEnabled = next;
+  // The Worker unmutes everything it holds when it is turned off, so nothing is
+  // left muted behind a switch the user just moved.
+  if (!next) mutedPids.clear();
+  post({ kind: 'set', enabled, mute: next });
 }
 
 export function guardPidAdded(threadId: string, pid: number): void {
@@ -63,11 +84,18 @@ export function guardPidAdded(threadId: string, pid: number): void {
 
 export function guardPidRemoved(threadId: string, pid: number): void {
   if (!isWindows || pid <= 0) return;
+  mutedPids.delete(pid);
   post({ kind: 'pid-remove', threadId, pid });
 }
 
 export function guardStatus(): GuardStatus {
-  return { running: worker !== null, hook, failure };
+  return {
+    running: worker !== null,
+    hook,
+    failure,
+    audio: audioFailure !== null ? 'failed' : muteEnabled ? 'on' : 'off',
+    mutedPids: [...mutedPids],
+  };
 }
 
 function post(command: GuardWorkerCommand): void {
@@ -86,7 +114,7 @@ function ensureWorker(): void {
     created.onerror = (event: unknown): void => {
       fail(describeWorkerError(event));
     };
-    const start: GuardWorkerCommand = { kind: 'start', stop: shared, waitMs: WAIT_MS, enabled };
+    const start: GuardWorkerCommand = { kind: 'start', stop: shared, waitMs: WAIT_MS, enabled, mute: muteEnabled };
     created.postMessage(start);
     // The core exits on its own terms; a pump that is still waiting must never
     // be what keeps the process alive.
@@ -121,6 +149,16 @@ function onWorkerMessage(message: GuardWorkerMessage): void {
     case 'foreground-pushed':
       sink?.pushed(message.threadId, message.pid, message.title, message.restored);
       return;
+    case 'session-muted':
+      // A mute that took is the proof the audio half works, whatever refused once.
+      audioFailure = null;
+      mutedPids.add(message.pid);
+      sink?.muted(message.threadId, message.pid);
+      return;
+    case 'audio-failed':
+      audioFailure = message.message;
+      sink?.note(`the audio mute is off: ${message.message}`);
+      return;
     case 'failed':
       fail(message.reason);
       return;
@@ -136,6 +174,8 @@ function teardown(): void {
   stopFlag = null;
   hook = null;
   failure = null;
+  audioFailure = null;
+  mutedPids.clear();
   if (running === null) return;
 
   if (flag !== null) Atomics.store(flag, 0, 1);
