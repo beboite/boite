@@ -69,6 +69,9 @@ export class Core {
     registerModules(this);
     this.procs.applySettings(this.settings.get());
     this.accounts.ensureDefaults();
+    // The journal is open and no socket is accepted yet: whatever a dead core
+    // left running or queued is closed here, or nothing ever would.
+    this.threads.recoverStuckTurns();
   }
 
   setEndpoint(host: string, port: number): void {
