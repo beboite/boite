@@ -139,6 +139,8 @@ export const strings = {
     picker: 'Provider and model',
     providers: 'Providers',
     models: 'Models',
+    searchModels: 'Search models',
+    noModels: 'No model matches',
     legacyModels: 'Legacy models',
     probing: "Reading the agent's models",
     reasoning: 'Reasoning',

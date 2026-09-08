@@ -32,6 +32,26 @@ function shownModels(): (string | null)[] {
   return Array.from(document.querySelectorAll('[data-model]')).map((el) => el.getAttribute('data-model'));
 }
 
+/** The prefix labels the model column groups its matches under, in order. */
+function groupLabels(): (string | null)[] {
+  return Array.from(document.querySelectorAll('[data-group]')).map((el) => el.getAttribute('data-group'));
+}
+
+/** Type into a field the way a user does, then let the effects settle. */
+async function type(field: HTMLInputElement, text: string): Promise<void> {
+  field.focus();
+  field.value = text;
+  field.dispatchEvent(new Event('input', { bubbles: true }));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+/** A key on whatever holds the focus, so it walks the same path a real one would. */
+function press(key: string): void {
+  (document.activeElement ?? document.body).dispatchEvent(
+    new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })
+  );
+}
+
 function query<T extends Element = HTMLElement>(selector: string): T {
   const found = document.querySelector<T>(selector);
   if (!found) throw new Error(`nothing matches ${selector}`);
@@ -138,7 +158,9 @@ test('the picker reads an ACP agent models, showing the descriptor and a probing
   expect(shownModels()).toEqual(['default']);
 
   await waitFor(() => document.querySelector('[data-testid=picker-probing]') === null);
-  expect(shownModels()).toEqual(['default', 'anthropic/claude-sonnet-5', 'openai/gpt-5-codex']);
+  // The agent lists more than the column shows at once; the first three are the ones it names first.
+  expect(shownModels().length).toBe(23);
+  expect(shownModels().slice(0, 3)).toEqual(['default', 'anthropic/claude-sonnet-5', 'openai/gpt-5-codex']);
   // The reasoning scale comes from the same answer, not from the descriptor.
   const levels = Array.from(document.querySelectorAll('[data-effort]')).map((el) => el.getAttribute('data-effort'));
   expect(levels).toEqual(['think', 'think-hard']);
@@ -155,6 +177,70 @@ test('the picker reads an ACP agent models, showing the descriptor and a probing
   query<HTMLButtonElement>('[data-testid=composer-send]').click();
   await waitFor(() => store.openThread !== null && store.draft === null);
   expect(store.openThread?.model).toBe('openai/gpt-5-codex');
+});
+
+test('past twelve models the column gets a search field, prefix groups and keyboard picking', async () => {
+  await mountOnFake();
+  query<HTMLButtonElement>('[data-testid=new-thread]').click();
+  await waitFor(() => store.draft !== null);
+  await waitFor(() => query('[data-testid=composer-picker]').textContent?.includes('Claude Sonnet 5') === true);
+
+  query<HTMLButtonElement>('[data-testid=composer-picker]').click();
+  await waitFor(() => document.querySelector('[data-testid=composer-picker-menu]') !== null);
+  // Claude lists ten models: short enough to stay a plain list.
+  expect(document.querySelector('[data-testid=picker-search]')).toBeNull();
+
+  query<HTMLButtonElement>('[data-instance="opencode::a-opencode"]').click();
+  await waitFor(() => document.querySelector('[data-testid=picker-probing]') === null);
+  await waitFor(() => document.querySelector('[data-testid=picker-search]') !== null);
+  expect(shownModels().length).toBe(23);
+  expect(groupLabels()).toEqual(['anthropic', 'openai', 'openrouter', 'opencode', 'nvidia']);
+  // The column opens on a long list, so the field already has the caret.
+  const search = query<HTMLInputElement>('[data-testid=picker-search]');
+  expect(document.activeElement).toBe(search);
+
+  await type(search, 'sonnet');
+  await waitFor(() => shownModels().length === 4);
+  // The agent's own default is pinned first whatever the query.
+  expect(shownModels()).toEqual([
+    'default',
+    'anthropic/claude-sonnet-5',
+    'openrouter/anthropic/claude-sonnet-4-5',
+    'opencode/claude-sonnet-5'
+  ]);
+  expect(groupLabels()).toEqual(['anthropic', 'openrouter', 'opencode']);
+
+  // Down onto the pinned row, down again onto the first match, Enter to take it.
+  press('ArrowDown');
+  press('ArrowDown');
+  expect((document.activeElement as HTMLElement).getAttribute('data-model')).toBe('anthropic/claude-sonnet-5');
+  press('Enter');
+  await waitFor(() => document.querySelector('[data-testid=composer-picker-menu]') === null);
+  expect(query('[data-testid=composer-picker]').textContent).toContain('Claude Sonnet 5');
+
+  // A query nothing answers says so, and Escape clears it before it closes anything.
+  query<HTMLButtonElement>('[data-testid=composer-picker]').click();
+  await waitFor(() => document.querySelector('[data-testid=picker-search]') !== null);
+  await type(query<HTMLInputElement>('[data-testid=picker-search]'), 'nothing here');
+  await waitFor(() => document.querySelector('[data-testid=picker-no-models]') !== null);
+  expect(shownModels()).toEqual(['default']);
+
+  press('Escape');
+  await waitFor(() => shownModels().length === 23);
+  expect(document.querySelector('[data-testid=composer-picker-menu]')).not.toBeNull();
+  expect(query<HTMLInputElement>('[data-testid=picker-search]').value).toBe('');
+
+  press('Escape');
+  await waitFor(() => document.querySelector('[data-testid=composer-picker-menu]') === null);
+
+  // The searched model is the one the first send writes on the thread.
+  const input = query<HTMLTextAreaElement>('[data-testid=composer-input]');
+  input.value = 'On the model I searched for';
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  await waitFor(() => !query<HTMLButtonElement>('[data-testid=composer-send]').disabled);
+  query<HTMLButtonElement>('[data-testid=composer-send]').click();
+  await waitFor(() => store.openThread !== null && store.draft === null);
+  expect(store.openThread?.model).toBe('anthropic/claude-sonnet-5');
 });
 
 test('the Reasoning row sets the effort of the picked model, and the default level clears the suffix', async () => {

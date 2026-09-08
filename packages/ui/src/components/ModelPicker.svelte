@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { ChevronDown, ChevronRight, Sparkles } from '@lucide/svelte';
+  import { ChevronDown, ChevronRight, Search, Sparkles } from '@lucide/svelte';
   import type { Account, ModelInfo, ProviderSummary } from '@boite/contracts';
   import { strings } from '../lib/strings';
   import type { Choice, PickPatch, Store } from '../lib/store.svelte';
@@ -22,9 +22,15 @@
     onpick: (patch: PickPatch) => void;
   } = $props();
 
+  /** Past this many models the column stops being a plain scroll and gets a search field. */
+  const SEARCH_FROM = 12;
+
   let open = $state(false);
   let legacyOpen = $state(false);
   let root = $state<HTMLDivElement | undefined>(undefined);
+  let searchBox = $state<HTMLInputElement | undefined>(undefined);
+  /** What the model column is filtered on; empty while the list is short. */
+  let modelQuery = $state('');
   /** The provider whose models the right column shows: the choice's until another account is clicked. */
   let shownProviderId = $state<string | null>(null);
 
@@ -98,6 +104,51 @@
   let currentModels = $derived(shownModels.filter((m) => !m.legacy));
   let legacyModels = $derived(shownModels.filter((m) => m.legacy));
 
+  // An ACP agent can list hundreds of models (OpenCode answered 534 here), and a
+  // plain scroll is useless at that length: past twelve the column gets a search
+  // field and the matches are grouped by the `provider/` prefix of their id.
+  let searchable = $derived(shownModels.length > SEARCH_FROM);
+  let words = $derived(
+    searchable ? modelQuery.toLowerCase().split(/\s+/).filter((word) => word.length > 0) : []
+  );
+
+  function matches(model: ModelInfo): boolean {
+    if (words.length === 0) return true;
+    const hay = `${model.id} ${model.name}`.toLowerCase();
+    return words.every((word) => hay.includes(word));
+  }
+
+  /** The descriptor's default: on an ACP provider it is "let the agent choose", so it never filters out. */
+  let pinnedModel = $derived.by((): ModelInfo | null => {
+    if (!searchable || !shown) return null;
+    const id = store.defaultModelOf(shown);
+    return shownModels.find((m) => m.id === id) ?? null;
+  });
+
+  let filteredCurrent = $derived(
+    searchable ? currentModels.filter((m) => m.id !== pinnedModel?.id && matches(m)) : currentModels
+  );
+  let filteredLegacy = $derived(searchable ? legacyModels.filter(matches) : legacyModels);
+
+  interface Group {
+    /** The part of the id before the first slash, empty for a model that has none. */
+    key: string;
+    models: ModelInfo[];
+  }
+
+  /** One label per prefix, the groups in the order the agent first mentioned each. */
+  let groups = $derived.by((): Group[] => {
+    const byKey = new Map<string, Group>();
+    for (const model of filteredCurrent) {
+      const slash = model.id.indexOf('/');
+      const key = slash > 0 ? model.id.slice(0, slash) : '';
+      const group = byKey.get(key);
+      if (group) group.models.push(model);
+      else byKey.set(key, { key, models: [model] });
+    }
+    return [...byKey.values()];
+  });
+
   /** The Reasoning row belongs to the model the choice is on, legacy ones included. */
   let effortModel = $derived.by((): ModelInfo | null => {
     if (!shown || !choice || choice.providerId !== shown.id) return null;
@@ -114,18 +165,26 @@
     return shown !== null && choice?.providerId === shown.id && choice?.model === model.id;
   }
 
+  // A column that opens on a long list is a column you are about to type in.
+  $effect(() => {
+    if (!open || !searchable) return;
+    searchBox?.focus();
+  });
+
   function toggle(event: MouseEvent) {
     event.stopPropagation();
     open = !open;
     if (open) {
       shownProviderId = choice?.providerId ?? null;
       legacyOpen = false;
+      modelQuery = '';
     }
   }
 
   function pickInstance(row: Row) {
     if (row.disabled || !row.account) return;
     shownProviderId = row.provider.id;
+    modelQuery = '';
     if (isCurrentInstance(row)) return;
     onpick({ providerId: row.provider.id, accountId: row.account.id, model: store.defaultModelOf(row.provider) });
   }
@@ -156,11 +215,41 @@
     return root ? Array.from(root.querySelectorAll<HTMLElement>('.popover [data-row]:not(:disabled)')) : [];
   }
 
+  /** The model rows alone: what the arrows walk once the search field has the focus. */
+  function modelRows(): HTMLElement[] {
+    return root ? Array.from(root.querySelectorAll<HTMLElement>('.popover .models [data-row]:not(:disabled)')) : [];
+  }
+
   function onkeydown(event: KeyboardEvent) {
     if (!open) return;
+    const active = document.activeElement as HTMLElement | null;
+    const searching = searchable && (active === searchBox || (active?.hasAttribute('data-model') ?? false));
+
     if (event.key === 'Escape') {
       event.stopPropagation();
+      // The query goes first: closing on it would throw away what was just typed.
+      if (searchable && modelQuery !== '') {
+        modelQuery = '';
+        searchBox?.focus();
+        return;
+      }
       open = false;
+      return;
+    }
+    if (event.key === 'Enter' && searching) {
+      // A focused row is activated by the browser too; taking the default keeps it to one pick.
+      event.preventDefault();
+      const row = active === searchBox ? modelRows()[0] : active;
+      row?.click();
+      return;
+    }
+    if (searching && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {
+      event.preventDefault();
+      const list = modelRows();
+      const here = active === searchBox || !active ? -1 : list.indexOf(active);
+      if (event.key === 'ArrowDown') list[Math.min(here + 1, list.length - 1)]?.focus();
+      else if (here <= 0) searchBox?.focus();
+      else list[here - 1]?.focus();
       return;
     }
     if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
@@ -176,7 +265,6 @@
     const list = focusable();
     if (list.length === 0) return;
     event.preventDefault();
-    const active = document.activeElement as HTMLElement | null;
     const index = active ? list.indexOf(active) : -1;
     const next = event.key === 'ArrowDown' ? (index + 1) % list.length : (index - 1 + list.length) % list.length;
     list[next]?.focus();
@@ -244,8 +332,7 @@
       </div>
 
       <div class="column models">
-        <span class="section-label head">{shown ? shown.name : strings.composer.models}</span>
-        {#each currentModels as model (model.id)}
+        {#snippet modelRow(model: ModelInfo)}
           <button
             type="button"
             class="row model"
@@ -261,8 +348,45 @@
               <span class="badge">{strings.composer.newBadge}</span>
             {/if}
           </button>
-        {/each}
-        {#if legacyModels.length > 0}
+        {/snippet}
+
+        <span class="section-label head">{shown ? shown.name : strings.composer.models}</span>
+
+        {#if searchable}
+          <div class="search-bar">
+            <label class="search">
+              <Search size={13} strokeWidth={1.75} />
+              <input
+                bind:this={searchBox}
+                bind:value={modelQuery}
+                placeholder={strings.composer.searchModels}
+                aria-label={strings.composer.searchModels}
+                data-testid="picker-search"
+                spellcheck="false"
+              />
+            </label>
+          </div>
+          {#if pinnedModel}
+            {@render modelRow(pinnedModel)}
+          {/if}
+          {#each groups as group (group.key)}
+            {#if group.key}
+              <span class="section-label group" data-group={group.key}>{group.key}</span>
+            {/if}
+            {#each group.models as model (model.id)}
+              {@render modelRow(model)}
+            {/each}
+          {/each}
+          {#if groups.length === 0 && filteredLegacy.length === 0 && modelQuery.trim() !== ''}
+            <p class="none subtle" data-testid="picker-no-models">{strings.composer.noModels}</p>
+          {/if}
+        {:else}
+          {#each currentModels as model (model.id)}
+            {@render modelRow(model)}
+          {/each}
+        {/if}
+
+        {#if filteredLegacy.length > 0}
           <button
             type="button"
             class="row fold"
@@ -273,10 +397,10 @@
           >
             <span class="caret" class:open={legacyOpen}><ChevronRight size={12} strokeWidth={2} /></span>
             <span class="name muted">{strings.composer.legacyModels}</span>
-            <span class="count">{legacyModels.length}</span>
+            <span class="count">{filteredLegacy.length}</span>
           </button>
           {#if legacyOpen}
-            {#each legacyModels as model (model.id)}
+            {#each filteredLegacy as model (model.id)}
               <button
                 type="button"
                 class="row model legacy"
@@ -386,6 +510,57 @@
 
   .head {
     padding: 4px 8px 6px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* The sidebar's search box, kept in place while hundreds of rows scroll under it. */
+  .search-bar {
+    position: sticky;
+    /* The column pads by 6, so the bar starts 6 higher and paints that strip itself. */
+    top: -6px;
+    z-index: 1;
+    margin: 0 -6px 4px;
+    padding: 6px 6px 4px;
+    background: var(--color-surface-2);
+  }
+
+  .search {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    height: 28px;
+    padding: 0 8px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    background: var(--color-surface);
+    color: var(--color-subtle);
+    transition: border-color var(--dur-2) var(--ease-out-quint);
+  }
+
+  .search:focus-within {
+    border-color: var(--color-edge);
+    color: var(--color-muted-foreground);
+  }
+
+  .search input {
+    flex: 1;
+    min-width: 0;
+    height: 100%;
+    padding: 0;
+    border: none;
+    background: transparent;
+    color: var(--color-foreground);
+    font-size: var(--text-sm);
+  }
+
+  .search input:focus {
+    outline: none;
+  }
+
+  .group {
+    padding: 8px 8px 2px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;

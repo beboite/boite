@@ -86,10 +86,39 @@ const PROBED_EFFORT = {
   default: 'think'
 };
 
+/**
+ * A real OpenCode answers with hundreds of models across a dozen prefixes (534
+ * on the machine this was written on), so the fake answers with enough of them
+ * to put the picker's model column past its search threshold.
+ */
+const PROBED_CATALOGUE: [string, string][] = [
+  ['openrouter/anthropic/claude-sonnet-4-5', 'Claude Sonnet 4.5'],
+  ['openrouter/anthropic/claude-haiku-4-5', 'Claude Haiku 4.5'],
+  ['openrouter/openai/gpt-5-mini', 'GPT-5 Mini'],
+  ['openrouter/google/gemini-3-pro', 'Gemini 3 Pro'],
+  ['openrouter/meta-llama/llama-4-scout', 'Llama 4 Scout'],
+  ['openrouter/deepseek/deepseek-v4', 'DeepSeek V4'],
+  ['openrouter/qwen/qwen3-max', 'Qwen3 Max'],
+  ['opencode/grok-code', 'Grok Code'],
+  ['opencode/claude-sonnet-5', 'Claude Sonnet 5 zen'],
+  ['opencode/gpt-5-codex', 'GPT-5 Codex zen'],
+  ['opencode/kimi-k2', 'Kimi K2'],
+  ['opencode/glm-4-7', 'GLM 4.7'],
+  ['opencode/minimax-m2', 'MiniMax M2'],
+  ['nvidia/nemotron-4-340b', 'Nemotron 4 340B'],
+  ['nvidia/llama-3-3-nemotron-super', 'Llama 3.3 Nemotron Super'],
+  ['nvidia/mistral-nemo-12b', 'Mistral Nemo 12B'],
+  ['nvidia/deepseek-r2', 'DeepSeek R2'],
+  ['nvidia/qwen3-coder-480b', 'Qwen3 Coder 480B'],
+  ['nvidia/gpt-oss-120b', 'GPT-OSS 120B'],
+  ['nvidia/phi-4-reasoning', 'Phi 4 Reasoning']
+];
+
 const PROBED_MODELS: ModelInfo[] = [
   { id: 'default', name: 'OpenCode default', default: false, effort: PROBED_EFFORT },
   { id: 'anthropic/claude-sonnet-5', name: 'Claude Sonnet 5', default: true, effort: PROBED_EFFORT },
-  { id: 'openai/gpt-5-codex', name: 'GPT-5 Codex', default: false, effort: PROBED_EFFORT }
+  { id: 'openai/gpt-5-codex', name: 'GPT-5 Codex', default: false, effort: PROBED_EFFORT },
+  ...PROBED_CATALOGUE.map(([id, name]): ModelInfo => ({ id, name, default: false, effort: PROBED_EFFORT }))
 ];
 
 /**

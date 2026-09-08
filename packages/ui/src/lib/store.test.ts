@@ -133,11 +133,9 @@ describe('Store', () => {
     await client.call('providers.probe', { providerId: 'opencode', accountId: 'a-opencode' });
 
     expect(Object.keys(store.probedModels)).toEqual(['opencode::a-opencode']);
-    expect(store.modelsOf('opencode', 'a-opencode').map((m) => m.id)).toEqual([
-      'default',
-      'anthropic/claude-sonnet-5',
-      'openai/gpt-5-codex'
-    ]);
+    const probed = store.modelsOf('opencode', 'a-opencode').map((m) => m.id);
+    expect(probed.length).toBe(23);
+    expect(probed.slice(0, 3)).toEqual(['default', 'anthropic/claude-sonnet-5', 'openai/gpt-5-codex']);
     // A provider that is not ACP keeps the descriptor's list either way.
     expect(store.modelsOf('echo', 'a-echo').map((m) => m.id)).toEqual(['echo-1']);
   });
