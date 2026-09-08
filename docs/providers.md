@@ -223,3 +223,10 @@ Each protocol takes them differently, and the difference is not cosmetic.
   false, the thread's permission mode never reaches the agent, and each session
   says so once in the log. A driver that waited for a permission question there
   would wait forever.
+
+A permission is not the only thing an agent asks. A protocol that carries a
+free-form question maps it to `askQuestion` on the turn context, which draws a
+question card in the timeline and answers the agent with what the user picked;
+Codex's `item/tool/requestUserInput` is the one that does today. A question is
+not a permission mode and is never gated by one: an agent whose approvals are
+off can still ask.
