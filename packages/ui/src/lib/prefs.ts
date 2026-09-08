@@ -85,3 +85,52 @@ export function readLayout(): LayoutPrefs {
 export function writeLayout(layout: LayoutPrefs): void {
   write(LAYOUT_STORAGE_KEY, layout);
 }
+
+/**
+ * What Ctrl+S puts aside: one text per thread, so a prompt written and not sent
+ * survives a reload. A draft has no thread id yet and stashes under
+ * `DRAFT_STASH_KEY`.
+ */
+export const STASH_STORAGE_KEY = 'boite:composer-stash:v1';
+export const DRAFT_STASH_KEY = 'draft';
+
+function readStashes(): Record<string, string> {
+  try {
+    const raw = window.localStorage.getItem(STASH_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== 'object' || parsed === null) return {};
+    const out: Record<string, string> = {};
+    for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+      if (typeof value === 'string') out[key] = value;
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+function writeStashes(stashes: Record<string, string>): void {
+  try {
+    if (Object.keys(stashes).length === 0) window.localStorage.removeItem(STASH_STORAGE_KEY);
+    else window.localStorage.setItem(STASH_STORAGE_KEY, JSON.stringify(stashes));
+  } catch {
+    /* a browser that refuses storage still runs for this session */
+  }
+}
+
+/** The text stashed for one thread, or null when there is none. */
+export function readStash(key: string): string | null {
+  return readStashes()[key] ?? null;
+}
+
+export function writeStash(key: string, text: string): void {
+  writeStashes({ ...readStashes(), [key]: text });
+}
+
+export function clearStash(key: string): void {
+  const stashes = readStashes();
+  if (!(key in stashes)) return;
+  delete stashes[key];
+  writeStashes(stashes);
+}

@@ -89,7 +89,11 @@
       }
       return;
     }
-    if (key === 'n') {
+    if (key === 's') {
+      // The composer stashes what it holds; here the browser's save dialog is
+      // kept shut wherever the focus is.
+      event.preventDefault();
+    } else if (key === 'n') {
       event.preventDefault();
       store.startDraft();
     } else if (key === 'k') {

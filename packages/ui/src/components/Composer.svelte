@@ -1,6 +1,7 @@
 <script lang="ts">
   import { ArrowUp, ShieldCheck, Square } from '@lucide/svelte';
   import type { PermissionMode } from '@boite/contracts';
+  import { clearStash, DRAFT_STASH_KEY, readStash, writeStash } from '../lib/prefs';
   import { fill, strings } from '../lib/strings';
   import type { Choice, PickPatch, Store } from '../lib/store.svelte';
   import Menu from './Menu.svelte';
@@ -15,6 +16,8 @@
   let queued = $state<string | null>(null);
   let choice = $state<Choice | null>(null);
   let box = $state<HTMLTextAreaElement | undefined>(undefined);
+  /** Where ArrowUp stands in this thread's sent prompts, or null outside recall. */
+  let recall = $state<number | null>(null);
 
   /** The chips follow the open thread, or the remembered choice on a draft. */
   $effect(() => {
@@ -37,10 +40,11 @@
     }
   });
 
-  /** A new draft or thread gets the keyboard. */
+  /** A new draft or thread gets the keyboard, and the recall starts over. */
   $effect(() => {
     store.openThread?.id;
     store.draft;
+    recall = null;
     box?.focus();
   });
 
@@ -52,6 +56,21 @@
       void store.submit(prompt, choice);
     }
   });
+
+  /** This thread's own sent prompts, most recent first: what ArrowUp walks. */
+  let sent = $derived(
+    (store.openThread?.messages ?? [])
+      .filter((message) => message.role === 'user')
+      .map((message) =>
+        message.parts
+          .filter((part) => part.type === 'text')
+          .map((part) => (part.type === 'text' ? part.text : ''))
+          .join('\n')
+          .trim()
+      )
+      .filter((prompt) => prompt.length > 0)
+      .reverse()
+  );
 
   let provider = $derived(choice ? store.providerOf(choice.providerId) : null);
   let bound = $derived(store.openThread !== null);
@@ -113,10 +132,28 @@
     el.style.height = `${Math.min(el.scrollHeight, line * MAX_LINES + 16)}px`;
   }
 
+  /** Typing is the user's own, so it takes the composer out of recall. */
+  function oninput() {
+    recall = null;
+    grow();
+  }
+
+  /** Writes a recalled or restored prompt in, caret at its end. */
+  function put(value: string) {
+    text = value;
+    const el = box;
+    if (el) {
+      el.value = value;
+      el.selectionStart = el.selectionEnd = value.length;
+    }
+    requestAnimationFrame(grow);
+  }
+
   function submit() {
     const prompt = text;
     if (prompt.trim().length === 0 || !choice) return;
     text = '';
+    recall = null;
     requestAnimationFrame(grow);
     if (store.busy) {
       queued = queued === null ? prompt : `${queued}\n${prompt}`;
@@ -125,10 +162,87 @@
     void store.submit(prompt, choice);
   }
 
+  /**
+   * Ctrl+Enter: the same send, then a fresh draft on the same choice. A turn
+   * that is still running only queues the text, and the queue goes out from
+   * this thread, so that case stays what Enter does.
+   */
+  function submitAndDraft() {
+    const prompt = text;
+    if (prompt.trim().length === 0 || !choice || store.busy) {
+      submit();
+      return;
+    }
+    text = '';
+    recall = null;
+    requestAnimationFrame(grow);
+    void store.submitAndDraft(prompt, choice);
+  }
+
+  /** ArrowUp: one prompt older, or nothing when the user typed the text themselves. */
+  function older(): boolean {
+    if (recall === null && text.length > 0) return false;
+    const next = recall === null ? 0 : recall + 1;
+    const prompt = sent[next];
+    if (prompt === undefined) return recall !== null;
+    recall = next;
+    put(prompt);
+    return true;
+  }
+
+  /** ArrowDown: one prompt newer, and past the newest the composer is empty again. */
+  function newer(): boolean {
+    if (recall === null) return false;
+    const next = recall - 1;
+    if (next < 0) {
+      recall = null;
+      put('');
+      return true;
+    }
+    const prompt = sent[next];
+    if (prompt === undefined) return true;
+    recall = next;
+    put(prompt);
+    return true;
+  }
+
+  /** Ctrl+S: text goes aside for this thread, an empty composer takes it back. */
+  function stash() {
+    const key = store.openThread?.id ?? DRAFT_STASH_KEY;
+    if (text.trim().length > 0) {
+      writeStash(key, text);
+      recall = null;
+      put('');
+      return;
+    }
+    const stashed = readStash(key);
+    if (stashed === null) return;
+    clearStash(key);
+    recall = null;
+    put(stashed);
+  }
+
   function onkeydown(event: KeyboardEvent) {
-    if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
+    if (event.isComposing) return;
+    const meta = event.ctrlKey || event.metaKey;
+    if (meta && event.key === 'Enter') {
+      event.preventDefault();
+      submitAndDraft();
+      return;
+    }
+    if (meta && event.key.toLowerCase() === 's' && !event.shiftKey && !event.altKey) {
+      event.preventDefault();
+      stash();
+      return;
+    }
+    if (meta || event.altKey) return;
+    if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
       submit();
+    } else if (event.key === 'ArrowUp' && !event.shiftKey) {
+      if (older()) event.preventDefault();
+    } else if (event.key === 'ArrowDown' && !event.shiftKey) {
+      if (newer()) event.preventDefault();
     } else if (event.key === 'Escape' && store.busy) {
       event.preventDefault();
       void store.stop();
@@ -144,7 +258,7 @@
     <textarea
       bind:this={box}
       bind:value={text}
-      oninput={grow}
+      {oninput}
       {onkeydown}
       rows="1"
       {placeholder}

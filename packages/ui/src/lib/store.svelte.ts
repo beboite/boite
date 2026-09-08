@@ -787,6 +787,20 @@ export class Store {
     if (created) await this.send(prompt);
   }
 
+  /**
+   * Ctrl+Enter: the same send, then a fresh draft in the same project. The
+   * choice is what `submit` already remembered, so the draft's composer opens
+   * on the provider, account, model, effort and mode the prompt just went out
+   * with. The draft waits for the send, because creating a thread from a draft
+   * opens it and would otherwise take the new draft's place.
+   */
+  async submitAndDraft(prompt: string, choice: Choice): Promise<void> {
+    if (prompt.trim().length === 0) return;
+    await this.submit(prompt, choice);
+    const projectId = this.openThread?.projectId ?? this.draft?.projectId;
+    if (projectId !== undefined) this.startDraft(projectId);
+  }
+
   async send(prompt: string): Promise<void> {
     const client = this.#client;
     const open = this.openThread;
