@@ -225,11 +225,14 @@
     box.scrollTop = box.scrollHeight;
   });
 
+  /**
+   * The caret rides the last part when that part is text, empty or not, so it
+   * blinks at the end of what is being written. A text part further up is
+   * finished: the model has moved on to a card, and the block caret takes over.
+   */
   function lastTextIndex(message: Message): number {
-    for (let index = message.parts.length - 1; index >= 0; index -= 1) {
-      if (message.parts[index]?.type === 'text') return index;
-    }
-    return -1;
+    const last = message.parts.length - 1;
+    return message.parts[last]?.type === 'text' ? last : -1;
   }
 
   /** The pulse goes on the reasoning only while it is the last thing written. */

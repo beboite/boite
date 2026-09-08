@@ -150,30 +150,33 @@
   style="--sidebar-width: {store.sidebarWidth}px"
   data-testid="sidebar"
 >
-  <div class="top">
-    <label class="search">
-      <Search size={14} strokeWidth={1.75} />
-      <input
-        bind:this={searchBox}
-        bind:value={store.search}
-        placeholder={strings.sidebar.search}
-        aria-label={strings.sidebar.search}
-        data-testid="sidebar-search"
-        spellcheck="false"
-      />
-    </label>
-    <button
-      type="button"
-      class="icon"
-      title="{strings.sidebar.newThread} (Ctrl+N)"
-      aria-label={strings.sidebar.newThread}
-      data-testid="new-thread"
-      disabled={store.projects.length === 0}
-      onclick={() => store.startDraft()}
-    >
-      <Plus size={16} strokeWidth={1.75} />
-    </button>
-  </div>
+  <!-- With no project there is nothing to search and nothing to start a thread
+       in, so the row is not there at all. -->
+  {#if store.projects.length > 0}
+    <div class="top">
+      <label class="search">
+        <Search size={14} strokeWidth={1.75} />
+        <input
+          bind:this={searchBox}
+          bind:value={store.search}
+          placeholder={strings.sidebar.search}
+          aria-label={strings.sidebar.search}
+          data-testid="sidebar-search"
+          spellcheck="false"
+        />
+      </label>
+      <button
+        type="button"
+        class="icon"
+        title="{strings.sidebar.newThread} (Ctrl+N)"
+        aria-label={strings.sidebar.newThread}
+        data-testid="new-thread"
+        onclick={() => store.startDraft()}
+      >
+        <Plus size={16} strokeWidth={1.75} />
+      </button>
+    </div>
+  {/if}
 
   <div class="scroll">
     {#if store.projects.length === 0}

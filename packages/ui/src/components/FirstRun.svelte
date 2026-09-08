@@ -47,8 +47,8 @@
         </button>
       </form>
     {:else}
-      <button type="button" class="ghost small" data-testid="add-project" onclick={() => (typing = true)}>
-        {strings.firstRun.pathPlaceholder}
+      <button type="button" class="ghost small type-path" data-testid="add-project" onclick={() => (typing = true)}>
+        {strings.firstRun.typePath}
       </button>
     {/if}
   </div>
@@ -105,6 +105,18 @@
     font-size: var(--text-xs);
     max-width: none;
     white-space: nowrap;
+  }
+
+  /* The secondary way in, so it reads like the drop hint above it and not like
+     a label with no field under it. */
+  .type-path {
+    font-size: var(--text-xs);
+    font-weight: 400;
+    color: var(--color-subtle);
+  }
+
+  .type-path:hover {
+    color: var(--color-muted-foreground);
   }
 
   form {

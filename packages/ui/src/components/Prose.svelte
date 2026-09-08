@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { renderMarkdown } from '../lib/markdown';
+  import { renderMarkdown, withCaret } from '../lib/markdown';
   import { strings } from '../lib/strings';
 
   /**
@@ -10,6 +10,9 @@
   let { text, live = false }: { text: string; live?: boolean } = $props();
 
   const MIN_GAP_MS = 48;
+
+  /** The caret rides inside the markdown, so it ends the last line rather than starting one. */
+  const CARET = `<span class="caret" aria-label="${strings.chat.streaming}"></span>`;
 
   let html = $state('');
   let timer = 0;
@@ -36,11 +39,11 @@
   $effect(() => () => {
     if (timer) clearTimeout(timer);
   });
+
+  const shown = $derived(live ? withCaret(html, CARET) : html);
 </script>
 
-<div class="prose" data-testid="text-part">
-  {@html html}{#if live}<span class="caret" aria-label={strings.chat.streaming}></span>{/if}
-</div>
+<div class="prose" data-testid="text-part">{@html shown}</div>
 
 <style>
   .prose {
@@ -105,7 +108,7 @@
     text-underline-offset: 2px;
   }
 
-  .caret {
+  .prose :global(.caret) {
     display: inline-block;
     width: 7px;
     height: 14px;

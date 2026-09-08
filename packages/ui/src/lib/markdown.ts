@@ -95,3 +95,22 @@ export function renderMarkdown(source: string): string {
   flushList();
   return html.join('');
 }
+
+/** Where the caret goes when the text ends on a list or a fenced block. */
+const TAILS = ['</li></ul>', '</li></ol>', '</code></pre>'];
+
+/**
+ * Puts a caret inside the last block `renderMarkdown` produced, so it blinks at
+ * the end of the text instead of on a line of its own under it: a sibling of a
+ * `<p>` would start a new line. A part with no text yet gets a paragraph to
+ * carry it. Escaped content can hold no `</`, so the last one closes the block.
+ */
+export function withCaret(html: string, caret: string): string {
+  if (html.length === 0) return `<p>${caret}</p>`;
+  for (const tail of TAILS) {
+    if (html.endsWith(tail)) return `${html.slice(0, -tail.length)}${caret}${tail}`;
+  }
+  const close = html.lastIndexOf('</');
+  if (close < 0) return `${html}${caret}`;
+  return `${html.slice(0, close)}${caret}${html.slice(close)}`;
+}

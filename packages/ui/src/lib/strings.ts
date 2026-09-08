@@ -37,6 +37,7 @@ export const strings = {
     body: 'Pick the folder an agent will work in. Threads live inside it.',
     pick: 'Choose a folder',
     dropHint: 'or drop a folder anywhere in this window',
+    typePath: 'Or type the path',
     pathPlaceholder: 'Absolute path of the folder',
     add: 'Open'
   },
@@ -263,6 +264,8 @@ export const strings = {
       resources: 'Resources'
     },
     back: 'Back to threads',
+    projects: 'Projects',
+    projectsHint: 'Right-click a project in the sidebar to remove it from Boite.',
     appearance: 'Appearance',
     theme: 'Theme',
     themeSystem: 'System',

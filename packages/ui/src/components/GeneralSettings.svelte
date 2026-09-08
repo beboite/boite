@@ -79,7 +79,7 @@
   </header>
 
   <section class="card">
-    <h2>{strings.firstRun.heading}</h2>
+    <h2>{strings.settings.projects}</h2>
     {#if store.projects.length > 0}
       <ul class="projects">
         {#each store.projects as project (project.id)}
@@ -89,6 +89,7 @@
           </li>
         {/each}
       </ul>
+      <p class="subtle hint">{strings.settings.projectsHint}</p>
     {/if}
     <form class="row" onsubmit={addProject} data-testid="settings-add-project">
       {#if inShell}
@@ -251,9 +252,14 @@
     width: 100%;
   }
 
+  .hint {
+    font-size: var(--text-xs);
+    margin: 0 0 12px;
+  }
+
   .projects {
     list-style: none;
-    margin: 0 0 10px;
+    margin: 0 0 6px;
     padding: 0;
     display: flex;
     flex-direction: column;
