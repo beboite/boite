@@ -352,6 +352,7 @@ export class ProcRegistry {
     if (fromJob !== undefined) {
       if (fromJob.cpuMs !== null) record.cpuMs = fromJob.cpuMs;
       if (fromJob.peakMemoryBytes !== null) record.peakMemoryBytes = fromJob.peakMemoryBytes;
+      if (fromJob.ioBytes !== null) record.ioBytes = fromJob.ioBytes;
     }
     this.journal.append({ type: 'process.exited', threadId, version: 1, payload: record }, () => {
       this.journal.putProcess(record);

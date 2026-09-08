@@ -169,7 +169,8 @@ describe('echo driver', () => {
 
     expect(started).toHaveLength(1);
     expect(started[0]?.commandLine).toContain('echo hello');
-    expect((await exited).exitCode).toBe(0);
+    const exitEvent = await exited;
+    expect(exitEvent.exitCode).toBe(0);
 
     const thread = await client.call('threads.get', { threadId });
     const assistant = thread.messages[thread.messages.length - 1];
@@ -179,6 +180,15 @@ describe('echo driver', () => {
     const trace = await client.call('trace.get', { threadId });
     expect(trace).toHaveLength(1);
     expect(trace[0]?.exitCode).toBe(0);
+    // The child wrote `hello` into a pipe, so WriteTransferCount is above zero
+    // wherever Job Objects read the counters. Elsewhere the poll path measures
+    // nothing and the field stays null.
+    if (process.platform === 'win32') {
+      expect(trace[0]?.ioBytes).toBeGreaterThan(0);
+    } else {
+      expect(trace[0]?.ioBytes).toBeNull();
+    }
+    expect(exitEvent.ioBytes).toBe(trace[0]?.ioBytes ?? null);
   });
 
   test('an error directive fails the turn loudly', async () => {

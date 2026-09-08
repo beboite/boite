@@ -242,3 +242,23 @@ test('an isolated account that is not logged in logs in from the Accounts page',
   query<HTMLButtonElement>('[data-testid=settings-back]').click();
   await waitFor(() => document.querySelector('[data-testid=settings]') === null);
 });
+
+test('the trace panel shows the I/O a process moved, and none for a record that measured nothing', async () => {
+  await mountOnFake();
+  await waitFor(() => document.querySelector('[data-thread-id="t-trace"]') !== null);
+  query<HTMLButtonElement>('[data-thread-id="t-trace"]').click();
+  await waitFor(() => store.openThread?.id === 't-trace');
+
+  if (!store.panelOpen) query<HTMLButtonElement>('[data-testid=tab-trace]').click();
+  await waitFor(() => document.querySelectorAll('[data-testid=trace-row]').length === 3);
+
+  expect(query('[data-testid=trace-panel] thead').textContent).toContain('I/O');
+  const cellOf = (pid: number): string =>
+    query(`[data-testid=trace-row][data-pid="${pid}"] [data-testid=trace-io]`).textContent?.trim() ?? '';
+  // 1_240_000 bytes through the same `bytes()` the memory column uses.
+  expect(cellOf(21_140)).toBe('1 MB');
+  expect(cellOf(21_402)).toBe('80 kB');
+  // Nothing measured reads like an unmeasured peak memory, from the same formatter.
+  expect(cellOf(21_460)).toBe('none');
+  expect(query('[data-testid=trace-row][data-pid="21460"]').textContent).toContain('none');
+});

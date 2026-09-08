@@ -28,6 +28,7 @@ export interface JobProcessExit {
   exitCode: number | null;
   cpuMs: number | null;
   peakMemoryBytes: number | null;
+  ioBytes: number | null;
 }
 
 export interface JobLoad {
@@ -109,6 +110,10 @@ const OFF_COMMAND_LINE = 0x70;
 const PROCESS_MEMORY_COUNTERS_SIZE = 72;
 const OFF_PEAK_WORKING_SET = 8;
 const OFF_WORKING_SET = 16;
+/** IO_COUNTERS: six u64, the three operation counts then the three transfer counts. */
+const IO_COUNTERS_SIZE = 48;
+const OFF_READ_TRANSFER = 24;
+const OFF_WRITE_TRANSFER = 32;
 /** GetProcessTimes writes four FILETIMEs; kernel is the third, user the fourth. */
 const OFF_KERNEL_TIME = 16;
 const OFF_USER_TIME = 24;
@@ -150,6 +155,7 @@ function loadKernel32() {
       returns: FFIType.i32,
     },
     K32GetProcessMemoryInfo: { args: [FFIType.ptr, FFIType.ptr, FFIType.u32], returns: FFIType.i32 },
+    GetProcessIoCounters: { args: [FFIType.ptr, FFIType.ptr], returns: FFIType.i32 },
     ReadProcessMemory: {
       args: [FFIType.ptr, FFIType.u64, FFIType.ptr, FFIType.u64, FFIType.ptr],
       returns: FFIType.i32,
@@ -205,6 +211,8 @@ function nativeApi(k32: Kernel32, nt: Ntdll | null) {
       k32.GetProcessTimes(asPointer(proc), ptr(out, 0), ptr(out, 8), ptr(out, 16), ptr(out, 24)) !== 0,
     memoryInfo: (proc: number, out: Uint8Array): boolean =>
       k32.K32GetProcessMemoryInfo(asPointer(proc), ptr(out), out.byteLength) !== 0,
+    ioCounters: (proc: number, out: Uint8Array): boolean =>
+      k32.GetProcessIoCounters(asPointer(proc), ptr(out)) !== 0,
     readMemory: (proc: number, address: bigint, into: Uint8Array): boolean => {
       const read = new Uint8Array(8);
       return (
@@ -635,7 +643,7 @@ function onProcessExited(threadId: string, pid: number): void {
   const entry = tracked.get(pid);
   const api = ensureNative();
   if (entry === undefined || api === null) {
-    sink?.exited(threadId, pid, { exitCode: null, cpuMs: null, peakMemoryBytes: null });
+    sink?.exited(threadId, pid, { exitCode: null, cpuMs: null, peakMemoryBytes: null, ioBytes: null });
     return;
   }
   tracked.delete(pid);
@@ -643,6 +651,7 @@ function onProcessExited(threadId: string, pid: number): void {
     exitCode: exitCodeOf(api, entry.handle),
     cpuMs: cpuMsOf(api, entry.handle),
     peakMemoryBytes: peakMemoryOf(api, entry),
+    ioBytes: ioBytesOf(api, entry.handle),
   };
   api.close(entry.handle);
   sink?.exited(threadId, pid, exit);
@@ -706,6 +715,15 @@ function cpuMsOf(api: Native, handle: number): number | null {
   const view = new DataView(times.buffer);
   const total = view.getBigUint64(OFF_KERNEL_TIME, true) + view.getBigUint64(OFF_USER_TIME, true);
   return Math.round(Number(total) / 10_000);
+}
+
+/** Bytes the process read and wrote, files, pipes and devices alike. */
+function ioBytesOf(api: Native, handle: number): number | null {
+  const counters = new Uint8Array(IO_COUNTERS_SIZE);
+  if (!api.ioCounters(handle, counters)) return null;
+  const view = new DataView(counters.buffer);
+  const total = view.getBigUint64(OFF_READ_TRANSFER, true) + view.getBigUint64(OFF_WRITE_TRANSFER, true);
+  return Number(total);
 }
 
 function peakMemoryOf(api: Native, entry: TrackedProcess): number | null {

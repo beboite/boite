@@ -32,6 +32,7 @@
           <th>{strings.trace.duration}</th>
           <th>{strings.trace.cpu}</th>
           <th>{strings.trace.memory}</th>
+          <th>{strings.trace.io}</th>
           <th>{strings.trace.exit}</th>
         </tr>
       </thead>
@@ -43,6 +44,7 @@
             <td class="mono">{duration(record.startedAt, record.exitedAt)}</td>
             <td class="mono">{millis(record.cpuMs)}</td>
             <td class="mono">{bytes(record.peakMemoryBytes)}</td>
+            <td class="mono" data-testid="trace-io">{bytes(record.ioBytes)}</td>
             <td class="mono">
               {#if record.exitedAt === null}
                 <span class="running">{strings.trace.live}</span>

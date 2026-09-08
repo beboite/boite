@@ -1312,6 +1312,20 @@ export class FakeClient implements ObservableClient {
         ioBytes: 82_000
       },
       {
+        // Gone before the job could read its counters: nothing measured.
+        pid: 21_460,
+        parentPid: 21_140,
+        threadId: 't-trace',
+        exe: 'git.exe',
+        commandLine: 'git.exe status --porcelain',
+        startedAt: T0 + 14_000,
+        exitedAt: T0 + 14_120,
+        exitCode: 0,
+        cpuMs: null,
+        peakMemoryBytes: null,
+        ioBytes: null
+      },
+      {
         pid: 22_800,
         parentPid: 4242,
         threadId: 't-scheduler',

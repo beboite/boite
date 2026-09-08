@@ -155,6 +155,7 @@ export const strings = {
     duration: 'Duration',
     cpu: 'CPU',
     memory: 'Peak memory',
+    io: 'I/O',
     exit: 'Exit',
     live: 'live',
     empty: 'This thread has launched no process yet.',
