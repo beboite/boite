@@ -439,7 +439,7 @@ export class ThreadStore {
 }
 
 /** The protocols whose models come from the agent, not from the descriptor. */
-const PROBED_PROTOCOLS: readonly Protocol[] = ['acp', 'codex-appserver'];
+const PROBED_PROTOCOLS: readonly Protocol[] = ['acp', 'codex-appserver', 'pi'];
 
 /**
  * What this account may run: the descriptor's models, plus the ones the last

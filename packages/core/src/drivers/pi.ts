@@ -17,23 +17,69 @@
  */
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import type { MessageId, MessagePart, ThreadId, ToolStatus, Usage } from '@boite/contracts';
+import type {
+  AccountId,
+  EffortLevel,
+  MessageId,
+  MessagePart,
+  ModelInfo,
+  ProviderDescriptor,
+  ProviderId,
+  ThreadId,
+  ToolStatus,
+  Usage,
+} from '@boite/contracts';
 import { messageOf, unavailable } from '../errors.ts';
 import { resolveDataDir } from '../paths.ts';
 import type { SpawnedChild } from '../procs.ts';
 import { profileFor, resolveExecutable } from '../providers/loader.ts';
-import type { Driver, TurnContext, TurnHandle, TurnResult } from './types.ts';
+import type {
+  Driver,
+  ProbeContext,
+  ProbeFilter,
+  ProbeResult,
+  TurnContext,
+  TurnHandle,
+  TurnResult,
+} from './types.ts';
 
 const MINUTE_MS = 60_000;
 const STDERR_MAX = 400;
 /** How long a failed command waits for the child's exit before blaming itself. */
 const EXIT_GRACE_MS = 500;
+/** How long a probe waits for the three commands it sends before giving up. */
+const PROBE_TIMEOUT_MS = 30_000;
 /** Where a thread's pi transcript lives, under the account's own directory. */
 const SESSION_ROOT = 'pi-sessions';
 /** The model id that means "the agent keeps the one it is configured with". */
 const AGENT_OWN_MODEL = 'default';
 /** The four `extension_ui_request` methods that block until the client answers. */
 const UI_DIALOGS = new Set(['select', 'confirm', 'input', 'editor']);
+
+/**
+ * What every pi process Boite starts gets on top of the environment, turns and
+ * probes alike. pi does network work of its own on a cold start; these two stop
+ * the part Boite has no use for and leave the rest alone.
+ *
+ * `PI_SKIP_VERSION_CHECK` drops the `pi.dev` latest-version request
+ * (`dist/utils/version-check.js`), `PI_TELEMETRY=0` drops the install and update
+ * telemetry and the provider attribution headers (`dist/core/telemetry.js`).
+ *
+ * `PI_OFFLINE` is deliberately not among them, even though it covers both. It
+ * also turns off `ModelRuntime.modelNetworkEnabled`, which a later `refresh()`
+ * falls back to (`dist/core/model-runtime.js`), so the remote model catalog is
+ * never read and the models probe answers with a shorter list: measured twice on
+ * the same configuration, 51 models with it against 53 without.
+ */
+const AGENT_ENV: Record<string, string> = {
+  PI_SKIP_VERSION_CHECK: '1',
+  PI_TELEMETRY: '0',
+};
+
+/** `process.env` plus what Boite forces, plus the account's own isolation, which wins. */
+function agentEnv(accountEnv: Record<string, string>): Record<string, string | undefined> {
+  return { ...process.env, ...AGENT_ENV, ...accountEnv };
+}
 
 type Timer = ReturnType<typeof setTimeout>;
 
@@ -538,7 +584,7 @@ class PiSession {
     ];
     const child = ctx.spawnChild(executable, args, {
       cwd: ctx.thread.cwd,
-      env: { ...process.env, ...ctx.accountEnv },
+      env: agentEnv(ctx.accountEnv),
     });
     this.child = child;
     const peer = new PiPeer(child, {
@@ -806,12 +852,299 @@ function sessionKey(ctx: TurnContext): string {
   });
 }
 
+// ---------------------------------------------------------------------------
+// The probe: the models pi itself lists
+// ---------------------------------------------------------------------------
+
+/** `Model` of `@earendil-works/pi-ai`, the fields the probe reads. */
+interface PiModel {
+  id?: string;
+  name?: string;
+  provider?: string;
+  reasoning?: boolean;
+  /** Per model: `null` drops a level, and `xhigh` or `max` exist only when present. */
+  thinkingLevelMap?: Record<string, string | null>;
+}
+
+/**
+ * `ThinkingLevel` in pi's own order, from `dist/cli/args.js`. `off` through
+ * `high` are the standard scale; `xhigh` and `max` are opt-in per model.
+ */
+const THINKING_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
+
+/** The words the picker shows for pi's level ids. */
+const EFFORT_LABELS: Record<string, string> = {
+  off: 'Off',
+  minimal: 'Minimal',
+  low: 'Low',
+  medium: 'Medium',
+  high: 'High',
+  xhigh: 'Extra high',
+  max: 'Max',
+};
+
+function effortLabel(id: string): string {
+  return EFFORT_LABELS[id] ?? `${id.slice(0, 1).toUpperCase()}${id.slice(1)}`;
+}
+
+/**
+ * The levels one model supports, exactly as pi decides them itself: the rule is
+ * `getSupportedThinkingLevels` of `@earendil-works/pi-ai`
+ * (`node_modules/@earendil-works/pi-ai/dist/models.js`). A model without
+ * reasoning has `off` and nothing else, a level mapped to `null` is dropped, and
+ * `xhigh` and `max` are only there when the model maps them.
+ *
+ * It is reproduced here rather than asked for because
+ * `get_available_thinking_levels` answers for the model the session is on and
+ * for no other, so reading the scale of five hundred models would mean five
+ * hundred `set_model` round trips. The session's own answer is still read, as
+ * the cross-check below.
+ */
+function supportedLevels(model: PiModel): string[] {
+  if (model.reasoning !== true) return ['off'];
+  return THINKING_LEVELS.filter((level) => {
+    const mapped = model.thinkingLevelMap?.[level];
+    if (mapped === null) return false;
+    if (level === 'xhigh' || level === 'max') return mapped !== undefined;
+    return true;
+  });
+}
+
+/**
+ * A model's `ModelInfo.effort`. A scale of one level is no choice at all, which
+ * is what a model without reasoning answers, so it carries no effort block.
+ */
+function effortOf(model: PiModel, wanted: string): ModelInfo['effort'] | null {
+  const ids = supportedLevels(model);
+  if (ids.length < 2) return null;
+  const levels: EffortLevel[] = ids.map((id) => ({ id, label: effortLabel(id) }));
+  return { levels, default: ids.includes(wanted) ? wanted : (ids[0] ?? '') };
+}
+
+/** pi's provider ids are lowercase; the picker shows them with a capital. */
+function providerLabel(provider: string): string {
+  return `${provider.slice(0, 1).toUpperCase()}${provider.slice(1)}`;
+}
+
+/** What one probe read from the agent, before any of it becomes a `ModelInfo`. */
+interface PiListing {
+  models: PiModel[];
+  /** The model the session is on, as `<provider>/<id>`, or an empty string. */
+  current: string;
+  /** The thinking level the session is on, the default effort of every model. */
+  thinkingLevel: string;
+  /** `get_available_thinking_levels`: the scale of the current model, and of it alone. */
+  sessionLevels: string[];
+}
+
+/**
+ * A pi listing as a model list. The id is what `--model` takes, `<provider>/<id>`,
+ * and the name carries the provider so two models called the same are told apart.
+ * The descriptor's `default` stays first so the choice can always go back to
+ * pi's own configuration, and it carries no effort of its own. An agent that
+ * lists nothing, which is what an unauthenticated pi does, leaves the
+ * descriptor's models standing.
+ */
+function modelsFrom(provider: ProviderDescriptor, listing: PiListing): ModelInfo[] {
+  const models: ModelInfo[] = [];
+  const seen = new Set<string>();
+  const own = provider.models.find((model) => model.id === AGENT_OWN_MODEL);
+  if (own !== undefined) {
+    models.push({ id: AGENT_OWN_MODEL, name: own.name, default: false });
+    seen.add(AGENT_OWN_MODEL);
+  }
+  for (const entry of listing.models) {
+    const id = entry.id ?? '';
+    const providerId = entry.provider ?? '';
+    if (id.length === 0 || providerId.length === 0) continue;
+    const full = `${providerId}/${id}`;
+    if (seen.has(full)) continue;
+    seen.add(full);
+    const effort = effortOf(entry, listing.thinkingLevel);
+    models.push({
+      id: full,
+      name: `${providerLabel(providerId)} / ${entry.name ?? id}`,
+      default: full === listing.current,
+      ...(effort === null ? {} : { effort }),
+    });
+  }
+  return models.length === (own === undefined ? 0 : 1) ? provider.models : models;
+}
+
+/** The `data` block of a `response`, or an empty record when there is none. */
+function dataOf(answer: Record<string, unknown>): Record<string, unknown> {
+  const data = answer['data'];
+  return data === null || typeof data !== 'object' ? {} : (data as Record<string, unknown>);
+}
+
+/**
+ * One short-lived `pi --mode rpc --no-session`: `get_state` for the model and the
+ * level the session is on, `get_available_models` for the list, and
+ * `get_available_thinking_levels` for the current model's own scale, which is
+ * what `supportedLevels` is checked against. `--no-session` because a probe must
+ * leave no transcript anywhere. The child goes through the registry that traced
+ * it on every path; nothing of this process is kept.
+ */
+async function readModels(ctx: ProbeContext): Promise<ModelInfo[]> {
+  const profile = profileFor(ctx.provider);
+  const executable = profile === undefined ? null : resolveExecutable(profile);
+  if (executable === null) {
+    throw unavailable(`no ${ctx.provider.id} executable on this machine`, { providerId: ctx.provider.id });
+  }
+
+  let lastStderr = '';
+  const child = ctx.spawnChild(executable, [...(profile?.launch?.args ?? []), '--no-session'], {
+    cwd: ctx.cwd,
+    env: agentEnv(ctx.accountEnv),
+  });
+  child.stderr.setEncoding('utf8');
+  child.stderr.on('data', (chunk: string) => {
+    for (const line of chunk.split(/\r?\n/)) {
+      const text = line.trim();
+      if (text.length > 0) lastStderr = text.slice(0, STDERR_MAX);
+    }
+  });
+
+  const say = (head: string): string => (lastStderr.length === 0 ? head : `${head}: ${lastStderr}`);
+  const detail = { providerId: ctx.provider.id, accountId: ctx.accountId };
+  let timer: Timer | null = null;
+  const peer = new PiPeer(child, {
+    // A probe runs no turn: pi has nothing to stream and nothing to ask.
+    event: () => undefined,
+    log: (level, message) => {
+      ctx.log(level, message);
+    },
+  });
+
+  try {
+    const died = new Promise<never>((_resolve, reject) => {
+      child.once('exit', (code) => {
+        reject(unavailable(say(`the ${ctx.provider.id} agent exited with code ${code ?? 'unknown'}`), detail));
+      });
+      child.once('error', (error) => {
+        reject(unavailable(say(`the ${ctx.provider.id} agent did not start: ${messageOf(error)}`), detail));
+      });
+    });
+    const expired = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => {
+        reject(
+          unavailable(
+            say(`the ${ctx.provider.id} agent did not list its models in ${PROBE_TIMEOUT_MS / 1000} s`),
+            detail,
+          ),
+        );
+      }, PROBE_TIMEOUT_MS);
+      timer.unref?.();
+    });
+
+    const read = (async (): Promise<PiListing> => {
+      const state = dataOf(await peer.command('get_state'));
+      const listed = dataOf(await peer.command('get_available_models'));
+      const levels = dataOf(await peer.command('get_available_thinking_levels'));
+      const current = (state['model'] ?? {}) as PiModel;
+      const currentId =
+        typeof current.id === 'string' && typeof current.provider === 'string'
+          ? `${current.provider}/${current.id}`
+          : '';
+      return {
+        models: Array.isArray(listed['models']) ? (listed['models'] as PiModel[]) : [],
+        current: currentId,
+        thinkingLevel: textOf(state['thinkingLevel']),
+        sessionLevels: Array.isArray(levels['levels']) ? (levels['levels'] as string[]) : [],
+      };
+    })();
+
+    const listing = await Promise.race([read, died, expired]);
+    checkLevels(ctx, listing);
+    return modelsFrom(ctx.provider, listing);
+  } finally {
+    if (timer !== null) clearTimeout(timer);
+    peer.fail('the pi probe is over');
+    try {
+      child.stdin.end();
+    } catch {
+      // the pipe is already gone
+    }
+    ctx.killTree();
+  }
+}
+
+/**
+ * The one place pi answers a scale itself is the model the session is on, so
+ * that answer is what says whether `supportedLevels` still matches pi's rule. A
+ * mismatch means pi changed it: one warning naming both, never a silent list of
+ * levels the agent would refuse.
+ */
+function checkLevels(ctx: ProbeContext, listing: PiListing): void {
+  if (listing.sessionLevels.length === 0 || listing.current === '') return;
+  const current = listing.models.find((model) => `${model.provider ?? ''}/${model.id ?? ''}` === listing.current);
+  if (current === undefined) return;
+  const computed = supportedLevels(current).join(',');
+  const answered = listing.sessionLevels.join(',');
+  if (computed === answered) return;
+  ctx.log(
+    'warn',
+    `pi probe: the levels of ${listing.current} read as ${computed} but the agent answered ${answered}`,
+  );
+}
+
+interface ProbeEntry {
+  providerId: ProviderId;
+  accountId: AccountId;
+  /** The one process in flight for this key, so two callers share it. */
+  running: Promise<ProbeResult> | null;
+  result: ProbeResult | null;
+}
+
 /** One `pi --mode rpc` process per thread, kept between turns like the Codex one. */
 export function createPiDriver(): Driver {
   const sessions = new Map<ThreadId, PiSession>();
+  const probes = new Map<string, ProbeEntry>();
+
+  const keyOf = (providerId: ProviderId, accountId: AccountId): string => `${providerId}::${accountId}`;
 
   return {
     protocol: 'pi',
+
+    async probe(ctx: ProbeContext): Promise<ProbeResult> {
+      const key = keyOf(ctx.provider.id, ctx.accountId);
+      const entry: ProbeEntry = probes.get(key) ?? {
+        providerId: ctx.provider.id,
+        accountId: ctx.accountId,
+        running: null,
+        result: null,
+      };
+      probes.set(key, entry);
+      if (entry.result !== null) return entry.result;
+      if (entry.running !== null) return entry.running;
+
+      const running = readModels(ctx).then((models) => ({ models, probedAt: Date.now() }));
+      entry.running = running;
+      try {
+        const result = await running;
+        // A `providers.reload` during the probe dropped the entry: nothing is
+        // cached behind its back, the next caller probes again.
+        if (probes.get(key) === entry) entry.result = result;
+        return result;
+      } catch (error) {
+        if (probes.get(key) === entry) probes.delete(key);
+        throw error;
+      } finally {
+        entry.running = null;
+      }
+    },
+
+    probedModels(providerId: ProviderId, accountId: AccountId): ModelInfo[] | null {
+      return probes.get(keyOf(providerId, accountId))?.result?.models ?? null;
+    },
+
+    forgetProbes(filter: ProbeFilter = {}): void {
+      for (const [key, entry] of [...probes]) {
+        if (filter.providerId !== undefined && filter.providerId !== entry.providerId) continue;
+        if (filter.accountId !== undefined && filter.accountId !== entry.accountId) continue;
+        probes.delete(key);
+      }
+    },
 
     startTurn(ctx: TurnContext): TurnHandle {
       const threadId = ctx.thread.id;

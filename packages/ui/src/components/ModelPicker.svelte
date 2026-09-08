@@ -59,7 +59,8 @@
   // core reads it from one short-lived agent process the first time the picker
   // shows that instance, and the answer stands for the rest of the session.
   $effect(() => {
-    if (!open || !shown || (shown.protocol !== 'acp' && shown.protocol !== 'codex-appserver')) return;
+    if (!open || !shown || (shown.protocol !== 'acp' && shown.protocol !== 'codex-appserver' && shown.protocol !== 'pi'))
+      return;
     const accountId = shownAccountId;
     if (accountId === null) return;
     void store.probeModels(shown.id, accountId);

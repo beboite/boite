@@ -133,6 +133,56 @@ function zeroUsage(): Record<string, unknown> {
   };
 }
 
+// ---------------------------------------------------------------------------
+// What the probe asks: the models and the thinking levels
+// ---------------------------------------------------------------------------
+
+/**
+ * Three models across two providers, shaped like `Model` of
+ * `@earendil-works/pi-ai`: one that maps the two opt-in levels, one that maps
+ * neither, and one without reasoning at all, whose only level is `off`.
+ */
+const MODELS = [
+  {
+    id: 'smart',
+    name: 'Fake Smart',
+    api: 'fake',
+    provider: 'fake-a',
+    baseUrl: 'https://example.invalid',
+    reasoning: true,
+    input: ['text'],
+    contextWindow: 200000,
+    maxTokens: 64000,
+    thinkingLevelMap: { xhigh: 'xhigh', max: 'max' },
+  },
+  {
+    id: 'quick',
+    name: 'Fake Quick',
+    api: 'fake',
+    provider: 'fake-a',
+    baseUrl: 'https://example.invalid',
+    reasoning: true,
+    input: ['text'],
+    contextWindow: 200000,
+    maxTokens: 64000,
+  },
+  {
+    id: 'plain',
+    name: 'Fake Plain',
+    api: 'fake',
+    provider: 'fake-b',
+    baseUrl: 'https://example.invalid',
+    reasoning: false,
+    input: ['text'],
+    contextWindow: 32000,
+    maxTokens: 8000,
+  },
+];
+
+/** The model the session is on, which is the one pi reports as current. */
+const CURRENT = MODELS[0];
+const CURRENT_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
+
 function assistantMessage(stopReason: string, usage: Record<string, unknown>): Record<string, unknown> {
   return {
     role: 'assistant',
@@ -249,6 +299,39 @@ function handle(message: Record<string, unknown>): void {
       setTimeout(() => {
         void runPrompt(textOf(message['message']));
       }, 0);
+      return;
+    }
+    case 'get_state': {
+      send({
+        id,
+        type: 'response',
+        command: 'get_state',
+        success: true,
+        data: {
+          model: CURRENT,
+          thinkingLevel: 'medium',
+          isStreaming: false,
+          isCompacting: false,
+          sessionId,
+          messageCount: 0,
+          pendingMessageCount: 0,
+        },
+      });
+      return;
+    }
+    case 'get_available_models': {
+      send({ id, type: 'response', command: 'get_available_models', success: true, data: { models: MODELS } });
+      return;
+    }
+    case 'get_available_thinking_levels': {
+      // Real pi answers for the model the session is on and for no other.
+      send({
+        id,
+        type: 'response',
+        command: 'get_available_thinking_levels',
+        success: true,
+        data: { levels: CURRENT_LEVELS },
+      });
       return;
     }
     case 'abort': {

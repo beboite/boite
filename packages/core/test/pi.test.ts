@@ -49,6 +49,13 @@ function argvLines(): string[] {
     .filter((line) => line.startsWith('argv '));
 }
 
+/** How many times the fake was sent one command, so a cached probe is provable. */
+function countLines(line: string): number {
+  return fakeLog()
+    .split('\n')
+    .filter((entry) => entry === line).length;
+}
+
 /** A user descriptor for the fake agent: `protocol: "pi"`, launched as `bun <fixture>`. */
 function writeDescriptor(dataDir: string): void {
   const dir = join(dataDir, 'providers');
@@ -71,10 +78,12 @@ function writeDescriptor(dataDir: string): void {
       profiles: { windows: profile, linux: profile, macos: profile },
       auth: { kind: 'none' },
       models: [
+        // Like the shipped descriptor: "the agent keeps its own", plus one entry
+        // written down, so a thread can pick a model before anything is probed.
+        { id: 'default', name: 'pi default', default: true },
         {
           id: 'anthropic/claude-sonnet-5',
           name: 'Fake pi model',
-          default: true,
           effort: {
             levels: [
               { id: 'low', label: 'Low' },
@@ -338,6 +347,107 @@ describe('pi driver', () => {
     expect(lines[1]).toBe(lines[0]);
     expect(lines[0]).toContain(`sessionId=${sessionId}`);
     expect((await client.call('threads.get', { threadId })).sessionId).toBe(sessionId);
+  });
+
+  test('a probe lists the models pi offers, each with the levels that model supports', async () => {
+    const client = await startCore();
+    const { accountId } = await piAccount(client);
+
+    const probed = client.next(
+      'providers.probed',
+      (event) => event.providerId === 'pi-fake' && event.accountId === accountId,
+      20000,
+    );
+    const result = await client.call('providers.probe', { providerId: 'pi-fake', accountId });
+
+    // The id is what `--model` takes, and the name carries the provider.
+    expect(result.models.map((model) => model.id)).toEqual([
+      'default',
+      'fake-a/smart',
+      'fake-a/quick',
+      'fake-b/plain',
+    ]);
+    expect(result.models[0]).toEqual({ id: 'default', name: 'pi default', default: false });
+    expect(result.models[1]?.name).toBe('Fake-a / Fake Smart');
+    // pi reports one model as current; that is the one the picker opens on.
+    expect(result.models.find((model) => model.default === true)?.id).toBe('fake-a/smart');
+
+    // The two opt-in levels are there only for the model that maps them, and the
+    // session's own level is the default of every scale that carries it.
+    expect(result.models[1]?.effort).toEqual({
+      levels: [
+        { id: 'off', label: 'Off' },
+        { id: 'minimal', label: 'Minimal' },
+        { id: 'low', label: 'Low' },
+        { id: 'medium', label: 'Medium' },
+        { id: 'high', label: 'High' },
+        { id: 'xhigh', label: 'Extra high' },
+        { id: 'max', label: 'Max' },
+      ],
+      default: 'medium',
+    });
+    expect(result.models[2]?.effort?.levels.map((level) => level.id)).toEqual([
+      'off',
+      'minimal',
+      'low',
+      'medium',
+      'high',
+    ]);
+    // A model without reasoning has `off` and nothing else, which is no choice.
+    expect(result.models[3]?.effort).toBeUndefined();
+    expect(result.probedAt).toBeGreaterThan(0);
+
+    // A second client learns the same list from the event.
+    expect((await probed).models.map((model) => model.id)).toEqual([
+      'default',
+      'fake-a/smart',
+      'fake-a/quick',
+      'fake-b/plain',
+    ]);
+
+    // The answer is cached, and the agent process is gone: a probe leaves nothing.
+    await client.call('providers.probe', { providerId: 'pi-fake', accountId });
+    expect(countLines('get_available_models')).toBe(1);
+    await waitFor(() => harness?.core.procs.liveCount(`probe:pi-fake:${accountId}`) === 0);
+    const trace = await client.call('trace.get', { threadId: `probe:pi-fake:${accountId}` });
+    expect(trace.length).toBeGreaterThan(0);
+    expect(trace.every((row) => row.exitedAt !== null)).toBe(true);
+  });
+
+  test('a thread on a probed model launches pi with that model and its effort', async () => {
+    const client = await startCore();
+    const { projectId, accountId } = await piAccount(client);
+
+    let failure = 'none';
+    try {
+      await client.call('threads.create', {
+        projectId,
+        providerId: 'pi-fake',
+        accountId,
+        title: 'too early',
+        model: 'fake-a/quick',
+      });
+    } catch (error) {
+      failure = (error as Error).message;
+    }
+    expect(failure).toBe('the agent has not listed this model: open the model picker so Boite reads its models first');
+
+    await client.call('providers.probe', { providerId: 'pi-fake', accountId });
+    const thread = await client.call('threads.create', {
+      projectId,
+      providerId: 'pi-fake',
+      accountId,
+      title: 'after the probe',
+      model: 'fake-a/quick',
+      effort: 'high',
+    });
+    expect(thread.model).toBe('fake-a/quick');
+    expect(thread.effort).toBe('high');
+
+    await client.call('threads.subscribe', { threadId: thread.id });
+    await runTurn(client, thread.id, 'first');
+    // The probe's own process wrote an argv line too; the turn's is the last one.
+    expect(argvLines()[argvLines().length - 1]).toContain('model=fake-a/quick:high');
   });
 
   function countProcesses(
