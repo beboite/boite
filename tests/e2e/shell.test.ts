@@ -65,11 +65,10 @@ function newestCoreSource(): SourceFile | null {
  * `packages/core/dist/main.js`, then the sources. The two middle ones are built
  * artefacts, and a stale one answers this suite's UI with an old contract: the
  * turn tests then time out on the picker with nothing saying why (2026-09-08).
- * The sources cannot go stale, and a `BOITE_CORE_COMMAND` points wherever its
- * author meant, so neither is checked.
+ * The sources cannot go stale, so they are not checked; `BOITE_CORE_COMMAND`
+ * is stripped from the shell's environment below, so it never counts here.
  */
 function staleCoreReason(): string | null {
-  if ((process.env.BOITE_CORE_COMMAND ?? '') !== '') return null;
   const sidecar = join(dirname(EXE), `boite-core${CORE_SUFFIX}`);
   const built = existsSync(sidecar) ? sidecar : join(ROOT, 'packages', 'core', 'dist', 'main.js');
   if (!existsSync(built)) return null;
