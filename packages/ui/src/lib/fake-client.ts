@@ -560,22 +560,47 @@ export class FakeClient implements ObservableClient {
       threadId: thread.id,
       turnId: turn.id,
       role: 'assistant',
-      parts: [{ type: 'text', text: '' }],
+      parts: [{ type: 'thinking', text: '' }],
       state: 'streaming',
       createdAt: this.#now()
     };
     thread.messages.push(message);
     this.#emitToThread(thread.id, 'message.started', structuredClone(message));
 
-    for (const piece of chunkText(prompt, 5)) {
-      if (record.cancelled) break;
+    // The reasoning first, in two deltas, the way a provider streams a thinking block.
+    const reasoning = `thinking about: ${prompt}`;
+    const cut = Math.ceil(reasoning.length / 2);
+    for (const piece of [reasoning.slice(0, cut), reasoning.slice(cut)]) {
+      if (record.cancelled || piece.length === 0) break;
       await this.#pause();
       const part = message.parts[0];
-      if (part && part.type === 'text') part.text += piece;
+      if (part && part.type === 'thinking') part.text += piece;
       this.#emitToThread(thread.id, 'message.delta', {
         threadId: thread.id,
         messageId: message.id,
         partIndex: 0,
+        text: piece
+      });
+    }
+
+    const textIndex = message.parts.length;
+    message.parts.push({ type: 'text', text: '' });
+    this.#emitToThread(thread.id, 'message.part', {
+      threadId: thread.id,
+      messageId: message.id,
+      partIndex: textIndex,
+      part: { type: 'text', text: '' }
+    });
+
+    for (const piece of chunkText(prompt, 5)) {
+      if (record.cancelled) break;
+      await this.#pause();
+      const part = message.parts[textIndex];
+      if (part && part.type === 'text') part.text += piece;
+      this.#emitToThread(thread.id, 'message.delta', {
+        threadId: thread.id,
+        messageId: message.id,
+        partIndex: textIndex,
         text: piece
       });
     }
@@ -1072,6 +1097,10 @@ export class FakeClient implements ObservableClient {
           turnId: 'turn-seed-1',
           role: 'assistant',
           parts: [
+            {
+              type: 'thinking',
+              text: 'The table wants a row per process, so the question is what procs already reports and what the panel would have to ask for on top. Start with trace.get.'
+            },
             {
               type: 'text',
               text: 'It needs trace.get for the table and the TraceCapability note above it. Let me look at what procs already reports.'

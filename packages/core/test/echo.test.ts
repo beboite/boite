@@ -57,6 +57,31 @@ describe('echo driver', () => {
     expect(thread.messages[1]?.parts).toEqual([{ type: 'text', text: prompt }]);
   });
 
+  test('a think directive streams a thinking part in two deltas before the text', async () => {
+    const client = await harness.connect();
+    const { threadId } = await echoThread(harness, client);
+    await client.call('threads.subscribe', { threadId });
+
+    const deltas: { partIndex: number; text: string }[] = [];
+    client.on('message.delta', (event) => {
+      if (event.threadId === threadId) deltas.push({ partIndex: event.partIndex, text: event.text });
+    });
+
+    const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 10000);
+    await client.call('turns.start', { threadId, prompt: '[think]what the echo says' });
+    expect((await finished).status).toBe('done');
+
+    const thread = await client.call('threads.get', { threadId });
+    expect(thread.messages[1]?.parts).toEqual([
+      { type: 'thinking', text: 'thinking about: what the echo says' },
+      { type: 'text', text: 'what the echo says' },
+    ]);
+    // Two deltas on the thinking part, whatever the journal coalesced after them.
+    expect(deltas.filter((delta) => delta.partIndex === 0).map((delta) => delta.text).join('')).toBe(
+      'thinking about: what the echo says',
+    );
+  });
+
   test('a tool directive produces a running then a done tool part', async () => {
     const client = await harness.connect();
     const { threadId } = await echoThread(harness, client);

@@ -277,6 +277,54 @@ describe('claude driver', () => {
     expect(tools[0]).toMatchObject({ toolId: 'toolu_1', name: 'Bash', status: 'done', output: 'hi' });
   });
 
+  test('a thinking block streams into its own part, ahead of the text, and is not repeated', async () => {
+    const client = await harness.connect();
+    const threadId = await claudeThread(client);
+
+    scripted((fake) => {
+      fake.emit(init('sess-think'));
+      fake.emit(streamEvent('sess-think', { type: 'message_start', message: { id: 'msg_1' } }));
+      fake.emit(
+        streamEvent('sess-think', {
+          type: 'content_block_start',
+          index: 0,
+          content_block: { type: 'thinking', thinking: '' },
+        }),
+      );
+      fake.emit(
+        streamEvent('sess-think', { type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: 'let me ' } }),
+      );
+      fake.emit(
+        streamEvent('sess-think', { type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: 'check' } }),
+      );
+      fake.emit(streamEvent('sess-think', { type: 'content_block_stop', index: 0 }));
+      fake.emit(
+        streamEvent('sess-think', { type: 'content_block_start', index: 1, content_block: { type: 'text', text: '' } }),
+      );
+      fake.emit(streamEvent('sess-think', { type: 'content_block_delta', index: 1, delta: { type: 'text_delta', text: 'pong' } }));
+      fake.emit(streamEvent('sess-think', { type: 'content_block_stop', index: 1 }));
+      // The assistant frame repeats both blocks; neither may be written twice.
+      fake.emit(
+        assistant('sess-think', [
+          { type: 'thinking', thinking: 'let me check', signature: 'sig' },
+          { type: 'text', text: 'pong' },
+        ]),
+      );
+      fake.emit(success('sess-think'));
+      fake.end();
+    });
+
+    expect(await runTurn(client, threadId, 'ping')).toBe('done');
+
+    const thread = await client.call('threads.get', { threadId });
+    const assistants = thread.messages.filter((message) => message.role === 'assistant');
+    expect(assistants).toHaveLength(1);
+    expect(assistants[0]?.parts).toEqual([
+      { type: 'thinking', text: 'let me check' },
+      { type: 'text', text: 'pong' },
+    ]);
+  });
+
   test('canUseTool routes to the permission gate and answers the CLI', async () => {
     const client = await harness.connect();
     const threadId = await claudeThread(client);

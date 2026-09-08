@@ -269,6 +269,44 @@ test('the trace panel shows the I/O a process moved, and none for a record that 
   expect(query('[data-testid=trace-row][data-pid="21460"]').textContent).toContain('none');
 });
 
+const SEEDED_THINKING = 'The table wants a row per process';
+
+test('a thinking part is folded, opens on its toggle, and a new turn shows it before the answer', async () => {
+  await mountOnFake();
+  await waitFor(() => document.querySelector('[data-thread-id="t-trace"]') !== null);
+  query<HTMLButtonElement>('[data-thread-id="t-trace"]').click();
+  await waitFor(() => store.openThread?.id === 't-trace');
+  await waitFor(() => document.querySelector('[data-testid=thinking-part]') !== null);
+
+  const toggle = query<HTMLButtonElement>('[data-testid=thinking-toggle]');
+  expect(toggle.getAttribute('aria-expanded')).toBe('false');
+  expect(toggle.textContent).toContain('Thinking');
+  expect(document.querySelector('[data-testid=thinking-text]')).toBeNull();
+
+  toggle.click();
+  await waitFor(() => document.querySelector('[data-testid=thinking-text]') !== null);
+  expect(query('[data-testid=thinking-text]').textContent).toContain(SEEDED_THINKING);
+  expect(query<HTMLButtonElement>('[data-testid=thinking-toggle]').getAttribute('aria-expanded')).toBe('true');
+
+  // A new turn on the same thread: the reasoning part comes before the answer.
+  const before = store.openThread?.messages.length ?? 0;
+  const input = query<HTMLTextAreaElement>('[data-testid=composer-input]');
+  input.value = 'what the trace panel needs';
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  await waitFor(() => !query<HTMLButtonElement>('[data-testid=composer-send]').disabled);
+  query<HTMLButtonElement>('[data-testid=composer-send]').click();
+
+  await waitFor(() => (store.openThread?.messages.length ?? 0) === before + 2);
+  const answer = store.openThread?.messages.at(-1);
+  await waitFor(() => answer?.state === 'complete');
+  expect(answer?.parts[0]).toEqual({
+    type: 'thinking',
+    text: 'thinking about: what the trace panel needs'
+  });
+  expect(answer?.parts[1]).toEqual({ type: 'text', text: 'what the trace panel needs' });
+  expect(document.querySelectorAll('[data-testid=thinking-part]').length).toBe(2);
+});
+
 /** Opens the Accounts page on the fake and returns the login link it shows. */
 async function loginLink(): Promise<HTMLAnchorElement> {
   await mountOnFake();

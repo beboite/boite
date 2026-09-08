@@ -99,11 +99,18 @@ const app = agent({ name: 'acp-fake' })
     const say = (chunk: string): Promise<void> =>
       send({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: chunk } });
 
+    const directives = directivesOf(text);
+    // A real agent reasons before it answers, so the thought chunks go first.
+    for (const directive of directives) {
+      if (directive !== 'thought') continue;
+      await send({ sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: 'thinking about it' } });
+    }
+
     const plain = plainOf(text);
     for (const chunk of chunksOf(plain)) await say(chunk);
 
     let usage: Usage | null = null;
-    for (const directive of directivesOf(text)) {
+    for (const directive of directives) {
       switch (directive) {
         case 'tool':
           await send({
@@ -136,10 +143,7 @@ const app = agent({ name: 'acp-fake' })
           break;
         }
         case 'thought':
-          await send({
-            sessionUpdate: 'agent_thought_chunk',
-            content: { type: 'text', text: 'thinking about it' },
-          });
+          // Already sent above, before the answer.
           break;
         case 'usage':
           await send({ sessionUpdate: 'usage_update', used: 12, size: 200, cost: { amount: 0.0042, currency: 'USD' } });

@@ -5,6 +5,7 @@
   import type { Store } from '../lib/store.svelte';
   import PermissionCard from './PermissionCard.svelte';
   import Prose from './Prose.svelte';
+  import ThinkingPart from './ThinkingPart.svelte';
   import ToolCard from './ToolCard.svelte';
 
   let {
@@ -22,7 +23,7 @@
   function growth(list: Message[]): number {
     const last = list.at(-1);
     const text = (last?.parts ?? []).reduce(
-      (total, part) => total + (part.type === 'text' ? part.text.length : 1),
+      (total, part) => total + (part.type === 'text' || part.type === 'thinking' ? part.text.length : 1),
       0
     );
     return list.length + text;
@@ -68,6 +69,12 @@
     }
     return -1;
   }
+
+  /** The pulse goes on the reasoning only while it is the last thing written. */
+  function lastThinkingIndex(message: Message): number {
+    const last = message.parts.length - 1;
+    return message.parts[last]?.type === 'thinking' ? last : -1;
+  }
 </script>
 
 <div class="timeline-wrap">
@@ -85,12 +92,15 @@
             </div>
           {:else}
             {@const caretAt = message.state === 'streaming' ? lastTextIndex(message) : -1}
+            {@const thinkingAt = message.state === 'streaming' ? lastThinkingIndex(message) : -1}
             <div class="parts">
               {#each message.parts as part, index (index)}
                 {#if part.type === 'text'}
                   {#if part.text.length > 0 || index === caretAt}
                     <Prose text={part.text} live={index === caretAt} />
                   {/if}
+                {:else if part.type === 'thinking'}
+                  <ThinkingPart text={part.text} live={index === thinkingAt} />
                 {:else if part.type === 'tool'}
                   <ToolCard name={part.name} input={part.input} output={part.output} status={part.status} />
                 {:else if part.type === 'permission'}
@@ -107,7 +117,7 @@
                   </div>
                 {/if}
               {/each}
-              {#if message.state === 'streaming' && caretAt === -1}
+              {#if message.state === 'streaming' && caretAt === -1 && thinkingAt === -1}
                 <span class="caret block" aria-label={strings.chat.streaming}></span>
               {/if}
             </div>

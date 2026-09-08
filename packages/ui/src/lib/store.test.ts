@@ -66,7 +66,11 @@ describe('Store', () => {
     const assistant = messages.at(-1);
     expect(assistant?.role).toBe('assistant');
     expect(assistant?.state).toBe('complete');
-    expect(assistant?.parts).toEqual([{ type: 'text', text: 'read the trace note' }]);
+    // The fake reasons before it answers, like a provider that streams thinking.
+    expect(assistant?.parts).toEqual([
+      { type: 'thinking', text: 'thinking about: read the trace note' },
+      { type: 'text', text: 'read the trace note' }
+    ]);
   });
 
   test('only the open thread streams, and the previous one is dropped', async () => {
@@ -99,10 +103,10 @@ describe('Store', () => {
     await client.settled();
 
     const parts = store.openThread?.messages.at(-1)?.parts ?? [];
-    expect(parts.map((p) => p.type)).toEqual(['text', 'permission', 'tool']);
-    const permission = parts[1];
+    expect(parts.map((p) => p.type)).toEqual(['thinking', 'text', 'permission', 'tool']);
+    const permission = parts[2];
     expect(permission?.type === 'permission' && permission.decision).toBe('allow');
-    const tool = parts[2];
+    const tool = parts[3];
     expect(tool?.type === 'tool' && tool.status).toBe('done');
   });
 

@@ -59,6 +59,7 @@ class AcpTurn {
   private messageId: MessageId | null = null;
   private nextIndex = 0;
   private textIndex: number | null = null;
+  private thinkingIndex: number | null = null;
   private readonly tools = new Map<string, ToolEntry>();
 
   private status: TurnResult['status'] = 'done';
@@ -146,6 +147,7 @@ class AcpTurn {
 
   takeIndex(): number {
     this.textIndex = null;
+    this.thinkingIndex = null;
     const index = this.nextIndex;
     this.nextIndex += 1;
     return index;
@@ -157,9 +159,24 @@ class AcpTurn {
       const index = this.nextIndex;
       this.nextIndex += 1;
       this.textIndex = index;
+      // A text chunk after a thought chunk answers in its own part.
+      this.thinkingIndex = null;
       this.part(index, { type: 'text', text: '' });
     }
     this.ctx.emit.delta(this.message(), this.textIndex, text);
+  }
+
+  /** `agent_thought_chunk`, the reasoning the UI folds. Its own part, like the text. */
+  writeThinking(text: string): void {
+    if (text.length === 0) return;
+    if (this.thinkingIndex === null) {
+      const index = this.nextIndex;
+      this.nextIndex += 1;
+      this.thinkingIndex = index;
+      this.textIndex = null;
+      this.part(index, { type: 'thinking', text: '' });
+    }
+    this.ctx.emit.delta(this.message(), this.thinkingIndex, text);
   }
 
   /** `tool_call` opens the part, `tool_call_update` replaces the same one by id. */
@@ -519,6 +536,9 @@ class AcpSession {
       case 'agent_message_chunk':
         if (update.content.type === 'text') turn.writeText(update.content.text);
         break;
+      case 'agent_thought_chunk':
+        if (update.content.type === 'text') turn.writeThinking(update.content.text);
+        break;
       case 'tool_call':
         turn.upsertTool(update.toolCallId, update.name ?? update.title, update.rawInput, update.rawOutput, update.status);
         break;
@@ -535,10 +555,10 @@ class AcpSession {
         if (update.cost != null && update.cost.currency === 'USD') turn.costUsdEquivalent = update.cost.amount;
         break;
       default:
-        // agent_thought_chunk, user_message_chunk, plan, plan_update,
-        // plan_removed, available_commands_update, current_mode_update,
-        // config_option_update, session_info_update and the compaction updates
-        // have no MessagePart in the contract, so they are dropped.
+        // user_message_chunk, plan, plan_update, plan_removed,
+        // available_commands_update, current_mode_update, config_option_update,
+        // session_info_update and the compaction updates have no MessagePart in
+        // the contract, so they are dropped.
         break;
     }
   }

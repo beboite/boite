@@ -623,8 +623,10 @@ export class Journal {
     if (message === null) return;
     const parts = padParts(message.parts, partIndex);
     const part = parts[partIndex];
-    if (part !== undefined && part.type === 'text') parts[partIndex] = { type: 'text', text: part.text + text };
-    else parts[partIndex] = { type: 'text', text };
+    // A delta appends to whatever kind of text part sits there: text or thinking.
+    if (part !== undefined && (part.type === 'text' || part.type === 'thinking')) {
+      parts[partIndex] = { type: part.type, text: part.text + text };
+    } else parts[partIndex] = { type: 'text', text };
     this.db.query('UPDATE messages SET parts = ? WHERE id = ?').run(JSON.stringify(parts), messageId);
   }
 }

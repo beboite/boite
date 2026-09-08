@@ -115,6 +115,9 @@ export const strings = {
       error: 'error',
       denied: 'denied'
     },
+    thinking: 'Thinking',
+    thinkingShow: 'Show the reasoning',
+    thinkingHide: 'Hide the reasoning',
     permissionHeading: 'Wants to use',
     allow: 'Allow',
     deny: 'Deny',

@@ -129,6 +129,21 @@ describe('acp driver', () => {
     expect(thread.messages[1]?.parts).toEqual([{ type: 'text', text: prompt }]);
   });
 
+  test('a thought chunk becomes a thinking part ahead of the answer', async () => {
+    const client = await startCore();
+    const threadId = await acpThread(client);
+
+    const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 20000);
+    await client.call('turns.start', { threadId, prompt: '[thought]the answer' });
+    expect((await finished).status).toBe('done');
+
+    const thread = await client.call('threads.get', { threadId });
+    expect(thread.messages[1]?.parts).toEqual([
+      { type: 'thinking', text: 'thinking about it' },
+      { type: 'text', text: 'the answer' },
+    ]);
+  });
+
   test('a tool call arrives running, then done with its output', async () => {
     const client = await startCore();
     const threadId = await acpThread(client);

@@ -232,6 +232,8 @@ export type ToolStatus = 'running' | 'done' | 'error' | 'denied';
 
 export type MessagePart =
   | { type: 'text'; text: string }
+  /** The model's reasoning as the provider streams it, folded in the UI. */
+  | { type: 'thinking'; text: string }
   | {
       type: 'tool';
       toolId: string;

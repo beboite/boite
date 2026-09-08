@@ -42,6 +42,7 @@ export interface ClaudeDeps {
 interface ContentBlock {
   type: string;
   text?: string;
+  thinking?: string;
   id?: string;
   name?: string;
   input?: unknown;
@@ -55,7 +56,7 @@ interface StreamEvent {
   index?: number;
   message?: { id?: string };
   content_block?: ContentBlock;
-  delta?: { type?: string; text?: string };
+  delta?: { type?: string; text?: string; thinking?: string };
 }
 
 interface ToolEntry {
@@ -119,10 +120,13 @@ class ClaudeTurn {
   private messageId: MessageId | null = null;
   private nextIndex = 0;
   private textIndex: number | null = null;
+  private thinkingIndex: number | null = null;
   private apiMessageId = '';
   private readonly tools = new Map<string, ToolEntry>();
   private readonly textBlocks = new Map<number, number>();
+  private readonly thinkingBlocks = new Map<number, number>();
   private readonly streamedText = new Map<string, string>();
+  private readonly streamedThinking = new Map<string, string>();
 
   private sessionId: string | null;
   private usage: Usage | null = null;
@@ -193,17 +197,32 @@ class ClaudeTurn {
       case 'message_start':
         this.apiMessageId = event.message?.id ?? '';
         this.textBlocks.clear();
+        this.thinkingBlocks.clear();
         break;
       case 'content_block_start': {
         const block = event.content_block;
         if (block === undefined) break;
         if (block.type === 'text' && event.index !== undefined) this.textBlocks.set(event.index, this.openText());
-        else if (block.type === 'tool_use' && typeof block.id === 'string') {
+        else if (block.type === 'thinking' && event.index !== undefined) {
+          this.thinkingBlocks.set(event.index, this.openThinking());
+        } else if (block.type === 'tool_use' && typeof block.id === 'string') {
           this.upsertTool(block.id, block.name ?? 'tool', block.input ?? {});
         }
+        // `redacted_thinking` carries no readable text: nothing to show.
         break;
       }
       case 'content_block_delta': {
+        // `signature_delta` signs the thinking block; it is not text.
+        if (event.delta?.type === 'thinking_delta') {
+          const thinking = event.delta.thinking ?? '';
+          if (thinking.length === 0) break;
+          const seen = event.index === undefined ? undefined : this.thinkingBlocks.get(event.index);
+          const at = seen ?? this.openThinking();
+          if (event.index !== undefined) this.thinkingBlocks.set(event.index, at);
+          this.ctx.emit.delta(this.message(), at, thinking);
+          this.streamedThinking.set(this.apiMessageId, (this.streamedThinking.get(this.apiMessageId) ?? '') + thinking);
+          break;
+        }
         if (event.delta?.type !== 'text_delta') break;
         const text = event.delta.text ?? '';
         if (text.length === 0) break;
@@ -232,6 +251,13 @@ class ClaudeTurn {
         // With includePartialMessages the deltas already carried this block.
         if (text.length === 0 || (this.streamedText.get(apiId) ?? '').includes(text)) continue;
         this.ctx.emit.delta(this.message(), this.openText(), text);
+        continue;
+      }
+      if (block.type === 'thinking') {
+        const thinking = block.thinking ?? '';
+        // Same dedupe as text: the deltas already carried this block.
+        if (thinking.length === 0 || (this.streamedThinking.get(apiId) ?? '').includes(thinking)) continue;
+        this.ctx.emit.delta(this.message(), this.openThinking(), thinking);
         continue;
       }
       if (block.type === 'tool_use' && typeof block.id === 'string') {
@@ -276,8 +302,18 @@ class ClaudeTurn {
     return index;
   }
 
+  /** The reasoning of one block, folded in the UI. Text after it opens its own part. */
+  private openThinking(): number {
+    if (this.thinkingIndex !== null) return this.thinkingIndex;
+    const index = this.takeIndex();
+    this.thinkingIndex = index;
+    this.part(index, { type: 'thinking', text: '' });
+    return index;
+  }
+
   takeIndex(): number {
     this.textIndex = null;
+    this.thinkingIndex = null;
     const index = this.nextIndex;
     this.nextIndex += 1;
     return index;

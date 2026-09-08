@@ -12,10 +12,11 @@ type Segment =
   | { kind: 'sleep'; ms: number }
   | { kind: 'tool' }
   | { kind: 'permission' }
+  | { kind: 'think' }
   | { kind: 'spawn'; command: string }
   | { kind: 'error' };
 
-const DIRECTIVE = /\[(?:sleep:\d+|tool|permission|spawn:[^\]]*|error)\]/g;
+const DIRECTIVE = /\[(?:sleep:\d+|tool|permission|think|spawn:[^\]]*|error)\]/g;
 
 export function parsePrompt(prompt: string): Segment[] {
   const segments: Segment[] = [];
@@ -28,11 +29,18 @@ export function parsePrompt(prompt: string): Segment[] {
     else if (body.startsWith('spawn:')) segments.push({ kind: 'spawn', command: body.slice('spawn:'.length) });
     else if (body === 'tool') segments.push({ kind: 'tool' });
     else if (body === 'permission') segments.push({ kind: 'permission' });
+    else if (body === 'think') segments.push({ kind: 'think' });
     else segments.push({ kind: 'error' });
     last = match.index + match[0].length;
   }
   if (last < prompt.length) segments.push({ kind: 'text', text: prompt.slice(last) });
   return segments;
+}
+
+/** What the fake model claims to reason about: the prompt with its directives cut. */
+export function thinkingFor(prompt: string): string {
+  DIRECTIVE.lastIndex = 0;
+  return `thinking about: ${prompt.replace(DIRECTIVE, '').trim()}`;
 }
 
 function countWords(text: string): number {
@@ -116,6 +124,18 @@ async function run(ctx: TurnContext, state: RunState): Promise<TurnResult> {
     return index;
   };
 
+  /** One thinking part, in two deltas, so a client sees it grow like real reasoning. */
+  const writeThinking = async (text: string): Promise<void> => {
+    const index = takeIndex();
+    ctx.emit.part(messageId, index, { type: 'thinking', text: '' });
+    const cut = Math.ceil(text.length / 2);
+    for (const chunk of [text.slice(0, cut), text.slice(cut)]) {
+      if (state.stopped || chunk.length === 0) return;
+      ctx.emit.delta(messageId, index, chunk);
+      await sleep(CHUNK_DELAY_MS, state);
+    }
+  };
+
   for (const segment of parsePrompt(ctx.prompt)) {
     if (state.stopped) break;
     switch (segment.kind) {
@@ -124,6 +144,9 @@ async function run(ctx: TurnContext, state: RunState): Promise<TurnResult> {
         break;
       case 'sleep':
         await sleep(segment.ms, state);
+        break;
+      case 'think':
+        await writeThinking(thinkingFor(ctx.prompt));
         break;
       case 'tool': {
         const index = takeIndex();

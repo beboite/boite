@@ -319,7 +319,8 @@ export class Store {
       const message = this.#message(threadId, messageId);
       if (!message) return;
       const part = message.parts[partIndex];
-      if (part && part.type === 'text') part.text += text;
+      // A delta appends to whatever kind of text part sits there: text or thinking.
+      if (part && (part.type === 'text' || part.type === 'thinking')) part.text += text;
       else if (!part) message.parts[partIndex] = { type: 'text', text };
     });
 
