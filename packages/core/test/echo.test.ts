@@ -186,6 +186,36 @@ describe('echo driver', () => {
     expect(failure).toBe('the account no login is not logged in');
   });
 
+  test('a model change resets the effort to the new model default, and an unknown level is refused', async () => {
+    const client = await harness.connect();
+    const project = await client.call('projects.add', { path: harness.dataDir, name: 'claude project' });
+    const account = await client.call('accounts.add', { providerId: 'claude', label: 'effort seat' });
+    const thread = await client.call('threads.create', {
+      projectId: project.id,
+      providerId: 'claude',
+      accountId: account.id,
+      effort: 'xhigh',
+    });
+    expect(thread.effort).toBe('xhigh');
+
+    // Only the model moves: the effort goes back to null, the new model's own default.
+    const moved = await client.call('threads.update', { threadId: thread.id, model: 'claude-opus-4-7' });
+    expect(moved.model).toBe('claude-opus-4-7');
+    expect(moved.effort).toBeNull();
+
+    // The model and a level in the same call: the level is checked against the new model.
+    const both = await client.call('threads.update', { threadId: thread.id, model: 'claude-opus-5', effort: 'max' });
+    expect(both.effort).toBe('max');
+
+    let failure = 'none';
+    try {
+      await client.call('threads.update', { threadId: thread.id, model: 'claude-opus-4-7', effort: 'max' });
+    } catch (error) {
+      failure = (error as Error).message;
+    }
+    expect(failure).toBe('the model does not offer this reasoning effort');
+  });
+
   test('a finished turn on an unwatched thread marks it unread until markRead', async () => {
     const client = await harness.connect();
     const { threadId } = await echoThread(harness, client);

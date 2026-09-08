@@ -116,7 +116,11 @@ export class ThreadStore {
     const thread = this.require(params.threadId);
     const next: ThreadSummary = { ...thread };
     if (params.title !== undefined && params.title.length > 0) next.title = params.title;
-    if (params.model !== undefined) next.model = params.model;
+    if (params.model !== undefined && params.model !== thread.model) {
+      // A new model starts on its own default unless the call says otherwise.
+      next.model = params.model;
+      next.effort = null;
+    }
     if (params.permissionMode !== undefined) next.permissionMode = params.permissionMode;
     if (params.effort !== undefined) next.effort = params.effort;
     // The model may have changed in the same call, so the scale is the new one's.
