@@ -85,7 +85,7 @@
       {#if streaming}
         <pre
           class="mono"
-          data-testid="tool-input">{inputText}<span class="caret" aria-label={strings.chat.streaming}></span></pre>
+          data-testid="tool-input">{inputText}<span class="cursor" aria-label={strings.chat.streaming}></span></pre>
       {:else}
         <pre class="mono" data-testid="tool-input">{json(input)}</pre>
       {/if}
@@ -205,8 +205,9 @@
     margin-bottom: 0;
   }
 
-  /* The same caret a streaming text part ends on, so both read as one thing. */
-  .caret {
+  /* The same blinking block a streaming text part ends on, so both read as one
+     thing. Not `.caret`: that class is the head's chevron. */
+  .cursor {
     display: inline-block;
     width: 7px;
     height: 12px;
