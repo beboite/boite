@@ -27,6 +27,11 @@ async function waitFor(check: () => boolean): Promise<void> {
   throw new Error(`gave up waiting, body was:\n${document.body.textContent ?? ''}`);
 }
 
+/** The model ids the right column of the picker is showing, in order. */
+function shownModels(): (string | null)[] {
+  return Array.from(document.querySelectorAll('[data-model]')).map((el) => el.getAttribute('data-model'));
+}
+
 function query<T extends Element = HTMLElement>(selector: string): T {
   const found = document.querySelector<T>(selector);
   if (!found) throw new Error(`nothing matches ${selector}`);
@@ -91,9 +96,13 @@ test('the picker lists providers with their accounts and the models of the one s
   query<HTMLButtonElement>('[data-testid=composer-picker]').click();
   await waitFor(() => document.querySelector('[data-testid=composer-picker-menu]') !== null);
   const instances = Array.from(document.querySelectorAll('[data-instance]')).map((el) => el.getAttribute('data-instance'));
-  expect(instances).toEqual(['claude::a-claude-main', 'claude::a-claude-side', 'echo::a-echo']);
-  const models = Array.from(document.querySelectorAll('[data-model]')).map((el) => el.getAttribute('data-model'));
-  expect(models).toEqual(['claude-fable-5-1', 'claude-opus-5', 'claude-sonnet-5']);
+  expect(instances).toEqual([
+    'claude::a-claude-main',
+    'claude::a-claude-side',
+    'echo::a-echo',
+    'opencode::a-opencode'
+  ]);
+  expect(shownModels()).toEqual(['claude-fable-5-1', 'claude-opus-5', 'claude-sonnet-5']);
 
   query<HTMLButtonElement>('[data-testid=picker-legacy]').click();
   await waitFor(() => document.querySelectorAll('[data-model]').length === 7);
@@ -112,6 +121,40 @@ test('the picker lists providers with their accounts and the models of the one s
   await waitFor(() => store.openThread !== null && store.draft === null);
   expect(store.openThread?.accountId).toBe('a-claude-side');
   expect(store.openThread?.model).toBe('claude-opus-5');
+});
+
+test('the picker reads an ACP agent models, showing the descriptor and a probing line meanwhile', async () => {
+  await mountOnFake();
+  query<HTMLButtonElement>('[data-testid=new-thread]').click();
+  await waitFor(() => store.draft !== null);
+  await waitFor(() => query('[data-testid=composer-picker]').textContent?.includes('Claude Sonnet 5') === true);
+
+  query<HTMLButtonElement>('[data-testid=composer-picker]').click();
+  await waitFor(() => document.querySelector('[data-testid=composer-picker-menu]') !== null);
+  query<HTMLButtonElement>('[data-instance="opencode::a-opencode"]').click();
+
+  // While the agent is being asked, its descriptor's one model stands.
+  await waitFor(() => document.querySelector('[data-testid=picker-probing]') !== null);
+  expect(shownModels()).toEqual(['default']);
+
+  await waitFor(() => document.querySelector('[data-testid=picker-probing]') === null);
+  expect(shownModels()).toEqual(['default', 'anthropic/claude-sonnet-5', 'openai/gpt-5-codex']);
+  // The reasoning scale comes from the same answer, not from the descriptor.
+  const levels = Array.from(document.querySelectorAll('[data-effort]')).map((el) => el.getAttribute('data-effort'));
+  expect(levels).toEqual(['think', 'think-hard']);
+
+  query<HTMLButtonElement>('[data-model="openai/gpt-5-codex"]').click();
+  await waitFor(() => document.querySelector('[data-testid=composer-picker-menu]') === null);
+  expect(query('[data-testid=composer-picker]').textContent).toContain('GPT-5 Codex');
+
+  // The probed model reaches the thread the first send creates.
+  const input = query<HTMLTextAreaElement>('[data-testid=composer-input]');
+  input.value = 'On the agent own model';
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  await waitFor(() => !query<HTMLButtonElement>('[data-testid=composer-send]').disabled);
+  query<HTMLButtonElement>('[data-testid=composer-send]').click();
+  await waitFor(() => store.openThread !== null && store.draft === null);
+  expect(store.openThread?.model).toBe('openai/gpt-5-codex');
 });
 
 test('the Reasoning row sets the effort of the picked model, and the default level clears the suffix', async () => {

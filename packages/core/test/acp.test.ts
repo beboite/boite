@@ -56,11 +56,9 @@ function writeDescriptor(dataDir: string): void {
       roots: ['{isolationDir}'],
       profiles: { windows: profile, linux: profile, macos: profile },
       auth: { kind: 'none' },
-      models: [
-        { id: 'fake-fast', name: 'Fast', default: true },
-        { id: 'fake-smart', name: 'Smart' },
-        { id: 'default', name: 'Agent default' },
-      ],
+      // One model, like OpenCode's shipped descriptor: the agent owns the list,
+      // and `providers.probe` is the only way to learn the rest.
+      models: [{ id: 'default', name: 'Agent default', default: true }],
       capabilities: {
         approvals: true,
         hooks: false,
@@ -74,7 +72,7 @@ function writeDescriptor(dataDir: string): void {
   );
 }
 
-async function acpThread(client: CoreClient, model?: string): Promise<string> {
+async function acpAccount(client: CoreClient): Promise<{ dataDir: string; projectId: string; accountId: string }> {
   const dataDir = harness?.dataDir ?? '';
   writeDescriptor(dataDir);
   const loaded = await client.call('providers.reload', {});
@@ -87,6 +85,18 @@ async function acpThread(client: CoreClient, model?: string): Promise<string> {
     label: 'Fake',
     useDefaultLocation: true,
   });
+  return { dataDir, projectId: project.id, accountId: account.id };
+}
+
+async function acpThread(client: CoreClient, model?: string): Promise<string> {
+  const { projectId, accountId } = await acpAccount(client);
+  // A model the descriptor does not carry is only accepted once the agent has
+  // listed it, which is what the picker does before it offers it.
+  if (model !== undefined && model !== 'default') {
+    await client.call('providers.probe', { providerId: 'acp-fake', accountId });
+  }
+  const project = { id: projectId };
+  const account = { id: accountId };
   const thread = await client.call('threads.create', {
     projectId: project.id,
     providerId: 'acp-fake',
@@ -321,6 +331,98 @@ describe('acp driver', () => {
     // set_config_option line is the driver skipping the call, not missing it.
     expect(fakeLog()).not.toContain('set_config_option');
   });
+
+  test('a probe lists the models the agent offers, the current one flagged', async () => {
+    const client = await startCore();
+    const { accountId } = await acpAccount(client);
+
+    const probed = client.next(
+      'providers.probed',
+      (event) => event.providerId === 'acp-fake' && event.accountId === accountId,
+      20000,
+    );
+    const result = await client.call('providers.probe', { providerId: 'acp-fake', accountId });
+
+    expect(result.models.map((model) => model.id)).toEqual(['default', 'fake-fast', 'fake-smart']);
+    // The descriptor's own model stays first and never claims to be the default.
+    expect(result.models[0]).toMatchObject({ id: 'default', name: 'Agent default', default: false });
+    expect(result.models.find((model) => model.default === true)?.id).toBe('fake-fast');
+    // `thought_level` is one scale for the session, so every model carries it.
+    for (const model of result.models) {
+      expect(model.effort).toEqual({
+        levels: [
+          { id: 'low', label: 'Low' },
+          { id: 'medium', label: 'Medium' },
+          { id: 'high', label: 'High' },
+        ],
+        default: 'medium',
+      });
+    }
+    expect(result.probedAt).toBeGreaterThan(0);
+
+    // A second client learns the same list from the event.
+    expect((await probed).models.map((model) => model.id)).toEqual(['default', 'fake-fast', 'fake-smart']);
+
+    // The agent process is gone: nothing is left running for a probe.
+    await waitFor(() => harness?.core.procs.liveCount(`probe:acp-fake:${accountId}`) === 0);
+    const trace = await client.call('trace.get', { threadId: `probe:acp-fake:${accountId}` });
+    expect(trace).toHaveLength(1);
+    expect(trace[0]?.exitedAt).not.toBeNull();
+  });
+
+  test('a second probe answers from the cache, and providers.reload empties it', async () => {
+    const client = await startCore();
+    const { accountId } = await acpAccount(client);
+
+    const first = await client.call('providers.probe', { providerId: 'acp-fake', accountId });
+    const second = await client.call('providers.probe', { providerId: 'acp-fake', accountId });
+    expect(second.probedAt).toBe(first.probedAt);
+    // One agent process for the two calls: the fake logs one line per process.
+    expect(initializeCount()).toBe(1);
+
+    await client.call('providers.reload', {});
+    const third = await client.call('providers.probe', { providerId: 'acp-fake', accountId });
+    expect(third.probedAt).toBeGreaterThanOrEqual(first.probedAt);
+    expect(initializeCount()).toBe(2);
+  });
+
+  test('a model the agent listed is accepted, the same one before any probe is refused', async () => {
+    const client = await startCore();
+    const { projectId, accountId } = await acpAccount(client);
+
+    let failure = 'none';
+    try {
+      await client.call('threads.create', {
+        projectId,
+        providerId: 'acp-fake',
+        accountId,
+        title: 'too early',
+        model: 'fake-smart',
+      });
+    } catch (error) {
+      failure = (error as Error).message;
+    }
+    expect(failure).toBe('the agent has not listed this model: open the model picker so Boite reads its models first');
+
+    await client.call('providers.probe', { providerId: 'acp-fake', accountId });
+    const thread = await client.call('threads.create', {
+      projectId,
+      providerId: 'acp-fake',
+      accountId,
+      title: 'after the probe',
+      model: 'fake-smart',
+      effort: 'high',
+    });
+    expect(thread.model).toBe('fake-smart');
+    expect(thread.effort).toBe('high');
+  });
+
+  /** One `initialize` per agent process, which is what the probe cache saves. */
+  function initializeCount(): number {
+    return fakeLog()
+      .split('\n')
+      .filter((line) => line === 'initialize').length;
+  }
 
   function countProcesses(
     client: CoreClient,

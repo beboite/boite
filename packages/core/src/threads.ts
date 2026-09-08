@@ -1,9 +1,11 @@
 import type {
   Account,
+  AccountId,
   Message,
   MessageId,
   MessagePart,
   MessageRole,
+  ModelInfo,
   PermissionRequest,
   ProviderDescriptor,
   RequestId,
@@ -17,7 +19,7 @@ import type {
 import type { Core } from './core.ts';
 import { messageOf, notFound, refused } from './errors.ts';
 import { newId } from './ids.ts';
-import { assertDriverRunnable, getDriver, releaseThread } from './drivers/index.ts';
+import { assertDriverRunnable, getDriver, probedModelsOf, releaseThread } from './drivers/index.ts';
 import type { EmitSink, PermissionTicket, TurnContext, TurnHandle, TurnResult } from './drivers/types.ts';
 import type { SpawnOptions } from './procs.ts';
 
@@ -80,7 +82,7 @@ export class ThreadStore {
     }
 
     const now = Date.now();
-    const model = params.model ?? defaultModel(provider);
+    const model = checkModel(provider, account.id, params.model ?? defaultModel(provider));
     const thread: ThreadSummary = {
       id: newId('thr_'),
       projectId: project.id,
@@ -88,7 +90,7 @@ export class ThreadStore {
       providerId: provider.id,
       accountId: account.id,
       model,
-      effort: checkEffort(provider, model, params.effort ?? null),
+      effort: checkEffort(provider, account.id, model, params.effort ?? null),
       cwd: params.cwd !== undefined && params.cwd.length > 0 ? params.cwd : project.path,
       permissionMode: params.permissionMode ?? 'default',
       status: 'idle',
@@ -116,15 +118,16 @@ export class ThreadStore {
     const thread = this.require(params.threadId);
     const next: ThreadSummary = { ...thread };
     if (params.title !== undefined && params.title.length > 0) next.title = params.title;
+    const provider = this.core.providers.require(thread.providerId);
     if (params.model !== undefined && params.model !== thread.model) {
       // A new model starts on its own default unless the call says otherwise.
-      next.model = params.model;
+      next.model = checkModel(provider, thread.accountId, params.model);
       next.effort = null;
     }
     if (params.permissionMode !== undefined) next.permissionMode = params.permissionMode;
     if (params.effort !== undefined) next.effort = params.effort;
     // The model may have changed in the same call, so the scale is the new one's.
-    next.effort = checkEffort(this.core.providers.require(thread.providerId), next.model, next.effort);
+    next.effort = checkEffort(provider, thread.accountId, next.model, next.effort);
     return this.save(next, 'thread.updated');
   }
 
@@ -435,12 +438,46 @@ export class ThreadStore {
 }
 
 /**
- * Null is always allowed and means the model's own default. Anything else must
- * be one of the levels that model's descriptor lists, or the call is refused.
+ * What this account may run: the descriptor's models, plus the ones the last
+ * probe read from the agent for an ACP provider. Nothing is probed here; a
+ * model the agent could list but nobody asked for is not offered yet.
  */
-function checkEffort(provider: ProviderDescriptor, model: string | null, effort: string | null): string | null {
+function modelsFor(provider: ProviderDescriptor, accountId: AccountId): ModelInfo[] {
+  const probed = probedModelsOf(provider.protocol, provider.id, accountId);
+  if (probed === null) return provider.models;
+  const known = new Set(probed.map((model) => model.id));
+  return [...probed, ...provider.models.filter((model) => !known.has(model.id))];
+}
+
+/**
+ * Null is always allowed and means the provider's own default. Anything else
+ * must be a model the descriptor lists or one the last probe read.
+ */
+function checkModel(provider: ProviderDescriptor, accountId: AccountId, model: string | null): string | null {
+  if (model === null) return null;
+  const models = modelsFor(provider, accountId);
+  if (models.some((entry) => entry.id === model)) return model;
+  throw refused(
+    provider.protocol === 'acp'
+      ? 'the agent has not listed this model: open the model picker so Boite reads its models first'
+      : 'the provider does not offer this model',
+    { providerId: provider.id, accountId, model, expected: models.map((entry) => entry.id) },
+  );
+}
+
+/**
+ * Null is always allowed and means the model's own default. Anything else must
+ * be one of the levels that model lists, from the descriptor or from the probe,
+ * or the call is refused.
+ */
+function checkEffort(
+  provider: ProviderDescriptor,
+  accountId: AccountId,
+  model: string | null,
+  effort: string | null,
+): string | null {
   if (effort === null) return null;
-  const levels = provider.models.find((entry) => entry.id === model)?.effort?.levels ?? [];
+  const levels = modelsFor(provider, accountId).find((entry) => entry.id === model)?.effort?.levels ?? [];
   if (levels.some((level) => level.id === effort)) return effort;
   throw refused('the model does not offer this reasoning effort', {
     providerId: provider.id,

@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { Message, RpcEvents } from '@boite/contracts';
-import { removeDir, startTestCore } from './harness.ts';
+import { removeDir, startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
 
 const TURN_TIMEOUT_MS = 120_000;
@@ -46,6 +46,19 @@ live('opencode acp driver, live', () => {
       if (account === undefined) throw new Error('no default opencode account on this machine');
       expect(account.isolationDir).toBeNull();
       expect(account.status).toBe('ok');
+
+      // The descriptor carries one model; the agent lists the rest itself.
+      const probe = await client.call('providers.probe', { providerId: 'opencode', accountId: account.id });
+      expect(probe.models.length).toBeGreaterThan(1);
+      expect(probe.models[0]?.id).toBe('default');
+      expect(probe.probedAt).toBeGreaterThan(0);
+      // The probe runs under its own synthetic thread, and nothing of it is left:
+      // the real agent spawns children of its own, and the job takes them all.
+      const probeThread = `probe:opencode:${account.id}`;
+      await waitFor(() => harness.core.procs.liveCount(probeThread) === 0, 20_000);
+      const probeTrace = await client.call('trace.get', { threadId: probeThread });
+      expect(probeTrace.length).toBeGreaterThan(0);
+      expect(probeTrace.filter((record) => record.exitedAt === null)).toEqual([]);
 
       const thread = await client.call('threads.create', {
         projectId: project.id,

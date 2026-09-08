@@ -140,6 +140,7 @@ export const strings = {
     providers: 'Providers',
     models: 'Models',
     legacyModels: 'Legacy models',
+    probing: "Reading the agent's models",
     reasoning: 'Reasoning',
     newBadge: 'new',
     lockedHint: 'A thread keeps its provider and account',

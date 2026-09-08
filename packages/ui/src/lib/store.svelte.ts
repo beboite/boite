@@ -2,6 +2,7 @@ import type {
   Account,
   CoreInfo,
   Message,
+  ModelInfo,
   PermissionMode,
   PermissionRequest,
   ProcessRecord,
@@ -89,6 +90,11 @@ function observable(client: Client): client is ObservableClient {
   return 'onState' in client;
 }
 
+/** One probe answer per provider and account, the key the core uses too. */
+export function probeKey(providerId: ProviderId, accountId: string): string {
+  return `${providerId}::${accountId}`;
+}
+
 /** A pid alone is reused by the OS, so a trace row is a pid and its start. */
 function sameProcess(a: ProcessRecord, b: ProcessRecord): boolean {
   return a.pid === b.pid && a.startedAt === b.startedAt;
@@ -121,6 +127,13 @@ export class Store {
   prefs = $state<ComposerPrefs>(defaultPrefs());
   providers = $state<ProviderSummary[]>([]);
   rejectedProviders = $state<ProviderRejected[]>([]);
+  /**
+   * What an agent answered `providers.probe` with, keyed `providerId::accountId`.
+   * An ACP agent owns its model list; the descriptor only carries `default`.
+   */
+  probedModels = $state<Record<string, ModelInfo[]>>({});
+  /** The keys a probe is running for, so the picker can say it is reading. */
+  probingModels = $state<string[]>([]);
   accounts = $state<Account[]>([]);
   /** Keyed by account id: one entry while a login runs, and after one failed. */
   logins = $state<Record<string, LoginState>>({});
@@ -181,6 +194,38 @@ export class Store {
     return this.accounts.find((a) => a.id === id) ?? null;
   }
 
+  /**
+   * The models to offer for this instance: the ones the agent listed when a
+   * probe already ran, else the descriptor's.
+   */
+  modelsOf(providerId: ProviderId, accountId: string | null): ModelInfo[] {
+    const probed = accountId ? this.probedModels[probeKey(providerId, accountId)] : undefined;
+    return probed ?? this.providerOf(providerId)?.models ?? [];
+  }
+
+  isProbing(providerId: ProviderId, accountId: string | null): boolean {
+    return accountId !== null && this.probingModels.includes(probeKey(providerId, accountId));
+  }
+
+  /**
+   * Ask the agent what it can run. Once per instance per session: the answer
+   * stays until the core reloads its descriptors or the account changes.
+   */
+  async probeModels(providerId: ProviderId, accountId: string): Promise<void> {
+    const client = this.#client;
+    const key = probeKey(providerId, accountId);
+    if (!client || this.probedModels[key] || this.probingModels.includes(key)) return;
+    this.probingModels = [...this.probingModels, key];
+    try {
+      const { models } = await client.call('providers.probe', { providerId, accountId });
+      this.probedModels = { ...this.probedModels, [key]: models };
+    } catch (error) {
+      this.#fail(error);
+    } finally {
+      this.probingModels = this.probingModels.filter((entry) => entry !== key);
+    }
+  }
+
   isCollapsed(projectId: ProjectId): boolean {
     return this.collapsedProjects.includes(projectId);
   }
@@ -216,11 +261,13 @@ export class Store {
       accounts.find((a) => a.status === 'ok') ??
       accounts[0];
     if (!account) return null;
+    // A probed model is as remembered as a descriptor one: the agent listed it.
+    const offered = this.modelsOf(provider.id, account.id);
     const model =
-      this.prefs.model && provider.models.some((m) => m.id === this.prefs.model)
+      this.prefs.model && offered.some((m) => m.id === this.prefs.model)
         ? this.prefs.model
         : this.defaultModelOf(provider);
-    const levels = provider.models.find((m) => m.id === model)?.effort?.levels ?? [];
+    const levels = offered.find((m) => m.id === model)?.effort?.levels ?? [];
     const effort = levels.some((level) => level.id === this.prefs.effort) ? this.prefs.effort : null;
     return {
       providerId: provider.id,
@@ -374,6 +421,9 @@ export class Store {
       this.accounts = this.accounts.some((a) => a.id === account.id)
         ? this.accounts.map((a) => (a.id === account.id ? account : a))
         : [...this.accounts, account];
+      // The core forgets its probe for a changed account; so does the UI, or
+      // the picker offers a model the core no longer accepts.
+      this.#dropProbes(account.id);
     });
     // The five below also reach the client that made the call, so every handler
     // has to survive being applied twice.
@@ -381,6 +431,7 @@ export class Store {
       this.accounts = this.accounts.filter((a) => a.id !== accountId);
       const { [accountId]: _gone, ...rest } = this.logins;
       this.logins = rest;
+      this.#dropProbes(accountId);
     });
     on('settings.updated', (settings) => {
       this.settings = settings;
@@ -388,6 +439,12 @@ export class Store {
     on('providers.updated', ({ loaded, rejected }) => {
       this.providers = loaded;
       this.rejectedProviders = rejected;
+      // The core drops its own probes on a reload; holding stale ones would
+      // offer a model it now refuses.
+      this.probedModels = {};
+    });
+    on('providers.probed', ({ providerId, accountId, models }) => {
+      this.probedModels = { ...this.probedModels, [probeKey(providerId, accountId)]: models };
     });
     on('project.added', (project) => {
       if (!this.projects.some((p) => p.id === project.id))
@@ -913,6 +970,15 @@ export class Store {
     const index = open.turns.findIndex((t) => t.id === turn.id);
     if (index >= 0) open.turns[index] = turn;
     else open.turns.push(turn);
+  }
+
+  /** What was probed for one account, dropped: the account itself changed. */
+  #dropProbes(accountId: string): void {
+    const suffix = `::${accountId}`;
+    const kept = Object.entries(this.probedModels).filter(([key]) => !key.endsWith(suffix));
+    if (kept.length !== Object.keys(this.probedModels).length) {
+      this.probedModels = Object.fromEntries(kept);
+    }
   }
 
   #fail(error: unknown): void {

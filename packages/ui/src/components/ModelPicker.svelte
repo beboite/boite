@@ -40,10 +40,28 @@
   let shown = $derived(
     (shownProviderId ? store.providerOf(shownProviderId) : null) ?? provider ?? store.providers[0] ?? null
   );
+  /** The account the right column belongs to: an agent lists its models per login. */
+  let shownAccountId = $derived.by((): string | null => {
+    if (!shown) return null;
+    if (choice && choice.providerId === shown.id) return choice.accountId;
+    return store.accountsOf(shown.id)[0]?.id ?? null;
+  });
+  let shownModels = $derived(shown ? store.modelsOf(shown.id, shownAccountId) : []);
+  let probing = $derived(shown ? store.isProbing(shown.id, shownAccountId) : false);
+
+  // An ACP agent owns its model list, so the descriptor cannot carry it: the
+  // core reads it from one short-lived agent process the first time the picker
+  // shows that instance, and the answer stands for the rest of the session.
+  $effect(() => {
+    if (!open || !shown || shown.protocol !== 'acp') return;
+    const accountId = shownAccountId;
+    if (accountId === null) return;
+    void store.probeModels(shown.id, accountId);
+  });
 
   let label = $derived.by(() => {
     if (!choice || !provider) return strings.composer.noProvider;
-    const model = provider.models.find((m) => m.id === choice.model);
+    const model = store.modelsOf(provider.id, choice.accountId).find((m) => m.id === choice.model);
     const name = model?.name ?? provider.name;
     const level = model?.effort?.levels.find((l) => l.id === choice.effort);
     // The default level is what the model does anyway, so only a change is worth the room.
@@ -77,13 +95,13 @@
     return out;
   });
 
-  let currentModels = $derived(shown ? shown.models.filter((m) => !m.legacy) : []);
-  let legacyModels = $derived(shown ? shown.models.filter((m) => m.legacy) : []);
+  let currentModels = $derived(shownModels.filter((m) => !m.legacy));
+  let legacyModels = $derived(shownModels.filter((m) => m.legacy));
 
   /** The Reasoning row belongs to the model the choice is on, legacy ones included. */
   let effortModel = $derived.by((): ModelInfo | null => {
     if (!shown || !choice || choice.providerId !== shown.id) return null;
-    return shown.models.find((m) => m.id === choice.model && m.effort) ?? null;
+    return shownModels.find((m) => m.id === choice.model && m.effort) ?? null;
   });
   let effortLevels = $derived(effortModel?.effort?.levels ?? []);
   let activeEffort = $derived(choice?.effort ?? effortModel?.effort?.default ?? null);
@@ -274,8 +292,11 @@
             {/each}
           {/if}
         {/if}
-        {#if shown && shown.models.length === 0}
+        {#if shown && shownModels.length === 0 && !probing}
           <p class="none subtle">{strings.thread.defaultModel}</p>
+        {/if}
+        {#if probing}
+          <p class="none subtle probing" data-testid="picker-probing">{strings.composer.probing}</p>
         {/if}
 
         {#if effortLevels.length > 0}
@@ -483,6 +504,12 @@
   p.none {
     padding: 6px 8px;
     font-size: var(--text-sm);
+  }
+
+  /* The agent is being asked for its models; the descriptor's stay above. */
+  p.probing {
+    margin-top: 2px;
+    font-size: var(--text-xs);
   }
 
   .effort {

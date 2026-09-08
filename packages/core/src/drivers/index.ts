@@ -1,9 +1,17 @@
-import type { Account, Protocol, ProviderSummary, ThreadId } from '@boite/contracts';
+import type {
+  Account,
+  AccountId,
+  ModelInfo,
+  Protocol,
+  ProviderId,
+  ProviderSummary,
+  ThreadId,
+} from '@boite/contracts';
 import { unavailable } from '../errors.ts';
 import { createAcpDriver } from './acp.ts';
 import { createClaudeDriver } from './claude.ts';
 import { echoDriver } from './echo.ts';
-import type { Driver } from './types.ts';
+import type { Driver, ProbeContext, ProbeFilter, ProbeResult } from './types.ts';
 
 const DRIVERS = new Map<Protocol, Driver>([
   ['echo', echoDriver],
@@ -50,6 +58,33 @@ export function assertDriverRunnable(
   }
 }
 
+/**
+ * Ask the driver of this protocol what the agent can run. A protocol whose
+ * driver has no probe answers with the descriptor's own models, which is what
+ * every non-ACP provider does.
+ */
+export function probeModels(protocol: Protocol, ctx: ProbeContext): Promise<ProbeResult> {
+  const driver = DRIVERS.get(protocol);
+  if (driver?.probe === undefined) {
+    return Promise.resolve({ models: ctx.provider.models, probedAt: Date.now() });
+  }
+  return driver.probe(ctx);
+}
+
+/** The models a probe already read for this account, or null if none ever ran. */
+export function probedModelsOf(
+  protocol: Protocol,
+  providerId: ProviderId,
+  accountId: AccountId,
+): ModelInfo[] | null {
+  return DRIVERS.get(protocol)?.probedModels?.(providerId, accountId) ?? null;
+}
+
+/** A reload, a changed account or a removed one: what a probe cached is stale. */
+export function forgetProbes(filter: ProbeFilter = {}): void {
+  for (const driver of DRIVERS.values()) driver.forgetProbes?.(filter);
+}
+
 /** A thread that is archived or gone keeps no warm process: every driver drops it. */
 export function releaseThread(threadId: ThreadId): void {
   for (const driver of DRIVERS.values()) driver.releaseThread?.(threadId);
@@ -70,4 +105,14 @@ export function setDriver(protocol: Protocol, driver: Driver): () => void {
   };
 }
 
-export type { Driver, TurnContext, TurnHandle, TurnResult, EmitSink, PermissionTicket } from './types.ts';
+export type {
+  Driver,
+  TurnContext,
+  TurnHandle,
+  TurnResult,
+  EmitSink,
+  PermissionTicket,
+  ProbeContext,
+  ProbeFilter,
+  ProbeResult,
+} from './types.ts';

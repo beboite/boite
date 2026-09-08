@@ -124,6 +124,24 @@ describe('Store', () => {
     expect(reopened.projectId).toBe('p-brain');
   });
 
+  test('a probe elsewhere fills the models of that instance, the descriptor until then', async () => {
+    const { store, client } = await ready();
+    expect(store.modelsOf('opencode', 'a-opencode').map((m) => m.id)).toEqual(['default']);
+    expect(store.probedModels).toEqual({});
+
+    // Straight through the client: what a second shell's probe looks like here.
+    await client.call('providers.probe', { providerId: 'opencode', accountId: 'a-opencode' });
+
+    expect(Object.keys(store.probedModels)).toEqual(['opencode::a-opencode']);
+    expect(store.modelsOf('opencode', 'a-opencode').map((m) => m.id)).toEqual([
+      'default',
+      'anthropic/claude-sonnet-5',
+      'openai/gpt-5-codex'
+    ]);
+    // A provider that is not ACP keeps the descriptor's list either way.
+    expect(store.modelsOf('echo', 'a-echo').map((m) => m.id)).toEqual(['echo-1']);
+  });
+
   test('settings changed elsewhere replace the ones the UI holds', async () => {
     const { store, client } = await ready();
     expect(store.settings?.maxConcurrentTurns).not.toBe(9);

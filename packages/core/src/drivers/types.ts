@@ -1,14 +1,18 @@
 import type {
   Account,
+  AccountId,
   Message,
   MessageId,
   MessagePart,
   MessageRole,
+  ModelInfo,
   Protocol,
   ProviderDescriptor,
+  ProviderId,
   RequestId,
   ThreadId,
   ThreadSummary,
+  Timestamp,
   Turn,
   Usage,
 } from '@boite/contracts';
@@ -66,9 +70,48 @@ export interface TurnHandle {
   stop(): void;
 }
 
+/**
+ * What a probe is given. No thread and no turn: it asks one agent process what
+ * it can run, under the account's environment, and writes nothing.
+ */
+export interface ProbeContext {
+  provider: ProviderDescriptor;
+  accountId: AccountId;
+  /** The isolation environment of this account, empty for the provider's own login. */
+  accountEnv: Record<string, string>;
+  /** The core's data directory: the probe session belongs to no project. */
+  cwd: string;
+  /** The registry that traces the probe process, under the thread `probe:<providerId>:<accountId>`. */
+  spawnChild(cmd: string, args: string[], opts?: SpawnOptions): SpawnedChild;
+  /** Terminates whatever that synthetic thread launched. Called on every path. */
+  killTree(): void;
+  log(level: 'info' | 'warn' | 'error', message: string): void;
+}
+
+export interface ProbeResult {
+  models: ModelInfo[];
+  probedAt: Timestamp;
+}
+
+/** Which cached probes to drop. An empty filter drops them all. */
+export interface ProbeFilter {
+  providerId?: ProviderId;
+  accountId?: AccountId;
+}
+
 export interface Driver {
   protocol: Protocol;
   startTurn(ctx: TurnContext): TurnHandle;
+  /**
+   * The models the agent itself lists, for a protocol whose descriptor cannot
+   * know them. Cached per provider and account; two callers at once share one
+   * agent process.
+   */
+  probe?(ctx: ProbeContext): Promise<ProbeResult>;
+  /** What the last probe read, without running one. Null when nothing was probed. */
+  probedModels?(providerId: ProviderId, accountId: AccountId): ModelInfo[] | null;
+  /** Drop cached probes: a reload, a changed account, a removed one. */
+  forgetProbes?(filter?: ProbeFilter): void;
   /** Drop whatever this thread keeps alive between turns: a warm process, a session. */
   releaseThread?(threadId: ThreadId): void;
   /** Core shutdown: drop what every thread keeps alive between turns. */

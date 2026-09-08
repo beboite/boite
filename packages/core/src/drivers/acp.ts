@@ -13,12 +13,30 @@ import type {
   ToolCallStatus,
   Usage as AcpUsage,
 } from '@agentclientprotocol/sdk';
-import type { MessageId, MessagePart, ThreadId, ToolStatus, Usage } from '@boite/contracts';
+import type {
+  AccountId,
+  MessageId,
+  MessagePart,
+  ModelInfo,
+  ProviderDescriptor,
+  ProviderId,
+  ThreadId,
+  ToolStatus,
+  Usage,
+} from '@boite/contracts';
 import pkg from '../../package.json';
 import { messageOf, unavailable } from '../errors.ts';
 import type { SpawnedChild } from '../procs.ts';
 import { profileFor, resolveExecutable } from '../providers/loader.ts';
-import type { Driver, TurnContext, TurnHandle, TurnResult } from './types.ts';
+import type {
+  Driver,
+  ProbeContext,
+  ProbeFilter,
+  ProbeResult,
+  TurnContext,
+  TurnHandle,
+  TurnResult,
+} from './types.ts';
 
 /** What the agent sees as `clientInfo.name`, and the name of the JSON-RPC app. */
 const CLIENT_NAME = 'boite';
@@ -32,6 +50,8 @@ const EXIT_GRACE_MS = 500;
  * with, so no `session/set_config_option` goes out and nothing is warned about.
  */
 const AGENT_OWN_MODEL = 'default';
+/** How long a probe waits for the agent to answer `initialize` and `session/new`. */
+const PROBE_TIMEOUT_MS = 20_000;
 
 /** The whole SDK, loaded on the first ACP turn: nothing heavy loads at core start. */
 export type AcpSdk = typeof import('@agentclientprotocol/sdk');
@@ -593,14 +613,162 @@ function sessionKey(ctx: TurnContext): string {
   });
 }
 
-function selectValues(option: SessionConfigOption): string[] {
+/** The values of a select option, groups flattened, in the order the agent listed them. */
+function selectChoices(option: SessionConfigOption): { value: string; name: string }[] {
   if (option.type !== 'select') return [];
-  const values: string[] = [];
+  const choices: { value: string; name: string }[] = [];
   for (const entry of option.options) {
-    if ('group' in entry) values.push(...entry.options.map((choice) => choice.value));
-    else values.push(entry.value);
+    if ('group' in entry) choices.push(...entry.options.map((choice) => ({ value: choice.value, name: choice.name })));
+    else choices.push({ value: entry.value, name: entry.name });
   }
-  return values;
+  return choices;
+}
+
+function selectValues(option: SessionConfigOption): string[] {
+  return selectChoices(option).map((choice) => choice.value);
+}
+
+// ---------------------------------------------------------------------------
+// The probe: the models the agent itself lists
+// ---------------------------------------------------------------------------
+
+function categoryOption(
+  options: SessionConfigOption[] | null,
+  category: SessionConfigOptionCategory,
+): SessionConfigOption | null {
+  if (options === null) return null;
+  return options.find((entry) => entry.category === category && entry.type === 'select') ?? null;
+}
+
+/** `thought_level` is one scale for the whole session, so every model carries it. */
+function effortFrom(option: SessionConfigOption | null): ModelInfo['effort'] | null {
+  if (option === null) return null;
+  const choices = selectChoices(option);
+  if (choices.length === 0) return null;
+  const levels = choices.map((choice) => ({ id: choice.value, label: choice.name }));
+  const current = option.type === 'select' ? String(option.currentValue) : '';
+  const fallback = levels.some((level) => level.id === current) ? current : (levels[0]?.id ?? '');
+  return { levels, default: fallback };
+}
+
+/**
+ * The `configOptions` of a `session/new` as a model list. The descriptor's
+ * `default` model stays first so the user can always hand the choice back to
+ * the agent; the agent's own values follow in its order, the current one
+ * flagged. No `model` option means the agent has nothing to say: the
+ * descriptor's models stand.
+ */
+function modelsFrom(provider: ProviderDescriptor, options: SessionConfigOption[] | null): ModelInfo[] {
+  const option = categoryOption(options, 'model');
+  if (option === null) return provider.models;
+  const effort = effortFrom(categoryOption(options, 'thought_level'));
+  const withEffort = (model: ModelInfo): ModelInfo => (effort === null ? model : { ...model, effort });
+
+  const models: ModelInfo[] = [];
+  const seen = new Set<string>();
+  const own = provider.models.find((model) => model.id === AGENT_OWN_MODEL);
+  if (own !== undefined) {
+    models.push(withEffort({ id: AGENT_OWN_MODEL, name: own.name, default: false }));
+    seen.add(AGENT_OWN_MODEL);
+  }
+  const current = option.type === 'select' ? String(option.currentValue) : '';
+  for (const choice of selectChoices(option)) {
+    if (seen.has(choice.value)) continue;
+    seen.add(choice.value);
+    models.push(withEffort({ id: choice.value, name: choice.name, default: choice.value === current }));
+  }
+  return models;
+}
+
+/**
+ * One short-lived agent process: `initialize`, `session/new`, read the config
+ * options, then the child goes through the registry that traced it. Nothing of
+ * this session is kept; a turn opens its own.
+ */
+async function readModels(ctx: ProbeContext, deps: AcpDeps): Promise<ModelInfo[]> {
+  const sdk = await deps.loadSdk();
+  const profile = profileFor(ctx.provider);
+  const executable = profile === undefined ? null : resolveExecutable(profile);
+  if (executable === null) {
+    throw unavailable(`no ${ctx.provider.id} executable on this machine`, { providerId: ctx.provider.id });
+  }
+
+  let lastStderr = '';
+  const child = ctx.spawnChild(executable, profile?.launch?.args ?? [], {
+    cwd: ctx.cwd,
+    env: { ...process.env, ...ctx.accountEnv },
+  });
+  child.stdin.on('error', () => undefined);
+  child.stderr.setEncoding('utf8');
+  child.stderr.on('data', (chunk: string) => {
+    for (const line of chunk.split(/\r?\n/)) {
+      const text = line.trim();
+      if (text.length > 0) lastStderr = text.slice(0, STDERR_MAX);
+    }
+  });
+
+  const say = (head: string): string => (lastStderr.length === 0 ? head : `${head}: ${lastStderr}`);
+  let connection: ClientConnection | null = null;
+  let timer: Timer | null = null;
+  try {
+    const died = new Promise<never>((_resolve, reject) => {
+      child.once('exit', (code) => {
+        reject(unavailable(say(`the ${ctx.provider.id} agent exited with code ${code ?? 'unknown'}`), {
+          providerId: ctx.provider.id,
+          accountId: ctx.accountId,
+        }));
+      });
+      child.once('error', (error) => {
+        reject(unavailable(say(`the ${ctx.provider.id} agent did not start: ${messageOf(error)}`), {
+          providerId: ctx.provider.id,
+          accountId: ctx.accountId,
+        }));
+      });
+    });
+    const expired = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => {
+        reject(unavailable(say(`the ${ctx.provider.id} agent did not list its models in ${PROBE_TIMEOUT_MS / 1000} s`), {
+          providerId: ctx.provider.id,
+          accountId: ctx.accountId,
+        }));
+      }, PROBE_TIMEOUT_MS);
+      timer.unref?.();
+    });
+
+    const stream = sdk.ndJsonStream(
+      Writable.toWeb(child.stdin) as unknown as WritableStream<Uint8Array>,
+      Readable.toWeb(child.stdout) as unknown as ReadableStream<Uint8Array>,
+    );
+    // No update handler and no permission handler: nothing of this session is
+    // drawn, and a prompt never goes out on it.
+    const open = sdk.client({ name: CLIENT_NAME }).connect(stream);
+    connection = open;
+
+    const read = (async (): Promise<SessionConfigOption[] | null> => {
+      await open.agent.request('initialize', {
+        protocolVersion: sdk.PROTOCOL_VERSION,
+        clientCapabilities: {},
+        clientInfo: { name: CLIENT_NAME, version: pkg.version },
+      });
+      const created = await open.agent.request('session/new', { cwd: ctx.cwd, mcpServers: [] });
+      return created.configOptions ?? null;
+    })();
+
+    return modelsFrom(ctx.provider, await Promise.race([read, died, expired]));
+  } finally {
+    if (timer !== null) clearTimeout(timer);
+    try {
+      connection?.close();
+    } catch {
+      // the connection is already closed
+    }
+    try {
+      child.stdin.end();
+    } catch {
+      // the pipe is already gone
+    }
+    ctx.killTree();
+  }
 }
 
 function pickOption(options: PermissionOption[], decision: 'allow' | 'deny'): string | null {
@@ -645,12 +813,63 @@ function stringify(value: unknown): string {
   }
 }
 
+interface ProbeEntry {
+  providerId: ProviderId;
+  accountId: AccountId;
+  /** The one process in flight for this key, so two callers share it. */
+  running: Promise<ProbeResult> | null;
+  result: ProbeResult | null;
+}
+
 /** One ACP agent process per thread, kept between turns the way the Claude one is. */
 export function createAcpDriver(deps: AcpDeps): Driver {
   const sessions = new Map<ThreadId, AcpSession>();
+  const probes = new Map<string, ProbeEntry>();
+
+  const keyOf = (providerId: ProviderId, accountId: AccountId): string => `${providerId}::${accountId}`;
 
   return {
     protocol: 'acp',
+
+    async probe(ctx: ProbeContext): Promise<ProbeResult> {
+      const key = keyOf(ctx.provider.id, ctx.accountId);
+      const entry: ProbeEntry = probes.get(key) ?? {
+        providerId: ctx.provider.id,
+        accountId: ctx.accountId,
+        running: null,
+        result: null,
+      };
+      probes.set(key, entry);
+      if (entry.result !== null) return entry.result;
+      if (entry.running !== null) return entry.running;
+
+      const running = readModels(ctx, deps).then((models) => ({ models, probedAt: Date.now() }));
+      entry.running = running;
+      try {
+        const result = await running;
+        // A `providers.reload` during the probe dropped the entry: nothing is
+        // cached behind its back, the next caller probes again.
+        if (probes.get(key) === entry) entry.result = result;
+        return result;
+      } catch (error) {
+        if (probes.get(key) === entry) probes.delete(key);
+        throw error;
+      } finally {
+        entry.running = null;
+      }
+    },
+
+    probedModels(providerId: ProviderId, accountId: AccountId): ModelInfo[] | null {
+      return probes.get(keyOf(providerId, accountId))?.result?.models ?? null;
+    },
+
+    forgetProbes(filter: ProbeFilter = {}): void {
+      for (const [key, entry] of [...probes]) {
+        if (filter.providerId !== undefined && filter.providerId !== entry.providerId) continue;
+        if (filter.accountId !== undefined && filter.accountId !== entry.accountId) continue;
+        probes.delete(key);
+      }
+    },
 
     startTurn(ctx: TurnContext): TurnHandle {
       const threadId = ctx.thread.id;
@@ -690,6 +909,7 @@ export function createAcpDriver(deps: AcpDeps): Driver {
     shutdown(): void {
       const open = [...sessions.values()];
       sessions.clear();
+      probes.clear();
       for (const session of open) session.close(null);
     },
   };

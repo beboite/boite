@@ -5,6 +5,7 @@ import {
   type CoreInfo,
   type Message,
   type MessagePart,
+  type ModelInfo,
   type PermissionRequest,
   type ProcessRecord,
   type Project,
@@ -68,6 +69,28 @@ function chunkText(text: string, pieces: number): string[] {
 }
 
 const SPAWN_MARKER = /\[spawn:([^\]]+)\]/;
+
+/** How long the fake agent takes to answer a probe, so the picker shows it reading. */
+const PROBE_MS = 150;
+
+/**
+ * What the fake ACP agent lists in the `configOptions` of a `session/new`: its
+ * own models, the descriptor's `default` first, and one reasoning scale that
+ * belongs to the session rather than to a model.
+ */
+const PROBED_EFFORT = {
+  levels: [
+    { id: 'think', label: 'Think' },
+    { id: 'think-hard', label: 'Think hard' }
+  ],
+  default: 'think'
+};
+
+const PROBED_MODELS: ModelInfo[] = [
+  { id: 'default', name: 'OpenCode default', default: false, effort: PROBED_EFFORT },
+  { id: 'anthropic/claude-sonnet-5', name: 'Claude Sonnet 5', default: true, effort: PROBED_EFFORT },
+  { id: 'openai/gpt-5-codex', name: 'GPT-5 Codex', default: false, effort: PROBED_EFFORT }
+];
 
 /**
  * The whole core in memory, contract-accurate: what `vite dev` uses behind
@@ -231,6 +254,10 @@ export class FakeClient implements ObservableClient {
         const result = { loaded: structuredClone(this.#providers), rejected: [] };
         this.#emit('providers.updated', structuredClone(result));
         return result;
+      }
+      case 'providers.probe': {
+        const params = rawParams as RpcParams<'providers.probe'>;
+        return this.#probe(params.providerId, params.accountId);
       }
       case 'providers.dryRun': {
         const params = rawParams as RpcParams<'providers.dryRun'>;
@@ -871,6 +898,22 @@ export class FakeClient implements ObservableClient {
     this.#emit('scheduler.updated', structuredClone(this.#scheduler));
   }
 
+  /**
+   * The ACP provider answers the way a real agent does: one round trip, then
+   * the models it can run. Every other protocol hands back its descriptor.
+   */
+  async #probe(providerId: string, accountId: string): Promise<RpcResult<'providers.probe'>> {
+    const provider = this.#providers.find((p) => p.id === providerId);
+    if (!provider) {
+      throw new RpcFailure({ code: RpcErrorCode.NotFound, message: `unknown provider ${providerId}` });
+    }
+    const models = provider.protocol === 'acp' ? structuredClone(PROBED_MODELS) : structuredClone(provider.models);
+    if (provider.protocol === 'acp') await new Promise((resolve) => setTimeout(resolve, PROBE_MS));
+    const probedAt = this.#now();
+    this.#emit('providers.probed', { providerId, accountId, models: structuredClone(models), probedAt });
+    return { models, probedAt };
+  }
+
   #resources(): ThreadResources[] {
     const out: ThreadResources[] = [];
     for (const thread of this.#threads.values()) {
@@ -1009,6 +1052,25 @@ export class FakeClient implements ObservableClient {
           planMode: false,
           resume: true
         }
+      },
+      {
+        id: 'opencode',
+        name: 'OpenCode',
+        shortName: 'OpenCode',
+        protocol: 'acp',
+        source: 'shipped',
+        available: true,
+        executable: 'C:\\Users\\you\\AppData\\Roaming\\npm\\opencode.exe',
+        // One model in the descriptor: the agent owns the rest, and a probe reads them.
+        models: [{ id: 'default', name: 'OpenCode default', default: true }],
+        capabilities: {
+          approvals: true,
+          hooks: false,
+          checkpoint: false,
+          images: false,
+          planMode: false,
+          resume: true
+        }
       }
     ];
 
@@ -1038,6 +1100,15 @@ export class FakeClient implements ObservableClient {
         isolationDir: `${DATA_DIR}\\accounts\\a-claude-side`,
         status: 'unauthenticated',
         identity: null,
+        createdAt: T0
+      },
+      {
+        id: 'a-opencode',
+        providerId: 'opencode',
+        label: 'Default',
+        isolationDir: null,
+        status: 'ok',
+        identity: 'you@example.com',
         createdAt: T0
       }
     ];

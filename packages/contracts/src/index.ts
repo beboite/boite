@@ -375,6 +375,18 @@ export interface RpcMethods {
     params: Record<string, never>;
     result: { loaded: ProviderSummary[]; rejected: ProviderRejected[] };
   };
+  /**
+   * The models this provider can actually run on this account. For an ACP
+   * provider they are the ones the agent lists in the `configOptions` of a
+   * `session/new`, read from one short-lived agent process under the account's
+   * environment, and kept until `providers.reload` or a change to that account.
+   * For any other protocol they are the descriptor's models, with `probedAt`
+   * the moment of the call.
+   */
+  'providers.probe': {
+    params: { providerId: ProviderId; accountId: AccountId };
+    result: { models: ModelInfo[]; probedAt: Timestamp };
+  };
   /** Validate a user descriptor and show what it would do. Writes nothing. */
   'providers.dryRun': {
     params: { file: string };
@@ -500,6 +512,13 @@ export interface RpcEvents {
   'settings.updated': Settings;
   /** What `providers.reload` found: the descriptors that loaded and the ones refused. */
   'providers.updated': { loaded: ProviderSummary[]; rejected: ProviderRejected[] };
+  /** Every `providers.probe` that completed, so a second client sees the same models. */
+  'providers.probed': {
+    providerId: ProviderId;
+    accountId: AccountId;
+    models: ModelInfo[];
+    probedAt: Timestamp;
+  };
   /**
    * The login process starting, one line of its output, or its exit. `url`
    * carries the first `https://` link seen in the output, once there is one.

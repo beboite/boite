@@ -4,7 +4,9 @@
  * directives, so the ACP client driver is proved without a real agent.
  *
  * Run as `bun <this file>`. `ACP_FAKE_LOG` names a file the agent appends what
- * a test needs to assert on: `loaded:<sessionId>` and `set_config_option ...`.
+ * a test needs to assert on: `initialize`, `loaded:<sessionId>` and
+ * `set_config_option ...`. One `initialize` line per process, so a test can
+ * count the agent processes a probe cache did or did not save.
  */
 import { appendFileSync } from 'node:fs';
 import { Readable, Writable } from 'node:stream';
@@ -29,6 +31,18 @@ const configOptions: SessionConfigOption[] = [
       { value: 'default', name: 'Agent default' },
       { value: 'fake-fast', name: 'Fast' },
       { value: 'fake-smart', name: 'Smart' },
+    ],
+  },
+  {
+    type: 'select',
+    id: 'thought_level',
+    category: 'thought_level',
+    name: 'Thinking',
+    currentValue: 'medium',
+    options: [
+      { value: 'low', name: 'Low' },
+      { value: 'medium', name: 'Medium' },
+      { value: 'high', name: 'High' },
     ],
   },
 ];
@@ -70,11 +84,14 @@ function chunksOf(text: string): string[] {
 }
 
 const app = agent({ name: 'acp-fake' })
-  .onRequest('initialize', () => ({
-    protocolVersion: PROTOCOL_VERSION,
-    agentCapabilities: { loadSession: true },
-    agentInfo: { name: 'acp-fake', version: '1' },
-  }))
+  .onRequest('initialize', () => {
+    log('initialize');
+    return {
+      protocolVersion: PROTOCOL_VERSION,
+      agentCapabilities: { loadSession: true },
+      agentInfo: { name: 'acp-fake', version: '1' },
+    };
+  })
   .onRequest('session/new', () => {
     const sessionId = `acp-fake-${Math.random().toString(16).slice(2, 10)}`;
     known.add(sessionId);
