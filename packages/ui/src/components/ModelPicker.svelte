@@ -69,15 +69,13 @@
     void store.probeModels(shown.id, accountId);
   });
 
+  // The effort has a chip of its own in the composer, so this one names the
+  // model and the account only: one place says the level.
   let label = $derived.by(() => {
     if (!choice || !provider) return strings.composer.noProvider;
-    const model = store.modelsOf(provider.id, choice.accountId).find((m) => m.id === choice.model);
-    const name = model?.name ?? provider.name;
-    const level = model?.effort?.levels.find((l) => l.id === choice.effort);
-    // The default level is what the model does anyway, so only a change is worth the room.
-    const withEffort = level && level.id !== model?.effort?.default ? `${name} · ${level.label}` : name;
+    const name = store.modelOf(choice)?.name ?? provider.name;
     const siblings = store.accountsOf(provider.id);
-    return siblings.length > 1 && account ? `${withEffort} · ${account.label}` : withEffort;
+    return siblings.length > 1 && account ? `${name} · ${account.label}` : name;
   });
 
   let rows = $derived.by((): Row[] => {

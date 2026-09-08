@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { ArrowUp, ShieldCheck, Square } from '@lucide/svelte';
+  import { ArrowUp, Brain, ShieldCheck, Square } from '@lucide/svelte';
   import type { PermissionMode } from '@boite/contracts';
   import { clearStash, DRAFT_STASH_KEY, readStash, writeStash } from '../lib/prefs';
   import { fill, strings } from '../lib/strings';
@@ -91,6 +91,21 @@
     }))
   );
 
+  // The reasoning chip belongs to the model the choice is on, and a model that
+  // offers no scale (an agent that keeps its own) gets no chip at all.
+  let effortLevels = $derived(store.modelOf(choice)?.effort?.levels ?? []);
+  let activeEffort = $derived(choice?.effort ?? store.modelOf(choice)?.effort?.default ?? null);
+  let effortLabel = $derived(effortLevels.find((level) => level.id === activeEffort)?.label ?? '');
+
+  let effortItems = $derived(
+    effortLevels.map((level) => ({
+      id: level.id,
+      label: level.label,
+      hint: level.description,
+      active: level.id === activeEffort
+    }))
+  );
+
   /** On a thread only the model and the effort change and they are saved at once; on a draft the whole choice is remembered. */
   function pick(patch: PickPatch) {
     if (!choice) return;
@@ -114,6 +129,10 @@
     }
     choice = { ...choice, ...patch, effort: null };
     store.remember(choice);
+  }
+
+  function pickEffort(id: string) {
+    pick({ effort: id });
   }
 
   function pickMode(id: string) {
@@ -270,6 +289,13 @@
     <div class="bar">
       <div class="chips">
         <ModelPicker {store} {choice} locked={bound} onpick={pick} />
+
+        {#if effortLevels.length > 0}
+          <Menu items={effortItems} onpick={pickEffort} label={strings.composer.reasoning} testid="composer-effort">
+            <Brain size={13} strokeWidth={1.75} />
+            {effortLabel}
+          </Menu>
+        {/if}
 
         <Menu items={modeItems} onpick={pickMode} label={strings.composer.mode} testid="composer-mode">
           <ShieldCheck size={13} strokeWidth={1.75} />

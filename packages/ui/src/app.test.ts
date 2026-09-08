@@ -246,7 +246,7 @@ test('past twelve models the column gets a search field, prefix groups and keybo
   expect(store.openThread?.model).toBe('anthropic/claude-sonnet-5');
 });
 
-test('the Reasoning row sets the effort of the picked model, and the default level clears the suffix', async () => {
+test('the Reasoning row sets the effort of the picked model, and the composer chip follows', async () => {
   await mountOnFake();
   query<HTMLButtonElement>('[data-testid=new-thread]').click();
   await waitFor(() => store.draft !== null);
@@ -263,11 +263,14 @@ test('the Reasoning row sets the effort of the picked model, and the default lev
   await waitFor(() => query('[data-effort=xhigh]').getAttribute('aria-pressed') === 'true');
   // Picking a level keeps the popover open: it is a setting of the model, not a choice of its own.
   expect(document.querySelector('[data-testid=composer-picker-menu]')).not.toBeNull();
-  expect(query('[data-testid=composer-picker]').textContent).toContain('Claude Sonnet 5 · Extra high');
+  // The level reads on its own chip; the picker's label names the model alone.
+  expect(query('[data-testid=composer-picker]').textContent).toContain('Claude Sonnet 5');
+  expect(query('[data-testid=composer-picker]').textContent).not.toContain('Extra high');
+  await waitFor(() => query('[data-testid=composer-effort]').textContent?.trim() === 'Extra high');
 
   query<HTMLButtonElement>('[data-effort=high]').click();
   await waitFor(() => query('[data-effort=high]').getAttribute('aria-pressed') === 'true');
-  expect(query('[data-testid=composer-picker]').textContent).not.toContain('Extra high');
+  await waitFor(() => query('[data-testid=composer-effort]').textContent?.trim() === 'High');
 
   // The draft carries the effort into the thread the first send creates.
   query<HTMLButtonElement>('[data-effort=xhigh]').click();

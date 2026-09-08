@@ -228,6 +228,12 @@ export class Store {
     return probed ?? this.providerOf(providerId)?.models ?? [];
   }
 
+  /** The model a choice runs on, out of what its own instance offers: what the chips read. */
+  modelOf(choice: Choice | null): ModelInfo | null {
+    if (!choice) return null;
+    return this.modelsOf(choice.providerId, choice.accountId).find((m) => m.id === choice.model) ?? null;
+  }
+
   isProbing(providerId: ProviderId, accountId: string | null): boolean {
     return accountId !== null && this.probingModels.includes(probeKey(providerId, accountId));
   }

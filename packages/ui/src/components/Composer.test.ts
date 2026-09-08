@@ -1,13 +1,14 @@
-import { afterEach, expect, test } from 'vitest';
+import { afterEach, expect, test, vi } from 'vitest';
 import { mount, unmount } from 'svelte';
 import App from '../App.svelte';
-import { STASH_STORAGE_KEY } from '../lib/prefs';
+import { PREFS_STORAGE_KEY, STASH_STORAGE_KEY } from '../lib/prefs';
 import { store } from '../lib/store.svelte';
 
 /**
  * The three composer keys, on the whole app over the in-memory fake: Ctrl+Enter
  * sends and opens the next draft, ArrowUp walks this thread's sent prompts, and
- * Ctrl+S puts the text aside and takes it back.
+ * Ctrl+S puts the text aside and takes it back. Then the reasoning chip, which
+ * carries the level the picker used to hide.
  */
 
 let running: Record<string, unknown> | null = null;
@@ -17,6 +18,7 @@ afterEach(() => {
   running = null;
   document.body.innerHTML = '';
   window.localStorage.clear();
+  vi.restoreAllMocks();
 });
 
 async function waitFor(check: () => boolean, attempts = 400): Promise<void> {
@@ -188,4 +190,80 @@ test('Ctrl+S stashes the composer under the thread, and an empty one takes it ba
   // The browser's own save dialog stays shut wherever the focus is.
   input().blur();
   expect(press('s', { ctrlKey: true })).toBe(false);
+});
+
+/** The reasoning chip of the composer bar, or null while the model offers no scale. */
+function effortChip(): HTMLElement | null {
+  return document.querySelector<HTMLElement>('[data-testid=composer-effort]');
+}
+
+/** The levels the open reasoning menu lists, in the model's order. */
+function effortRows(): (string | null)[] {
+  return Array.from(document.querySelectorAll('[data-testid=composer-effort-menu] [data-value]')).map((el) =>
+    el.getAttribute('data-value')
+  );
+}
+
+async function openDraft(): Promise<void> {
+  query<HTMLButtonElement>('[data-testid=new-thread]').click();
+  await waitFor(() => store.draft !== null);
+  await waitFor(() => query('[data-testid=composer-picker]').textContent?.includes('Claude Sonnet 5') === true);
+}
+
+test('the reasoning chip reads the model default level and saves the pick on the open thread', async () => {
+  await mountOnFake();
+  await store.open('t-trace');
+  await waitFor(() => store.openThread?.id === 't-trace' && !store.busy);
+  // The thread runs the echo model, whose scale is two levels with high as its default.
+  expect(store.openThread?.effort).toBeNull();
+  await waitFor(() => effortChip() !== null);
+  expect(effortChip()?.textContent?.trim()).toBe('High');
+
+  const update = vi.spyOn(store, 'update');
+  query<HTMLButtonElement>('[data-testid=composer-effort]').click();
+  await waitFor(() => document.querySelector('[data-testid=composer-effort-menu]') !== null);
+  expect(effortRows()).toEqual(['low', 'high']);
+
+  query<HTMLButtonElement>('[data-testid=composer-effort-menu] [data-value=low]').click();
+  await waitFor(() => store.openThread?.effort === 'low');
+  expect(update).toHaveBeenCalledWith('t-trace', { effort: 'low' });
+  // The chip names the level that is live, and the picker's own label leaves it alone.
+  await waitFor(() => effortChip()?.textContent?.trim() === 'Low');
+  expect(query('[data-testid=composer-picker]').textContent).not.toContain('Low');
+});
+
+test('the reasoning chip remembers the level a draft picks', async () => {
+  await mountOnFake();
+  await openDraft();
+  await waitFor(() => effortChip() !== null);
+  expect(effortChip()?.textContent?.trim()).toBe('High');
+
+  query<HTMLButtonElement>('[data-testid=composer-effort]').click();
+  await waitFor(() => document.querySelector('[data-testid=composer-effort-menu]') !== null);
+  expect(effortRows()).toEqual(['low', 'medium', 'high', 'xhigh', 'max', 'ultrathink']);
+
+  query<HTMLButtonElement>('[data-testid=composer-effort-menu] [data-value=xhigh]').click();
+  await waitFor(() => store.prefs.effort === 'xhigh');
+  expect(JSON.parse(window.localStorage.getItem(PREFS_STORAGE_KEY) ?? 'null')).toMatchObject({
+    model: 'claude-sonnet-5',
+    effort: 'xhigh'
+  });
+  await waitFor(() => effortChip()?.textContent?.trim() === 'Extra high');
+});
+
+test('a model with no reasoning scale gets no chip at all', async () => {
+  await mountOnFake();
+  await openDraft();
+  await waitFor(() => effortChip() !== null);
+
+  // Claude Haiku 4.5 is the one legacy model the descriptor gives no levels.
+  query<HTMLButtonElement>('[data-testid=composer-picker]').click();
+  await waitFor(() => document.querySelector('[data-testid=composer-picker-menu]') !== null);
+  query<HTMLButtonElement>('[data-testid=picker-legacy]').click();
+  await waitFor(() => document.querySelector('[data-model="claude-haiku-4-5-20251001"]') !== null);
+  query<HTMLButtonElement>('[data-model="claude-haiku-4-5-20251001"]').click();
+
+  await waitFor(() => document.querySelector('[data-testid=composer-picker-menu]') === null);
+  await waitFor(() => effortChip() === null);
+  expect(query('[data-testid=composer-picker]').textContent).toContain('Claude Haiku 4.5');
 });
