@@ -9,6 +9,8 @@ import type {
   PermissionRequest,
   Protocol,
   ProviderDescriptor,
+  QuestionAnswer,
+  QuestionRequest,
   RequestId,
   Thread,
   ThreadId,
@@ -21,7 +23,15 @@ import type { Core } from './core.ts';
 import { messageOf, notFound, refused } from './errors.ts';
 import { newId } from './ids.ts';
 import { assertDriverRunnable, getDriver, probedModelsOf, releaseThread } from './drivers/index.ts';
-import type { EmitSink, PermissionTicket, TurnContext, TurnHandle, TurnResult } from './drivers/types.ts';
+import type {
+  EmitSink,
+  PermissionTicket,
+  QuestionAsk,
+  QuestionTicket,
+  TurnContext,
+  TurnHandle,
+  TurnResult,
+} from './drivers/types.ts';
 import type { SpawnOptions } from './procs.ts';
 
 /** What a turn a dead core left behind says, once the next core has closed it. */
@@ -33,9 +43,16 @@ interface PendingPermission {
   resolve: (decision: 'allow' | 'deny') => void;
 }
 
+interface PendingQuestion {
+  request: QuestionRequest;
+  /** Null is the cancel: the turn ended before the user answered. */
+  resolve: (answer: QuestionAnswer | null) => void;
+}
+
 export class ThreadStore {
   private readonly handles = new Map<ThreadId, TurnHandle>();
   private readonly permissions = new Map<RequestId, PendingPermission>();
+  private readonly questions = new Map<RequestId, PendingQuestion>();
 
   constructor(private readonly core: Core) {}
 
@@ -335,6 +352,7 @@ export class ThreadStore {
     this.core.journal.flushDeltas();
     this.core.bus.flush();
     this.clearPermissionsOf(threadId);
+    this.clearQuestionsOf(threadId);
 
     const finished: Turn = {
       ...running,
@@ -386,6 +404,70 @@ export class ThreadStore {
     this.core.bus.emit('permission.resolved', { requestId: params.requestId, threadId, decision: params.decision });
     this.setStatus(threadId, 'running');
     pending.resolve(params.decision);
+  }
+
+  /**
+   * The questions still waiting for an answer, oldest first. The same rule as
+   * the permissions: answering one or finishing its turn takes it out, so a
+   * client that was not subscribed when it fired still draws the card.
+   */
+  listQuestions(threadId?: ThreadId): QuestionRequest[] {
+    const pending = [...this.questions.values()].map((entry) => entry.request);
+    const scoped = threadId === undefined ? pending : pending.filter((q) => q.threadId === threadId);
+    return scoped.sort((a, b) => a.createdAt - b.createdAt);
+  }
+
+  answerQuestion(params: {
+    threadId: ThreadId;
+    questionId: RequestId;
+    optionIds: string[];
+    text?: string;
+  }): void {
+    const pending = this.questions.get(params.questionId);
+    if (pending === undefined) throw notFound(`unknown question ${params.questionId}`, params);
+    const request = pending.request;
+    if (request.threadId !== params.threadId) {
+      throw refused('the question belongs to another thread', {
+        questionId: params.questionId,
+        threadId: params.threadId,
+        expected: request.threadId,
+      });
+    }
+
+    const known = new Set(request.options.map((option) => option.id));
+    const unknown = params.optionIds.filter((id) => !known.has(id));
+    if (unknown.length > 0) {
+      throw refused('the question does not offer these options', {
+        questionId: request.id,
+        unknown,
+        expected: [...known],
+      });
+    }
+    if (!request.multiple && params.optionIds.length > 1) {
+      throw refused('the question takes one option', { questionId: request.id, optionIds: params.optionIds });
+    }
+    const text = params.text ?? '';
+    if (text.length > 0 && !request.allowText) {
+      throw refused('the question takes no free text', { questionId: request.id });
+    }
+    if (params.optionIds.length === 0 && text.length === 0) {
+      throw refused('an answer needs an option or some text', { questionId: request.id });
+    }
+
+    const answer: QuestionAnswer = text.length > 0 ? { optionIds: params.optionIds, text } : { optionIds: params.optionIds };
+    this.questions.delete(request.id);
+    this.core.journal.append(
+      {
+        type: 'question.answered',
+        threadId: request.threadId,
+        version: 1,
+        payload: { questionId: request.id, answer },
+      },
+      () => undefined,
+    );
+    this.core.bus.emit('question.answered', { questionId: request.id, threadId: request.threadId, answer });
+    this.setStatus(request.threadId, 'running');
+    pending.resolve(answer);
   }
 
   // -- internals ------------------------------------------------------------
@@ -454,6 +536,7 @@ export class ThreadStore {
       },
       requestPermission: (toolName: string, input: unknown, description: string | null): PermissionTicket =>
         this.requestPermission(thread, turn, toolName, input, description),
+      askQuestion: (ask: QuestionAsk): QuestionTicket => this.askQuestion(thread, turn, ask),
       // Every driver reaches the launcher through these two, so this is the one
       // place a lease on the provider's managed files can be held for the life
       // of an agent process, warm sessions included. `providers.uninstall`
@@ -515,6 +598,41 @@ export class ThreadStore {
     this.setStatus(thread.id, 'waiting');
     this.core.bus.emit('permission.requested', request);
     return Object.assign(promise, { requestId: request.id });
+  }
+
+  private askQuestion(thread: ThreadSummary, turn: Turn, ask: QuestionAsk): QuestionTicket {
+    const request: QuestionRequest = {
+      id: newId('qst_'),
+      threadId: thread.id,
+      turnId: turn.id,
+      text: ask.text,
+      options: ask.options,
+      allowText: ask.allowText,
+      multiple: ask.multiple,
+      createdAt: Date.now(),
+    };
+    let resolve: (answer: QuestionAnswer | null) => void = () => undefined;
+    const promise = new Promise<QuestionAnswer | null>((done) => {
+      resolve = done;
+    });
+    this.questions.set(request.id, { request, resolve });
+    this.core.journal.append(
+      { type: 'question.asked', threadId: thread.id, version: 1, payload: request },
+      () => undefined,
+    );
+    this.setStatus(thread.id, 'waiting');
+    this.core.bus.emit('question.asked', request);
+    return Object.assign(promise, { questionId: request.id });
+  }
+
+  /** The turn ended with a question still open: it is cancelled, so the driver settles. */
+  private clearQuestionsOf(threadId: ThreadId): void {
+    for (const [id, pending] of [...this.questions]) {
+      if (pending.request.threadId !== threadId) continue;
+      this.questions.delete(id);
+      this.core.bus.emit('question.answered', { questionId: id, threadId, answer: null });
+      pending.resolve(null);
+    }
   }
 
   private clearPermissionsOf(threadId: ThreadId): void {
@@ -644,6 +762,16 @@ export function registerThreadMethods(core: Core): void {
   core.router.register('permissions.list', (params) => core.threads.listPermissions(params.threadId));
   core.router.register('permissions.answer', (params) => {
     core.threads.answerPermission({ requestId: params.requestId, decision: params.decision });
+    return { ok: true } as const;
+  });
+  core.router.register('questions.list', (params) => core.threads.listQuestions(params.threadId));
+  core.router.register('questions.answer', (params) => {
+    core.threads.answerQuestion({
+      threadId: params.threadId,
+      questionId: params.questionId,
+      optionIds: params.optionIds,
+      ...(params.text === undefined ? {} : { text: params.text }),
+    });
     return { ok: true } as const;
   });
 }

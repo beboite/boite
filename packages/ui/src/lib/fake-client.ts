@@ -7,6 +7,8 @@ import {
   type MessagePart,
   type ModelInfo,
   type PermissionRequest,
+  type QuestionAnswer,
+  type QuestionRequest,
   type ProcessRecord,
   type Project,
   type ProviderInstallState,
@@ -87,6 +89,13 @@ const SPAWN_MARKER = /\[spawn:([^\]]+)\]/;
 const STREAMED_TOOL_INPUT = '{"command":"echo streamed","description":"a streamed input"}';
 
 /** The three tool documents, the same ones the core's echo driver produces. */
+/** What the fake agent asks when a prompt mentions a question, echo's wording. */
+const QUESTION_TEXT = 'Which shape should the echo take?';
+const QUESTION_OPTIONS = [
+  { id: 'short', label: 'Short', description: 'one line back' },
+  { id: 'long', label: 'Long', description: 'the whole prompt back' }
+];
+
 const DIFF_PATH = 'src/app.ts';
 const DIFF_OLD = 'export function boot() {\n  return start();\n}';
 const DIFF_NEW = "export function boot() {\n  return start({ warm: true });\n  log('booted');\n}";
@@ -213,6 +222,11 @@ export class FakeClient implements ObservableClient {
   #pendingPermissions = new Map<
     string,
     { request: PermissionRequest; resolve: (decision: 'allow' | 'deny') => void }
+  >();
+  /** Same shape for the questions: the request kept beside what settles it. */
+  #pendingQuestions = new Map<
+    string,
+    { request: QuestionRequest; resolve: (answer: QuestionAnswer | null) => void }
   >();
   #inFlight = new Map<ThreadId, { cancelled: boolean; done: Promise<void> }>();
   /** Account ids whose fake login is waiting for a code. */
@@ -553,6 +567,11 @@ export class FakeClient implements ObservableClient {
           this.#pendingPermissions.delete(requestId);
           pending.resolve('deny');
         }
+        for (const [questionId, pending] of [...this.#pendingQuestions]) {
+          this.#pendingQuestions.delete(questionId);
+          this.#emit('question.answered', { questionId, threadId: params.threadId, answer: null });
+          pending.resolve(null);
+        }
         return { stopped: true };
       }
 
@@ -571,6 +590,27 @@ export class FakeClient implements ObservableClient {
         if (!pending) throw this.#notFound('permission request', params.requestId);
         this.#pendingPermissions.delete(params.requestId);
         pending.resolve(params.decision);
+        return { ok: true };
+      }
+
+      case 'questions.list': {
+        const params = rawParams as RpcParams<'questions.list'>;
+        const requests = [...this.#pendingQuestions.values()]
+          .map((pending) => pending.request)
+          .filter((request) => params.threadId === undefined || request.threadId === params.threadId)
+          .sort((a, b) => a.createdAt - b.createdAt);
+        return structuredClone(requests);
+      }
+
+      case 'questions.answer': {
+        const params = rawParams as RpcParams<'questions.answer'>;
+        const pending = this.#pendingQuestions.get(params.questionId);
+        if (!pending) throw this.#notFound('question', params.questionId);
+        this.#pendingQuestions.delete(params.questionId);
+        const text = params.text ?? '';
+        const answer: QuestionAnswer =
+          text.length > 0 ? { optionIds: params.optionIds, text } : { optionIds: params.optionIds };
+        pending.resolve(answer);
         return { ok: true };
       }
 
@@ -748,6 +788,10 @@ export class FakeClient implements ObservableClient {
     if (!record.cancelled && prompt.includes('[permission]')) {
       await this.#askPermission(thread, turn, message);
     }
+    // The bare word, like the echo driver: the fake agent asks one question.
+    if (!record.cancelled && /question/.test(prompt)) {
+      await this.#askQuestion(thread, turn, message);
+    }
     if (!record.cancelled && prompt.includes('[tool-stream]')) {
       await this.#streamToolInput(thread, message);
     }
@@ -838,6 +882,71 @@ export class FakeClient implements ObservableClient {
     this.#settlePermission(thread, message, partIndex, request, decision);
     thread.status = 'running';
     this.#touch(thread);
+  }
+
+  async #askQuestion(thread: Thread, turn: Turn, message: Message): Promise<void> {
+    const questionId = `qst-${++this.#seq}`;
+    const partIndex = message.parts.length;
+    const asked = {
+      text: QUESTION_TEXT,
+      options: QUESTION_OPTIONS,
+      allowText: true,
+      multiple: false
+    };
+    const part: MessagePart = { type: 'question', questionId, ...asked, answer: null };
+    message.parts.push(part);
+    this.#emitToThread(thread.id, 'message.part', {
+      threadId: thread.id,
+      messageId: message.id,
+      partIndex,
+      part: structuredClone(part)
+    });
+
+    const request: QuestionRequest = {
+      id: questionId,
+      threadId: thread.id,
+      turnId: turn.id,
+      ...asked,
+      createdAt: this.#now()
+    };
+    thread.status = 'waiting';
+    this.#touch(thread);
+    this.#emit('question.asked', structuredClone(request));
+
+    const answer = await new Promise<QuestionAnswer | null>((resolve) => {
+      this.#pendingQuestions.set(questionId, { request, resolve });
+    });
+
+    this.#settleQuestion(thread, message, partIndex, request, answer);
+    thread.status = 'running';
+    this.#touch(thread);
+  }
+
+  /** The answer written into the part, then the event, whichever path answered. */
+  #settleQuestion(
+    thread: Thread,
+    message: Message,
+    partIndex: number,
+    request: QuestionRequest,
+    answer: QuestionAnswer | null
+  ): void {
+    const stored = message.parts[partIndex];
+    if (stored && stored.type === 'question') stored.answer = answer;
+    this.#emitToThread(thread.id, 'message.part', {
+      threadId: thread.id,
+      messageId: message.id,
+      partIndex,
+      part: {
+        type: 'question',
+        questionId: request.id,
+        text: request.text,
+        options: request.options,
+        allowText: request.allowText,
+        multiple: request.multiple,
+        answer
+      }
+    });
+    this.#emit('question.answered', { questionId: request.id, threadId: thread.id, answer });
   }
 
   /** Writes the answer into the part and tells everyone, whichever path asked. */
@@ -1576,7 +1685,9 @@ export class FakeClient implements ObservableClient {
       projectId: 'p-boite',
       title: 'Port the scheduler',
       cwd: 'D:\\Dev\\Collab\\boite',
-      status: 'running',
+      // Waiting on a question nobody has answered, the same reason as `t-bench`
+      // and its permission: a page that loads now draws the card from the list.
+      status: 'waiting',
       unread: false,
       sessionId: 'sess-scheduler',
       load: { processes: 2, cpuPercent: 34, memoryBytes: 412 * 1024 * 1024 },
@@ -1609,7 +1720,18 @@ export class FakeClient implements ObservableClient {
           threadId: 't-scheduler',
           turnId: 'turn-seed-2',
           role: 'assistant',
-          parts: [{ type: 'text', text: 'Reading the current caps and the queue order' }],
+          parts: [
+            { type: 'text', text: 'Reading the current caps and the queue order' },
+            {
+              type: 'question',
+              questionId: 'qst-seed-1',
+              text: QUESTION_TEXT,
+              options: QUESTION_OPTIONS,
+              allowText: true,
+              multiple: false,
+              answer: null
+            }
+          ],
           state: 'streaming',
           createdAt: T0 + 171_000
         }
@@ -1760,6 +1882,40 @@ export class FakeClient implements ObservableClient {
         }
         waiting.status = 'idle';
         this.#touch(waiting);
+      }
+    });
+
+    const seededQuestion: QuestionRequest = {
+      id: 'qst-seed-1',
+      threadId: running.id,
+      turnId: 'turn-seed-2',
+      text: QUESTION_TEXT,
+      options: QUESTION_OPTIONS,
+      allowText: true,
+      multiple: false,
+      createdAt: T0 + 171_500
+    };
+    const questionMessage = running.messages[1];
+    this.#pendingQuestions.set(seededQuestion.id, {
+      request: seededQuestion,
+      resolve: (answer) => {
+        if (questionMessage) {
+          this.#settleQuestion(running, questionMessage, 1, seededQuestion, answer);
+          questionMessage.state = 'complete';
+          this.#emitToThread(running.id, 'message.completed', {
+            threadId: running.id,
+            messageId: questionMessage.id,
+            state: 'complete'
+          });
+        }
+        const turn = running.turns[0];
+        if (turn) {
+          turn.status = 'done';
+          turn.finishedAt = this.#now();
+          this.#emit('turn.finished', structuredClone(turn));
+        }
+        running.status = 'idle';
+        this.#touch(running);
       }
     });
 

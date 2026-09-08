@@ -274,12 +274,24 @@ async function runTurn(turnId: string, text: string): Promise<void> {
           turnId,
           itemId: `item-${itemCounter}`,
           questions: [
-            { id: 'q1', header: 'Pick', question: 'which one?', isOther: false, isSecret: false, options: null },
+            {
+              id: 'q1',
+              header: 'Pick',
+              question: 'which one?',
+              isOther: true,
+              isSecret: false,
+              options: [
+                { id: 'red', label: 'Red' },
+                { id: 'blue', label: 'Blue' },
+              ],
+            },
           ],
           isBlocking: true,
           autoResolutionMs: null,
         });
-        say(Object.keys(answer.answers ?? {}).length === 0 ? 'input refused' : 'input answered');
+        const given = answer.answers ?? {};
+        const q1 = typeof given['q1'] === 'string' ? given['q1'] : '';
+        say(q1.length === 0 ? 'input refused' : `input answered ${q1}`);
         break;
       }
       case 'usage':

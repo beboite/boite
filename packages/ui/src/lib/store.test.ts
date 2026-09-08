@@ -23,12 +23,15 @@ describe('Store', () => {
     expect(store.core?.version).toBe('2.0.0-alpha.1');
     expect(store.projects.map((p) => p.id)).toEqual(['p-boite', 'p-brain']);
     expect(store.threads).toHaveLength(4);
+    // Two seeded threads wait: one on a permission, one on a question.
     expect(store.threads.map((t) => t.status).sort()).toEqual([
       'idle',
       'idle',
-      'running',
+      'waiting',
       'waiting'
     ]);
+    expect(store.pendingPermissions.map((p) => p.id)).toEqual(['req-seed-1']);
+    expect(store.pendingQuestions.map((q) => q.id)).toEqual(['qst-seed-1']);
     expect(store.unreadCount).toBe(1);
   });
 

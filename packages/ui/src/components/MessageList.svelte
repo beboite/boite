@@ -4,6 +4,7 @@
   import { strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
   import PermissionCard from './PermissionCard.svelte';
+  import QuestionCard from './QuestionCard.svelte';
   import Prose from './Prose.svelte';
   import ThinkingPart from './ThinkingPart.svelte';
   import ToolCard from './ToolCard.svelte';
@@ -289,6 +290,17 @@
                     decision={part.decision}
                     request={store.permissionRequests[part.requestId] ?? null}
                     answer={(decision) => void store.answer(part.requestId, decision)}
+                  />
+                {:else if part.type === 'question'}
+                  <QuestionCard
+                    text={part.text}
+                    options={part.options}
+                    allowText={part.allowText}
+                    multiple={part.multiple}
+                    answer={part.answer ?? null}
+                    pending={store.pendingQuestions.some((q) => q.id === part.questionId)}
+                    submit={(optionIds, text) =>
+                      void store.answerQuestion(message.threadId, part.questionId, optionIds, text)}
                   />
                 {:else}
                   <div class="error" data-testid="error-part">

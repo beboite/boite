@@ -15,6 +15,13 @@ const TOOL_STREAM_INPUT = '{"command":"echo streamed","description":"a streamed 
 const TOOL_STREAM_PIECES = 4;
 const ERROR_MESSAGE = 'echo error requested';
 
+/** What `[question]`, or the bare word `question`, asks: two options and a free field. */
+const QUESTION_TEXT = 'Which shape should the echo take?';
+const QUESTION_OPTIONS = [
+  { id: 'short', label: 'Short', description: 'one line back' },
+  { id: 'long', label: 'Long', description: 'the whole prompt back' },
+];
+
 /** What `[diff]` edits: three lines in, four out, the middle one changed. */
 const DIFF_PATH = 'src/app.ts';
 const DIFF_OLD = 'export function boot() {\n  return start();\n}';
@@ -43,11 +50,17 @@ type Segment =
   | { kind: 'doc' }
   | { kind: 'image' }
   | { kind: 'permission' }
+  | { kind: 'question' }
   | { kind: 'think' }
   | { kind: 'spawn'; command: string }
   | { kind: 'error' };
 
-const DIRECTIVE = /\[(?:sleep:\d+|tool-stream|tool|diff|doc|image|permission|think|spawn:[^\]]*|error)\]/g;
+/**
+ * A directive in brackets, plus the bare word `question`: the fake agent asks
+ * one whenever a prompt mentions it, which is what the end to end run types.
+ */
+const DIRECTIVE =
+  /\[(?:sleep:\d+|tool-stream|tool|diff|doc|image|permission|question|think|spawn:[^\]]*|error)\]|\bquestion\b/g;
 
 export function parsePrompt(prompt: string): Segment[] {
   const segments: Segment[] = [];
@@ -55,7 +68,7 @@ export function parsePrompt(prompt: string): Segment[] {
   DIRECTIVE.lastIndex = 0;
   for (let match = DIRECTIVE.exec(prompt); match !== null; match = DIRECTIVE.exec(prompt)) {
     if (match.index > last) segments.push({ kind: 'text', text: prompt.slice(last, match.index) });
-    const body = match[0].slice(1, -1);
+    const body = match[0].startsWith('[') ? match[0].slice(1, -1) : match[0];
     if (body.startsWith('sleep:')) segments.push({ kind: 'sleep', ms: Number(body.slice('sleep:'.length)) });
     else if (body.startsWith('spawn:')) segments.push({ kind: 'spawn', command: body.slice('spawn:'.length) });
     else if (body === 'tool-stream') segments.push({ kind: 'tool-stream' });
@@ -64,6 +77,7 @@ export function parsePrompt(prompt: string): Segment[] {
     else if (body === 'doc') segments.push({ kind: 'doc' });
     else if (body === 'image') segments.push({ kind: 'image' });
     else if (body === 'permission') segments.push({ kind: 'permission' });
+    else if (body === 'question') segments.push({ kind: 'question' });
     else if (body === 'think') segments.push({ kind: 'think' });
     else segments.push({ kind: 'error' });
     last = match.index + match[0].length;
@@ -97,6 +111,16 @@ function sleep(ms: number, state: RunState): Promise<void> {
     };
     const timer = setTimeout(wake, ms);
     state.waiters.add(wake);
+  });
+}
+
+/** Resolves null on `stop()`, so a driver waiting on an answer is not stuck. */
+function untilStopped(state: RunState): Promise<null> {
+  if (state.stopped) return Promise.resolve(null);
+  return new Promise<null>((resolve) => {
+    state.waiters.add(() => {
+      resolve(null);
+    });
   });
 }
 
@@ -322,6 +346,40 @@ async function run(ctx: TurnContext, state: RunState): Promise<TurnResult> {
           decision,
         });
         await writeText(decision === 'allow' ? 'allowed' : 'denied');
+        break;
+      }
+      case 'question': {
+        const ticket = ctx.askQuestion({
+          text: QUESTION_TEXT,
+          options: QUESTION_OPTIONS,
+          allowText: true,
+          multiple: false,
+        });
+        const index = takeIndex();
+        ctx.emit.part(messageId, index, {
+          type: 'question',
+          questionId: ticket.questionId,
+          text: QUESTION_TEXT,
+          options: QUESTION_OPTIONS,
+          allowText: true,
+          multiple: false,
+          answer: null,
+        });
+        // A stop while the card is open ends the wait: the pending question is
+        // cancelled with the turn, and the driver settles instead of hanging.
+        const answer = await Promise.race([ticket, untilStopped(state)]);
+        ctx.emit.part(messageId, index, {
+          type: 'question',
+          questionId: ticket.questionId,
+          text: QUESTION_TEXT,
+          options: QUESTION_OPTIONS,
+          allowText: true,
+          multiple: false,
+          answer,
+        });
+        // The answer echoed back, which is what a test and a capture read.
+        if (answer === null) await writeText('question cancelled');
+        else await writeText(`answered ${[...answer.optionIds, answer.text ?? ''].filter((p) => p.length > 0).join(' ')}`);
         break;
       }
       case 'spawn': {

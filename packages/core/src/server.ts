@@ -249,7 +249,8 @@ export function startServer(options: ServerOptions): RunningServer {
   };
 
   const off = core.bus.onAny((name, payload) => {
-    const scoped = name.startsWith('message.') || name.startsWith('permission.');
+    const scoped =
+      name.startsWith('message.') || name.startsWith('permission.') || name.startsWith('question.');
     const threadId = eventThreadId(payload);
     for (const connection of connections) {
       if (!connection.authenticated) continue;

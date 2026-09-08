@@ -20,6 +20,8 @@ import type {
   PermissionMode,
   ProviderDescriptor,
   ProviderId,
+  QuestionAnswer,
+  QuestionOption,
   ThreadId,
   ToolStatus,
   Usage,
@@ -33,6 +35,7 @@ import type {
   ProbeContext,
   ProbeFilter,
   ProbeResult,
+  QuestionAsk,
   TurnContext,
   TurnHandle,
   TurnResult,
@@ -132,6 +135,21 @@ interface CodexItem {
   result?: unknown;
   error?: { message?: string } | null;
   contentItems?: unknown;
+}
+
+/**
+ * One entry of `item/tool/requestUserInput`'s `questions`. `options` is null on
+ * a free-text question and, when it is a list, its entries are either plain
+ * strings or objects: both spellings are read, because the wire has carried
+ * both and neither is worth a refusal.
+ */
+interface CodexQuestion {
+  id?: string;
+  header?: string;
+  question?: string;
+  isOther?: boolean;
+  isSecret?: boolean;
+  options?: unknown;
 }
 
 /**
@@ -838,14 +856,55 @@ class CodexSession {
         return { decision };
       }
       case 'item/tool/requestUserInput':
-        // Boite has no part for a free-form question, and a request left
-        // unanswered hangs the turn. So it is refused with empty answers, which
-        // is what the agent reads as "the user answered nothing".
-        ctx.log('warn', 'codex: the agent asked the user a free-form question, which Boite refuses');
-        return { answers: {} };
+        return { answers: await this.askQuestions(ctx, params['questions']) };
       default:
         throw new Error(`boite does not implement ${method}`);
     }
+  }
+
+  /**
+   * `item/tool/requestUserInput` carries one or more questions, each with its
+   * own id and, sometimes, a list of options. Each becomes one question card,
+   * they are asked in order, and the answers go back keyed by the question id
+   * the server sent. A stop, or a turn that ends first, cancels the rest and
+   * the request is answered with what was collected: leaving it unanswered
+   * would hang the agent.
+   */
+  private async askQuestions(ctx: TurnContext, raw: unknown): Promise<Record<string, string>> {
+    const turn = this.current;
+    const answers: Record<string, string> = {};
+    if (turn === null || !Array.isArray(raw)) return answers;
+    for (const entry of raw as CodexQuestion[]) {
+      if (turn.settled || turn.isStopped) break;
+      const id = typeof entry?.id === 'string' ? entry.id : '';
+      if (id.length === 0) {
+        ctx.log('warn', 'codex: a question with no id was skipped');
+        continue;
+      }
+      const options = optionsOf(entry.options);
+      const answer = await this.askOne(turn, {
+        text: questionTextOf(entry),
+        options,
+        // A question the server marks `isOther`, or one with no options at all,
+        // is the free-text case: there is nothing to pick otherwise.
+        allowText: entry.isOther === true || options.length === 0,
+        multiple: false,
+      });
+      if (answer === null) break;
+      answers[id] = answerTextOf(answer, options);
+    }
+    return answers;
+  }
+
+  /** One question card, drawn and then folded with what the user picked. */
+  private async askOne(turn: CodexTurn, ask: QuestionAsk): Promise<QuestionAnswer | null> {
+    const ticket = turn.ctx.askQuestion(ask);
+    const index = turn.takeIndex();
+    turn.part(index, { type: 'question', questionId: ticket.questionId, ...ask, answer: null });
+    const answer = await Promise.race([ticket, turn.stopped.then(() => null)]);
+    if (answer === null) return null;
+    turn.part(index, { type: 'question', questionId: ticket.questionId, ...ask, answer });
+    return answer;
   }
 
   /** The inline permission card, and the Codex decision the answer becomes. */
@@ -882,6 +941,54 @@ function stringify(value: unknown): string | null {
   } catch {
     return String(value);
   }
+}
+
+/** The header and the question itself, whichever of the two the server filled. */
+function questionTextOf(entry: CodexQuestion): string {
+  const header = textOf(entry.header).trim();
+  const body = textOf(entry.question).trim();
+  if (header.length > 0 && body.length > 0 && header !== body) return `${header}: ${body}`;
+  return body.length > 0 ? body : header;
+}
+
+/** A string option, or an object with an id and a label, becomes one card row. */
+function optionsOf(raw: unknown): QuestionOption[] {
+  if (!Array.isArray(raw)) return [];
+  const options: QuestionOption[] = [];
+  for (const [at, entry] of raw.entries()) {
+    if (typeof entry === 'string') {
+      options.push({ id: entry, label: entry });
+      continue;
+    }
+    if (entry === null || typeof entry !== 'object') continue;
+    const record = entry as Record<string, unknown>;
+    const id = firstString([record['id'], record['value'], record['label'], record['name']]) ?? String(at);
+    const label = firstString([record['label'], record['name'], record['value'], record['id']]) ?? id;
+    const description = firstString([record['description']]);
+    options.push(description === undefined ? { id, label } : { id, label, description });
+  }
+  return options;
+}
+
+function firstString(values: unknown[]): string | undefined {
+  for (const value of values) {
+    if (typeof value === 'string' && value.length > 0) return value;
+  }
+  return undefined;
+}
+
+/**
+ * What goes back on the wire for one question: the text the user typed when
+ * there is one, otherwise the label of what they picked. Codex reads a string
+ * per question id, so an answer is flattened here rather than sent as an object.
+ */
+function answerTextOf(answer: QuestionAnswer, options: QuestionOption[]): string {
+  const picked = answer.optionIds
+    .map((id) => options.find((option) => option.id === id)?.label ?? id)
+    .join(', ');
+  const text = answer.text ?? '';
+  if (picked.length > 0 && text.length > 0) return `${picked}: ${text}`;
+  return picked.length > 0 ? picked : text;
 }
 
 /** `CommandExecutionStatus`, `PatchApplyStatus`, `McpToolCallStatus` all read the same. */

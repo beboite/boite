@@ -338,6 +338,21 @@ export type MessagePart =
       documents?: ToolDocument[];
     }
   | { type: 'permission'; requestId: RequestId; toolName: string; decision: 'allow' | 'deny' | null }
+  /**
+   * A free-form question the agent asked. The card is answered from the
+   * timeline, and `answer` is written back into the part once it is. Null or
+   * absent means it is still waiting.
+   */
+  | {
+      type: 'question';
+      questionId: RequestId;
+      text: string;
+      options: QuestionOption[];
+      /** A question with no options and this true is a plain free-text prompt. */
+      allowText: boolean;
+      multiple: boolean;
+      answer?: QuestionAnswer | null;
+    }
   | { type: 'error'; message: string };
 
 export interface Message {
@@ -366,6 +381,39 @@ export interface PermissionRequest {
   toolName: string;
   input: unknown;
   description: string | null;
+  createdAt: Timestamp;
+}
+
+// ---------------------------------------------------------------------------
+// Questions: what an agent asks the user that is not a tool call.
+// ---------------------------------------------------------------------------
+
+/** One choice on a question card. */
+export interface QuestionOption {
+  id: string;
+  label: string;
+  description?: string;
+}
+
+/** What the user picked. `text` is the free field, when the question has one. */
+export interface QuestionAnswer {
+  optionIds: string[];
+  text?: string;
+}
+
+/**
+ * A question waiting for the user. A driver whose protocol asks something that
+ * is not a permission maps it here, one request per question, in order.
+ */
+export interface QuestionRequest {
+  id: RequestId;
+  threadId: ThreadId;
+  turnId: TurnId;
+  text: string;
+  options: QuestionOption[];
+  /** No options plus this true is a plain free-text prompt. */
+  allowText: boolean;
+  multiple: boolean;
   createdAt: Timestamp;
 }
 
@@ -580,6 +628,21 @@ export interface RpcMethods {
     result: { ok: true };
   };
 
+  /**
+   * The questions still unanswered, oldest first; every thread when `threadId`
+   * is omitted. Same reason as `permissions.list`: a client that connects while
+   * a turn waits rebuilds the card from here.
+   */
+  'questions.list': { params: { threadId?: ThreadId }; result: QuestionRequest[] };
+  /**
+   * One answer. `optionIds` are ids the question listed and `text` the free
+   * field it allowed. A question that is not pending is refused, naming the id.
+   */
+  'questions.answer': {
+    params: { threadId: ThreadId; questionId: RequestId; optionIds: string[]; text?: string };
+    result: { ok: true };
+  };
+
   'trace.get': { params: { threadId: ThreadId; limit?: number }; result: ProcessRecord[] };
   'resources.list': { params: Record<string, never>; result: ThreadResources[] };
   'resources.killTree': { params: { threadId: ThreadId }; result: { killed: number } };
@@ -622,6 +685,11 @@ export interface RpcEvents {
   /** A client that missed this one reads the request from `permissions.list`. */
   'permission.requested': PermissionRequest;
   'permission.resolved': { requestId: RequestId; threadId: ThreadId; decision: 'allow' | 'deny' };
+
+  /** A client that missed this one reads the question from `questions.list`. */
+  'question.asked': QuestionRequest;
+  /** The answer, or null when the turn ended before one came. */
+  'question.answered': { questionId: RequestId; threadId: ThreadId; answer: QuestionAnswer | null };
 
   'process.started': ProcessRecord;
   'process.exited': ProcessRecord;

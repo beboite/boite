@@ -239,6 +239,100 @@ describe('echo driver', () => {
     expect(await latecomer.call('permissions.list', {})).toEqual([]);
   });
 
+  test('a question draws a card, is listed while it waits, and the answer comes back', async () => {
+    const client = await harness.connect();
+    const { threadId } = await echoThread(harness, client);
+    const other = await echoThread(harness, client, 'the thread nobody asked about');
+    await client.call('threads.subscribe', { threadId });
+
+    const asked = client.next('question.asked', (request) => request.threadId === threadId, 10000);
+    const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 10000);
+    await client.call('turns.start', { threadId, prompt: 'question' });
+
+    const question = await asked;
+    expect(question.text).toBe('Which shape should the echo take?');
+    expect(question.options.map((option) => option.id)).toEqual(['short', 'long']);
+    expect(question.allowText).toBe(true);
+    expect(question.multiple).toBe(false);
+    expect((await client.call('threads.get', { threadId })).status).toBe('waiting');
+
+    // A client that connected after the question, subscribed to nothing: the
+    // event never reached it, the method has to.
+    const latecomer = await harness.connect();
+    const pending = await latecomer.call('questions.list', {});
+    expect(pending).toHaveLength(1);
+    expect(pending[0]?.id).toBe(question.id);
+    expect(pending[0]?.turnId).toBe(question.turnId);
+    expect(await latecomer.call('questions.list', { threadId })).toHaveLength(1);
+    expect(await latecomer.call('questions.list', { threadId: other.threadId })).toEqual([]);
+
+    const answered = client.next('question.answered', (event) => event.questionId === question.id, 10000);
+    await latecomer.call('questions.answer', {
+      threadId,
+      questionId: question.id,
+      optionIds: ['short'],
+      text: 'one line please',
+    });
+    expect((await answered).answer).toEqual({ optionIds: ['short'], text: 'one line please' });
+    expect(await latecomer.call('questions.list', {})).toEqual([]);
+
+    expect((await finished).status).toBe('done');
+    const thread = await client.call('threads.get', { threadId });
+    const assistant = thread.messages[thread.messages.length - 1];
+    expect(assistant?.parts[0]).toMatchObject({
+      type: 'question',
+      questionId: question.id,
+      answer: { optionIds: ['short'], text: 'one line please' },
+    });
+    expect(assistant?.parts[1]).toEqual({ type: 'text', text: 'answered short one line please' });
+  });
+
+  test('a question refuses an unknown id, an option nobody offered and an empty answer', async () => {
+    const client = await harness.connect();
+    const { threadId } = await echoThread(harness, client);
+    await client.call('threads.subscribe', { threadId });
+
+    await expect(
+      client.call('questions.answer', { threadId, questionId: 'qst_nobody', optionIds: ['short'] }),
+    ).rejects.toThrow(/qst_nobody/);
+
+    const asked = client.next('question.asked', (request) => request.threadId === threadId, 10000);
+    const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 10000);
+    await client.call('turns.start', { threadId, prompt: 'question' });
+    const question = await asked;
+
+    await expect(
+      client.call('questions.answer', { threadId, questionId: question.id, optionIds: ['purple'] }),
+    ).rejects.toThrow(/options/);
+    await expect(
+      client.call('questions.answer', { threadId, questionId: question.id, optionIds: [] }),
+    ).rejects.toThrow(/option or some text/);
+    // Refused and still pending: the card is answerable after a bad try.
+    expect(await client.call('questions.list', { threadId })).toHaveLength(1);
+
+    await client.call('questions.answer', { threadId, questionId: question.id, optionIds: ['long'] });
+    expect((await finished).status).toBe('done');
+  });
+
+  test('a turn stopped while a question waits cancels it', async () => {
+    const client = await harness.connect();
+    const { threadId } = await echoThread(harness, client);
+    await client.call('threads.subscribe', { threadId });
+
+    const asked = client.next('question.asked', (request) => request.threadId === threadId, 10000);
+    const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 10000);
+    await client.call('turns.start', { threadId, prompt: 'question' });
+    const question = await asked;
+
+    const answered = client.next('question.answered', (event) => event.questionId === question.id, 10000);
+    expect((await client.call('turns.stop', { threadId })).stopped).toBe(true);
+
+    expect((await answered).answer).toBeNull();
+    expect((await finished).status).toBe('stopped');
+    expect(await client.call('questions.list', {})).toEqual([]);
+    expect((await client.call('threads.get', { threadId })).status).toBe('idle');
+  });
+
   test('an unsubscribed connection gets thread.updated but no message.delta', async () => {
     const subscriber = await harness.connect();
     const watcher = await harness.connect();

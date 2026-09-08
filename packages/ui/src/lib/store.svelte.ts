@@ -5,6 +5,7 @@ import type {
   ModelInfo,
   PermissionMode,
   PermissionRequest,
+  QuestionRequest,
   ProcessRecord,
   Project,
   ProjectId,
@@ -161,6 +162,9 @@ export class Store {
   pendingPermissions = $state<PermissionRequest[]>([]);
   /** Kept after the answer so a resolved card still shows what was asked. */
   permissionRequests = $state<Record<RequestId, PermissionRequest>>({});
+  pendingQuestions = $state<QuestionRequest[]>([]);
+  /** Kept after the answer so a folded card still shows what was asked. */
+  questionRequests = $state<Record<RequestId, QuestionRequest>>({});
   collapsedProjects = $state<string[]>([]);
 
   #client: Client | null = null;
@@ -414,6 +418,13 @@ export class Store {
       this.pendingPermissions = this.pendingPermissions.filter((p) => p.id !== requestId);
     });
 
+    on('question.asked', (request) => {
+      this.#mergeQuestions([request]);
+    });
+    on('question.answered', ({ questionId }) => {
+      this.pendingQuestions = this.pendingQuestions.filter((q) => q.id !== questionId);
+    });
+
     on('process.started', (record) => {
       if (this.openThread?.id !== record.threadId) return;
       this.trace = [record, ...this.trace.filter((p) => !sameProcess(p, record))];
@@ -569,16 +580,19 @@ export class Store {
     const client = this.#client;
     if (!client) return;
     try {
-      const [projects, threads, providers, accounts, settings, scheduler, permissions] = await Promise.all([
-        client.call('projects.list', {}),
-        client.call('threads.list', {}),
-        client.call('providers.list', {}),
-        client.call('accounts.list', {}),
-        client.call('settings.get', {}),
-        client.call('scheduler.get', {}),
-        client.call('permissions.list', {})
-      ]);
+      const [projects, threads, providers, accounts, settings, scheduler, permissions, questions] =
+        await Promise.all([
+          client.call('projects.list', {}),
+          client.call('threads.list', {}),
+          client.call('providers.list', {}),
+          client.call('accounts.list', {}),
+          client.call('settings.get', {}),
+          client.call('scheduler.get', {}),
+          client.call('permissions.list', {}),
+          client.call('questions.list', {})
+        ]);
       this.#mergePermissions(permissions);
+      this.#mergeQuestions(questions);
       this.projects = projects;
       this.threads = threads;
       this.providers = providers.loaded;
@@ -715,6 +729,7 @@ export class Store {
       this.trace = await client.call('trace.get', { threadId });
       // The thread may already be waiting on a request this page never saw.
       this.#mergePermissions(await client.call('permissions.list', { threadId }));
+      this.#mergeQuestions(await client.call('questions.list', { threadId }));
       if (thread.unread) {
         await client.call('threads.markRead', { threadId });
         thread.unread = false;
@@ -808,6 +823,39 @@ export class Store {
       ...this.permissionRequests,
       ...Object.fromEntries(requests.map((request) => [request.id, request] as const))
     };
+  }
+
+  /** The same rebuild as the permissions, for the same reason: a missed event. */
+  #mergeQuestions(requests: QuestionRequest[]): void {
+    if (requests.length === 0) return;
+    const byId = new Map(this.pendingQuestions.map((q) => [q.id, q] as const));
+    for (const request of requests) byId.set(request.id, request);
+    this.pendingQuestions = [...byId.values()].sort((a, b) => a.createdAt - b.createdAt);
+    this.questionRequests = {
+      ...this.questionRequests,
+      ...Object.fromEntries(requests.map((request) => [request.id, request] as const))
+    };
+  }
+
+  async answerQuestion(
+    threadId: ThreadId,
+    questionId: string,
+    optionIds: string[],
+    text?: string
+  ): Promise<void> {
+    const client = this.#client;
+    if (!client) return;
+    try {
+      await client.call('questions.answer', {
+        threadId,
+        questionId,
+        optionIds,
+        ...(text === undefined || text.length === 0 ? {} : { text })
+      });
+      this.pendingQuestions = this.pendingQuestions.filter((q) => q.id !== questionId);
+    } catch (error) {
+      this.#fail(error);
+    }
   }
 
   async answer(requestId: string, decision: 'allow' | 'deny'): Promise<void> {

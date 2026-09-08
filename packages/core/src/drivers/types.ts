@@ -9,6 +9,8 @@ import type {
   Protocol,
   ProviderDescriptor,
   ProviderId,
+  QuestionAnswer,
+  QuestionOption,
   RequestId,
   ThreadId,
   ThreadSummary,
@@ -35,6 +37,23 @@ export interface EmitSink {
  */
 export type PermissionTicket = Promise<'allow' | 'deny'> & { readonly requestId: RequestId };
 
+/** What a driver hands the core to draw a question card. */
+export interface QuestionAsk {
+  text: string;
+  options: QuestionOption[];
+  /** True lets the user type an answer of their own beside the options. */
+  allowText: boolean;
+  multiple: boolean;
+}
+
+/**
+ * The answer, plus the id of the question that carries it, so a driver can draw
+ * the card before the user has answered. It resolves to null when the turn
+ * ended or was stopped before an answer landed, which is what lets a driver
+ * settle its own promise instead of hanging on the protocol.
+ */
+export type QuestionTicket = Promise<QuestionAnswer | null> & { readonly questionId: RequestId };
+
 export interface TurnContext {
   thread: ThreadSummary;
   account: Account;
@@ -53,6 +72,8 @@ export interface TurnContext {
   emit: EmitSink;
   log(level: 'info' | 'warn' | 'error', message: string): void;
   requestPermission(toolName: string, input: unknown, description: string | null): PermissionTicket;
+  /** The inline question card. One call per question, and they are asked in order. */
+  askQuestion(ask: QuestionAsk): QuestionTicket;
   spawn(cmd: string, args: string[], opts?: SpawnOptions): SpawnedProcess;
   /** Same registry as `spawn`, node streams and node events, environment as given. */
   spawnChild(cmd: string, args: string[], opts?: SpawnOptions): SpawnedChild;

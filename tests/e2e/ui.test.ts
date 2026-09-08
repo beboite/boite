@@ -16,6 +16,7 @@ const SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui.png');
 const RELOAD_SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui-permission-reload.png');
 const TOOL_SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui-tool-input.png');
 const DIFF_SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui-tool-diff.png');
+const QUESTION_SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui-question.png');
 const OFFLINE_SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui-offline-shell.png');
 /** The one name `public/sw.js` opens; every other cache is deleted on activate. */
 const UI_CACHE = 'boite-ui-v1';
@@ -204,6 +205,38 @@ test(
 
     await page.screenshot(DIFF_SCREENSHOT);
     expect(existsSync(DIFF_SCREENSHOT)).toBe(true);
+  },
+  TIMEOUT,
+);
+
+test(
+  'a question is asked inline, answered from the card, and the answer comes back',
+  async () => {
+    await page.type(testid('composer-input'), 'now question please');
+    await clickWhenEnabled(testid('composer-send'));
+    await page.waitFor(`document.querySelector('${testid('question-card')}')`, 30_000);
+    expect(await page.text(testid('question-text'))).toContain('Which shape');
+    // Nothing picked yet, so there is nothing to send.
+    expect(
+      await page.evaluate<boolean>(`document.querySelector('${testid('question-submit')}').disabled`),
+    ).toBe(true);
+
+    await page.click(`${testid('question-option')}[data-option=short]`);
+    await page.type(testid('question-text-input'), 'one line please');
+    await clickWhenEnabled(testid('question-submit'));
+
+    await page.waitFor(
+      `document.querySelector('${testid('question-card')}').dataset.state === 'answered'`,
+      30_000,
+    );
+    expect(await page.text(testid('question-answer'))).toBe('Short: one line please');
+    await page.waitFor(`document.querySelector('${testid('thread-status')}').dataset.status === 'idle'`, 30_000);
+
+    const assistant = await page.evaluate<string>(ASSISTANT_TEXT);
+    expect(assistant).toContain('answered short one line please');
+
+    await page.screenshot(QUESTION_SCREENSHOT);
+    expect(existsSync(QUESTION_SCREENSHOT)).toBe(true);
   },
   TIMEOUT,
 );

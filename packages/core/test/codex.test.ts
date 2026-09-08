@@ -124,15 +124,6 @@ async function codexThread(client: CoreClient, permissionMode?: PermissionMode, 
   return thread.id;
 }
 
-/** Everything the core logged on this connection, as `<level> <message>` lines. */
-function collectLogs(client: CoreClient): string[] {
-  const lines: string[] = [];
-  client.on('core.log', (entry) => {
-    lines.push(`${entry.level} ${entry.message}`);
-  });
-  return lines;
-}
-
 describe('codex driver', () => {
   test('getDriver returns the codex driver', () => {
     expect(getDriver('codex-appserver').protocol).toBe('codex-appserver');
@@ -304,23 +295,41 @@ describe('codex driver', () => {
     expect(done.status).toBe('done');
   });
 
-  test('a free-form question is refused and the turn still ends', async () => {
+  test('a free-form question draws a card, and the answer reaches the agent', async () => {
     const client = await startCore();
     const threadId = await codexThread(client);
-    const logs = collectLogs(client);
+    await client.call('threads.subscribe', { threadId });
 
+    const asked = client.next('question.asked', (request) => request.threadId === threadId, 20000);
     const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 20000);
     await client.call('turns.start', { threadId, prompt: '[input]' });
+
+    const question = await asked;
+    expect(question.text).toBe('Pick: which one?');
+    expect(question.options).toEqual([
+      { id: 'red', label: 'Red' },
+      { id: 'blue', label: 'Blue' },
+    ]);
+    // `isOther` is the server saying the user may write their own answer.
+    expect(question.allowText).toBe(true);
+    expect(question.multiple).toBe(false);
+    expect(await client.call('questions.list', { threadId })).toHaveLength(1);
+
+    await client.call('questions.answer', { threadId, questionId: question.id, optionIds: ['blue'] });
 
     const done = await finished;
     expect(done.status).toBe('done');
     const thread = await client.call('threads.get', { threadId });
     const parts = thread.messages[thread.messages.length - 1]?.parts ?? [];
+    expect(parts.find((part) => part.type === 'question')).toMatchObject({
+      type: 'question',
+      questionId: question.id,
+      answer: { optionIds: ['blue'] },
+    });
+    // What the fake server received: the label of what the user picked.
     const text = parts.find((part) => part.type === 'text');
-    expect(text?.type === 'text' ? text.text : '').toBe('input refused');
-    await waitFor(() =>
-      logs.some((line) => line.includes('the agent asked the user a free-form question, which Boite refuses')),
-    );
+    expect(text?.type === 'text' ? text.text : '').toBe('input answered Blue');
+    expect(await client.call('questions.list', {})).toEqual([]);
   });
 
   test('a warm thread keeps one agent process for two turns, a cold one starts a second', async () => {
