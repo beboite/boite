@@ -8,6 +8,7 @@ import { freshDataDir, killProcessTree, removeDirectory } from './lib/core.ts';
 const TIMEOUT = 120_000;
 const READY_TIMEOUT_MS = 30_000;
 const CORE_GONE_TIMEOUT_MS = 5_000;
+const HARD_KILL_TIMEOUT_MS = 3_000;
 const POLL_MS = 100;
 
 const ROOT = join(import.meta.dir, '..', '..');
@@ -79,6 +80,22 @@ function pidAlive(pid: number): boolean {
   } catch (error) {
     return (error as NodeJS.ErrnoException).code === 'EPERM';
   }
+}
+
+// A shell killed without its tree leaves its WebView2 browser processes behind
+// for a moment. They are this run's own, recognised by the profile they carry
+// under the temporary data directory, and nothing else is touched.
+function killWebviewsOf(dataDir: string): void {
+  Bun.spawnSync({
+    cmd: [
+      'powershell',
+      '-NoProfile',
+      '-Command',
+      `Get-CimInstance Win32_Process -Filter "Name='msedgewebview2.exe'" | Where-Object { $_.CommandLine -like '*${dataDir}*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }`,
+    ],
+    stdout: 'ignore',
+    stderr: 'ignore',
+  });
 }
 
 function parentOf(pid: number): number | null {
@@ -227,6 +244,67 @@ shellTest(
     }
     expect(pidAlive(corePid)).toBe(false);
     expect(pidAlive(shellPid)).toBe(false);
+  },
+  TIMEOUT,
+);
+
+shellTest(
+  'a hard-killed shell takes its core down',
+  async () => {
+    // Its own shell, its own data directory: the shell above is already gone.
+    const ownDataDir = freshDataDir();
+    const env: Record<string, string> = {};
+    for (const [key, value] of Object.entries(process.env)) {
+      if (value !== undefined) env[key] = value;
+    }
+    delete env.BOITE_CORE_COMMAND;
+    env.BOITE_SHELL_HIDDEN = '1';
+    env.BOITE_DATA_DIR = ownDataDir;
+    env.BOITE_ECHO = '1';
+
+    const proc = Bun.spawn({
+      cmd: [EXE],
+      env,
+      stdout: 'ignore',
+      stderr: 'ignore',
+      windowsHide: true,
+    });
+    let corePid = 0;
+
+    try {
+      const deadline = Date.now() + READY_TIMEOUT_MS;
+      const corePath = join(ownDataDir, 'core.json');
+      for (;;) {
+        const file = readCoreFile(corePath);
+        if (file !== undefined && (await healthy(file.port))) {
+          corePid = file.pid;
+          break;
+        }
+        if (Date.now() > deadline) {
+          throw new Error(`the shell did not write ${corePath} and answer /health within ${READY_TIMEOUT_MS / 1000} s`);
+        }
+        await Bun.sleep(POLL_MS);
+      }
+      expect(corePid).toBeGreaterThan(0);
+      expect(pidAlive(corePid)).toBe(true);
+
+      // The shell alone, no `/T`: nothing walks the tree here, so only the Job
+      // Object the shell owns can take the core down.
+      Bun.spawnSync(['taskkill', '/pid', String(proc.pid), '/F'], { stdout: 'ignore', stderr: 'ignore' });
+
+      const gone = Date.now() + HARD_KILL_TIMEOUT_MS;
+      while (pidAlive(corePid)) {
+        if (Date.now() > gone) break;
+        await Bun.sleep(POLL_MS);
+      }
+      expect(pidAlive(proc.pid)).toBe(false);
+      expect(pidAlive(corePid)).toBe(false);
+    } finally {
+      killProcessTree(proc.pid);
+      if (corePid > 0) killProcessTree(corePid);
+      killWebviewsOf(ownDataDir);
+      await removeDirectory(ownDataDir);
+    }
   },
   TIMEOUT,
 );

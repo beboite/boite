@@ -25,6 +25,109 @@ const POLL_INTERVAL: Duration = Duration::from_millis(120);
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
+// ---------------------------------------------------------------------------
+// The Job Object that owns the core.
+// ---------------------------------------------------------------------------
+
+/// A Windows Job Object with `KILL_ON_JOB_CLOSE`, holding the core this shell
+/// started. `kill_child` covers a clean quit; this covers everything else, a
+/// crash or a `Stop-Process -Force` on the shell included: the last handle to
+/// the job dies with the process, the kernel closes it, and the core goes with
+/// it. An orphan `boite-core.exe` used to survive that and keep
+/// `%LOCALAPPDATA%\Boite\boite-core.exe` open, which the installer then could
+/// not overwrite.
+///
+/// The core creates Job Objects of its own (`boite-agents` and one per thread,
+/// `packages/core/src/platform/jobs.ts`), and a shell launched from a terminal
+/// that is itself in a job is in one too. Both are fine: jobs nest on Windows 8
+/// and later, and closing this one kills the whole tree underneath it.
+#[cfg(windows)]
+mod job {
+    use std::os::windows::io::AsRawHandle;
+    use std::process::Child;
+
+    use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, HANDLE};
+    use windows_sys::Win32::System::JobObjects::{
+        AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
+        SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+    };
+
+    /// Owns the job handle and closes it on drop.
+    pub struct CoreJob(HANDLE);
+
+    // A job handle is a kernel handle: valid from every thread of the process,
+    // and this one is only moved into the shell state and dropped from there.
+    unsafe impl Send for CoreJob {}
+
+    impl Drop for CoreJob {
+        fn drop(&mut self) {
+            unsafe { CloseHandle(self.0) };
+        }
+    }
+
+    fn last_error() -> u32 {
+        unsafe { GetLastError() }
+    }
+
+    pub fn create_core_job() -> Result<CoreJob, String> {
+        let handle = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
+        if handle.is_null() {
+            return Err(format!("CreateJobObjectW failed, error {}", last_error()));
+        }
+        let job = CoreJob(handle);
+
+        let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+        limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        let set = unsafe {
+            SetInformationJobObject(
+                job.0,
+                JobObjectExtendedLimitInformation,
+                std::ptr::addr_of!(limits).cast(),
+                std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+            )
+        };
+        if set == 0 {
+            return Err(format!(
+                "SetInformationJobObject(JobObjectExtendedLimitInformation) failed, error {}",
+                last_error()
+            ));
+        }
+        Ok(job)
+    }
+
+    pub fn assign(job: &CoreJob, child: &Child) -> Result<(), String> {
+        let assigned =
+            unsafe { AssignProcessToJobObject(job.0, child.as_raw_handle() as HANDLE) };
+        if assigned == 0 {
+            return Err(format!(
+                "AssignProcessToJobObject failed, error {}",
+                last_error()
+            ));
+        }
+        Ok(())
+    }
+}
+
+/// Nothing to own outside Windows: the core is killed on quit and on exit, and
+/// a process group is the story a later pass writes here.
+#[cfg(not(windows))]
+mod job {
+    use std::process::Child;
+
+    pub struct CoreJob;
+
+    pub fn create_core_job() -> Result<CoreJob, String> {
+        Ok(CoreJob)
+    }
+
+    pub fn assign(_job: &CoreJob, _child: &Child) -> Result<(), String> {
+        Ok(())
+    }
+}
+
+use job::CoreJob;
+
 #[derive(Clone, Serialize)]
 pub struct CoreEndpoint {
     pub url: String,
@@ -53,6 +156,8 @@ struct Slot {
 pub struct CoreState {
     slot: Arc<(Mutex<Slot>, Condvar)>,
     child: Arc<Mutex<Option<Child>>>,
+    /// Held for the life of the shell process: see `job::CoreJob`.
+    job: Arc<Mutex<Option<CoreJob>>>,
 }
 
 impl CoreState {
@@ -60,6 +165,7 @@ impl CoreState {
         Self {
             slot: Arc::new((Mutex::new(Slot::default()), Condvar::new())),
             child: Arc::new(Mutex::new(None)),
+            job: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -71,6 +177,11 @@ impl CoreState {
                 let _ = child.kill();
                 let _ = child.wait();
             }
+        }
+        // Dropping the job closes its handle, which kills whatever is still in
+        // it: a core that ignored the kill, and anything it had spawned.
+        if let Ok(mut guard) = self.job.lock() {
+            drop(guard.take());
         }
     }
 }
@@ -276,8 +387,9 @@ fn core_command() -> Result<(String, Vec<String>, Option<PathBuf>), String> {
     ))
 }
 
-fn spawn_core() -> Result<(Child, Arc<AtomicBool>), String> {
+fn spawn_core() -> Result<(Child, Arc<AtomicBool>, CoreJob), String> {
     let (program, args, working_directory) = core_command()?;
+    let job = job::create_core_job()?;
 
     let mut command = Command::new(&program);
     command
@@ -298,6 +410,11 @@ fn spawn_core() -> Result<(Child, Arc<AtomicBool>), String> {
         .spawn()
         .map_err(|error| format!("the core could not be started with `{program}`: {error}"))?;
 
+    // Not fatal: the core runs either way, and a clean quit still kills it.
+    if let Err(error) = job::assign(&job, &child) {
+        eprintln!("[shell] the core could not be put in this shell's job object: {error}");
+    }
+
     let ready = Arc::new(AtomicBool::new(false));
     if let Some(stdout) = child.stdout.take() {
         let flag = ready.clone();
@@ -312,10 +429,13 @@ fn spawn_core() -> Result<(Child, Arc<AtomicBool>), String> {
         });
     }
 
-    Ok((child, ready))
+    Ok((child, ready, job))
 }
 
-fn resolve_core(child_slot: &Mutex<Option<Child>>) -> Result<CoreEndpoint, String> {
+fn resolve_core(
+    child_slot: &Mutex<Option<Child>>,
+    job_slot: &Mutex<Option<CoreJob>>,
+) -> Result<CoreEndpoint, String> {
     let directory = data_dir()?;
     let file = directory.join("core.json");
 
@@ -325,9 +445,12 @@ fn resolve_core(child_slot: &Mutex<Option<Child>>) -> Result<CoreEndpoint, Strin
         Err(error) => eprintln!("[shell] {error}"),
     }
 
-    let (child, ready) = spawn_core()?;
+    let (child, ready, job) = spawn_core()?;
     if let Ok(mut guard) = child_slot.lock() {
         *guard = Some(child);
+    }
+    if let Ok(mut guard) = job_slot.lock() {
+        *guard = Some(job);
     }
 
     let started = Instant::now();
@@ -352,10 +475,11 @@ fn resolve_core(child_slot: &Mutex<Option<Child>>) -> Result<CoreEndpoint, Strin
 fn start_core<R: Runtime>(app: &AppHandle<R>, state: &CoreState) {
     let slot = state.slot.clone();
     let child_slot = state.child.clone();
+    let job_slot = state.job.clone();
     let handle = app.clone();
 
     std::thread::spawn(move || {
-        let outcome = resolve_core(&child_slot);
+        let outcome = resolve_core(&child_slot, &job_slot);
         {
             let (lock, ready) = &*slot;
             if let Ok(mut guard) = lock.lock() {
