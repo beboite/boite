@@ -12,18 +12,18 @@
   },
   "dependencies": {
     "@boite/contracts": "workspace:*",
-    "@lucide/svelte": "1.41.0",
+    "@lucide/svelte": "1.42.0",
     "@tauri-apps/api": "2.11.1",
     "@tauri-apps/plugin-dialog": "2.7.3",
     "geist": "^1.7.2"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "7.3.0",
-    "jsdom": "^26.0.0",
+    "jsdom": "^30.0.1",
     "svelte": "5.57.0",
-    "svelte-check": "^4.3.0",
-    "typescript": "^5.9.0",
+    "svelte-check": "^4.7.6",
+    "typescript": "^6.0.3",
     "vite": "8.2.2",
-    "vitest": "^3.2.0"
+    "vitest": "^5.0.0"
   }
 }
