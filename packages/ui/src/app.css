@@ -35,6 +35,8 @@
   --color-live: #facc15;
   --color-success: #4ade80;
   --color-danger: #f87171;
+  --color-danger-hover: #d36060;
+  --color-on-danger: #ffffff;
   --color-scrim: rgba(0, 0, 0, 0.6);
   --color-on-foreground: #0a0a0a;
 
@@ -70,7 +72,7 @@
   color-scheme: dark;
 }
 
-/* The light palette exists for a theme toggle that is not built yet; `index.html` reads `boite.theme` from storage. */
+/* Light, stamped by `lib/theme.ts` and by the boot script of `index.html`; dark stamps nothing. */
 [data-theme='light'] {
   --color-background: #fbfbfc;
   --color-titlebar: #f0f0f3;
@@ -86,6 +88,8 @@
   --color-live: #b45309;
   --color-success: #16a34a;
   --color-danger: #dc2626;
+  --color-danger-hover: #bb2020;
+  --color-on-danger: #ffffff;
   --color-scrim: rgba(0, 0, 0, 0.35);
   --color-on-foreground: #fbfbfc;
   --shadow-e1: 0 1px 2px rgb(0 0 0 / 0.08), inset 0 1px 0 rgb(255 255 255 / 0.6);

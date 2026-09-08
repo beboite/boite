@@ -9,6 +9,7 @@ afterEach(() => {
   if (running) unmount(running, { outro: false });
   running = null;
   document.body.innerHTML = '';
+  delete document.documentElement.dataset.theme;
   window.localStorage.clear();
 });
 
@@ -153,6 +154,27 @@ test('a right click on a thread row opens the context menu, and Archive removes 
   await waitFor(() => document.querySelector('[data-testid=context-menu]') === null);
   await waitFor(() => document.querySelectorAll('[data-testid=thread-row]').length === 3);
   expect(document.querySelector('[data-thread-id="t-bench"]')).toBeNull();
+});
+
+test('the theme setting stamps the light palette and remembers the choice', async () => {
+  await mountOnFake();
+  query<HTMLButtonElement>('[data-testid=nav-settings]').click();
+  await waitFor(() => document.querySelector('[data-testid=theme-light]') !== null);
+  expect(query('[data-testid=theme-system]').getAttribute('aria-pressed')).toBe('true');
+
+  query<HTMLButtonElement>('[data-testid=theme-light]').click();
+  await waitFor(() => document.documentElement.dataset.theme === 'light');
+  expect(window.localStorage.getItem('boite.theme')).toBe('light');
+  expect(query('[data-testid=theme-light]').getAttribute('aria-pressed')).toBe('true');
+
+  query<HTMLButtonElement>('[data-testid=theme-dark]').click();
+  await waitFor(() => document.documentElement.dataset.theme === undefined);
+  expect(window.localStorage.getItem('boite.theme')).toBe('dark');
+  expect(query('[data-testid=theme-dark]').getAttribute('aria-pressed')).toBe('true');
+
+  // The store is one module-level singleton: leave the next test on the chat.
+  query<HTMLButtonElement>('[data-testid=settings-back]').click();
+  await waitFor(() => document.querySelector('[data-testid=settings]') === null);
 });
 
 test('removing a project asks first, and Cancel keeps it', async () => {

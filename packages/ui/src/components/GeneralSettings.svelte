@@ -4,8 +4,21 @@
   import { readStoredEndpoint } from '../lib/endpoint';
   import { strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
+  import { readTheme, setTheme, type Theme } from '../lib/theme';
 
   let { store }: { store: Store } = $props();
+
+  const themes: { id: Theme; label: string }[] = [
+    { id: 'system', label: strings.settings.themeSystem },
+    { id: 'dark', label: strings.settings.themeDark },
+    { id: 'light', label: strings.settings.themeLight }
+  ];
+  let theme = $state<Theme>(untrack(() => readTheme()));
+
+  function pickTheme(next: Theme) {
+    theme = next;
+    setTheme(next);
+  }
 
   const stored = readStoredEndpoint();
   const inShell = window.__TAURI_INTERNALS__ !== undefined;
@@ -78,6 +91,26 @@
         {strings.firstRun.add}
       </button>
     </form>
+  </section>
+
+  <section class="card">
+    <h2>{strings.settings.appearance}</h2>
+    <div class="switch-row">
+      <span class="text">{strings.settings.theme}</span>
+      <div class="segmented" role="group" aria-label={strings.settings.theme}>
+        {#each themes as option (option.id)}
+          <button
+            type="button"
+            class:on={theme === option.id}
+            aria-pressed={theme === option.id}
+            data-testid="theme-{option.id}"
+            onclick={() => pickTheme(option.id)}
+          >
+            {option.label}
+          </button>
+        {/each}
+      </div>
+    </div>
   </section>
 
   <section class="card">
@@ -258,6 +291,38 @@
 
   .switch-row input:checked::after {
     transform: translateX(12px);
+  }
+
+  /* Three buttons in one track, the chosen one filled like a primary button. */
+  .segmented {
+    display: inline-flex;
+    flex: none;
+    gap: 2px;
+    padding: 2px;
+    border: 1px solid var(--color-edge);
+    border-radius: var(--radius-md);
+    background: var(--color-surface-2);
+  }
+
+  .segmented button {
+    height: 24px;
+    padding: 0 10px;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--color-muted-foreground);
+    font-size: var(--text-sm);
+  }
+
+  .segmented button:hover:not(.on) {
+    background: var(--color-surface-3);
+    color: var(--color-foreground);
+  }
+
+  .segmented button.on {
+    background: var(--color-foreground);
+    border-color: var(--color-foreground);
+    color: var(--color-on-foreground);
   }
 
   .actions {

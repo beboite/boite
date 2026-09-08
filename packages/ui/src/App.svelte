@@ -11,13 +11,16 @@
   import TracePanel from './components/TracePanel.svelte';
   import { strings } from './lib/strings';
   import { store } from './lib/store.svelte';
+  import { startTheme } from './lib/theme';
 
   const inShell = window.__TAURI_INTERNALS__ !== undefined;
   let sidebar = $state<Sidebar | undefined>(undefined);
 
   onMount(() => {
     void store.boot();
-    if (!inShell) return;
+    // The stored theme, and the OS one while the setting reads `system`.
+    const stopTheme = startTheme();
+    if (!inShell) return stopTheme;
 
     // A folder dragged from the Explorer: the shell reports it, the core
     // refuses anything that is not a directory, the toast repeats why.
@@ -39,6 +42,7 @@
     return () => {
       disposed = true;
       unlisten?.();
+      stopTheme();
     };
   });
 

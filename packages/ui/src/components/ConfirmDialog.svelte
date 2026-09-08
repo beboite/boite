@@ -109,11 +109,11 @@
   .destructive {
     background: var(--color-danger);
     border-color: var(--color-danger);
-    color: #ffffff;
+    color: var(--color-on-danger);
   }
 
   .destructive:hover:not(:disabled) {
-    background: color-mix(in srgb, var(--color-danger) 85%, #000000);
+    background: var(--color-danger-hover);
   }
 
   @keyframes fade {

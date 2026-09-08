@@ -219,6 +219,11 @@ export const strings = {
       resources: 'Resources'
     },
     back: 'Back to threads',
+    appearance: 'Appearance',
+    theme: 'Theme',
+    themeSystem: 'System',
+    themeDark: 'Dark',
+    themeLight: 'Light',
     connection: 'Connection',
     coreUrl: 'Core URL',
     token: 'Token',

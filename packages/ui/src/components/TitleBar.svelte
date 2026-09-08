@@ -190,6 +190,6 @@
 
   .ctl.close:hover:not(:disabled) {
     background: var(--color-danger);
-    color: #ffffff;
+    color: var(--color-on-danger);
   }
 </style>

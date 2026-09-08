@@ -10,7 +10,7 @@
     <link rel="preload" href="./fonts/Geist-Variable.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="preload" href="./fonts/GeistMono-Variable.woff2" as="font" type="font/woff2" crossorigin />
     <title>Boite</title>
-    <!-- Painted before the stylesheet arrives, so a reload never flashes white. -->
+    <!-- Painted before the stylesheet arrives, so a reload never flashes the wrong ground. -->
     <style>
       html,
       body {
@@ -20,11 +20,27 @@
         color: #fafafa;
         overflow: hidden;
       }
+
+      html[data-theme='light'],
+      html[data-theme='light'] body {
+        background: #fbfbfc;
+        color: #18181b;
+      }
     </style>
+    <!-- The same rule as lib/theme.ts, run before the first paint: dark stamps nothing. -->
     <script>
       try {
-        var theme = localStorage.getItem('boite.theme');
-        if (theme === 'light') document.documentElement.dataset.theme = 'light';
+        var stored = localStorage.getItem('boite.theme');
+        var theme = stored === 'dark' || stored === 'light' ? stored : 'system';
+        var light =
+          theme === 'light' ||
+          (theme === 'system' &&
+            typeof window.matchMedia === 'function' &&
+            window.matchMedia('(prefers-color-scheme: light)').matches);
+        if (light) {
+          document.documentElement.dataset.theme = 'light';
+          document.querySelector('meta[name="theme-color"]').setAttribute('content', '#fbfbfc');
+        }
       } catch (e) {}
     </script>
   </head>
