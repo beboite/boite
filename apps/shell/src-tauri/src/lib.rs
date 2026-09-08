@@ -187,8 +187,18 @@ impl CoreState {
 }
 
 // ---------------------------------------------------------------------------
-// The one command the UI invokes.
+// The commands the shell's own page can invoke.
 // ---------------------------------------------------------------------------
+
+/// The clean quit, the very one the tray's Quit item runs: `kill_child` first,
+/// then the app. The window's close button and a `WM_CLOSE` both land on the
+/// `CloseRequested` this shell prevents, which hides to the tray, so the tray
+/// was the only way out and `kill_child` could be reached from no test at all.
+/// `tests/e2e/shell.test.ts` invokes this.
+#[tauri::command]
+fn quit_shell(app: AppHandle) {
+    quit(&app);
+}
 
 #[tauri::command]
 async fn core_endpoint(state: State<'_, CoreState>) -> Result<CoreEndpoint, String> {
@@ -576,7 +586,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .manage(CoreState::new())
-        .invoke_handler(tauri::generate_handler![core_endpoint])
+        .invoke_handler(tauri::generate_handler![core_endpoint, quit_shell])
         .setup(|app| {
             let handle = app.handle().clone();
             let window = build_main_window(&handle)?;

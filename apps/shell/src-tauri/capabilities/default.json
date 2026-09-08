@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "What the Boite UI needs: the core IPC, the frameless window's own controls (drag, minimize, maximize state and toggle, close), the drag-and-drop events, the folder picker, and handing an external link to the system browser. `core_endpoint` is an application command, which capabilities do not gate.",
+  "description": "What the Boite UI needs: the core IPC, the frameless window's own controls (drag, minimize, maximize state and toggle, close), the drag-and-drop events, the folder picker, and handing an external link to the system browser. `core_endpoint` and `quit_shell` are application commands, which capabilities do not gate.",
   "windows": ["main"],
   "permissions": [
     "core:default",

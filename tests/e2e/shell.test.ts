@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { BrowserPage, freePort } from './lib/cdp.ts';
-import { freshDataDir, killProcessTree, removeDirectory } from './lib/core.ts';
+import { freshDataDir, killProcessTree, removeDirectory, startCore } from './lib/core.ts';
 
 const TIMEOUT = 120_000;
 const READY_TIMEOUT_MS = 30_000;
@@ -188,49 +188,82 @@ function parentOf(pid: number): number | null {
   return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
 }
 
-beforeAll(async () => {
-  if (exeMissing || staleReason !== null) return;
-  dataDir = freshDataDir();
-  projectDir = mkdtempSync(join(tmpdir(), 'boite-e2e-shell-project-'));
-  const debugPort = await freePort();
-
+/**
+ * A shell with no window: `BOITE_SHELL_HIDDEN` keeps it off the screen, and its
+ * WebView2 profile goes under the data directory, so a run never shares a
+ * browser process with the installed app the user may have open. A debugging
+ * port is only passed when the test drives the page.
+ */
+function spawnHiddenShell(ownDataDir: string, debugPort?: number): number {
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(process.env)) {
     if (value !== undefined) env[key] = value;
   }
   delete env.BOITE_CORE_COMMAND;
   env.BOITE_SHELL_HIDDEN = '1';
-  // The shell puts its WebView2 profile under the data directory, so this run
-  // never shares a browser process with the installed app the user may have open.
-  env.BOITE_DATA_DIR = dataDir;
+  env.BOITE_DATA_DIR = ownDataDir;
   env.BOITE_ECHO = '1';
-  env.WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = `--remote-debugging-port=${debugPort} --remote-allow-origins=*`;
+  if (debugPort !== undefined) {
+    env.WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = `--remote-debugging-port=${debugPort} --remote-allow-origins=*`;
+  }
+  return Bun.spawn({ cmd: [EXE], env, stdout: 'ignore', stderr: 'ignore', windowsHide: true }).pid;
+}
 
-  const startedAt = performance.now();
-  const proc = Bun.spawn({
-    cmd: [EXE],
-    env,
-    stdout: 'ignore',
-    stderr: 'ignore',
-    windowsHide: true,
-  });
-  shellPid = proc.pid;
-
+async function waitForHealthyCore(ownDataDir: string): Promise<CoreFile> {
+  const corePath = join(ownDataDir, 'core.json');
   const deadline = Date.now() + READY_TIMEOUT_MS;
-  const corePath = join(dataDir, 'core.json');
   for (;;) {
     const file = readCoreFile(corePath);
-    if (file !== undefined && (await healthy(file.port))) {
-      startToHealthMs = performance.now() - startedAt;
-      coreFile = file;
-      break;
-    }
+    if (file !== undefined && (await healthy(file.port))) return file;
     if (Date.now() > deadline) {
-      killProcessTree(shellPid);
-      throw new Error(`the shell did not write ${corePath} and answer /health within ${READY_TIMEOUT_MS / 1000} s`);
+      throw new Error(`no core answered /health from ${corePath} within ${READY_TIMEOUT_MS / 1000} s`);
     }
     await Bun.sleep(POLL_MS);
   }
+}
+
+/** The webview exposes its page target before the IPC bridge is injected. */
+const TAURI_READY = "typeof window.__TAURI_INTERNALS__?.invoke === 'function'";
+
+async function waitUntil(done: () => boolean, timeoutMs: number): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!done() && Date.now() < deadline) await Bun.sleep(POLL_MS);
+}
+
+/**
+ * The clean quit, the one the tray's Quit item runs: `CoreState::kill_child`
+ * and then `app.exit(0)`. `quit_shell` is an application command, which the
+ * capability file does not gate, and it is the only way in without a mouse on
+ * the tray icon: the window's close button and a `WM_CLOSE` both land on the
+ * `CloseRequested` the shell prevents, which hides to the tray and quits
+ * nothing (`apps/shell/src-tauri/src/lib.rs`).
+ */
+async function quitShell(shellPage: BrowserPage): Promise<void> {
+  await shellPage.waitFor(TAURI_READY);
+  try {
+    await shellPage.evaluate<null>(
+      `(() => { window.__TAURI_INTERNALS__.invoke('quit_shell'); return null; })()`,
+    );
+  } catch {
+    // The webview can die with the shell before the answer comes back.
+  }
+}
+
+beforeAll(async () => {
+  if (exeMissing || staleReason !== null) return;
+  dataDir = freshDataDir();
+  projectDir = mkdtempSync(join(tmpdir(), 'boite-e2e-shell-project-'));
+  const debugPort = await freePort();
+
+  const startedAt = performance.now();
+  shellPid = spawnHiddenShell(dataDir, debugPort);
+  try {
+    coreFile = await waitForHealthyCore(dataDir);
+  } catch (error) {
+    killProcessTree(shellPid);
+    throw error;
+  }
+  startToHealthMs = performance.now() - startedAt;
   console.log(`[shell.test] spawn to /health: ${startToHealthMs.toFixed(0)} ms`);
 
   page = await BrowserPage.attach(debugPort);
@@ -382,57 +415,104 @@ shellTest(
   async () => {
     // Its own shell, its own data directory: the shell above is already gone.
     const ownDataDir = freshDataDir();
-    const env: Record<string, string> = {};
-    for (const [key, value] of Object.entries(process.env)) {
-      if (value !== undefined) env[key] = value;
-    }
-    delete env.BOITE_CORE_COMMAND;
-    env.BOITE_SHELL_HIDDEN = '1';
-    env.BOITE_DATA_DIR = ownDataDir;
-    env.BOITE_ECHO = '1';
-
-    const proc = Bun.spawn({
-      cmd: [EXE],
-      env,
-      stdout: 'ignore',
-      stderr: 'ignore',
-      windowsHide: true,
-    });
+    const shell = spawnHiddenShell(ownDataDir);
     let corePid = 0;
 
     try {
-      const deadline = Date.now() + READY_TIMEOUT_MS;
-      const corePath = join(ownDataDir, 'core.json');
-      for (;;) {
-        const file = readCoreFile(corePath);
-        if (file !== undefined && (await healthy(file.port))) {
-          corePid = file.pid;
-          break;
-        }
-        if (Date.now() > deadline) {
-          throw new Error(`the shell did not write ${corePath} and answer /health within ${READY_TIMEOUT_MS / 1000} s`);
-        }
-        await Bun.sleep(POLL_MS);
-      }
+      corePid = (await waitForHealthyCore(ownDataDir)).pid;
       expect(corePid).toBeGreaterThan(0);
       expect(pidAlive(corePid)).toBe(true);
 
       // The shell alone, no `/T`: nothing walks the tree here, so only the Job
       // Object the shell owns can take the core down.
-      Bun.spawnSync(['taskkill', '/pid', String(proc.pid), '/F'], { stdout: 'ignore', stderr: 'ignore' });
+      Bun.spawnSync(['taskkill', '/pid', String(shell), '/F'], { stdout: 'ignore', stderr: 'ignore' });
 
-      const gone = Date.now() + HARD_KILL_TIMEOUT_MS;
-      while (pidAlive(corePid)) {
-        if (Date.now() > gone) break;
-        await Bun.sleep(POLL_MS);
-      }
-      expect(pidAlive(proc.pid)).toBe(false);
+      await waitUntil(() => !pidAlive(corePid), HARD_KILL_TIMEOUT_MS);
+      expect(pidAlive(shell)).toBe(false);
       expect(pidAlive(corePid)).toBe(false);
     } finally {
-      killProcessTree(proc.pid);
+      killProcessTree(shell);
       if (corePid > 0) killProcessTree(corePid);
       killWebviewsOf(ownDataDir);
       await removeDirectory(ownDataDir);
+    }
+  },
+  TIMEOUT,
+);
+
+shellTest(
+  'a clean quit kills the core the shell started',
+  async () => {
+    // `kill_child` is the explicit half of the shutdown: the tree kill above
+    // proves the Job Object, this proves the shell asking its own core to go.
+    const ownDataDir = freshDataDir();
+    const debugPort = await freePort();
+    const shell = spawnHiddenShell(ownDataDir, debugPort);
+    let corePid = 0;
+    let shellPage: BrowserPage | undefined;
+
+    try {
+      corePid = (await waitForHealthyCore(ownDataDir)).pid;
+      expect(corePid).toBeGreaterThan(0);
+      expect(pidAlive(corePid)).toBe(true);
+      // Started, not adopted: the core is this shell's own child.
+      expect(parentOf(corePid)).toBe(shell);
+
+      shellPage = await BrowserPage.attach(debugPort);
+      await quitShell(shellPage);
+
+      await waitUntil(() => !pidAlive(shell) && !pidAlive(corePid), CORE_GONE_TIMEOUT_MS);
+      expect(pidAlive(shell)).toBe(false);
+      expect(pidAlive(corePid)).toBe(false);
+    } finally {
+      await shellPage?.close();
+      killProcessTree(shell);
+      if (corePid > 0) killProcessTree(corePid);
+      killWebviewsOf(ownDataDir);
+      await removeDirectory(ownDataDir);
+    }
+  },
+  TIMEOUT,
+);
+
+shellTest(
+  'a clean quit leaves the core the shell adopted alone',
+  async () => {
+    // A core that was already answering when the shell opened is nobody's
+    // child and is in no Job Object of the shell's: quitting must not touch it.
+    const adopted = await startCore();
+    const debugPort = await freePort();
+    let shell = 0;
+    let shellPage: BrowserPage | undefined;
+
+    try {
+      shell = spawnHiddenShell(adopted.dataDir, debugPort);
+      shellPage = await BrowserPage.attach(debugPort);
+
+      // Adopted, not replaced: the endpoint the shell hands its own UI is the
+      // core this test started, and `core.json` still names that process. The
+      // page target is there before the IPC is, so this waits for the bridge.
+      await shellPage.waitFor(TAURI_READY);
+      const endpoint = await shellPage.evaluate<{ url: string }>(
+        `window.__TAURI_INTERNALS__.invoke('core_endpoint')`,
+      );
+      expect(endpoint.url).toContain(`:${adopted.port}`);
+      expect(readCoreFile(join(adopted.dataDir, 'core.json'))?.pid).toBe(adopted.pid);
+
+      await quitShell(shellPage);
+
+      await waitUntil(() => !pidAlive(shell), CORE_GONE_TIMEOUT_MS);
+      expect(pidAlive(shell)).toBe(false);
+
+      // Long enough for a job handle closing at exit to have taken it down.
+      await Bun.sleep(500);
+      expect(pidAlive(adopted.pid)).toBe(true);
+      expect(await healthy(adopted.port)).toBe(true);
+    } finally {
+      await shellPage?.close();
+      if (shell > 0) killProcessTree(shell);
+      killWebviewsOf(adopted.dataDir);
+      await adopted.stop();
     }
   },
   TIMEOUT,
