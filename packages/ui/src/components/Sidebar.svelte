@@ -146,6 +146,15 @@
   }
 
   let usageToday = $derived(store.usage ? store.usage.total.inputTokens + store.usage.total.outputTokens : null);
+
+  // The one plus left in the sidebar says which project it will open the draft
+  // in: the same fallback `startDraft` uses, the open project then the first.
+  let newThreadTarget = $derived(store.openProject ?? store.projects[0] ?? null);
+  let newThreadLabel = $derived(
+    newThreadTarget
+      ? fill(strings.sidebar.newThreadIn, { project: newThreadTarget.name })
+      : strings.sidebar.newThread
+  );
 </script>
 
 <aside
@@ -173,8 +182,8 @@
       <button
         type="button"
         class="icon"
-        title="{strings.sidebar.newThread} (Ctrl+N)"
-        aria-label={strings.sidebar.newThread}
+        title="{newThreadLabel} (Ctrl+N)"
+        aria-label={newThreadLabel}
         data-testid="new-thread"
         onclick={() => store.startDraft()}
       >
@@ -207,16 +216,6 @@
             <span class="tile">{initial(project.name)}</span>
             <span class="name">{project.name}</span>
             <span class="caret" class:collapsed><ChevronRight size={13} strokeWidth={2} /></span>
-          </button>
-          <button
-            type="button"
-            class="ghost small icon hover-only"
-            title={strings.sidebar.newThread}
-            aria-label={strings.sidebar.newThread}
-            data-testid="project-new-thread"
-            onclick={() => store.startDraft(project.id)}
-          >
-            <Plus size={16} strokeWidth={1.75} />
           </button>
           <button
             type="button"

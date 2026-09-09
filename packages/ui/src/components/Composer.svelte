@@ -8,7 +8,12 @@
   import Menu from './Menu.svelte';
   import ModelPicker from './ModelPicker.svelte';
 
-  let { store }: { store: Store } = $props();
+  /**
+   * `centered` is the draft's placement: the parent stacks the composer under
+   * the heading and centres the pair, so the wrapper drops the padding that
+   * holds it off the bottom of the column. Same component, same box.
+   */
+  let { store, centered = false }: { store: Store; centered?: boolean } = $props();
 
   const MODES: PermissionMode[] = ['default', 'acceptEdits', 'plan', 'bypassPermissions', 'dontAsk'];
   const MAX_LINES = 8;
@@ -260,7 +265,7 @@
   }
 </script>
 
-<div class="composer-wrap">
+<div class="composer-wrap" class:centered>
   <div class="composer" data-testid="composer">
     {#if queued !== null}
       <div class="queued subtle" data-testid="composer-queued">{strings.composer.queued}</div>
@@ -317,6 +322,12 @@
   .composer-wrap {
     flex: none;
     padding: 8px 20px 16px;
+  }
+
+  /* Centred under the draft's heading: the air above and below is the column's
+     to give, and the horizontal padding is the one the heading uses too. */
+  .composer-wrap.centered {
+    padding: 0 20px;
   }
 
   /* The one raised object in the column: it floats over the timeline instead of
@@ -402,6 +413,10 @@
   @media (max-width: 720px) {
     .composer-wrap {
       padding: 6px 10px 10px;
+    }
+
+    .composer-wrap.centered {
+      padding: 0 10px;
     }
 
     .hint {

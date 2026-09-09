@@ -1,11 +1,13 @@
 <script lang="ts">
-  import { Activity, PanelLeft } from '@lucide/svelte';
+  import { Activity, ChevronDown, PanelLeft } from '@lucide/svelte';
+  import type { ProjectId } from '@boite/contracts';
   import { focusOnMount } from '../lib/actions';
   import { contextMenu } from '../lib/context-menu.svelte';
-  import { separator } from '../lib/menu';
+  import { separator, type MenuItem } from '../lib/menu';
   import { strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
   import Composer from './Composer.svelte';
+  import Menu from './Menu.svelte';
   import MessageList from './MessageList.svelte';
   import StatusMark from './StatusMark.svelte';
 
@@ -63,6 +65,20 @@
 
   let thread = $derived(store.openThread);
   let project = $derived(store.openProject);
+
+  /** Every project, the draft's own marked: what the heading's dropdown lists. */
+  let projectItems = $derived<MenuItem[]>(
+    store.projects.map((entry) => ({
+      id: entry.id,
+      label: entry.name,
+      hint: entry.path,
+      active: entry.id === store.draft?.projectId
+    }))
+  );
+
+  function pickProject(id: string) {
+    store.setDraftProject(id as ProjectId);
+  }
 </script>
 
 {#if !thread && !store.draft}
@@ -116,7 +132,8 @@
 
       <span class="spacer"></span>
 
-      {#if project}
+      <!-- A draft names its project in the heading below, so the chip would say it twice. -->
+      {#if project && thread}
         <span class="chip path mono" title={project.path}>{project.name}</span>
       {/if}
       {#if thread}
@@ -139,11 +156,31 @@
       <MessageList {store} threadId={thread.id} messages={thread.messages} />
     {:else}
       <div class="draft-body" data-testid="draft-empty">
-        <p class="muted">{strings.thread.draftHint}</p>
+        <h1 class="start">
+          <span>{strings.thread.startIn}</span>
+          <!-- It opens upward, into the empty half of the column: under the
+               heading it would land on the composer. -->
+          <Menu
+            items={projectItems}
+            onpick={pickProject}
+            variant="text"
+            label={strings.thread.changeProject}
+            testid="draft-project"
+          >
+            {project?.name ?? ''}
+            <ChevronDown size={14} strokeWidth={2} />
+          </Menu>
+        </h1>
       </div>
     {/if}
 
-    <Composer {store} />
+    <Composer {store} centered={!thread} />
+
+    <!-- The draft's heading and composer are one block in the middle of the
+         column: the body above and this tail below share the free space. -->
+    {#if !thread}
+      <div class="draft-tail"></div>
+    {/if}
   </section>
 {/if}
 
@@ -242,14 +279,33 @@
     color: var(--color-foreground);
   }
 
+  /* Zero basis on both halves, so the heading sits exactly as far below the
+     top as the composer sits above the bottom: one centred block. */
   .draft-body {
-    flex: 1;
+    flex: 1 1 0;
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    padding: 24px 20px 16px;
+    animation: rise var(--dur-3) var(--ease-out-quint);
+  }
+
+  .draft-tail {
+    flex: 1 1 0;
+    min-height: 0;
+  }
+
+  .start {
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 24px;
-    text-align: center;
-    animation: rise var(--dur-3) var(--ease-out-quint);
+    flex-wrap: wrap;
+    gap: 2px;
+    width: 100%;
+    max-width: var(--content);
+    font-size: var(--text-lg);
+    font-weight: 600;
+    color: var(--color-foreground);
   }
 
   @media (max-width: 720px) {
@@ -259,6 +315,10 @@
 
     .path {
       display: none;
+    }
+
+    .draft-body {
+      padding: 16px 10px;
     }
   }
 </style>

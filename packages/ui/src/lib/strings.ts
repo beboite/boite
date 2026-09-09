@@ -103,7 +103,9 @@ export const strings = {
     model: 'Model',
     defaultModel: 'Default model',
     renamePlaceholder: 'Thread title',
-    draftHint: 'Type a message to start this thread.'
+    /** The draft's own heading, the project's name in the dropdown after it. */
+    startIn: 'Start a thread in',
+    changeProject: 'Change project'
   },
 
   chat: {
@@ -242,11 +244,11 @@ export const strings = {
     killed: 'Killed'
   },
 
-  /** A provider whose files Boite downloads itself: the picker row and the Accounts page share these. */
+  /** A provider whose files Boite downloads itself. Settings is the only place this shows. */
   install: {
-    heading: 'Providers Boite installs',
+    heading: 'Installed by Boite',
     action: 'Install',
-    actionWithSize: 'Install, {size}',
+    update: 'Update',
     retry: 'Install again',
     cancel: 'Cancel',
     remove: 'Remove',
@@ -254,16 +256,16 @@ export const strings = {
     removeBody: 'The files Boite downloaded go with it. It can be installed again later.',
     removeConfirm: 'Remove',
     removeCancel: 'Keep',
-    absent: 'not installed, {size} to download',
-    downloading: 'Downloading {received} of {total}',
+    absent: 'Not installed, {size}',
     verifying: 'Checking the archive',
     extracting: 'Unpacking',
-    installed: 'Installed, version {version}',
+    upToDate: 'Version {version}',
+    updateAvailable: 'Version {installed}, {available} available',
     progress: 'Download progress'
   },
 
   accounts: {
-    heading: 'Accounts',
+    heading: 'Providers',
     empty: 'No account yet.',
     add: 'Add account',
     provider: 'Provider',
@@ -307,7 +309,7 @@ export const strings = {
     heading: 'Settings',
     tabs: {
       general: 'General',
-      accounts: 'Accounts',
+      accounts: 'Providers',
       usage: 'Usage',
       resources: 'Resources'
     },

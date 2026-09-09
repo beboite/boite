@@ -145,6 +145,41 @@ test('the sidebar draft row hands the keyboard back to the composer', async () =
   store.draft = null;
 });
 
+test('a draft names its project in the heading and the dropdown moves it to another one', async () => {
+  await mountOnFake();
+
+  // The one plus left says where it will open the draft, and a project row has none.
+  expect(query<HTMLButtonElement>('[data-testid=new-thread]').title).toBe('New thread in brain (Ctrl+N)');
+  expect(document.querySelector('[data-testid=project-new-thread]')).toBeNull();
+
+  // The draft opens in the project of the thread that was open, `brain`.
+  query<HTMLButtonElement>('[data-testid=new-thread]').click();
+  await waitFor(() => store.draft !== null);
+
+  const heading = query('[data-testid=draft-empty]');
+  expect(heading.textContent).toContain('Start a thread in');
+  expect(heading.textContent).toContain('brain');
+  // The heading says the project, so the header chip no longer repeats it.
+  expect(query('[data-testid=chat] header').textContent).not.toContain('brain');
+
+  query<HTMLButtonElement>('[data-testid=draft-project]').click();
+  await waitFor(() => document.querySelector('[data-testid=draft-project-menu]') !== null);
+  const rows = Array.from(
+    document.querySelectorAll<HTMLButtonElement>('[data-testid=draft-project-menu] [data-row]')
+  );
+  expect(rows.map((row) => row.dataset['value'])).toEqual(['p-boite', 'p-brain']);
+
+  rows[0]?.click();
+  await waitFor(() => store.draft?.projectId === 'p-boite');
+  await waitFor(() => (query('[data-testid=draft-empty]').textContent ?? '').includes('boite'));
+  // The draft row moved with it, and the composer took the keyboard back.
+  expect(query('[data-testid=project][data-project-id=p-boite]').querySelector('[data-testid=draft-row]')).not.toBeNull();
+  await waitFor(() => document.activeElement === document.querySelector('[data-testid=composer-input]'));
+
+  // The store is the singleton every test shares: the draft goes back out.
+  store.draft = null;
+});
+
 test('the picker rails the providers as logos and gives the shown one its accounts and models', async () => {
   await mountOnFake();
   query<HTMLButtonElement>('[data-testid=new-thread]').click();
@@ -737,6 +772,57 @@ test('a provider Boite installs says so in the picker and sends you to Settings,
 
   query<HTMLButtonElement>('[data-model=default]').click();
   await waitFor(() => (query('[data-testid=composer-picker]').textContent ?? '').includes('Antigravity'));
+});
+
+test('the Providers page says where each managed install stands and offers Update on the one behind', async () => {
+  store.draft = null;
+  await mountOnFake();
+  query<HTMLButtonElement>('[data-testid=nav-settings]').click();
+  await waitFor(() => document.querySelector('[data-testid=settings-tab-accounts]') !== null);
+  // The nav entry is named after what the page is now about.
+  expect(query('[data-testid=settings-tab-accounts]').textContent?.trim()).toBe('Providers');
+
+  query<HTMLButtonElement>('[data-testid=settings-tab-accounts]').click();
+  await waitFor(() => document.querySelector('[data-testid=managed-providers]') !== null);
+  expect(query('[data-testid=managed-providers] h2').textContent?.trim()).toBe('Installed by Boite');
+
+  // Nothing on the machine: the size rides in the words, the button is one verb.
+  const absent = query('[data-testid=install-control][data-provider=antigravity]');
+  expect(absent.querySelector('[data-testid=install-status]')?.textContent?.trim()).toBe(
+    'Not installed, 447 MB'
+  );
+  expect(absent.querySelector('[data-testid=install-start]')?.textContent?.trim()).toBe('Install');
+  expect(absent.querySelector('[data-testid=install-remove]')).toBeNull();
+
+  // Down and one release behind: both versions in the row, Update beside Remove.
+  const behind = query('[data-testid=install-control][data-provider=opencode]');
+  expect(behind.getAttribute('data-update')).toBe('true');
+  expect(behind.querySelector('[data-testid=install-status]')?.textContent?.trim()).toBe(
+    'Version 0.4.12, 0.5.0 available'
+  );
+  expect(behind.querySelector('[data-testid=install-update]')?.textContent?.trim()).toBe('Update');
+  expect(behind.querySelector('[data-testid=install-remove]')).not.toBeNull();
+
+  // The update is the same download, and the row settles on the new version alone.
+  query<HTMLButtonElement>('[data-testid=install-update]').click();
+  // While it runs the row is the track and Cancel, the same one a first install draws.
+  await waitFor(() => document.querySelector('[data-testid=install-progress]') !== null);
+  expect(document.querySelector('[data-testid=install-cancel]')).not.toBeNull();
+
+  await waitFor(
+    () =>
+      query(
+        '[data-testid=install-control][data-provider=opencode] [data-testid=install-status]'
+      ).textContent?.trim() === 'Version 0.5.0',
+    2000
+  );
+  const updated = query('[data-testid=install-control][data-provider=opencode]');
+  expect(updated.getAttribute('data-update')).toBe('false');
+  expect(document.querySelector('[data-testid=install-update]')).toBeNull();
+
+  // The store is one module-level singleton: leave the next test on the chat.
+  query<HTMLButtonElement>('[data-testid=settings-back]').click();
+  await waitFor(() => store.page === 'chat');
 });
 
 test('the chat header keeps the mark and the title, the status word riding the mark', async () => {

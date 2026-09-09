@@ -723,6 +723,19 @@ export class Store {
     this.sidebarOpen = false;
   }
 
+  /**
+   * The draft moves to another project. Everything reading it follows on its
+   * own (`openProject`, the composer's placeholder, the sidebar group), and a
+   * folded project is opened, because a draft nobody can see is a lost draft.
+   */
+  setDraftProject(projectId: ProjectId): void {
+    const draft = this.draft;
+    if (!draft || draft.projectId === projectId) return;
+    if (!this.projects.some((p) => p.id === projectId)) return;
+    this.draft = { projectId };
+    this.collapsedProjects = this.collapsedProjects.filter((id) => id !== projectId);
+  }
+
   async open(threadId: ThreadId): Promise<void> {
     const client = this.#client;
     if (!client) return;

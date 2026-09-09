@@ -18,7 +18,8 @@
     align?: 'start' | 'end';
     /** Where the popover sits: above the trigger, the composer's way, or under it. */
     placement?: 'top' | 'bottom';
-    variant?: 'chip' | 'ghost';
+    /** `text` reads as the sentence it sits in: no fill, no border, the parent's type. */
+    variant?: 'chip' | 'ghost' | 'text';
     label: string;
     testid?: string;
     children: Snippet;
@@ -98,6 +99,7 @@
     class="trigger"
     class:chip={variant === 'chip'}
     class:ghost={variant === 'ghost'}
+    class:text={variant === 'text'}
     aria-haspopup="menu"
     aria-expanded={popover.open}
     aria-label={label}
@@ -175,6 +177,25 @@
     color: var(--color-foreground);
   }
 
+  /* A word inside a sentence, not a control parked in one: it takes the type
+     and the colour of whatever it sits in and only fills under the pointer. */
+  .trigger.text {
+    height: auto;
+    padding: 2px 6px;
+    gap: 4px;
+    border: none;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    border-radius: var(--radius-md);
+  }
+
+  .trigger.text:hover,
+  .trigger.text[aria-expanded='true'] {
+    background: var(--color-hover);
+    color: inherit;
+  }
+
   .popover {
     position: absolute;
     bottom: calc(100% + 6px);
@@ -186,6 +207,10 @@
     border: 1px solid var(--color-border);
     border-radius: var(--radius-md);
     box-shadow: var(--shadow-e2);
+    /* The list reads at the body size wherever the trigger sits, a heading
+       included: it never inherits the type of the sentence around it. */
+    font-size: var(--text-base);
+    font-weight: 400;
     z-index: 40;
     display: flex;
     flex-direction: column;
