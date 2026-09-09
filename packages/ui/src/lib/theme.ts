@@ -12,8 +12,8 @@ export const THEME_STORAGE_KEY = 'boite.theme';
 
 const THEMES: Theme[] = ['system', 'dark', 'light'];
 
-/** What `<meta name="theme-color">` reads once the theme resolves. */
-const THEME_COLOR: Record<'dark' | 'light', string> = { dark: '#0a0a0a', light: '#fbfbfc' };
+/** What `<meta name="theme-color">` reads once the theme resolves: `--color-background`. */
+const THEME_COLOR: Record<'dark' | 'light', string> = { dark: '#101013', light: '#f3f3f6' };
 
 const LIGHT_QUERY = '(prefers-color-scheme: light)';
 

@@ -501,6 +501,48 @@ tr:last-child td {
   background: transparent;
 }
 
+/* ------------------------------------------------------------------------- */
+/* The window material                                                        */
+/* ------------------------------------------------------------------------- */
+
+/*
+ * Stamped by `lib/glass.ts` on `<html>`, and only in the Tauri shell: the
+ * compositor draws acrylic or mica behind the window, and the page has to stop
+ * painting its own ground over it. The ground and the chrome slabs go
+ * translucent, the chat keeps a nearly opaque sheet so an answer is read on a
+ * surface and not on the wallpaper, and the composer is the one piece of real
+ * glass. Everything a word is read inside stays exactly as it was: menus,
+ * dialogs, code wells, the textarea fill, tables and the browser slot. Only
+ * surfaces move here, never a text colour, and the light palette needs no rule
+ * of its own because every value below is a token light redefines.
+ */
+
+html[data-glass],
+html[data-glass] body,
+html[data-glass] #app {
+  background: transparent;
+}
+
+html[data-glass] .titlebar {
+  background: color-mix(in oklab, var(--color-titlebar) 80%, transparent);
+}
+
+html[data-glass] .sidebar,
+html[data-glass] .panel,
+html[data-glass] .settings nav {
+  background: color-mix(in oklab, var(--color-surface) 80%, transparent);
+}
+
+html[data-glass] .chat,
+html[data-glass] .first-run {
+  background: color-mix(in oklab, var(--color-background) 90%, transparent);
+}
+
+html[data-glass] .composer {
+  background: color-mix(in oklab, var(--color-surface-2) 70%, transparent);
+  backdrop-filter: blur(12px) saturate(1.14);
+}
+
 /* Keyframes shared by the components. */
 @keyframes rise {
   from {

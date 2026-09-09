@@ -1,7 +1,8 @@
 <script lang="ts">
-  import { untrack } from 'svelte';
+  import { onMount, untrack } from 'svelte';
   import { time } from '../lib/format';
   import { readStoredEndpoint } from '../lib/endpoint';
+  import { glassSupported, readGlass, setGlass, type Glass } from '../lib/glass';
   import { strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
   import { readTheme, setTheme, type Theme } from '../lib/theme';
@@ -18,6 +19,24 @@
   function pickTheme(next: Theme) {
     theme = next;
     setTheme(next);
+  }
+
+  const materials: { id: Glass; label: string }[] = [
+    { id: 'acrylic', label: strings.settings.materialAcrylic },
+    { id: 'mica', label: strings.settings.materialMica },
+    { id: 'solid', label: strings.settings.materialSolid }
+  ];
+  let glass = $state<Glass>(untrack(() => readGlass()));
+  // The shell answers on Windows alone, so the row stays away everywhere else.
+  let hasMaterial = $state(false);
+
+  onMount(() => {
+    void glassSupported().then((supported) => (hasMaterial = supported));
+  });
+
+  function pickMaterial(next: Glass) {
+    glass = next;
+    setGlass(next);
   }
 
   const stored = readStoredEndpoint();
@@ -126,6 +145,27 @@
         {/each}
       </div>
     </div>
+    {#if hasMaterial}
+      <div class="switch-row">
+        <span class="text">
+          {strings.settings.material}
+          <span class="hint">{strings.settings.materialHint}</span>
+        </span>
+        <div class="segmented" role="group" aria-label={strings.settings.material}>
+          {#each materials as option (option.id)}
+            <button
+              type="button"
+              class:on={glass === option.id}
+              aria-pressed={glass === option.id}
+              data-testid="glass-{option.id}"
+              onclick={() => pickMaterial(option.id)}
+            >
+              {option.label}
+            </button>
+          {/each}
+        </div>
+      </div>
+    {/if}
   </section>
 
   <section class="card">

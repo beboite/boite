@@ -10,6 +10,7 @@
   import Sidebar from './components/Sidebar.svelte';
   import TitleBar from './components/TitleBar.svelte';
   import { Closing } from './lib/closing.svelte';
+  import { startGlass } from './lib/glass';
   import { installExternalLinks } from './lib/links';
   import { strings } from './lib/strings';
   import { rightPanel } from './lib/right-panel.svelte';
@@ -59,6 +60,8 @@
     void store.boot();
     // The stored theme, and the OS one while the setting reads `system`.
     const stopTheme = startTheme();
+    // The stored window material, which only the shell wears.
+    startGlass();
     if (!inShell) return stopTheme;
 
     // A folder dragged from the Explorer: the shell reports it, the core

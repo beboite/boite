@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="color-scheme" content="dark light" />
-    <meta name="theme-color" content="#0a0a0a" />
+    <meta name="theme-color" content="#101013" />
     <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="icon" type="image/svg+xml" href="./icons/icon.svg" />
     <link rel="icon" type="image/png" sizes="192x192" href="./icons/icon-192.png" />
@@ -17,15 +17,15 @@
       body {
         margin: 0;
         height: 100%;
-        background: #0a0a0a;
-        color: #fafafa;
+        background: #101013;
+        color: #ececf1;
         overflow: hidden;
       }
 
       html[data-theme='light'],
       html[data-theme='light'] body {
-        background: #fbfbfc;
-        color: #18181b;
+        background: #f3f3f6;
+        color: #1c1c21;
       }
     </style>
     <!-- The same rule as lib/theme.ts, run before the first paint: dark stamps nothing. -->
@@ -40,7 +40,7 @@
             window.matchMedia('(prefers-color-scheme: light)').matches);
         if (light) {
           document.documentElement.dataset.theme = 'light';
-          document.querySelector('meta[name="theme-color"]').setAttribute('content', '#fbfbfc');
+          document.querySelector('meta[name="theme-color"]').setAttribute('content', '#f3f3f6');
         }
       } catch (e) {}
     </script>

@@ -13,6 +13,8 @@ use serde::{Deserialize, Serialize};
 use tauri::{
     menu::{Menu, MenuItem},
     tray::TrayIconBuilder,
+    utils::config::WindowEffectsConfig,
+    window::Effect,
     AppHandle, Manager, Runtime, State, Webview, WindowEvent,
 };
 
@@ -261,6 +263,57 @@ fn quit_shell(app: AppHandle, webview: Webview) -> Result<(), String> {
     browser::only_main(&webview)?;
     quit(&app);
     Ok(())
+}
+
+/// What the UI's "Window material" setting asks of the window, as the effects
+/// Tauri hands to `window_vibrancy`. `None` is the answer for "solid": it clears
+/// whatever the window wears. Pure, so every case is a test, and a value nobody
+/// defined is refused with the value in the message rather than quietly falling
+/// back on a material the user never picked.
+fn effects_for(kind: &str) -> Result<Option<WindowEffectsConfig>, String> {
+    let effects = match kind {
+        // Tauri applies the first effect of the list and ignores the rest, so
+        // the order is the choice: acrylic, and blur behind it for a Windows
+        // that has no acrylic to give.
+        "acrylic" => vec![Effect::Acrylic, Effect::Blur],
+        "mica" => vec![Effect::Mica],
+        "solid" => return Ok(None),
+        other => {
+            return Err(format!(
+                "unknown window material {other:?}: acrylic, mica or solid"
+            ))
+        }
+    };
+    Ok(Some(WindowEffectsConfig {
+        effects,
+        state: None,
+        radius: None,
+        color: None,
+    }))
+}
+
+/// The material the window wears, changed from the settings page while the app
+/// runs. Async like the browser commands: a synchronous command runs on the main
+/// thread, which is the thread the window work has to come back to.
+#[tauri::command]
+async fn window_material(app: AppHandle, webview: Webview, kind: String) -> Result<(), String> {
+    browser::only_main(&webview)?;
+    let effects = effects_for(&kind)?;
+    let window = app
+        .get_webview_window(MAIN_LABEL)
+        .ok_or_else(|| format!("the {MAIN_LABEL:?} window is gone: no material was applied"))?;
+    window
+        .set_effects(effects)
+        .map_err(|error| format!("the window material {kind:?} was refused: {error}"))
+}
+
+/// Whether this platform has a window material at all. Windows does and nothing
+/// else here does, and the setting hides itself on a false: a control that
+/// changes nothing is worse than no control.
+#[tauri::command]
+fn window_material_supported(webview: Webview) -> Result<bool, String> {
+    browser::only_main(&webview)?;
+    Ok(cfg!(windows))
 }
 
 /// The core token rides in this answer, so the caller is checked like every
@@ -620,6 +673,10 @@ fn build_main_window<R: Runtime>(
             .min_inner_size(880.0, 560.0)
             .resizable(true)
             .decorations(false)
+            // The compositor draws the material behind the window, so the window
+            // has to let it through. The page paints its own ground back over it
+            // unless the UI stamps `data-glass`, which it only does in the shell.
+            .transparent(true)
             .visible(false)
             .focused(true)
             // The browser surfaces belong to the page that asked for them: a
@@ -629,6 +686,18 @@ fn build_main_window<R: Runtime>(
                     browser::close_all(window.app_handle());
                 }
             });
+    // Acrylic is what a window opens on, and `lib/glass.ts` re-applies whatever
+    // the setting says as soon as the UI mounts. Only Windows has a material;
+    // elsewhere the window is merely transparent under an opaque page.
+    #[cfg(windows)]
+    {
+        builder = builder.effects(WindowEffectsConfig {
+            effects: vec![Effect::Acrylic, Effect::Mica, Effect::Blur],
+            state: None,
+            radius: None,
+            color: None,
+        });
+    }
     if let Some(directory) = webview_profile() {
         builder = builder.data_directory(directory);
     }
@@ -694,6 +763,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             core_endpoint,
             quit_shell,
+            window_material,
+            window_material_supported,
             browser::browser_create,
             browser::browser_navigate,
             browser::browser_back,
@@ -731,7 +802,8 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::Channel;
+    use super::{effects_for, Channel};
+    use tauri::window::Effect;
 
     #[test]
     fn the_identifier_is_the_only_thing_that_names_the_channel() {
@@ -753,5 +825,32 @@ mod tests {
     fn only_the_dev_channel_puts_anything_on_the_cores_argv() {
         assert!(Channel::Stable.core_args().is_empty());
         assert_eq!(Channel::Dev.core_args(), vec!["--channel", "dev"]);
+    }
+
+    #[test]
+    fn acrylic_asks_for_acrylic_first_and_blur_behind_it() {
+        let config = effects_for("acrylic")
+            .expect("acrylic is a material")
+            .expect("acrylic paints something");
+        assert_eq!(config.effects, vec![Effect::Acrylic, Effect::Blur]);
+    }
+
+    #[test]
+    fn mica_asks_for_mica_alone() {
+        let config = effects_for("mica")
+            .expect("mica is a material")
+            .expect("mica paints something");
+        assert_eq!(config.effects, vec![Effect::Mica]);
+    }
+
+    #[test]
+    fn solid_clears_the_material_rather_than_painting_one() {
+        assert!(effects_for("solid").expect("solid is a material").is_none());
+    }
+
+    #[test]
+    fn a_material_nobody_defined_is_refused_by_name() {
+        let error = effects_for("frosted").expect_err("frosted is not a material");
+        assert!(error.contains("frosted"), "the refusal never named it: {error}");
     }
 }

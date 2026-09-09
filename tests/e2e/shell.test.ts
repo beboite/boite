@@ -473,6 +473,58 @@ shellTest(
   TIMEOUT,
 );
 
+/**
+ * The material itself is drawn by the compositor behind the window, so no
+ * capture of this webview can show it. What is provable here is the half the UI
+ * owns: the stored choice is read before the first paint of every load, and
+ * `data-glass` is what `app.css` reads to let the ground through. Solid removes
+ * the attribute instead of setting a third value.
+ */
+async function reloadShellPage(): Promise<void> {
+  await page?.send('Page.reload', {});
+  await page?.waitFor(`document.querySelector('${testid('sidebar')}')`, 30_000);
+}
+
+shellTest(
+  'the stored window material is stamped on every load, and solid stamps nothing',
+  async () => {
+    await page?.evaluate<null>(
+      `(() => { window.localStorage.setItem('boite.glass', 'mica'); return null; })()`,
+    );
+    await reloadShellPage();
+    await page?.waitFor(`document.documentElement.dataset.glass === 'mica'`, 30_000);
+
+    await page?.evaluate<null>(
+      `(() => { window.localStorage.setItem('boite.glass', 'solid'); return null; })()`,
+    );
+    await reloadShellPage();
+    await page?.waitFor(`document.documentElement.dataset.glass === undefined`, 30_000);
+    expect(await page?.evaluate<string | undefined>('document.documentElement.dataset.glass')).toBe(
+      undefined,
+    );
+
+    // The other half, which the UI swallows on purpose: the command is really
+    // registered, it really reaches the window, and a material nobody defined is
+    // refused by name rather than falling back on one.
+    const supported = await page?.evaluate<boolean>(
+      `window.__TAURI_INTERNALS__.invoke('window_material_supported')`,
+    );
+    expect(supported).toBe(process.platform === 'win32');
+
+    await invokeShell('window_material', { kind: 'mica' });
+    await invokeShell('window_material', { kind: 'solid' });
+
+    let refusal = '';
+    try {
+      await invokeShell('window_material', { kind: 'frosted' });
+    } catch (error) {
+      refusal = error instanceof Error ? error.message : String(error);
+    }
+    expect(refusal).toContain('frosted');
+  },
+  TIMEOUT,
+);
+
 shellTest(
   'killing the shell tree takes the core it started with it',
   async () => {
