@@ -412,6 +412,9 @@ test('a permission left pending is read back on connect and answered from its ca
 test('the theme setting stamps the light palette and remembers the choice', async () => {
   await mountOnFake();
   query<HTMLButtonElement>('[data-testid=nav-settings]').click();
+  // The theme lives on its own tab now, not on General.
+  await waitFor(() => document.querySelector('[data-testid=settings-tab-appearance]') !== null);
+  query<HTMLButtonElement>('[data-testid=settings-tab-appearance]').click();
   await waitFor(() => document.querySelector('[data-testid=theme-light]') !== null);
   expect(query('[data-testid=theme-system]').getAttribute('aria-pressed')).toBe('true');
 

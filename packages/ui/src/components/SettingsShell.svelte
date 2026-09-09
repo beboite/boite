@@ -1,8 +1,10 @@
 <script lang="ts">
-  import { Activity, ArrowLeft, Coins, Settings2, Users } from '@lucide/svelte';
+  import { Activity, ArrowLeft, Coins, FlaskConical, Palette, Settings2, Users } from '@lucide/svelte';
   import { strings } from '../lib/strings';
   import type { SettingsTab, Store } from '../lib/store.svelte';
   import AccountsPage from './AccountsPage.svelte';
+  import AppearancePage from './AppearancePage.svelte';
+  import ExperimentsPage from './ExperimentsPage.svelte';
   import GeneralSettings from './GeneralSettings.svelte';
   import ResourcesPage from './ResourcesPage.svelte';
   import UsagePage from './UsagePage.svelte';
@@ -11,9 +13,11 @@
 
   const tabs: { id: SettingsTab; label: string; icon: typeof Settings2 }[] = [
     { id: 'general', label: strings.settings.tabs.general, icon: Settings2 },
+    { id: 'appearance', label: strings.settings.tabs.appearance, icon: Palette },
     { id: 'accounts', label: strings.settings.tabs.accounts, icon: Users },
     { id: 'usage', label: strings.settings.tabs.usage, icon: Coins },
-    { id: 'resources', label: strings.settings.tabs.resources, icon: Activity }
+    { id: 'resources', label: strings.settings.tabs.resources, icon: Activity },
+    { id: 'experiments', label: strings.settings.tabs.experiments, icon: FlaskConical }
   ];
 </script>
 
@@ -46,10 +50,14 @@
     <section>
       {#if store.settingsTab === 'general'}
         <GeneralSettings {store} />
+      {:else if store.settingsTab === 'appearance'}
+        <AppearancePage />
       {:else if store.settingsTab === 'accounts'}
         <AccountsPage {store} />
       {:else if store.settingsTab === 'usage'}
         <UsagePage {store} />
+      {:else if store.settingsTab === 'experiments'}
+        <ExperimentsPage />
       {:else}
         <ResourcesPage {store} />
       {/if}

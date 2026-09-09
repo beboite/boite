@@ -309,9 +309,11 @@ export const strings = {
     heading: 'Settings',
     tabs: {
       general: 'General',
+      appearance: 'Appearance',
       accounts: 'Providers',
       usage: 'Usage',
-      resources: 'Resources'
+      resources: 'Resources',
+      experiments: 'Experiments'
     },
     back: 'Back to threads',
     projects: 'Projects',
@@ -321,6 +323,11 @@ export const strings = {
     themeSystem: 'System',
     themeDark: 'Dark',
     themeLight: 'Light',
+    themeGrain: 'Grain',
+    experiments: {
+      heading: 'Experiments',
+      intro: 'These are unfinished. They may change shape or leave in a later build.'
+    },
     material: 'Window material',
     materialHint: 'What Windows draws behind the window',
     materialAcrylic: 'Acrylic',
@@ -354,6 +361,13 @@ export const strings = {
     endpoint: 'Endpoint',
     pairingUrl: 'Pairing URL',
     noCore: 'Not connected to a core.'
+  },
+
+  experiments: {
+    themeGrain: {
+      title: 'Grain theme',
+      hint: 'A grainy ground fading from light grey at the top left to black at the bottom right'
+    }
   },
 
   time: {

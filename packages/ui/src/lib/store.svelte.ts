@@ -48,7 +48,7 @@ import { rightPanel, type BoundPanel } from './right-panel.svelte';
 import { strings } from './strings';
 
 export type Page = 'chat' | 'settings';
-export type SettingsTab = 'general' | 'accounts' | 'usage' | 'resources';
+export type SettingsTab = 'general' | 'appearance' | 'accounts' | 'usage' | 'resources' | 'experiments';
 
 /** A login process the core runs for one account, as `account.login` reports it. */
 export interface LoginState {
@@ -108,6 +108,23 @@ export function probeKey(providerId: ProviderId, accountId: string): string {
   return `${providerId}::${accountId}`;
 }
 
+/**
+ * The requests of one thread, or of none. The same object comes back when there
+ * was nothing to drop, so a filter that changes nothing re-renders nothing.
+ */
+function requestsOf<T extends { threadId: ThreadId }>(
+  records: Record<RequestId, T>,
+  keep: (threadId: ThreadId) => boolean
+): Record<RequestId, T> {
+  const kept: Record<RequestId, T> = {};
+  let dropped = false;
+  for (const [id, record] of Object.entries(records)) {
+    if (keep(record.threadId)) kept[id] = record;
+    else dropped = true;
+  }
+  return dropped ? kept : records;
+}
+
 /** A pid alone is reused by the OS, so a trace row is a pid and its start. */
 function sameProcess(a: ProcessRecord, b: ProcessRecord): boolean {
   return a.pid === b.pid && a.startedAt === b.startedAt;
@@ -154,6 +171,9 @@ export class Store {
   /**
    * What an agent answered `providers.probe` with, keyed `providerId::accountId`.
    * An ACP agent owns its model list; the descriptor only carries `default`.
+   * One entry per provider and account the picker has opened this session, which
+   * is what bounds it: the pairs exist on the machine, they do not arrive with
+   * time, and an account that changes drops its own key.
    */
   probedModels = $state<Record<string, ModelInfo[]>>({});
   /** The keys a probe is running for, so the picker can say it is reading. */
@@ -167,10 +187,14 @@ export class Store {
   usage = $state<UsageReport | null>(null);
   trace = $state<ProcessRecord[]>([]);
   pendingPermissions = $state<PermissionRequest[]>([]);
-  /** Kept after the answer so a resolved card still shows what was asked. */
+  /**
+   * Kept after the answer so a resolved card still shows what was asked. Only
+   * the open thread has cards on the screen, so only its entries are held: this
+   * record grew for the life of the page before that.
+   */
   permissionRequests = $state<Record<RequestId, PermissionRequest>>({});
   pendingQuestions = $state<QuestionRequest[]>([]);
-  /** Kept after the answer so a folded card still shows what was asked. */
+  /** Kept after the answer so a folded card still shows what was asked. Same bound. */
   questionRequests = $state<Record<RequestId, QuestionRequest>>({});
   collapsedProjects = $state<string[]>([]);
 
@@ -383,6 +407,7 @@ export class Store {
     });
     on('thread.removed', ({ threadId }) => {
       this.threads = this.threads.filter((t) => t.id !== threadId);
+      this.#dropRequestsOf(threadId);
       if (this.openThread?.id === threadId) this.openThread = null;
       // A thread that left Boite takes its panel layout with it.
       rightPanel.forget(threadId);
@@ -718,6 +743,7 @@ export class Store {
     void this.#unsubscribe();
     this.openThread = null;
     this.trace = [];
+    this.#keepRequestsOf(null);
     this.draft = { projectId: target };
     this.page = 'chat';
     this.sidebarOpen = false;
@@ -752,6 +778,8 @@ export class Store {
       // The last page, pinned to the bottom; what is above it arrives on scroll.
       this.loadingOlder = false;
       this.openThread = thread;
+      // The thread that was open takes its permission and question cards with it.
+      this.#keepRequestsOf(threadId);
       this.page = 'chat';
       this.sidebarOpen = false;
       this.trace = await client.call('trace.get', { threadId });
@@ -887,6 +915,26 @@ export class Store {
   }
 
   /**
+   * The two records exist for the cards of the thread on the screen, so they
+   * hold that thread and nothing else. Called when a thread opens, when the
+   * chat goes to a draft, and when a thread is archived or removed: before
+   * this, a page left open all day kept every request it had ever been told
+   * about.
+   */
+  #keepRequestsOf(threadId: ThreadId | null): void {
+    const mine = (id: ThreadId): boolean => id === threadId;
+    this.permissionRequests = requestsOf(this.permissionRequests, mine);
+    this.questionRequests = requestsOf(this.questionRequests, mine);
+  }
+
+  /** The same, for a thread that is gone while another one stays open. */
+  #dropRequestsOf(threadId: ThreadId): void {
+    const others = (id: ThreadId): boolean => id !== threadId;
+    this.permissionRequests = requestsOf(this.permissionRequests, others);
+    this.questionRequests = requestsOf(this.questionRequests, others);
+  }
+
+  /**
    * `permission.requested` reaches a subscribed socket once and is gone. A page
    * that loads while a turn waits gets the same request from `permissions.list`,
    * so both paths land here and the same id never makes a second card.
@@ -980,6 +1028,7 @@ export class Store {
     try {
       await client.call('threads.archive', { threadId, archived: true });
       this.threads = this.threads.filter((t) => t.id !== threadId);
+      this.#dropRequestsOf(threadId);
       if (this.openThread?.id === threadId) {
         this.openThread = null;
         await this.#unsubscribe();

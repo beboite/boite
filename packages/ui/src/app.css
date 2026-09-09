@@ -506,6 +506,97 @@ tr:last-child td {
 }
 
 /* ------------------------------------------------------------------------- */
+/* The Grain theme, behind the `theme-grain` experiment                       */
+/* ------------------------------------------------------------------------- */
+
+/*
+ * Stamped by `lib/theme.ts` as `data-theme="grain"`, and by the boot script of
+ * `index.html` so a reload paints the mid tone rather than the dark ground.
+ * It redefines no palette token, so `:root` holds word for word and grain is
+ * the dark theme with another floor; the two variables below are the floor
+ * itself, not colours anything else reads.
+ *
+ * The page stops painting a ground, one fixed layer under the app carries the
+ * fade with the grain blended into it, and the chrome slabs go translucent the
+ * way the window material takes them, or opaque surfaces would hide the fade
+ * everywhere but the settings pages. Under `data-glass` the compositor is
+ * already blurring the wallpaper: the fade carries alpha there, and the
+ * surfaces keep the mix glass gives them, which is why every rule here sits
+ * before the window material section and loses to it on equal specificity.
+ */
+
+html[data-theme='grain'] {
+  /*
+   * A 160 px tile of `feTurbulence` fractal noise, desaturated to grey and
+   * given a flat 14% alpha, blended `overlay` over the fade: it lifts and
+   * darkens by that much, which reads as film grain rather than as dots.
+   * `stitchTiles` is what keeps the seams out of the repeat, and
+   * `color-interpolation-filters="sRGB"` keeps the values off linear light,
+   * where the grain would all but vanish.
+   */
+  --grain-tile: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='g' x='0' y='0' width='160' height='160' filterUnits='userSpaceOnUse' color-interpolation-filters='sRGB'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3CfeComponentTransfer%3E%3CfeFuncA type='table' tableValues='0.14 0.14'/%3E%3C/feComponentTransfer%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23g)'/%3E%3C/svg%3E");
+  --grain-fade: linear-gradient(135deg, #d8d8de 0%, #7a7a84 28%, #2a2a31 62%, #050507 100%);
+}
+
+/* The window material blurs what is behind the window; an opaque fade would
+   throw that away, so this one lets it through, 0.88 light end to 0.55 dark. */
+html[data-glass][data-theme='grain'] {
+  --grain-fade: linear-gradient(
+    135deg,
+    rgba(216, 216, 222, 0.88) 0%,
+    rgba(122, 122, 132, 0.79) 28%,
+    rgba(42, 42, 49, 0.67) 62%,
+    rgba(5, 5, 7, 0.55) 100%
+  );
+}
+
+html[data-theme='grain'],
+html[data-theme='grain'] body,
+html[data-theme='grain'] #app {
+  background: transparent;
+}
+
+/* One layer, two backgrounds: the tile blended over the fade, fixed to the
+   viewport and behind everything the app draws. */
+html[data-theme='grain'] body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-image: var(--grain-tile), var(--grain-fade);
+  background-size: 160px 160px, cover;
+  background-repeat: repeat, no-repeat;
+  background-blend-mode: overlay, normal;
+}
+
+/*
+ * The slabs, translucent enough for the fade to read through and dark enough
+ * for text to hold over its light corner. Measured against the top left of the
+ * fade, the lightest the chrome ever stands on: `--color-foreground` reads at
+ * 7.6:1 on the title bar, 7.0:1 on the sidebar and 7.4:1 on the chat.
+ */
+html[data-theme='grain'] .titlebar {
+  background: color-mix(in oklab, var(--color-titlebar) 70%, transparent);
+}
+
+html[data-theme='grain'] .sidebar,
+html[data-theme='grain'] .panel,
+html[data-theme='grain'] .settings nav {
+  background: color-mix(in oklab, var(--color-surface) 70%, transparent);
+}
+
+html[data-theme='grain'] .chat,
+html[data-theme='grain'] .first-run {
+  background: color-mix(in oklab, var(--color-background) 62%, transparent);
+}
+
+html[data-theme='grain'] .composer {
+  background: color-mix(in oklab, var(--color-surface-2) 62%, transparent);
+  backdrop-filter: blur(12px) saturate(1.14);
+}
+
+/* ------------------------------------------------------------------------- */
 /* The window material                                                        */
 /* ------------------------------------------------------------------------- */
 

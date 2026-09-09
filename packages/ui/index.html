@@ -27,20 +27,41 @@
         background: #f3f3f6;
         color: #1c1c21;
       }
+
+      /* Grain paints its fade from the stylesheet; the mid tone stands in until then. */
+      html[data-theme='grain'],
+      html[data-theme='grain'] body {
+        background: #2a2a31;
+        color: #ececf1;
+      }
     </style>
     <!-- The same rule as lib/theme.ts, run before the first paint: dark stamps nothing. -->
     <script>
       try {
         var stored = localStorage.getItem('boite.theme');
-        var theme = stored === 'dark' || stored === 'light' ? stored : 'system';
-        var light =
-          theme === 'light' ||
-          (theme === 'system' &&
-            typeof window.matchMedia === 'function' &&
-            window.matchMedia('(prefers-color-scheme: light)').matches);
-        if (light) {
-          document.documentElement.dataset.theme = 'light';
-          document.querySelector('meta[name="theme-color"]').setAttribute('content', '#f3f3f6');
+        var theme = stored === 'dark' || stored === 'light' || stored === 'grain' ? stored : 'system';
+        // Grain rides behind an experiment: a stored choice with the switch off is System again.
+        if (theme === 'grain') {
+          var on = false;
+          try {
+            var raw = localStorage.getItem('boite.experiments');
+            on = raw !== null && JSON.parse(raw).indexOf('theme-grain') !== -1;
+          } catch (e) {}
+          if (!on) theme = 'system';
+        }
+        if (theme === 'grain') {
+          document.documentElement.dataset.theme = 'grain';
+          document.querySelector('meta[name="theme-color"]').setAttribute('content', '#1a1a1e');
+        } else {
+          var light =
+            theme === 'light' ||
+            (theme === 'system' &&
+              typeof window.matchMedia === 'function' &&
+              window.matchMedia('(prefers-color-scheme: light)').matches);
+          if (light) {
+            document.documentElement.dataset.theme = 'light';
+            document.querySelector('meta[name="theme-color"]').setAttribute('content', '#f3f3f6');
+          }
         }
       } catch (e) {}
     </script>

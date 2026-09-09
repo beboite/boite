@@ -1,43 +1,11 @@
 <script lang="ts">
-  import { onMount, untrack } from 'svelte';
+  import { untrack } from 'svelte';
   import { time } from '../lib/format';
   import { readStoredEndpoint } from '../lib/endpoint';
-  import { glassSupported, readGlass, setGlass, type Glass } from '../lib/glass';
   import { strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
-  import { readTheme, setTheme, type Theme } from '../lib/theme';
 
   let { store }: { store: Store } = $props();
-
-  const themes: { id: Theme; label: string }[] = [
-    { id: 'system', label: strings.settings.themeSystem },
-    { id: 'dark', label: strings.settings.themeDark },
-    { id: 'light', label: strings.settings.themeLight }
-  ];
-  let theme = $state<Theme>(untrack(() => readTheme()));
-
-  function pickTheme(next: Theme) {
-    theme = next;
-    setTheme(next);
-  }
-
-  const materials: { id: Glass; label: string }[] = [
-    { id: 'acrylic', label: strings.settings.materialAcrylic },
-    { id: 'mica', label: strings.settings.materialMica },
-    { id: 'solid', label: strings.settings.materialSolid }
-  ];
-  let glass = $state<Glass>(untrack(() => readGlass()));
-  // The shell answers on Windows alone, so the row stays away everywhere else.
-  let hasMaterial = $state(false);
-
-  onMount(() => {
-    void glassSupported().then((supported) => (hasMaterial = supported));
-  });
-
-  function pickMaterial(next: Glass) {
-    glass = next;
-    setGlass(next);
-  }
 
   const stored = readStoredEndpoint();
   const inShell = window.__TAURI_INTERNALS__ !== undefined;
@@ -125,47 +93,6 @@
         {strings.firstRun.add}
       </button>
     </form>
-  </section>
-
-  <section class="card">
-    <h2>{strings.settings.appearance}</h2>
-    <div class="switch-row">
-      <span class="text">{strings.settings.theme}</span>
-      <div class="segmented" role="group" aria-label={strings.settings.theme}>
-        {#each themes as option (option.id)}
-          <button
-            type="button"
-            class:on={theme === option.id}
-            aria-pressed={theme === option.id}
-            data-testid="theme-{option.id}"
-            onclick={() => pickTheme(option.id)}
-          >
-            {option.label}
-          </button>
-        {/each}
-      </div>
-    </div>
-    {#if hasMaterial}
-      <div class="switch-row">
-        <span class="text">
-          {strings.settings.material}
-          <span class="hint">{strings.settings.materialHint}</span>
-        </span>
-        <div class="segmented" role="group" aria-label={strings.settings.material}>
-          {#each materials as option (option.id)}
-            <button
-              type="button"
-              class:on={glass === option.id}
-              aria-pressed={glass === option.id}
-              data-testid="glass-{option.id}"
-              onclick={() => pickMaterial(option.id)}
-            >
-              {option.label}
-            </button>
-          {/each}
-        </div>
-      </div>
-    {/if}
   </section>
 
   <section class="card">
@@ -398,38 +325,6 @@
      hugging the pill where it would read as part of the control. */
   .switch-row input:focus-visible {
     outline-offset: 3px;
-  }
-
-  /* Three buttons in one track, the chosen one filled like a primary button. */
-  .segmented {
-    display: inline-flex;
-    flex: none;
-    gap: 2px;
-    padding: 2px;
-    border: 1px solid var(--color-edge);
-    border-radius: var(--radius-md);
-    background: var(--color-surface-2);
-  }
-
-  .segmented button {
-    height: var(--control-sm);
-    padding: 0 10px;
-    border: 1px solid transparent;
-    border-radius: var(--radius-sm);
-    background: transparent;
-    color: var(--color-muted-foreground);
-    font-size: var(--text-sm);
-  }
-
-  .segmented button:hover:not(.on) {
-    background: var(--color-surface-3);
-    color: var(--color-foreground);
-  }
-
-  .segmented button.on {
-    background: var(--color-foreground);
-    border-color: var(--color-foreground);
-    color: var(--color-on-foreground);
   }
 
   .actions {
