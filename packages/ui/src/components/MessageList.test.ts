@@ -1,8 +1,9 @@
 import { afterEach, expect, test } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import type { Message } from '@boite/contracts';
-import MessageList from './MessageList.svelte';
-import type { Store } from '../lib/store.svelte';
+import MessageList, { windowStats } from './MessageList.svelte';
+import { FakeClient } from '../lib/fake-client';
+import { Store } from '../lib/store.svelte';
 
 /**
  * jsdom has no layout, so the three numbers the window is computed from are
@@ -17,6 +18,13 @@ const ESTIMATE = 80;
 const tops = new WeakMap<Element, number>();
 let scrollHeight = 0;
 
+/**
+ * What the component asked the layout for. The pin effect is the one thing that
+ * reads `scrollHeight` and writes `scrollTop`, so these two count its runs, and
+ * the bench below asserts a streaming answer does not run it once per token.
+ */
+const layout = { reads: 0, writes: 0 };
+
 const original = {
   clientHeight: Object.getOwnPropertyDescriptor(Element.prototype, 'clientHeight'),
   scrollHeight: Object.getOwnPropertyDescriptor(Element.prototype, 'scrollHeight'),
@@ -25,13 +33,18 @@ const original = {
 
 function stubLayout(total: number): void {
   scrollHeight = total;
+  layout.reads = 0;
+  layout.writes = 0;
   Object.defineProperty(Element.prototype, 'clientHeight', {
     configurable: true,
     get: () => VIEW_HEIGHT
   });
   Object.defineProperty(Element.prototype, 'scrollHeight', {
     configurable: true,
-    get: () => scrollHeight
+    get: () => {
+      layout.reads += 1;
+      return scrollHeight;
+    }
   });
   Object.defineProperty(Element.prototype, 'scrollTop', {
     configurable: true,
@@ -39,6 +52,7 @@ function stubLayout(total: number): void {
       return tops.get(this) ?? 0;
     },
     set(this: Element, value: number) {
+      layout.writes += 1;
       tops.set(this, value);
     }
   });
@@ -228,6 +242,101 @@ test('a thread whose first message is loaded asks for nothing at the top', async
   await settle();
 
   expect(paged.calls()).toBe(0);
+});
+
+/**
+ * The bench. Four hundred messages, two hundred deltas into the last one, then
+ * ten scroll steps, on the real store over the in-memory client: the timeline
+ * has to stream into a `$state` proxy the way it does in the app, and a plain
+ * array mutated in a test moves nothing at all.
+ *
+ * What it holds: the DOM keeps the window and its overscan, never the four
+ * hundred articles; a token of a streaming answer recomputes neither the window
+ * nor the pin; and a scroll reads no slot height, because the spacers come off
+ * the running totals instead of a walk over the list.
+ */
+test('four hundred messages, two hundred deltas: the window and the pin stay put', async () => {
+  window.localStorage.clear();
+  const client = new FakeClient({ delayMs: 0, long: true });
+  const store = new Store();
+  store.attach(client);
+  await store.connect();
+  await store.open('t-long');
+  // `threads.get` hands back the last page: the bench wants the whole thread in
+  // the list, so the pages above it are pulled in before anything is mounted.
+  while (store.messagesBefore !== null) await store.loadOlder();
+  const messages = store.openThread?.messages ?? [];
+  expect(messages).toHaveLength(400);
+
+  stubLayout(messages.length * ESTIMATE);
+  const mountedAt = performance.now();
+  running = mount(MessageList, {
+    target: document.body,
+    props: { store, threadId: 't-long', messages }
+  });
+  await settle();
+  const mounted = performance.now() - mountedAt;
+
+  // The window and its overscan, not the four hundred articles.
+  expect(articles().length).toBeGreaterThan(0);
+  expect(articles().length).toBeLessThan(40);
+  expect(shownIds().at(-1)).toBe('m-long-399');
+
+  const last = messages.at(-1);
+  const part = last?.parts[0];
+  if (!last || part?.type !== 'text') throw new Error('the long thread ends on a text part');
+  last.state = 'streaming';
+  await settle();
+
+  const beforeDeltas = { ...windowStats, ...layout };
+  const streamedAt = performance.now();
+  for (let delta = 0; delta < 200; delta += 1) {
+    part.text += ' token';
+    flushSync();
+  }
+  await settle();
+  const streamed = performance.now() - streamedAt;
+  const deltas = {
+    recomputes: windowStats.recomputes - beforeDeltas.recomputes,
+    slots: windowStats.slots - beforeDeltas.slots,
+    reads: layout.reads - beforeDeltas.reads,
+    writes: layout.writes - beforeDeltas.writes
+  };
+
+  expect(articles().length).toBeLessThan(40);
+  expect(deltas.recomputes).toBeLessThan(40);
+  expect(deltas.slots).toBeLessThan(40);
+  // The pin ran on the character count before this: two hundred of each.
+  expect(deltas.reads).toBeLessThan(40);
+  expect(deltas.writes).toBeLessThan(40);
+
+  const timeline = document.querySelector<HTMLElement>('[data-testid=timeline]');
+  const beforeScroll = { ...windowStats };
+  const scrolledAt = performance.now();
+  for (let step = 10; step > 0; step -= 1) {
+    if (timeline) timeline.scrollTop = step * 3_000;
+    timeline?.dispatchEvent(new Event('scroll'));
+    await settle();
+    expect(articles().length).toBeLessThan(40);
+  }
+  const scrolled = performance.now() - scrolledAt;
+  const scrolls = {
+    recomputes: windowStats.recomputes - beforeScroll.recomputes,
+    slots: windowStats.slots - beforeScroll.slots
+  };
+
+  // Ten windows found by bisection off the totals, and not one slot read: the
+  // walk this replaced was two spacers over four hundred messages a time.
+  expect(scrolls.recomputes).toBeLessThan(40);
+  expect(scrolls.slots).toBeLessThan(100);
+
+  console.log(
+    `[bench] 400 messages: mount ${mounted.toFixed(1)} ms, ` +
+      `200 deltas ${streamed.toFixed(1)} ms (${deltas.recomputes} recomputes, ` +
+      `${deltas.slots} slot reads, ${deltas.reads} height reads, ${deltas.writes} scroll writes), ` +
+      `10 scroll steps ${scrolled.toFixed(1)} ms (${scrolls.recomputes} recomputes, ` +
+      `${scrolls.slots} slot reads), ${articles().length} articles in the DOM`
+  );
 });
 
 test('a page in flight shows one line at the top of the list', async () => {

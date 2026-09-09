@@ -49,10 +49,14 @@
    * A fenced block gets a copy button of its own. The markdown is written by
    * `{@html}`, which replaces the whole subtree on every render, so the button
    * is hung again after each one rather than kept: the wrapper and the listener
-   * die with the nodes they were on.
+   * die with the nodes they were on. While the part streams that pass is a walk
+   * over every block of the answer every 48 ms for a button nobody can hit on a
+   * block still being written, so it waits: the effect runs again on the render
+   * that follows `live` going false, and hangs them all then.
    */
   $effect(() => {
     void shown;
+    if (live) return;
     const node = host;
     if (!node) return;
     // The `{@html}` write lands with the rest of the render, so the buttons go

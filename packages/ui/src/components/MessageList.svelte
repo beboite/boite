@@ -1,3 +1,13 @@
+<script module lang="ts">
+  /**
+   * What the window has cost since the page loaded: one count per recompute of
+   * the slice, one per slot height read. The bench test in `MessageList.test.ts`
+   * reads them to prove both stay flat while a message streams; nothing else
+   * does, and neither is reactive.
+   */
+  export const windowStats = { recomputes: 0, slots: 0 };
+</script>
+
 <script lang="ts">
   import { ArrowDown } from '@lucide/svelte';
   import type { Message } from '@boite/contracts';
@@ -23,6 +33,8 @@
   const ESTIMATE = 80;
   /** The column's flex gap, which belongs to the slot a message takes. */
   const GAP = 24;
+  /** How often the bottom message's height is allowed to speak to the pin. */
+  const TAIL_GAP_MS = 100;
 
   let viewport = $state<HTMLDivElement | undefined>(undefined);
   let pinned = $state(true);
@@ -44,9 +56,88 @@
   const windowed = $derived(messages.length > WINDOW_FROM);
 
   function slotAt(list: Message[], index: number): number {
+    windowStats.slots += 1;
     const message = list[index];
     if (!message) return ESTIMATE;
     return heights.get(message.id) ?? ESTIMATE;
+  }
+
+  // -- the running totals ------------------------------------------------------
+  // `sums[i]` is the height of everything above message `i`. A spacer is then
+  // one subtraction and the slice one bisection, instead of the walk over every
+  // message the window used to do on each recompute, streaming deltas included.
+
+  let sums: number[] = [0];
+  /** What `sums` was built on: how many messages there were, and the id at the head. */
+  let sumsCount = 0;
+  let sumsHead = '';
+  /** The lowest index a measurement invalidated. Repaired from there on the next read. */
+  let dirty = 0;
+  /** Where each message sits, so a measurement finds its index without scanning. */
+  const positions = new Map<string, number>();
+
+  function rebuild(list: Message[]): void {
+    sums = new Array<number>(list.length + 1);
+    sums[0] = 0;
+    positions.clear();
+    for (let i = 0; i < list.length; i += 1) {
+      const message = list[i];
+      if (message) positions.set(message.id, i);
+      sums[i + 1] = (sums[i] ?? 0) + slotAt(list, i);
+    }
+    sumsCount = list.length;
+    sumsHead = list[0]?.id ?? '';
+    dirty = list.length;
+  }
+
+  /**
+   * The totals for this list. A page prepended above the window moves every
+   * index and starts the array again; messages arriving at the bottom extend
+   * it; a height that moved repairs the totals from its own index down, never
+   * from the top.
+   */
+  function totals(list: Message[]): number[] {
+    const head = list[0]?.id ?? '';
+    if (head !== sumsHead || list.length < sumsCount) {
+      rebuild(list);
+      return sums;
+    }
+    if (list.length > sumsCount) {
+      sums.length = list.length + 1;
+      if (sumsCount < dirty) dirty = sumsCount;
+      for (let i = sumsCount; i < list.length; i += 1) {
+        const message = list[i];
+        if (message) positions.set(message.id, i);
+      }
+      sumsCount = list.length;
+    }
+    for (let i = dirty; i < list.length; i += 1) sums[i + 1] = (sums[i] ?? 0) + slotAt(list, i);
+    dirty = list.length;
+    return sums;
+  }
+
+  /** The last message whose top is at or above `at`. The totals only ever grow. */
+  function atOrBefore(total: number[], count: number, at: number): number {
+    let low = 0;
+    let high = count;
+    while (low < high) {
+      const mid = (low + high + 1) >> 1;
+      if ((total[mid] ?? 0) <= at) low = mid;
+      else high = mid - 1;
+    }
+    return low;
+  }
+
+  /** The first message at or after `from` whose top reaches `at`, or the end of the list. */
+  function reaches(total: number[], count: number, from: number, at: number): number {
+    let low = from;
+    let high = count;
+    while (low < high) {
+      const mid = (low + high) >> 1;
+      if ((total[mid] ?? 0) >= at) high = mid;
+      else low = mid + 1;
+    }
+    return low;
   }
 
   /**
@@ -57,48 +148,36 @@
    */
   const view = $derived.by(() => {
     void measured;
+    windowStats.recomputes += 1;
     const list = messages;
     if (!windowed) {
       return { start: 0, end: list.length, first: 0, above: 0, below: 0 };
     }
 
+    const count = list.length;
+    const total = totals(list);
+    const whole = total[count] ?? 0;
     let first: number;
     let last: number;
     if (pinned) {
-      last = list.length;
-      first = list.length;
-      let filled = 0;
-      while (first > 0 && filled < viewHeight) {
-        first -= 1;
-        filled += slotAt(list, first);
-      }
+      first = atOrBefore(total, count, whole - viewHeight);
+      last = count;
     } else {
-      let offset = 0;
-      first = 0;
-      while (first < list.length && offset + slotAt(list, first) <= scrollTop) {
-        offset += slotAt(list, first);
-        first += 1;
-      }
-      last = first;
-      let bottom = offset;
-      while (last < list.length && bottom < scrollTop + viewHeight) {
-        bottom += slotAt(list, last);
-        last += 1;
-      }
+      first = atOrBefore(total, count, scrollTop);
+      last = reaches(total, count, first, scrollTop + viewHeight);
     }
 
     const start = Math.max(0, first - OVERSCAN);
-    const end = Math.min(list.length, last + OVERSCAN);
-    let above = 0;
-    for (let i = 0; i < start; i += 1) above += slotAt(list, i);
-    let below = 0;
-    for (let i = end; i < list.length; i += 1) below += slotAt(list, i);
-    return { start, end, first, above, below };
+    const end = Math.min(count, last + OVERSCAN);
+    return { start, end, first, above: total[start] ?? 0, below: whole - (total[end] ?? 0) };
   });
 
   const rendered = $derived(messages.slice(view.start, view.end));
 
+  /** Where a message sits now, off the map the totals keep; a miss falls back to a scan. */
   function indexOf(id: string): number {
+    const at = positions.get(id);
+    if (at !== undefined && messages[at]?.id === id) return at;
     return messages.findIndex((message) => message.id === id);
   }
 
@@ -109,6 +188,7 @@
    */
   function onMeasured(entries: ResizeObserverEntry[]): void {
     const box = viewport;
+    const lastId = messages.at(-1)?.id;
     let shift = 0;
     let moved = false;
     for (const entry of entries) {
@@ -124,12 +204,42 @@
       if (previous === next) continue;
       heights.set(id, next);
       moved = true;
-      if (indexOf(id) < view.first) shift += next - previous;
+      const at = indexOf(id);
+      if (at < 0) continue;
+      // Everything from here down is worth a different number now.
+      if (at < dirty) dirty = at;
+      if (at < view.first) shift += next - previous;
+      if (id === lastId) noteTail(next);
     }
     if (!moved) return;
     measured += 1;
     if (box && shift !== 0 && !pinned) box.scrollTop += shift;
   }
+
+  /** The bottom message's height, at most ten times a second: what the pin follows. */
+  let tail = $state(0);
+  let tailAt = 0;
+  let tailTimer = 0;
+
+  function noteTail(height: number): void {
+    if (tailTimer) return;
+    const wait = TAIL_GAP_MS - (performance.now() - tailAt);
+    if (wait <= 0) {
+      tailAt = performance.now();
+      tail = height;
+      return;
+    }
+    tailTimer = window.setTimeout(() => {
+      tailTimer = 0;
+      tailAt = performance.now();
+      const last = messages.at(-1);
+      tail = last ? (heights.get(last.id) ?? ESTIMATE) : 0;
+    }, wait);
+  }
+
+  $effect(() => () => {
+    if (tailTimer) clearTimeout(tailTimer);
+  });
 
   /**
    * Every rendered message reports its height here and says which id it is. The
@@ -164,21 +274,6 @@
     };
   });
 
-  /** Reads everything that grows, so the effect below runs on every delta. */
-  function growth(list: Message[]): number {
-    const last = list.at(-1);
-    const text = (last?.parts ?? []).reduce((total, part) => {
-      if (part.type === 'text' || part.type === 'thinking') return total + part.text.length;
-      // A tool input grows the card too while the model types it, and its
-      // documents land after it.
-      if (part.type === 'tool') {
-        return total + 1 + (part.inputText?.length ?? 0) + (part.documents?.length ?? 0);
-      }
-      return total + 1;
-    }, 0);
-    return list.length + text;
-  }
-
   function atBottom(box: HTMLDivElement): boolean {
     return box.scrollHeight - box.scrollTop - box.clientHeight < 80;
   }
@@ -210,12 +305,16 @@
   function pullOlder(box: HTMLDivElement): void {
     if (box.scrollTop > LOAD_AT) return;
     if (store.messagesBefore === null || store.loadingOlder) return;
-    const heightBefore = box.scrollHeight;
     const topBefore = box.scrollTop;
     void store.loadOlder().then((added) => {
       if (added === 0) return;
       requestAnimationFrame(() => {
-        const grew = box.scrollHeight - heightBefore;
+        // What the page put in front is the running total of its own messages,
+        // which is a read rather than a measurement of a list that has just
+        // been laid out, and it is right whether they landed in the window or
+        // in the spacer above it.
+        const total = totals(messages);
+        const grew = total[Math.min(added, messages.length)] ?? 0;
         if (grew <= 0) return;
         box.scrollTop = topBefore + grew;
         scrollTop = box.scrollTop;
@@ -233,8 +332,14 @@
     scrollTop = box.scrollTop;
   }
 
+  /**
+   * A message arriving, and the bottom one growing no more than ten times a
+   * second. Never the character count of what streams: reading that here ran
+   * this whole effect on every token of every answer.
+   */
   $effect(() => {
-    growth(messages);
+    void messages.length;
+    void tail;
     const box = viewport;
     if (!box) return;
     const opened = shown !== threadId;

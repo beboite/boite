@@ -13,6 +13,38 @@
   $effect(() => {
     if (open) built = true;
   });
+
+  /**
+   * The same 48 ms gate as the markdown next door: while the reasoning streams,
+   * the text node is rewritten at most twenty times a second instead of on
+   * every token. What is not live lands at once.
+   */
+  const MIN_GAP_MS = 48;
+
+  let body = $state('');
+  let timer = 0;
+  let writtenAt = 0;
+
+  $effect(() => {
+    void text;
+    if (!live) {
+      if (timer) clearTimeout(timer);
+      timer = 0;
+      body = text;
+      return;
+    }
+    if (timer) return;
+    const wait = Math.max(0, MIN_GAP_MS - (performance.now() - writtenAt));
+    timer = window.setTimeout(() => {
+      timer = 0;
+      writtenAt = performance.now();
+      body = text;
+    }, wait);
+  });
+
+  $effect(() => () => {
+    if (timer) clearTimeout(timer);
+  });
 </script>
 
 <div class="thinking" data-testid="thinking-part">
@@ -34,7 +66,7 @@
   <div class="fold" class:open inert={!open}>
     <div class="clip">
       {#if built}
-        <p class="body" data-testid="thinking-text">{text}</p>
+        <p class="body" data-testid="thinking-text">{body}</p>
       {/if}
     </div>
   </div>

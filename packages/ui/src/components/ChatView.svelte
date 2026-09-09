@@ -153,7 +153,12 @@
     </header>
 
     {#if thread}
-      <MessageList {store} threadId={thread.id} messages={thread.messages} />
+      <!-- One timeline per thread: the heights it measured and the ids that
+           already played the rise belong to that thread alone, and kept across
+           a switch they grew for every message the page had ever shown. -->
+      {#key thread.id}
+        <MessageList {store} threadId={thread.id} messages={thread.messages} />
+      {/key}
     {:else}
       <div class="draft-body" data-testid="draft-empty">
         <h1 class="start">

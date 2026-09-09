@@ -46,6 +46,23 @@ test('a fenced block carries a copy button that writes the code to the clipboard
   expect(button.textContent).toBe('Copy');
 });
 
+test('a block that is still being written carries no button yet', async () => {
+  // The pass that hangs them walks every block of the answer, and it ran every
+  // 48 ms while the part streamed, for a button on code nobody can copy yet.
+  running = mount(Prose, {
+    target: document.body,
+    props: { text: 'Run it:\n\n```sh\nbun run --cwd packages/ui te', live: true }
+  });
+  flushSync();
+  // Past the 48 ms the markdown itself is gated on, so the block is really there.
+  await new Promise((resolve) => setTimeout(resolve, 120));
+  flushSync();
+  await tick();
+
+  expect(document.querySelector('pre')).not.toBeNull();
+  expect(document.querySelector('[data-testid=code-copy]')).toBeNull();
+});
+
 test('text with no fenced block gets no button', async () => {
   running = mount(Prose, { target: document.body, props: { text: 'Plain `inline` text only.' } });
   flushSync();
