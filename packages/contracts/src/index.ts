@@ -59,12 +59,16 @@ export interface ProviderInstall {
  * Where a managed install stands. `absent` and `installed` are read from disk
  * at core start; the three middle ones only exist while `providers.install`
  * runs, and `failed` carries its reason until the next attempt.
+ *
+ * On `installed`, `version` is what sits on disk and `available` is what the
+ * descriptor's install block names right now: equal means up to date, different
+ * means `providers.install` would fetch that newer release.
  */
 export type ProviderInstallState =
   | { state: 'absent'; version: string; archiveBytes: number }
   | { state: 'downloading'; version: string; receivedBytes: number; totalBytes: number; operationId: string }
   | { state: 'verifying' | 'extracting'; version: string; operationId: string }
-  | { state: 'installed'; version: string; installedAt: Timestamp }
+  | { state: 'installed'; version: string; installedAt: Timestamp; available: string }
   | { state: 'failed'; version: string; message: string };
 
 export interface OsProfile {
@@ -565,11 +569,15 @@ export interface RpcMethods {
     result: { models: ModelInfo[]; probedAt: Timestamp };
   };
   /**
-   * Download and unpack the release this profile's `install` block names.
-   * Refused when the profile carries no such block, when an install is already
-   * running for that provider, or when the free space under the data directory
-   * is under the archive plus the unpacked files plus a 256 MB margin. Progress
-   * arrives as `providers.installProgress`.
+   * Download and unpack the release this profile's `install` block names. On a
+   * provider already installed at an older version this is the update: the new
+   * release lands beside the old one and `current` is repointed, the old
+   * directory staying until `providers.uninstall` because a process may still
+   * be running out of it. Refused when the profile carries no such block, when
+   * the installed version is already the one the descriptor names, when an
+   * install is already running for that provider, or when the free space under
+   * the data directory is under the archive plus the unpacked files plus a
+   * 256 MB margin. Progress arrives as `providers.installProgress`.
    */
   'providers.install': { params: { providerId: ProviderId }; result: ProviderInstallState };
   /** Abort the running install. The operation id is the one its state carries. */

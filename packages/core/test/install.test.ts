@@ -14,7 +14,11 @@ const NOTE = new TextEncoder().encode('the second file of the release\n');
 const EXE_PATH = 'bin/agent.exe';
 const NOTE_PATH = 'share/note.txt';
 
+/** The next release: another size on the executable, so the files themselves say which one landed. */
+const EXE_V2 = new Uint8Array(6144).fill(0x43);
+
 const RELEASE = zipSync({ [EXE_PATH]: EXE, [NOTE_PATH]: NOTE });
+const RELEASE_V2 = zipSync({ [EXE_PATH]: EXE_V2, [NOTE_PATH]: NOTE });
 const ESCAPING = zipSync({ '../evil.txt': NOTE, [EXE_PATH]: EXE });
 
 function sha256(bytes: Uint8Array): string {
@@ -80,6 +84,20 @@ function goodInstall(): Record<string, unknown> {
   };
 }
 
+/** The same provider, one release later: what an update reads. */
+function nextInstall(): Record<string, unknown> {
+  return {
+    version: '1.1.0',
+    url: url('/release-2.zip'),
+    sha256: sha256(RELEASE_V2),
+    archiveBytes: RELEASE_V2.byteLength,
+    files: [
+      { path: EXE_PATH, bytes: EXE_V2.byteLength },
+      { path: NOTE_PATH, bytes: NOTE.byteLength },
+    ],
+  };
+}
+
 /** Writes the descriptor and makes the core re-read it, the way a user would. */
 async function loadDescriptor(install: Record<string, unknown>): Promise<void> {
   const dir = join(harness.dataDir, 'providers');
@@ -101,6 +119,7 @@ beforeEach(async () => {
     async fetch(request) {
       const path = new URL(request.url).pathname;
       if (path === '/release.zip') return new Response(RELEASE);
+      if (path === '/release-2.zip') return new Response(RELEASE_V2);
       if (path === '/escaping.zip') return new Response(ESCAPING);
       if (path === '/tampered.zip') return new Response(tampered());
       // Two bytes short of what the descriptor promises.
@@ -164,6 +183,75 @@ describe('managed installs', () => {
     expect(installed?.available).toBe(true);
     expect(installed?.executable).toBe(exe);
     expect(installed?.install?.state).toBe('installed');
+  });
+
+  test('an installed release names the version on offer, and an update lands beside the old one', async () => {
+    await loadDescriptor(goodInstall());
+    const client = await harness.connect();
+
+    const states: ProviderInstallState[] = [];
+    client.on('providers.installProgress', (event) => states.push(event));
+    await client.call('providers.install', { providerId: 'managed' });
+    await waitFor(() => states.some((state) => state.state === 'installed'));
+
+    // Up to date: the version on disk and the one the descriptor offers are one.
+    const first = await client.call('providers.list', {});
+    expect(first.loaded.find((provider) => provider.id === 'managed')?.install).toEqual({
+      state: 'installed',
+      version: '1.0.0',
+      installedAt: expect.any(Number),
+      available: '1.0.0',
+    });
+
+    // The descriptor moves on: the provider stays installed and usable, and says
+    // which release is waiting rather than reading as absent.
+    await loadDescriptor(nextInstall());
+    const waiting = await client.call('providers.list', {});
+    const behind = waiting.loaded.find((provider) => provider.id === 'managed');
+    expect(behind?.available).toBe(true);
+    expect(behind?.install).toEqual({
+      state: 'installed',
+      version: '1.0.0',
+      installedAt: expect.any(Number),
+      available: '1.1.0',
+    });
+
+    states.length = 0;
+    await client.call('providers.install', { providerId: 'managed' });
+    await waitFor(() => states.some((state) => state.state === 'installed'));
+
+    // The new release sits beside the old directory, which nothing deleted: a
+    // process of it may still be alive.
+    expect(existsSync(agentDir('releases', '1.0.0'))).toBe(true);
+    expect(existsSync(agentDir('releases', '1.1.0'))).toBe(true);
+    expect(statSync(agentDir('current', 'bin', 'agent.exe')).size).toBe(EXE_V2.byteLength);
+
+    const after = await client.call('providers.list', {});
+    expect(after.loaded.find((provider) => provider.id === 'managed')?.install).toEqual({
+      state: 'installed',
+      version: '1.1.0',
+      installedAt: expect.any(Number),
+      available: '1.1.0',
+    });
+  });
+
+  test('installing the version already on disk is refused as up to date', async () => {
+    await loadDescriptor(goodInstall());
+    const client = await harness.connect();
+
+    const states: ProviderInstallState[] = [];
+    client.on('providers.installProgress', (event) => states.push(event));
+    await client.call('providers.install', { providerId: 'managed' });
+    await waitFor(() => states.some((state) => state.state === 'installed'));
+
+    let refusal = '';
+    try {
+      await client.call('providers.install', { providerId: 'managed' });
+    } catch (error) {
+      refusal = error instanceof Error ? error.message : String(error);
+    }
+    expect(refusal).toContain('up to date');
+    expect(refusal).toContain('1.0.0');
   });
 
   test('a digest that does not match is refused with both hashes and leaves nothing behind', async () => {

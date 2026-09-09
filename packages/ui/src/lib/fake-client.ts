@@ -49,6 +49,18 @@ const MANAGED_ID = 'antigravity';
 const MANAGED_VERSION = 'agy_acp_server_1.1.1';
 const MANAGED_ARCHIVE_BYTES = 468_238_392;
 const MANAGED_EXE = `${DATA_DIR}\\agents\\${MANAGED_ID}\\current\\agy_acp_server.exe`;
+
+/** The second one is already down, one version behind: that is the Update row. */
+const UPDATABLE_ID = 'opencode';
+const UPDATABLE_VERSION = '0.4.12';
+const UPDATABLE_AVAILABLE = '0.5.0';
+const UPDATABLE_ARCHIVE_BYTES = 41_268_224;
+
+/** What one `providers.install` on that provider would fetch, and how big it is. */
+const RELEASES: Record<string, { version: string; archiveBytes: number }> = {
+  [MANAGED_ID]: { version: MANAGED_VERSION, archiveBytes: MANAGED_ARCHIVE_BYTES },
+  [UPDATABLE_ID]: { version: UPDATABLE_AVAILABLE, archiveBytes: UPDATABLE_ARCHIVE_BYTES }
+};
 /** Sixteen steps of 120 ms: about two seconds of download, long enough to be seen. */
 const INSTALL_STEPS = 16;
 const INSTALL_STEP_MS = 120;
@@ -213,6 +225,8 @@ export class FakeClient implements ObservableClient {
 
   #projects: Project[] = [];
   #providers: ProviderSummary[] = [];
+  /** Where each managed install stood before the running one started, for a cancel. */
+  #installBefore = new Map<string, ProviderInstallState>();
   #accounts: Account[] = [];
   #threads = new Map<ThreadId, Thread>();
   #processes: ProcessRecord[] = [];
@@ -1307,29 +1321,54 @@ export class FakeClient implements ObservableClient {
     this.#emit('providers.installProgress', { ...state, providerId: provider.id });
   }
 
+  /** The release one install would fetch on this provider, and what it weighs. */
+  #release(providerId: string): { version: string; archiveBytes: number } {
+    return RELEASES[providerId] ?? { version: MANAGED_VERSION, archiveBytes: MANAGED_ARCHIVE_BYTES };
+  }
+
   #startInstall(providerId: string): ProviderInstallState {
     const provider = this.#managed(providerId);
-    if (provider.install?.state === 'downloading') {
+    const before = provider.install;
+    if (
+      before !== null &&
+      before.state !== 'absent' &&
+      before.state !== 'installed' &&
+      before.state !== 'failed'
+    ) {
       throw new RpcFailure({
         code: RpcErrorCode.Refused,
         message: `an install of ${providerId} is already running`
       });
     }
+    if (before?.state === 'installed' && before.available === before.version) {
+      throw new RpcFailure({
+        code: RpcErrorCode.Refused,
+        message: `${providerId} is up to date on ${before.version}`
+      });
+    }
+    // An update that is cancelled goes back to the release already on disk.
+    if (before !== null) this.#installBefore.set(providerId, before);
+
+    const release = this.#release(providerId);
     const operationId = `inst_${(this.#seq += 1)}`;
     const state: ProviderInstallState = {
       state: 'downloading',
-      version: MANAGED_VERSION,
+      version: release.version,
       receivedBytes: 0,
-      totalBytes: MANAGED_ARCHIVE_BYTES,
+      totalBytes: release.archiveBytes,
       operationId
     };
     this.#setInstall(provider, state);
-    void this.#runInstall(provider, operationId);
+    void this.#runInstall(provider, release, operationId);
     return state;
   }
 
   /** The download ticks, then the two short states, then the files are there. */
-  async #runInstall(provider: ProviderSummary, operationId: string): Promise<void> {
+  async #runInstall(
+    provider: ProviderSummary,
+    release: { version: string; archiveBytes: number },
+    operationId: string
+  ): Promise<void> {
     const running = (): boolean =>
       provider.install !== null &&
       provider.install.state !== 'absent' &&
@@ -1342,22 +1381,28 @@ export class FakeClient implements ObservableClient {
       if (!running()) return;
       this.#setInstall(provider, {
         state: 'downloading',
-        version: MANAGED_VERSION,
-        receivedBytes: Math.round((MANAGED_ARCHIVE_BYTES * step) / INSTALL_STEPS),
-        totalBytes: MANAGED_ARCHIVE_BYTES,
+        version: release.version,
+        receivedBytes: Math.round((release.archiveBytes * step) / INSTALL_STEPS),
+        totalBytes: release.archiveBytes,
         operationId
       });
     }
     for (const state of ['verifying', 'extracting'] as const) {
       await new Promise((resolve) => setTimeout(resolve, INSTALL_STEP_MS));
       if (!running()) return;
-      this.#setInstall(provider, { state, version: MANAGED_VERSION, operationId });
+      this.#setInstall(provider, { state, version: release.version, operationId });
     }
     await new Promise((resolve) => setTimeout(resolve, INSTALL_STEP_MS));
     if (!running()) return;
+    this.#installBefore.delete(provider.id);
     provider.available = true;
-    provider.executable = MANAGED_EXE;
-    this.#setInstall(provider, { state: 'installed', version: MANAGED_VERSION, installedAt: this.#now() });
+    provider.executable = provider.id === MANAGED_ID ? MANAGED_EXE : provider.executable;
+    this.#setInstall(provider, {
+      state: 'installed',
+      version: release.version,
+      installedAt: this.#now(),
+      available: release.version
+    });
     this.#emit('providers.updated', { loaded: structuredClone(this.#providers), rejected: [] });
   }
 
@@ -1375,10 +1420,13 @@ export class FakeClient implements ObservableClient {
     if (current.operationId !== operationId) {
       throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'that operation is not the one running' });
     }
-    const state: ProviderInstallState = {
+    const release = this.#release(providerId);
+    const back = this.#installBefore.get(providerId);
+    this.#installBefore.delete(providerId);
+    const state: ProviderInstallState = back ?? {
       state: 'absent',
-      version: MANAGED_VERSION,
-      archiveBytes: MANAGED_ARCHIVE_BYTES
+      version: release.version,
+      archiveBytes: release.archiveBytes
     };
     this.#setInstall(provider, state);
     return state;
@@ -1386,12 +1434,14 @@ export class FakeClient implements ObservableClient {
 
   #uninstall(providerId: string): ProviderInstallState {
     const provider = this.#managed(providerId);
+    const release = this.#release(providerId);
+    this.#installBefore.delete(providerId);
     provider.available = false;
     provider.executable = null;
     const state: ProviderInstallState = {
       state: 'absent',
-      version: MANAGED_VERSION,
-      archiveBytes: MANAGED_ARCHIVE_BYTES
+      version: release.version,
+      archiveBytes: release.archiveBytes
     };
     this.#setInstall(provider, state);
     this.#emit('providers.updated', { loaded: structuredClone(this.#providers), rejected: [] });
@@ -1540,7 +1590,7 @@ export class FakeClient implements ObservableClient {
         }
       },
       {
-        id: 'opencode',
+        id: UPDATABLE_ID,
         name: 'OpenCode',
         shortName: 'OpenCode',
         protocol: 'acp',
@@ -1549,7 +1599,13 @@ export class FakeClient implements ObservableClient {
         executable: 'C:\\Users\\you\\AppData\\Roaming\\npm\\opencode.exe',
         // One model in the descriptor: the agent owns the rest, and a probe reads them.
         models: [{ id: 'default', name: 'OpenCode default', default: true }],
-        install: null,
+        // Its files are down and one version behind: the Providers page offers Update.
+        install: {
+          state: 'installed',
+          version: UPDATABLE_VERSION,
+          installedAt: T0,
+          available: UPDATABLE_AVAILABLE
+        },
         capabilities: {
           approvals: true,
           hooks: false,

@@ -6,22 +6,23 @@
   import type { Store } from '../lib/store.svelte';
 
   /**
-   * The one control for a provider whose files Boite downloads: Install with
-   * the size, a progress bar with a Cancel while it runs, the reason in the
-   * danger colour when it failed, and Remove where the page offers it.
+   * One row of the Providers page for a provider whose files Boite downloads:
+   * the name, where the install stands in words, and the one action that
+   * applies, Remove beside it once the files are there. Settings is the only
+   * place this shows; a 447 MB fetch is not started from the picker.
    */
   let {
     store,
-    provider,
-    removable = false
+    provider
   }: {
     store: Store;
     provider: ProviderSummary;
-    /** The Accounts page offers Remove; the picker row does not. */
-    removable?: boolean;
   } = $props();
 
   let state = $derived(store.installOf(provider.id));
+
+  /** The descriptor names a release the installed one is not: Update applies. */
+  let updatable = $derived(state?.state === 'installed' && state.available !== state.version);
 
   let ratio = $derived.by((): number => {
     if (state?.state !== 'downloading' || state.totalBytes <= 0) return 0;
@@ -41,37 +42,31 @@
 </script>
 
 {#if state}
-  <div class="install" data-testid="install-control" data-provider={provider.id} data-state={state.state}>
-    {#if state.state === 'absent'}
-      <button
-        type="button"
-        class="small act"
-        data-testid="install-start"
-        data-provider={provider.id}
-        onclick={() => void store.installProvider(provider.id)}
-      >
-        {strings.install.actionWithSize.replace('{size}', bytes(state.archiveBytes))}
-      </button>
-    {:else if state.state === 'failed'}
-      <span class="reason" data-testid="install-error">{state.message}</span>
-      <button
-        type="button"
-        class="small act"
-        data-testid="install-start"
-        data-provider={provider.id}
-        onclick={() => void store.installProvider(provider.id)}
-      >
-        {strings.install.retry}
-      </button>
-    {:else if state.state === 'installed'}
-      <span class="note">{strings.install.installed.replace('{version}', state.version)}</span>
-      {#if removable}
-        <button type="button" class="quiet small act" data-testid="install-remove" onclick={() => void remove()}>
-          {strings.install.remove}
-        </button>
-      {/if}
-    {:else}
-      <div class="running">
+  <div
+    class="install-row"
+    data-testid="install-control"
+    data-provider={provider.id}
+    data-state={state.state}
+    data-update={updatable ? 'true' : 'false'}
+  >
+    <span class="name">{provider.name}</span>
+
+    <div class="state">
+      {#if state.state === 'absent'}
+        <span class="note" data-testid="install-status">
+          {strings.install.absent.replace('{size}', bytes(state.archiveBytes))}
+        </span>
+      {:else if state.state === 'failed'}
+        <span class="reason" data-testid="install-error">{state.message}</span>
+      {:else if state.state === 'installed'}
+        <span class="note" data-testid="install-status">
+          {updatable
+            ? strings.install.updateAvailable
+                .replace('{installed}', state.version)
+                .replace('{available}', state.available)
+            : strings.install.upToDate.replace('{version}', state.version)}
+        </span>
+      {:else}
         <div
           class="track"
           data-testid="install-progress"
@@ -93,6 +88,52 @@
             {strings.install.extracting}
           {/if}
         </span>
+      {/if}
+    </div>
+
+    <div class="actions">
+      {#if state.state === 'absent'}
+        <button
+          type="button"
+          class="small act"
+          data-testid="install-start"
+          data-provider={provider.id}
+          onclick={() => void store.installProvider(provider.id)}
+        >
+          {strings.install.action}
+        </button>
+      {:else if state.state === 'failed'}
+        <button
+          type="button"
+          class="small act"
+          data-testid="install-start"
+          data-provider={provider.id}
+          onclick={() => void store.installProvider(provider.id)}
+        >
+          {strings.install.retry}
+        </button>
+      {:else if state.state === 'installed'}
+        {#if updatable}
+          <button
+            type="button"
+            class="small act"
+            data-testid="install-update"
+            data-provider={provider.id}
+            onclick={() => void store.installProvider(provider.id)}
+          >
+            {strings.install.update}
+          </button>
+        {/if}
+        <button
+          type="button"
+          class="quiet small act"
+          data-testid="install-remove"
+          data-provider={provider.id}
+          onclick={() => void remove()}
+        >
+          {strings.install.remove}
+        </button>
+      {:else}
         <button
           type="button"
           class="quiet small act"
@@ -102,32 +143,46 @@
         >
           {strings.install.cancel}
         </button>
-      </div>
-    {/if}
+      {/if}
+    </div>
   </div>
 {/if}
 
 <style>
-  .install {
+  .install-row {
     display: flex;
     align-items: center;
-    gap: 6px;
-    flex: 1;
-    min-width: 0;
-    justify-content: flex-end;
+    gap: 10px;
+    min-height: var(--row);
   }
 
-  .running {
+  /* A width the two shipped names clear, so the state words line up row to row. */
+  .name {
+    flex: none;
+    min-width: 92px;
+    font-weight: 500;
+  }
+
+  /* The state in words, and the track while a download runs. */
+  .state {
     display: flex;
     align-items: center;
     gap: 6px;
     flex: 1;
     min-width: 0;
+  }
+
+  .actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: none;
   }
 
   .track {
     flex: 1;
     min-width: 48px;
+    max-width: 180px;
     height: 2px;
     border-radius: 999px;
     background: var(--color-surface-3);

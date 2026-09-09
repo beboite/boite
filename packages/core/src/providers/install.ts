@@ -131,8 +131,15 @@ export class InstallManager {
     const failed = this.#failed.get(providerId);
     if (failed !== undefined && failed.version === install.version) return failed;
     const record = this.#readRecord(providerId);
-    if (record !== null && record.version === install.version) {
-      return { state: 'installed', version: record.version, installedAt: record.installedAt };
+    if (record !== null) {
+      // What is on disk, and what the descriptor offers today: an older record
+      // is an update waiting, not an absent provider whose files are missing.
+      return {
+        state: 'installed',
+        version: record.version,
+        installedAt: record.installedAt,
+        available: install.version,
+      };
     }
     return { state: 'absent', version: install.version, archiveBytes: install.archiveBytes };
   }
@@ -174,11 +181,24 @@ export class InstallManager {
 
   // -- operations -----------------------------------------------------------
 
+  /**
+   * The download, and the update: a provider whose record names an older
+   * version installs the new release beside it and repoints `current`. Nothing
+   * of the old release is deleted here, a process may still be running out of
+   * it; `uninstall` takes the whole directory.
+   */
   start(providerId: ProviderId, install: ProviderInstall): ProviderInstallState {
     if (this.#running.has(providerId)) {
       throw refused(`an install of ${providerId} is already running`, {
         providerId,
         operationId: this.#running.get(providerId)?.operationId,
+      });
+    }
+    const record = this.#readRecord(providerId);
+    if (record !== null && record.version === install.version) {
+      throw refused(`${providerId} is up to date on ${install.version}`, {
+        providerId,
+        version: install.version,
       });
     }
     this.#failed.delete(providerId);
@@ -290,6 +310,7 @@ export class InstallManager {
         state: 'installed',
         version: install.version,
         installedAt: record?.installedAt ?? Date.now(),
+        available: install.version,
       };
       this.#running.delete(providerId);
       this.#emit(providerId, state);
@@ -299,8 +320,10 @@ export class InstallManager {
       rmSync(releaseDir, { recursive: true, force: true });
       this.#running.delete(providerId);
       if (error instanceof Cancelled || (error as { name?: string } | null)?.name === 'InstallCancelled') {
-        const state: ProviderInstallState = {
-          state: 'absent',
+        // Back to what is on disk: absent for a first install, the release that
+        // was already there for an update nobody finished.
+        const state = this.stateOf(providerId, install) ?? {
+          state: 'absent' as const,
           version: install.version,
           archiveBytes: install.archiveBytes,
         };
@@ -474,7 +497,9 @@ export class InstallManager {
   /**
    * `current` points at the release that just landed: a junction on Windows, a
    * symlink elsewhere, and a plain rename of the directory where neither can be
-   * made (an unprivileged account with no developer mode is the case).
+   * made (an unprivileged account with no developer mode is the case). On that
+   * last path an update has nothing to keep: the old release was moved into
+   * `current` rather than linked, so repointing takes it.
    */
   #point(providerId: ProviderId, releaseDir: string): void {
     const link = this.currentDir(providerId);

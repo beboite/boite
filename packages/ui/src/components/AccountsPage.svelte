@@ -64,6 +64,15 @@
     <button class="quiet" onclick={() => (adding = !adding)}>{strings.accounts.add}</button>
   </header>
 
+  {#if managed.length > 0}
+    <section class="card managed" data-testid="managed-providers">
+      <h2>{strings.install.heading}</h2>
+      {#each managed as provider (provider.id)}
+        <InstallControl {store} {provider} />
+      {/each}
+    </section>
+  {/if}
+
   {#if adding}
     <form class="card" onsubmit={submit}>
       <div class="field">
@@ -95,18 +104,6 @@
         </button>
       </div>
     </form>
-  {/if}
-
-  {#if managed.length > 0}
-    <section class="managed" data-testid="managed-providers">
-      <h2>{strings.install.heading}</h2>
-      {#each managed as provider (provider.id)}
-        <div class="managed-row" data-testid="managed-provider" data-provider={provider.id}>
-          <span class="name">{provider.name}</span>
-          <InstallControl {store} {provider} removable />
-        </div>
-      {/each}
-    </section>
   {/if}
 
   {#if store.accounts.length === 0}
@@ -144,9 +141,6 @@
               </span>
             </td>
             <td class="row-actions">
-              {#if provider && !provider.available && store.installOf(provider.id)}
-                <InstallControl {store} {provider} />
-              {/if}
               {#if canLogIn(account, provider)}
                 <button
                   class="quiet"
@@ -256,36 +250,11 @@
     background: var(--color-surface);
   }
 
+  /* The first card of the page: one row per provider Boite downloads itself. */
   .managed {
     display: grid;
-    gap: 6px;
-    margin-bottom: 12px;
-    padding: 8px;
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-md);
-    background: var(--color-surface);
+    gap: 2px;
     max-width: 560px;
-  }
-
-  .managed h2 {
-    margin: 0 0 2px;
-    font-size: var(--text-xs);
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: var(--color-muted-foreground);
-  }
-
-  .managed-row {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    min-height: 26px;
-  }
-
-  .managed-row .name {
-    flex: none;
-    font-weight: 500;
   }
 
   .path {
