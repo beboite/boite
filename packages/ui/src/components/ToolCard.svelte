@@ -81,6 +81,13 @@
    * streaming one is never cut: the block cursor rides its last line.
    */
   let clamped = $derived(!streaming && !showAll && inputJson.split('\n').length > CLAMP_LINES);
+
+  // The body is built on the first open and folds from then on, so a timeline of
+  // closed cards costs nothing and an open one animates its height both ways.
+  let built = $state(false);
+  $effect(() => {
+    if (shown) built = true;
+  });
 </script>
 
 <div class="tool" data-testid="tool-card" data-status={status} data-streaming={streaming}>
@@ -113,38 +120,42 @@
     </span>
   </button>
 
-  {#if shown}
-    <div class="body">
-      <div class="section-label">{strings.chat.toolInput}</div>
-      {#if streaming}
-        <pre
-          class="mono"
-          data-testid="tool-input">{inputText}<span class="cursor" aria-label={strings.chat.streaming}></span></pre>
-      {:else}
-        <pre class="mono" class:clamped data-testid="tool-input">{inputJson}</pre>
-        {#if clamped}
-          <button
-            type="button"
-            class="ghost small show-all"
-            data-testid="tool-input-show-all"
-            onclick={() => (showAll = true)}
-          >
-            {strings.chat.showAll}
-          </button>
-        {/if}
-      {/if}
-      <div class="section-label">{strings.chat.toolOutput}</div>
-      <pre class="mono" data-testid="tool-output">{output ?? strings.chat.noOutput}</pre>
-      {#if documents.length > 0}
-        <div class="section-label">{strings.chat.toolDocuments}</div>
-        <div class="documents">
-          {#each documents as doc, index (index)}
-            <DocumentView {doc} />
-          {/each}
+  <div class="fold" class:open={shown} inert={!shown}>
+    <div class="clip">
+      {#if built}
+        <div class="body">
+          <div class="section-label">{strings.chat.toolInput}</div>
+          {#if streaming}
+            <pre
+              class="mono"
+              data-testid="tool-input">{inputText}<span class="cursor" aria-label={strings.chat.streaming}></span></pre>
+          {:else}
+            <pre class="mono" class:clamped data-testid="tool-input">{inputJson}</pre>
+            {#if clamped}
+              <button
+                type="button"
+                class="ghost small show-all"
+                data-testid="tool-input-show-all"
+                onclick={() => (showAll = true)}
+              >
+                {strings.chat.showAll}
+              </button>
+            {/if}
+          {/if}
+          <div class="section-label">{strings.chat.toolOutput}</div>
+          <pre class="mono" data-testid="tool-output">{output ?? strings.chat.noOutput}</pre>
+          {#if documents.length > 0}
+            <div class="section-label">{strings.chat.toolDocuments}</div>
+            <div class="documents">
+              {#each documents as doc, index (index)}
+                <DocumentView {doc} />
+              {/each}
+            </div>
+          {/if}
         </div>
       {/if}
     </div>
-  {/if}
+  </div>
 </div>
 
 <style>
@@ -162,7 +173,7 @@
     align-items: center;
     gap: 8px;
     width: 100%;
-    height: 30px;
+    height: var(--row);
     padding: 0 10px 0 6px;
     border-radius: 0;
     color: var(--color-muted-foreground);
@@ -171,6 +182,12 @@
 
   .head:hover:not(:disabled) {
     background: var(--color-surface-2);
+  }
+
+  /* A full width row does not shrink under the finger, it fills one step more. */
+  .head:active:not(:disabled) {
+    transform: none;
+    background: var(--color-surface-3);
   }
 
   .caret {
@@ -246,6 +263,27 @@
     to {
       transform: rotate(360deg);
     }
+  }
+
+  /* The open and the close are the same move: the rows track goes 0fr to 1fr,
+     so the card grows to whatever the body measures without a pixel written. */
+  .fold {
+    display: grid;
+    grid-template-rows: 0fr;
+    opacity: 0;
+    transition:
+      grid-template-rows var(--dur-3) var(--ease-out-quint),
+      opacity var(--dur-3) var(--ease-out-quint);
+  }
+
+  .fold.open {
+    grid-template-rows: 1fr;
+    opacity: 1;
+  }
+
+  .clip {
+    min-height: 0;
+    overflow: hidden;
   }
 
   .body {

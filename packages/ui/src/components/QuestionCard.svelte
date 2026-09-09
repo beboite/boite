@@ -213,10 +213,28 @@
     color: inherit;
     font: inherit;
     cursor: pointer;
+    transition:
+      background var(--dur-2) var(--ease-out-quint),
+      border-color var(--dur-2) var(--ease-out-quint),
+      transform var(--dur-1) var(--ease-out-quint);
   }
 
+  /* The option lifts a pixel under the pointer and fills under the keyboard;
+     neither one commits the pick, which is what the click is for. */
   .option:hover:not(:disabled) {
     border-color: var(--color-edge);
+    transform: translateY(-1px);
+  }
+
+  .option:focus-visible {
+    outline: none;
+    border-color: var(--color-edge);
+    background: var(--color-surface-2);
+  }
+
+  .option:active:not(:disabled) {
+    transform: none;
+    background: var(--color-surface-3);
   }
 
   .option.picked {

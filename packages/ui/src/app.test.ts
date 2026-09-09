@@ -586,9 +586,12 @@ test('a tool card shows the input as the model types it, then switches to the pa
   expect(summaries.length).toBeGreaterThan(0);
   for (const text of summaries) expect('echo streamed'.startsWith(text)).toBe(true);
 
-  // Once the parsed input lands the card folds back to its one line.
+  // Once the parsed input lands the card folds back to its one line. The body
+  // stays built so the fold can animate its height both ways; what says it is
+  // shut is the toggle, and the fold around it holds no open track.
   await waitFor(() => card.dataset.streaming === 'false');
-  expect(card.querySelector('[data-testid=tool-input]')).toBeNull();
+  expect(card.querySelector('[data-testid=tool-toggle]')?.getAttribute('aria-expanded')).toBe('false');
+  expect(card.querySelector('.fold')?.classList.contains('open')).toBe(false);
   expect(card.querySelector('.line')?.textContent).toBe('echo streamed');
 
   card.querySelector<HTMLButtonElement>('[data-testid=tool-toggle]')?.click();

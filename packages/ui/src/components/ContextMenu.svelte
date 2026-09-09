@@ -1,10 +1,14 @@
 <script lang="ts">
   import { tick } from 'svelte';
-  import { contextMenu } from '../lib/context-menu.svelte';
+  import { Closing } from '../lib/closing.svelte';
+  import { contextMenu, type ContextMenuState } from '../lib/context-menu.svelte';
   import type { MenuItem } from '../lib/menu';
 
   const GAP = 6;
 
+  const popover = new Closing();
+  /** The request is nulled the moment it is answered, so the exit plays on a copy. */
+  let held = $state<ContextMenuState | null>(null);
   let root = $state<HTMLDivElement | undefined>(undefined);
   let left = $state(0);
   let top = $state(0);
@@ -12,7 +16,12 @@
   /** Opens at the pointer, then slides inside the viewport once its size is known. */
   $effect(() => {
     const current = contextMenu.current;
-    if (!current) return;
+    if (!current) {
+      popover.hide();
+      return;
+    }
+    held = current;
+    popover.show();
     left = current.x;
     top = current.y;
     void tick().then(() => {
@@ -73,17 +82,21 @@
   }}
 />
 
-{#if contextMenu.current}
+{#if popover.shown && held}
+  {@const request = held}
   <div
     class="context-menu"
+    class:closing={popover.closing}
     role="menu"
     tabindex="-1"
     bind:this={root}
+    use:popover.attach
+    onanimationend={popover.end}
     style="left: {left}px; top: {top}px;"
     data-testid="context-menu"
     oncontextmenu={(event) => event.preventDefault()}
   >
-    {#each contextMenu.current.items as item (item.id)}
+    {#each request.items as item (item.id)}
       {#if item.separator}
         <div class="rule" role="separator"></div>
       {:else}
@@ -128,6 +141,11 @@
     outline: none;
   }
 
+  .context-menu.closing {
+    animation-name: pop-out;
+    pointer-events: none;
+  }
+
   .row {
     display: flex;
     align-items: center;
@@ -149,8 +167,10 @@
     outline: none;
   }
 
+  /* A full width row does not shrink under the finger, it fills one step more. */
   .row:active:not(:disabled) {
     transform: none;
+    background: color-mix(in srgb, var(--color-surface-3) 85%, var(--color-foreground));
   }
 
   .row.danger {

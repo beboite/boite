@@ -45,13 +45,4 @@
     font-size: var(--text-md);
     margin-top: 6px;
   }
-
-  @keyframes fade {
-    from {
-      opacity: 0;
-    }
-    to {
-      opacity: 1;
-    }
-  }
 </style>

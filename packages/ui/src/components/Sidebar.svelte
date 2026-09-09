@@ -1,7 +1,7 @@
 <script lang="ts">
   import { ChevronRight, Ellipsis, Plus, Search, Settings } from '@lucide/svelte';
   import type { Project, ProjectId, ThreadId, ThreadSummary } from '@boite/contracts';
-  import { focusOnMount } from '../lib/actions';
+  import { focusOnMount, riseOnce } from '../lib/actions';
   import { confirm } from '../lib/confirm.svelte';
   import { contextMenu } from '../lib/context-menu.svelte';
   import { ago, tokens } from '../lib/format';
@@ -19,6 +19,11 @@
   let renaming = $state<ThreadId | null>(null);
   let renameText = $state('');
   let now = $state(Date.now());
+
+  // Each list keeps its own set: a row rises the first time it is drawn and
+  // never again, whatever a status tick or a reorder does to the node.
+  const riseSection = riseOnce();
+  const riseThread = riseOnce();
 
   $effect(() => {
     const timer = setInterval(() => (now = Date.now()), 30_000);
@@ -155,7 +160,7 @@
   {#if store.projects.length > 0}
     <div class="top">
       <label class="search">
-        <Search size={14} strokeWidth={1.75} />
+        <Search size={16} strokeWidth={1.75} />
         <input
           bind:this={searchBox}
           bind:value={store.search}
@@ -187,7 +192,7 @@
       {@const threads = store.sortedThreadsOf(project.id)}
       {@const collapsed = store.isCollapsed(project.id)}
       {@const draftHere = store.draft?.projectId === project.id}
-      <section class="project" data-testid="project" data-project-id={project.id}>
+      <section class="project" data-testid="project" data-project-id={project.id} use:riseSection={project.id}>
         <!-- svelte-ignore a11y_no_static_element_interactions -->
         <div class="head" oncontextmenu={(event) => openProjectMenu(event, project)}>
           <button
@@ -211,7 +216,7 @@
             data-testid="project-new-thread"
             onclick={() => store.startDraft(project.id)}
           >
-            <Plus size={14} strokeWidth={1.75} />
+            <Plus size={16} strokeWidth={1.75} />
           </button>
           <button
             type="button"
@@ -221,11 +226,13 @@
             data-testid="project-menu"
             onclick={(event) => openProjectMenu(event, project)}
           >
-            <Ellipsis size={14} strokeWidth={1.75} />
+            <Ellipsis size={16} strokeWidth={1.75} />
           </button>
         </div>
 
-        {#if !collapsed}
+        <!-- Folding a project is a height move, not a disappearance: the list
+             stays here at zero height and the rows track carries it both ways. -->
+        <div class="fold" class:open={!collapsed} inert={collapsed}>
           <ul>
             {#if draftHere}
               <li>
@@ -236,7 +243,7 @@
               </li>
             {/if}
             {#each threads as thread (thread.id)}
-              <li>
+              <li use:riseThread={thread.id}>
                 {#if renaming === thread.id}
                   <input
                     class="rename"
@@ -279,7 +286,7 @@
                       data-testid="thread-menu"
                       onclick={(event) => openThreadMenu(event, thread)}
                     >
-                      <Ellipsis size={14} strokeWidth={1.75} />
+                      <Ellipsis size={16} strokeWidth={1.75} />
                     </button>
                   </div>
                 {/if}
@@ -289,7 +296,7 @@
               <li class="none subtle">{store.search.trim() ? strings.sidebar.noMatch : strings.sidebar.noThreads}</li>
             {/if}
           </ul>
-        {/if}
+        </div>
       </section>
     {/each}
   </div>
@@ -297,7 +304,7 @@
   {#if store.projects.length > 0}
     <button
       type="button"
-      class="ghost add-project"
+      class="ghost small add-project"
       data-testid="add-project"
       onclick={() => void (window.__TAURI_INTERNALS__ === undefined ? store.showSettings('general') : store.pickProject())}
     >
@@ -425,6 +432,7 @@
 
   .project {
     margin-bottom: 8px;
+    animation: rise var(--dur-3) var(--ease-out-quint);
   }
 
   .head {
@@ -437,7 +445,7 @@
   .toggle {
     flex: 1;
     min-width: 0;
-    height: 30px;
+    height: var(--row);
     padding: 0 6px 0 4px;
     justify-content: flex-start;
     gap: 8px;
@@ -449,7 +457,7 @@
     place-items: center;
     width: 20px;
     height: 20px;
-    border-radius: 6px;
+    border-radius: var(--radius-sm);
     background: var(--color-surface-3);
     border: 1px solid var(--color-border);
     font-size: var(--text-xs);
@@ -491,6 +499,21 @@
     opacity: 1;
   }
 
+  /* The rows track goes 0fr to 1fr, so a project opens to its own height. */
+  .fold {
+    display: grid;
+    grid-template-rows: 0fr;
+    opacity: 0;
+    transition:
+      grid-template-rows var(--dur-3) var(--ease-out-quint),
+      opacity var(--dur-3) var(--ease-out-quint);
+  }
+
+  .fold.open {
+    grid-template-rows: 1fr;
+    opacity: 1;
+  }
+
   ul {
     list-style: none;
     margin: 0;
@@ -498,6 +521,14 @@
     display: flex;
     flex-direction: column;
     gap: 2px;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  /* Each row and each section rises once, the first time it is drawn: the
+     `riseOnce` actions above turn the animation off on every later node. */
+  .project li {
+    animation: rise var(--dur-3) var(--ease-out-quint);
   }
 
   .thread {
@@ -529,6 +560,12 @@
 
   .row:hover:not(:disabled) {
     background: transparent;
+  }
+
+  /* A full width row does not shrink under the finger, it fills one step more. */
+  .row:active:not(:disabled) {
+    transform: none;
+    background: color-mix(in srgb, var(--color-surface-3) 85%, var(--color-foreground));
   }
 
   .thread.open .row,
@@ -657,8 +694,6 @@
   .add-project {
     margin: 0 8px 6px;
     justify-content: flex-start;
-    height: 26px;
-    font-size: var(--text-sm);
   }
 
   @media (min-width: 721px) {

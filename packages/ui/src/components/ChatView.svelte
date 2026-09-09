@@ -153,6 +153,7 @@
     padding: 40px;
     text-align: center;
     color: var(--color-muted-foreground);
+    animation: rise var(--dur-3) var(--ease-out-quint);
   }
 
   .none h1 {
@@ -243,6 +244,7 @@
     justify-content: center;
     padding: 24px;
     text-align: center;
+    animation: rise var(--dur-3) var(--ease-out-quint);
   }
 
   @media (max-width: 720px) {

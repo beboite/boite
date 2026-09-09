@@ -9,6 +9,7 @@
   import SettingsShell from './components/SettingsShell.svelte';
   import Sidebar from './components/Sidebar.svelte';
   import TitleBar from './components/TitleBar.svelte';
+  import { Closing } from './lib/closing.svelte';
   import { installExternalLinks } from './lib/links';
   import { strings } from './lib/strings';
   import { rightPanel } from './lib/right-panel.svelte';
@@ -18,6 +19,34 @@
   const inShell = window.__TAURI_INTERNALS__ !== undefined;
   let sidebar = $state<Sidebar | undefined>(undefined);
   let appRoot = $state<HTMLDivElement | undefined>(undefined);
+
+  // The three overlays of this file leave the way they arrived: one `--dur-2`
+  // playing the reverse animation, then out of the DOM on `animationend`.
+  const toast = new Closing();
+  const scrim = new Closing();
+  const panelSlot = new Closing();
+  /** The error is cleared the moment Dismiss is pressed, so the exit plays on a copy. */
+  let toastText = $state('');
+
+  $effect(() => {
+    const error = store.error;
+    if (!error) {
+      toast.hide();
+      return;
+    }
+    toastText = error;
+    toast.show();
+  });
+
+  $effect(() => {
+    if (store.sidebarOpen) scrim.show();
+    else scrim.hide();
+  });
+
+  $effect(() => {
+    if (store.panelOpen && store.openThread) panelSlot.show();
+    else panelSlot.hide();
+  });
 
   // Every http(s) link the UI shows goes to the system browser, once, from here.
   $effect(() => {
@@ -144,8 +173,16 @@
       <SettingsShell {store} />
     {:else}
       <Sidebar bind:this={sidebar} {store} />
-      {#if store.sidebarOpen}
-        <button type="button" class="scrim" aria-label={strings.common.close} onclick={() => (store.sidebarOpen = false)}></button>
+      {#if scrim.shown}
+        <button
+          type="button"
+          class="scrim"
+          class:closing={scrim.closing}
+          aria-label={strings.common.close}
+          use:scrim.attach
+          onanimationend={scrim.end}
+          onclick={() => (store.sidebarOpen = false)}
+        ></button>
       {/if}
       <main>
         {#if firstRun}
@@ -154,8 +191,14 @@
           <ChatView {store} />
         {/if}
       </main>
-      {#if store.panelOpen && store.openThread}
-        <RightPanel {store} panel={store.panel} />
+      {#if panelSlot.shown && store.openThread}
+        <RightPanel
+          {store}
+          panel={store.panel}
+          closing={panelSlot.closing}
+          attach={panelSlot.attach}
+          onexit={panelSlot.end}
+        />
       {/if}
     {/if}
   </div>
@@ -164,9 +207,16 @@
     <DropOverlay />
   {/if}
 
-  {#if store.error}
-    <div class="toast" role="alert" data-testid="error-toast">
-      <span class="text" title={store.error}>{strings.errors.prefix}: {store.error}</span>
+  {#if toast.shown}
+    <div
+      class="toast"
+      class:closing={toast.closing}
+      role="alert"
+      use:toast.attach
+      onanimationend={toast.end}
+      data-testid="error-toast"
+    >
+      <span class="text" title={toastText}>{strings.errors.prefix}: {toastText}</span>
       <button type="button" class="ghost small" onclick={() => (store.error = null)}>{strings.common.dismiss}</button>
     </div>
   {/if}
@@ -183,8 +233,9 @@
     position: relative;
   }
 
+  /* The whole app arriving is a fade: nothing inside it should look shifted. */
   .app.ready {
-    animation: rise var(--dur-3) var(--ease-out-quint);
+    animation: fade var(--dur-3) var(--ease-out-quint);
   }
 
   .body {
@@ -245,6 +296,11 @@
     animation: rise var(--dur-3) var(--ease-out-quint);
   }
 
+  .toast.closing {
+    animation: fade-out var(--dur-2) var(--ease-out-quint);
+    pointer-events: none;
+  }
+
   .toast .text {
     flex: 1;
     min-width: 0;
@@ -265,6 +321,12 @@
       background: var(--color-scrim);
       height: auto;
       padding: 0;
+      animation: fade var(--dur-2) var(--ease-out-quint);
+    }
+
+    .scrim.closing {
+      animation-name: fade-out;
+      pointer-events: none;
     }
   }
 </style>

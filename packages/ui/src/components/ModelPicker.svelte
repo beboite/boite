@@ -2,6 +2,7 @@
   import { ChevronDown, ChevronRight, Search, Sparkles } from '@lucide/svelte';
   import type { Account, ModelInfo, ProviderInstallState, ProviderSummary } from '@boite/contracts';
   import InstallControl from './InstallControl.svelte';
+  import { Closing } from '../lib/closing.svelte';
   import { strings } from '../lib/strings';
   import type { Choice, PickPatch, Store } from '../lib/store.svelte';
 
@@ -26,7 +27,7 @@
   /** Past this many models the column stops being a plain scroll and gets a search field. */
   const SEARCH_FROM = 12;
 
-  let open = $state(false);
+  const popover = new Closing();
   let legacyOpen = $state(false);
   let root = $state<HTMLDivElement | undefined>(undefined);
   let searchBox = $state<HTMLInputElement | undefined>(undefined);
@@ -62,7 +63,7 @@
   // core reads it from one short-lived agent process the first time the picker
   // shows that instance, and the answer stands for the rest of the session.
   $effect(() => {
-    if (!open || !shown || (shown.protocol !== 'acp' && shown.protocol !== 'codex-appserver' && shown.protocol !== 'pi'))
+    if (!popover.open || !shown || (shown.protocol !== 'acp' && shown.protocol !== 'codex-appserver' && shown.protocol !== 'pi'))
       return;
     const accountId = shownAccountId;
     if (accountId === null) return;
@@ -177,14 +178,14 @@
 
   // A column that opens on a long list is a column you are about to type in.
   $effect(() => {
-    if (!open || !searchable) return;
+    if (!popover.open || !searchable) return;
     searchBox?.focus();
   });
 
   function toggle(event: MouseEvent) {
     event.stopPropagation();
-    open = !open;
-    if (open) {
+    popover.toggle();
+    if (popover.open) {
       shownProviderId = choice?.providerId ?? null;
       legacyOpen = false;
       modelQuery = '';
@@ -207,7 +208,7 @@
         : firstInstanceOf(shown.id);
     if (!instance) return;
     onpick({ ...instance, model: model.id });
-    open = false;
+    popover.hide();
   }
 
   /** The popover stays open: an effort is a setting of the model just picked, not a choice of its own. */
@@ -231,7 +232,7 @@
   }
 
   function onkeydown(event: KeyboardEvent) {
-    if (!open) return;
+    if (!popover.open) return;
     const active = document.activeElement as HTMLElement | null;
     const searching = searchable && (active === searchBox || (active?.hasAttribute('data-model') ?? false));
 
@@ -243,7 +244,7 @@
         searchBox?.focus();
         return;
       }
-      open = false;
+      popover.hide();
       return;
     }
     if (event.key === 'Enter' && searching) {
@@ -281,9 +282,9 @@
   }
 
   function onWindowPointerdown(event: PointerEvent) {
-    if (!open) return;
+    if (!popover.open) return;
     if (root && event.target instanceof Node && root.contains(event.target)) return;
-    open = false;
+    popover.hide();
   }
 </script>
 
@@ -294,7 +295,7 @@
     type="button"
     class="chip trigger"
     aria-haspopup="menu"
-    aria-expanded={open}
+    aria-expanded={popover.open}
     aria-label={strings.composer.picker}
     title={locked ? strings.composer.lockedHint : strings.composer.picker}
     data-testid="composer-picker"
@@ -306,8 +307,18 @@
     <ChevronDown size={12} strokeWidth={2} />
   </button>
 
-  {#if open}
-    <div class="popover" role="menu" tabindex="-1" aria-label={strings.composer.picker} data-testid="composer-picker-menu" {onkeydown}>
+  {#if popover.shown}
+    <div
+      class="popover"
+      class:closing={popover.closing}
+      role="menu"
+      tabindex="-1"
+      aria-label={strings.composer.picker}
+      data-testid="composer-picker-menu"
+      use:popover.attach
+      onanimationend={popover.end}
+      {onkeydown}
+    >
       <div class="column instances">
         <span class="section-label head">{strings.composer.providers}</span>
         {#each rows as row (row.account ? `${row.provider.id}::${row.account.id}` : row.provider.id)}
@@ -407,7 +418,7 @@
         {#if filteredLegacy.length > 0}
           <button
             type="button"
-            class="row fold"
+            class="row fold small"
             data-row
             data-testid="picker-legacy"
             aria-expanded={legacyOpen}
@@ -417,22 +428,28 @@
             <span class="name muted">{strings.composer.legacyModels}</span>
             <span class="count">{filteredLegacy.length}</span>
           </button>
-          {#if legacyOpen}
-            {#each filteredLegacy as model (model.id)}
-              <button
-                type="button"
-                class="row model legacy"
-                class:current={isCurrentModel(model)}
-                role="menuitem"
-                data-row
-                data-model={model.id}
-                onclick={() => pickModel(model)}
-              >
-                <span class="mark"></span>
-                <span class="name">{model.name}</span>
-              </button>
-            {/each}
-          {/if}
+          <!-- Folded, the group is still here at zero height: that is what the
+               `0fr` to `1fr` rows animate. The hooks come off with it, so a
+               collapsed row is neither walked by the arrows nor picked. -->
+          <div class="fold-body" class:open={legacyOpen} inert={!legacyOpen}>
+            <div class="clip">
+              {#each filteredLegacy as model (model.id)}
+                <button
+                  type="button"
+                  class="row model legacy"
+                  class:current={isCurrentModel(model)}
+                  role="menuitem"
+                  tabindex={legacyOpen ? 0 : -1}
+                  data-row={legacyOpen || undefined}
+                  data-model={legacyOpen ? model.id : undefined}
+                  onclick={() => pickModel(model)}
+                >
+                  <span class="mark"></span>
+                  <span class="name">{model.name}</span>
+                </button>
+              {/each}
+            </div>
+          </div>
         {/if}
         {#if shown && shownModels.length === 0 && !probing}
           <p class="none subtle">{strings.thread.defaultModel}</p>
@@ -448,7 +465,7 @@
               {#each effortLevels as level (level.id)}
                 <button
                   type="button"
-                  class="step"
+                  class="step small"
                   data-effort={level.id}
                   aria-pressed={level.id === activeEffort}
                   title={level.description ?? level.label}
@@ -510,6 +527,11 @@
     animation: pop var(--dur-2) var(--ease-out-quint);
     transform-origin: bottom left;
     overflow: hidden;
+  }
+
+  .popover.closing {
+    animation-name: pop-out;
+    pointer-events: none;
   }
 
   .column {
@@ -590,7 +612,7 @@
     justify-content: flex-start;
     gap: 8px;
     width: 100%;
-    min-height: 30px;
+    min-height: var(--row);
     padding: 3px 8px;
     border: none;
     border-radius: var(--radius-sm);
@@ -606,8 +628,10 @@
     outline: none;
   }
 
+  /* A full width row does not shrink under the finger, it fills one step more. */
   .row:active:not(:disabled) {
     transform: none;
+    background: color-mix(in srgb, var(--color-surface-3) 85%, var(--color-foreground));
   }
 
   .row:disabled,
@@ -679,7 +703,7 @@
   }
 
   .badge {
-    font-size: 10px;
+    font-size: var(--text-xs);
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.08em;
@@ -691,7 +715,30 @@
 
   .fold {
     margin-top: 4px;
-    min-height: 26px;
+    min-height: 24px;
+  }
+
+  /* The fold opens on its rows track, so the group grows to its own height. */
+  .fold-body {
+    display: grid;
+    grid-template-rows: 0fr;
+    opacity: 0;
+    transition:
+      grid-template-rows var(--dur-3) var(--ease-out-quint),
+      opacity var(--dur-3) var(--ease-out-quint);
+  }
+
+  .fold-body.open {
+    grid-template-rows: 1fr;
+    opacity: 1;
+  }
+
+  .fold-body .clip {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    min-height: 0;
+    overflow: hidden;
   }
 
   .caret {
@@ -745,7 +792,8 @@
 
   .step {
     flex: 1 1 auto;
-    min-height: 22px;
+    min-height: 24px;
+    height: 24px;
     padding: 2px 8px;
     border: none;
     border-radius: var(--radius-sm);

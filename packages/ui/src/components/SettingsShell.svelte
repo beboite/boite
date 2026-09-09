@@ -40,17 +40,21 @@
     {/each}
   </nav>
 
-  <section>
-    {#if store.settingsTab === 'general'}
-      <GeneralSettings {store} />
-    {:else if store.settingsTab === 'accounts'}
-      <AccountsPage {store} />
-    {:else if store.settingsTab === 'usage'}
-      <UsagePage {store} />
-    {:else}
-      <ResourcesPage {store} />
-    {/if}
-  </section>
+  <!-- The panel is keyed on the tab, so switching tabs fades the new page in
+       rather than swapping it in one frame. -->
+  {#key store.settingsTab}
+    <section>
+      {#if store.settingsTab === 'general'}
+        <GeneralSettings {store} />
+      {:else if store.settingsTab === 'accounts'}
+        <AccountsPage {store} />
+      {:else if store.settingsTab === 'usage'}
+        <UsagePage {store} />
+      {:else}
+        <ResourcesPage {store} />
+      {/if}
+    </section>
+  {/key}
 </div>
 
 <style>
@@ -84,9 +88,15 @@
 
   .tab {
     justify-content: flex-start;
-    height: 30px;
+    height: var(--row);
     padding: 0 10px;
     color: var(--color-muted-foreground);
+  }
+
+  /* A full width row does not shrink under the finger, it fills one step more. */
+  .tab:active:not(:disabled) {
+    transform: none;
+    background: color-mix(in srgb, var(--color-surface-3) 85%, var(--color-foreground));
   }
 
   .tab.active {
@@ -99,6 +109,7 @@
     min-width: 0;
     min-height: 0;
     overflow: auto;
+    animation: fade var(--dur-2) var(--ease-out-quint);
   }
 
   @media (max-width: 720px) {

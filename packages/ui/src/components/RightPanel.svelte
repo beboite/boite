@@ -11,7 +11,20 @@
   import Menu from './Menu.svelte';
   import TraceSurface from './TraceSurface.svelte';
 
-  let { store, panel }: { store: Store; panel: BoundPanel } = $props();
+  let {
+    store,
+    panel,
+    closing = false,
+    attach,
+    onexit
+  }: {
+    store: Store;
+    panel: BoundPanel;
+    /** Set by `App.svelte` while the panel plays its exit, just before it unmounts. */
+    closing?: boolean;
+    attach: (node: HTMLElement) => { destroy: () => void };
+    onexit: (event: AnimationEvent) => void;
+  } = $props();
 
   const inShell = window.__TAURI_INTERNALS__ !== undefined;
 
@@ -150,6 +163,19 @@
     }
   }
 
+  /** The arrows walk the strip, the way a tablist is expected to answer them. */
+  function onTabsKey(event: KeyboardEvent): void {
+    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+    const node = tabs;
+    if (!node) return;
+    const list = Array.from(node.querySelectorAll<HTMLElement>('[role="tab"]'));
+    const index = list.indexOf(document.activeElement as HTMLElement);
+    if (list.length === 0 || index < 0) return;
+    event.preventDefault();
+    const step = event.key === 'ArrowRight' ? 1 : -1;
+    list[(index + step + list.length) % list.length]?.focus();
+  }
+
   function launch(kind: SurfaceKind): void {
     // A page needs a webview of its own, which only the desktop shell has.
     if (kind === 'browser' && !inShell) return;
@@ -236,9 +262,12 @@
   class="panel"
   class:maximized={rightPanel.maximized}
   class:dragging
+  class:closing
   style="--panel-width: {rightPanel.width}px"
   data-testid="right-panel"
   bind:this={root}
+  use:attach
+  onanimationend={onexit}
   onpointerenter={() => (near = true)}
   onpointerleave={() => (near = false)}
   onfocusin={() => (near = true)}
@@ -269,11 +298,19 @@
         aria-label={strings.rightPanel.scrollLeft}
         onclick={() => scrollBy(-1)}
       >
-        <ChevronLeft size={14} strokeWidth={1.75} />
+        <ChevronLeft size={12} strokeWidth={1.75} />
       </button>
     {/if}
 
-    <div class="tabs" role="tablist" bind:this={tabs} {onwheel} data-testid="panel-tabs">
+    <div
+      class="tabs"
+      role="tablist"
+      tabindex="-1"
+      bind:this={tabs}
+      {onwheel}
+      onkeydown={onTabsKey}
+      data-testid="panel-tabs"
+    >
       {#each surfaces as surface (surface.id)}
         <div
           class="tab"
@@ -322,7 +359,7 @@
         aria-label={strings.rightPanel.scrollRight}
         onclick={() => scrollBy(1)}
       >
-        <ChevronRight size={14} strokeWidth={1.75} />
+        <ChevronRight size={12} strokeWidth={1.75} />
       </button>
     {/if}
 
@@ -335,7 +372,7 @@
         label={strings.rightPanel.newSurface}
         testid="panel-add"
       >
-        <Plus size={14} strokeWidth={1.75} />
+        <Plus size={12} strokeWidth={1.75} />
       </Menu>
     {/if}
 
@@ -351,9 +388,9 @@
       onclick={() => (rightPanel.maximized = !rightPanel.maximized)}
     >
       {#if rightPanel.maximized}
-        <Minimize2 size={13} strokeWidth={1.75} />
+        <Minimize2 size={12} strokeWidth={1.75} />
       {:else}
-        <Maximize2 size={13} strokeWidth={1.75} />
+        <Maximize2 size={12} strokeWidth={1.75} />
       {/if}
     </button>
     <button
@@ -364,7 +401,7 @@
       data-testid="panel-close"
       onclick={() => panel.toggle()}
     >
-      <X size={14} strokeWidth={1.75} />
+      <X size={12} strokeWidth={1.75} />
     </button>
   </header>
 
@@ -423,6 +460,12 @@
   .panel.maximized {
     width: auto;
     flex: 1;
+  }
+
+  /* The exit is opacity alone: the width would be horizontal travel on the way out. */
+  .panel.closing {
+    animation-name: fade-out;
+    pointer-events: none;
   }
 
   @keyframes panel-in {
@@ -512,6 +555,7 @@
     font-size: var(--text-sm);
     cursor: pointer;
     user-select: none;
+    animation: rise var(--dur-3) var(--ease-out-quint);
     transition:
       background var(--dur-2) var(--ease-out-quint),
       color var(--dur-2) var(--ease-out-quint);
@@ -553,6 +597,7 @@
 
   .closer:active:not(:disabled) {
     transform: none;
+    background: color-mix(in srgb, var(--color-foreground) 22%, transparent);
   }
 
   .cross {
@@ -565,13 +610,16 @@
     justify-content: center;
   }
 
-  /* The surface's own icon is the close target: it turns into an X under the pointer. */
+  /* The surface's own icon is the close target: it turns into an X under the
+     pointer, and under the keyboard too as soon as the tab holds the focus. */
   .tab:hover .glyph,
+  .tab:focus-within .glyph,
   .closer:focus-visible .glyph {
     display: none;
   }
 
   .tab:hover .cross,
+  .tab:focus-within .cross,
   .closer:focus-visible .cross {
     display: inline-flex;
   }

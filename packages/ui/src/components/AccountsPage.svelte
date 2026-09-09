@@ -206,12 +206,14 @@
 </div>
 
 <style>
+  /* The form appears on a press, so it rises rather than popping into place. */
   form {
     display: grid;
     gap: 6px;
     padding: 8px;
     margin-bottom: 10px;
     max-width: 420px;
+    animation: rise var(--dur-3) var(--ease-out-quint);
   }
 
   form input:not([type]) {
@@ -270,7 +272,7 @@
     font-size: var(--text-xs);
     font-weight: 600;
     text-transform: uppercase;
-    letter-spacing: 0.03em;
+    letter-spacing: 0.08em;
     color: var(--color-muted-foreground);
   }
 
@@ -295,7 +297,7 @@
   .status {
     font-size: var(--text-xs);
     text-transform: uppercase;
-    letter-spacing: 0.03em;
+    letter-spacing: 0.08em;
     color: var(--color-muted-foreground);
   }
 
@@ -311,6 +313,11 @@
     display: flex;
     gap: 6px;
     justify-content: flex-end;
+  }
+
+  /* A row under the pointer fills, the way every other list here answers. */
+  tbody tr:not(.login):hover td {
+    background: var(--color-surface-2);
   }
 
   /* The cell stays a table cell so the colspan holds; the grid lives inside it. */

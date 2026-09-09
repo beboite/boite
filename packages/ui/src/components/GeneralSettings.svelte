@@ -354,6 +354,12 @@
     transform: translateX(12px);
   }
 
+  /* The track is small and round, so the ring stands off it rather than
+     hugging the pill where it would read as part of the control. */
+  .switch-row input:focus-visible {
+    outline-offset: 3px;
+  }
+
   /* Three buttons in one track, the chosen one filled like a primary button. */
   .segmented {
     display: inline-flex;

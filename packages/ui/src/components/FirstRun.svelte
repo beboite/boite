@@ -116,11 +116,13 @@
     color: var(--color-muted-foreground);
   }
 
+  /* The field takes the place of the link that opened it, so it rises in. */
   form {
     display: flex;
     gap: 6px;
     width: 100%;
     margin-top: 8px;
+    animation: rise var(--dur-3) var(--ease-out-quint);
   }
 
   form input {

@@ -1,13 +1,24 @@
 <script lang="ts">
   import { tick } from 'svelte';
-  import { confirm } from '../lib/confirm.svelte';
+  import { Closing } from '../lib/closing.svelte';
+  import { confirm, type ConfirmRequest } from '../lib/confirm.svelte';
 
+  const FOCUSABLE = 'button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])';
+
+  const overlay = new Closing();
+  /** The request is nulled the moment it is answered, so the exit plays on a copy. */
+  let held = $state<ConfirmRequest | null>(null);
   let card = $state<HTMLDivElement | undefined>(undefined);
 
   /** A dangerous action opens with the keyboard on Cancel, a plain one on Confirm. */
   $effect(() => {
     const current = confirm.current;
-    if (!current) return;
+    if (!current) {
+      overlay.hide();
+      return;
+    }
+    held = current;
+    overlay.show();
     void tick().then(() => {
       const target = card?.querySelector<HTMLButtonElement>(current.danger ? '[data-cancel]' : '[data-confirm]');
       target?.focus({ preventScroll: true });
@@ -20,23 +31,44 @@
       event.preventDefault();
       event.stopPropagation();
       confirm.answer(false);
+      return;
     }
+    if (event.key === 'Tab') trap(event);
+  }
+
+  /** While the dialog is up the keyboard cannot leave it. */
+  function trap(event: KeyboardEvent) {
+    const el = card;
+    if (!el) return;
+    const stops = Array.from(el.querySelectorAll<HTMLElement>(FOCUSABLE));
+    const first = stops[0];
+    const last = stops[stops.length - 1];
+    if (!first || !last) return;
+    const active = document.activeElement;
+    const inside = active instanceof Node && el.contains(active);
+    if (event.shiftKey ? inside && active !== first : inside && active !== last) return;
+    event.preventDefault();
+    (event.shiftKey ? last : first).focus({ preventScroll: true });
   }
 </script>
 
 <svelte:window onkeydowncapture={onkeydown} />
 
-{#if confirm.current}
-  {@const request = confirm.current}
+{#if overlay.shown && held}
+  {@const request = held}
   <div
     class="scrim"
+    class:closing={overlay.closing}
     role="presentation"
+    use:overlay.attach
+    onanimationend={overlay.end}
     onclick={(event) => {
       if (event.target === event.currentTarget) confirm.answer(false);
     }}
   >
     <div
       class="dialog"
+      class:closing={overlay.closing}
       role="alertdialog"
       aria-modal="true"
       aria-labelledby="confirm-title"
@@ -80,6 +112,11 @@
     animation: fade var(--dur-2) var(--ease-out-quint);
   }
 
+  .scrim.closing {
+    animation-name: fade-out;
+    pointer-events: none;
+  }
+
   .dialog {
     width: min(380px, calc(100vw - 32px));
     padding: 18px 18px 14px;
@@ -88,6 +125,10 @@
     border-radius: var(--radius-xl);
     box-shadow: var(--shadow-e3);
     animation: pop var(--dur-2) var(--ease-out-quint);
+  }
+
+  .dialog.closing {
+    animation-name: pop-out;
   }
 
   h2 {
@@ -114,14 +155,5 @@
 
   .destructive:hover:not(:disabled) {
     background: var(--color-danger-hover);
-  }
-
-  @keyframes fade {
-    from {
-      opacity: 0;
-    }
-    to {
-      opacity: 1;
-    }
   }
 </style>

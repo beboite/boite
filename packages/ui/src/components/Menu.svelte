@@ -1,5 +1,6 @@
 <script lang="ts">
-  import type { Snippet } from 'svelte';
+  import { tick, type Snippet } from 'svelte';
+  import { Closing } from '../lib/closing.svelte';
   import type { MenuItem } from '../lib/menu';
 
   let {
@@ -23,31 +24,69 @@
     children: Snippet;
   } = $props();
 
-  let open = $state(false);
+  const popover = new Closing();
   let root = $state<HTMLDivElement | undefined>(undefined);
+  let trigger = $state<HTMLButtonElement | undefined>(undefined);
+
+  /** The keyboard lands on the first item the moment the list is there. */
+  $effect(() => {
+    if (!popover.open) return;
+    void tick().then(() => rows()[0]?.focus({ preventScroll: true }));
+  });
+
+  function rows(): HTMLElement[] {
+    return root ? Array.from(root.querySelectorAll<HTMLElement>('[data-row]:not(:disabled)')) : [];
+  }
 
   function toggle(event: MouseEvent) {
     event.stopPropagation();
-    open = !open;
+    popover.toggle();
   }
 
   function pick(item: MenuItem) {
     if (item.disabled) return;
-    open = false;
+    popover.hide();
     onpick(item.id);
   }
 
   function onWindowClick(event: MouseEvent) {
-    if (!open) return;
+    if (!popover.open) return;
     if (root && event.target instanceof Node && root.contains(event.target)) return;
-    open = false;
+    popover.hide();
   }
 
   function onkeydown(event: KeyboardEvent) {
-    if (event.key === 'Escape' && open) {
+    if (event.key === 'Escape') {
+      if (!popover.open) return;
       event.stopPropagation();
-      open = false;
+      popover.hide();
+      trigger?.focus({ preventScroll: true });
+      return;
     }
+    if (!popover.open) {
+      if (event.key !== 'ArrowDown') return;
+      event.preventDefault();
+      popover.show();
+      return;
+    }
+    const list = rows();
+    if (list.length === 0) return;
+    const active = document.activeElement as HTMLElement | null;
+    const index = active ? list.indexOf(active) : -1;
+    if (event.key === 'Enter') {
+      if (index < 0) return;
+      event.preventDefault();
+      const chosen = items.find((item) => item.id === active?.dataset['value']);
+      if (chosen) pick(chosen);
+      return;
+    }
+    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp' && event.key !== 'Home' && event.key !== 'End') return;
+    event.preventDefault();
+    let next = 0;
+    if (event.key === 'ArrowDown') next = (index + 1) % list.length;
+    else if (event.key === 'ArrowUp') next = (index - 1 + list.length) % list.length;
+    else if (event.key === 'End') next = list.length - 1;
+    list[next]?.focus({ preventScroll: true });
   }
 </script>
 
@@ -60,18 +99,30 @@
     class:chip={variant === 'chip'}
     class:ghost={variant === 'ghost'}
     aria-haspopup="menu"
-    aria-expanded={open}
+    aria-expanded={popover.open}
     aria-label={label}
     title={label}
     data-testid={testid}
+    bind:this={trigger}
     onclick={toggle}
     {onkeydown}
   >
     {@render children()}
   </button>
 
-  {#if open}
-    <div class="popover" class:end={align === 'end'} class:below={placement === 'bottom'} role="menu" tabindex="-1" {onkeydown} data-testid={testid ? `${testid}-menu` : undefined}>
+  {#if popover.shown}
+    <div
+      class="popover"
+      class:end={align === 'end'}
+      class:below={placement === 'bottom'}
+      class:closing={popover.closing}
+      role="menu"
+      tabindex="-1"
+      {onkeydown}
+      use:popover.attach
+      onanimationend={popover.end}
+      data-testid={testid ? `${testid}-menu` : undefined}
+    >
       {#each items as item (item.id)}
         <button
           type="button"
@@ -80,6 +131,7 @@
           class:danger={item.danger}
           role="menuitem"
           disabled={item.disabled}
+          data-row
           data-value={item.id}
           onclick={() => pick(item)}
         >
@@ -142,6 +194,11 @@
     transform-origin: bottom left;
   }
 
+  .popover.closing {
+    animation-name: pop-out;
+    pointer-events: none;
+  }
+
   .popover.end {
     left: auto;
     right: 0;
@@ -173,8 +230,16 @@
     white-space: normal;
   }
 
-  .item:hover:not(:disabled) {
+  .item:hover:not(:disabled),
+  .item:focus-visible {
     background: var(--color-hover);
+    outline: none;
+  }
+
+  /* A full width row does not shrink under the finger, it fills one step more. */
+  .item:active:not(:disabled) {
+    transform: none;
+    background: var(--color-active);
   }
 
   .item.active .label::after {

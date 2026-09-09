@@ -187,7 +187,7 @@
     display: flex;
     align-items: center;
     gap: 4px;
-    height: 40px;
+    height: 44px;
     padding: 0 8px;
     border-bottom: 1px solid var(--color-border);
     flex: none;
@@ -228,6 +228,7 @@
   }
 
   .address:hover .external,
+  .address:focus-within .external,
   .external:focus-visible {
     opacity: 1;
   }

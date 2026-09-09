@@ -45,7 +45,7 @@
     {#if state.state === 'absent'}
       <button
         type="button"
-        class="act"
+        class="small act"
         data-testid="install-start"
         data-provider={provider.id}
         onclick={() => void store.installProvider(provider.id)}
@@ -56,7 +56,7 @@
       <span class="reason" data-testid="install-error">{state.message}</span>
       <button
         type="button"
-        class="act"
+        class="small act"
         data-testid="install-start"
         data-provider={provider.id}
         onclick={() => void store.installProvider(provider.id)}
@@ -66,7 +66,7 @@
     {:else if state.state === 'installed'}
       <span class="note">{strings.install.installed.replace('{version}', state.version)}</span>
       {#if removable}
-        <button type="button" class="quiet act" data-testid="install-remove" onclick={() => void remove()}>
+        <button type="button" class="quiet small act" data-testid="install-remove" onclick={() => void remove()}>
           {strings.install.remove}
         </button>
       {/if}
@@ -95,7 +95,7 @@
         </span>
         <button
           type="button"
-          class="quiet act"
+          class="quiet small act"
           data-testid="install-cancel"
           data-provider={provider.id}
           onclick={() => void store.cancelInstall(provider.id)}
@@ -163,7 +163,7 @@
   }
 
   .act {
-    min-height: 22px;
+    min-height: 24px;
     padding: 2px 8px;
     font-size: var(--text-xs);
     white-space: nowrap;

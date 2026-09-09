@@ -118,4 +118,9 @@
     color: var(--color-danger);
     font-size: var(--text-xs);
   }
+
+  /* A row under the pointer fills, the way every other list here answers. */
+  tbody tr:hover td {
+    background: var(--color-surface-2);
+  }
 </style>

@@ -99,7 +99,7 @@
   </div>
   <div class="controls">
     <button type="button" class="ctl" aria-label={strings.titlebar.minimize} title={strings.titlebar.minimize} onclick={() => void minimize()}>
-      <Minus size={14} strokeWidth={1.75} />
+      <Minus size={15} strokeWidth={1.75} />
     </button>
     <button
       type="button"
@@ -111,9 +111,9 @@
       onclick={() => void maximize()}
     >
       {#if maximized}
-        <Copy size={11} strokeWidth={1.75} />
+        <Copy size={15} strokeWidth={1.75} />
       {:else}
-        <Square size={11} strokeWidth={1.75} />
+        <Square size={15} strokeWidth={1.75} />
       {/if}
     </button>
     <button type="button" class="ctl close" aria-label={strings.titlebar.close} title={strings.titlebar.close} onclick={() => void close()}>
@@ -199,17 +199,27 @@
     color: var(--color-muted-foreground);
   }
 
-  .ctl:hover:not(:disabled) {
+  .ctl:hover:not(:disabled),
+  .ctl:focus-visible {
     background: var(--color-surface-3);
     color: var(--color-foreground);
+    outline: none;
   }
 
+  /* A window control is part of the frame: it darkens under the finger rather
+     than moving, because the frame itself never moves. */
   .ctl:active:not(:disabled) {
     transform: none;
+    background: color-mix(in srgb, var(--color-surface-3) 82%, var(--color-foreground));
   }
 
-  .ctl.close:hover:not(:disabled) {
+  .ctl.close:hover:not(:disabled),
+  .ctl.close:focus-visible {
     background: var(--color-danger);
     color: var(--color-on-danger);
+  }
+
+  .ctl.close:active:not(:disabled) {
+    background: var(--color-danger-hover);
   }
 </style>

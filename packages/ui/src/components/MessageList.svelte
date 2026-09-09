@@ -325,7 +325,7 @@
   </div>
 
   {#if behind}
-    <button type="button" class="jump" onclick={jump} data-testid="jump-to-latest">
+    <button type="button" class="small jump" onclick={jump} data-testid="jump-to-latest">
       <ArrowDown size={14} strokeWidth={2} />
       {strings.chat.jumpToLatest}
     </button>
@@ -379,7 +379,7 @@
     background: var(--color-surface-2);
     border: 1px solid var(--color-border);
     border-radius: var(--radius-lg);
-    border-bottom-right-radius: 4px;
+    border-bottom-right-radius: var(--radius-sm);
     box-shadow: var(--shadow-e1);
   }
 
@@ -451,7 +451,6 @@
     left: 50%;
     bottom: 12px;
     transform: translateX(-50%);
-    height: 26px;
     padding: 0 10px 0 8px;
     border-radius: 999px;
     background: var(--color-surface-2);

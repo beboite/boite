@@ -123,7 +123,7 @@
   }
 
   th {
-    letter-spacing: 0.03em;
+    letter-spacing: 0.08em;
     white-space: normal;
     overflow-wrap: anywhere;
   }
@@ -150,6 +150,16 @@
 
   .running {
     color: var(--color-live);
+  }
+
+  /* A row rises the first time it appears, and only then: the key holds the pid
+     and the start, so a row that is already here is never minted twice. */
+  tbody tr {
+    animation: rise var(--dur-3) var(--ease-out-quint);
+  }
+
+  tbody tr:hover td {
+    background: var(--color-surface-2);
   }
 
   tr.live td {

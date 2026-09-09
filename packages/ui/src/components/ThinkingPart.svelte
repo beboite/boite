@@ -6,6 +6,13 @@
 
   // Folded by default, and the fold belongs to this part alone.
   let open = $state(false);
+
+  // Built on the first open, then folded rather than thrown away: that is what
+  // gives the height something to animate on the way back.
+  let built = $state(false);
+  $effect(() => {
+    if (open) built = true;
+  });
 </script>
 
 <div class="thinking" data-testid="thinking-part">
@@ -24,9 +31,13 @@
     {/if}
   </button>
 
-  {#if open}
-    <p class="body" data-testid="thinking-text">{text}</p>
-  {/if}
+  <div class="fold" class:open inert={!open}>
+    <div class="clip">
+      {#if built}
+        <p class="body" data-testid="thinking-text">{text}</p>
+      {/if}
+    </div>
+  </div>
 </div>
 
 <style>
@@ -68,6 +79,26 @@
     border-radius: 50%;
     background: var(--color-live);
     animation: pulse 1.6s ease-in-out infinite;
+  }
+
+  /* The rows track carries the open and the close, the same trick as the tool card. */
+  .fold {
+    display: grid;
+    grid-template-rows: 0fr;
+    opacity: 0;
+    transition:
+      grid-template-rows var(--dur-3) var(--ease-out-quint),
+      opacity var(--dur-3) var(--ease-out-quint);
+  }
+
+  .fold.open {
+    grid-template-rows: 1fr;
+    opacity: 1;
+  }
+
+  .clip {
+    min-height: 0;
+    overflow: hidden;
   }
 
   .body {

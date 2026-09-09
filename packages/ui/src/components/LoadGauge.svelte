@@ -22,7 +22,7 @@
     width: 28px;
     height: 3px;
     background: var(--color-surface-3);
-    border-radius: 2px;
+    border-radius: 999px;
     overflow: hidden;
     flex: none;
   }
