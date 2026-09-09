@@ -99,7 +99,7 @@
   }
 
   .drop-hint {
-    font-size: var(--text-xs);
+    font-size: var(--text-sm);
     max-width: none;
     white-space: nowrap;
   }
@@ -107,7 +107,7 @@
   /* The secondary way in, so it reads like the drop hint above it and not like
      a label with no field under it. */
   .type-path {
-    font-size: var(--text-xs);
+    font-size: var(--text-sm);
     font-weight: 400;
     color: var(--color-subtle);
   }
@@ -133,6 +133,6 @@
   }
 
   form button {
-    height: 32px;
+    height: var(--input);
   }
 </style>

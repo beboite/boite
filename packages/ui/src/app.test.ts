@@ -105,6 +105,27 @@ test('New thread opens a draft and the first send creates the thread titled from
   expect(store.openThread?.messages[0]?.role).toBe('user');
 });
 
+test('the sidebar draft row hands the keyboard back to the composer', async () => {
+  await mountOnFake();
+
+  query<HTMLButtonElement>('[data-testid=new-thread]').click();
+  await waitFor(() => store.draft !== null);
+
+  // Something else in the page holds the keyboard, the way it does after a click.
+  const gear = query<HTMLButtonElement>('[data-testid=nav-settings]');
+  gear.focus();
+  expect(document.activeElement).toBe(gear);
+
+  query<HTMLButtonElement>('[data-testid=draft-row]').click();
+  await waitFor(
+    () => document.activeElement === document.querySelector('[data-testid=composer-input]')
+  );
+  expect(store.draft).not.toBeNull();
+
+  // The store is the singleton every test shares: the draft goes back out.
+  store.draft = null;
+});
+
 test('the picker lists providers with their accounts and the models of the one shown, legacy folded', async () => {
   await mountOnFake();
   query<HTMLButtonElement>('[data-testid=new-thread]').click();

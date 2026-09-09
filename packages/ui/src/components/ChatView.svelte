@@ -122,15 +122,15 @@
       {#if thread}
         <button
           type="button"
-          class="ghost icon"
+          class="ghost trace"
           class:on={store.panelOpen}
           title={strings.thread.traceHint}
-          aria-label={strings.thread.trace}
           aria-pressed={store.panelOpen}
           data-testid="tab-trace"
           onclick={() => store.togglePanel()}
         >
           <Activity size={16} strokeWidth={1.75} />
+          {strings.thread.trace}
         </button>
       {/if}
     </header>
@@ -188,7 +188,7 @@
   }
 
   .title {
-    height: 28px;
+    height: var(--control);
     padding: 0 6px;
     margin-left: -6px;
     font-weight: 600;
@@ -198,7 +198,7 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     display: block;
-    line-height: 28px;
+    line-height: var(--control);
   }
 
   .title.draft {
@@ -207,7 +207,7 @@
   }
 
   .rename {
-    height: 28px;
+    height: var(--control);
     width: min(420px, 50%);
     font-weight: 600;
   }
@@ -229,7 +229,12 @@
     max-width: 240px;
     overflow: hidden;
     text-overflow: ellipsis;
-    font-size: var(--text-xs);
+    font-size: var(--text-sm);
+  }
+
+  .trace {
+    flex: none;
+    padding: 0 10px 0 8px;
   }
 
   .on {

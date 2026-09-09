@@ -49,7 +49,7 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    height: 24px;
+    height: var(--control-sm);
     padding: 0 8px 0 4px;
     color: var(--color-muted-foreground);
     font-size: var(--text-sm);

@@ -203,7 +203,7 @@
   }
 
   .url {
-    height: 28px;
+    height: var(--control);
     width: 100%;
     padding: 0 30px 0 10px;
     border-color: transparent;

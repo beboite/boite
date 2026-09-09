@@ -83,7 +83,7 @@ export const strings = {
     acceptEdits: 'Accept edits',
     bypassPermissions: 'Bypass',
     plan: 'Plan',
-    dontAsk: 'Never ask'
+    dontAsk: 'Auto-deny'
   },
 
   permissionModeLong: {
@@ -91,7 +91,7 @@ export const strings = {
     acceptEdits: 'Accept edits, ask for the rest',
     bypassPermissions: 'Run everything without asking',
     plan: 'Plan only, no changes',
-    dontAsk: 'Deny what would need asking'
+    dontAsk: 'Deny anything that would need asking'
   },
 
   thread: {
@@ -370,7 +370,7 @@ export const strings = {
     seconds: 's',
     minutes: 'min',
     hours: 'h',
-    tokens: 'tok'
+    tokens: 'tokens'
   },
 
   common: {

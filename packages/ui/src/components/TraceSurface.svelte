@@ -53,7 +53,7 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    height: 32px;
+    height: var(--row);
     padding: 0 6px 0 12px;
     flex: none;
   }

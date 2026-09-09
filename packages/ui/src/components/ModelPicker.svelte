@@ -302,7 +302,7 @@
     onclick={toggle}
     {onkeydown}
   >
-    <Sparkles size={13} strokeWidth={1.75} />
+    <Sparkles size={14} strokeWidth={1.75} />
     <span class="label">{label}</span>
     <ChevronDown size={12} strokeWidth={2} />
   </button>
@@ -491,7 +491,7 @@
 
   .trigger {
     cursor: pointer;
-    height: 24px;
+    height: var(--control-sm);
     max-width: 260px;
     padding-right: 6px;
     transition:
@@ -570,7 +570,7 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    height: 28px;
+    height: var(--control);
     padding: 0 8px;
     border: 1px solid var(--color-border);
     border-radius: var(--radius-md);
@@ -686,7 +686,7 @@
   }
 
   .sub {
-    font-size: var(--text-xs);
+    font-size: var(--text-sm);
     color: var(--color-muted-foreground);
     overflow: hidden;
     text-overflow: ellipsis;
@@ -715,7 +715,7 @@
 
   .fold {
     margin-top: 4px;
-    min-height: 24px;
+    min-height: var(--control-sm);
   }
 
   /* The fold opens on its rows track, so the group grows to its own height. */
@@ -768,7 +768,7 @@
   /* The agent is being asked for its models; the descriptor's stay above. */
   p.probing {
     margin-top: 2px;
-    font-size: var(--text-xs);
+    font-size: var(--text-sm);
   }
 
   .effort {
@@ -792,14 +792,14 @@
 
   .step {
     flex: 1 1 auto;
-    min-height: 24px;
-    height: 24px;
+    min-height: var(--control-sm);
+    height: var(--control-sm);
     padding: 2px 8px;
     border: none;
     border-radius: var(--radius-sm);
     background: transparent;
     color: var(--color-muted-foreground);
-    font-size: var(--text-xs);
+    font-size: var(--text-sm);
     font-weight: 500;
     white-space: nowrap;
     transition:

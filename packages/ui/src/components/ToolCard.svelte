@@ -218,7 +218,7 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-size: var(--text-xs);
+    font-size: var(--text-sm);
   }
 
   .chip {
@@ -324,7 +324,7 @@
   .show-all {
     align-self: flex-start;
     margin-bottom: 6px;
-    font-size: var(--text-xs);
+    font-size: var(--text-sm);
     color: var(--color-muted-foreground);
   }
 

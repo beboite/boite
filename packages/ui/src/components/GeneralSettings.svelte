@@ -296,7 +296,7 @@
   }
 
   .hint {
-    font-size: var(--text-xs);
+    font-size: var(--text-sm);
     margin: 0 0 12px;
   }
 
@@ -325,7 +325,7 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-size: var(--text-xs);
+    font-size: var(--text-sm);
   }
 
   .grow {
@@ -357,7 +357,7 @@
   .switch-row .hint {
     display: block;
     color: var(--color-muted-foreground);
-    font-size: var(--text-xs);
+    font-size: var(--text-sm);
     margin-top: 2px;
   }
 
@@ -412,7 +412,7 @@
   }
 
   .segmented button {
-    height: 24px;
+    height: var(--control-sm);
     padding: 0 10px;
     border: 1px solid transparent;
     border-radius: var(--radius-sm);
@@ -448,7 +448,7 @@
 
   dt {
     color: var(--color-muted-foreground);
-    font-size: var(--text-xs);
+    font-size: var(--text-sm);
     padding-top: 2px;
   }
 

@@ -148,14 +148,14 @@
   }
 
   .note {
-    font-size: var(--text-xs);
+    font-size: var(--text-sm);
     color: var(--color-muted-foreground);
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
   }
 
   .reason {
-    font-size: var(--text-xs);
+    font-size: var(--text-sm);
     color: var(--color-danger);
     overflow: hidden;
     text-overflow: ellipsis;
@@ -163,9 +163,9 @@
   }
 
   .act {
-    min-height: 24px;
+    min-height: var(--control-sm);
     padding: 2px 8px;
-    font-size: var(--text-xs);
+    font-size: var(--text-sm);
     white-space: nowrap;
   }
 </style>

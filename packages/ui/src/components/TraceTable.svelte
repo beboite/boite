@@ -80,13 +80,13 @@
 
   .note {
     margin: 0 14px 10px;
-    font-size: var(--text-xs);
+    font-size: var(--text-sm);
   }
 
   .mode {
     color: var(--color-muted-foreground);
     margin-right: 6px;
-    font-size: var(--text-xs);
+    font-size: var(--text-sm);
   }
 
   /* The panel is 360 px and never scrolls sideways: the columns are fixed and
@@ -119,11 +119,16 @@
   th,
   td {
     padding: 5px 5px;
-    font-size: var(--text-xs);
+  }
+
+  /* The mono cells read at 13; the header stays a section label at 12. */
+  td {
+    font-size: var(--text-sm);
   }
 
   th {
-    letter-spacing: 0.08em;
+    font-size: var(--text-xs);
+    letter-spacing: 0.06em;
     white-space: normal;
     overflow-wrap: anywhere;
   }

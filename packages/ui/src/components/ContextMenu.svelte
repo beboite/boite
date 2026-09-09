@@ -152,7 +152,7 @@
     justify-content: space-between;
     gap: 12px;
     width: 100%;
-    height: 28px;
+    height: var(--control);
     padding: 0 8px;
     border: none;
     border-radius: var(--radius-sm);
@@ -189,7 +189,7 @@
   }
 
   .hint {
-    font-size: var(--text-xs);
+    font-size: var(--text-sm);
     color: var(--color-subtle);
     white-space: nowrap;
   }

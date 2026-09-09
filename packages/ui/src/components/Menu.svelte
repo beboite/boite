@@ -153,7 +153,7 @@
 
   .trigger {
     cursor: pointer;
-    height: 24px;
+    height: var(--control-sm);
     justify-content: center;
     transition:
       background var(--dur-2) var(--ease-out-quint),
@@ -161,7 +161,7 @@
   }
 
   .trigger.ghost {
-    width: 24px;
+    width: var(--control-sm);
     padding: 0;
     border-color: transparent;
     background: transparent;
@@ -262,7 +262,7 @@
   }
 
   .hint {
-    font-size: var(--text-xs);
+    font-size: var(--text-sm);
     color: var(--color-muted-foreground);
   }
 </style>

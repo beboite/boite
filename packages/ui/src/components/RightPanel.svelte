@@ -527,6 +527,13 @@
     min-width: 0;
   }
 
+  /* The strip keeps its own scale, so its controls stay 24 px beside the pills. */
+  .strip button.small.icon,
+  .strip :global(.trigger.ghost) {
+    height: 24px;
+    width: 24px;
+  }
+
   .tabs {
     display: flex;
     align-items: center;
@@ -552,7 +559,8 @@
     padding: 0 8px 0 5px;
     border-radius: var(--radius-md);
     color: var(--color-muted-foreground);
-    font-size: var(--text-sm);
+    /* The strip keeps its own scale: 24 px pills on 12 px type. */
+    font-size: var(--text-xs);
     cursor: pointer;
     user-select: none;
     animation: rise var(--dur-3) var(--ease-out-quint);
@@ -682,7 +690,7 @@
   }
 
   .card-hint {
-    font-size: var(--text-xs);
+    font-size: var(--text-sm);
     line-height: 1.4;
   }
 

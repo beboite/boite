@@ -236,9 +236,17 @@
           <ul>
             {#if draftHere}
               <li>
-                <div class="thread draft open" data-testid="draft-row">
-                  <span class="mark-slot"><span class="draft-mark"></span></span>
-                  <span class="title muted">{strings.sidebar.draft}</span>
+                <div class="thread draft open">
+                  <button
+                    type="button"
+                    class="ghost row"
+                    data-testid="draft-row"
+                    title={strings.sidebar.draft}
+                    onclick={() => store.startDraft(project.id)}
+                  >
+                    <span class="mark-slot"><span class="draft-mark"></span></span>
+                    <span class="title">{strings.sidebar.draft}</span>
+                  </button>
                 </div>
               </li>
             {/if}
@@ -319,7 +327,16 @@
       {strings.connection[store.connection]}
     </span>
     {#if usageToday !== null && usageToday > 0}
-      <span class="chip usage" title={strings.usage.heading}>{tokens(usageToday)} {strings.units.tokens}</span>
+      <button
+        type="button"
+        class="chip usage"
+        title={strings.usage.heading}
+        data-testid="usage-pill"
+        onclick={() => store.showSettings('usage')}
+      >
+        {tokens(usageToday)}
+        {strings.units.tokens}
+      </button>
     {/if}
     <button
       type="button"
@@ -395,7 +412,7 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    height: 28px;
+    height: var(--control);
     padding: 0 8px;
     border: 1px solid var(--color-border);
     border-radius: var(--radius-md);
@@ -623,10 +640,8 @@
     transform: translateY(-50%);
   }
 
-  .draft {
-    height: var(--row);
-    padding: 0 6px 0 8px;
-    gap: 8px;
+  .draft .row {
+    color: var(--color-muted-foreground);
   }
 
   .draft-mark {
@@ -661,7 +676,7 @@
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    font-size: var(--text-xs);
+    font-size: var(--text-sm);
     color: var(--color-muted-foreground);
   }
 
@@ -686,9 +701,19 @@
   }
 
   .usage {
-    height: 20px;
+    height: var(--control-sm);
     font-size: var(--text-xs);
     font-variant-numeric: tabular-nums;
+    gap: 4px;
+    cursor: pointer;
+    transition:
+      background var(--dur-2) var(--ease-out-quint),
+      color var(--dur-2) var(--ease-out-quint);
+  }
+
+  .usage:hover {
+    background: var(--color-surface-3);
+    color: var(--color-foreground);
   }
 
   .add-project {

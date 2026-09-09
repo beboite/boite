@@ -65,7 +65,7 @@
   .path {
     flex: 1;
     min-width: 0;
-    font-size: var(--text-xs);
+    font-size: var(--text-sm);
     color: var(--color-muted-foreground);
     overflow: hidden;
     text-overflow: ellipsis;
@@ -148,6 +148,6 @@
   .row.gap {
     color: var(--color-subtle);
     background: var(--color-surface-3);
-    font-size: var(--text-xs);
+    font-size: var(--text-sm);
   }
 </style>

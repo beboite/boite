@@ -292,13 +292,13 @@
 
         {#if effortLevels.length > 0}
           <Menu items={effortItems} onpick={pickEffort} label={strings.composer.reasoning} testid="composer-effort">
-            <Brain size={13} strokeWidth={1.75} />
+            <Brain size={14} strokeWidth={1.75} />
             {effortLabel}
           </Menu>
         {/if}
 
         <Menu items={modeItems} onpick={pickMode} label={strings.composer.mode} testid="composer-mode">
-          <ShieldCheck size={13} strokeWidth={1.75} />
+          <ShieldCheck size={14} strokeWidth={1.75} />
           {choice ? strings.permissionMode[choice.permissionMode] : strings.permissionMode.default}
         </Menu>
       </div>
@@ -356,7 +356,7 @@
 
   .queued {
     padding: 6px 14px 0;
-    font-size: var(--text-xs);
+    font-size: var(--text-sm);
   }
 
   textarea {
@@ -390,23 +390,19 @@
     min-width: 0;
   }
 
-  /* Off until the box has the keyboard, and still holding its width so the send
-     button does not move when it appears. */
+  /* Read at rest, not a reward for focusing the box: the two keys are learned
+     here. It goes under 720 px, where the row has no width to spare. */
   .hint {
     margin-left: auto;
-    font-size: var(--text-xs);
+    font-size: var(--text-sm);
+    color: var(--color-subtle);
     white-space: nowrap;
-    opacity: 0;
-  }
-
-  .composer:focus-within .hint {
-    opacity: 1;
   }
 
   .send,
   .stop {
-    width: 28px;
-    height: 28px;
+    width: var(--control);
+    height: var(--control);
     border-radius: var(--radius-md);
     flex: none;
   }

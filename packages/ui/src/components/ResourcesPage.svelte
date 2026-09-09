@@ -111,12 +111,12 @@
 
   .totals {
     margin-left: auto;
-    font-size: var(--text-xs);
+    font-size: var(--text-sm);
   }
 
   .confirm {
     color: var(--color-danger);
-    font-size: var(--text-xs);
+    font-size: var(--text-sm);
   }
 
   /* A row under the pointer fills, the way every other list here answers. */
