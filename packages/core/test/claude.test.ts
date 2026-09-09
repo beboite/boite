@@ -700,6 +700,8 @@ describe('claude driver', () => {
     // Nothing moved yet: the query opened on all three.
     expect(queries[0]?.setters).toEqual([]);
 
+    // `plan` and not `bypassPermissions`: that one is in the session key, and
+    // the test under this one is what covers it.
     await client.call('threads.update', {
       threadId,
       model: 'claude-opus-5',
@@ -719,6 +721,37 @@ describe('claude driver', () => {
       'effortLevel xhigh',
       'setPermissionMode plan',
     ]);
+  });
+
+  test('a switch into bypassPermissions opens a second query, and back out a third', async () => {
+    const client = await harness.connect();
+    const threadId = await claudeThread(client);
+    await client.call('settings.set', { warmProcessMinutes: 5 });
+
+    scripted(() => undefined, answerEach('sess-bypass'));
+
+    expect(await runTurn(client, threadId, 'first')).toBe('done');
+
+    // `allowDangerouslySkipPermissions` is a query-start option with no setter
+    // beside it, so the warm query cannot be talked into the skip: it closes and
+    // the turn lands on a query opened with the flag.
+    await client.call('threads.update', { threadId, permissionMode: 'bypassPermissions' });
+    expect(await runTurn(client, threadId, 'second')).toBe('done');
+
+    expect(queries).toHaveLength(2);
+    expect(queries[0]?.setters).toEqual([]);
+    expect(calls[0]?.options.allowDangerouslySkipPermissions).toBe(false);
+    expect(calls[1]?.options.allowDangerouslySkipPermissions).toBe(true);
+    expect(calls[1]?.options.permissionMode).toBe('bypassPermissions');
+    expect(calls[1]?.prompts).toEqual(['second']);
+
+    // And the way back is the same: a query opened with the skip keeps it.
+    await client.call('threads.update', { threadId, permissionMode: 'default' });
+    expect(await runTurn(client, threadId, 'third')).toBe('done');
+
+    expect(queries).toHaveLength(3);
+    expect(calls[2]?.options.allowDangerouslySkipPermissions).toBe(false);
+    expect(calls[2]?.prompts).toEqual(['third']);
   });
 
   test('a turn that changed nothing reaches for no setter at all', async () => {

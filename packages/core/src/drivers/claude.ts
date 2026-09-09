@@ -51,8 +51,10 @@ export interface ClaudeDeps {
  * The three things a running `query()` can be told to change, as the SDK takes
  * them: `setModel`, `applyFlagSettings({ effortLevel })` and
  * `setPermissionMode`. A session remembers the last one it applied, so a turn
- * on a warm query only sends what actually moved. None of them is in the
- * session key, which is what lets the CLI live across the change.
+ * on a warm query only sends what actually moved. None of the three is in the
+ * session key, which is what lets the CLI live across the change; the one thing
+ * the key still holds is whether the mode is `bypassPermissions`, because that
+ * one rides on a query-start option no setter can reach (`sessionKey`).
  */
 export interface LiveSetup {
   model: string | null;
@@ -491,6 +493,8 @@ interface SessionHooks {
  * only an idle window, a stop, a changed setup or the core going down ends it.
  * A changed model, effort or permission mode is not a changed setup: the SDK
  * has a setter for each of the three, so the CLI takes the new one in place.
+ * The one exception is a move in or out of `bypassPermissions`, which needs a
+ * query-start option and therefore a new query (`sessionKey`).
  */
 class ClaudeSession {
   private readonly abortController = new AbortController();
@@ -592,6 +596,9 @@ class ClaudeSession {
         live.effortLevel = wanted.effortLevel;
       }
       if (wanted.permissionMode !== live.permissionMode) {
+        // Never a move in or out of `bypassPermissions`: that one is in the
+        // session key, so such a turn never reaches a query opened on the other
+        // side of it.
         await query.setPermissionMode(wanted.permissionMode);
         live.permissionMode = wanted.permissionMode;
       }
@@ -834,16 +841,22 @@ class ClaudeSession {
 /**
  * What a session was started with and cannot be told to change. A turn that
  * differs on any of it cannot land on the running CLI: it closes that session
- * and starts its own. The model, the effort and the permission mode are
- * deliberately not in here: each has a Query setter that changes it on the live
- * CLI, so a warm session follows the thread instead of being dropped. What is
- * left is what the child process was spawned with.
+ * and starts its own. The model and the effort are deliberately not in here,
+ * and neither are four of the five permission modes: each has a Query setter
+ * that changes it on the live CLI, so a warm session follows the thread instead
+ * of being dropped. What is left is what the child process was spawned with,
+ * `allowDangerouslySkipPermissions` included: `setPermissionMode` moves the
+ * mode, but that flag is a query-start option with no setter beside it, so a
+ * query opened without it cannot be talked into `bypassPermissions` and a query
+ * opened with it keeps the skip even after the mode moves away. Hence one
+ * boolean rather than the mode itself: the four other modes still cross freely.
  */
 function sessionKey(ctx: TurnContext): string {
   return JSON.stringify({
     cwd: ctx.thread.cwd,
     accountId: ctx.account.id,
     env: ctx.accountEnv,
+    bypass: ctx.thread.permissionMode === 'bypassPermissions',
   });
 }
 
@@ -949,7 +962,7 @@ export function createClaudeDriver(deps: ClaudeDeps): Driver {
     let session = sessions.get(threadId) ?? null;
     if (session !== null && !session.usable(key, warmMs)) {
       sessions.delete(threadId);
-      session.close(session.key === key ? null : 'the thread changed account or folder');
+      session.close(session.key === key ? null : 'the thread changed account, folder or bypass mode');
       session = null;
     }
     if (session === null) {

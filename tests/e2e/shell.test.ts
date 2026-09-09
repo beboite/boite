@@ -21,6 +21,9 @@ const SOURCE_ROOTS = [
   join(ROOT, 'packages', 'contracts', 'src'),
 ];
 const SOURCE_EXTENSIONS = ['.ts', '.json'];
+/** What the shell exe carries: `frontendDist` is compiled into the binary. */
+const UI_ROOTS = [join(ROOT, 'packages', 'ui', 'src')];
+const UI_EXTENSIONS = ['.ts', '.svelte', '.css', '.html', '.json'];
 
 const exeMissing = !existsSync(EXE);
 if (exeMissing) {
@@ -34,8 +37,8 @@ interface SourceFile {
   mtimeMs: number;
 }
 
-/** The most recently touched `.ts` or `.json` the compiled core is built from. */
-function newestCoreSource(): SourceFile | null {
+/** The most recently touched source file a built artefact is supposed to carry. */
+function newestSource(roots: string[], extensions: string[]): SourceFile | null {
   let newest: SourceFile | null = null;
   const walk = (directory: string): void => {
     let entries;
@@ -50,13 +53,25 @@ function newestCoreSource(): SourceFile | null {
         walk(full);
         continue;
       }
-      if (!SOURCE_EXTENSIONS.some((extension) => entry.name.endsWith(extension))) continue;
+      if (!extensions.some((extension) => entry.name.endsWith(extension))) continue;
       const mtimeMs = statSync(full).mtimeMs;
       if (newest === null || mtimeMs > newest.mtimeMs) newest = { path: full, mtimeMs };
     }
   };
-  for (const root of SOURCE_ROOTS) walk(root);
+  for (const root of roots) walk(root);
   return newest;
+}
+
+/** The same report for either artefact: what is old, what moved after it, how to refresh it. */
+function staleReport(label: string, built: string, builtAtMs: number, newest: SourceFile, fix: string): string {
+  return [
+    `the ${label} the shell would run is older than the sources it is built from:`,
+    `  built:  ${built}`,
+    `          modified ${new Date(builtAtMs).toISOString()}`,
+    `  newest: ${newest.path}`,
+    `          modified ${new Date(newest.mtimeMs).toISOString()}`,
+    `Refresh it before trusting this file: ${fix}`,
+  ].join('\n');
 }
 
 /**
@@ -73,25 +88,39 @@ function staleCoreReason(): string | null {
   const built = existsSync(sidecar) ? sidecar : join(ROOT, 'packages', 'core', 'dist', 'main.js');
   if (!existsSync(built)) return null;
   const builtAtMs = statSync(built).mtimeMs;
-  const newest = newestCoreSource();
+  const newest = newestSource(SOURCE_ROOTS, SOURCE_EXTENSIONS);
   if (newest === null || builtAtMs >= newest.mtimeMs) return null;
-  return [
-    `the core the shell would start is older than the sources it is built from:`,
-    `  core:   ${built}`,
-    `          modified ${new Date(builtAtMs).toISOString()}`,
-    `  newest: ${newest.path}`,
-    `          modified ${new Date(newest.mtimeMs).toISOString()}`,
-    `Refresh it before trusting this file: bun run stage:core`,
-  ].join('\n');
+  return staleReport('core', built, builtAtMs, newest, 'bun run stage:core');
 }
 
-const staleReason = exeMissing ? null : staleCoreReason();
+/**
+ * The other half of the same trap. The shell window opens on
+ * `WebviewUrl::default()`, so the UI it shows is the `frontendDist` compiled
+ * into the exe, not the one the core serves: a `bun run build:ui` after the
+ * last `tauri build` changes nothing on this window. A shell carrying yesterday's
+ * UI against today's core fails exactly like a stale core did, on the picker,
+ * with nothing saying why (2026-09-09).
+ */
+function staleUiReason(): string | null {
+  const builtAtMs = statSync(EXE).mtimeMs;
+  const newest = newestSource(UI_ROOTS, UI_EXTENSIONS);
+  if (newest === null || builtAtMs >= newest.mtimeMs) return null;
+  return staleReport(
+    'UI',
+    EXE,
+    builtAtMs,
+    newest,
+    'bun run --cwd apps/shell tauri build --no-bundle',
+  );
+}
+
+const staleReason = exeMissing ? null : (staleCoreReason() ?? staleUiReason());
 const shellTest = exeMissing || staleReason !== null ? test.skip : test;
 
 // One failure, right away, instead of two turn tests timing out in two minutes.
 if (staleReason !== null) {
   const reason = staleReason;
-  test('the core the shell would start is not older than the core sources', () => {
+  test('neither the core nor the UI the shell would run is older than its sources', () => {
     throw new Error(reason);
   });
 }
