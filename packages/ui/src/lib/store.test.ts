@@ -143,6 +143,68 @@ describe('Store', () => {
     expect(store.modelsOf('echo', 'a-echo').map((m) => m.id)).toEqual(['echo-1']);
   });
 
+  test('a long thread opens on its last page and loadOlder walks back in order', async () => {
+    const client = new FakeClient({ delayMs: 0, long: true });
+    const store = new Store();
+    store.attach(client);
+    await store.connect();
+
+    await store.open('t-long');
+
+    // The last page, not the four hundred messages.
+    expect(store.openThread?.messages).toHaveLength(120);
+    expect(store.openThread?.messages.at(0)?.id).toBe('m-long-280');
+    expect(store.openThread?.messages.at(-1)?.id).toBe('m-long-399');
+    expect(store.messagesBefore).toBe('m-long-280');
+
+    expect(await store.loadOlder()).toBe(120);
+    expect(store.openThread?.messages).toHaveLength(240);
+    expect(store.messagesBefore).toBe('m-long-160');
+
+    expect(await store.loadOlder()).toBe(120);
+    const messages = store.openThread?.messages ?? [];
+    expect(messages).toHaveLength(360);
+    expect(messages.at(0)?.id).toBe('m-long-40');
+    expect(messages.at(-1)?.id).toBe('m-long-399');
+    expect(store.messagesBefore).toBe('m-long-40');
+    expect(store.loadingOlder).toBe(false);
+
+    // In order, no gap, no duplicate.
+    const numbers = messages.map((message) => Number(message.id.replace('m-long-', '')));
+    expect(new Set(numbers).size).toBe(360);
+    expect(numbers).toEqual([...numbers].sort((a, b) => a - b));
+    expect(numbers[0]).toBe(40);
+  });
+
+  test('loadOlder stops at the first message and does nothing without a cursor', async () => {
+    const client = new FakeClient({ delayMs: 0, long: true });
+    const store = new Store();
+    store.attach(client);
+    await store.connect();
+    await store.open('t-long');
+
+    let rounds = 0;
+    while (store.messagesBefore !== null) {
+      await store.loadOlder();
+      rounds += 1;
+      if (rounds > 10) throw new Error('the cursor never reached the first message');
+    }
+
+    // 120 on open, then 120, 120 and the last 40.
+    expect(rounds).toBe(3);
+    expect(store.openThread?.messages).toHaveLength(400);
+    expect(store.openThread?.messages.at(0)?.id).toBe('m-long-0');
+    expect(await store.loadOlder()).toBe(0);
+  });
+
+  test('a short thread opens whole, with no cursor to walk', async () => {
+    const { store } = await ready();
+    await store.open('t-trace');
+
+    expect(store.messagesBefore).toBeNull();
+    expect(await store.loadOlder()).toBe(0);
+  });
+
   test('settings changed elsewhere replace the ones the UI holds', async () => {
     const { store, client } = await ready();
     expect(store.settings?.maxConcurrentTurns).not.toBe(9);

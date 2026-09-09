@@ -15,6 +15,12 @@ import type {
 export const SCHEMA_VERSION = 2;
 const DELTA_WINDOW_MS = 16;
 
+/** What `listMessagePage` hands back: the page itself and the cursor for what is behind it. */
+export interface MessagePage {
+  messages: Message[];
+  before: string | null;
+}
+
 export interface JournalEvent {
   type: string;
   threadId: string | null;
@@ -506,6 +512,46 @@ export class Journal {
       .query('SELECT * FROM messages WHERE thread_id = ? ORDER BY rowid')
       .all(threadId) as MessageRow[];
     return rows.map(toMessage);
+  }
+
+  /**
+   * The rowid of one message inside one thread, which is the cursor a page walks
+   * back from. Null when that id belongs to no message of that thread.
+   */
+  messageRowid(threadId: string, messageId: string): number | null {
+    const row = this.db
+      .query('SELECT rowid AS row FROM messages WHERE id = ? AND thread_id = ?')
+      .get(messageId, threadId) as { row: number } | null;
+    return row === null ? null : row.row;
+  }
+
+  /**
+   * One page of a thread's messages, oldest first: the last `limit` of them, or
+   * the last `limit` written before `beforeRowid`. `before` names the oldest one
+   * returned while the thread still holds older ones, and is null once the page
+   * reaches the first message.
+   *
+   * `messages_by_thread` is `(thread_id)` plus the implicit rowid, so both shapes
+   * are an index search, descending, with no sort step and no scan of the rest of
+   * the thread.
+   */
+  listMessagePage(threadId: string, options: { beforeRowid?: number; limit: number }): MessagePage {
+    const limit = Math.max(1, Math.trunc(options.limit));
+    // One row past the page is what says whether anything is left behind it.
+    const rows =
+      options.beforeRowid === undefined
+        ? (this.db
+            .query('SELECT * FROM messages WHERE thread_id = ? ORDER BY rowid DESC LIMIT ?')
+            .all(threadId, limit + 1) as MessageRow[])
+        : (this.db
+            .query('SELECT * FROM messages WHERE thread_id = ? AND rowid < ? ORDER BY rowid DESC LIMIT ?')
+            .all(threadId, options.beforeRowid, limit + 1) as MessageRow[]);
+    const older = rows.length > limit;
+    const page = (older ? rows.slice(0, limit) : rows).reverse();
+    return {
+      messages: page.map(toMessage),
+      before: older ? (page[0]?.id ?? null) : null,
+    };
   }
 
   setMessagePart(messageId: string, partIndex: number, part: MessagePart): void {

@@ -60,8 +60,41 @@ afterEach(() => {
   document.body.innerHTML = '';
 });
 
-/** Nothing in this component touches the store unless a permission part is rendered. */
-const store = { permissionRequests: {}, answer: async () => {} } as unknown as Store;
+/**
+ * Nothing in this component touches the store unless a permission part is
+ * rendered or the list is paged: `messagesBefore` null is a thread whose first
+ * message is already loaded, which is every test but the paging ones.
+ */
+const store = {
+  permissionRequests: {},
+  answer: async () => {},
+  messagesBefore: null,
+  loadingOlder: false,
+  loadOlder: async () => 0
+} as unknown as Store;
+
+/** A store whose thread still has older messages behind the window. */
+function pagedStore(overrides: Partial<Record<string, unknown>> = {}): {
+  store: Store;
+  calls: () => number;
+} {
+  let calls = 0;
+  // The real store flips `loadingOlder` for the length of the call and never
+  // starts a second one; a page that never resolves is what holds it open here.
+  const paged: Record<string, unknown> = {
+    permissionRequests: {},
+    answer: async () => {},
+    messagesBefore: 'm-before',
+    loadingOlder: false,
+    loadOlder: (): Promise<number> => {
+      calls += 1;
+      paged['loadingOlder'] = true;
+      return new Promise<number>(() => {});
+    },
+    ...overrides
+  };
+  return { store: paged as unknown as Store, calls: () => calls };
+}
 
 function thread(count: number): Message[] {
   const messages: Message[] = [];
@@ -149,4 +182,65 @@ test('a short thread renders whole, with no spacer at all', async () => {
   expect(shownIds().at(-1)).toBe('m-29');
   expect(spacer('timeline-above')).toBeNull();
   expect(spacer('timeline-below')).toBeNull();
+});
+
+test('the top of a paged list asks the store for the page above it, once', async () => {
+  const messages = thread(200);
+  stubLayout(messages.length * ESTIMATE);
+  const paged = pagedStore();
+
+  running = mount(MessageList, {
+    target: document.body,
+    props: { store: paged.store, threadId: 't-paged', messages }
+  });
+  await settle();
+
+  const timeline = document.querySelector<HTMLElement>('[data-testid=timeline]');
+  // Well above the top: nothing is asked for.
+  if (timeline) timeline.scrollTop = 5_000;
+  timeline?.dispatchEvent(new Event('scroll'));
+  await settle();
+  expect(paged.calls()).toBe(0);
+
+  // Under the 400 px trigger: one call, and one only while it is in flight.
+  if (timeline) timeline.scrollTop = 120;
+  timeline?.dispatchEvent(new Event('scroll'));
+  await settle();
+  timeline?.dispatchEvent(new Event('scroll'));
+  await settle();
+  expect(paged.calls()).toBe(1);
+});
+
+test('a thread whose first message is loaded asks for nothing at the top', async () => {
+  const messages = thread(200);
+  stubLayout(messages.length * ESTIMATE);
+  const paged = pagedStore({ messagesBefore: null });
+
+  running = mount(MessageList, {
+    target: document.body,
+    props: { store: paged.store, threadId: 't-whole', messages }
+  });
+  await settle();
+
+  const timeline = document.querySelector<HTMLElement>('[data-testid=timeline]');
+  if (timeline) timeline.scrollTop = 0;
+  timeline?.dispatchEvent(new Event('scroll'));
+  await settle();
+
+  expect(paged.calls()).toBe(0);
+});
+
+test('a page in flight shows one line at the top of the list', async () => {
+  const messages = thread(200);
+  stubLayout(messages.length * ESTIMATE);
+  const paged = pagedStore({ loadingOlder: true });
+
+  running = mount(MessageList, {
+    target: document.body,
+    props: { store: paged.store, threadId: 't-loading', messages }
+  });
+  await settle();
+
+  const row = document.querySelector<HTMLElement>('[data-testid=loading-older]');
+  expect(row?.textContent).toBe('Loading earlier messages');
 });

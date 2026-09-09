@@ -190,7 +190,39 @@
     viewHeight = box.clientHeight;
     pinned = atBottom(box);
     if (pinned) behind = false;
+    pullOlder(box);
   }
+
+  // -- paging ----------------------------------------------------------------
+  // Two things in this file belong to the paged history, and they are both here:
+  // the trigger near the top of the list, and the scroll compensation once the
+  // prepended page has been laid out. Everything else above is the windowing.
+
+  /** How close to the top the viewport gets before the page above it is asked for. */
+  const LOAD_AT = 400;
+
+  /**
+   * Asks the store for the page above the window, then puts the height it added
+   * back into `scrollTop` on the next frame, so the message being read stays
+   * exactly where it was. The store itself refuses a second call while one is in
+   * flight and a call with no cursor left.
+   */
+  function pullOlder(box: HTMLDivElement): void {
+    if (box.scrollTop > LOAD_AT) return;
+    if (store.messagesBefore === null || store.loadingOlder) return;
+    const heightBefore = box.scrollHeight;
+    const topBefore = box.scrollTop;
+    void store.loadOlder().then((added) => {
+      if (added === 0) return;
+      requestAnimationFrame(() => {
+        const grew = box.scrollHeight - heightBefore;
+        if (grew <= 0) return;
+        box.scrollTop = topBefore + grew;
+        scrollTop = box.scrollTop;
+      });
+    });
+  }
+  // -- end paging ------------------------------------------------------------
 
   function jump() {
     const box = viewport;
@@ -246,6 +278,10 @@
 <div class="timeline-wrap">
   <div class="timeline" bind:this={viewport} {onscroll} data-testid="timeline">
     <div class="column">
+      <!-- paging: the one line the top of the list shows while a page is in flight. -->
+      {#if store.loadingOlder}
+        <p class="loading-older" data-testid="loading-older">{strings.chat.loadingOlder}</p>
+      {/if}
       {#if view.above > 0}
         <div class="spacer" data-testid="timeline-above" style="height: {view.above}px"></div>
       {/if}
@@ -361,6 +397,14 @@
   /* What a long thread's unrendered messages weigh, above and below the window. */
   .spacer {
     flex: 0 0 auto;
+  }
+
+  /* paging: one muted line at the top while the page above is being read. */
+  .loading-older {
+    flex: 0 0 auto;
+    text-align: center;
+    color: var(--color-muted-foreground);
+    font-size: var(--text-sm);
   }
 
   .message {

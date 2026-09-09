@@ -1,9 +1,12 @@
 import {
+  MESSAGE_PAGE,
+  MESSAGE_PAGE_MAX,
   PROTOCOL_VERSION,
   RpcErrorCode,
   type Account,
   type CoreInfo,
   type Message,
+  type MessageId,
   type MessagePart,
   type ModelInfo,
   type PermissionRequest,
@@ -512,6 +515,7 @@ export class FakeClient implements ObservableClient {
           createdAt: at,
           updatedAt: at,
           messages: [],
+          messagesBefore: null,
           turns: []
         };
         this.#threads.set(thread.id, thread);
@@ -520,7 +524,24 @@ export class FakeClient implements ObservableClient {
       }
       case 'threads.get': {
         const params = rawParams as RpcParams<'threads.get'>;
-        return structuredClone(this.#thread(params.threadId));
+        const thread = this.#thread(params.threadId);
+        const page = this.#page(thread.messages, thread.messages.length, MESSAGE_PAGE);
+        return structuredClone({ ...thread, messages: page.messages, messagesBefore: page.before });
+      }
+      case 'messages.list': {
+        const params = rawParams as RpcParams<'messages.list'>;
+        const thread = this.#thread(params.threadId);
+        const at = thread.messages.findIndex((message) => message.id === params.before);
+        if (at < 0) {
+          throw new RpcFailure({
+            code: RpcErrorCode.Refused,
+            message: `message ${params.before} is not a message of thread ${params.threadId}`,
+            data: { threadId: params.threadId, before: params.before }
+          });
+        }
+        const asked = params.limit ?? MESSAGE_PAGE;
+        const limit = Math.min(Math.max(1, Math.trunc(asked)), MESSAGE_PAGE_MAX);
+        return structuredClone(this.#page(thread.messages, at, limit));
       }
       case 'threads.update': {
         const params = rawParams as RpcParams<'threads.update'>;
@@ -1208,6 +1229,21 @@ export class FakeClient implements ObservableClient {
     return thread;
   }
 
+  /**
+   * The `limit` messages that sit just before `end`, oldest first, with the
+   * cursor for what is still behind them. The core reads the same window off
+   * rowids; here it is a slice of the array the fake keeps.
+   */
+  #page(
+    messages: Message[],
+    end: number,
+    limit: number
+  ): { messages: Message[]; before: MessageId | null } {
+    const start = Math.max(0, end - limit);
+    const page = messages.slice(start, end);
+    return { messages: page, before: start > 0 ? (page[0]?.id ?? null) : null };
+  }
+
   #notFound(what: string, id: string): RpcFailure {
     return new RpcFailure({
       code: RpcErrorCode.NotFound,
@@ -1604,7 +1640,9 @@ export class FakeClient implements ObservableClient {
       model: 'echo-1',
       effort: null,
       permissionMode: 'default' as const,
-      archived: false
+      archived: false,
+      // A stored thread is the whole record; `threads.get` is what pages it.
+      messagesBefore: null
     };
 
     const finished: Thread = {
@@ -2073,6 +2111,7 @@ export class FakeClient implements ObservableClient {
       load: null,
       createdAt: T0 + 400_000,
       updatedAt: T0 + 800_000,
+      messagesBefore: null,
       turns: [
         {
           id: 'turn-long',

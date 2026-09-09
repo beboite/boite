@@ -2,6 +2,7 @@ import type {
   Account,
   CoreInfo,
   Message,
+  MessageId,
   ModelInfo,
   PermissionMode,
   PermissionRequest,
@@ -133,7 +134,13 @@ export class Store {
 
   projects = $state<Project[]>([]);
   threads = $state<ThreadSummary[]>([]);
+  /**
+   * The open thread holds the window that is loaded, not the whole history:
+   * `threads.get` gives the last page and `loadOlder` prepends what is above it.
+   */
   openThread = $state<Thread | null>(null);
+  /** True while a page of older messages is in flight, so the timeline can say so. */
+  loadingOlder = $state(false);
   draft = $state<Draft | null>(null);
   prefs = $state<ComposerPrefs>(defaultPrefs());
   providers = $state<ProviderSummary[]>([]);
@@ -729,6 +736,8 @@ export class Store {
       this.#subscribedThreadId = threadId;
       const thread = await client.call('threads.get', { threadId });
       this.draft = null;
+      // The last page, pinned to the bottom; what is above it arrives on scroll.
+      this.loadingOlder = false;
       this.openThread = thread;
       this.page = 'chat';
       this.sidebarOpen = false;
@@ -743,6 +752,41 @@ export class Store {
       }
     } catch (error) {
       this.#fail(error);
+    }
+  }
+
+  /** The cursor above the loaded window, null when the first message is already in hand. */
+  get messagesBefore(): MessageId | null {
+    return this.openThread?.messagesBefore ?? null;
+  }
+
+  /**
+   * One page of messages older than the window, prepended in place. Nothing
+   * happens without a cursor or while a page is already in flight, and a page
+   * that lands on a thread the user has left is dropped. Returns how many
+   * messages landed, so the caller can put their height back into `scrollTop`.
+   */
+  async loadOlder(): Promise<number> {
+    const client = this.#client;
+    const open = this.openThread;
+    if (!client || !open) return 0;
+    const cursor = open.messagesBefore;
+    if (cursor === null || this.loadingOlder) return 0;
+    this.loadingOlder = true;
+    try {
+      const page = await client.call('messages.list', { threadId: open.id, before: cursor });
+      const still = this.openThread;
+      if (!still || still.id !== open.id || still.messagesBefore !== cursor) return 0;
+      const known = new Set(still.messages.map((m) => m.id));
+      const older = page.messages.filter((m) => !known.has(m.id));
+      still.messages.unshift(...older);
+      still.messagesBefore = page.before;
+      return older.length;
+    } catch (error) {
+      this.#fail(error);
+      return 0;
+    } finally {
+      this.loadingOlder = false;
     }
   }
 

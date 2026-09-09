@@ -365,8 +365,20 @@ export interface Message {
   createdAt: Timestamp;
 }
 
+/** How many messages `threads.get` returns, and what `messages.list` gives when it is asked for no limit. */
+export const MESSAGE_PAGE = 120;
+/** The most `messages.list` will ever hand back in one call, whatever `limit` says. */
+export const MESSAGE_PAGE_MAX = 200;
+
 export interface Thread extends ThreadSummary {
+  /** The last `MESSAGE_PAGE` messages of the thread, oldest first. Older ones come from `messages.list`. */
   messages: Message[];
+  /**
+   * The oldest message `messages` carries, when the thread has older ones behind
+   * it; null when this page is the whole thread. It is the cursor `messages.list`
+   * takes as `before`.
+   */
+  messagesBefore: MessageId | null;
   turns: Turn[];
 }
 
@@ -606,7 +618,22 @@ export interface RpcMethods {
     };
     result: ThreadSummary;
   };
+  /**
+   * The thread with its last `MESSAGE_PAGE` messages and the cursor for what is
+   * behind them. Opening a thousand-message thread costs one page, not the lot.
+   */
   'threads.get': { params: { threadId: ThreadId }; result: Thread };
+  /**
+   * One page of older messages, oldest first inside the page: what was written
+   * before `before`, at most `limit` (`MESSAGE_PAGE` by default, `MESSAGE_PAGE_MAX`
+   * whatever is asked). The result's own `before` is the next cursor, null once
+   * the first message of the thread is in hand. An unknown thread is a not-found;
+   * a `before` that is not a message of that thread is refused by name.
+   */
+  'messages.list': {
+    params: { threadId: ThreadId; before: MessageId; limit?: number };
+    result: { messages: Message[]; before: MessageId | null };
+  };
   'threads.update': {
     params: {
       threadId: ThreadId;

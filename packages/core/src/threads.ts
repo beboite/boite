@@ -1,3 +1,4 @@
+import { MESSAGE_PAGE, MESSAGE_PAGE_MAX } from '@boite/contracts';
 import type {
   Account,
   AccountId,
@@ -71,13 +72,43 @@ export class ThreadStore {
     return thread;
   }
 
+  /**
+   * The thread with its last page of messages. A thousand-message thread costs
+   * one page here; the rest is walked back through `messages`, whose cursor is
+   * `messagesBefore`.
+   */
   get(threadId: ThreadId): Thread {
     const thread = this.withLoad(this.require(threadId));
+    const page = this.core.journal.listMessagePage(threadId, { limit: MESSAGE_PAGE });
     return {
       ...thread,
-      messages: this.core.journal.listMessages(threadId),
+      messages: page.messages,
+      messagesBefore: page.before,
+      // Read after the messages: a thread with no turns costs nothing extra.
       turns: this.core.journal.listTurns(threadId),
     };
+  }
+
+  /**
+   * One page of messages older than `before`, oldest first inside the page. An
+   * unknown thread is a not-found; a cursor that is not a message of that thread
+   * is refused by name rather than answered with an empty page.
+   */
+  messages(params: { threadId: ThreadId; before: MessageId; limit?: number }): {
+    messages: Message[];
+    before: MessageId | null;
+  } {
+    this.require(params.threadId);
+    const rowid = this.core.journal.messageRowid(params.threadId, params.before);
+    if (rowid === null) {
+      throw refused(`message ${params.before} is not a message of thread ${params.threadId}`, {
+        threadId: params.threadId,
+        before: params.before,
+      });
+    }
+    const asked = params.limit ?? MESSAGE_PAGE;
+    const limit = Math.min(Math.max(1, Math.trunc(asked)), MESSAGE_PAGE_MAX);
+    return this.core.journal.listMessagePage(params.threadId, { beforeRowid: rowid, limit });
   }
 
   // -- writes ---------------------------------------------------------------
@@ -740,6 +771,7 @@ export function registerThreadMethods(core: Core): void {
   core.router.register('threads.list', (params) => core.threads.list(params));
   core.router.register('threads.create', (params) => core.threads.create(params));
   core.router.register('threads.get', (params) => core.threads.get(params.threadId));
+  core.router.register('messages.list', (params) => core.threads.messages(params));
   core.router.register('threads.update', (params) => core.threads.update(params));
   core.router.register('threads.archive', (params) =>
     core.threads.archive(params.threadId, params.archived !== false),
