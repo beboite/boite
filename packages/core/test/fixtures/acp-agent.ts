@@ -163,7 +163,10 @@ const app = agent({ name: 'acp-fake' })
   .onRequest('session/load', ({ params }) => {
     known.add(params.sessionId);
     log(`loaded:${params.sessionId}`);
-    return { modes: modeState() };
+    // A load answers with the config options too, the way the protocol allows
+    // and a real agent does: the client has to put the loaded session on the
+    // thread's model, not leave it on whatever it was saved with.
+    return { modes: modeState(), configOptions };
   })
   .onRequest('session/set_config_option', ({ params }) => {
     log(`set_config_option ${params.configId} ${String(params.value)}`);

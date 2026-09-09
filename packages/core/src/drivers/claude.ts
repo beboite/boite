@@ -1,5 +1,6 @@
 import type {
   CanUseTool,
+  EffortLevel,
   HookInput,
   HookJSONOutput,
   Options,
@@ -12,7 +13,15 @@ import type {
   SDKUserMessage,
   SpawnOptions as SdkSpawnOptions,
 } from '@anthropic-ai/claude-agent-sdk';
-import type { MessageId, MessagePart, ThreadId, ToolDocument, ToolStatus, Usage } from '@boite/contracts';
+import type {
+  MessageId,
+  MessagePart,
+  PermissionMode,
+  ThreadId,
+  ToolDocument,
+  ToolStatus,
+  Usage,
+} from '@boite/contracts';
 import { messageOf, unavailable } from '../errors.ts';
 import type { SpawnedChild } from '../procs.ts';
 import { profileFor, resolveExecutable } from '../providers/loader.ts';
@@ -36,6 +45,35 @@ export type QueryFn = (params: { prompt: AsyncIterable<SDKUserMessage>; options:
 export interface ClaudeDeps {
   /** Resolved on the first turn: importing the SDK costs about 69 MB of resident memory. */
   loadQuery: () => Promise<QueryFn>;
+}
+
+/**
+ * The three things a running `query()` can be told to change, as the SDK takes
+ * them: `setModel`, `applyFlagSettings({ effortLevel })` and
+ * `setPermissionMode`. A session remembers the last one it applied, so a turn
+ * on a warm query only sends what actually moved. None of them is in the
+ * session key, which is what lets the CLI live across the change.
+ */
+export interface LiveSetup {
+  model: string | null;
+  /**
+   * Null is the model's own default, and both cases land there: a thread with
+   * no effort, and `ultrathink`, which is a word in the prompt and no option at
+   * all. `applyFlagSettings` takes null as "clear it from the flag layer", so
+   * the drift back to the default is one call like any other.
+   */
+  effortLevel: EffortLevel | null;
+  permissionMode: PermissionMode;
+}
+
+/** What this turn asks the running query to be, whatever the last one asked for. */
+export function liveSetup(thread: { model: string | null; effort: string | null; permissionMode: PermissionMode }): LiveSetup {
+  const effort = thread.effort;
+  return {
+    model: thread.model,
+    effortLevel: effort !== null && SDK_EFFORTS.includes(effort) ? (effort as EffortLevel) : null,
+    permissionMode: thread.permissionMode,
+  };
 }
 
 /** The JSON boundary: the SDK types these through the Anthropic API package. */
@@ -184,6 +222,8 @@ class ClaudeTurn {
   readonly done: Promise<TurnResult>;
   stopped = false;
   settled = false;
+  /** The session holding it right now: a stranded turn moves to another one. */
+  session: ClaudeSession | null = null;
 
   constructor(readonly ctx: TurnContext) {
     this.sessionId = ctx.sessionId;
@@ -437,11 +477,20 @@ class ClaudeTurn {
   }
 }
 
+/** What the driver has to do for a session that ends, and for turns it hands back. */
+interface SessionHooks {
+  ended(session: ClaudeSession): void;
+  /** Turns this query cannot serve: they go on a session started with their own setup. */
+  stranded(turns: ClaudeTurn[]): void;
+}
+
 /**
  * One `query()` and one prompt stream for a thread. With `warmProcessMinutes`
  * at zero it lives for one turn, which is what the driver did before warm
  * sessions existed; above zero it takes the next turns of the thread too, and
  * only an idle window, a stop, a changed setup or the core going down ends it.
+ * A changed model, effort or permission mode is not a changed setup: the SDK
+ * has a setter for each of the three, so the CLI takes the new one in place.
  */
 class ClaudeSession {
   private readonly abortController = new AbortController();
@@ -456,16 +505,25 @@ class ClaudeSession {
   private started = false;
   private closing = false;
   private ended = false;
+  /** What the query was last told to be: the options it opened on, plus every setter since. */
+  private applied: LiveSetup | null = null;
+  /** The setters of one turn run to the end before the next turn's, and before its prompt. */
+  private pending: Promise<void> = Promise.resolve();
+  private readonly ready: Promise<void>;
+  private markReady: () => void = () => undefined;
 
   constructor(
     readonly key: string,
     private warmMs: number,
     private readonly deps: ClaudeDeps,
-    private readonly onEnded: (session: ClaudeSession) => void,
+    private readonly hooks: SessionHooks,
     ctx: TurnContext,
   ) {
     this.ctx = ctx;
     this.sessionId = ctx.sessionId;
+    this.ready = new Promise<void>((resolve) => {
+      this.markReady = resolve;
+    });
   }
 
   /** Reusable only while the CLI is up and the turn asks for the very same setup. */
@@ -483,10 +541,82 @@ class ClaudeSession {
     this.ctx = turn.ctx;
     this.clearIdle();
     this.waiting.push(turn);
+    if (!this.started) {
+      this.started = true;
+      // The options the query opens on are this turn's: nothing to apply yet.
+      this.applied = liveSetup(turn.ctx.thread);
+      this.prompts.push(turn.promptText());
+      void this.run(turn);
+      return;
+    }
+    // A warm query takes a changed model, effort or mode through the SDK's own
+    // setters, and this turn's prompt only goes in once they landed. The chain
+    // keeps the prompts in the order the turns attached.
+    this.pending = this.pending.then(() => this.follow(turn));
+  }
+
+  /** A turn on a warm query: its setup first, its prompt after, or it moves house. */
+  private async follow(turn: ClaudeTurn): Promise<void> {
+    if (turn.stopped || this.closing || this.ended) return;
+    // The query is built after the SDK import: a turn that arrives during it
+    // would otherwise send its prompt with nothing applied.
+    await this.ready;
+    if (turn.stopped || this.closing || this.ended) return;
+    if (!(await this.applyLive(turn))) return;
+    if (turn.stopped || this.closing || this.ended) return;
     this.prompts.push(turn.promptText());
-    if (this.started) return;
-    this.started = true;
-    void this.run(turn);
+  }
+
+  /**
+   * The thread's model, effort and permission mode on a query that is already
+   * up. Each one goes out only when it moved, through the setter that changes
+   * it in place, so nothing is sent on a turn that changed nothing. False means
+   * the turn is no longer this session's.
+   */
+  private async applyLive(turn: ClaudeTurn): Promise<boolean> {
+    const query = this.query;
+    const applied = this.applied;
+    if (query === null || applied === null) return true;
+    const wanted = liveSetup(turn.ctx.thread);
+    const live = { ...applied };
+    try {
+      if (wanted.model !== live.model) {
+        // `undefined` is the SDK's "back to the default model".
+        await query.setModel(wanted.model ?? undefined);
+        live.model = wanted.model;
+      }
+      if (wanted.effortLevel !== live.effortLevel) {
+        // Null clears the level from the flag layer: the model's own default,
+        // which is what a thread with no effort and `ultrathink` both want.
+        await query.applyFlagSettings({ effortLevel: wanted.effortLevel });
+        live.effortLevel = wanted.effortLevel;
+      }
+      if (wanted.permissionMode !== live.permissionMode) {
+        await query.setPermissionMode(wanted.permissionMode);
+        live.permissionMode = wanted.permissionMode;
+      }
+    } catch (error) {
+      this.applied = live;
+      this.strand(turn, messageOf(error));
+      return false;
+    }
+    this.applied = live;
+    return true;
+  }
+
+  /**
+   * A setter the CLI refused. That query keeps the setup it opened on, so it
+   * cannot serve this turn: it ends, and the driver puts this turn and
+   * everything queued behind it on a query started with the new setup, which is
+   * what a changed model did before the setters existed. One warning, never a
+   * failed turn.
+   */
+  private strand(turn: ClaudeTurn, reason: string): void {
+    const at = this.waiting.indexOf(turn);
+    const moved = at < 0 ? [turn] : this.waiting.splice(at);
+    turn.ctx.log('warn', `claude: the warm session refused the new setup (${reason}); starting a new one`);
+    this.close(null);
+    this.hooks.stranded(moved);
   }
 
   stopTurn(turn: ClaudeTurn): void {
@@ -539,6 +669,8 @@ class ClaudeSession {
       // Loading the SDK is the first await of the session, so a stop can land here.
       if (!first.stopped && !this.closing) {
         this.query = queryFn({ prompt: this.prompts.stream(), options });
+        // The next turn's setters have something to talk to from here on.
+        this.markReady();
         for await (const message of this.query) this.receive(message);
       }
       this.finish(null);
@@ -570,6 +702,8 @@ class ClaudeSession {
   private finish(reason: string | null): void {
     if (this.ended) return;
     this.ended = true;
+    // Nothing waits on a query that will never open.
+    this.markReady();
     this.clearIdle();
     for (const timer of this.timers) clearTimeout(timer);
     this.timers.clear();
@@ -587,7 +721,7 @@ class ClaudeSession {
     if (reason !== null && left.length === 0) {
       this.ctx.log('error', `the warm claude session ended: ${reason}`);
     }
-    this.onEnded(this);
+    this.hooks.ended(this);
   }
 
   private head(): ClaudeTurn | null {
@@ -623,15 +757,17 @@ class ClaudeSession {
     if (executable === null) {
       throw unavailable(`no ${ctx.provider.id} executable on this machine`, { providerId: ctx.provider.id });
     }
-    const effort = ctx.thread.effort;
+    // The same three values the setters carry later, so what the query opens on
+    // and what the session records as applied can never say different things.
+    const setup = liveSetup(ctx.thread);
     return {
       resume: ctx.sessionId ?? undefined,
       cwd: ctx.thread.cwd,
-      model: ctx.thread.model ?? undefined,
+      model: setup.model ?? undefined,
       // A level the CLI knows goes in the options; `ultrathink` goes in the prompt.
-      ...(effort !== null && SDK_EFFORTS.includes(effort) ? { effort: effort as Options['effort'] } : {}),
-      permissionMode: ctx.thread.permissionMode,
-      allowDangerouslySkipPermissions: ctx.thread.permissionMode === 'bypassPermissions',
+      ...(setup.effortLevel === null ? {} : { effort: setup.effortLevel }),
+      permissionMode: setup.permissionMode,
+      allowDangerouslySkipPermissions: setup.permissionMode === 'bypassPermissions',
       pathToClaudeCodeExecutable: executable,
       settingSources: ['user', 'project', 'local'],
       includePartialMessages: true,
@@ -696,14 +832,15 @@ class ClaudeSession {
 }
 
 /**
- * What a session was started with. A turn that differs on any of it cannot land
- * on the running CLI: it closes that session and starts its own.
+ * What a session was started with and cannot be told to change. A turn that
+ * differs on any of it cannot land on the running CLI: it closes that session
+ * and starts its own. The model, the effort and the permission mode are
+ * deliberately not in here: each has a Query setter that changes it on the live
+ * CLI, so a warm session follows the thread instead of being dropped. What is
+ * left is what the child process was spawned with.
  */
 function sessionKey(ctx: TurnContext): string {
   return JSON.stringify({
-    model: ctx.thread.model,
-    effort: ctx.thread.effort,
-    permissionMode: ctx.thread.permissionMode,
     cwd: ctx.thread.cwd,
     accountId: ctx.account.id,
     env: ctx.accountEnv,
@@ -803,33 +940,55 @@ function errorSentence(error: SDKAssistantMessageError): string {
 export function createClaudeDriver(deps: ClaudeDeps): Driver {
   const sessions = new Map<ThreadId, ClaudeSession>();
 
+  /** The thread's session, started if it has none and replaced if it cannot serve this turn. */
+  function acquire(ctx: TurnContext): ClaudeSession {
+    const threadId = ctx.thread.id;
+    const warmMs = Math.max(0, ctx.warmProcessMinutes) * MINUTE_MS;
+    const key = sessionKey(ctx);
+
+    let session = sessions.get(threadId) ?? null;
+    if (session !== null && !session.usable(key, warmMs)) {
+      sessions.delete(threadId);
+      session.close(session.key === key ? null : 'the thread changed account or folder');
+      session = null;
+    }
+    if (session === null) {
+      session = new ClaudeSession(
+        key,
+        warmMs,
+        deps,
+        {
+          ended: (dead): void => {
+            if (sessions.get(threadId) === dead) sessions.delete(threadId);
+          },
+          stranded: (turns): void => {
+            for (const moved of turns) attach(moved);
+          },
+        },
+        ctx,
+      );
+      sessions.set(threadId, session);
+    }
+    return session;
+  }
+
+  function attach(turn: ClaudeTurn): void {
+    const session = acquire(turn.ctx);
+    turn.session = session;
+    session.attach(turn, Math.max(0, turn.ctx.warmProcessMinutes) * MINUTE_MS);
+  }
+
   return {
     protocol: 'claude-sdk',
 
     startTurn(ctx: TurnContext): TurnHandle {
-      const threadId = ctx.thread.id;
-      const warmMs = Math.max(0, ctx.warmProcessMinutes) * MINUTE_MS;
-      const key = sessionKey(ctx);
       const turn = new ClaudeTurn(ctx);
-
-      let session = sessions.get(threadId) ?? null;
-      if (session !== null && !session.usable(key, warmMs)) {
-        sessions.delete(threadId);
-        session.close(session.key === key ? null : 'the thread changed model, account, mode or folder');
-        session = null;
-      }
-      if (session === null) {
-        session = new ClaudeSession(key, warmMs, deps, (ended) => {
-          if (sessions.get(threadId) === ended) sessions.delete(threadId);
-        }, ctx);
-        sessions.set(threadId, session);
-      }
-      const running = session;
-      running.attach(turn, warmMs);
+      attach(turn);
       return {
         done: turn.done,
         stop: (): void => {
-          running.stopTurn(turn);
+          // The session that holds it, which is not always the one it started on.
+          turn.session?.stopTurn(turn);
         },
       };
     },

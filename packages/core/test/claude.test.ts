@@ -45,13 +45,21 @@ async function claudeThread(client: CoreClient): Promise<string> {
   return thread.id;
 }
 
-/** The SDK's `Query` as far as the driver uses it: an async iterable plus interrupt and close. */
+/**
+ * The SDK's `Query` as far as the driver uses it: an async iterable, interrupt
+ * and close, and the three setters that change a live session's model, effort
+ * and permission mode.
+ */
 class FakeQuery {
   private readonly queue: SDKMessage[] = [];
   private notify: (() => void) | null = null;
   private ended = false;
   interrupts = 0;
   closes = 0;
+  /** Every live setter the driver reached for, in order, as `<name> <value>`. */
+  readonly setters: string[] = [];
+  /** The name of the one setter this CLI refuses, the way an older one would. */
+  refuse: string | null = null;
 
   emit(message: SDKMessage): void {
     this.queue.push(message);
@@ -72,6 +80,24 @@ class FakeQuery {
   close(): void {
     this.closes += 1;
     this.end();
+  }
+
+  setModel(model?: string): Promise<void> {
+    return this.setter('setModel', model ?? 'the default');
+  }
+
+  setPermissionMode(mode: string): Promise<void> {
+    return this.setter('setPermissionMode', mode);
+  }
+
+  applyFlagSettings(settings: { effortLevel?: string | null }): Promise<void> {
+    return this.setter('effortLevel', settings.effortLevel ?? 'the default');
+  }
+
+  private setter(name: string, value: string): Promise<void> {
+    if (this.refuse === name) return Promise.reject(new Error(`${name} is not available on this CLI`));
+    this.setters.push(`${name} ${value}`);
+    return Promise.resolve();
   }
 
   async *[Symbol.asyncIterator](): AsyncGenerator<SDKMessage, void> {
@@ -663,12 +689,84 @@ describe('claude driver', () => {
     expect(calls[1]?.prompts).toEqual(['second']);
   });
 
-  test('a model changed between the turns starts a second query', async () => {
+  test('a model, an effort and a mode changed between the turns go to the live query', async () => {
     const client = await harness.connect();
     const threadId = await claudeThread(client);
     await client.call('settings.set', { warmProcessMinutes: 5 });
 
-    scripted(() => undefined, answerEach('sess-model'));
+    scripted(() => undefined, answerEach('sess-live'));
+
+    expect(await runTurn(client, threadId, 'first')).toBe('done');
+    // Nothing moved yet: the query opened on all three.
+    expect(queries[0]?.setters).toEqual([]);
+
+    await client.call('threads.update', {
+      threadId,
+      model: 'claude-opus-5',
+      effort: 'xhigh',
+      permissionMode: 'plan',
+    });
+    expect(await runTurn(client, threadId, 'second')).toBe('done');
+
+    // One query and one prompt stream: the CLI took all three in place.
+    expect(queries).toHaveLength(1);
+    expect(calls[0]?.prompts).toEqual(['first', 'second']);
+    expect(calls[0]?.options.model).toBe('claude-sonnet-5');
+    expect(calls[0]?.options.effort).toBeUndefined();
+    expect(calls[0]?.options.permissionMode).toBe('default');
+    expect(queries[0]?.setters).toEqual([
+      'setModel claude-opus-5',
+      'effortLevel xhigh',
+      'setPermissionMode plan',
+    ]);
+  });
+
+  test('a turn that changed nothing reaches for no setter at all', async () => {
+    const client = await harness.connect();
+    const threadId = await claudeThread(client);
+    await client.call('settings.set', { warmProcessMinutes: 5 });
+
+    scripted(() => undefined, answerEach('sess-still'));
+
+    expect(await runTurn(client, threadId, 'first')).toBe('done');
+    expect(await runTurn(client, threadId, 'second')).toBe('done');
+
+    expect(queries).toHaveLength(1);
+    expect(queries[0]?.setters).toEqual([]);
+  });
+
+  test('ultrathink on a warm query clears the effort level back to the model default', async () => {
+    const client = await harness.connect();
+    const threadId = await claudeThread(client);
+    await client.call('settings.set', { warmProcessMinutes: 5 });
+    await client.call('threads.update', { threadId, effort: 'xhigh' });
+
+    scripted(() => undefined, answerEach('sess-ultra'));
+
+    expect(await runTurn(client, threadId, 'first')).toBe('done');
+    await client.call('threads.update', { threadId, effort: 'ultrathink' });
+    expect(await runTurn(client, threadId, 'second')).toBe('done');
+
+    expect(queries).toHaveLength(1);
+    // `ultrathink` is no SDK level: the flag layer is cleared and the word goes
+    // in the prompt, exactly what a query opened on `ultrathink` does.
+    expect(queries[0]?.setters).toEqual(['effortLevel the default']);
+    expect(calls[0]?.prompts).toEqual(['first', 'second ultrathink']);
+  });
+
+  test('a setter the CLI refuses starts a fresh query on the new setup, and the turn still runs', async () => {
+    const client = await harness.connect();
+    const threadId = await claudeThread(client);
+    await client.call('settings.set', { warmProcessMinutes: 5 });
+    const logs: string[] = [];
+    client.on('core.log', (entry) => {
+      logs.push(`${entry.level} ${entry.message}`);
+    });
+
+    scripted((fake) => {
+      // Only the first query refuses; the second opens on the new model.
+      if (queries.length === 1) fake.refuse = 'setModel';
+    }, answerEach('sess-refused'));
 
     expect(await runTurn(client, threadId, 'first')).toBe('done');
     await client.call('threads.update', { threadId, model: 'claude-opus-5' });
@@ -677,6 +775,8 @@ describe('claude driver', () => {
     expect(queries).toHaveLength(2);
     expect(calls[0]?.options.model).toBe('claude-sonnet-5');
     expect(calls[1]?.options.model).toBe('claude-opus-5');
+    expect(calls[1]?.prompts).toEqual(['second']);
+    await waitFor(() => logs.some((line) => line.startsWith('warn claude: the warm session refused')));
   });
 
   test('the idle window ends the session and the next turn starts a new query', async () => {

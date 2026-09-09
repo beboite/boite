@@ -354,6 +354,37 @@ describe('codex driver', () => {
     expect(cold.started).toHaveLength(2);
   });
 
+  test('a model and an effort changed on a warm thread ride the next turn/start', async () => {
+    const client = await startCore({ warmProcessMinutes: 5 });
+    const { projectId, accountId } = await codexAccount(client);
+    // The picker's probe first: `fake-smart` is the server's model, not the
+    // descriptor's, so nothing may put it on a thread before the agent listed it.
+    await client.call('providers.probe', { providerId: 'codex-fake', accountId });
+    const thread = await client.call('threads.create', {
+      projectId,
+      providerId: 'codex-fake',
+      accountId,
+      title: 'codex switch',
+      model: 'fake-codex',
+      effort: 'low',
+    });
+    await client.call('threads.subscribe', { threadId: thread.id });
+    const counted = countProcesses(client, thread.id);
+
+    await runTurn(client, thread.id, 'first');
+    expect(countLines('turn/start model=fake-codex effort=low')).toBe(1);
+
+    await client.call('threads.update', { threadId: thread.id, model: 'fake-smart', effort: 'high' });
+    await runTurn(client, thread.id, 'second');
+
+    // Neither is in the session key: the same app-server took the new pair on
+    // the turn itself, and its thread was neither restarted nor resumed.
+    expect(countLines('turn/start model=fake-smart effort=high')).toBe(1);
+    expect(counted.started).toHaveLength(1);
+    expect(counted.exited).toHaveLength(0);
+    expect(fakeLog()).not.toContain('thread/resume');
+  });
+
   test('a dropped session is resumed on the codex thread id the first turn minted', async () => {
     const client = await startCore({ warmProcessMinutes: 0 });
     const threadId = await codexThread(client);

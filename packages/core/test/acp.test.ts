@@ -126,6 +126,13 @@ function setModeCount(modeId: string): number {
     .filter((line) => line === `set_mode ${modeId}`).length;
 }
 
+/** How many times a given `<configId> <value>` pair was set on the fake. */
+function configCount(pair: string): number {
+  return fakeLog()
+    .split('\n')
+    .filter((line) => line === `set_config_option ${pair}`).length;
+}
+
 describe('acp driver', () => {
   test('getDriver returns the acp driver', () => {
     expect(getDriver('acp').protocol).toBe('acp');
@@ -399,6 +406,29 @@ describe('acp driver', () => {
     await runTurn(client, threadId, 'second');
     await waitFor(() => fakeLog().includes(`loaded:${sessionId}`));
     expect((await client.call('threads.get', { threadId })).sessionId).toBe(sessionId);
+    // A loaded session is put on the thread's model too: the agent keeps the
+    // one it was saved with otherwise, and the thread would silently answer on it.
+    await waitFor(() => configCount('model fake-smart') === 2);
+  });
+
+  test('a warm session follows a model and an effort change without starting a second process', async () => {
+    const client = await startCore({ warmProcessMinutes: 5 });
+    const threadId = await acpThread(client, 'fake-fast');
+    const counted = countProcesses(client, threadId);
+
+    await runTurn(client, threadId, 'first');
+    await waitFor(() => configCount('model fake-fast') === 1);
+
+    await client.call('threads.update', { threadId, model: 'fake-smart', effort: 'high' });
+    await runTurn(client, threadId, 'second');
+
+    await waitFor(() => configCount('model fake-smart') === 1);
+    await waitFor(() => configCount('thought_level high') === 1);
+    // Neither is part of the session key any more, so the same agent kept the turn.
+    expect(counted.started).toHaveLength(1);
+    expect(counted.exited).toHaveLength(0);
+    // Only what moved went out: the first turn's model is not sent twice.
+    expect(configCount('model fake-fast')).toBe(1);
   });
 
   test('a thread on the model "default" lets the agent keep its own', async () => {

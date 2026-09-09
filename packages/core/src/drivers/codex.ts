@@ -596,6 +596,9 @@ class CodexSession {
     this.current = turn;
     const ctx = turn.ctx;
     try {
+      // The thread as it stands for this turn, not as it stood when the
+      // app-server thread opened: that is what carries a changed model or
+      // effort to a process that stayed up.
       const model = modelOf(ctx);
       const started = await rpc.request<{ turn: CodexTurnRecord }>('turn/start', {
         threadId,
@@ -1067,15 +1070,17 @@ function modelOf(ctx: TurnContext): string | null {
 }
 
 /**
- * What a session was started with. A turn that differs on any of it needs its
- * own. The permission mode is in here, unlike the ACP driver's key: Codex takes
- * the pair on `thread/start` and `thread/resume` and has no call to change it
- * on a live thread.
+ * What a session was started with and cannot be told to change. A turn that
+ * differs on any of it needs its own. The model and the effort are not in here:
+ * `turn/start` carries both on every turn, read off the thread as it stands
+ * then, so a change reaches the running app-server with the next prompt. The
+ * permission mode is, unlike the ACP driver's key: Codex takes the
+ * `approvalPolicy` and `sandbox` pair on `thread/start` and `thread/resume` and
+ * has no call that changes it on a live thread, so a change there is the one
+ * thing that still drops the process.
  */
 function sessionKey(ctx: TurnContext): string {
   return JSON.stringify({
-    model: ctx.thread.model,
-    effort: ctx.thread.effort,
     cwd: ctx.thread.cwd,
     permissionMode: ctx.thread.permissionMode,
     accountId: ctx.account.id,
@@ -1321,7 +1326,7 @@ export function createCodexDriver(): Driver {
       if (session !== null && !session.usable(key, warmMs)) {
         sessions.delete(threadId);
         session.close(
-          session.key === key ? null : 'the thread changed model, effort, mode, account or folder',
+          session.key === key ? null : 'the thread changed mode, account or folder',
           ctx,
         );
         session = null;

@@ -303,6 +303,24 @@ describe('grok', () => {
     expect(loggedLines('argv:')).toEqual(wanted.map(([, argv]) => argv));
   });
 
+  test('a model and an effort changed on a warm thread go out as one session/set_model', async () => {
+    const client = await startCore({ warmProcessMinutes: 5 });
+    const threadId = await grokThread(client, 'grok-4.5', 'medium');
+
+    await runTurn(client, threadId, 'first');
+    expect(loggedLines('set_model ')).toEqual(['grok-4.5 medium']);
+
+    await client.call('threads.update', { threadId, model: 'grok-4.6', effort: 'xhigh' });
+    await runTurn(client, threadId, 'second');
+
+    // The pair moved, so one more call; the process did not, so no second argv
+    // line after the probe's and the turn's.
+    expect(loggedLines('set_model ')).toEqual(['grok-4.5 medium', 'grok-4.6 xhigh']);
+    expect(loggedLines('argv:')).toEqual(['agent stdio', '--permission-mode default agent stdio']);
+    // One session, opened once: no `session/load` behind our back.
+    expect(fakeLog()).not.toContain('loaded:');
+  });
+
   test('a mode changed on a warm thread drops the process, because it is on the argv', async () => {
     const client = await startCore({ warmProcessMinutes: 5 });
     const threadId = await grokThread(client);

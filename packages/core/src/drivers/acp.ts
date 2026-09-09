@@ -408,6 +408,18 @@ class AcpSession {
   private sessionId: string | null = null;
   private canLoad = false;
   private configWarned = false;
+  /** What the last session answer, or the last `set_config_option`, listed. */
+  private configOptions: SessionConfigOption[] = [];
+  /** What the last session answer said about models, for the agents that list them. */
+  private agentModels: AgentModels | null = null;
+  /**
+   * The model and the effort as they last went out, whichever call carried
+   * them. `undefined` is "nothing sent yet", which is not the same as a thread
+   * that asks for none. They are not in the session key: a turn that moved one
+   * of them sends it on the live session instead of dropping the process.
+   */
+  private appliedModel: string | null | undefined = undefined;
+  private appliedEffort: string | null | undefined = undefined;
   /** What the last `session/new` or `session/load` said the agent can be in. */
   private modes: SessionMode[] = [];
   /** The mode the agent is in, as it last told us: an answer or a drift it announced. */
@@ -498,8 +510,12 @@ class AcpSession {
     }
 
     turn.noteSession(sessionId);
-    // Every turn, not only the first: a warm session outlives a mode change,
-    // and the agent may have switched on its own since the last prompt.
+    // Every turn, not only the first: a warm session outlives a change to any
+    // of the three, the agent may have switched on its own since the last
+    // prompt, and a `session/load` reports none of them reliably. Each call
+    // sends nothing when what it carries has not moved.
+    await this.applyModel(turn.ctx);
+    await this.applyConfig(turn.ctx);
     await this.applyMode(turn.ctx);
     this.current = turn;
     let response: PromptResponse;
@@ -588,8 +604,7 @@ class AcpSession {
         mcpServers: [],
       });
       this.sessionId = ctx.sessionId;
-      this.noteModes(loaded.modes);
-      await this.applyModel(ctx, loaded);
+      this.noteSession(loaded.modes, loaded.configOptions ?? null, loaded);
       return;
     }
 
@@ -598,21 +613,37 @@ class AcpSession {
       mcpServers: [],
     });
     this.sessionId = created.sessionId;
-    this.noteModes(created.modes);
-    await this.applyModel(ctx, created);
-    await this.applyConfig(ctx, created.configOptions ?? null);
+    this.noteSession(created.modes, created.configOptions ?? null, created);
+  }
+
+  /**
+   * What a `session/new` or `session/load` said about itself: the modes, the
+   * config options and the models. Nothing is sent from here; the turn that
+   * follows applies the thread's own values, which is the one place a loaded
+   * session and a warm one are treated alike.
+   */
+  private noteSession(
+    modes: SessionModeState | null | undefined,
+    options: SessionConfigOption[] | null,
+    answer: unknown,
+  ): void {
+    this.noteModes(modes);
+    if (options !== null && options.length > 0) this.configOptions = options;
+    const listed = agentModelsOf(answer);
+    if (listed !== null) this.agentModels = listed;
   }
 
   /**
    * The thread's model and reasoning effort as one `session/set_model`, for the
    * agents that take them there rather than through `session/set_config_option`
-   * (Grok, today). It goes out right after the session opens and never again:
-   * both are in the session key, so a changed one ends the session and the next
-   * process sends a fresh pair. A thread on the agent's own model with no
-   * effort set says nothing, and neither does one the session answer already
-   * reports as current.
+   * (Grok, today). It runs at the start of every turn and sends nothing when
+   * the pair has not moved since the last one, so a warm session follows a
+   * change instead of being dropped for it. A thread on the agent's own model
+   * with no effort set says nothing, and neither does one the session answer
+   * already reports as current. A refusal is one warning: the turn runs on
+   * whatever the agent is already on.
    */
-  private async applyModel(ctx: TurnContext, answer: unknown): Promise<void> {
+  private async applyModel(ctx: TurnContext): Promise<void> {
     if (!isGrok(ctx.provider)) return;
     const agent = this.agent;
     const sessionId = this.sessionId;
@@ -622,21 +653,33 @@ class AcpSession {
     const effort = ctx.thread.effort !== null && ctx.thread.effort.length > 0 ? ctx.thread.effort : null;
     if (wanted === null && effort === null) return;
 
-    const listed = agentModelsOf(answer);
+    const listed = this.agentModels;
     const modelId = wanted ?? listed?.currentModelId ?? null;
     if (modelId === null) return;
+    if (this.appliedModel === modelId && this.appliedEffort === effort) return;
 
-    if (listed !== null && listed.currentModelId === modelId) {
+    // Nothing sent yet, and the session already opened on that pair.
+    if (this.appliedModel === undefined && listed !== null && listed.currentModelId === modelId) {
       const entry = listed.available.find((model) => model.modelId === modelId) ?? null;
       const current = entry === null ? null : grokReasoningEffortOf(entry.meta);
-      if (effort === null || effort === current) return;
+      if (effort === null || effort === current) {
+        this.appliedModel = modelId;
+        this.appliedEffort = effort;
+        return;
+      }
     }
 
-    await agent.request('session/set_model', {
-      sessionId,
-      modelId,
-      ...(effort === null ? {} : { _meta: { reasoningEffort: effort } }),
-    });
+    try {
+      await agent.request('session/set_model', {
+        sessionId,
+        modelId,
+        ...(effort === null ? {} : { _meta: { reasoningEffort: effort } }),
+      });
+      this.appliedModel = modelId;
+      this.appliedEffort = effort;
+    } catch (error) {
+      ctx.log('warn', `acp: the agent refused the model ${modelId}: ${messageOf(error)}`);
+    }
   }
 
   /** What a `session/new` or `session/load` answered about modes, if anything. */
@@ -682,27 +725,40 @@ class AcpSession {
     }
   }
 
-  private async applyConfig(ctx: TurnContext, options: SessionConfigOption[] | null): Promise<void> {
+  /**
+   * The thread's model and reasoning effort as `session/set_config_option`,
+   * which is how ACP changes them in place. It runs at the start of every turn,
+   * on a session that was loaded as well as on one that was created, and sends
+   * only what moved since the last turn: a change of either follows the warm
+   * process instead of dropping it.
+   */
+  private async applyConfig(ctx: TurnContext): Promise<void> {
     // Grok took its model and its effort through `session/set_model` and
     // answers `session/set_config_option` with method-not-found: nothing goes
     // out.
     if (isGrok(ctx.provider)) return;
-    if (options === null || options.length === 0) return;
-    await this.setOption(ctx, options, 'model', ctx.thread.model);
-    await this.setOption(ctx, options, 'thought_level', ctx.thread.effort);
+    if (this.configOptions.length === 0) return;
+    const model = ctx.thread.model;
+    const effort = ctx.thread.effort;
+    if (model !== this.appliedModel && (await this.setOption(ctx, 'model', model))) this.appliedModel = model;
+    if (effort !== this.appliedEffort && (await this.setOption(ctx, 'thought_level', effort))) {
+      this.appliedEffort = effort;
+    }
   }
 
+  /** True once that value is what the agent is on, whether it was sent or never needed. */
   private async setOption(
     ctx: TurnContext,
-    options: SessionConfigOption[],
     category: SessionConfigOptionCategory,
     wanted: string | null,
-  ): Promise<void> {
+  ): Promise<boolean> {
     const agent = this.agent;
     const sessionId = this.sessionId;
-    if (wanted === null || wanted.length === 0 || agent === null || sessionId === null) return;
-    if (category === 'model' && wanted === AGENT_OWN_MODEL) return;
-    const option = options.find(
+    if (agent === null || sessionId === null) return false;
+    // Nothing to ask for: the agent keeps whatever it is configured with.
+    if (wanted === null || wanted.length === 0) return true;
+    if (category === 'model' && wanted === AGENT_OWN_MODEL) return true;
+    const option = this.configOptions.find(
       (entry) => entry.category === category && selectValues(entry).includes(wanted),
     );
     if (option === undefined) {
@@ -710,9 +766,22 @@ class AcpSession {
         this.configWarned = true;
         ctx.log('warn', `acp: the agent offers no ${category} option with the value ${wanted}`);
       }
-      return;
+      return false;
     }
-    await agent.request('session/set_config_option', { sessionId, configId: option.id, value: wanted });
+    try {
+      const answer = await agent.request('session/set_config_option', {
+        sessionId,
+        configId: option.id,
+        value: wanted,
+      });
+      // The answer carries the options as they now stand, current values included.
+      const listed = (answer as { configOptions?: SessionConfigOption[] | null }).configOptions ?? null;
+      if (listed !== null && listed.length > 0) this.configOptions = listed;
+      return true;
+    } catch (error) {
+      ctx.log('warn', `acp: the agent refused the ${category} ${wanted}: ${messageOf(error)}`);
+      return false;
+    }
   }
 
   private watch(child: SpawnedChild, ctx: TurnContext): void {
@@ -886,16 +955,16 @@ class AcpSession {
 }
 
 /**
- * What a session was started with. A turn that differs on any of it needs its
- * own. The permission mode is deliberately not in here for an agent that takes
- * it as a `session/set_mode`, which changes it in place, so a warm session
- * survives the change; it is in here for Grok, whose mode is a command line
- * option, so a change there drops the process the way it does for Codex.
+ * What a session was started with and cannot be told to change. A turn that
+ * differs on any of it needs its own. The model and the effort are deliberately
+ * not in here: ACP changes them in place with `session/set_config_option`, and
+ * Grok with `session/set_model`, so a warm session follows the thread. Neither
+ * is the permission mode for an agent that takes it as a `session/set_mode`; it
+ * is in here for Grok alone, whose mode is a command line option, so a change
+ * there drops the process the way it does for Codex.
  */
 function sessionKey(ctx: TurnContext): string {
   return JSON.stringify({
-    model: ctx.thread.model,
-    effort: ctx.thread.effort,
     permissionMode: isGrok(ctx.provider) ? ctx.thread.permissionMode : null,
     cwd: ctx.thread.cwd,
     accountId: ctx.account.id,
@@ -1404,7 +1473,14 @@ export function createAcpDriver(deps: AcpDeps): Driver {
       let session = sessions.get(threadId) ?? null;
       if (session !== null && !session.usable(key, warmMs)) {
         sessions.delete(threadId);
-        session.close(session.key === key ? null : 'the thread changed model, effort, account or folder', ctx);
+        session.close(
+          session.key === key
+            ? null
+            : isGrok(ctx.provider)
+              ? 'the thread changed mode, account or folder'
+              : 'the thread changed account or folder',
+          ctx,
+        );
         session = null;
       }
       if (session === null) {

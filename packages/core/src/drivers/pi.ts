@@ -837,9 +837,13 @@ function modelArgs(ctx: TurnContext): string[] {
 
 /**
  * What a session was started with. A turn that differs on any of it needs its
- * own, because pi reads all of it once, on the command line. The permission mode
- * is not in here: pi has no approval gate in RPC mode, so nothing about it ever
- * reaches the agent and changing it would drop a process for nothing.
+ * own, because pi reads all of it once, on the command line. The model and the
+ * effort stay in here where the other drivers took them out: they are one
+ * `--model <id>:<effort>` argument at spawn, pi's rpc mode has no call that
+ * changes either on a running session, so a change has nowhere to go but a new
+ * process. The permission mode is not in here: pi has no approval gate in RPC
+ * mode, so nothing about it ever reaches the agent and changing it would drop a
+ * process for nothing.
  */
 function sessionKey(ctx: TurnContext): string {
   return JSON.stringify({
