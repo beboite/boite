@@ -22,7 +22,7 @@
   /** What a message's slot is worth before it has been measured. */
   const ESTIMATE = 80;
   /** The column's flex gap, which belongs to the slot a message takes. */
-  const GAP = 18;
+  const GAP = 24;
 
   let viewport = $state<HTMLDivElement | undefined>(undefined);
   let pinned = $state(true);
@@ -269,45 +269,47 @@
             {@const thinkingAt = message.state === 'streaming' ? lastThinkingIndex(message) : -1}
             <div class="parts">
               {#each message.parts as part, index (index)}
-                {#if part.type === 'text'}
-                  {#if part.text.length > 0 || index === caretAt}
-                    <Prose text={part.text} live={index === caretAt} />
+                <div class="part" data-kind={part.type}>
+                  {#if part.type === 'text'}
+                    {#if part.text.length > 0 || index === caretAt}
+                      <Prose text={part.text} live={index === caretAt} />
+                    {/if}
+                  {:else if part.type === 'thinking'}
+                    <ThinkingPart text={part.text} live={index === thinkingAt} />
+                  {:else if part.type === 'tool'}
+                    <ToolCard
+                      name={part.name}
+                      input={part.input}
+                      inputText={part.inputText}
+                      output={part.output}
+                      status={part.status}
+                      documents={part.documents ?? []}
+                    />
+                  {:else if part.type === 'permission'}
+                    <PermissionCard
+                      toolName={part.toolName}
+                      decision={part.decision}
+                      request={store.permissionRequests[part.requestId] ?? null}
+                      answer={(decision) => void store.answer(part.requestId, decision)}
+                    />
+                  {:else if part.type === 'question'}
+                    <QuestionCard
+                      text={part.text}
+                      options={part.options}
+                      allowText={part.allowText}
+                      multiple={part.multiple}
+                      answer={part.answer ?? null}
+                      pending={store.pendingQuestions.some((q) => q.id === part.questionId)}
+                      submit={(optionIds, text) =>
+                        void store.answerQuestion(message.threadId, part.questionId, optionIds, text)}
+                    />
+                  {:else}
+                    <div class="error" data-testid="error-part">
+                      <span class="section-label">{strings.chat.error}</span>
+                      <p>{part.message}</p>
+                    </div>
                   {/if}
-                {:else if part.type === 'thinking'}
-                  <ThinkingPart text={part.text} live={index === thinkingAt} />
-                {:else if part.type === 'tool'}
-                  <ToolCard
-                    name={part.name}
-                    input={part.input}
-                    inputText={part.inputText}
-                    output={part.output}
-                    status={part.status}
-                    documents={part.documents ?? []}
-                  />
-                {:else if part.type === 'permission'}
-                  <PermissionCard
-                    toolName={part.toolName}
-                    decision={part.decision}
-                    request={store.permissionRequests[part.requestId] ?? null}
-                    answer={(decision) => void store.answer(part.requestId, decision)}
-                  />
-                {:else if part.type === 'question'}
-                  <QuestionCard
-                    text={part.text}
-                    options={part.options}
-                    allowText={part.allowText}
-                    multiple={part.multiple}
-                    answer={part.answer ?? null}
-                    pending={store.pendingQuestions.some((q) => q.id === part.questionId)}
-                    submit={(optionIds, text) =>
-                      void store.answerQuestion(message.threadId, part.questionId, optionIds, text)}
-                  />
-                {:else}
-                  <div class="error" data-testid="error-part">
-                    <span class="section-label">{strings.chat.error}</span>
-                    <p>{part.message}</p>
-                  </div>
-                {/if}
+                </div>
               {/each}
               {#if message.state === 'streaming' && caretAt === -1 && thinkingAt === -1}
                 <span class="caret block" aria-label={strings.chat.streaming}></span>
@@ -350,7 +352,7 @@
   .column {
     display: flex;
     flex-direction: column;
-    gap: 18px;
+    gap: 24px;
     width: 100%;
     max-width: var(--content);
     margin: 0 auto;
@@ -373,11 +375,12 @@
 
   .bubble {
     max-width: 75%;
-    padding: 8px 12px;
+    padding: 10px 14px;
     background: var(--color-surface-2);
     border: 1px solid var(--color-border);
     border-radius: var(--radius-lg);
     border-bottom-right-radius: 4px;
+    box-shadow: var(--shadow-e1);
   }
 
   .user-text {
@@ -385,11 +388,33 @@
     word-break: break-word;
   }
 
+  /* A 4 px rest on the left so an answer does not kiss the column's edge. */
   .parts {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 2px;
+    padding-left: 4px;
     max-width: 100%;
+  }
+
+  .part {
+    min-width: 0;
+  }
+
+  /* Consecutive cards stack as one block at the flex gap; text on either side
+     of a card, or two text blocks in a row, get the full 12 px instead. */
+  .part[data-kind='text'] + .part,
+  .part[data-kind='thinking'] + .part,
+  .part[data-kind='error'] + .part,
+  .part + .part[data-kind='text'],
+  .part + .part[data-kind='thinking'],
+  .part + .part[data-kind='error'] {
+    margin-top: 10px;
+  }
+
+  /* An answer is read at its own measure; cards keep the whole column. */
+  .part[data-kind='text'] {
+    max-width: var(--prose);
   }
 
   .caret {

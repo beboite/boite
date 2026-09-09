@@ -125,6 +125,8 @@ export const strings = {
     diffAdded: '+{count}',
     diffRemoved: '-{count}',
     noOutput: 'No output',
+    /** Under an expanded tool input that opened cut to six lines. */
+    showAll: 'Show all',
     toolStatus: {
       running: 'running',
       done: 'done',

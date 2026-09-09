@@ -63,12 +63,24 @@
     return fill(template, { count });
   }
 
+  /** What the expanded input is cut to before `Show all` is pressed. */
+  const CLAMP_LINES = 6;
+
+  let showAll = $state(false);
+
   let streaming = $derived(typeof inputText === 'string');
   // The body opens itself while the input is being typed: that is the whole point
   // of the stream. It folds back to the one line once the parsed input lands.
   let shown = $derived(open || streaming);
   let line = $derived(streaming ? partialSummary(inputText ?? '') : summary(input));
   let chip = $derived(documents.length > 0 && !shown ? chipFor(documents) : '');
+
+  let inputJson = $derived(streaming ? '' : json(input));
+  /**
+   * A parsed input past six lines opens cut, with one ghost button under it. A
+   * streaming one is never cut: the block cursor rides its last line.
+   */
+  let clamped = $derived(!streaming && !showAll && inputJson.split('\n').length > CLAMP_LINES);
 </script>
 
 <div class="tool" data-testid="tool-card" data-status={status} data-streaming={streaming}>
@@ -109,7 +121,17 @@
           class="mono"
           data-testid="tool-input">{inputText}<span class="cursor" aria-label={strings.chat.streaming}></span></pre>
       {:else}
-        <pre class="mono" data-testid="tool-input">{json(input)}</pre>
+        <pre class="mono" class:clamped data-testid="tool-input">{inputJson}</pre>
+        {#if clamped}
+          <button
+            type="button"
+            class="ghost small show-all"
+            data-testid="tool-input-show-all"
+            onclick={() => (showAll = true)}
+          >
+            {strings.chat.showAll}
+          </button>
+        {/if}
       {/if}
       <div class="section-label">{strings.chat.toolOutput}</div>
       <pre class="mono" data-testid="tool-output">{output ?? strings.chat.noOutput}</pre>
@@ -130,6 +152,7 @@
     border: 1px solid var(--color-border);
     border-radius: var(--radius-md);
     background: var(--color-surface);
+    box-shadow: var(--shadow-e1);
     max-width: 100%;
     overflow: hidden;
   }
@@ -233,10 +256,11 @@
     gap: 4px;
   }
 
+  /* A well sits above the card's fill, never below the page: a hole reads as damage. */
   pre {
     margin: 0 0 6px;
     padding: 8px 10px;
-    background: var(--color-background);
+    background: var(--color-surface-2);
     border: 1px solid var(--color-border);
     border-radius: var(--radius-sm);
     max-height: 260px;
@@ -247,6 +271,23 @@
 
   pre:last-child {
     margin-bottom: 0;
+  }
+
+  pre.clamped {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 6;
+    line-clamp: 6;
+    max-height: none;
+    overflow: hidden;
+    margin-bottom: 2px;
+  }
+
+  .show-all {
+    align-self: flex-start;
+    margin-bottom: 6px;
+    font-size: var(--text-xs);
+    color: var(--color-muted-foreground);
   }
 
   .documents {

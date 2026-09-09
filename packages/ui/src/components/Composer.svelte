@@ -331,21 +331,27 @@
     padding: 8px 20px 16px;
   }
 
+  /* The one raised object in the column: it floats over the timeline instead of
+     repeating the sidebar's slab. e1 rides on e2 for the inset top highlight. */
   .composer {
     display: flex;
     flex-direction: column;
     width: 100%;
     max-width: var(--content);
     margin: 0 auto;
-    background: var(--color-surface);
-    border: 1px solid var(--color-edge);
-    border-radius: var(--radius-lg);
-    box-shadow: var(--shadow-e1);
+    background: var(--color-surface-2);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-xl);
+    box-shadow: var(--shadow-e2), var(--shadow-e1);
     transition: border-color var(--dur-2) var(--ease-out-quint);
   }
 
   .composer:focus-within {
-    border-color: color-mix(in srgb, var(--color-foreground) 35%, var(--color-edge));
+    border-color: var(--color-edge);
+    box-shadow:
+      var(--shadow-e2),
+      var(--shadow-e1),
+      0 0 0 2px color-mix(in srgb, var(--color-foreground) 22%, transparent);
   }
 
   .queued {
@@ -384,10 +390,17 @@
     min-width: 0;
   }
 
+  /* Off until the box has the keyboard, and still holding its width so the send
+     button does not move when it appears. */
   .hint {
     margin-left: auto;
     font-size: var(--text-xs);
     white-space: nowrap;
+    opacity: 0;
+  }
+
+  .composer:focus-within .hint {
+    opacity: 1;
   }
 
   .send,

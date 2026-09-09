@@ -2,6 +2,8 @@
   import { untrack } from 'svelte';
   import type { Account, ProviderSummary } from '@boite/contracts';
   import InstallControl from './InstallControl.svelte';
+  import Menu from './Menu.svelte';
+  import type { MenuItem } from '../lib/menu';
   import { strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
 
@@ -24,6 +26,18 @@
 
   /** The providers whose files Boite downloads itself, install block and all. */
   let managed = $derived(store.providers.filter((p: ProviderSummary) => store.installOf(p.id) !== null));
+
+  /** The provider column of the add form, drawn as a menu: the family has no native select. */
+  let providerItems = $derived(
+    store.providers.map(
+      (provider: ProviderSummary): MenuItem => ({
+        id: provider.id,
+        label: provider.name,
+        active: provider.id === providerId
+      })
+    )
+  );
+  let providerName = $derived(store.providerOf(providerId)?.name ?? strings.common.none);
 
   /**
    * The provider's own login is the user's to run; Boite only drives isolated
@@ -52,14 +66,18 @@
 
   {#if adding}
     <form class="card" onsubmit={submit}>
-      <label>
+      <div class="field">
         <span>{strings.accounts.provider}</span>
-        <select bind:value={providerId}>
-          {#each store.providers as provider (provider.id)}
-            <option value={provider.id}>{provider.name}</option>
-          {/each}
-        </select>
-      </label>
+        <Menu
+          items={providerItems}
+          onpick={(id) => (providerId = id)}
+          placement="bottom"
+          label={strings.accounts.provider}
+          testid="account-provider"
+        >
+          {providerName}
+        </Menu>
+      </div>
       <label>
         <span>{strings.accounts.label}</span>
         <input bind:value={label} placeholder={strings.accounts.labelPlaceholder} />
@@ -196,16 +214,35 @@
     max-width: 420px;
   }
 
-  form select,
   form input:not([type]) {
     width: 100%;
+  }
+
+  /* A label with a button inside is not a label, so the row is a div and the
+     menu is stretched to the width the fields around it take. */
+  .field {
+    display: grid;
+    gap: 2px;
+  }
+
+  .field :global(.menu) {
+    display: flex;
+  }
+
+  .field :global(.menu > .trigger) {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .field :global(.menu > .popover) {
+    min-width: 100%;
   }
 
   .check {
     display: flex;
     align-items: center;
     gap: 6px;
-    font-size: 12px;
+    font-size: var(--text-sm);
   }
 
   .actions {

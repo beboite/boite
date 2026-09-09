@@ -69,20 +69,19 @@
 <style>
   .note {
     margin: 0 0 10px;
-    color: var(--muted);
-    border-left: 2px solid var(--border-strong);
+    color: var(--color-muted-foreground);
+    border-left: 2px solid var(--color-edge);
     padding-left: 8px;
     max-width: 620px;
   }
 
   table {
-    background: var(--panel);
     max-width: 780px;
   }
 
   tfoot td {
     font-weight: 600;
-    border-top: 1px solid var(--border-strong);
+    border-top: 1px solid var(--color-edge);
   }
 
   tbody button {

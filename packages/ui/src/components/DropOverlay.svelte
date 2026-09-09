@@ -21,7 +21,7 @@
     justify-content: center;
     padding: 24px;
     background: var(--color-scrim);
-    backdrop-filter: blur(2px);
+    backdrop-filter: blur(4px);
     pointer-events: none;
     animation: fade var(--dur-2) var(--ease-out-quint);
   }

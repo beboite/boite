@@ -21,31 +21,34 @@
 }
 
 :root {
-  --color-background: #0a0a0a;
-  --color-titlebar: #060606;
-  --color-surface: #131313;
-  --color-surface-2: #1a1a1a;
-  --color-surface-3: #232323;
-  --color-border: #26262b;
-  --color-edge: #3a3a41;
-  --color-foreground: #fafafa;
-  --color-muted-foreground: #a1a1aa;
-  --color-subtle: #6b6b74;
+  --color-background: #101013;
+  --color-titlebar: #0d0d10;
+  --color-surface: #151518;
+  --color-surface-2: #1b1b1f;
+  --color-surface-3: #232327;
+  --color-border: rgba(255, 255, 255, 0.07);
+  --color-edge: rgba(255, 255, 255, 0.14);
+  /* The lift a hovered or selected row takes: light over the ground, never a new grey. */
+  --color-hover: rgba(255, 255, 255, 0.05);
+  --color-active: rgba(255, 255, 255, 0.09);
+  --color-foreground: #ececf1;
+  --color-muted-foreground: #a2a2ad;
+  --color-subtle: #6f6f7a;
   --color-selection: rgba(228, 228, 231, 0.18);
-  --color-live: #facc15;
+  --color-live: #eab308;
   --color-success: #4ade80;
-  --color-danger: #f87171;
+  --color-danger: #f0716f;
   --color-danger-hover: #d36060;
   --color-on-danger: #ffffff;
-  --color-scrim: rgba(0, 0, 0, 0.6);
-  --color-on-foreground: #0a0a0a;
+  --color-scrim: rgba(6, 6, 8, 0.55);
+  --color-on-foreground: #101013;
 
   --radius-sm: 6px;
   --radius-md: 8px;
   --radius-lg: 12px;
   --radius-xl: 16px;
 
-  --shadow-e1: 0 1px 2px rgb(0 0 0 / 0.4), inset 0 1px 0 rgb(255 255 255 / 0.04);
+  --shadow-e1: 0 1px 2px rgb(0 0 0 / 0.35), inset 0 1px 0 rgb(255 255 255 / 0.05);
   --shadow-e2: 0 8px 24px rgb(0 0 0 / 0.45), 0 0 0 1px rgb(255 255 255 / 0.05);
   --shadow-e3: 0 20px 60px rgb(0 0 0 / 0.55), 0 0 0 1px rgb(255 255 255 / 0.06);
 
@@ -62,6 +65,8 @@
   --sidebar: 280px;
   --panel: 360px;
   --content: 820px;
+  /* The measure an answer is read at, inside the 820 px column. */
+  --prose: 720px;
   --row: 32px;
 
   --dur-1: 90ms;
@@ -74,24 +79,26 @@
 
 /* Light, stamped by `lib/theme.ts` and by the boot script of `index.html`; dark stamps nothing. */
 [data-theme='light'] {
-  --color-background: #fbfbfc;
-  --color-titlebar: #f0f0f3;
-  --color-surface: #ffffff;
-  --color-surface-2: #f4f4f6;
-  --color-surface-3: #ececf0;
-  --color-border: #d9d9df;
-  --color-edge: #c4c4cc;
-  --color-foreground: #18181b;
-  --color-muted-foreground: #52525b;
-  --color-subtle: #8a8a94;
-  --color-selection: rgba(24, 24, 27, 0.14);
-  --color-live: #b45309;
+  --color-background: #f3f3f6;
+  --color-titlebar: #eeeef2;
+  --color-surface: #fafafb;
+  --color-surface-2: #ffffff;
+  --color-surface-3: #ebebef;
+  --color-border: rgba(0, 0, 0, 0.08);
+  --color-edge: rgba(0, 0, 0, 0.16);
+  --color-hover: rgba(0, 0, 0, 0.045);
+  --color-active: rgba(0, 0, 0, 0.08);
+  --color-foreground: #1c1c21;
+  --color-muted-foreground: #66666f;
+  --color-subtle: #8b8b95;
+  --color-selection: rgba(28, 28, 33, 0.14);
+  --color-live: #ca8a04;
   --color-success: #16a34a;
   --color-danger: #dc2626;
   --color-danger-hover: #bb2020;
   --color-on-danger: #ffffff;
-  --color-scrim: rgba(0, 0, 0, 0.35);
-  --color-on-foreground: #fbfbfc;
+  --color-scrim: rgba(20, 20, 24, 0.35);
+  --color-on-foreground: #fafafb;
   --shadow-e1: 0 1px 2px rgb(0 0 0 / 0.08), inset 0 1px 0 rgb(255 255 255 / 0.6);
   --shadow-e2: 0 8px 24px rgb(0 0 0 / 0.12), 0 0 0 1px rgb(0 0 0 / 0.06);
   --shadow-e3: 0 20px 60px rgb(0 0 0 / 0.18), 0 0 0 1px rgb(0 0 0 / 0.08);
@@ -349,6 +356,7 @@ label > span {
   background: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-e1);
 }
 
 .chip {

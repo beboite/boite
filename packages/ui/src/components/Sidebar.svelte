@@ -269,7 +269,7 @@
                       {#if thread.load}
                         <LoadGauge load={thread.load} />
                       {/if}
-                      <span class="when subtle">{ago(thread.updatedAt, now)}</span>
+                      <span class="when">{ago(thread.updatedAt, now)}</span>
                     </button>
                     <button
                       type="button"
@@ -497,7 +497,7 @@
     padding: 0 0 0 4px;
     display: flex;
     flex-direction: column;
-    gap: 1px;
+    gap: 2px;
   }
 
   .thread {
@@ -509,11 +509,11 @@
   }
 
   .thread:hover {
-    background: var(--color-surface-2);
+    background: var(--color-hover);
   }
 
   .thread.open {
-    background: var(--color-surface-3);
+    background: var(--color-active);
   }
 
   .row {
@@ -543,6 +543,7 @@
     flex: none;
   }
 
+  /* An idle title is the row's own colour at rest, not a second muted line. */
   .title {
     flex: 1;
     min-width: 0;
@@ -551,6 +552,13 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     font-weight: 400;
+    color: var(--color-foreground);
+    opacity: 0.85;
+  }
+
+  .thread.open .title,
+  .thread.unread .title {
+    opacity: 1;
   }
 
   .thread.unread .title {
@@ -560,11 +568,15 @@
   .when {
     font-size: var(--text-xs);
     flex: none;
+    color: var(--color-muted-foreground);
     font-variant-numeric: tabular-nums;
+    transition: opacity var(--dur-2) var(--ease-out-quint);
   }
 
-  .thread:hover .when {
-    display: none;
+  /* The date fades instead of leaving, so the title never lunges to the right. */
+  .thread:hover .when,
+  .thread:focus-within .when {
+    opacity: 0;
   }
 
   .actions {

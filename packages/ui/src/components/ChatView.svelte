@@ -109,7 +109,6 @@
             {thread.title}
           </button>
         {/if}
-        <span class="status subtle" data-testid="thread-status-label">{strings.threadStatus[thread.status]}</span>
       {:else}
         <span class="draft-mark"></span>
         <span class="title draft" data-testid="thread-title">{strings.sidebar.draft}</span>
@@ -212,10 +211,6 @@
     font-weight: 600;
   }
 
-  .status {
-    font-size: var(--text-xs);
-  }
-
   .draft-mark {
     display: inline-block;
     width: 8px;
@@ -237,7 +232,7 @@
   }
 
   .on {
-    background: var(--color-surface-3);
+    background: var(--color-active);
     color: var(--color-foreground);
   }
 

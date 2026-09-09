@@ -674,3 +674,41 @@ test('a provider Boite installs offers the download in the picker, then becomes 
   row.click();
   await waitFor(() => (query('[data-testid=composer-picker]').textContent ?? '').includes('Antigravity'));
 });
+
+test('the chat header keeps the mark and the title, the status word riding the mark', async () => {
+  // The store is the singleton every test shares: a draft left open by another
+  // one would keep the boot from opening a thread at all.
+  store.draft = null;
+  await mountOnFake();
+
+  // The word used to sit beside the title and repeat what the mark already says.
+  expect(document.querySelector('[data-testid=thread-status-label]')).toBeNull();
+
+  const mark = query('[data-testid=thread-status]');
+  expect(mark.getAttribute('data-status')).toBe('idle');
+  expect(mark.getAttribute('title')).toBe('idle');
+  expect(mark.getAttribute('aria-label')).toBe('idle');
+  expect(query('[data-testid=thread-title]').textContent?.trim()).toBe(store.openThread?.title);
+});
+
+test('the Accounts page picks a provider with the menu, never a native select', async () => {
+  store.draft = null;
+  await mountOnFake();
+  query<HTMLButtonElement>('[data-testid=nav-settings]').click();
+  await waitFor(() => document.querySelector('[data-testid=settings-tab-accounts]') !== null);
+  query<HTMLButtonElement>('[data-testid=settings-tab-accounts]').click();
+  await waitFor(() => document.querySelector('[data-testid=accounts-page]') !== null);
+
+  query<HTMLButtonElement>('[data-testid=accounts-page] header button').click();
+  await waitFor(() => document.querySelector('[data-testid=account-provider]') !== null);
+  expect(document.querySelector('[data-testid=accounts-page] select')).toBeNull();
+
+  const trigger = query<HTMLButtonElement>('[data-testid=account-provider]');
+  expect(trigger.textContent?.trim()).toBe('Claude');
+
+  trigger.click();
+  await waitFor(() => document.querySelector('[data-testid=account-provider-menu]') !== null);
+  query<HTMLButtonElement>('[data-testid=account-provider-menu] [data-value=opencode]').click();
+  await waitFor(() => (query('[data-testid=account-provider]').textContent ?? '').includes('OpenCode'));
+  expect(document.querySelector('[data-testid=account-provider-menu]')).toBeNull();
+});

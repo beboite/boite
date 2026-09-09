@@ -130,17 +130,29 @@
 <style>
   .question {
     border: 1px solid var(--color-border);
-    border-left: 3px solid var(--color-live);
+    border-left: 2px solid color-mix(in srgb, var(--color-live) 60%, var(--color-border));
     border-radius: var(--radius-md);
     background: var(--color-surface);
+    box-shadow: var(--shadow-e1);
     padding: 8px 12px 10px;
     display: flex;
     flex-direction: column;
     gap: 6px;
   }
 
+  /* Answered, it drops to a collapsed tool card's weight: the question and what went back. */
   .question.resolved {
-    border-left-color: var(--color-edge);
+    border-left-color: var(--color-border);
+    background: transparent;
+    box-shadow: none;
+    padding: 4px 10px;
+    gap: 2px;
+    color: var(--color-muted-foreground);
+  }
+
+  .question.resolved .prompt {
+    font-weight: 500;
+    font-size: var(--text-sm);
   }
 
   .head {
@@ -197,7 +209,7 @@
     padding: 6px 8px;
     border: 1px solid var(--color-border);
     border-radius: var(--radius-sm);
-    background: var(--color-background);
+    background: var(--color-surface-2);
     color: inherit;
     font: inherit;
     cursor: pointer;
@@ -255,7 +267,7 @@
     padding: 6px 8px;
     border: 1px solid var(--color-border);
     border-radius: var(--radius-sm);
-    background: var(--color-background);
+    background: var(--color-surface-2);
     color: inherit;
     font: inherit;
   }

@@ -602,7 +602,7 @@
 
   .row:hover:not(:disabled):not(.none),
   .row:focus-visible {
-    background: var(--color-surface-3);
+    background: var(--color-hover);
     outline: none;
   }
 

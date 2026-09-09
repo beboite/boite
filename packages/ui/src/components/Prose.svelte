@@ -48,12 +48,12 @@
 <style>
   .prose {
     word-break: break-word;
-    line-height: 1.6;
+    line-height: 1.65;
   }
 
   .prose :global(p) {
     white-space: pre-wrap;
-    margin: 0 0 8px;
+    margin: 0 0 12px;
   }
 
   .prose :global(p:last-child) {
@@ -70,7 +70,7 @@
 
   .prose :global(ul),
   .prose :global(ol) {
-    margin: 0 0 8px;
+    margin: 0 0 12px;
     padding-left: 22px;
   }
 
@@ -91,7 +91,7 @@
     margin: 6px 0 10px;
     padding: 10px 12px;
     border-radius: var(--radius-md);
-    background: var(--color-surface);
+    background: var(--color-surface-2);
     border: 1px solid var(--color-border);
     overflow: auto;
   }

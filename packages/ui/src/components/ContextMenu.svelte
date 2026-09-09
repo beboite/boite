@@ -145,7 +145,7 @@
 
   .row:hover:not(:disabled),
   .row:focus-visible {
-    background: var(--color-surface-3);
+    background: var(--color-hover);
     outline: none;
   }
 

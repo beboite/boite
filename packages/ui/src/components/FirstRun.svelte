@@ -76,14 +76,11 @@
     animation: rise var(--dur-3) var(--ease-out-quint);
   }
 
+  /* The mark stands on the card, with no tile of its own: a second box behind a
+     drawing that is already a box only doubles the edges. */
   .mark {
     display: grid;
     place-items: center;
-    width: 52px;
-    height: 52px;
-    border-radius: var(--radius-lg);
-    background: var(--color-surface-2);
-    border: 1px solid var(--color-border);
     margin-bottom: 6px;
   }
 

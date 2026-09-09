@@ -100,8 +100,8 @@
     align-items: center;
     gap: 8px;
     padding: 5px 8px;
-    border-bottom: 1px solid var(--border);
-    background: var(--panel-alt);
+    border-bottom: 1px solid var(--color-border);
+    background: var(--color-surface-2);
   }
 
   .title {
@@ -111,11 +111,11 @@
 
   .totals {
     margin-left: auto;
-    font-size: 11px;
+    font-size: var(--text-xs);
   }
 
   .confirm {
-    color: var(--danger);
-    font-size: 11px;
+    color: var(--color-danger);
+    font-size: var(--text-xs);
   }
 </style>

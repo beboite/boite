@@ -56,17 +56,32 @@
 <style>
   .permission {
     border: 1px solid var(--color-border);
-    border-left: 3px solid var(--color-live);
+    border-left: 2px solid color-mix(in srgb, var(--color-live) 60%, var(--color-border));
     border-radius: var(--radius-md);
     background: var(--color-surface);
+    box-shadow: var(--shadow-e1);
     padding: 8px 12px 10px;
     display: flex;
     flex-direction: column;
     gap: 6px;
   }
 
+  /* Answered, it stops outranking the tool cards around it: one muted line. */
   .permission.resolved {
-    border-left-color: var(--color-edge);
+    border-left-color: var(--color-border);
+    background: transparent;
+    box-shadow: none;
+    padding: 4px 10px;
+    color: var(--color-muted-foreground);
+  }
+
+  .permission.resolved .description,
+  .permission.resolved pre {
+    display: none;
+  }
+
+  .permission.resolved .tool {
+    font-weight: 500;
   }
 
   .head {
@@ -109,7 +124,7 @@
   pre {
     margin: 0;
     padding: 8px 10px;
-    background: var(--color-background);
+    background: var(--color-surface-2);
     border: 1px solid var(--color-border);
     border-radius: var(--radius-sm);
     max-height: 200px;

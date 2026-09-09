@@ -518,12 +518,12 @@
   }
 
   .tab:hover {
-    background: color-mix(in srgb, var(--color-surface-3) 60%, transparent);
+    background: var(--color-hover);
     color: var(--color-foreground);
   }
 
   .tab.active {
-    background: var(--color-surface-3);
+    background: var(--color-active);
     color: var(--color-foreground);
   }
 

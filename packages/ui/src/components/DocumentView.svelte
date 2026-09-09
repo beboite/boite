@@ -37,7 +37,7 @@
     padding: 8px 10px;
     border: 1px solid var(--color-border);
     border-radius: var(--radius-sm);
-    background: var(--color-background);
+    background: var(--color-surface-2);
   }
 
   .shot {

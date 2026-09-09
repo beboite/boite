@@ -90,7 +90,7 @@
   }
 
   .tab.active {
-    background: var(--color-surface-3);
+    background: var(--color-active);
     color: var(--color-foreground);
   }
 

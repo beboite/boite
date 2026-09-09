@@ -174,7 +174,7 @@
   }
 
   .item:hover:not(:disabled) {
-    background: var(--color-surface-3);
+    background: var(--color-hover);
   }
 
   .item.active .label::after {

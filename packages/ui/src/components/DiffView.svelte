@@ -48,7 +48,7 @@
   .diff {
     border: 1px solid var(--color-border);
     border-radius: var(--radius-sm);
-    background: var(--color-background);
+    background: var(--color-surface-2);
     max-width: 100%;
     overflow: hidden;
   }
@@ -59,7 +59,7 @@
     gap: 8px;
     padding: 5px 10px;
     border-bottom: 1px solid var(--color-border);
-    background: var(--color-surface);
+    background: var(--color-surface-3);
   }
 
   .path {
@@ -128,9 +128,9 @@
   }
 
   /* The family has no green or red surface token, so both tints are the status
-     colour mixed into the ground rather than a new hex. */
+     colour mixed into the well's own fill rather than a new hex. */
   .row.add {
-    background: color-mix(in srgb, var(--color-success) 14%, var(--color-background));
+    background: color-mix(in srgb, var(--color-success) 14%, var(--color-surface-2));
   }
 
   .row.add .gutter {
@@ -138,7 +138,7 @@
   }
 
   .row.remove {
-    background: color-mix(in srgb, var(--color-danger) 14%, var(--color-background));
+    background: color-mix(in srgb, var(--color-danger) 14%, var(--color-surface-2));
   }
 
   .row.remove .gutter {
@@ -147,7 +147,7 @@
 
   .row.gap {
     color: var(--color-subtle);
-    background: var(--color-surface);
+    background: var(--color-surface-3);
     font-size: var(--text-xs);
   }
 </style>
