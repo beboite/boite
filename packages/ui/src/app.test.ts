@@ -32,6 +32,25 @@ function shownModels(): (string | null)[] {
   return Array.from(document.querySelectorAll('[data-model]')).map((el) => el.getAttribute('data-model'));
 }
 
+/** The provider ids the rail draws a logo tile for, in order. */
+function tiles(): (string | null)[] {
+  return Array.from(document.querySelectorAll('[data-testid=composer-picker-menu] [data-provider]')).map((el) =>
+    el.getAttribute('data-provider')
+  );
+}
+
+/** The account chips beside the shown provider's name, in order. */
+function seats(): (string | null)[] {
+  return Array.from(document.querySelectorAll('[data-seat]')).map((el) => el.getAttribute('data-instance'));
+}
+
+/** The levels the open reasoning slider draws a dot for, in the model's order. */
+function effortDots(): (string | null)[] {
+  return Array.from(document.querySelectorAll('[data-testid=composer-effort-menu] [data-dot]')).map((el) =>
+    el.getAttribute('data-dot')
+  );
+}
+
 /** The prefix labels the model column groups its matches under, in order. */
 function groupLabels(): (string | null)[] {
   return Array.from(document.querySelectorAll('[data-group]')).map((el) => el.getAttribute('data-group'));
@@ -126,7 +145,7 @@ test('the sidebar draft row hands the keyboard back to the composer', async () =
   store.draft = null;
 });
 
-test('the picker lists providers with their accounts and the models of the one shown, legacy folded', async () => {
+test('the picker rails the providers as logos and gives the shown one its accounts and models', async () => {
   await mountOnFake();
   query<HTMLButtonElement>('[data-testid=new-thread]').click();
   await waitFor(() => store.draft !== null);
@@ -136,18 +155,24 @@ test('the picker lists providers with their accounts and the models of the one s
 
   query<HTMLButtonElement>('[data-testid=composer-picker]').click();
   await waitFor(() => document.querySelector('[data-testid=composer-picker-menu]') !== null);
-  const instances = Array.from(document.querySelectorAll('[data-instance]')).map((el) => el.getAttribute('data-instance'));
-  // Antigravity has an account too, but its release is not downloaded yet, so it
-  // gets one row of its own with the install in it rather than a row per account.
-  expect(instances).toEqual([
-    'claude::a-claude-main',
-    'claude::a-claude-side',
-    'echo::a-echo',
-    'opencode::a-opencode',
-    'antigravity::'
-  ]);
+  // One tile per provider, in the core's order, the one whose files are still to
+  // download included: it is picked like any other and its column says why.
+  expect(tiles()).toEqual(['claude', 'echo', 'opencode', 'antigravity']);
+  // Claude is the shown one and has two logins, so they sit beside its name.
+  expect(seats()).toEqual(['claude::a-claude-main', 'claude::a-claude-side']);
   expect(shownModels()).toEqual(['claude-fable-5-1', 'claude-opus-5', 'claude-sonnet-5']);
 
+  // One account: nothing beside the name.
+  query<HTMLButtonElement>('[data-testid=composer-picker-menu] [data-provider=echo]').click();
+  await waitFor(() => shownModels().length === 1);
+  expect(seats()).toEqual([]);
+
+  query<HTMLButtonElement>('[data-testid=composer-picker-menu] [data-provider=antigravity]').click();
+  await waitFor(() => document.querySelector('[data-testid=picker-not-installed]') !== null);
+  expect(shownModels()).toEqual([]);
+
+  query<HTMLButtonElement>('[data-testid=composer-picker-menu] [data-provider=claude]').click();
+  await waitFor(() => shownModels().length === 3);
   query<HTMLButtonElement>('[data-testid=picker-legacy]').click();
   await waitFor(() => document.querySelectorAll('[data-model]').length === 7);
 
@@ -175,7 +200,7 @@ test('the picker reads an ACP agent models, showing the descriptor and a probing
 
   query<HTMLButtonElement>('[data-testid=composer-picker]').click();
   await waitFor(() => document.querySelector('[data-testid=composer-picker-menu]') !== null);
-  query<HTMLButtonElement>('[data-instance="opencode::a-opencode"]').click();
+  query<HTMLButtonElement>('[data-testid=composer-picker-menu] [data-provider=opencode]').click();
 
   // While the agent is being asked, its descriptor's one model stands.
   await waitFor(() => document.querySelector('[data-testid=picker-probing]') !== null);
@@ -185,13 +210,18 @@ test('the picker reads an ACP agent models, showing the descriptor and a probing
   // The agent lists more than the column shows at once; the first three are the ones it names first.
   expect(shownModels().length).toBe(23);
   expect(shownModels().slice(0, 3)).toEqual(['default', 'anthropic/claude-sonnet-5', 'openai/gpt-5-codex']);
-  // The reasoning scale comes from the same answer, not from the descriptor.
-  const levels = Array.from(document.querySelectorAll('[data-effort]')).map((el) => el.getAttribute('data-effort'));
-  expect(levels).toEqual(['think', 'think-hard']);
 
   query<HTMLButtonElement>('[data-model="openai/gpt-5-codex"]').click();
   await waitFor(() => document.querySelector('[data-testid=composer-picker-menu]') === null);
   expect(query('[data-testid=composer-picker]').textContent).toContain('GPT-5 Codex');
+
+  // The reasoning scale comes from the same answer, not from the descriptor, and
+  // it is the composer's own chip that carries it.
+  query<HTMLButtonElement>('[data-testid=composer-effort]').click();
+  await waitFor(() => document.querySelector('[data-testid=composer-effort-menu]') !== null);
+  expect(effortDots()).toEqual(['think', 'think-hard']);
+  press('Escape');
+  await waitFor(() => document.querySelector('[data-testid=composer-effort-menu]') === null);
 
   // The probed model reaches the thread the first send creates.
   const input = query<HTMLTextAreaElement>('[data-testid=composer-input]');
@@ -214,7 +244,7 @@ test('past twelve models the column gets a search field, prefix groups and keybo
   // Claude lists ten models: short enough to stay a plain list.
   expect(document.querySelector('[data-testid=picker-search]')).toBeNull();
 
-  query<HTMLButtonElement>('[data-instance="opencode::a-opencode"]').click();
+  query<HTMLButtonElement>('[data-testid=composer-picker-menu] [data-provider=opencode]').click();
   await waitFor(() => document.querySelector('[data-testid=picker-probing]') === null);
   await waitFor(() => document.querySelector('[data-testid=picker-search]') !== null);
   expect(shownModels().length).toBe(23);
@@ -267,35 +297,40 @@ test('past twelve models the column gets a search field, prefix groups and keybo
   expect(store.openThread?.model).toBe('anthropic/claude-sonnet-5');
 });
 
-test('the Reasoning row sets the effort of the picked model, and the composer chip follows', async () => {
+test('the reasoning slider sets the effort of the picked model, and the chip follows', async () => {
   await mountOnFake();
   query<HTMLButtonElement>('[data-testid=new-thread]').click();
   await waitFor(() => store.draft !== null);
   await waitFor(() => query('[data-testid=composer-picker]').textContent?.includes('Claude Sonnet 5') === true);
 
-  query<HTMLButtonElement>('[data-testid=composer-picker]').click();
-  await waitFor(() => document.querySelector('[data-testid=picker-effort]') !== null);
-  const levels = Array.from(document.querySelectorAll('[data-effort]')).map((el) => el.getAttribute('data-effort'));
-  expect(levels).toEqual(['low', 'medium', 'high', 'xhigh', 'max', 'ultrathink']);
+  query<HTMLButtonElement>('[data-testid=composer-effort]').click();
+  await waitFor(() => document.querySelector('[data-testid=composer-effort-menu]') !== null);
+  expect(effortDots()).toEqual(['low', 'medium', 'high', 'xhigh', 'max', 'ultrathink']);
   // Nothing chosen yet, so the model's own default reads as the active one.
-  expect(query('[data-effort=high]').getAttribute('aria-pressed')).toBe('true');
+  const track = query('[data-testid=effort-track]');
+  expect(track.getAttribute('aria-valuenow')).toBe('2');
+  expect(track.getAttribute('aria-valuetext')).toBe('High');
 
-  query<HTMLButtonElement>('[data-effort=xhigh]').click();
-  await waitFor(() => query('[data-effort=xhigh]').getAttribute('aria-pressed') === 'true');
+  query<HTMLButtonElement>('[data-testid=composer-effort-menu] [data-value=xhigh]').click();
+  await waitFor(() => query('[data-testid=effort-track]').getAttribute('aria-valuenow') === '3');
   // Picking a level keeps the popover open: it is a setting of the model, not a choice of its own.
-  expect(document.querySelector('[data-testid=composer-picker-menu]')).not.toBeNull();
+  expect(document.querySelector('[data-testid=composer-effort-menu]')).not.toBeNull();
   // The level reads on its own chip; the picker's label names the model alone.
   expect(query('[data-testid=composer-picker]').textContent).toContain('Claude Sonnet 5');
   expect(query('[data-testid=composer-picker]').textContent).not.toContain('Extra high');
   await waitFor(() => query('[data-testid=composer-effort]').textContent?.trim() === 'Extra high');
 
-  query<HTMLButtonElement>('[data-effort=high]').click();
-  await waitFor(() => query('[data-effort=high]').getAttribute('aria-pressed') === 'true');
+  // The dots are filled up to the one that is live, and no further.
+  const filled = Array.from(document.querySelectorAll('[data-dot]')).filter((dot) => dot.classList.contains('on'));
+  expect(filled.map((dot) => dot.getAttribute('data-dot'))).toEqual(['low', 'medium', 'high', 'xhigh']);
+
+  query<HTMLButtonElement>('[data-testid=composer-effort-menu] [data-value=high]').click();
   await waitFor(() => query('[data-testid=composer-effort]').textContent?.trim() === 'High');
 
   // The draft carries the effort into the thread the first send creates.
-  query<HTMLButtonElement>('[data-effort=xhigh]').click();
-  await waitFor(() => query('[data-effort=xhigh]').getAttribute('aria-pressed') === 'true');
+  query<HTMLButtonElement>('[data-testid=composer-effort-menu] [data-value=xhigh]').click();
+  await waitFor(() => query('[data-testid=composer-effort]').textContent?.trim() === 'Extra high');
+  press('Escape');
   const input = query<HTMLTextAreaElement>('[data-testid=composer-input]');
   input.value = 'Think harder about the caps';
   input.dispatchEvent(new Event('input', { bubbles: true }));
@@ -668,7 +703,7 @@ test('a tool card shows the diff, the markdown and the image it produced', async
   expect(image.alt).toBe('one pixel');
 });
 
-test('a provider Boite installs offers the download in the picker, then becomes pickable', async () => {
+test('a provider Boite installs says so in the picker and sends you to Settings, then becomes pickable', async () => {
   await mountOnFake();
   // An open thread locks its provider; a draft is where another one can be picked.
   query<HTMLButtonElement>('[data-testid=new-thread]').click();
@@ -676,26 +711,31 @@ test('a provider Boite installs offers the download in the picker, then becomes 
   query<HTMLButtonElement>('[data-testid=composer-picker]').click();
   await waitFor(() => document.querySelector('[data-testid=composer-picker-menu]') !== null);
 
-  // Nothing is on the machine yet: one row for the provider, carrying its size.
-  const start = query<HTMLButtonElement>('[data-testid=install-start][data-provider=antigravity]');
-  expect(start.textContent).toContain('447 MB');
-  expect(document.querySelector('[data-instance="antigravity::a-antigravity"]')).toBeNull();
+  // Nothing is on the machine yet: the tile is pickable and its column says why
+  // it offers no model. The download itself lives on the Accounts page.
+  query<HTMLButtonElement>('[data-testid=composer-picker-menu] [data-provider=antigravity]').click();
+  await waitFor(() => document.querySelector('[data-testid=picker-not-installed]') !== null);
+  expect(document.querySelector('[data-testid=install-start]')).toBeNull();
+  expect(shownModels()).toEqual([]);
 
-  start.click();
-  await waitFor(
-    () => document.querySelector('[data-testid=install-progress][data-provider=antigravity]') !== null
-  );
-  const bar = query('[data-testid=install-progress][data-provider=antigravity] .bar');
-  await waitFor(() => (bar.getAttribute('style') ?? '').replace(/\s/g, '') !== 'width:0%');
-  expect(document.querySelector('[data-testid=install-cancel][data-provider=antigravity]')).not.toBeNull();
+  query<HTMLButtonElement>('[data-testid=picker-install-settings]').click();
+  await waitFor(() => store.page === 'settings' && store.settingsTab === 'accounts');
+  // The picker closed on the way out.
+  await waitFor(() => document.querySelector('[data-testid=composer-picker-menu]') === null);
 
-  // The fake ticks for about two seconds, then the account row is a real one.
-  await waitFor(() => document.querySelector('[data-instance="antigravity::a-antigravity"]') !== null, 2000);
-  const row = query<HTMLButtonElement>('[data-instance="antigravity::a-antigravity"]');
-  expect(row.disabled).toBe(false);
-  expect(document.querySelector('[data-testid=install-start][data-provider=antigravity]')).toBeNull();
+  // The fake ticks for about two seconds, then the provider is one tile like any other.
+  await store.installProvider('antigravity');
+  await waitFor(() => store.installOf('antigravity')?.state === 'installed', 2000);
+  store.showChat();
+  await waitFor(() => document.querySelector('[data-testid=composer-picker]') !== null);
 
-  row.click();
+  query<HTMLButtonElement>('[data-testid=composer-picker]').click();
+  await waitFor(() => document.querySelector('[data-testid=composer-picker-menu]') !== null);
+  query<HTMLButtonElement>('[data-testid=composer-picker-menu] [data-provider=antigravity]').click();
+  await waitFor(() => document.querySelector('[data-testid=picker-not-installed]') === null);
+  await waitFor(() => shownModels().length > 0);
+
+  query<HTMLButtonElement>('[data-model=default]').click();
   await waitFor(() => (query('[data-testid=composer-picker]').textContent ?? '').includes('Antigravity'));
 });
 

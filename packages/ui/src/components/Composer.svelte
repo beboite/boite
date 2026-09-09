@@ -1,9 +1,10 @@
 <script lang="ts">
-  import { ArrowUp, Brain, ShieldCheck, Square } from '@lucide/svelte';
+  import { ArrowUp, ShieldCheck, Square } from '@lucide/svelte';
   import type { PermissionMode } from '@boite/contracts';
   import { clearStash, DRAFT_STASH_KEY, readStash, writeStash } from '../lib/prefs';
   import { fill, strings } from '../lib/strings';
   import type { Choice, PickPatch, Store } from '../lib/store.svelte';
+  import EffortSlider from './EffortSlider.svelte';
   import Menu from './Menu.svelte';
   import ModelPicker from './ModelPicker.svelte';
 
@@ -95,16 +96,6 @@
   // offers no scale (an agent that keeps its own) gets no chip at all.
   let effortLevels = $derived(store.modelOf(choice)?.effort?.levels ?? []);
   let activeEffort = $derived(choice?.effort ?? store.modelOf(choice)?.effort?.default ?? null);
-  let effortLabel = $derived(effortLevels.find((level) => level.id === activeEffort)?.label ?? '');
-
-  let effortItems = $derived(
-    effortLevels.map((level) => ({
-      id: level.id,
-      label: level.label,
-      hint: level.description,
-      active: level.id === activeEffort
-    }))
-  );
 
   /** On a thread only the model and the effort change and they are saved at once; on a draft the whole choice is remembered. */
   function pick(patch: PickPatch) {
@@ -291,10 +282,7 @@
         <ModelPicker {store} {choice} locked={bound} onpick={pick} />
 
         {#if effortLevels.length > 0}
-          <Menu items={effortItems} onpick={pickEffort} label={strings.composer.reasoning} testid="composer-effort">
-            <Brain size={14} strokeWidth={1.75} />
-            {effortLabel}
-          </Menu>
+          <EffortSlider levels={effortLevels} active={activeEffort} onpick={pickEffort} />
         {/if}
 
         <Menu items={modeItems} onpick={pickMode} label={strings.composer.mode} testid="composer-mode">

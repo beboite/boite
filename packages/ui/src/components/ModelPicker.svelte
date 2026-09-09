@@ -1,15 +1,16 @@
 <script lang="ts">
   import { ChevronDown, ChevronRight, Search, Sparkles } from '@lucide/svelte';
-  import type { Account, ModelInfo, ProviderInstallState, ProviderSummary } from '@boite/contracts';
-  import InstallControl from './InstallControl.svelte';
+  import type { Account, ModelInfo, ProviderSummary } from '@boite/contracts';
+  import ProviderLogo from './ProviderLogo.svelte';
   import { Closing } from '../lib/closing.svelte';
   import { strings } from '../lib/strings';
   import type { Choice, PickPatch, Store } from '../lib/store.svelte';
 
   /**
-   * T3 Code's picker: providers and their accounts on the left, the models of
-   * the highlighted one on the right. One click on an account switches to it
-   * with its default model; one click on a model closes the picker.
+   * One popover: a rail of provider logos on the left, everything about the
+   * shown provider on the right. Its name heads the column, its accounts sit
+   * beside the name as chips when there is more than one, and its models fill
+   * the rest. A click on a model closes the picker; nothing else does.
    */
   let {
     store,
@@ -33,16 +34,15 @@
   let searchBox = $state<HTMLInputElement | undefined>(undefined);
   /** What the model column is filtered on; empty while the list is short. */
   let modelQuery = $state('');
-  /** The provider whose models the right column shows: the choice's until another account is clicked. */
+  /** The provider whose column is shown: the choice's until another tile is clicked. */
   let shownProviderId = $state<string | null>(null);
 
-  interface Row {
+  interface Tile {
     provider: ProviderSummary;
-    account: Account | null;
-    disabled: boolean;
-    hint: string | null;
-    /** Set on the one row a provider gets while its files are still to download. */
-    install: ProviderInstallState | null;
+    /** Why this provider cannot run, or null: it dims the tile and rides in its title. */
+    reason: string | null;
+    /** True while an open thread holds the choice on another provider. */
+    held: boolean;
   }
 
   let provider = $derived(choice ? store.providerOf(choice.providerId) : null);
@@ -56,15 +56,23 @@
     if (choice && choice.providerId === shown.id) return choice.accountId;
     return store.accountsOf(shown.id)[0]?.id ?? null;
   });
+  let seats = $derived(shown ? store.accountsOf(shown.id) : []);
+  /** The files are still to download, so this provider has no models to offer yet. */
+  let needsInstall = $derived.by((): boolean => {
+    if (!shown) return false;
+    const install = store.installOf(shown.id);
+    return install !== null && install.state !== 'installed';
+  });
   let shownModels = $derived(shown ? store.modelsOf(shown.id, shownAccountId) : []);
   let probing = $derived(shown ? store.isProbing(shown.id, shownAccountId) : false);
 
   // An ACP agent owns its model list, so the descriptor cannot carry it: the
   // core reads it from one short-lived agent process the first time the picker
   // shows that instance, and the answer stands for the rest of the session.
+  // Nothing is asked of a provider whose executable is not on the machine.
   $effect(() => {
-    if (!popover.open || !shown || (shown.protocol !== 'acp' && shown.protocol !== 'codex-appserver' && shown.protocol !== 'pi'))
-      return;
+    if (!popover.open || !shown || needsInstall) return;
+    if (shown.protocol !== 'acp' && shown.protocol !== 'codex-appserver' && shown.protocol !== 'pi') return;
     const accountId = shownAccountId;
     if (accountId === null) return;
     void store.probeModels(shown.id, accountId);
@@ -79,38 +87,43 @@
     return siblings.length > 1 && account ? `${name} · ${account.label}` : name;
   });
 
-  let rows = $derived.by((): Row[] => {
-    const out: Row[] = [];
-    const ordered = [...store.providers].sort((a, b) => Number(b.available) - Number(a.available));
-    for (const entry of ordered) {
-      // A provider whose release is not on the machine yet gets one row with the
-      // download in it, whatever accounts it has: nothing can run until it lands.
+  /** One tile per provider, in the order the core listed them. */
+  let tiles = $derived.by((): Tile[] =>
+    store.providers.map((entry) => {
       const install = store.installOf(entry.id);
-      if (install !== null && install.state !== 'installed') {
-        out.push({ provider: entry, account: null, disabled: true, hint: null, install });
-        continue;
-      }
-      const accounts = store.accountsOf(entry.id);
-      if (accounts.length === 0) {
-        out.push({ provider: entry, account: null, disabled: true, hint: strings.composer.noAccount, install: null });
-        continue;
-      }
-      for (const acc of accounts) {
-        const same = choice?.providerId === entry.id && choice?.accountId === acc.id;
-        const hints: string[] = [];
-        if (!entry.available) hints.push(strings.composer.unavailable);
-        if (acc.status === 'unauthenticated') hints.push(strings.accounts.status.unauthenticated);
-        out.push({
-          provider: entry,
-          account: acc,
-          disabled: !entry.available || (locked && !same),
-          hint: hints.join(', ') || null,
-          install: null
-        });
-      }
-    }
-    return out;
-  });
+      const pending = install !== null && install.state !== 'installed';
+      const reason = pending || !entry.available
+        ? strings.composer.unavailable
+        : store.accountsOf(entry.id).length === 0
+          ? strings.composer.noAccount
+          : null;
+      return { provider: entry, reason, held: locked && choice?.providerId !== entry.id };
+    })
+  );
+
+  function tileTitle(tile: Tile): string {
+    if (tile.held) return strings.composer.lockedHint;
+    return tile.reason === null ? tile.provider.name : `${tile.provider.name}, ${tile.reason}`;
+  }
+
+  /** What keeps an account chip from being clicked, or null. */
+  function seatReason(seat: Account): string | null {
+    if (!shown) return null;
+    const hints: string[] = [];
+    if (!shown.available) hints.push(strings.composer.unavailable);
+    if (seat.status === 'unauthenticated') hints.push(strings.accounts.status.unauthenticated);
+    return hints.join(', ') || null;
+  }
+
+  function seatHeld(seat: Account): boolean {
+    return locked && !(choice?.providerId === shown?.id && choice?.accountId === seat.id);
+  }
+
+  function seatTitle(seat: Account): string {
+    if (seatHeld(seat)) return strings.composer.lockedHint;
+    const reason = seatReason(seat);
+    return reason === null ? (seat.identity ?? seat.label) : `${seat.label}, ${reason}`;
+  }
 
   let currentModels = $derived(shownModels.filter((m) => !m.legacy));
   let legacyModels = $derived(shownModels.filter((m) => m.legacy));
@@ -160,18 +173,6 @@
     return [...byKey.values()];
   });
 
-  /** The Reasoning row belongs to the model the choice is on, legacy ones included. */
-  let effortModel = $derived.by((): ModelInfo | null => {
-    if (!shown || !choice || choice.providerId !== shown.id) return null;
-    return shownModels.find((m) => m.id === choice.model && m.effort) ?? null;
-  });
-  let effortLevels = $derived(effortModel?.effort?.levels ?? []);
-  let activeEffort = $derived(choice?.effort ?? effortModel?.effort?.default ?? null);
-
-  function isCurrentInstance(row: Row): boolean {
-    return row.account !== null && choice?.providerId === row.provider.id && choice?.accountId === row.account.id;
-  }
-
   function isCurrentModel(model: ModelInfo): boolean {
     return shown !== null && choice?.providerId === shown.id && choice?.model === model.id;
   }
@@ -192,12 +193,19 @@
     }
   }
 
-  function pickInstance(row: Row) {
-    if (row.disabled || !row.account) return;
-    shownProviderId = row.provider.id;
+  /** A tile only moves the column: the choice follows a model or an account chip. */
+  function pickTile(tile: Tile) {
+    if (tile.held) return;
+    shownProviderId = tile.provider.id;
+    legacyOpen = false;
     modelQuery = '';
-    if (isCurrentInstance(row)) return;
-    onpick({ providerId: row.provider.id, accountId: row.account.id, model: store.defaultModelOf(row.provider) });
+  }
+
+  function pickSeat(seat: Account) {
+    if (!shown || seatHeld(seat) || !shown.available) return;
+    if (choice?.providerId === shown.id && choice.accountId === seat.id) return;
+    modelQuery = '';
+    onpick({ providerId: shown.id, accountId: seat.id, model: store.defaultModelOf(shown) });
   }
 
   function pickModel(model: ModelInfo) {
@@ -211,15 +219,17 @@
     popover.hide();
   }
 
-  /** The popover stays open: an effort is a setting of the model just picked, not a choice of its own. */
-  function pickEffort(id: string) {
-    if (id === activeEffort) return;
-    onpick({ effort: id });
+  /** The download happens on the Accounts page now, so the picker sends you there. */
+  function openInstall() {
+    popover.hide();
+    store.showSettings('accounts');
   }
 
   function firstInstanceOf(providerId: string): { providerId: string; accountId: string } | null {
-    const row = rows.find((r) => r.provider.id === providerId && r.account && !r.disabled);
-    return row && row.account ? { providerId, accountId: row.account.id } : null;
+    const entry = store.providerOf(providerId);
+    if (!entry || !entry.available) return null;
+    const seat = store.accountsOf(providerId)[0];
+    return seat ? { providerId, accountId: seat.id } : null;
   }
 
   function focusable(): HTMLElement[] {
@@ -264,12 +274,13 @@
       return;
     }
     if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
-      const steps = root ? Array.from(root.querySelectorAll<HTMLElement>('.popover [data-effort]')) : [];
-      const here = steps.indexOf(document.activeElement as HTMLElement);
+      // The account chips are a segmented control: the arrows walk them.
+      const chips = root ? Array.from(root.querySelectorAll<HTMLElement>('.popover [data-seat]:not(:disabled)')) : [];
+      const here = chips.indexOf(document.activeElement as HTMLElement);
       if (here === -1) return;
       event.preventDefault();
       const step = event.key === 'ArrowRight' ? 1 : -1;
-      steps[(here + step + steps.length) % steps.length]?.focus();
+      chips[(here + step + chips.length) % chips.length]?.focus();
       return;
     }
     if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
@@ -319,44 +330,23 @@
       onanimationend={popover.end}
       {onkeydown}
     >
-      <div class="column instances">
-        <span class="section-label head">{strings.composer.providers}</span>
-        {#each rows as row (row.account ? `${row.provider.id}::${row.account.id}` : row.provider.id)}
-          {#if row.account}
-            <button
-              type="button"
-              class="row"
-              class:current={isCurrentInstance(row)}
-              disabled={row.disabled}
-              role="menuitem"
-              data-row
-              data-instance="{row.provider.id}::{row.account.id}"
-              title={row.disabled && locked ? strings.composer.lockedHint : row.account.identity ?? undefined}
-              onclick={() => pickInstance(row)}
-            >
-              <span class="mark"></span>
-              <span class="text">
-                <span class="name">{row.provider.name}</span>
-                <span class="sub">{row.hint ?? row.account.label}</span>
-              </span>
-            </button>
-          {:else if row.install}
-            <div class="row managed" data-instance="{row.provider.id}::">
-              <span class="mark"></span>
-              <span class="text">
-                <span class="name">{row.provider.name}</span>
-              </span>
-              <InstallControl {store} provider={row.provider} />
-            </div>
-          {:else}
-            <div class="row none" data-instance="{row.provider.id}::">
-              <span class="mark"></span>
-              <span class="text">
-                <span class="name">{row.provider.name}</span>
-                <span class="sub">{row.hint}</span>
-              </span>
-            </div>
-          {/if}
+      <div class="column rail">
+        {#each tiles as tile (tile.provider.id)}
+          <button
+            type="button"
+            class="tile"
+            class:current={shown?.id === tile.provider.id}
+            class:dim={tile.reason !== null}
+            disabled={tile.held}
+            role="menuitem"
+            data-row
+            data-provider={tile.provider.id}
+            title={tileTitle(tile)}
+            aria-label={tile.provider.name}
+            onclick={() => pickTile(tile)}
+          >
+            <ProviderLogo providerId={tile.provider.id} size={18} />
+          </button>
         {/each}
       </div>
 
@@ -379,103 +369,118 @@
           </button>
         {/snippet}
 
-        <span class="section-label head">{shown ? shown.name : strings.composer.models}</span>
-
-        {#if searchable}
-          <div class="search-bar">
-            <label class="search">
-              <Search size={13} strokeWidth={1.75} />
-              <input
-                bind:this={searchBox}
-                bind:value={modelQuery}
-                placeholder={strings.composer.searchModels}
-                aria-label={strings.composer.searchModels}
-                data-testid="picker-search"
-                spellcheck="false"
-              />
-            </label>
-          </div>
-          {#if pinnedModel}
-            {@render modelRow(pinnedModel)}
+        <div class="head">
+          <span class="provider-name">{shown ? shown.name : strings.composer.models}</span>
+          {#if seats.length > 1}
+            <div class="seats" role="group" aria-label={strings.accounts.heading}>
+              {#each seats as seat (seat.id)}
+                <button
+                  type="button"
+                  class="seat"
+                  disabled={seatHeld(seat) || !(shown?.available ?? false)}
+                  data-seat
+                  data-instance="{shown?.id}::{seat.id}"
+                  aria-pressed={seat.id === shownAccountId}
+                  title={seatTitle(seat)}
+                  onclick={() => pickSeat(seat)}
+                >
+                  {seat.label}
+                </button>
+              {/each}
+            </div>
           {/if}
-          {#each groups as group (group.key)}
-            {#if group.key}
-              <span class="section-label group" data-group={group.key}>{group.key}</span>
-            {/if}
-            {#each group.models as model (model.id)}
-              {@render modelRow(model)}
-            {/each}
-          {/each}
-          {#if groups.length === 0 && filteredLegacy.length === 0 && modelQuery.trim() !== ''}
-            <p class="none subtle" data-testid="picker-no-models">{strings.composer.noModels}</p>
-          {/if}
-        {:else}
-          {#each currentModels as model (model.id)}
-            {@render modelRow(model)}
-          {/each}
+        </div>
+        {#if locked && seats.length > 1}
+          <span class="locked-note">{strings.composer.lockedHint}</span>
         {/if}
 
-        {#if filteredLegacy.length > 0}
+        {#if needsInstall}
+          <p class="none subtle" data-testid="picker-not-installed">{strings.composer.notInstalled}</p>
           <button
             type="button"
-            class="row fold small"
-            data-row
-            data-testid="picker-legacy"
-            aria-expanded={legacyOpen}
-            onclick={() => (legacyOpen = !legacyOpen)}
+            class="quiet small to-settings"
+            data-testid="picker-install-settings"
+            onclick={openInstall}
           >
-            <span class="caret" class:open={legacyOpen}><ChevronRight size={12} strokeWidth={2} /></span>
-            <span class="name muted">{strings.composer.legacyModels}</span>
-            <span class="count">{filteredLegacy.length}</span>
+            {strings.composer.installInSettings}
           </button>
-          <!-- Folded, the group is still here at zero height: that is what the
-               `0fr` to `1fr` rows animate. The hooks come off with it, so a
-               collapsed row is neither walked by the arrows nor picked. -->
-          <div class="fold-body" class:open={legacyOpen} inert={!legacyOpen}>
-            <div class="clip">
-              {#each filteredLegacy as model (model.id)}
-                <button
-                  type="button"
-                  class="row model legacy"
-                  class:current={isCurrentModel(model)}
-                  role="menuitem"
-                  tabindex={legacyOpen ? 0 : -1}
-                  data-row={legacyOpen || undefined}
-                  data-model={legacyOpen ? model.id : undefined}
-                  onclick={() => pickModel(model)}
-                >
-                  <span class="mark"></span>
-                  <span class="name">{model.name}</span>
-                </button>
-              {/each}
+        {:else}
+          {#if searchable}
+            <div class="search-bar">
+              <label class="search">
+                <Search size={13} strokeWidth={1.75} />
+                <input
+                  bind:this={searchBox}
+                  bind:value={modelQuery}
+                  placeholder={strings.composer.searchModels}
+                  aria-label={strings.composer.searchModels}
+                  data-testid="picker-search"
+                  spellcheck="false"
+                />
+              </label>
             </div>
-          </div>
-        {/if}
-        {#if shown && shownModels.length === 0 && !probing}
-          <p class="none subtle">{strings.thread.defaultModel}</p>
-        {/if}
-        {#if probing}
-          <p class="none subtle probing" data-testid="picker-probing">{strings.composer.probing}</p>
-        {/if}
+            {#if pinnedModel}
+              {@render modelRow(pinnedModel)}
+            {/if}
+            {#each groups as group (group.key)}
+              {#if group.key}
+                <span class="section-label group" data-group={group.key}>{group.key}</span>
+              {/if}
+              {#each group.models as model (model.id)}
+                {@render modelRow(model)}
+              {/each}
+            {/each}
+            {#if groups.length === 0 && filteredLegacy.length === 0 && modelQuery.trim() !== ''}
+              <p class="none subtle" data-testid="picker-no-models">{strings.composer.noModels}</p>
+            {/if}
+          {:else}
+            {#each currentModels as model (model.id)}
+              {@render modelRow(model)}
+            {/each}
+          {/if}
 
-        {#if effortLevels.length > 0}
-          <div class="effort" data-testid="picker-effort">
-            <span class="section-label">{strings.composer.reasoning}</span>
-            <div class="steps" role="group" aria-label={strings.composer.reasoning}>
-              {#each effortLevels as level (level.id)}
-                <button
-                  type="button"
-                  class="step small"
-                  data-effort={level.id}
-                  aria-pressed={level.id === activeEffort}
-                  title={level.description ?? level.label}
-                  onclick={() => pickEffort(level.id)}
-                >
-                  {level.label}
-                </button>
-              {/each}
+          {#if filteredLegacy.length > 0}
+            <button
+              type="button"
+              class="row fold small"
+              data-row
+              data-testid="picker-legacy"
+              aria-expanded={legacyOpen}
+              onclick={() => (legacyOpen = !legacyOpen)}
+            >
+              <span class="caret" class:open={legacyOpen}><ChevronRight size={12} strokeWidth={2} /></span>
+              <span class="name muted">{strings.composer.legacyModels}</span>
+              <span class="count">{filteredLegacy.length}</span>
+            </button>
+            <!-- Folded, the group is still here at zero height: that is what the
+                 `0fr` to `1fr` rows animate. The hooks come off with it, so a
+                 collapsed row is neither walked by the arrows nor picked. -->
+            <div class="fold-body" class:open={legacyOpen} inert={!legacyOpen}>
+              <div class="clip">
+                {#each filteredLegacy as model (model.id)}
+                  <button
+                    type="button"
+                    class="row model legacy"
+                    class:current={isCurrentModel(model)}
+                    role="menuitem"
+                    tabindex={legacyOpen ? 0 : -1}
+                    data-row={legacyOpen || undefined}
+                    data-model={legacyOpen ? model.id : undefined}
+                    onclick={() => pickModel(model)}
+                  >
+                    <span class="mark"></span>
+                    <span class="name">{model.name}</span>
+                  </button>
+                {/each}
+              </div>
             </div>
-          </div>
+          {/if}
+          {#if shown && shownModels.length === 0 && !probing}
+            <p class="none subtle">{strings.thread.defaultModel}</p>
+          {/if}
+          {#if probing}
+            <p class="none subtle probing" data-testid="picker-probing">{strings.composer.probing}</p>
+          {/if}
         {/if}
       </div>
     </div>
@@ -517,8 +522,8 @@
     left: 0;
     z-index: 40;
     display: grid;
-    grid-template-columns: 200px minmax(220px, 1fr);
-    width: min(520px, calc(100vw - 32px));
+    grid-template-columns: 48px minmax(240px, 1fr);
+    width: min(460px, calc(100vw - 32px));
     max-height: 340px;
     background: var(--color-surface-2);
     border: 1px solid var(--color-border);
@@ -543,16 +548,118 @@
     overflow: auto;
   }
 
-  .instances {
+  /* Logos only: the name is the tile's title, and the column beside it names
+     the one that is shown, so nothing is repeated. */
+  .rail {
+    align-items: center;
+    gap: 4px;
+    /* Exactly one tile wide: a horizontal scrollbar here would be a stripe. */
+    overflow-x: hidden;
     border-right: 1px solid var(--color-border);
     background: var(--color-surface);
   }
 
+  .tile {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: none;
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    border: none;
+    border-radius: var(--radius-md);
+    background: transparent;
+    color: var(--color-muted-foreground);
+    transition:
+      background var(--dur-2) var(--ease-out-quint),
+      color var(--dur-2) var(--ease-out-quint);
+  }
+
+  .tile:hover:not(:disabled),
+  .tile:focus-visible {
+    background: var(--color-hover);
+    color: var(--color-foreground);
+    outline: none;
+  }
+
+  .tile.current {
+    background: var(--color-active);
+    color: var(--color-foreground);
+  }
+
+  /* Nothing runs on it: still pickable, so its column can say why. */
+  .tile.dim {
+    opacity: 0.45;
+  }
+
   .head {
-    padding: 4px 8px 6px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: var(--control-sm);
+    padding: 2px 4px 6px;
+  }
+
+  .provider-name {
+    font-size: var(--text-base);
+    font-weight: 500;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .seats {
+    display: flex;
+    gap: 2px;
+    margin-left: auto;
+    padding: 2px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    background: var(--color-surface);
+    min-width: 0;
+  }
+
+  .seat {
+    height: 20px;
+    max-width: 110px;
+    padding: 0 7px;
+    border: none;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--color-muted-foreground);
+    font-size: var(--text-sm);
+    font-weight: 500;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: block;
+    transition:
+      background var(--dur-2) var(--ease-out-quint),
+      color var(--dur-2) var(--ease-out-quint);
+  }
+
+  .seat:hover:not(:disabled),
+  .seat:focus-visible {
+    background: var(--color-surface-3);
+    color: var(--color-foreground);
+    outline: none;
+  }
+
+  .seat[aria-pressed='true'] {
+    background: var(--color-surface-3);
+    color: var(--color-foreground);
+    box-shadow: var(--shadow-e1);
+  }
+
+  .locked-note {
+    padding: 0 4px 6px;
+    font-size: var(--text-sm);
+    color: var(--color-muted-foreground);
+  }
+
+  .to-settings {
+    align-self: flex-start;
+    margin: 2px 0 0 4px;
   }
 
   /* The sidebar's search box, kept in place while hundreds of rows scroll under it. */
@@ -622,7 +729,7 @@
     white-space: normal;
   }
 
-  .row:hover:not(:disabled):not(.none),
+  .row:hover:not(:disabled),
   .row:focus-visible {
     background: var(--color-hover);
     outline: none;
@@ -632,31 +739,6 @@
   .row:active:not(:disabled) {
     transform: none;
     background: color-mix(in srgb, var(--color-surface-3) 85%, var(--color-foreground));
-  }
-
-  .row:disabled,
-  .row.none {
-    opacity: 0.5;
-    cursor: default;
-  }
-
-  /* The download is the row's point, so it keeps full contrast and a line of its
-     own under the name: a bar squeezed beside it would cross the provider name. */
-  .row.managed {
-    flex-wrap: wrap;
-    row-gap: 5px;
-    padding-bottom: 6px;
-    cursor: default;
-  }
-
-  .row.managed .text {
-    flex: 1 0 auto;
-  }
-
-  .row.managed :global(.install) {
-    flex: 1 0 100%;
-    padding-left: 14px;
-    justify-content: flex-start;
   }
 
   .mark {
@@ -671,23 +753,8 @@
     background: var(--color-foreground);
   }
 
-  .text {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    min-width: 0;
-  }
-
   .name {
     font-weight: 500;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .sub {
-    font-size: var(--text-sm);
-    color: var(--color-muted-foreground);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -771,65 +838,18 @@
     font-size: var(--text-sm);
   }
 
-  .effort {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    margin-top: 6px;
-    padding: 8px 8px 2px;
-    border-top: 1px solid var(--color-border);
-  }
-
-  .steps {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 2px;
-    padding: 2px;
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-md);
-    background: var(--color-surface);
-  }
-
-  .step {
-    flex: 1 1 auto;
-    min-height: var(--control-sm);
-    height: var(--control-sm);
-    padding: 2px 8px;
-    border: none;
-    border-radius: var(--radius-sm);
-    background: transparent;
-    color: var(--color-muted-foreground);
-    font-size: var(--text-sm);
-    font-weight: 500;
-    white-space: nowrap;
-    transition:
-      background var(--dur-2) var(--ease-out-quint),
-      color var(--dur-2) var(--ease-out-quint);
-  }
-
-  .step:hover,
-  .step:focus-visible {
-    background: var(--color-surface-3);
-    color: var(--color-foreground);
-    outline: none;
-  }
-
-  .step[aria-pressed='true'] {
-    background: var(--color-surface-3);
-    color: var(--color-foreground);
-    box-shadow: var(--shadow-e1);
-  }
-
   @media (max-width: 720px) {
     .popover {
       grid-template-columns: 1fr;
       max-height: 60vh;
     }
 
-    .instances {
+    .rail {
+      flex-direction: row;
+      flex-wrap: wrap;
+      justify-content: flex-start;
       border-right: none;
       border-bottom: 1px solid var(--color-border);
-      max-height: 40%;
     }
   }
 </style>

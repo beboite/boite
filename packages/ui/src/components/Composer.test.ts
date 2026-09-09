@@ -197,10 +197,17 @@ function effortChip(): HTMLElement | null {
   return document.querySelector<HTMLElement>('[data-testid=composer-effort]');
 }
 
-/** The levels the open reasoning menu lists, in the model's order. */
+/** The level names the open reasoning slider writes under its track, in order. */
 function effortRows(): (string | null)[] {
   return Array.from(document.querySelectorAll('[data-testid=composer-effort-menu] [data-value]')).map((el) =>
     el.getAttribute('data-value')
+  );
+}
+
+/** The dots on that track, one per level. */
+function effortDots(): (string | null)[] {
+  return Array.from(document.querySelectorAll('[data-testid=composer-effort-menu] [data-dot]')).map((el) =>
+    el.getAttribute('data-dot')
   );
 }
 
@@ -249,6 +256,42 @@ test('the reasoning chip remembers the level a draft picks', async () => {
     effort: 'xhigh'
   });
   await waitFor(() => effortChip()?.textContent?.trim() === 'Extra high');
+});
+
+test('the reasoning slider draws one dot per level and the arrows move it', async () => {
+  await mountOnFake();
+  await store.open('t-trace');
+  await waitFor(() => store.openThread?.id === 't-trace' && !store.busy);
+  await waitFor(() => effortChip() !== null);
+
+  query<HTMLButtonElement>('[data-testid=composer-effort]').click();
+  await waitFor(() => document.querySelector('[data-testid=composer-effort-menu]') !== null);
+  // The echo model runs two levels, so the track carries two dots and its value
+  // is the index of the one that is live.
+  expect(effortDots()).toEqual(['low', 'high']);
+  expect(query('[data-testid=effort-track]').getAttribute('aria-valuemax')).toBe('1');
+  expect(query('[data-testid=effort-track]').getAttribute('aria-valuenow')).toBe('1');
+  // The track takes the keyboard the moment the popover is there.
+  await waitFor(() => document.activeElement === query('[data-testid=effort-track]'));
+
+  const update = vi.spyOn(store, 'update');
+  expect(press('ArrowLeft')).toBe(false);
+  await waitFor(() => store.openThread?.effort === 'low');
+  expect(update).toHaveBeenCalledWith('t-trace', { effort: 'low' });
+  await waitFor(() => query('[data-testid=effort-track]').getAttribute('aria-valuenow') === '0');
+  expect(effortChip()?.textContent?.trim()).toBe('Low');
+
+  // One dot right takes the same save path, and the popover stays open under it.
+  press('ArrowRight');
+  await waitFor(() => store.openThread?.effort === 'high');
+  expect(update).toHaveBeenCalledWith('t-trace', { effort: 'high' });
+  expect(document.querySelector('[data-testid=composer-effort-menu]')).not.toBeNull();
+  await waitFor(() => effortChip()?.textContent?.trim() === 'High');
+
+  press('Home');
+  await waitFor(() => query('[data-testid=effort-track]').getAttribute('aria-valuenow') === '0');
+  press('End');
+  await waitFor(() => query('[data-testid=effort-track]').getAttribute('aria-valuenow') === '1');
 });
 
 test('a model with no reasoning scale gets no chip at all', async () => {
