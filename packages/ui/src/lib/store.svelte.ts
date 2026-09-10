@@ -229,12 +229,15 @@ export class Store {
     return this.threads.filter((t) => t.projectId === projectId && !t.archived);
   }
 
-  /** Live threads first, then by last activity; the search box narrows it. */
+  /** Pinned threads first, then the live ones, then by last activity; the search box narrows it. */
   sortedThreadsOf(projectId: ProjectId): ThreadSummary[] {
     const needle = this.search.trim().toLowerCase();
     return this.threadsOf(projectId)
       .filter((t) => needle === '' || t.title.toLowerCase().includes(needle))
-      .sort((a, b) => LIVE[a.status] - LIVE[b.status] || b.updatedAt - a.updatedAt);
+      .sort(
+        (a, b) =>
+          Number(b.pinned) - Number(a.pinned) || LIVE[a.status] - LIVE[b.status] || b.updatedAt - a.updatedAt
+      );
   }
 
   accountsOf(providerId: ProviderId): Account[] {
@@ -1047,6 +1050,19 @@ export class Store {
     const clean = title.trim();
     if (clean.length === 0) return;
     await this.update(threadId, { title: clean });
+  }
+
+  async pin(threadId: ThreadId, pinned: boolean): Promise<void> {
+    const client = this.#client;
+    if (!client) return;
+    try {
+      const summary = await client.call('threads.pin', { threadId, pinned });
+      this.#upsertThread(summary);
+      const open = this.openThread;
+      if (open && open.id === threadId) open.pinned = summary.pinned;
+    } catch (error) {
+      this.#fail(error);
+    }
   }
 
   async archive(threadId: ThreadId): Promise<void> {

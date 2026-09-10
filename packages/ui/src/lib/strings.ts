@@ -74,6 +74,9 @@ export const strings = {
     threadMenu: 'Thread actions',
     open: 'Open',
     rename: 'Rename',
+    pin: 'Pin',
+    unpin: 'Unpin',
+    pinned: 'Pinned',
     archive: 'Archive',
     draft: 'New thread'
   },

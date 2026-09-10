@@ -323,6 +323,8 @@ export interface ThreadSummary {
   status: ThreadStatus;
   unread: boolean;
   archived: boolean;
+  /** Kept above the other threads of its project in the sidebar, whatever runs. */
+  pinned: boolean;
   /** Provider session id once the first turn has run; used to resume. */
   sessionId: string | null;
   load: ThreadLoad | null;
@@ -707,6 +709,8 @@ export interface RpcMethods {
     result: ThreadSummary;
   };
   'threads.archive': { params: { threadId: ThreadId; archived?: boolean }; result: ThreadSummary };
+  /** Pin or unpin (`pinned: false`) a thread. An archived thread keeps its pin for when it comes back. */
+  'threads.pin': { params: { threadId: ThreadId; pinned?: boolean }; result: ThreadSummary };
   'threads.markRead': { params: { threadId: ThreadId }; result: { ok: true } };
   /** Only subscribed threads stream message events to this connection. */
   'threads.subscribe': { params: { threadId: ThreadId }; result: { ok: true } };

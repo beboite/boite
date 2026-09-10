@@ -149,6 +149,7 @@ export class ThreadStore {
       status: 'idle',
       unread: false,
       archived: false,
+      pinned: false,
       sessionId: null,
       load: null,
       createdAt: now,
@@ -199,6 +200,13 @@ export class ThreadStore {
     const thread = this.require(threadId);
     if (!thread.unread) return;
     this.save({ ...thread, unread: false }, 'thread.read');
+  }
+
+  pin(threadId: ThreadId, pinned: boolean): ThreadSummary {
+    const thread = this.require(threadId);
+    // Pinning twice is not a change: no journal row, no event, the same summary back.
+    if (thread.pinned === pinned) return this.withLoad(thread);
+    return this.save({ ...thread, pinned }, 'thread.pinned');
   }
 
   startTurn(threadId: ThreadId, prompt: string): Turn {
@@ -790,6 +798,7 @@ export function registerThreadMethods(core: Core): void {
   core.router.register('threads.archive', (params) =>
     core.threads.archive(params.threadId, params.archived !== false),
   );
+  core.router.register('threads.pin', (params) => core.threads.pin(params.threadId, params.pinned !== false));
   core.router.register('threads.markRead', (params) => {
     core.threads.markRead(params.threadId);
     return { ok: true } as const;

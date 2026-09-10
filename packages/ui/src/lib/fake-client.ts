@@ -584,6 +584,7 @@ export class FakeClient implements ObservableClient {
           status: 'idle',
           unread: false,
           archived: false,
+          pinned: false,
           sessionId: null,
           load: null,
           createdAt: at,
@@ -631,6 +632,14 @@ export class FakeClient implements ObservableClient {
         const thread = this.#thread(params.threadId);
         thread.archived = params.archived ?? true;
         if (thread.archived) await this.#stopTurn(thread.id);
+        return this.#touch(thread);
+      }
+      case 'threads.pin': {
+        const params = rawParams as RpcParams<'threads.pin'>;
+        const thread = this.#thread(params.threadId);
+        const pinned = params.pinned ?? true;
+        if (thread.pinned === pinned) return structuredClone(toSummary(thread));
+        thread.pinned = pinned;
         return this.#touch(thread);
       }
       case 'threads.markRead': {
@@ -1853,6 +1862,7 @@ export class FakeClient implements ObservableClient {
       effort: null,
       permissionMode: 'default' as const,
       archived: false,
+      pinned: false,
       // A stored thread is the whole record; `threads.get` is what pages it.
       messagesBefore: null
     };
@@ -2315,6 +2325,7 @@ export class FakeClient implements ObservableClient {
       effort: null,
       permissionMode: 'default',
       archived: false,
+      pinned: false,
       title: 'Four hundred messages',
       cwd: 'D:\\Dev\\Collab\\boite',
       status: 'idle',

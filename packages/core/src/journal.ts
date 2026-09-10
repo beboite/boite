@@ -56,6 +56,7 @@ interface ThreadRow {
   status: string;
   unread: number;
   archived: number;
+  pinned: number;
   session_id: string | null;
   created_at: number;
   updated_at: number;
@@ -200,6 +201,11 @@ const SCHEMA_V2 = `
 ALTER TABLE threads ADD COLUMN effort TEXT;
 `;
 
+/** A pinned thread sits above the others of its project. */
+const SCHEMA_V3 = `
+ALTER TABLE threads ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0;
+`;
+
 function migrate(db: Database): void {
   const row = db.query('PRAGMA user_version').get() as { user_version: number } | null;
   let version = row?.user_version ?? 0;
@@ -210,6 +216,10 @@ function migrate(db: Database): void {
   if (version < 2) {
     db.exec(SCHEMA_V2);
     version = 2;
+  }
+  if (version < 3) {
+    db.exec(SCHEMA_V3);
+    version = 3;
   }
   db.exec(`PRAGMA user_version = ${version}`);
 }
@@ -240,6 +250,7 @@ function toThread(row: ThreadRow): ThreadSummary {
     status: row.status as ThreadSummary['status'],
     unread: row.unread !== 0,
     archived: row.archived !== 0,
+    pinned: row.pinned !== 0,
     sessionId: row.session_id,
     load: null,
     createdAt: row.created_at,
@@ -411,8 +422,8 @@ export class Journal {
     this.db
       .query(
         `INSERT OR REPLACE INTO threads
-         (id, project_id, title, provider_id, account_id, model, effort, cwd, permission_mode, status, unread, archived, session_id, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (id, project_id, title, provider_id, account_id, model, effort, cwd, permission_mode, status, unread, archived, pinned, session_id, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         thread.id,
@@ -427,6 +438,7 @@ export class Journal {
         thread.status,
         thread.unread ? 1 : 0,
         thread.archived ? 1 : 0,
+        thread.pinned ? 1 : 0,
         thread.sessionId,
         thread.createdAt,
         thread.updatedAt,

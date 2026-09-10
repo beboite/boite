@@ -468,4 +468,24 @@ describe('echo driver', () => {
     await client.call('threads.markRead', { threadId });
     expect((await client.call('threads.get', { threadId })).unread).toBe(false);
   });
+
+  test('a pin is kept in the journal and survives a restart, and pinning twice is not an update', async () => {
+    const client = await harness.connect();
+    const { threadId } = await echoThread(harness, client);
+    expect((await client.call('threads.get', { threadId })).pinned).toBe(false);
+
+    const updates: boolean[] = [];
+    client.on('thread.updated', (summary) => {
+      if (summary.id === threadId) updates.push(summary.pinned);
+    });
+    expect((await client.call('threads.pin', { threadId })).pinned).toBe(true);
+    expect((await client.call('threads.pin', { threadId })).pinned).toBe(true);
+    expect(updates).toEqual([true]);
+
+    const reopened = harness.core.journal.getThread(threadId);
+    expect(reopened?.pinned).toBe(true);
+
+    expect((await client.call('threads.pin', { threadId, pinned: false })).pinned).toBe(false);
+    expect((await client.call('threads.list', {})).find((t) => t.id === threadId)?.pinned).toBe(false);
+  });
 });

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { ChevronRight, Ellipsis, Plus, Search, Settings } from '@lucide/svelte';
+  import { ChevronRight, Ellipsis, Pin, Plus, Search, Settings } from '@lucide/svelte';
   import type { Project, ProjectId, ThreadId, ThreadSummary } from '@boite/contracts';
   import { focusOnMount, riseOnce } from '../lib/actions';
   import { confirm } from '../lib/confirm.svelte';
@@ -85,6 +85,7 @@
     return [
       { id: 'open', label: strings.sidebar.open, disabled: isOpen(thread) },
       { id: 'rename', label: strings.sidebar.rename },
+      { id: 'pin', label: thread.pinned ? strings.sidebar.unpin : strings.sidebar.pin },
       separator(),
       { id: 'archive', label: strings.sidebar.archive, danger: true }
     ];
@@ -94,6 +95,7 @@
     contextMenu.open(event, threadItems(thread), (action) => {
       if (action === 'open') void store.open(thread.id);
       else if (action === 'rename') beginRename(thread);
+      else if (action === 'pin') void store.pin(thread.id, !thread.pinned);
       else if (action === 'archive') void store.archive(thread.id);
     });
   }
@@ -280,6 +282,7 @@
                     class="thread"
                     class:open={isOpen(thread)}
                     class:unread={thread.unread}
+                    class:pinned={thread.pinned}
                     oncontextmenu={(event) => openThreadMenu(event, thread)}
                   >
                     <button
@@ -288,6 +291,7 @@
                       data-testid="thread-row"
                       data-thread-id={thread.id}
                       data-status={thread.status}
+                      data-pinned={thread.pinned ? 'true' : undefined}
                       title={thread.title}
                       onclick={() => void store.open(thread.id)}
                       ondblclick={() => beginRename(thread)}
@@ -296,6 +300,11 @@
                       <span class="title">{thread.title}</span>
                       {#if thread.load}
                         <LoadGauge load={thread.load} />
+                      {/if}
+                      {#if thread.pinned}
+                        <span class="pin" title={strings.sidebar.pinned} aria-label={strings.sidebar.pinned}>
+                          <Pin size={12} strokeWidth={1.75} />
+                        </span>
                       {/if}
                       <span class="when">{ago(thread.updatedAt, now)}</span>
                     </button>
@@ -662,6 +671,19 @@
   /* The date fades instead of leaving, so the title never lunges to the right. */
   .thread:hover .when,
   .thread:focus-within .when {
+    opacity: 0;
+  }
+
+  /* The pin sits where the time does, in the same quiet colour, and fades with it. */
+  .pin {
+    display: inline-flex;
+    flex: none;
+    color: var(--color-muted-foreground);
+    transition: opacity var(--dur-2) var(--ease-out-quint);
+  }
+
+  .thread:hover .pin,
+  .thread:focus-within .pin {
     opacity: 0;
   }
 

@@ -46,6 +46,20 @@ describe('Store', () => {
     expect(store.unreadCount).toBe(0);
   });
 
+  test('a pinned thread floats above the live ones of its project, and unpinning drops it back', async () => {
+    const { store } = await ready();
+    const project = store.threads.find((t) => t.id === 't-trace')?.projectId ?? '';
+    const before = store.sortedThreadsOf(project).map((t) => t.id);
+    expect(before[0]).not.toBe('t-trace');
+
+    await store.pin('t-trace', true);
+    expect(store.threads.find((t) => t.id === 't-trace')?.pinned).toBe(true);
+    expect(store.sortedThreadsOf(project)[0]?.id).toBe('t-trace');
+
+    await store.pin('t-trace', false);
+    expect(store.sortedThreadsOf(project).map((t) => t.id)).toEqual(before);
+  });
+
   test('a prompt streams into one text part and the thread goes running then idle', async () => {
     const { store, client } = await ready();
     await store.open('t-trace');
