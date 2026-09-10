@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "quotas",
+  "description": "The local quota popup can listen to tray visibility events. Application commands check its webview label.",
+  "windows": ["quotas"],
+  "permissions": ["core:event:default"]
+}

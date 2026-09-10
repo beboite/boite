@@ -50,7 +50,7 @@ import { rightPanel, type BoundPanel } from './right-panel.svelte';
 import { strings } from './strings';
 
 export type Page = 'chat' | 'settings';
-export type SettingsTab = 'general' | 'appearance' | 'accounts' | 'usage' | 'resources' | 'experiments';
+export type SettingsTab = 'general' | 'appearance' | 'accounts' | 'plugins' | 'usage' | 'resources' | 'experiments';
 
 /** A login process the core runs for one account, as `account.login` reports it. */
 export interface LoginState {
@@ -1126,15 +1126,17 @@ export class Store {
     providerId: ProviderId;
     label: string;
     useDefaultLocation?: boolean;
-  }): Promise<void> {
+  }): Promise<Account | null> {
     const client = this.#client;
-    if (!client) return;
+    if (!client) return null;
     try {
       const account = await client.call('accounts.add', input);
       if (!this.accounts.some((a) => a.id === account.id))
         this.accounts = [...this.accounts, account];
+      return account;
     } catch (error) {
       this.#fail(error);
+      return null;
     }
   }
 

@@ -5,7 +5,8 @@ rule. What Boite 2 is, the stack and the build commands: [README.md](README.md).
 Running the core and the UI, the fake client, the tests and the captures:
 [docs/development.md](docs/development.md). Writing or reading a provider
 descriptor: [docs/providers.md](docs/providers.md). Isolation directories and
-logins: [docs/accounts.md](docs/accounts.md). Pairing a phone:
+logins: [docs/accounts.md](docs/accounts.md). Managed plugins:
+[docs/plugins.md](docs/plugins.md). Pairing a phone:
 [docs/phone.md](docs/phone.md). Job Objects, the trace and the two Windows
 guards: [docs/trace.md](docs/trace.md). Cutting a build:
 [docs/releasing.md](docs/releasing.md).

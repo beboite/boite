@@ -1266,6 +1266,42 @@ interface ProbeEntry {
   result: ProbeResult | null;
 }
 
+/** Reads subscription limits without creating a thread or submitting a prompt. */
+export async function readCodexQuota(ctx: ProbeContext): Promise<unknown> {
+  const profile = profileFor(ctx.provider);
+  const executable = profile ? resolveExecutable(profile) : null;
+  if (!executable) throw new Error('Codex is not installed. Check Providers.');
+  const child = ctx.spawnChild(executable, profileFor(ctx.provider)?.launch?.args ?? [], {
+    cwd: ctx.cwd, env: { ...process.env, ...ctx.accountEnv },
+  });
+  child.stderr.resume();
+  const rpc = new CodexRpc(child, {
+    notification: () => undefined,
+    request: () => Promise.reject(new Error('No turn is running during a quota read')),
+    log: () => undefined,
+  });
+  let timer: Timer | undefined;
+  try {
+    const failure = new Promise<never>((_, reject) => {
+      child.once('exit', () => reject(new Error('Codex closed before reporting quotas. Check its login in Providers.')));
+      child.once('error', () => reject(new Error('Codex could not start. Check Providers.')));
+      timer = setTimeout(() => reject(new Error('Codex did not report quotas within 20 seconds.')), PROBE_TIMEOUT_MS);
+    });
+    const read = (async () => {
+      await rpc.request('initialize', { clientInfo: { name: CLIENT_NAME, title: null, version: pkg.version }, capabilities: null });
+      rpc.notify('initialized', {});
+      try { return await rpc.request('account/rateLimits/read', {}); }
+      catch { throw new Error('Codex could not read subscription quotas. Check its login in Providers.'); }
+    })();
+    return await Promise.race([read, failure]);
+  } finally {
+    clearTimeout(timer);
+    rpc.fail('the quota read is over');
+    child.stdin.end();
+    ctx.killTree();
+  }
+}
+
 /** One `codex app-server` process per thread, kept between turns like the ACP one. */
 export function createCodexDriver(): Driver {
   const sessions = new Map<ThreadId, CodexSession>();

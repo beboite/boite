@@ -9,6 +9,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 mod instance;
+mod quota_window;
 
 use serde::{Deserialize, Serialize};
 use tauri::{
@@ -16,7 +17,7 @@ use tauri::{
     tray::TrayIconBuilder,
     utils::config::WindowEffectsConfig,
     window::Effect,
-    AppHandle, Manager, Runtime, State, Webview, WindowEvent,
+    AppHandle, Emitter, Manager, Runtime, State, Webview, WindowEvent,
 };
 
 mod browser;
@@ -223,6 +224,33 @@ pub struct CoreState {
     channel: Channel,
 }
 
+#[derive(Default, Serialize, Deserialize)]
+struct ShellPreferences { close_to_tray: bool }
+
+struct CloseBehavior { enabled: AtomicBool, path: PathBuf }
+
+fn read_close_behavior(path: &Path) -> Result<bool, String> {
+    match std::fs::read_to_string(path) {
+        Ok(text) => serde_json::from_str::<ShellPreferences>(&text).map(|p| p.close_to_tray)
+            .map_err(|e| format!("{} must contain a boolean close_to_tray: {e}", path.display())),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(e) => Err(format!("{} could not be read: {e}", path.display())),
+    }
+}
+
+#[tauri::command]
+fn close_behavior(webview: Webview, state: State<'_, CloseBehavior>, enabled: Option<bool>) -> Result<bool, String> {
+    browser::only_main(&webview)?;
+    if let Some(enabled) = enabled {
+        let text = serde_json::to_string(&ShellPreferences { close_to_tray: enabled }).map_err(|e| e.to_string())?;
+        let temporary = state.path.with_extension("tmp");
+        std::fs::write(&temporary, text).map_err(|e| format!("close behavior could not be saved: {e}"))?;
+        std::fs::rename(&temporary, &state.path).map_err(|e| format!("close behavior could not be saved: {e}"))?;
+        state.enabled.store(enabled, Ordering::Release);
+    }
+    Ok(state.enabled.load(Ordering::Acquire))
+}
+
 impl CoreState {
     fn new(channel: Channel) -> Self {
         Self {
@@ -255,13 +283,12 @@ impl CoreState {
 // ---------------------------------------------------------------------------
 
 /// The clean quit, the very one the tray's Quit item runs: `kill_child` first,
-/// then the app. The window's close button and a `WM_CLOSE` both land on the
-/// `CloseRequested` this shell prevents, which hides to the tray, so the tray
-/// was the only way out and `kill_child` could be reached from no test at all.
+/// then the app. Closing the window takes this path too, unless the saved
+/// close behavior explicitly keeps the shell in the notification area.
 /// `tests/e2e/shell.test.ts` invokes this.
 #[tauri::command]
 fn quit_shell(app: AppHandle, webview: Webview) -> Result<(), String> {
-    browser::only_main(&webview)?;
+    quota_window::only_ui(&webview)?;
     quit(&app);
     Ok(())
 }
@@ -324,7 +351,7 @@ async fn core_endpoint(
     webview: Webview,
     state: State<'_, CoreState>,
 ) -> Result<CoreEndpoint, String> {
-    browser::only_main(&webview)?;
+    quota_window::only_ui(&webview)?;
     let slot = state.slot.clone();
     tauri::async_runtime::spawn_blocking(move || wait_for_endpoint(&slot))
         .await
@@ -723,10 +750,16 @@ fn build_main_window<R: Runtime>(
 /// The window is created hidden and only reaches the screen here, once the
 /// core endpoint resolved, so an empty frame never flashes.
 fn show_main<R: Runtime>(app: &AppHandle<R>) {
+    if let Some(popup) = app.get_webview_window(quota_window::LABEL) {
+        let _ = popup.hide();
+        let _ = popup.emit("tray://closed", ());
+    }
     if hidden() {
         return;
     }
     if let Some(window) = app.get_webview_window(MAIN_LABEL) {
+        let _ = window.unminimize();
+        let _ = window.set_skip_taskbar(false);
         let _ = window.show();
         let _ = window.set_focus();
     }
@@ -735,6 +768,7 @@ fn show_main<R: Runtime>(app: &AppHandle<R>) {
 fn hide_main<R: Runtime>(app: &AppHandle<R>) {
     if let Some(window) = app.get_webview_window(MAIN_LABEL) {
         let _ = window.hide();
+        let _ = window.set_skip_taskbar(true);
     }
 }
 
@@ -753,7 +787,19 @@ fn build_tray<R: Runtime>(app: &AppHandle<R>, channel: Channel) -> tauri::Result
     let mut builder = TrayIconBuilder::with_id("boite")
         .tooltip(channel.product_name())
         .menu(&menu)
-        .show_menu_on_left_click(true)
+        .show_menu_on_left_click(false)
+        .on_tray_icon_event(|tray, event| {
+            use tauri::tray::{MouseButton, MouseButtonState, TrayIconEvent};
+            match event {
+                TrayIconEvent::Enter { position, .. } => quota_window::enter(tray.app_handle(), position),
+                TrayIconEvent::Leave { .. } => quota_window::leave(tray.app_handle()),
+                TrayIconEvent::Click { position, button: MouseButton::Left, button_state: MouseButtonState::Up, .. } => {
+                    quota_window::enter(tray.app_handle(), position);
+                }
+                TrayIconEvent::DoubleClick { button: MouseButton::Left, .. } => show_main(tray.app_handle()),
+                _ => {}
+            }
+        })
         .on_menu_event(|app, event| match event.id().as_ref() {
             "show" => show_main(app),
             "quit" => quit(app),
@@ -762,7 +808,8 @@ fn build_tray<R: Runtime>(app: &AppHandle<R>, channel: Channel) -> tauri::Result
     if let Some(icon) = app.default_window_icon().cloned() {
         builder = builder.icon(icon);
     }
-    builder.build(app)?;
+    // Keep an explicit app-owned reference for the entire shell lifetime.
+    app.manage(builder.build(app)?);
     Ok(())
 }
 
@@ -775,14 +822,20 @@ pub fn run() {
     let Some(_instance) = instance::acquire(&directory).expect("the shell instance lock could not be acquired") else {
         return;
     };
+    let preferences_path = directory.join("shell-settings.json");
+    let close_to_tray = read_close_behavior(&preferences_path).expect("shell settings could not be read");
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .manage(CoreState::new(channel))
+        .manage(quota_window::HoverState::default())
+        .manage(CloseBehavior { enabled: AtomicBool::new(close_to_tray), path: preferences_path })
         .invoke_handler(tauri::generate_handler![
             core_endpoint,
             quit_shell,
+            close_behavior,
+            quota_window::quota_window,
             window_material,
             window_material_supported,
             browser::browser_create,
@@ -806,7 +859,8 @@ pub fn run() {
             window.on_window_event(move |event| {
                 if let WindowEvent::CloseRequested { api, .. } = event {
                     api.prevent_close();
-                    hide_main(&closing);
+                    if closing.state::<CloseBehavior>().enabled.load(Ordering::Acquire) { hide_main(&closing); }
+                    else { quit(&closing); }
                 }
             });
             Ok(())

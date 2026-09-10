@@ -1,5 +1,6 @@
 <script lang="ts">
   import { untrack } from 'svelte';
+  import ShellSettings from './ShellSettings.svelte';
   import { time } from '../lib/format';
   import { readStoredEndpoint } from '../lib/endpoint';
   import { strings } from '../lib/strings';
@@ -64,6 +65,8 @@
   <header>
     <h1>{strings.settings.tabs.general}</h1>
   </header>
+
+  {#if inShell}<ShellSettings />{/if}
 
   <section class="card">
     <h2>{strings.settings.projects}</h2>

@@ -68,6 +68,11 @@
     // refuses anything that is not a directory, the toast repeats why.
     let unlisten: (() => void) | undefined;
     let disposed = false;
+    let stopTray: (() => void) | undefined;
+    void import('@tauri-apps/api/event').then(async ({ listen }) => {
+      const stop = await listen('tray://providers', () => store.showSettings('accounts'));
+      if (disposed) stop(); else stopTray = stop;
+    });
     void import('@tauri-apps/api/webview').then(async ({ getCurrentWebview }) => {
       const stop = await getCurrentWebview().onDragDropEvent((event) => {
         const payload = event.payload;
@@ -84,6 +89,7 @@
     return () => {
       disposed = true;
       unlisten?.();
+      stopTray?.();
       stopTheme();
     };
   });

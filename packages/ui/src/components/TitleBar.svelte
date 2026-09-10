@@ -73,7 +73,7 @@
     await (await windowOf()).toggleMaximize();
   }
 
-  /** The shell turns this into a hide to the tray. */
+  /** The shell quits by default, or hides when its close-to-tray setting is on. */
   async function close() {
     await (await windowOf()).close();
   }

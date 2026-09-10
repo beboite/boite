@@ -79,6 +79,7 @@ export class Scheduler {
       if (this.running.size >= settings.maxConcurrentTurns) break;
       const index = this.queue.findIndex(
         (entry) => this.runningForAccount(entry.accountId) < settings.perAccountConcurrency
+          && !this.core.plugins.blocksAccount(entry.accountId)
           && ![...this.running.values()].some((run) => run.threadId === entry.threadId),
       );
       if (index < 0) break;

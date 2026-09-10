@@ -16,6 +16,8 @@ import { Router } from './router.ts';
 import { Scheduler } from './scheduler.ts';
 import { SettingsStore } from './settings.ts';
 import { ThreadStore } from './threads.ts';
+import { QuotaStore } from './quotas.ts';
+import { PluginStore } from './plugins.ts';
 
 export const CORE_VERSION: string = pkg.version;
 
@@ -48,6 +50,8 @@ export class Core {
   readonly procs: ProcRegistry;
   readonly scheduler: Scheduler;
   readonly threads: ThreadStore;
+  readonly quotas: QuotaStore;
+  readonly plugins: PluginStore;
 
   subscribers: SubscriptionSink = { hasSubscribers: () => false };
 
@@ -69,6 +73,8 @@ export class Core {
     this.procs = new ProcRegistry(this.journal, this.bus);
     this.scheduler = new Scheduler(this);
     this.threads = new ThreadStore(this);
+    this.quotas = new QuotaStore(this);
+    this.plugins = new PluginStore(this);
 
     registerModules(this);
     this.procs.applySettings(this.settings.get());
@@ -114,6 +120,7 @@ export class Core {
   }
 
   async close(): Promise<void> {
+    await this.plugins.close();
     await this.scheduler.drain();
     this.providers.installs.stop();
     shutdownDrivers();

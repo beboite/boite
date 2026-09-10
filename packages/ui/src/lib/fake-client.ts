@@ -4,6 +4,9 @@ import {
   PROTOCOL_VERSION,
   RpcErrorCode,
   type Account,
+  type AccountQuota,
+  type PluginState,
+  type PluginPool,
   type CoreInfo,
   type Message,
   type MessageId,
@@ -238,6 +241,12 @@ export class FakeClient implements ObservableClient {
   #processes: ProcessRecord[] = [];
   #usage = new Map<ThreadId, Usage>();
   #settings: Settings;
+  #quotaEnabled: Record<string, boolean> = {};
+  #plugin: PluginState = { id: 'kebacc-switcher', name: 'kebacc-switcher', version: null, availableVersion: '2.0.1', status: 'not-installed', progress: 0, error: null };
+  #pluginPools: PluginPool[] = ['claude', 'codex', 'antigravity'].map((provider) => ({ provider, accounts: [
+    { email: 'work@example.com', active: true, checkedSecondsAgo: 10, windows: [{ id: 'fiveHour', label: '5 hours', usedPercent: 32, resetsAt: null }, { id: 'sevenDay', label: 'Weekly', usedPercent: 74, resetsAt: null }] },
+    { email: 'personal@example.com', active: false, checkedSecondsAgo: 10, windows: [{ id: 'fiveHour', label: '5 hours', usedPercent: 8, resetsAt: null }] },
+  ] }));
   #scheduler: SchedulerState;
   #core: CoreInfo;
 
@@ -358,6 +367,30 @@ export class FakeClient implements ObservableClient {
 
   async #dispatch(method: RpcMethodName, rawParams: unknown): Promise<unknown> {
     switch (method) {
+      case 'quotas.configure': {
+        const params = rawParams as RpcParams<'quotas.configure'>;
+        this.#quotaEnabled[params.accountId] = params.enabled;
+        const rows = this.#quotas(); this.#emit('quotas.updated', rows); return rows;
+      }
+      case 'quotas.list': return this.#quotas();
+      case 'plugins.list': return [structuredClone(this.#plugin)];
+      case 'plugins.install': {
+        this.#plugin = { ...this.#plugin, status: 'installed', version: '2.0.1', progress: 100 };
+        this.#emit('plugins.updated', structuredClone(this.#plugin)); return structuredClone(this.#plugin);
+      }
+      case 'plugins.cancel': return structuredClone(this.#plugin);
+      case 'plugins.uninstall': {
+        this.#plugin = { ...this.#plugin, status: 'not-installed', version: null, progress: 0 };
+        this.#emit('plugins.updated', structuredClone(this.#plugin)); return structuredClone(this.#plugin);
+      }
+      case 'plugins.accounts': return structuredClone(this.#pluginPools);
+      case 'plugins.accountAction': {
+        const params = rawParams as RpcParams<'plugins.accountAction'>;
+        const pool = this.#pluginPools.find((pool) => pool.provider === params.provider);
+        if (pool && params.action === 'switch') for (const account of pool.accounts) account.active = account.email === params.email;
+        if (pool && params.action === 'remove') pool.accounts = pool.accounts.filter((a) => a.email !== params.email);
+        return structuredClone(this.#pluginPools);
+      }
       case 'hello':
         return { core: this.#core };
 
@@ -736,6 +769,19 @@ export class FakeClient implements ObservableClient {
         });
       }
     }
+  }
+
+  #quotas(): AccountQuota[] {
+    return this.#accounts.map((account, index) => ({
+      accountId: account.id, providerId: account.providerId, providerName: this.#providers.find((p) => p.id === account.providerId)?.name ?? account.providerId,
+      label: account.label, enabled: this.#quotaEnabled[account.id] !== false,
+      status: this.#quotaEnabled[account.id] === false ? 'disabled' : 'ready',
+      checkedAt: Date.now(), error: null,
+      windows: this.#quotaEnabled[account.id] === false ? [] : [
+        { id: 'primary', label: '5 hours', usedPercent: index === 0 ? 32 : 87, resetsAt: Date.now() + 2 * 3600_000 },
+        { id: 'secondary', label: 'Weekly', usedPercent: 61, resetsAt: Date.now() + 3 * 86400_000 },
+      ],
+    }));
   }
 
   // -------------------------------------------------------------------------

@@ -143,8 +143,8 @@ export class BrowserPage {
    * Drives a page that something else launched, such as the shell's WebView2
    * started with `--remote-debugging-port`. Closing it kills nothing.
    */
-  static async attach(port: number): Promise<BrowserPage> {
-    const socket = await openSocket(await waitForPageTarget(port));
+  static async attach(port: number, urlIncludes = ''): Promise<BrowserPage> {
+    const socket = await openSocket(await waitForPageTarget(port, urlIncludes));
     const page = new BrowserPage(socket, null, null);
     await page.send('Page.enable', {});
     await page.send('Runtime.enable', {});
@@ -292,7 +292,7 @@ export class BrowserPage {
   }
 }
 
-async function waitForPageTarget(port: number): Promise<TargetInfo> {
+async function waitForPageTarget(port: number, urlIncludes = ''): Promise<TargetInfo> {
   const deadline = Date.now() + CONNECT_TIMEOUT_MS;
   let last = 'the debugging port never answered';
   for (;;) {
@@ -300,7 +300,7 @@ async function waitForPageTarget(port: number): Promise<TargetInfo> {
       const response = await fetch(`http://127.0.0.1:${port}/json/list`);
       const targets = (await response.json()) as TargetInfo[];
       const page = targets.find(
-        (target) => target.type === 'page' && typeof target.webSocketDebuggerUrl === 'string',
+        (target) => target.type === 'page' && target.url.includes(urlIncludes) && typeof target.webSocketDebuggerUrl === 'string',
       );
       if (page !== undefined) return page;
       last = `no page target among ${targets.length}`;

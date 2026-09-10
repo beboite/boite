@@ -2,6 +2,7 @@ import { existsSync, mkdtempSync, readFileSync, readdirSync, statSync } from 'no
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { afterAll, beforeAll, expect, test } from 'bun:test';
+import { connect } from '../../packages/core/src/client.ts';
 import { BrowserPage, freePort } from './lib/cdp.ts';
 import { freshDataDir, killProcessTree, removeDirectory, startCore } from './lib/core.ts';
 
@@ -257,6 +258,71 @@ async function waitForHealthyCore(ownDataDir: string): Promise<CoreFile> {
 
 /** The webview exposes its page target before the IPC bridge is injected. */
 const TAURI_READY = "typeof window.__TAURI_INTERNALS__?.invoke === 'function'";
+
+shellTest('close exits by default; the persisted setting hides instead; the native quota page connects', async () => {
+  const ownDataDir = freshDataDir();
+  let ownPid = 0;
+  let ownCore: CoreFile | undefined;
+  let ownPage: BrowserPage | undefined;
+  let popup: BrowserPage | undefined;
+  try {
+    const port = await freePort(); ownPid = spawnHiddenShell(ownDataDir, port);
+    ownCore = await waitForHealthyCore(ownDataDir);
+    ownPage = await BrowserPage.attach(port);
+    await ownPage.waitFor(TAURI_READY);
+    expect(await ownPage.evaluate(`window.__TAURI_INTERNALS__.invoke('close_behavior')`)).toBe(false);
+    await ownPage.waitFor(`document.querySelector('[data-testid="titlebar"] .close')`);
+    await ownPage.evaluate(`document.querySelector('[data-testid="titlebar"] .close').click()`);
+    await waitUntil(() => !pidAlive(ownPid) && !pidAlive(ownCore!.pid), CORE_GONE_TIMEOUT_MS);
+    expect(pidAlive(ownPid)).toBe(false); expect(pidAlive(ownCore.pid)).toBe(false);
+    await ownPage.close(); ownPage = undefined;
+
+    const secondPort = await freePort(); ownPid = spawnHiddenShell(ownDataDir, secondPort);
+    ownCore = await waitForHealthyCore(ownDataDir); ownPage = await BrowserPage.attach(secondPort);
+    await ownPage.waitFor(`document.querySelector('[data-testid="nav-settings"]')`);
+    await ownPage.click('[data-testid="nav-settings"]');
+    await ownPage.waitFor(`document.querySelector('[data-testid="close-to-tray"]') && !document.querySelector('[data-testid="close-to-tray"]').disabled`);
+    await ownPage.click('[data-testid="close-to-tray"]');
+    await ownPage.waitFor(`document.querySelector('[data-testid="close-to-tray"]').checked`);
+    await ownPage.screenshot(join(import.meta.dir, '.artifacts', 'shell-close-settings.png'));
+    expect(JSON.parse(readFileSync(join(ownDataDir, 'shell-settings.json'), 'utf8')).close_to_tray).toBe(true);
+    await ownPage.evaluate(`document.querySelector('[data-testid="titlebar"] .close').click()`);
+    expect(await healthy(ownCore.port)).toBe(true);
+    expect(pidAlive(ownPid)).toBe(true);
+
+    // Keep every real login out of this test. The popup still crosses real IPC and WS.
+    const client = await connect(`http://127.0.0.1:${ownCore.port}`, ownCore.token);
+    try {
+      for (const account of await client.call('accounts.list', {})) await client.call('quotas.configure', { accountId: account.id, enabled: false });
+    } finally { client.close(); }
+    await ownPage.evaluate(`window.__TAURI_INTERNALS__.invoke('quota_window', {action:'show'})`);
+    popup = await BrowserPage.attach(secondPort, 'view=quotas');
+    await popup.waitFor(`document.querySelector('[data-testid="quota-popup"]') && !document.querySelector('[role="alert"]')`);
+    await popup.waitFor(`document.querySelector('[data-testid="quota-list"]')`);
+    expect(await popup.evaluate(`window.__TAURI_INTERNALS__.invoke('core_endpoint').then(e => Boolean(e.url && e.token))`)).toBe(true);
+    await popup.screenshot(join(import.meta.dir, '.artifacts', 'shell-quota-popup.png'));
+    await popup.evaluate(`window.__TAURI_INTERNALS__.invoke('quota_window', {action:'hide'})`);
+    await popup.close(); popup = undefined;
+    await quitShell(ownPage);
+    await waitUntil(() => !pidAlive(ownPid), CORE_GONE_TIMEOUT_MS);
+    await ownPage.close(); ownPage = undefined;
+
+    const thirdPort = await freePort(); ownPid = spawnHiddenShell(ownDataDir, thirdPort);
+    ownCore = await waitForHealthyCore(ownDataDir); ownPage = await BrowserPage.attach(thirdPort);
+    await ownPage.waitFor(TAURI_READY);
+    expect(await ownPage.evaluate(`window.__TAURI_INTERNALS__.invoke('close_behavior')`)).toBe(true);
+    await ownPage.evaluate(`window.__TAURI_INTERNALS__.invoke('close_behavior', {enabled:false})`);
+    await ownPage.waitFor(`document.querySelector('[data-testid="titlebar"] .close')`);
+    await ownPage.evaluate(`document.querySelector('[data-testid="titlebar"] .close').click()`);
+    await waitUntil(() => !pidAlive(ownPid) && !pidAlive(ownCore!.pid), CORE_GONE_TIMEOUT_MS);
+    expect(pidAlive(ownPid)).toBe(false); expect(pidAlive(ownCore.pid)).toBe(false);
+  } finally {
+    await popup?.close(); await ownPage?.close();
+    if (ownPid) killProcessTree(ownPid);
+    if (ownCore) killProcessTree(ownCore.pid);
+    await removeDirectory(ownDataDir);
+  }
+}, TIMEOUT);
 
 async function waitUntil(done: () => boolean, timeoutMs: number): Promise<void> {
   const deadline = Date.now() + timeoutMs;

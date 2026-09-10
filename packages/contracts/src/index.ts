@@ -235,6 +235,41 @@ export interface ProviderRejected {
 
 export type AccountStatus = 'unknown' | 'ok' | 'unauthenticated' | 'error';
 
+export interface QuotaWindow {
+  id: string;
+  label: string;
+  usedPercent: number;
+  resetsAt: Timestamp | null;
+}
+
+/** Provider-reported limits, never inferred from Boite's token ledger. */
+export interface AccountQuota {
+  accountId: AccountId;
+  providerId: ProviderId;
+  providerName: string;
+  label: string;
+  enabled: boolean;
+  status: 'ready' | 'unavailable' | 'unsupported' | 'disabled';
+  windows: QuotaWindow[];
+  checkedAt: Timestamp | null;
+  error: string | null;
+}
+
+export interface PluginState {
+  id: string;
+  name: string;
+  version: string | null;
+  availableVersion: string;
+  status: 'not-installed' | 'installed' | 'installing' | 'error';
+  progress: number;
+  error: string | null;
+}
+
+export interface PluginPool {
+  provider: string;
+  accounts: { email: string; active: boolean; windows: QuotaWindow[]; checkedSecondsAgo: number | null }[];
+}
+
 export interface Account {
   id: AccountId;
   providerId: ProviderId;
@@ -544,6 +579,17 @@ export interface CoreInfo {
 // ---------------------------------------------------------------------------
 
 export interface RpcMethods {
+  'quotas.list': { params: { refresh?: boolean }; result: AccountQuota[] };
+  'quotas.configure': { params: { accountId: AccountId; enabled: boolean }; result: AccountQuota[] };
+  'plugins.list': { params: Record<string, never>; result: PluginState[] };
+  'plugins.install': { params: { id: string }; result: PluginState };
+  'plugins.cancel': { params: { id: string }; result: PluginState };
+  'plugins.uninstall': { params: { id: string }; result: PluginState };
+  'plugins.accounts': { params: { id: string; refresh?: boolean }; result: PluginPool[] };
+  'plugins.accountAction': {
+    params: { id: string; provider: string; action: 'add' | 'switch' | 'remove'; email?: string };
+    result: PluginPool[];
+  };
   hello: {
     params: { token: string; protocolVersion: number; client: { name: string; version: string } };
     result: { core: CoreInfo };
@@ -715,6 +761,8 @@ export type RpcParams<M extends RpcMethodName> = RpcMethods[M]['params'];
 export type RpcResult<M extends RpcMethodName> = RpcMethods[M]['result'];
 
 export interface RpcEvents {
+  'quotas.updated': AccountQuota[];
+  'plugins.updated': PluginState;
   /** A project `projects.add` created. A known path returns its project without one. */
   'project.added': Project;
   /** A project `projects.remove` deleted, after the `thread.removed` of each of its threads. */

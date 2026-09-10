@@ -1,6 +1,8 @@
 <script lang="ts">
-  import { untrack } from 'svelte';
-  import type { Account, ProviderSummary } from '@boite/contracts';
+  import { onMount, untrack } from 'svelte';
+  import type { Account, AccountQuota, ProviderSummary } from '@boite/contracts';
+  import QuotaList from './QuotaList.svelte';
+  import ProviderIcon from './ProviderLogo.svelte';
   import InstallControl from './InstallControl.svelte';
   import Menu from './Menu.svelte';
   import { confirm } from '../lib/confirm.svelte';
@@ -16,13 +18,55 @@
   let useDefaultLocation = $state(false);
   /** One pending code per account, so two logins never share a field. */
   let codes = $state<Record<string, string>>({});
+  let quotas = $state<AccountQuota[]>([]);
+  let quotaBusy = $state(false);
+  let connectAfterCreate = $state(false);
+  let submitting = $state(false);
+  let verified = $state<Record<string, number>>({});
+  let checking = $state<string | null>(null);
+  async function readQuotas(refresh = false) {
+    if (!store.client || quotaBusy) return;
+    quotaBusy = true;
+    try { quotas = await store.client.call('quotas.list', { refresh }); }
+    catch (error) { store.error = String(error); }
+    finally { quotaBusy = false; }
+  }
+  async function monitor(accountId: string, enabled: boolean) {
+    if (!store.client) return;
+    try { quotas = await store.client.call('quotas.configure', { accountId, enabled }); if (enabled) await readQuotas(); }
+    catch (error) { store.error = String(error); }
+  }
+  async function verify(account: Account) {
+    if (!store.client) return;
+    checking = account.id;
+    try {
+      await store.checkAccount(account.id);
+      const { models } = await store.client.call('providers.probe', { providerId: account.providerId, accountId: account.id });
+      verified = { ...verified, [account.id]: models.length };
+    } catch (error) { store.error = String(error); }
+    finally { checking = null; }
+  }
+  function connect(provider: ProviderSummary) {
+    providerId = provider.id; label = provider.name; useDefaultLocation = false;
+    connectAfterCreate = true; adding = true;
+  }
+  onMount(() => {
+    void readQuotas();
+    const off = store.client?.on('quotas.updated', (rows) => { quotas = rows; });
+    return () => off?.();
+  });
 
   async function submit(event: SubmitEvent) {
     event.preventDefault();
     if (!providerId || label.trim().length === 0) return;
-    await store.addAccount({ providerId, label: label.trim(), useDefaultLocation: !alwaysIsolated && useDefaultLocation });
+    if (submitting) return;
+    submitting = true;
+    const account = await store.addAccount({ providerId, label: label.trim(), useDefaultLocation: !alwaysIsolated && useDefaultLocation });
+    submitting = false;
+    if (!account) return;
     label = '';
     adding = false;
+    if (connectAfterCreate && account.isolationDir !== null) await store.loginAccount(account.id);
   }
 
   /** The providers whose files Boite downloads itself, install block and all. */
@@ -48,7 +92,7 @@
    */
   function canLogIn(account: Account, provider: ProviderSummary | null): boolean {
     if (!provider?.available || !provider.login) return false;
-    return account.isolationDir !== null && account.status !== 'ok' && store.logins[account.id]?.state !== 'running';
+    return account.isolationDir !== null && store.logins[account.id]?.state !== 'running';
   }
 
   async function remove(account: Account) {
@@ -73,9 +117,20 @@
 
 <div class="page" data-testid="accounts-page">
   <header>
-    <h1>{strings.accounts.heading}</h1>
-    <button class="quiet" onclick={() => (adding = !adding)}>{strings.accounts.add}</button>
+    <h1>{strings.providerSettings.heading}</h1>
+    <button class="quiet" onclick={() => { connectAfterCreate = false; adding = !adding; }}>{strings.accounts.add}</button>
   </header>
+  <p class="intro">{strings.providerSettings.intro}</p>
+  <div class="providers">
+    {#each store.providers as provider (provider.id)}
+      <section class="card provider" data-testid="provider-settings" data-provider-id={provider.id}>
+        <div class="provider-title"><ProviderIcon providerId={provider.id} size={22} /><h2>{provider.name}</h2></div>
+        <p class="intro">{provider.available ? strings.providerSettings.available : strings.providerSettings.missing}</p>
+        {#if provider.executable}<details><summary>{strings.providerSettings.executable}</summary><code>{provider.executable}</code></details>{/if}
+        <button class="quiet" disabled={!provider.available || !provider.login} onclick={() => connect(provider)}>{strings.providerSettings.connect}</button>
+      </section>
+    {/each}
+  </div>
 
   {#if managed.length > 0}
     <section class="card managed" data-testid="managed-providers">
@@ -111,7 +166,7 @@
         </label>
       {/if}
       <div class="actions">
-        <button type="submit" class="primary" disabled={label.trim().length === 0}>
+        <button type="submit" class="primary" disabled={submitting || label.trim().length === 0}>
           {strings.accounts.create}
         </button>
         <button type="button" class="quiet" onclick={() => (adding = false)}>
@@ -124,29 +179,13 @@
   {#if store.accounts.length === 0}
     <p class="empty">{strings.accounts.empty}</p>
   {:else}
-    <table class="card">
-      <thead>
-        <tr>
-          <th>{strings.accounts.label}</th>
-          <th>{strings.accounts.provider}</th>
-          <th>{strings.accounts.identity}</th>
-          <th>{strings.accounts.isolation}</th>
-          <th></th>
-          <th></th>
-        </tr>
-      </thead>
-      <tbody>
+    <div class="account-list">
         {#each store.accounts as account (account.id)}
           {@const login = store.logins[account.id]}
           {@const provider = store.providerOf(account.providerId)}
-          <tr data-testid="account-row" data-account-id={account.id}>
-            <td>{account.label}</td>
-            <td class="mono">{store.providerOf(account.providerId)?.shortName ?? account.providerId}</td>
-            <td class="mono">{account.identity ?? strings.common.none}</td>
-            <td class="mono path" title={account.isolationDir ?? strings.accounts.defaultLocation}>
-              {account.isolationDir ?? strings.accounts.defaultLocation}
-            </td>
-            <td>
+          {@const quota = quotas.find((row) => row.accountId === account.id)}
+          <section class="card account" data-testid="account-row" data-account-id={account.id}>
+            <header><div class="provider-title"><ProviderIcon providerId={account.providerId} size={20} /><h2>{account.label}</h2></div>
               <span
                 class="status"
                 class:ok={account.status === 'ok'}
@@ -154,8 +193,10 @@
               >
                 {strings.accounts.status[account.status]}
               </span>
-            </td>
-            <td class="row-actions">
+            </header>
+            <p class="intro">{provider?.name ?? account.providerId} · {account.isolationDir === null ? strings.providerSettings.default : strings.providerSettings.isolated}{account.identity ? ` · ${account.identity}` : ''}</p>
+            <p class="intro">{account.isolationDir === null ? strings.providerSettings.defaultHint : strings.providerSettings.isolatedHint}</p>
+            <div class="row-actions">
               {#if canLogIn(account, provider)}
                 <button
                   class="quiet"
@@ -163,20 +204,24 @@
                   data-account-id={account.id}
                   onclick={() => void store.loginAccount(account.id)}
                 >
-                  {strings.accounts.login}
+                  {account.status === 'ok' ? strings.providerSettings.reconnect : strings.accounts.login}
                 </button>
               {/if}
               <button class="quiet" onclick={() => void store.checkAccount(account.id)}>
                 {strings.accounts.check}
               </button>
+              <button class="quiet" disabled={!provider?.available || checking !== null} data-testid="account-verify" onclick={() => void verify(account)}>{strings.providerSettings.modelCheck}</button>
               <button class="quiet" data-testid="account-remove" data-account-id={account.id} onclick={() => void remove(account)}>
                 {strings.accounts.remove}
               </button>
-            </td>
-          </tr>
+            </div>
+            {#if verified[account.id] !== undefined}<p class="intro" role="status">{strings.providerSettings.models.replace('{count}', String(verified[account.id]))}</p>{/if}
+            {#if quota && quota.status !== 'unsupported'}
+              <label class="monitor"><span>{strings.quotas.monitor}</span><input type="checkbox" role="switch" data-testid="quota-monitor" checked={quota.enabled} onchange={(event) => void monitor(account.id, event.currentTarget.checked)} /></label>
+              <QuotaList rows={[quota]} />
+            {/if}
           {#if login}
-            <tr class="login" data-testid="account-login-row" data-account-id={account.id}>
-              <td colspan="6">
+            <div class="login" data-testid="account-login-row" data-account-id={account.id}>
                 <div class="login-box">
                 {#if login.url}
                   <a
@@ -213,13 +258,13 @@
                   </form>
                 {/if}
                 </div>
-              </td>
-            </tr>
+            </div>
           {/if}
+          </section>
         {/each}
-      </tbody>
-    </table>
+    </div>
   {/if}
+  <button class="quiet" disabled={quotaBusy} onclick={() => void readQuotas(true)}>{strings.quotas.refresh}</button>
 </div>
 
 <style>
@@ -269,9 +314,19 @@
     gap: 6px;
   }
 
-  table {
-    background: var(--color-surface);
-  }
+  .intro { color: var(--color-muted-foreground); font-size: var(--text-sm); }
+  .providers { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: 10px; max-width: 960px; margin-bottom: 20px; }
+  .provider { display: flex; flex-direction: column; gap: 8px; margin: 0; }
+  .provider button { margin-top: auto; }
+  .provider-title { display: flex; gap: 10px; align-items: center; }
+  .provider .provider-title h2, .account .provider-title h2 { margin: 0; font-size: var(--text-base); text-transform: none; }
+  .provider p { margin: 0; }
+  details { font-size: var(--text-sm); }
+  details code { display: block; overflow-wrap: anywhere; margin-top: 6px; }
+  .account-list { display: grid; gap: 12px; max-width: 960px; margin: 16px 0; }
+  .account { margin: 0; }
+  .account header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .monitor { display: flex; align-items: center; justify-content: space-between; margin: 14px 0; gap: 12px; }
 
   /* The first card of the page: one row per provider Boite downloads itself. */
   .managed {
@@ -280,11 +335,6 @@
     max-width: 560px;
   }
 
-  .path {
-    max-width: 300px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
 
   .status {
     font-size: var(--text-xs);
@@ -304,32 +354,28 @@
   .row-actions {
     display: flex;
     gap: 6px;
-    justify-content: flex-end;
+    flex-wrap: wrap;
   }
 
-  /* A row under the pointer fills, the way every other list here answers. */
-  tbody tr:not(.login):hover td {
-    background: var(--color-surface-2);
-  }
-
-  /* The cell stays a table cell so the colspan holds; the grid lives inside it. */
-  tr.login td {
+  .login {
     background: var(--color-surface-2);
     border-left: 2px solid var(--color-live);
+    padding: 12px;
+    margin-top: 12px;
   }
 
-  tr.login .login-box {
+  .login .login-box {
     display: grid;
     gap: 6px;
   }
 
-  tr.login .link {
+  .login .link {
     font-family: var(--font-mono);
     font-size: var(--text-sm);
     overflow-wrap: anywhere;
   }
 
-  tr.login .output {
+  .login .output {
     margin: 0;
     font-family: var(--font-mono);
     font-size: var(--text-sm);
@@ -337,17 +383,17 @@
     overflow-wrap: anywhere;
   }
 
-  tr.login .output.bad {
+  .login .output.bad {
     color: var(--color-danger);
   }
 
-  tr.login .code {
+  .login .code {
     display: flex;
     gap: 6px;
     align-items: center;
   }
 
-  tr.login .code input {
+  .login .code input {
     flex: 1;
     max-width: 360px;
   }

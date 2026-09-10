@@ -1,5 +1,6 @@
 import { mount } from 'svelte';
 import App from './App.svelte';
+import QuotaApp from './QuotaApp.svelte';
 import './app.css';
 import { registerServiceWorker } from './lib/sw';
 
@@ -8,4 +9,4 @@ if (!target) throw new Error('index.html is missing the #app element');
 
 registerServiceWorker();
 
-export default mount(App, { target });
+export default mount(new URLSearchParams(location.search).get('view') === 'quotas' ? QuotaApp : App, { target });

@@ -564,10 +564,23 @@ html[data-theme='grain'] body::before {
   inset: 0;
   z-index: -1;
   pointer-events: none;
-  background-image: var(--grain-tile), var(--grain-fade);
-  background-size: 160px 160px, cover;
-  background-repeat: repeat, no-repeat;
-  background-blend-mode: overlay, normal;
+  background-image: var(--grain-fade);
+  background-size: cover;
+  background-repeat: no-repeat;
+}
+
+/* Grain must sit above the translucent chrome and the acrylic backdrop blur.
+   A separate, noninteractive layer keeps the texture visible on both materials. */
+html[data-theme='grain'] body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  pointer-events: none;
+  background-image: var(--grain-tile);
+  background-size: 160px 160px;
+  background-repeat: repeat;
+  opacity: 0.85;
 }
 
 /*
@@ -587,6 +600,7 @@ html[data-theme='grain'] .settings nav {
 }
 
 html[data-theme='grain'] .chat,
+html[data-theme='grain'] .settings > section,
 html[data-theme='grain'] .first-run {
   background: color-mix(in oklab, var(--color-background) 62%, transparent);
 }

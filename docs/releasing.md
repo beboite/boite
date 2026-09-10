@@ -148,6 +148,12 @@ anything: it names every file and where it goes.
 
 ## How the shell finds a core
 
+Closing the window exits the shell and its owned core by default. General settings
+can keep it in the notification area instead. The choice lives in
+`<dataDir>/shell-settings.json` and survives restart. The tray's Quit action always
+exits. Hovering or clicking the tray icon opens a compact quota window; its Show
+action restores the main window. Quota polling runs only while that popup is open.
+
 The installed shell starts a core of its own, adopts one that already answers,
 and owns the one it started through a `KILL_ON_JOB_CLOSE` Job Object, so a shell
 killed hard takes its core down with it instead of leaving an orphan holding

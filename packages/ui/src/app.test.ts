@@ -475,7 +475,7 @@ test('an isolated account that is not logged in logs in from the Accounts page',
 
   await waitFor(() => store.accountOf('a-claude-side')?.status === 'ok');
   await waitFor(() => document.querySelector('[data-testid=account-login-row]') === null);
-  expect(document.querySelector('[data-testid=account-login]')).toBeNull();
+  expect(document.querySelector('[data-testid=account-login]')?.textContent).toContain('Reconnect');
 
   // The store is one module-level singleton: leave the next test on the chat.
   query<HTMLButtonElement>('[data-testid=settings-back]').click();

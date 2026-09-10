@@ -129,7 +129,18 @@ agent that keeps a background process on its configuration directory. An account
 that runs under `node` names nothing there, because the process in the job is
 `node` and killing every `node` on the machine is not a thing Boite will ever do.
 
-## What is not here yet
+## Quotas and account pools
 
-No account pools, no relay, no automatic rotation between seats. Those belong to
-a plugin, out of process, and the plugin host is not written.
+Providers shows connection actions, account checks and model discovery. Isolated
+accounts can reconnect there; default-location accounts keep their external login.
+Claude subscription quotas come from its OAuth usage endpoint using the account's
+credentials file. Keychain-only Claude credentials are not supported. Codex quotas
+come from `account/rateLimits/read`, without starting a conversation.
+
+Monitoring is configurable per account. Successful reads are cached for one minute,
+manual refreshes are at least ten seconds apart, and failures retry after five
+minutes. A failed refresh preserves the last reading and marks it stale. Other
+providers report that quotas are unsupported rather than inventing a balance.
+
+The optional [kebacc-switcher plugin](plugins.md) manages external CLI account pools.
+There is no automatic rotation or relay.
