@@ -22,7 +22,7 @@ that core, over an authenticated WebSocket.
 
 ```bash
 bun install
-bun run dev:core            # the host on 127.0.0.1, prints the pairing URL
+bun run dev:core            # the host on 127.0.0.1, prints a one-time pairing link
 bun run dev:ui              # vite dev server for the UI; add ?fake=1 for the in-memory client
 bun run check               # tsc on contracts and core, svelte-check on the UI
 bun run test                # bun test in packages/core, vitest in packages/ui
@@ -75,7 +75,8 @@ bench                measurements against Boite Legacy
 - [docs/providers.md](docs/providers.md): the descriptor format and the shipped
   providers.
 - [docs/accounts.md](docs/accounts.md): isolation directories and logins.
-- [docs/phone.md](docs/phone.md): pairing, the PWA, what is cached.
+- [docs/phone.md](docs/phone.md): pairing links and paired devices, the PWA,
+  what is cached.
 - [docs/trace.md](docs/trace.md): Job Objects, the trace, the caps, the guards.
 - [docs/releasing.md](docs/releasing.md): from a clean tree to the installer.
 

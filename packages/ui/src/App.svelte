@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import ChatView from './components/ChatView.svelte';
+  import CommandPalette from './components/CommandPalette.svelte';
   import ConfirmDialog from './components/ConfirmDialog.svelte';
   import ContextMenu from './components/ContextMenu.svelte';
   import DropOverlay from './components/DropOverlay.svelte';
@@ -73,6 +74,13 @@
     const root = appRoot;
     if (!root) return;
     return installExternalLinks(root);
+  });
+
+  // The unread count rides the document title, so the taskbar and a browser
+  // tab say "(2) Boite" while the window is somewhere behind.
+  $effect(() => {
+    const unread = store.unreadCount;
+    document.title = unread > 0 ? `(${unread}) ${strings.app.name}` : strings.app.name;
   });
 
   onMount(() => {
@@ -171,10 +179,9 @@
       event.preventDefault();
       store.startDraft();
     } else if (key === 'k') {
+      // The palette: threads across every project and the app's commands.
       event.preventDefault();
-      store.showChat();
-      if (store.sidebarCollapsed) store.toggleSidebar();
-      sidebar?.focusSearch();
+      store.paletteOpen = !store.paletteOpen;
     } else if (key === 'b') {
       event.preventDefault();
       store.toggleSidebar();
@@ -285,6 +292,7 @@
 
 <ContextMenu />
 <ConfirmDialog />
+<CommandPalette {store} />
 
 <style>
   .app {

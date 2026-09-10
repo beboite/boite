@@ -83,6 +83,36 @@ export const strings = {
     draft: 'New thread'
   },
 
+  palette: {
+    placeholder: 'Search threads, or type a command',
+    threads: 'Threads',
+    commands: 'Commands',
+    empty: 'Nothing matches.',
+    hint: 'Enter to open, Esc to close',
+    newThread: 'New thread',
+    addProject: 'Add a project',
+    settings: 'Open settings',
+    appearance: 'Appearance settings',
+    providers: 'Providers and accounts',
+    pair: 'Pair a phone',
+    sidebar: 'Toggle the sidebar',
+    panel: 'Toggle the right panel',
+    trace: 'Show the trace',
+    pin: 'Pin this thread',
+    unpin: 'Unpin this thread',
+    rename: 'Rename this thread',
+    archive: 'Archive this thread',
+    themeDark: 'Theme: dark',
+    themeLight: 'Theme: light',
+    themeSystem: 'Theme: system'
+  },
+
+  notify: {
+    done: 'Done',
+    failed: 'Failed',
+    needsYou: 'Needs your answer'
+  },
+
   permissionMode: {
     default: 'Ask',
     acceptEdits: 'Accept edits',
@@ -360,6 +390,9 @@ export const strings = {
     background: 'Background',
     closeToTray: 'Keep Boite running when the window closes',
     closeToTrayHint: 'Off by default. Enable to hide to the notification area and keep turns running. Quit always stops Boite.',
+    notifications: 'Notify me when a thread finishes or asks something',
+    notificationsHint: 'A toast for a thread you are not looking at, or when Boite is not the window in front. This machine only.',
+    notificationsDenied: 'Notifications are blocked for Boite on this system; allow them in its settings.',
     focusGuard: 'Keep agent windows out of the foreground',
     focusGuardHint: 'Windows an agent opens are sent behind Boite instead of taking your focus',
     muteAgents: 'Mute agent audio',

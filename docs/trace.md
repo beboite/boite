@@ -123,6 +123,12 @@ Both live under Settings, General, Background, and both are on by default.
 | `focusGuard` | an agent's window keeps the foreground it took |
 | `muteAgents` | an agent's audio reaches the speakers, and anything muted is unmuted |
 
+The third switch of that card, the notifications, is the UI's own and never
+reaches the core: a system toast when a thread finishes, fails or asks
+something while another thread is open or the window is not in front. The
+shell carries it through `tauri-plugin-notification`, the phone through Web
+Notifications, and it is stored per machine under `boite.notifications`.
+
 ## Linux and macOS
 
 There are no Job Objects. The registry records direct children at spawn and

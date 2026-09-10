@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import type { ThreadStatus } from '@boite/contracts';
 import { FakeClient } from './fake-client';
+import { setNotificationSender, type Toast } from './notify';
 import { Store } from './store.svelte';
 
 async function ready(): Promise<{ store: Store; client: FakeClient }> {
@@ -44,6 +45,35 @@ describe('Store', () => {
     expect(store.openThread?.unread).toBe(false);
     expect(store.threads.find((t) => t.id === 't-descriptors')?.unread).toBe(false);
     expect(store.unreadCount).toBe(0);
+  });
+
+  test('a turn finishing on a thread that is not open sends a toast, the open one does not', async () => {
+    const sent: Toast[] = [];
+    setNotificationSender(async (toast) => {
+      sent.push(toast);
+    });
+    const focused = vi.spyOn(document, 'hasFocus').mockReturnValue(true);
+    try {
+      const { store, client } = await ready();
+      await store.open('t-descriptors');
+
+      await client.call('turns.start', { threadId: 't-trace', prompt: 'quietly' });
+      await client.settled();
+      expect(sent).toEqual([{ title: 'Finish the trace tab', body: 'Done' }]);
+
+      await store.send('in front of me');
+      await client.settled();
+      expect(sent).toHaveLength(1);
+
+      // The switch off: a background turn says nothing.
+      await store.setNotifications(false);
+      await client.call('turns.start', { threadId: 't-trace', prompt: 'silence' });
+      await client.settled();
+      expect(sent).toHaveLength(1);
+    } finally {
+      focused.mockRestore();
+      setNotificationSender(null);
+    }
   });
 
   test('a pinned thread floats above the live ones of its project, and unpinning drops it back', async () => {

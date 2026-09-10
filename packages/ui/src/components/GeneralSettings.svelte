@@ -121,6 +121,19 @@
     <h2>{strings.settings.background}</h2>
     <label class="switch-row">
       <span class="text">
+        {strings.settings.notifications}
+        <span class="hint">{strings.settings.notificationsHint}</span>
+      </span>
+      <input
+        type="checkbox"
+        role="switch"
+        data-testid="setting-notifications"
+        checked={store.notifications}
+        onchange={(event) => void store.setNotifications(event.currentTarget.checked)}
+      />
+    </label>
+    <label class="switch-row">
+      <span class="text">
         {strings.settings.focusGuard}
         <span class="hint">{strings.settings.focusGuardHint}</span>
       </span>

@@ -39,6 +39,15 @@ import {
 import { resolveEndpoint, storeEndpoint } from './endpoint';
 import { titleFrom } from './format';
 import {
+  readNotifications,
+  requestNotificationPermission,
+  sendNotification,
+  shouldNotify,
+  toastFor,
+  writeNotifications,
+  type NotifyKind
+} from './notify';
+import {
   clampSidebar,
   DRAFT_STASH_KEY,
   defaultPrefs,
@@ -146,6 +155,12 @@ export class Store {
   /** The last one-time pairing link minted from Settings, until the page changes. */
   pairing = $state<PairingGrant | null>(null);
   sessions = $state<PairedSession[]>([]);
+  /** Toasts for threads the user is not looking at, per machine. */
+  notifications = $state(readNotifications());
+  /** The command palette, `Ctrl+K`. */
+  paletteOpen = $state(false);
+  /** Set by the palette's Rename: the chat header opens its title field and clears it. */
+  renameRequested = $state(false);
   error = $state<string | null>(null);
   page = $state<Page>('chat');
   settingsTab = $state<SettingsTab>('general');
@@ -434,6 +449,9 @@ export class Store {
     on('turn.finished', (turn) => {
       this.#upsertTurn(turn.threadId, turn);
       void this.refreshUsage();
+      // A stop is the user's own doing: nothing to tell them.
+      if (turn.status === 'done') this.#notify('done', turn.threadId, null);
+      else if (turn.status === 'error') this.#notify('error', turn.threadId, turn.error);
     });
 
     on('message.started', (message) => {
@@ -468,6 +486,7 @@ export class Store {
 
     on('permission.requested', (request) => {
       this.#mergePermissions([request]);
+      this.#notify('needs-you', request.threadId, null);
     });
     on('permission.resolved', ({ requestId }) => {
       this.pendingPermissions = this.pendingPermissions.filter((p) => p.id !== requestId);
@@ -475,6 +494,7 @@ export class Store {
 
     on('question.asked', (request) => {
       this.#mergeQuestions([request]);
+      this.#notify('needs-you', request.threadId, null);
     });
     on('question.answered', ({ questionId }) => {
       this.pendingQuestions = this.pendingQuestions.filter((q) => q.id !== questionId);
@@ -1342,6 +1362,29 @@ export class Store {
     } catch {
       /* the thread may already be gone */
     }
+  }
+
+  /** A toast for what happened where the user was not looking; the decision is `shouldNotify`. */
+  #notify(kind: NotifyKind, threadId: ThreadId, detail: string | null): void {
+    const go = shouldNotify({
+      kind,
+      threadId,
+      openThreadId: this.openThread?.id ?? null,
+      focused: typeof document !== 'undefined' && document.hasFocus() && document.visibilityState === 'visible',
+      enabled: this.notifications
+    });
+    if (!go) return;
+    const title = this.threads.find((t) => t.id === threadId)?.title ?? strings.app.name;
+    void sendNotification(toastFor(kind, title, detail));
+  }
+
+  /** The switch of the Background card; the platform prompt comes with the first turn-on. */
+  async setNotifications(enabled: boolean): Promise<void> {
+    this.notifications = enabled;
+    writeNotifications(enabled);
+    if (!enabled) return;
+    const granted = await requestNotificationPermission();
+    if (!granted) this.error = strings.settings.notificationsDenied;
   }
 
   #upsertThread(summary: ThreadSummary): void {

@@ -23,6 +23,13 @@
     renaming = true;
   }
 
+  // The palette asks for a rename from outside this header.
+  $effect(() => {
+    if (!store.renameRequested) return;
+    store.renameRequested = false;
+    beginRename();
+  });
+
   async function commitRename() {
     const thread = store.openThread;
     renaming = false;
