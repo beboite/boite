@@ -20,7 +20,7 @@ import { Unzip, UnzipInflate } from 'fflate';
 import type { ProviderId, ProviderInstall, ProviderInstallState } from '@boite/contracts';
 import { newId } from '../ids.ts';
 import { agentsDirPath, currentOs, providerAgentDir } from '../paths.ts';
-import { refused, unavailable } from '../errors.ts';
+import { messageOf, refused, unavailable } from '../errors.ts';
 
 /** Room left on the volume after the archive and the unpacked files, so nothing fills the disk. */
 export const FREE_SPACE_MARGIN = 256 * 1024 * 1024;
@@ -130,7 +130,9 @@ export class InstallManager {
     if (running !== undefined) return running.state;
     const failed = this.#failed.get(providerId);
     if (failed !== undefined && failed.version === install.version) return failed;
-    const record = this.#readRecord(providerId);
+    let record: ReleaseRecord | null;
+    try { record = this.#readRecord(providerId); }
+    catch (error) { return { state: 'failed', version: install.version, message: messageOf(error) }; }
     if (record !== null) {
       // What is on disk, and what the descriptor offers today: an older record
       // is an update waiting, not an absent provider whose files are missing.
@@ -149,16 +151,20 @@ export class InstallManager {
     if (!existsSync(file)) return null;
     try {
       const raw: unknown = JSON.parse(readFileSync(file, 'utf8'));
-      if (typeof raw !== 'object' || raw === null) return null;
+      if (typeof raw !== 'object' || raw === null) throw new Error('expected an object');
       const record = raw as Partial<ReleaseRecord>;
-      if (typeof record.version !== 'string' || !Array.isArray(record.files)) return null;
+      if (typeof record.version !== 'string' || record.version.length === 0) throw new Error('version must be a nonempty string');
+      if (!Array.isArray(record.files) || !record.files.every((entry) => typeof entry === 'string' && safeEntryPath(entry) !== null)) {
+        throw new Error('files must be an array of relative file paths');
+      }
+      if (typeof record.installedAt !== 'number' || !Number.isFinite(record.installedAt)) throw new Error('installedAt must be a finite timestamp');
       return {
         version: record.version,
-        files: record.files.filter((entry): entry is string => typeof entry === 'string'),
-        installedAt: typeof record.installedAt === 'number' ? record.installedAt : Date.now(),
+        files: record.files,
+        installedAt: record.installedAt,
       };
-    } catch {
-      return null;
+    } catch (error) {
+      throw refused(`${file}: invalid completion record: ${messageOf(error)}. Uninstall this release before installing again.`);
     }
   }
 

@@ -290,23 +290,50 @@ describe('pi driver', () => {
     expect(done.status).toBe('done');
   });
 
-  test('an extension dialog is refused and the turn still ends', async () => {
+  test('an extension dialog draws a question and returns the answer', async () => {
     const client = await startCore();
     const threadId = await piThread(client);
-    const logs = collectLogs(client);
+    const requested = client.next('question.asked', (request) => request.threadId === threadId);
 
     const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 20000);
     await client.call('turns.start', { threadId, prompt: '[ask]' });
-
+    const request = await requested;
+    await client.call('questions.answer', { threadId, questionId: request.id, optionIds: ['yes'] });
     const done = await finished;
     expect(done.status).toBe('done');
     const thread = await client.call('threads.get', { threadId });
     const parts = thread.messages[thread.messages.length - 1]?.parts ?? [];
     const text = parts.find((part) => part.type === 'text');
-    expect(text?.type === 'text' ? text.text : '').toBe('dialog cancelled');
-    await waitFor(() =>
-      logs.some((line) => line.includes('an extension asked the user a confirm, which Boite refuses')),
-    );
+    expect(text?.type === 'text' ? text.text : '').toBe('dialog answered');
+  });
+
+  for (const method of ['select', 'input', 'editor']) {
+    test(`the ${method} dialog returns the value pi expects`, async () => {
+      const client = await startCore();
+      const threadId = await piThread(client);
+      const asked = client.next('question.asked', (request) => request.threadId === threadId);
+      const finished = client.next('turn.finished', (turn) => turn.threadId === threadId);
+      await client.call('turns.start', { threadId, prompt: `[${method}]` });
+      const request = await asked;
+      const value = method === 'select' ? 'Second choice' : 'replacement text';
+      await client.call('questions.answer', { threadId, questionId: request.id,
+        optionIds: method === 'select' ? ['1'] : [], ...(method === 'select' ? {} : { text: value }) });
+      expect((await finished).status).toBe('done');
+      const thread = await client.call('threads.get', { threadId });
+      expect(thread.messages.at(-1)?.parts.some((part) => part.type === 'text' && part.text === value)).toBe(true);
+    });
+  }
+
+  test('stopping while a dialog waits cancels it and clears the question', async () => {
+    const client = await startCore();
+    const threadId = await piThread(client);
+    const asked = client.next('question.asked', (request) => request.threadId === threadId);
+    const finished = client.next('turn.finished', (turn) => turn.threadId === threadId);
+    await client.call('turns.start', { threadId, prompt: '[ask]' });
+    await asked;
+    await client.call('turns.stop', { threadId });
+    expect((await finished).status).toBe('stopped');
+    expect(await client.call('questions.list', { threadId })).toEqual([]);
   });
 
   test('a warm thread keeps one agent process for two turns, a cold one starts a second', async () => {

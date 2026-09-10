@@ -1,5 +1,7 @@
 import {
+  PROTOCOL_VERSION,
   RPC_PATH,
+  RpcCloseCode,
   RpcErrorCode,
   type ClientName,
   type CoreInfo,
@@ -56,7 +58,7 @@ export interface SocketLike {
   close(): void;
   onopen: (() => void) | null;
   onmessage: ((event: SocketMessage) => void) | null;
-  onclose: (() => void) | null;
+  onclose: ((event?: { code?: number }) => void) | null;
   onerror: (() => void) | null;
 }
 
@@ -223,10 +225,12 @@ export class WsClient implements ObservableClient {
 
       socket.onmessage = (event) => this.#receive(event.data);
       socket.onerror = () => fail('socket error');
-      socket.onclose = () => {
+      socket.onclose = (event) => {
+        const incompatible = event?.code === RpcCloseCode.ProtocolMismatch;
+        if (incompatible) this.#manuallyClosed = true;
         this.#dropPending('connection closed');
         this.#socket = null;
-        fail('connection closed');
+        fail(incompatible ? `core protocol version must be ${PROTOCOL_VERSION}` : 'connection closed');
         if (this.#manuallyClosed || !this.#options.reconnect) {
           this.#setState('closed');
           return;
@@ -237,9 +241,16 @@ export class WsClient implements ObservableClient {
       socket.onopen = () => {
         this.#send(socket, 'hello', {
           token: this.#options.token,
+          protocolVersion: PROTOCOL_VERSION,
           client: { name: this.#options.clientName, version: this.#options.version }
         }).then(
           (result) => {
+            if (result.core.protocolVersion !== PROTOCOL_VERSION) {
+              this.#manuallyClosed = true;
+              fail(`core protocol version must be ${PROTOCOL_VERSION}`);
+              socket.close();
+              return;
+            }
             this.#attempt = 0;
             this.#core = result.core;
             this.#setState('ready');
@@ -254,7 +265,10 @@ export class WsClient implements ObservableClient {
               settled = true;
               reject(error instanceof Error ? error : transportFailure(String(error)));
             }
-            socket.close();
+            // The hello parameters are fixed for this client. Retrying a
+            // protocol rejection cannot make them compatible with the core.
+            if (error instanceof RpcFailure && error.code === RpcErrorCode.InvalidParams) this.close();
+            else socket.close();
           }
         );
       };

@@ -35,6 +35,12 @@ export class SettingsStore {
   }
 
   set(patch: Partial<Settings>): Settings {
+    for (const key of ['maxConcurrentTurns', 'perAccountConcurrency'] as const) {
+      const value = patch[key];
+      if (value !== undefined && (!Number.isInteger(value) || value < 1)) {
+        throw invalidParams(`${key} must be a positive integer`, { field: key });
+      }
+    }
     for (const key of NUMERIC_KEYS) {
       const value = patch[key];
       if (value === undefined) continue;

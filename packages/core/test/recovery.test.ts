@@ -30,6 +30,16 @@ function turnOf(turns: Turn[], turnId: string): Turn | undefined {
 }
 
 describe('crash recovery', () => {
+  test('a busy thread with no unfinished turn becomes idle', async () => {
+    const harness = await startTestCore();
+    try {
+      const client = await harness.connect();
+      const { threadId } = await echoThread(harness, client);
+      harness.core.journal.db.query("UPDATE threads SET status = 'running' WHERE id = ?").run(threadId);
+      harness.core.threads.recoverStuckTurns();
+      expect(harness.core.threads.get(threadId).status).toBe('idle');
+    } finally { await harness.stop(); }
+  });
   test('a turn left running by a dead core is an error on the next start', async () => {
     const harness = await startTestCore();
     const client = await harness.connect();

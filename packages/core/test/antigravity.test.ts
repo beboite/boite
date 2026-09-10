@@ -113,6 +113,17 @@ async function agyAccount(client: CoreClient): Promise<{ id: string; isolationDi
 }
 
 describe('antigravity', () => {
+  test('removing an account waits for its ACP login process and drops the lease', async () => {
+    const client = await startCore();
+    const account = await agyAccount(client);
+    await client.call('accounts.login', { accountId: account.id });
+    await waitFor(() => fakeLog().includes('callback:'), 20_000);
+    expect(harness!.core.providers.installs.leaseCount('agy-fake')).toBe(1);
+    await client.call('accounts.remove', { accountId: account.id });
+    expect(harness!.core.providers.installs.leaseCount('agy-fake')).toBe(0);
+    expect(existsSync(account.isolationDir)).toBe(false);
+    expect(await client.call('accounts.logins', {})).toEqual([]);
+  });
   test('every account is isolated, and the seed file and the browser no-op are written before any spawn', async () => {
     const client = await startCore();
     const account = await agyAccount(client);

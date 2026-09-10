@@ -5,8 +5,7 @@
  *
  * Two halves have to agree. `data-glass` on `<html>` is what `app.css` reads to
  * let the ground through, and the `window_material` command is what puts the
- * material on the window itself. Outside the Tauri shell there is no window to
- * dress: nothing is stamped and no command goes out.
+ * material on the window itself. Unsupported shells keep an opaque document.
  */
 
 export type Glass = 'acrylic' | 'mica' | 'solid';
@@ -14,6 +13,8 @@ export type Glass = 'acrylic' | 'mica' | 'solid';
 export const GLASS_STORAGE_KEY = 'boite.glass';
 
 const KINDS: Glass[] = ['acrylic', 'mica', 'solid'];
+let materialQueue = Promise.resolve();
+let materialRevision = 0;
 
 /** The stored material, `acrylic` when nothing is stored or storage is refused. */
 export function readGlass(): Glass {
@@ -43,28 +44,42 @@ async function ask(command: string, args: Record<string, unknown> = {}): Promise
 }
 
 /**
- * Stamps the root and asks the shell for the material. Solid removes the
- * attribute rather than setting one, the way dark removes `data-theme`.
+ * Native changes run in order. Only the latest successful request paints the
+ * document, so a slow previous request cannot bring transparency back.
  */
-export function applyGlass(kind: Glass): void {
-  if (!insideShell()) return;
+export function applyGlass(kind: Glass): Promise<void> {
+  const revision = ++materialRevision;
   const root = document.documentElement;
-  if (kind === 'solid') delete root.dataset.glass;
-  else root.dataset.glass = kind;
-  void ask('window_material', { kind }).catch(() => {
-    /* the CSS still holds if the shell refuses; nothing here is worth a toast */
+  if (!insideShell()) {
+    delete root.dataset.glass;
+    return Promise.resolve();
+  }
+  materialQueue = materialQueue.then(async () => {
+    if (!(await glassSupported())) {
+      if (revision === materialRevision) delete root.dataset.glass;
+      return;
+    }
+    try {
+      await ask('window_material', { kind });
+      if (revision !== materialRevision || !insideShell()) return;
+      if (kind === 'solid') delete root.dataset.glass;
+      else root.dataset.glass = kind;
+    } catch {
+      if (revision === materialRevision) delete root.dataset.glass;
+    }
   });
+  return materialQueue;
 }
 
 /** Stores the choice and paints it in one call: what the settings control uses. */
 export function setGlass(kind: Glass): void {
   writeGlass(kind);
-  applyGlass(kind);
+  void applyGlass(kind);
 }
 
 /** The stored material, applied. Called once from the app's mount. */
 export function startGlass(): void {
-  applyGlass(readGlass());
+  void applyGlass(readGlass());
 }
 
 /**

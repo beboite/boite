@@ -59,10 +59,10 @@ const SHIPPED_SOURCES: { file: string; raw: unknown; when?: () => boolean }[] = 
   { file: 'shipped/echo.json', raw: echoShipped, when: echoEnabled },
 ];
 
-const PROTOCOLS: readonly Protocol[] = ['claude-sdk', 'codex-appserver', 'opencode', 'pi', 'acp', 'echo'];
+const PROTOCOLS: readonly Protocol[] = ['claude-sdk', 'codex-appserver', 'pi', 'acp', 'echo'];
 const OS_KEYS: readonly Os[] = ['windows', 'linux', 'macos'];
 const AUTH_KINDS: readonly ProviderAuth['kind'][] = ['oauth-cli', 'api-key', 'none'];
-const CANDIDATE_KINDS: readonly ExecutableCandidate['kind'][] = ['path', 'file', 'registry', 'acp-registry'];
+const CANDIDATE_KINDS: readonly ExecutableCandidate['kind'][] = ['path', 'file'];
 const QUIRKS: readonly ProviderQuirk[] = ['antigravity', 'grok'];
 const CAPABILITY_KEYS: readonly (keyof ProviderCapabilities)[] = [
   'approvals',
@@ -609,7 +609,6 @@ export function resolveExecutable(profile: OsProfile): string | null {
     } else if (candidate.kind === 'file') {
       if (existsSync(candidate.value)) return candidate.value;
     }
-    // 'registry' and 'acp-registry' resolve in a later wave.
   }
   return null;
 }
@@ -647,6 +646,8 @@ export function summarize(entry: LoadedProvider, installs: InstallManager, dataD
     source: entry.source,
     available,
     executable,
+    login: entry.descriptor.login === undefined ? false : { kind: entry.descriptor.login.acp === undefined ? 'command' : 'acp' },
+    alwaysIsolated: entry.descriptor.isolation?.alwaysIsolated === true,
     models: entry.descriptor.models,
     capabilities: entry.descriptor.capabilities,
     install: installs.stateOf(entry.descriptor.id, profile?.install),

@@ -94,6 +94,11 @@ ever start that executable: a window on the user's screen is forbidden.
 
 ## Rebuilding the shell executable
 
+`bun run test:shell` runs the Rust unit tests. A full `bun run e2e` fails when
+the shell executable or its workers are missing or stale. Set
+`BOITE_E2E_SKIP_SHELL=1` only for an explicitly partial core/UI run. The browser
+suite rebuilds the UI before starting so it cannot pass against an old bundle.
+
 The end to end run drives
 `apps/shell/src-tauri/target/release/boite-shell.exe`, and the only command that
 produces a working one is:

@@ -118,7 +118,7 @@ export function assertDriverRunnable(
 /**
  * Ask the driver of this protocol what the agent can run. A protocol whose
  * driver has no probe answers with the descriptor's own models, which is what
- * every non-ACP provider does.
+ * Claude and echo do.
  */
 export function probeModels(protocol: Protocol, ctx: ProbeContext): Promise<ProbeResult> {
   const driver = DRIVERS.get(protocol);

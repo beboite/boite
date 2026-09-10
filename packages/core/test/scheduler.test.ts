@@ -33,6 +33,45 @@ afterEach(async () => {
 });
 
 describe('scheduler', () => {
+  test('refuses a second in-flight turn without journaling its prompt', async () => {
+    const client = await harness.connect();
+    const [threadId = ''] = await threeThreads(client);
+    await client.call('turns.start', { threadId, prompt: '[sleep:60000] first' });
+    await expect(client.call('turns.start', { threadId, prompt: 'must not land' })).rejects.toThrow('in-flight');
+    expect(harness.core.threads.get(threadId).turns).toHaveLength(1);
+  });
+
+  test('archiving a queued thread stops its turn and refuses new turns', async () => {
+    const client = await harness.connect();
+    await client.call('settings.set', { maxConcurrentTurns: 1 });
+    const [running = '', queued = ''] = await threeThreads(client);
+    await client.call('turns.start', { threadId: running, prompt: '[sleep:60000]' });
+    await client.call('turns.start', { threadId: queued, prompt: 'must not run' });
+    harness.core.threads.archive(queued, true);
+    expect(harness.core.scheduler.state().queued).toHaveLength(0);
+    expect(harness.core.threads.get(queued).turns[0]?.status).toBe('stopped');
+    expect(harness.core.threads.get(queued).status).toBe('idle');
+    expect(() => harness.core.threads.startTurn(queued, 'no')).toThrow('archived');
+  });
+
+  test('clean shutdown marks queued turns stopped', async () => {
+    const client = await harness.connect();
+    await client.call('settings.set', { maxConcurrentTurns: 1 });
+    const [running = '', queued = ''] = await threeThreads(client);
+    await client.call('turns.start', { threadId: running, prompt: '[sleep:60000]' });
+    await client.call('turns.start', { threadId: queued, prompt: 'wait' });
+    await harness.core.scheduler.drain();
+    expect(harness.core.threads.get(queued).turns[0]?.status).toBe('stopped');
+  });
+
+  test('concurrency caps require positive integers', () => {
+    for (const key of ['maxConcurrentTurns', 'perAccountConcurrency'] as const) {
+      for (const value of [0, 0.5, 1.5]) {
+        expect(() => harness.core.settings.set({ [key]: value })).toThrow('positive integer');
+      }
+    }
+  });
+
   test('a third turn waits its turn and runs when a slot frees', async () => {
     const client = await harness.connect();
     const threads = await threeThreads(client);

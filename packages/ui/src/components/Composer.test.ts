@@ -63,6 +63,7 @@ async function mountOnFake(): Promise<void> {
   // The store is a singleton: the previous test's thread and its draft would
   // otherwise stand, and a boot that already has one opens nothing.
   store.booted = false;
+  store.composerStates = {};
   store.openThread = null;
   store.draft = null;
   running = mount(App, { target });
@@ -309,4 +310,122 @@ test('a model with no reasoning scale gets no chip at all', async () => {
   await waitFor(() => document.querySelector('[data-testid=composer-picker-menu]') === null);
   await waitFor(() => effortChip() === null);
   expect(query('[data-testid=composer-picker]').textContent).toContain('Claude Haiku 4.5');
+});
+
+test('a refused turn keeps the prompt for Enter and Ctrl+Enter', async () => {
+  await mountOnFake();
+  await store.open('t-trace');
+  const client = store.client!;
+  const call = client.call.bind(client);
+  vi.spyOn(client, 'call').mockImplementation((method, params) => {
+    if (method === 'turns.start') return Promise.reject(new Error('model refused'));
+    return call(method, params);
+  });
+  for (const ctrlKey of [false, true]) {
+    await type('keep my prompt');
+    press('Enter', { ctrlKey });
+    await waitFor(() => store.error === 'model refused');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(input().value).toBe('keep my prompt');
+    expect(store.openThread?.id).toBe('t-trace');
+    expect(store.draft).toBeNull();
+  }
+});
+
+test('reconnecting blocks keyboard and button sends without clearing text', async () => {
+  await mountOnFake();
+  await store.open('t-trace');
+  const submit = vi.spyOn(store, 'submit');
+  store.connection = 'connecting';
+  await type('wait for connection');
+  expect(query<HTMLButtonElement>('[data-testid=composer-send]').disabled).toBe(true);
+  press('Enter');
+  press('Enter', { ctrlKey: true });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(submit).not.toHaveBeenCalled();
+  expect(input().value).toBe('wait for connection');
+});
+
+test('queued prompts stay on their thread and run as separate turns', async () => {
+  await mountOnFake();
+  await store.open('t-trace');
+  store.openThread!.status = 'running';
+  await type('first queued prompt');
+  press('Enter');
+  await type('second queued prompt');
+  press('Enter');
+  await waitFor(() => input().value === '');
+  await store.open('t-descriptors');
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  const other = await store.client!.call('threads.get', { threadId: 't-descriptors' });
+  expect(other.messages.some((m) => m.parts.some((p) => p.type === 'text' && p.text.includes('queued prompt')))).toBe(false);
+  await store.open('t-trace');
+  await waitFor(() => store.openThread!.messages.filter((m) => m.role === 'user').length === 3 && !store.busy);
+  expect(store.openThread!.messages.filter((m) => m.role === 'user').slice(-2).map((m) => m.parts)).toEqual([
+    [{ type: 'text', text: 'first queued prompt' }],
+    [{ type: 'text', text: 'second queued prompt' }]
+  ]);
+});
+
+
+
+test('a draft keeps its prompt in the created thread when turns.start fails', async () => {
+  await mountOnFake();
+  store.startDraft();
+  await waitFor(() => store.draft !== null);
+  const client = store.client!;
+  const call = client.call.bind(client);
+  vi.spyOn(client, 'call').mockImplementation((method, params) => {
+    if (method === 'turns.start') return Promise.reject(new Error('draft turn refused'));
+    return call(method, params);
+  });
+  await type('the first prompt must survive');
+  press('Enter');
+  await waitFor(() => store.error === 'draft turn refused');
+  expect(store.openThread?.title).toBe('the first prompt must survive');
+  expect(input().value).toBe('the first prompt must survive');
+});
+
+test('a pending send cannot duplicate a turn or erase text typed for the next prompt', async () => {
+  await mountOnFake();
+  await store.open('t-trace');
+  const client = store.client!;
+  const call = client.call.bind(client);
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const rpc = vi.spyOn(client, 'call').mockImplementation(async (method, params) => {
+    if (method === 'turns.start') await gate;
+    return call(method, params);
+  });
+  await type('send this once');
+  press('Enter');
+  press('Enter');
+  await type('still composing the next prompt');
+  release();
+  await waitFor(() => store.busy);
+  expect(input().value).toBe('still composing the next prompt');
+  expect(rpc.mock.calls.filter(([method]) => method === 'turns.start')).toHaveLength(1);
+});
+
+test('queued prompts survive settings and wait for a ready connection', async () => {
+  await mountOnFake();
+  await store.open('t-trace');
+  store.openThread!.status = 'running';
+  await type('queue through settings');
+  press('Enter');
+  await waitFor(() => input().value === '');
+  store.page = 'settings';
+  await waitFor(() => document.querySelector('[data-testid=composer-input]') === null);
+  store.connection = 'connecting';
+  store.openThread!.status = 'idle';
+  store.page = 'chat';
+  await waitFor(() => document.querySelector('[data-testid=composer-queued]') !== null);
+  const rpc = vi.spyOn(store.client!, 'call');
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(rpc.mock.calls.filter(([method]) => method === 'turns.start')).toHaveLength(0);
+  store.connection = 'ready';
+  await waitFor(() => store.busy);
+  expect(rpc.mock.calls.filter(([method]) => method === 'turns.start')).toEqual([
+    ['turns.start', { threadId: 't-trace', prompt: 'queue through settings' }]
+  ]);
 });

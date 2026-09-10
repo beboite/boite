@@ -1,5 +1,6 @@
 import { afterEach, expect, test, vi } from 'vitest';
 import { mount, unmount } from 'svelte';
+import type { RpcMethodName } from '@boite/contracts';
 import App from './App.svelte';
 import { store } from './lib/store.svelte';
 
@@ -84,6 +85,9 @@ async function mountOnFake(): Promise<void> {
   // The store is a singleton and keeps the previous test's open thread, so
   // `booted` is the only honest signal that this mount finished its own boot.
   store.booted = false;
+  store.openThread = null;
+  store.draft = null;
+  store.composerStates = {};
   running = mount(App, { target });
   await waitFor(() => store.booted && store.openThread !== null);
 }
@@ -192,7 +196,7 @@ test('the picker rails the providers as logos and gives the shown one its accoun
   await waitFor(() => document.querySelector('[data-testid=composer-picker-menu]') !== null);
   // One tile per provider, in the core's order, the one whose files are still to
   // download included: it is picked like any other and its column says why.
-  expect(tiles()).toEqual(['claude', 'echo', 'opencode', 'antigravity']);
+  expect(tiles()).toEqual(['claude', 'echo', 'opencode', 'antigravity', 'codex', 'pi', 'grok']);
   // Claude is the shown one and has two logins, so they sit beside its name.
   expect(seats()).toEqual(['claude::a-claude-main', 'claude::a-claude-side']);
   expect(shownModels()).toEqual(['claude-fable-5-1', 'claude-opus-5', 'claude-sonnet-5']);
@@ -864,4 +868,138 @@ test('the Accounts page picks a provider with the menu, never a native select', 
   query<HTMLButtonElement>('[data-testid=account-provider-menu] [data-value=opencode]').click();
   await waitFor(() => (query('[data-testid=account-provider]').textContent ?? '').includes('OpenCode'));
   expect(document.querySelector('[data-testid=account-provider-menu]')).toBeNull();
+});
+
+test('account lifecycle removal asks first and cancellation keeps the account', async () => {
+  await mountOnFake();
+  store.showSettings('accounts');
+  await waitFor(() => document.querySelector('[data-testid=accounts-page]') !== null);
+  const selector = '[data-testid=account-remove][data-account-id=a-claude-side]';
+  expect(document.querySelector(selector)).not.toBeNull();
+  query<HTMLButtonElement>(selector).click();
+  await waitFor(() => document.querySelector('[data-testid=confirm-dialog]') !== null);
+  expect(query('[data-testid=confirm-dialog]').textContent).toContain('isolation directory');
+  query<HTMLButtonElement>('[data-testid=confirm-cancel]').click();
+  await waitFor(() => document.querySelector('[data-testid=confirm-dialog]') === null);
+  expect(store.accounts.some((a) => a.id === 'a-claude-side')).toBe(true);
+  query<HTMLButtonElement>(selector).click();
+  await waitFor(() => document.querySelector('[data-testid=confirm-dialog]') !== null);
+  query<HTMLButtonElement>('[data-testid=confirm-ok]').click();
+  await waitFor(() => !store.accounts.some((a) => a.id === 'a-claude-side'));
+});
+
+test('account lifecycle cancel button stops login and restores retry', async () => {
+  await mountOnFake();
+  store.showSettings('accounts');
+  await waitFor(() => document.querySelector('[data-testid=account-login]') !== null);
+  query<HTMLButtonElement>('[data-testid=account-login]').click();
+  await waitFor(() => document.querySelector('[data-testid=account-login-cancel]') !== null);
+  query<HTMLButtonElement>('[data-testid=account-login-cancel]').click();
+  await waitFor(() => document.querySelector('[data-testid=account-login-row]') === null);
+  expect(document.querySelector('[data-testid=account-login]')).not.toBeNull();
+});
+
+test('account lifecycle provider metadata gates login and default-location controls', async () => {
+  await mountOnFake();
+  store.showSettings('accounts');
+  await waitFor(() => document.querySelector('[data-testid=accounts-page]') !== null);
+  const side = store.accounts.find((a) => a.id === 'a-claude-side')!;
+  const provider = store.providers.find((p) => p.id === 'claude')!;
+  side.status = 'unknown';
+  await waitFor(() => document.querySelector('[data-testid=account-login]') !== null);
+  store.logins[side.id] = { state: 'failed', output: 'refused', url: null, exitCode: 1 };
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(document.querySelector('[data-testid=account-login]')).not.toBeNull();
+  provider.login = false;
+  await waitFor(() => document.querySelector('[data-testid=account-login]') === null);
+  query<HTMLButtonElement>('[data-testid=accounts-page] header button').click();
+  await waitFor(() => document.querySelector('[data-testid=account-default-location]') !== null);
+  query<HTMLInputElement>('[data-testid=account-default-location]').click();
+  provider.alwaysIsolated = true;
+  await waitFor(() => document.querySelector('[data-testid=account-default-location]') === null);
+  await type(query<HTMLInputElement>('[data-testid=accounts-page] form input:not([type])'), 'isolated seat');
+  query<HTMLFormElement>('[data-testid=accounts-page] form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  await waitFor(() => store.accounts.some((a) => a.label === 'isolated seat'));
+  expect(store.accounts.find((a) => a.label === 'isolated seat')?.isolationDir).not.toBeNull();
+});
+
+test('browser Add project opens a path form and starts a draft in the added folder', async () => {
+  await mountOnFake();
+  const before = store.projects.length;
+  store.sidebarOpen = true;
+  query<HTMLButtonElement>('[data-testid=add-project]').click();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(store.page).toBe('chat');
+  expect(document.querySelector('[data-testid=add-project-form]')).not.toBeNull();
+  await type(query<HTMLInputElement>('[data-testid=project-path]'), 'D:\\work\\another-project');
+  query<HTMLButtonElement>('[data-testid=project-add]').click();
+  await waitFor(() => store.projects.length === before + 1);
+  const added = store.projects.find((p) => p.path === 'D:\\work\\another-project')!;
+  expect(store.draft?.projectId).toBe(added.id);
+  expect(store.sidebarOpen).toBe(false);
+  await waitFor(() => document.querySelector('[data-testid=add-project-form]') === null);
+});
+
+test('browser Add project keeps refused paths and Escape returns to its button', async () => {
+  await mountOnFake();
+  query<HTMLButtonElement>('[data-testid=add-project]').click();
+  await waitFor(() => document.querySelector('[data-testid=project-path]') !== null);
+  const field = query<HTMLInputElement>('[data-testid=project-path]');
+  await waitFor(() => document.activeElement === field);
+  const client = store.client!;
+  const call = client.call.bind(client);
+  const spy = vi.spyOn(client, 'call').mockImplementation((method, params) => {
+    if (method === 'projects.add') return Promise.reject(new Error('folder not found'));
+    return call<RpcMethodName>(method, params);
+  });
+  try {
+    await type(field, 'D:\\missing-project');
+    query<HTMLButtonElement>('[data-testid=project-add]').click();
+    await waitFor(() => store.error === 'folder not found');
+    expect(field.value).toBe('D:\\missing-project');
+    field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    await waitFor(() => document.querySelector('[data-testid=add-project-form]') === null);
+    expect(document.activeElement).toBe(query('[data-testid=add-project]'));
+    expect(store.page).toBe('chat');
+  } finally {
+    spy.mockRestore();
+  }
+});
+
+test('first run uses the same path form to open its first project', async () => {
+  await mountOnFake();
+  store.projects = [];
+  store.openThread = null;
+  store.draft = null;
+  await waitFor(() => document.querySelector('[data-testid=first-run]') !== null);
+  await type(query<HTMLInputElement>('[data-testid=project-path]'), 'D:\\work\\first-project');
+  query<HTMLButtonElement>('[data-testid=project-add]').click();
+  await waitFor(() => store.draft !== null);
+  expect(store.openProject?.path).toBe('D:\\work\\first-project');
+  expect(document.querySelector('[data-testid=first-run]')).toBeNull();
+});
+
+test('an ACP login accepts the phone redirect URL through the login input', async () => {
+  await mountOnFake();
+  store.showSettings('accounts');
+  await store.installProvider('antigravity');
+  await waitFor(() => store.providerOf('antigravity')?.available === true, 2000);
+  const loginButton = '[data-testid=account-login][data-account-id=a-antigravity]';
+  await waitFor(() => document.querySelector(loginButton) !== null);
+  query<HTMLButtonElement>(loginButton).click();
+  const row = '[data-testid=account-login-row][data-account-id=a-antigravity]';
+  await waitFor(() => document.querySelector(row) !== null);
+  const field = document.querySelector<HTMLInputElement>(`${row} [data-testid=account-login-input]`);
+  expect(field).not.toBeNull();
+  expect(field!.placeholder).toMatch(/redirect URL/i);
+  const send = vi.spyOn(store, 'sendLoginInput');
+  try {
+    const redirect = 'http://127.0.0.1:54321/oauth/callback?code=demo';
+    await type(field!, redirect);
+    query<HTMLButtonElement>(`${row} [data-testid=account-login-send]`).click();
+    await waitFor(() => store.accountOf('a-antigravity')?.status === 'ok');
+    expect(send).toHaveBeenCalledWith('a-antigravity', redirect);
+  } finally {
+    send.mockRestore();
+  }
 });

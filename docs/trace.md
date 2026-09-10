@@ -125,14 +125,15 @@ Both live under Settings, General, Background, and both are on by default.
 
 ## Linux and macOS
 
-There are no Job Objects, so `procs` polls a process group every second. That
-means direct children only: a grandchild the agent spawned and a process that
-lived less than the poll interval are both invisible, and the exit data is what
-the poll last saw rather than what the kernel reported.
+There are no Job Objects. The registry records direct children at spawn and
+exit; it does not discover grandchildren or poll a process group. Bun supplies
+exit usage for its own subprocesses, while the Node spawn path has no exit
+usage off Windows. The reported `poll` mode denotes this limited fallback.
 
 Nothing hides that. `TraceCapability` carries the operating system, a `mode` of
 `events`, `poll` or `none`, and a note saying why, and every client reads it
 before promising anything. Windows with a working FFI surface reports `events`;
 Windows where that surface failed to load reports `poll` with the error in the
-note. `resources.killTree` still works everywhere, and the focus guard and the
-audio mute simply do not exist off Windows.
+note. Off Windows, `resources.killTree` kills registered direct children only.
+The focus guard and audio mute do not exist there. A hard kill of the shell
+does not guarantee that its core exits on Linux or macOS.

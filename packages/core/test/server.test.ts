@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { RPC_PATH, RpcCloseCode, RpcErrorCode } from '@boite/contracts';
-import { PLACEHOLDER_HTML, UI_DIST } from '../src/server.ts';
+import { PROTOCOL_VERSION, RPC_PATH, RpcCloseCode, RpcErrorCode } from '@boite/contracts';
+import { isAllowedOrigin, PLACEHOLDER_HTML, ServerConnection, UI_DIST } from '../src/server.ts';
 import { startTestCore } from './harness.ts';
 import type { TestCore } from './harness.ts';
 
@@ -49,6 +49,49 @@ function opened(socket: WebSocket): Promise<void> {
 }
 
 describe('server', () => {
+  test('drain sends the journal including deltas still inside the coalescing window', () => {
+    const journal = harness.core.journal;
+    journal.putMessage({ id: 'msg_drain', threadId: 'thr_drain', turnId: 'turn_drain', role: 'assistant',
+      state: 'streaming', createdAt: Date.now(), parts: [] });
+    const writes: string[] = [];
+    const closed: number[] = [];
+    let result = -1;
+    const connection = new ServerConnection(harness.core);
+    connection.attach({ send: (frame: string) => { writes.push(frame); return result; },
+      close: (code: number) => { closed.push(code); } } as unknown as Parameters<ServerConnection['attach']>[0]);
+    const delta = { threadId: 'thr_drain', messageId: 'msg_drain', partIndex: 0, text: 'first' };
+    journal.appendDelta(delta.threadId, delta.messageId, 0, delta.text);
+    connection.sendEvent('message.delta', delta);
+    journal.appendDelta(delta.threadId, delta.messageId, 0, ' second');
+    connection.sendEvent('message.delta', { ...delta, text: ' second' });
+    expect(writes).toHaveLength(1);
+    result = 20;
+    connection.drain();
+    expect(JSON.parse(writes[1] ?? '{}').params.part.text).toBe('first second');
+    expect(closed).toEqual([]);
+    result = 0;
+    connection.sendEvent('message.delta', delta);
+    expect(closed).toEqual([1013]);
+  });
+  test('a valid token with an incompatible protocol closes 4010', async () => {
+    const socket = rawSocket();
+    await opened(socket);
+    const closed = closeCode(socket);
+    socket.send(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'hello', params: {
+      token: harness.token, protocolVersion: PROTOCOL_VERSION - 1, client: { name: 'test', version: '0' },
+    } }));
+    expect(await closed).toBe(RpcCloseCode.ProtocolMismatch);
+  });
+  test('LAN origin checks reject foreign hosts and opaque origins', () => {
+    for (const origin of ['null', '', 'http://evil.example:4321', 'https://evil.example:4321']) {
+      expect(isAllowedOrigin(origin, 4321, '0.0.0.0')).toBe(false);
+    }
+    expect(isAllowedOrigin(null, 4321, '0.0.0.0')).toBe(true);
+    expect(isAllowedOrigin('http://127.0.0.1:4321', 4321, '0.0.0.0')).toBe(true);
+    expect(isAllowedOrigin('tauri://localhost', 4321, '0.0.0.0')).toBe(true);
+    expect(isAllowedOrigin('http://192.0.2.1:4321', 4321, '192.0.2.1')).toBe(true);
+    expect(isAllowedOrigin('http://192.0.2.1:4322', 4321, '192.0.2.1')).toBe(false);
+  });
   test('health answers without auth', async () => {
     const response = await fetch(`${harness.url}/health`);
     expect(response.status).toBe(200);
@@ -138,7 +181,7 @@ describe('server', () => {
   test('the right token opens the RPC', async () => {
     const client = await harness.connect();
     expect(client.core.pid).toBe(process.pid);
-    expect(client.core.protocolVersion).toBe(1);
+    expect(client.core.protocolVersion).toBe(PROTOCOL_VERSION);
     // A core nobody told otherwise is the stable install.
     expect(client.core.channel).toBe('stable');
     expect(await client.call('projects.list', {})).toEqual([]);

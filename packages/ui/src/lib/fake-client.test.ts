@@ -1,0 +1,126 @@
+import { afterEach, expect, test, vi } from 'vitest';
+import { FakeClient } from './fake-client';
+import { RpcErrorCode } from '@boite/contracts';
+
+afterEach(() => vi.useRealTimers());
+
+async function newThread(client: FakeClient, projectId = 'p-boite') {
+  return client.call('threads.create', { projectId, providerId: 'echo', accountId: 'a-echo' });
+}
+
+test.each(['maxConcurrentTurns', 'perAccountConcurrency'] as const)('fake settings reject invalid %s atomically', async (field) => {
+  const client = new FakeClient({ delayMs: 0 });
+  await client.connect();
+  const before = await client.call('settings.get', {});
+  for (const value of [0, -1, 1.5, NaN, Infinity]) {
+    await expect(client.call('settings.set', { [field]: value, warmProcessMinutes: 99 }))
+      .rejects.toMatchObject({ code: RpcErrorCode.InvalidParams, message: `${field} must be a positive integer` });
+    expect(await client.call('settings.get', {})).toEqual(before);
+  }
+  expect((await client.call('settings.set', { [field]: 3 }))[field]).toBe(3);
+  client.close();
+});
+
+test('fake refuses a second active turn and archived threads without adding messages', async () => {
+  vi.useFakeTimers();
+  const client = new FakeClient({ delayMs: 1 });
+  await client.connect();
+  const thread = await newThread(client);
+  await client.call('turns.start', { threadId: thread.id, prompt: '[permission]' });
+  const before = await client.call('threads.get', { threadId: thread.id });
+  await expect(client.call('turns.start', { threadId: thread.id, prompt: 'second' }))
+    .rejects.toMatchObject({ code: RpcErrorCode.Refused, message: 'this thread already has an in-flight turn' });
+  expect((await client.call('threads.get', { threadId: thread.id })).messages).toEqual(before.messages);
+  await vi.runAllTimersAsync();
+  await expect(client.call('turns.start', { threadId: thread.id, prompt: 'while waiting' })).rejects.toThrow(/in-flight/);
+  await client.call('threads.archive', { threadId: thread.id });
+  await expect(client.call('turns.start', { threadId: thread.id, prompt: 'archived' })).rejects.toThrow(/archived/);
+  await client.call('threads.archive', { threadId: thread.id, archived: false });
+  await client.call('turns.start', { threadId: thread.id, prompt: 'again' });
+  await vi.runAllTimersAsync();
+  await client.settled();
+  client.close();
+});
+
+test.each([
+  ['stop', '[permission] question'], ['archive', '[permission] question'], ['remove', '[permission] question'],
+  ['stop', 'question'], ['archive', 'question'], ['remove', 'question']
+] as const)('fake %s drains its own %s turn and leaves other requests pending', async (action, prompt) => {
+  vi.useFakeTimers();
+  const client = new FakeClient({ delayMs: 1 });
+  await client.connect();
+  const project = await client.call('projects.add', { path: 'D:/demo/remove' });
+  const a = await newThread(client, project.id);
+  const b = await newThread(client);
+  const c = await newThread(client);
+  await client.call('turns.start', { threadId: a.id, prompt });
+  await client.call('turns.start', { threadId: b.id, prompt: '[permission]' });
+  await client.call('turns.start', { threadId: c.id, prompt: 'question' });
+  await vi.runAllTimersAsync();
+  const permissions = await client.call('permissions.list', {});
+  const questions = await client.call('questions.list', {});
+  const events: string[] = [];
+  client.on('turn.finished', (turn) => { if (turn.threadId === a.id) events.push(`finished:${turn.status}`); });
+  client.on('thread.removed', ({ threadId }) => { if (threadId === a.id) events.push('removed'); });
+  if (action === 'stop') await client.call('turns.stop', { threadId: a.id });
+  if (action === 'archive') await client.call('threads.archive', { threadId: a.id });
+  if (action === 'remove') await client.call('projects.remove', { projectId: project.id });
+  expect(events).toEqual(action === 'remove' ? ['finished:stopped', 'removed'] : ['finished:stopped']);
+  expect(await client.call('permissions.list', {})).toEqual(permissions.filter((request) => request.threadId !== a.id));
+  expect(await client.call('questions.list', {})).toEqual(questions.filter((request) => request.threadId !== a.id));
+  if (action !== 'remove') expect((await client.call('threads.get', { threadId: a.id })).status).toBe('idle');
+  await client.call('turns.stop', { threadId: b.id });
+  await client.call('turns.stop', { threadId: c.id });
+  await client.settled();
+  client.close();
+});
+
+test('fake probes expose distinct OpenCode, Codex, pi, Grok and Antigravity catalogs', async () => {
+  vi.useFakeTimers();
+  const client = new FakeClient({ delayMs: 0 });
+  await client.connect();
+  await client.call('providers.install', { providerId: 'antigravity' });
+  await vi.runAllTimersAsync();
+  const catalogs = new Map<string, string[]>();
+  for (const providerId of ['opencode', 'codex', 'pi', 'grok', 'antigravity']) {
+    const pending = client.call('providers.probe', { providerId, accountId: `a-${providerId}` });
+    const [result] = await Promise.all([pending, vi.runAllTimersAsync()]);
+    catalogs.set(providerId, result.models.map((model) => model.id));
+  }
+  expect(catalogs.get('opencode')).toContain('anthropic/claude-sonnet-5');
+  for (const providerId of ['codex', 'pi', 'grok', 'antigravity']) {
+    expect(catalogs.get(providerId)).toContain(`${providerId}-demo`);
+    expect(catalogs.get(providerId)).not.toContain('anthropic/claude-sonnet-5');
+  }
+  expect(new Set([...catalogs.values()].map((models) => JSON.stringify(models))).size).toBe(5);
+  client.close();
+});
+
+test('fake probes use descriptor models for protocols without probing', async () => {
+  const client = new FakeClient({ delayMs: 0 });
+  await client.connect();
+  const { loaded } = await client.call('providers.list', {});
+  for (const [providerId, accountId] of [['claude', 'a-claude-main'], ['echo', 'a-echo']] as const) {
+    expect((await client.call('providers.probe', { providerId, accountId })).models)
+      .toEqual(loaded.find((provider) => provider.id === providerId)?.models);
+  }
+  client.close();
+});
+
+test('fake keeps forced isolation when a provider forbids default accounts', async () => {
+  const client = new FakeClient({ delayMs: 0 });
+  await client.connect();
+  const account = await client.call('accounts.add', { providerId: 'antigravity', label: 'Isolated', useDefaultLocation: true });
+  expect(account.isolationDir).not.toBeNull();
+  client.close();
+});
+
+test('fake probes reject invalid provider/account pairs and unavailable agents', async () => {
+  const client = new FakeClient({ delayMs: 0 });
+  await client.connect();
+  await expect(client.call('providers.probe', { providerId: 'missing', accountId: 'a-echo' })).rejects.toThrow(/provider/);
+  await expect(client.call('providers.probe', { providerId: 'opencode', accountId: 'missing' })).rejects.toThrow(/account/);
+  await expect(client.call('providers.probe', { providerId: 'opencode', accountId: 'a-echo' })).rejects.toThrow(/another provider/);
+  await expect(client.call('providers.probe', { providerId: 'antigravity', accountId: 'a-antigravity' })).rejects.toThrow(/not available/);
+  client.close();
+});

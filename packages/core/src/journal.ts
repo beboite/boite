@@ -214,11 +214,11 @@ function migrate(db: Database): void {
   db.exec(`PRAGMA user_version = ${version}`);
 }
 
-function parseJson<T>(text: string, fallback: T): T {
+function parseJson<T>(text: string, location: string): T {
   try {
     return JSON.parse(text) as T;
   } catch {
-    return fallback;
+    throw new Error(`invalid JSON in ${location}`);
   }
 }
 
@@ -255,7 +255,7 @@ function toTurn(row: TurnRow): Turn {
     queuedAt: row.queued_at,
     startedAt: row.started_at,
     finishedAt: row.finished_at,
-    usage: row.usage === null ? null : parseJson<Usage | null>(row.usage, null),
+    usage: row.usage === null ? null : parseJson<Usage>(row.usage, `turns.usage row ${row.id}`),
     error: row.error,
   };
 }
@@ -266,7 +266,7 @@ function toMessage(row: MessageRow): Message {
     threadId: row.thread_id,
     turnId: row.turn_id,
     role: row.role as MessageRole,
-    parts: parseJson<MessagePart[]>(row.parts, []),
+    parts: parseJson<MessagePart[]>(row.parts, `messages.parts row ${row.id}`),
     state: row.state as Message['state'],
     createdAt: row.created_at,
   };
@@ -315,7 +315,9 @@ export class Journal {
     this.db = new Database(file, { create: true });
     this.db.exec('PRAGMA journal_mode = WAL');
     this.db.exec('PRAGMA synchronous = NORMAL');
-    migrate(this.db);
+    this.db.exec('PRAGMA busy_timeout = 5000');
+    this.db.transaction(() => migrate(this.db))();
+    this.db.exec('CREATE INDEX IF NOT EXISTS turns_by_status ON turns (status)');
   }
 
   append<T>(event: JournalEvent, apply: (db: Database) => T): T {
@@ -446,6 +448,9 @@ export class Journal {
 
   deleteThreadsOfProject(projectId: string): string[] {
     const rows = this.db.query('SELECT id FROM threads WHERE project_id = ?').all(projectId) as { id: string }[];
+    for (const table of ['turns', 'messages', 'processes']) {
+      this.db.query(`DELETE FROM ${table} WHERE thread_id IN (SELECT id FROM threads WHERE project_id = ?)`).run(projectId);
+    }
     this.db.query('DELETE FROM threads WHERE project_id = ?').run(projectId);
     return rows.map((row) => row.id);
   }
@@ -480,6 +485,11 @@ export class Journal {
       threadId === undefined
         ? (this.db.query('SELECT * FROM turns ORDER BY rowid').all() as TurnRow[])
         : (this.db.query('SELECT * FROM turns WHERE thread_id = ? ORDER BY rowid').all(threadId) as TurnRow[]);
+    return rows.map(toTurn);
+  }
+
+  unfinishedTurns(): Turn[] {
+    const rows = this.db.query("SELECT * FROM turns WHERE status IN ('running', 'queued') ORDER BY rowid").all() as TurnRow[];
     return rows.map(toTurn);
   }
 
@@ -649,7 +659,7 @@ export class Journal {
   getSetting(key: string): unknown {
     const row = this.db.query('SELECT value FROM settings WHERE key = ?').get(key) as { value: string } | null;
     if (row === null) return undefined;
-    return parseJson<unknown>(row.value, undefined);
+    return parseJson<unknown>(row.value, `settings.value row ${key}`);
   }
 
   setSetting(key: string, value: unknown): void {

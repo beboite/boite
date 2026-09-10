@@ -3,20 +3,12 @@
   import { strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
   import BoiteMark from './BoiteMark.svelte';
+  import ProjectForm from './ProjectForm.svelte';
 
   let { store }: { store: Store } = $props();
 
   const inShell = window.__TAURI_INTERNALS__ !== undefined;
-  let path = $state('');
   let typing = $state(!inShell);
-
-  async function submit(event: SubmitEvent) {
-    event.preventDefault();
-    const clean = path.trim();
-    if (clean.length === 0) return;
-    const project = await store.addProject(clean);
-    if (project) path = '';
-  }
 </script>
 
 <div class="first-run" data-testid="first-run">
@@ -34,18 +26,7 @@
     {/if}
 
     {#if typing}
-      <form onsubmit={submit} data-testid="add-project-form">
-        <input
-          data-testid="project-path"
-          bind:value={path}
-          placeholder={strings.firstRun.pathPlaceholder}
-          spellcheck="false"
-          autocomplete="off"
-        />
-        <button type="submit" class:primary={!inShell} data-testid="project-add" disabled={path.trim().length === 0}>
-          {strings.firstRun.add}
-        </button>
-      </form>
+      <ProjectForm {store} primary={!inShell} />
     {:else}
       <button type="button" class="ghost small type-path" data-testid="add-project" onclick={() => (typing = true)}>
         {strings.firstRun.typePath}
@@ -116,23 +97,4 @@
     color: var(--color-muted-foreground);
   }
 
-  /* The field takes the place of the link that opened it, so it rises in. */
-  form {
-    display: flex;
-    gap: 6px;
-    width: 100%;
-    margin-top: 8px;
-    animation: rise var(--dur-3) var(--ease-out-quint);
-  }
-
-  form input {
-    flex: 1;
-    min-width: 0;
-    font-family: var(--font-mono);
-    font-size: var(--text-sm);
-  }
-
-  form button {
-    height: var(--input);
-  }
 </style>

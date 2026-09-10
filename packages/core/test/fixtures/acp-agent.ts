@@ -24,7 +24,7 @@ import type {
   Usage,
 } from '@agentclientprotocol/sdk';
 
-const DIRECTIVE = /\[(tool|documents|big-image|permission|thought|usage|slow|refuse|crash|noise)\]/g;
+const DIRECTIVE = /\[(tool|documents|big-image|permission|question|thought|usage|slow|refuse|crash|noise)\]/g;
 /** `[mode-switch <id>]`: the agent changes mode on its own before it answers. */
 const MODE_SWITCH = /\[mode-switch ([\w-]+)\]/g;
 const CHUNKS = 3;
@@ -34,6 +34,7 @@ type Directive =
   | 'documents'
   | 'big-image'
   | 'permission'
+  | 'question'
   | 'thought'
   | 'usage'
   | 'slow'
@@ -163,10 +164,8 @@ const app = agent({ name: 'acp-fake' })
   .onRequest('session/load', ({ params }) => {
     known.add(params.sessionId);
     log(`loaded:${params.sessionId}`);
-    // A load answers with the config options too, the way the protocol allows
-    // and a real agent does: the client has to put the loaded session on the
-    // thread's model, not leave it on whatever it was saved with.
-    return { modes: modeState(), configOptions };
+    // A conforming load may omit configOptions. The probe still supplied them.
+    return { modes: modeState() };
   })
   .onRequest('session/set_config_option', ({ params }) => {
     log(`set_config_option ${params.configId} ${String(params.value)}`);
@@ -281,10 +280,11 @@ const app = agent({ name: 'acp-fake' })
             content: [{ type: 'content', content: { type: 'image', data: HUGE_IMAGE, mimeType: 'image/png' } }],
           });
           break;
+        case 'question':
         case 'permission': {
           const answer = await client.request('session/request_permission', {
             sessionId,
-            toolCall: { toolCallId: 'fake-1', title: 'fake tool', name: 'fake_tool', rawInput: { echo: true } },
+            toolCall: { toolCallId: directive === 'question' ? 'interaction_1' : 'fake-1', title: 'fake tool', name: 'fake_tool', rawInput: { echo: true } },
             options: [
               { optionId: 'yes', name: 'Allow once', kind: 'allow_once' },
               { optionId: 'no', name: 'Reject once', kind: 'reject_once' },

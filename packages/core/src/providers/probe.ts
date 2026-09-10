@@ -1,4 +1,8 @@
 import type { AccountId, ProviderId, RpcEvents, RpcResult, ThreadId } from '@boite/contracts';
+import { mkdtempSync } from 'node:fs';
+import { rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { Core } from '../core.ts';
 import { forgetProbes, probeModels } from '../drivers/index.ts';
 import { refused } from '../errors.ts';
@@ -9,10 +13,9 @@ export function probeThreadId(providerId: ProviderId, accountId: AccountId): Thr
 }
 
 /**
- * What this account can actually run. An ACP agent is asked: one process,
- * `initialize` then `session/new`, its `configOptions` read, the process killed
- * through the registry that traced it. Every other protocol answers with the
- * descriptor, which is where its models are written down.
+ * ACP, Codex and pi list their own models through one temporary process.
+ * Claude and echo use their descriptor. The probe's empty working directory
+ * keeps project instructions and the core's journal outside that session.
  */
 async function probeProvider(
   core: Core,
@@ -30,36 +33,47 @@ async function probeProvider(
   }
 
   const threadId = probeThreadId(provider.id, account.id);
-  const { models, probedAt } = await probeModels(provider.protocol, {
-    provider,
-    accountId: account.id,
-    accountEnv: core.accounts.accountEnv(account, provider),
-    cwd: core.dataDir,
-    // A probe runs the same executable a turn would, so it holds the same lease:
-    // removing a managed install under a probe would be the same crash.
-    spawnChild: (cmd, args, opts) => {
-      const child = core.procs.spawnChild(threadId, cmd, args, opts);
-      const installs = core.providers.installs;
-      installs.acquire(provider.id);
-      let released = false;
-      const drop = (): void => {
-        if (released) return;
-        released = true;
-        installs.release(provider.id);
-      };
-      child.once('exit', drop);
-      child.once('error', drop);
-      return child;
-    },
-    killTree: () => {
-      core.procs.killTree(threadId);
-    },
-    log: (level, message) => {
-      core.log(level, message);
-    },
-  });
-  core.bus.emit('providers.probed', { providerId: provider.id, accountId: account.id, models, probedAt });
-  return { models, probedAt };
+  const directory = mkdtempSync(join(tmpdir(), 'boite-probe-'));
+  const exits: Promise<void>[] = [];
+  try {
+    const { models, probedAt } = await probeModels(provider.protocol, {
+      provider,
+      accountId: account.id,
+      accountEnv: core.accounts.accountEnv(account, provider),
+      cwd: directory,
+      // A probe runs the same executable a turn would, so it holds the same lease:
+      // removing a managed install under a probe would be the same crash.
+      spawnChild: (cmd, args, opts) => {
+        const child = core.procs.spawnChild(threadId, cmd, args, opts);
+        exits.push(new Promise<void>((resolve) => {
+          child.once('close', () => resolve());
+          child.once('error', () => resolve());
+        }));
+        const installs = core.providers.installs;
+        installs.acquire(provider.id);
+        let released = false;
+        const drop = (): void => {
+          if (released) return;
+          released = true;
+          installs.release(provider.id);
+        };
+        child.once('exit', drop);
+        child.once('error', drop);
+        return child;
+      },
+      killTree: () => {
+        core.procs.killTree(threadId);
+      },
+      log: (level, message) => {
+        core.log(level, message);
+      },
+    });
+    core.bus.emit('providers.probed', { providerId: provider.id, accountId: account.id, models, probedAt });
+    return { models, probedAt };
+  } finally {
+    await Promise.all(exits);
+    await rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
 }
 
 export function registerProbeMethods(core: Core): void {

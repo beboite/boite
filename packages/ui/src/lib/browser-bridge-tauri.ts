@@ -89,7 +89,6 @@ export class TauriBridge implements BrowserBridge {
     this.#run(id, 'browser_destroy', {});
     this.#live.delete(id);
     this.#bounds.delete(id);
-    this.#queues.delete(id);
   }
 
   on(handler: (event: BrowserEvent) => void): () => void {
@@ -128,6 +127,9 @@ export class TauriBridge implements BrowserBridge {
         this.#emit({ type: 'failed', id, reason: reasonOf(error) });
       });
     this.#queues.set(id, next);
+    void next.then(() => {
+      if (this.#queues.get(id) === next) this.#queues.delete(id);
+    });
   }
 
   #emit(event: BrowserEvent): void {

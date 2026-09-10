@@ -16,10 +16,10 @@
  */
 import { appendFileSync } from 'node:fs';
 
-const DIRECTIVE = /\[(tool|thought|usage|slow|crash|ask)\]/g;
+const DIRECTIVE = /\[(tool|thought|usage|slow|crash|ask|select|input|editor)\]/g;
 const CHUNKS = 3;
 
-type Directive = 'tool' | 'thought' | 'usage' | 'slow' | 'crash' | 'ask';
+type Directive = 'tool' | 'thought' | 'usage' | 'slow' | 'crash' | 'ask' | 'select' | 'input' | 'editor';
 
 let toolCounter = 0;
 let dialogCounter = 0;
@@ -240,12 +240,17 @@ async function runPrompt(text: string): Promise<void> {
         });
         break;
       }
+      case 'select':
+      case 'input':
+      case 'editor':
       case 'ask': {
-        const answer = await askDialog('confirm', {
+        const answer = await askDialog(directive === 'ask' ? 'confirm' : directive, {
           title: 'Do the thing?',
           message: 'the fake extension is asking',
+          options: ['First choice', 'Second choice'],
+          prefill: 'existing text',
         });
-        say(answer['cancelled'] === true ? 'dialog cancelled' : 'dialog answered');
+        say(answer['cancelled'] === true ? 'dialog cancelled' : directive === 'ask' ? 'dialog answered' : textOf(answer['value']));
         break;
       }
       case 'usage':

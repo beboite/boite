@@ -320,6 +320,21 @@ describe('acp driver', () => {
     });
   });
 
+  test('an Antigravity interaction keeps the selected option id', async () => {
+    const client = await startCore();
+    const threadId = await acpThread(client);
+    harness!.core.providers.require('acp-fake').quirks = ['antigravity'];
+    const requested = client.next('question.asked', (request) => request.threadId === threadId);
+    const finished = client.next('turn.finished', (turn) => turn.threadId === threadId);
+    await client.call('turns.start', { threadId, prompt: '[question]' });
+    const request = await requested;
+    expect(request.options.map((option) => option.id)).toEqual(['yes', 'no']);
+    await client.call('questions.answer', { threadId, questionId: request.id, optionIds: ['no'] });
+    expect((await finished).status).toBe('done');
+    const thread = await client.call('threads.get', { threadId });
+    expect(thread.messages.at(-1)?.parts.some((part) => part.type === 'text' && part.text === 'denied')).toBe(true);
+  });
+
   test('stopping a turn cancels the session and the agent process is gone', async () => {
     const client = await startCore();
     const threadId = await acpThread(client);
@@ -402,8 +417,11 @@ describe('acp driver', () => {
     expect(sessionId).not.toBe('');
     await waitFor(() => fakeLog().includes('set_config_option model fake-smart'));
 
-    // The session went with the turn, so the second one resumes through session/load.
-    await runTurn(client, threadId, 'second');
+      // The session went with the turn, so the second one resumes through session/load.
+      harness!.core.providers.load();
+      const { forgetProbes } = await import('../src/drivers/index.ts');
+      forgetProbes();
+      await runTurn(client, threadId, 'second');
     await waitFor(() => fakeLog().includes(`loaded:${sessionId}`));
     expect((await client.call('threads.get', { threadId })).sessionId).toBe(sessionId);
     // A loaded session is put on the thread's model too: the agent keeps the

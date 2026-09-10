@@ -35,6 +35,13 @@ afterEach(() => {
 });
 
 describe('journal', () => {
+  test('corrupt JSON names its table, row and column', () => {
+    journal.putMessage(sampleMessage('broken-message'));
+    journal.db.query('UPDATE messages SET parts = ? WHERE id = ?').run('{', 'broken-message');
+    expect(() => journal.getMessage('broken-message')).toThrow('messages.parts row broken-message');
+    journal.db.query('INSERT INTO settings (key, value) VALUES (?, ?)').run('settings', '{');
+    expect(() => journal.getSetting('settings')).toThrow('settings.value row settings');
+  });
   test('the schema version is stamped and WAL is on', () => {
     const version = journal.db.query('PRAGMA user_version').get() as { user_version: number };
     expect(version.user_version).toBe(SCHEMA_VERSION);

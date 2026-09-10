@@ -1,7 +1,8 @@
 import { existsSync } from 'node:fs';
+import { hostname, networkInterfaces } from 'node:os';
 import { dirname, join, normalize, resolve, sep } from 'node:path';
 import type { ServerWebSocket } from 'bun';
-import { RPC_PATH, RpcCloseCode, RpcErrorCode } from '@boite/contracts';
+import { PROTOCOL_VERSION, RPC_PATH, RpcCloseCode, RpcErrorCode } from '@boite/contracts';
 import type { RpcError, RpcEventName, RpcEvents, ThreadId } from '@boite/contracts';
 import { eventThreadId } from './bus.ts';
 import type { Core } from './core.ts';
@@ -53,7 +54,7 @@ export interface RunningServer {
   stop(): Promise<void>;
 }
 
-class ServerConnection implements Connection {
+export class ServerConnection implements Connection {
   readonly id = newId('con_');
   readonly subscriptions = new Set<ThreadId>();
   authenticated = false;
@@ -61,7 +62,6 @@ class ServerConnection implements Connection {
   private socket: ServerWebSocket<SocketData> | null = null;
   private congested = false;
   private readonly catchUp = new Set<string>();
-  private catchUpTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(private readonly core: Core) {}
 
@@ -75,16 +75,21 @@ class ServerConnection implements Connection {
       return;
     }
     const sent = this.write({ jsonrpc: '2.0', method: name, params: payload });
-    if (sent >= 0) return;
+    if (sent > 0) return;
+    if (sent === 0) {
+      this.close(1013, 'connection dropped a frame; reconnect');
+      return;
+    }
     this.congested = true;
     if (name === 'message.delta') this.queueCatchUp(payload);
   }
 
   sendResponse(response: OutgoingResponse): void {
-    this.write(response);
+    if (this.write(response) === 0) this.close(1013, 'connection dropped a response; reconnect');
   }
 
   close(code: number, reason?: string): void {
+    this.catchUp.clear();
     this.socket?.close(code, reason);
   }
 
@@ -103,29 +108,27 @@ class ServerConnection implements Connection {
     const messageId = (payload as { messageId?: unknown }).messageId;
     if (typeof messageId !== 'string') return;
     this.catchUp.add(messageId);
-    if (this.catchUpTimer !== null) return;
-    this.catchUpTimer = setTimeout(() => {
-      this.catchUpTimer = null;
-      this.flushCatchUp();
-    }, 0);
   }
 
-  private flushCatchUp(): void {
+  drain(): void {
+    if (this.core.journal.isClosed()) return;
+    this.core.journal.flushDeltas();
+    this.congested = false;
     const ids = [...this.catchUp];
-    this.catchUp.clear();
     for (const messageId of ids) {
       const message = this.core.journal.getMessage(messageId);
-      if (message === null) continue;
-      message.parts.forEach((part, partIndex) => {
-        this.write({
+      if (message === null) { this.catchUp.delete(messageId); continue; }
+      for (const [partIndex, part] of message.parts.entries()) {
+        const sent = this.write({
           jsonrpc: '2.0',
           method: 'message.part',
           params: { threadId: message.threadId, messageId, partIndex, part },
         });
-      });
+        if (sent === 0) { this.close(1013, 'catch-up dropped; reconnect'); return; }
+        if (sent < 0) { this.congested = true; return; }
+      }
+      this.catchUp.delete(messageId);
     }
-    this.congested = this.bufferedAmount() > 0;
-    if (this.congested && this.catchUp.size > 0) this.queueCatchUp({ messageId: [...this.catchUp][0] });
   }
 }
 
@@ -136,15 +139,18 @@ function envTimeout(): number | null {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 }
 
-function isAllowedOrigin(origin: string | null, port: number, host: string): boolean {
-  if (origin === null || origin === '' || origin === 'null') return true;
+export function isAllowedOrigin(origin: string | null, port: number, host: string): boolean {
+  if (origin === null) return true;
   if (SHELL_ORIGINS.includes(origin)) return true;
-  if (origin === `http://127.0.0.1:${port}` || origin === `http://localhost:${port}`) return true;
-  if (host === '127.0.0.1' || host === 'localhost') return false;
   try {
     const url = new URL(origin);
     if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
-    return url.port === String(port);
+    if (url.origin !== origin || Number(url.port || (url.protocol === 'https:' ? 443 : 80)) !== port) return false;
+    const name = url.hostname.replace(/^\[|\]$/g, '').toLowerCase();
+    if (['127.0.0.1', 'localhost', '::1'].includes(name)) return true;
+    if (host !== '0.0.0.0' && host !== '::') return name === host.toLowerCase();
+    if (name === hostname().toLowerCase()) return true;
+    return Object.values(networkInterfaces()).some((entries) => entries?.some((entry) => entry.address === name));
   } catch {
     return false;
   }
@@ -184,6 +190,9 @@ export function startServer(options: ServerOptions): RunningServer {
   const host = options.host ?? '127.0.0.1';
   const helloTimeoutMs = options.helloTimeoutMs ?? envTimeout() ?? DEFAULT_HELLO_TIMEOUT_MS;
   const connections = new Set<ServerConnection>();
+  const helloTimers = new Map<ServerConnection, ReturnType<typeof setTimeout>>();
+  const frames = new Set<Promise<void>>();
+  let stopping = false;
 
   const server = Bun.serve<SocketData>({
     hostname: host,
@@ -191,6 +200,7 @@ export function startServer(options: ServerOptions): RunningServer {
     idleTimeout: 0,
 
     fetch(request, self) {
+      if (stopping) return new Response('core stopping', { status: 503 });
       const url = new URL(request.url);
 
       if (url.pathname === '/health') {
@@ -221,17 +231,25 @@ export function startServer(options: ServerOptions): RunningServer {
         const connection = socket.data.connection;
         connection.attach(socket);
         connections.add(connection);
-        setTimeout(() => {
+        helloTimers.set(connection, setTimeout(() => {
+          helloTimers.delete(connection);
           if (connection.authenticated) return;
           connection.close(RpcCloseCode.Unauthorized, 'hello timed out');
-        }, helloTimeoutMs);
+        }, helloTimeoutMs));
       },
 
       message(socket, raw) {
-        void handleFrame(core, socket.data.connection, typeof raw === 'string' ? raw : raw.toString());
+        if (stopping) return;
+        const frame = handleFrame(core, socket.data.connection, typeof raw === 'string' ? raw : raw.toString());
+        frames.add(frame);
+        void frame.catch((error: unknown) => core.log('error', messageOf(error))).finally(() => frames.delete(frame));
       },
 
+      drain(socket) { socket.data.connection.drain(); },
+
       close(socket) {
+        clearTimeout(helloTimers.get(socket.data.connection));
+        helloTimers.delete(socket.data.connection);
         connections.delete(socket.data.connection);
       },
     },
@@ -264,13 +282,16 @@ export function startServer(options: ServerOptions): RunningServer {
     port,
     url: core.baseUrl(),
     async stop(): Promise<void> {
+      stopping = true;
       off();
+      for (const timer of helloTimers.values()) clearTimeout(timer);
+      helloTimers.clear();
       for (const connection of connections) connection.close(1001, 'core stopping');
       connections.clear();
       // Bun 1.3.11 never resolves server.stop() once a socket has been upgraded,
       // so the listener is closed without waiting on that promise.
       void server.stop(true);
-      await Promise.resolve();
+      await Promise.allSettled([...frames]);
     },
   };
 }
@@ -279,6 +300,7 @@ async function handleFrame(core: Core, connection: ServerConnection, raw: string
   let frame: { id?: unknown; method?: unknown; params?: unknown };
   try {
     frame = JSON.parse(raw) as { id?: unknown; method?: unknown; params?: unknown };
+    if (frame === null || typeof frame !== 'object' || Array.isArray(frame)) throw new Error('expected an RPC object');
   } catch {
     connection.sendResponse({
       jsonrpc: '2.0',
@@ -301,7 +323,7 @@ async function handleFrame(core: Core, connection: ServerConnection, raw: string
       connection.close(RpcCloseCode.Unauthorized, 'hello expected');
       return;
     }
-    const params = frame.params as { token?: unknown } | undefined;
+    const params = frame.params as { token?: unknown; protocolVersion?: unknown } | undefined;
     if (typeof params?.token !== 'string' || params.token !== core.token) {
       connection.sendResponse({
         jsonrpc: '2.0',
@@ -309,6 +331,13 @@ async function handleFrame(core: Core, connection: ServerConnection, raw: string
         error: { code: RpcErrorCode.Unauthorized, message: 'the token is wrong' },
       });
       connection.close(RpcCloseCode.Unauthorized, 'bad token');
+      return;
+    }
+    if (params.protocolVersion !== PROTOCOL_VERSION) {
+      connection.sendResponse({ jsonrpc: '2.0', id, error: {
+        code: RpcErrorCode.InvalidParams, message: `protocolVersion must be ${PROTOCOL_VERSION}`,
+      } });
+      connection.close(RpcCloseCode.ProtocolMismatch, 'protocol version mismatch');
       return;
     }
     connection.authenticated = true;

@@ -8,7 +8,7 @@
  * event that is not here does not exist.
  */
 
-export const PROTOCOL_VERSION = 1 as const;
+export const PROTOCOL_VERSION = 2 as const;
 
 // ---------------------------------------------------------------------------
 // Identifiers. All opaque strings minted by the core.
@@ -29,7 +29,7 @@ export type Timestamp = number;
 // Providers: one JSON descriptor per provider, shipped or user-supplied.
 // ---------------------------------------------------------------------------
 
-export type Protocol = 'claude-sdk' | 'codex-appserver' | 'opencode' | 'pi' | 'acp' | 'echo';
+export type Protocol = 'claude-sdk' | 'codex-appserver' | 'pi' | 'acp' | 'echo';
 
 export type Os = 'windows' | 'linux' | 'macos';
 
@@ -213,6 +213,10 @@ export interface ProviderSummary {
   executable: string | null;
   models: ModelInfo[];
   capabilities: ProviderCapabilities;
+  /** Whether Boite can start login, and which protocol owns it. */
+  login: false | { kind: 'command' | 'acp' };
+  /** True when the provider cannot use its default login location. */
+  alwaysIsolated: boolean;
   /** Where the managed install stands, null when this profile has no `install` block. */
   install: ProviderInstallState | null;
 }
@@ -527,6 +531,7 @@ export interface CoreInfo {
   channel: Channel;
   pid: number;
   startedAt: Timestamp;
+  /** Bind address, possibly a wildcard. Use pairingUrl to reach the core remotely. */
   endpoint: { host: string; port: number };
   /** URL a phone opens once to pair, token included. */
   pairingUrl: string;
@@ -540,7 +545,7 @@ export interface CoreInfo {
 
 export interface RpcMethods {
   hello: {
-    params: { token: string; client: { name: string; version: string } };
+    params: { token: string; protocolVersion: number; client: { name: string; version: string } };
     result: { core: CoreInfo };
   };
 
@@ -557,10 +562,9 @@ export interface RpcMethods {
     result: { loaded: ProviderSummary[]; rejected: ProviderRejected[] };
   };
   /**
-   * The models this provider can actually run on this account. For an ACP
-   * provider they are the ones the agent lists in the `configOptions` of a
-   * `session/new`, read from one short-lived agent process under the account's
-   * environment, and kept until `providers.reload` or a change to that account.
+   * ACP, Codex and pi list their own models through a temporary agent process.
+   * Claude and echo return the descriptor's models. Results are kept until
+   * `providers.reload` or a change to that account.
    * For any other protocol they are the descriptor's models, with `probedAt`
    * the moment of the call.
    */
@@ -609,6 +613,10 @@ export interface RpcMethods {
    * `account.login`.
    */
   'accounts.login': { params: { accountId: AccountId }; result: { ok: true } };
+  /** Current login state, used to rebuild cards after reconnecting. */
+  'accounts.logins': { params: Record<string, never>; result: RpcEvents['account.login'][] };
+  /** Stop the login process tree and wait for its exit. */
+  'accounts.loginCancel': { params: { accountId: AccountId }; result: { ok: true } };
   /** One line into the running login's stdin, for a CLI that asks for a code. */
   'accounts.loginInput': { params: { accountId: AccountId; text: string }; result: { ok: true } };
 
@@ -669,7 +677,7 @@ export interface RpcMethods {
    */
   'permissions.list': { params: { threadId?: ThreadId }; result: PermissionRequest[] };
   'permissions.answer': {
-    params: { requestId: RequestId; decision: 'allow' | 'deny'; updatedInput?: unknown; message?: string };
+    params: { requestId: RequestId; decision: 'allow' | 'deny' };
     result: { ok: true };
   };
 

@@ -3,6 +3,7 @@
   import type { Project, ProjectId, ThreadId, ThreadSummary } from '@boite/contracts';
   import { focusOnMount, riseOnce } from '../lib/actions';
   import { confirm } from '../lib/confirm.svelte';
+  import { Closing } from '../lib/closing.svelte';
   import { contextMenu } from '../lib/context-menu.svelte';
   import { ago, tokens } from '../lib/format';
   import { separator, type MenuItem } from '../lib/menu';
@@ -12,6 +13,7 @@
   import BoiteMark from './BoiteMark.svelte';
   import LoadGauge from './LoadGauge.svelte';
   import StatusMark from './StatusMark.svelte';
+  import ProjectForm from './ProjectForm.svelte';
 
   let { store }: { store: Store } = $props();
 
@@ -19,6 +21,18 @@
   let renaming = $state<ThreadId | null>(null);
   let renameText = $state('');
   let now = $state(Date.now());
+  const projectForm = new Closing();
+  let projectButton = $state<HTMLButtonElement | undefined>(undefined);
+
+  function addProject() {
+    if (window.__TAURI_INTERNALS__ !== undefined) void store.pickProject();
+    else projectForm.toggle();
+  }
+
+  function cancelProject() {
+    projectForm.hide();
+    projectButton?.focus();
+  }
 
   // Each list keeps its own set: a row rises the first time it is drawn and
   // never again, whatever a status tick or a reorder does to the node.
@@ -313,11 +327,17 @@
       type="button"
       class="ghost small add-project"
       data-testid="add-project"
-      onclick={() => void (window.__TAURI_INTERNALS__ === undefined ? store.showSettings('general') : store.pickProject())}
+      bind:this={projectButton}
+      onclick={addProject}
     >
       <BoiteMark size={13} />
       {strings.sidebar.addProject}
     </button>
+    {#if projectForm.shown}
+      <div class="project-form" class:closing={projectForm.closing} use:projectForm.attach onanimationend={projectForm.end}>
+        <ProjectForm {store} focus onadded={() => projectForm.hide()} oncancel={cancelProject} />
+      </div>
+    {/if}
   {/if}
 
   <div class="foot">
@@ -362,6 +382,19 @@
 </aside>
 
 <style>
+  .project-form {
+    padding: 0 10px 10px;
+    animation: rise var(--dur-2) var(--ease-out-quint);
+  }
+
+  .project-form.closing {
+    animation: project-form-out var(--dur-2) var(--ease-out-quint);
+  }
+
+  @keyframes project-form-out {
+    to { opacity: 0; transform: translateY(4px); }
+  }
+
   .sidebar {
     position: relative;
     width: var(--sidebar-width);

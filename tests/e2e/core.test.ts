@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, expect, test } from 'bun:test';
-import { RPC_PATH, RpcCloseCode } from '../../packages/contracts/src/index.ts';
+import { PROTOCOL_VERSION, RPC_PATH, RpcCloseCode } from '../../packages/contracts/src/index.ts';
 import type {
   Account,
   MessagePart,
@@ -39,12 +39,12 @@ afterAll(async () => {
 test(
   'hello answers with a core that can trace',
   () => {
-    expect(client.core.protocolVersion).toBe(1);
+    expect(client.core.protocolVersion).toBe(PROTOCOL_VERSION);
     expect(client.core.channel).toBe('stable');
     expect(client.core.pid).toBeGreaterThan(0);
     expect(client.core.endpoint.port).toBe(core.port);
     expect(client.core.dataDir).toBe(core.dataDir);
-    expect(['events', 'poll', 'none']).toContain(client.core.trace.mode);
+    expect(client.core.trace.mode).toBe(process.platform === 'win32' ? 'events' : 'poll');
     expect(client.core.trace.note.length).toBeGreaterThan(0);
     expect(client.core.trace.os).toBe(process.platform === 'win32' ? 'windows' : client.core.trace.os);
   },

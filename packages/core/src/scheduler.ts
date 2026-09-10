@@ -66,13 +66,20 @@ export class Scheduler {
     return true;
   }
 
+  async stopAndWait(threadId: ThreadId): Promise<void> {
+    const entry = [...this.running.values()].find((run) => run.threadId === threadId);
+    this.stop(threadId);
+    await entry?.done;
+  }
+
   private pump(): void {
     const settings = this.core.settings.get();
     let started = false;
     for (;;) {
       if (this.running.size >= settings.maxConcurrentTurns) break;
       const index = this.queue.findIndex(
-        (entry) => this.runningForAccount(entry.accountId) < settings.perAccountConcurrency,
+        (entry) => this.runningForAccount(entry.accountId) < settings.perAccountConcurrency
+          && ![...this.running.values()].some((run) => run.threadId === entry.threadId),
       );
       if (index < 0) break;
       const [entry] = this.queue.splice(index, 1);
@@ -95,6 +102,9 @@ export class Scheduler {
 
   /** Shutdown: drop the queue, stop what runs, and wait for it before the journal closes. */
   async drain(): Promise<void> {
+    if (!this.core.journal.isClosed()) {
+      for (const entry of this.queue) this.core.threads.markQueuedStopped(entry.turnId);
+    }
     this.queue.length = 0;
     const entries = [...this.running.values()];
     for (const entry of entries) this.core.threads.stopRunning(entry.threadId);

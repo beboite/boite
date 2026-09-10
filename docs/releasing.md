@@ -8,6 +8,7 @@ From a clean tree to an installer. Every command below exists in the workspace
 ```bash
 bun run check
 bun run test
+bun run test:shell
 bun run build:ui
 bun run build:core
 bun run build:core:exe
@@ -16,8 +17,8 @@ bun run build:shell
 bun run e2e
 ```
 
-Each step feeds the next, and skipping one shows up as something stale rather
-than as an error. `bun run build:shell` runs `stage:core` itself, and `stage:core`
+Each step feeds the next. The end to end suite refuses missing or stale shell
+artifacts. `bun run build:shell` runs `stage:core` itself, and `stage:core`
 runs `build:core:exe` itself, so the short version of that list is check, test,
 `build:shell`, `e2e`. The long version is what to run when a step has failed and
 you want to see which.
@@ -28,9 +29,10 @@ you want to see which.
   `/` and what the shell bundles as its frontend. The Tauri config also runs it
   as its own before-build command, so a shell build never ships a UI older than
   the sources.
-- `build:core` writes `packages/core/dist`: `main.js`, `jobs-worker.js`,
-  `guard-worker.js`, and the split chunk holding the agent SDKs, which is what
-  keeps them off the start path. `bun run core` and the shell both prefer this
+- `build:core` cleans and writes `packages/core/dist`: `main.js`, `jobs-worker.js`,
+  `guard-worker.js`, and hashed chunks for the main module and lazy drivers.
+  Keep every emitted file together when distributing this bundle. Lazy imports
+  keep the SDKs off the start path. `bun run core` and the shell both prefer this
   bundle over the sources when it is there.
 - `build:core:exe` compiles `packages/core/dist/boite-core.exe`. The two worker
   files are not compiled into it: the core loads them by name from beside its own
@@ -42,8 +44,8 @@ you want to see which.
   entries that land them beside the installed sidecar. The end to end suite wants
   the same files beside `apps/shell/src-tauri/target/release/boite-shell.exe`,
   which is the shell executable it drives, so the script copies there too
-  whenever that executable exists. Without the staged workers the trace degrades
-  from exact events to polling and the focus guard never starts.
+  whenever that executable exists. The shell refuses a sidecar missing either
+  worker and names the missing file.
 - `build:shell` runs the Tauri build with the bundle overlay and produces the
   NSIS installer.
 
@@ -182,9 +184,10 @@ bun run --cwd apps/shell tauri icon ../../packages/ui/public/icons/icon-dev.svg 
 
 ## Version numbers
 
-The version lives in the root `package.json`, in each workspace package, and in
-`apps/shell/src-tauri/tauri.conf.json`, which is the one the installer and the
-window title read. Bump them together, in the same commit as the release.
+The version lives in the root `package.json`, each workspace package,
+`apps/shell/src-tauri/Cargo.toml` and `apps/shell/src-tauri/tauri.conf.json`.
+Update them together and refresh the package entry in `Cargo.lock` in the same
+release commit.
 
 ## Before handing a build to anyone
 

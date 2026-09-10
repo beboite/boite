@@ -13,7 +13,7 @@
  * Two things about the wire are worth writing down. It is strict JSONL with LF
  * as the only delimiter, so nothing here may split on anything else. And pi has
  * no approval gate in RPC mode: the only request it sends back is an extension's
- * `extension_ui_request`, which Boite has no part for and answers by cancelling.
+ * `extension_ui_request`, drawn as an inline question.
  */
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -449,8 +449,6 @@ class PiSession {
   private running = 0;
   private closing = false;
   private ended = false;
-  /** One line per session, not one per question, when an extension asks something. */
-  private warnedDialog = false;
 
   constructor(
     readonly key: string,
@@ -701,7 +699,7 @@ class PiSession {
   private onEvent(ctx: TurnContext, message: Record<string, unknown>): void {
     const type = message['type'];
     if (type === 'extension_ui_request') {
-      this.answerDialog(ctx, message);
+      void this.answerDialog(ctx, message).catch((error) => ctx.log('warn', `pi question: ${messageOf(error)}`));
       return;
     }
     if (type === 'extension_error') {
@@ -760,20 +758,34 @@ class PiSession {
 
   /**
    * pi's only request back to the client. `select`, `confirm`, `input` and
-   * `editor` block the agent until an answer with the same id arrives, and Boite
-   * has no part for a free-form question, so they are cancelled: the extension
-   * reads that as the user dismissing the dialog. The rest are fire and forget.
+   * `editor` block the agent until an answer with the same id arrives.
    */
-  private answerDialog(ctx: TurnContext, message: Record<string, unknown>): void {
+  private async answerDialog(ctx: TurnContext, message: Record<string, unknown>): Promise<void> {
     const method = textOf(message['method']);
     if (!UI_DIALOGS.has(method)) return;
     const id = message['id'];
     if (typeof id !== 'string') return;
-    if (!this.warnedDialog) {
-      this.warnedDialog = true;
-      ctx.log('warn', `pi: an extension asked the user a ${method}, which Boite refuses`);
-    }
-    this.peer?.answer({ type: 'extension_ui_response', id, cancelled: true });
+    const turn = this.current;
+    const peer = this.peer;
+    if (turn === null || peer === null) return;
+    const choices = Array.isArray(message['options']) ? message['options'].filter((option): option is string => typeof option === 'string') : [];
+    const options = method === 'confirm'
+      ? [{ id: 'yes', label: 'Yes' }, { id: 'no', label: 'No' }]
+      : choices.map((label, index) => ({ id: String(index), label }));
+    const ask = {
+      text: [textOf(message['title']) || 'pi asks', textOf(message['message']), textOf(message['prefill'])].filter(Boolean).join('\n\n'),
+      options, allowText: method === 'input' || method === 'editor', multiple: false,
+    };
+    const ticket = ctx.askQuestion(ask);
+    const index = turn.takeIndex();
+    turn.part(index, { type: 'question', questionId: ticket.questionId, ...ask, answer: null });
+    const answer = await Promise.race([ticket, turn.stopped.then(() => null)]);
+    if (answer === null) { peer.answer({ type: 'extension_ui_response', id, cancelled: true }); return; }
+    turn.part(index, { type: 'question', questionId: ticket.questionId, ...ask, answer });
+    const value = method === 'select' ? options.find((option) => option.id === answer.optionIds[0])?.label : answer.text ?? '';
+    peer.answer(method === 'confirm'
+      ? { type: 'extension_ui_response', id, confirmed: answer.optionIds[0] === 'yes' }
+      : { type: 'extension_ui_response', id, value });
   }
 }
 

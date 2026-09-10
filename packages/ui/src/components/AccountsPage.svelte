@@ -3,6 +3,7 @@
   import type { Account, ProviderSummary } from '@boite/contracts';
   import InstallControl from './InstallControl.svelte';
   import Menu from './Menu.svelte';
+  import { confirm } from '../lib/confirm.svelte';
   import type { MenuItem } from '../lib/menu';
   import { strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
@@ -19,7 +20,7 @@
   async function submit(event: SubmitEvent) {
     event.preventDefault();
     if (!providerId || label.trim().length === 0) return;
-    await store.addAccount({ providerId, label: label.trim(), useDefaultLocation });
+    await store.addAccount({ providerId, label: label.trim(), useDefaultLocation: !alwaysIsolated && useDefaultLocation });
     label = '';
     adding = false;
   }
@@ -38,6 +39,7 @@
     )
   );
   let providerName = $derived(store.providerOf(providerId)?.name ?? strings.common.none);
+  let alwaysIsolated = $derived(store.providerOf(providerId)?.alwaysIsolated ?? false);
 
   /**
    * The provider's own login is the user's to run; Boite only drives isolated
@@ -45,8 +47,19 @@
    * log in with either: that row offers the install instead.
    */
   function canLogIn(account: Account, provider: ProviderSummary | null): boolean {
-    if (provider !== null && !provider.available) return false;
-    return account.isolationDir !== null && account.status === 'unauthenticated' && !store.logins[account.id];
+    if (!provider?.available || !provider.login) return false;
+    return account.isolationDir !== null && account.status !== 'ok' && store.logins[account.id]?.state !== 'running';
+  }
+
+  async function remove(account: Account) {
+    const accepted = await confirm.ask({
+      title: strings.accounts.removeTitle.replace('{account}', account.label),
+      body: account.isolationDir === null ? strings.accounts.removeDefaultBody : strings.accounts.removeBody,
+      confirmLabel: strings.accounts.remove,
+      cancelLabel: strings.accounts.cancel,
+      danger: true
+    });
+    if (accepted) await store.removeAccount(account.id);
   }
 
   async function sendCode(event: SubmitEvent, accountId: string) {
@@ -91,10 +104,12 @@
         <span>{strings.accounts.label}</span>
         <input bind:value={label} placeholder={strings.accounts.labelPlaceholder} />
       </label>
-      <label class="check">
-        <input type="checkbox" bind:checked={useDefaultLocation} />
-        {strings.accounts.useDefaultLocation}
-      </label>
+      {#if !alwaysIsolated}
+        <label class="check">
+          <input type="checkbox" bind:checked={useDefaultLocation} data-testid="account-default-location" />
+          {strings.accounts.useDefaultLocation}
+        </label>
+      {/if}
       <div class="actions">
         <button type="submit" class="primary" disabled={label.trim().length === 0}>
           {strings.accounts.create}
@@ -154,6 +169,9 @@
               <button class="quiet" onclick={() => void store.checkAccount(account.id)}>
                 {strings.accounts.check}
               </button>
+              <button class="quiet" data-testid="account-remove" data-account-id={account.id} onclick={() => void remove(account)}>
+                {strings.accounts.remove}
+              </button>
             </td>
           </tr>
           {#if login}
@@ -176,10 +194,15 @@
                   {login.output.length > 0 ? login.output : strings.accounts.loginStarting}
                 </p>
                 {#if login.state === 'running'}
+                  <button type="button" class="quiet" data-testid="account-login-cancel" data-account-id={account.id} onclick={() => void store.cancelLogin(account.id)}>
+                    {strings.accounts.loginCancel}
+                  </button>
                   <form class="code" onsubmit={(event) => void sendCode(event, account.id)}>
                     <input
                       data-testid="account-login-input"
-                      placeholder={strings.accounts.loginInputPlaceholder}
+                      placeholder={provider?.login && provider.login.kind === 'acp'
+                        ? strings.accounts.loginRedirectPlaceholder
+                        : strings.accounts.loginInputPlaceholder}
                       value={codes[account.id] ?? ''}
                       oninput={(event) =>
                         (codes = { ...codes, [account.id]: event.currentTarget.value })}

@@ -54,6 +54,14 @@ afterEach(async () => {
 });
 
 describe('providers', () => {
+  test('an unsupported executable resolver is rejected at its field', () => {
+    const body = validDescriptor();
+    body.profiles = { windows: { detect: {}, executable: [{ kind: 'registry', value: 'anything' }], isolation: {} } };
+    writeUserDescriptor('unsupported.json', body);
+    harness.core.providers.load();
+    const rejected = harness.core.providers.list().rejected;
+    expect(JSON.stringify(rejected)).toContain('profiles.windows.executable[0].kind');
+  });
   test('the shipped descriptors load', async () => {
     const client = await harness.connect();
     const { loaded, rejected } = await client.call('providers.list', {});

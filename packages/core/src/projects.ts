@@ -6,6 +6,7 @@ import { newId } from './ids.ts';
 import { notFound, refused } from './errors.ts';
 
 export class ProjectStore {
+  private readonly removing = new Set<ProjectId>();
   constructor(private readonly core: Core) {}
 
   list(): Project[] {
@@ -13,6 +14,7 @@ export class ProjectStore {
   }
 
   require(projectId: ProjectId): Project {
+    if (this.removing.has(projectId)) throw refused('this project is being removed', { projectId });
     const project = this.core.journal.getProject(projectId);
     if (project === null) throw notFound(`unknown project ${projectId}`, { projectId });
     return project;
@@ -44,26 +46,35 @@ export class ProjectStore {
     return project;
   }
 
-  remove(projectId: ProjectId): void {
+  async remove(projectId: ProjectId): Promise<void> {
     this.require(projectId);
-    const threadIds = this.core.journal.append(
-      { type: 'project.removed', threadId: null, version: 1, payload: { projectId } },
-      () => {
-        const removed = this.core.journal.deleteThreadsOfProject(projectId);
-        this.core.journal.deleteProject(projectId);
-        return removed;
-      },
-    );
-    for (const threadId of threadIds) this.core.bus.emit('thread.removed', { threadId });
-    this.core.bus.emit('project.removed', { projectId });
+    this.removing.add(projectId);
+    try {
+      const threads = this.core.journal.listThreads(projectId);
+      for (const thread of threads) this.core.threads.archive(thread.id, true);
+      await Promise.all(threads.map((thread) => this.core.scheduler.stopAndWait(thread.id)));
+      await Promise.all(threads.map((thread) => this.core.procs.stopAndWait(thread.id)));
+      const threadIds = this.core.journal.append(
+        { type: 'project.removed', threadId: null, version: 1, payload: { projectId } },
+        () => {
+          const removed = this.core.journal.deleteThreadsOfProject(projectId);
+          this.core.journal.deleteProject(projectId);
+          return removed;
+        },
+      );
+      for (const threadId of threadIds) this.core.bus.emit('thread.removed', { threadId });
+      this.core.bus.emit('project.removed', { projectId });
+    } finally {
+      this.removing.delete(projectId);
+    }
   }
 }
 
 export function registerProjectMethods(core: Core): void {
   core.router.register('projects.list', () => core.projects.list());
   core.router.register('projects.add', (params) => core.projects.add(params.path, params.name));
-  core.router.register('projects.remove', (params) => {
-    core.projects.remove(params.projectId);
+  core.router.register('projects.remove', async (params) => {
+    await core.projects.remove(params.projectId);
     return { ok: true } as const;
   });
 }

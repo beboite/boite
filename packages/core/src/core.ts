@@ -117,7 +117,7 @@ export class Core {
     await this.scheduler.drain();
     this.providers.installs.stop();
     shutdownDrivers();
-    this.accounts.closeLogins();
+    await this.accounts.closeLogins();
     this.procs.killAll();
     this.procs.close();
     this.bus.dispose();

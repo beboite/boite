@@ -22,15 +22,11 @@ const SOURCE_ROOTS = [
 ];
 const SOURCE_EXTENSIONS = ['.ts', '.json'];
 /** What the shell exe carries: `frontendDist` is compiled into the binary. */
-const UI_ROOTS = [join(ROOT, 'packages', 'ui', 'src')];
-const UI_EXTENSIONS = ['.ts', '.svelte', '.css', '.html', '.json'];
+const UI_ROOTS = [join(ROOT, 'packages', 'ui', 'src'), join(ROOT, 'packages', 'ui', 'public'), join(ROOT, 'apps', 'shell', 'src-tauri', 'src')];
+const UI_EXTENSIONS = ['.ts', '.svelte', '.css', '.html', '.json', '.js', '.rs', '.svg', '.png', '.webmanifest'];
 
 const exeMissing = !existsSync(EXE);
-if (exeMissing) {
-  console.log(
-    `[shell.test] skipped: ${EXE} does not exist. Build it with \`bun run --cwd apps/shell tauri build --no-bundle\`.`,
-  );
-}
+const skipShell = process.env.BOITE_E2E_SKIP_SHELL === '1';
 
 interface SourceFile {
   path: string;
@@ -87,10 +83,15 @@ function staleCoreReason(): string | null {
   const sidecar = join(dirname(EXE), `boite-core${CORE_SUFFIX}`);
   const built = existsSync(sidecar) ? sidecar : join(ROOT, 'packages', 'core', 'dist', 'main.js');
   if (!existsSync(built)) return null;
-  const builtAtMs = statSync(built).mtimeMs;
   const newest = newestSource(SOURCE_ROOTS, SOURCE_EXTENSIONS);
-  if (newest === null || builtAtMs >= newest.mtimeMs) return null;
-  return staleReport('core', built, builtAtMs, newest, 'bun run stage:core');
+  for (const artifact of [built, join(dirname(built), 'jobs-worker.js'), join(dirname(built), 'guard-worker.js')]) {
+    if (!existsSync(artifact)) return `missing core artifact: ${artifact}. Run bun run stage:core`;
+    const builtAtMs = statSync(artifact).mtimeMs;
+    if (newest !== null && builtAtMs < newest.mtimeMs) {
+      return staleReport('core', artifact, builtAtMs, newest, 'bun run stage:core');
+    }
+  }
+  return null;
 }
 
 /**
@@ -114,8 +115,10 @@ function staleUiReason(): string | null {
   );
 }
 
-const staleReason = exeMissing ? null : (staleCoreReason() ?? staleUiReason());
-const shellTest = exeMissing || staleReason !== null ? test.skip : test;
+const staleReason = skipShell ? null : exeMissing
+  ? `missing shell: ${EXE}. Run bun run --cwd apps/shell tauri build --no-bundle, or explicitly set BOITE_E2E_SKIP_SHELL=1 for a partial run`
+  : (staleCoreReason() ?? staleUiReason());
+const shellTest = skipShell || staleReason !== null ? test.skip : test;
 
 // One failure, right away, instead of two turn tests timing out in two minutes.
 if (staleReason !== null) {
@@ -280,7 +283,7 @@ async function quitShell(shellPage: BrowserPage): Promise<void> {
 }
 
 beforeAll(async () => {
-  if (exeMissing || staleReason !== null) return;
+  if (skipShell || staleReason !== null) return;
   dataDir = freshDataDir();
   projectDir = mkdtempSync(join(tmpdir(), 'boite-e2e-shell-project-'));
   debugPort = await freePort();

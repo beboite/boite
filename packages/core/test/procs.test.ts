@@ -17,6 +17,18 @@ afterEach(async () => {
 });
 
 describe('procs', () => {
+  test.skipIf(process.platform !== 'win32')('spawnChild keeps native exit usage after the node exit callback', async () => {
+    const threadId = 'native-child-usage';
+    const child = harness.core.procs.spawnChild(threadId, process.execPath, ['-e', 'setTimeout(() => {}, 250)'], {
+      cwd: harness.dataDir,
+    });
+    await new Promise<void>((resolve, reject) => { child.once('exit', () => resolve()); child.once('error', reject); });
+    await waitFor(() => harness.core.procs.liveCount(threadId) === 0);
+    const record = harness.core.journal.listProcesses(threadId, 10)[0];
+    expect(record?.cpuMs).not.toBeNull();
+    expect(record?.peakMemoryBytes).toBeGreaterThan(0);
+    expect(record?.ioBytes).not.toBeNull();
+  });
   test('killTree kills the child a turn spawned', async () => {
     const client = await harness.connect();
     const { threadId } = await echoThread(harness, client);

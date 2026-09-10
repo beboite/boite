@@ -131,8 +131,7 @@ export function main(argv: string[]): void {
   const shutdown = (): void => {
     if (stopping) return;
     stopping = true;
-    void server.stop();
-    void core.close().then(() => process.exit(0));
+    void server.stop().then(() => core.close()).then(() => process.exit(0));
   };
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);

@@ -72,7 +72,7 @@ export class MuteLogic {
    * from an earlier pass or the user's own choice, and both are left alone.
    */
   tick(): void {
-    if (!this.#enabled) return;
+    if (!this.#enabled || this.#pids.size === 0) return;
 
     let sessions: AudioSession[];
     try {

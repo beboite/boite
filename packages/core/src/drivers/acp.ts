@@ -128,6 +128,7 @@ export function jsonLinesOnly(
   const decoder = new TextDecoder();
   const encoder = new TextEncoder();
   let buffer = '';
+  let discarding = false;
   const take = (line: string, controller: ReadableStreamDefaultController<Uint8Array>): void => {
     const text = line.replace(/\r$/, '');
     if (text.trimStart().startsWith('{')) {
@@ -149,20 +150,29 @@ export function jsonLinesOnly(
           controller.close();
           return;
         }
-        buffer += decoder.decode(value, { stream: true });
-        if (buffer.length > STDOUT_LINE_MAX) {
-          buffer = '';
-          onOther('the agent sent a stdout line too large to be a protocol line');
-          continue;
+        let chunk = decoder.decode(value, { stream: true });
+        if (discarding) {
+          const end = chunk.indexOf('\n');
+          if (end < 0) continue;
+          chunk = chunk.slice(end + 1);
+          discarding = false;
         }
+        buffer += chunk;
         let index = buffer.indexOf('\n');
-        if (index < 0) continue;
+        let complete = false;
         while (index >= 0) {
-          take(buffer.slice(0, index), controller);
+          if (index > STDOUT_LINE_MAX) onOther('the agent sent a stdout line too large to be a protocol line');
+          else take(buffer.slice(0, index), controller);
           buffer = buffer.slice(index + 1);
           index = buffer.indexOf('\n');
+          complete = true;
         }
-        return;
+        if (buffer.length > STDOUT_LINE_MAX) {
+          buffer = '';
+          discarding = true;
+          onOther('the agent sent a stdout line too large to be a protocol line');
+        }
+        if (complete) return;
       }
     },
     cancel(reason) {
@@ -442,6 +452,10 @@ class AcpSession {
     private readonly onEnded: (session: AcpSession) => void,
   ) {}
 
+  seedConfig(options: SessionConfigOption[]): void {
+    if (this.configOptions.length === 0) this.configOptions = structuredClone(options);
+  }
+
   /** Reusable only while the process is up and the turn asks for the very same setup. */
   usable(key: string, warmMs: number): boolean {
     return !this.ended && !this.closing && this.key === key && warmMs > 0 && this.warmMs > 0;
@@ -596,6 +610,13 @@ class AcpSession {
     this.canLoad = init.agentCapabilities?.loadSession === true;
 
     if (ctx.sessionId !== null && this.canLoad) {
+      // A fresh core has no probe cache, and session/load may omit controls.
+      // Discover them before loading so the resumed session stays the active one.
+      if (!isGrok(ctx.provider) && this.configOptions.length === 0
+        && (ctx.thread.model !== AGENT_OWN_MODEL || ctx.thread.effort !== null)) {
+        const discovered = await connection.agent.request('session/new', { cwd: ctx.thread.cwd, mcpServers: [] });
+        this.seedConfig(discovered.configOptions ?? []);
+      }
       // Every `session/update` of a load is history replay: `current` is null,
       // so the update handler drops them.
       const loaded = await connection.agent.request('session/load', {
@@ -931,24 +952,32 @@ class AcpSession {
     // `RequestPermissionResponse.outcome` is itself the tagged outcome object.
     if (turn === null) return { outcome: { outcome: 'cancelled' } };
     const call = params.toolCall;
-    // Antigravity sends its free-form questions through the permission method,
-    // under a `interaction_` id and with its own choices rather than the
-    // protocol's allow and reject kinds. The contract has no part for a
-    // question, so it is drawn as the permission card it arrived as: allowing
-    // takes the agent's first choice, denying cancels the question.
+    // Antigravity carries questions on this method, using its own option ids.
     const question = turn.antigravity && isAntigravityQuestion(params);
-    const toolName = question
-      ? (call.title ?? 'Antigravity asks')
-      : (call.name ?? call.title ?? call.toolCallId);
+    if (question) {
+      const ask = {
+        text: call.title ?? 'Antigravity asks',
+        options: params.options.map((option) => ({ id: option.optionId, label: option.name })),
+        allowText: false, multiple: false,
+      };
+      const ticket = turn.ctx.askQuestion(ask);
+      const index = turn.takeIndex();
+      turn.part(index, { type: 'question', questionId: ticket.questionId, ...ask, answer: null });
+      const answer = await Promise.race([ticket, turn.stopped.then(() => null)]);
+      if (answer === null) return { outcome: { outcome: 'cancelled' } };
+      turn.part(index, { type: 'question', questionId: ticket.questionId, ...ask, answer });
+      const optionId = answer.optionIds[0];
+      if (!params.options.some((option) => option.optionId === optionId)) return { outcome: { outcome: 'cancelled' } };
+      return { outcome: { outcome: 'selected', optionId: optionId! } };
+    }
+    const toolName = call.name ?? call.title ?? call.toolCallId;
     const ticket = turn.ctx.requestPermission(toolName, call.rawInput ?? null, call.title ?? null);
     const index = turn.takeIndex();
     turn.part(index, { type: 'permission', requestId: ticket.requestId, toolName, decision: null });
     const answer = await Promise.race([ticket, turn.stopped.then(() => 'cancelled' as const)]);
     if (answer === 'cancelled') return { outcome: { outcome: 'cancelled' } };
     turn.part(index, { type: 'permission', requestId: ticket.requestId, toolName, decision: answer });
-    const optionId = question
-      ? (answer === 'allow' ? (params.options[0]?.optionId ?? null) : null)
-      : pickOption(params.options, answer);
+    const optionId = pickOption(params.options, answer);
     if (optionId === null) return { outcome: { outcome: 'cancelled' } };
     return { outcome: { outcome: 'selected', optionId } };
   }
@@ -1154,7 +1183,7 @@ function modelsFromConfig(provider: ProviderDescriptor, options: SessionConfigOp
  * options, then the child goes through the registry that traced it. Nothing of
  * this session is kept; a turn opens its own.
  */
-async function readModels(ctx: ProbeContext, deps: AcpDeps): Promise<ModelInfo[]> {
+async function readModels(ctx: ProbeContext, deps: AcpDeps, noteOptions: (options: SessionConfigOption[]) => void): Promise<ModelInfo[]> {
   const sdk = await deps.loadSdk();
   const profile = profileFor(ctx.provider);
   const executable = profile === undefined ? null : resolveExecutable(profile);
@@ -1228,6 +1257,7 @@ async function readModels(ctx: ProbeContext, deps: AcpDeps): Promise<ModelInfo[]
     })();
 
     const answer = await Promise.race([read, died, expired]);
+    noteOptions(answer.options ?? []);
     return modelsFrom(ctx.provider, answer.options, answer.listed);
   } finally {
     if (timer !== null) clearTimeout(timer);
@@ -1262,6 +1292,8 @@ export interface AcpLoginInput {
 }
 
 export interface AcpLoginRun {
+  /** Settles only once the process and its pipes have closed. */
+  exited: Promise<void>;
   /** Resolves when `authenticate` answered, rejects with what the agent refused. */
   done: Promise<void>;
   /** The process and the connection go, on success and on failure alike. */
@@ -1279,6 +1311,10 @@ const LOGIN_TIMEOUT_MS = 5 * MINUTE_MS;
  */
 export function runAcpLogin(input: AcpLoginInput): AcpLoginRun {
   const child = input.spawnChild(input.executable, input.args, { cwd: input.cwd, env: input.env });
+  const exited = new Promise<void>((resolve) => {
+    child.once('close', () => resolve());
+    child.once('error', () => resolve());
+  });
   child.stdin.on('error', () => undefined);
   child.stderr.setEncoding('utf8');
   let stderrBuffer = '';
@@ -1361,7 +1397,7 @@ export function runAcpLogin(input: AcpLoginInput): AcpLoginRun {
     }
   })();
 
-  return { done, kill };
+  return { done, kill, exited };
 }
 
 function pickOption(options: PermissionOption[], decision: 'allow' | 'deny'): string | null {
@@ -1407,6 +1443,7 @@ function stringify(value: unknown): string {
 }
 
 interface ProbeEntry {
+  options: SessionConfigOption[];
   providerId: ProviderId;
   accountId: AccountId;
   /** The one process in flight for this key, so two callers share it. */
@@ -1427,6 +1464,7 @@ export function createAcpDriver(deps: AcpDeps): Driver {
     async probe(ctx: ProbeContext): Promise<ProbeResult> {
       const key = keyOf(ctx.provider.id, ctx.accountId);
       const entry: ProbeEntry = probes.get(key) ?? {
+        options: [],
         providerId: ctx.provider.id,
         accountId: ctx.accountId,
         running: null,
@@ -1436,7 +1474,7 @@ export function createAcpDriver(deps: AcpDeps): Driver {
       if (entry.result !== null) return entry.result;
       if (entry.running !== null) return entry.running;
 
-      const running = readModels(ctx, deps).then((models) => ({ models, probedAt: Date.now() }));
+      const running = readModels(ctx, deps, (options) => { entry.options = options; }).then((models) => ({ models, probedAt: Date.now() }));
       entry.running = running;
       try {
         const result = await running;
@@ -1490,6 +1528,7 @@ export function createAcpDriver(deps: AcpDeps): Driver {
         sessions.set(threadId, session);
       }
       const running = session;
+      running.seedConfig(probes.get(keyOf(ctx.provider.id, ctx.account.id))?.options ?? []);
       running.attach(turn, warmMs);
       return {
         done: turn.done,

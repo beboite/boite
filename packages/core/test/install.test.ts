@@ -145,6 +145,15 @@ afterEach(async () => {
 });
 
 describe('managed installs', () => {
+  test('a corrupt completion record stays visible as a failed install', async () => {
+    await loadDescriptor(goodInstall());
+    mkdirSync(agentDir('current'), { recursive: true });
+    writeFileSync(agentDir('current', '.install-complete.json'), '{');
+    const client = await harness.connect();
+    const provider = (await client.call('providers.list', {})).loaded.find((entry) => entry.id === 'managed');
+    expect(provider?.install?.state).toBe('failed');
+    if (provider?.install?.state === 'failed') expect(provider.install.message).toContain('.install-complete.json');
+  });
   test('a release is downloaded, checked, unpacked and pointed at by {agentsDir}', async () => {
     await loadDescriptor(goodInstall());
     const client = await harness.connect();

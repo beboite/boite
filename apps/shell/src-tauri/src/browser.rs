@@ -258,6 +258,9 @@ pub async fn browser_create(
     let handle = app.clone();
     let surface = id.clone();
     builder = builder.on_new_window(move |url, _features| {
+        if checked_url(&surface, url.as_str()).is_err() {
+            return NewWindowResponse::Deny;
+        }
         announce(
             &handle,
             Event::NewWindow {

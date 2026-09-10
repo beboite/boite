@@ -68,6 +68,8 @@ const LOAD_INTERVAL_MS = 1000;
  * grandchild nobody here spawned is registered from a job event.
  */
 export class ProcRegistry {
+  private readonly unassigned = new Set<number>();
+  private readonly exitTimers = new Map<number, ReturnType<typeof setTimeout>>();
   private readonly live = new Map<ThreadId, Map<number, Entry>>();
   /** Every pid this thread ever registered. A job event for one of them is a repeat, not a grandchild. */
   private readonly known = new Map<ThreadId, Set<number>>();
@@ -138,6 +140,8 @@ export class ProcRegistry {
 
   close(): void {
     clearInterval(this.loadTimer);
+    for (const timer of this.exitTimers.values()) clearTimeout(timer);
+    this.exitTimers.clear();
     releaseJobs();
     releaseGuard();
   }
@@ -179,7 +183,7 @@ export class ProcRegistry {
    * that cannot reach a browser asks for a code to be pasted back.
    */
   spawnPiped(threadId: ThreadId, cmd: string, args: string[], opts: SpawnOptions = {}): SpawnedPipedProcess {
-    const env: Record<string, string | undefined> = { ...process.env, ...(opts.env ?? {}) };
+    const env = opts.env ?? process.env;
     const proc = Bun.spawn({
       cmd: [cmd, ...args],
       cwd: opts.cwd,
@@ -263,7 +267,7 @@ export class ProcRegistry {
       ioBytes: null,
     };
 
-    assignToThreadJob(threadId, pid);
+    if (!assignToThreadJob(threadId, pid)) this.unassigned.add(pid);
     this.track(threadId, record, control);
     return record;
   }
@@ -350,25 +354,25 @@ export class ProcRegistry {
     const byPid = this.live.get(threadId);
     const entries = byPid === undefined ? [] : [...byPid.values()];
     const terminated = terminateThreadJob(threadId);
-    if (!terminated) {
-      for (const entry of entries) {
-        if (process.platform === 'win32') {
-          try {
-            Bun.spawnSync({
-              cmd: ['taskkill', '/T', '/F', '/PID', String(entry.record.pid)],
-              stdout: 'ignore',
-              stderr: 'ignore',
-              windowsHide: true,
-            });
-          } catch {
-            // taskkill fails when the process is already gone; entry.kill() below covers it.
-          }
-        }
+    for (const entry of entries) {
+      if (terminated && !this.unassigned.has(entry.record.pid)) continue;
+      if (entry.record.pid <= 0) continue;
+      if (process.platform === 'win32') {
         try {
-          entry.kill();
+          Bun.spawnSync({
+            cmd: ['taskkill', '/T', '/F', '/PID', String(entry.record.pid)],
+            stdout: 'ignore',
+            stderr: 'ignore',
+            windowsHide: true,
+          });
         } catch {
-          // already exited
+          // taskkill fails when the process is already gone; entry.kill() below covers it.
         }
+      }
+      try {
+        entry.kill();
+      } catch {
+        // already exited
       }
     }
     return entries.length;
@@ -378,9 +382,32 @@ export class ProcRegistry {
     for (const threadId of [...this.live.keys()]) this.killTree(threadId);
   }
 
+  /** Project removal must wait for exit records before deleting the projection. */
+  async stopAndWait(threadId: ThreadId): Promise<void> {
+    this.killTree(threadId);
+    const deadline = Date.now() + 5000;
+    while (this.liveCount(threadId) > 0) {
+      if (Date.now() >= deadline) throw new Error(`processes of ${threadId} did not exit within five seconds`);
+      await new Promise<void>((resolve) => setTimeout(resolve, 25));
+    }
+  }
+
   private onExit(threadId: ThreadId, pid: number, code: number | null, fromJob?: JobProcessExit): void {
     const entry = this.live.get(threadId)?.get(pid);
     if (entry === undefined) return;
+    // Node's exit has no usage. Let the completion-port event carry it, while
+    // retaining a bounded fallback if the worker missed a short-lived process.
+    if (fromJob === undefined && !this.unassigned.has(pid) && this.capability().mode === 'events'
+      && !this.exitTimers.has(pid)) {
+      const timer = setTimeout(() => this.onExit(threadId, pid, code), 1000);
+      timer.unref();
+      this.exitTimers.set(pid, timer);
+      return;
+    }
+    const timer = this.exitTimers.get(pid);
+    if (timer !== undefined) clearTimeout(timer);
+    this.exitTimers.delete(pid);
+    this.unassigned.delete(pid);
     this.live.get(threadId)?.delete(pid);
     guardPidRemoved(threadId, pid);
     if (this.journal.isClosed()) return;

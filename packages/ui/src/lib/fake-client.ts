@@ -213,6 +213,12 @@ const PROBED_MODELS: ModelInfo[] = [
   ...PROBED_CATALOGUE.map(([id, name]): ModelInfo => ({ id, name, default: false, effort: PROBED_EFFORT }))
 ];
 
+const PROBE_PROVIDERS: Pick<ProviderSummary, 'id' | 'name' | 'protocol' | 'login'>[] = [
+  { id: 'codex', name: 'Codex', protocol: 'codex-appserver', login: { kind: 'command' } },
+  { id: 'pi', name: 'pi', protocol: 'pi', login: false },
+  { id: 'grok', name: 'Grok', protocol: 'acp', login: { kind: 'command' } }
+];
+
 /**
  * The whole core in memory, contract-accurate: what `vite dev` uses behind
  * `?fake=1` and what every test runs against.
@@ -246,8 +252,8 @@ export class FakeClient implements ObservableClient {
     { request: QuestionRequest; resolve: (answer: QuestionAnswer | null) => void }
   >();
   #inFlight = new Map<ThreadId, { cancelled: boolean; done: Promise<void> }>();
-  /** Account ids whose fake login is waiting for a code. */
-  #logins = new Set<string>();
+  /** The current output of every active fake login, also returned after reconnect. */
+  #logins = new Map<string, RpcEvents['account.login']>();
   #seq = 0;
   #delayMs: number;
   #long: boolean;
@@ -336,7 +342,7 @@ export class FakeClient implements ObservableClient {
       throw new RpcFailure({ code: RpcErrorCode.Internal, message: 'not connected' });
     }
     await this.#tick();
-    return this.#dispatch(method, params) as RpcResult<M>;
+    return await this.#dispatch(method, params) as RpcResult<M>;
   }
 
   /** Resolves when no turn is still streaming. A pending permission blocks it. */
@@ -350,7 +356,7 @@ export class FakeClient implements ObservableClient {
   // Dispatch
   // -------------------------------------------------------------------------
 
-  #dispatch(method: RpcMethodName, rawParams: unknown): unknown {
+  async #dispatch(method: RpcMethodName, rawParams: unknown): Promise<unknown> {
     switch (method) {
       case 'hello':
         return { core: this.#core };
@@ -372,8 +378,10 @@ export class FakeClient implements ObservableClient {
       case 'projects.remove': {
         const params = rawParams as RpcParams<'projects.remove'>;
         this.#projects = this.#projects.filter((p) => p.id !== params.projectId);
-        for (const thread of [...this.#threads.values()]) {
-          if (thread.projectId !== params.projectId) continue;
+        const threads = [...this.#threads.values()].filter((thread) => thread.projectId === params.projectId);
+        for (const thread of threads) thread.archived = true;
+        await Promise.all(threads.map((thread) => this.#stopTurn(thread.id)));
+        for (const thread of threads) {
           this.#threads.delete(thread.id);
           this.#emit('thread.removed', { threadId: thread.id });
         }
@@ -429,12 +437,14 @@ export class FakeClient implements ObservableClient {
         return structuredClone(this.#accounts);
       case 'accounts.add': {
         const params = rawParams as RpcParams<'accounts.add'>;
+        const provider = this.#providers.find((p) => p.id === params.providerId);
+        if (!provider) throw this.#notFound('provider', params.providerId);
         const id = `a-${++this.#seq}`;
         const account: Account = {
           id,
           providerId: params.providerId,
           label: params.label,
-          isolationDir: params.useDefaultLocation ? null : `${DATA_DIR}\\accounts\\${id}`,
+          isolationDir: params.useDefaultLocation && !provider.alwaysIsolated ? null : `${DATA_DIR}\\accounts\\${id}`,
           status: 'unknown',
           identity: null,
           createdAt: this.#now()
@@ -445,6 +455,12 @@ export class FakeClient implements ObservableClient {
       }
       case 'accounts.remove': {
         const params = rawParams as RpcParams<'accounts.remove'>;
+        if (!this.#accounts.some((a) => a.id === params.accountId)) throw this.#notFound('account', params.accountId);
+        const referenced = [...this.#threads.values()].find((t) => t.accountId === params.accountId);
+        if (referenced) {
+          throw new RpcFailure({ code: RpcErrorCode.Refused, message: `account ${params.accountId} is used by thread ${referenced.id}` });
+        }
+        this.#cancelLogin(params.accountId);
         this.#accounts = this.#accounts.filter((a) => a.id !== params.accountId);
         this.#emit('accounts.removed', { accountId: params.accountId });
         return { ok: true };
@@ -462,6 +478,10 @@ export class FakeClient implements ObservableClient {
         const params = rawParams as RpcParams<'accounts.login'>;
         const account = this.#accounts.find((a) => a.id === params.accountId);
         if (!account) throw this.#notFound('account', params.accountId);
+        const provider = this.#providers.find((p) => p.id === account.providerId);
+        if (!provider?.available || !provider.login) {
+          throw new RpcFailure({ code: RpcErrorCode.Refused, message: `login is not available for ${account.providerId}` });
+        }
         if (account.isolationDir === null) {
           throw new RpcFailure({
             code: RpcErrorCode.Refused,
@@ -474,8 +494,7 @@ export class FakeClient implements ObservableClient {
             message: `a login is already running for ${account.label}`
           });
         }
-        this.#logins.add(account.id);
-        this.#emit('account.login', {
+        this.#loginEvent({
           accountId: account.id,
           state: 'running',
           output: '',
@@ -483,6 +502,14 @@ export class FakeClient implements ObservableClient {
           exitCode: null
         });
         void this.#fakeLoginPrompt(account.id);
+        return { ok: true };
+      }
+      case 'accounts.logins':
+        return structuredClone([...this.#logins.values()]);
+      case 'accounts.loginCancel': {
+        const params = rawParams as RpcParams<'accounts.loginCancel'>;
+        if (!this.#accounts.some((a) => a.id === params.accountId)) throw this.#notFound('account', params.accountId);
+        this.#cancelLogin(params.accountId);
         return { ok: true };
       }
       case 'accounts.loginInput': {
@@ -570,6 +597,7 @@ export class FakeClient implements ObservableClient {
         const params = rawParams as RpcParams<'threads.archive'>;
         const thread = this.#thread(params.threadId);
         thread.archived = params.archived ?? true;
+        if (thread.archived) await this.#stopTurn(thread.id);
         return this.#touch(thread);
       }
       case 'threads.markRead': {
@@ -596,19 +624,7 @@ export class FakeClient implements ObservableClient {
       }
       case 'turns.stop': {
         const params = rawParams as RpcParams<'turns.stop'>;
-        const running = this.#inFlight.get(params.threadId);
-        if (!running) return { stopped: false };
-        running.cancelled = true;
-        for (const [requestId, pending] of [...this.#pendingPermissions]) {
-          this.#pendingPermissions.delete(requestId);
-          pending.resolve('deny');
-        }
-        for (const [questionId, pending] of [...this.#pendingQuestions]) {
-          this.#pendingQuestions.delete(questionId);
-          this.#emit('question.answered', { questionId, threadId: params.threadId, answer: null });
-          pending.resolve(null);
-        }
-        return { stopped: true };
+        return { stopped: await this.#stopTurn(params.threadId) };
       }
 
       case 'permissions.list': {
@@ -695,6 +711,12 @@ export class FakeClient implements ObservableClient {
         return { ...this.#settings };
       case 'settings.set': {
         const params = rawParams as RpcParams<'settings.set'>;
+        for (const field of ['maxConcurrentTurns', 'perAccountConcurrency'] as const) {
+          const value = params[field];
+          if (value !== undefined && (!Number.isInteger(value) || value < 1)) {
+            throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: `${field} must be a positive integer`, data: { field } });
+          }
+        }
         this.#settings = { ...this.#settings, ...params };
         this.#scheduler = {
           ...this.#scheduler,
@@ -720,8 +742,34 @@ export class FakeClient implements ObservableClient {
   // Turns
   // -------------------------------------------------------------------------
 
+  async #stopTurn(threadId: ThreadId): Promise<boolean> {
+    const running = this.#inFlight.get(threadId);
+    let stopped = running !== undefined;
+    if (running) running.cancelled = true;
+    for (const [requestId, pending] of [...this.#pendingPermissions]) {
+      if (pending.request.threadId !== threadId) continue;
+      stopped = true;
+      this.#pendingPermissions.delete(requestId);
+      pending.resolve('deny');
+    }
+    for (const [questionId, pending] of [...this.#pendingQuestions]) {
+      if (pending.request.threadId !== threadId) continue;
+      stopped = true;
+      this.#pendingQuestions.delete(questionId);
+      pending.resolve(null);
+    }
+    await running?.done;
+    return stopped;
+  }
+
   #startTurn(threadId: ThreadId, prompt: string): Turn {
     const thread = this.#thread(threadId);
+    if (thread.archived) {
+      throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'cannot start a turn on an archived thread', data: { threadId } });
+    }
+    if (['queued', 'running', 'waiting'].includes(thread.status) || this.#inFlight.has(threadId)) {
+      throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'this thread already has an in-flight turn', data: { threadId } });
+    }
     const at = this.#now();
     const turn: Turn = {
       id: `turn-${++this.#seq}`,
@@ -825,7 +873,7 @@ export class FakeClient implements ObservableClient {
       await this.#askPermission(thread, turn, message);
     }
     // The bare word, like the echo driver: the fake agent asks one question.
-    if (!record.cancelled && /question/.test(prompt)) {
+    if (!record.cancelled && /\bquestion\b/.test(prompt)) {
       await this.#askQuestion(thread, turn, message);
     }
     if (!record.cancelled && prompt.includes('[tool-stream]')) {
@@ -1175,11 +1223,25 @@ export class FakeClient implements ObservableClient {
   // Account login
   // -------------------------------------------------------------------------
 
+  #loginEvent(event: RpcEvents['account.login']): void {
+    if (event.state === 'running') {
+      const existing = this.#logins.get(event.accountId);
+      this.#logins.set(event.accountId, existing ? Object.assign(existing, event) : event);
+    } else this.#logins.delete(event.accountId);
+    this.#emit('account.login', structuredClone(event));
+  }
+
+  #cancelLogin(accountId: string): void {
+    if (!this.#logins.has(accountId)) return;
+    this.#loginEvent({ accountId, state: 'done', output: 'Login cancelled', url: null, exitCode: null });
+  }
+
   /** What a provider CLI prints first: a link to open, then a question. */
   async #fakeLoginPrompt(accountId: string): Promise<void> {
+    const active = this.#logins.get(accountId);
     await this.#pause();
-    if (!this.#logins.has(accountId)) return;
-    this.#emit('account.login', {
+    if (!active || this.#logins.get(accountId) !== active) return;
+    this.#loginEvent({
       accountId,
       state: 'running',
       output: 'Open https://example.invalid/login?code=fake to continue',
@@ -1189,9 +1251,10 @@ export class FakeClient implements ObservableClient {
   }
 
   async #finishFakeLogin(account: Account): Promise<void> {
+    const active = this.#logins.get(account.id);
     await this.#pause();
-    this.#logins.delete(account.id);
-    this.#emit('account.login', {
+    if (!active || this.#logins.get(account.id) !== active) return;
+    this.#loginEvent({
       accountId: account.id,
       state: 'done',
       output: 'logged in',
@@ -1286,16 +1349,31 @@ export class FakeClient implements ObservableClient {
   }
 
   /**
-   * The ACP provider answers the way a real agent does: one round trip, then
-   * the models it can run. Every other protocol hands back its descriptor.
+   * ACP, Codex and pi probe their own catalogs. Demo models are explicitly
+   * named as such; only OpenCode uses the large catalog fixture.
    */
   async #probe(providerId: string, accountId: string): Promise<RpcResult<'providers.probe'>> {
     const provider = this.#providers.find((p) => p.id === providerId);
     if (!provider) {
       throw new RpcFailure({ code: RpcErrorCode.NotFound, message: `unknown provider ${providerId}` });
     }
-    const models = provider.protocol === 'acp' ? structuredClone(PROBED_MODELS) : structuredClone(provider.models);
-    if (provider.protocol === 'acp') await new Promise((resolve) => setTimeout(resolve, PROBE_MS));
+    const account = this.#accounts.find((a) => a.id === accountId);
+    if (!account) throw this.#notFound('account', accountId);
+    if (account.providerId !== providerId) {
+      throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'the account belongs to another provider' });
+    }
+    const dynamic = ['acp', 'codex-appserver', 'pi'].includes(provider.protocol);
+    if (dynamic && !provider.available) {
+      throw new RpcFailure({ code: RpcErrorCode.Unavailable, message: `${provider.name} is not available on this machine` });
+    }
+    let models = structuredClone(provider.models);
+    if (dynamic) {
+      models = provider.id === UPDATABLE_ID ? structuredClone(PROBED_MODELS) : [
+        ...models,
+        { id: `${provider.id}-demo`, name: `${provider.name} demo model`, default: false }
+      ];
+      await new Promise((resolve) => setTimeout(resolve, PROBE_MS));
+    }
     const probedAt = this.#now();
     this.#emit('providers.probed', { providerId, accountId, models: structuredClone(models), probedAt });
     return { models, probedAt };
@@ -1484,6 +1562,8 @@ export class FakeClient implements ObservableClient {
         name: 'Claude',
         shortName: 'Claude',
         protocol: 'claude-sdk',
+        login: { kind: 'command' },
+        alwaysIsolated: false,
         source: 'shipped',
         available: true,
         executable: 'C:\\Users\\you\\.local\\bin\\claude.exe',
@@ -1562,6 +1642,8 @@ export class FakeClient implements ObservableClient {
         name: 'Echo',
         shortName: 'Echo',
         protocol: 'echo',
+        login: false,
+        alwaysIsolated: false,
         source: 'shipped',
         available: true,
         executable: null,
@@ -1594,6 +1676,8 @@ export class FakeClient implements ObservableClient {
         name: 'OpenCode',
         shortName: 'OpenCode',
         protocol: 'acp',
+        login: { kind: 'command' },
+        alwaysIsolated: false,
         source: 'shipped',
         available: true,
         executable: 'C:\\Users\\you\\AppData\\Roaming\\npm\\opencode.exe',
@@ -1620,6 +1704,8 @@ export class FakeClient implements ObservableClient {
         name: 'Antigravity',
         shortName: 'Antigravity',
         protocol: 'acp',
+        login: { kind: 'acp' },
+        alwaysIsolated: true,
         source: 'shipped',
         // Nothing runs until the release lands: the picker row offers the download.
         available: false,
@@ -1640,6 +1726,20 @@ export class FakeClient implements ObservableClient {
         }
       }
     ];
+    this.#providers.push(...PROBE_PROVIDERS.map((provider): ProviderSummary => ({
+      ...provider,
+      shortName: provider.name,
+      source: 'shipped',
+      available: true,
+      executable: `${DATA_DIR}\\demo\\${provider.id}.exe`,
+      models: [{ id: 'default', name: `${provider.name} default`, default: true }],
+      capabilities: {
+        approvals: provider.protocol !== 'pi', hooks: false, checkpoint: false,
+        images: false, planMode: provider.protocol !== 'pi', resume: true
+      },
+      install: null,
+      alwaysIsolated: false
+    })));
     this.#accounts = [
       {
         id: 'a-echo',
@@ -1689,6 +1789,16 @@ export class FakeClient implements ObservableClient {
         createdAt: T0
       }
     ];
+
+    this.#accounts.push(...PROBE_PROVIDERS.map((provider): Account => ({
+      id: `a-${provider.id}`,
+      providerId: provider.id,
+      label: 'Default',
+      isolationDir: null,
+      status: 'ok',
+      identity: 'you@example.com',
+      createdAt: T0
+    })));
 
     const base = {
       providerId: 'echo',

@@ -8,6 +8,7 @@ use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
+mod instance;
 
 use serde::{Deserialize, Serialize};
 use tauri::{
@@ -487,15 +488,28 @@ fn repo_root() -> Option<PathBuf> {
     None
 }
 
-fn sidecar() -> Option<PathBuf> {
-    let exe = std::env::current_exe().ok()?;
+fn sidecar() -> Result<Option<PathBuf>, String> {
+    let exe = std::env::current_exe().map_err(|error| error.to_string())?;
     let name = if cfg!(windows) {
         "boite-core.exe"
     } else {
         "boite-core"
     };
-    let path = exe.parent()?.join(name);
-    path.exists().then_some(path)
+    let directory = exe.parent().ok_or("the shell executable has no parent directory")?;
+    let path = directory.join(name);
+    if !path.exists() { return Ok(None); }
+    check_workers(directory)?;
+    Ok(Some(path))
+}
+
+fn check_workers(directory: &Path) -> Result<(), String> {
+    for name in ["jobs-worker.js", "guard-worker.js"] {
+        let worker = directory.join(name);
+        if !worker.is_file() {
+            return Err(format!("missing core worker: {}. Reinstall or run bun run stage:core", worker.display()));
+        }
+    }
+    Ok(())
 }
 
 /// In order: `BOITE_CORE_COMMAND`, the `boite-core` sidecar next to this
@@ -518,7 +532,7 @@ fn core_program() -> Result<(String, Vec<String>, Option<PathBuf>), String> {
         return Ok((program, parts.collect(), None));
     }
 
-    if let Some(path) = sidecar() {
+    if let Some(path) = sidecar()? {
         return Ok((path.display().to_string(), Vec::new(), None));
     }
 
@@ -563,9 +577,10 @@ fn spawn_core(channel: Channel) -> Result<(Child, Arc<AtomicBool>, CoreJob), Str
         .spawn()
         .map_err(|error| format!("the core could not be started with `{program}`: {error}"))?;
 
-    // Not fatal: the core runs either way, and a clean quit still kills it.
     if let Err(error) = job::assign(&job, &child) {
-        eprintln!("[shell] the core could not be put in this shell's job object: {error}");
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(format!("the core could not be put in this shell's job object: {error}"));
     }
 
     let ready = Arc::new(AtomicBool::new(false));
@@ -676,9 +691,10 @@ fn build_main_window<R: Runtime>(
             // The compositor draws the material behind the window, so the window
             // has to let it through. The page paints its own ground back over it
             // unless the UI stamps `data-glass`, which it only does in the shell.
-            .transparent(true)
+            .transparent(cfg!(windows))
             .visible(false)
-            .focused(true)
+            .focused(!hidden())
+            .skip_taskbar(hidden())
             // The browser surfaces belong to the page that asked for them: a
             // reload of the UI takes every child webview with it.
             .on_page_load(|window, payload| {
@@ -755,6 +771,10 @@ pub fn run() {
     // is the only thing that says which install this executable is.
     let context = tauri::generate_context!();
     let channel = Channel::of_identifier(&context.config().identifier);
+    let directory = data_dir(channel).expect("the shell data directory could not be resolved");
+    let Some(_instance) = instance::acquire(&directory).expect("the shell instance lock could not be acquired") else {
+        return;
+    };
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -777,7 +797,9 @@ pub fn run() {
         .setup(move |app| {
             let handle = app.handle().clone();
             let window = build_main_window(&handle, channel)?;
-            build_tray(&handle, channel)?;
+            if !hidden() {
+                build_tray(&handle, channel)?;
+            }
             start_core(&handle, &app.state::<CoreState>());
 
             let closing = handle.clone();
@@ -804,6 +826,18 @@ pub fn run() {
 mod tests {
     use super::{effects_for, Channel};
     use tauri::window::Effect;
+
+    #[test]
+    fn both_sidecar_workers_are_required() {
+        let directory = std::env::temp_dir().join(format!("boite-workers-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).unwrap();
+        assert!(super::check_workers(&directory).unwrap_err().contains("jobs-worker.js"));
+        std::fs::write(directory.join("jobs-worker.js"), "").unwrap();
+        assert!(super::check_workers(&directory).unwrap_err().contains("guard-worker.js"));
+        std::fs::write(directory.join("guard-worker.js"), "").unwrap();
+        assert!(super::check_workers(&directory).is_ok());
+        std::fs::remove_dir_all(directory).unwrap();
+    }
 
     #[test]
     fn the_identifier_is_the_only_thing_that_names_the_channel() {

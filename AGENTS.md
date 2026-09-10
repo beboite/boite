@@ -152,9 +152,9 @@ assigns the child right after spawn. A completion port drained in a Worker
 reports every process that enters or leaves, grandchildren included, as
 `process.started` and `process.exited` with pid, executable, command line, CPU
 time, peak memory, bytes moved and exit code. That is exact attribution, per
-thread, of a tree nobody declared. Linux and macOS poll a process group every
-second instead and say so in `TraceCapability`, which every client reads before
-promising anything.
+thread, of a tree nobody declared. Linux and macOS track direct children only;
+their `TraceCapability` reports the limited fallback. They do not discover
+grandchildren or promise whole-tree termination.
 
 Two Windows-only rules ride the same pid set, both in a second Worker and both
 switchable from General settings. The focus guard sends a window of a traced pid

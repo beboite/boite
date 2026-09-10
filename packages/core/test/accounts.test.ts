@@ -149,6 +149,49 @@ describe('accounts', () => {
     await client.call('accounts.remove', { accountId: account.id });
     const accounts = await client.call('accounts.list', {});
     expect(accounts.some((entry) => entry.id === account.id)).toBe(false);
+    expect(existsSync(account.isolationDir ?? '')).toBe(false);
+  });
+
+  test('an account used by a thread cannot be removed', async () => {
+    const client = await harness.connect();
+    const account = await client.call('accounts.add', { providerId: 'echo', label: 'Used' });
+    const project = await client.call('projects.add', { path: harness.dataDir });
+    await client.call('threads.create', { projectId: project.id, providerId: 'echo', accountId: account.id });
+    await expect(client.call('accounts.remove', { accountId: account.id })).rejects.toThrow('used by');
+    expect(existsSync(account.isolationDir ?? '')).toBe(true);
+  });
+
+  test('a running login can be listed and cancelled', async () => {
+    const client = await harness.connect();
+    const providerId = await addLoginProvider(harness, client);
+    const account = await client.call('accounts.add', { providerId, label: 'Cancel login' });
+    await client.call('accounts.login', { accountId: account.id });
+    const state = await client.call('accounts.logins', {});
+    expect(harness.core.providers.installs.leaseCount(providerId)).toBe(1);
+    expect(state.some((run) => run.accountId === account.id && run.state === 'running')).toBe(true);
+    await client.call('accounts.loginCancel', { accountId: account.id });
+    expect(await client.call('accounts.logins', {})).toEqual([]);
+    expect(harness.core.providers.installs.leaseCount(providerId)).toBe(0);
+    await waitFor(() => harness.core.procs.liveCount(`login:${account.id}`) === 0);
+  });
+
+  test('CLI login strips unsetEnv before spawning the real child', async () => {
+    const client = await harness.connect();
+    const providerId = await addLoginProvider(harness, client);
+    const descriptor = harness.core.providers.require(providerId);
+    for (const profile of Object.values(descriptor.profiles)) {
+      if (profile) profile.unsetEnv = ['BOITE_TEST_UNSET'];
+    }
+    const script = join(harness.dataDir, 'check-login-env.ts');
+    writeFileSync(script, "console.log(process.env.BOITE_TEST_UNSET === undefined ? 'environment isolated' : 'environment leaked');");
+    descriptor.login = { command: [process.execPath, script] };
+    const account = await client.call('accounts.add', { providerId, label: 'Environment' });
+    process.env.BOITE_TEST_UNSET = 'test-only-sentinel';
+    try {
+      const finished = client.next('account.login', (event) => event.accountId === account.id && event.state !== 'running');
+      await client.call('accounts.login', { accountId: account.id });
+      expect((await finished).output).toBe('environment isolated');
+    } finally { delete process.env.BOITE_TEST_UNSET; }
   });
 
   test('accounts.login runs the provider command, takes a pasted code and leaves the account ok', async () => {

@@ -282,7 +282,13 @@ export const strings = {
     loginStarting: 'Waiting for the provider CLI',
     loginOpen: 'Open this link to log in',
     loginInputPlaceholder: 'Paste the code the page gives you',
+    loginRedirectPlaceholder: 'Paste the localhost redirect URL from the sign-in page',
     loginSend: 'Send',
+    loginCancel: 'Cancel login',
+    remove: 'Remove',
+    removeTitle: 'Remove {account}?',
+    removeBody: 'This deletes the account and its isolation directory. Accounts used by a thread cannot be removed.',
+    removeDefaultBody: 'This removes the account from Boite. The provider login stays on this machine. Accounts used by a thread cannot be removed.',
     status: {
       unknown: 'unknown',
       ok: 'ok',

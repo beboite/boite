@@ -16,6 +16,7 @@ import type {
   ProviderSummary,
   RequestId,
   RpcEventName,
+  RpcEvents,
   SchedulerState,
   Settings,
   Thread,
@@ -36,6 +37,7 @@ import { resolveEndpoint, storeEndpoint } from './endpoint';
 import { titleFrom } from './format';
 import {
   clampSidebar,
+  DRAFT_STASH_KEY,
   defaultPrefs,
   readLayout,
   readPrefs,
@@ -201,6 +203,8 @@ export class Store {
   #client: Client | null = null;
   #off: (() => void)[] = [];
   #subscribedThreadId: ThreadId | null = null;
+  #loginRevision = 0;
+  #loginChanges = new Map<string, number>();
 
   get client(): Client | null {
     return this.#client;
@@ -373,6 +377,8 @@ export class Store {
 
   attach(client: Client): void {
     this.detach();
+    this.logins = {};
+    this.#loginChanges.clear();
     this.#client = client;
     this.connection = client.state;
     this.prefs = readPrefs();
@@ -476,6 +482,7 @@ export class Store {
       this.scheduler = state;
     });
     on('account.login', (event) => {
+      this.#loginChanges.set(event.accountId, ++this.#loginRevision);
       if (event.state === 'done') {
         const { [event.accountId]: _done, ...rest } = this.logins;
         this.logins = rest;
@@ -503,6 +510,7 @@ export class Store {
     // has to survive being applied twice.
     on('accounts.removed', ({ accountId }) => {
       this.accounts = this.accounts.filter((a) => a.id !== accountId);
+      this.#loginChanges.set(accountId, ++this.#loginRevision);
       const { [accountId]: _gone, ...rest } = this.logins;
       this.logins = rest;
       this.#dropProbes(accountId);
@@ -617,8 +625,9 @@ export class Store {
   async reload(): Promise<void> {
     const client = this.#client;
     if (!client) return;
+    const loginRevision = this.#loginRevision;
     try {
-      const [projects, threads, providers, accounts, settings, scheduler, permissions, questions] =
+      const [projects, threads, providers, accounts, settings, scheduler, permissions, questions, logins] =
         await Promise.all([
           client.call('projects.list', {}),
           client.call('threads.list', {}),
@@ -627,7 +636,8 @@ export class Store {
           client.call('settings.get', {}),
           client.call('scheduler.get', {}),
           client.call('permissions.list', {}),
-          client.call('questions.list', {})
+          client.call('questions.list', {}),
+          client.call('accounts.logins', {})
         ]);
       this.#mergePermissions(permissions);
       this.#mergeQuestions(questions);
@@ -637,7 +647,7 @@ export class Store {
       this.rejectedProviders = providers.rejected;
       this.installStates = installStatesOf(providers.loaded);
       this.accounts = accounts;
-      this.logins = {};
+      this.#restoreLogins(logins, loginRevision);
       this.settings = settings;
       this.scheduler = scheduler;
       const open = this.openThread;
@@ -853,19 +863,27 @@ export class Store {
     }
   }
 
+  /** Unsent prompts survive thread switches and the settings page. */
+  composerStates = $state<Record<string, {
+    text: string;
+    queued: string[];
+    sending: boolean;
+    paused: boolean;
+  }>>({});
+
   /**
    * The composer's one action. On a draft it creates the thread first, titled
    * from the prompt; on an open thread it starts a turn.
    */
-  async submit(prompt: string, choice: Choice): Promise<void> {
-    if (prompt.trim().length === 0) return;
+  async submit(prompt: string, choice: Choice): Promise<boolean> {
+    if (prompt.trim().length === 0 || this.connection !== 'ready') return false;
     this.remember(choice);
     if (this.openThread) {
-      await this.send(prompt);
-      return;
+      return this.send(prompt, this.openThread.id);
     }
     const draft = this.draft;
-    if (!draft) return;
+    if (!draft) return false;
+    const composer = this.composerStates[DRAFT_STASH_KEY];
     const created = await this.createThread({
       projectId: draft.projectId,
       providerId: choice.providerId,
@@ -875,7 +893,12 @@ export class Store {
       effort: choice.effort,
       ...(choice.model ? { model: choice.model } : {})
     });
-    if (created) await this.send(prompt);
+    if (!created) return false;
+    if (composer) {
+      this.composerStates[created.id] = composer;
+      delete this.composerStates[DRAFT_STASH_KEY];
+    }
+    return this.send(prompt, created.id);
   }
 
   /**
@@ -885,21 +908,25 @@ export class Store {
    * with. The draft waits for the send, because creating a thread from a draft
    * opens it and would otherwise take the new draft's place.
    */
-  async submitAndDraft(prompt: string, choice: Choice): Promise<void> {
-    if (prompt.trim().length === 0) return;
-    await this.submit(prompt, choice);
+  async submitAndDraft(prompt: string, choice: Choice): Promise<boolean> {
     const projectId = this.openThread?.projectId ?? this.draft?.projectId;
-    if (projectId !== undefined) this.startDraft(projectId);
+    const threadId = this.openThread?.id;
+    if (!(await this.submit(prompt, choice))) return false;
+    if (projectId !== undefined && (threadId === undefined || this.openThread?.id === threadId)) {
+      this.startDraft(projectId);
+    }
+    return true;
   }
 
-  async send(prompt: string): Promise<void> {
+  async send(prompt: string, threadId = this.openThread?.id): Promise<boolean> {
     const client = this.#client;
-    const open = this.openThread;
-    if (!client || !open || prompt.trim().length === 0) return;
+    if (!client || !threadId || this.connection !== 'ready' || prompt.trim().length === 0) return false;
     try {
-      await client.call('turns.start', { threadId: open.id, prompt });
+      await client.call('turns.start', { threadId, prompt });
+      return true;
     } catch (error) {
       this.#fail(error);
+      return false;
     }
   }
 
@@ -1106,6 +1133,44 @@ export class Store {
       const account = await client.call('accounts.add', input);
       if (!this.accounts.some((a) => a.id === account.id))
         this.accounts = [...this.accounts, account];
+    } catch (error) {
+      this.#fail(error);
+    }
+  }
+
+  /** Events received after the snapshot request win over its older rows. */
+  #restoreLogins(events: RpcEvents['account.login'][], revision: number): void {
+    const snapshot: Record<string, LoginState> = {};
+    for (const { accountId, ...state } of events) {
+      if (state.state !== 'done') snapshot[accountId] = { ...state, state: state.state };
+    }
+    for (const [accountId, changedAt] of this.#loginChanges) {
+      if (changedAt <= revision) continue;
+      const current = this.logins[accountId];
+      if (current) snapshot[accountId] = current;
+      else delete snapshot[accountId];
+    }
+    this.logins = snapshot;
+  }
+
+  async removeAccount(accountId: string): Promise<void> {
+    const client = this.#client;
+    if (!client) return;
+    try {
+      await client.call('accounts.remove', { accountId });
+      this.accounts = this.accounts.filter((a) => a.id !== accountId);
+      delete this.logins[accountId];
+    } catch (error) {
+      this.#fail(error);
+    }
+  }
+
+  async cancelLogin(accountId: string): Promise<void> {
+    const client = this.#client;
+    if (!client) return;
+    try {
+      await client.call('accounts.loginCancel', { accountId });
+      delete this.logins[accountId];
     } catch (error) {
       this.#fail(error);
     }

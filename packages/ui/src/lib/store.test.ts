@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, test } from 'vitest';
+import { beforeEach, describe, expect, test, vi } from 'vitest';
 import type { ThreadStatus } from '@boite/contracts';
 import { FakeClient } from './fake-client';
 import { Store } from './store.svelte';
@@ -223,3 +223,72 @@ async function waitFor<T>(read: () => T | undefined): Promise<T> {
   }
   throw new Error('condition never became true');
 }
+
+test('account lifecycle reload preserves the running login snapshot', async () => {
+  const { store, client } = await ready();
+  await client.call('accounts.login', { accountId: 'a-claude-side' });
+  await waitFor(() => store.logins['a-claude-side']?.url ?? undefined);
+  const before = { ...store.logins['a-claude-side'] };
+  await store.reload();
+  expect(store.logins['a-claude-side']).toEqual(before);
+});
+
+test('account lifecycle refuses removal of an account referenced by an archived thread', async () => {
+  const { client } = await ready();
+  await client.call('threads.archive', { threadId: 't-trace', archived: true });
+  await expect(client.call('accounts.remove', { accountId: 'a-echo' })).rejects.toThrow(/thread/i);
+  expect((await client.call('accounts.list', {})).some((a) => a.id === 'a-echo')).toBe(true);
+});
+
+test('account lifecycle cancellation removes the login and permits retry', async () => {
+  const { store, client } = await ready();
+  await store.loginAccount('a-claude-side');
+  await waitFor(() => store.logins['a-claude-side']?.url ?? undefined);
+  expect(await client.call('accounts.logins', {})).toHaveLength(1);
+  await store.cancelLogin('a-claude-side');
+  expect(store.logins['a-claude-side']).toBeUndefined();
+  expect(await client.call('accounts.logins', {})).toEqual([]);
+  await store.loginAccount('a-claude-side');
+  expect(store.logins['a-claude-side']?.state).toBe('running');
+  await store.removeAccount('a-claude-side');
+  expect(store.accounts.some((a) => a.id === 'a-claude-side')).toBe(false);
+  expect(await client.call('accounts.logins', {})).toEqual([]);
+});
+
+test('account lifecycle fake rejects unsupported login and enforces provider isolation', async () => {
+  const { client } = await ready();
+  await expect(client.call('accounts.login', { accountId: 'a-echo' })).rejects.toThrow(/login is not available/i);
+  const account = await client.call('accounts.add', {
+    providerId: 'antigravity', label: 'isolated only', useDefaultLocation: true
+  });
+  expect(account.isolationDir).toBeTruthy();
+});
+
+test('account lifecycle newer cancellation beats a stale reload snapshot', async () => {
+  const { store, client } = await ready();
+  await store.loginAccount('a-claude-side');
+  await waitFor(() => store.logins['a-claude-side']?.url ?? undefined);
+  const call = client.call.bind(client);
+  let release!: () => void;
+  let snapshotRead = false;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const spy = vi.spyOn(client, 'call').mockImplementation(async (method, params) => {
+    const result = await call(method, params);
+    if (method === 'accounts.logins') {
+      snapshotRead = true;
+      await gate;
+    }
+    return result;
+  });
+  try {
+    const reload = store.reload();
+    await waitFor(() => snapshotRead ? true : undefined);
+    await store.cancelLogin('a-claude-side');
+    release();
+    await reload;
+    expect(store.logins['a-claude-side']).toBeUndefined();
+  } finally {
+    release();
+    spy.mockRestore();
+  }
+});

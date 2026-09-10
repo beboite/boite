@@ -45,7 +45,7 @@ OpenCode's descriptor, with the `linux` and `macos` profiles left out:
   shipped one. `schemaVersion` is `1` and is checked. `name` and `shortName` are
   what the picker and the chips show.
 - `protocol` picks the driver: `claude-sdk`, `acp`, `codex-appserver`, `pi`,
-  `opencode` or `echo`. A protocol with no driver behind it has nothing to run,
+  or `echo`. OpenCode uses `acp`. A protocol with no driver behind it has nothing to run,
   so it is the one field that cannot be invented.
 - `roots` lists every directory the engine may read or write for this provider. A
   path outside them is refused, and a `..` segment is refused at load.
@@ -125,7 +125,7 @@ Free space is checked first, against the archive plus the unpacked files plus a
 256 MB margin. A cancel aborts the fetch and leaves no `.part`, and nothing goes
 into the journal, so a core that dies mid-download comes back saying `absent`.
 `providers.uninstall` deletes `<dataDir>/agents/<id>` and is refused while a lease
-is held, and one is held for every process a thread or a probe launched.
+is held, and one is held for every process a thread, probe or login launched.
 
 ## What ships
 

@@ -37,7 +37,7 @@ export function freshDataDir(): string {
 
 export function killProcessTree(pid: number): void {
   if (process.platform === 'win32') {
-    Bun.spawnSync(['taskkill', '/pid', String(pid), '/T', '/F'], { stdout: 'ignore', stderr: 'ignore' });
+    Bun.spawnSync(['taskkill', '/pid', String(pid), '/T', '/F'], { stdout: 'ignore', stderr: 'ignore', windowsHide: true });
     return;
   }
   try {
@@ -62,6 +62,7 @@ export async function startCore(options: StartCoreOptions = {}): Promise<Running
   const dataDir = options.dataDir ?? freshDataDir();
   const port = options.port ?? 0;
   const proc = Bun.spawn({
+    windowsHide: true,
     cmd: [
       ...(options.command ?? CORE_SOURCE_COMMAND),
       '--port',

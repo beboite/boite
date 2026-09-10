@@ -185,9 +185,13 @@ export class ThreadStore {
   }
 
   archive(threadId: ThreadId, archived: boolean): ThreadSummary {
-    const thread = this.require(threadId);
+    this.require(threadId);
     // An archived thread is not coming back this minute: its warm process goes now.
-    if (archived) releaseThread(threadId);
+    if (archived) {
+      this.core.scheduler.stop(threadId);
+      releaseThread(threadId);
+    }
+    const thread = this.require(threadId);
     return this.save({ ...thread, archived }, 'thread.archived');
   }
 
@@ -199,6 +203,10 @@ export class ThreadStore {
 
   startTurn(threadId: ThreadId, prompt: string): Turn {
     const thread = this.require(threadId);
+    if (thread.archived) throw refused('cannot start a turn on an archived thread', { threadId });
+    if (['queued', 'running', 'waiting'].includes(thread.status) || this.handles.has(threadId)) {
+      throw refused('this thread already has an in-flight turn', { threadId });
+    }
     const provider = this.core.providers.require(thread.providerId);
     assertDriverRunnable(
       provider.protocol,
@@ -272,16 +280,21 @@ export class ThreadStore {
    * journal and the user sends it again.
    */
   recoverStuckTurns(): number {
-    const stuck = this.core.journal
-      .listTurns()
-      .filter((turn) => turn.status === 'running' || turn.status === 'queued');
+    const stuck = this.core.journal.unfinishedTurns();
     for (const turn of stuck) {
       const previous = turn.status;
-      this.failStuckTurn(turn, previous === 'running' ? CRASH_WHILE_RUNNING : CRASH_WHILE_QUEUED);
+      this.core.journal.db.transaction(() => {
+        this.failStuckTurn(turn, previous === 'running' ? CRASH_WHILE_RUNNING : CRASH_WHILE_QUEUED);
+      })();
       this.core.log(
         'warn',
         `recovered turn ${turn.id} of thread ${turn.threadId}, left ${previous} by a stopped core`,
       );
+    }
+    for (const thread of this.core.journal.listThreads()) {
+      if (['queued', 'running', 'waiting'].includes(thread.status)) {
+        this.save({ ...thread, status: 'idle' }, 'thread.finished');
+      }
     }
     return stuck.length;
   }
@@ -403,6 +416,7 @@ export class ThreadStore {
 
     const current = this.core.journal.getThread(threadId);
     if (current === null) return;
+    if (current.archived) releaseThread(threadId);
     const next: ThreadSummary = {
       ...current,
       sessionId: result.sessionId ?? current.sessionId,

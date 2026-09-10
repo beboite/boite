@@ -1,4 +1,4 @@
-import { RPC_PATH } from '@boite/contracts';
+import { PROTOCOL_VERSION, RPC_PATH } from '@boite/contracts';
 import type {
   CoreInfo,
   RpcError,
@@ -102,8 +102,13 @@ export async function connect(url: string, token: string, options: ConnectOption
 
   const hello = (await send('hello', {
     token,
+    protocolVersion: PROTOCOL_VERSION,
     client: options.client ?? { name: 'test', version: '2.0.0-beta.1' },
   })) as { core: CoreInfo };
+  if (hello.core.protocolVersion !== PROTOCOL_VERSION) {
+    socket.close();
+    throw new Error(`core protocol version must be ${PROTOCOL_VERSION}`);
+  }
 
   const on = (event: string, handler: (payload: unknown) => void): (() => void) => {
     let set = listeners.get(event);

@@ -6,6 +6,11 @@ without either noticing the other. The code is
 `packages/core/src/accounts.ts`; the descriptor fields it reads are described in
 [providers.md](providers.md).
 
+`accounts.logins` restores running login cards after reconnect. `accounts.loginCancel`
+stops the login process and waits for it to exit. Removing an account does the
+same before deleting its isolated directory; default CLI directories stay on
+disk. Removal is refused while any thread still references the account.
+
 ## The isolation directory
 
 Every account Boite creates gets `<dataDir>/accounts/<id>/`, and the descriptor's
@@ -18,6 +23,7 @@ environment variables, with `{isolationDir}` substituted at spawn:
 - pi moves with `PI_CODING_AGENT_DIR`, which is the whole config directory, so
   one variable is enough and the session file is `auth.json` under it.
 - Claude moves with `CLAUDE_CONFIG_DIR`, and files `.credentials.json`.
+- Grok moves with `GROK_HOME`, and files `auth.json`.
 - Antigravity moves with `GEMINI_HOME`, files `antigravity-acp/acp_token.json`
   under it, and has no default account at all: its descriptor says
   `isolation.alwaysIsolated`, so `accounts.add` gives every account a directory
@@ -36,7 +42,8 @@ usually the one with the subscription, and reading it is the point.
 Reading it correctly needs one thing the descriptor does not say, which is what
 the isolation variable means when nobody sets it. The core carries those
 defaults: the XDG pair resolve under `~/.local/share` and `~/.config`,
-`CODEX_HOME` to `~/.codex`, `PI_CODING_AGENT_DIR` to `.pi/agent` under the home.
+`CODEX_HOME` to `~/.codex`, `CLAUDE_CONFIG_DIR` to `~/.claude`, `GROK_HOME`
+to `~/.grok`, and `PI_CODING_AGENT_DIR` to `.pi/agent` under the home.
 A variable the core does not know falls back to `~/.<id>`. Without that table a
 default account is looked for in the wrong place, finds no session file, and
 reports `unauthenticated` while the user is perfectly logged in. That failure is

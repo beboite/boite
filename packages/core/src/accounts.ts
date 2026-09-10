@@ -1,6 +1,6 @@
-import { chmodSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import type { Account, AccountId, ProviderDescriptor, ProviderId } from '@boite/contracts';
+import { chmodSync, existsSync, lstatSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
+import type { Account, AccountId, ProviderDescriptor, ProviderId, RpcEvents } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { newId } from './ids.ts';
 import { invalidParams, messageOf, notFound, refused } from './errors.ts';
@@ -32,10 +32,13 @@ const ISOLATION_DEFAULTS: Record<string, string[]> = {
   XDG_STATE_HOME: ['.local', 'state'],
   XDG_CACHE_HOME: ['.cache'],
   CODEX_HOME: ['.codex'],
+  CLAUDE_CONFIG_DIR: ['.claude'],
+  GROK_HOME: ['.grok'],
   PI_CODING_AGENT_DIR: ['.pi', 'agent'],
 };
 
 interface LoginRun {
+  done: Promise<void>;
   /** The CLI form: a piped process whose stdin takes a pasted code. */
   spawned: SpawnedPipedProcess | null;
   /** The ACP form: one `authenticate` call over the agent's own stdio. */
@@ -93,8 +96,22 @@ export class AccountStore {
     return this.check(account.id);
   }
 
-  remove(accountId: AccountId): void {
-    this.require(accountId);
+  async remove(accountId: AccountId): Promise<void> {
+    const account = this.require(accountId);
+    if (this.core.journal.listThreads().some((thread) => thread.accountId === accountId)) {
+      throw refused('this account is used by a thread; remove its project before removing the account', { accountId });
+    }
+    const directory = account.isolationDir;
+    if (directory !== null && (resolve(directory) !== resolve(this.core.dataDir, 'accounts', accountId)
+      || (existsSync(directory) && lstatSync(directory).isSymbolicLink()))) {
+      throw refused('the account isolationDir must be its own directory under accounts', { accountId, field: 'isolationDir' });
+    }
+    await this.loginCancel(accountId);
+    // Cancelling yields to RPC work; a new thread may have claimed this account.
+    if (this.core.journal.listThreads().some((thread) => thread.accountId === accountId)) {
+      throw refused('this account is used by a thread; remove its project before removing the account', { accountId });
+    }
+    if (directory !== null) rmSync(directory, { recursive: true, force: true });
     this.core.journal.append(
       { type: 'account.removed', threadId: null, version: 1, payload: { accountId } },
       () => {
@@ -211,7 +228,7 @@ export class AccountStore {
     const argv = provider.login.command;
     if (argv === undefined) throw refused('the login command is empty', { accountId, field: 'login.command' });
     const command = argv.map((part) => part.split('{isolationDir}').join(isolationDir));
-    const env: Record<string, string> = { ...this.accountEnv(account, provider) };
+    const env = agentEnv(provider, this.accountEnv(account, provider));
     for (const [key, value] of Object.entries(provider.login.env ?? {})) {
       env[key] = value.split('{isolationDir}').join(isolationDir);
     }
@@ -221,19 +238,21 @@ export class AccountStore {
     const executable = this.loginExecutable(provider, first);
 
     let spawned: SpawnedPipedProcess;
+    this.core.providers.installs.acquire(provider.id);
     try {
       spawned = this.core.procs.spawnPiped(loginThreadId(accountId), executable, args, { cwd: isolationDir, env });
     } catch (error) {
+      this.core.providers.installs.release(provider.id);
       throw refused(`the login command ${executable} did not start: ${messageOf(error)}`, {
         accountId,
         command: [executable, ...args].join(' '),
       });
     }
 
-    const run: LoginRun = { spawned, acp: null, url: null, lastLine: '' };
+    const run: LoginRun = { spawned, acp: null, url: null, lastLine: '', done: Promise.resolve() };
     this.logins.set(accountId, run);
     this.emitLogin(accountId, 'running', '', run);
-    void this.readLogin(accountId, run);
+    run.done = this.readLogin(accountId, run).finally(() => this.core.providers.installs.release(provider.id));
     return { ok: true };
   }
 
@@ -257,6 +276,7 @@ export class AccountStore {
     const env = agentEnv(provider, this.accountEnv(account, provider));
 
     let acp: AcpLoginRun;
+    this.core.providers.installs.acquire(provider.id);
     try {
       acp = runAcpLogin({
         methodId,
@@ -270,16 +290,34 @@ export class AccountStore {
         },
       });
     } catch (error) {
+      this.core.providers.installs.release(provider.id);
       throw refused(`the ${provider.name} agent did not start: ${messageOf(error)}`, {
         accountId,
         command: executable,
       });
     }
 
-    const run: LoginRun = { spawned: null, acp, url: null, lastLine: '' };
+    const run: LoginRun = { spawned: null, acp, url: null, lastLine: '', done: Promise.resolve() };
     this.logins.set(accountId, run);
     this.emitLogin(accountId, 'running', '', run);
-    void this.finishAcpLogin(accountId, run, acp);
+    run.done = this.finishAcpLogin(accountId, run, acp).finally(() => this.core.providers.installs.release(provider.id));
+    return { ok: true };
+  }
+
+  loginStates(): RpcEvents['account.login'][] {
+    return [...this.logins].map(([accountId, run]) => ({
+      accountId, state: 'running', output: run.lastLine, url: run.url, exitCode: null,
+    }));
+  }
+
+  async loginCancel(accountId: AccountId): Promise<{ ok: true }> {
+    this.require(accountId);
+    const run = this.logins.get(accountId);
+    if (run !== undefined) {
+      this.core.procs.killTree(loginThreadId(accountId));
+      run.acp?.kill();
+      await run.done;
+    }
     return { ok: true };
   }
 
@@ -291,6 +329,8 @@ export class AccountStore {
       failure = messageOf(error);
     }
     acp.kill();
+    this.core.procs.killTree(loginThreadId(accountId));
+    await acp.exited;
     this.logins.delete(accountId);
     if (failure !== null) run.lastLine = failure;
     this.emitLogin(accountId, failure === null ? 'done' : 'failed', run.lastLine, run, failure === null ? 0 : 1);
@@ -343,16 +383,8 @@ export class AccountStore {
   }
 
   /** Every login still running, killed with the core. */
-  closeLogins(): void {
-    for (const [accountId, run] of this.logins) {
-      try {
-        run.spawned?.proc.kill();
-        run.acp?.kill();
-      } catch {
-        // already gone
-      }
-      this.logins.delete(accountId);
-    }
+  async closeLogins(): Promise<void> {
+    await Promise.all([...this.logins.keys()].map((accountId) => this.loginCancel(accountId)));
   }
 
   /** One line of a login's output, whichever form it takes. */
@@ -444,12 +476,14 @@ export function registerAccountMethods(core: Core): void {
     if (typeof params.label !== 'string') throw refused('an account needs a label', { field: 'label' });
     return core.accounts.add(params);
   });
-  core.router.register('accounts.remove', (params) => {
-    core.accounts.remove(params.accountId);
+  core.router.register('accounts.remove', async (params) => {
+    await core.accounts.remove(params.accountId);
     return { ok: true } as const;
   });
   core.router.register('accounts.check', (params) => core.accounts.check(params.accountId));
   core.router.register('accounts.login', (params) => core.accounts.login(params.accountId));
+  core.router.register('accounts.logins', () => core.accounts.loginStates());
+  core.router.register('accounts.loginCancel', (params) => core.accounts.loginCancel(params.accountId));
   core.router.register('accounts.loginInput', (params) => {
     if (typeof params.text !== 'string') throw invalidParams('a login input needs text', { field: 'text' });
     return core.accounts.loginInput(params.accountId, params.text);

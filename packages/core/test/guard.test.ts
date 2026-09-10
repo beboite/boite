@@ -258,6 +258,17 @@ const MUTED_PID = 7001;
 const OTHER_PID = 7002;
 
 describe('the audio mute rule', () => {
+  test('an idle mute never enumerates the endpoint', () => {
+    let walks = 0;
+    const mute = new MuteLogic(() => { walks += 1; return []; }, true);
+    mute.tick();
+    expect(walks).toBe(0);
+    mute.addPid('thr_one', MUTED_PID);
+    expect(walks).toBe(1);
+    mute.removePid(MUTED_PID);
+    mute.tick();
+    expect(walks).toBe(1);
+  });
   test('a session of a traced pid is muted once and reported once', () => {
     const endpoint = new FakeEndpoint();
     const mixer = endpoint.add(MUTED_PID);
@@ -280,7 +291,7 @@ describe('the audio mute rule', () => {
     const mixer = endpoint.add(OTHER_PID);
     const mute = new MuteLogic(endpoint.list, true);
 
-    mute.tick();
+    mute.addPid('thr_without_audio', MUTED_PID);
 
     expect(mixer.muted).toBe(false);
     expect(mute.events).toEqual([]);
@@ -326,6 +337,7 @@ describe('the audio mute rule', () => {
     const mute = new MuteLogic(endpoint.list, true);
 
     endpoint.throws = 'IAudioSessionManager2::GetSessionEnumerator failed with 0x88890004';
+    mute.addPid('thr_one', MUTED_PID);
     mute.tick();
     mute.tick();
     mute.tick();

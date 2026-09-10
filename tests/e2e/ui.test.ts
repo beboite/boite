@@ -43,12 +43,13 @@ async function clickWhenEnabled(selector: string): Promise<void> {
 }
 
 beforeAll(async () => {
-  if (!existsSync(UI_INDEX)) {
+  {
     const built = Bun.spawnSync({
       cmd: ['bun', 'run', '--cwd', 'packages/ui', 'build'],
       cwd: ROOT,
       stdout: 'pipe',
       stderr: 'pipe',
+      windowsHide: true,
     });
     if (!built.success) throw new Error(`the ui did not build:\n${built.stderr.toString()}`);
   }

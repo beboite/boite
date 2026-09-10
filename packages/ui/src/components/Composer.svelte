@@ -1,5 +1,6 @@
 <script lang="ts">
   import { ArrowUp, ShieldCheck, Square } from '@lucide/svelte';
+  import { untrack } from 'svelte';
   import type { PermissionMode } from '@boite/contracts';
   import { clearStash, DRAFT_STASH_KEY, readStash, writeStash } from '../lib/prefs';
   import { fill, strings } from '../lib/strings';
@@ -18,8 +19,9 @@
   const MODES: PermissionMode[] = ['default', 'acceptEdits', 'plan', 'bypassPermissions', 'dontAsk'];
   const MAX_LINES = 8;
 
-  let text = $state('');
-  let queued = $state<string | null>(null);
+  let key = $derived(store.openThread?.id ?? DRAFT_STASH_KEY);
+  let composer = $derived(store.composerStates[key]);
+  let text = $derived(composer?.text ?? '');
   let choice = $state<Choice | null>(null);
   let box = $state<HTMLTextAreaElement | undefined>(undefined);
   /** Where ArrowUp stands in this thread's sent prompts, or null outside recall. */
@@ -54,12 +56,13 @@
     box?.focus();
   });
 
-  /** What was typed during a turn goes out once the turn ends. */
+  /** Only this thread's next prompt goes out, after the previous turn ends. */
   $effect(() => {
-    if (!store.busy && queued !== null && choice) {
-      const prompt = queued;
-      queued = null;
-      void store.submit(prompt, choice);
+    const state = composer;
+    const threadId = store.openThread?.id;
+    if (store.connection === 'ready' && !store.busy && threadId && state &&
+        state.queued.length > 0 && !state.sending && !state.paused) {
+      untrack(() => void drain(threadId, state));
     }
   });
 
@@ -80,7 +83,9 @@
 
   let provider = $derived(choice ? store.providerOf(choice.providerId) : null);
   let bound = $derived(store.openThread !== null);
-  let canSend = $derived(text.trim().length > 0 && choice !== null && !store.busy);
+  let canSend = $derived(
+    text.trim().length > 0 && choice !== null && store.connection === 'ready' && !composer?.sending
+  );
 
   let placeholder = $derived(
     store.openProject && provider
@@ -155,7 +160,7 @@
 
   /** Writes a recalled or restored prompt in, caret at its end. */
   function put(value: string) {
-    text = value;
+    setText(value);
     const el = box;
     if (el) {
       el.value = value;
@@ -164,17 +169,49 @@
     requestAnimationFrame(grow);
   }
 
-  function submit() {
+  function stateForInput() {
+    return store.composerStates[key] ??= { text: '', queued: [], sending: false, paused: false };
+  }
+
+  function setText(value: string) {
+    stateForInput().text = value;
+  }
+
+  async function drain(threadId: string, state: NonNullable<typeof composer>) {
+    const prompt = state.queued[0];
+    if (prompt === undefined) return;
+    state.sending = true;
+    const accepted = await store.send(prompt, threadId);
+    if (accepted) state.queued.shift();
+    else {
+      // Pause after a refusal. Put the rejected prompt back for an explicit retry.
+      state.paused = true;
+      if (state.text.length === 0) state.text = state.queued.shift()!;
+    }
+    state.sending = false;
+  }
+
+  async function submit(nextDraft = false) {
     const prompt = text;
-    if (prompt.trim().length === 0 || !choice) return;
-    text = '';
-    recall = null;
-    requestAnimationFrame(grow);
+    if (!canSend || !choice) return;
+    const state = stateForInput();
     if (store.busy) {
-      queued = queued === null ? prompt : `${queued}\n${prompt}`;
+      state.queued.push(prompt);
+      state.text = '';
+      recall = null;
+      requestAnimationFrame(grow);
       return;
     }
-    void store.submit(prompt, choice);
+    state.sending = true;
+    const accepted = await (nextDraft ? store.submitAndDraft(prompt, choice) : store.submit(prompt, choice));
+    if (accepted) {
+      // Text typed while the RPC was pending belongs to the next prompt.
+      if (state.text === prompt) state.text = '';
+      state.paused = false;
+      recall = null;
+      requestAnimationFrame(grow);
+    }
+    state.sending = false;
   }
 
   /**
@@ -183,15 +220,7 @@
    * this thread, so that case stays what Enter does.
    */
   function submitAndDraft() {
-    const prompt = text;
-    if (prompt.trim().length === 0 || !choice || store.busy) {
-      submit();
-      return;
-    }
-    text = '';
-    recall = null;
-    requestAnimationFrame(grow);
-    void store.submitAndDraft(prompt, choice);
+    void submit(true);
   }
 
   /** ArrowUp: one prompt older, or nothing when the user typed the text themselves. */
@@ -253,7 +282,7 @@
     if (meta || event.altKey) return;
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
-      submit();
+      void submit();
     } else if (event.key === 'ArrowUp' && !event.shiftKey) {
       if (older()) event.preventDefault();
     } else if (event.key === 'ArrowDown' && !event.shiftKey) {
@@ -267,12 +296,12 @@
 
 <div class="composer-wrap" class:centered>
   <div class="composer" data-testid="composer">
-    {#if queued !== null}
+    {#if composer && composer.queued.length > 0}
       <div class="queued subtle" data-testid="composer-queued">{strings.composer.queued}</div>
     {/if}
     <textarea
       bind:this={box}
-      bind:value={text}
+      bind:value={() => text, setText}
       {oninput}
       {onkeydown}
       rows="1"
@@ -309,8 +338,8 @@
         data-testid="composer-send"
         title={strings.composer.send}
         aria-label={strings.composer.send}
-        disabled={!canSend && !(store.busy && text.trim().length > 0)}
-        onclick={submit}
+        disabled={!canSend}
+        onclick={() => void submit()}
       >
         <ArrowUp size={16} strokeWidth={2.25} />
       </button>

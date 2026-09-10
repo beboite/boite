@@ -1,10 +1,10 @@
-import { describe, expect, test } from 'vitest';
-import { RpcErrorCode, type CoreInfo } from '@boite/contracts';
+import { describe, expect, test, vi } from 'vitest';
+import { PROTOCOL_VERSION, RpcCloseCode, RpcErrorCode, type CoreInfo } from '@boite/contracts';
 import { RpcFailure, WsClient, rpcUrl, type SocketLike } from './client';
 
 const CORE: CoreInfo = {
   version: '2.0.0-beta.1',
-  protocolVersion: 1,
+  protocolVersion: PROTOCOL_VERSION,
   os: 'windows',
   channel: 'stable',
   pid: 99,
@@ -25,7 +25,7 @@ class FakeSocket implements SocketLike {
   sent: string[] = [];
   onopen: (() => void) | null = null;
   onmessage: ((event: { data: unknown }) => void) | null = null;
-  onclose: (() => void) | null = null;
+  onclose: SocketLike['onclose'] = null;
   onerror: (() => void) | null = null;
   closed = false;
 
@@ -33,9 +33,9 @@ class FakeSocket implements SocketLike {
     this.sent.push(data);
   }
 
-  close(): void {
+  close(code?: number): void {
     this.closed = true;
-    this.onclose?.();
+    this.onclose?.({ code });
   }
 
   open(): void {
@@ -109,6 +109,7 @@ describe('WsClient', () => {
     expect(hello.method).toBe('hello');
     expect(hello.params).toEqual({
       token: 'secret',
+      protocolVersion: PROTOCOL_VERSION,
       client: { name: 'shell', version: '2.0.0-beta.1' }
     });
 
@@ -214,4 +215,35 @@ describe('WsClient', () => {
     expect(second.frame(1).params).toEqual({ threadId: 't-1' });
     client.close();
   });
+});
+
+test('a permanent protocol rejection closes the client without reconnecting', async () => {
+  vi.useFakeTimers();
+  const sockets: FakeSocket[] = [];
+  const client = new WsClient({
+    url: 'http://127.0.0.1:8777', token: 'secret', backoff: () => 1,
+    socketFactory: () => {
+      const socket = new FakeSocket();
+      sockets.push(socket);
+      return socket;
+    }
+  });
+  try {
+    const connecting = client.connect();
+    const rejection = expect(connecting).rejects.toThrow('protocolVersion must be');
+    const socket = take(sockets, 0);
+    socket.open();
+    socket.receive({ jsonrpc: '2.0', id: socket.frame(0).id, error: {
+      code: RpcErrorCode.InvalidParams, message: `protocolVersion must be ${PROTOCOL_VERSION + 1}`
+    } });
+    await Promise.resolve();
+    socket.close(RpcCloseCode.ProtocolMismatch);
+    await rejection;
+    await vi.advanceTimersByTimeAsync(100);
+    expect(client.state).toBe('closed');
+    expect(sockets).toHaveLength(1);
+  } finally {
+    client.close();
+    vi.useRealTimers();
+  }
 });
