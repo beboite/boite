@@ -16,7 +16,9 @@ export const strings = {
     minimize: 'Minimize',
     maximize: 'Maximize',
     restore: 'Restore',
-    close: 'Close'
+    close: 'Close',
+    quitHold: 'Hold Ctrl+Q to quit',
+    quitHoldHint: 'or press it twice'
   },
 
   connection: {

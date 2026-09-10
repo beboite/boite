@@ -712,6 +712,49 @@ shellTest(
 );
 
 shellTest(
+  'Ctrl+Q held for the hold quits the shell and its core, one tap only shows the hint',
+  async () => {
+    // The chord goes through the real webview's key events, so what is proved
+    // is the whole path: `keydown` on the window, the hold timer, `quit_shell`.
+    const ownDataDir = freshDataDir();
+    const debugPort = await freePort();
+    const shell = spawnHiddenShell(ownDataDir, debugPort);
+    let corePid = 0;
+    let shellPage: BrowserPage | undefined;
+    const chord = (type: 'keyDown' | 'keyUp') =>
+      shellPage!.send('Input.dispatchKeyEvent', { type, key: 'q', code: 'KeyQ', modifiers: 2, windowsVirtualKeyCode: 81 });
+
+    try {
+      corePid = (await waitForHealthyCore(ownDataDir)).pid;
+      shellPage = await BrowserPage.attach(debugPort);
+      await shellPage.waitFor(TAURI_READY);
+      await shellPage.waitFor(`document.querySelector('[data-testid="titlebar"]')`);
+
+      // One tap: the hint comes and goes, nothing quits.
+      await chord('keyDown');
+      await shellPage.waitFor(`document.querySelector('[data-testid="quit-hint"]')`);
+      await chord('keyUp');
+      await shellPage.waitFor(`!document.querySelector('[data-testid="quit-hint"]')`);
+      await Bun.sleep(600);
+      expect(pidAlive(shell)).toBe(true);
+
+      // Held: the shell and the core it started go together.
+      await chord('keyDown');
+      await waitUntil(() => !pidAlive(shell) && !pidAlive(corePid), CORE_GONE_TIMEOUT_MS);
+      expect(pidAlive(shell)).toBe(false);
+      expect(pidAlive(corePid)).toBe(false);
+    } finally {
+      await shellPage?.close();
+      killProcessTree(shell);
+      if (corePid > 0) killProcessTree(corePid);
+      killWebviewsOf(ownDataDir);
+      await removeDirectory(ownDataDir);
+    }
+  },
+  TIMEOUT,
+);
+
+shellTest(
   'a clean quit leaves the core the shell adopted alone',
   async () => {
     // A core that was already answering when the shell opened is nobody's

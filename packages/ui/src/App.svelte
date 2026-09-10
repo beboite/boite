@@ -12,6 +12,7 @@
   import { Closing } from './lib/closing.svelte';
   import { startGlass } from './lib/glass';
   import { installExternalLinks } from './lib/links';
+  import { isQuitChord, QUIT_HOLD_MS, QuitHold } from './lib/quit-hold';
   import { strings } from './lib/strings';
   import { rightPanel } from './lib/right-panel.svelte';
   import { store } from './lib/store.svelte';
@@ -28,6 +29,24 @@
   const panelSlot = new Closing();
   /** The error is cleared the moment Dismiss is pressed, so the exit plays on a copy. */
   let toastText = $state('');
+
+  // Ctrl+Q quits the shell after a hold or a double press, never on one slip:
+  // the hint shows for as long as the key is down. Only the shell has a
+  // process to quit; a browser tab keeps its own Ctrl+Q.
+  const quitHint = new Closing();
+  let quitting = $state(false);
+  const quitHold = inShell
+    ? new QuitHold({
+        onHolding: (holding) => {
+          if (holding) quitHint.show();
+          else quitHint.hide();
+        },
+        onQuit: () => {
+          quitting = true;
+          void import('@tauri-apps/api/core').then(({ invoke }) => invoke('quit_shell'));
+        }
+      })
+    : null;
 
   $effect(() => {
     const error = store.error;
@@ -91,8 +110,20 @@
       unlisten?.();
       stopTray?.();
       stopTheme();
+      quitHold?.dispose();
     };
   });
+
+  function onkeyup(event: KeyboardEvent) {
+    // Whichever half of the chord lifts first ends the hold.
+    if (quitHold && (event.key.toLowerCase() === 'q' || event.key === 'Control' || event.key === 'Meta')) {
+      quitHold.release();
+    }
+  }
+
+  function onblur() {
+    quitHold?.release();
+  }
 
   /** A key that belongs to whatever the user is typing in, not to the app. */
   function typing(event: KeyboardEvent): boolean {
@@ -104,6 +135,11 @@
   }
 
   function onkeydown(event: KeyboardEvent) {
+    if (quitHold && isQuitChord(event)) {
+      event.preventDefault();
+      quitHold.press();
+      return;
+    }
     const meta = event.ctrlKey || event.metaKey;
     if (!meta) {
       if (event.key === 'Escape' && store.sidebarOpen) store.sidebarOpen = false;
@@ -157,9 +193,9 @@
   let firstRun = $derived(store.booted && store.connection !== 'closed' && store.projects.length === 0);
 </script>
 
-<svelte:window {onkeydown} />
+<svelte:window {onkeydown} {onkeyup} {onblur} />
 
-<div class="app" class:shell={inShell} class:ready={store.booted} bind:this={appRoot}>
+<div class="app" class:shell={inShell} class:ready={store.booted} class:quitting bind:this={appRoot}>
   {#if inShell}
     <TitleBar {store} />
   {/if}
@@ -214,6 +250,22 @@
 
   {#if store.dropping}
     <DropOverlay />
+  {/if}
+
+  {#if quitHint.shown}
+    <div
+      class="quit-hint"
+      class:closing={quitHint.closing}
+      role="status"
+      style="--quit-hold: {QUIT_HOLD_MS}ms"
+      use:quitHint.attach
+      onanimationend={quitHint.end}
+      data-testid="quit-hint"
+    >
+      <span class="text">{strings.titlebar.quitHold}</span>
+      <span class="sub">{strings.titlebar.quitHoldHint}</span>
+      <span class="bar" class:filling={quitHint.open}></span>
+    </div>
   {/if}
 
   {#if toast.shown}
@@ -317,6 +369,67 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     font-size: var(--text-sm);
+  }
+
+  /* The quit hint: a card at the top centre with a bar that fills over the
+     hold, so the eye reads how long is left before the window goes. */
+  .quit-hint {
+    position: absolute;
+    top: calc(var(--titlebar, 0px) + 12px);
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 90;
+    display: grid;
+    grid-template-columns: auto auto;
+    align-items: baseline;
+    gap: 6px 8px;
+    padding: 8px 12px 10px;
+    background: var(--color-surface-2);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-e2);
+    animation: pop var(--dur-2) var(--ease-out-quint);
+    pointer-events: none;
+  }
+
+  .quit-hint.closing {
+    animation: pop-out var(--dur-2) var(--ease-out-quint);
+  }
+
+  .quit-hint .text {
+    font-size: var(--text-sm);
+    font-weight: 600;
+  }
+
+  .quit-hint .sub {
+    font-size: var(--text-xs);
+    color: var(--color-muted-foreground);
+  }
+
+  .quit-hint .bar {
+    grid-column: 1 / -1;
+    height: 2px;
+    border-radius: 1px;
+    background: var(--color-foreground);
+    transform: scaleX(0);
+    transform-origin: left;
+  }
+
+  .quit-hint .bar.filling {
+    animation: quit-fill var(--quit-hold) linear forwards;
+  }
+
+  @keyframes quit-fill {
+    to {
+      transform: scaleX(1);
+    }
+  }
+
+  /* The last frame before the process goes: nothing under the pointer answers. */
+  .app.quitting {
+    pointer-events: none;
+    opacity: 0.6;
+    transition: opacity var(--dur-2) var(--ease-out-quint);
   }
 
   @media (max-width: 720px) {
