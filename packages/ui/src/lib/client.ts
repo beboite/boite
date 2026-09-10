@@ -84,6 +84,8 @@ export interface WsClientOptions {
    */
   grant?: string;
   onSession?: (session: Session) => void;
+  /** The session this client held stopped opening the core: it was revoked. The client is closed for good. */
+  onRevoked?: () => void;
   clientName?: ClientName;
   version?: string;
   socketFactory?: SocketFactory;
@@ -120,13 +122,14 @@ function browserSocket(url: string): SocketLike {
 }
 
 export class WsClient implements ObservableClient {
-  #options: Required<Omit<WsClientOptions, 'clientName' | 'version' | 'grant' | 'onSession'>> & {
+  #options: Required<Omit<WsClientOptions, 'clientName' | 'version' | 'grant' | 'onSession' | 'onRevoked'>> & {
     clientName: ClientName;
     version: string;
   };
   /** Spent on the first hello that answers; a refused grant is not retried. */
   #grant: string | null;
   #onSession: ((session: Session) => void) | null;
+  #onRevoked: (() => void) | null;
   #principal: Principal | null = null;
   #socket: SocketLike | null = null;
   #state: ClientState = 'idle';
@@ -152,6 +155,7 @@ export class WsClient implements ObservableClient {
     };
     this.#grant = options.grant ?? null;
     this.#onSession = options.onSession ?? null;
+    this.#onRevoked = options.onRevoked ?? null;
   }
 
   get state(): ClientState {
@@ -312,6 +316,7 @@ export class WsClient implements ObservableClient {
                 (error.code === RpcErrorCode.InvalidParams || (grant !== null && error.code === RpcErrorCode.Unauthorized)));
             if (permanent) this.close();
             else socket.close();
+            if (revoked) this.#onRevoked?.();
           }
         );
       };

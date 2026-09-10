@@ -36,7 +36,7 @@ import {
   type EventHandler,
   type ObservableClient
 } from './client';
-import { resolveEndpoint, storeEndpoint } from './endpoint';
+import { clearStoredEndpoint, resolveEndpoint, storeEndpoint } from './endpoint';
 import { titleFrom } from './format';
 import {
   readNotifications,
@@ -610,6 +610,13 @@ export class Store {
             // The session a grant became is this device's own credential: kept
             // where the next load reads it, so the link is opened once, ever.
             onSession: (session) => storeEndpoint({ url, token: session.token }),
+            // Revoked from the desktop: the dead key goes, and the page says
+            // what to do rather than retrying every ten seconds.
+            onRevoked: () => {
+              clearStoredEndpoint();
+              this.connection = 'closed';
+              this.error = strings.errors.revoked;
+            },
             clientName: window.__TAURI_INTERNALS__ === undefined ? 'pwa' : 'shell',
             version: UI_VERSION
           })

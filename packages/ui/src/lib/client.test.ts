@@ -158,6 +158,41 @@ describe('WsClient', () => {
     client.close();
   });
 
+  test('a session whose key stops opening the core is revoked: closed for good, and the caller told', async () => {
+    const sockets: FakeSocket[] = [];
+    let revoked = 0;
+    const client = new WsClient({
+      url: 'http://127.0.0.1:8777',
+      token: 'minted',
+      onRevoked: () => {
+        revoked += 1;
+      },
+      backoff: () => 0,
+      socketFactory: () => {
+        const socket = new FakeSocket();
+        sockets.push(socket);
+        return socket;
+      }
+    });
+    void client.connect().catch(() => undefined);
+    const first = take(sockets, 0);
+    first.open();
+    first.receive({ jsonrpc: '2.0', id: first.frame(0).id, result: { core: CORE, principal: 'session' } });
+    await Promise.resolve();
+    expect(client.principal).toBe('session');
+
+    // The core closes the socket on the revoke; the reconnect's hello is refused.
+    first.close(RpcCloseCode.Unauthorized);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    const second = take(sockets, 1);
+    second.open();
+    second.receive({ jsonrpc: '2.0', id: second.frame(0).id, error: { code: RpcErrorCode.Unauthorized, message: 'the token is wrong' } });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(revoked).toBe(1);
+    expect(client.state).toBe('closed');
+    expect(sockets).toHaveLength(2);
+  });
+
   test('a grant the core refuses closes the client for good', async () => {
     const sockets: FakeSocket[] = [];
     const client = new WsClient({

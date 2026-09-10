@@ -360,7 +360,11 @@ test(
         client.close();
       }
       await page.waitFor(`!document.querySelector('${testid('paired-devices')}')`, 30_000);
-      await phone.waitFor(`${textOf('status-connection')} !== 'Connected'`, 30_000);
+      // The phone's reconnect is refused once, then it stops, drops its dead key and says why.
+      await phone.waitFor(`${textOf('status-connection')} === 'Disconnected'`, 30_000);
+      await phone.waitFor(`document.querySelector('${testid('error-toast')}')`, 30_000);
+      expect(await phone.text(testid('error-toast'))).toContain('revoked');
+      expect(await phone.evaluate<string | null>(`localStorage.getItem('boite.core')`)).toBeNull();
       await page.click(testid('settings-back'));
     } finally {
       await phone.close();

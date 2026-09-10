@@ -498,7 +498,8 @@ export const strings = {
     prefix: 'Error',
     noEndpoint: 'No core endpoint could be resolved.',
     connect: 'Could not connect to the core.',
-    clipboard: 'The clipboard refused the text.'
+    clipboard: 'The clipboard refused the text.',
+    revoked: 'This device was revoked from the desktop app. Open a new pairing link to connect again.'
   },
 
   units: {
