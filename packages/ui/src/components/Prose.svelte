@@ -184,6 +184,80 @@
     text-underline-offset: 2px;
   }
 
+  .prose :global(ul ul),
+  .prose :global(ol ol),
+  .prose :global(ul ol),
+  .prose :global(ol ul) {
+    margin: 2px 0 0;
+  }
+
+  /* A task box reads as a mark, never as a control: it takes no pointer. */
+  .prose :global(li.task) {
+    list-style: none;
+    margin-left: -18px;
+  }
+
+  .prose :global(li.task input) {
+    width: 13px;
+    height: 13px;
+    margin: 0 4px 0 0;
+    vertical-align: -2px;
+    accent-color: var(--color-foreground);
+    pointer-events: none;
+  }
+
+  .prose :global(blockquote) {
+    margin: 0 0 12px;
+    padding: 2px 0 2px 12px;
+    border-left: 2px solid var(--color-edge);
+    color: var(--color-muted-foreground);
+  }
+
+  .prose :global(blockquote > :last-child) {
+    margin-bottom: 0;
+  }
+
+  .prose :global(hr) {
+    border: none;
+    border-top: 1px solid var(--color-border);
+    margin: 14px 0;
+  }
+
+  .prose :global(del) {
+    color: var(--color-muted-foreground);
+  }
+
+  /* A table is a code well's cousin: the surface-2 ground, hairlines, the head one step up. */
+  .prose :global(table) {
+    width: 100%;
+    margin: 6px 0 12px;
+    border-collapse: separate;
+    border-spacing: 0;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    background: var(--color-surface-2);
+    font-size: var(--text-sm);
+    overflow: hidden;
+  }
+
+  .prose :global(th),
+  .prose :global(td) {
+    padding: 6px 10px;
+    text-align: left;
+    vertical-align: top;
+    border-bottom: 1px solid var(--color-border);
+  }
+
+  .prose :global(th) {
+    font-weight: 600;
+    background: var(--color-surface-3);
+    color: var(--color-muted-foreground);
+  }
+
+  .prose :global(tbody tr:last-child td) {
+    border-bottom: none;
+  }
+
   .prose :global(.caret) {
     display: inline-block;
     width: 7px;
