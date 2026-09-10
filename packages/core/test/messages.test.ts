@@ -164,6 +164,55 @@ describe('message paging', () => {
     expect(detail).not.toContain('TEMP B-TREE');
   });
 
+  test('threads.get carries the turns of its page and the ones in flight, not every turn', async () => {
+    const client = await harness.connect();
+    const { threadId } = await echoThread(harness, client);
+    // One finished turn per message pair, in journal order, then a queued one with no message yet.
+    for (let index = 0; index < 150; index += 1) {
+      harness.core.journal.putTurn({
+        id: `trn_${String(index).padStart(4, '0')}`,
+        threadId,
+        status: 'done',
+        queuedAt: 1_000 + index,
+        startedAt: 1_000 + index,
+        finishedAt: 1_001 + index,
+        usage: null,
+        error: null,
+      });
+    }
+    for (let index = 0; index < 300; index += 1) {
+      harness.core.journal.putMessage({
+        id: `msg_${String(index).padStart(4, '0')}`,
+        threadId,
+        turnId: `trn_${String(Math.floor(index / 2)).padStart(4, '0')}`,
+        role: index % 2 === 0 ? 'user' : 'assistant',
+        parts: [{ type: 'text', text: `message ${index}` }],
+        state: 'complete',
+        createdAt: 1_000 + index,
+      });
+    }
+    harness.core.journal.putTurn({
+      id: 'trn_queued',
+      threadId,
+      status: 'queued',
+      queuedAt: 5_000,
+      startedAt: null,
+      finishedAt: null,
+      usage: null,
+      error: null,
+    });
+
+    const thread = await client.call('threads.get', { threadId });
+    const turnIds = thread.turns.map((turn) => turn.id);
+    // 120 messages over 60 turns: trn_0090 to trn_0149, then the queued one.
+    expect(turnIds).toHaveLength(61);
+    expect(turnIds[0]).toBe('trn_0090');
+    expect(turnIds[59]).toBe('trn_0149');
+    expect(turnIds.at(-1)).toBe('trn_queued');
+    expect(new Set(thread.messages.map((message) => message.turnId)).size).toBe(60);
+    expect(harness.core.journal.listTurns(threadId)).toHaveLength(151);
+  });
+
   test('the journal still hands the whole thread to the core itself', async () => {
     const client = await harness.connect();
     const { threadId } = await echoThread(harness, client);

@@ -424,6 +424,7 @@ export interface Thread extends ThreadSummary {
    * takes as `before`.
    */
   messagesBefore: MessageId | null;
+  /** The turns `messages` refers to, plus any still queued or running; never the whole history. */
   turns: Turn[];
 }
 

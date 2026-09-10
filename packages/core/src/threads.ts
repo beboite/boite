@@ -84,8 +84,11 @@ export class ThreadStore {
       ...thread,
       messages: page.messages,
       messagesBefore: page.before,
-      // Read after the messages: a thread with no turns costs nothing extra.
-      turns: this.core.journal.listTurns(threadId),
+      // The turns of that page and the ones still in flight, never the whole history.
+      turns: this.core.journal.listTurnsFor(
+        threadId,
+        page.messages.map((message) => message.turnId),
+      ),
     };
   }
 

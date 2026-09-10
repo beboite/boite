@@ -500,6 +500,21 @@ export class Journal {
     return rows.map(toTurn);
   }
 
+  /**
+   * The turns a page of messages refers to, plus any turn of the thread still
+   * queued or running, in journal order. What `threads.get` hands back instead
+   * of every turn: a thousand-turn thread costs the page, not the lot.
+   */
+  listTurnsFor(threadId: string, turnIds: Iterable<string>): Turn[] {
+    const ids = [...new Set(turnIds)];
+    const marks = ids.map(() => '?').join(', ');
+    const where = ids.length === 0 ? '' : ` OR id IN (${marks})`;
+    const rows = this.db
+      .query(`SELECT * FROM turns WHERE thread_id = ? AND (status IN ('running', 'queued')${where}) ORDER BY rowid`)
+      .all(threadId, ...ids) as TurnRow[];
+    return rows.map(toTurn);
+  }
+
   unfinishedTurns(): Turn[] {
     const rows = this.db.query("SELECT * FROM turns WHERE status IN ('running', 'queued') ORDER BY rowid").all() as TurnRow[];
     return rows.map(toTurn);
