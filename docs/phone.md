@@ -25,29 +25,42 @@ setting that chose it.
 
 Two things guard the socket whatever it is bound to. The `Origin` header must be
 absent, one of the shell origins, or the core's own HTTP origin, and the first
-frame must be `hello` carrying the core token within five seconds, or the socket
+frame must be `hello` carrying a credential within five seconds, or the socket
 closes with `4001`. A phone reaching the core over the LAN passes the first check
-with the core's own origin, and the second with the token from its pairing link.
+with the core's own origin, and the second with the session key its pairing link
+became.
 
 ## Pairing
 
-The core prints its pairing URL on the ready line and carries it in `CoreInfo`:
+A pairing link is minted from the desktop app, in Settings under "Phones and
+other devices", and the core prints one on its ready line too:
 
 ```
-http://192.168.1.20:53421/?token=<32 random bytes, hex>
+http://192.168.1.20:53421/?grant=<32 random bytes, hex>
 ```
 
-The token is generated on first start and kept in `<dataDir>/core.json` with the
-port and the pid, so a restart on the same data directory keeps the same link.
-The link carries `?token=` alone, with no `core=`, because the page it opens is
+The grant inside it is not the core token. It is a one-time id the core
+remembers for ten minutes: the page that opens the link says `hello` with it,
+the core exchanges it for a session key of that device's own, and the grant is
+forgotten on the spot. A link opened twice, or after its time, is refused by
+name. The core token itself stays in `<dataDir>/core.json`, where the shell
+reads it, and travels nowhere.
+
+Session keys are stored hashed in the journal, so a core restart keeps every
+pairing and a copy of the journal holds no credential. `sessions.list` shows
+every paired device with the client it said it was and when it was last seen;
+`sessions.revoke`, the Revoke button of the same card, closes its sockets and
+deletes the row, after which its key opens nothing. Minting a link and
+revoking are the owner's alone: a paired device sees the list and cannot pair
+another.
+
+The link carries `?grant=` alone, with no `core=`, because the page it opens is
 the one the core is serving: an absent `core` parameter means the origin of this
 page. `?core=<url>` is the other form, for a UI served from somewhere else and
-pointed at a core elsewhere.
-
-The UI stores the endpoint in `localStorage` and strips both parameters from the
-address bar on the first load, so the token is not left sitting in history or in
-a screenshot of the address bar. Treat the pairing link itself as a credential:
-whoever has it has the core.
+pointed at a core elsewhere, and `?token=` opens a page on a token one already
+holds. The UI strips all three from the address bar on the first load, stores
+the endpoint in `localStorage`, and never stores a grant: what it keeps is the
+session key that came back.
 
 ## The app on the phone
 
@@ -106,7 +119,8 @@ feature, the phone opening Boite a second time.
   back on its own. No queued messages, no offline history: the journal is on the
   core.
 - Pairing is a link somebody carries over, by hand or by a QR code they make
-  themselves. There is no discovery on the network.
+  themselves, and it has to be opened within ten minutes. There is no discovery
+  on the network.
 - There is no Android or iOS package. The phone runs the web app, and a Tauri
   mobile build is a later job.
 - Nothing pushes: a notification while the app is closed does not exist, because

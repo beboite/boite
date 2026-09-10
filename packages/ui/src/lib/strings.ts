@@ -373,8 +373,23 @@ export const strings = {
     pid: 'PID',
     dataDir: 'Data directory',
     endpoint: 'Endpoint',
-    pairingUrl: 'Pairing URL',
-    noCore: 'Not connected to a core.'
+    noCore: 'Not connected to a core.',
+    pairing: {
+      heading: 'Phones and other devices',
+      intro: 'A pairing link opens Boite on another device with a key of its own. It works once and for ten minutes.',
+      mint: 'New pairing link',
+      copy: 'Copy link',
+      expires: 'Works once, until {time}',
+      lanHint: 'The core listens on this machine only: turn on the LAN switch above, then restart it, before a phone can reach this link.',
+      devices: 'Paired devices',
+      noDevices: 'No device paired yet.',
+      thisDevice: 'this device',
+      lastSeen: 'seen {when}',
+      revoke: 'Revoke',
+      revokeTitle: 'Revoke this device?',
+      revokeBody: 'It disconnects now and its key opens nothing any more. Pair it again with a new link.',
+      paired: 'This device is paired with a key of its own. Pairing links are made from the desktop app.'
+    }
   },
 
   experiments: {

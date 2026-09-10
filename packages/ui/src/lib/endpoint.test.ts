@@ -31,6 +31,16 @@ describe('resolveEndpoint', () => {
     expect(window.location.search).toBe('');
   });
 
+  test('a grant link is carried in memory, stored without the grant, and stripped from the URL', async () => {
+    at('/?grant=onetime');
+
+    const endpoint = await resolveEndpoint();
+
+    expect(endpoint).toEqual({ url: window.location.origin, token: '', grant: 'onetime' });
+    expect(readStoredEndpoint()).toEqual({ url: window.location.origin, token: '' });
+    expect(window.location.search).toBe('');
+  });
+
   test('what a pairing link stored is used next time', async () => {
     storeEndpoint({ url: 'http://10.0.0.5:9000/', token: 'stored' });
 

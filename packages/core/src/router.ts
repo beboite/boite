@@ -1,11 +1,14 @@
 import { RpcErrorCode } from '@boite/contracts';
 import type { RpcEventName, RpcEvents, RpcMethodName, RpcMethods, ThreadId } from '@boite/contracts';
 import { RpcFailure } from './errors.ts';
+import type { Identity } from './sessions.ts';
 
 /** What a handler is allowed to know about the socket it was called on. */
 export interface Connection {
   readonly id: string;
   readonly subscriptions: Set<ThreadId>;
+  /** Who said hello: the owner, or a paired session by id. */
+  readonly identity: Identity;
   sendEvent<E extends RpcEventName>(name: E, payload: RpcEvents[E]): void;
   close(code: number, reason?: string): void;
 }

@@ -1,6 +1,7 @@
 import { PROTOCOL_VERSION, RPC_PATH } from '@boite/contracts';
 import type {
   CoreInfo,
+  Principal,
   RpcError,
   RpcEventName,
   RpcEvents,
@@ -11,10 +12,15 @@ import type {
 export interface ConnectOptions {
   client?: { name: string; version: string };
   timeoutMs?: number;
+  /** Say hello with a pairing grant instead of the token; `session` then carries what came back. */
+  grant?: string;
 }
 
 export interface CoreClient {
   readonly core: CoreInfo;
+  readonly principal: Principal;
+  /** The session a grant was exchanged for, absent on a token hello. */
+  readonly session: { id: string; token: string } | null;
   call<M extends RpcMethodName>(method: M, params: RpcMethods[M]['params']): Promise<RpcMethods[M]['result']>;
   on<E extends RpcEventName>(event: E, handler: (payload: RpcEvents[E]) => void): () => void;
   onAny(handler: (event: RpcEventName, payload: unknown) => void): () => void;
@@ -101,10 +107,10 @@ export async function connect(url: string, token: string, options: ConnectOption
   });
 
   const hello = (await send('hello', {
-    token,
+    ...(options.grant === undefined ? { token } : { grant: options.grant }),
     protocolVersion: PROTOCOL_VERSION,
     client: options.client ?? { name: 'test', version: '2.0.0-beta.1' },
-  })) as { core: CoreInfo };
+  })) as { core: CoreInfo; principal: Principal; session?: { id: string; token: string } };
   if (hello.core.protocolVersion !== PROTOCOL_VERSION) {
     socket.close();
     throw new Error(`core protocol version must be ${PROTOCOL_VERSION}`);
@@ -124,6 +130,8 @@ export async function connect(url: string, token: string, options: ConnectOption
 
   return {
     core: hello.core,
+    principal: hello.principal,
+    session: hello.session ?? null,
     async call<M extends RpcMethodName>(method: M, params: RpcMethods[M]['params']): Promise<RpcMethods[M]['result']> {
       if (closed) throw new Error('the client is closed');
       return (await send(method, params)) as RpcMethods[M]['result'];

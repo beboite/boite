@@ -387,7 +387,7 @@ test('a right click on a thread row opens the context menu, and Archive removes 
   row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 40, clientY: 60 }));
   await waitFor(() => document.querySelector('[data-testid=context-menu]') !== null);
   const labels = Array.from(document.querySelectorAll('[data-testid=context-menu] [data-row]')).map((el) => el.textContent?.trim());
-  expect(labels).toEqual(['Open', 'Rename', 'Archive']);
+  expect(labels).toEqual(['Open', 'Rename', 'Pin', 'Archive']);
 
   query<HTMLButtonElement>('[data-testid=context-menu] [data-value=archive]').click();
   await waitFor(() => document.querySelector('[data-testid=context-menu]') === null);

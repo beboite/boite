@@ -5,6 +5,7 @@ import {
   RpcErrorCode,
   type ClientName,
   type CoreInfo,
+  type Principal,
   type RpcError,
   type RpcEventName,
   type RpcEvents,
@@ -36,7 +37,15 @@ export interface Client {
   call<M extends RpcMethodName>(method: M, params: RpcParams<M>): Promise<RpcResult<M>>;
   on<E extends RpcEventName>(event: E, handler: EventHandler<E>): () => void;
   readonly state: ClientState;
+  /** Who the core took this client for on the last hello; null before one. */
+  readonly principal: Principal | null;
   close(): void;
+}
+
+/** What a grant hello hands back: the token this client says hello with from then on. */
+export interface Session {
+  id: string;
+  token: string;
 }
 
 /**
@@ -68,6 +77,13 @@ export interface WsClientOptions {
   /** HTTP origin of the core, for instance `http://127.0.0.1:8777`. */
   url: string;
   token: string;
+  /**
+   * A one-time pairing grant, used on the first hello instead of the token.
+   * The session it becomes replaces the token for every hello after, and
+   * `onSession` is where the caller stores it.
+   */
+  grant?: string;
+  onSession?: (session: Session) => void;
   clientName?: ClientName;
   version?: string;
   socketFactory?: SocketFactory;
@@ -104,10 +120,14 @@ function browserSocket(url: string): SocketLike {
 }
 
 export class WsClient implements ObservableClient {
-  #options: Required<Omit<WsClientOptions, 'clientName' | 'version'>> & {
+  #options: Required<Omit<WsClientOptions, 'clientName' | 'version' | 'grant' | 'onSession'>> & {
     clientName: ClientName;
     version: string;
   };
+  /** Spent on the first hello that answers; a refused grant is not retried. */
+  #grant: string | null;
+  #onSession: ((session: Session) => void) | null;
+  #principal: Principal | null = null;
   #socket: SocketLike | null = null;
   #state: ClientState = 'idle';
   #core: CoreInfo | null = null;
@@ -130,10 +150,16 @@ export class WsClient implements ObservableClient {
       reconnect: options.reconnect ?? true,
       backoff: options.backoff ?? defaultBackoff
     };
+    this.#grant = options.grant ?? null;
+    this.#onSession = options.onSession ?? null;
   }
 
   get state(): ClientState {
     return this.#state;
+  }
+
+  get principal(): Principal | null {
+    return this.#principal;
   }
 
   get core(): CoreInfo | null {
@@ -239,8 +265,9 @@ export class WsClient implements ObservableClient {
         this.#scheduleRetry();
       };
       socket.onopen = () => {
+        const grant = this.#grant;
         this.#send(socket, 'hello', {
-          token: this.#options.token,
+          ...(grant === null ? { token: this.#options.token } : { grant }),
           protocolVersion: PROTOCOL_VERSION,
           client: { name: this.#options.clientName, version: this.#options.version }
         }).then(
@@ -251,6 +278,13 @@ export class WsClient implements ObservableClient {
               socket.close();
               return;
             }
+            if (result.session) {
+              // The grant is spent: from here on this client is its session.
+              this.#grant = null;
+              this.#options.token = result.session.token;
+              this.#onSession?.(result.session);
+            }
+            this.#principal = result.principal;
             this.#attempt = 0;
             this.#core = result.core;
             this.#setState('ready');
@@ -266,8 +300,17 @@ export class WsClient implements ObservableClient {
               reject(error instanceof Error ? error : transportFailure(String(error)));
             }
             // The hello parameters are fixed for this client. Retrying a
-            // protocol rejection cannot make them compatible with the core.
-            if (error instanceof RpcFailure && error.code === RpcErrorCode.InvalidParams) this.close();
+            // protocol rejection cannot make them compatible with the core,
+            // and a grant the core refused once is spent or expired: the
+            // retry would only say so again.
+            // A session whose key stopped opening the core was revoked from
+            // the desktop: retrying every ten seconds would never pair it again.
+            const revoked = this.#principal === 'session' && error instanceof RpcFailure && error.code === RpcErrorCode.Unauthorized;
+            const permanent =
+              revoked ||
+              (error instanceof RpcFailure &&
+                (error.code === RpcErrorCode.InvalidParams || (grant !== null && error.code === RpcErrorCode.Unauthorized)));
+            if (permanent) this.close();
             else socket.close();
           }
         );

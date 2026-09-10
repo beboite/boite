@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { PROTOCOL_VERSION, RPC_PATH, RpcCloseCode, RpcErrorCode } from '@boite/contracts';
+import { connect } from '../src/client.ts';
 import { isAllowedOrigin, PLACEHOLDER_HTML, ServerConnection, UI_DIST } from '../src/server.ts';
 import { startTestCore } from './harness.ts';
 import type { TestCore } from './harness.ts';
@@ -185,6 +186,90 @@ describe('server', () => {
     // A core nobody told otherwise is the stable install.
     expect(client.core.channel).toBe('stable');
     expect(await client.call('projects.list', {})).toEqual([]);
+  });
+
+  test('a pairing grant is exchanged once for a session that survives a restart, and a revoke closes it', async () => {
+    const owner = await harness.connect();
+    expect(owner.principal).toBe('owner');
+    const { url, grant, expiresAt } = await owner.call('pairing.grant', {});
+    expect(url).toBe(`${harness.url}/?grant=${grant}`);
+    expect(expiresAt).toBeGreaterThan(Date.now());
+    expect(owner.core).not.toHaveProperty('pairingUrl');
+
+    const phone = await connect(harness.url, '', { grant, client: { name: 'pwa', version: '2.0.0-beta.1' } });
+    expect(phone.principal).toBe('session');
+    expect(phone.session?.token).toHaveLength(64);
+    expect(phone.session?.token).not.toBe(harness.token);
+    expect(await phone.call('projects.list', {})).toEqual([]);
+
+    // Second use of the same link: refused by name, socket closed.
+    let reused = 'none';
+    try {
+      await connect(harness.url, '', { grant });
+    } catch (error) {
+      reused = (error as Error).message;
+    }
+    expect(reused).toBe('the pairing link was already used, expired, or never issued');
+
+    // The session token opens the RPC on its own, and the journal holds only its hash.
+    const again = await connect(harness.url, phone.session?.token ?? '');
+    expect(again.principal).toBe('session');
+    const rows = harness.core.journal.listSessions();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.token_hash).not.toContain(phone.session?.token ?? 'never');
+    expect(rows[0]?.client_name).toBe('pwa');
+
+    // A session sees the list with itself marked, and cannot mint or revoke.
+    const seen = await again.call('sessions.list', {});
+    expect(seen.map((row) => row.current)).toEqual([true]);
+    let minted = 'none';
+    try {
+      await again.call('pairing.grant', {});
+    } catch (error) {
+      minted = (error as Error).message;
+    }
+    expect(minted).toBe('pairing.grant is for the owner only');
+
+    // Revoked by the owner: both of its sockets close 4001 and the token is dead.
+    const sessionId = phone.session?.id ?? '';
+    const closed = new Promise<void>((resolve) => again.on('core.log', () => resolve()));
+    await owner.call('sessions.revoke', { sessionId });
+    void closed;
+    expect(await owner.call('sessions.list', {})).toEqual([]);
+    let dead = 'none';
+    try {
+      await connect(harness.url, phone.session?.token ?? '');
+    } catch (error) {
+      dead = (error as Error).message;
+    }
+    expect(dead).toBe('the token is wrong');
+    let after = 'none';
+    try {
+      await again.call('projects.list', {});
+    } catch (error) {
+      after = (error as Error).message;
+    }
+    expect(['the socket closed', 'the client is closed']).toContain(after);
+  });
+
+  test('a grant expires, and hello with both a token and a grant is refused', async () => {
+    const grant = harness.core.sessions.grant(1_000);
+    let expired = 'none';
+    try {
+      harness.core.sessions.exchange(grant.grant, { name: 'pwa', version: '0' }, 1_000 + 10 * 60 * 1000);
+    } catch (error) {
+      expired = (error as Error).message;
+    }
+    expect(expired).toBe('the pairing link was already used, expired, or never issued');
+
+    const socket = rawSocket();
+    await opened(socket);
+    socket.send(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'hello', params: {
+      token: harness.token, grant: 'x', protocolVersion: PROTOCOL_VERSION, client: { name: 'test', version: '0' },
+    } }));
+    const frame = (await firstFrame(socket)) as { error?: { code: number; message: string } };
+    expect(frame.error?.message).toBe('hello takes a token or a grant, one of the two');
+    expect(await closeCode(socket)).toBe(RpcCloseCode.Unauthorized);
   });
 
   test('an unknown method answers MethodNotFound', async () => {

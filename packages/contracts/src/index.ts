@@ -569,12 +569,39 @@ export interface CoreInfo {
   channel: Channel;
   pid: number;
   startedAt: Timestamp;
-  /** Bind address, possibly a wildcard. Use pairingUrl to reach the core remotely. */
+  /** Bind address, possibly a wildcard. `pairing.grant` gives the link a phone opens. */
   endpoint: { host: string; port: number };
-  /** URL a phone opens once to pair, token included. */
-  pairingUrl: string;
   dataDir: string;
   trace: TraceCapability;
+}
+
+/**
+ * Who a connection is. The owner said hello with the core token itself, which
+ * only the shell and the tests hold; a session said hello with a token the
+ * core minted for it when a pairing grant was exchanged. Minting grants and
+ * revoking sessions are the owner's alone.
+ */
+export type Principal = 'owner' | 'session';
+
+/** One paired client, as `sessions.list` shows it. The token itself is never listed. */
+export interface PairedSession {
+  id: string;
+  client: { name: string; version: string };
+  createdAt: Timestamp;
+  lastSeenAt: Timestamp;
+  /** True on the connection that asked. */
+  current: boolean;
+}
+
+/**
+ * A one-time pairing link. The grant inside it is exchanged once, within
+ * `expiresAt`, for a session token of the client's own; the core token never
+ * leaves the machine. A grant that was used or that expired is refused by name.
+ */
+export interface PairingGrant {
+  url: string;
+  grant: string;
+  expiresAt: Timestamp;
 }
 
 // ---------------------------------------------------------------------------
@@ -593,10 +620,28 @@ export interface RpcMethods {
     params: { id: string; provider: string; action: 'add' | 'switch' | 'remove'; email?: string };
     result: PluginPool[];
   };
+  /**
+   * The first frame. `token` is the core token or a session token; `grant` is
+   * a pairing grant, exchanged here for a session whose token comes back in
+   * `session` and is what this client says hello with from then on. One of the
+   * two, never both.
+   */
   hello: {
-    params: { token: string; protocolVersion: number; client: { name: string; version: string } };
-    result: { core: CoreInfo };
+    params: {
+      token?: string;
+      grant?: string;
+      protocolVersion: number;
+      client: { name: string; version: string };
+    };
+    result: { core: CoreInfo; principal: Principal; session?: { id: string; token: string } };
   };
+
+  /** A fresh one-time pairing link. Owner only. */
+  'pairing.grant': { params: Record<string, never>; result: PairingGrant };
+  /** Every paired client still able to connect. */
+  'sessions.list': { params: Record<string, never>; result: PairedSession[] };
+  /** Forget a paired client: its sockets close and its token opens nothing any more. Owner only. */
+  'sessions.revoke': { params: { sessionId: string }; result: { ok: true } };
 
   'projects.list': { params: Record<string, never>; result: Project[] };
   'projects.add': { params: { path: string; name?: string }; result: Project };
@@ -823,6 +868,8 @@ export interface RpcEvents {
   'accounts.removed': { accountId: AccountId };
   /** The whole settings object, as `settings.set` wrote it. */
   'settings.updated': Settings;
+  /** A session was created or revoked: the list to re-read is `sessions.list`. */
+  'sessions.updated': { sessionId: string; state: 'created' | 'revoked' };
   /** What `providers.reload` found: the descriptors that loaded and the ones refused. */
   'providers.updated': { loaded: ProviderSummary[]; rejected: ProviderRejected[] };
   /**
@@ -912,8 +959,12 @@ export const RpcCloseCode = {
 /** Path of the RPC WebSocket on the core's HTTP server. */
 export const RPC_PATH = '/rpc';
 
-/** Query parameter that carries the pairing token when a phone opens the UI. */
+/** Query parameter that carries a token when a UI is opened on one by hand. */
 export const PAIR_QUERY_PARAM = 'token';
+/** Query parameter that carries the one-time grant of a pairing link. */
+export const GRANT_QUERY_PARAM = 'grant';
+/** How long a pairing grant can wait to be opened. */
+export const GRANT_TTL_MS = 10 * 60 * 1000;
 
 export const CLIENT_NAMES = ['shell', 'pwa', 'test', 'bench'] as const;
 export type ClientName = (typeof CLIENT_NAMES)[number];

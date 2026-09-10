@@ -1,6 +1,6 @@
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { PAIR_QUERY_PARAM, PROTOCOL_VERSION } from '@boite/contracts';
+import { PROTOCOL_VERSION } from '@boite/contracts';
 import type { Channel, CoreInfo, ThreadId } from '@boite/contracts';
 import pkg from '../package.json';
 import { AccountStore } from './accounts.ts';
@@ -14,6 +14,7 @@ import { ProjectStore } from './projects.ts';
 import { ProviderRegistry } from './providers/loader.ts';
 import { Router } from './router.ts';
 import { Scheduler } from './scheduler.ts';
+import { SessionStore } from './sessions.ts';
 import { SettingsStore } from './settings.ts';
 import { ThreadStore } from './threads.ts';
 import { QuotaStore } from './quotas.ts';
@@ -21,9 +22,11 @@ import { PluginStore } from './plugins.ts';
 
 export const CORE_VERSION: string = pkg.version;
 
-/** The server tells the core which threads a live socket is watching. */
+/** The server tells the core which threads a live socket is watching, and closes sockets on request. */
 export interface SubscriptionSink {
   hasSubscribers(threadId: ThreadId): boolean;
+  /** Every socket a revoked session holds goes, with the close code the client reads as "pair again". */
+  closeSession(sessionId: string): void;
 }
 
 export interface CoreOptions {
@@ -52,8 +55,9 @@ export class Core {
   readonly threads: ThreadStore;
   readonly quotas: QuotaStore;
   readonly plugins: PluginStore;
+  readonly sessions: SessionStore;
 
-  subscribers: SubscriptionSink = { hasSubscribers: () => false };
+  subscribers: SubscriptionSink = { hasSubscribers: () => false, closeSession: () => undefined };
 
   private endpoint = { host: '127.0.0.1', port: 0 };
 
@@ -75,6 +79,7 @@ export class Core {
     this.threads = new ThreadStore(this);
     this.quotas = new QuotaStore(this);
     this.plugins = new PluginStore(this);
+    this.sessions = new SessionStore(this);
 
     registerModules(this);
     this.procs.applySettings(this.settings.get());
@@ -96,8 +101,9 @@ export class Core {
     return `http://${this.displayHost()}:${this.endpoint.port}`;
   }
 
+  /** A fresh one-time pairing link: what the ready line prints and the Settings page mints. */
   pairingUrl(): string {
-    return `${this.baseUrl()}/?${PAIR_QUERY_PARAM}=${this.token}`;
+    return this.sessions.grant().url;
   }
 
   info(): CoreInfo {
@@ -109,7 +115,6 @@ export class Core {
       pid: process.pid,
       startedAt: this.startedAt,
       endpoint: { ...this.endpoint },
-      pairingUrl: this.pairingUrl(),
       dataDir: this.dataDir,
       trace: this.procs.capability(),
     };

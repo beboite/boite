@@ -328,6 +328,48 @@ test(
 );
 
 test(
+  'a second browser pairs on the one-time link, gets a key of its own, and the desktop can revoke it',
+  async () => {
+    // A fresh profile, like a phone: no stored endpoint, only the grant link.
+    const phone = await BrowserPage.launch({ url: core.pairingUrl });
+    try {
+      await phone.waitFor(`${textOf('status-connection')} === 'Connected'`, 30_000);
+      const stored = await phone.evaluate<{ url: string; token: string }>(`JSON.parse(localStorage.getItem('boite.core'))`);
+      expect(stored.token).toHaveLength(64);
+      expect(stored.token).not.toBe(core.token);
+      expect(await phone.evaluate<string>('location.search')).toBe('');
+
+      // Same link again: refused, and the page says so instead of retrying forever.
+      const again = await BrowserPage.launch({ url: core.pairingUrl });
+      try {
+        await again.waitFor(`document.querySelector('${testid('error-toast')}')`, 30_000);
+        expect(await again.text(testid('error-toast'))).toContain('already used');
+      } finally {
+        await again.close();
+      }
+
+      // The desktop lists the phone and revokes it; the phone's socket closes and its key is dead.
+      await page.click(testid('nav-settings'));
+      await page.waitFor(`document.querySelector('${testid('paired-devices')} li[data-session-id]')`, 30_000);
+      const client = await connect(core.url, core.token);
+      try {
+        const sessions = await client.call('sessions.list', {});
+        expect(sessions.map((session) => session.client.name)).toEqual(['pwa']);
+        await client.call('sessions.revoke', { sessionId: sessions[0]?.id ?? '' });
+      } finally {
+        client.close();
+      }
+      await page.waitFor(`!document.querySelector('${testid('paired-devices')}')`, 30_000);
+      await phone.waitFor(`${textOf('status-connection')} !== 'Connected'`, 30_000);
+      await page.click(testid('settings-back'));
+    } finally {
+      await phone.close();
+    }
+  },
+  TIMEOUT,
+);
+
+test(
   'the page reconnects on its own to a core restarted on the same port, and the next turn streams',
   async () => {
     // Survives a reconnect and nothing else: this is what tells one apart from

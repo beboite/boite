@@ -12,7 +12,7 @@ import type {
   Usage,
 } from '@boite/contracts';
 
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 4;
 const DELTA_WINDOW_MS = 16;
 
 /** What `listMessagePage` hands back: the page itself and the cursor for what is behind it. */
@@ -105,6 +105,16 @@ interface AccountRow {
   status: string;
   identity: string | null;
   created_at: number;
+}
+
+/** A paired client. The token is stored hashed: the journal never holds a credential. */
+export interface SessionRow {
+  id: string;
+  token_hash: string;
+  client_name: string;
+  client_version: string;
+  created_at: number;
+  last_seen_at: number;
 }
 
 const SCHEMA_V1 = `
@@ -206,6 +216,18 @@ const SCHEMA_V3 = `
 ALTER TABLE threads ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0;
 `;
 
+/** Paired clients, one row per session token the core minted. */
+const SCHEMA_V4 = `
+CREATE TABLE IF NOT EXISTS sessions (
+  id TEXT PRIMARY KEY,
+  token_hash TEXT NOT NULL UNIQUE,
+  client_name TEXT NOT NULL,
+  client_version TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  last_seen_at INTEGER NOT NULL
+);
+`;
+
 function migrate(db: Database): void {
   const row = db.query('PRAGMA user_version').get() as { user_version: number } | null;
   let version = row?.user_version ?? 0;
@@ -220,6 +242,10 @@ function migrate(db: Database): void {
   if (version < 3) {
     db.exec(SCHEMA_V3);
     version = 3;
+  }
+  if (version < 4) {
+    db.exec(SCHEMA_V4);
+    version = 4;
   }
   db.exec(`PRAGMA user_version = ${version}`);
 }
@@ -465,6 +491,37 @@ export class Journal {
     }
     this.db.query('DELETE FROM threads WHERE project_id = ?').run(projectId);
     return rows.map((row) => row.id);
+  }
+
+  // -- sessions -------------------------------------------------------------
+
+  putSession(row: SessionRow): void {
+    this.db
+      .query(
+        `INSERT OR REPLACE INTO sessions (id, token_hash, client_name, client_version, created_at, last_seen_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      )
+      .run(row.id, row.token_hash, row.client_name, row.client_version, row.created_at, row.last_seen_at);
+  }
+
+  getSessionByHash(tokenHash: string): SessionRow | null {
+    return (this.db.query('SELECT * FROM sessions WHERE token_hash = ?').get(tokenHash) as SessionRow | null) ?? null;
+  }
+
+  getSession(sessionId: string): SessionRow | null {
+    return (this.db.query('SELECT * FROM sessions WHERE id = ?').get(sessionId) as SessionRow | null) ?? null;
+  }
+
+  touchSession(sessionId: string, at: number): void {
+    this.db.query('UPDATE sessions SET last_seen_at = ? WHERE id = ?').run(at, sessionId);
+  }
+
+  listSessions(): SessionRow[] {
+    return this.db.query('SELECT * FROM sessions ORDER BY rowid').all() as SessionRow[];
+  }
+
+  deleteSession(sessionId: string): boolean {
+    return this.db.query('DELETE FROM sessions WHERE id = ?').run(sessionId).changes > 0;
   }
 
   // -- turns ----------------------------------------------------------------

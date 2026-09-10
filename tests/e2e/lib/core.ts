@@ -1,7 +1,7 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { PAIR_QUERY_PARAM } from '../../../packages/contracts/src/index.ts';
+import { GRANT_QUERY_PARAM, PAIR_QUERY_PARAM } from '../../../packages/contracts/src/index.ts';
 
 const MAIN = join(import.meta.dir, '..', '..', '..', 'packages', 'core', 'src', 'main.ts');
 /** The default: the end to end suite proves the sources, a bench may point elsewhere. */
@@ -23,7 +23,10 @@ export interface StartCoreOptions {
 
 export interface RunningCore {
   url: string;
+  /** The core token, read out of `core.json`: what the shell holds and a phone never sees. */
   token: string;
+  /** The one-time pairing link the ready line printed, good for one page load. */
+  pairingUrl: string;
   port: number;
   dataDir: string;
   pid: number;
@@ -120,12 +123,17 @@ export async function startCore(options: StartCoreOptions = {}): Promise<Running
 
   const url = match[1] ?? '';
   const pairingUrl = match[2] ?? '';
-  const token = new URL(pairingUrl).searchParams.get(PAIR_QUERY_PARAM) ?? '';
-  if (token === '') throw new Error(`the pairing url carries no token: ${pairingUrl}`);
+  if (new URL(pairingUrl).searchParams.get(GRANT_QUERY_PARAM) === null) {
+    throw new Error(`the pairing url carries no grant: ${pairingUrl}`);
+  }
+  const coreFile = JSON.parse(readFileSync(join(dataDir, 'core.json'), 'utf8')) as { token?: unknown };
+  const token = typeof coreFile.token === 'string' ? coreFile.token : '';
+  if (token === '') throw new Error(`core.json under ${dataDir} carries no token`);
 
   return {
     url,
     token,
+    pairingUrl,
     port: Number(new URL(url).port),
     dataDir,
     pid: proc.pid,
@@ -138,6 +146,11 @@ export async function startCore(options: StartCoreOptions = {}): Promise<Running
   };
 }
 
+/**
+ * The owner's own link: the core token in the query, the way a UI is opened by
+ * hand on a token. It is reusable, unlike `core.pairingUrl`, so a test that
+ * reloads the page keeps using it.
+ */
 export function pairingUrlOf(core: Pick<RunningCore, 'url' | 'token'>): string {
   return `${core.url}/?${PAIR_QUERY_PARAM}=${core.token}`;
 }

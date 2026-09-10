@@ -4,6 +4,7 @@ import { registerProjectMethods } from './projects.ts';
 import { registerProviderMethods } from './providers/loader.ts';
 import { registerProbeMethods } from './providers/probe.ts';
 import { registerSchedulerMethods } from './scheduler.ts';
+import { registerSessionMethods } from './sessions.ts';
 import { registerSettingsMethods } from './settings.ts';
 import { registerThreadMethods } from './threads.ts';
 import { registerTraceMethods } from './trace.ts';
@@ -28,4 +29,5 @@ export function registerModules(core: Core): void {
   registerTraceMethods(core);
   registerUsageMethods(core);
   registerSettingsMethods(core);
+  registerSessionMethods(core);
 }

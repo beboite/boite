@@ -9,6 +9,7 @@ import type { Core } from './core.ts';
 import { RpcFailure, messageOf } from './errors.ts';
 import { newId } from './ids.ts';
 import type { Connection } from './router.ts';
+import type { Identity } from './sessions.ts';
 
 const DEFAULT_HELLO_TIMEOUT_MS = 5000;
 /**
@@ -58,6 +59,8 @@ export class ServerConnection implements Connection {
   readonly id = newId('con_');
   readonly subscriptions = new Set<ThreadId>();
   authenticated = false;
+  /** Owner until hello says otherwise; nothing reads it before `authenticated` is true. */
+  identity: Identity = { principal: 'owner', sessionId: null };
 
   private socket: ServerWebSocket<SocketData> | null = null;
   private congested = false;
@@ -264,6 +267,11 @@ export function startServer(options: ServerOptions): RunningServer {
       }
       return false;
     },
+    closeSession(sessionId: string): void {
+      for (const connection of connections) {
+        if (connection.identity.sessionId === sessionId) connection.close(RpcCloseCode.Unauthorized, 'session revoked');
+      }
+    },
   };
 
   const off = core.bus.onAny((name, payload) => {
@@ -323,30 +331,73 @@ async function handleFrame(core: Core, connection: ServerConnection, raw: string
       connection.close(RpcCloseCode.Unauthorized, 'hello expected');
       return;
     }
-    const params = frame.params as { token?: unknown; protocolVersion?: unknown } | undefined;
-    if (typeof params?.token !== 'string' || params.token !== core.token) {
-      connection.sendResponse({
-        jsonrpc: '2.0',
-        id,
-        error: { code: RpcErrorCode.Unauthorized, message: 'the token is wrong' },
-      });
-      connection.close(RpcCloseCode.Unauthorized, 'bad token');
+    const params = frame.params as
+      | { token?: unknown; grant?: unknown; protocolVersion?: unknown; client?: { name?: unknown; version?: unknown } }
+      | undefined;
+    const refuse = (message: string, reason: string): void => {
+      connection.sendResponse({ jsonrpc: '2.0', id, error: { code: RpcErrorCode.Unauthorized, message } });
+      connection.close(RpcCloseCode.Unauthorized, reason);
+    };
+    const token = typeof params?.token === 'string' ? params.token : null;
+    const grant = typeof params?.grant === 'string' ? params.grant : null;
+    const client = {
+      name: typeof params?.client?.name === 'string' ? params.client.name : 'unknown',
+      version: typeof params?.client?.version === 'string' ? params.client.version : '',
+    };
+
+    let session: { id: string; token: string } | undefined;
+    let identity: Identity;
+    if (grant !== null && token === null) {
+      // The exchange happens before the protocol check on purpose: a grant is
+      // one-shot, and a client that trips the version check keeps its link.
+      if (params?.protocolVersion !== PROTOCOL_VERSION) {
+        connection.sendResponse({ jsonrpc: '2.0', id, error: {
+          code: RpcErrorCode.InvalidParams, message: `protocolVersion must be ${PROTOCOL_VERSION}`,
+        } });
+        connection.close(RpcCloseCode.ProtocolMismatch, 'protocol version mismatch');
+        return;
+      }
+      try {
+        session = core.sessions.exchange(grant, client);
+      } catch (error) {
+        refuse(messageOf(error), 'bad grant');
+        return;
+      }
+      identity = { principal: 'session', sessionId: session.id };
+    } else if (token !== null && grant === null) {
+      if (token === core.token) {
+        identity = { principal: 'owner', sessionId: null };
+      } else {
+        const found = token.length > 0 ? core.sessions.authenticate(token) : null;
+        if (found === null) {
+          refuse('the token is wrong', 'bad token');
+          return;
+        }
+        identity = { principal: 'session', sessionId: found.id };
+      }
+    } else {
+      refuse('hello takes a token or a grant, one of the two', 'bad hello');
       return;
     }
-    if (params.protocolVersion !== PROTOCOL_VERSION) {
+    if (params?.protocolVersion !== PROTOCOL_VERSION) {
       connection.sendResponse({ jsonrpc: '2.0', id, error: {
         code: RpcErrorCode.InvalidParams, message: `protocolVersion must be ${PROTOCOL_VERSION}`,
       } });
       connection.close(RpcCloseCode.ProtocolMismatch, 'protocol version mismatch');
       return;
     }
+    connection.identity = identity;
     connection.authenticated = true;
-    connection.sendResponse({ jsonrpc: '2.0', id, result: { core: core.info() } });
+    connection.sendResponse({
+      jsonrpc: '2.0',
+      id,
+      result: { core: core.info(), principal: identity.principal, ...(session === undefined ? {} : { session }) },
+    });
     return;
   }
 
   if (method === 'hello') {
-    connection.sendResponse({ jsonrpc: '2.0', id, result: { core: core.info() } });
+    connection.sendResponse({ jsonrpc: '2.0', id, result: { core: core.info(), principal: connection.identity.principal } });
     return;
   }
 

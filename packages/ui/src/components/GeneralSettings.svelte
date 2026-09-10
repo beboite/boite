@@ -1,9 +1,11 @@
 <script lang="ts">
   import { untrack } from 'svelte';
+  import type { PairedSession } from '@boite/contracts';
   import ShellSettings from './ShellSettings.svelte';
-  import { time } from '../lib/format';
+  import { confirm } from '../lib/confirm.svelte';
+  import { ago, time } from '../lib/format';
   import { readStoredEndpoint } from '../lib/endpoint';
-  import { strings } from '../lib/strings';
+  import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
 
   let { store }: { store: Store } = $props();
@@ -12,9 +14,26 @@
   const inShell = window.__TAURI_INTERNALS__ !== undefined;
 
   let url = $state(
-    untrack(() => stored?.url ?? store.core?.pairingUrl.split('?')[0]?.replace(/\/+$/, '') ?? '')
+    untrack(() => stored?.url ?? (store.core ? `http://${store.core.endpoint.host}:${store.core.endpoint.port}` : ''))
   );
   let token = $state(stored?.token ?? '');
+
+  // The devices list is read on arrival and after every `sessions.updated`;
+  // the pairing link is minted on the button, never on its own.
+  $effect(() => {
+    if (store.connection === 'ready') void store.loadSessions();
+  });
+
+  async function revoke(session: PairedSession) {
+    const ok = await confirm.ask({
+      title: strings.settings.pairing.revokeTitle,
+      body: strings.settings.pairing.revokeBody,
+      confirmLabel: strings.settings.pairing.revoke,
+      cancelLabel: strings.common.cancel,
+      danger: true
+    });
+    if (ok) await store.revokeSession(session.id);
+  }
 
   let projectPath = $state('');
 
@@ -148,6 +167,53 @@
     </div>
   </section>
 
+  <section class="card" data-testid="pairing-card">
+    <h2>{strings.settings.pairing.heading}</h2>
+    {#if store.principal === 'owner'}
+      <p class="subtle hint">{strings.settings.pairing.intro}</p>
+      {#if store.settings && !store.settings.listenOnLan}
+        <p class="subtle hint">{strings.settings.pairing.lanHint}</p>
+      {/if}
+      <div class="actions">
+        <button type="button" class="primary" data-testid="pairing-mint" onclick={() => void store.mintPairing()}>
+          {strings.settings.pairing.mint}
+        </button>
+        {#if store.pairing}
+          <button type="button" onclick={() => void store.copy(store.pairing?.url ?? '')}>
+            {strings.settings.pairing.copy}
+          </button>
+        {/if}
+      </div>
+      {#if store.pairing}
+        <p class="mono wrap link" data-testid="pairing-link">{store.pairing.url}</p>
+        <p class="subtle hint">{fill(strings.settings.pairing.expires, { time: time(store.pairing.expiresAt) })}</p>
+      {/if}
+    {:else}
+      <p class="subtle hint">{strings.settings.pairing.paired}</p>
+    {/if}
+    <h3>{strings.settings.pairing.devices}</h3>
+    {#if store.sessions.length === 0}
+      <p class="muted">{strings.settings.pairing.noDevices}</p>
+    {:else}
+      <ul class="devices" data-testid="paired-devices">
+        {#each store.sessions as session (session.id)}
+          <li data-session-id={session.id}>
+            <span class="name">
+              {session.client.name} {session.client.version}
+              {#if session.current}<span class="subtle">({strings.settings.pairing.thisDevice})</span>{/if}
+            </span>
+            <span class="subtle seen">{fill(strings.settings.pairing.lastSeen, { when: ago(session.lastSeenAt) })}</span>
+            {#if store.principal === 'owner'}
+              <button type="button" class="ghost small danger" onclick={() => void revoke(session)}>
+                {strings.settings.pairing.revoke}
+              </button>
+            {/if}
+          </li>
+        {/each}
+      </ul>
+    {/if}
+  </section>
+
   <section class="card">
     <h2>{strings.settings.scheduler}</h2>
     <div class="grid">
@@ -205,8 +271,6 @@
         </dd>
         <dt>{strings.settings.dataDir}</dt>
         <dd class="mono">{store.core.dataDir}</dd>
-        <dt>{strings.settings.pairingUrl}</dt>
-        <dd class="mono wrap">{store.core.pairingUrl}</dd>
       </dl>
     {:else}
       <p class="muted">{strings.settings.noCore}</p>
@@ -359,5 +423,58 @@
   .wrap {
     word-break: break-all;
     white-space: normal;
+  }
+
+  h3 {
+    font-size: var(--text-sm);
+    font-weight: 600;
+    color: var(--color-muted-foreground);
+    margin: 16px 0 6px;
+  }
+
+  .link {
+    margin: 10px 0 2px;
+    padding: 8px 10px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    background: var(--color-surface-2);
+    font-size: var(--text-sm);
+    user-select: all;
+  }
+
+  .devices {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .devices li {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: var(--row);
+    padding: 0 4px 0 10px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+  }
+
+  .devices .name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .devices .seen {
+    font-size: var(--text-xs);
+    flex: none;
+  }
+
+  .danger {
+    color: var(--color-danger);
   }
 </style>

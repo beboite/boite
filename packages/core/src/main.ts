@@ -125,6 +125,9 @@ export function main(argv: string[]): void {
   };
   writeFileSync(coreFile, `${JSON.stringify(state, null, 2)}\n`, 'utf8');
 
+  // The pairing link on the ready line is a one-time grant, good for ten
+  // minutes: the core token itself stays in `core.json`, readable by the
+  // shell and by nobody who only saw the log.
   process.stdout.write(`boite-core ready ${core.baseUrl()} pairing ${core.pairingUrl()}\n`);
 
   let stopping = false;

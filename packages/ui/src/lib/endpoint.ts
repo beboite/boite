@@ -1,8 +1,14 @@
-import { PAIR_QUERY_PARAM } from '@boite/contracts';
+import { GRANT_QUERY_PARAM, PAIR_QUERY_PARAM } from '@boite/contracts';
 
 export interface Endpoint {
   url: string;
   token: string;
+  /**
+   * A one-time pairing grant from the link that opened this page. Never
+   * stored: it is spent on the first hello, and the session token that comes
+   * back is what gets stored in its place.
+   */
+  grant?: string;
 }
 
 export const ENDPOINT_STORAGE_KEY = 'boite.core';
@@ -49,23 +55,29 @@ export function clearStoredEndpoint(): void {
 }
 
 /**
- * The core's own pairing link carries the token alone, on a page it serves
- * itself, so an absent `core` parameter means the origin of this page.
+ * The core's own pairing link carries a grant alone, on a page it serves
+ * itself, so an absent `core` parameter means the origin of this page. A
+ * `token` is the other form, a UI opened by hand on a token one already holds.
  */
 function takeFromQuery(): Endpoint | null {
   const params = new URLSearchParams(window.location.search);
   const core = params.get(CORE_QUERY_PARAM);
   const token = params.get(PAIR_QUERY_PARAM);
-  if (!core && !token) return null;
+  const grant = params.get(GRANT_QUERY_PARAM);
+  if (!core && !token && !grant) return null;
 
   const endpoint: Endpoint = {
     url: normalise(core ?? window.location.origin),
-    token: token ?? ''
+    token: token ?? '',
+    ...(grant ? { grant } : {})
   };
-  storeEndpoint(endpoint);
+  // A grant is not a credential to keep: the stored token stays empty until
+  // the session comes back, then `onSession` writes that one.
+  storeEndpoint({ url: endpoint.url, token: endpoint.token });
 
   params.delete(CORE_QUERY_PARAM);
   params.delete(PAIR_QUERY_PARAM);
+  params.delete(GRANT_QUERY_PARAM);
   const query = params.toString();
   const stripped = `${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash}`;
   window.history.replaceState(null, '', stripped);

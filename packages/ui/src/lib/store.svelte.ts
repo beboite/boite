@@ -4,8 +4,11 @@ import type {
   Message,
   MessageId,
   ModelInfo,
+  PairedSession,
+  PairingGrant,
   PermissionMode,
   PermissionRequest,
+  Principal,
   QuestionRequest,
   ProcessRecord,
   Project,
@@ -138,6 +141,11 @@ type ThreadStatusRank = Record<ThreadSummary['status'], number>;
 export class Store {
   connection = $state<ClientState>('idle');
   core = $state<CoreInfo | null>(null);
+  /** Owner on the core token, session on a paired one; what decides who may pair a phone. */
+  principal = $state<Principal | null>(null);
+  /** The last one-time pairing link minted from Settings, until the page changes. */
+  pairing = $state<PairingGrant | null>(null);
+  sessions = $state<PairedSession[]>([]);
   error = $state<string | null>(null);
   page = $state<Page>('chat');
   settingsTab = $state<SettingsTab>('general');
@@ -521,6 +529,9 @@ export class Store {
     on('settings.updated', (settings) => {
       this.settings = settings;
     });
+    on('sessions.updated', () => {
+      if (this.page === 'settings') void this.loadSessions();
+    });
     on('providers.installProgress', ({ providerId, ...state }) => {
       this.installStates = { ...this.installStates, [providerId]: state as ProviderInstallState };
     });
@@ -570,10 +581,15 @@ export class Store {
           this.booted = true;
           return;
         }
+        const url = endpoint.url;
         this.attach(
           new WsClient({
-            url: endpoint.url,
+            url,
             token: endpoint.token,
+            ...(endpoint.grant === undefined ? {} : { grant: endpoint.grant }),
+            // The session a grant became is this device's own credential: kept
+            // where the next load reads it, so the link is opened once, ever.
+            onSession: (session) => storeEndpoint({ url, token: session.token }),
             clientName: window.__TAURI_INTERNALS__ === undefined ? 'pwa' : 'shell',
             version: UI_VERSION
           })
@@ -605,10 +621,46 @@ export class Store {
     try {
       this.core = await client.connect();
       this.connection = client.state;
+      this.principal = client.principal;
       this.error = null;
       await this.reload();
     } catch (error) {
       this.connection = client.state;
+      this.#fail(error);
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Pairing: the owner mints one-time links, sees every paired device, revokes.
+  // -------------------------------------------------------------------------
+
+  async mintPairing(): Promise<void> {
+    const client = this.#client;
+    if (!client) return;
+    try {
+      this.pairing = await client.call('pairing.grant', {});
+    } catch (error) {
+      this.#fail(error);
+    }
+  }
+
+  async loadSessions(): Promise<void> {
+    const client = this.#client;
+    if (!client) return;
+    try {
+      this.sessions = await client.call('sessions.list', {});
+    } catch (error) {
+      this.#fail(error);
+    }
+  }
+
+  async revokeSession(sessionId: string): Promise<void> {
+    const client = this.#client;
+    if (!client) return;
+    try {
+      await client.call('sessions.revoke', { sessionId });
+      this.sessions = this.sessions.filter((session) => session.id !== sessionId);
+    } catch (error) {
       this.#fail(error);
     }
   }

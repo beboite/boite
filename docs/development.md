@@ -14,13 +14,16 @@ bun run core                # the built bundle when there is one, the sources ot
 The core prints one ready line on stdout and nothing else at start:
 
 ```
-boite-core ready http://127.0.0.1:53421 pairing http://127.0.0.1:53421/?token=...
+boite-core ready http://127.0.0.1:53421 pairing http://127.0.0.1:53421/?grant=...
 ```
 
 Both halves matter. The first is the RPC endpoint a client connects to, the
-second is the URL a phone opens once. The token is 32 random bytes generated on
-first start and kept in `<dataDir>/core.json` with the port and the pid, so a
-restart on the same data directory keeps the same pairing link.
+second is a one-time pairing link: its grant is exchanged for a session key on
+the first `hello` and refused after that, or after ten minutes. The core token
+itself is 32 random bytes generated on first start and kept in
+`<dataDir>/core.json` with the port and the pid; the shell reads it there, a
+test reads it there, and it never appears on the ready line
+([docs/phone.md](phone.md)).
 
 Flags: `--port` (0 asks the OS for a free one), `--host`, `--lan` (which is
 `--host 0.0.0.0`) and `--data-dir`. There is a fifth, `--channel`, which takes
@@ -56,8 +59,10 @@ in-memory fake.
   UI tests run on and the fastest way to look at a screen.
 - `?fake=1&long=1` adds a four-hundred-message thread, which is what the
   windowed message list is looked at on.
-- `?token=<token>` pairs the page against its own origin; `?core=<url>` points it
-  somewhere else. Both are stored and stripped from the address bar.
+- `?grant=<grant>` is a pairing link: the page exchanges it once for a session
+  key of its own and stores that. `?token=<token>` opens the page on a token
+  one already holds, and `?core=<url>` points it somewhere else. All three are
+  stripped from the address bar; the grant is never stored.
 
 The service worker never registers under `?fake=1`, so a rebuild is always what
 a reload shows.

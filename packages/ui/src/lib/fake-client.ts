@@ -12,7 +12,9 @@ import {
   type MessageId,
   type MessagePart,
   type ModelInfo,
+  type PairedSession,
   type PermissionRequest,
+  type Principal,
   type QuestionAnswer,
   type QuestionRequest,
   type ProcessRecord,
@@ -249,6 +251,10 @@ export class FakeClient implements ObservableClient {
   ] }));
   #scheduler: SchedulerState;
   #core: CoreInfo;
+  /** One phone already paired, so the devices list has a row to revoke. */
+  #sessions: PairedSession[] = [
+    { id: 'ses-phone', client: { name: 'pwa', version: '2.0.0-beta.1' }, createdAt: T0, lastSeenAt: T0 + 600_000, current: false }
+  ];
 
   /** The request itself is kept beside its resolver, which is what `permissions.list` answers with. */
   #pendingPermissions = new Map<
@@ -288,7 +294,6 @@ export class FakeClient implements ObservableClient {
       pid: 4242,
       startedAt: T0,
       endpoint: { host: '127.0.0.1', port: 8777 },
-      pairingUrl: 'http://192.168.1.20:8777/?core=http://192.168.1.20:8777&token=fake',
       dataDir: DATA_DIR,
       trace: {
         os: 'windows',
@@ -315,6 +320,11 @@ export class FakeClient implements ObservableClient {
 
   get core(): CoreInfo | null {
     return this.#state === 'ready' ? this.#core : null;
+  }
+
+  /** The fake is the desktop: the owner, who can pair a phone. */
+  get principal(): Principal | null {
+    return this.#state === 'ready' ? 'owner' : null;
   }
 
   onState(handler: (state: ClientState) => void): () => void {
@@ -392,7 +402,22 @@ export class FakeClient implements ObservableClient {
         return structuredClone(this.#pluginPools);
       }
       case 'hello':
-        return { core: this.#core };
+        return { core: this.#core, principal: 'owner' };
+      case 'pairing.grant': {
+        const grant = `fake-grant-${++this.#seq}`;
+        return { url: `http://192.168.1.20:8777/?grant=${grant}`, grant, expiresAt: this.#now() + 10 * 60 * 1000 };
+      }
+      case 'sessions.list':
+        return structuredClone(this.#sessions);
+      case 'sessions.revoke': {
+        const params = rawParams as RpcParams<'sessions.revoke'>;
+        if (!this.#sessions.some((session) => session.id === params.sessionId)) {
+          throw new RpcFailure({ code: RpcErrorCode.Refused, message: `unknown session ${params.sessionId}` });
+        }
+        this.#sessions = this.#sessions.filter((session) => session.id !== params.sessionId);
+        this.#emit('sessions.updated', { sessionId: params.sessionId, state: 'revoked' });
+        return { ok: true };
+      }
 
       case 'projects.list':
         return structuredClone(this.#projects);

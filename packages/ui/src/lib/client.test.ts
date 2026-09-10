@@ -10,7 +10,6 @@ const CORE: CoreInfo = {
   pid: 99,
   startedAt: 0,
   endpoint: { host: '127.0.0.1', port: 8777 },
-  pairingUrl: 'http://127.0.0.1:8777/',
   dataDir: 'C:\\boite2',
   trace: { os: 'windows', mode: 'events', note: 'exact' }
 };
@@ -113,10 +112,78 @@ describe('WsClient', () => {
       client: { name: 'shell', version: '2.0.0-beta.1' }
     });
 
-    live.receive({ jsonrpc: '2.0', id: hello.id, result: { core: CORE } });
+    live.receive({ jsonrpc: '2.0', id: hello.id, result: { core: CORE, principal: 'owner' } });
     await expect(connecting).resolves.toEqual(CORE);
     expect(client.state).toBe('ready');
     expect(client.core).toEqual(CORE);
+    expect(client.principal).toBe('owner');
+  });
+
+  test('a grant goes out on the first hello, and the session that comes back is the token from then on', async () => {
+    const sockets: FakeSocket[] = [];
+    const stored: { id: string; token: string }[] = [];
+    const client = new WsClient({
+      url: 'http://127.0.0.1:8777',
+      token: '',
+      grant: 'one-time',
+      onSession: (session) => stored.push(session),
+      socketFactory: () => {
+        const socket = new FakeSocket();
+        sockets.push(socket);
+        return socket;
+      },
+      backoff: () => 0
+    });
+    void client.connect().catch(() => undefined);
+    const first = take(sockets, 0);
+    first.open();
+    expect(first.frame(0).params).toMatchObject({ grant: 'one-time' });
+    expect(first.frame(0).params).not.toHaveProperty('token');
+    first.receive({
+      jsonrpc: '2.0',
+      id: first.frame(0).id,
+      result: { core: CORE, principal: 'session', session: { id: 'ses-1', token: 'minted' } }
+    });
+    await Promise.resolve();
+    expect(client.principal).toBe('session');
+    expect(stored).toEqual([{ id: 'ses-1', token: 'minted' }]);
+
+    // The reconnect says hello with the minted token, never with the grant again.
+    first.close();
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    const second = take(sockets, 1);
+    second.open();
+    expect(second.frame(0).params).toMatchObject({ token: 'minted' });
+    expect(second.frame(0).params).not.toHaveProperty('grant');
+    client.close();
+  });
+
+  test('a grant the core refuses closes the client for good', async () => {
+    const sockets: FakeSocket[] = [];
+    const client = new WsClient({
+      url: 'http://127.0.0.1:8777',
+      token: '',
+      grant: 'spent',
+      backoff: () => 0,
+      socketFactory: () => {
+        const socket = new FakeSocket();
+        sockets.push(socket);
+        return socket;
+      }
+    });
+    const connecting = client.connect();
+    const rejection = expect(connecting).rejects.toThrow('already used');
+    const socket = take(sockets, 0);
+    socket.open();
+    socket.receive({
+      jsonrpc: '2.0',
+      id: socket.frame(0).id,
+      error: { code: RpcErrorCode.Unauthorized, message: 'the pairing link was already used, expired, or never issued' }
+    });
+    await rejection;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(client.state).toBe('closed');
+    expect(sockets).toHaveLength(1);
   });
 
   test('a response resolves the matching call', async () => {
