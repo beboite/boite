@@ -178,6 +178,22 @@ describe('pi driver', () => {
     expect(argvLines()[0]).toContain(`sessionId=${thread.sessionId ?? ''}`);
   });
 
+  test('get_commands lists the agent commands once the process is up', async () => {
+    const client = await startCore();
+    const threadId = await piThread(client);
+
+    const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 20000);
+    await client.call('turns.start', { threadId, prompt: 'hello' });
+    expect((await finished).status).toBe('done');
+
+    const thread = await client.call('threads.get', { threadId });
+    expect(thread.commands).toEqual([
+      { name: 'fake-report', description: 'Write a status report', hint: null },
+      { name: 'skill:fake-search', description: 'Search fake docs', hint: null },
+    ]);
+    expect(fakeLog()).toContain('get_commands\n');
+  });
+
   test('an image attachment rides the prompt command as an images entry', async () => {
     const client = await startCore();
     const threadId = await piThread(client);

@@ -1,5 +1,6 @@
 import { Readable, Writable } from 'node:stream';
 import type {
+  AvailableCommand,
   ClientConnection,
   ClientContext,
   ContentBlock,
@@ -19,6 +20,7 @@ import type {
 } from '@agentclientprotocol/sdk';
 import type {
   AccountId,
+  AgentCommand,
   ImageAttachment,
   MessageId,
   MessagePart,
@@ -232,6 +234,15 @@ function documentsOf(content: ToolCallContent[]): ToolDocument[] {
   return documents;
 }
 
+/** `AvailableCommand` as the contract's `AgentCommand`: no `input` means no hint. */
+function commandsOf(list: AvailableCommand[]): AgentCommand[] {
+  return list.map((command) => ({
+    name: command.name,
+    description: command.description || null,
+    hint: command.input?.hint ?? null,
+  }));
+}
+
 /**
  * One `session/prompt` and what it wrote. The parts are drawn the way every
  * other driver draws them: one text part the chunks append to, one part per
@@ -425,6 +436,13 @@ class AcpSession {
   private connection: ClientConnection | null = null;
   private agent: ClientContext | null = null;
   private starting: Promise<void> | null = null;
+  /**
+   * The thread's latest `TurnContext`, kept across turns. `available_commands_update`
+   * typically arrives right after `session/new` or `session/load`, before any
+   * turn is in flight, so the update handler reports through this rather than
+   * through `current`, or the list would be dropped between turns.
+   */
+  private ctx: TurnContext | null = null;
 
   private sessionId: string | null = null;
   private canLoad = false;
@@ -519,6 +537,7 @@ class AcpSession {
   // -- the process ----------------------------------------------------------
 
   private async runTurn(turn: AcpTurn): Promise<void> {
+    this.ctx = turn.ctx;
     try {
       await this.start(turn.ctx);
     } catch (error) {
@@ -917,9 +936,15 @@ class AcpSession {
   // -- what the agent sends -------------------------------------------------
 
   private onUpdate(params: SessionNotification): void {
+    const update = params.update;
+    // Not gated on `current`: this one arrives between turns as often as
+    // during one, right after `session/new` or `session/load`.
+    if (update.sessionUpdate === 'available_commands_update') {
+      this.ctx?.commands(commandsOf(update.availableCommands));
+      return;
+    }
     const turn = this.current;
     if (turn === null) return;
-    const update = params.update;
     switch (update.sessionUpdate) {
       case 'agent_message_chunk':
         if (update.content.type === 'text') turn.writeText(update.content.text);
@@ -959,9 +984,8 @@ class AcpSession {
         break;
       default:
         // user_message_chunk, plan, plan_update, plan_removed,
-        // available_commands_update, config_option_update, session_info_update
-        // and the compaction updates have no MessagePart in the contract, so
-        // they are dropped.
+        // config_option_update, session_info_update and the compaction
+        // updates have no MessagePart in the contract, so they are dropped.
         break;
     }
   }

@@ -22,6 +22,7 @@ import { appendFileSync } from 'node:fs';
 import { Readable, Writable } from 'node:stream';
 import { agent, ndJsonStream, PROTOCOL_VERSION, RequestError } from '@agentclientprotocol/sdk';
 import type {
+  AvailableCommand,
   ContentBlock,
   SessionConfigOption,
   SessionMode,
@@ -63,6 +64,12 @@ const TINY_PNG =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
 /** Over the core's 2 MB base64 cap, so `[big-image]` has to come back as a line of text. */
 const HUGE_IMAGE = 'A'.repeat(2 * 1024 * 1024 + 512 * 1024);
+
+/** What `session/new` reports right away, before any prompt: the between-turns path. */
+const FAKE_COMMANDS: AvailableCommand[] = [
+  { name: 'fake-report', description: 'Write a status report', input: { hint: '<summary>' } },
+  { name: 'fake-ping', description: 'Answer pong' },
+];
 
 const configOptions: SessionConfigOption[] = [
   {
@@ -167,9 +174,14 @@ const app = agent({ name: 'acp-fake' })
       agentInfo: { name: 'acp-fake', version: '1' },
     };
   })
-  .onRequest('session/new', () => {
+  .onRequest('session/new', async ({ client }) => {
     const sessionId = `acp-fake-${Math.random().toString(16).slice(2, 10)}`;
     known.add(sessionId);
+    // Before any prompt: the between-turns path a driver must not drop.
+    await client.notify('session/update', {
+      sessionId,
+      update: { sessionUpdate: 'available_commands_update', availableCommands: FAKE_COMMANDS },
+    });
     return { sessionId, configOptions, modes: modeState() };
   })
   .onRequest('session/load', ({ params }) => {

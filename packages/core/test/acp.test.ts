@@ -165,6 +165,30 @@ describe('acp driver', () => {
     expect(thread.messages[1]?.parts).toEqual([{ type: 'text', text: prompt }]);
   });
 
+  test('available_commands_update lists the agent commands, sent right after session/new', async () => {
+    const client = await startCore();
+    const threadId = await acpThread(client);
+
+    const listed: RpcEvents['thread.commands'][] = [];
+    client.on('thread.commands', (event) => {
+      if (event.threadId === threadId) listed.push(event);
+    });
+
+    const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 20000);
+    await client.call('turns.start', { threadId, prompt: 'hello' });
+    expect((await finished).status).toBe('done');
+
+    const thread = await client.call('threads.get', { threadId });
+    expect(thread.commands).toEqual([
+      { name: 'fake-report', description: 'Write a status report', hint: '<summary>' },
+      { name: 'fake-ping', description: 'Answer pong', hint: null },
+    ]);
+    // The fixture sends it from inside its `session/new` handler, before the
+    // agent has answered that request, let alone taken a prompt: the session
+    // has no turn running yet when the driver hears it.
+    expect(listed.length).toBeGreaterThan(0);
+  });
+
   test('a line that is not json on stdout is logged, and the turn goes through anyway', async () => {
     const client = await startCore();
     const logs = collectLogs(client);

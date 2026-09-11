@@ -1,7 +1,14 @@
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import type { Options, PermissionResult, Query, SDKMessage, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
+import type {
+  Options,
+  PermissionResult,
+  Query,
+  SDKMessage,
+  SDKUserMessage,
+  SlashCommand,
+} from '@anthropic-ai/claude-agent-sdk';
 import type { MessagePart, RpcEvents } from '@boite/contracts';
 import type { CoreClient } from '../src/client.ts';
 import { createClaudeDriver } from '../src/drivers/claude.ts';
@@ -60,6 +67,12 @@ class FakeQuery {
   readonly setters: string[] = [];
   /** The name of the one setter this CLI refuses, the way an older one would. */
   refuse: string | null = null;
+  /** What `supportedCommands()` answers, scripted before the query is used. */
+  commandsAnswer: SlashCommand[] = [];
+
+  supportedCommands(): Promise<SlashCommand[]> {
+    return Promise.resolve(this.commandsAnswer);
+  }
 
   emit(message: SDKMessage): void {
     this.queue.push(message);
@@ -883,6 +896,50 @@ describe('claude driver', () => {
     expect(sent).toEqual([
       { type: 'text', text: 'what is this' },
       { type: 'image', source: { type: 'base64', media_type: 'image/png', data: PNG } },
+    ]);
+  });
+
+  test('supportedCommands lists the slash commands, and commands_changed moves the list', async () => {
+    const client = await harness.connect();
+    const threadId = await claudeThread(client);
+    await client.call('settings.set', { warmProcessMinutes: 5 });
+
+    scripted(
+      (fake) => {
+        fake.commandsAnswer = [
+          { name: 'shout', description: 'The prompt back in capitals', argumentHint: '<text>' },
+          { name: 'whisper', description: 'The prompt back as it came', argumentHint: '' },
+        ];
+      },
+      (fake, _prompt, index) => {
+        fake.emit(init('sess-commands'));
+        if (index === 1) {
+          fake.emit(
+            sdk({
+              type: 'system',
+              subtype: 'commands_changed',
+              session_id: 'sess-commands',
+              uuid: 'uuid-commands',
+              commands: [{ name: 'yell', description: 'louder still', argumentHint: '' }],
+            }),
+          );
+        }
+        fake.emit(assistant('sess-commands', [{ type: 'text', text: `answer ${index}` }]));
+        fake.emit(success('sess-commands'));
+      },
+    );
+
+    expect(await runTurn(client, threadId, 'first')).toBe('done');
+    expect((await client.call('threads.get', { threadId })).commands).toEqual([
+      { name: 'shout', description: 'The prompt back in capitals', hint: '<text>' },
+      { name: 'whisper', description: 'The prompt back as it came', hint: null },
+    ]);
+
+    // One query the whole time: the second list arrives mid-session, on the CLI's own say-so.
+    expect(await runTurn(client, threadId, 'second')).toBe('done');
+    expect(queries).toHaveLength(1);
+    expect((await client.call('threads.get', { threadId })).commands).toEqual([
+      { name: 'yell', description: 'louder still', hint: null },
     ]);
   });
 });

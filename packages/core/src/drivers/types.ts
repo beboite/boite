@@ -1,6 +1,7 @@
 import type {
   Account,
   AccountId,
+  AgentCommand,
   ImageAttachment,
   Message,
   MessageId,
@@ -78,6 +79,12 @@ export interface TurnContext {
   warmProcessMinutes: number;
   emit: EmitSink;
   log(level: 'info' | 'warn' | 'error', message: string): void;
+  /**
+   * The `/name` commands the agent takes, whole, whenever the driver learns or
+   * relearns them: the core keeps the list per thread and tells the clients
+   * when it changed. Names are deduplicated, the first wins.
+   */
+  commands(list: AgentCommand[]): void;
   requestPermission(toolName: string, input: unknown, description: string | null): PermissionTicket;
   /** The inline question card. One call per question, and they are asked in order. */
   askQuestion(ask: QuestionAsk): QuestionTicket;

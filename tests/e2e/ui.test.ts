@@ -20,6 +20,7 @@ const QUESTION_SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui-question.png
 const OFFLINE_SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui-offline-shell.png');
 const ATTACHMENT_SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui-attachment.png');
 const ATTACHMENT_SENT_SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui-attachment-sent.png');
+const SLASH_SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui-slash-menu.png');
 /** The one name `public/sw.js` opens; every other cache is deleted on activate. */
 const UI_CACHE = 'boite-ui-v1';
 /** What the echo provider's `[tool-stream]` directive types, one piece at a time. */
@@ -288,6 +289,40 @@ test(
     expect(images).toEqual(['data:image/png;base64,']);
     await page.screenshot(ATTACHMENT_SENT_SCREENSHOT);
     expect(existsSync(ATTACHMENT_SENT_SCREENSHOT)).toBe(true);
+  },
+  TIMEOUT,
+);
+
+test(
+  'a slash at the start of the composer lists the agent commands, and the picked one reaches the agent',
+  async () => {
+    // The echo listed its commands on the first turn of this thread, so the
+    // menu has an agent group to show before Boite's own commands.
+    await page.type(testid('composer-input'), '/');
+    await page.waitFor(`document.querySelector('${testid('slash-menu')}')`, 10_000);
+    const names = await page.evaluate<string[]>(
+      `Array.from(document.querySelectorAll('${testid('slash-row')}')).map((row) => row.dataset.name)`,
+    );
+    expect(names.slice(0, 2)).toEqual(['shout', 'whisper']);
+    expect(names.length).toBeGreaterThan(2);
+    await page.screenshot(SLASH_SCREENSHOT);
+
+    await page.type(testid('composer-input'), '/sh');
+    await page.waitFor(`document.querySelectorAll('${testid('slash-row')}').length === 1`, 10_000);
+    await page.evaluate<null>(
+      `(() => {
+        const box = document.querySelector('${testid('composer-input')}');
+        box.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+        return null;
+      })()`,
+    );
+    await page.waitFor(`!document.querySelector('${testid('slash-menu')}')`, 10_000);
+    expect(await page.evaluate<string>(`document.querySelector('${testid('composer-input')}').value`)).toBe('/shout ');
+
+    await page.type(testid('composer-input'), '/shout the square again');
+    await clickWhenEnabled(testid('composer-send'));
+    await page.waitFor(`${ASSISTANT_TEXT}.includes('THE SQUARE AGAIN')`, 30_000);
+    await page.waitFor(`document.querySelector('${testid('thread-status')}').dataset.status === 'idle'`, 30_000);
   },
   TIMEOUT,
 );

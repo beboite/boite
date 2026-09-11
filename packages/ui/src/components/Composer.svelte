@@ -1,14 +1,17 @@
 <script lang="ts">
   import { ArrowUp, Paperclip, ShieldCheck, Square, X } from '@lucide/svelte';
-  import { untrack } from 'svelte';
+  import { tick, untrack } from 'svelte';
   import type { ImageAttachment, PermissionMode } from '@boite/contracts';
   import { acceptAttachments, readImageFile } from '../lib/attachments';
+  import { AGENT_PREFIX, appCommands, isAgentCommand, runCommand } from '../lib/commands.svelte';
+  import { rankItems, type PaletteItem } from '../lib/palette';
   import { clearStash, DRAFT_STASH_KEY, readStash, writeStash } from '../lib/prefs';
   import { fill, strings } from '../lib/strings';
   import type { Choice, PickPatch, Store } from '../lib/store.svelte';
   import EffortSlider from './EffortSlider.svelte';
   import Menu from './Menu.svelte';
   import ModelPicker from './ModelPicker.svelte';
+  import SlashMenu from './SlashMenu.svelte';
 
   /**
    * `centered` is the draft's placement: the parent stacks the composer under
@@ -30,6 +33,20 @@
   let picker = $state<HTMLInputElement | undefined>(undefined);
   /** Where ArrowUp stands in this thread's sent prompts, or null outside recall. */
   let recall = $state<number | null>(null);
+  /** The box has the keyboard: one of the two things that open the slash menu. */
+  let focused = $state(false);
+  /** Escape shuts the menu on text it keeps, until that text changes again. */
+  let slashDismissed = $state(false);
+  /** The row the keyboard is on in the slash menu. */
+  let slashAt = $state(0);
+
+  const inShell = window.__TAURI_INTERNALS__ !== undefined;
+  /** The three commands the composer runs itself: each one opens a chip's menu. */
+  const CHIP_COMMANDS: Record<string, { testid: string; description: string }> = {
+    model: { testid: 'composer-picker', description: strings.slash.model },
+    effort: { testid: 'composer-effort', description: strings.slash.effort },
+    mode: { testid: 'composer-mode', description: strings.slash.mode }
+  };
 
   /** The chips follow the open thread, or the remembered choice on a draft. */
   $effect(() => {
@@ -102,6 +119,66 @@
       : strings.composer.placeholderNoProject
   );
 
+  // -- the slash menu -----------------------------------------------------------
+  // `/` on an empty box, then the word being typed: nothing else opens it, and a
+  // space or a second line closes it, since the input of a command is not a query.
+
+  /** What was typed after the slash, or null while the box is not a bare `/word`. */
+  let slashQuery = $derived.by((): string | null => {
+    const match = /^\/(\S*)$/.exec(text);
+    return match ? (match[1] ?? '') : null;
+  });
+
+  let slashOpen = $derived(slashQuery !== null && focused && !slashDismissed);
+
+  /** Typing anything takes the box out of the dismissal Escape put it in. */
+  $effect(() => {
+    void text;
+    slashDismissed = false;
+  });
+
+  /** The agent's own, in the order it reported them. Never on a draft: there is no agent yet. */
+  let agentItems = $derived.by((): PaletteItem[] =>
+    (store.openThread?.commands ?? []).map((command) => ({
+      id: `${AGENT_PREFIX}${command.name}`,
+      kind: 'command' as const,
+      label: `/${command.name}`,
+      hint: command.hint ?? undefined,
+      description: command.description ?? undefined
+    }))
+  );
+
+  /**
+   * Boite's own under them: the palette's list plus the three the composer runs
+   * itself. A row reads as the `/name` it is typed as, the sentence under it.
+   */
+  let boiteItems = $derived.by((): PaletteItem[] => [
+    ...Object.entries(CHIP_COMMANDS).map(([name, chip]) => ({
+      id: name,
+      kind: 'command' as const,
+      label: `/${name}`,
+      description: chip.description
+    })),
+    // A command is looked up by the `/name` it is typed as, so the palette's
+    // sentence becomes the line under it and never part of what is ranked: it
+    // is a whole sentence, and one of its words would outrank every real name.
+    ...appCommands(store, inShell).map((item) => ({
+      id: item.id,
+      kind: 'command' as const,
+      label: `/${item.id}`,
+      description: item.label,
+      keywords: item.keywords
+    }))
+  ]);
+
+  /** Agent commands first, so a tie goes to the agent's own. */
+  let slashItems = $derived(rankItems(slashQuery ?? '', [...agentItems, ...boiteItems]));
+
+  $effect(() => {
+    void slashItems;
+    slashAt = 0;
+  });
+
   let modeItems = $derived(
     MODES.map((mode) => ({
       id: mode,
@@ -164,6 +241,8 @@
   /** Typing is the user's own, so it takes the composer out of recall. */
   function oninput() {
     recall = null;
+    // Typing is proof the box has the keyboard, whatever the focus event did.
+    focused = true;
     grow();
   }
 
@@ -363,6 +442,53 @@
     put(stashed);
   }
 
+  /**
+   * An agent command is completed into the box for the user to finish, since
+   * only they know its input; one of Boite's runs on the spot and the `/word`
+   * goes. Either way the text stops matching `/word`, so the menu closes itself.
+   */
+  function pickSlash(item: PaletteItem) {
+    if (isAgentCommand(item)) {
+      put(`/${item.id.slice(AGENT_PREFIX.length)} `);
+      box?.focus();
+      return;
+    }
+    put('');
+    const chip = CHIP_COMMANDS[item.id];
+    if (chip) {
+      void openChip(chip.testid);
+      return;
+    }
+    runCommand(store, item.id, inShell);
+  }
+
+  /** The chip's own trigger opens its menu: one popover, owned by one component. */
+  async function openChip(testid: string) {
+    await tick();
+    const bar = box?.closest('[data-testid="composer"]');
+    bar?.querySelector<HTMLElement>(`[data-testid="${testid}"]`)?.click();
+  }
+
+  /** The slash menu's keys, while it is open. True when the key was ours. */
+  function slashKey(event: KeyboardEvent): boolean {
+    if (!slashOpen) return false;
+    if (event.key === 'Escape') {
+      slashDismissed = true;
+      return true;
+    }
+    if (event.key === 'Enter' || event.key === 'Tab') {
+      const item = slashItems[slashAt];
+      if (!item) return false;
+      pickSlash(item);
+      return true;
+    }
+    if (slashItems.length === 0) return false;
+    if (event.key === 'ArrowDown') slashAt = (slashAt + 1) % slashItems.length;
+    else if (event.key === 'ArrowUp') slashAt = (slashAt - 1 + slashItems.length) % slashItems.length;
+    else return false;
+    return true;
+  }
+
   function onkeydown(event: KeyboardEvent) {
     if (event.isComposing) return;
     const meta = event.ctrlKey || event.metaKey;
@@ -377,6 +503,12 @@
       return;
     }
     if (meta || event.altKey) return;
+    // The menu takes the arrows, Enter, Tab and Escape while it is open; every
+    // other key, the recall and the send included, is untouched.
+    if (!event.shiftKey && slashKey(event)) {
+      event.preventDefault();
+      return;
+    }
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
       void submit();
@@ -425,12 +557,22 @@
       {oninput}
       {onkeydown}
       {onpaste}
+      onfocus={() => (focused = true)}
+      onblur={() => (focused = false)}
       rows="1"
       {placeholder}
       aria-label={placeholder}
       data-testid="composer-input"
       spellcheck="true"
     ></textarea>
+
+    <SlashMenu
+      open={slashOpen}
+      items={slashItems}
+      selected={slashAt}
+      onpick={pickSlash}
+      onhover={(index) => (slashAt = index)}
+    />
 
     <div class="bar">
       <div class="chips">
@@ -507,6 +649,7 @@
   /* The one raised object in the column: it floats over the timeline instead of
      repeating the sidebar's slab. e1 rides on e2 for the inset top highlight. */
   .composer {
+    position: relative;
     display: flex;
     flex-direction: column;
     width: 100%;

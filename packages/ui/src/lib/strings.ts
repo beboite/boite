@@ -107,6 +107,17 @@ export const strings = {
     themeSystem: 'Theme: system'
   },
 
+  /** The composer's slash menu: the agent's own commands over Boite's. */
+  slash: {
+    label: 'Commands',
+    agent: 'Agent',
+    app: 'Boite',
+    empty: 'No command matches',
+    model: 'Change the model',
+    effort: 'Change the reasoning effort',
+    mode: 'Change the permission mode'
+  },
+
   notify: {
     done: 'Done',
     failed: 'Failed',

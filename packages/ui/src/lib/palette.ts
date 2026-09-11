@@ -14,6 +14,8 @@ export interface PaletteItem {
   hint?: string;
   /** Extra words a query may hit, never shown. */
   keywords?: string;
+  /** The second line a list may draw under the label. The palette draws none; the slash menu does. */
+  description?: string;
 }
 
 /** Threads shown before any typing: the most recent ones, whatever the project. */

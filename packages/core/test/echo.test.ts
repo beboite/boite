@@ -538,4 +538,36 @@ describe('echo driver', () => {
     expect((await client.call('threads.pin', { threadId, pinned: false })).pinned).toBe(false);
     expect((await client.call('threads.list', {})).find((t) => t.id === threadId)?.pinned).toBe(false);
   });
+
+  test('the agent lists its slash commands once, a /command reaches it, and archiving forgets them', async () => {
+    const client = await harness.connect();
+    const { threadId } = await echoThread(harness, client);
+    expect((await client.call('threads.get', { threadId })).commands).toEqual([]);
+
+    const listed: RpcEvents['thread.commands'][] = [];
+    client.on('thread.commands', (event) => {
+      if (event.threadId === threadId) listed.push(event);
+    });
+
+    let finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 10000);
+    await client.call('turns.start', { threadId, prompt: '/shout the echo hears this' });
+    expect((await finished).status).toBe('done');
+
+    const shouted = await client.call('threads.get', { threadId });
+    expect(shouted.messages[1]?.parts).toEqual([{ type: 'text', text: 'THE ECHO HEARS THIS' }]);
+    expect(shouted.commands).toEqual([
+      { name: 'shout', description: 'The prompt back in capitals', hint: '<text>' },
+      { name: 'whisper', description: 'The prompt back as it came', hint: null },
+    ]);
+
+    // The same list on the second turn is no event: the clients only hear a change.
+    finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 10000);
+    await client.call('turns.start', { threadId, prompt: 'plain' });
+    expect((await finished).status).toBe('done');
+    expect(listed).toHaveLength(1);
+    expect(listed[0]?.commands.map((command) => command.name)).toEqual(['shout', 'whisper']);
+
+    await client.call('threads.archive', { threadId });
+    expect((await client.call('threads.get', { threadId })).commands).toEqual([]);
+  });
 });

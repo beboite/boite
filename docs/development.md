@@ -77,7 +77,9 @@ it themselves; a core you start by hand without it lists the real providers
 alone, and anything expecting an echo account fails on "no echo account". It
 takes images: each one comes back as `[image <mime>, <bytes> bytes, <name>]`
 in front of the echoed prompt, which is how a test proves an attachment reached
-the agent.
+the agent. It lists two slash commands on every turn, `/shout <text>` (the text
+back in capitals) and `/whisper`, so the composer's slash menu has an agent
+group to show and a test can prove the picked command reached the agent.
 
 ```bash
 BOITE_ECHO=1 bun run dev:core

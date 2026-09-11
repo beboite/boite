@@ -1,4 +1,4 @@
-import type { MessageId, ToolDocument, Usage } from '@boite/contracts';
+import type { AgentCommand, MessageId, ToolDocument, Usage } from '@boite/contracts';
 import { newId } from '../ids.ts';
 import type { Driver, TurnContext, TurnHandle, TurnResult } from './types.ts';
 
@@ -40,6 +40,14 @@ const DOC_TEXT = [
 const IMAGE_MIME = 'image/png';
 const IMAGE_BASE64 =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+
+/** The one command the fake acts on: `/shout <text>` comes back in capitals. */
+const SHOUT = 'shout';
+/** What the fake lists as its `/name` commands, the way a real agent would on its first turn. */
+const ECHO_COMMANDS: AgentCommand[] = [
+  { name: SHOUT, description: 'The prompt back in capitals', hint: '<text>' },
+  { name: 'whisper', description: 'The prompt back as it came', hint: null },
+];
 
 type Segment =
   | { kind: 'text'; text: string }
@@ -233,6 +241,11 @@ async function run(ctx: TurnContext, state: RunState): Promise<TurnResult> {
     });
   };
 
+  // What a real agent lists on its first message: the fake takes two commands.
+  ctx.commands(ECHO_COMMANDS);
+  const shouted = ctx.prompt.startsWith(`/${SHOUT} `) ? ctx.prompt.slice(SHOUT.length + 2) : null;
+  const prompt = shouted === null ? ctx.prompt : shouted.toUpperCase();
+
   // An image is named back the way an agent that read it would: format and weight.
   for (const attachment of ctx.attachments) {
     if (state.stopped) break;
@@ -240,7 +253,7 @@ async function run(ctx: TurnContext, state: RunState): Promise<TurnResult> {
     await writeText(`[image ${attachment.mimeType}, ${bytes} bytes${attachment.name === null ? '' : `, ${attachment.name}`}] `);
   }
 
-  for (const segment of parsePrompt(ctx.prompt)) {
+  for (const segment of parsePrompt(prompt)) {
     if (state.stopped) break;
     switch (segment.kind) {
       case 'text':

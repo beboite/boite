@@ -348,6 +348,21 @@ function handle(message: Record<string, unknown>): void {
       });
       return;
     }
+    case 'get_commands': {
+      send({
+        id,
+        type: 'response',
+        command: 'get_commands',
+        success: true,
+        data: {
+          commands: [
+            { name: 'fake-report', description: 'Write a status report', source: 'extension' },
+            { name: 'skill:fake-search', description: 'Search fake docs', source: 'skill', location: 'user' },
+          ],
+        },
+      });
+      return;
+    }
     case 'abort': {
       const waiter = waitingAbort;
       waitingAbort = null;

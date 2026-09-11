@@ -2,6 +2,7 @@ import { ATTACHMENTS_PER_TURN, ATTACHMENT_MAX_BYTES, IMAGE_MIME_TYPES, MESSAGE_P
 import type {
   Account,
   AccountId,
+  AgentCommand,
   ImageAttachment,
   Message,
   MessageId,
@@ -104,6 +105,12 @@ export class ThreadStore {
   private readonly handles = new Map<ThreadId, TurnHandle>();
   private readonly permissions = new Map<RequestId, PendingPermission>();
   private readonly questions = new Map<RequestId, PendingQuestion>();
+  /**
+   * What each thread's agent last said it takes as `/name`. Memory only: the
+   * list belongs to the agent process, so a fresh core learns it again on the
+   * next turn, and nothing here is worth a journal row.
+   */
+  private readonly commands = new Map<ThreadId, AgentCommand[]>();
 
   constructor(private readonly core: Core) {}
 
@@ -133,6 +140,7 @@ export class ThreadStore {
     return {
       ...thread,
       messages: page.messages,
+      commands: this.commands.get(threadId) ?? [],
       messagesBefore: page.before,
       // The turns of that page and the ones still in flight, never the whole history.
       turns: this.core.journal.listTurnsFor(
@@ -240,10 +248,12 @@ export class ThreadStore {
 
   archive(threadId: ThreadId, archived: boolean): ThreadSummary {
     this.require(threadId);
-    // An archived thread is not coming back this minute: its warm process goes now.
+    // An archived thread is not coming back this minute: its warm process goes
+    // now, and the commands that process listed go with it.
     if (archived) {
       this.core.scheduler.stop(threadId);
       releaseThread(threadId);
+      this.commands.delete(threadId);
     }
     const thread = this.require(threadId);
     return this.save({ ...thread, archived }, 'thread.archived');
@@ -651,6 +661,7 @@ export class ThreadStore {
       log: (level, message) => {
         this.core.log(level, message);
       },
+      commands: (list: AgentCommand[]) => this.noteCommands(threadId, list),
       requestPermission: (toolName: string, input: unknown, description: string | null): PermissionTicket =>
         this.requestPermission(thread, turn, toolName, input, description),
       askQuestion: (ask: QuestionAsk): QuestionTicket => this.askQuestion(thread, turn, ask),
@@ -778,6 +789,30 @@ export class ThreadStore {
       };
     }
     return { prompt: '', attachments: [] };
+  }
+
+  /**
+   * The agent's command list, whole, as a driver reports it. A name listed
+   * twice keeps its first entry, an empty or non-string name is dropped, and
+   * the same list twice is no event: the clients only hear a change.
+   */
+  private noteCommands(threadId: ThreadId, list: AgentCommand[]): void {
+    const seen = new Set<string>();
+    const commands: AgentCommand[] = [];
+    for (const entry of list) {
+      const name = typeof entry.name === 'string' ? entry.name.trim().replace(/^\//, '') : '';
+      if (name.length === 0 || seen.has(name)) continue;
+      seen.add(name);
+      commands.push({
+        name,
+        description: typeof entry.description === 'string' && entry.description.length > 0 ? entry.description : null,
+        hint: typeof entry.hint === 'string' && entry.hint.length > 0 ? entry.hint : null,
+      });
+    }
+    const before = this.commands.get(threadId);
+    if (before !== undefined && JSON.stringify(before) === JSON.stringify(commands)) return;
+    this.commands.set(threadId, commands);
+    this.core.bus.emit('thread.commands', { threadId, commands });
   }
 
   private setStatus(threadId: ThreadId, status: ThreadStatus): void {

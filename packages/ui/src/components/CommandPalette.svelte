@@ -3,10 +3,10 @@
   import { Search } from '@lucide/svelte';
   import type { ThreadSummary } from '@boite/contracts';
   import { Closing } from '../lib/closing.svelte';
+  import { appCommands, runCommand } from '../lib/commands.svelte';
   import { PALETTE_LIMIT, RECENT_THREADS, rankItems, type PaletteItem } from '../lib/palette';
   import { strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
-  import { setTheme } from '../lib/theme';
   import StatusMark from './StatusMark.svelte';
 
   let { store }: { store: Store } = $props();
@@ -48,28 +48,7 @@
       }))
   );
 
-  let commandItems = $derived.by((): PaletteItem[] => {
-    const open = store.openThread;
-    const items: PaletteItem[] = [];
-    if (store.projects.length > 0) items.push({ id: 'new-thread', kind: 'command', label: strings.palette.newThread, hint: 'Ctrl+N', keywords: 'draft start' });
-    items.push({ id: 'add-project', kind: 'command', label: strings.palette.addProject, keywords: 'folder open' });
-    if (open) {
-      items.push({ id: 'pin', kind: 'command', label: open.pinned ? strings.palette.unpin : strings.palette.pin, keywords: 'favourite top' });
-      items.push({ id: 'rename', kind: 'command', label: strings.palette.rename, keywords: 'title' });
-      items.push({ id: 'panel', kind: 'command', label: strings.palette.panel, hint: 'Ctrl+Alt+B', keywords: 'browser surface' });
-      items.push({ id: 'trace', kind: 'command', label: strings.palette.trace, keywords: 'processes load' });
-    }
-    items.push({ id: 'sidebar', kind: 'command', label: strings.palette.sidebar, hint: 'Ctrl+B' });
-    items.push({ id: 'settings', kind: 'command', label: strings.palette.settings, hint: 'Ctrl+,', keywords: 'preferences' });
-    items.push({ id: 'appearance', kind: 'command', label: strings.palette.appearance, keywords: 'theme material' });
-    items.push({ id: 'providers', kind: 'command', label: strings.palette.providers, keywords: 'accounts login install' });
-    items.push({ id: 'pair', kind: 'command', label: strings.palette.pair, keywords: 'phone link devices' });
-    items.push({ id: 'theme-dark', kind: 'command', label: strings.palette.themeDark });
-    items.push({ id: 'theme-light', kind: 'command', label: strings.palette.themeLight });
-    items.push({ id: 'theme-system', kind: 'command', label: strings.palette.themeSystem });
-    if (open) items.push({ id: 'archive', kind: 'command', label: strings.palette.archive, keywords: 'close remove' });
-    return items;
-  });
+  let commandItems = $derived.by((): PaletteItem[] => appCommands(store, inShell));
 
   /** Threads first, commands after: a query ranks across both, nothing typed shows the recents. */
   let rows = $derived.by((): PaletteItem[] => {
@@ -100,28 +79,7 @@
       void store.open(item.id.slice('thread:'.length));
       return;
     }
-    const open = store.openThread;
-    switch (item.id) {
-      case 'new-thread': store.showChat(); store.startDraft(); break;
-      case 'add-project':
-        if (inShell) void store.pickProject();
-        else store.showSettings('general');
-        break;
-      case 'pin': if (open) void store.pin(open.id, !open.pinned); break;
-      case 'rename': store.showChat(); store.renameRequested = true; break;
-      case 'panel': store.showChat(); store.panel.toggle(); break;
-      case 'trace': store.showChat(); if (!store.panelOpen || store.panel.activeSurfaceId !== 'trace') store.togglePanel(); break;
-      case 'sidebar': store.toggleSidebar(); break;
-      case 'settings': store.showSettings(); break;
-      case 'appearance': store.showSettings('appearance'); break;
-      case 'providers': store.showSettings('accounts'); break;
-      case 'pair': store.showSettings('general'); break;
-      case 'theme-dark': setTheme('dark'); break;
-      case 'theme-light': setTheme('light'); break;
-      case 'theme-system': setTheme('system'); break;
-      case 'archive': if (open) void store.archive(open.id); break;
-      default: break;
-    }
+    runCommand(store, item.id, inShell);
   }
 
   function onkeydown(event: KeyboardEvent) {

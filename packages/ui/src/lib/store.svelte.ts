@@ -438,6 +438,12 @@ export class Store {
       const open = this.openThread;
       if (open && open.id === summary.id) Object.assign(open, summary);
     });
+    // The agent's `/name` list is the whole list each time, and it lives on the
+    // open thread only: a summary in the sidebar carries none.
+    on('thread.commands', ({ threadId, commands }) => {
+      const open = this.openThread;
+      if (open && open.id === threadId) open.commands = commands;
+    });
     on('thread.removed', ({ threadId }) => {
       this.threads = this.threads.filter((t) => t.id !== threadId);
       this.#dropRequestsOf(threadId);

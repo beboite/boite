@@ -79,6 +79,20 @@ OpenCode's descriptor, with the `linux` and `macos` profiles left out:
   to `turn/start`'s `input`; pi adds an `images` array of
   `{ type: 'image', data, mimeType }` entries to the `prompt` command.
 
+A thread's `/commands` come from wherever the protocol says an agent lists its
+own, never from the descriptor: `commands(list)` on `TurnContext` carries the
+whole list each time a driver learns or relearns it, and the core dedups and
+tells the clients only on a change. Claude reads `Query.supportedCommands()`
+once the CLI is up and takes a `{ type: 'system', subtype: 'commands_changed' }`
+message on top of it for a mid-session change. ACP takes a `session/update`
+whose `sessionUpdate` is `available_commands_update`, which an agent may send
+right after `session/new` or `session/load`, before any turn; the driver keeps
+the thread's latest `TurnContext` outside the running turn for exactly that
+window, since the update carries no turn of its own to report through. pi asks
+once per process, right after it comes up, with the `get_commands` RPC
+command. Codex has no such listing in the app-server protocol the driver
+speaks, so `codex.ts` reports none.
+
 ## Inside an OS profile
 
 - `detect` is `{ command }` or `{ file }`. A provider whose detect does not

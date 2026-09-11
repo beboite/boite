@@ -439,9 +439,29 @@ export const MESSAGE_PAGE = 120;
 /** The most `messages.list` will ever hand back in one call, whatever `limit` says. */
 export const MESSAGE_PAGE_MAX = 200;
 
+/**
+ * A command the agent of a thread takes at the start of a prompt, sent as the
+ * text `/name` followed by its input. Claude lists its skills here, an ACP agent
+ * its `available_commands_update`, pi its `get_commands`. Boite's own commands
+ * are the client's and never in this list.
+ */
+export interface AgentCommand {
+  /** Without the leading slash. */
+  name: string;
+  description: string | null;
+  /** What goes after the name, as the agent words it (`<file>`), or null. */
+  hint: string | null;
+}
+
 export interface Thread extends ThreadSummary {
   /** The last `MESSAGE_PAGE` messages of the thread, oldest first. Older ones come from `messages.list`. */
   messages: Message[];
+  /**
+   * What the agent of this thread last said it takes as `/name`. Empty until a
+   * session of this core reported them: the list is the agent's, kept in
+   * memory, and `thread.commands` follows every change.
+   */
+  commands: AgentCommand[];
   /**
    * The oldest message `messages` carries, when the thread has older ones behind
    * it; null when this page is the whole thread. It is the cursor `messages.list`
@@ -846,6 +866,8 @@ export interface RpcEvents {
   'thread.created': ThreadSummary;
   'thread.updated': ThreadSummary;
   'thread.removed': { threadId: ThreadId };
+  /** The agent's `/name` commands, whole, each time the list it reports changes. */
+  'thread.commands': { threadId: ThreadId; commands: AgentCommand[] };
 
   'turn.started': Turn;
   'turn.finished': Turn;

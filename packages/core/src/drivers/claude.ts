@@ -11,9 +11,11 @@ import type {
   SDKMessage,
   SDKResultMessage,
   SDKUserMessage,
+  SlashCommand,
   SpawnOptions as SdkSpawnOptions,
 } from '@anthropic-ai/claude-agent-sdk';
 import type {
+  AgentCommand,
   ImageAttachment,
   MessageId,
   MessagePart,
@@ -109,6 +111,15 @@ interface ToolEntry {
   output: string | null;
   status: ToolStatus;
   documents: ToolDocument[];
+}
+
+/** The SDK's `SlashCommand` as the contract's `AgentCommand`: an empty field becomes null. */
+function commandsOf(list: SlashCommand[]): AgentCommand[] {
+  return list.map((command) => ({
+    name: command.name,
+    description: command.description || null,
+    hint: command.argumentHint || null,
+  }));
 }
 
 function stringField(record: Record<string, unknown>, key: string): string | null {
@@ -287,9 +298,17 @@ class ClaudeTurn {
       case 'result':
         this.handleResult(message);
         break;
+      case 'system':
+        this.handleSystem(message);
+        break;
       default:
         break;
     }
+  }
+
+  /** `commands_changed`: the CLI relearned its slash commands mid-session. */
+  private handleSystem(message: Extract<SDKMessage, { type: 'system' }>): void {
+    if (message.subtype === 'commands_changed') this.ctx.commands(commandsOf(message.commands));
   }
 
   private handleStream(event: StreamEvent): void {
@@ -689,6 +708,12 @@ class ClaudeSession {
         this.query = queryFn({ prompt: this.prompts.stream(), options });
         // The next turn's setters have something to talk to from here on.
         this.markReady();
+        // Not awaited: an older CLI that has no answer for this is one warning,
+        // never a reason to hold up the turn's own messages.
+        void this.query
+          .supportedCommands()
+          .then((commands) => this.ctx.commands(commandsOf(commands)))
+          .catch((error) => this.ctx.log('warn', `claude: supportedCommands failed: ${messageOf(error)}`));
         for await (const message of this.query) this.receive(message);
       }
       this.finish(null);

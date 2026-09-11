@@ -5,6 +5,7 @@ import {
   RpcErrorCode,
   type Account,
   type AccountQuota,
+  type AgentCommand,
   type PluginState,
   type PluginPool,
   type CoreInfo,
@@ -50,6 +51,14 @@ export interface FakeClientOptions {
 
 const T0 = Date.UTC(2026, 8, 5, 9, 0, 0);
 const DATA_DIR = 'C:\\Users\\you\\AppData\\Local\\boite2';
+
+/** What the echo driver reports as its `/name` list, the same two commands. */
+const ECHO_COMMANDS: AgentCommand[] = [
+  { name: 'shout', description: 'The prompt back in capitals', hint: '<text>' },
+  { name: 'whisper', description: 'The prompt back as it came', hint: null }
+];
+/** The one the fake acts on: `/shout <text>` comes back in capitals. */
+const SHOUT = 'shout';
 
 /** The managed provider of the seed: a release Boite downloads, 468 MB of it. */
 const MANAGED_ID = 'antigravity';
@@ -617,6 +626,7 @@ export class FakeClient implements ObservableClient {
           createdAt: at,
           updatedAt: at,
           messages: [],
+          commands: [],
           messagesBefore: null,
           turns: []
         };
@@ -852,6 +862,16 @@ export class FakeClient implements ObservableClient {
     if (['queued', 'running', 'waiting'].includes(thread.status) || this.#inFlight.has(threadId)) {
       throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'this thread already has an in-flight turn', data: { threadId } });
     }
+    // The agent names what it takes on its first turn, the way the echo driver
+    // does: the list is the agent's, so it only exists once one has run.
+    if (thread.commands.length === 0) {
+      thread.commands = structuredClone(ECHO_COMMANDS);
+      this.#emitToThread(threadId, 'thread.commands', {
+        threadId,
+        commands: structuredClone(thread.commands)
+      });
+    }
+
     const at = this.#now();
     const turn: Turn = {
       id: `turn-${++this.#seq}`,
@@ -948,6 +968,10 @@ export class FakeClient implements ObservableClient {
       part: { type: 'text', text: '' }
     });
 
+    // `/shout <text>` comes back in capitals, the one command the fake acts on.
+    const shouted = prompt.startsWith(`/${SHOUT} `) ? prompt.slice(SHOUT.length + 2) : null;
+    const echoed = shouted === null ? prompt : shouted.toUpperCase();
+
     // An image is named back the way the echo driver names it, format and
     // weight first, then the prompt itself is echoed.
     const reply =
@@ -958,7 +982,7 @@ export class FakeClient implements ObservableClient {
               attachment.name === null ? '' : `, ${attachment.name}`
             }] `
         )
-        .join('') + prompt;
+        .join('') + echoed;
 
     for (const piece of chunkText(reply, 5)) {
       if (record.cancelled) break;
@@ -1915,7 +1939,8 @@ export class FakeClient implements ObservableClient {
       archived: false,
       pinned: false,
       // A stored thread is the whole record; `threads.get` is what pages it.
-      messagesBefore: null
+      messagesBefore: null,
+      commands: []
     };
 
     const finished: Thread = {
@@ -2107,6 +2132,9 @@ export class FakeClient implements ObservableClient {
       projectId: 'p-brain',
       title: 'Review the descriptor loader',
       cwd: 'D:\\Dev\\brain',
+      // The most recent thread, so this is the one a boot opens: it has already
+      // run a turn, so the echo agent has already named what it takes.
+      commands: structuredClone(ECHO_COMMANDS),
       status: 'idle',
       unread: true,
       sessionId: 'sess-descriptors',
@@ -2386,6 +2414,7 @@ export class FakeClient implements ObservableClient {
       createdAt: T0 + 400_000,
       updatedAt: T0 + 800_000,
       messagesBefore: null,
+      commands: [],
       turns: [
         {
           id: 'turn-long',

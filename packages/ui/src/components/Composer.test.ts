@@ -500,6 +500,103 @@ test('a provider that reads no image hides the button and says so on a paste', a
   expect(document.querySelector('[data-testid=composer-attachments]')).toBeNull();
 });
 
+// -- the slash menu -----------------------------------------------------------
+
+function slashRows(): string[] {
+  return Array.from(document.querySelectorAll('[data-testid=slash-row]')).map(
+    (row) => row.getAttribute('data-name') ?? ''
+  );
+}
+
+function slashMenu(): HTMLElement | null {
+  return document.querySelector<HTMLElement>('[data-testid=slash-menu]');
+}
+
+test('a slash lists the agent commands first, filters, and completes the box', async () => {
+  await mountOnFake();
+  // The thread a boot opens has already run a turn, so the echo agent has
+  // already said what it takes.
+  await waitFor(() => store.openThread?.id === 't-descriptors' && !store.busy);
+  expect(store.openThread?.commands.map((command) => command.name)).toEqual(['shout', 'whisper']);
+
+  await type('/');
+  await waitFor(() => slashMenu() !== null);
+  const rows = slashRows();
+  // The agent's two, in its own order, before every one of Boite's.
+  expect(rows.slice(0, 2)).toEqual(['shout', 'whisper']);
+  expect(rows).toContain('model');
+  expect(rows).toContain('theme-dark');
+  expect(slashMenu()?.textContent).toContain('The prompt back in capitals');
+  expect(slashMenu()?.textContent).toContain('<text>');
+  expect(document.body.textContent).toContain('Agent');
+  expect(document.body.textContent).toContain('Boite');
+
+  await type('/sh');
+  await waitFor(() => slashRows().length === 1);
+  expect(slashRows()).toEqual(['shout']);
+
+  // Enter takes the row the keyboard is on: the box completes, the menu goes.
+  input().focus();
+  expect(press('Enter')).toBe(false);
+  await waitFor(() => slashMenu() === null);
+  expect(input().value).toBe('/shout ');
+
+  // The completed command is a plain prompt, and the fake echoes it in capitals.
+  await type('/shout hello');
+  input().focus();
+  press('Enter');
+  await waitFor(() => (store.openThread?.messages.length ?? 0) >= 4 && !store.busy);
+  const answer = store
+    .openThread!.messages.at(-1)!
+    .parts.filter((part) => part.type === 'text')
+    .map((part) => (part.type === 'text' ? part.text : ''))
+    .join('');
+  expect(answer).toBe('HELLO');
+});
+
+test('one of Boite own commands runs from the slash menu and empties the box', async () => {
+  await mountOnFake();
+  await waitFor(() => store.openThread !== null && !store.busy);
+
+  await type('/dark');
+  await waitFor(() => slashMenu() !== null);
+  expect(slashRows()).toEqual(['theme-dark']);
+
+  input().focus();
+  expect(press('Enter')).toBe(false);
+  await waitFor(() => slashMenu() === null);
+  expect(input().value).toBe('');
+  expect(window.localStorage.getItem('boite.theme')).toBe('dark');
+  // Nothing was sent: a Boite command is not a prompt.
+  expect(store.busy).toBe(false);
+});
+
+test('Escape shuts the slash menu and keeps what is typed', async () => {
+  await mountOnFake();
+  await waitFor(() => store.openThread !== null && !store.busy);
+
+  await type('/');
+  await waitFor(() => slashMenu() !== null);
+
+  input().focus();
+  expect(press('Escape')).toBe(false);
+  await waitFor(() => slashMenu() === null);
+  expect(input().value).toBe('/');
+
+  // It stays shut on that text, and the next keystroke opens it again.
+  press('ArrowDown');
+  expect(slashMenu()).toBeNull();
+  await type('/wh');
+  await waitFor(() => slashMenu() !== null);
+  expect(slashRows()).toEqual(['whisper']);
+
+  // Tab picks what Enter picks.
+  input().focus();
+  expect(press('Tab')).toBe(false);
+  await waitFor(() => slashMenu() === null);
+  expect(input().value).toBe('/whisper ');
+});
+
 test('queued prompts survive settings and wait for a ready connection', async () => {
   await mountOnFake();
   await store.open('t-trace');

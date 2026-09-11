@@ -19,6 +19,7 @@ import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import type {
   AccountId,
+  AgentCommand,
   EffortLevel,
   ImageAttachment,
   MessageId,
@@ -108,6 +109,25 @@ interface PiAssistantMessage {
   usage?: PiUsage;
   stopReason?: string;
   errorMessage?: string;
+}
+
+/** One entry of `get_commands`: extension commands, prompt templates and skills alike. */
+interface PiCommand {
+  name?: string;
+  description?: string;
+  source?: string;
+  location?: string;
+  path?: string;
+}
+
+/** `get_commands`' list as the contract's `AgentCommand`. pi carries no argument hint. */
+function commandsOf(list: PiCommand[]): AgentCommand[] {
+  const commands: AgentCommand[] = [];
+  for (const entry of list) {
+    if (entry.name === undefined || entry.name.length === 0) continue;
+    commands.push({ name: entry.name, description: entry.description ?? null, hint: null });
+  }
+  return commands;
 }
 
 // ---------------------------------------------------------------------------
@@ -612,7 +632,22 @@ class PiSession {
     // pi's RPC mode has no approval call: there is nothing to gate a tool on, so
     // the thread's permission mode is a preference the agent never sees.
     ctx.log('info', 'pi session: the permission mode is not enforced, pi has no approval gate in rpc mode');
+    // Once per process, not per turn: `open` runs once for the life of the
+    // session, memoized behind `start`. Not awaited, so a slow or unknown
+    // command never holds up the turn that started this process.
+    void this.fetchCommands(ctx, peer);
     return Promise.resolve();
+  }
+
+  /** `get_commands`: a refusal or a dead peer is one warning, never a failed turn. */
+  private async fetchCommands(ctx: TurnContext, peer: PiPeer): Promise<void> {
+    try {
+      const data = dataOf(await peer.command('get_commands'));
+      const list = Array.isArray(data['commands']) ? (data['commands'] as PiCommand[]) : [];
+      ctx.commands(commandsOf(list));
+    } catch (error) {
+      ctx.log('warn', `pi: get_commands failed: ${messageOf(error)}`);
+    }
   }
 
   private watch(child: SpawnedChild, ctx: TurnContext, peer: PiPeer): void {
