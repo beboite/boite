@@ -4,6 +4,8 @@ import { basename, join } from 'node:path';
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import corePackage from '../../packages/core/package.json';
 import { connect } from '../../packages/core/src/client.ts';
+import { claudeProjectFolder } from '../../packages/core/src/imports/claude.ts';
+import { claudeSessionFixture, FIXTURE_SESSION_ID } from '../../packages/core/test/fixtures/claude-session.ts';
 import { BrowserPage } from './lib/cdp.ts';
 import { pairingUrlOf, removeDirectory, startCore, type RunningCore } from './lib/core.ts';
 
@@ -25,6 +27,7 @@ const MENTION_SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui-mention-menu.
 const WORKTREE_SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui-worktree.png');
 const KEYBOARD_SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui-keyboard.png');
 const RETITLE_SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui-retitle.png');
+const IMPORT_SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui-import.png');
 /** The one name `public/sw.js` opens; every other cache is deleted on activate. */
 const UI_CACHE = 'boite-ui-v1';
 /** What the echo provider's `[tool-stream]` directive types, one piece at a time. */
@@ -165,6 +168,59 @@ test(
     await page.waitFor(`${textOf('thread-title')} === 'Echo: browser thread'`, 30_000);
     // The echo agent answers faster than the menu's closing animation runs.
     await page.waitFor(`!document.querySelector('${testid('context-menu')}')`);
+  },
+  TIMEOUT,
+);
+
+test(
+  'a claude code transcript filed for the project is imported as a thread from the project menu',
+  async () => {
+    // An isolated claude account: its transcripts live in the core's data
+    // directory, filed where the CLI would file this project's sessions.
+    const client = await connect(core.url, core.token);
+    try {
+      const account = await client.call('accounts.add', { providerId: 'claude', label: 'imports' });
+      if (account.isolationDir === null) throw new Error('the account must be isolated');
+      const folder = join(account.isolationDir, 'projects', claudeProjectFolder(projectDir));
+      mkdirSync(folder, { recursive: true });
+      writeFileSync(join(folder, `${FIXTURE_SESSION_ID}.jsonl`), claudeSessionFixture(projectDir, { aiTitle: 'Folder listing' }));
+    } finally {
+      client.close();
+    }
+
+    await page.evaluate<null>(
+      `(() => { document.querySelector('${testid('project-row')}').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 60, clientY: 60 })); return null; })()`,
+    );
+    await page.waitFor(`document.querySelector('${testid('context-menu')} [data-value=import]')`);
+    await page.click(`${testid('context-menu')} [data-value=import]`);
+    await page.waitFor(`document.querySelectorAll('${testid('import-row')}').length === 1`);
+    expect(await page.evaluate<string>(`document.querySelector('${testid('import-row')} .title').textContent`)).toBe('Folder listing');
+    await page.screenshot(IMPORT_SCREENSHOT);
+
+    await page.click(testid('import-row'));
+    await page.waitFor(`!document.querySelector('${testid('import-dialog')}')`);
+    await page.waitFor(`${textOf('thread-title')} === 'Folder listing'`);
+    await page.waitFor(`document.querySelectorAll('${testid('message')}').length === 4`);
+    expect(await page.evaluate<string>(ASSISTANT_TEXT)).toContain('Two files. Hello.');
+
+    const reader = await connect(core.url, core.token);
+    try {
+      const threads = await reader.call('threads.list', {});
+      const imported = threads.find((thread) => thread.sessionId === FIXTURE_SESSION_ID);
+      if (imported === undefined) throw new Error('the imported thread is not listed');
+      expect(imported).toMatchObject({ title: 'Folder listing', titleSource: 'agent', status: 'idle' });
+      // Out of the way: the tests after this one type into the echo thread and
+      // count the rows of the sidebar.
+      await reader.call('threads.archive', { threadId: imported.id, archived: true });
+    } finally {
+      reader.close();
+    }
+    await page.waitFor(`!Array.from(document.querySelectorAll('${testid('thread-row')}')).some((row) => row.textContent.includes('Folder listing'))`);
+    await page.evaluate<null>(
+      `(() => { Array.from(document.querySelectorAll('${testid('thread-row')}')).find((row) => row.textContent.includes('Echo: browser thread')).click(); return null; })()`,
+    );
+    await page.waitFor(`${textOf('thread-title')} === 'Echo: browser thread'`);
+    await page.waitFor(`document.querySelector('${testid('thread-status')}').dataset.status === 'idle'`);
   },
   TIMEOUT,
 );

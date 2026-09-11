@@ -185,7 +185,7 @@ each one is skipped unless its variable is set. Run them from
 
 | Variable | Test | What it proves |
 |---|---|---|
-| `BOITE_E2E_CLAUDE=1` | `test/claude.live.test.ts` | a real Claude turn, then a resume |
+| `BOITE_E2E_CLAUDE=1` | `test/claude.live.test.ts` | a real Claude turn, then a resume; the same session imported from `~/.claude/projects` into a new thread and resumed there; a warm thread on one process |
 | `BOITE_E2E_OPENCODE=1` | `test/opencode.live.test.ts` | an ACP turn, then a resume on a new process |
 | `BOITE_E2E_GROK=1` | `test/grok.live.test.ts` | an ACP turn on a named Grok model and effort, then a resume on a new process. It only ever uses the default account, which reads `~/.grok`: a Grok started on an empty `GROK_HOME` opens a browser |
 | `BOITE_E2E_CODEX=1` | `test/codex.live.test.ts` | a Codex app-server turn and its resume |

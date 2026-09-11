@@ -31,6 +31,7 @@ test('the list carries every app command, the thread ones only while one is open
   expect(ids()).toEqual([
     'new-thread',
     'add-project',
+    'import-session',
     'sidebar',
     'settings',
     'appearance',
@@ -45,6 +46,7 @@ test('the list carries every app command, the thread ones only while one is open
   expect(ids()).toEqual([
     'new-thread',
     'add-project',
+    'import-session',
     'pin',
     'rename',
     'retitle',

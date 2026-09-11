@@ -456,7 +456,7 @@ export class AccountStore {
    * carries one, that variable's own default when Boite knows it, else
    * `~/.<id>`.
    */
-  private defaultLocation(provider: ProviderDescriptor): string | null {
+  defaultLocation(provider: ProviderDescriptor): string | null {
     const profile = profileFor(provider);
     if (profile !== undefined) {
       for (const key of Object.keys(profile.isolation)) {

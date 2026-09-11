@@ -39,6 +39,7 @@ export function appCommands(store: Store, inShell: boolean): PaletteItem[] {
   };
   if (store.projects.length > 0) items.push(row('new-thread', strings.palette.newThread, 'draft start'));
   items.push(row('add-project', strings.palette.addProject, 'folder open'));
+  if (store.projects.length > 0) items.push(row('import-session', strings.palette.importSession, 'transcript history resume'));
   if (open) {
     items.push(row('pin', open.pinned ? strings.palette.unpin : strings.palette.pin, 'favourite top'));
     items.push(row('rename', strings.palette.rename, 'title'));
@@ -82,6 +83,7 @@ export function commandLabel(id: KeybindingCommand): string {
     case 'theme-light': return strings.palette.themeLight;
     case 'theme-system': return strings.palette.themeSystem;
     case 'archive': return strings.palette.archive;
+    case 'import-session': return strings.palette.importSession;
   }
 }
 
@@ -112,6 +114,12 @@ export function runCommand(store: Store, id: string, inShell: boolean): void {
     case 'theme-light': setTheme('light'); break;
     case 'theme-system': setTheme('system'); break;
     case 'archive': if (open) void store.archive(open.id); break;
+    case 'import-session': {
+      // The open thread's project, else the draft's, else the first one.
+      const projectId = open?.projectId ?? store.draft?.projectId ?? store.projects[0]?.id;
+      if (projectId !== undefined) void store.openImports(projectId);
+      break;
+    }
     default: break;
   }
 }

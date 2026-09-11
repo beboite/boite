@@ -10,6 +10,7 @@ import {
   type PluginPool,
   type CoreInfo,
   type ImageAttachment,
+  type ImportableSession,
   type Message,
   type MessageId,
   type MessagePart,
@@ -232,6 +233,8 @@ const LONG_ANSWERS = [
 const PROBE_MS = 150;
 /** How long the fake's `threads.retitle` takes: long enough for the menu to say it is writing. */
 const RETITLE_DELAY_MS = 200;
+/** How long the fake takes to read its transcripts, and to import one. */
+const IMPORT_LIST_MS = 120;
 
 /**
  * What the fake ACP agent lists in the `configOptions` of a `session/new`: its
@@ -298,6 +301,8 @@ export class FakeClient implements ObservableClient {
   #subscribed = new Set<ThreadId>();
 
   #projects: Project[] = [];
+  /** The sessions Claude Code kept, each tagged with the project whose folder it sits under. */
+  #importable: (ImportableSession & { projectId: string })[] = [];
   #providers: ProviderSummary[] = [];
   /** Where each managed install stood before the running one started, for a cancel. */
   #installBefore = new Map<string, ProviderInstallState>();
@@ -906,6 +911,76 @@ export class FakeClient implements ObservableClient {
         this.#emit('scheduler.updated', structuredClone(this.#scheduler));
         this.#emit('settings.updated', { ...this.#settings });
         return { ...this.#settings };
+      }
+
+      case 'imports.list': {
+        const params = rawParams as RpcParams<'imports.list'>;
+        if (!this.#projects.some((p) => p.id === params.projectId)) throw this.#notFound('project', params.projectId);
+        await new Promise((resolve) => setTimeout(resolve, IMPORT_LIST_MS));
+        // Newest first, the core's order.
+        return structuredClone(
+          this.#importable
+            .filter((session) => session.projectId === params.projectId)
+            .sort((a, b) => b.updatedAt - a.updatedAt)
+            .map(({ projectId: _p, ...session }) => session)
+        );
+      }
+      case 'imports.run': {
+        const params = rawParams as RpcParams<'imports.run'>;
+        const project = this.#projects.find((p) => p.id === params.projectId);
+        if (!project) throw this.#notFound('project', params.projectId);
+        const session = this.#importable.find((entry) => entry.projectId === params.projectId && entry.sessionId === params.sessionId);
+        if (!session) {
+          throw new RpcFailure({ code: RpcErrorCode.NotFound, message: `no transcript for session ${params.sessionId}`, data: { sessionId: params.sessionId } });
+        }
+        if (session.threadId !== null) {
+          throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'this session is already a thread', data: { sessionId: params.sessionId, threadId: session.threadId } });
+        }
+        await new Promise((resolve) => setTimeout(resolve, IMPORT_LIST_MS));
+        const id: ThreadId = `t-${++this.#seq}`;
+        const turnA: Turn = { id: `turn-${id}-1`, threadId: id, status: 'done', queuedAt: session.startedAt, startedAt: session.startedAt, finishedAt: session.startedAt + 4_000, usage: null, error: null };
+        const turnB: Turn = { id: `turn-${id}-2`, threadId: id, status: 'done', queuedAt: session.updatedAt - 9_000, startedAt: session.updatedAt - 9_000, finishedAt: session.updatedAt, usage: null, error: null };
+        const thread: Thread = {
+          id,
+          projectId: params.projectId,
+          title: session.title,
+          titleSource: 'agent',
+          providerId: 'claude',
+          accountId: params.accountId,
+          model: 'claude-sonnet-5',
+          effort: null,
+          cwd: project.path,
+          branch: null,
+          permissionMode: 'default',
+          status: 'idle',
+          unread: false,
+          archived: false,
+          pinned: false,
+          sessionId: session.sessionId,
+          load: null,
+          createdAt: session.startedAt,
+          updatedAt: session.updatedAt,
+          commands: [],
+          messagesBefore: null,
+          turns: [turnA, turnB],
+          messages: [
+            { id: `${id}-m1`, threadId: id, turnId: turnA.id, role: 'user', parts: [{ type: 'text', text: 'Where does the shell look for a core, in what order?' }], state: 'complete', createdAt: turnA.queuedAt },
+            {
+              id: `${id}-m2`, threadId: id, turnId: turnA.id, role: 'assistant', state: 'complete', createdAt: turnA.queuedAt + 1_000,
+              parts: [
+                { type: 'thinking', text: 'The order lives in the Rust side, next to the sidecar lookup.' },
+                { type: 'tool', toolId: `${id}-tool-1`, name: 'Grep', input: { pattern: 'boite-core', path: 'apps/shell/src-tauri/src' }, output: 'apps/shell/src-tauri/src/core.rs:41\napps/shell/src-tauri/src/core.rs:58', status: 'done' },
+                { type: 'text', text: 'Three places, in order: the sidecar beside the exe, `BOITE_CORE` in the environment, then `bun run core` from the repository.' }
+              ]
+            },
+            { id: `${id}-m3`, threadId: id, turnId: turnB.id, role: 'user', parts: [{ type: 'text', text: 'Write that down in docs/releasing.md' }], state: 'complete', createdAt: turnB.queuedAt },
+            { id: `${id}-m4`, threadId: id, turnId: turnB.id, role: 'assistant', state: 'complete', createdAt: turnB.queuedAt + 2_000, parts: [{ type: 'text', text: 'Done: a short list under "Where the shell looks for a core".' }] }
+          ]
+        };
+        this.#threads.set(id, thread);
+        session.threadId = id;
+        this.#emit('thread.created', structuredClone(toSummary(thread)));
+        return structuredClone(toSummary(thread));
       }
 
       default: {
@@ -1783,6 +1858,36 @@ export class FakeClient implements ObservableClient {
     this.#projects = [
       { id: 'p-boite', name: 'boite', path: 'D:\\Dev\\Collab\\boite', createdAt: T0 },
       { id: 'p-brain', name: 'brain', path: 'D:\\Dev\\brain', createdAt: T0 }
+    ];
+
+    // What Claude Code left under its projects folder for boite: one session
+    // to import, one that is already the trace thread.
+    const transcripts = 'C:\\Users\\you\\.claude\\projects\\D--Dev-Collab-boite';
+    this.#importable = [
+      {
+        projectId: 'p-boite',
+        providerId: 'claude',
+        accountId: 'a-claude-main',
+        sessionId: '4c1d2e3f-5a6b-4c7d-8e9f-0a1b2c3d4e5f',
+        file: `${transcripts}\\4c1d2e3f-5a6b-4c7d-8e9f-0a1b2c3d4e5f.jsonl`,
+        title: 'Where the shell looks for a core',
+        startedAt: T0 - 26 * 3_600_000,
+        updatedAt: T0 - 25 * 3_600_000,
+        bytes: 184_320,
+        threadId: null
+      },
+      {
+        projectId: 'p-boite',
+        providerId: 'claude',
+        accountId: 'a-claude-main',
+        sessionId: '9e8d7c6b-5a4f-4e3d-2c1b-0a9f8e7d6c5b',
+        file: `${transcripts}\\9e8d7c6b-5a4f-4e3d-2c1b-0a9f8e7d6c5b.jsonl`,
+        title: 'Finish the trace tab',
+        startedAt: T0 - 2 * 3_600_000,
+        updatedAt: T0 - 3_600_000,
+        bytes: 61_440,
+        threadId: 't-trace'
+      }
     ];
 
     this.#providers = [

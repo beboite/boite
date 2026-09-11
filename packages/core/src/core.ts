@@ -6,6 +6,7 @@ import pkg from '../package.json';
 import { AccountStore } from './accounts.ts';
 import { Bus } from './bus.ts';
 import { shutdownDrivers } from './drivers/index.ts';
+import { ImportStore } from './imports.ts';
 import { Journal } from './journal.ts';
 import { KeybindingStore } from './keybindings.ts';
 import { registerModules } from './modules.ts';
@@ -60,6 +61,7 @@ export class Core {
   readonly sessions: SessionStore;
   readonly worktrees: Worktrees;
   readonly keybindings: KeybindingStore;
+  readonly imports: ImportStore;
 
   subscribers: SubscriptionSink = { hasSubscribers: () => false, closeSession: () => undefined };
 
@@ -86,6 +88,7 @@ export class Core {
     this.sessions = new SessionStore(this);
     this.worktrees = new Worktrees(this);
     this.keybindings = new KeybindingStore(this);
+    this.imports = new ImportStore(this);
 
     registerModules(this);
     this.procs.applySettings(this.settings.get());

@@ -4,6 +4,7 @@ import type {
   AccountId,
   AgentCommand,
   ImageAttachment,
+  ImageMimeType,
   Message,
   MessageId,
   MessagePart,
@@ -229,6 +230,102 @@ export class ThreadStore {
     };
     this.core.journal.append({ type: 'thread.created', threadId: thread.id, version: 1, payload: thread }, () => {
       this.core.journal.putThread(thread);
+    });
+    this.core.bus.emit('thread.created', thread);
+    return thread;
+  }
+
+  /**
+   * A thread with a history it never ran: one finished turn per prompt of an
+   * imported transcript, written with the thread in one transaction so no
+   * client ever sees it empty, and the session id set so the next turn
+   * resumes the agent's own session.
+   */
+  createImported(
+    params: CreateParams,
+    history: {
+      sessionId: string;
+      titleSource: ThreadSummary['titleSource'];
+      turns: {
+        prompt: string;
+        images: { mimeType: ImageMimeType; data: string }[];
+        promptAt: number;
+        parts: MessagePart[];
+        answerAt: number | null;
+        lastAt: number;
+      }[];
+    },
+  ): ThreadSummary {
+    const { project, provider, account } = this.check(params);
+    const now = Date.now();
+    const first = history.turns[0];
+    const last = history.turns[history.turns.length - 1];
+    const model = checkModel(provider, account.id, params.model ?? defaultModel(provider));
+    const thread: ThreadSummary = {
+      id: newId('thr_'),
+      projectId: project.id,
+      title: titleOf(params.title),
+      titleSource: history.titleSource,
+      providerId: provider.id,
+      accountId: account.id,
+      model,
+      effort: null,
+      cwd: params.cwd !== undefined && params.cwd.length > 0 ? params.cwd : project.path,
+      branch: null,
+      permissionMode: params.permissionMode ?? 'default',
+      status: 'idle',
+      unread: false,
+      archived: false,
+      pinned: false,
+      sessionId: history.sessionId,
+      load: null,
+      createdAt: first?.promptAt || now,
+      updatedAt: last?.lastAt || now,
+    };
+    const rows: { turn: Turn; messages: Message[] }[] = history.turns.map((entry) => {
+      const turn: Turn = {
+        id: newId('trn_'),
+        threadId: thread.id,
+        status: 'done',
+        queuedAt: entry.promptAt,
+        startedAt: entry.promptAt,
+        finishedAt: entry.lastAt,
+        usage: null,
+        error: null,
+      };
+      const messages: Message[] = [
+        {
+          id: newId('msg_'),
+          threadId: thread.id,
+          turnId: turn.id,
+          role: 'user',
+          parts: [
+            { type: 'text', text: entry.prompt },
+            ...entry.images.map((image): MessagePart => ({ type: 'image', mimeType: image.mimeType, data: image.data, alt: null })),
+          ],
+          state: 'complete',
+          createdAt: entry.promptAt,
+        },
+      ];
+      if (entry.parts.length > 0) {
+        messages.push({
+          id: newId('msg_'),
+          threadId: thread.id,
+          turnId: turn.id,
+          role: 'assistant',
+          parts: entry.parts,
+          state: 'complete',
+          createdAt: entry.answerAt ?? entry.promptAt,
+        });
+      }
+      return { turn, messages };
+    });
+    this.core.journal.append({ type: 'thread.imported', threadId: thread.id, version: 1, payload: thread }, () => {
+      this.core.journal.putThread(thread);
+      for (const row of rows) {
+        this.core.journal.putTurn(row.turn);
+        for (const message of row.messages) this.core.journal.putMessage(message);
+      }
     });
     this.core.bus.emit('thread.created', thread);
     return thread;

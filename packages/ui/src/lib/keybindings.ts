@@ -30,7 +30,8 @@ export const DEFAULT_BINDINGS: Record<KeybindingCommand, string | null> = {
   'theme-dark': null,
   'theme-light': null,
   'theme-system': null,
-  archive: null
+  archive: null,
+  'import-session': null
 };
 
 /** The resolved table: every command, its chord parsed or null, and whether the file set it. */

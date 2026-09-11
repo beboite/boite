@@ -2,6 +2,7 @@ import type {
   Account,
   CoreInfo,
   ImageAttachment,
+  ImportableSession,
   Keybindings,
   KeybindingCommand,
   Message,
@@ -169,6 +170,8 @@ export class Store {
   renameRequested = $state(false);
   /** The threads a `threads.retitle` is out for: their menu item waits. */
   retitling = $state<ThreadId[]>([]);
+  /** The import dialog while it is open: the project, what `imports.list` found, the session being imported. */
+  imports = $state<{ projectId: ProjectId; sessions: ImportableSession[]; loading: boolean; running: string | null } | null>(null);
   error = $state<string | null>(null);
   page = $state<Page>('chat');
   settingsTab = $state<SettingsTab>('general');
@@ -1224,6 +1227,42 @@ export class Store {
       this.#fail(error);
     } finally {
       this.retitling = this.retitling.filter((id) => id !== threadId);
+    }
+  }
+
+  /** The import dialog for one project: opens at once, the list arrives when the core has read the files. */
+  async openImports(projectId: ProjectId): Promise<void> {
+    const client = this.#client;
+    if (!client) return;
+    this.imports = { projectId, sessions: [], loading: true, running: null };
+    try {
+      const sessions = await client.call('imports.list', { projectId });
+      if (this.imports?.projectId === projectId) this.imports = { ...this.imports, sessions, loading: false };
+    } catch (error) {
+      this.imports = null;
+      this.#fail(error);
+    }
+  }
+
+  closeImports(): void {
+    if (this.imports?.running === null) this.imports = null;
+  }
+
+  /** One session into a new thread, opened on arrival; the dialog closes with it. */
+  async importSession(accountId: string, sessionId: string): Promise<void> {
+    const client = this.#client;
+    const dialog = this.imports;
+    if (!client || !dialog || dialog.running !== null) return;
+    this.imports = { ...dialog, running: sessionId };
+    try {
+      const summary = await client.call('imports.run', { projectId: dialog.projectId, accountId, sessionId });
+      this.imports = null;
+      this.#upsertThread(summary);
+      this.showChat();
+      await this.open(summary.id);
+    } catch (error) {
+      this.imports = { ...dialog, running: null };
+      this.#fail(error);
     }
   }
 

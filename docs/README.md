@@ -16,6 +16,8 @@ build commands in [../README.md](../README.md).
   default, the `keybindings.json` file the core watches, and what it refuses.
 - [titles.md](titles.md): the three sources of a thread's title, the call the
   agent gets after the first turn, `Regenerate title`, and what is refused.
+- [imports.md](imports.md): a Claude Code session brought in as a thread, where
+  the transcripts are read from, what is kept, and the resume that follows.
 - [phone.md](phone.md): listening on the LAN, the one-time pairing link and the
   session it becomes, revoking a device, the service worker, what is cached and
   what never is, and the limits.

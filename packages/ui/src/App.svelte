@@ -6,6 +6,7 @@
   import ContextMenu from './components/ContextMenu.svelte';
   import DropOverlay from './components/DropOverlay.svelte';
   import FirstRun from './components/FirstRun.svelte';
+  import ImportDialog from './components/ImportDialog.svelte';
   import RightPanel from './components/RightPanel.svelte';
   import SettingsShell from './components/SettingsShell.svelte';
   import Sidebar from './components/Sidebar.svelte';
@@ -305,6 +306,7 @@
 
 <ContextMenu />
 <ConfirmDialog />
+<ImportDialog {store} />
 <CommandPalette {store} />
 
 <style>

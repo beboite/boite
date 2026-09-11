@@ -640,8 +640,33 @@ export const KEYBINDING_COMMANDS = [
   'theme-light',
   'theme-system',
   'archive',
+  'import-session',
 ] as const;
 export type KeybindingCommand = (typeof KEYBINDING_COMMANDS)[number];
+
+// ---------------------------------------------------------------------------
+// Imports: a session an agent ran outside Boite, read from its own transcript
+// files and turned into a thread the agent can resume.
+// ---------------------------------------------------------------------------
+
+/** One session an account's agent kept on disk for a project's folder. Claude Code today. */
+export interface ImportableSession {
+  providerId: ProviderId;
+  accountId: AccountId;
+  /** The agent's own id for the session, what a resumed turn hands back to it. */
+  sessionId: string;
+  /** The transcript file, absolute. */
+  file: string;
+  /** The title: the agent's own when the transcript carries one, else the first prompt's first line. */
+  title: string;
+  /** The first prompt's time. */
+  startedAt: Timestamp;
+  /** The file's last write. */
+  updatedAt: Timestamp;
+  bytes: number;
+  /** The thread that already carries this session, so it is not imported twice. */
+  threadId: ThreadId | null;
+}
 
 /** What `<dataDir>/keybindings.json` says, as the core last read it. */
 export interface Keybindings {
@@ -1037,6 +1062,23 @@ export interface RpcMethods {
   'settings.set': { params: Partial<Settings>; result: Settings };
   /** The keybindings file as last read: the path, the entries it names, and what it got wrong. */
   'keybindings.get': { params: Record<string, never>; result: Keybindings };
+
+  /**
+   * The sessions the project's folder has on disk across every account whose
+   * agent keeps transcripts (Claude Code: `<config dir>/projects/<folder>/*.jsonl`),
+   * newest first. A file with no prompt is left out.
+   */
+  'imports.list': { params: { projectId: ProjectId }; result: ImportableSession[] };
+  /**
+   * One session read whole into a new thread: one finished turn per prompt,
+   * the answers with their reasoning and tool calls, the session id set so
+   * the next turn resumes it. Refused by name when the session is already a
+   * thread, the account's agent keeps no transcripts, or the file has no prompt.
+   */
+  'imports.run': {
+    params: { projectId: ProjectId; accountId: AccountId; sessionId: string };
+    result: ThreadSummary;
+  };
 }
 
 export type RpcMethodName = keyof RpcMethods;

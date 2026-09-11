@@ -69,6 +69,7 @@ export const strings = {
     projectMenu: 'Project actions',
     copyPath: 'Copy path',
     copied: 'Copied',
+    importSession: 'Import a Claude Code session',
     removeProject: 'Remove from Boite',
     removeProjectTitle: 'Remove {project} from Boite?',
     removeProjectBody: 'Its threads go with it. Files on disk stay where they are.',
@@ -93,6 +94,7 @@ export const strings = {
     hint: 'Enter to open, Esc to close',
     newThread: 'New thread',
     addProject: 'Add a project',
+    importSession: 'Import a Claude Code session',
     settings: 'Open settings',
     appearance: 'Appearance settings',
     providers: 'Providers and accounts',
@@ -108,6 +110,17 @@ export const strings = {
     themeDark: 'Theme: dark',
     themeLight: 'Theme: light',
     themeSystem: 'Theme: system'
+  },
+
+  /** The import dialog: the sessions Claude Code kept for a project's folder. */
+  imports: {
+    title: 'Import a session into {project}',
+    intro: 'Claude Code sessions started in this folder. One becomes a thread with its history, and the next turn continues it.',
+    loading: 'Looking for sessions',
+    empty: 'No Claude Code session for this folder.',
+    imported: 'Imported',
+    importing: 'Importing',
+    close: 'Close'
   },
 
   /** The composer's slash menu: the agent's own commands over Boite's. */

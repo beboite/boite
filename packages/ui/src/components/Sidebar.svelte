@@ -110,6 +110,7 @@
     return [
       { id: 'new', label: fill(strings.sidebar.newThreadIn, { project: project.name }) },
       { id: 'copy', label: strings.sidebar.copyPath, hint: project.path },
+      { id: 'import', label: strings.sidebar.importSession },
       separator(),
       { id: 'remove', label: strings.sidebar.removeProject, danger: true }
     ];
@@ -119,6 +120,7 @@
     contextMenu.open(event, projectItems(project), (action) => {
       if (action === 'new') store.startDraft(project.id);
       else if (action === 'copy') void store.copy(project.path);
+      else if (action === 'import') void store.openImports(project.id);
       else if (action === 'remove') void removeProject(project);
     });
   }
