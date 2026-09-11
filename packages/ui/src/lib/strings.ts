@@ -158,7 +158,9 @@ export const strings = {
     renamePlaceholder: 'Thread title',
     /** The draft's own heading, the project's name in the dropdown after it. */
     startIn: 'Start a thread in',
-    changeProject: 'Change project'
+    changeProject: 'Change project',
+    /** The header badge of a thread working in its own worktree; the title says where. */
+    branchHint: 'Working in a worktree on this branch'
   },
 
   chat: {
@@ -237,6 +239,10 @@ export const strings = {
     noAccount: 'no account',
     noProvider: 'No provider',
     hint: 'Enter to send, Shift+Enter for a new line',
+    /** The draft's worktree switch, off and on. */
+    worktree: 'Worktree',
+    worktreeOff: 'Start in a git worktree on its own branch',
+    worktreeOn: 'Starts in a git worktree on its own branch',
     /** Images sent with the prompt: the strip above the box and what refuses one. */
     attach: 'Attach images',
     attachRemove: 'Remove {name}',

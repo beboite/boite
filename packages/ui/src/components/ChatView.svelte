@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Activity, ChevronDown, PanelLeft } from '@lucide/svelte';
+  import { Activity, ChevronDown, GitBranch, PanelLeft } from '@lucide/svelte';
   import type { ProjectId } from '@boite/contracts';
   import { focusOnMount } from '../lib/actions';
   import { contextMenu } from '../lib/context-menu.svelte';
@@ -143,6 +143,12 @@
       {#if project && thread}
         <span class="chip path mono" title={project.path}>{project.name}</span>
       {/if}
+      {#if thread?.branch}
+        <span class="chip path branch mono" title="{strings.thread.branchHint}: {thread.cwd}" data-testid="thread-branch">
+          <GitBranch size={12} strokeWidth={1.75} />
+          {thread.branch}
+        </span>
+      {/if}
       {#if thread}
         <button
           type="button"
@@ -279,6 +285,10 @@
     overflow: hidden;
     text-overflow: ellipsis;
     font-size: var(--text-sm);
+  }
+
+  .branch {
+    color: var(--color-foreground);
   }
 
   .trace {

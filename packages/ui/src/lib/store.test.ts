@@ -36,6 +36,32 @@ describe('Store', () => {
     expect(store.unreadCount).toBe(1);
   });
 
+  test('a draft with the worktree switch on sends the option once, and a project change keeps it', async () => {
+    const { store, client } = await ready();
+    store.startDraft('p-boite');
+    expect(store.draft?.worktree).toBe(false);
+    store.setDraftWorktree(true);
+    store.setDraftProject('p-brain');
+    expect(store.draft).toEqual({ projectId: 'p-brain', worktree: true });
+
+    const spy = vi.spyOn(client, 'call');
+    await store.submit('Fix the login', {
+      providerId: 'echo',
+      accountId: 'a-echo',
+      permissionMode: 'default',
+      model: 'echo-1',
+      effort: null
+    });
+    const create = spy.mock.calls.find(([method]) => method === 'threads.create');
+    expect(create?.[1]).toMatchObject({ projectId: 'p-brain', title: 'Fix the login', worktree: {} });
+    expect(store.openThread?.branch).toBe('boite/fix-the-login');
+    expect(store.draft).toBeNull();
+
+    // The next draft starts with the switch off: a worktree is a decision each time.
+    store.startDraft('p-brain');
+    expect(store.draft?.worktree).toBe(false);
+  });
+
   test('opening a thread clears its unread badge', async () => {
     const { store } = await ready();
 

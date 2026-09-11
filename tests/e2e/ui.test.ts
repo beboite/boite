@@ -22,6 +22,7 @@ const ATTACHMENT_SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui-attachment
 const ATTACHMENT_SENT_SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui-attachment-sent.png');
 const SLASH_SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui-slash-menu.png');
 const MENTION_SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui-mention-menu.png');
+const WORKTREE_SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui-worktree.png');
 /** The one name `public/sw.js` opens; every other cache is deleted on activate. */
 const UI_CACHE = 'boite-ui-v1';
 /** What the echo provider's `[tool-stream]` directive types, one piece at a time. */
@@ -30,6 +31,8 @@ const STREAMED_TOOL_INPUT = '{"command":"echo streamed","description":"a streame
 let core: RunningCore;
 let page: BrowserPage;
 let projectDir: string;
+/** Where the core puts the project's worktrees: beside it, under `.boite-worktrees`. */
+let worktreesDir: string;
 
 function testid(id: string): string {
   return `[data-testid=${id}]`;
@@ -59,6 +62,7 @@ beforeAll(async () => {
   }
   core = await startCore();
   projectDir = mkdtempSync(join(tmpdir(), 'boite-e2e-ui-'));
+  worktreesDir = join(tmpdir(), '.boite-worktrees', basename(projectDir));
   page = await BrowserPage.launch({ url: pairingUrlOf(core) });
 });
 
@@ -66,6 +70,7 @@ afterAll(async () => {
   await page?.close();
   await core?.stop();
   if (projectDir !== undefined) await removeDirectory(projectDir);
+  if (worktreesDir !== undefined) await removeDirectory(worktreesDir);
 });
 
 test(
@@ -381,6 +386,59 @@ test(
     );
     await page.click(testid('tab-trace'));
     await page.waitFor(`!document.querySelector('${testid('trace-panel')}')`);
+  },
+  TIMEOUT,
+);
+
+test(
+  'a draft with the worktree chip on starts its thread on a branch, in a worktree git made beside the project',
+  async () => {
+    // The project becomes a repository with one commit: what a worktree needs.
+    const env = {
+      ...process.env,
+      GIT_AUTHOR_NAME: 'boite e2e',
+      GIT_AUTHOR_EMAIL: 'e2e@boite.invalid',
+      GIT_COMMITTER_NAME: 'boite e2e',
+      GIT_COMMITTER_EMAIL: 'e2e@boite.invalid',
+    };
+    for (const args of [['init', '-q'], ['add', '.'], ['commit', '-q', '-m', 'init']]) {
+      const run = Bun.spawnSync({ cmd: ['git', ...args], cwd: projectDir, env, stdout: 'pipe', stderr: 'pipe', windowsHide: true });
+      if (!run.success) throw new Error(`git ${args.join(' ')} failed: ${run.stderr.toString()}`);
+    }
+
+    await page.click(testid('new-thread'));
+    await page.waitFor(`document.querySelector('${testid('composer-worktree')}')`);
+    expect(await page.evaluate<string>(`document.querySelector('${testid('composer-worktree')}').getAttribute('aria-pressed')`)).toBe('false');
+    await page.click(testid('composer-worktree'));
+    await page.waitFor(`document.querySelector('${testid('composer-worktree')}').getAttribute('aria-pressed') === 'true'`);
+    await page.waitFor(`${textOf('composer-picker')}.startsWith('Echo')`);
+    await page.type(testid('composer-input'), 'worktree thread');
+    await clickWhenEnabled(testid('composer-send'));
+
+    await page.waitFor(`${textOf('thread-branch')} === 'boite/worktree-thread'`, 30_000);
+    await page.waitFor(`${textOf('thread-title')} === 'worktree thread'`);
+    const worktree = join(worktreesDir, 'worktree-thread');
+    expect(existsSync(join(worktree, '.git'))).toBe(true);
+    expect(existsSync(join(worktree, 'src', 'lib', 'store.ts'))).toBe(true);
+    expect(await page.evaluate<string>(`document.querySelector('${testid('thread-branch')}').title`)).toContain(worktree);
+    await page.screenshot(WORKTREE_SCREENSHOT);
+    // The chip is a draft's: the thread has no such choice left.
+    expect(await page.evaluate<boolean>(`!!document.querySelector('${testid('composer-worktree')}')`)).toBe(false);
+
+    // The tests after this one count on the first thread being the open one:
+    // the worktree thread is archived and the first row opened again.
+    const client = await connect(core.url, core.token);
+    try {
+      const threads = await client.call('threads.list', {});
+      const created = threads.find((entry) => entry.branch === 'boite/worktree-thread');
+      if (created === undefined) throw new Error('the worktree thread is not listed');
+      await client.call('threads.archive', { threadId: created.id, archived: true });
+    } finally {
+      client.close();
+    }
+    await page.waitFor(`document.querySelectorAll('${testid('thread-row')}').length === 1`);
+    await page.click(testid('thread-row'));
+    await page.waitFor(`${textOf('thread-title')} === 'browser thread [permission]'`);
   },
   TIMEOUT,
 );

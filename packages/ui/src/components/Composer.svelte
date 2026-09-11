@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { ArrowUp, Paperclip, ShieldCheck, Square, X } from '@lucide/svelte';
+  import { ArrowUp, GitBranch, Paperclip, ShieldCheck, Square, X } from '@lucide/svelte';
   import { tick, untrack } from 'svelte';
   import type { ImageAttachment, PermissionMode } from '@boite/contracts';
   import { acceptAttachments, readImageFile } from '../lib/attachments';
@@ -731,6 +731,23 @@
           <ShieldCheck size={14} strokeWidth={1.75} />
           {choice ? strings.permissionMode[choice.permissionMode] : strings.permissionMode.default}
         </Menu>
+
+        <!-- A thread keeps its directory, so the switch exists on a draft alone. -->
+        {#if store.draft}
+          <button
+            type="button"
+            class="chip worktree"
+            class:on={store.draft.worktree}
+            data-testid="composer-worktree"
+            title={store.draft.worktree ? strings.composer.worktreeOn : strings.composer.worktreeOff}
+            aria-label={strings.composer.worktree}
+            aria-pressed={store.draft.worktree}
+            onclick={() => store.setDraftWorktree(!store.draft?.worktree)}
+          >
+            <GitBranch size={14} strokeWidth={1.75} />
+            {strings.composer.worktree}
+          </button>
+        {/if}
       </div>
 
       <span class="hint subtle">{strings.composer.hint}</span>
@@ -848,6 +865,13 @@
 
   .attach {
     padding: 0 7px;
+  }
+
+  /* Off it reads like the other chips; on it takes the active fill, the same as a pressed tab. */
+  .worktree.on {
+    background: var(--color-active);
+    border-color: var(--color-active);
+    color: var(--color-foreground);
   }
 
   textarea {

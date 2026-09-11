@@ -10,11 +10,13 @@ import type {
   MessageRole,
   ModelInfo,
   PermissionRequest,
+  Project,
   Protocol,
   ProviderDescriptor,
   QuestionAnswer,
   QuestionRequest,
   RequestId,
+  RpcParams,
   Thread,
   ThreadId,
   ThreadStatus,
@@ -38,6 +40,12 @@ import type {
 import type { SpawnOptions } from './procs.ts';
 
 const BASE64 = /^[A-Za-z0-9+/]+={0,2}$/;
+
+type CreateParams = RpcParams<'threads.create'>;
+
+function titleOf(title: string | undefined): string {
+  return title !== undefined && title.length > 0 ? title : 'New thread';
+}
 
 /** How many bytes a base64 string decodes to, without decoding it. */
 function decodedBytes(data: string): number {
@@ -174,38 +182,37 @@ export class ThreadStore {
 
   // -- writes ---------------------------------------------------------------
 
-  create(params: {
-    projectId: string;
-    providerId: string;
-    accountId: string;
-    title?: string;
-    cwd?: string;
-    model?: string;
-    effort?: string | null;
-    permissionMode?: ThreadSummary['permissionMode'];
-  }): ThreadSummary {
-    const project = this.core.projects.require(params.projectId);
-    const provider = this.core.providers.require(params.providerId);
-    const account = this.core.accounts.require(params.accountId);
-    if (account.providerId !== provider.id) {
-      throw refused('the account belongs to another provider', {
-        accountId: account.id,
-        accountProviderId: account.providerId,
-        providerId: provider.id,
-      });
+  /**
+   * The thread in its own git worktree: the branch and directory are made
+   * first, under the id the thread will carry, and the record is written only
+   * once git succeeded. A refusal leaves nothing behind but the trace of the
+   * git processes.
+   */
+  async createInWorktree(params: CreateParams): Promise<ThreadSummary> {
+    if (params.cwd !== undefined) {
+      throw refused('cwd and worktree exclude each other: a worktree is the working directory', { cwd: params.cwd });
     }
+    const { project } = this.check(params);
+    const id = newId('thr_');
+    const placed = await this.core.worktrees.add(id, project, titleOf(params.title), params.worktree?.branch);
+    return this.create({ ...params, cwd: placed.path }, { id, branch: placed.branch });
+  }
+
+  create(params: CreateParams, placed?: { id: ThreadId; branch: string }): ThreadSummary {
+    const { project, provider, account } = this.check(params);
 
     const now = Date.now();
     const model = checkModel(provider, account.id, params.model ?? defaultModel(provider));
     const thread: ThreadSummary = {
-      id: newId('thr_'),
+      id: placed?.id ?? newId('thr_'),
       projectId: project.id,
-      title: params.title !== undefined && params.title.length > 0 ? params.title : 'New thread',
+      title: titleOf(params.title),
       providerId: provider.id,
       accountId: account.id,
       model,
       effort: checkEffort(provider, account.id, model, params.effort ?? null),
       cwd: params.cwd !== undefined && params.cwd.length > 0 ? params.cwd : project.path,
+      branch: placed?.branch ?? null,
       permissionMode: params.permissionMode ?? 'default',
       status: 'idle',
       unread: false,
@@ -221,6 +228,21 @@ export class ThreadStore {
     });
     this.core.bus.emit('thread.created', thread);
     return thread;
+  }
+
+  /** The project, provider and account a new thread names, each refused by name when wrong. */
+  private check(params: CreateParams): { project: Project; provider: ProviderDescriptor; account: Account } {
+    const project = this.core.projects.require(params.projectId);
+    const provider = this.core.providers.require(params.providerId);
+    const account = this.core.accounts.require(params.accountId);
+    if (account.providerId !== provider.id) {
+      throw refused('the account belongs to another provider', {
+        accountId: account.id,
+        accountProviderId: account.providerId,
+        providerId: provider.id,
+      });
+    }
+    return { project, provider, account };
   }
 
   update(params: {
@@ -898,7 +920,9 @@ function defaultModel(provider: ProviderDescriptor): string | null {
 
 export function registerThreadMethods(core: Core): void {
   core.router.register('threads.list', (params) => core.threads.list(params));
-  core.router.register('threads.create', (params) => core.threads.create(params));
+  core.router.register('threads.create', (params) =>
+    params.worktree === undefined ? core.threads.create(params) : core.threads.createInWorktree(params),
+  );
   core.router.register('threads.get', (params) => core.threads.get(params.threadId));
   core.router.register('messages.list', (params) => core.threads.messages(params));
   core.router.register('threads.update', (params) => core.threads.update(params));

@@ -19,6 +19,7 @@ import { SettingsStore } from './settings.ts';
 import { ThreadStore } from './threads.ts';
 import { QuotaStore } from './quotas.ts';
 import { PluginStore } from './plugins.ts';
+import { Worktrees } from './worktree.ts';
 
 export const CORE_VERSION: string = pkg.version;
 
@@ -56,6 +57,7 @@ export class Core {
   readonly quotas: QuotaStore;
   readonly plugins: PluginStore;
   readonly sessions: SessionStore;
+  readonly worktrees: Worktrees;
 
   subscribers: SubscriptionSink = { hasSubscribers: () => false, closeSession: () => undefined };
 
@@ -80,6 +82,7 @@ export class Core {
     this.quotas = new QuotaStore(this);
     this.plugins = new PluginStore(this);
     this.sessions = new SessionStore(this);
+    this.worktrees = new Worktrees(this);
 
     registerModules(this);
     this.procs.applySettings(this.settings.get());

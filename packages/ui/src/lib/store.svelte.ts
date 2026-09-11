@@ -83,6 +83,8 @@ export interface UsageReport {
 /** A thread that exists only in the UI until its first message is sent. */
 export interface Draft {
   projectId: ProjectId;
+  /** The first send starts the thread in a git worktree of the project, on a branch of its own. */
+  worktree: boolean;
 }
 
 /** What the composer sends a message with. */
@@ -843,7 +845,7 @@ export class Store {
     this.openThread = null;
     this.trace = [];
     this.#keepRequestsOf(null);
-    this.draft = { projectId: target };
+    this.draft = { projectId: target, worktree: false };
     this.page = 'chat';
     this.sidebarOpen = false;
   }
@@ -857,8 +859,15 @@ export class Store {
     const draft = this.draft;
     if (!draft || draft.projectId === projectId) return;
     if (!this.projects.some((p) => p.id === projectId)) return;
-    this.draft = { projectId };
+    this.draft = { projectId, worktree: draft.worktree };
     this.collapsedProjects = this.collapsedProjects.filter((id) => id !== projectId);
+  }
+
+  /** The draft's worktree switch: on, the first send asks the core for a branch and a worktree. */
+  setDraftWorktree(worktree: boolean): void {
+    const draft = this.draft;
+    if (!draft || draft.worktree === worktree) return;
+    this.draft = { ...draft, worktree };
   }
 
   async open(threadId: ThreadId): Promise<void> {
@@ -938,6 +947,7 @@ export class Store {
     permissionMode?: PermissionMode;
     model?: string;
     effort?: string | null;
+    worktree?: { branch?: string };
   }): Promise<ThreadSummary | null> {
     const client = this.#client;
     if (!client) return null;
@@ -986,7 +996,8 @@ export class Store {
       permissionMode: choice.permissionMode,
       title: titleFrom(prompt) || undefined,
       effort: choice.effort,
-      ...(choice.model ? { model: choice.model } : {})
+      ...(choice.model ? { model: choice.model } : {}),
+      ...(draft.worktree ? { worktree: {} } : {})
     });
     if (!created) return false;
     if (composer) {

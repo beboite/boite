@@ -1,0 +1,132 @@
+import { existsSync, mkdirSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { slugOf, worktreeRoot } from '../src/worktree.ts';
+import { startTestCore } from './harness.ts';
+import type { TestCore } from './harness.ts';
+import type { CoreClient } from '../src/client.ts';
+
+let harness: TestCore;
+let client: CoreClient;
+
+beforeEach(async () => {
+  harness = await startTestCore();
+  client = await harness.connect();
+});
+
+afterEach(async () => {
+  await harness.stop();
+});
+
+/** The fixture repository's own identity: a commit needs one, and the machine's config is not the test's business. */
+const FIXTURE_GIT_ENV = {
+  ...process.env,
+  GIT_AUTHOR_NAME: 'boite test',
+  GIT_AUTHOR_EMAIL: 'test@boite.invalid',
+  GIT_COMMITTER_NAME: 'boite test',
+  GIT_COMMITTER_EMAIL: 'test@boite.invalid',
+};
+
+function git(cwd: string, ...args: string[]): string {
+  const run = Bun.spawnSync({
+    cmd: ['git', ...args],
+    cwd,
+    env: FIXTURE_GIT_ENV,
+    stdout: 'pipe',
+    stderr: 'pipe',
+    windowsHide: true,
+  });
+  if (!run.success) throw new Error(`git ${args.join(' ')} failed: ${run.stderr.toString()}`);
+  return run.stdout.toString();
+}
+
+/** A repository with one commit inside the test data directory, so its worktrees land in the data directory too. */
+async function repoProject(name = 'repo'): Promise<{ id: string; path: string }> {
+  const path = join(harness.dataDir, name);
+  mkdirSync(path, { recursive: true });
+  git(path, 'init', '-q');
+  git(path, 'commit', '-q', '--allow-empty', '-m', 'init');
+  return client.call('projects.add', { path, name });
+}
+
+async function echoAccount(): Promise<string> {
+  const accounts = await client.call('accounts.list', {});
+  const account = accounts.find((entry) => entry.providerId === 'echo');
+  if (account === undefined) throw new Error('no echo account');
+  return account.id;
+}
+
+describe('a thread in its own worktree', () => {
+  test('the slug and the root are what name the branch and its directory', () => {
+    expect(slugOf('Fix the login: retry on 401!')).toBe('fix-the-login-retry-on-401');
+    expect(slugOf('   ')).toBe('thread');
+    expect(slugOf('a'.repeat(60))).toBe('a'.repeat(40));
+    expect(worktreeRoot(join('D:', 'Dev', 'boite'))).toBe(join('D:', 'Dev', '.boite-worktrees', 'boite'));
+  });
+
+  test('the branch is boite/<slug>, the worktree is beside the repository, and the journal keeps both', async () => {
+    const project = await repoProject();
+    const accountId = await echoAccount();
+    const thread = await client.call('threads.create', {
+      projectId: project.id,
+      providerId: 'echo',
+      accountId,
+      title: 'Fix the login',
+      worktree: {},
+    });
+    expect(thread.branch).toBe('boite/fix-the-login');
+    expect(thread.cwd).toBe(join(worktreeRoot(project.path), 'fix-the-login'));
+    expect(existsSync(join(thread.cwd, '.git'))).toBe(true);
+    expect(git(project.path, 'worktree', 'list', '--porcelain')).toContain('branch refs/heads/boite/fix-the-login');
+    expect(harness.core.journal.getThread(thread.id)?.branch).toBe('boite/fix-the-login');
+    expect(harness.core.journal.getThread(thread.id)?.cwd).toBe(thread.cwd);
+    // The git calls ran under the thread's id, so the trace has them.
+    const processes = await client.call('trace.get', { threadId: thread.id });
+    expect(processes.some((record) => record.exe === 'git')).toBe(true);
+  });
+
+  test('a second thread with the same title gets -2, and a wanted branch is honoured or refused', async () => {
+    const project = await repoProject();
+    const accountId = await echoAccount();
+    const base = { projectId: project.id, providerId: 'echo' as const, accountId, title: 'Fix the login' };
+    await client.call('threads.create', { ...base, worktree: {} });
+    const second = await client.call('threads.create', { ...base, worktree: {} });
+    expect(second.branch).toBe('boite/fix-the-login-2');
+    expect(second.cwd).toBe(join(worktreeRoot(project.path), 'fix-the-login-2'));
+
+    const named = await client.call('threads.create', { ...base, worktree: { branch: 'feature/retry' } });
+    expect(named.branch).toBe('feature/retry');
+    expect(named.cwd).toBe(join(worktreeRoot(project.path), 'feature-retry'));
+
+    await expect(client.call('threads.create', { ...base, worktree: { branch: 'feature/retry' } })).rejects.toThrow(
+      'branch feature/retry already exists',
+    );
+    await expect(client.call('threads.create', { ...base, worktree: { branch: 'two words' } })).rejects.toThrow(
+      'not a branch name',
+    );
+    await expect(client.call('threads.create', { ...base, cwd: project.path, worktree: {} })).rejects.toThrow(
+      'cwd and worktree exclude each other',
+    );
+  });
+
+  test('a project that is not a git repository is refused by path, and no thread is written', async () => {
+    const path = join(harness.dataDir, 'plain');
+    mkdirSync(path, { recursive: true });
+    const project = await client.call('projects.add', { path, name: 'plain' });
+    const accountId = await echoAccount();
+    await expect(
+      client.call('threads.create', { projectId: project.id, providerId: 'echo', accountId, title: 'x', worktree: {} }),
+    ).rejects.toThrow(`${path} is not a git repository`);
+    expect(await client.call('threads.list', {})).toHaveLength(0);
+    expect(existsSync(worktreeRoot(path))).toBe(false);
+  });
+
+  test('a thread without the option keeps working in the project itself', async () => {
+    const project = await repoProject();
+    const accountId = await echoAccount();
+    const thread = await client.call('threads.create', { projectId: project.id, providerId: 'echo', accountId, title: 'plain' });
+    expect(thread.branch).toBeNull();
+    expect(thread.cwd).toBe(project.path);
+    rmSync(worktreeRoot(project.path), { recursive: true, force: true });
+  });
+});

@@ -319,6 +319,12 @@ export interface ThreadSummary {
   /** One of the model's effort level ids. Null means the model's own default. */
   effort: string | null;
   cwd: string;
+  /**
+   * The git branch the thread works on when it started in its own worktree;
+   * `cwd` is then that worktree, not the project. Null for a thread that works
+   * in the project directory itself.
+   */
+  branch: string | null;
   permissionMode: PermissionMode;
   status: ThreadStatus;
   unread: boolean;
@@ -781,6 +787,14 @@ export interface RpcMethods {
       model?: string;
       effort?: string | null;
       permissionMode?: PermissionMode;
+      /**
+       * Start the thread in a git worktree of the project on a branch of its
+       * own: `boite/<slug of the title>` unless `branch` names one. The core
+       * runs `git worktree add` and refuses by name when the project is not a
+       * git repository, git is missing, or the named branch already exists.
+       * Excludes `cwd`.
+       */
+      worktree?: { branch?: string };
     };
     result: ThreadSummary;
   };

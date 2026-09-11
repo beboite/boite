@@ -79,6 +79,19 @@ names the root `.gitignore` lists outright, and stops at twenty thousand files,
 saying so in `capped`. A glob or a negation in `.gitignore` is not read, so a
 tree ignored through one still shows up in the menu.
 
+A draft has one more chip, `Worktree`. On, the first send passes
+`worktree: {}` to `threads.create` and the core runs `git worktree add -b`
+before writing the thread: the branch is `boite/<slug of the title>` (`-2`,
+`-3` when the name is taken, or the `branch` the call names), the directory
+is `<parent of the project>/.boite-worktrees/<project>/<slug>`, beside the
+repository and on its volume, and the thread's `cwd` is that directory with
+`branch` set, which the header shows as a badge. A project that is not a git
+repository, a missing git, a branch that already exists: each is refused by
+name and no thread is written. The git calls run under the thread's id, so
+they are in its trace. Archiving the thread leaves the worktree and the branch
+where they are: the branch may carry work nobody merged, and deleting it is a
+person's call, `git worktree remove` from the project.
+
 ## The echo provider
 
 `echo` is the deterministic fake agent: it streams the prompt back, can call a

@@ -113,6 +113,24 @@ const RELEASES: Record<string, { version: string; archiveBytes: number }> = {
 const INSTALL_STEPS = 16;
 const INSTALL_STEP_MS = 120;
 
+/** Where the core would put a worktree: `<parent>/.boite-worktrees/<repo>/<slug>` on `boite/<slug>`. */
+function fakeWorktree(projectPath: string, title: string, branch?: string): { branch: string; path: string } {
+  const slug =
+    title
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 40) || 'thread';
+  const separator = projectPath.includes('\\') ? '\\' : '/';
+  const parts = projectPath.split(/[\\/]/);
+  const repo = parts.pop() ?? 'repo';
+  const dir = branch === undefined ? slug : branch.replace(/^boite\//, '').replace(/[^a-z0-9]+/gi, '-').toLowerCase();
+  return {
+    branch: branch ?? `boite/${slug}`,
+    path: [...parts, '.boite-worktrees', repo, dir].join(separator)
+  };
+}
+
 function toSummary(thread: Thread): ThreadSummary {
   const { messages: _messages, turns: _turns, ...rest } = thread;
   return { ...rest };
@@ -650,15 +668,20 @@ export class FakeClient implements ObservableClient {
         const project = this.#projects.find((p) => p.id === params.projectId);
         if (!project) throw this.#notFound('project', params.projectId);
         const at = this.#now();
+        const title = params.title ?? 'Untitled thread';
+        // The core's own placement: a branch named after the title, the
+        // worktree beside the repository. No git here, only the two strings.
+        const placed = params.worktree === undefined ? null : fakeWorktree(project.path, title, params.worktree.branch);
         const thread: Thread = {
           id: `t-${++this.#seq}`,
           projectId: params.projectId,
-          title: params.title ?? 'Untitled thread',
+          title,
           providerId: params.providerId,
           accountId: params.accountId,
           model: params.model ?? null,
           effort: params.effort ?? null,
-          cwd: params.cwd ?? project.path,
+          cwd: placed?.path ?? params.cwd ?? project.path,
+          branch: placed?.branch ?? null,
           permissionMode: params.permissionMode ?? 'default',
           status: 'idle',
           unread: false,
@@ -1981,6 +2004,7 @@ export class FakeClient implements ObservableClient {
       permissionMode: 'default' as const,
       archived: false,
       pinned: false,
+      branch: null,
       // A stored thread is the whole record; `threads.get` is what pages it.
       messagesBefore: null,
       commands: []
@@ -2064,7 +2088,9 @@ export class FakeClient implements ObservableClient {
       id: 't-scheduler',
       projectId: 'p-boite',
       title: 'Port the scheduler',
-      cwd: 'D:\\Dev\\Collab\\boite',
+      // The one seeded thread in its own worktree: what the header badge is looked at on.
+      cwd: 'D:\\Dev\\Collab\\.boite-worktrees\\boite\\port-the-scheduler',
+      branch: 'boite/port-the-scheduler',
       // Waiting on a question nobody has answered, the same reason as `t-bench`
       // and its permission: a page that loads now draws the card from the list.
       status: 'waiting',
@@ -2450,6 +2476,7 @@ export class FakeClient implements ObservableClient {
       pinned: false,
       title: 'Four hundred messages',
       cwd: 'D:\\Dev\\Collab\\boite',
+      branch: null,
       status: 'idle',
       unread: false,
       sessionId: 'sess-long',

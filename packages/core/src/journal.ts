@@ -12,7 +12,7 @@ import type {
   Usage,
 } from '@boite/contracts';
 
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 const DELTA_WINDOW_MS = 16;
 
 /** What `listMessagePage` hands back: the page itself and the cursor for what is behind it. */
@@ -52,6 +52,7 @@ interface ThreadRow {
   model: string | null;
   effort: string | null;
   cwd: string;
+  branch: string | null;
   permission_mode: string;
   status: string;
   unread: number;
@@ -228,6 +229,11 @@ CREATE TABLE IF NOT EXISTS sessions (
 );
 `;
 
+/** The branch of a thread started in its own worktree. NULL for one in the project itself. */
+const SCHEMA_V5 = `
+ALTER TABLE threads ADD COLUMN branch TEXT;
+`;
+
 function migrate(db: Database): void {
   const row = db.query('PRAGMA user_version').get() as { user_version: number } | null;
   let version = row?.user_version ?? 0;
@@ -246,6 +252,10 @@ function migrate(db: Database): void {
   if (version < 4) {
     db.exec(SCHEMA_V4);
     version = 4;
+  }
+  if (version < 5) {
+    db.exec(SCHEMA_V5);
+    version = 5;
   }
   db.exec(`PRAGMA user_version = ${version}`);
 }
@@ -272,6 +282,7 @@ function toThread(row: ThreadRow): ThreadSummary {
     model: row.model,
     effort: row.effort,
     cwd: row.cwd,
+    branch: row.branch,
     permissionMode: row.permission_mode as ThreadSummary['permissionMode'],
     status: row.status as ThreadSummary['status'],
     unread: row.unread !== 0,
@@ -448,8 +459,8 @@ export class Journal {
     this.db
       .query(
         `INSERT OR REPLACE INTO threads
-         (id, project_id, title, provider_id, account_id, model, effort, cwd, permission_mode, status, unread, archived, pinned, session_id, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (id, project_id, title, provider_id, account_id, model, effort, cwd, branch, permission_mode, status, unread, archived, pinned, session_id, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         thread.id,
@@ -460,6 +471,7 @@ export class Journal {
         thread.model,
         thread.effort,
         thread.cwd,
+        thread.branch,
         thread.permissionMode,
         thread.status,
         thread.unread ? 1 : 0,

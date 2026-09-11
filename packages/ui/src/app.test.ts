@@ -128,6 +128,36 @@ test('New thread opens a draft and the first send creates the thread titled from
   expect(store.openThread?.messages[0]?.role).toBe('user');
 });
 
+test('the draft worktree chip puts the first send on its own branch, and the header names it', async () => {
+  await mountOnFake();
+
+  // A thread keeps its directory: no chip while one is open.
+  expect(document.querySelector('[data-testid=composer-worktree]')).toBeNull();
+
+  query<HTMLButtonElement>('[data-testid=new-thread]').click();
+  await waitFor(() => store.draft !== null);
+  const chip = query<HTMLButtonElement>('[data-testid=composer-worktree]');
+  expect(chip.getAttribute('aria-pressed')).toBe('false');
+  chip.click();
+  await waitFor(() => store.draft?.worktree === true);
+  expect(query<HTMLButtonElement>('[data-testid=composer-worktree]').getAttribute('aria-pressed')).toBe('true');
+
+  const input = query<HTMLTextAreaElement>('[data-testid=composer-input]');
+  input.value = 'Fix the login';
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  await waitFor(() => !query<HTMLButtonElement>('[data-testid=composer-send]').disabled);
+  query<HTMLButtonElement>('[data-testid=composer-send]').click();
+
+  await waitFor(() => store.openThread !== null && store.draft === null);
+  expect(store.openThread?.branch).toBe('boite/fix-the-login');
+  expect(store.openThread?.cwd).toBe('D:\\Dev\\.boite-worktrees\\brain\\fix-the-login');
+  await waitFor(() => document.querySelector('[data-testid=thread-branch]') !== null);
+  expect(query('[data-testid=thread-branch]').textContent?.trim()).toBe('boite/fix-the-login');
+  expect(query('[data-testid=thread-branch]').title).toContain('fix-the-login');
+  // The chip went with the draft.
+  expect(document.querySelector('[data-testid=composer-worktree]')).toBeNull();
+});
+
 test('the sidebar draft row hands the keyboard back to the composer', async () => {
   await mountOnFake();
 
