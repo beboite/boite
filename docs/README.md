@@ -14,6 +14,8 @@ build commands in [../README.md](../README.md).
   the user's own login, the login flow and what the core refuses.
 - [keybindings.md](keybindings.md): the chord grammar, every command and its
   default, the `keybindings.json` file the core watches, and what it refuses.
+- [titles.md](titles.md): the three sources of a thread's title, the call the
+  agent gets after the first turn, `Regenerate title`, and what is refused.
 - [phone.md](phone.md): listening on the LAN, the one-time pairing link and the
   session it becomes, revoking a device, the service worker, what is cached and
   what never is, and the limits.

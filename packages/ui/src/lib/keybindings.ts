@@ -22,6 +22,7 @@ export const DEFAULT_BINDINGS: Record<KeybindingCommand, string | null> = {
   'add-project': null,
   pin: null,
   rename: null,
+  retitle: null,
   trace: null,
   appearance: null,
   providers: null,

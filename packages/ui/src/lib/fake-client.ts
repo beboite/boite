@@ -230,6 +230,8 @@ const LONG_ANSWERS = [
 
 /** How long the fake agent takes to answer a probe, so the picker shows it reading. */
 const PROBE_MS = 150;
+/** How long the fake's `threads.retitle` takes: long enough for the menu to say it is writing. */
+const RETITLE_DELAY_MS = 200;
 
 /**
  * What the fake ACP agent lists in the `configOptions` of a `session/new`: its
@@ -676,6 +678,7 @@ export class FakeClient implements ObservableClient {
           id: `t-${++this.#seq}`,
           projectId: params.projectId,
           title,
+          titleSource: 'prompt',
           providerId: params.providerId,
           accountId: params.accountId,
           model: params.model ?? null,
@@ -724,10 +727,35 @@ export class FakeClient implements ObservableClient {
       case 'threads.update': {
         const params = rawParams as RpcParams<'threads.update'>;
         const thread = this.#thread(params.threadId);
-        if (params.title !== undefined) thread.title = params.title;
+        if (params.title !== undefined) {
+          thread.title = params.title;
+          thread.titleSource = 'user';
+        }
         if (params.model !== undefined) thread.model = params.model;
         if (params.effort !== undefined) thread.effort = params.effort;
         if (params.permissionMode !== undefined) thread.permissionMode = params.permissionMode;
+        return this.#touch(thread);
+      }
+      case 'threads.retitle': {
+        const params = rawParams as RpcParams<'threads.retitle'>;
+        const thread = this.#thread(params.threadId);
+        const first = thread.messages.find((message) => message.role === 'user');
+        if (first === undefined) {
+          throw new RpcFailure({
+            code: RpcErrorCode.Refused,
+            message: 'this thread has no prompt to write a title from',
+            data: { threadId: params.threadId }
+          });
+        }
+        // The echo agent's rule, at the echo agent's pace: its prefix and the first five words.
+        await new Promise<void>((resolve) => setTimeout(resolve, RETITLE_DELAY_MS));
+        const words = first.parts
+          .map((part) => (part.type === 'text' ? part.text : ''))
+          .join(' ')
+          .split(/\s+/)
+          .filter((word) => word.length > 0);
+        thread.title = `Echo: ${words.slice(0, 5).join(' ')}`;
+        thread.titleSource = 'agent';
         return this.#touch(thread);
       }
       case 'threads.archive': {
@@ -2012,6 +2040,7 @@ export class FakeClient implements ObservableClient {
       archived: false,
       pinned: false,
       branch: null,
+      titleSource: 'prompt' as const,
       // A stored thread is the whole record; `threads.get` is what pages it.
       messagesBefore: null,
       commands: []
@@ -2482,6 +2511,7 @@ export class FakeClient implements ObservableClient {
       archived: false,
       pinned: false,
       title: 'Four hundred messages',
+      titleSource: 'prompt',
       cwd: 'D:\\Dev\\Collab\\boite',
       branch: null,
       status: 'idle',

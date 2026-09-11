@@ -417,7 +417,7 @@ test('a right click on a thread row opens the context menu, and Archive removes 
   row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 40, clientY: 60 }));
   await waitFor(() => document.querySelector('[data-testid=context-menu]') !== null);
   const labels = Array.from(document.querySelectorAll('[data-testid=context-menu] [data-row]')).map((el) => el.textContent?.trim());
-  expect(labels).toEqual(['Open', 'Rename', 'Pin', 'Archive']);
+  expect(labels).toEqual(['Open', 'Rename', 'Regenerate title', 'Pin', 'Archive']);
 
   query<HTMLButtonElement>('[data-testid=context-menu] [data-value=archive]').click();
   await waitFor(() => document.querySelector('[data-testid=context-menu]') === null);
@@ -896,6 +896,38 @@ test('the Providers page says where each managed install stands and offers Updat
   // The store is one module-level singleton: leave the next test on the chat.
   query<HTMLButtonElement>('[data-testid=settings-back]').click();
   await waitFor(() => store.page === 'chat');
+});
+
+test('Regenerate title in the thread menu waits on the agent, then the row and the header carry its words', async () => {
+  store.draft = null;
+  await mountOnFake();
+  await waitFor(() => document.querySelector('[data-thread-id="t-trace"]') !== null);
+  const before = store.threads.find((thread) => thread.id === 't-trace')?.title;
+  expect(before).toBe('Finish the trace tab');
+
+  const row = query<HTMLButtonElement>('[data-thread-id="t-trace"]');
+  row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 40, clientY: 60 }));
+  await waitFor(() => document.querySelector('[data-testid=context-menu]') !== null);
+  query<HTMLButtonElement>('[data-testid=context-menu] [data-value=retitle]').click();
+  await waitFor(() => document.querySelector('[data-testid=context-menu]') === null);
+
+  // While the fake writes, the menu says so and takes the item away.
+  expect(store.retitling).toEqual(['t-trace']);
+  row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 40, clientY: 60 }));
+  await waitFor(() => document.querySelector('[data-testid=context-menu]') !== null);
+  const waiting = query<HTMLButtonElement>('[data-testid=context-menu] [data-value=retitle]');
+  expect(waiting.textContent?.trim()).toBe('Writing a title');
+  expect(waiting.disabled).toBe(true);
+  press('Escape');
+
+  await waitFor(() => store.retitling.length === 0);
+  const after = store.threads.find((thread) => thread.id === 't-trace');
+  expect(after).toMatchObject({ title: 'Echo: What does the trace tab', titleSource: 'agent' });
+  await waitFor(() => query('[data-thread-id="t-trace"]').textContent?.includes('Echo: What does the trace tab') === true);
+
+  // The open thread is the same one: its header follows.
+  await store.open('t-trace');
+  await waitFor(() => query('[data-testid=thread-title]').textContent?.trim() === 'Echo: What does the trace tab');
 });
 
 test('the chat header keeps the mark and the title, the status word riding the mark', async () => {

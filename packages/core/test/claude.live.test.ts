@@ -60,6 +60,12 @@ live('claude driver, live', () => {
       });
       const exited = client.next('process.exited', (record) => record.threadId === threadId, TURN_TIMEOUT_MS);
       const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, TURN_TIMEOUT_MS);
+      // The first finished turn sends one short call to the small model for the title.
+      const titled = client.next(
+        'thread.updated',
+        (summary) => summary.id === threadId && summary.titleSource === 'agent',
+        TURN_TIMEOUT_MS,
+      );
 
       await client.call('turns.start', { threadId, prompt: 'Reply with exactly the word: pong' });
       const done = await finished;
@@ -68,6 +74,11 @@ live('claude driver, live', () => {
       expect(done.usage?.outputTokens).toBeGreaterThan(0);
       expect(started.length).toBeGreaterThan(0);
       expect((await exited).threadId).toBe(threadId);
+
+      const withTitle = await titled;
+      expect(withTitle.title.length).toBeGreaterThan(0);
+      expect(withTitle.title).not.toBe('live claude');
+      console.log(`claude wrote the title: ${JSON.stringify(withTitle.title)}`);
 
       const first = await client.call('threads.get', { threadId });
       expect(first.sessionId).not.toBeNull();
@@ -103,6 +114,9 @@ live('claude driver, live', () => {
         title: 'live warm claude',
       });
       const threadId = thread.id;
+      // A title the user typed: no title call after the first turn, so the only
+      // CLI this thread ever starts is the one the warm window keeps.
+      await client.call('threads.update', { threadId, title: 'live warm claude' });
       await client.call('threads.subscribe', { threadId });
 
       const started: RpcEvents['process.started'][] = [];

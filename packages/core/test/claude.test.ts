@@ -48,6 +48,9 @@ async function claudeThread(client: CoreClient): Promise<string> {
     accountId: account.id,
     title: 'scripted claude',
   });
+  // A title the user typed: the first finished turn asks the agent for none, so
+  // every query and every process these tests count is a turn's own.
+  await client.call('threads.update', { threadId: thread.id, title: 'scripted claude' });
   await client.call('threads.subscribe', { threadId: thread.id });
   return thread.id;
 }

@@ -214,7 +214,8 @@ test(
 
     const resources = await client.call('resources.list', {});
     const mine = resources.find((entry) => entry.threadId === thread.id);
-    expect(mine?.title).toBe('e2e thread');
+    // The echo agent's title, written once the first turn was done: its prefix and the prompt's words.
+    expect(mine?.title).toBe('Echo: e2e');
     expect(mine?.totals.processes).toBeGreaterThan(0);
   },
   TIMEOUT,

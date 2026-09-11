@@ -128,6 +128,26 @@ export interface ProbeResult {
   probedAt: Timestamp;
 }
 
+/**
+ * What a title is written from. No turn and no message sink: the driver asks
+ * its agent for a few words and answers them, or null when it has none to
+ * give, and the core falls back to the first line of the prompt.
+ */
+export interface TitleContext {
+  thread: ThreadSummary;
+  provider: ProviderDescriptor;
+  account: Account;
+  /** The isolation environment of this account, empty for the provider's own login. */
+  accountEnv: Record<string, string>;
+  /** The first prompt of the thread, its text parts only. */
+  prompt: string;
+  /** The first answer of the thread, its text parts only. Empty when the agent wrote no text. */
+  answer: string;
+  /** Traced under the thread the title is for, like a turn's process. */
+  spawnChild(cmd: string, args: string[], opts?: SpawnOptions): SpawnedChild;
+  log(level: 'info' | 'warn' | 'error', message: string): void;
+}
+
 /** Which cached probes to drop. An empty filter drops them all. */
 export interface ProbeFilter {
   providerId?: ProviderId;
@@ -147,6 +167,12 @@ export interface Driver {
   probedModels?(providerId: ProviderId, accountId: AccountId): ModelInfo[] | null;
   /** Drop cached probes: a reload, a changed account, a removed one. */
   forgetProbes?(filter?: ProbeFilter): void;
+  /**
+   * A title for the thread, in the agent's own words. A driver without one
+   * leaves the title to the core's cut of the prompt, and one that answers
+   * null or throws gets the same fallback, with the error on the log.
+   */
+  title?(ctx: TitleContext): Promise<string | null>;
   /** Drop whatever this thread keeps alive between turns: a warm process, a session. */
   releaseThread?(threadId: ThreadId): void;
   /** Core shutdown: drop what every thread keeps alive between turns. */

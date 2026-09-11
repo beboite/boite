@@ -24,6 +24,7 @@ const SLASH_SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui-slash-menu.png'
 const MENTION_SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui-mention-menu.png');
 const WORKTREE_SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui-worktree.png');
 const KEYBOARD_SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui-keyboard.png');
+const RETITLE_SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui-retitle.png');
 /** The one name `public/sw.js` opens; every other cache is deleted on activate. */
 const UI_CACHE = 'boite-ui-v1';
 /** What the echo provider's `[tool-stream]` directive types, one piece at a time. */
@@ -130,6 +131,40 @@ test(
 
     await page.screenshot(SCREENSHOT);
     expect(existsSync(SCREENSHOT)).toBe(true);
+  },
+  TIMEOUT,
+);
+
+test(
+  'the first finished turn gets the agent title, a rename keeps it, and the menu asks again',
+  async () => {
+    // The echo agent's rule: its prefix and the first words of the prompt, the directive cut.
+    await page.waitFor(`${textOf('thread-title')} === 'Echo: browser thread'`, 30_000);
+    await page.waitFor(`${textOf('thread-row')} .includes('Echo: browser thread')`);
+
+    // A name the user gave is theirs until they ask the agent again.
+    const client = await connect(core.url, core.token);
+    try {
+      const threads = await client.call('threads.list', {});
+      const mine = threads[0];
+      if (mine === undefined) throw new Error('no thread to rename');
+      expect(mine.titleSource).toBe('agent');
+      const renamed = await client.call('threads.update', { threadId: mine.id, title: 'my own name' });
+      expect(renamed.titleSource).toBe('user');
+    } finally {
+      client.close();
+    }
+    await page.waitFor(`${textOf('thread-title')} === 'my own name'`);
+
+    await page.evaluate<null>(
+      `(() => { document.querySelector('${testid('thread-row')}').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 60, clientY: 120 })); return null; })()`,
+    );
+    await page.waitFor(`document.querySelector('${testid('context-menu')} [data-value=retitle]')`);
+    await page.screenshot(RETITLE_SCREENSHOT);
+    await page.click(`${testid('context-menu')} [data-value=retitle]`);
+    await page.waitFor(`${textOf('thread-title')} === 'Echo: browser thread'`, 30_000);
+    // The echo agent answers faster than the menu's closing animation runs.
+    await page.waitFor(`!document.querySelector('${testid('context-menu')}')`);
   },
   TIMEOUT,
 );
@@ -417,7 +452,8 @@ test(
     await clickWhenEnabled(testid('composer-send'));
 
     await page.waitFor(`${textOf('thread-branch')} === 'boite/worktree-thread'`, 30_000);
-    await page.waitFor(`${textOf('thread-title')} === 'worktree thread'`);
+    // The turn is over in a blink and the echo agent's title lands right behind it.
+    await page.waitFor(`${textOf('thread-title')} === 'Echo: worktree thread'`);
     const worktree = join(worktreesDir, 'worktree-thread');
     expect(existsSync(join(worktree, '.git'))).toBe(true);
     expect(existsSync(join(worktree, 'src', 'lib', 'store.ts'))).toBe(true);
@@ -439,7 +475,7 @@ test(
     }
     await page.waitFor(`document.querySelectorAll('${testid('thread-row')}').length === 1`);
     await page.click(testid('thread-row'));
-    await page.waitFor(`${textOf('thread-title')} === 'browser thread [permission]'`);
+    await page.waitFor(`${textOf('thread-title')} === 'Echo: browser thread'`);
   },
   TIMEOUT,
 );
@@ -474,7 +510,7 @@ test(
     rmSync(file);
     await page.waitFor(`document.querySelector('${testid('new-thread')}').title.endsWith('(Ctrl+N)')`);
     await page.click(testid('thread-row'));
-    await page.waitFor(`${textOf('thread-title')} === 'browser thread [permission]'`);
+    await page.waitFor(`${textOf('thread-title')} === 'Echo: browser thread'`);
   },
   TIMEOUT,
 );
@@ -491,7 +527,7 @@ test(
 
     await page.click(testid('settings-back'));
     await page.waitFor(`document.querySelector('${testid('chat')}')`);
-    expect(await page.evaluate<string>(textOf('thread-title'))).toBe('browser thread [permission]');
+    expect(await page.evaluate<string>(textOf('thread-title'))).toBe('Echo: browser thread');
   },
   TIMEOUT,
 );
@@ -623,7 +659,8 @@ test(
     expect(await page.evaluate<number>(`performance.getEntriesByType('navigation').length`)).toBe(1);
 
     await page.waitFor(`document.querySelectorAll('${testid('thread-row')}').length === ${rows}`);
-    expect(await page.evaluate<string>(textOf('thread-title'))).toBe('reloaded permission');
+    // The permission turn finished before the restart, so the echo agent had titled the thread.
+    expect(await page.evaluate<string>(textOf('thread-title'))).toBe('Echo: reloaded');
 
     await page.type(testid('composer-input'), 'after the restart');
     await clickWhenEnabled(testid('composer-send'));

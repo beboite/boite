@@ -42,6 +42,7 @@ export function appCommands(store: Store, inShell: boolean): PaletteItem[] {
   if (open) {
     items.push(row('pin', open.pinned ? strings.palette.unpin : strings.palette.pin, 'favourite top'));
     items.push(row('rename', strings.palette.rename, 'title'));
+    items.push(row('retitle', strings.palette.retitle, 'title agent name'));
     items.push(row('panel', strings.palette.panel, 'browser surface'));
     items.push(row('trace', strings.palette.trace, 'processes load'));
   }
@@ -72,6 +73,7 @@ export function commandLabel(id: KeybindingCommand): string {
     case 'add-project': return strings.palette.addProject;
     case 'pin': return strings.keyboard.commands.pin;
     case 'rename': return strings.palette.rename;
+    case 'retitle': return strings.palette.retitle;
     case 'trace': return strings.palette.trace;
     case 'appearance': return strings.palette.appearance;
     case 'providers': return strings.palette.providers;
@@ -98,6 +100,7 @@ export function runCommand(store: Store, id: string, inShell: boolean): void {
       break;
     case 'pin': if (open) void store.pin(open.id, !open.pinned); break;
     case 'rename': store.showChat(); store.renameRequested = true; break;
+    case 'retitle': if (open) void store.retitle(open.id); break;
     case 'panel': store.showChat(); store.panel.toggle(); break;
     case 'trace': store.showChat(); if (!store.panelOpen || store.panel.activeSurfaceId !== 'trace') store.togglePanel(); break;
     case 'sidebar': store.toggleSidebar(); break;

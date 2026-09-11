@@ -1,6 +1,6 @@
 import type { AgentCommand, MessageId, ToolDocument, Usage } from '@boite/contracts';
 import { newId } from '../ids.ts';
-import type { Driver, TurnContext, TurnHandle, TurnResult } from './types.ts';
+import type { Driver, TitleContext, TurnContext, TurnHandle, TurnResult } from './types.ts';
 
 const CHUNK_SIZE = 16;
 const CHUNK_DELAY_MS = 5;
@@ -43,6 +43,9 @@ const IMAGE_BASE64 =
 
 /** The one command the fake acts on: `/shout <text>` comes back in capitals. */
 const SHOUT = 'shout';
+/** What the fake's title is made of: this prefix and the first words of the prompt. */
+const TITLE_PREFIX = 'Echo:';
+const TITLE_WORDS = 5;
 /** What the fake lists as its `/name` commands, the way a real agent would on its first turn. */
 const ECHO_COMMANDS: AgentCommand[] = [
   { name: SHOUT, description: 'The prompt back in capitals', hint: '<text>' },
@@ -145,6 +148,18 @@ function shellFor(command: string): { cmd: string; args: string[] } {
   return { cmd: 'sh', args: ['-c', command] };
 }
 
+/**
+ * What the fake calls a thread: `Echo:` and the first five words of the
+ * prompt, its directives cut. Null on a prompt with no word, which is what
+ * makes the core fall back to its own cut.
+ */
+export function echoTitle(prompt: string): string | null {
+  DIRECTIVE.lastIndex = 0;
+  const words = prompt.replace(DIRECTIVE, ' ').split(/\s+/).filter((word) => word.length > 0);
+  if (words.length === 0) return null;
+  return `${TITLE_PREFIX} ${words.slice(0, TITLE_WORDS).join(' ')}`;
+}
+
 /** Deterministic driver for tests and benches. It never reaches the network. */
 export const echoDriver: Driver = {
   protocol: 'echo',
@@ -158,6 +173,9 @@ export const echoDriver: Driver = {
         for (const wake of [...state.waiters]) wake();
       },
     };
+  },
+  title(ctx: TitleContext): Promise<string | null> {
+    return Promise.resolve(echoTitle(ctx.prompt));
   },
 };
 

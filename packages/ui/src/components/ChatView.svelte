@@ -52,12 +52,18 @@
       event,
       [
         { id: 'rename', label: strings.sidebar.rename },
+        {
+          id: 'retitle',
+          label: store.retitling.includes(open.id) ? strings.sidebar.retitling : strings.sidebar.retitle,
+          disabled: store.retitling.includes(open.id)
+        },
         { id: 'copy', label: strings.sidebar.copyPath, hint: open.cwd },
         separator(),
         { id: 'archive', label: strings.sidebar.archive, danger: true }
       ],
       (action) => {
         if (action === 'rename') beginRename();
+        else if (action === 'retitle') void store.retitle(open.id);
         else if (action === 'copy') void store.copy(open.cwd);
         else if (action === 'archive') void store.archive(open.id);
       }

@@ -12,7 +12,7 @@ import type {
   Usage,
 } from '@boite/contracts';
 
-export const SCHEMA_VERSION = 5;
+export const SCHEMA_VERSION = 6;
 const DELTA_WINDOW_MS = 16;
 
 /** What `listMessagePage` hands back: the page itself and the cursor for what is behind it. */
@@ -47,6 +47,7 @@ interface ThreadRow {
   id: string;
   project_id: string;
   title: string;
+  title_source: string;
   provider_id: string;
   account_id: string;
   model: string | null;
@@ -234,6 +235,14 @@ const SCHEMA_V5 = `
 ALTER TABLE threads ADD COLUMN branch TEXT;
 `;
 
+/**
+ * Who wrote the title: prompt, agent or user. A thread from before this
+ * column reads `prompt`, which is what every title was.
+ */
+const SCHEMA_V6 = `
+ALTER TABLE threads ADD COLUMN title_source TEXT NOT NULL DEFAULT 'prompt';
+`;
+
 function migrate(db: Database): void {
   const row = db.query('PRAGMA user_version').get() as { user_version: number } | null;
   let version = row?.user_version ?? 0;
@@ -257,6 +266,10 @@ function migrate(db: Database): void {
     db.exec(SCHEMA_V5);
     version = 5;
   }
+  if (version < 6) {
+    db.exec(SCHEMA_V6);
+    version = 6;
+  }
   db.exec(`PRAGMA user_version = ${version}`);
 }
 
@@ -277,6 +290,7 @@ function toThread(row: ThreadRow): ThreadSummary {
     id: row.id,
     projectId: row.project_id,
     title: row.title,
+    titleSource: row.title_source as ThreadSummary['titleSource'],
     providerId: row.provider_id,
     accountId: row.account_id,
     model: row.model,
@@ -459,13 +473,14 @@ export class Journal {
     this.db
       .query(
         `INSERT OR REPLACE INTO threads
-         (id, project_id, title, provider_id, account_id, model, effort, cwd, branch, permission_mode, status, unread, archived, pinned, session_id, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (id, project_id, title, title_source, provider_id, account_id, model, effort, cwd, branch, permission_mode, status, unread, archived, pinned, session_id, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         thread.id,
         thread.projectId,
         thread.title,
+        thread.titleSource,
         thread.providerId,
         thread.accountId,
         thread.model,

@@ -37,7 +37,8 @@ import type {
   TurnHandle,
   TurnResult,
 } from './drivers/types.ts';
-import type { SpawnOptions } from './procs.ts';
+import type { SpawnedChild, SpawnOptions } from './procs.ts';
+import { cleanAgentTitle, textOf, titleFromPrompt } from './titles.ts';
 
 const BASE64 = /^[A-Za-z0-9+/]+={0,2}$/;
 
@@ -119,6 +120,8 @@ export class ThreadStore {
    * next turn, and nothing here is worth a journal row.
    */
   private readonly commands = new Map<ThreadId, AgentCommand[]>();
+  /** The threads a title is being written for right now: a second ask is refused, not doubled. */
+  private readonly retitling = new Set<ThreadId>();
 
   constructor(private readonly core: Core) {}
 
@@ -207,6 +210,7 @@ export class ThreadStore {
       id: placed?.id ?? newId('thr_'),
       projectId: project.id,
       title: titleOf(params.title),
+      titleSource: 'prompt',
       providerId: provider.id,
       accountId: account.id,
       model,
@@ -254,7 +258,11 @@ export class ThreadStore {
   }): ThreadSummary {
     const thread = this.require(params.threadId);
     const next: ThreadSummary = { ...thread };
-    if (params.title !== undefined && params.title.length > 0) next.title = params.title;
+    // A title the user typed is theirs: no turn and no retitle overwrites it unasked.
+    if (params.title !== undefined && params.title.length > 0) {
+      next.title = params.title;
+      next.titleSource = 'user';
+    }
     const provider = this.core.providers.require(thread.providerId);
     if (params.model !== undefined && params.model !== thread.model) {
       // A new model starts on its own default unless the call says otherwise.
@@ -292,6 +300,80 @@ export class ThreadStore {
     // Pinning twice is not a change: no journal row, no event, the same summary back.
     if (thread.pinned === pinned) return this.withLoad(thread);
     return this.save({ ...thread, pinned }, 'thread.pinned');
+  }
+
+  /**
+   * A title from the thread's first prompt and first answer: the driver's own
+   * words when it has some (`titleSource: agent`), the first line of the
+   * prompt otherwise (`prompt`). A driver that throws is one warning on the
+   * log and the same fallback, never a failed call. Refused by name on a
+   * thread with no prompt yet, or while an earlier ask is still running.
+   */
+  async retitle(threadId: ThreadId): Promise<ThreadSummary> {
+    const thread = this.require(threadId);
+    if (this.retitling.has(threadId)) {
+      throw refused('a title is already being written for this thread', { threadId });
+    }
+    const messages = this.core.journal.listMessages(threadId);
+    const first = messages.find((message) => message.role === 'user');
+    if (first === undefined) throw refused('this thread has no prompt to write a title from', { threadId });
+    const prompt = textOf(first);
+    const answer = messages.find((message) => message.role === 'assistant' && textOf(message).length > 0);
+    const provider = this.core.providers.require(thread.providerId);
+    const account = this.core.accounts.require(thread.accountId);
+    const driver = getDriver(provider.protocol);
+
+    this.retitling.add(threadId);
+    let agentTitle: string | null = null;
+    try {
+      if (driver.title !== undefined) {
+        const raw = await driver.title({
+          thread,
+          provider,
+          account,
+          accountEnv: this.core.accounts.accountEnv(account, provider),
+          prompt,
+          answer: answer === undefined ? '' : textOf(answer),
+          spawnChild: this.leasedSpawnChild(threadId, provider),
+          log: (level, message) => {
+            this.core.log(level, message);
+          },
+        });
+        agentTitle = raw === null ? null : cleanAgentTitle(raw);
+      }
+    } catch (error) {
+      this.core.log('warn', `no title from ${provider.name} for thread ${threadId}: ${messageOf(error)}`);
+    } finally {
+      this.retitling.delete(threadId);
+    }
+    if (this.core.journal.isClosed()) return thread;
+
+    // The thread as it stands now: a rename that landed during the ask is the
+    // user's, and the agent's words do not go over it.
+    const current = this.require(threadId);
+    if (agentTitle !== null) return this.save({ ...current, title: agentTitle, titleSource: 'agent' }, 'thread.updated');
+    const fromPrompt = titleFromPrompt(prompt);
+    if (fromPrompt.length === 0 || (fromPrompt === current.title && current.titleSource === 'prompt')) {
+      return this.withLoad(current);
+    }
+    return this.save({ ...current, title: fromPrompt, titleSource: 'prompt' }, 'thread.updated');
+  }
+
+  /**
+   * The first finished turn of a thread still called by its prompt gets the
+   * agent's title, when the driver writes one. Not awaited by the turn: the
+   * title lands as its own `thread.updated`, seconds later on a real agent.
+   */
+  private autoTitle(threadId: ThreadId, turnId: TurnId): void {
+    const thread = this.core.journal.getThread(threadId);
+    if (thread === null || thread.archived || thread.titleSource !== 'prompt') return;
+    const provider = this.core.providers.get(thread.providerId);
+    if (provider === undefined || getDriver(provider.protocol).title === undefined) return;
+    const done = this.core.journal.listTurns(threadId).filter((turn) => turn.status === 'done');
+    if (done.length !== 1 || done[0]?.id !== turnId) return;
+    void this.retitle(threadId).catch((error: unknown) => {
+      this.core.log('warn', `no title for thread ${threadId}: ${messageOf(error)}`);
+    });
   }
 
   startTurn(threadId: ThreadId, prompt: string, attachments: ImageAttachment[] = []): Turn {
@@ -526,6 +608,7 @@ export class ThreadStore {
       unread: current.unread || !this.core.subscribers.hasSubscribers(threadId),
     };
     this.save(next, 'thread.finished');
+    if (result.status === 'done') this.autoTitle(threadId, turnId);
   }
 
   /**
@@ -703,20 +786,28 @@ export class ThreadStore {
         });
         return spawned;
       },
-      spawnChild: (cmd: string, args: string[], opts?: SpawnOptions) => {
-        const child = this.core.procs.spawnChild(threadId, cmd, args, opts);
-        const installs = this.core.providers.installs;
-        installs.acquire(provider.id);
-        let released = false;
-        const drop = (): void => {
-          if (released) return;
-          released = true;
-          installs.release(provider.id);
-        };
-        child.once('exit', drop);
-        child.once('error', drop);
-        return child;
-      },
+      spawnChild: this.leasedSpawnChild(threadId, provider),
+    };
+  }
+
+  /** `procs.spawnChild` under the thread, holding the provider's install lease for the child's life. */
+  private leasedSpawnChild(
+    threadId: ThreadId,
+    provider: ProviderDescriptor,
+  ): (cmd: string, args: string[], opts?: SpawnOptions) => SpawnedChild {
+    return (cmd, args, opts) => {
+      const child = this.core.procs.spawnChild(threadId, cmd, args, opts);
+      const installs = this.core.providers.installs;
+      installs.acquire(provider.id);
+      let released = false;
+      const drop = (): void => {
+        if (released) return;
+        released = true;
+        installs.release(provider.id);
+      };
+      child.once('exit', drop);
+      child.once('error', drop);
+      return child;
     };
   }
 
@@ -926,6 +1017,7 @@ export function registerThreadMethods(core: Core): void {
   core.router.register('threads.get', (params) => core.threads.get(params.threadId));
   core.router.register('messages.list', (params) => core.threads.messages(params));
   core.router.register('threads.update', (params) => core.threads.update(params));
+  core.router.register('threads.retitle', (params) => core.threads.retitle(params.threadId));
   core.router.register('threads.archive', (params) =>
     core.threads.archive(params.threadId, params.archived !== false),
   );

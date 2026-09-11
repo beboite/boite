@@ -60,6 +60,7 @@ A chord is modifiers, then one key, joined with `+`, case and spaces ignored.
 | `add-project` | none | The folder dialog in the shell, General in a browser |
 | `pin` | none | Pin or unpin the open thread |
 | `rename` | none | Rename the open thread |
+| `retitle` | none | Ask the agent for the open thread's title again ([titles.md](titles.md)) |
 | `trace` | none | The trace surface |
 | `appearance` | none | The Appearance tab |
 | `providers` | none | The Providers tab |

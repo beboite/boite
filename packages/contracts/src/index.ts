@@ -309,10 +309,19 @@ export interface ThreadLoad {
   memoryBytes: number;
 }
 
+/**
+ * Who wrote the thread's title. `prompt` is the first line of the first
+ * prompt, what a client sends on `threads.create`; `agent` is what the agent
+ * itself answered after the first turn or on `threads.retitle`; `user` is a
+ * `threads.update` with a title, after which nothing rewrites it unasked.
+ */
+export type TitleSource = 'prompt' | 'agent' | 'user';
+
 export interface ThreadSummary {
   id: ThreadId;
   projectId: ProjectId;
   title: string;
+  titleSource: TitleSource;
   providerId: ProviderId;
   accountId: AccountId;
   model: string | null;
@@ -622,6 +631,7 @@ export const KEYBINDING_COMMANDS = [
   'add-project',
   'pin',
   'rename',
+  'retitle',
   'trace',
   'appearance',
   'providers',
@@ -965,6 +975,15 @@ export interface RpcMethods {
     };
     result: ThreadSummary;
   };
+  /**
+   * A title written from the thread's first prompt and first answer. The
+   * agent's own driver writes it when it can (Claude on one short call to a
+   * small model, echo in memory), the core cuts the first line of the prompt
+   * otherwise. Refused by name on a thread that has no prompt yet, or while
+   * a title is already being written for it. The answer is the thread as
+   * saved, `titleSource` saying which of the two wrote it.
+   */
+  'threads.retitle': { params: { threadId: ThreadId }; result: ThreadSummary };
   'threads.archive': { params: { threadId: ThreadId; archived?: boolean }; result: ThreadSummary };
   /** Pin or unpin (`pinned: false`) a thread. An archived thread keeps its pin for when it comes back. */
   'threads.pin': { params: { threadId: ThreadId; pinned?: boolean }; result: ThreadSummary };

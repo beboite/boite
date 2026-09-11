@@ -47,6 +47,7 @@ test('the list carries every app command, the thread ones only while one is open
     'add-project',
     'pin',
     'rename',
+    'retitle',
     'panel',
     'trace',
     'sidebar',

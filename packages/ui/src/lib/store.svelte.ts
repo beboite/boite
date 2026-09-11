@@ -167,6 +167,8 @@ export class Store {
   paletteOpen = $state(false);
   /** Set by the palette's Rename: the chat header opens its title field and clears it. */
   renameRequested = $state(false);
+  /** The threads a `threads.retitle` is out for: their menu item waits. */
+  retitling = $state<ThreadId[]>([]);
   error = $state<string | null>(null);
   page = $state<Page>('chat');
   settingsTab = $state<SettingsTab>('general');
@@ -1206,6 +1208,23 @@ export class Store {
     const clean = title.trim();
     if (clean.length === 0) return;
     await this.update(threadId, { title: clean });
+  }
+
+  /** The agent's own title for the thread, asked again. The menu item is out while it runs. */
+  async retitle(threadId: ThreadId): Promise<void> {
+    const client = this.#client;
+    if (!client || this.retitling.includes(threadId)) return;
+    this.retitling = [...this.retitling, threadId];
+    try {
+      const summary = await client.call('threads.retitle', { threadId });
+      this.#upsertThread(summary);
+      const open = this.openThread;
+      if (open && open.id === threadId) Object.assign(open, summary);
+    } catch (error) {
+      this.#fail(error);
+    } finally {
+      this.retitling = this.retitling.filter((id) => id !== threadId);
+    }
   }
 
   async pin(threadId: ThreadId, pinned: boolean): Promise<void> {

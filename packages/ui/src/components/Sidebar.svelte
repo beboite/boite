@@ -85,6 +85,11 @@
     return [
       { id: 'open', label: strings.sidebar.open, disabled: isOpen(thread) },
       { id: 'rename', label: strings.sidebar.rename },
+      {
+        id: 'retitle',
+        label: store.retitling.includes(thread.id) ? strings.sidebar.retitling : strings.sidebar.retitle,
+        disabled: store.retitling.includes(thread.id)
+      },
       { id: 'pin', label: thread.pinned ? strings.sidebar.unpin : strings.sidebar.pin },
       separator(),
       { id: 'archive', label: strings.sidebar.archive, danger: true }
@@ -95,6 +100,7 @@
     contextMenu.open(event, threadItems(thread), (action) => {
       if (action === 'open') void store.open(thread.id);
       else if (action === 'rename') beginRename(thread);
+      else if (action === 'retitle') void store.retitle(thread.id);
       else if (action === 'pin') void store.pin(thread.id, !thread.pinned);
       else if (action === 'archive') void store.archive(thread.id);
     });
