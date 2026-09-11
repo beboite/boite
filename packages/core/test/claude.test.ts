@@ -945,4 +945,63 @@ describe('claude driver', () => {
       { name: 'yell', description: 'louder still', hint: null },
     ]);
   });
+
+  test('the last request of a turn is the context meter, the result names the window, and a compaction is a divider', async () => {
+    const client = await harness.connect();
+    const threadId = await claudeThread(client);
+
+    scripted(() => undefined, (fake) => {
+      fake.emit(init('sess-context'));
+      // The first request is a tool call: not the reading, the second request is.
+      fake.emit(
+        sdk({
+          type: 'assistant',
+          session_id: 'sess-context',
+          parent_tool_use_id: null,
+          message: {
+            id: 'msg_a',
+            role: 'assistant',
+            model: 'claude-opus-5',
+            content: [{ type: 'text', text: 'looking' }],
+            usage: { input_tokens: 4_000, cache_read_input_tokens: 90_000, cache_creation_input_tokens: 1_000 },
+          },
+        }),
+      );
+      fake.emit(
+        sdk({
+          type: 'system',
+          subtype: 'compact_boundary',
+          session_id: 'sess-context',
+          uuid: 'uuid-compact',
+          compact_metadata: { trigger: 'auto', pre_tokens: 95_000, post_tokens: 20_000 },
+        }),
+      );
+      fake.emit(
+        sdk({
+          type: 'assistant',
+          session_id: 'sess-context',
+          parent_tool_use_id: null,
+          message: {
+            id: 'msg_b',
+            role: 'assistant',
+            model: 'claude-opus-5',
+            content: [{ type: 'text', text: 'done' }],
+            usage: { input_tokens: 500, cache_read_input_tokens: 20_000, cache_creation_input_tokens: 0 },
+          },
+        }),
+      );
+      const result = success('sess-context') as SDKMessage & { modelUsage: Record<string, unknown> };
+      result.modelUsage = { 'claude-opus-5-20260401': { contextWindow: 200_000 } };
+      fake.emit(result);
+    });
+
+    expect(await runTurn(client, threadId, 'measure')).toBe('done');
+    const thread = await client.call('threads.get', { threadId });
+    expect(thread.context).toMatchObject({ tokens: 20_500, window: 200_000 });
+    expect(thread.messages[1]?.parts).toEqual([
+      { type: 'text', text: 'looking' },
+      { type: 'compaction', trigger: 'auto', preTokens: 95_000, postTokens: 20_000 },
+      { type: 'text', text: 'done' },
+    ]);
+  });
 });

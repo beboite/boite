@@ -104,7 +104,10 @@ takes images: each one comes back as `[image <mime>, <bytes> bytes, <name>]`
 in front of the echoed prompt, which is how a test proves an attachment reached
 the agent. It lists two slash commands on every turn, `/shout <text>` (the text
 back in capitals) and `/whisper`, so the composer's slash menu has an agent
-group to show and a test can prove the picked command reached the agent.
+group to show and a test can prove the picked command reached the agent. Its
+context meter is 100 tokens plus one per character of the prompt on a window
+of 2000, and `[compact]` in a prompt draws a compaction divider and drops the
+reading to 300 ([context.md](context.md)).
 
 ```bash
 BOITE_ECHO=1 bun run dev:core

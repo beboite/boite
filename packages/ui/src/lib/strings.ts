@@ -176,7 +176,10 @@ export const strings = {
     startIn: 'Start a thread in',
     changeProject: 'Change project',
     /** The header badge of a thread working in its own worktree; the title says where. */
-    branchHint: 'Working in a worktree on this branch'
+    branchHint: 'Working in a worktree on this branch',
+    /** The context meter's tooltip: `{tokens}` and `{window}` formatted, `{percent}` whole. */
+    contextHint: 'Context: {tokens} of {window} tokens ({percent}%) as of the last request',
+    contextHintNoWindow: 'Context: {tokens} tokens as of the last request; the agent named no window'
   },
 
   chat: {
@@ -211,6 +214,10 @@ export const strings = {
     thinking: 'Thinking',
     thinkingShow: 'Show the reasoning',
     thinkingHide: 'Hide the reasoning',
+    /** The divider a compaction draws: `{pre}` and `{post}` formatted token counts. */
+    compaction: 'Context compacted, {pre} to {post} tokens',
+    compactionNoPost: 'Context compacted from {pre} tokens',
+    compactionManual: 'by hand',
     permissionHeading: 'Wants to use',
     allow: 'Allow',
     deny: 'Deny',

@@ -12,7 +12,7 @@ import type {
   Usage,
 } from '@boite/contracts';
 
-export const SCHEMA_VERSION = 6;
+export const SCHEMA_VERSION = 7;
 const DELTA_WINDOW_MS = 16;
 
 /** What `listMessagePage` hands back: the page itself and the cursor for what is behind it. */
@@ -60,6 +60,7 @@ interface ThreadRow {
   archived: number;
   pinned: number;
   session_id: string | null;
+  context: string | null;
   created_at: number;
   updated_at: number;
 }
@@ -243,6 +244,11 @@ const SCHEMA_V6 = `
 ALTER TABLE threads ADD COLUMN title_source TEXT NOT NULL DEFAULT 'prompt';
 `;
 
+/** The context meter as JSON (`ContextUse`). NULL until the agent reports its usage. */
+const SCHEMA_V7 = `
+ALTER TABLE threads ADD COLUMN context TEXT;
+`;
+
 function migrate(db: Database): void {
   const row = db.query('PRAGMA user_version').get() as { user_version: number } | null;
   let version = row?.user_version ?? 0;
@@ -269,6 +275,10 @@ function migrate(db: Database): void {
   if (version < 6) {
     db.exec(SCHEMA_V6);
     version = 6;
+  }
+  if (version < 7) {
+    db.exec(SCHEMA_V7);
+    version = 7;
   }
   db.exec(`PRAGMA user_version = ${version}`);
 }
@@ -304,6 +314,7 @@ function toThread(row: ThreadRow): ThreadSummary {
     pinned: row.pinned !== 0,
     sessionId: row.session_id,
     load: null,
+    context: row.context === null ? null : parseJson<ThreadSummary['context']>(row.context, `threads.context of ${row.id}`),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -473,8 +484,8 @@ export class Journal {
     this.db
       .query(
         `INSERT OR REPLACE INTO threads
-         (id, project_id, title, title_source, provider_id, account_id, model, effort, cwd, branch, permission_mode, status, unread, archived, pinned, session_id, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (id, project_id, title, title_source, provider_id, account_id, model, effort, cwd, branch, permission_mode, status, unread, archived, pinned, session_id, context, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         thread.id,
@@ -493,6 +504,7 @@ export class Journal {
         thread.archived ? 1 : 0,
         thread.pinned ? 1 : 0,
         thread.sessionId,
+        thread.context === null ? null : JSON.stringify(thread.context),
         thread.createdAt,
         thread.updatedAt,
       );

@@ -18,6 +18,8 @@ build commands in [../README.md](../README.md).
   agent gets after the first turn, `Regenerate title`, and what is refused.
 - [imports.md](imports.md): a Claude Code session brought in as a thread, where
   the transcripts are read from, what is kept, and the resume that follows.
+- [context.md](context.md): the context meter in the header, where each
+  agent's reading comes from, and the divider a compaction draws.
 - [phone.md](phone.md): listening on the LAN, the one-time pairing link and the
   session it becomes, revoking a device, the service worker, what is cached and
   what never is, and the limits.

@@ -6,6 +6,7 @@
   import { separator, type MenuItem } from '../lib/menu';
   import { strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
+  import { contextLevel, contextPercent, formatTokens } from '../lib/tokens';
   import Composer from './Composer.svelte';
   import Menu from './Menu.svelte';
   import MessageList from './MessageList.svelte';
@@ -15,6 +16,20 @@
 
   let renaming = $state(false);
   let renameText = $state('');
+
+  const context = $derived(store.openThread?.context ?? null);
+  const contextShare = $derived(context === null ? null : contextPercent(context));
+  const contextTitle = $derived.by(() => {
+    if (context === null) return '';
+    const tokens = formatTokens(context.tokens);
+    if (context.window === null || contextShare === null) {
+      return strings.thread.contextHintNoWindow.replace('{tokens}', tokens);
+    }
+    return strings.thread.contextHint
+      .replace('{tokens}', tokens)
+      .replace('{window}', formatTokens(context.window))
+      .replace('{percent}', String(contextShare));
+  });
 
   function beginRename() {
     const thread = store.openThread;
@@ -153,6 +168,23 @@
         <span class="chip path branch mono" title="{strings.thread.branchHint}: {thread.cwd}" data-testid="thread-branch">
           <GitBranch size={12} strokeWidth={1.75} />
           {thread.branch}
+        </span>
+      {/if}
+      {#if thread && context}
+        <!-- The context meter: a ring filled to the share of the window, the count beside it. -->
+        <span
+          class="chip meter mono"
+          data-level={contextLevel(contextShare)}
+          data-testid="context-meter"
+          data-percent={contextShare ?? ''}
+          title={contextTitle}
+        >
+          {#if contextShare !== null}
+            <span class="ring" style="--fill: {contextShare}%" aria-hidden="true"></span>
+            {contextShare}%
+          {:else}
+            {formatTokens(context.tokens)}
+          {/if}
         </span>
       {/if}
       {#if thread}
@@ -295,6 +327,32 @@
 
   .branch {
     color: var(--color-foreground);
+  }
+
+  .meter {
+    flex: none;
+    gap: 6px;
+    font-size: var(--text-sm);
+    color: var(--color-muted-foreground);
+  }
+
+  .meter[data-level='high'] {
+    color: var(--color-foreground);
+  }
+
+  .meter[data-level='full'] {
+    color: var(--color-danger);
+  }
+
+  /* A 12 px ring: the filled arc is the share, the track is the border colour. */
+  .ring {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: conic-gradient(currentColor var(--fill), var(--color-border) 0);
+    -webkit-mask: radial-gradient(circle at center, transparent 3.5px, #000 4px);
+    mask: radial-gradient(circle at center, transparent 3.5px, #000 4px);
   }
 
   .trace {

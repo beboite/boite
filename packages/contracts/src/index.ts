@@ -317,6 +317,18 @@ export interface ThreadLoad {
  */
 export type TitleSource = 'prompt' | 'agent' | 'user';
 
+/**
+ * How full the agent's context is, as of the last request it made: `tokens`
+ * is what that request carried (input plus cache reads and writes), `window`
+ * the model's context window when the agent says it, null when it does not.
+ * Null on a thread whose agent never reported it.
+ */
+export interface ContextUse {
+  tokens: number;
+  window: number | null;
+  at: Timestamp;
+}
+
 export interface ThreadSummary {
   id: ThreadId;
   projectId: ProjectId;
@@ -343,6 +355,8 @@ export interface ThreadSummary {
   /** Provider session id once the first turn has run; used to resume. */
   sessionId: string | null;
   load: ThreadLoad | null;
+  /** The context meter, written at the end of every turn whose agent reports its usage. */
+  context: ContextUse | null;
   createdAt: Timestamp;
   updatedAt: Timestamp;
 }
@@ -437,6 +451,11 @@ export type MessagePart =
       multiple: boolean;
       answer?: QuestionAnswer | null;
     }
+  /**
+   * The agent compacted its context mid-turn: what it held before, what is
+   * left after when it says so. Drawn as a divider in the timeline.
+   */
+  | { type: 'compaction'; trigger: 'auto' | 'manual'; preTokens: number; postTokens: number | null }
   | { type: 'error'; message: string };
 
 export interface Message {

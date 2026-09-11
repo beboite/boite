@@ -244,6 +244,8 @@ class ClaudeTurn {
 
   private sessionId: string | null;
   private usage: Usage | null = null;
+  /** What the last API request of the turn carried, the context meter's reading. */
+  private contextTokens: number | null = null;
   private status: TurnResult['status'] = 'done';
   private error: string | null = null;
   private resolve: (result: TurnResult) => void = () => undefined;
@@ -311,9 +313,21 @@ class ClaudeTurn {
     }
   }
 
-  /** `commands_changed`: the CLI relearned its slash commands mid-session. */
+  /**
+   * `commands_changed`: the CLI relearned its slash commands mid-session.
+   * `compact_boundary`: it compacted the conversation, drawn as a divider.
+   */
   private handleSystem(message: Extract<SDKMessage, { type: 'system' }>): void {
     if (message.subtype === 'commands_changed') this.ctx.commands(commandsOf(message.commands));
+    if (message.subtype === 'compact_boundary') {
+      const meta = message.compact_metadata;
+      this.part(this.takeIndex(), {
+        type: 'compaction',
+        trigger: meta.trigger === 'manual' ? 'manual' : 'auto',
+        preTokens: meta.pre_tokens,
+        postTokens: typeof meta.post_tokens === 'number' ? meta.post_tokens : null,
+      });
+    }
   }
 
   private handleStream(event: StreamEvent): void {
@@ -381,8 +395,10 @@ class ClaudeTurn {
       this.fail(errorSentence(message.error));
       return;
     }
-    const body = message.message as { id?: string; content?: unknown } | undefined;
+    const body = message.message as { id?: string; content?: unknown; usage?: unknown } | undefined;
     const apiId = body?.id ?? '';
+    const carried = requestTokens(body?.usage);
+    if (carried !== null) this.contextTokens = carried;
     for (const block of contentBlocks(body?.content)) {
       if (block.type === 'text') {
         const text = block.text ?? '';
@@ -414,6 +430,9 @@ class ClaudeTurn {
 
   private handleResult(message: SDKResultMessage): void {
     this.usage = mapUsage(message);
+    if (this.contextTokens !== null) {
+      this.ctx.context({ tokens: this.contextTokens, window: contextWindowOf(message, this.ctx.thread.model) });
+    }
     if (message.subtype !== 'success') {
       this.fail(message.errors.length > 0 ? message.errors.join('; ') : message.subtype);
     } else if (message.is_error) {
@@ -1024,6 +1043,32 @@ function mapUsage(result: SDKResultMessage): Usage {
     cacheWriteTokens: usage?.cache_creation_input_tokens ?? 0,
     costUsdEquivalent: typeof result.total_cost_usd === 'number' ? result.total_cost_usd : null,
   };
+}
+
+/** What one API request carried: its input, plus what it read from and wrote to the cache. */
+function requestTokens(usage: unknown): number | null {
+  if (usage === null || typeof usage !== 'object') return null;
+  const fields = usage as Record<string, unknown>;
+  const input = fields.input_tokens;
+  if (typeof input !== 'number' || !Number.isFinite(input)) return null;
+  const read = typeof fields.cache_read_input_tokens === 'number' ? fields.cache_read_input_tokens : 0;
+  const written = typeof fields.cache_creation_input_tokens === 'number' ? fields.cache_creation_input_tokens : 0;
+  return input + read + written;
+}
+
+/**
+ * The window of the thread's model as the result names it, else of the one
+ * model the turn ran on, else null: two models in one turn is a subagent's
+ * doing and the meter is the main loop's.
+ */
+function contextWindowOf(result: SDKResultMessage, model: string | null): number | null {
+  const usage = result.modelUsage as Record<string, { contextWindow?: unknown }> | undefined;
+  if (usage === undefined) return null;
+  const entries = Object.entries(usage);
+  const own = model === null ? undefined : entries.find(([id]) => id === model || id.startsWith(`${model}-`));
+  const picked = own ?? (entries.length === 1 ? entries[0] : undefined);
+  const window = picked?.[1].contextWindow;
+  return typeof window === 'number' && Number.isFinite(window) && window > 0 ? window : null;
 }
 
 function errorSentence(error: SDKAssistantMessageError): string {

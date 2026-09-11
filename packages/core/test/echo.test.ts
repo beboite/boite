@@ -82,6 +82,36 @@ describe('echo driver', () => {
     );
   });
 
+  test('every turn writes the context meter on the thread, and a compact directive lowers it behind a divider', async () => {
+    const client = await harness.connect();
+    const { threadId } = await echoThread(harness, client);
+    await client.call('threads.subscribe', { threadId });
+
+    const updates: RpcEvents['thread.updated'][] = [];
+    client.on('thread.updated', (summary) => {
+      if (summary.id === threadId) updates.push(summary);
+    });
+
+    let finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 10000);
+    await client.call('turns.start', { threadId, prompt: 'twelve chars' });
+    await finished;
+    const plain = (await client.call('threads.get', { threadId })).context;
+    expect(plain).toMatchObject({ tokens: 112, window: 2000 });
+    // The meter reached the subscribers before the turn ended, on the thread itself.
+    expect(updates.some((summary) => summary.context?.tokens === 112)).toBe(true);
+
+    finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 10000);
+    await client.call('turns.start', { threadId, prompt: 'before [compact] after' });
+    await finished;
+    const thread = await client.call('threads.get', { threadId });
+    expect(thread.context).toMatchObject({ tokens: 300, window: 2000 });
+    expect(thread.messages[3]?.parts).toEqual([
+      { type: 'text', text: 'before ' },
+      { type: 'compaction', trigger: 'auto', preTokens: 1800, postTokens: 300 },
+      { type: 'text', text: ' after' },
+    ]);
+  });
+
   test('a tool directive produces a running then a done tool part', async () => {
     const client = await harness.connect();
     const { threadId } = await echoThread(harness, client);

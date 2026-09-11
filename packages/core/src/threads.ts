@@ -225,6 +225,7 @@ export class ThreadStore {
       pinned: false,
       sessionId: null,
       load: null,
+      context: null,
       createdAt: now,
       updatedAt: now,
     };
@@ -279,6 +280,7 @@ export class ThreadStore {
       pinned: false,
       sessionId: history.sessionId,
       load: null,
+      context: null,
       createdAt: first?.promptAt || now,
       updatedAt: last?.lastAt || now,
     };
@@ -864,6 +866,7 @@ export class ThreadStore {
         this.core.log(level, message);
       },
       commands: (list: AgentCommand[]) => this.noteCommands(threadId, list),
+      context: (use) => this.noteContext(threadId, use),
       requestPermission: (toolName: string, input: unknown, description: string | null): PermissionTicket =>
         this.requestPermission(thread, turn, toolName, input, description),
       askQuestion: (ask: QuestionAsk): QuestionTicket => this.askQuestion(thread, turn, ask),
@@ -1023,6 +1026,16 @@ export class ThreadStore {
     if (before !== undefined && JSON.stringify(before) === JSON.stringify(commands)) return;
     this.commands.set(threadId, commands);
     this.core.bus.emit('thread.commands', { threadId, commands });
+  }
+
+  /** The context meter, whole numbers only: a driver that misreads its agent writes nothing. */
+  private noteContext(threadId: ThreadId, use: { tokens: number; window: number | null }): void {
+    const tokens = Number.isFinite(use.tokens) && use.tokens >= 0 ? Math.round(use.tokens) : null;
+    if (tokens === null) return;
+    const window = use.window !== null && Number.isFinite(use.window) && use.window > 0 ? Math.round(use.window) : null;
+    const thread = this.core.journal.getThread(threadId);
+    if (thread === null) return;
+    this.save({ ...thread, context: { tokens, window, at: Date.now() } }, 'thread.context');
   }
 
   private setStatus(threadId: ThreadId, status: ThreadStatus): void {

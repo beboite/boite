@@ -235,6 +235,10 @@ const PROBE_MS = 150;
 const RETITLE_DELAY_MS = 200;
 /** How long the fake takes to read its transcripts, and to import one. */
 const IMPORT_LIST_MS = 120;
+/** The fake's context meter: a window, a floor on the first turn, a step per turn on top of the prompt. */
+const FAKE_CONTEXT_WINDOW = 200_000;
+const FAKE_CONTEXT_FLOOR = 1_200;
+const FAKE_CONTEXT_PER_TURN = 600;
 
 /**
  * What the fake ACP agent lists in the `configOptions` of a `session/new`: its
@@ -697,6 +701,7 @@ export class FakeClient implements ObservableClient {
           pinned: false,
           sessionId: null,
           load: null,
+          context: null,
           createdAt: at,
           updatedAt: at,
           messages: [],
@@ -958,6 +963,7 @@ export class FakeClient implements ObservableClient {
           pinned: false,
           sessionId: session.sessionId,
           load: null,
+          context: null,
           createdAt: session.startedAt,
           updatedAt: session.updatedAt,
           commands: [],
@@ -1228,6 +1234,12 @@ export class FakeClient implements ObservableClient {
     this.#inFlight.delete(thread.id);
     thread.status = 'idle';
     thread.unread = !this.#subscribed.has(thread.id);
+    // The context meter grows with every turn, the way a real session's does.
+    thread.context = {
+      tokens: (thread.context?.tokens ?? FAKE_CONTEXT_FLOOR) + FAKE_CONTEXT_PER_TURN + prompt.length * 4,
+      window: FAKE_CONTEXT_WINDOW,
+      at: this.#now()
+    };
     this.#touch(thread);
     this.#emit('turn.finished', structuredClone(turn));
     this.#pushScheduler(turn, 'finished');
@@ -2161,6 +2173,7 @@ export class FakeClient implements ObservableClient {
       unread: false,
       sessionId: 'sess-trace',
       load: null,
+      context: null,
       createdAt: T0,
       updatedAt: T0 + 60_000,
       turns: [
@@ -2238,6 +2251,8 @@ export class FakeClient implements ObservableClient {
       unread: false,
       sessionId: 'sess-scheduler',
       load: { processes: 2, cpuPercent: 34, memoryBytes: 412 * 1024 * 1024 },
+      // Running at a high share: the meter turns full past nine tenths.
+      context: { tokens: 183_000, window: 200_000, at: T0 + 100_000 },
       createdAt: T0 + 100_000,
       updatedAt: T0 + 180_000,
       turns: [
@@ -2297,6 +2312,7 @@ export class FakeClient implements ObservableClient {
       unread: false,
       sessionId: 'sess-bench',
       load: null,
+      context: null,
       createdAt: T0 + 200_000,
       updatedAt: T0 + 200_000,
       turns: [
@@ -2349,6 +2365,7 @@ export class FakeClient implements ObservableClient {
       unread: true,
       sessionId: 'sess-descriptors',
       load: null,
+      context: null,
       createdAt: T0 + 300_000,
       updatedAt: T0 + 340_000,
       turns: [
@@ -2388,13 +2405,19 @@ export class FakeClient implements ObservableClient {
             {
               type: 'text',
               text: 'It does, with the file, the field and what was expected. One case is still silent: a roots entry that resolves outside the descriptor directory.'
-            }
+            },
+            // The agent compacted on its way out: the divider under the answer.
+            { type: 'compaction', trigger: 'auto', preTokens: 184_000, postTokens: 31_000 },
+            { type: 'text', text: 'The loader test now names that case too.' }
           ],
           state: 'complete',
           createdAt: T0 + 320_000
         }
       ]
     };
+    // The meters: the trace thread at a comfortable share, the descriptor one just compacted.
+    finished.context = { tokens: 84_000, window: 200_000, at: T0 + 60_000 };
+    unread.context = { tokens: 31_000, window: 200_000, at: T0 + 340_000 };
 
     for (const thread of [finished, running, waiting, unread]) this.#threads.set(thread.id, thread);
     if (this.#long) {
@@ -2623,6 +2646,7 @@ export class FakeClient implements ObservableClient {
       unread: false,
       sessionId: 'sess-long',
       load: null,
+      context: null,
       createdAt: T0 + 400_000,
       updatedAt: T0 + 800_000,
       messagesBefore: null,

@@ -63,15 +63,23 @@ type Segment =
   | { kind: 'permission' }
   | { kind: 'question' }
   | { kind: 'think' }
+  | { kind: 'compact' }
   | { kind: 'spawn'; command: string }
   | { kind: 'error' };
+
+/** What the fake's context meter says: a fixed window, and a token per character of the prompt on top of a floor. */
+const CONTEXT_WINDOW = 2_000;
+const CONTEXT_FLOOR = 100;
+/** What `[compact]` claims it held before compacting and keeps after. */
+const COMPACT_PRE_TOKENS = 1_800;
+const COMPACT_POST_TOKENS = 300;
 
 /**
  * A directive in brackets, plus the bare word `question`: the fake agent asks
  * one whenever a prompt mentions it, which is what the end to end run types.
  */
 const DIRECTIVE =
-  /\[(?:sleep:\d+|tool-stream|tool|diff|doc|image|permission|question|think|spawn:[^\]]*|error)\]|\bquestion\b/g;
+  /\[(?:sleep:\d+|tool-stream|tool|diff|doc|image|permission|question|think|compact|spawn:[^\]]*|error)\]|\bquestion\b/g;
 
 export function parsePrompt(prompt: string): Segment[] {
   const segments: Segment[] = [];
@@ -90,6 +98,7 @@ export function parsePrompt(prompt: string): Segment[] {
     else if (body === 'permission') segments.push({ kind: 'permission' });
     else if (body === 'question') segments.push({ kind: 'question' });
     else if (body === 'think') segments.push({ kind: 'think' });
+    else if (body === 'compact') segments.push({ kind: 'compact' });
     else segments.push({ kind: 'error' });
     last = match.index + match[0].length;
   }
@@ -185,6 +194,7 @@ async function run(ctx: TurnContext, state: RunState): Promise<TurnResult> {
   let nextIndex = 0;
   let textIndex: number | null = null;
   let streamed = '';
+  let contextTokens = CONTEXT_FLOOR + ctx.prompt.length;
 
   const usage = (): Usage => ({
     inputTokens: countWords(ctx.prompt),
@@ -282,6 +292,15 @@ async function run(ctx: TurnContext, state: RunState): Promise<TurnResult> {
         break;
       case 'think':
         await writeThinking(thinkingFor(ctx.prompt));
+        break;
+      case 'compact':
+        ctx.emit.part(messageId, takeIndex(), {
+          type: 'compaction',
+          trigger: 'auto',
+          preTokens: COMPACT_PRE_TOKENS,
+          postTokens: COMPACT_POST_TOKENS,
+        });
+        contextTokens = COMPACT_POST_TOKENS;
         break;
       case 'tool': {
         const index = takeIndex();
@@ -438,5 +457,6 @@ async function run(ctx: TurnContext, state: RunState): Promise<TurnResult> {
   }
 
   ctx.emit.complete(messageId, 'complete');
+  ctx.context({ tokens: contextTokens, window: CONTEXT_WINDOW });
   return { status: state.stopped ? 'stopped' : 'done', sessionId, usage: usage() };
 }

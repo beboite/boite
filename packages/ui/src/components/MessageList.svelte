@@ -13,6 +13,7 @@
   import type { Message } from '@boite/contracts';
   import { strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
+  import { formatTokens } from '../lib/tokens';
   import PermissionCard from './PermissionCard.svelte';
   import QuestionCard from './QuestionCard.svelte';
   import Prose from './Prose.svelte';
@@ -483,6 +484,19 @@
                       submit={(optionIds, text) =>
                         void store.answerQuestion(message.threadId, part.questionId, optionIds, text)}
                     />
+                  {:else if part.type === 'compaction'}
+                    <div class="compaction" data-testid="compaction-part" data-trigger={part.trigger}>
+                      <span class="rule"></span>
+                      <span class="label">
+                        {part.postTokens === null
+                          ? strings.chat.compactionNoPost.replace('{pre}', formatTokens(part.preTokens))
+                          : strings.chat.compaction
+                              .replace('{pre}', formatTokens(part.preTokens))
+                              .replace('{post}', formatTokens(part.postTokens))}
+                        {#if part.trigger === 'manual'}({strings.chat.compactionManual}){/if}
+                      </span>
+                      <span class="rule"></span>
+                    </div>
                   {:else if part.type === 'error'}
                     <div class="error" data-testid="error-part">
                       <span class="section-label">{strings.chat.error}</span>
@@ -677,6 +691,26 @@
     margin-top: 4px;
     white-space: pre-wrap;
     word-break: break-word;
+  }
+
+  /* A compaction is a divider between what the agent still holds and what it let go. */
+  .compaction {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 6px 0;
+    font-size: var(--text-xs);
+    color: var(--color-muted-foreground);
+  }
+
+  .compaction .rule {
+    flex: 1;
+    height: 1px;
+    background: var(--color-border);
+  }
+
+  .compaction .label {
+    flex: none;
   }
 
   .jump {
