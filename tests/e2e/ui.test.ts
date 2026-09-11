@@ -28,6 +28,7 @@ const WORKTREE_SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui-worktree.png
 const KEYBOARD_SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui-keyboard.png');
 const RETITLE_SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui-retitle.png');
 const IMPORT_SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui-import.png');
+const EXPERIMENTS_SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui-experiments.png');
 /** The one name `public/sw.js` opens; every other cache is deleted on activate. */
 const UI_CACHE = 'boite-ui-v1';
 /** What the echo provider's `[tool-stream]` directive types, one piece at a time. */
@@ -193,9 +194,24 @@ test(
       client.close();
     }
 
-    await page.evaluate<null>(
-      `(() => { document.querySelector('${testid('project-row')}').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 60, clientY: 60 })); return null; })()`,
-    );
+    // The import sits behind an experiment: the menu has no row until the
+    // switch on the Experiments page is on, and the row is there the moment it is.
+    const openProjectMenu = `(() => { document.querySelector('${testid('project-row')}').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 60, clientY: 60 })); return null; })()`;
+    await page.evaluate<null>(openProjectMenu);
+    await page.waitFor(`document.querySelector('${testid('context-menu')} [data-value=copy]')`);
+    expect(await page.evaluate<boolean>(`document.querySelector('${testid('context-menu')} [data-value=import]') === null`)).toBe(true);
+    await page.evaluate<null>(`(() => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); return null; })()`);
+    await page.waitFor(`!document.querySelector('${testid('context-menu')}')`);
+
+    await page.click(testid('nav-settings'));
+    await page.click(testid('settings-tab-experiments'));
+    await page.click(testid('experiment-session-import'));
+    await page.waitFor(`document.querySelector('${testid('experiment-session-import')}').checked`);
+    await page.screenshot(EXPERIMENTS_SCREENSHOT);
+    await page.click(testid('settings-back'));
+    await page.waitFor(`document.querySelector('${testid('chat')}')`);
+
+    await page.evaluate<null>(openProjectMenu);
     await page.waitFor(`document.querySelector('${testid('context-menu')} [data-value=import]')`);
     await page.click(`${testid('context-menu')} [data-value=import]`);
     await page.waitFor(`document.querySelectorAll('${testid('import-row')}').length === 1`);

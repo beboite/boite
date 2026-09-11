@@ -6,6 +6,7 @@
  */
 
 import type { KeybindingCommand } from '@boite/contracts';
+import { experimentOn } from './experiments.svelte';
 import type { PaletteItem } from './palette';
 import { strings } from './strings';
 import type { Store } from './store.svelte';
@@ -39,7 +40,7 @@ export function appCommands(store: Store, inShell: boolean): PaletteItem[] {
   };
   if (store.projects.length > 0) items.push(row('new-thread', strings.palette.newThread, 'draft start'));
   items.push(row('add-project', strings.palette.addProject, 'folder open'));
-  if (store.projects.length > 0) items.push(row('import-session', strings.palette.importSession, 'transcript history resume'));
+  if (store.projects.length > 0 && experimentOn('session-import')) items.push(row('import-session', strings.palette.importSession, 'transcript history resume'));
   if (open) {
     items.push(row('pin', open.pinned ? strings.palette.unpin : strings.palette.pin, 'favourite top'));
     items.push(row('rename', strings.palette.rename, 'title'));

@@ -41,6 +41,7 @@ import {
   type ObservableClient
 } from './client';
 import { clearStoredEndpoint, resolveEndpoint, storeEndpoint } from './endpoint';
+import { isExperimentEnabled } from './experiments';
 import { titleFrom } from './format';
 import { chordLabel, commandForKey, resolveBindings } from './keybindings';
 import {
@@ -1230,10 +1231,14 @@ export class Store {
     }
   }
 
-  /** The import dialog for one project: opens at once, the list arrives when the core has read the files. */
+  /**
+   * The import dialog for one project: opens at once, the list arrives when the
+   * core has read the files. Behind the `session-import` experiment: a chord or
+   * a palette row that reaches here with it off does nothing.
+   */
   async openImports(projectId: ProjectId): Promise<void> {
     const client = this.#client;
-    if (!client) return;
+    if (!client || !isExperimentEnabled('session-import')) return;
     this.imports = { projectId, sessions: [], loading: true, running: null };
     try {
       const sessions = await client.call('imports.list', { projectId });

@@ -61,7 +61,7 @@ A chord is modifiers, then one key, joined with `+`, case and spaces ignored.
 | `pin` | none | Pin or unpin the open thread |
 | `rename` | none | Rename the open thread |
 | `retitle` | none | Ask the agent for the open thread's title again ([titles.md](titles.md)) |
-| `import-session` | none | Import a Claude Code session into the open thread's project ([imports.md](imports.md)) |
+| `import-session` | none | Import a Claude Code session into the open thread's project, once that experiment is on ([imports.md](imports.md)) |
 | `trace` | none | The trace surface |
 | `appearance` | none | The Appearance tab |
 | `providers` | none | The Providers tab |

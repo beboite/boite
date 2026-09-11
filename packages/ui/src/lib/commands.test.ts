@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, expect, test } from 'vitest';
 import { appCommands, isAgentCommand, runCommand, slashName } from './commands.svelte';
+import { setExperiment, writeExperiments } from './experiments';
 import { FakeClient } from './fake-client';
 import { Store } from './store.svelte';
 import { THEME_STORAGE_KEY } from './theme';
@@ -19,6 +20,7 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
+  writeExperiments([]);
   window.localStorage.clear();
   delete document.documentElement.dataset['theme'];
 });
@@ -28,6 +30,9 @@ function ids(): string[] {
 }
 
 test('the list carries every app command, the thread ones only while one is open', async () => {
+  // The import row rides behind its experiment, off until the switch is on.
+  expect(ids()).not.toContain('import-session');
+  setExperiment('session-import', true);
   expect(ids()).toEqual([
     'new-thread',
     'add-project',

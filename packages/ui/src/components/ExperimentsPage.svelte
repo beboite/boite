@@ -5,7 +5,8 @@
 
   /** One entry per shipped id, so a new experiment cannot land without its words. */
   const copy: Record<ExperimentId, { title: string; hint: string }> = {
-    'theme-grain': strings.experiments.themeGrain
+    'theme-grain': strings.experiments.themeGrain,
+    'session-import': strings.experiments.sessionImport
   };
 
   let enabled = $state<ExperimentId[]>(untrack(() => readExperiments()));

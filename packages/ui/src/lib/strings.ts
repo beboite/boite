@@ -515,6 +515,10 @@ export const strings = {
     themeGrain: {
       title: 'Grain theme',
       hint: 'A grainy ground fading from light grey at the top left to black at the bottom right'
+    },
+    sessionImport: {
+      title: 'Claude Code session import',
+      hint: 'Turn a session started in the terminal into a thread, from the project menu and the palette'
     }
   },
 

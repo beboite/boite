@@ -5,6 +5,7 @@
   import { confirm } from '../lib/confirm.svelte';
   import { Closing } from '../lib/closing.svelte';
   import { contextMenu } from '../lib/context-menu.svelte';
+  import { experimentOn } from '../lib/experiments.svelte';
   import { ago, tokens } from '../lib/format';
   import { separator, type MenuItem } from '../lib/menu';
   import { clampSidebar, SIDEBAR_DEFAULT } from '../lib/prefs';
@@ -110,7 +111,7 @@
     return [
       { id: 'new', label: fill(strings.sidebar.newThreadIn, { project: project.name }) },
       { id: 'copy', label: strings.sidebar.copyPath, hint: project.path },
-      { id: 'import', label: strings.sidebar.importSession },
+      ...(experimentOn('session-import') ? [{ id: 'import', label: strings.sidebar.importSession }] : []),
       separator(),
       { id: 'remove', label: strings.sidebar.removeProject, danger: true }
     ];

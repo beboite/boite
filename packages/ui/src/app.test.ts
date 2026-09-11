@@ -3,6 +3,7 @@ import { mount, unmount } from 'svelte';
 import type { RpcMethodName } from '@boite/contracts';
 import App from './App.svelte';
 import { store } from './lib/store.svelte';
+import { setExperiment, writeExperiments } from './lib/experiments';
 
 // The opener plugin is the shell's system browser; nothing real may run here.
 const { openUrl } = vi.hoisted(() => ({ openUrl: vi.fn(async (_url: string) => {}) }));
@@ -15,6 +16,8 @@ afterEach(() => {
   running = null;
   document.body.innerHTML = '';
   delete document.documentElement.dataset.theme;
+  // Through the writer, so the reactive mirror hears the reset too.
+  writeExperiments([]);
   window.localStorage.clear();
   delete window.__TAURI_INTERNALS__;
   openUrl.mockClear();
@@ -959,8 +962,27 @@ test('Regenerate title in the thread menu waits on the agent, then the row and t
   await waitFor(() => query('[data-testid=thread-title]').textContent?.trim() === 'Echo: What does the trace tab');
 });
 
+test('the project menu carries no import until the session-import experiment is on', async () => {
+  store.draft = null;
+  await mountOnFake();
+  await waitFor(() => document.querySelector('[data-testid=project-row][data-project-id="p-boite"]') !== null);
+
+  const head = query<HTMLElement>('[data-testid=project-row][data-project-id="p-boite"]');
+  head.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 40, clientY: 40 }));
+  await waitFor(() => document.querySelector('[data-testid=context-menu] [data-value=copy]') !== null);
+  expect(document.querySelector('[data-testid=context-menu] [data-value=import]')).toBeNull();
+  document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  await waitFor(() => document.querySelector('[data-testid=context-menu]') === null);
+
+  // The switch on the Experiments page is what puts the row in, no reload.
+  setExperiment('session-import', true);
+  head.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 40, clientY: 40 }));
+  await waitFor(() => document.querySelector('[data-testid=context-menu] [data-value=import]') !== null);
+});
+
 test('Import a Claude Code session in the project menu lists the transcripts and opens the imported thread', async () => {
   store.draft = null;
+  setExperiment('session-import', true);
   await mountOnFake();
   await waitFor(() => document.querySelector('[data-testid=project-row][data-project-id="p-boite"]') !== null);
 
