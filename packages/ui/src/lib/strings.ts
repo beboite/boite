@@ -413,6 +413,8 @@ export const strings = {
       mint: 'New pairing link',
       copy: 'Copy link',
       expires: 'Works once, until {time}',
+      qr: 'The pairing link as a QR code',
+      scan: 'Scan the code with the phone, or open the link on it.',
       lanHint: 'The core listens on this machine only: turn on the LAN switch above, then restart it, before a phone can reach this link.',
       devices: 'Paired devices',
       noDevices: 'No device paired yet.',

@@ -5,6 +5,7 @@
   import { confirm } from '../lib/confirm.svelte';
   import { ago, time } from '../lib/format';
   import { readStoredEndpoint } from '../lib/endpoint';
+  import { qrSvg } from '../lib/qr';
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
 
@@ -22,6 +23,23 @@
   // the pairing link is minted on the button, never on its own.
   $effect(() => {
     if (store.connection === 'ready') void store.loadSessions();
+  });
+
+  // The QR code follows the minted link: a new link redraws it, no link clears it.
+  let qr = $state('');
+  $effect(() => {
+    const url = store.pairing?.url;
+    if (!url) {
+      qr = '';
+      return;
+    }
+    let live = true;
+    void qrSvg(url).then((svg) => {
+      if (live) qr = svg;
+    });
+    return () => {
+      live = false;
+    };
   });
 
   async function revoke(session: PairedSession) {
@@ -198,8 +216,16 @@
         {/if}
       </div>
       {#if store.pairing}
-        <p class="mono wrap link" data-testid="pairing-link">{store.pairing.url}</p>
-        <p class="subtle hint">{fill(strings.settings.pairing.expires, { time: time(store.pairing.expiresAt) })}</p>
+        <div class="minted">
+          {#if qr}
+            <div class="qr" data-testid="pairing-qr" aria-label={strings.settings.pairing.qr}>{@html qr}</div>
+          {/if}
+          <div class="minted-text">
+            <p class="mono wrap link" data-testid="pairing-link">{store.pairing.url}</p>
+            <p class="subtle hint">{fill(strings.settings.pairing.expires, { time: time(store.pairing.expiresAt) })}</p>
+            <p class="subtle hint">{strings.settings.pairing.scan}</p>
+          </div>
+        </div>
       {/if}
     {:else}
       <p class="subtle hint">{strings.settings.pairing.paired}</p>
@@ -443,6 +469,39 @@
     font-weight: 600;
     color: var(--color-muted-foreground);
     margin: 16px 0 6px;
+  }
+
+  .minted {
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+    margin-top: 10px;
+  }
+
+  .minted-text {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .minted-text .link {
+    margin-top: 0;
+  }
+
+  .qr {
+    flex: none;
+    width: 132px;
+    height: 132px;
+    padding: 8px;
+    box-sizing: border-box;
+    border-radius: var(--radius-md);
+    background: #ffffff;
+    border: 1px solid var(--color-border);
+  }
+
+  .qr :global(svg) {
+    display: block;
+    width: 100%;
+    height: 100%;
   }
 
   .link {

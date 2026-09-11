@@ -33,7 +33,8 @@ became.
 ## Pairing
 
 A pairing link is minted from the desktop app, in Settings under "Phones and
-other devices", and the core prints one on its ready line too:
+other devices", drawn beside a QR code the phone's camera opens, and the core
+prints one on its ready line too:
 
 ```
 http://192.168.1.20:53421/?grant=<32 random bytes, hex>
@@ -118,9 +119,9 @@ feature, the phone opening Boite a second time.
   first-run card, and "Connecting" in the sidebar footer until the socket comes
   back on its own. No queued messages, no offline history: the journal is on the
   core.
-- Pairing is a link somebody carries over, by hand or by a QR code they make
-  themselves, and it has to be opened within ten minutes. There is no discovery
-  on the network.
+- Pairing is a link somebody carries over, by hand or by the QR code beside it,
+  and it has to be opened within ten minutes. There is no discovery on the
+  network.
 - There is no Android or iOS package. The phone runs the web app, and a Tauri
   mobile build is a later job.
 - Nothing pushes: a notification while the app is closed does not exist, because
