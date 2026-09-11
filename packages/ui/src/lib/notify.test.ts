@@ -1,6 +1,7 @@
-import { afterEach, beforeEach, describe, expect, test } from 'vitest';
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import {
   NOTIFICATIONS_STORAGE_KEY,
+  onNotificationOpen,
   readNotifications,
   sendNotification,
   setNotificationSender,
@@ -44,13 +45,18 @@ describe('the switch', () => {
 
 describe('toastFor', () => {
   test('names the thread and says what happened', () => {
-    expect(toastFor('done', 'Port the scheduler', null)).toEqual({ title: 'Port the scheduler', body: 'Done' });
-    expect(toastFor('error', 'Port the scheduler', 'the model refused')).toEqual({
+    expect(toastFor('done', 't-1', 'Port the scheduler', null)).toEqual({
       title: 'Port the scheduler',
-      body: 'the model refused'
+      body: 'Done',
+      threadId: 't-1'
     });
-    expect(toastFor('error', 'Port the scheduler', null).body).toBe('Failed');
-    expect(toastFor('needs-you', 'Port the scheduler', null).body).toBe('Needs your answer');
+    expect(toastFor('error', 't-1', 'Port the scheduler', 'the model refused')).toEqual({
+      title: 'Port the scheduler',
+      body: 'the model refused',
+      threadId: 't-1'
+    });
+    expect(toastFor('error', 't-1', 'Port the scheduler', null).body).toBe('Failed');
+    expect(toastFor('needs-you', 't-1', 'Port the scheduler', null).body).toBe('Needs your answer');
   });
 });
 
@@ -62,12 +68,50 @@ describe('sendNotification', () => {
     setNotificationSender(async (toast) => {
       sent.push(toast);
     });
-    await sendNotification({ title: 'a', body: 'b' });
-    expect(sent).toEqual([{ title: 'a', body: 'b' }]);
+    await sendNotification({ title: 'a', body: 'b', threadId: 't-1' });
+    expect(sent).toEqual([{ title: 'a', body: 'b', threadId: 't-1' }]);
 
     setNotificationSender(async () => {
       throw new Error('no surface');
     });
-    await expect(sendNotification({ title: 'a', body: 'b' })).resolves.toBeUndefined();
+    await expect(sendNotification({ title: 'a', body: 'b', threadId: 't-1' })).resolves.toBeUndefined();
+  });
+
+  test('on the web, a click on the toast opens its thread and closes the toast', async () => {
+    const shown: FakeNotification[] = [];
+    class FakeNotification {
+      static permission: NotificationPermission = 'granted';
+      static requestPermission = async () => FakeNotification.permission;
+      onclick: (() => void) | null = null;
+      closed = false;
+      constructor(
+        public title: string,
+        public options: { body?: string; tag?: string }
+      ) {
+        shown.push(this);
+      }
+      close() {
+        this.closed = true;
+      }
+    }
+    vi.stubGlobal('Notification', FakeNotification);
+    const opened: string[] = [];
+    const stop = onNotificationOpen((threadId) => opened.push(threadId));
+    try {
+      await sendNotification({ title: 'Port the scheduler', body: 'Done', threadId: 't-2' });
+      expect(shown).toHaveLength(1);
+      expect(shown[0]?.options).toEqual({ body: 'Done', tag: 't-2' });
+      shown[0]?.onclick?.();
+      expect(opened).toEqual(['t-2']);
+      expect(shown[0]?.closed).toBe(true);
+
+      // Permission refused: nothing is shown, nothing throws.
+      FakeNotification.permission = 'denied';
+      await sendNotification({ title: 'x', body: 'y', threadId: 't-3' });
+      expect(shown).toHaveLength(1);
+    } finally {
+      stop();
+      vi.unstubAllGlobals();
+    }
   });
 });

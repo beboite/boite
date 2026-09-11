@@ -14,6 +14,7 @@
   import { startGlass } from './lib/glass';
   import { installExternalLinks } from './lib/links';
   import { isQuitChord, QUIT_HOLD_MS, QuitHold } from './lib/quit-hold';
+  import { onNotificationOpen } from './lib/notify';
   import { strings } from './lib/strings';
   import { rightPanel } from './lib/right-panel.svelte';
   import { store } from './lib/store.svelte';
@@ -89,7 +90,14 @@
     const stopTheme = startTheme();
     // The stored window material, which only the shell wears.
     startGlass();
-    if (!inShell) return stopTheme;
+    // A click on a toast opens the thread it was about.
+    const stopToasts = onNotificationOpen((threadId) => void store.open(threadId));
+    if (!inShell) {
+      return () => {
+        stopTheme();
+        stopToasts();
+      };
+    }
 
     // A folder dragged from the Explorer: the shell reports it, the core
     // refuses anything that is not a directory, the toast repeats why.
@@ -118,6 +126,7 @@
       unlisten?.();
       stopTray?.();
       stopTheme();
+      stopToasts();
       quitHold?.dispose();
     };
   });

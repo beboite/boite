@@ -15,7 +15,6 @@
     "@lucide/svelte": "1.42.0",
     "@tauri-apps/api": "2.11.1",
     "@tauri-apps/plugin-dialog": "2.7.3",
-    "@tauri-apps/plugin-notification": "^2.4.0",
     "@tauri-apps/plugin-opener": "2.5.5",
     "geist": "^1.7.2",
     "qrcode": "^1.5.4"

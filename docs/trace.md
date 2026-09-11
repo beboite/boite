@@ -126,8 +126,9 @@ Both live under Settings, General, Background, and both are on by default.
 The third switch of that card, the notifications, is the UI's own and never
 reaches the core: a system toast when a thread finishes, fails or asks
 something while another thread is open or the window is not in front. The
-shell carries it through `tauri-plugin-notification`, the phone through Web
-Notifications, and it is stored per machine under `boite.notifications`.
+shell carries it as a Windows toast through its `notify` command, the phone
+through Web Notifications, a click on either opens the thread, and the switch
+is stored per machine under `boite.notifications`.
 
 ## Linux and macOS
 

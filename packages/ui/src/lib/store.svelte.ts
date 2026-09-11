@@ -1382,7 +1382,7 @@ export class Store {
     });
     if (!go) return;
     const title = this.threads.find((t) => t.id === threadId)?.title ?? strings.app.name;
-    void sendNotification(toastFor(kind, title, detail));
+    void sendNotification(toastFor(kind, threadId, title, detail));
   }
 
   /** The switch of the Background card; the platform prompt comes with the first turn-on. */

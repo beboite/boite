@@ -4,11 +4,13 @@
  * in this window or another window altogether; the open thread on a focused
  * window says it on the screen already and gets no toast.
  *
- * The decision is pure and tested; the delivery is the shell's notification
- * plugin, or the Web Notifications API on a phone, and nothing at all where
- * neither answers. The switch lives in `localStorage` under
- * `boite.notifications`, on by default, per machine like the theme: it is a
- * client's choice, so the core never hears of it.
+ * The decision is pure and tested; the delivery is the shell's `notify`
+ * command (a Windows toast whose click comes back as `notification://open`),
+ * or the Web Notifications API on a phone, and nothing at all where neither
+ * answers. A click on either opens the thread the toast was about. The switch
+ * lives in `localStorage` under `boite.notifications`, on by default, per
+ * machine like the theme: it is a client's choice, so the core never hears
+ * of it.
  */
 
 import { strings } from './strings';
@@ -53,41 +55,69 @@ export function writeNotifications(enabled: boolean): void {
 export interface Toast {
   title: string;
   body: string;
+  /** The thread a click on the toast opens. */
+  threadId: string;
 }
 
 /** The words for each kind, so the store never builds prose. */
-export function toastFor(kind: NotifyKind, title: string, detail: string | null): Toast {
+export function toastFor(kind: NotifyKind, threadId: string, title: string, detail: string | null): Toast {
   const body =
     kind === 'done'
       ? strings.notify.done
       : kind === 'error'
         ? (detail ?? strings.notify.failed)
         : strings.notify.needsYou;
-  return { title, body };
+  return { title, body, threadId };
 }
 
 type Sender = (toast: Toast) => Promise<void>;
+type Opener = (threadId: string) => void;
 
 let sender: Sender | null = null;
+let opener: Opener | null = null;
 
 /** A test hands in its own sender; the app uses the platform one below. */
 export function setNotificationSender(next: Sender | null): void {
   sender = next;
 }
 
+/**
+ * What a click on a toast does: the store hands in `open`. In the shell the
+ * click arrives as the `notification://open` event, which this listens for;
+ * on the web it is the notification's own `onclick`. Returns the way to stop.
+ */
+export function onNotificationOpen(next: Opener | null): () => void {
+  opener = next;
+  if (next === null || window.__TAURI_INTERNALS__ === undefined) return () => {};
+  let stop: (() => void) | undefined;
+  let disposed = false;
+  void import('@tauri-apps/api/event').then(async ({ listen }) => {
+    const unlisten = await listen<string>('notification://open', (event) => opener?.(event.payload));
+    if (disposed) unlisten();
+    else stop = unlisten;
+  });
+  return () => {
+    disposed = true;
+    stop?.();
+    if (opener === next) opener = null;
+  };
+}
+
 async function shellSender(toast: Toast): Promise<void> {
-  const plugin = await import('@tauri-apps/plugin-notification');
-  let granted = await plugin.isPermissionGranted();
-  if (!granted) granted = (await plugin.requestPermission()) === 'granted';
-  if (!granted) return;
-  plugin.sendNotification({ title: toast.title, body: toast.body });
+  const { invoke } = await import('@tauri-apps/api/core');
+  await invoke('notify', { title: toast.title, body: toast.body, threadId: toast.threadId });
 }
 
 async function webSender(toast: Toast): Promise<void> {
   if (typeof Notification === 'undefined') return;
   if (Notification.permission === 'default') await Notification.requestPermission();
   if (Notification.permission !== 'granted') return;
-  new Notification(toast.title, { body: toast.body });
+  const notification = new Notification(toast.title, { body: toast.body, tag: toast.threadId });
+  notification.onclick = () => {
+    window.focus();
+    notification.close();
+    opener?.(toast.threadId);
+  };
 }
 
 /** Sends, and never throws: a toast that cannot go out is not an error the chat should show. */
@@ -107,11 +137,8 @@ export async function sendNotification(toast: Toast): Promise<void> {
  */
 export async function requestNotificationPermission(): Promise<boolean> {
   try {
-    if (window.__TAURI_INTERNALS__ !== undefined) {
-      const plugin = await import('@tauri-apps/plugin-notification');
-      if (await plugin.isPermissionGranted()) return true;
-      return (await plugin.requestPermission()) === 'granted';
-    }
+    // A Windows toast asks nobody: the system's own switch decides, silently.
+    if (window.__TAURI_INTERNALS__ !== undefined) return true;
     if (typeof Notification === 'undefined') return false;
     if (Notification.permission === 'granted') return true;
     return (await Notification.requestPermission()) === 'granted';
