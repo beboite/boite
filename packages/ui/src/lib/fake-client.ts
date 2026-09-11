@@ -8,6 +8,7 @@ import {
   type PluginState,
   type PluginPool,
   type CoreInfo,
+  type ImageAttachment,
   type Message,
   type MessageId,
   type MessagePart,
@@ -37,6 +38,7 @@ import {
   type Turn,
   type Usage
 } from '@boite/contracts';
+import { decodedBytes } from './attachments';
 import { RpcFailure, type ClientState, type EventHandler, type ObservableClient } from './client';
 
 export interface FakeClientOptions {
@@ -687,7 +689,7 @@ export class FakeClient implements ObservableClient {
 
       case 'turns.start': {
         const params = rawParams as RpcParams<'turns.start'>;
-        return this.#startTurn(params.threadId, params.prompt);
+        return this.#startTurn(params.threadId, params.prompt, params.attachments ?? []);
       }
       case 'turns.stop': {
         const params = rawParams as RpcParams<'turns.stop'>;
@@ -842,7 +844,7 @@ export class FakeClient implements ObservableClient {
     return stopped;
   }
 
-  #startTurn(threadId: ThreadId, prompt: string): Turn {
+  #startTurn(threadId: ThreadId, prompt: string, attachments: ImageAttachment[] = []): Turn {
     const thread = this.#thread(threadId);
     if (thread.archived) {
       throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'cannot start a turn on an archived thread', data: { threadId } });
@@ -868,7 +870,16 @@ export class FakeClient implements ObservableClient {
       threadId,
       turnId: turn.id,
       role: 'user',
-      parts: [{ type: 'text', text: prompt }],
+      // The images ride after the text, the order the core journals them in.
+      parts: [
+        { type: 'text', text: prompt },
+        ...attachments.map((attachment): MessagePart => ({
+          type: 'image',
+          mimeType: attachment.mimeType,
+          data: attachment.data,
+          alt: attachment.name
+        }))
+      ],
       state: 'complete',
       createdAt: at
     };
@@ -887,7 +898,7 @@ export class FakeClient implements ObservableClient {
     this.#pushScheduler(turn, 'running');
 
     const record = { cancelled: false, done: Promise.resolve() };
-    record.done = this.#stream(thread, turn, prompt, record);
+    record.done = this.#stream(thread, turn, prompt, record, attachments);
     this.#inFlight.set(threadId, record);
 
     return structuredClone(turn);
@@ -897,7 +908,8 @@ export class FakeClient implements ObservableClient {
     thread: Thread,
     turn: Turn,
     prompt: string,
-    record: { cancelled: boolean }
+    record: { cancelled: boolean },
+    attachments: ImageAttachment[] = []
   ): Promise<void> {
     const message: Message = {
       id: `m-${++this.#seq}`,
@@ -936,7 +948,19 @@ export class FakeClient implements ObservableClient {
       part: { type: 'text', text: '' }
     });
 
-    for (const piece of chunkText(prompt, 5)) {
+    // An image is named back the way the echo driver names it, format and
+    // weight first, then the prompt itself is echoed.
+    const reply =
+      attachments
+        .map(
+          (attachment) =>
+            `[image ${attachment.mimeType}, ${decodedBytes(attachment.data)} bytes${
+              attachment.name === null ? '' : `, ${attachment.name}`
+            }] `
+        )
+        .join('') + prompt;
+
+    for (const piece of chunkText(reply, 5)) {
       if (record.cancelled) break;
       await this.#pause();
       const part = message.parts[textIndex];
@@ -1742,11 +1766,13 @@ export class FakeClient implements ObservableClient {
           }
         ],
         install: null,
+        // The shipped echo descriptor reads images too: the fake agent names
+        // back what it was sent, which is what the attachment capture proves.
         capabilities: {
           approvals: true,
           hooks: false,
           checkpoint: false,
-          images: false,
+          images: true,
           planMode: false,
           resume: true
         }

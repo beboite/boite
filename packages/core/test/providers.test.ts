@@ -211,7 +211,7 @@ describe('providers', () => {
       approvals: true,
       hooks: false,
       checkpoint: false,
-      images: false,
+      images: true,
       planMode: true,
       resume: true,
     });

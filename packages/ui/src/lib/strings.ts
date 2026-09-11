@@ -158,6 +158,8 @@ export const strings = {
       docs: '{count} docs'
     },
     documentImage: 'What the tool produced',
+    /** An image the user sent with the prompt, when it came with no name. */
+    imagePart: 'Image sent with the prompt',
     diffHidden: '{count} unchanged lines',
     diffAdded: '+{count}',
     diffRemoved: '-{count}',
@@ -216,7 +218,16 @@ export const strings = {
     unavailable: 'not installed',
     noAccount: 'no account',
     noProvider: 'No provider',
-    hint: 'Enter to send, Shift+Enter for a new line'
+    hint: 'Enter to send, Shift+Enter for a new line',
+    /** Images sent with the prompt: the strip above the box and what refuses one. */
+    attach: 'Attach images',
+    attachRemove: 'Remove {name}',
+    attachAlt: 'Attached image',
+    attachUnnamed: 'the pasted image',
+    attachFormat: '{name} is {type}, and an image must be one of {formats}.',
+    attachTooLarge: '{name} is too big: an image may weigh {max} at most.',
+    attachTooMany: 'A turn carries at most {max} images, so {name} was left out.',
+    attachNoImages: '{provider} takes no images: send the prompt without them.'
   },
 
   /** The panel on the right of the chat: its tab strip, its launcher, its surfaces. */

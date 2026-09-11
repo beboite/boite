@@ -74,7 +74,10 @@ fake tool, can ask for a permission, can spawn a child process on request, and
 never touches the network. It ships only when `BOITE_ECHO=1` is set, so a user
 never sees it in the picker. The tests, the end to end suite and the bench set
 it themselves; a core you start by hand without it lists the real providers
-alone, and anything expecting an echo account fails on "no echo account".
+alone, and anything expecting an echo account fails on "no echo account". It
+takes images: each one comes back as `[image <mime>, <bytes> bytes, <name>]`
+in front of the echoed prompt, which is how a test proves an attachment reached
+the agent.
 
 ```bash
 BOITE_ECHO=1 bun run dev:core

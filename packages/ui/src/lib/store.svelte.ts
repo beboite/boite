@@ -1,6 +1,7 @@
 import type {
   Account,
   CoreInfo,
+  ImageAttachment,
   Message,
   MessageId,
   ModelInfo,
@@ -945,23 +946,29 @@ export class Store {
     }
   }
 
-  /** Unsent prompts survive thread switches and the settings page. */
+  /**
+   * Unsent prompts survive thread switches and the settings page, images and
+   * all: a prompt queued while a turn runs keeps the pictures it was written
+   * with, so the pair goes out together when its turn comes.
+   */
   composerStates = $state<Record<string, {
     text: string;
-    queued: string[];
+    attachments: ImageAttachment[];
+    queued: { text: string; attachments: ImageAttachment[] }[];
     sending: boolean;
     paused: boolean;
   }>>({});
 
   /**
    * The composer's one action. On a draft it creates the thread first, titled
-   * from the prompt; on an open thread it starts a turn.
+   * from the prompt; on an open thread it starts a turn. An image alone is a
+   * turn too, so an empty prompt with an attachment goes out.
    */
-  async submit(prompt: string, choice: Choice): Promise<boolean> {
-    if (prompt.trim().length === 0 || this.connection !== 'ready') return false;
+  async submit(prompt: string, choice: Choice, attachments: ImageAttachment[] = []): Promise<boolean> {
+    if ((prompt.trim().length === 0 && attachments.length === 0) || this.connection !== 'ready') return false;
     this.remember(choice);
     if (this.openThread) {
-      return this.send(prompt, this.openThread.id);
+      return this.send(prompt, this.openThread.id, attachments);
     }
     const draft = this.draft;
     if (!draft) return false;
@@ -980,7 +987,7 @@ export class Store {
       this.composerStates[created.id] = composer;
       delete this.composerStates[DRAFT_STASH_KEY];
     }
-    return this.send(prompt, created.id);
+    return this.send(prompt, created.id, attachments);
   }
 
   /**
@@ -990,21 +997,36 @@ export class Store {
    * with. The draft waits for the send, because creating a thread from a draft
    * opens it and would otherwise take the new draft's place.
    */
-  async submitAndDraft(prompt: string, choice: Choice): Promise<boolean> {
+  async submitAndDraft(
+    prompt: string,
+    choice: Choice,
+    attachments: ImageAttachment[] = []
+  ): Promise<boolean> {
     const projectId = this.openThread?.projectId ?? this.draft?.projectId;
     const threadId = this.openThread?.id;
-    if (!(await this.submit(prompt, choice))) return false;
+    if (!(await this.submit(prompt, choice, attachments))) return false;
     if (projectId !== undefined && (threadId === undefined || this.openThread?.id === threadId)) {
       this.startDraft(projectId);
     }
     return true;
   }
 
-  async send(prompt: string, threadId = this.openThread?.id): Promise<boolean> {
+  async send(
+    prompt: string,
+    threadId = this.openThread?.id,
+    attachments: ImageAttachment[] = []
+  ): Promise<boolean> {
     const client = this.#client;
-    if (!client || !threadId || this.connection !== 'ready' || prompt.trim().length === 0) return false;
+    if (!client || !threadId || this.connection !== 'ready') return false;
+    if (prompt.trim().length === 0 && attachments.length === 0) return false;
     try {
-      await client.call('turns.start', { threadId, prompt });
+      // The key is left out when there is nothing to carry: a turn with no
+      // image sends the params it always sent.
+      await client.call('turns.start', {
+        threadId,
+        prompt,
+        ...(attachments.length > 0 ? { attachments } : {})
+      });
       return true;
     } catch (error) {
       this.#fail(error);

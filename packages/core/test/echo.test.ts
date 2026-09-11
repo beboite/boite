@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import type { MessagePart, RpcEvents, ToolDocument } from '@boite/contracts';
+import type { ImageAttachment, MessagePart, RpcEvents, ToolDocument } from '@boite/contracts';
 import { echoThread, startTestCore } from './harness.ts';
 import type { TestCore } from './harness.ts';
 
@@ -181,6 +181,56 @@ describe('echo driver', () => {
     const data = image?.kind === 'image' ? image.data : '';
     expect(data.startsWith('data:')).toBe(false);
     expect([...Buffer.from(data, 'base64').subarray(0, 4)]).toEqual([137, 80, 78, 71]);
+  });
+
+  test('an image sent with the prompt is journalled on the user message and named back by the agent', async () => {
+    const client = await harness.connect();
+    const { threadId } = await echoThread(harness, client);
+    await client.call('threads.subscribe', { threadId });
+
+    // A one-pixel PNG, 70 bytes, as the composer would send it.
+    const png =
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+    const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 10000);
+    await client.call('turns.start', {
+      threadId,
+      prompt: 'what is this',
+      attachments: [{ kind: 'image', mimeType: 'image/png', data: png, name: 'pixel.png' }],
+    });
+    expect((await finished).status).toBe('done');
+
+    const thread = await client.call('threads.get', { threadId });
+    expect(thread.messages[0]?.parts).toEqual([
+      { type: 'text', text: 'what is this' },
+      { type: 'image', mimeType: 'image/png', data: png, alt: 'pixel.png' },
+    ]);
+    expect(thread.messages[1]?.parts).toEqual([{ type: 'text', text: '[image image/png, 70 bytes, pixel.png] what is this' }]);
+  });
+
+  test('an attachment is refused by name: the format, the body, the weight, the count', async () => {
+    const client = await harness.connect();
+    const { threadId } = await echoThread(harness, client);
+    const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+    const image = (over: Partial<{ mimeType: string; data: string; name: string | null }>): ImageAttachment =>
+      ({ kind: 'image', mimeType: 'image/png', data: png, name: 'pixel.png', ...over }) as ImageAttachment;
+
+    await expect(
+      client.call('turns.start', { threadId, prompt: 'x', attachments: [image({ mimeType: 'image/bmp' })] }),
+    ).rejects.toThrow('pixel.png: image/bmp is not an image format an agent reads');
+    await expect(
+      client.call('turns.start', { threadId, prompt: 'x', attachments: [image({ data: 'data:image/png;base64,abcd' })] }),
+    ).rejects.toThrow('pixel.png: the image data is not base64');
+    await expect(
+      client.call('turns.start', { threadId, prompt: 'x', attachments: [image({ data: 'A'.repeat(7 * 1048576), name: null })] }),
+    ).rejects.toThrow('attachment 1: 5.3 MB is over the 5 MB an image may weigh');
+    await expect(
+      client.call('turns.start', { threadId, prompt: 'x', attachments: Array.from({ length: 9 }, () => image({})) }),
+    ).rejects.toThrow('a turn carries at most 8 images, this one has 9');
+
+    // Nothing above started a turn, so the thread is still idle and empty.
+    const thread = await client.call('threads.get', { threadId });
+    expect(thread.status).toBe('idle');
+    expect(thread.messages).toHaveLength(0);
   });
 
   test('a permission directive waits for the answer, then continues', async () => {

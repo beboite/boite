@@ -84,7 +84,7 @@ function writeDescriptor(dataDir: string): void {
         approvals: true,
         hooks: false,
         checkpoint: false,
-        images: false,
+        images: true,
         planMode: true,
         resume: true,
       },
@@ -156,6 +156,25 @@ describe('codex driver', () => {
     // The client says hello the way the protocol asks, request then notification.
     expect(fakeLog()).toContain('initialize\n');
     expect(fakeLog()).toContain('initialized\n');
+  });
+
+  test('an image attachment rides turn/start as a data url', async () => {
+    const client = await startCore();
+    const threadId = await codexThread(client);
+
+    const PNG =
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+    const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 20000);
+    await client.call('turns.start', {
+      threadId,
+      prompt: 'what is this',
+      attachments: [{ kind: 'image', mimeType: 'image/png', data: PNG, name: 'pixel.png' }],
+    });
+    const done = await finished;
+    expect(done.error).toBeNull();
+    expect(done.status).toBe('done');
+
+    expect(fakeLog()).toContain(`image data:image/png;base64,${PNG}`);
   });
 
   test('a reasoning delta becomes a thinking part ahead of the answer', async () => {

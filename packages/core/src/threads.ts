@@ -1,7 +1,8 @@
-import { MESSAGE_PAGE, MESSAGE_PAGE_MAX } from '@boite/contracts';
+import { ATTACHMENTS_PER_TURN, ATTACHMENT_MAX_BYTES, IMAGE_MIME_TYPES, MESSAGE_PAGE, MESSAGE_PAGE_MAX } from '@boite/contracts';
 import type {
   Account,
   AccountId,
+  ImageAttachment,
   Message,
   MessageId,
   MessagePart,
@@ -34,6 +35,55 @@ import type {
   TurnResult,
 } from './drivers/types.ts';
 import type { SpawnOptions } from './procs.ts';
+
+const BASE64 = /^[A-Za-z0-9+/]+={0,2}$/;
+
+/** How many bytes a base64 string decodes to, without decoding it. */
+function decodedBytes(data: string): number {
+  const padding = data.endsWith('==') ? 2 : data.endsWith('=') ? 1 : 0;
+  return Math.floor((data.length * 3) / 4) - padding;
+}
+
+/**
+ * The attachments of a turn, or the refusal: the provider takes none, too
+ * many, a format no agent reads, a body that is not base64, one over the cap.
+ * Each refusal names the attachment by its index and what was expected.
+ */
+export function checkAttachments(attachments: ImageAttachment[], provider: ProviderDescriptor): void {
+  if (attachments.length === 0) return;
+  if (!provider.capabilities.images) {
+    throw refused(`${provider.name} takes no images: send the prompt without them`, { providerId: provider.id });
+  }
+  if (attachments.length > ATTACHMENTS_PER_TURN) {
+    throw refused(`a turn carries at most ${ATTACHMENTS_PER_TURN} images, this one has ${attachments.length}`, {
+      count: attachments.length,
+      max: ATTACHMENTS_PER_TURN,
+    });
+  }
+  attachments.forEach((attachment, index) => {
+    const label = attachment.name ?? `attachment ${index + 1}`;
+    if (attachment.kind !== 'image') {
+      throw refused(`${label}: an attachment is an image, got kind ${JSON.stringify(attachment.kind)}`, { index });
+    }
+    if (!(IMAGE_MIME_TYPES as readonly string[]).includes(attachment.mimeType)) {
+      throw refused(`${label}: ${attachment.mimeType} is not an image format an agent reads (${IMAGE_MIME_TYPES.join(', ')})`, {
+        index,
+        mimeType: attachment.mimeType,
+      });
+    }
+    if (typeof attachment.data !== 'string' || attachment.data.length === 0 || attachment.data.length % 4 !== 0 || !BASE64.test(attachment.data)) {
+      throw refused(`${label}: the image data is not base64 (no data: prefix, no line breaks)`, { index });
+    }
+    const bytes = decodedBytes(attachment.data);
+    if (bytes > ATTACHMENT_MAX_BYTES) {
+      throw refused(`${label}: ${(bytes / 1048576).toFixed(1)} MB is over the ${ATTACHMENT_MAX_BYTES / 1048576} MB an image may weigh`, {
+        index,
+        bytes,
+        max: ATTACHMENT_MAX_BYTES,
+      });
+    }
+  });
+}
 
 /** What a turn a dead core left behind says, once the next core has closed it. */
 export const CRASH_WHILE_RUNNING = 'The core stopped while this turn was running; send the prompt again.';
@@ -212,7 +262,7 @@ export class ThreadStore {
     return this.save({ ...thread, pinned }, 'thread.pinned');
   }
 
-  startTurn(threadId: ThreadId, prompt: string): Turn {
+  startTurn(threadId: ThreadId, prompt: string, attachments: ImageAttachment[] = []): Turn {
     const thread = this.require(threadId);
     if (thread.archived) throw refused('cannot start a turn on an archived thread', { threadId });
     if (['queued', 'running', 'waiting'].includes(thread.status) || this.handles.has(threadId)) {
@@ -224,6 +274,7 @@ export class ThreadStore {
       this.core.providers.summary(thread.providerId),
       this.core.accounts.require(thread.accountId),
     );
+    checkAttachments(attachments, provider);
 
     const now = Date.now();
     const turn: Turn = {
@@ -241,7 +292,15 @@ export class ThreadStore {
       threadId,
       turnId: turn.id,
       role: 'user',
-      parts: [{ type: 'text', text: prompt }],
+      parts: [
+        { type: 'text', text: prompt },
+        ...attachments.map((attachment): MessagePart => ({
+          type: 'image',
+          mimeType: attachment.mimeType,
+          data: attachment.data,
+          alt: attachment.name,
+        })),
+      ],
       state: 'complete',
       createdAt: now,
     };
@@ -577,12 +636,14 @@ export class ThreadStore {
       },
     };
 
+    const input = this.lastUserInput(threadId, turn.id);
     return {
       thread,
       account,
       provider,
       turn,
-      prompt: this.lastUserPrompt(threadId, turn.id),
+      prompt: input.prompt,
+      attachments: input.attachments,
       sessionId: thread.sessionId,
       accountEnv: env,
       warmProcessMinutes: this.core.settings.get().warmProcessMinutes,
@@ -699,16 +760,24 @@ export class ThreadStore {
     }
   }
 
-  private lastUserPrompt(threadId: ThreadId, turnId: TurnId): string {
+  /** The user message of the turn, read back from the journal: the text and the images it carried. */
+  private lastUserInput(threadId: ThreadId, turnId: TurnId): { prompt: string; attachments: ImageAttachment[] } {
     const messages = this.core.journal.listMessages(threadId);
     for (let index = messages.length - 1; index >= 0; index -= 1) {
       const message = messages[index];
       if (message === undefined || message.turnId !== turnId || message.role !== 'user') continue;
-      return message.parts
-        .map((part) => (part.type === 'text' ? part.text : ''))
-        .join('');
+      const attachments: ImageAttachment[] = [];
+      for (const part of message.parts) {
+        if (part.type === 'image') {
+          attachments.push({ kind: 'image', mimeType: part.mimeType, data: part.data, name: part.alt });
+        }
+      }
+      return {
+        prompt: message.parts.map((part) => (part.type === 'text' ? part.text : '')).join(''),
+        attachments,
+      };
     }
-    return '';
+    return { prompt: '', attachments: [] };
   }
 
   private setStatus(threadId: ThreadId, status: ThreadStatus): void {
@@ -815,7 +884,9 @@ export function registerThreadMethods(core: Core): void {
     ctx.connection.subscriptions.delete(params.threadId);
     return { ok: true } as const;
   });
-  core.router.register('turns.start', (params) => core.threads.startTurn(params.threadId, params.prompt));
+  core.router.register('turns.start', (params) =>
+    core.threads.startTurn(params.threadId, params.prompt, params.attachments ?? []),
+  );
   core.router.register('turns.stop', (params) => ({ stopped: core.threads.stopTurn(params.threadId) }));
   core.router.register('permissions.list', (params) => core.threads.listPermissions(params.threadId));
   core.router.register('permissions.answer', (params) => {

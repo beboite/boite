@@ -366,8 +366,32 @@ export type ToolDocument =
   /** `data` is base64 with no `data:` prefix. The core caps it before it is journalled. */
   | { kind: 'image'; mimeType: string; data: string; alt: string | null };
 
+/** The image formats every agent that takes images accepts. */
+export const IMAGE_MIME_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'] as const;
+export type ImageMimeType = (typeof IMAGE_MIME_TYPES)[number];
+/** The most one image may weigh once decoded: the smallest of the agents' own caps. */
+export const ATTACHMENT_MAX_BYTES = 5 * 1024 * 1024;
+/** The most images one turn carries. */
+export const ATTACHMENTS_PER_TURN = 8;
+
+/**
+ * An image sent with a prompt. `data` is base64 with no `data:` prefix. The
+ * core refuses one over `ATTACHMENT_MAX_BYTES`, more than `ATTACHMENTS_PER_TURN`
+ * of them, a format outside `IMAGE_MIME_TYPES`, and any of them on a provider
+ * whose `capabilities.images` is false, each by name.
+ */
+export interface ImageAttachment {
+  kind: 'image';
+  mimeType: ImageMimeType;
+  data: string;
+  /** The file name when it came from one, for the timeline's tooltip. */
+  name: string | null;
+}
+
 export type MessagePart =
   | { type: 'text'; text: string }
+  /** An image the user sent with the prompt, journalled with the message. */
+  | { type: 'image'; mimeType: ImageMimeType; data: string; alt: string | null }
   /** The model's reasoning as the provider streams it, folded in the UI. */
   | { type: 'thinking'; text: string }
   | {
@@ -762,7 +786,8 @@ export interface RpcMethods {
   'threads.subscribe': { params: { threadId: ThreadId }; result: { ok: true } };
   'threads.unsubscribe': { params: { threadId: ThreadId }; result: { ok: true } };
 
-  'turns.start': { params: { threadId: ThreadId; prompt: string }; result: Turn };
+  /** `attachments` ride with the prompt as image parts of the user message; see `ImageAttachment` for what is refused. */
+  'turns.start': { params: { threadId: ThreadId; prompt: string; attachments?: ImageAttachment[] }; result: Turn };
   'turns.stop': { params: { threadId: ThreadId }; result: { stopped: boolean } };
 
   /**

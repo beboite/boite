@@ -858,4 +858,31 @@ describe('claude driver', () => {
     expect(queries).toHaveLength(2);
     expect(calls[1]?.prompts).toEqual(['again']);
   });
+
+  test('an image attachment rides beside the text as a content block', async () => {
+    const client = await harness.connect();
+    const threadId = await claudeThread(client);
+
+    scripted((fake) => {
+      fake.emit(init('sess-image'));
+      fake.emit(assistant('sess-image', [{ type: 'text', text: 'i see it' }]));
+      fake.emit(success('sess-image'));
+    });
+
+    const PNG =
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+    const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 10000);
+    await client.call('turns.start', {
+      threadId,
+      prompt: 'what is this',
+      attachments: [{ kind: 'image', mimeType: 'image/png', data: PNG, name: 'pixel.png' }],
+    });
+    expect((await finished).status).toBe('done');
+
+    const sent = JSON.parse(calls[0]?.prompts[0] ?? '[]') as unknown[];
+    expect(sent).toEqual([
+      { type: 'text', text: 'what is this' },
+      { type: 'image', source: { type: 'base64', media_type: 'image/png', data: PNG } },
+    ]);
+  });
 });

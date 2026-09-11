@@ -20,6 +20,7 @@ import { join } from 'node:path';
 import type {
   AccountId,
   EffortLevel,
+  ImageAttachment,
   MessageId,
   MessagePart,
   ModelInfo,
@@ -79,6 +80,15 @@ const AGENT_ENV: Record<string, string> = {
 /** `process.env` plus what Boite forces, plus the account's own isolation, which wins. */
 function agentEnv(accountEnv: Record<string, string>): Record<string, string | undefined> {
   return { ...process.env, ...AGENT_ENV, ...accountEnv };
+}
+
+/** One `ImageContent` per attachment, `data` and `mimeType` as `docs/rpc.md` names them. */
+function imagesOf(attachments: ImageAttachment[]): { type: 'image'; data: string; mimeType: string }[] {
+  return attachments.map((attachment) => ({
+    type: 'image' as const,
+    data: attachment.data,
+    mimeType: attachment.mimeType,
+  }));
 }
 
 type Timer = ReturnType<typeof setTimeout>;
@@ -519,7 +529,10 @@ class PiSession {
     turn.noteSession(sessionId);
     this.current = turn;
     try {
-      await peer.command('prompt', { message: turn.ctx.prompt });
+      await peer.command('prompt', {
+        message: turn.ctx.prompt,
+        ...(turn.ctx.attachments.length === 0 ? {} : { images: imagesOf(turn.ctx.attachments) }),
+      });
       if (turn.isStopped) void peer.command('abort').catch(() => undefined);
     } catch (error) {
       // A child that died takes the pipe with it, and its exit says more than

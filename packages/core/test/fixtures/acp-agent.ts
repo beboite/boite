@@ -11,6 +11,12 @@
  *
  * `ACP_FAKE_NO_MODES=1` makes it answer no `modes` at all, which is the agent
  * the mode mapping has to survive without sending anything.
+ *
+ * `ACP_FAKE_NO_IMAGES=1` makes `initialize` answer with no
+ * `promptCapabilities.image`, which is the agent a driver must refuse to send
+ * an attachment to. Otherwise the fake advertises image support, and every
+ * `image` block a `session/prompt` carries is logged as
+ * `image <mimeType> <byte length>`.
  */
 import { appendFileSync } from 'node:fs';
 import { Readable, Writable } from 'node:stream';
@@ -100,6 +106,8 @@ const MODES: SessionMode[] = [
 
 /** An agent with no modes at all, so the driver's warning path has a subject. */
 const noModes = process.env['ACP_FAKE_NO_MODES'] === '1';
+/** An agent that never learned to read an image, so a driver has to refuse first. */
+const noImages = process.env['ACP_FAKE_NO_IMAGES'] === '1';
 let currentModeId = 'default';
 
 function modeState(): SessionModeState | undefined {
@@ -152,7 +160,10 @@ const app = agent({ name: 'acp-fake' })
     log('initialize');
     return {
       protocolVersion: PROTOCOL_VERSION,
-      agentCapabilities: { loadSession: true },
+      agentCapabilities: {
+        loadSession: true,
+        ...(noImages ? {} : { promptCapabilities: { image: true } }),
+      },
       agentInfo: { name: 'acp-fake', version: '1' },
     };
   })
@@ -188,6 +199,9 @@ const app = agent({ name: 'acp-fake' })
   .onRequest('session/prompt', async ({ params, client }) => {
     const sessionId = params.sessionId;
     const text = promptText(params.prompt);
+    for (const block of params.prompt) {
+      if (block.type === 'image') log(`image ${block.mimeType} ${block.data.length}`);
+    }
     const send = (update: SessionUpdate): Promise<void> => client.notify('session/update', { sessionId, update });
     const say = (chunk: string): Promise<void> =>
       send({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: chunk } });

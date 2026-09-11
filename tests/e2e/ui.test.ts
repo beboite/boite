@@ -18,6 +18,8 @@ const TOOL_SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui-tool-input.png')
 const DIFF_SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui-tool-diff.png');
 const QUESTION_SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui-question.png');
 const OFFLINE_SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui-offline-shell.png');
+const ATTACHMENT_SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui-attachment.png');
+const ATTACHMENT_SENT_SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui-attachment-sent.png');
 /** The one name `public/sw.js` opens; every other cache is deleted on activate. */
 const UI_CACHE = 'boite-ui-v1';
 /** What the echo provider's `[tool-stream]` directive types, one piece at a time. */
@@ -238,6 +240,54 @@ test(
 
     await page.screenshot(QUESTION_SCREENSHOT);
     expect(existsSync(QUESTION_SCREENSHOT)).toBe(true);
+  },
+  TIMEOUT,
+);
+
+test(
+  'an image pasted into the composer reaches the agent and is drawn under the prompt',
+  async () => {
+    // Chromium builds the file, the transfer and the event; the composer sees
+    // exactly what a Ctrl+V of a screenshot would hand it.
+    await page.evaluate<null>(
+      `(() => {
+        const canvas = document.createElement('canvas');
+        canvas.width = 64;
+        canvas.height = 64;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#d9773b';
+        ctx.fillRect(0, 0, 64, 64);
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(16, 16, 32, 32);
+        return new Promise((resolve) => canvas.toBlob((blob) => {
+          const file = new File([blob], 'square.png', { type: 'image/png' });
+          const transfer = new DataTransfer();
+          transfer.items.add(file);
+          const event = new ClipboardEvent('paste', { clipboardData: transfer, bubbles: true, cancelable: true });
+          document.querySelector('${testid('composer-input')}').dispatchEvent(event);
+          resolve(null);
+        }, 'image/png'));
+      })()`,
+    );
+    await page.waitFor(`document.querySelectorAll('${testid('composer-attachment')}').length === 1`, 10_000);
+    await page.screenshot(ATTACHMENT_SCREENSHOT);
+
+    await page.type(testid('composer-input'), 'what is this square');
+    await clickWhenEnabled(testid('composer-send'));
+    await page.waitFor(`${ASSISTANT_TEXT}.includes('what is this square')`, 30_000);
+    await page.waitFor(`document.querySelector('${testid('thread-status')}').dataset.status === 'idle'`, 30_000);
+
+    // The strip is empty again, the echo names the image it was given, and the
+    // user bubble carries the thumbnail as a part of the journalled message.
+    expect(await page.evaluate<number>(`document.querySelectorAll('${testid('composer-attachment')}').length`)).toBe(0);
+    const assistant = await page.evaluate<string>(ASSISTANT_TEXT);
+    expect(assistant).toMatch(/\[image image\/png, \d+ bytes, square\.png\] what is this square/);
+    const images = await page.evaluate<string[]>(
+      `Array.from(document.querySelectorAll('${testid('message')}[data-role=user] ${testid('image-part')}')).map((img) => img.getAttribute('src').slice(0, 22))`,
+    );
+    expect(images).toEqual(['data:image/png;base64,']);
+    await page.screenshot(ATTACHMENT_SENT_SCREENSHOT);
+    expect(existsSync(ATTACHMENT_SENT_SCREENSHOT)).toBe(true);
   },
   TIMEOUT,
 );

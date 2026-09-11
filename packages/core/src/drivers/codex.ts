@@ -14,6 +14,7 @@
 import type {
   AccountId,
   EffortLevel,
+  ImageAttachment,
   MessageId,
   MessagePart,
   ModelInfo,
@@ -602,7 +603,7 @@ class CodexSession {
       const model = modelOf(ctx);
       const started = await rpc.request<{ turn: CodexTurnRecord }>('turn/start', {
         threadId,
-        input: [{ type: 'text', text: ctx.prompt, text_elements: [] }],
+        input: [{ type: 'text', text: ctx.prompt, text_elements: [] }, ...imageInputsOf(ctx.attachments)],
         ...(model === null ? {} : { model }),
         ...(ctx.thread.effort === null ? {} : { effort: ctx.thread.effort }),
       });
@@ -1067,6 +1068,14 @@ function modelOf(ctx: TurnContext): string | null {
   const model = ctx.thread.model;
   if (model === null || model === AGENT_OWN_MODEL) return null;
   return model;
+}
+
+/** One `UserInput` image variant per attachment, a data URL as the app-server takes it. */
+function imageInputsOf(attachments: ImageAttachment[]): { type: 'image'; url: string }[] {
+  return attachments.map((attachment) => ({
+    type: 'image' as const,
+    url: `data:${attachment.mimeType};base64,${attachment.data}`,
+  }));
 }
 
 /**

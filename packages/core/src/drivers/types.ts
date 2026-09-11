@@ -1,6 +1,7 @@
 import type {
   Account,
   AccountId,
+  ImageAttachment,
   Message,
   MessageId,
   MessagePart,
@@ -60,6 +61,12 @@ export interface TurnContext {
   provider: ProviderDescriptor;
   turn: Turn;
   prompt: string;
+  /**
+   * The images sent with the prompt, already checked by the core (format,
+   * size, count, and the provider's `capabilities.images`). Empty for most
+   * turns; a driver hands each one to its agent in that protocol's shape.
+   */
+  attachments: ImageAttachment[];
   sessionId: string | null;
   /** The isolation environment of this account, empty for the provider's own login. */
   accountEnv: Record<string, string>;

@@ -2,6 +2,7 @@ import { Readable, Writable } from 'node:stream';
 import type {
   ClientConnection,
   ClientContext,
+  ContentBlock,
   PermissionOption,
   PermissionOptionKind,
   PromptResponse,
@@ -18,6 +19,7 @@ import type {
 } from '@agentclientprotocol/sdk';
 import type {
   AccountId,
+  ImageAttachment,
   MessageId,
   MessagePart,
   ModelInfo,
@@ -80,6 +82,15 @@ function isGrok(provider: ProviderDescriptor): boolean {
 function launchArgs(profile: OsProfile | undefined, provider: ProviderDescriptor, mode: PermissionMode): string[] {
   const declared = profile?.launch?.args ?? [];
   return isGrok(provider) ? grokLaunchArgs(declared, mode) : [...declared];
+}
+
+/** One `ContentBlock::Image` per attachment, `mimeType` and `data` as ACP names them. */
+function imageBlocksOf(attachments: ImageAttachment[]): ContentBlock[] {
+  return attachments.map((attachment) => ({
+    type: 'image' as const,
+    mimeType: attachment.mimeType,
+    data: attachment.data,
+  }));
 }
 
 /**
@@ -417,6 +428,7 @@ class AcpSession {
 
   private sessionId: string | null = null;
   private canLoad = false;
+  private imagesSupported = false;
   private configWarned = false;
   /** What the last session answer, or the last `set_config_option`, listed. */
   private configOptions: SessionConfigOption[] = [];
@@ -523,6 +535,12 @@ class AcpSession {
       return;
     }
 
+    if (turn.ctx.attachments.length > 0 && !this.imagesSupported) {
+      turn.fail(`${turn.ctx.provider.name} takes no images`);
+      this.endTurn(turn, true);
+      return;
+    }
+
     turn.noteSession(sessionId);
     // Every turn, not only the first: a warm session outlives a change to any
     // of the three, the agent may have switched on its own since the last
@@ -536,7 +554,7 @@ class AcpSession {
     try {
       const pending = agent.request('session/prompt', {
         sessionId,
-        prompt: [{ type: 'text', text: turn.ctx.prompt }],
+        prompt: [{ type: 'text', text: turn.ctx.prompt }, ...imageBlocksOf(turn.ctx.attachments)],
       });
       if (turn.isStopped) this.cancel();
       response = await pending;
@@ -608,6 +626,7 @@ class AcpSession {
       clientInfo: { name: CLIENT_NAME, version: pkg.version },
     });
     this.canLoad = init.agentCapabilities?.loadSession === true;
+    this.imagesSupported = init.agentCapabilities?.promptCapabilities?.image === true;
 
     if (ctx.sessionId !== null && this.canLoad) {
       // A fresh core has no probe cache, and session/load may omit controls.

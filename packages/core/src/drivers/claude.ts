@@ -14,6 +14,7 @@ import type {
   SpawnOptions as SdkSpawnOptions,
 } from '@anthropic-ai/claude-agent-sdk';
 import type {
+  ImageAttachment,
   MessageId,
   MessagePart,
   PermissionMode,
@@ -165,10 +166,20 @@ class PromptQueue {
   private notify: (() => void) | null = null;
   private ended = false;
 
-  push(text: string): void {
+  push(text: string, attachments: ImageAttachment[]): void {
+    const content =
+      attachments.length === 0
+        ? text
+        : [
+            { type: 'text', text },
+            ...attachments.map((attachment) => ({
+              type: 'image',
+              source: { type: 'base64', media_type: attachment.mimeType, data: attachment.data },
+            })),
+          ];
     this.items.push({
       type: 'user',
-      message: { role: 'user', content: text },
+      message: { role: 'user', content },
       parent_tool_use_id: null,
     } as SDKUserMessage);
     this.wake();
@@ -549,7 +560,7 @@ class ClaudeSession {
       this.started = true;
       // The options the query opens on are this turn's: nothing to apply yet.
       this.applied = liveSetup(turn.ctx.thread);
-      this.prompts.push(turn.promptText());
+      this.prompts.push(turn.promptText(), turn.ctx.attachments);
       void this.run(turn);
       return;
     }
@@ -568,7 +579,7 @@ class ClaudeSession {
     if (turn.stopped || this.closing || this.ended) return;
     if (!(await this.applyLive(turn))) return;
     if (turn.stopped || this.closing || this.ended) return;
-    this.prompts.push(turn.promptText());
+    this.prompts.push(turn.promptText(), turn.ctx.attachments);
   }
 
   /**

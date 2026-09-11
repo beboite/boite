@@ -378,6 +378,24 @@
     const last = message.parts.length - 1;
     return message.parts[last]?.type === 'thinking' ? last : -1;
   }
+
+  /**
+   * The images a user message carries, shown at their natural size once
+   * clicked: `message.id:index` per picture, so the pair survives the window
+   * dropping the message and building it again.
+   */
+  let expanded = $state<string[]>([]);
+
+  type ImagePart = Extract<Message['parts'][number], { type: 'image' }>;
+
+  /** The pictures a prompt was sent with; an assistant message never has one. */
+  function imagesOf(message: Message): ImagePart[] {
+    return message.parts.filter((part): part is ImagePart => part.type === 'image');
+  }
+
+  function toggleImage(id: string): void {
+    expanded = expanded.includes(id) ? expanded.filter((entry) => entry !== id) : [...expanded, id];
+  }
 </script>
 
 <div class="timeline-wrap">
@@ -398,12 +416,33 @@
           data-role={message.role}
         >
           {#if message.role === 'user'}
+            {@const images = imagesOf(message)}
             <div class="bubble">
               {#each message.parts as part, index (index)}
                 {#if part.type === 'text'}
                   <p class="user-text" data-testid="text-part">{part.text}</p>
                 {/if}
               {/each}
+              {#if images.length > 0}
+                <div class="images">
+                  {#each images as image, at (at)}
+                    {@const id = `${message.id}:${at}`}
+                    <button
+                      type="button"
+                      class="shot"
+                      class:full={expanded.includes(id)}
+                      title={image.alt ?? strings.chat.imagePart}
+                      onclick={() => toggleImage(id)}
+                    >
+                      <img
+                        data-testid="image-part"
+                        src="data:{image.mimeType};base64,{image.data}"
+                        alt={image.alt ?? ''}
+                      />
+                    </button>
+                  {/each}
+                </div>
+              {/if}
             </div>
           {:else}
             {@const caretAt = message.state === 'streaming' ? lastTextIndex(message) : -1}
@@ -444,7 +483,7 @@
                       submit={(optionIds, text) =>
                         void store.answerQuestion(message.threadId, part.questionId, optionIds, text)}
                     />
-                  {:else}
+                  {:else if part.type === 'error'}
                     <div class="error" data-testid="error-part">
                       <span class="section-label">{strings.chat.error}</span>
                       <p>{part.message}</p>
@@ -535,6 +574,51 @@
   .user-text {
     white-space: pre-wrap;
     word-break: break-word;
+  }
+
+  /* The images sent with the prompt, in a row that wraps under the text. */
+  .images {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 8px;
+  }
+
+  .user-text + .images {
+    margin-top: 8px;
+  }
+
+  .shot {
+    height: auto;
+    width: auto;
+    max-width: 100%;
+    padding: 0;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    background: var(--color-surface);
+    overflow: hidden;
+    cursor: zoom-in;
+  }
+
+  .shot:hover:not(:disabled) {
+    background: var(--color-surface);
+    border-color: var(--color-edge);
+  }
+
+  .shot img {
+    display: block;
+    max-width: 100%;
+    max-height: 240px;
+    object-fit: contain;
+  }
+
+  /* Clicked once, the picture is worth its own size instead of a thumbnail. */
+  .shot.full {
+    cursor: zoom-out;
+  }
+
+  .shot.full img {
+    max-height: none;
   }
 
   /* A 4 px rest on the left so an answer does not kiss the column's edge. */

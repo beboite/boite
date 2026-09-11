@@ -66,6 +66,18 @@ OpenCode's descriptor, with the `linux` and `macos` profiles left out:
 - `capabilities` is six booleans: `approvals`, `hooks`, `checkpoint`, `images`,
   `planMode`, `resume`. `approvals: false` means the thread's permission mode
   never reaches that agent, and the UI stops promising a gate that does not exist.
+  `images: false` refuses a turn's attachments before anything is sent, so a
+  driver whose protocol carries no image at all never has to. Where `images` is
+  true, each protocol hands an attachment over in its own shape: the Claude
+  driver turns the prompt into a content-block array, one text block plus one
+  `{ type: 'image', source: { type: 'base64', media_type, data } }` block per
+  attachment; ACP sends a `{ type: 'image', mimeType, data }` block alongside
+  the text block of `session/prompt`, but only once the agent's `initialize`
+  answer says `agentCapabilities.promptCapabilities.image` is true, or the turn
+  fails before anything goes out; Codex appends one
+  `{ type: 'image', url: 'data:<mimeType>;base64,<data>' }` entry per attachment
+  to `turn/start`'s `input`; pi adds an `images` array of
+  `{ type: 'image', data, mimeType }` entries to the `prompt` command.
 
 ## Inside an OS profile
 

@@ -1,7 +1,7 @@
 import { afterEach, expect, test, vi } from 'vitest';
 import { mount, unmount } from 'svelte';
 import App from '../App.svelte';
-import { PREFS_STORAGE_KEY, STASH_STORAGE_KEY } from '../lib/prefs';
+import { defaultPrefs, PREFS_STORAGE_KEY, STASH_STORAGE_KEY } from '../lib/prefs';
 import { store } from '../lib/store.svelte';
 
 /**
@@ -405,6 +405,99 @@ test('a pending send cannot duplicate a turn or erase text typed for the next pr
   await waitFor(() => store.busy);
   expect(input().value).toBe('still composing the next prompt');
   expect(rpc.mock.calls.filter(([method]) => method === 'turns.start')).toHaveLength(1);
+});
+
+// -- images -------------------------------------------------------------------
+
+/** One transparent pixel, the smallest real PNG. */
+const PIXEL =
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+
+function pngFile(name = 'pixel.png'): File {
+  const bytes = Uint8Array.from(atob(PIXEL), (character) => character.charCodeAt(0));
+  return new File([bytes], name, { type: 'image/png' });
+}
+
+/**
+ * jsdom builds neither `DataTransfer` nor `ClipboardEvent`, so the paste lands
+ * as a plain event carrying the same `clipboardData` shape the handler reads.
+ */
+function paste(file: File): void {
+  const event = new Event('paste', { bubbles: true, cancelable: true });
+  Object.defineProperty(event, 'clipboardData', {
+    value: { items: [{ kind: 'file', type: file.type, getAsFile: () => file }] }
+  });
+  input().dispatchEvent(event);
+}
+
+function chips(): HTMLElement[] {
+  return Array.from(document.querySelectorAll<HTMLElement>('[data-testid=composer-attachment]'));
+}
+
+test('a pasted image becomes a chip, comes off again, and rides the prompt', async () => {
+  await mountOnFake();
+  await store.open('t-trace');
+  await waitFor(() => store.openThread?.id === 't-trace' && !store.busy);
+  // The echo agent reads images, so the chip bar offers the paperclip.
+  await waitFor(() => document.querySelector('[data-testid=composer-attach]') !== null);
+
+  paste(pngFile());
+  await waitFor(() => chips().length === 1);
+  expect(chips()[0]?.getAttribute('title')).toBe('pixel.png');
+  expect(query<HTMLImageElement>('[data-testid=composer-attachment] img').getAttribute('src')).toBe(
+    `data:image/png;base64,${PIXEL}`
+  );
+
+  query<HTMLButtonElement>('[data-testid=composer-attachment-remove]').click();
+  await waitFor(() => document.querySelector('[data-testid=composer-attachments]') === null);
+
+  paste(pngFile());
+  await waitFor(() => chips().length === 1);
+  await type('look at this');
+  input().focus();
+  press('Enter');
+  await waitFor(() => (store.openThread?.messages.length ?? 0) >= 4 && !store.busy);
+
+  const sent = store.openThread!.messages.filter((m) => m.role === 'user').at(-1)!;
+  expect(sent.parts[0]).toEqual({ type: 'text', text: 'look at this' });
+  expect(sent.parts[1]).toEqual({
+    type: 'image',
+    mimeType: 'image/png',
+    data: PIXEL,
+    alt: 'pixel.png'
+  });
+  // The timeline draws it under the text of that bubble.
+  await waitFor(() => document.querySelectorAll('[data-testid=image-part]').length === 1);
+
+  const answer = store
+    .openThread!.messages.at(-1)!
+    .parts.filter((part) => part.type === 'text')
+    .map((part) => (part.type === 'text' ? part.text : ''))
+    .join('');
+  expect(answer.startsWith('[image image/png, 70 bytes, pixel.png] ')).toBe(true);
+  expect(answer.endsWith('look at this')).toBe(true);
+
+  // What went out left the composer, text and picture together.
+  expect(input().value).toBe('');
+  expect(document.querySelector('[data-testid=composer-attachments]')).toBeNull();
+});
+
+test('a provider that reads no image hides the button and says so on a paste', async () => {
+  window.localStorage.setItem(
+    PREFS_STORAGE_KEY,
+    JSON.stringify({ ...defaultPrefs(), providerId: 'opencode', accountId: 'a-opencode', model: 'default' })
+  );
+  await mountOnFake();
+  store.startDraft();
+  await waitFor(() => store.draft !== null);
+  await waitFor(() => query('[data-testid=composer-picker]').textContent?.includes('OpenCode') === true);
+
+  expect(document.querySelector('[data-testid=composer-attach]')).toBeNull();
+
+  paste(pngFile());
+  await waitFor(() => store.error !== null);
+  expect(store.error).toBe('OpenCode takes no images: send the prompt without them.');
+  expect(document.querySelector('[data-testid=composer-attachments]')).toBeNull();
 });
 
 test('queued prompts survive settings and wait for a ready connection', async () => {

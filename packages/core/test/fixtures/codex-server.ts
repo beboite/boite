@@ -96,6 +96,15 @@ function promptOf(params: Record<string, unknown>): string {
     .join('');
 }
 
+/** Every `{ type: 'image', url: ... }` entry of `turn/start`'s `input`, logged as `image <url>`. */
+function imageUrlsOf(params: Record<string, unknown>): string[] {
+  const input = params['input'];
+  if (!Array.isArray(input)) return [];
+  return input
+    .filter((entry) => (entry as Record<string, unknown>)['type'] === 'image')
+    .map((entry) => textOf((entry as Record<string, unknown>)['url']));
+}
+
 function directivesOf(text: string): Directive[] {
   DIRECTIVE.lastIndex = 0;
   const found: Directive[] = [];
@@ -376,6 +385,7 @@ function handle(method: string, raw: unknown): unknown {
       turnCounter += 1;
       const turnId = `codex-fake-turn-${turnCounter}`;
       log(`turn/start model=${textOf(params['model'])} effort=${textOf(params['effort'])}`);
+      for (const url of imageUrlsOf(params)) log(`image ${url}`);
       // After the response is written, never before: a real server answers the
       // request and streams the turn afterwards.
       setTimeout(() => {

@@ -19,6 +19,7 @@ afterEach(async () => {
   harness = null;
   delete process.env['ACP_FAKE_LOG'];
   delete process.env['ACP_FAKE_NO_MODES'];
+  delete process.env['ACP_FAKE_NO_IMAGES'];
   if (open !== null) await open.stop();
 });
 
@@ -64,7 +65,7 @@ function writeDescriptor(dataDir: string): void {
         approvals: true,
         hooks: false,
         checkpoint: false,
-        images: false,
+        images: true,
         planMode: false,
         resume: true,
       },
@@ -365,6 +366,43 @@ describe('acp driver', () => {
     const done = await finished;
     expect(done.status).toBe('error');
     expect(done.error).toBe('the agent stopped: refusal');
+  });
+
+  const PNG =
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+
+  test('an image attachment reaches the agent as an image content block', async () => {
+    const client = await startCore();
+    const threadId = await acpThread(client);
+
+    const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 20000);
+    await client.call('turns.start', {
+      threadId,
+      prompt: 'what is this',
+      attachments: [{ kind: 'image', mimeType: 'image/png', data: PNG, name: 'pixel.png' }],
+    });
+    const done = await finished;
+    expect(done.error).toBeNull();
+    expect(done.status).toBe('done');
+
+    expect(fakeLog()).toContain(`image image/png ${PNG.length}`);
+  });
+
+  test('an agent that never learned images refuses the turn before it sends anything', async () => {
+    const client = await startCore();
+    process.env['ACP_FAKE_NO_IMAGES'] = '1';
+    const threadId = await acpThread(client);
+
+    const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 20000);
+    await client.call('turns.start', {
+      threadId,
+      prompt: 'what is this',
+      attachments: [{ kind: 'image', mimeType: 'image/png', data: PNG, name: 'pixel.png' }],
+    });
+    const done = await finished;
+    expect(done.status).toBe('error');
+    expect(done.error).toBe('Fake ACP agent takes no images');
+    expect(fakeLog()).not.toContain('image image/png');
   });
 
   test('an agent that dies fails the turn with its exit code and stderr, and the next turn works', async () => {

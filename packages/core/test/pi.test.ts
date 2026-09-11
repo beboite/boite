@@ -97,7 +97,7 @@ function writeDescriptor(dataDir: string): void {
         approvals: false,
         hooks: false,
         checkpoint: false,
-        images: false,
+        images: true,
         planMode: false,
         resume: true,
       },
@@ -176,6 +176,27 @@ describe('pi driver', () => {
     expect(fakeLog()).toContain('prompt\n');
     expect(argvLines()).toHaveLength(1);
     expect(argvLines()[0]).toContain(`sessionId=${thread.sessionId ?? ''}`);
+  });
+
+  test('an image attachment rides the prompt command as an images entry', async () => {
+    const client = await startCore();
+    const threadId = await piThread(client);
+
+    const PNG =
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+    const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 20000);
+    await client.call('turns.start', {
+      threadId,
+      prompt: 'what is this',
+      attachments: [{ kind: 'image', mimeType: 'image/png', data: PNG, name: 'pixel.png' }],
+    });
+    const done = await finished;
+    expect(done.error).toBeNull();
+    expect(done.status).toBe('done');
+
+    // The fake logs the mimeType and the length of the string it got, which
+    // proves pi received the base64 data itself, not a reference to it.
+    expect(fakeLog()).toContain(`image image/png ${PNG.length}`);
   });
 
   test('the session directory is the thread s own, under the account s location', async () => {

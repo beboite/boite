@@ -233,6 +233,13 @@ async function run(ctx: TurnContext, state: RunState): Promise<TurnResult> {
     });
   };
 
+  // An image is named back the way an agent that read it would: format and weight.
+  for (const attachment of ctx.attachments) {
+    if (state.stopped) break;
+    const bytes = Buffer.from(attachment.data, 'base64').length;
+    await writeText(`[image ${attachment.mimeType}, ${bytes} bytes${attachment.name === null ? '' : `, ${attachment.name}`}] `);
+  }
+
   for (const segment of parsePrompt(ctx.prompt)) {
     if (state.stopped) break;
     switch (segment.kind) {

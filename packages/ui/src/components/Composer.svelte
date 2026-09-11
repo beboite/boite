@@ -1,7 +1,8 @@
 <script lang="ts">
-  import { ArrowUp, ShieldCheck, Square } from '@lucide/svelte';
+  import { ArrowUp, Paperclip, ShieldCheck, Square, X } from '@lucide/svelte';
   import { untrack } from 'svelte';
-  import type { PermissionMode } from '@boite/contracts';
+  import type { ImageAttachment, PermissionMode } from '@boite/contracts';
+  import { acceptAttachments, readImageFile } from '../lib/attachments';
   import { clearStash, DRAFT_STASH_KEY, readStash, writeStash } from '../lib/prefs';
   import { fill, strings } from '../lib/strings';
   import type { Choice, PickPatch, Store } from '../lib/store.svelte';
@@ -22,8 +23,11 @@
   let key = $derived(store.openThread?.id ?? DRAFT_STASH_KEY);
   let composer = $derived(store.composerStates[key]);
   let text = $derived(composer?.text ?? '');
+  /** The images this prompt carries, the same array the strip above the box draws. */
+  let attachments = $derived<ImageAttachment[]>(composer?.attachments ?? []);
   let choice = $state<Choice | null>(null);
   let box = $state<HTMLTextAreaElement | undefined>(undefined);
+  let picker = $state<HTMLInputElement | undefined>(undefined);
   /** Where ArrowUp stands in this thread's sent prompts, or null outside recall. */
   let recall = $state<number | null>(null);
 
@@ -83,8 +87,13 @@
 
   let provider = $derived(choice ? store.providerOf(choice.providerId) : null);
   let bound = $derived(store.openThread !== null);
+  /** The attach button is only there for an agent that reads images. */
+  let takesImages = $derived(provider?.capabilities.images ?? false);
   let canSend = $derived(
-    text.trim().length > 0 && choice !== null && store.connection === 'ready' && !composer?.sending
+    (text.trim().length > 0 || attachments.length > 0) &&
+      choice !== null &&
+      store.connection === 'ready' &&
+      !composer?.sending
   );
 
   let placeholder = $derived(
@@ -169,8 +178,21 @@
     requestAnimationFrame(grow);
   }
 
+  /**
+   * This input's state, created on first use. The entry is read back rather
+   * than returned from the `??=`: that operator hands back the plain object it
+   * wrote, and a write to it would land beside the store's own `$state` proxy
+   * instead of inside it, so nothing would redraw.
+   */
   function stateForInput() {
-    return store.composerStates[key] ??= { text: '', queued: [], sending: false, paused: false };
+    store.composerStates[key] ??= {
+      text: '',
+      attachments: [],
+      queued: [],
+      sending: false,
+      paused: false
+    };
+    return store.composerStates[key]!;
   }
 
   function setText(value: string) {
@@ -178,40 +200,115 @@
   }
 
   async function drain(threadId: string, state: NonNullable<typeof composer>) {
-    const prompt = state.queued[0];
-    if (prompt === undefined) return;
+    const entry = state.queued[0];
+    if (entry === undefined) return;
     state.sending = true;
-    const accepted = await store.send(prompt, threadId);
+    const accepted = await store.send(entry.text, threadId, entry.attachments);
     if (accepted) state.queued.shift();
     else {
       // Pause after a refusal. Put the rejected prompt back for an explicit retry.
       state.paused = true;
-      if (state.text.length === 0) state.text = state.queued.shift()!;
+      if (state.text.length === 0 && state.attachments.length === 0) {
+        const back = state.queued.shift()!;
+        state.text = back.text;
+        state.attachments = back.attachments;
+      }
     }
     state.sending = false;
   }
 
   async function submit(nextDraft = false) {
     const prompt = text;
+    const images = attachments;
     if (!canSend || !choice) return;
     const state = stateForInput();
     if (store.busy) {
-      state.queued.push(prompt);
+      state.queued.push({ text: prompt, attachments: images });
       state.text = '';
+      state.attachments = [];
       recall = null;
       requestAnimationFrame(grow);
       return;
     }
     state.sending = true;
-    const accepted = await (nextDraft ? store.submitAndDraft(prompt, choice) : store.submit(prompt, choice));
+    const accepted = await (nextDraft
+      ? store.submitAndDraft(prompt, choice, images)
+      : store.submit(prompt, choice, images));
     if (accepted) {
-      // Text typed while the RPC was pending belongs to the next prompt.
+      // Text typed and images attached while the RPC was pending belong to the
+      // next prompt: only what went out is cleared.
       if (state.text === prompt) state.text = '';
+      if (state.attachments === images) state.attachments = [];
       state.paused = false;
       recall = null;
       requestAnimationFrame(grow);
     }
     state.sending = false;
+  }
+
+  // -- images -----------------------------------------------------------------
+  // Three ways in, one path: the attach button, a paste carrying image items,
+  // and image files dropped on the box. `lib/attachments.ts` owns the caps.
+
+  /**
+   * Reads the files and keeps what the caps allow. A provider that reads no
+   * image refuses the lot by name rather than dropping them in silence.
+   */
+  async function take(files: File[]) {
+    if (files.length === 0) return;
+    if (provider && !provider.capabilities.images) {
+      store.error = fill(strings.composer.attachNoImages, { provider: provider.name });
+      return;
+    }
+    const state = stateForInput();
+    const read = await Promise.all(files.map(readImageFile));
+    const { accepted, refused } = acceptAttachments(state.attachments, read);
+    state.attachments = accepted;
+    if (refused !== null) store.error = refused;
+  }
+
+  function imagesOf(list: FileList | null | undefined): File[] {
+    return Array.from(list ?? []).filter((file) => file.type.startsWith('image/'));
+  }
+
+  function onchoose(event: Event) {
+    const field = event.currentTarget as HTMLInputElement;
+    const files = imagesOf(field.files);
+    // The same picture picked twice in a row must fire `change` both times.
+    field.value = '';
+    void take(files);
+  }
+
+  function onpaste(event: ClipboardEvent) {
+    const files = Array.from(event.clipboardData?.items ?? [])
+      .filter((item) => item.kind === 'file' && item.type.startsWith('image/'))
+      .map((item) => item.getAsFile())
+      .filter((file): file is File => file !== null);
+    if (files.length === 0) return;
+    // The text of a clipboard that also carries an image stays out of the box.
+    event.preventDefault();
+    void take(files);
+  }
+
+  /** Only an image is taken here; a folder falls through to the app's own drop. */
+  function ondragover(event: DragEvent) {
+    if (!Array.from(event.dataTransfer?.items ?? []).some((item) => item.type.startsWith('image/'))) return;
+    event.preventDefault();
+    event.stopPropagation();
+  }
+
+  function ondrop(event: DragEvent) {
+    const files = imagesOf(event.dataTransfer?.files);
+    if (files.length === 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    void take(files);
+  }
+
+  function removeAttachment(at: number) {
+    const state = stateForInput();
+    state.attachments = state.attachments.filter((_, index) => index !== at);
+    box?.focus();
   }
 
   /**
@@ -295,15 +392,39 @@
 </script>
 
 <div class="composer-wrap" class:centered>
-  <div class="composer" data-testid="composer">
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div class="composer" data-testid="composer" {ondragover} {ondrop}>
     {#if composer && composer.queued.length > 0}
       <div class="queued subtle" data-testid="composer-queued">{strings.composer.queued}</div>
     {/if}
+
+    {#if attachments.length > 0}
+      <div class="attachments" data-testid="composer-attachments">
+        {#each attachments as attachment, at (at)}
+          {@const label = attachment.name ?? strings.composer.attachAlt}
+          <div class="attachment" data-testid="composer-attachment" title={label}>
+            <img src="data:{attachment.mimeType};base64,{attachment.data}" alt={label} />
+            <button
+              type="button"
+              class="icon small remove"
+              data-testid="composer-attachment-remove"
+              title={fill(strings.composer.attachRemove, { name: label })}
+              aria-label={fill(strings.composer.attachRemove, { name: label })}
+              onclick={() => removeAttachment(at)}
+            >
+              <X size={12} strokeWidth={2.25} />
+            </button>
+          </div>
+        {/each}
+      </div>
+    {/if}
+
     <textarea
       bind:this={box}
       bind:value={() => text, setText}
       {oninput}
       {onkeydown}
+      {onpaste}
       rows="1"
       {placeholder}
       aria-label={placeholder}
@@ -314,6 +435,30 @@
     <div class="bar">
       <div class="chips">
         <ModelPicker {store} {choice} locked={bound} onpick={pick} />
+
+        {#if takesImages}
+          <button
+            type="button"
+            class="chip attach"
+            data-testid="composer-attach"
+            title={strings.composer.attach}
+            aria-label={strings.composer.attach}
+            onclick={() => picker?.click()}
+          >
+            <Paperclip size={14} strokeWidth={1.75} />
+          </button>
+          <input
+            bind:this={picker}
+            class="file"
+            type="file"
+            accept="image/png,image/jpeg,image/gif,image/webp"
+            multiple
+            tabindex="-1"
+            aria-hidden="true"
+            data-testid="composer-file"
+            onchange={onchoose}
+          />
+        {/if}
 
         {#if effortLevels.length > 0}
           <EffortSlider levels={effortLevels} active={activeEffort} onpick={pickEffort} />
@@ -385,6 +530,60 @@
   .queued {
     padding: 6px 14px 0;
     font-size: var(--text-sm);
+  }
+
+  /* The images this prompt carries, above the box they were pasted into. */
+  .attachments {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 10px 14px 0;
+  }
+
+  .attachment {
+    position: relative;
+    width: 56px;
+    height: 56px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    background: var(--color-surface);
+    overflow: hidden;
+    animation: pop var(--dur-2) var(--ease-out-quint);
+  }
+
+  .attachment img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+
+  /* The remove button rides the corner, readable over any picture. */
+  .attachment .remove {
+    position: absolute;
+    top: 2px;
+    right: 2px;
+    width: 18px;
+    height: 18px;
+    padding: 0;
+    border: none;
+    border-radius: var(--radius-sm);
+    background: var(--color-scrim);
+    color: var(--color-foreground);
+  }
+
+  .attachment .remove:hover:not(:disabled) {
+    background: var(--color-danger);
+    color: var(--color-on-danger);
+  }
+
+  /* The button in the chip bar is what opens it; the field itself never shows. */
+  .file {
+    display: none;
+  }
+
+  .attach {
+    padding: 0 7px;
   }
 
   textarea {

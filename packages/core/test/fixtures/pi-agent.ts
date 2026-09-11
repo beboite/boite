@@ -9,8 +9,10 @@
  *
  * Run as `bun <this file>`. `PI_FAKE_LOG` names a file it appends to: one
  * `argv sessionId=<id> sessionDir=<dir> model=<m>` line per process at start,
- * then one line per command it receives (`prompt`, `abort`). The argv line is
- * what tells a test how many agent processes a warm session did or did not save.
+ * then one line per command it receives (`prompt`, `abort`), and one
+ * `image <mimeType> <byte length>` line per `images` entry a `prompt` command
+ * carries. The argv line is what tells a test how many agent processes a warm
+ * session did or did not save.
  *
  * The framing is copied from the real mode on purpose: strict JSONL, LF only.
  */
@@ -298,6 +300,13 @@ function handle(message: Record<string, unknown>): void {
   log(type);
   switch (type) {
     case 'prompt': {
+      const images = message['images'];
+      if (Array.isArray(images)) {
+        for (const image of images) {
+          const entry = image as Record<string, unknown>;
+          log(`image ${textOf(entry['mimeType'])} ${textOf(entry['data']).length}`);
+        }
+      }
       send({ id, type: 'response', command: 'prompt', success: true });
       // After the response is written, never before: the real mode answers the
       // command and streams the run afterwards.
