@@ -25,31 +25,55 @@ function fold(text: string): string {
   return text.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 }
 
+const WORD_BREAK = /[\s\-_/.:]/;
+
+function isWordStart(hay: string, at: number): boolean {
+  return at === 0 || WORD_BREAK.test(hay.charAt(at - 1));
+}
+
+/** The next place `char` sits at a word start, at or after `from`; -1 when nowhere. */
+function nextWordStart(hay: string, char: string, from: number): number {
+  let at = hay.indexOf(char, from);
+  while (at >= 0 && !isWordStart(hay, at)) at = hay.indexOf(char, at + 1);
+  return at;
+}
+
 /**
  * How well `text` answers `query`, higher is better, null is no match. A
  * prefix beats a word start, a word start beats a substring, a substring
- * beats letters found in order with gaps between them.
+ * beats an abbreviation: letters in order where each one either starts a word
+ * or follows the previous hit directly (`pts` for "Port the scheduler", `ftt`
+ * for "Finish the trace tab"). Letters merely found somewhere in order do not
+ * count, that rule matched half the list on four letters.
  */
 export function scoreMatch(query: string, text: string): number | null {
   const needle = fold(query.trim());
   if (needle.length === 0) return 0;
   const hay = fold(text);
   if (hay.startsWith(needle)) return 100;
-  const at = hay.indexOf(needle);
-  if (at >= 0) {
-    const wordStart = at === 0 || /[\s\-_/.:]/.test(hay.charAt(at - 1));
-    return (wordStart ? 80 : 60) - Math.min(at, 20);
+  // Several words: each one must land on its own, the weakest decides.
+  if (/\s/.test(needle)) {
+    let worst = 100;
+    for (const word of needle.split(/\s+/)) {
+      const score = scoreMatch(word, hay);
+      if (score === null) return null;
+      worst = Math.min(worst, score);
+    }
+    return worst;
   }
-  // Letters in order: each gap costs, a query longer than the text cannot fit.
-  let index = 0;
+  const at = hay.indexOf(needle);
+  if (at >= 0) return (isWordStart(hay, at) ? 80 : 60) - Math.min(at, 20);
   let gaps = 0;
   let last = -1;
   for (const char of needle) {
-    const found = hay.indexOf(char, index);
-    if (found < 0) return null;
-    if (last >= 0 && found > last + 1) gaps += 1;
+    let found = -1;
+    if (last >= 0 && hay.charAt(last + 1) === char) found = last + 1;
+    else {
+      found = nextWordStart(hay, char, last + 1);
+      if (found < 0) return null;
+      if (last >= 0) gaps += 1;
+    }
     last = found;
-    index = found + 1;
   }
   return Math.max(1, 30 - gaps * 3 - Math.min(last, 10));
 }

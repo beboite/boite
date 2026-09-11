@@ -20,6 +20,13 @@ describe('scoreMatch', () => {
     expect(scoreMatch('schedulers', 'scheduler')).toBeNull();
   });
 
+  test('an abbreviation lands on word starts, letters merely in order do not', () => {
+    expect(scoreMatch('ftt', 'Finish the trace tab')).not.toBeNull();
+    expect(scoreMatch('fin tr', 'Finish the trace tab')).not.toBeNull();
+    expect(scoreMatch('sett', 'Finish the trace tab')).toBeNull();
+    expect(scoreMatch('ihe', 'Finish the trace tab')).toBeNull();
+  });
+
   test('case and accents do not count', () => {
     expect(scoreMatch('ÉCHO', 'echo provider')).toBe(100);
   });
@@ -40,9 +47,9 @@ describe('rankItems', () => {
   });
 
   test('a query ranks by score and drops what does not match', () => {
-    // "the" is a word start in three titles, the earlier the better, and
-    // scattered letters in "New thread" (t, h, then the e of "thread").
-    expect(rankItems('the', items).map((item) => item.id)).toEqual(['t-2', 't-1', 't-3', 'new']);
+    // "the" is a word start in three titles, the earlier the better; "New
+    // thread" has t, h and e in order but the e sits mid-word after a gap.
+    expect(rankItems('the', items).map((item) => item.id)).toEqual(['t-2', 't-1', 't-3']);
     expect(rankItems('brain', items).map((item) => item.id)).toEqual(['t-3']);
     expect(rankItems('draft', items).map((item) => item.id)).toEqual(['new']);
     expect(rankItems('zzz', items)).toEqual([]);
