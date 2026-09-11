@@ -854,6 +854,13 @@ export class FakeClient implements ObservableClient {
 
       case 'settings.get':
         return { ...this.#settings };
+      case 'keybindings.get':
+        // A file with one moved chord, one taken away, and one line the core refused.
+        return {
+          path: `${DATA_DIR}\\keybindings.json`,
+          bindings: { 'theme-light': 'mod+shift+l', panel: null },
+          errors: ['keybindings.json: "trace": "t" has no modifier: a chord needs mod, ctrl, alt or meta before its key']
+        };
       case 'settings.set': {
         const params = rawParams as RpcParams<'settings.set'>;
         for (const field of ['maxConcurrentTurns', 'perAccountConcurrency'] as const) {

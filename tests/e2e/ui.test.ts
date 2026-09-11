@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { afterAll, beforeAll, expect, test } from 'bun:test';
@@ -23,6 +23,7 @@ const ATTACHMENT_SENT_SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui-attac
 const SLASH_SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui-slash-menu.png');
 const MENTION_SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui-mention-menu.png');
 const WORKTREE_SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui-worktree.png');
+const KEYBOARD_SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui-keyboard.png');
 /** The one name `public/sw.js` opens; every other cache is deleted on activate. */
 const UI_CACHE = 'boite-ui-v1';
 /** What the echo provider's `[tool-stream]` directive types, one piece at a time. */
@@ -437,6 +438,41 @@ test(
       client.close();
     }
     await page.waitFor(`document.querySelectorAll('${testid('thread-row')}').length === 1`);
+    await page.click(testid('thread-row'));
+    await page.waitFor(`${textOf('thread-title')} === 'browser thread [permission]'`);
+  },
+  TIMEOUT,
+);
+
+test(
+  'the keybindings file is read the moment it is saved, and the moved chord works in the page',
+  async () => {
+    const file = join(core.dataDir, 'keybindings.json');
+    const keyOf = (id: string) =>
+      `document.querySelector('${testid('keybinding-row')}[data-command=${id}] ${testid('keybinding-key')}')?.textContent.trim()`;
+    const chord = (init: string) =>
+      `(() => { document.body.dispatchEvent(new KeyboardEvent('keydown', { ${init}, bubbles: true, cancelable: true })); return null; })()`;
+
+    writeFileSync(file, JSON.stringify({ 'new-thread': 'mod+shift+n', nope: 'mod+x' }));
+    await page.click(testid('nav-settings'));
+    await page.click(testid('settings-tab-keyboard'));
+    // The core watched the write and announced it; the page redrew the row.
+    await page.waitFor(`${keyOf('new-thread')} === 'Ctrl+Shift+N'`);
+    expect(await page.evaluate<string>(keyOf('palette'))).toBe('Ctrl+K');
+    expect(await page.evaluate<string>(textOf('keybindings-path'))).toBe(file);
+    expect(await page.evaluate<string>(textOf('keybinding-error'))).toContain('"nope" is not a command Boite has');
+    await page.screenshot(KEYBOARD_SCREENSHOT);
+
+    // The old chord is nobody's now; the new one opens a draft from the settings page.
+    await page.evaluate<null>(chord(`key: 'n', ctrlKey: true`));
+    expect(await page.evaluate<boolean>(`!!document.querySelector('${testid('keyboard-page')}')`)).toBe(true);
+    await page.evaluate<null>(chord(`key: 'N', ctrlKey: true, shiftKey: true`));
+    await page.waitFor(`document.querySelector('${testid('draft-empty')}')`);
+    expect(await page.evaluate<string>(`document.querySelector('${testid('new-thread')}').title`)).toEndWith('(Ctrl+Shift+N)');
+
+    // The file goes, the default comes back, and the draft closes on the first row.
+    rmSync(file);
+    await page.waitFor(`document.querySelector('${testid('new-thread')}').title.endsWith('(Ctrl+N)')`);
     await page.click(testid('thread-row'));
     await page.waitFor(`${textOf('thread-title')} === 'browser thread [permission]'`);
   },

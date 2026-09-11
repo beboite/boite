@@ -198,7 +198,7 @@
       <button
         type="button"
         class="icon"
-        title="{newThreadLabel} (Ctrl+N)"
+        title="{newThreadLabel}{store.keyHint('new-thread')}"
         aria-label={newThreadLabel}
         data-testid="new-thread"
         onclick={() => store.startDraft()}
@@ -369,7 +369,7 @@
     <button
       type="button"
       class="ghost icon"
-      title="{strings.sidebar.settings} (Ctrl+,)"
+      title="{strings.sidebar.settings}{store.keyHint('settings')}"
       aria-label={strings.sidebar.settings}
       data-testid="nav-settings"
       onclick={() => store.showSettings()}

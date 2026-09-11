@@ -386,6 +386,7 @@ export const strings = {
     tabs: {
       general: 'General',
       appearance: 'Appearance',
+      keyboard: 'Keyboard',
       accounts: 'Providers',
       plugins: 'Plugins',
       usage: 'Usage',
@@ -459,6 +460,31 @@ export const strings = {
       revokeTitle: 'Revoke this device?',
       revokeBody: 'It disconnects now and its key opens nothing any more. Pair it again with a new link.',
       paired: 'This device is paired with a key of its own. Pairing links are made from the desktop app.'
+    }
+  },
+
+  /** The Keyboard settings page: the table, the file, and the commands the palette has no word for. */
+  keyboard: {
+    heading: 'Shortcuts',
+    intro: 'Every chord Boite answers to. Change one in the file below: it is read the moment it is saved, no restart.',
+    file: 'The file',
+    fileHint:
+      'A JSON object of command ids to chords, "mod+shift+k" style, or null to take a key away. mod is Ctrl here and Cmd on a Mac. Only the entries you name change; the rest keep their default.',
+    example: 'Example',
+    command: 'Command',
+    id: 'Id',
+    chord: 'Chord',
+    none: 'none',
+    custom: 'from the file',
+    problems: 'Refused',
+    problemsHint: 'These lines of the file were not applied. Fix them and save; the rest of the file is in use.',
+    commands: {
+      palette: 'Open the command palette',
+      browser: 'Open the browser surface',
+      closeSurface: 'Close the active surface',
+      stash: 'Stash the composer text, or take it back',
+      sendAndDraft: 'Send and open a new draft',
+      pin: 'Pin or unpin this thread'
     }
   },
 

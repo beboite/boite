@@ -599,12 +599,13 @@
   function onkeydown(event: KeyboardEvent) {
     if (event.isComposing) return;
     const meta = event.ctrlKey || event.metaKey;
-    if (meta && event.key === 'Enter') {
+    // The two composer chords come from the keyboard table, like the app's.
+    if (store.isKey(event, 'send-and-draft')) {
       event.preventDefault();
       submitAndDraft();
       return;
     }
-    if (meta && event.key.toLowerCase() === 's' && !event.shiftKey && !event.altKey) {
+    if (store.isKey(event, 'stash')) {
       event.preventDefault();
       stash();
       return;

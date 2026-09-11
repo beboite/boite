@@ -12,6 +12,8 @@ build commands in [../README.md](../README.md).
   providers, the models probe, and how each protocol takes a permission mode.
 - [accounts.md](accounts.md): isolation directories, the default account that is
   the user's own login, the login flow and what the core refuses.
+- [keybindings.md](keybindings.md): the chord grammar, every command and its
+  default, the `keybindings.json` file the core watches, and what it refuses.
 - [phone.md](phone.md): listening on the LAN, the one-time pairing link and the
   session it becomes, revoking a device, the service worker, what is cached and
   what never is, and the limits.

@@ -1,5 +1,6 @@
 import type { Core } from './core.ts';
 import { registerAccountMethods } from './accounts.ts';
+import { registerKeybindingMethods } from './keybindings.ts';
 import { registerProjectMethods } from './projects.ts';
 import { registerProviderMethods } from './providers/loader.ts';
 import { registerProbeMethods } from './providers/probe.ts';
@@ -29,5 +30,6 @@ export function registerModules(core: Core): void {
   registerTraceMethods(core);
   registerUsageMethods(core);
   registerSettingsMethods(core);
+  registerKeybindingMethods(core);
   registerSessionMethods(core);
 }

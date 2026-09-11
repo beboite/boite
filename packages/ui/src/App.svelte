@@ -11,6 +11,7 @@
   import Sidebar from './components/Sidebar.svelte';
   import TitleBar from './components/TitleBar.svelte';
   import { Closing } from './lib/closing.svelte';
+  import { runCommand } from './lib/commands.svelte';
   import { startGlass } from './lib/glass';
   import { installExternalLinks } from './lib/links';
   import { isQuitChord, QUIT_HOLD_MS, QuitHold } from './lib/quit-hold';
@@ -151,58 +152,61 @@
     );
   }
 
+  /**
+   * Every app chord goes through the keyboard table (`lib/keybindings.ts`,
+   * the defaults under the user's `keybindings.json`), so a moved key moves
+   * here, in the palette hints and in the tooltips at once. The quit hold is
+   * the one chord that stays where it is.
+   */
   function onkeydown(event: KeyboardEvent) {
     if (quitHold && isQuitChord(event)) {
       event.preventDefault();
       quitHold.press();
       return;
     }
-    const meta = event.ctrlKey || event.metaKey;
-    if (!meta) {
+    const command = store.commandForKey(event);
+    if (command === null) {
       if (event.key === 'Escape' && store.sidebarOpen) store.sidebarOpen = false;
       return;
     }
-    const key = event.key.toLowerCase();
-    if (event.altKey) {
-      // Ctrl+Alt+B is the panel; Ctrl+B alone stays the sidebar.
-      if (key === 'b' && store.openThread) {
+    switch (command) {
+      case 'palette':
+        // The palette: threads across every project and the app's commands.
+        event.preventDefault();
+        store.paletteOpen = !store.paletteOpen;
+        break;
+      case 'panel':
+        if (!store.openThread) return;
         event.preventDefault();
         store.panel.toggle();
-      }
-      return;
-    }
-    if (event.shiftKey) {
-      if (key === 'j' && store.openThread && window.__TAURI_INTERNALS__ !== undefined) {
+        break;
+      case 'browser': {
+        if (!store.openThread || !inShell) return;
         event.preventDefault();
         const open = store.panel.surfaces.find((surface) => surface.kind === 'browser');
         if (open) store.panel.activate(open.id);
         else store.panel.open('browser');
+        break;
       }
-      return;
-    }
-    if (key === 's') {
-      // The composer stashes what it holds; here the browser's save dialog is
-      // kept shut wherever the focus is.
-      event.preventDefault();
-    } else if (key === 'n') {
-      event.preventDefault();
-      store.startDraft();
-    } else if (key === 'k') {
-      // The palette: threads across every project and the app's commands.
-      event.preventDefault();
-      store.paletteOpen = !store.paletteOpen;
-    } else if (key === 'b') {
-      event.preventDefault();
-      store.toggleSidebar();
-    } else if (key === 'w') {
-      // The active surface, never the window: only while the panel is showing.
-      const active = store.panel.activeSurfaceId;
-      if (!store.panelOpen || !active || typing(event)) return;
-      event.preventDefault();
-      store.panel.close(active);
-    } else if (event.key === ',') {
-      event.preventDefault();
-      store.showSettings();
+      case 'close-surface': {
+        // The active surface, never the window: only while the panel is showing.
+        const active = store.panel.activeSurfaceId;
+        if (!store.panelOpen || !active || typing(event)) return;
+        event.preventDefault();
+        store.panel.close(active);
+        break;
+      }
+      case 'stash':
+        // The composer stashes what it holds; here the browser's save dialog is
+        // kept shut wherever the focus is.
+        event.preventDefault();
+        break;
+      case 'send-and-draft':
+        // The composer's own, on the keydown it saw first.
+        break;
+      default:
+        event.preventDefault();
+        runCommand(store, command, inShell);
     }
   }
 

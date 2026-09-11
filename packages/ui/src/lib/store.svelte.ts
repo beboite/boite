@@ -2,6 +2,8 @@ import type {
   Account,
   CoreInfo,
   ImageAttachment,
+  Keybindings,
+  KeybindingCommand,
   Message,
   MessageId,
   ModelInfo,
@@ -39,6 +41,7 @@ import {
 } from './client';
 import { clearStoredEndpoint, resolveEndpoint, storeEndpoint } from './endpoint';
 import { titleFrom } from './format';
+import { chordLabel, commandForKey, resolveBindings } from './keybindings';
 import {
   readNotifications,
   requestNotificationPermission,
@@ -63,7 +66,7 @@ import { rightPanel, type BoundPanel } from './right-panel.svelte';
 import { strings } from './strings';
 
 export type Page = 'chat' | 'settings';
-export type SettingsTab = 'general' | 'appearance' | 'accounts' | 'plugins' | 'usage' | 'resources' | 'experiments';
+export type SettingsTab = 'general' | 'appearance' | 'keyboard' | 'accounts' | 'plugins' | 'usage' | 'resources' | 'experiments';
 
 /** A login process the core runs for one account, as `account.login` reports it. */
 export interface LoginState {
@@ -211,6 +214,10 @@ export class Store {
   logins = $state<Record<string, LoginState>>({});
   scheduler = $state<SchedulerState | null>(null);
   settings = $state<Settings | null>(null);
+  /** The keybindings file as the core last read it; null until the first `keybindings.get`. */
+  keybindings = $state<Keybindings | null>(null);
+  /** Every command with its chord: the defaults, the file's entries over them. */
+  bindings = $derived(resolveBindings(this.keybindings?.bindings ?? {}));
   resources = $state<ThreadResources[]>([]);
   usage = $state<UsageReport | null>(null);
   trace = $state<ProcessRecord[]>([]);
@@ -558,6 +565,9 @@ export class Store {
     on('settings.updated', (settings) => {
       this.settings = settings;
     });
+    on('keybindings.updated', (keybindings) => {
+      this.keybindings = keybindings;
+    });
     on('sessions.updated', () => {
       if (this.page === 'settings') void this.loadSessions();
     });
@@ -718,7 +728,7 @@ export class Store {
     if (!client) return;
     const loginRevision = this.#loginRevision;
     try {
-      const [projects, threads, providers, accounts, settings, scheduler, permissions, questions, logins] =
+      const [projects, threads, providers, accounts, settings, scheduler, permissions, questions, logins, keybindings] =
         await Promise.all([
           client.call('projects.list', {}),
           client.call('threads.list', {}),
@@ -728,7 +738,8 @@ export class Store {
           client.call('scheduler.get', {}),
           client.call('permissions.list', {}),
           client.call('questions.list', {}),
-          client.call('accounts.logins', {})
+          client.call('accounts.logins', {}),
+          client.call('keybindings.get', {})
         ]);
       this.#mergePermissions(permissions);
       this.#mergeQuestions(questions);
@@ -740,12 +751,39 @@ export class Store {
       this.accounts = accounts;
       this.#restoreLogins(logins, loginRevision);
       this.settings = settings;
+      this.keybindings = keybindings;
       this.scheduler = scheduler;
       const open = this.openThread;
       if (open) await this.open(open.id);
     } catch (error) {
       this.#fail(error);
     }
+  }
+
+  // -------------------------------------------------------------------------
+  // The keyboard
+  // -------------------------------------------------------------------------
+
+  /** The command this keydown is bound to, or null when the key is nobody's. */
+  commandForKey(event: KeyboardEvent): KeybindingCommand | null {
+    return commandForKey(this.bindings, event);
+  }
+
+  /** True while this keydown is the chord of that one command. */
+  isKey(event: KeyboardEvent, id: KeybindingCommand): boolean {
+    return this.commandForKey(event) === id;
+  }
+
+  /** `Ctrl+N`, or null while the command has no key. */
+  keyLabel(id: KeybindingCommand): string | null {
+    const chord = this.bindings[id].chord;
+    return chord === null ? null : chordLabel(chord);
+  }
+
+  /** ` (Ctrl+N)` for a tooltip, or nothing while the command has no key. */
+  keyHint(id: KeybindingCommand): string {
+    const label = this.keyLabel(id);
+    return label === null ? '' : ` (${label})`;
   }
 
   // -------------------------------------------------------------------------

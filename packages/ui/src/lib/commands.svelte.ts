@@ -5,6 +5,7 @@
  * command is written once and both entries stay in step.
  */
 
+import type { KeybindingCommand } from '@boite/contracts';
 import type { PaletteItem } from './palette';
 import { strings } from './strings';
 import type { Store } from './store.svelte';
@@ -31,24 +32,55 @@ export function appCommands(store: Store, inShell: boolean): PaletteItem[] {
   void inShell;
   const open = store.openThread;
   const items: PaletteItem[] = [];
-  if (store.projects.length > 0) items.push({ id: 'new-thread', kind: 'command', label: strings.palette.newThread, hint: 'Ctrl+N', keywords: 'draft start' });
-  items.push({ id: 'add-project', kind: 'command', label: strings.palette.addProject, keywords: 'folder open' });
+  /** One row, its hint the chord the keyboard table holds for it, if any. */
+  const row = (id: KeybindingCommand, label: string, keywords?: string): PaletteItem => {
+    const hint = store.keyLabel(id);
+    return { id, kind: 'command', label, ...(hint === null ? {} : { hint }), ...(keywords === undefined ? {} : { keywords }) };
+  };
+  if (store.projects.length > 0) items.push(row('new-thread', strings.palette.newThread, 'draft start'));
+  items.push(row('add-project', strings.palette.addProject, 'folder open'));
   if (open) {
-    items.push({ id: 'pin', kind: 'command', label: open.pinned ? strings.palette.unpin : strings.palette.pin, keywords: 'favourite top' });
-    items.push({ id: 'rename', kind: 'command', label: strings.palette.rename, keywords: 'title' });
-    items.push({ id: 'panel', kind: 'command', label: strings.palette.panel, hint: 'Ctrl+Alt+B', keywords: 'browser surface' });
-    items.push({ id: 'trace', kind: 'command', label: strings.palette.trace, keywords: 'processes load' });
+    items.push(row('pin', open.pinned ? strings.palette.unpin : strings.palette.pin, 'favourite top'));
+    items.push(row('rename', strings.palette.rename, 'title'));
+    items.push(row('panel', strings.palette.panel, 'browser surface'));
+    items.push(row('trace', strings.palette.trace, 'processes load'));
   }
-  items.push({ id: 'sidebar', kind: 'command', label: strings.palette.sidebar, hint: 'Ctrl+B' });
-  items.push({ id: 'settings', kind: 'command', label: strings.palette.settings, hint: 'Ctrl+,', keywords: 'preferences' });
-  items.push({ id: 'appearance', kind: 'command', label: strings.palette.appearance, keywords: 'theme material' });
-  items.push({ id: 'providers', kind: 'command', label: strings.palette.providers, keywords: 'accounts login install' });
-  items.push({ id: 'pair', kind: 'command', label: strings.palette.pair, keywords: 'phone link devices' });
-  items.push({ id: 'theme-dark', kind: 'command', label: strings.palette.themeDark });
-  items.push({ id: 'theme-light', kind: 'command', label: strings.palette.themeLight });
-  items.push({ id: 'theme-system', kind: 'command', label: strings.palette.themeSystem });
-  if (open) items.push({ id: 'archive', kind: 'command', label: strings.palette.archive, keywords: 'close remove' });
+  items.push(row('sidebar', strings.palette.sidebar));
+  items.push(row('settings', strings.palette.settings, 'preferences'));
+  items.push(row('appearance', strings.palette.appearance, 'theme material'));
+  items.push(row('providers', strings.palette.providers, 'accounts login install'));
+  items.push(row('pair', strings.palette.pair, 'phone link devices'));
+  items.push(row('theme-dark', strings.palette.themeDark));
+  items.push(row('theme-light', strings.palette.themeLight));
+  items.push(row('theme-system', strings.palette.themeSystem));
+  if (open) items.push(row('archive', strings.palette.archive, 'close remove'));
   return items;
+}
+
+/** The label of every command a chord can reach, the palette's words where it has them. */
+export function commandLabel(id: KeybindingCommand): string {
+  switch (id) {
+    case 'new-thread': return strings.palette.newThread;
+    case 'palette': return strings.keyboard.commands.palette;
+    case 'sidebar': return strings.palette.sidebar;
+    case 'panel': return strings.palette.panel;
+    case 'browser': return strings.keyboard.commands.browser;
+    case 'close-surface': return strings.keyboard.commands.closeSurface;
+    case 'settings': return strings.palette.settings;
+    case 'stash': return strings.keyboard.commands.stash;
+    case 'send-and-draft': return strings.keyboard.commands.sendAndDraft;
+    case 'add-project': return strings.palette.addProject;
+    case 'pin': return strings.keyboard.commands.pin;
+    case 'rename': return strings.palette.rename;
+    case 'trace': return strings.palette.trace;
+    case 'appearance': return strings.palette.appearance;
+    case 'providers': return strings.palette.providers;
+    case 'pair': return strings.palette.pair;
+    case 'theme-dark': return strings.palette.themeDark;
+    case 'theme-light': return strings.palette.themeLight;
+    case 'theme-system': return strings.palette.themeSystem;
+    case 'archive': return strings.palette.archive;
+  }
 }
 
 /**
@@ -59,6 +91,7 @@ export function runCommand(store: Store, id: string, inShell: boolean): void {
   const open = store.openThread;
   switch (id) {
     case 'new-thread': store.showChat(); store.startDraft(); break;
+    case 'palette': store.paletteOpen = !store.paletteOpen; break;
     case 'add-project':
       if (inShell) void store.pickProject();
       else store.showSettings('general');

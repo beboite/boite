@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { Activity, ArrowLeft, Coins, FlaskConical, Palette, Puzzle, Settings2, Users } from '@lucide/svelte';
+  import { Activity, ArrowLeft, Coins, FlaskConical, Keyboard, Palette, Puzzle, Settings2, Users } from '@lucide/svelte';
+  import KeyboardPage from './KeyboardPage.svelte';
   import PluginsPage from './PluginsPage.svelte';
   import { strings } from '../lib/strings';
   import type { SettingsTab, Store } from '../lib/store.svelte';
@@ -15,6 +16,7 @@
   const tabs: { id: SettingsTab; label: string; icon: typeof Settings2 }[] = [
     { id: 'general', label: strings.settings.tabs.general, icon: Settings2 },
     { id: 'appearance', label: strings.settings.tabs.appearance, icon: Palette },
+    { id: 'keyboard', label: strings.settings.tabs.keyboard, icon: Keyboard },
     { id: 'accounts', label: strings.settings.tabs.accounts, icon: Users },
     { id: 'plugins', label: strings.settings.tabs.plugins, icon: Puzzle },
     { id: 'usage', label: strings.settings.tabs.usage, icon: Coins },
@@ -54,6 +56,8 @@
         <GeneralSettings {store} />
       {:else if store.settingsTab === 'appearance'}
         <AppearancePage />
+      {:else if store.settingsTab === 'keyboard'}
+        <KeyboardPage {store} />
       {:else if store.settingsTab === 'accounts'}
         <AccountsPage {store} />
       {:else if store.settingsTab === 'usage'}

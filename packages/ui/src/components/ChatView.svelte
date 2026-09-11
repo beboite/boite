@@ -100,7 +100,7 @@
         type="button"
         class="ghost icon drawer"
         class:shown={store.sidebarCollapsed}
-        title="{strings.sidebar.expand} (Ctrl+B)"
+        title="{strings.sidebar.expand}{store.keyHint('sidebar')}"
         aria-label={strings.sidebar.expand}
         data-testid="sidebar-toggle"
         onclick={toggleSidebar}

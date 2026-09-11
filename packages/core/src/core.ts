@@ -7,6 +7,7 @@ import { AccountStore } from './accounts.ts';
 import { Bus } from './bus.ts';
 import { shutdownDrivers } from './drivers/index.ts';
 import { Journal } from './journal.ts';
+import { KeybindingStore } from './keybindings.ts';
 import { registerModules } from './modules.ts';
 import { currentOs } from './paths.ts';
 import { ProcRegistry } from './procs.ts';
@@ -58,6 +59,7 @@ export class Core {
   readonly plugins: PluginStore;
   readonly sessions: SessionStore;
   readonly worktrees: Worktrees;
+  readonly keybindings: KeybindingStore;
 
   subscribers: SubscriptionSink = { hasSubscribers: () => false, closeSession: () => undefined };
 
@@ -83,6 +85,7 @@ export class Core {
     this.plugins = new PluginStore(this);
     this.sessions = new SessionStore(this);
     this.worktrees = new Worktrees(this);
+    this.keybindings = new KeybindingStore(this);
 
     registerModules(this);
     this.procs.applySettings(this.settings.get());
@@ -135,6 +138,7 @@ export class Core {
     await this.accounts.closeLogins();
     this.procs.killAll();
     this.procs.close();
+    this.keybindings.close();
     this.bus.dispose();
     this.journal.close();
   }

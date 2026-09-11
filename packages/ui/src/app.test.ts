@@ -467,6 +467,42 @@ test('the theme setting stamps the light palette and remembers the choice', asyn
   await waitFor(() => document.querySelector('[data-testid=settings]') === null);
 });
 
+test('the keybindings file moves a chord, takes one away, and the Keyboard page says so', async () => {
+  await mountOnFake();
+  await waitFor(() => store.keybindings !== null);
+
+  // The fake's file binds the light theme to Ctrl+Shift+L and unbinds the panel.
+  const light = new KeyboardEvent('keydown', { key: 'L', ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true });
+  expect(document.body.dispatchEvent(light)).toBe(false);
+  await waitFor(() => document.documentElement.dataset.theme === 'light');
+
+  await waitFor(() => store.openThread !== null);
+  const panel = new KeyboardEvent('keydown', { key: 'b', ctrlKey: true, altKey: true, bubbles: true, cancelable: true });
+  expect(document.body.dispatchEvent(panel)).toBe(true);
+  expect(store.panelOpen).toBe(false);
+
+  // A default still stands, and the tooltip and the palette hint read the table too.
+  expect(query<HTMLButtonElement>('[data-testid=nav-settings]').title).toBe('Settings (Ctrl+,)');
+  const settings = new KeyboardEvent('keydown', { key: ',', ctrlKey: true, bubbles: true, cancelable: true });
+  expect(document.body.dispatchEvent(settings)).toBe(false);
+  await waitFor(() => document.querySelector('[data-testid=settings-tab-keyboard]') !== null);
+
+  query<HTMLButtonElement>('[data-testid=settings-tab-keyboard]').click();
+  await waitFor(() => document.querySelector('[data-testid=keyboard-page]') !== null);
+  const keyOf = (id: string) =>
+    query(`[data-testid=keybinding-row][data-command=${id}] [data-testid=keybinding-key]`).textContent?.trim();
+  expect(keyOf('theme-light')).toBe('Ctrl+Shift+L');
+  expect(keyOf('panel')).toBe('none');
+  expect(keyOf('new-thread')).toBe('Ctrl+N');
+  expect(query('[data-testid=keybinding-row][data-command=theme-light]').classList.contains('custom')).toBe(true);
+  expect(query('[data-testid=keybinding-row][data-command=new-thread]').classList.contains('custom')).toBe(false);
+  expect(query('[data-testid=keybindings-path]').textContent).toBe('C:\\Users\\you\\AppData\\Local\\boite2\\keybindings.json');
+  expect(query('[data-testid=keybinding-error]').textContent).toContain('"trace": "t" has no modifier');
+
+  query<HTMLButtonElement>('[data-testid=settings-back]').click();
+  await waitFor(() => document.querySelector('[data-testid=settings]') === null);
+});
+
 test('removing a project asks first, and Cancel keeps it', async () => {
   await mountOnFake();
   const head = query('[data-project-id="p-brain"][data-testid=project-row]');
