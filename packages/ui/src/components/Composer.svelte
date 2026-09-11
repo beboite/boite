@@ -11,6 +11,7 @@
   import EffortSlider from './EffortSlider.svelte';
   import Menu from './Menu.svelte';
   import ModelPicker from './ModelPicker.svelte';
+  import MentionMenu from './MentionMenu.svelte';
   import SlashMenu from './SlashMenu.svelte';
 
   /**
@@ -39,6 +40,20 @@
   let slashDismissed = $state(false);
   /** The row the keyboard is on in the slash menu. */
   let slashAt = $state(0);
+  /** Where the caret stands in the text, kept for the mention menu. */
+  let caret = $state(0);
+  /** Escape shuts the mention menu on text it keeps, until that text changes again. */
+  let mentionDismissed = $state(false);
+  /** The row the keyboard is on in the mention menu. */
+  let mentionAt = $state(0);
+  /** The core's last page of files for the mention query. */
+  let mentionItems = $state<PaletteItem[]>([]);
+  /** How many matches the core held beyond that page. */
+  let mentionMore = $state(0);
+  /** The number of the last `projects.files` asked, so an older answer is dropped. */
+  let mentionAsk = 0;
+  const MENTION_PAGE = 30;
+  const MENTION_DEBOUNCE_MS = 60;
 
   const inShell = window.__TAURI_INTERNALS__ !== undefined;
   /** The three commands the composer runs itself: each one opens a chip's menu. */
@@ -129,12 +144,64 @@
     return match ? (match[1] ?? '') : null;
   });
 
-  let slashOpen = $derived(slashQuery !== null && focused && !slashDismissed);
+  // -- the mention menu ---------------------------------------------------------
+  // `@` at the start of a word, wherever the caret is: the word after it is the
+  // query, and the core ranks the project's files on it. The pick writes the
+  // path in as `@path`, plain text every agent reads, its own way.
+
+  /** The word being typed after an `@`, or null while the caret is not on one. */
+  let mentionQuery = $derived.by((): string | null => {
+    const match = /(?:^|\s)@([^\s@]*)$/.exec(text.slice(0, caret));
+    return match ? (match[1] ?? '') : null;
+  });
+
+  /** A mention wins over the slash menu on the odd `/@word`: it is the word under the caret. */
+  let slashOpen = $derived(slashQuery !== null && mentionQuery === null && focused && !slashDismissed);
 
   /** Typing anything takes the box out of the dismissal Escape put it in. */
   $effect(() => {
     void text;
     slashDismissed = false;
+    mentionDismissed = false;
+  });
+
+  let mentionOpen = $derived(mentionQuery !== null && focused && !mentionDismissed);
+
+  /** The project whose files are named: the open thread's, or the draft's. */
+  let mentionProject = $derived(store.openThread?.projectId ?? store.draft?.projectId ?? null);
+
+  /** The core's page for the query, asked a beat after the last keystroke, the stale answer dropped. */
+  $effect(() => {
+    const query = mentionQuery;
+    const projectId = mentionProject;
+    const client = store.client;
+    if (query === null || projectId === null || !client) return;
+    const ask = ++mentionAsk;
+    const timer = setTimeout(() => {
+      void client
+        .call('projects.files', { projectId, query, limit: MENTION_PAGE })
+        .then((page) => {
+          if (ask !== mentionAsk) return;
+          mentionItems = page.files.map((path) => {
+            const cut = path.lastIndexOf('/');
+            return {
+              id: path,
+              kind: 'command' as const,
+              label: cut < 0 ? path : path.slice(cut + 1),
+              description: cut < 0 ? undefined : path.slice(0, cut)
+            };
+          });
+          mentionMore = Math.max(0, page.total - page.files.length);
+          mentionAt = 0;
+        })
+        .catch(() => {
+          // A project gone or a core away: the menu says nothing matches, the text stands.
+          if (ask !== mentionAsk) return;
+          mentionItems = [];
+          mentionMore = 0;
+        });
+    }, MENTION_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
   });
 
   /** The agent's own, in the order it reported them. Never on a draft: there is no agent yet. */
@@ -243,17 +310,24 @@
     recall = null;
     // Typing is proof the box has the keyboard, whatever the focus event did.
     focused = true;
+    track();
     grow();
   }
 
+  /** Where the caret is now: read after every key, click and input. */
+  function track() {
+    caret = box?.selectionEnd ?? text.length;
+  }
+
   /** Writes a recalled or restored prompt in, caret at its end. */
-  function put(value: string) {
+  function put(value: string, at = value.length) {
     setText(value);
     const el = box;
     if (el) {
       el.value = value;
-      el.selectionStart = el.selectionEnd = value.length;
+      el.selectionStart = el.selectionEnd = at;
     }
+    caret = at;
     requestAnimationFrame(grow);
   }
 
@@ -469,22 +543,55 @@
     bar?.querySelector<HTMLElement>(`[data-testid="${testid}"]`)?.click();
   }
 
-  /** The slash menu's keys, while it is open. True when the key was ours. */
-  function slashKey(event: KeyboardEvent): boolean {
-    if (!slashOpen) return false;
+  /**
+   * The `@word` under the caret becomes `@path `, the rest of the text stays,
+   * and the caret lands after the space. The text stops matching, so the menu
+   * closes itself.
+   */
+  function pickMention(item: PaletteItem) {
+    const head = text.slice(0, caret);
+    const at = head.lastIndexOf('@');
+    if (at < 0) return;
+    const written = `${head.slice(0, at)}@${item.id} `;
+    put(written + text.slice(caret), written.length);
+    box?.focus();
+  }
+
+  /**
+   * The keys of whichever menu is open. True when the key was ours: Escape
+   * shuts it on the text as typed, Enter and Tab take the row, the arrows move.
+   */
+  function menuKey(event: KeyboardEvent): boolean {
+    if (mentionOpen) {
+      return listKey(event, mentionItems, mentionAt, (index) => (mentionAt = index), () => (mentionDismissed = true), pickMention);
+    }
+    if (slashOpen) {
+      return listKey(event, slashItems, slashAt, (index) => (slashAt = index), () => (slashDismissed = true), pickSlash);
+    }
+    return false;
+  }
+
+  function listKey(
+    event: KeyboardEvent,
+    items: PaletteItem[],
+    at: number,
+    move: (index: number) => void,
+    dismiss: () => void,
+    pick: (item: PaletteItem) => void
+  ): boolean {
     if (event.key === 'Escape') {
-      slashDismissed = true;
+      dismiss();
       return true;
     }
     if (event.key === 'Enter' || event.key === 'Tab') {
-      const item = slashItems[slashAt];
+      const item = items[at];
       if (!item) return false;
-      pickSlash(item);
+      pick(item);
       return true;
     }
-    if (slashItems.length === 0) return false;
-    if (event.key === 'ArrowDown') slashAt = (slashAt + 1) % slashItems.length;
-    else if (event.key === 'ArrowUp') slashAt = (slashAt - 1 + slashItems.length) % slashItems.length;
+    if (items.length === 0) return false;
+    if (event.key === 'ArrowDown') move((at + 1) % items.length);
+    else if (event.key === 'ArrowUp') move((at - 1 + items.length) % items.length);
     else return false;
     return true;
   }
@@ -505,7 +612,7 @@
     if (meta || event.altKey) return;
     // The menu takes the arrows, Enter, Tab and Escape while it is open; every
     // other key, the recall and the send included, is untouched.
-    if (!event.shiftKey && slashKey(event)) {
+    if (!event.shiftKey && menuKey(event)) {
       event.preventDefault();
       return;
     }
@@ -557,7 +664,12 @@
       {oninput}
       {onkeydown}
       {onpaste}
-      onfocus={() => (focused = true)}
+      onkeyup={track}
+      onclick={track}
+      onfocus={() => {
+        focused = true;
+        track();
+      }}
       onblur={() => (focused = false)}
       rows="1"
       {placeholder}
@@ -572,6 +684,15 @@
       selected={slashAt}
       onpick={pickSlash}
       onhover={(index) => (slashAt = index)}
+    />
+
+    <MentionMenu
+      open={mentionOpen}
+      items={mentionItems}
+      selected={mentionAt}
+      more={mentionMore}
+      onpick={pickMention}
+      onhover={(index) => (mentionAt = index)}
     />
 
     <div class="bar">

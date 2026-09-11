@@ -60,6 +60,38 @@ const ECHO_COMMANDS: AgentCommand[] = [
 /** The one the fake acts on: `/shout <text>` comes back in capitals. */
 const SHOUT = 'shout';
 
+/** What `projects.files` names for any project of the seed: a small repository's tree. */
+const FAKE_FILES = [
+  'README.md',
+  'package.json',
+  'src/main.ts',
+  'src/app.css',
+  'src/App.svelte',
+  'src/lib/store.svelte.ts',
+  'src/lib/strings.ts',
+  'src/lib/client.ts',
+  'src/components/Composer.svelte',
+  'src/components/Sidebar.svelte',
+  'docs/development.md',
+  'docs/providers.md',
+  'tests/e2e/ui.test.ts'
+];
+
+/**
+ * The core's ranking in short: the file's own name first, prefix over
+ * substring, then the whole path, ties to the shorter path.
+ */
+function scoreFakeFile(query: string, path: string): number {
+  const word = query.toLowerCase();
+  if (word.length === 0) return 1;
+  const lower = path.toLowerCase();
+  const name = lower.slice(lower.lastIndexOf('/') + 1);
+  if (name.startsWith(word)) return 80;
+  if (name.includes(word)) return 60;
+  if (lower.includes(word)) return 40;
+  return 0;
+}
+
 /** The managed provider of the seed: a release Boite downloads, 468 MB of it. */
 const MANAGED_ID = 'antigravity';
 const MANAGED_VERSION = 'agy_acp_server_1.1.1';
@@ -456,6 +488,17 @@ export class FakeClient implements ObservableClient {
         }
         this.#emit('project.removed', { projectId: params.projectId });
         return { ok: true };
+      }
+      case 'projects.files': {
+        const params = rawParams as RpcParams<'projects.files'>;
+        if (!this.#projects.some((p) => p.id === params.projectId)) {
+          throw new RpcFailure({ code: RpcErrorCode.NotFound, message: `unknown project ${params.projectId}` });
+        }
+        const limit = Math.max(1, Math.min(200, params.limit ?? 50));
+        const scored = FAKE_FILES.map((path) => ({ path, score: scoreFakeFile(params.query, path) }))
+          .filter((entry) => entry.score > 0)
+          .sort((a, b) => b.score - a.score || a.path.length - b.path.length || (a.path < b.path ? -1 : 1));
+        return { files: scored.slice(0, limit).map((entry) => entry.path), total: scored.length, capped: false };
       }
 
       case 'providers.list':

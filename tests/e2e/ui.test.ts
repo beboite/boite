@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { afterAll, beforeAll, expect, test } from 'bun:test';
@@ -21,6 +21,7 @@ const OFFLINE_SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui-offline-shell
 const ATTACHMENT_SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui-attachment.png');
 const ATTACHMENT_SENT_SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui-attachment-sent.png');
 const SLASH_SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui-slash-menu.png');
+const MENTION_SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui-mention-menu.png');
 /** The one name `public/sw.js` opens; every other cache is deleted on activate. */
 const UI_CACHE = 'boite-ui-v1';
 /** What the echo provider's `[tool-stream]` directive types, one piece at a time. */
@@ -323,6 +324,49 @@ test(
     await clickWhenEnabled(testid('composer-send'));
     await page.waitFor(`${ASSISTANT_TEXT}.includes('THE SQUARE AGAIN')`, 30_000);
     await page.waitFor(`document.querySelector('${testid('thread-status')}').dataset.status === 'idle'`, 30_000);
+  },
+  TIMEOUT,
+);
+
+test(
+  'an at sign lists the project files the core walked, and the picked one is written in as a path',
+  async () => {
+    // The project directory was empty until now: a few files, one of them
+    // under a directory the root .gitignore names, so the walk is the real one.
+    mkdirSync(join(projectDir, 'src', 'lib'), { recursive: true });
+    mkdirSync(join(projectDir, 'dist'), { recursive: true });
+    writeFileSync(join(projectDir, 'README.md'), '# e2e\n');
+    writeFileSync(join(projectDir, 'src', 'app.ts'), 'export {};\n');
+    writeFileSync(join(projectDir, 'src', 'lib', 'store.ts'), 'export {};\n');
+    writeFileSync(join(projectDir, 'dist', 'app.js'), '');
+    writeFileSync(join(projectDir, '.gitignore'), 'dist/\n');
+
+    await page.type(testid('composer-input'), 'look at @');
+    await page.waitFor(`document.querySelectorAll('${testid('mention-row')}').length >= 4`, 10_000);
+    const names = await page.evaluate<string[]>(
+      `Array.from(document.querySelectorAll('${testid('mention-row')}')).map((row) => row.dataset.name)`,
+    );
+    expect(names).toContain('src/lib/store.ts');
+    expect(names).not.toContain('dist/app.js');
+    await page.screenshot(MENTION_SCREENSHOT);
+
+    await page.type(testid('composer-input'), 'look at @sto');
+    await page.waitFor(
+      `document.querySelectorAll('${testid('mention-row')}').length === 1 && document.querySelector('${testid('mention-row')}').dataset.name === 'src/lib/store.ts'`,
+      10_000,
+    );
+    await page.evaluate<null>(
+      `(() => {
+        const box = document.querySelector('${testid('composer-input')}');
+        box.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+        return null;
+      })()`,
+    );
+    await page.waitFor(`!document.querySelector('${testid('mention-menu')}')`, 10_000);
+    expect(await page.evaluate<string>(`document.querySelector('${testid('composer-input')}').value`)).toBe(
+      'look at @src/lib/store.ts ',
+    );
+    await page.type(testid('composer-input'), '');
   },
   TIMEOUT,
 );

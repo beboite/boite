@@ -4,10 +4,20 @@ import type { Project, ProjectId } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { newId } from './ids.ts';
 import { notFound, refused } from './errors.ts';
+import { FileIndex } from './files.ts';
+import type { FilesPage } from './files.ts';
 
 export class ProjectStore {
   private readonly removing = new Set<ProjectId>();
+  private readonly files = new FileIndex();
   constructor(private readonly core: Core) {}
+
+  /** The files a mention can name, ranked on the query. */
+  listFiles(projectId: ProjectId, query: string, limit?: number): Promise<FilesPage> {
+    const project = this.require(projectId);
+    if (typeof query !== 'string') throw refused('projects.files wants a string query', { projectId });
+    return this.files.list(project.path, query, limit);
+  }
 
   list(): Project[] {
     return this.core.journal.listProjects();
@@ -47,7 +57,7 @@ export class ProjectStore {
   }
 
   async remove(projectId: ProjectId): Promise<void> {
-    this.require(projectId);
+    const project = this.require(projectId);
     this.removing.add(projectId);
     try {
       const threads = this.core.journal.listThreads(projectId);
@@ -64,6 +74,7 @@ export class ProjectStore {
       );
       for (const threadId of threadIds) this.core.bus.emit('thread.removed', { threadId });
       this.core.bus.emit('project.removed', { projectId });
+      this.files.forget(project.path);
     } finally {
       this.removing.delete(projectId);
     }
@@ -77,4 +88,7 @@ export function registerProjectMethods(core: Core): void {
     await core.projects.remove(params.projectId);
     return { ok: true } as const;
   });
+  core.router.register('projects.files', (params) =>
+    core.projects.listFiles(params.projectId, params.query, params.limit),
+  );
 }

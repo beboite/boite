@@ -67,6 +67,18 @@ in-memory fake.
 The service worker never registers under `?fake=1`, so a rebuild is always what
 a reload shows.
 
+Two menus open over the composer while typing. `/` on an empty box lists the
+commands: the agent's own first (`Thread.commands`, whatever its protocol
+reported), then Boite's, the same list as the palette. `@` at the start of a
+word lists the project's files, ranked by `projects.files` on the word after
+it, and the pick writes the path in as `@src/lib/store.ts`. That is plain text
+in the prompt: Claude Code reads a mention as the file itself, every other
+agent gets a path relative to its working directory. The core walks the project
+once per query burst (a five second hold), skips `.git`, `node_modules` and the
+names the root `.gitignore` lists outright, and stops at twenty thousand files,
+saying so in `capped`. A glob or a negation in `.gitignore` is not read, so a
+tree ignored through one still shows up in the menu.
+
 ## The echo provider
 
 `echo` is the deterministic fake agent: it streams the prompt back, can call a

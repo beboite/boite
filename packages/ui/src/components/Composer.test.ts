@@ -571,6 +571,72 @@ test('one of Boite own commands runs from the slash menu and empties the box', a
   expect(store.busy).toBe(false);
 });
 
+// -- the mention menu ---------------------------------------------------------
+
+function mentionRows(): string[] {
+  return Array.from(document.querySelectorAll('[data-testid=mention-row]')).map(
+    (row) => row.getAttribute('data-name') ?? ''
+  );
+}
+
+function mentionMenu(): HTMLElement | null {
+  return document.querySelector<HTMLElement>('[data-testid=mention-menu]');
+}
+
+test('an at sign lists the project files, narrows on the word, and writes the pick in as a path', async () => {
+  await mountOnFake();
+  await waitFor(() => store.openThread !== null && !store.busy);
+
+  // Anywhere in the text, not only at the start: the word under the caret is the query.
+  await type('please read @');
+  await waitFor(() => mentionMenu() !== null && mentionRows().length > 0);
+  expect(mentionRows()).toContain('src/lib/store.svelte.ts');
+  expect(mentionMenu()?.textContent).toContain('store.svelte.ts');
+  expect(mentionMenu()?.textContent).toContain('src/lib');
+  // The slash menu stays shut: `@` is not `/`.
+  expect(slashMenu()).toBeNull();
+
+  await type('please read @stri');
+  await waitFor(() => mentionRows().length === 1);
+  expect(mentionRows()).toEqual(['src/lib/strings.ts']);
+
+  input().focus();
+  expect(press('Enter')).toBe(false);
+  await waitFor(() => mentionMenu() === null);
+  expect(input().value).toBe('please read @src/lib/strings.ts ');
+  // Nothing was sent: the pick completes the text, the user goes on.
+  expect(store.busy).toBe(false);
+
+  // A second mention further along ranks on its own word, and the first one stands.
+  await type('please read @src/lib/strings.ts and @composer');
+  await waitFor(() => mentionRows()[0] === 'src/components/Composer.svelte');
+  expect(mentionRows()).toEqual(['src/components/Composer.svelte']);
+  input().focus();
+  expect(press('Tab')).toBe(false);
+  await waitFor(() => mentionMenu() === null);
+  expect(input().value).toBe('please read @src/lib/strings.ts and @src/components/Composer.svelte ');
+});
+
+test('Escape shuts the mention menu, a space closes it, and nothing matches says so', async () => {
+  await mountOnFake();
+  await waitFor(() => store.openThread !== null && !store.busy);
+
+  await type('@');
+  await waitFor(() => mentionMenu() !== null);
+  input().focus();
+  expect(press('Escape')).toBe(false);
+  await waitFor(() => mentionMenu() === null);
+  expect(input().value).toBe('@');
+
+  await type('@nothing-here');
+  await waitFor(() => document.querySelector('[data-testid=mention-empty]') !== null);
+  expect(mentionRows()).toEqual([]);
+
+  // Enter with nothing to pick is the send, as always.
+  await type('@main ');
+  await waitFor(() => mentionMenu() === null);
+});
+
 test('Escape shuts the slash menu and keeps what is typed', async () => {
   await mountOnFake();
   await waitFor(() => store.openThread !== null && !store.busy);

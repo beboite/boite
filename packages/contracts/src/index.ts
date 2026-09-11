@@ -690,6 +690,18 @@ export interface RpcMethods {
   'projects.list': { params: Record<string, never>; result: Project[] };
   'projects.add': { params: { path: string; name?: string }; result: Project };
   'projects.remove': { params: { projectId: ProjectId }; result: { ok: true } };
+  /**
+   * The files of a project a mention can name, ranked on the query: relative
+   * paths with `/` separators, `.git`, `node_modules` and what the root
+   * `.gitignore` names by plain name left out. `total` is the number of
+   * matches, `files` the first `limit` of them (50 unless asked otherwise, 200
+   * at most), and `capped` says the walk stopped at the file cap, so a match
+   * may be missing.
+   */
+  'projects.files': {
+    params: { projectId: ProjectId; query: string; limit?: number };
+    result: { files: string[]; total: number; capped: boolean };
+  };
 
   'providers.list': {
     params: Record<string, never>;
