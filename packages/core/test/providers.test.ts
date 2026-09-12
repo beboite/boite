@@ -458,6 +458,33 @@ describe('providers', () => {
     expect(result.plan.closes).toEqual(process.platform === 'win32' ? ['mine.exe'] : []);
   });
 
+  test('dryRun reads the providers directory and nothing else on the machine', async () => {
+    const client = await harness.connect();
+    const outside = join(harness.dataDir, 'core.json');
+    const expected = `a .json file under ${join(harness.dataDir, 'providers')}`;
+    // A path the caller names used to be read and parsed: the parse error came
+    // back with a line of the file in it, which turned dryRun into a way to
+    // read the machine one message at a time.
+    for (const file of [outside, join(harness.dataDir, 'providers', '..', '..', 'core.json'), 'C:\\Windows\\win.ini']) {
+      const result = await client.call('providers.dryRun', { file });
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error(`${file} should have been refused`);
+      expect(result.rejected.expected).toBe(expected);
+      expect(result.rejected.message).toBe(
+        'a descriptor is read from the providers directory of the data directory, nowhere else',
+      );
+    }
+
+    // Inside the directory, but not a descriptor file: refused the same way.
+    mkdirSync(join(harness.dataDir, 'providers'), { recursive: true });
+    const notJson = join(harness.dataDir, 'providers', 'notes.txt');
+    writeFileSync(notJson, 'not a descriptor', 'utf8');
+    const refused = await client.call('providers.dryRun', { file: notJson });
+    expect(refused.ok).toBe(false);
+    if (refused.ok) throw new Error('notes.txt should have been refused');
+    expect(refused.rejected.expected).toBe(expected);
+  });
+
   test('dryRun reports the refusal with file, field and expected', async () => {
     const file = writeUserDescriptor('dry-bad.json', { ...validDescriptor(), protocol: 'smoke-signals' });
     const client = await harness.connect();

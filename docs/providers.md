@@ -198,7 +198,9 @@ runs on. Four descriptor fields exist for it and are open to any provider:
   `authenticate` with that method, and forwards the sign-in link the server
   prints. The redirect URL pasted back is fetched once by the core, which is how
   a phone finishes a sign-in whose loopback listener runs on the core's machine.
-  [accounts.md](accounts.md) has the flow.
+  The paste is checked against the `redirect_uri` of the link the agent printed,
+  same port and same path, so the fetch lands on the agent's listener and
+  nowhere else on the machine. [accounts.md](accounts.md) has the flow.
 
 `quirks` turns on a dialect the ACP driver knows, and there are two.
 `quirks: ["antigravity"]` folds a tool call's command, working directory and

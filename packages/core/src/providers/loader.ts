@@ -1,5 +1,5 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { join, normalize } from 'node:path';
+import { join, normalize, relative, resolve } from 'node:path';
 import type {
   EffortLevel,
   ExecutableCandidate,
@@ -745,9 +745,29 @@ export class ProviderRegistry {
     return this.list().loaded.filter((provider) => provider.available);
   }
 
+  /**
+   * Validate a user descriptor without loading it. The file has to be one of
+   * ours: the answer says whether a path exists and hands back the first thing
+   * a parser choked on, which on any path the caller names is a way to read the
+   * machine one error message at a time.
+   */
   dryRun(file: string): RpcResult<'providers.dryRun'> {
+    const root = resolve(this.dataDir, 'providers');
+    const resolved = resolve(file);
+    const inside = relative(root, resolved);
+    if (inside.startsWith('..') || resolve(inside) === inside || !resolved.endsWith('.json')) {
+      return {
+        ok: false,
+        rejected: {
+          file,
+          field: 'file',
+          expected: `a .json file under ${root}`,
+          message: 'a descriptor is read from the providers directory of the data directory, nowhere else',
+        },
+      };
+    }
     try {
-      const raw: unknown = JSON.parse(readFileSync(file, 'utf8'));
+      const raw: unknown = JSON.parse(readFileSync(resolved, 'utf8'));
       const shippedIds = new Set(
         [...this.entries.values()].filter((entry) => entry.source === 'shipped').map((entry) => entry.descriptor.id),
       );
