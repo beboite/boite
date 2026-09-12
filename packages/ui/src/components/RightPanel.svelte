@@ -179,6 +179,9 @@
   function launch(kind: SurfaceKind): void {
     // A page needs a webview of its own, which only the desktop shell has.
     if (kind === 'browser' && !inShell) return;
+    // The T key reaches this with no card to disable, and a trace a paired
+    // device may not read would open on an empty surface.
+    if (kind === 'trace' && !store.owner) return;
     panel.open(kind);
   }
 
@@ -430,10 +433,19 @@
             >
             <span class="kbd">B</span>
           </button>
-          <button type="button" class="card" data-testid="launch-trace" onclick={() => launch('trace')}>
+          <!-- Same treatment as the browser card above: the launcher would be
+               empty without it, so the row stays and says whose app reads a
+               trace. `trace.get` is refused to a paired device. -->
+          <button
+            type="button"
+            class="card"
+            disabled={!store.owner}
+            data-testid="launch-trace"
+            onclick={() => launch('trace')}
+          >
             <Activity size={16} strokeWidth={1.75} />
             <span class="card-name">{strings.rightPanel.trace}</span>
-            <span class="card-hint">{strings.rightPanel.traceHint}</span>
+            <span class="card-hint">{store.owner ? strings.rightPanel.traceHint : strings.rightPanel.ownerOnly}</span>
             <span class="kbd">T</span>
           </button>
         </div>

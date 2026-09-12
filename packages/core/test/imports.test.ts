@@ -34,7 +34,7 @@ async function seeded(
 }
 
 test('the folder name is the working directory with every other character turned into a dash', () => {
-  expect(claudeProjectFolder('D:\\Dev\\Collab\\boite')).toBe('D--Dev-Collab-boite');
+  expect(claudeProjectFolder('C:\\src\\boite')).toBe('C--src-boite');
   expect(claudeProjectFolder('/home/me/my app')).toBe('-home-me-my-app');
 });
 
@@ -87,6 +87,26 @@ test('a transcript is listed from its head, imported whole, and never twice', as
   await expect(client.call('imports.run', { projectId, accountId: account.id, sessionId: FIXTURE_SESSION_ID })).rejects.toThrow(
     'already a thread',
   );
+});
+
+test('two runs fired at once import the session once, the second refused by name', async () => {
+  const client = await harness.connect();
+  const { projectId, account } = await seeded(client);
+
+  // A double click: the server dispatches the second frame without waiting for
+  // the first, and both used to pass the "already a thread" check while the
+  // transcript was still being read, which made two threads of one session.
+  const params = { projectId, accountId: account.id, sessionId: FIXTURE_SESSION_ID };
+  const results = await Promise.allSettled([client.call('imports.run', params), client.call('imports.run', params)]);
+  const done = results.filter((result) => result.status === 'fulfilled');
+  const refused = results.filter((result) => result.status === 'rejected');
+  expect(done).toHaveLength(1);
+  expect(refused).toHaveLength(1);
+  // Whichever way the two frames interleave, the second is told why by name.
+  expect(['this session is already being imported', 'this session is already a thread']).toContain(
+    (refused[0] as PromiseRejectedResult).reason.message,
+  );
+  expect(await client.call('threads.list', { projectId })).toHaveLength(1);
 });
 
 test('the agent title wins over the prompt, and is marked as the agent\'s', async () => {

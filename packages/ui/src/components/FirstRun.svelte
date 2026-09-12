@@ -15,22 +15,26 @@
   <div class="card">
     <div class="mark"><BoiteMark size={28} /></div>
     <h1>{strings.firstRun.heading}</h1>
-    <p class="muted">{strings.firstRun.body}</p>
+    <!-- A paired device cannot open a folder, so it gets the one sentence that
+         says where the list comes from instead of a form that would be refused. -->
+    <p class="muted">{store.owner ? strings.firstRun.body : strings.firstRun.deviceBody}</p>
 
-    {#if inShell}
-      <button type="button" class="primary big" data-testid="pick-project" onclick={() => void store.pickProject()}>
-        <FolderOpen size={16} strokeWidth={1.75} />
-        {strings.firstRun.pick}
-      </button>
-      <p class="subtle drop-hint">{strings.firstRun.dropHint}</p>
-    {/if}
+    {#if store.owner}
+      {#if inShell}
+        <button type="button" class="primary big" data-testid="pick-project" onclick={() => void store.pickProject()}>
+          <FolderOpen size={16} strokeWidth={1.75} />
+          {strings.firstRun.pick}
+        </button>
+        <p class="subtle drop-hint">{strings.firstRun.dropHint}</p>
+      {/if}
 
-    {#if typing}
-      <ProjectForm {store} primary={!inShell} />
-    {:else}
-      <button type="button" class="ghost small type-path" data-testid="add-project" onclick={() => (typing = true)}>
-        {strings.firstRun.typePath}
-      </button>
+      {#if typing}
+        <ProjectForm {store} primary={!inShell} />
+      {:else}
+        <button type="button" class="ghost small type-path" data-testid="add-project" onclick={() => (typing = true)}>
+          {strings.firstRun.typePath}
+        </button>
+      {/if}
     {/if}
   </div>
 </div>

@@ -31,7 +31,9 @@
   onMount(() => {
     const off = [startTheme()];
     const initialize = async () => {
-      if (new URLSearchParams(location.search).get('fake') === '1') {
+      // Same gate as `Store.boot`: the constant folds, so the fake core is in
+      // the dev bundle and in vitest, never in what ships.
+      if (import.meta.env.DEV && new URLSearchParams(location.search).get('fake') === '1') {
         const { FakeClient } = await import('./lib/fake-client'); client = new FakeClient();
       } else {
         const endpoint = await resolveEndpoint();

@@ -203,7 +203,6 @@ struct CoreFile {
     host: Option<String>,
     token: String,
     #[serde(default)]
-    #[allow(dead_code)]
     pid: Option<u32>,
 }
 
@@ -235,6 +234,21 @@ fn read_close_behavior(path: &Path) -> Result<bool, String> {
             .map_err(|e| format!("{} must contain a boolean close_to_tray: {e}", path.display())),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
         Err(e) => Err(format!("{} could not be read: {e}", path.display())),
+    }
+}
+
+/// `read_close_behavior` for `run()`, which starts before any window exists: a
+/// malformed `shell-settings.json` must never take the app down with it. The
+/// same default `read_close_behavior` already uses for a missing file, logged
+/// rather than turned into a panic, exactly what `read_core_file`'s caller
+/// already does for a corrupt `core.json`.
+fn close_to_tray_or_default(path: &Path) -> bool {
+    match read_close_behavior(path) {
+        Ok(value) => value,
+        Err(error) => {
+            eprintln!("[shell] {error}; using the default close behavior (close_to_tray: false)");
+            false
+        }
     }
 }
 
@@ -473,6 +487,21 @@ fn data_dir(channel: Channel) -> Result<PathBuf, String> {
     }
 }
 
+/// `data_dir` for `run()`: an unresolvable `%APPDATA%` (or `HOME`) no longer
+/// panics before any window exists. The OS temp directory is the fallback,
+/// present on every platform this ships to, so the shell still starts and
+/// says, in a line an attached terminal or log redirection can show, why its
+/// data now lives there instead.
+fn resolve_data_dir(channel: Channel) -> PathBuf {
+    match data_dir(channel) {
+        Ok(directory) => directory,
+        Err(error) => {
+            eprintln!("[shell] {error}; falling back to a data directory under the OS temp directory");
+            std::env::temp_dir().join(channel.data_dir_name())
+        }
+    }
+}
+
 /// The WebView2 profile the main window and every browser surface share. `None`
 /// leaves it to Tauri, which puts it under the app's own local data directory.
 /// One profile means one browser process for the whole shell.
@@ -512,8 +541,28 @@ fn endpoint_of(file: &CoreFile) -> CoreEndpoint {
     }
 }
 
-/// A plain GET on `/health`, because one request does not deserve an HTTP crate.
-fn health(port: u16) -> bool {
+/// The JSON body the real core answers `/health` with
+/// (`packages/core/src/server.ts:209-211`: `{ ok, version, pid }`). Only `ok`
+/// and `pid` matter here; `version` rides along unread.
+#[derive(Deserialize)]
+struct HealthBody {
+    #[serde(default)]
+    ok: bool,
+    #[serde(default)]
+    pid: Option<u32>,
+}
+
+/// A bound on how much of a `/health` response is ever read, so a local
+/// process that keeps the connection open and streams data cannot be used to
+/// tie up the shell's startup past `HEALTH_TIMEOUT` with unbounded memory.
+/// The real response is a small JSON object; this is generous over that.
+const HEALTH_RESPONSE_LIMIT: usize = 8 * 1024;
+
+/// A GET on `/health`, because one request does not deserve an HTTP crate.
+/// The response is read to its end (or to `HEALTH_RESPONSE_LIMIT`, or until
+/// `HEALTH_TIMEOUT` elapses) and handed to `health_response_matches`, which is
+/// what actually decides whether this is the core `core.json` described.
+fn health(port: u16, expected_pid: u32) -> bool {
     let address = SocketAddr::from(([127, 0, 0, 1], port));
     let Ok(mut stream) = TcpStream::connect_timeout(&address, HEALTH_TIMEOUT) else {
         return false;
@@ -527,10 +576,41 @@ fn health(port: u16) -> bool {
         return false;
     }
 
-    let mut head = [0u8; 32];
-    let read = stream.read(&mut head).unwrap_or(0);
-    let status = String::from_utf8_lossy(&head[..read]);
-    status.starts_with("HTTP/1.1 200") || status.starts_with("HTTP/1.0 200")
+    let mut response = Vec::new();
+    let mut chunk = [0u8; 1024];
+    loop {
+        if response.len() >= HEALTH_RESPONSE_LIMIT {
+            break;
+        }
+        match stream.read(&mut chunk) {
+            Ok(0) => break,
+            Ok(read) => response.extend_from_slice(&chunk[..read]),
+            Err(_) => break,
+        }
+    }
+    health_response_matches(&response, expected_pid)
+}
+
+/// The pure parse behind `health`, kept separate from the socket so a crafted
+/// response can be checked without one. A response that is not a 200, that
+/// carries no blank line ending its headers, whose body is not the JSON
+/// `/health` answers with, or whose `pid` is not `expected_pid`, is never a
+/// match: a local process squatting the port and merely echoing
+/// `HTTP/1.1 200` gets none of these right unless it can also read
+/// `core.json`, which is exactly what it is being asked to prove it can.
+fn health_response_matches(response: &[u8], expected_pid: u32) -> bool {
+    let text = String::from_utf8_lossy(response);
+    if !(text.starts_with("HTTP/1.1 200") || text.starts_with("HTTP/1.0 200")) {
+        return false;
+    }
+    let Some(body_start) = text.find("\r\n\r\n") else {
+        return false;
+    };
+    let body = &text[body_start + 4..];
+    match serde_json::from_str::<HealthBody>(body) {
+        Ok(parsed) => parsed.ok && parsed.pid == Some(expected_pid),
+        Err(_) => false,
+    }
 }
 
 fn repo_root() -> Option<PathBuf> {
@@ -681,7 +761,9 @@ fn resolve_core(
     let file = directory.join("core.json");
 
     match read_core_file(&file) {
-        Ok(Some(existing)) if health(existing.port) => return Ok(endpoint_of(&existing)),
+        Ok(Some(existing)) if existing.pid.map_or(false, |pid| health(existing.port, pid)) => {
+            return Ok(endpoint_of(&existing))
+        }
         Ok(_) => {}
         Err(error) => eprintln!("[shell] {error}"),
     }
@@ -698,7 +780,7 @@ fn resolve_core(
     while started.elapsed() < START_TIMEOUT {
         if ready.load(Ordering::Acquire) || started.elapsed() > Duration::from_secs(1) {
             if let Ok(Some(found)) = read_core_file(&file) {
-                if health(found.port) {
+                if found.pid.map_or(false, |pid| health(found.port, pid)) {
                     return Ok(endpoint_of(&found));
                 }
             }
@@ -860,15 +942,26 @@ fn build_tray<R: Runtime>(app: &AppHandle<R>, channel: Channel) -> tauri::Result
 
 pub fn run() {
     // The channel is read here and nowhere else: the compiled bundle identifier
-    // is the only thing that says which install this executable is.
+    // is the only thing that says which install this executable is. Nothing
+    // from here to the end of this block may panic: there is no window yet,
+    // so a panic here is the app not starting with nothing the user can see.
     let context = tauri::generate_context!();
     let channel = Channel::of_identifier(&context.config().identifier);
-    let directory = data_dir(channel).expect("the shell data directory could not be resolved");
-    let Some(_instance) = instance::acquire(&directory).expect("the shell instance lock could not be acquired") else {
-        return;
+    let directory = resolve_data_dir(channel);
+    let _instance = match instance::acquire(&directory) {
+        Ok(Some(file)) => Some(file),
+        // Another instance already owns this data directory: it has the
+        // window, so this process has nothing left to do.
+        Ok(None) => return,
+        Err(error) => {
+            eprintln!(
+                "[shell] the shell instance lock could not be acquired: {error}; continuing without single-instance protection"
+            );
+            None
+        }
     };
     let preferences_path = directory.join("shell-settings.json");
-    let close_to_tray = read_close_behavior(&preferences_path).expect("shell settings could not be read");
+    let close_to_tray = close_to_tray_or_default(&preferences_path);
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -937,6 +1030,83 @@ mod tests {
         std::fs::write(directory.join("guard-worker.js"), "").unwrap();
         assert!(super::check_workers(&directory).is_ok());
         std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    // -----------------------------------------------------------------------
+    // Finding 4 (security audit, 2026-09-12): `health` used to accept any
+    // local listener that merely echoed `HTTP/1.1 200`. These are the four
+    // cases the fix is required to tell apart, all through the pure parse
+    // rather than a real socket.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn health_response_matches_the_real_core_body_with_the_matching_pid() {
+        let response = b"HTTP/1.1 200 OK\r\ncontent-type: application/json;charset=utf-8\r\ncontent-length: 40\r\n\r\n{\"ok\":true,\"version\":\"2.0.0\",\"pid\":4242}";
+        assert!(super::health_response_matches(response, 4242));
+    }
+
+    #[test]
+    fn health_response_refuses_a_body_naming_a_different_pid() {
+        let response = b"HTTP/1.1 200 OK\r\ncontent-type: application/json\r\n\r\n{\"ok\":true,\"version\":\"2.0.0\",\"pid\":1}";
+        assert!(!super::health_response_matches(response, 4242));
+    }
+
+    #[test]
+    fn health_response_refuses_a_body_that_is_not_json() {
+        let response = b"HTTP/1.1 200 OK\r\ncontent-type: text/plain\r\n\r\nsquatting this port";
+        assert!(!super::health_response_matches(response, 4242));
+    }
+
+    #[test]
+    fn health_response_refuses_a_bare_200_with_no_body() {
+        let response = b"HTTP/1.1 200 OK\r\n\r\n";
+        assert!(!super::health_response_matches(response, 4242));
+    }
+
+    // -----------------------------------------------------------------------
+    // Finding 6 (security audit) / finding 2 (platform audit, 2026-09-12): a
+    // malformed `shell-settings.json` used to panic `run()` before any window
+    // existed. `close_to_tray_or_default` must answer a plain bool for all
+    // four shapes the file can be in, never an `Err` that only `.expect()` was
+    // there to turn into a crash.
+    // -----------------------------------------------------------------------
+
+    fn settings_path(name: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!(
+            "boite-shell-settings-{}-{name}.json",
+            std::process::id()
+        ))
+    }
+
+    #[test]
+    fn close_behavior_reads_a_valid_file() {
+        let path = settings_path("valid");
+        std::fs::write(&path, r#"{"close_to_tray":true}"#).unwrap();
+        assert_eq!(super::close_to_tray_or_default(&path), true);
+        std::fs::remove_file(&path).unwrap();
+    }
+
+    #[test]
+    fn close_behavior_falls_back_to_the_default_on_malformed_json() {
+        let path = settings_path("malformed");
+        std::fs::write(&path, "{not json").unwrap();
+        assert_eq!(super::close_to_tray_or_default(&path), false);
+        std::fs::remove_file(&path).unwrap();
+    }
+
+    #[test]
+    fn close_behavior_falls_back_to_the_default_on_the_wrong_type() {
+        let path = settings_path("wrong-type");
+        std::fs::write(&path, r#"{"close_to_tray":"yes"}"#).unwrap();
+        assert_eq!(super::close_to_tray_or_default(&path), false);
+        std::fs::remove_file(&path).unwrap();
+    }
+
+    #[test]
+    fn close_behavior_falls_back_to_the_default_on_a_missing_file() {
+        let path = settings_path("missing");
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(super::close_to_tray_or_default(&path), false);
     }
 
     #[cfg(windows)]

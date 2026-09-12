@@ -187,7 +187,9 @@
           {/if}
         </span>
       {/if}
-      {#if thread}
+      <!-- `trace.get` is the owner's, so the button that opens the trace surface
+           is not in the device's header at all. -->
+      {#if thread && store.owner}
         <button
           type="button"
           class="ghost trace"

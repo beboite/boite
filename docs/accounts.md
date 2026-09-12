@@ -97,8 +97,11 @@ and gives up after five minutes. The sign-in link arrives as a line on the agent
 stdout that is not JSON, and reaches the page the same way, in `url`. The agent
 holds a loopback listener for the redirect, so a browser on the core's machine
 finishes the flow on its own; from a phone, the redirect URL pasted into
-`accounts.loginInput` is fetched once by the core, and only an `http://127.0.0.1`
-or `http://localhost` URL is accepted. Antigravity is the shipped example.
+`accounts.loginInput` is fetched once by the core. What is accepted is narrow on
+purpose: a loopback URL whose port and path are the ones the agent asked for in
+the `redirect_uri` of the link it printed. A paste aimed anywhere else on the
+machine is refused by name, and no redirect is followed. Antigravity is the
+shipped example.
 
 A login that insists on opening a browser window of its own is one Boite points at
 a launcher that does nothing, through the profile's `BROWSER` variable, so the link

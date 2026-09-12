@@ -2,11 +2,12 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { GRANT_QUERY_PARAM, PAIR_QUERY_PARAM } from '../../../packages/contracts/src/index.ts';
+import { connect } from '../../../packages/core/src/client.ts';
 
 const MAIN = join(import.meta.dir, '..', '..', '..', 'packages', 'core', 'src', 'main.ts');
 /** The default: the end to end suite proves the sources, a bench may point elsewhere. */
 export const CORE_SOURCE_COMMAND: readonly string[] = ['bun', 'run', MAIN];
-const READY = /boite-core ready (\S+) pairing (\S+)/;
+const READY = /boite-core ready (\S+)/;
 const READY_TIMEOUT_MS = 30_000;
 
 export interface StartCoreOptions {
@@ -25,8 +26,6 @@ export interface RunningCore {
   url: string;
   /** The core token, read out of `core.json`: what the shell holds and a phone never sees. */
   token: string;
-  /** The one-time pairing link the ready line printed, good for one page load. */
-  pairingUrl: string;
   port: number;
   dataDir: string;
   pid: number;
@@ -122,10 +121,6 @@ export async function startCore(options: StartCoreOptions = {}): Promise<Running
   })().catch(() => undefined);
 
   const url = match[1] ?? '';
-  const pairingUrl = match[2] ?? '';
-  if (new URL(pairingUrl).searchParams.get(GRANT_QUERY_PARAM) === null) {
-    throw new Error(`the pairing url carries no grant: ${pairingUrl}`);
-  }
   const coreFile = JSON.parse(readFileSync(join(dataDir, 'core.json'), 'utf8')) as { token?: unknown };
   const token = typeof coreFile.token === 'string' ? coreFile.token : '';
   if (token === '') throw new Error(`core.json under ${dataDir} carries no token`);
@@ -133,7 +128,6 @@ export async function startCore(options: StartCoreOptions = {}): Promise<Running
   return {
     url,
     token,
-    pairingUrl,
     port: Number(new URL(url).port),
     dataDir,
     pid: proc.pid,
@@ -148,9 +142,27 @@ export async function startCore(options: StartCoreOptions = {}): Promise<Running
 
 /**
  * The owner's own link: the core token in the query, the way a UI is opened by
- * hand on a token. It is reusable, unlike `core.pairingUrl`, so a test that
+ * hand on a token. It is reusable, unlike a pairing grant, so a test that
  * reloads the page keeps using it.
  */
 export function pairingUrlOf(core: Pick<RunningCore, 'url' | 'token'>): string {
   return `${core.url}/?${PAIR_QUERY_PARAM}=${core.token}`;
+}
+
+/**
+ * A one-time pairing link, minted the only way there is one: the owner asks for
+ * it. The ready line used to print one on every start, which handed a session
+ * token to anything that could read a log.
+ */
+export async function mintPairing(core: Pick<RunningCore, 'url' | 'token'>): Promise<string> {
+  const client = await connect(core.url, core.token);
+  try {
+    const { url } = await client.call('pairing.grant', {});
+    if (new URL(url).searchParams.get(GRANT_QUERY_PARAM) === null) {
+      throw new Error(`the pairing url carries no grant: ${url}`);
+    }
+    return url;
+  } finally {
+    client.close();
+  }
 }

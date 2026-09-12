@@ -65,6 +65,32 @@ describe('procs', () => {
     expect(trace[0]?.exitedAt).not.toBeNull();
   }, 30000);
 
+  test('a thread with nothing running keeps its pid history, and a new process cancels the forgetting', async () => {
+    const threadId = 'forget-when-idle';
+    // The three maps the load tick walks. Without the timer they held every
+    // thread the core ever ran, and the plugin store mints an id per call.
+    const registry = harness.core.procs as unknown as {
+      known: Map<string, Set<number>>;
+      forgetTimers: Map<string, ReturnType<typeof setTimeout>>;
+    };
+    const first = harness.core.procs.spawnChild(threadId, process.execPath, ['-e', ''], { cwd: harness.dataDir });
+    const pid = first.pid ?? 0;
+    expect(pid).toBeGreaterThan(0);
+    await new Promise<void>((resolve, reject) => { first.once('exit', () => resolve()); first.once('error', reject); });
+    await waitFor(() => harness.core.procs.liveCount(threadId) === 0, 5000);
+
+    // The history outlives the process on purpose: a job event for that pid is
+    // a repeat, not a grandchild, and `known` is what tells the two apart.
+    expect(registry.known.get(threadId)?.has(pid)).toBe(true);
+    expect(registry.forgetTimers.has(threadId)).toBe(true);
+
+    const second = harness.core.procs.spawnChild(threadId, process.execPath, ['-e', ''], { cwd: harness.dataDir });
+    expect(registry.forgetTimers.has(threadId)).toBe(false);
+    await new Promise<void>((resolve, reject) => { second.once('exit', () => resolve()); second.once('error', reject); });
+    await waitFor(() => harness.core.procs.liveCount(threadId) === 0, 5000);
+    expect(registry.forgetTimers.has(threadId)).toBe(true);
+  }, 15000);
+
   test('the trace capability says what it can promise on this OS', async () => {
     const client = await harness.connect();
     if (process.platform === 'win32') {

@@ -1,5 +1,6 @@
 import { RpcErrorCode } from '@boite/contracts';
 import type { RpcEventName, RpcEvents, RpcMethodName, RpcMethods, ThreadId } from '@boite/contracts';
+import { assertAllowed } from './access.ts';
 import { RpcFailure } from './errors.ts';
 import type { Identity } from './sessions.ts';
 
@@ -35,11 +36,19 @@ export class Router {
     return this.handlers.has(method as RpcMethodName);
   }
 
+  /** Every method registered, which is what the access test walks. */
+  methods(): RpcMethodName[] {
+    return [...this.handlers.keys()];
+  }
+
   async dispatch(method: string, params: unknown, ctx: RpcContext): Promise<unknown> {
     const handler = this.handlers.get(method as RpcMethodName);
     if (handler === undefined) {
       throw new RpcFailure(RpcErrorCode.MethodNotFound, `unknown method ${method}`, { method });
     }
+    // Every method goes through the same gate, so a new one is the owner's
+    // until `DEVICE_METHODS` says otherwise.
+    assertAllowed(method as RpcMethodName, ctx.connection);
     return await handler(params as never, ctx);
   }
 }

@@ -110,11 +110,6 @@ export class Core {
     return `http://${this.displayHost()}:${this.endpoint.port}`;
   }
 
-  /** A fresh one-time pairing link: what the ready line prints and the Settings page mints. */
-  pairingUrl(): string {
-    return this.sessions.grant().url;
-  }
-
   info(): CoreInfo {
     return {
       version: this.version,

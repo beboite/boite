@@ -5,6 +5,8 @@
  * core: the panel is a client's layout, so it lives in `localStorage`.
  */
 
+import { browserBridge } from './browser-bridge';
+
 export type SurfaceKind = 'trace' | 'browser';
 
 export interface Surface {
@@ -170,9 +172,16 @@ export class RightPanelStore {
     return bound;
   }
 
-  /** A thread that left Boite takes its panel with it. */
+  /** A thread that left Boite takes its panel with it, browser views included. */
   forget(threadId: string): void {
-    if (!(threadId in this.threads)) return;
+    const state = this.threads[threadId];
+    if (!state) return;
+    // The strip goes with the layout, so nothing will ever list these surfaces
+    // again: a view not destroyed here outlives the session with no tab to
+    // close it. The surface's own teardown only parks it, on purpose.
+    for (const surface of state.surfaces) {
+      if (surface.kind === 'browser') browserBridge.destroy(surface.id);
+    }
     const { [threadId]: _gone, ...kept } = this.threads;
     this.threads = kept;
     this.#bound.delete(threadId);

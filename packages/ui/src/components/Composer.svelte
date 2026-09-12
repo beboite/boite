@@ -52,6 +52,8 @@
   let mentionMore = $state(0);
   /** The number of the last `projects.files` asked, so an older answer is dropped. */
   let mentionAsk = 0;
+  /** The project `mentionItems` was ranked in: another one's paths are never shown. */
+  let mentionFrom: string | null = null;
   const MENTION_PAGE = 30;
   const MENTION_DEBOUNCE_MS = 60;
 
@@ -175,8 +177,18 @@
     const query = mentionQuery;
     const projectId = mentionProject;
     const client = store.client;
-    if (query === null || projectId === null || !client) return;
+    // Every run drops the page in flight, the one that shuts the menu included.
     const ask = ++mentionAsk;
+    // The menu opens on the frame `@` is typed, a whole round trip before the
+    // answer: a list ranked in another project, or for a word the user has
+    // left, would be pickable until then. Narrowing inside one project keeps
+    // its rows, which is what makes the list stand still while he types.
+    if (query === null || projectId !== mentionFrom) {
+      mentionFrom = projectId;
+      mentionItems = [];
+      mentionMore = 0;
+    }
+    if (query === null || projectId === null || !client) return;
     const timer = setTimeout(() => {
       void client
         .call('projects.files', { projectId, query, limit: MENTION_PAGE })
@@ -359,9 +371,11 @@
     const accepted = await store.send(entry.text, threadId, entry.attachments);
     if (accepted) state.queued.shift();
     else {
-      // Pause after a refusal. Put the rejected prompt back for an explicit retry.
+      // Pause after a refusal. The prompt goes back in the box for an explicit
+      // retry only when it is the whole queue: taking it out from under the
+      // ones behind it would send them in the order they were not typed in.
       state.paused = true;
-      if (state.text.length === 0 && state.attachments.length === 0) {
+      if (state.queued.length === 1 && state.text.length === 0 && state.attachments.length === 0) {
         const back = state.queued.shift()!;
         state.text = back.text;
         state.attachments = back.attachments;
@@ -375,10 +389,14 @@
     const images = attachments;
     if (!canSend || !choice) return;
     const state = stateForInput();
-    if (store.busy) {
+    // A queue that still holds something takes this prompt too, whatever the
+    // thread's status: sending it on its own would put it ahead of prompts the
+    // user typed first. Sending is also how he resumes a queue a refusal paused.
+    if (store.busy || state.queued.length > 0) {
       state.queued.push({ text: prompt, attachments: images });
       state.text = '';
       state.attachments = [];
+      state.paused = false;
       recall = null;
       requestAnimationFrame(grow);
       return;

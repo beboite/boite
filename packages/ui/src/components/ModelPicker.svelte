@@ -396,14 +396,18 @@
 
         {#if needsInstall}
           <p class="none subtle" data-testid="picker-not-installed">{strings.composer.notInstalled}</p>
-          <button
-            type="button"
-            class="quiet small to-settings"
-            data-testid="picker-install-settings"
-            onclick={openInstall}
-          >
-            {strings.composer.installInSettings}
-          </button>
+          <!-- The Providers page is `accounts.*` and `providers.install`, so the
+               device is told the provider is missing and nothing more. -->
+          {#if store.owner}
+            <button
+              type="button"
+              class="quiet small to-settings"
+              data-testid="picker-install-settings"
+              onclick={openInstall}
+            >
+              {strings.composer.installInSettings}
+            </button>
+          {/if}
         {:else}
           {#if searchable}
             <div class="search-bar">

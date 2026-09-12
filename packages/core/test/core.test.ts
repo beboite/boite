@@ -1,9 +1,11 @@
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join, sep } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { echoThread, startTestCore } from './harness.ts';
+import { echoThread, removeDir, startTestCore } from './harness.ts';
 import type { TestCore } from './harness.ts';
 import { newId } from '../src/ids.ts';
-import { parseFlags, resolveHost } from '../src/main.ts';
+import { lockDataDir, parseFlags, resolveHost } from '../src/main.ts';
 import { dataDirName, defaultDataDir, resolveDataDir } from '../src/paths.ts';
 import { DEFAULT_SETTINGS } from '../src/settings.ts';
 
@@ -243,5 +245,62 @@ describe('the bind address', () => {
       resolveHost(parseFlags(['--host', '127.0.0.1']), { ...DEFAULT_SETTINGS, listenOnLan: true }),
     ).toBe('127.0.0.1');
     expect(resolveHost(parseFlags(['--lan']), { ...DEFAULT_SETTINGS, listenOnLan: false })).toBe('0.0.0.0');
+  });
+});
+
+describe('the data directory lock', () => {
+  // A pid nothing holds: high enough that no live process wears it here, and
+  // `alive()` says so on both platforms.
+  const DEAD_PID = 0x7ff_fff0;
+  let dir: string;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'boite-lock-'));
+  });
+
+  afterEach(async () => {
+    await removeDir(dir);
+  });
+
+  test('the lock is taken, then released, and the file says who holds it', () => {
+    const release = lockDataDir(dir);
+    const file = join(dir, 'core.lock');
+    expect(existsSync(file)).toBe(true);
+    expect(JSON.parse(readFileSync(file, 'utf8')) as { pid: number }).toMatchObject({ pid: process.pid });
+    release();
+    expect(existsSync(file)).toBe(false);
+    // Releasing twice is not an error: shutdown may run after a crash cleaned up.
+    release();
+  });
+
+  test('a live holder refuses the second core by name, and says what to do instead', () => {
+    // The parent process is alive and is not this one, which is the case that
+    // matters: two cores, two pids, one journal.
+    writeFileSync(join(dir, 'core.lock'), JSON.stringify({ pid: process.ppid, startedAt: Date.now() }), 'utf8');
+    let failure = 'none';
+    try {
+      lockDataDir(dir);
+    } catch (error) {
+      failure = (error as Error).message;
+    }
+    expect(failure).toContain(`another core is already running on ${dir}`);
+    expect(failure).toContain(`pid ${process.ppid}`);
+    expect(failure).toContain('--data-dir');
+  });
+
+  test('a lock whose holder is gone is taken over rather than left in the way', () => {
+    const file = join(dir, 'core.lock');
+    writeFileSync(file, JSON.stringify({ pid: DEAD_PID, startedAt: 0 }), 'utf8');
+    const release = lockDataDir(dir);
+    expect(JSON.parse(readFileSync(file, 'utf8')) as { pid: number }).toMatchObject({ pid: process.pid });
+    release();
+  });
+
+  test('a lock file nobody can parse is taken over too', () => {
+    const file = join(dir, 'core.lock');
+    writeFileSync(file, 'half a write and a power cut', 'utf8');
+    const release = lockDataDir(dir);
+    expect(JSON.parse(readFileSync(file, 'utf8')) as { pid: number }).toMatchObject({ pid: process.pid });
+    release();
   });
 });

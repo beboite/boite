@@ -2,9 +2,12 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, test } from 'bun:test';
+import type { SessionNotification } from '@agentclientprotocol/sdk';
 import type { MessagePart, PermissionMode, RpcEvents, Settings } from '@boite/contracts';
 import type { CoreClient } from '../src/client.ts';
-import { getDriver } from '../src/drivers/index.ts';
+import type { AcpSdk } from '../src/drivers/acp.ts';
+import { createAcpDriver } from '../src/drivers/acp.ts';
+import { getDriver, setDriver } from '../src/drivers/index.ts';
 import { startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
 
@@ -13,6 +16,7 @@ const FAKE_AGENT = fileURLToPath(new URL('./fixtures/acp-agent.ts', import.meta.
 
 let harness: TestCore | null = null;
 let logFile = '';
+let restoreDriver: (() => void) | null = null;
 
 afterEach(async () => {
   const open = harness;
@@ -20,8 +24,43 @@ afterEach(async () => {
   delete process.env['ACP_FAKE_LOG'];
   delete process.env['ACP_FAKE_NO_MODES'];
   delete process.env['ACP_FAKE_NO_IMAGES'];
-  if (open !== null) await open.stop();
+  try {
+    if (open !== null) await open.stop();
+  } finally {
+    restoreDriver?.();
+    restoreDriver = null;
+  }
 });
+
+/**
+ * The real SDK with one seam: the `session/update` handler the driver registers
+ * is kept, so a test can hand it a notification at a moment the fake agent
+ * cannot reach through the wire, such as between two turns of a warm session.
+ * Everything else, the agent process included, stays exactly what it was.
+ */
+async function sdkWithUpdateSeam(): Promise<{ sdk: AcpSdk; send: (notification: SessionNotification) => void }> {
+  const real = await import('@agentclientprotocol/sdk');
+  let handler: ((context: { params: SessionNotification }) => void) | null = null;
+  const sdk = {
+    ...real,
+    client: (options?: Parameters<typeof real.client>[0]) => {
+      const app = real.client(options);
+      const register = app.onNotification.bind(app);
+      app.onNotification = ((method: string, given: unknown) => {
+        if (method === 'session/update') handler = given as (context: { params: SessionNotification }) => void;
+        return register(method as never, given as never);
+      }) as typeof app.onNotification;
+      return app;
+    },
+  } as unknown as AcpSdk;
+  return {
+    sdk,
+    send: (notification) => {
+      if (handler === null) throw new Error('the driver registered no session/update handler');
+      handler({ params: notification });
+    },
+  };
+}
 
 async function startCore(settings?: Partial<Settings>): Promise<CoreClient> {
   const started = await startTestCore(settings === undefined ? {} : { settings });
@@ -688,6 +727,30 @@ describe('acp driver', () => {
 
     await runTurn(client, threadId, 'back to work');
     await waitFor(() => setModeCount('default') === 1);
+  });
+
+  test('a mode the agent announces between two turns is not dropped', async () => {
+    const client = await startCore({ warmProcessMinutes: 5 });
+    const seam = await sdkWithUpdateSeam();
+    restoreDriver = setDriver('acp', createAcpDriver({ loadSdk: () => Promise.resolve(seam.sdk) }));
+    const threadId = await acpThread(client);
+    const logs = collectLogs(client);
+
+    await runTurn(client, threadId, 'first');
+    // The thread and the agent both started on `default`: nothing was sent.
+    expect(fakeLog()).not.toContain('set_mode');
+
+    // The agent switches on its own with no prompt in flight, which is where a
+    // `session/update` lands between two turns of a warm session.
+    const sessionId = (await client.call('threads.get', { threadId })).sessionId ?? '';
+    expect(sessionId).not.toBe('');
+    seam.send({ sessionId, update: { sessionUpdate: 'current_mode_update', currentModeId: 'yolo' } });
+
+    // The next turn has to put the agent back: dropping the update leaves the
+    // driver believing `default` is live, and the whole turn runs unattended.
+    await runTurn(client, threadId, 'second');
+    expect(setModeCount('default')).toBe(1);
+    expect(logs.some((line) => line.includes('the agent switched to the session mode yolo'))).toBe(true);
   });
 
   test('an agent with no modes at all is one warning, and the turn still runs', async () => {

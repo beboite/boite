@@ -33,12 +33,15 @@ became.
 ## Pairing
 
 A pairing link is minted from the desktop app, in Settings under "Phones and
-other devices", drawn beside a QR code the phone's camera opens, and the core
-prints one on its ready line too:
+other devices", drawn beside a QR code the phone's camera opens:
 
 ```
 http://192.168.1.20:53421/?grant=<32 random bytes, hex>
 ```
+
+Asking is the only way to get one. The core used to print a live grant on its
+ready line at every start, which put a working session key in every log file and
+every terminal scrollback that had seen the core boot.
 
 The grant inside it is not the core token. It is a one-time id the core
 remembers for ten minutes: the page that opens the link says `hello` with it,
@@ -51,9 +54,26 @@ Session keys are stored hashed in the journal, so a core restart keeps every
 pairing and a copy of the journal holds no credential. `sessions.list` shows
 every paired device with the client it said it was and when it was last seen;
 `sessions.revoke`, the Revoke button of the same card, closes its sockets and
-deletes the row, after which its key opens nothing. Minting a link and
-revoking are the owner's alone: a paired device sees the list and cannot pair
-another.
+deletes the row, after which its key opens nothing.
+
+## What a paired device may call
+
+`packages/core/src/access.ts` holds the whole boundary, as one list the router
+checks before any handler runs. Read it as the phone's screen: the sidebar, a
+thread, the composer, the cards an agent raises, and the settings it only
+displays. Nothing on that list writes outside a thread, names a path on the
+machine, starts a process of its own or changes what the core trusts.
+
+A method absent from the list is the owner's, and a method added tomorrow is
+refused to a device until someone puts it there on purpose. That is the point of
+the shape: the gate is deny by default, so the boundary cannot be widened by
+forgetting. A refusal names the method (`projects.add is for the owner only`).
+
+The owner is whoever holds the core token, which means the desktop shell and
+anything else that can read `core.json`. Until this list existed, a paired phone
+could add a project pointing anywhere on the machine, start a thread with a
+working directory of its own, turn on `listenOnLan` and read files through a
+provider dry run: everything the owner could do except pairing another device.
 
 The link carries `?grant=` alone, with no `core=`, because the page it opens is
 the one the core is serving: an absent `core` parameter means the origin of this

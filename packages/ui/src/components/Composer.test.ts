@@ -685,3 +685,71 @@ test('queued prompts survive settings and wait for a ready connection', async ()
     ['turns.start', { threadId: 't-trace', prompt: 'queue through settings' }]
   ]);
 });
+
+test('a refused prompt keeps its place in the queue and the next send resumes it in order', async () => {
+  await mountOnFake();
+  await store.open('t-trace');
+  await waitFor(() => store.openThread?.id === 't-trace' && !store.busy);
+  const client = store.client!;
+  const call = client.call.bind(client);
+  let refuse = true;
+  vi.spyOn(client, 'call').mockImplementation((method, params) => {
+    if (method === 'turns.start' && refuse) return Promise.reject(new Error('account at its cap'));
+    return call(method, params);
+  });
+
+  // Two prompts queued behind a running turn, a third typed while it runs.
+  store.openThread!.status = 'running';
+  await type('P1');
+  press('Enter');
+  await type('P2');
+  press('Enter');
+  await waitFor(() => input().value === '');
+  await type('P3');
+
+  // The turn ends, the queue drains, and the core refuses the first prompt.
+  store.openThread!.status = 'idle';
+  await waitFor(() => store.error === 'account at its cap');
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(store.composerStates['t-trace']?.queued.map((entry) => entry.text)).toEqual(['P1', 'P2']);
+  expect(input().value).toBe('P3');
+
+  // Sending the third is the explicit retry: it goes in behind what waits.
+  refuse = false;
+  input().focus();
+  press('Enter');
+  await waitFor(() => (store.composerStates['t-trace']?.queued.length ?? 1) === 0 && !store.busy);
+
+  const sent = store
+    .openThread!.messages.filter((message) => message.role === 'user')
+    .slice(-3)
+    .map((message) => message.parts.map((part) => (part.type === 'text' ? part.text : '')).join(''));
+  expect(sent).toEqual(['P1', 'P2', 'P3']);
+});
+
+test('the mention menu never opens on the project the composer just left', async () => {
+  await mountOnFake();
+  await store.open('t-trace');
+  await waitFor(() => store.openThread?.id === 't-trace' && !store.busy);
+  const client = store.client!;
+  const call = client.call.bind(client);
+  // The fake ranks one list for every project, so each gets its own here: what
+  // is on the screen has to name the project the composer is standing in.
+  vi.spyOn(client, 'call').mockImplementation(async (method, params) => {
+    if (method !== 'projects.files') return call(method, params);
+    return { files: [`${(params as { projectId: string }).projectId}/one.ts`], total: 1, capped: false };
+  });
+
+  await type('read @o');
+  await waitFor(() => mentionRows().length === 1);
+  expect(mentionRows()).toEqual(['p-boite/one.ts']);
+
+  await store.open('t-descriptors');
+  await waitFor(() => store.openThread?.id === 't-descriptors');
+  await type('read @o');
+
+  // The frame it opens on holds nothing of the project just left.
+  expect(mentionRows()).toEqual([]);
+  await waitFor(() => mentionRows().length === 1);
+  expect(mentionRows()).toEqual(['p-notes/one.ts']);
+});

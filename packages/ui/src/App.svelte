@@ -13,6 +13,7 @@
   import TitleBar from './components/TitleBar.svelte';
   import { Closing } from './lib/closing.svelte';
   import { runCommand } from './lib/commands.svelte';
+  import { confirm } from './lib/confirm.svelte';
   import { startGlass } from './lib/glass';
   import { installExternalLinks } from './lib/links';
   import { isQuitChord, QUIT_HOLD_MS, QuitHold } from './lib/quit-hold';
@@ -144,6 +145,9 @@
     quitHold?.release();
   }
 
+  /** Whether one of the two modal dialogs is up, waiting on the user. */
+  let modal = $derived(confirm.current !== null || store.imports !== null);
+
   /** A key that belongs to whatever the user is typing in, not to the app. */
   function typing(event: KeyboardEvent): boolean {
     const target = event.target;
@@ -165,6 +169,10 @@
       quitHold.press();
       return;
     }
+    // A dialog waiting for an answer owns the keyboard: a chord under it moves
+    // an app the user cannot see, and the call it is asking about stays
+    // pending. Each dialog answers its own keys on the capture phase.
+    if (modal) return;
     const command = store.commandForKey(event);
     if (command === null) {
       if (event.key === 'Escape' && store.sidebarOpen) store.sidebarOpen = false;

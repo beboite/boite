@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { tick } from 'svelte';
+  import { tick, untrack } from 'svelte';
   import { Search } from '@lucide/svelte';
   import type { ThreadSummary } from '@boite/contracts';
   import { Closing } from '../lib/closing.svelte';
@@ -57,9 +57,20 @@
     return rankItems(query, [...threads, ...commandItems], PALETTE_LIMIT);
   });
 
+  // The walk starts over on what the user typed, never on the list being
+  // rebuilt: the core pushes a `thread.updated` a second per live agent, and
+  // the selection cannot jump back to the top under his fingers.
   $effect(() => {
-    void rows;
-    selected = 0;
+    void query;
+    untrack(() => (selected = 0));
+  });
+
+  /** A shorter list keeps the keyboard on a row that is still there. */
+  $effect(() => {
+    const count = rows.length;
+    untrack(() => {
+      if (selected >= count) selected = Math.max(0, count - 1);
+    });
   });
 
   $effect(() => {

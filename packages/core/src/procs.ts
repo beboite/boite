@@ -60,6 +60,8 @@ interface Entry {
 const CPU_EPSILON_PERCENT = 1;
 const MEMORY_EPSILON_BYTES = 1024 * 1024;
 const LOAD_INTERVAL_MS = 1000;
+/** How long a thread with nothing running keeps its pid history, for a late job event. */
+const FORGET_DELAY_MS = 30_000;
 
 /**
  * The one launcher. Nothing in the core reaches `Bun.spawn` directly: a child
@@ -73,6 +75,8 @@ export class ProcRegistry {
   private readonly live = new Map<ThreadId, Map<number, Entry>>();
   /** Every pid this thread ever registered. A job event for one of them is a repeat, not a grandchild. */
   private readonly known = new Map<ThreadId, Set<number>>();
+  /** Forgetting a thread whose last process exited, once a late job event can no longer arrive. */
+  private readonly forgetTimers = new Map<ThreadId, ReturnType<typeof setTimeout>>();
   private readonly lastLoad = new Map<ThreadId, ThreadLoad>();
   /** What was last sent as `thread.updated`. A plain read must never move it. */
   private readonly lastPushed = new Map<ThreadId, ThreadLoad>();
@@ -142,6 +146,8 @@ export class ProcRegistry {
     clearInterval(this.loadTimer);
     for (const timer of this.exitTimers.values()) clearTimeout(timer);
     this.exitTimers.clear();
+    for (const timer of this.forgetTimers.values()) clearTimeout(timer);
+    this.forgetTimers.clear();
     releaseJobs();
     releaseGuard();
   }
@@ -273,6 +279,11 @@ export class ProcRegistry {
   }
 
   private track(threadId: ThreadId, record: ProcessRecord, control: Omit<Entry, 'record'>): void {
+    const forgetting = this.forgetTimers.get(threadId);
+    if (forgetting !== undefined) {
+      clearTimeout(forgetting);
+      this.forgetTimers.delete(threadId);
+    }
     let byPid = this.live.get(threadId);
     if (byPid === undefined) {
       byPid = new Map();
@@ -409,6 +420,7 @@ export class ProcRegistry {
     this.exitTimers.delete(pid);
     this.unassigned.delete(pid);
     this.live.get(threadId)?.delete(pid);
+    this.forgetWhenIdle(threadId);
     guardPidRemoved(threadId, pid);
     if (this.journal.isClosed()) return;
     const record = entry.record;
@@ -428,6 +440,29 @@ export class ProcRegistry {
       this.journal.putProcess(record);
     });
     this.bus.emit('process.exited', { ...record });
+  }
+
+  /**
+   * A thread whose last process exited is forgotten, entry and pid history
+   * alike. Kept for a moment first, because a job event for one of those pids
+   * can still be in flight and `known` is what tells it from a grandchild.
+   * Without this, every thread the core ever ran stays in three maps the load
+   * tick walks, and a caller minting an id per call (the plugin store) grows
+   * them without bound.
+   */
+  private forgetWhenIdle(threadId: ThreadId): void {
+    if ((this.live.get(threadId)?.size ?? 0) > 0) return;
+    if (this.forgetTimers.has(threadId)) return;
+    const timer = setTimeout(() => {
+      this.forgetTimers.delete(threadId);
+      if ((this.live.get(threadId)?.size ?? 0) > 0) return;
+      this.live.delete(threadId);
+      this.known.delete(threadId);
+      this.lastLoad.delete(threadId);
+      this.lastPushed.delete(threadId);
+    }, FORGET_DELAY_MS);
+    timer.unref();
+    this.forgetTimers.set(threadId, timer);
   }
 
   private measure(threadId: ThreadId, processes: number): ThreadLoad {

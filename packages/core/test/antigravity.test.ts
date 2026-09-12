@@ -184,6 +184,19 @@ describe('antigravity', () => {
       .find((line) => line.startsWith('callback:'))
       ?.slice('callback:'.length);
     expect(callback).toContain('http://127.0.0.1:');
+
+    // A loopback URL that is not the one the agent announced is refused before
+    // anything is fetched. Without the check, a paste was a GET at any port on
+    // the user's machine, sent from the core.
+    const elsewhere = new URL(callback ?? '');
+    const otherPort = String(Number(elsewhere.port) + 1);
+    await expect(
+      client.call('accounts.loginInput', { accountId: account.id, text: `http://127.0.0.1:${otherPort}/oauth2callback?code=x` }),
+    ).rejects.toThrow(/this login listens on/);
+    await expect(
+      client.call('accounts.loginInput', { accountId: account.id, text: `http://127.0.0.1:${elsewhere.port}/admin/shutdown` }),
+    ).rejects.toThrow(/this login listens on/);
+
     await client.call('accounts.loginInput', { accountId: account.id, text: callback ?? '' });
 
     // The core fetched it, the agent's own listener saw the hit and answered

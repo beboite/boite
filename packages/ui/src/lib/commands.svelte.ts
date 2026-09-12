@@ -15,6 +15,9 @@ import { setTheme } from './theme';
 /** What marks an agent's own command apart from Boite's in a mixed list. */
 export const AGENT_PREFIX = 'agent:';
 
+/** The commands that end in a method only the owner may call. */
+const OWNER_COMMANDS = new Set<string>(['add-project', 'import-session', 'trace', 'providers', 'pair']);
+
 /** True while this row is a command the agent reported, not one of Boite's. */
 export function isAgentCommand(item: PaletteItem): boolean {
   return item.id.startsWith(AGENT_PREFIX);
@@ -39,20 +42,25 @@ export function appCommands(store: Store, inShell: boolean): PaletteItem[] {
     return { id, kind: 'command', label, ...(hint === null ? {} : { hint }), ...(keywords === undefined ? {} : { keywords }) };
   };
   if (store.projects.length > 0) items.push(row('new-thread', strings.palette.newThread, 'draft start'));
-  items.push(row('add-project', strings.palette.addProject, 'folder open'));
-  if (store.projects.length > 0 && experimentOn('session-import')) items.push(row('import-session', strings.palette.importSession, 'transcript history resume'));
+  // Opening a folder, reading a transcript, listing processes and everything
+  // Providers and pairing do are the owner's: `packages/core/src/access.ts`
+  // refuses them to a paired device, so they are not offered to one.
+  if (store.owner) items.push(row('add-project', strings.palette.addProject, 'folder open'));
+  if (store.owner && store.projects.length > 0 && experimentOn('session-import')) items.push(row('import-session', strings.palette.importSession, 'transcript history resume'));
   if (open) {
     items.push(row('pin', open.pinned ? strings.palette.unpin : strings.palette.pin, 'favourite top'));
     items.push(row('rename', strings.palette.rename, 'title'));
     items.push(row('retitle', strings.palette.retitle, 'title agent name'));
     items.push(row('panel', strings.palette.panel, 'browser surface'));
-    items.push(row('trace', strings.palette.trace, 'processes load'));
+    if (store.owner) items.push(row('trace', strings.palette.trace, 'processes load'));
   }
   items.push(row('sidebar', strings.palette.sidebar));
   items.push(row('settings', strings.palette.settings, 'preferences'));
   items.push(row('appearance', strings.palette.appearance, 'theme material'));
-  items.push(row('providers', strings.palette.providers, 'accounts login install'));
-  items.push(row('pair', strings.palette.pair, 'phone link devices'));
+  if (store.owner) {
+    items.push(row('providers', strings.palette.providers, 'accounts login install'));
+    items.push(row('pair', strings.palette.pair, 'phone link devices'));
+  }
   items.push(row('theme-dark', strings.palette.themeDark));
   items.push(row('theme-light', strings.palette.themeLight));
   items.push(row('theme-system', strings.palette.themeSystem));
@@ -94,6 +102,9 @@ export function commandLabel(id: KeybindingCommand): string {
  */
 export function runCommand(store: Store, id: string, inShell: boolean): void {
   const open = store.openThread;
+  // A chord reaches this without a row to hide, so the boundary is checked here
+  // too: these five are the owner's, whatever key was pressed.
+  if (!store.owner && OWNER_COMMANDS.has(id)) return;
   switch (id) {
     case 'new-thread': store.showChat(); store.startDraft(); break;
     case 'palette': store.paletteOpen = !store.paletteOpen; break;

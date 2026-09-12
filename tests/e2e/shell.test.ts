@@ -397,6 +397,41 @@ shellTest(
 );
 
 shellTest(
+  'the shipped webview refuses what the content security policy forbids',
+  async () => {
+    // `csp: null` shipped a window where any origin was fair game. What proves
+    // a policy is live is the browser refusing a load, never a string read back
+    // out of tauri.conf.json. Port 1 answers nothing, so a missing policy ends
+    // in a refused connection rather than a request that leaves the machine.
+    const refused = await page?.evaluate<string>(`(() => new Promise((resolve) => {
+      const seen = [];
+      const onViolation = (event) => seen.push(event.violatedDirective);
+      document.addEventListener('securitypolicyviolation', onViolation);
+      const done = () => {
+        document.removeEventListener('securitypolicyviolation', onViolation);
+        resolve(seen.join(','));
+      };
+      const img = new Image();
+      img.onerror = () => setTimeout(done, 100);
+      img.onload = () => setTimeout(done, 100);
+      img.src = 'http://127.0.0.1:1/blocked.png';
+    }))()`);
+    expect(refused).toContain('img-src');
+
+    // And the policy still lets the app draw what it draws: a composer
+    // attachment is a data: URI, which `img-src 'self' data:` names on purpose.
+    const inline = await page?.evaluate<string>(`(() => new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => resolve('loaded');
+      img.onerror = () => resolve('refused');
+      img.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+    }))()`);
+    expect(inline).toBe('loaded');
+  },
+  TIMEOUT,
+);
+
+shellTest(
   'a project, an echo thread and a turn go through the shell',
   async () => {
     // The first-run card offers the native picker in the shell; the path field sits behind one click.

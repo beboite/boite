@@ -6,11 +6,13 @@ import { Store } from '../lib/store.svelte';
 
 let running: Record<string, unknown> | null = null;
 let store: Store;
+let client: FakeClient;
 
 beforeEach(async () => {
   window.localStorage.clear();
   store = new Store();
-  store.attach(new FakeClient({ delayMs: 0 }));
+  client = new FakeClient({ delayMs: 0 });
+  store.attach(client);
   await store.connect();
   await store.open('t-descriptors');
   running = mount(CommandPalette, { target: document.body, props: { store } });
@@ -135,4 +137,27 @@ test('pin and unpin follow the open thread', async () => {
   await tick();
   await type('pin this');
   expect(document.body.textContent).toContain('Unpin this thread');
+});
+
+test('a load tick leaves the row the keyboard is on where it is', async () => {
+  store.paletteOpen = true;
+  flushSync();
+  await tick();
+
+  key('ArrowDown');
+  key('ArrowDown');
+  const picked = selectedId();
+  expect(picked).toBe(rows()[2]);
+
+  // The core pushes one of these a second for every thread with a live agent.
+  client.sampleLoad('t-trace');
+  client.sampleLoad('t-bench');
+  flushSync();
+
+  expect(rows()[2]).toBe(picked);
+  expect(selectedId()).toBe(picked);
+
+  // Typing still starts the walk over: that reset belongs to the query.
+  await type('thread');
+  expect(selectedId()).toBe(rows()[0]);
 });

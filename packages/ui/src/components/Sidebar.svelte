@@ -108,6 +108,16 @@
   }
 
   function projectItems(project: Project): MenuItem[] {
+    // Reading a transcript is `imports.list` and dropping a folder is
+    // `projects.remove`, neither of which a paired device may call. Both come
+    // off the menu together with the rule that separated them, so a phone gets
+    // a two row menu rather than a row that answers with a red toast.
+    if (!store.owner) {
+      return [
+        { id: 'new', label: fill(strings.sidebar.newThreadIn, { project: project.name }) },
+        { id: 'copy', label: strings.sidebar.copyPath, hint: project.path }
+      ];
+    }
     return [
       { id: 'new', label: fill(strings.sidebar.newThreadIn, { project: project.name }) },
       { id: 'copy', label: strings.sidebar.copyPath, hint: project.path },
@@ -340,7 +350,9 @@
     {/each}
   </div>
 
-  {#if store.projects.length > 0}
+  <!-- The folder comes from the machine the core runs on, so `projects.add` is
+       the owner's and the device never sees the button or its form. -->
+  {#if store.projects.length > 0 && store.owner}
     <button
       type="button"
       class="ghost small add-project"
