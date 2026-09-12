@@ -36,7 +36,7 @@ describe('rankItems', () => {
   const items: PaletteItem[] = [
     { id: 't-1', kind: 'thread', label: 'Finish the trace tab', hint: 'boite' },
     { id: 't-2', kind: 'thread', label: 'Port the scheduler', hint: 'boite' },
-    { id: 't-3', kind: 'thread', label: 'Review the descriptor loader', hint: 'brain' },
+    { id: 't-3', kind: 'thread', label: 'Review the descriptor loader', hint: 'notes' },
     { id: 'new', kind: 'command', label: 'New thread', hint: 'Ctrl+N', keywords: 'draft start' },
     { id: 'settings', kind: 'command', label: 'Open settings', hint: 'Ctrl+,' }
   ];
@@ -50,7 +50,7 @@ describe('rankItems', () => {
     // "the" is a word start in three titles, the earlier the better; "New
     // thread" has t, h and e in order but the e sits mid-word after a gap.
     expect(rankItems('the', items).map((item) => item.id)).toEqual(['t-2', 't-1', 't-3']);
-    expect(rankItems('brain', items).map((item) => item.id)).toEqual(['t-3']);
+    expect(rankItems('notes', items).map((item) => item.id)).toEqual(['t-3']);
     expect(rankItems('draft', items).map((item) => item.id)).toEqual(['new']);
     expect(rankItems('zzz', items)).toEqual([]);
   });
@@ -58,7 +58,7 @@ describe('rankItems', () => {
   test('a label hit outranks a hint hit on the same query', () => {
     const rows: PaletteItem[] = [
       { id: 'a', kind: 'thread', label: 'Something else', hint: 'boite' },
-      { id: 'b', kind: 'thread', label: 'Boite release notes', hint: 'brain' }
+      { id: 'b', kind: 'thread', label: 'Boite release notes', hint: 'notes' }
     ];
     expect(rankItems('boite', rows).map((item) => item.id)).toEqual(['b', 'a']);
   });

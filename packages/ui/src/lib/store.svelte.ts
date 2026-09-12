@@ -147,6 +147,19 @@ function requestsOf<T extends { threadId: ThreadId }>(
   return dropped ? kept : records;
 }
 
+/**
+ * What a list of requests speaks for: every thread (`reload()`), one thread
+ * (`open()`), or nothing but itself, which is one event arriving.
+ */
+type RequestScope = ThreadId | 'all' | 'one';
+
+/** True while `scope` says nothing about this request, so it is kept as it is. */
+function outside(request: { threadId: ThreadId }, scope: RequestScope): boolean {
+  if (scope === 'one') return true;
+  if (scope === 'all') return false;
+  return request.threadId !== scope;
+}
+
 /** A pid alone is reused by the OS, so a trace row is a pid and its start. */
 function sameProcess(a: ProcessRecord, b: ProcessRecord): boolean {
   return a.pid === b.pid && a.startedAt === b.startedAt;
@@ -242,11 +255,28 @@ export class Store {
   #client: Client | null = null;
   #off: (() => void)[] = [];
   #subscribedThreadId: ThreadId | null = null;
+  /** The number of the newest `open()`, so an older one writes nothing. */
+  #openGeneration = 0;
+  /** What that newest run is opening, so an older one knows what to give back. */
+  #openTarget: ThreadId | null = null;
+  /** The load in flight, so the two callers of `reload()` share one. */
+  #reloading: Promise<void> | null = null;
   #loginRevision = 0;
   #loginChanges = new Map<string, number>();
 
   get client(): Client | null {
     return this.#client;
+  }
+
+  /**
+   * What this client may ask of the core. A paired device reaches the list in
+   * `packages/core/src/access.ts` and nothing else, so everything outside it
+   * comes off its screen rather than throwing under a finger. The `null` of a
+   * `hello` still in flight counts as the owner: the desktop must not blink its
+   * own controls away, and a phone showing one for a frame is the cheaper miss.
+   */
+  get owner(): boolean {
+    return this.principal !== 'session';
   }
 
   get unreadCount(): number {
@@ -322,7 +352,9 @@ export class Store {
   async probeModels(providerId: ProviderId, accountId: string): Promise<void> {
     const client = this.#client;
     const key = probeKey(providerId, accountId);
-    if (!client || this.probedModels[key] || this.probingModels.includes(key)) return;
+    // Probing starts an agent process, so it is the owner's. A device shows the
+    // models the descriptor and the core already named, and asks for nothing.
+    if (!client || !this.owner || this.probedModels[key] || this.probingModels.includes(key)) return;
     this.probingModels = [...this.probingModels, key];
     try {
       const { models } = await client.call('providers.probe', { providerId, accountId });
@@ -439,6 +471,11 @@ export class Store {
           if (state === 'ready') {
             this.error = null;
             this.core = client.core;
+            // `WsClient` writes its principal from the hello answer before it
+            // reports `ready`, and this handler runs before `connect()` returns:
+            // reading it here is what keeps the owner-only calls out of the very
+            // first load, and what refreshes it after a reconnect.
+            this.principal = client.principal;
             void this.reload();
           }
         })
@@ -462,9 +499,17 @@ export class Store {
     on('thread.removed', ({ threadId }) => {
       this.threads = this.threads.filter((t) => t.id !== threadId);
       this.#dropRequestsOf(threadId);
-      if (this.openThread?.id === threadId) this.openThread = null;
       // A thread that left Boite takes its panel layout with it.
       rightPanel.forget(threadId);
+      if (this.openThread?.id !== threadId) return;
+      this.openThread = null;
+      // The two steps `archive()` takes when the thread on screen goes: the
+      // socket lets it go, and the chat lands on the next thread rather than
+      // on the empty card.
+      void (async () => {
+        await this.#unsubscribe();
+        await this.openWhereLeft();
+      })();
     });
 
     on('turn.started', (turn) => this.#upsertTurn(turn.threadId, turn));
@@ -507,7 +552,7 @@ export class Store {
     });
 
     on('permission.requested', (request) => {
-      this.#mergePermissions([request]);
+      this.#mergePermissions([request], 'one');
       this.#notify('needs-you', request.threadId, null);
     });
     on('permission.resolved', ({ requestId }) => {
@@ -515,7 +560,7 @@ export class Store {
     });
 
     on('question.asked', (request) => {
-      this.#mergeQuestions([request]);
+      this.#mergeQuestions([request], 'one');
       this.#notify('needs-you', request.threadId, null);
     });
     on('question.answered', ({ questionId }) => {
@@ -615,10 +660,21 @@ export class Store {
   async boot(): Promise<void> {
     try {
       const params = new URLSearchParams(window.location.search);
-      if (params.get('fake') === '1') {
+      // `import.meta.env.DEV` is a constant the bundler folds, so a production
+      // build drops this branch whole and never carries the fake core, which
+      // is a seeded copy of the app's data. It is true under vite's dev server
+      // and under vitest, the two places `?fake=1` is used.
+      if (import.meta.env.DEV && params.get('fake') === '1') {
         const { FakeClient } = await import('./fake-client');
-        // `&long=1` adds the four-hundred-message thread the windowed list is looked at on.
-        this.attach(new FakeClient({ long: params.get('long') === '1' }));
+        // `&long=1` adds the four-hundred-message thread the windowed list is
+        // looked at on, `&principal=session` answers as a paired phone, so the
+        // screens a device is refused can be walked without pairing one.
+        this.attach(
+          new FakeClient({
+            long: params.get('long') === '1',
+            ...(params.get('principal') === 'session' ? { principal: 'session' as const } : {})
+          })
+        );
       } else {
         const endpoint = await resolveEndpoint();
         if (!endpoint) {
@@ -729,7 +785,19 @@ export class Store {
     await this.openWhereLeft();
   }
 
-  async reload(): Promise<void> {
+  /**
+   * `connect()` and the `ready` state handler both ask for this on every boot
+   * and on every reconnect, and the second one used to send the same ten calls
+   * again. It joins the load already in flight instead.
+   */
+  reload(): Promise<void> {
+    this.#reloading ??= this.#load().finally(() => {
+      this.#reloading = null;
+    });
+    return this.#reloading;
+  }
+
+  async #load(): Promise<void> {
     const client = this.#client;
     if (!client) return;
     const loginRevision = this.#loginRevision;
@@ -744,11 +812,14 @@ export class Store {
           client.call('scheduler.get', {}),
           client.call('permissions.list', {}),
           client.call('questions.list', {}),
-          client.call('accounts.logins', {}),
+          // The one owner-only call of the boot. A device asking for it is
+          // refused, and `Promise.all` would take the whole load down with it,
+          // so the phone would come up on an empty app and a red toast.
+          this.owner ? client.call('accounts.logins', {}) : Promise.resolve([]),
           client.call('keybindings.get', {})
         ]);
-      this.#mergePermissions(permissions);
-      this.#mergeQuestions(questions);
+      this.#mergePermissions(permissions, 'all');
+      this.#mergeQuestions(questions, 'all');
       this.projects = projects;
       this.threads = threads;
       this.providers = providers.loaded;
@@ -914,18 +985,36 @@ export class Store {
     this.draft = { ...draft, worktree };
   }
 
+  /**
+   * Two clicks inside one round trip are one thread: the newest run owns the
+   * screen and the subscription, and an older one writes nothing, not even
+   * `#subscribedThreadId`. The order is subscribe then unsubscribe, so a
+   * refused subscribe leaves the thread on screen with the socket it had
+   * rather than with none at all.
+   */
   async open(threadId: ThreadId): Promise<void> {
     const client = this.#client;
     if (!client) return;
+    const generation = ++this.#openGeneration;
+    this.#openTarget = threadId;
+    const newest = (): boolean => this.#openGeneration === generation;
     try {
       const previous = this.#subscribedThreadId;
+      await client.call('threads.subscribe', { threadId });
+      if (!newest()) {
+        // A newer click took over while this one was in flight. Its own thread
+        // is the one the socket keeps, so this subscription goes back.
+        if (this.#openTarget !== threadId) {
+          await client.call('threads.unsubscribe', { threadId }).catch(() => undefined);
+        }
+        return;
+      }
+      this.#subscribedThreadId = threadId;
       if (previous && previous !== threadId) {
-        this.#subscribedThreadId = null;
         await client.call('threads.unsubscribe', { threadId: previous });
       }
-      await client.call('threads.subscribe', { threadId });
-      this.#subscribedThreadId = threadId;
       const thread = await client.call('threads.get', { threadId });
+      if (!newest()) return;
       this.draft = null;
       // The last page, pinned to the bottom; what is above it arrives on scroll.
       this.loadingOlder = false;
@@ -934,17 +1023,25 @@ export class Store {
       this.#keepRequestsOf(threadId);
       this.page = 'chat';
       this.sidebarOpen = false;
-      this.trace = await client.call('trace.get', { threadId });
-      // The thread may already be waiting on a request this page never saw.
-      this.#mergePermissions(await client.call('permissions.list', { threadId }));
-      this.#mergeQuestions(await client.call('questions.list', { threadId }));
+      // The trace is the owner's: a device has no button for it, and asking
+      // would refuse the rest of this open with it.
+      const trace = this.owner ? await client.call('trace.get', { threadId }) : [];
+      if (!newest()) return;
+      this.trace = trace;
+      // The thread may already be waiting on a request this page never saw,
+      // and may have had one settled where this client could not hear it.
+      const permissions = await client.call('permissions.list', { threadId });
+      const questions = await client.call('questions.list', { threadId });
+      if (!newest()) return;
+      this.#mergePermissions(permissions, threadId);
+      this.#mergeQuestions(questions, threadId);
       if (thread.unread) {
         await client.call('threads.markRead', { threadId });
         thread.unread = false;
         this.threads = this.threads.map((t) => (t.id === threadId ? { ...t, unread: false } : t));
       }
     } catch (error) {
-      this.#fail(error);
+      if (newest()) this.#fail(error);
     }
   }
 
@@ -1130,10 +1227,17 @@ export class Store {
    * `permission.requested` reaches a subscribed socket once and is gone. A page
    * that loads while a turn waits gets the same request from `permissions.list`,
    * so both paths land here and the same id never makes a second card.
+   *
+   * `scope` is what the list the caller holds speaks for. A list is the core's
+   * whole answer about it, empty included, so an id the core no longer carries
+   * was settled where this client could not hear it and its card must stop
+   * offering the button. An event carries one request and speaks for nothing
+   * else, so it comes in as `'one'` and drops nothing.
    */
-  #mergePermissions(requests: PermissionRequest[]): void {
-    if (requests.length === 0) return;
-    const byId = new Map(this.pendingPermissions.map((p) => [p.id, p] as const));
+  #mergePermissions(requests: PermissionRequest[], scope: RequestScope): void {
+    const byId = new Map(
+      this.pendingPermissions.filter((request) => outside(request, scope)).map((r) => [r.id, r] as const)
+    );
     for (const request of requests) byId.set(request.id, request);
     this.pendingPermissions = [...byId.values()].sort((a, b) => a.createdAt - b.createdAt);
     this.permissionRequests = {
@@ -1142,10 +1246,11 @@ export class Store {
     };
   }
 
-  /** The same rebuild as the permissions, for the same reason: a missed event. */
-  #mergeQuestions(requests: QuestionRequest[]): void {
-    if (requests.length === 0) return;
-    const byId = new Map(this.pendingQuestions.map((q) => [q.id, q] as const));
+  /** The same rebuild as the permissions, for the same reasons. */
+  #mergeQuestions(requests: QuestionRequest[], scope: RequestScope): void {
+    const byId = new Map(
+      this.pendingQuestions.filter((request) => outside(request, scope)).map((q) => [q.id, q] as const)
+    );
     for (const request of requests) byId.set(request.id, request);
     this.pendingQuestions = [...byId.values()].sort((a, b) => a.createdAt - b.createdAt);
     this.questionRequests = {
@@ -1308,7 +1413,8 @@ export class Store {
   async refreshTrace(): Promise<void> {
     const client = this.#client;
     const open = this.openThread;
-    if (!client || !open) return;
+    // Owner-only, like the surface it draws.
+    if (!client || !open || !this.owner) return;
     try {
       this.trace = await client.call('trace.get', { threadId: open.id });
     } catch (error) {

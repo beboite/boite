@@ -2,6 +2,7 @@ import { afterEach, expect, test, vi } from 'vitest';
 import { mount, unmount } from 'svelte';
 import type { RpcMethodName } from '@boite/contracts';
 import App from './App.svelte';
+import { confirm } from './lib/confirm.svelte';
 import { store } from './lib/store.svelte';
 import { setExperiment, writeExperiments } from './lib/experiments';
 
@@ -69,9 +70,9 @@ async function type(field: HTMLInputElement, text: string): Promise<void> {
 }
 
 /** A key on whatever holds the focus, so it walks the same path a real one would. */
-function press(key: string): void {
+function press(key: string, init: KeyboardEventInit = {}): void {
   (document.activeElement ?? document.body).dispatchEvent(
-    new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })
+    new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...init })
   );
 }
 
@@ -81,8 +82,22 @@ function query<T extends Element = HTMLElement>(selector: string): T {
   return found;
 }
 
-async function mountOnFake(): Promise<void> {
-  window.history.replaceState(null, '', '/?fake=1');
+/** The command ids the open palette is drawing a row for, in order. */
+function paletteIds(): (string | null)[] {
+  return Array.from(document.querySelectorAll('[data-testid=palette-row]')).map((el) =>
+    el.getAttribute('data-palette-id')
+  );
+}
+
+/** The ids of the rows the open context menu is showing, separators aside. */
+function menuValues(): (string | null)[] {
+  return Array.from(document.querySelectorAll('[data-testid=context-menu] [data-value]')).map((el) =>
+    el.getAttribute('data-value')
+  );
+}
+
+async function mountOnFake(search = '/?fake=1'): Promise<void> {
+  window.history.replaceState(null, '', search);
   const target = document.createElement('div');
   document.body.appendChild(target);
   // The store is a singleton and keeps the previous test's open thread, so
@@ -153,7 +168,7 @@ test('the draft worktree chip puts the first send on its own branch, and the hea
 
   await waitFor(() => store.openThread !== null && store.draft === null);
   expect(store.openThread?.branch).toBe('boite/fix-the-login');
-  expect(store.openThread?.cwd).toBe('D:\\Dev\\.boite-worktrees\\brain\\fix-the-login');
+  expect(store.openThread?.cwd).toBe('C:\\src\\.boite-worktrees\\notes\\fix-the-login');
   await waitFor(() => document.querySelector('[data-testid=thread-branch]') !== null);
   expect(query('[data-testid=thread-branch]').textContent?.trim()).toBe('boite/fix-the-login');
   expect(query('[data-testid=thread-branch]').title).toContain('fix-the-login');
@@ -186,25 +201,25 @@ test('a draft names its project in the heading and the dropdown moves it to anot
   await mountOnFake();
 
   // The one plus left says where it will open the draft, and a project row has none.
-  expect(query<HTMLButtonElement>('[data-testid=new-thread]').title).toBe('New thread in brain (Ctrl+N)');
+  expect(query<HTMLButtonElement>('[data-testid=new-thread]').title).toBe('New thread in notes (Ctrl+N)');
   expect(document.querySelector('[data-testid=project-new-thread]')).toBeNull();
 
-  // The draft opens in the project of the thread that was open, `brain`.
+  // The draft opens in the project of the thread that was open, `notes`.
   query<HTMLButtonElement>('[data-testid=new-thread]').click();
   await waitFor(() => store.draft !== null);
 
   const heading = query('[data-testid=draft-empty]');
   expect(heading.textContent).toContain('Start a thread in');
-  expect(heading.textContent).toContain('brain');
+  expect(heading.textContent).toContain('notes');
   // The heading says the project, so the header chip no longer repeats it.
-  expect(query('[data-testid=chat] header').textContent).not.toContain('brain');
+  expect(query('[data-testid=chat] header').textContent).not.toContain('notes');
 
   query<HTMLButtonElement>('[data-testid=draft-project]').click();
   await waitFor(() => document.querySelector('[data-testid=draft-project-menu]') !== null);
   const rows = Array.from(
     document.querySelectorAll<HTMLButtonElement>('[data-testid=draft-project-menu] [data-row]')
   );
-  expect(rows.map((row) => row.dataset['value'])).toEqual(['p-boite', 'p-brain']);
+  expect(rows.map((row) => row.dataset['value'])).toEqual(['p-boite', 'p-notes']);
 
   rows[0]?.click();
   await waitFor(() => store.draft?.projectId === 'p-boite');
@@ -508,12 +523,12 @@ test('the keybindings file moves a chord, takes one away, and the Keyboard page 
 
 test('removing a project asks first, and Cancel keeps it', async () => {
   await mountOnFake();
-  const head = query('[data-project-id="p-brain"][data-testid=project-row]');
+  const head = query('[data-project-id="p-notes"][data-testid=project-row]');
   head.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 40, clientY: 30 }));
   await waitFor(() => document.querySelector('[data-testid=context-menu]') !== null);
   query<HTMLButtonElement>('[data-testid=context-menu] [data-value=remove]').click();
   await waitFor(() => document.querySelector('[data-testid=confirm-dialog]') !== null);
-  expect(document.querySelector('[data-testid=confirm-dialog]')?.textContent).toContain('brain');
+  expect(document.querySelector('[data-testid=confirm-dialog]')?.textContent).toContain('notes');
 
   query<HTMLButtonElement>('[data-testid=confirm-cancel]').click();
   await waitFor(() => document.querySelector('[data-testid=confirm-dialog]') === null);
@@ -1191,4 +1206,122 @@ test('an ACP login accepts the phone redirect URL through the login input', asyn
   } finally {
     send.mockRestore();
   }
+});
+
+test('a dialog waiting for an answer holds the window chords', async () => {
+  await mountOnFake();
+  const open = store.openThread?.id;
+  const page = store.page;
+
+  const answer = confirm.ask({
+    title: 'Remove this project?',
+    confirmLabel: 'Remove',
+    cancelLabel: 'Cancel',
+    danger: true
+  });
+  await waitFor(() => document.querySelector('[data-testid=confirm-dialog]') !== null);
+
+  // The three the user reaches for out of habit while a dialog is up.
+  press('n', { ctrlKey: true });
+  press('k', { ctrlKey: true });
+  press(',', { ctrlKey: true });
+
+  expect(store.draft).toBeNull();
+  expect(store.openThread?.id).toBe(open);
+  expect(store.paletteOpen).toBe(false);
+  expect(store.page).toBe(page);
+  // It is still the dialog asking, and the promise it holds is still pending.
+  expect(document.querySelector('[data-testid=confirm-dialog]')).not.toBeNull();
+
+  query<HTMLButtonElement>('[data-testid=confirm-cancel]').click();
+  expect(await answer).toBe(false);
+
+  // Answered, the same chord moves the app again.
+  press('k', { ctrlKey: true });
+  expect(store.paletteOpen).toBe(true);
+  store.paletteOpen = false;
+});
+
+/*
+ * The device boundary, seen from the screen. `packages/core/src/access.ts`
+ * refuses a paired device every method outside `DEVICE_METHODS`, so the two
+ * tests below walk the same surfaces twice: once as the phone, which must not
+ * be offered them, once as the desktop, which must still have every one.
+ */
+
+/** Everything owner-only that is drawn without leaving the chat. */
+const OWNER_ONLY_IN_CHAT = ['[data-testid=add-project]', '[data-testid=tab-trace]'];
+
+/** Everything owner-only on the settings nav and its General page. */
+const OWNER_ONLY_IN_SETTINGS = [
+  '[data-testid=settings-tab-accounts]',
+  '[data-testid=settings-tab-plugins]',
+  '[data-testid=settings-tab-resources]',
+  '[data-testid=settings-add-project]',
+  '[data-testid=setting-focus-guard]',
+  '[data-testid=setting-mute-agents]',
+  '[data-testid=setting-listen-on-lan]',
+  '[data-testid=pairing-mint]'
+];
+
+/** The palette ids that each end in a method a device may not call. */
+const OWNER_ONLY_COMMANDS = ['add-project', 'trace', 'providers', 'pair'];
+
+test('a paired device is offered none of the affordances the core refuses it', async () => {
+  await mountOnFake('/?fake=1&principal=session');
+  expect(store.principal).toBe('session');
+  expect(store.owner).toBe(false);
+  // The boot itself is the first proof: the fake refuses what the core does,
+  // so one owner-only call left in it would have failed the load.
+  expect(store.error).toBeNull();
+  expect(store.threads.length).toBe(4);
+
+  for (const selector of OWNER_ONLY_IN_CHAT) expect(document.querySelector(selector)).toBeNull();
+
+  store.paletteOpen = true;
+  await waitFor(() => document.querySelector('[data-testid=palette]') !== null);
+  const commands = paletteIds();
+  expect(commands).toContain('new-thread');
+  for (const id of OWNER_ONLY_COMMANDS) expect(commands).not.toContain(id);
+  store.paletteOpen = false;
+
+  // The project's own menu: no Remove, and no transcript import behind it.
+  query('[data-testid=project-row]').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+  await waitFor(() => document.querySelector('[data-testid=context-menu]') !== null);
+  expect(menuValues()).toEqual(['new', 'copy']);
+  press('Escape');
+  await waitFor(() => document.querySelector('[data-testid=context-menu]') === null);
+
+  store.showSettings();
+  await waitFor(() => document.querySelector('[data-testid=settings-page]') !== null);
+  for (const selector of OWNER_ONLY_IN_SETTINGS) expect(document.querySelector(selector)).toBeNull();
+  // A screen that loses a control keeps the line saying whose app has it.
+  const settingsText = document.body.textContent ?? '';
+  expect(settingsText).toContain('Folders are added and removed from the app the core runs in.');
+  expect(settingsText).toContain('This device is paired with a key of its own.');
+  expect(store.error).toBeNull();
+});
+
+test('the desktop still has every one of them', async () => {
+  await mountOnFake();
+  expect(store.principal).toBe('owner');
+  expect(store.owner).toBe(true);
+
+  for (const selector of OWNER_ONLY_IN_CHAT) expect(document.querySelector(selector)).not.toBeNull();
+
+  store.paletteOpen = true;
+  await waitFor(() => document.querySelector('[data-testid=palette]') !== null);
+  const commands = paletteIds();
+  for (const id of OWNER_ONLY_COMMANDS) expect(commands).toContain(id);
+  store.paletteOpen = false;
+
+  query('[data-testid=project-row]').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+  await waitFor(() => document.querySelector('[data-testid=context-menu]') !== null);
+  expect(menuValues()).toEqual(['new', 'copy', 'remove']);
+  press('Escape');
+  await waitFor(() => document.querySelector('[data-testid=context-menu]') === null);
+
+  store.showSettings();
+  await waitFor(() => document.querySelector('[data-testid=settings-page]') !== null);
+  for (const selector of OWNER_ONLY_IN_SETTINGS) expect(document.querySelector(selector)).not.toBeNull();
 });

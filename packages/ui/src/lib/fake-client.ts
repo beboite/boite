@@ -48,7 +48,45 @@ export interface FakeClientOptions {
   delayMs?: number;
   /** Seeds one thread of 400 messages, what `?fake=1&long=1` opens the list on. */
   long?: boolean;
+  /** Who this client is. `'session'` makes it a paired phone, refused like one. */
+  principal?: Principal;
 }
+
+/*
+ * The device boundary, copied. `packages/core/src/access.ts` owns it, and the
+ * UI package cannot import the core, so this list is a mirror kept by hand: a
+ * method added there and forgotten here only makes the fake stricter than the
+ * core, which shows up as a test failing rather than a screen that lies.
+ * `hello` is not in it because the core answers it before the router's gate.
+ */
+const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>([
+  'sessions.list',
+  'projects.list',
+  'projects.files',
+  'providers.list',
+  'accounts.list',
+  'threads.list',
+  'threads.create',
+  'threads.get',
+  'messages.list',
+  'threads.update',
+  'threads.retitle',
+  'threads.archive',
+  'threads.pin',
+  'threads.markRead',
+  'threads.subscribe',
+  'threads.unsubscribe',
+  'turns.start',
+  'turns.stop',
+  'permissions.list',
+  'permissions.answer',
+  'questions.list',
+  'questions.answer',
+  'scheduler.get',
+  'usage.get',
+  'settings.get',
+  'keybindings.get'
+]);
 
 const T0 = Date.UTC(2026, 8, 5, 9, 0, 0);
 const DATA_DIR = 'C:\\Users\\you\\AppData\\Local\\boite2';
@@ -302,7 +340,12 @@ export class FakeClient implements ObservableClient {
   #state: ClientState = 'idle';
   #handlers = new Map<string, Set<(payload: unknown) => void>>();
   #stateHandlers = new Set<(state: ClientState) => void>();
+  /** What the core has this socket subscribed to: what `#emitToThread` reads. */
   #subscribed = new Set<ThreadId>();
+  /** `WsClient.#subscribed`'s mirror: the ids the client itself puts back after a reconnect. */
+  #clientSubscribed = new Set<ThreadId>();
+  /** The calls the socket is holding, so `drop()` can reject them from underneath. */
+  #pending = new Set<{ reject: (error: RpcFailure) => void }>();
 
   #projects: Project[] = [];
   /** The sessions Claude Code kept, each tagged with the project whose folder it sits under. */
@@ -344,10 +387,12 @@ export class FakeClient implements ObservableClient {
   #seq = 0;
   #delayMs: number;
   #long: boolean;
+  #principal: Principal;
 
   constructor(options: FakeClientOptions = {}) {
     this.#delayMs = options.delayMs ?? 18;
     this.#long = options.long ?? false;
+    this.#principal = options.principal ?? 'owner';
     this.#settings = {
       maxConcurrentTurns: 6,
       perAccountConcurrency: 2,
@@ -394,9 +439,23 @@ export class FakeClient implements ObservableClient {
     return this.#state === 'ready' ? this.#core : null;
   }
 
-  /** The fake is the desktop: the owner, who can pair a phone. */
+  /**
+   * Who the core says this client is, `null` until `hello` has answered, which
+   * is what the real `WsClient` reports. The fake is the desktop owner unless
+   * it was built with `{ principal: 'session' }`, the paired phone.
+   */
   get principal(): Principal | null {
-    return this.#state === 'ready' ? 'owner' : null;
+    return this.#state === 'ready' ? this.#principal : null;
+  }
+
+  /**
+   * Turns this client into a paired device, or back into the owner, in the
+   * spirit of `drop` and `restore`: the boundary is the core's, so a test can
+   * cross it without a second socket. `hello` and every later call answer as
+   * the new principal from here on.
+   */
+  becomes(principal: Principal): void {
+    this.#principal = principal;
   }
 
   onState(handler: (state: ClientState) => void): () => void {
@@ -426,6 +485,40 @@ export class FakeClient implements ObservableClient {
 
   close(): void {
     this.#setState('closed');
+    this.#dropPending('client closed');
+  }
+
+  /**
+   * The socket going away under the app, what `WsClient` does from
+   * `socket.onclose`: every call it was holding rejects with the transport's
+   * own failure, the state falls back to `connecting`, and the core's events
+   * of that gap reach nobody. The core keeps running behind it.
+   */
+  drop(): void {
+    if (this.#state !== 'ready') return;
+    this.#setState('connecting');
+    this.#dropPending('connection closed');
+  }
+
+  /** The socket back and the hello answered, `#resubscribe` included. */
+  async restore(): Promise<CoreInfo> {
+    if (this.#state === 'ready') return this.#core;
+    this.#setState('connecting');
+    await this.#tick();
+    this.#setState('ready');
+    // `WsClient.#resubscribe` sends one `threads.subscribe` per id it kept.
+    for (const threadId of this.#clientSubscribed) this.#subscribed.add(threadId);
+    return this.#core;
+  }
+
+  /** The ids the core holds this socket on, the set `#emitToThread` gates on. */
+  get coreSubscribers(): ThreadId[] {
+    return [...this.#subscribed];
+  }
+
+  /** The ids the client would resubscribe after a reconnect. */
+  get clientSubscriptions(): ThreadId[] {
+    return [...this.#clientSubscribed];
   }
 
   async call<M extends RpcMethodName>(method: M, params: RpcParams<M>): Promise<RpcResult<M>> {
@@ -433,7 +526,50 @@ export class FakeClient implements ObservableClient {
       throw new RpcFailure({ code: RpcErrorCode.Internal, message: 'not connected' });
     }
     await this.#tick();
-    return await this.#dispatch(method, params) as RpcResult<M>;
+    // The router's gate, word for word: deny by default, `hello` before it.
+    if (this.#principal === 'session' && method !== 'hello' && !DEVICE_METHODS.has(method)) {
+      throw new RpcFailure({ code: RpcErrorCode.Refused, message: `${method} is for the owner only` });
+    }
+    const result = await this.#hold(this.#dispatch(method, params)) as RpcResult<M>;
+    // The real client writes its set from the answer, never from the request.
+    if (method === 'threads.subscribe') {
+      this.#clientSubscribed.add((params as RpcParams<'threads.subscribe'>).threadId);
+    } else if (method === 'threads.unsubscribe') {
+      this.#clientSubscribed.delete((params as RpcParams<'threads.unsubscribe'>).threadId);
+    }
+    return result;
+  }
+
+  /**
+   * One tick of the core's load sampler (`packages/core/src/procs.ts`): the
+   * thread's summary with a fresh `load` and the timestamp it already had,
+   * pushed once a second for every thread with a live process. It is not a
+   * `#touch`: a load sample moves no row in the sidebar.
+   */
+  sampleLoad(threadId: ThreadId, processes = 1): void {
+    const thread = this.#thread(threadId);
+    thread.load = { processes, cpuPercent: 12, memoryBytes: 48 * 1024 * 1024 };
+    this.#emit('thread.updated', structuredClone(toSummary(thread)));
+  }
+
+  /**
+   * What the core's recovery does to a thread whose turn it ends: every
+   * request still waiting is settled and dropped, the question with a null
+   * answer and the permission with a deny (`packages/core/src/threads.ts`).
+   */
+  clearRequestsOf(threadId: ThreadId): void {
+    for (const [questionId, pending] of [...this.#pendingQuestions]) {
+      if (pending.request.threadId !== threadId) continue;
+      this.#pendingQuestions.delete(questionId);
+      this.#emit('question.answered', { questionId, threadId, answer: null });
+      pending.resolve(null);
+    }
+    for (const [requestId, pending] of [...this.#pendingPermissions]) {
+      if (pending.request.threadId !== threadId) continue;
+      this.#pendingPermissions.delete(requestId);
+      this.#emit('permission.resolved', { requestId, threadId, decision: 'deny' });
+      pending.resolve('deny');
+    }
   }
 
   /** Resolves when no turn is still streaming. A pending permission blocks it. */
@@ -474,7 +610,7 @@ export class FakeClient implements ObservableClient {
         return structuredClone(this.#pluginPools);
       }
       case 'hello':
-        return { core: this.#core, principal: 'owner' };
+        return { core: this.#core, principal: this.#principal };
       case 'pairing.grant': {
         const grant = `fake-grant-${++this.#seq}`;
         return { url: `http://192.168.1.20:8777/?grant=${grant}`, grant, expiresAt: this.#now() + 10 * 60 * 1000 };
@@ -792,6 +928,8 @@ export class FakeClient implements ObservableClient {
       }
       case 'threads.subscribe': {
         const params = rawParams as RpcParams<'threads.subscribe'>;
+        // The core runs `threads.require` first, so an unknown id is a NotFound.
+        this.#thread(params.threadId);
         this.#subscribed.add(params.threadId);
         return { ok: true };
       }
@@ -1605,7 +1743,38 @@ export class FakeClient implements ObservableClient {
     for (const handler of this.#stateHandlers) handler(state);
   }
 
+  /**
+   * One call the socket holds. A reply that lands after `drop()` broke the
+   * promise is thrown away rather than settling it twice, which is what
+   * `WsClient` gets for free by clearing `#pending` before it rejects.
+   */
+  #hold<T>(answer: Promise<T>): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+      const entry = { reject };
+      this.#pending.add(entry);
+      answer.then(
+        (value) => {
+          if (this.#pending.delete(entry)) resolve(value);
+        },
+        (error: unknown) => {
+          if (this.#pending.delete(entry)) reject(error);
+        }
+      );
+    });
+  }
+
+  #dropPending(message: string): void {
+    const pending = [...this.#pending];
+    this.#pending.clear();
+    for (const entry of pending) {
+      entry.reject(new RpcFailure({ code: RpcErrorCode.Internal, message }));
+    }
+  }
+
   #emit<E extends RpcEventName>(event: E, payload: RpcEvents[E]): void {
+    // A socket that is down carries nothing. Everything the core emitted
+    // during the gap is lost, which is what `reload()` exists to repair.
+    if (this.#state !== 'ready') return;
     const set = this.#handlers.get(event);
     if (!set) return;
     for (const handler of [...set]) handler(payload);
@@ -1868,8 +2037,8 @@ export class FakeClient implements ObservableClient {
 
   #seed(): void {
     this.#projects = [
-      { id: 'p-boite', name: 'boite', path: 'D:\\Dev\\Collab\\boite', createdAt: T0 },
-      { id: 'p-brain', name: 'brain', path: 'D:\\Dev\\brain', createdAt: T0 }
+      { id: 'p-boite', name: 'boite', path: 'C:\\src\\boite', createdAt: T0 },
+      { id: 'p-notes', name: 'notes', path: 'C:\\src\\notes', createdAt: T0 }
     ];
 
     // What Claude Code left under its projects folder for boite: one session
@@ -2168,7 +2337,7 @@ export class FakeClient implements ObservableClient {
       id: 't-trace',
       projectId: 'p-boite',
       title: 'Finish the trace tab',
-      cwd: 'D:\\Dev\\Collab\\boite',
+      cwd: 'C:\\src\\boite',
       status: 'idle',
       unread: false,
       sessionId: 'sess-trace',
@@ -2243,7 +2412,7 @@ export class FakeClient implements ObservableClient {
       projectId: 'p-boite',
       title: 'Port the scheduler',
       // The one seeded thread in its own worktree: what the header badge is looked at on.
-      cwd: 'D:\\Dev\\Collab\\.boite-worktrees\\boite\\port-the-scheduler',
+      cwd: 'C:\\src\\.boite-worktrees\\boite\\port-the-scheduler',
       branch: 'boite/port-the-scheduler',
       // Waiting on a question nobody has answered, the same reason as `t-bench`
       // and its permission: a page that loads now draws the card from the list.
@@ -2307,7 +2476,7 @@ export class FakeClient implements ObservableClient {
       id: 't-bench',
       projectId: 'p-boite',
       title: 'Bench against legacy',
-      cwd: 'D:\\Dev\\Collab\\boite',
+      cwd: 'C:\\src\\boite',
       status: 'waiting',
       unread: false,
       sessionId: 'sess-bench',
@@ -2355,9 +2524,9 @@ export class FakeClient implements ObservableClient {
     const unread: Thread = {
       ...base,
       id: 't-descriptors',
-      projectId: 'p-brain',
+      projectId: 'p-notes',
       title: 'Review the descriptor loader',
-      cwd: 'D:\\Dev\\brain',
+      cwd: 'C:\\src\\notes',
       // The most recent thread, so this is the one a boot opens: it has already
       // run a turn, so the echo agent has already named what it takes.
       commands: structuredClone(ECHO_COMMANDS),
@@ -2640,7 +2809,7 @@ export class FakeClient implements ObservableClient {
       pinned: false,
       title: 'Four hundred messages',
       titleSource: 'prompt',
-      cwd: 'D:\\Dev\\Collab\\boite',
+      cwd: 'C:\\src\\boite',
       branch: null,
       status: 'idle',
       unread: false,

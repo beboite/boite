@@ -22,7 +22,7 @@ describe('Store', () => {
 
     expect(store.connection).toBe('ready');
     expect(store.core?.version).toBe('2.0.0-beta.1');
-    expect(store.projects.map((p) => p.id)).toEqual(['p-boite', 'p-brain']);
+    expect(store.projects.map((p) => p.id)).toEqual(['p-boite', 'p-notes']);
     expect(store.threads).toHaveLength(4);
     // Two seeded threads wait: one on a permission, one on a question.
     expect(store.threads.map((t) => t.status).sort()).toEqual([
@@ -41,8 +41,8 @@ describe('Store', () => {
     store.startDraft('p-boite');
     expect(store.draft?.worktree).toBe(false);
     store.setDraftWorktree(true);
-    store.setDraftProject('p-brain');
-    expect(store.draft).toEqual({ projectId: 'p-brain', worktree: true });
+    store.setDraftProject('p-notes');
+    expect(store.draft).toEqual({ projectId: 'p-notes', worktree: true });
 
     const spy = vi.spyOn(client, 'call');
     await store.submit('Fix the login', {
@@ -53,12 +53,12 @@ describe('Store', () => {
       effort: null
     });
     const create = spy.mock.calls.find(([method]) => method === 'threads.create');
-    expect(create?.[1]).toMatchObject({ projectId: 'p-brain', title: 'Fix the login', worktree: {} });
+    expect(create?.[1]).toMatchObject({ projectId: 'p-notes', title: 'Fix the login', worktree: {} });
     expect(store.openThread?.branch).toBe('boite/fix-the-login');
     expect(store.draft).toBeNull();
 
     // The next draft starts with the switch off: a worktree is a decision each time.
-    store.startDraft('p-brain');
+    store.startDraft('p-notes');
     expect(store.draft?.worktree).toBe(false);
   });
 
@@ -191,10 +191,10 @@ describe('Store', () => {
     // Straight through the client, the way another connection's removal arrives.
     await client.call('projects.remove', { projectId: 'p-boite' });
 
-    expect(store.projects.map((p) => p.id)).toEqual(['p-brain']);
+    expect(store.projects.map((p) => p.id)).toEqual(['p-notes']);
     expect(store.threads.every((t) => t.projectId !== 'p-boite')).toBe(true);
     const reopened = await waitFor(() => store.openThread ?? undefined);
-    expect(reopened.projectId).toBe('p-brain');
+    expect(reopened.projectId).toBe('p-notes');
   });
 
   test('a probe elsewhere fills the models of that instance, the descriptor until then', async () => {
@@ -282,6 +282,83 @@ describe('Store', () => {
     await client.call('settings.set', { maxConcurrentTurns: 9 });
 
     expect(store.settings?.maxConcurrentTurns).toBe(9);
+  });
+
+  test('the newest open wins, and the socket is left holding that thread alone', async () => {
+    const { store, client } = await ready();
+    await store.open('t-trace');
+
+    // Two clicks inside one round trip. The second is the one the user made.
+    await Promise.all([store.open('t-bench'), store.open('t-scheduler')]);
+
+    expect(store.openThread?.id).toBe('t-scheduler');
+    expect(store.trace).toEqual(await client.call('trace.get', { threadId: 't-scheduler' }));
+    expect(client.coreSubscribers).toEqual(['t-scheduler']);
+    expect(client.clientSubscriptions).toEqual(['t-scheduler']);
+  });
+
+  test('a refused subscribe leaves the thread that was open subscribed', async () => {
+    const { store, client } = await ready();
+    await store.open('t-trace');
+
+    // Archived elsewhere between the render and the click: the core refuses it.
+    await store.open('t-gone');
+
+    expect(store.error).toMatch(/no such thread/i);
+    expect(store.openThread?.id).toBe('t-trace');
+    expect(client.coreSubscribers).toEqual(['t-trace']);
+    expect(client.clientSubscriptions).toEqual(['t-trace']);
+  });
+
+  test('a request the core settled while the socket was down leaves the card', async () => {
+    const { store, client } = await ready();
+    await store.open('t-scheduler');
+    expect(store.pendingQuestions.map((q) => q.id)).toEqual(['qst-seed-1']);
+    expect(store.pendingPermissions.map((p) => p.id)).toEqual(['req-seed-1']);
+
+    // The core's recovery ends both turns into a socket nobody is holding.
+    client.drop();
+    client.clearRequestsOf('t-scheduler');
+    client.clearRequestsOf('t-bench');
+    await client.restore();
+    await waitFor(() => (store.pendingQuestions.length === 0 ? true : undefined));
+
+    expect(store.pendingQuestions).toEqual([]);
+    expect(store.pendingPermissions).toEqual([]);
+  });
+
+  test('a thread removed elsewhere lets its subscription go before the next one is taken', async () => {
+    const { store, client } = await ready();
+    await store.open('t-descriptors');
+    const spy = vi.spyOn(client, 'call');
+
+    await client.call('projects.remove', { projectId: 'p-notes' });
+    await waitFor(() => store.openThread?.id);
+
+    const strip = spy.mock.calls
+      .filter(([method]) => method === 'threads.subscribe' || method === 'threads.unsubscribe')
+      .map(([method, params]) => `${method} ${(params as { threadId: string }).threadId}`);
+    // The handler that saw the thread leave is what releases it: the next
+    // thread is never subscribed while the socket still holds a dead one.
+    expect(strip[0]).toBe('threads.unsubscribe t-descriptors');
+    expect(store.openThread?.projectId).toBe('p-boite');
+    expect(client.clientSubscriptions).toEqual([store.openThread?.id]);
+    spy.mockRestore();
+  });
+
+  test('a boot loads the core once, not twice', async () => {
+    const client = new FakeClient({ delayMs: 0 });
+    const store = new Store();
+    const spy = vi.spyOn(client, 'call');
+    store.attach(client);
+
+    await store.connect();
+
+    // `connect()` and the `ready` state handler both ask: one load goes out.
+    expect(spy.mock.calls.filter(([method]) => method === 'projects.list')).toHaveLength(1);
+    expect(spy.mock.calls.filter(([method]) => method === 'keybindings.get')).toHaveLength(1);
+    expect(store.projects).toHaveLength(2);
+    spy.mockRestore();
   });
 });
 

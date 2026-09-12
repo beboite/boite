@@ -116,23 +116,29 @@
           </li>
         {/each}
       </ul>
-      <p class="subtle hint">{strings.settings.projectsHint}</p>
+      {#if store.owner}<p class="subtle hint">{strings.settings.projectsHint}</p>{/if}
     {/if}
-    <form class="row" onsubmit={addProject} data-testid="settings-add-project">
-      {#if inShell}
-        <button type="button" onclick={() => void store.pickProject()}>{strings.firstRun.pick}</button>
-      {/if}
-      <input
-        bind:value={projectPath}
-        placeholder={strings.firstRun.pathPlaceholder}
-        data-testid="settings-project-path"
-        class="mono grow"
-        spellcheck="false"
-      />
-      <button type="submit" class="primary" data-testid="settings-project-add" disabled={projectPath.trim().length === 0}>
-        {strings.firstRun.add}
-      </button>
-    </form>
+    <!-- `projects.add` is the owner's, so a paired device reads the list and
+         is told where the folders come from. -->
+    {#if store.owner}
+      <form class="row" onsubmit={addProject} data-testid="settings-add-project">
+        {#if inShell}
+          <button type="button" onclick={() => void store.pickProject()}>{strings.firstRun.pick}</button>
+        {/if}
+        <input
+          bind:value={projectPath}
+          placeholder={strings.firstRun.pathPlaceholder}
+          data-testid="settings-project-path"
+          class="mono grow"
+          spellcheck="false"
+        />
+        <button type="submit" class="primary" data-testid="settings-project-add" disabled={projectPath.trim().length === 0}>
+          {strings.firstRun.add}
+        </button>
+      </form>
+    {:else}
+      <p class="subtle hint">{strings.settings.projectsDevice}</p>
+    {/if}
   </section>
 
   <section class="card">
@@ -150,32 +156,36 @@
         onchange={(event) => void store.setNotifications(event.currentTarget.checked)}
       />
     </label>
-    <label class="switch-row">
-      <span class="text">
-        {strings.settings.focusGuard}
-        <span class="hint">{strings.settings.focusGuardHint}</span>
-      </span>
-      <input
-        type="checkbox"
-        role="switch"
-        data-testid="setting-focus-guard"
-        bind:checked={focusGuard}
-        onchange={() => void saveFocusGuard()}
-      />
-    </label>
-    <label class="switch-row">
-      <span class="text">
-        {strings.settings.muteAgents}
-        <span class="hint">{strings.settings.muteAgentsHint}</span>
-      </span>
-      <input
-        type="checkbox"
-        role="switch"
-        data-testid="setting-mute-agents"
-        bind:checked={muteAgents}
-        onchange={() => void saveMuteAgents()}
-      />
-    </label>
+    <!-- Both write `settings.set`, and both are about the machine the agents
+         run on, which is never the device reading this. -->
+    {#if store.owner}
+      <label class="switch-row">
+        <span class="text">
+          {strings.settings.focusGuard}
+          <span class="hint">{strings.settings.focusGuardHint}</span>
+        </span>
+        <input
+          type="checkbox"
+          role="switch"
+          data-testid="setting-focus-guard"
+          bind:checked={focusGuard}
+          onchange={() => void saveFocusGuard()}
+        />
+      </label>
+      <label class="switch-row">
+        <span class="text">
+          {strings.settings.muteAgents}
+          <span class="hint">{strings.settings.muteAgentsHint}</span>
+        </span>
+        <input
+          type="checkbox"
+          role="switch"
+          data-testid="setting-mute-agents"
+          bind:checked={muteAgents}
+          onchange={() => void saveMuteAgents()}
+        />
+      </label>
+    {/if}
   </section>
 
   <section class="card">
@@ -253,44 +263,49 @@
     {/if}
   </section>
 
-  <section class="card">
-    <h2>{strings.settings.scheduler}</h2>
-    <div class="grid">
-      <label>
-        <span>{strings.settings.maxConcurrentTurns}</span>
-        <input type="number" min="1" max="64" bind:value={maxConcurrentTurns} />
+  <!-- Every field here ends in one `settings.set` under the Save button, and
+       `listenOnLan` decides whether the phone can reach the core at all. The
+       whole card is the owner's machine, so the device does not see it. -->
+  {#if store.owner}
+    <section class="card">
+      <h2>{strings.settings.scheduler}</h2>
+      <div class="grid">
+        <label>
+          <span>{strings.settings.maxConcurrentTurns}</span>
+          <input type="number" min="1" max="64" bind:value={maxConcurrentTurns} />
+        </label>
+        <label>
+          <span>{strings.settings.perAccountConcurrency}</span>
+          <input type="number" min="1" max="32" bind:value={perAccountConcurrency} />
+        </label>
+        <label>
+          <span>{strings.settings.warmProcessMinutes}</span>
+          <input type="number" min="0" max="120" bind:value={warmProcessMinutes} />
+        </label>
+        <label>
+          <span>{strings.settings.agentCpuCapPercent}</span>
+          <input type="number" min="0" max="100" bind:value={agentCpuCapPercent} />
+        </label>
+        <label>
+          <span>{strings.settings.threadMemoryCapMb}</span>
+          <input type="number" min="0" max="65536" bind:value={threadMemoryCapMb} />
+        </label>
+      </div>
+      <label class="switch-row">
+        <span class="text">
+          {strings.settings.listenOnLan}
+          <span class="hint">{strings.settings.listenOnLanHint}</span>
+        </span>
+        <input type="checkbox" role="switch" data-testid="setting-listen-on-lan" bind:checked={listenOnLan} />
       </label>
-      <label>
-        <span>{strings.settings.perAccountConcurrency}</span>
-        <input type="number" min="1" max="32" bind:value={perAccountConcurrency} />
-      </label>
-      <label>
-        <span>{strings.settings.warmProcessMinutes}</span>
-        <input type="number" min="0" max="120" bind:value={warmProcessMinutes} />
-      </label>
-      <label>
-        <span>{strings.settings.agentCpuCapPercent}</span>
-        <input type="number" min="0" max="100" bind:value={agentCpuCapPercent} />
-      </label>
-      <label>
-        <span>{strings.settings.threadMemoryCapMb}</span>
-        <input type="number" min="0" max="65536" bind:value={threadMemoryCapMb} />
-      </label>
-    </div>
-    <label class="switch-row">
-      <span class="text">
-        {strings.settings.listenOnLan}
-        <span class="hint">{strings.settings.listenOnLanHint}</span>
-      </span>
-      <input type="checkbox" role="switch" data-testid="setting-listen-on-lan" bind:checked={listenOnLan} />
-    </label>
-    <div class="actions">
-      <button type="button" class="primary" onclick={() => void save()}>{strings.settings.save}</button>
-      {#if savedAt !== null}
-        <span class="muted">{strings.settings.saved} {time(savedAt)}</span>
-      {/if}
-    </div>
-  </section>
+      <div class="actions">
+        <button type="button" class="primary" onclick={() => void save()}>{strings.settings.save}</button>
+        {#if savedAt !== null}
+          <span class="muted">{strings.settings.saved} {time(savedAt)}</span>
+        {/if}
+      </div>
+    </section>
+  {/if}
 
   <section class="card">
     <h2>{strings.settings.core}</h2>

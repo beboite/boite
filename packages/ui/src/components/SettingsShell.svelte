@@ -13,7 +13,10 @@
 
   let { store }: { store: Store } = $props();
 
-  const tabs: { id: SettingsTab; label: string; icon: typeof Settings2 }[] = [
+  /** Providers, Plugins and Resources call nothing a paired device may call. */
+  const OWNER_TABS: SettingsTab[] = ['accounts', 'plugins', 'resources'];
+
+  const all: { id: SettingsTab; label: string; icon: typeof Settings2 }[] = [
     { id: 'general', label: strings.settings.tabs.general, icon: Settings2 },
     { id: 'appearance', label: strings.settings.tabs.appearance, icon: Palette },
     { id: 'keyboard', label: strings.settings.tabs.keyboard, icon: Keyboard },
@@ -23,6 +26,10 @@
     { id: 'resources', label: strings.settings.tabs.resources, icon: Activity },
     { id: 'experiments', label: strings.settings.tabs.experiments, icon: FlaskConical }
   ];
+
+  let tabs = $derived(all.filter((tab) => store.owner || !OWNER_TABS.includes(tab.id)));
+  /** A tab this client has no nav entry for lands on General rather than nowhere. */
+  let tab = $derived(tabs.some((entry) => entry.id === store.settingsTab) ? store.settingsTab : 'general');
 </script>
 
 <div class="settings" data-testid="settings">
@@ -32,39 +39,39 @@
       {strings.settings.back}
     </button>
     <h1>{strings.settings.heading}</h1>
-    {#each tabs as tab (tab.id)}
-      {@const Icon = tab.icon}
+    {#each tabs as entry (entry.id)}
+      {@const Icon = entry.icon}
       <button
         type="button"
         class="ghost tab"
-        class:active={store.settingsTab === tab.id}
-        data-testid="settings-tab-{tab.id}"
-        aria-current={store.settingsTab === tab.id ? 'page' : undefined}
-        onclick={() => store.showSettings(tab.id)}
+        class:active={tab === entry.id}
+        data-testid="settings-tab-{entry.id}"
+        aria-current={tab === entry.id ? 'page' : undefined}
+        onclick={() => store.showSettings(entry.id)}
       >
         <Icon size={15} strokeWidth={1.75} />
-        {tab.label}
+        {entry.label}
       </button>
     {/each}
   </nav>
 
   <!-- The panel is keyed on the tab, so switching tabs fades the new page in
        rather than swapping it in one frame. -->
-  {#key store.settingsTab}
+  {#key tab}
     <section>
-      {#if store.settingsTab === 'general'}
+      {#if tab === 'general'}
         <GeneralSettings {store} />
-      {:else if store.settingsTab === 'appearance'}
+      {:else if tab === 'appearance'}
         <AppearancePage />
-      {:else if store.settingsTab === 'keyboard'}
+      {:else if tab === 'keyboard'}
         <KeyboardPage {store} />
-      {:else if store.settingsTab === 'accounts'}
+      {:else if tab === 'accounts'}
         <AccountsPage {store} />
-      {:else if store.settingsTab === 'usage'}
+      {:else if tab === 'usage'}
         <UsagePage {store} />
-      {:else if store.settingsTab === 'plugins'}
+      {:else if tab === 'plugins'}
         <PluginsPage {store} />
-      {:else if store.settingsTab === 'experiments'}
+      {:else if tab === 'experiments'}
         <ExperimentsPage />
       {:else}
         <ResourcesPage {store} />

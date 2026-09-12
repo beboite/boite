@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, test } from 'vitest';
+import { beforeEach, describe, expect, test, vi } from 'vitest';
+import { browserBridge } from './browser-bridge';
 import {
   PANEL_DEFAULT,
   PANEL_MIN,
@@ -201,5 +202,18 @@ describe('the right panel', () => {
 
     expect(root.for('t-1').surfaces).toHaveLength(0);
     expect(new RightPanelStore().for('t-1').surfaces).toHaveLength(0);
+  });
+
+  test('and its browser views, which nothing else would ever list again', () => {
+    const { root, bound } = panel('t-1');
+    bound.open('trace');
+    const first = bound.open('browser');
+    const second = bound.open('browser');
+    const destroy = vi.spyOn(browserBridge, 'destroy');
+
+    root.forget('t-1');
+
+    expect(destroy.mock.calls.map(([id]) => id)).toEqual([first.id, second.id]);
+    destroy.mockRestore();
   });
 });

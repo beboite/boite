@@ -40,6 +40,7 @@ export const strings = {
   firstRun: {
     heading: 'Open a project',
     body: 'Pick the folder an agent will work in. Threads live inside it.',
+    deviceBody: 'Projects are opened from the app the core runs in. The ones it holds show up here.',
     pick: 'Choose a folder',
     dropHint: 'or drop a folder anywhere in this window',
     typePath: 'Or type the path',
@@ -297,6 +298,7 @@ export const strings = {
     browser: 'Browser',
     browserHint: 'A page beside the thread',
     desktopOnly: 'Only in the desktop app',
+    ownerOnly: "Only in the owner's app",
     launcher: 'Open a surface in this panel',
     untitled: 'Browser'
   },
@@ -419,6 +421,7 @@ export const strings = {
     back: 'Back to threads',
     projects: 'Projects',
     projectsHint: 'Right-click a project in the sidebar to remove it from Boite.',
+    projectsDevice: 'Folders are added and removed from the app the core runs in.',
     appearance: 'Appearance',
     theme: 'Theme',
     themeSystem: 'System',
