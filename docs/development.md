@@ -14,16 +14,22 @@ bun run core                # the built bundle when there is one, the sources ot
 The core prints one ready line on stdout and nothing else at start:
 
 ```
-boite-core ready http://127.0.0.1:53421 pairing http://127.0.0.1:53421/?grant=...
+boite-core ready http://127.0.0.1:53421
 ```
 
-Both halves matter. The first is the RPC endpoint a client connects to, the
-second is a one-time pairing link: its grant is exchanged for a session key on
-the first `hello` and refused after that, or after ten minutes. The core token
-itself is 32 random bytes generated on first start and kept in
-`<dataDir>/core.json` with the port and the pid; the shell reads it there, a
-test reads it there, and it never appears on the ready line
-([docs/phone.md](phone.md)).
+That is the RPC endpoint a client connects to, and it is the whole line. No
+pairing grant rides on it: a grant is a live session key, and a line printed on
+every start ends up in log files, terminal scrollback and anything that reprints
+stdout. A phone gets its link when the owner asks for one in Settings, or over
+`pairing.grant` ([docs/phone.md](phone.md)). The core token is 32 random bytes
+generated on first start and kept in `<dataDir>/core.json` with the port and the
+pid, written `0600`; the shell reads it there, a test reads it there, and it
+never appears on stdout.
+
+One core per data directory. The first one to start takes `<dataDir>/core.lock`
+and a second one refuses to start rather than rewrite the first one's live turns
+as crashes. A lock whose holder is gone is taken over, so a core killed hard
+leaves nothing to clean up by hand.
 
 Flags: `--port` (0 asks the OS for a free one), `--host`, `--lan` (which is
 `--host 0.0.0.0`) and `--data-dir`. There is a fifth, `--channel`, which takes

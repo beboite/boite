@@ -51,6 +51,41 @@ test(
   TIMEOUT,
 );
 
+test(
+  'a second core on the same data directory refuses to start, and says which pid holds it',
+  async () => {
+    // Two cores on one journal is not a rare accident: `bun run dev:core` reads
+    // the same directory as the installed app. The second one used to take the
+    // first one's live turn and rewrite it as a crash.
+    const file = join(core.dataDir, 'core.json');
+    const before = JSON.parse(readFileSync(file, 'utf8')) as { pid: number; port: number };
+    const second = Bun.spawn({
+      windowsHide: true,
+      cmd: ['bun', 'run', join(import.meta.dir, '..', '..', 'packages', 'core', 'src', 'main.ts'), '--port', '0'],
+      env: { ...process.env, BOITE_DATA_DIR: core.dataDir, BOITE_ECHO: '1' },
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    const [out, error, code] = await Promise.all([
+      new Response(second.stdout).text(),
+      new Response(second.stderr).text(),
+      second.exited,
+    ]);
+    expect(code).not.toBe(0);
+    expect(out).not.toContain('boite-core ready');
+    expect(error).toContain(`another core is already running on ${core.dataDir}`);
+    expect(error).toContain(`pid ${before.pid}`);
+    expect(error).toContain('--data-dir');
+
+    // The first core is untouched: same port, same journal, still answering.
+    expect((await client.call('threads.list', {})).length).toBeGreaterThanOrEqual(0);
+    const held = JSON.parse(readFileSync(file, 'utf8')) as { pid: number; port: number };
+    expect(held.pid).toBe(before.pid);
+    expect(held.port).toBe(core.port);
+  },
+  TIMEOUT,
+);
+
 // The dev channel proved where it is cheap: a second `tauri build` for a dev
 // shell executable costs minutes, while the flag, the `CoreInfo` it fills and
 // the `core.json` a dev shell then reads all live in the core. The rest of the

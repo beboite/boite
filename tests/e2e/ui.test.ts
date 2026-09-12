@@ -7,7 +7,7 @@ import { connect } from '../../packages/core/src/client.ts';
 import { claudeProjectFolder } from '../../packages/core/src/imports/claude.ts';
 import { claudeSessionFixture, FIXTURE_SESSION_ID } from '../../packages/core/test/fixtures/claude-session.ts';
 import { BrowserPage } from './lib/cdp.ts';
-import { pairingUrlOf, removeDirectory, startCore, type RunningCore } from './lib/core.ts';
+import { mintPairing, pairingUrlOf, removeDirectory, startCore, type RunningCore } from './lib/core.ts';
 
 const TIMEOUT = 60_000;
 /** The reconnect has its own budget: a backoff that needs a minute is a bug. */
@@ -666,8 +666,10 @@ test(
 test(
   'a second browser pairs on the one-time link, gets a key of its own, and the desktop can revoke it',
   async () => {
-    // A fresh profile, like a phone: no stored endpoint, only the grant link.
-    const phone = await BrowserPage.launch({ url: core.pairingUrl });
+    // A fresh profile, like a phone: no stored endpoint, only the grant link the
+    // owner minted for it.
+    const grantUrl = await mintPairing(core);
+    const phone = await BrowserPage.launch({ url: grantUrl });
     try {
       await phone.waitFor(`${textOf('status-connection')} === 'Connected'`, 30_000);
       const stored = await phone.evaluate<{ url: string; token: string }>(`JSON.parse(localStorage.getItem('boite.core'))`);
@@ -676,7 +678,7 @@ test(
       expect(await phone.evaluate<string>('location.search')).toBe('');
 
       // Same link again: refused, and the page says so instead of retrying forever.
-      const again = await BrowserPage.launch({ url: core.pairingUrl });
+      const again = await BrowserPage.launch({ url: grantUrl });
       try {
         await again.waitFor(`document.querySelector('${testid('error-toast')}')`, 30_000);
         expect(await again.text(testid('error-toast'))).toContain('already used');

@@ -22,7 +22,7 @@ that core, over an authenticated WebSocket.
 
 ```bash
 bun install
-bun run dev:core            # the host on 127.0.0.1, prints a one-time pairing link
+bun run dev:core            # the host on 127.0.0.1, prints the url it listens on
 bun run dev:ui              # vite dev server for the UI; add ?fake=1 for the in-memory client
 bun run check               # tsc on contracts and core, svelte-check on the UI
 bun run test                # bun test in packages/core, vitest in packages/ui
