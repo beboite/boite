@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { ImageAttachment, MessagePart, RpcEvents, ToolDocument } from '@boite/contracts';
-import { echoThread, startTestCore } from './harness.ts';
+import { echoThread, startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
 
 let harness: TestCore;
@@ -411,6 +411,55 @@ describe('echo driver', () => {
     expect((await finished).status).toBe('stopped');
     expect(await client.call('questions.list', {})).toEqual([]);
     expect((await client.call('threads.get', { threadId })).status).toBe('idle');
+  });
+
+  test('a turn stopped while a permission card is open denies it and the turn really ends', async () => {
+    const client = await harness.connect();
+    const { threadId } = await echoThread(harness, client);
+    await client.call('threads.subscribe', { threadId });
+
+    const requested = client.next('permission.requested', (request) => request.threadId === threadId, 10000);
+    const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 10000);
+    await client.call('turns.start', { threadId, prompt: '[permission]' });
+    const request = await requested;
+    expect((await client.call('threads.get', { threadId })).status).toBe('waiting');
+
+    // Before the fix this stopped nothing: the driver stayed parked on the
+    // card, no turn.finished ever fired and the thread stayed `waiting`.
+    const resolved = client.next('permission.resolved', (event) => event.requestId === request.id, 10000);
+    expect((await client.call('turns.stop', { threadId })).stopped).toBe(true);
+
+    expect((await resolved).decision).toBe('deny');
+    expect((await finished).status).toBe('stopped');
+    expect(await client.call('permissions.list', {})).toEqual([]);
+    expect((await client.call('threads.get', { threadId })).status).toBe('idle');
+  });
+
+  test('with two cards open, answering one keeps the thread waiting on the other', async () => {
+    const client = await harness.connect();
+    const { threadId } = await echoThread(harness, client);
+    await client.call('threads.subscribe', { threadId });
+
+    const raised: string[] = [];
+    client.on('permission.requested', (request) => {
+      if (request.threadId === threadId) raised.push(request.id);
+    });
+    const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 10000);
+    await client.call('turns.start', { threadId, prompt: '[permission:2]' });
+    await waitFor(() => raised.length === 2);
+    const cards = await client.call('permissions.list', { threadId });
+    expect(cards).toHaveLength(2);
+    expect((await client.call('threads.get', { threadId })).status).toBe('waiting');
+
+    // Answering the first used to put the thread back to `running` with a card
+    // still on screen, so the header said the agent was working on nothing.
+    await client.call('permissions.answer', { requestId: cards[0]?.id ?? '', decision: 'allow' });
+    expect((await client.call('threads.get', { threadId })).status).toBe('waiting');
+    expect(await client.call('permissions.list', { threadId })).toHaveLength(1);
+
+    await client.call('permissions.answer', { requestId: cards[1]?.id ?? '', decision: 'allow' });
+    expect((await finished).status).toBe('done');
+    expect(await client.call('permissions.list', { threadId })).toEqual([]);
   });
 
   test('an unsubscribed connection gets thread.updated but no message.delta', async () => {

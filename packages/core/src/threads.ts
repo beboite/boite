@@ -1,3 +1,5 @@
+import { statSync } from 'node:fs';
+import { relative, resolve } from 'node:path';
 import { ATTACHMENTS_PER_TURN, ATTACHMENT_MAX_BYTES, IMAGE_MIME_TYPES, MESSAGE_PAGE, MESSAGE_PAGE_MAX } from '@boite/contracts';
 import type {
   Account,
@@ -47,6 +49,31 @@ type CreateParams = RpcParams<'threads.create'>;
 
 function titleOf(title: string | undefined): string {
   return title !== undefined && title.length > 0 ? title : 'New thread';
+}
+
+/**
+ * The working directory a client asked for, resolved and kept inside the
+ * project. The agent runs there, so an unchecked string is a way to point any
+ * process at any directory on the machine: the worktree path the core builds
+ * itself is the one exception, and it never comes through `params.cwd`.
+ */
+function checkCwd(project: Project, cwd: string): string {
+  const resolved = resolve(cwd);
+  const inside = relative(resolve(project.path), resolved);
+  if (inside.startsWith('..') || resolve(inside) === inside) {
+    throw refused('the working directory must be inside the project', {
+      cwd: resolved,
+      projectPath: project.path,
+    });
+  }
+  let stat;
+  try {
+    stat = statSync(resolved);
+  } catch (error) {
+    throw refused(`the working directory cannot be read: ${messageOf(error)}`, { cwd: resolved });
+  }
+  if (!stat.isDirectory()) throw refused('the working directory is not a directory', { cwd: resolved });
+  return resolved;
 }
 
 /** How many bytes a base64 string decodes to, without decoding it. */
@@ -189,17 +216,25 @@ export class ThreadStore {
   /**
    * The thread in its own git worktree: the branch and directory are made
    * first, under the id the thread will carry, and the record is written only
-   * once git succeeded. A refusal leaves nothing behind but the trace of the
-   * git processes.
+   * once git succeeded. Everything a refusal can come from is checked before
+   * git makes anything, and a refusal after that removes the worktree and its
+   * branch again, so nothing is left behind but the trace of the git processes.
    */
   async createInWorktree(params: CreateParams): Promise<ThreadSummary> {
     if (params.cwd !== undefined) {
       throw refused('cwd and worktree exclude each other: a worktree is the working directory', { cwd: params.cwd });
     }
-    const { project } = this.check(params);
+    const { project, provider, account } = this.check(params);
+    const model = checkModel(provider, account.id, params.model ?? defaultModel(provider));
+    checkEffort(provider, account.id, model, params.effort ?? null);
     const id = newId('thr_');
     const placed = await this.core.worktrees.add(id, project, titleOf(params.title), params.worktree?.branch);
-    return this.create({ ...params, cwd: placed.path }, { id, branch: placed.branch });
+    try {
+      return this.create({ ...params, cwd: placed.path }, { id, branch: placed.branch });
+    } catch (error) {
+      await this.core.worktrees.remove(id, project, placed);
+      throw error;
+    }
   }
 
   create(params: CreateParams, placed?: { id: ThreadId; branch: string }): ThreadSummary {
@@ -216,7 +251,14 @@ export class ThreadStore {
       accountId: account.id,
       model,
       effort: checkEffort(provider, account.id, model, params.effort ?? null),
-      cwd: params.cwd !== undefined && params.cwd.length > 0 ? params.cwd : project.path,
+      // A worktree's directory is the core's own and sits beside the project;
+      // anything a client names has to be inside it.
+      cwd:
+        params.cwd !== undefined && params.cwd.length > 0
+          ? placed !== undefined
+            ? params.cwd
+            : checkCwd(project, params.cwd)
+          : project.path,
       branch: placed?.branch ?? null,
       permissionMode: params.permissionMode ?? 'default',
       status: 'idle',
@@ -448,8 +490,10 @@ export class ThreadStore {
     if (this.core.journal.isClosed()) return thread;
 
     // The thread as it stands now: a rename that landed during the ask is the
-    // user's, and the agent's words do not go over it.
+    // user's, and the agent's words do not go over it. Asking again on a name
+    // the user typed earlier is still allowed, since that ask is his own.
     const current = this.require(threadId);
+    if (current.titleSource === 'user' && current.title !== thread.title) return this.withLoad(current);
     if (agentTitle !== null) return this.save({ ...current, title: agentTitle, titleSource: 'agent' }, 'thread.updated');
     const fromPrompt = titleFromPrompt(prompt);
     if (fromPrompt.length === 0 || (fromPrompt === current.title && current.titleSource === 'prompt')) {
@@ -537,6 +581,11 @@ export class ThreadStore {
   stopRunning(threadId: ThreadId): boolean {
     const handle = this.handles.get(threadId);
     if (handle === undefined) return false;
+    // An open card is what the driver is parked on. Aborting without answering
+    // it leaves that await pending for good: the turn never finishes, the
+    // thread stays `waiting`, and Stop does nothing the user can see.
+    this.clearPermissionsOf(threadId);
+    this.clearQuestionsOf(threadId);
     handle.stop();
     return true;
   }
@@ -721,6 +770,17 @@ export class ThreadStore {
     return scoped.sort((a, b) => a.createdAt - b.createdAt);
   }
 
+  /**
+   * Is anything of this thread still waiting on the user? An agent can run two
+   * tools at once and raise a card for each, so answering one does not mean the
+   * turn is running again.
+   */
+  private waitingOn(threadId: ThreadId): boolean {
+    for (const entry of this.permissions.values()) if (entry.request.threadId === threadId) return true;
+    for (const entry of this.questions.values()) if (entry.request.threadId === threadId) return true;
+    return false;
+  }
+
   answerPermission(params: { requestId: RequestId; decision: 'allow' | 'deny' }): void {
     const pending = this.permissions.get(params.requestId);
     if (pending === undefined) throw notFound(`unknown permission request ${params.requestId}`, params);
@@ -731,7 +791,7 @@ export class ThreadStore {
       () => undefined,
     );
     this.core.bus.emit('permission.resolved', { requestId: params.requestId, threadId, decision: params.decision });
-    this.setStatus(threadId, 'running');
+    this.setStatus(threadId, this.waitingOn(threadId) ? 'waiting' : 'running');
     pending.resolve(params.decision);
   }
 
@@ -795,7 +855,7 @@ export class ThreadStore {
       () => undefined,
     );
     this.core.bus.emit('question.answered', { questionId: request.id, threadId: request.threadId, answer });
-    this.setStatus(request.threadId, 'running');
+    this.setStatus(request.threadId, this.waitingOn(request.threadId) ? 'waiting' : 'running');
     pending.resolve(answer);
   }
 
@@ -976,10 +1036,14 @@ export class ThreadStore {
     }
   }
 
+  /** The turn ended with a card still open: it is denied, and every client is told so. */
   private clearPermissionsOf(threadId: ThreadId): void {
     for (const [id, pending] of [...this.permissions]) {
       if (pending.request.threadId !== threadId) continue;
       this.permissions.delete(id);
+      // Without this the card stays on screen with live buttons, and pressing
+      // one answers `unknown permission request`.
+      this.core.bus.emit('permission.resolved', { requestId: id, threadId, decision: 'deny' });
       pending.resolve('deny');
     }
   }

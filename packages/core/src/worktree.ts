@@ -84,6 +84,24 @@ export class Worktrees {
     throw refused(`${SUFFIX_MAX} worktrees already carry the name ${slug}: rename the thread`, { slug, root });
   }
 
+  /**
+   * Undo an `add` whose thread was never written. Best effort on purpose: the
+   * caller is already failing with the real reason, and a git that refuses to
+   * clean up must not replace it. What it could not remove goes to the log with
+   * the path, so the user can finish the job himself.
+   */
+  async remove(threadId: ThreadId, project: Project, placed: PlacedWorktree): Promise<void> {
+    const removed = await this.git(threadId, project.path, ['worktree', 'remove', '--force', placed.path]);
+    if (removed.code !== 0) {
+      this.core.log('warn', `could not remove the worktree ${placed.path}: ${removed.stderr.trim() || `exit ${removed.code}`}`);
+      return;
+    }
+    const deleted = await this.git(threadId, project.path, ['branch', '-D', placed.branch]);
+    if (deleted.code !== 0) {
+      this.core.log('warn', `could not delete the branch ${placed.branch}: ${deleted.stderr.trim() || `exit ${deleted.code}`}`);
+    }
+  }
+
   private async branchExists(threadId: ThreadId, cwd: string, branch: string): Promise<boolean> {
     const result = await this.git(threadId, cwd, ['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`]);
     return result.code === 0;

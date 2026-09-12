@@ -121,6 +121,39 @@ describe('a thread in its own worktree', () => {
     expect(existsSync(worktreeRoot(path))).toBe(false);
   });
 
+  test('a model nobody offers is refused before any worktree exists', async () => {
+    const project = await repoProject();
+    const accountId = await echoAccount();
+    // The check used to run after `git worktree add`, so a typo in the model
+    // left a branch and a directory behind with no thread pointing at them.
+    await expect(
+      client.call('threads.create', {
+        projectId: project.id,
+        providerId: 'echo',
+        accountId,
+        title: 'Fix the login',
+        model: 'no-such-model',
+        worktree: {},
+      }),
+    ).rejects.toThrow('the provider does not offer this model');
+    expect(existsSync(worktreeRoot(project.path))).toBe(false);
+    expect(git(project.path, 'branch', '--list', 'boite/fix-the-login').trim()).toBe('');
+    expect(await client.call('threads.list', {})).toHaveLength(0);
+  });
+
+  test('rolling a worktree back takes its directory, its branch and its registration', async () => {
+    const project = await repoProject();
+    const row = harness.core.projects.require(project.id);
+    const threadId = 'thr_rollback';
+    const placed = await harness.core.worktrees.add(threadId, row, 'Fix the login');
+    expect(existsSync(placed.path)).toBe(true);
+
+    await harness.core.worktrees.remove(threadId, row, placed);
+    expect(existsSync(placed.path)).toBe(false);
+    expect(git(project.path, 'branch', '--list', placed.branch).trim()).toBe('');
+    expect(git(project.path, 'worktree', 'list', '--porcelain')).not.toContain(placed.branch);
+  });
+
   test('a thread without the option keeps working in the project itself', async () => {
     const project = await repoProject();
     const accountId = await echoAccount();

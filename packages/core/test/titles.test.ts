@@ -86,6 +86,25 @@ describe('thread titles', () => {
     expect((await client.call('threads.get', { threadId })).title).toBe('Echo: check the trace of this');
   });
 
+  test('a rename typed while the title is being written is the one that stays', async () => {
+    const client = await harness.connect();
+    const { threadId } = await echoThread(harness, client, 'boxes');
+    await client.call('threads.subscribe', { threadId });
+    const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, EVENT_TIMEOUT_MS);
+    await client.call('turns.start', { threadId, prompt: 'write something about boxes' });
+    expect((await finished).status).toBe('done');
+
+    // The ask is in flight when the rename lands, which is the whole race: the
+    // agent answers about a title nobody is using any more, and its words used
+    // to go over the user's on the way back.
+    const asking = harness.core.threads.retitle(threadId);
+    const renamed = harness.core.threads.update({ threadId, title: 'mine, typed during the ask' });
+    expect(renamed.titleSource).toBe('user');
+
+    expect(await asking).toMatchObject({ title: 'mine, typed during the ask', titleSource: 'user' });
+    expect((await client.call('threads.get', { threadId })).title).toBe('mine, typed during the ask');
+  });
+
   test('a thread with no prompt is refused, and a title from the prompt is the fallback', async () => {
     const client = await harness.connect();
     const { threadId } = await echoThread(harness, client, 'untouched');

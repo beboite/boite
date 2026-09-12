@@ -60,7 +60,8 @@ type Segment =
   | { kind: 'diff' }
   | { kind: 'doc' }
   | { kind: 'image' }
-  | { kind: 'permission' }
+  /** `[permission:2]` raises two cards at once, the way parallel tool calls do. */
+  | { kind: 'permission'; count: number }
   | { kind: 'question' }
   | { kind: 'think' }
   | { kind: 'compact' }
@@ -79,7 +80,7 @@ const COMPACT_POST_TOKENS = 300;
  * one whenever a prompt mentions it, which is what the end to end run types.
  */
 const DIRECTIVE =
-  /\[(?:sleep:\d+|tool-stream|tool|diff|doc|image|permission|question|think|compact|spawn:[^\]]*|error)\]|\bquestion\b/g;
+  /\[(?:sleep:\d+|tool-stream|tool|diff|doc|image|permission(?::\d+)?|question|think|compact|spawn:[^\]]*|error)\]|\bquestion\b/g;
 
 export function parsePrompt(prompt: string): Segment[] {
   const segments: Segment[] = [];
@@ -95,7 +96,10 @@ export function parsePrompt(prompt: string): Segment[] {
     else if (body === 'diff') segments.push({ kind: 'diff' });
     else if (body === 'doc') segments.push({ kind: 'doc' });
     else if (body === 'image') segments.push({ kind: 'image' });
-    else if (body === 'permission') segments.push({ kind: 'permission' });
+    else if (body.startsWith('permission')) {
+      const count = body.startsWith('permission:') ? Number(body.slice('permission:'.length)) : 1;
+      segments.push({ kind: 'permission', count: Number.isInteger(count) && count > 0 ? count : 1 });
+    }
     else if (body === 'question') segments.push({ kind: 'question' });
     else if (body === 'think') segments.push({ kind: 'think' });
     else if (body === 'compact') segments.push({ kind: 'compact' });
@@ -387,22 +391,31 @@ async function run(ctx: TurnContext, state: RunState): Promise<TurnResult> {
         ]);
         break;
       case 'permission': {
-        const ticket = ctx.requestPermission('fake_tool', { echo: true }, 'the echo driver asks for a fake tool');
-        const index = takeIndex();
-        ctx.emit.part(messageId, index, {
-          type: 'permission',
-          requestId: ticket.requestId,
-          toolName: 'fake_tool',
-          decision: null,
+        // Every card is raised before any is awaited, so `[permission:2]` is
+        // two open at once: what an agent asking for two parallel tool calls
+        // does, and what the thread status has to survive.
+        const cards = [];
+        for (let card = 0; card < segment.count; card += 1) {
+          const ticket = ctx.requestPermission('fake_tool', { echo: true }, 'the echo driver asks for a fake tool');
+          const index = takeIndex();
+          ctx.emit.part(messageId, index, {
+            type: 'permission',
+            requestId: ticket.requestId,
+            toolName: 'fake_tool',
+            decision: null,
+          });
+          cards.push({ ticket, index });
+        }
+        const decisions = await Promise.all(cards.map(({ ticket }) => ticket));
+        cards.forEach(({ ticket, index }, card) => {
+          ctx.emit.part(messageId, index, {
+            type: 'permission',
+            requestId: ticket.requestId,
+            toolName: 'fake_tool',
+            decision: decisions[card] ?? 'deny',
+          });
         });
-        const decision = await ticket;
-        ctx.emit.part(messageId, index, {
-          type: 'permission',
-          requestId: ticket.requestId,
-          toolName: 'fake_tool',
-          decision,
-        });
-        await writeText(decision === 'allow' ? 'allowed' : 'denied');
+        await writeText(decisions.every((decision) => decision === 'allow') ? 'allowed' : 'denied');
         break;
       }
       case 'question': {
