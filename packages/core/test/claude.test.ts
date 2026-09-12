@@ -556,6 +556,62 @@ describe('claude driver', () => {
     ]);
   });
 
+  test('a CLI that dies with a card open writes nothing behind the completed message', async () => {
+    const client = await harness.connect();
+    const threadId = await claudeThread(client);
+
+    const answers: (PermissionResult | null)[] = [];
+    scripted((fake, options) => {
+      const ask = options.canUseTool;
+      if (ask === undefined) throw new Error('the driver must pass canUseTool');
+      fake.emit(init('sess-late'));
+      void (async () => {
+        answers.push(
+          await ask(
+            'Bash',
+            { command: 'rm -rf /' },
+            { signal: new AbortController().signal, toolUseID: 'toolu_late', requestId: 'req_late' },
+          ),
+        );
+      })();
+      // The CLI dies with the card still open: no result message, no answer.
+      fake.end();
+    });
+
+    // Everything written on the assistant message, in the order the clients see it.
+    let assistantId = '';
+    const written: string[] = [];
+    client.on('message.started', (message) => {
+      if (message.threadId === threadId && message.role === 'assistant') assistantId = message.id;
+    });
+    client.on('message.part', (event) => {
+      if (event.messageId === assistantId) written.push(`part ${event.part.type}`);
+    });
+    client.on('message.completed', (event) => {
+      if (event.messageId === assistantId) written.push('completed');
+    });
+
+    const requested = client.next('permission.requested', (request) => request.threadId === threadId, 10000);
+    const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 10000);
+    await client.call('turns.start', { threadId, prompt: 'clean up' });
+    const request = await requested;
+    await finished;
+
+    // The core denies the card the turn left open, which is what wakes the
+    // continuation the dead CLI parked here.
+    await waitFor(() => answers.length === 1);
+    expect(answers).toEqual([{ behavior: 'deny', message: 'Denied in Boite' }]);
+
+    // A round trip on the same socket: every event the core emitted is delivered
+    // by the time the answer comes back, so the order below is the whole order.
+    const thread = await client.call('threads.get', { threadId });
+    const parts: MessagePart[] = thread.messages[thread.messages.length - 1]?.parts ?? [];
+    expect(parts.filter((part) => part.type === 'permission')).toEqual([
+      { type: 'permission', requestId: request.id, toolName: 'Bash', decision: null },
+    ]);
+    expect(written).toEqual(['part permission', 'completed']);
+  });
+
   test('stop interrupts the query and the turn ends stopped', async () => {
     const client = await harness.connect();
     const threadId = await claudeThread(client);

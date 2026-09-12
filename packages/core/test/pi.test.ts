@@ -56,14 +56,89 @@ function countLines(line: string): number {
     .filter((entry) => entry === line).length;
 }
 
+/**
+ * Waits for something without failing on the wait, so the assertion that
+ * follows is what names whatever did not happen.
+ */
+async function settle(predicate: () => boolean): Promise<void> {
+  try {
+    await waitFor(predicate, 3000);
+  } catch {
+    // the expectation after this call reports what is missing
+  }
+}
+
+/**
+ * A second fake pi, as small as the one thing it proves: it raises an extension
+ * dialog once the run has settled, which is a dialog reaching the client with
+ * no prompt in flight. The shared fixture only ever asks inside a run.
+ */
+function writeLateDialogAgent(dataDir: string): string {
+  const path = join(dataDir, 'pi-late-dialog.mjs');
+  writeFileSync(
+    path,
+    [
+      "import { appendFileSync } from 'node:fs';",
+      "const LOG = process.env.PI_FAKE_LOG ?? '';",
+      "function log(line) { if (LOG.length > 0) appendFileSync(LOG, line + '\\n', 'utf8'); }",
+      "function send(payload) { process.stdout.write(JSON.stringify(payload) + '\\n'); }",
+      'const ZERO = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0,',
+      '  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } };',
+      'function run() {',
+      "  send({ type: 'message_update', usage: ZERO,",
+      "    assistantMessageEvent: { type: 'text_delta', contentIndex: 0, delta: 'done' } });",
+      "  send({ type: 'agent_settled' });",
+      '  // The extension finishes its own work after the run, so the driver has no',
+      '  // turn to draw a card on and the agent still blocks on the answer.',
+      '  setTimeout(() => {',
+      "    send({ type: 'extension_ui_request', id: 'late-1', method: 'confirm',",
+      "      title: 'Late', message: 'after the run' });",
+      '  }, 30);',
+      '}',
+      'function handle(message) {',
+      "  if (message.type === 'extension_ui_response') {",
+      "    log('late-answer ' + message.id + ' cancelled=' + (message.cancelled === true));",
+      '    return;',
+      '  }',
+      "  if (message.type === 'prompt') {",
+      "    send({ id: message.id, type: 'response', command: 'prompt', success: true });",
+      '    setTimeout(run, 0);',
+      '    return;',
+      '  }',
+      "  if (message.type === 'get_commands') {",
+      "    send({ id: message.id, type: 'response', command: 'get_commands', success: true, data: { commands: [] } });",
+      '    return;',
+      '  }',
+      "  send({ id: message.id, type: 'response', command: message.type, success: false, error: 'not implemented' });",
+      '}',
+      "let buffer = '';",
+      "process.stdin.setEncoding('utf8');",
+      "process.stdin.on('data', (chunk) => {",
+      '  buffer += chunk;',
+      '  for (;;) {',
+      "    const at = buffer.indexOf('\\n');",
+      '    if (at < 0) break;',
+      '    const line = buffer.slice(0, at).trim();',
+      '    buffer = buffer.slice(at + 1);',
+      '    if (line.length === 0) continue;',
+      '    handle(JSON.parse(line));',
+      '  }',
+      '});',
+      '',
+    ].join('\n'),
+    'utf8',
+  );
+  return path;
+}
+
 /** A user descriptor for the fake agent: `protocol: "pi"`, launched as `bun <fixture>`. */
-function writeDescriptor(dataDir: string): void {
+function writeDescriptor(dataDir: string, agent: string = FAKE_AGENT): void {
   const dir = join(dataDir, 'providers');
   mkdirSync(dir, { recursive: true });
   const profile = {
     detect: {},
     executable: [{ kind: 'path', value: 'bun' }],
-    launch: { args: [FAKE_AGENT] },
+    launch: { args: [agent] },
     isolation: {},
   };
   writeFileSync(
@@ -106,9 +181,12 @@ function writeDescriptor(dataDir: string): void {
   );
 }
 
-async function piAccount(client: CoreClient): Promise<{ dataDir: string; projectId: string; accountId: string }> {
+async function piAccount(
+  client: CoreClient,
+  agent: string = FAKE_AGENT,
+): Promise<{ dataDir: string; projectId: string; accountId: string }> {
   const dataDir = harness?.dataDir ?? '';
-  writeDescriptor(dataDir);
+  writeDescriptor(dataDir, agent);
   const loaded = await client.call('providers.reload', {});
   expect(loaded.rejected).toEqual([]);
   expect(loaded.loaded.some((provider) => provider.id === 'pi-fake' && provider.available)).toBe(true);
@@ -131,6 +209,19 @@ async function piThread(client: CoreClient, model?: string, effort?: string): Pr
     title: 'pi thread',
     ...(model === undefined ? {} : { model }),
     ...(effort === undefined ? {} : { effort }),
+  });
+  await client.call('threads.subscribe', { threadId: thread.id });
+  return thread.id;
+}
+
+/** The same thread, on a fake pi the test wrote rather than the shared fixture. */
+async function threadOnAgent(client: CoreClient, agent: string): Promise<string> {
+  const { projectId, accountId } = await piAccount(client, agent);
+  const thread = await client.call('threads.create', {
+    projectId,
+    providerId: 'pi-fake',
+    accountId,
+    title: 'pi thread',
   });
   await client.call('threads.subscribe', { threadId: thread.id });
   return thread.id;
@@ -360,6 +451,46 @@ describe('pi driver', () => {
       expect(thread.messages.at(-1)?.parts.some((part) => part.type === 'text' && part.text === value)).toBe(true);
     });
   }
+
+  test('a question on a warm session is filed under the turn that asked it', async () => {
+    const client = await startCore({ warmProcessMinutes: 5 });
+    const threadId = await piThread(client);
+
+    const turnIds: string[] = [];
+    client.on('turn.started', (turn) => {
+      if (turn.threadId === threadId) turnIds.push(turn.id);
+    });
+
+    await runTurn(client, threadId, 'first');
+
+    const asked = client.next('question.asked', (request) => request.threadId === threadId, 20000);
+    const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 20000);
+    await client.call('turns.start', { threadId, prompt: '[ask]' });
+    const request = await asked;
+    await client.call('questions.answer', { threadId, questionId: request.id, optionIds: ['yes'] });
+    expect((await finished).status).toBe('done');
+
+    // One process for the two turns, so the event handler still carries the
+    // first turn's context: the question belongs to the second one all the same.
+    expect(argvLines()).toHaveLength(1);
+    expect(turnIds).toHaveLength(2);
+    expect(request.turnId).toBe(turnIds[1] ?? '');
+  });
+
+  test('a dialog raised outside a turn is refused on its id, not dropped', async () => {
+    const client = await startCore({ warmProcessMinutes: 5 });
+    const threadId = await threadOnAgent(client, writeLateDialogAgent(harness?.dataDir ?? ''));
+    const logs = collectLogs(client);
+
+    await runTurn(client, threadId, 'first');
+
+    // The process stays warm, so the extension's dialog lands with no turn to
+    // draw a card on. Unanswered, it blocks that extension for the life of the
+    // process and the agent waits on an id nobody holds.
+    await settle(() => fakeLog().includes('late-answer'));
+    expect(fakeLog()).toContain('late-answer late-1 cancelled=true');
+    expect(logs.some((line) => line.includes('confirm') && line.includes('late-1'))).toBe(true);
+  });
 
   test('stopping while a dialog waits cancels it and clears the question', async () => {
     const client = await startCore();

@@ -249,9 +249,12 @@ class ClaudeTurn {
   private status: TurnResult['status'] = 'done';
   private error: string | null = null;
   private resolve: (result: TurnResult) => void = () => undefined;
+  private wake: () => void = () => undefined;
 
   readonly done: Promise<TurnResult>;
-  stopped = false;
+  /** Resolves on a stop and on the settle, so a card still waiting can answer "cancelled". */
+  readonly stopped: Promise<void>;
+  isStopped = false;
   settled = false;
   /** The session holding it right now: a stranded turn moves to another one. */
   session: ClaudeSession | null = null;
@@ -260,6 +263,9 @@ class ClaudeTurn {
     this.sessionId = ctx.sessionId;
     this.done = new Promise<TurnResult>((resolve) => {
       this.resolve = resolve;
+    });
+    this.stopped = new Promise<void>((resolve) => {
+      this.wake = resolve;
     });
   }
 
@@ -274,10 +280,16 @@ class ClaudeTurn {
     this.sessionId = sessionId;
   }
 
+  markStopped(): void {
+    this.isStopped = true;
+    this.wake();
+  }
+
   settle(): void {
     if (this.settled) return;
     this.settled = true;
-    if (this.stopped) this.status = 'stopped';
+    this.wake();
+    if (this.isStopped) this.status = 'stopped';
     if (this.messageId !== null) {
       this.ctx.emit.complete(this.messageId, this.status === 'error' ? 'error' : 'complete');
     }
@@ -361,7 +373,7 @@ class ClaudeTurn {
           const seen = event.index === undefined ? undefined : this.thinkingBlocks.get(event.index);
           const at = seen ?? this.openThinking();
           if (event.index !== undefined) this.thinkingBlocks.set(event.index, at);
-          this.ctx.emit.delta(this.message(), at, thinking);
+          this.write(at, thinking);
           this.streamedThinking.set(this.apiMessageId, (this.streamedThinking.get(this.apiMessageId) ?? '') + thinking);
           break;
         }
@@ -372,7 +384,7 @@ class ClaudeTurn {
           const entry = toolId === undefined ? undefined : this.tools.get(toolId);
           if (entry === undefined) break;
           entry.inputText = (entry.inputText ?? '') + partial;
-          this.ctx.emit.delta(this.message(), entry.index, partial);
+          this.write(entry.index, partial);
           break;
         }
         if (event.delta?.type !== 'text_delta') break;
@@ -381,7 +393,7 @@ class ClaudeTurn {
         const known = event.index === undefined ? undefined : this.textBlocks.get(event.index);
         const index = known ?? this.openText();
         if (event.index !== undefined) this.textBlocks.set(event.index, index);
-        this.ctx.emit.delta(this.message(), index, text);
+        this.write(index, text);
         this.streamedText.set(this.apiMessageId, (this.streamedText.get(this.apiMessageId) ?? '') + text);
         break;
       }
@@ -404,14 +416,14 @@ class ClaudeTurn {
         const text = block.text ?? '';
         // With includePartialMessages the deltas already carried this block.
         if (text.length === 0 || (this.streamedText.get(apiId) ?? '').includes(text)) continue;
-        this.ctx.emit.delta(this.message(), this.openText(), text);
+        this.write(this.openText(), text);
         continue;
       }
       if (block.type === 'thinking') {
         const thinking = block.thinking ?? '';
         // Same dedupe as text: the deltas already carried this block.
         if (thinking.length === 0 || (this.streamedThinking.get(apiId) ?? '').includes(thinking)) continue;
-        this.ctx.emit.delta(this.message(), this.openThinking(), thinking);
+        this.write(this.openThinking(), thinking);
         continue;
       }
       if (block.type === 'tool_use' && typeof block.id === 'string') {
@@ -447,8 +459,21 @@ class ClaudeTurn {
     return this.messageId;
   }
 
+  /**
+   * Nothing is drawn once the turn has settled: `message.completed` and
+   * `turn.finished` are already out, so a part written here lands behind both
+   * and reopens a closed message. What used to write one is the `canUseTool`
+   * continuation of a CLI that died with its card open.
+   */
   part(index: number, part: MessagePart): void {
+    if (this.settled) return;
     this.ctx.emit.part(this.message(), index, part);
+  }
+
+  /** The same guard as `part`, for the text and thinking the stream appends. */
+  private write(index: number, text: string): void {
+    if (this.settled) return;
+    this.ctx.emit.delta(this.message(), index, text);
   }
 
   private openText(): number {
@@ -615,13 +640,13 @@ class ClaudeSession {
 
   /** A turn on a warm query: its setup first, its prompt after, or it moves house. */
   private async follow(turn: ClaudeTurn): Promise<void> {
-    if (turn.stopped || this.closing || this.ended) return;
+    if (turn.isStopped || this.closing || this.ended) return;
     // The query is built after the SDK import: a turn that arrives during it
     // would otherwise send its prompt with nothing applied.
     await this.ready;
-    if (turn.stopped || this.closing || this.ended) return;
+    if (turn.isStopped || this.closing || this.ended) return;
     if (!(await this.applyLive(turn))) return;
-    if (turn.stopped || this.closing || this.ended) return;
+    if (turn.isStopped || this.closing || this.ended) return;
     this.prompts.push(turn.promptText(), turn.ctx.attachments);
   }
 
@@ -682,7 +707,7 @@ class ClaudeSession {
 
   stopTurn(turn: ClaudeTurn): void {
     if (turn.settled) return;
-    turn.stopped = true;
+    turn.markStopped();
     const index = this.waiting.indexOf(turn);
     if (index < 0) {
       turn.settle();
@@ -728,7 +753,7 @@ class ClaudeSession {
       const options = this.options(first.ctx);
       const queryFn = await this.deps.loadQuery();
       // Loading the SDK is the first await of the session, so a stop can land here.
-      if (!first.stopped && !this.closing) {
+      if (!first.isStopped && !this.closing) {
         this.query = queryFn({ prompt: this.prompts.stream(), options });
         // The next turn's setters have something to talk to from here on.
         this.markReady();
@@ -781,7 +806,7 @@ class ClaudeSession {
     }
     const left = this.waiting.splice(0, this.waiting.length);
     for (const turn of left) {
-      if (reason !== null && !turn.stopped) turn.fail(reason);
+      if (reason !== null && !turn.isStopped) turn.fail(reason);
       turn.settle();
     }
     // Between turns nobody is listening, so the reason goes to the core log.
@@ -876,7 +901,11 @@ class ClaudeSession {
     const ticket = turn.ctx.requestPermission(toolName, input, options.title ?? options.description ?? null);
     const index = turn.takeIndex();
     turn.part(index, { type: 'permission', requestId: ticket.requestId, toolName, decision: null });
-    const decision = await ticket;
+    // The ticket alone never settles when the CLI dies with the card open: the
+    // turn ends, and the deny the core then writes would land behind
+    // `message.completed`. Every other driver races the turn's stop here.
+    const decision = await Promise.race([ticket, turn.stopped.then(() => 'cancelled' as const)]);
+    if (decision === 'cancelled') return { behavior: 'deny', message: DENIED };
     turn.part(index, { type: 'permission', requestId: ticket.requestId, toolName, decision });
     if (decision === 'allow') return { behavior: 'allow', updatedInput: input };
     return { behavior: 'deny', message: DENIED };

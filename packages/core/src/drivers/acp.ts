@@ -943,6 +943,17 @@ class AcpSession {
       this.ctx?.commands(commandsOf(update.availableCommands));
       return;
     }
+    // Same reason: an agent announces a mode change between two turns as well
+    // as during one. Dropped here, the cached id stays what the last turn set,
+    // `applyMode` finds nothing to send, and the next turn runs in the agent's
+    // mode instead of the user's. The thread record is not touched: the mode
+    // the user picked stands. A replayed one from a `session/load` is harmless,
+    // the load's own answer overwrites it right after.
+    if (update.sessionUpdate === 'current_mode_update') {
+      this.currentModeId = update.currentModeId;
+      this.ctx?.log('info', `acp: the agent switched to the session mode ${update.currentModeId}`);
+      return;
+    }
     const turn = this.current;
     if (turn === null) return;
     switch (update.sessionUpdate) {
@@ -974,13 +985,6 @@ class AcpSession {
         break;
       case 'usage_update':
         if (update.cost != null && update.cost.currency === 'USD') turn.costUsdEquivalent = update.cost.amount;
-        break;
-      case 'current_mode_update':
-        // The agent switched on its own. Remembering it is what makes the next
-        // turn send the thread's mode again instead of trusting a stale one.
-        // The thread record is not touched: the mode the user picked stands.
-        this.currentModeId = update.currentModeId;
-        turn.ctx.log('info', `acp: the agent switched to the session mode ${update.currentModeId}`);
         break;
       default:
         // user_message_chunk, plan, plan_update, plan_removed,

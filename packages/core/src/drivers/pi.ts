@@ -810,12 +810,29 @@ class PiSession {
    */
   private async answerDialog(ctx: TurnContext, message: Record<string, unknown>): Promise<void> {
     const method = textOf(message['method']);
-    if (!UI_DIALOGS.has(method)) return;
     const id = message['id'];
-    if (typeof id !== 'string') return;
-    const turn = this.current;
     const peer = this.peer;
-    if (turn === null || peer === null) return;
+    // Nothing can be answered without the id the agent waits on, and nothing is
+    // waiting once the process is gone.
+    if (typeof id !== 'string') {
+      ctx.log('warn', `pi: an ${method || 'unnamed'} dialog arrived with no id, nothing can answer it`);
+      return;
+    }
+    if (peer === null) return;
+    // The turn running now, not the one that opened the process: a warm session
+    // outlives its first turn, and both the card and the journal row belong to
+    // whoever is running when the dialog arrives.
+    const turn = this.current;
+    if (turn === null || !UI_DIALOGS.has(method)) {
+      // A refusal is the answer pi defines for a dialog the client will not
+      // draw. Dropping it silently leaves the extension blocked inside a
+      // process that stays warm, on an id nobody will ever answer.
+      const why = turn === null ? 'no turn is running' : 'boite draws no card for that method';
+      ctx.log('warn', `pi: the ${method} dialog ${id} is refused, ${why}`);
+      peer.answer({ type: 'extension_ui_response', id, cancelled: true });
+      return;
+    }
+    const live = turn.ctx;
     const choices = Array.isArray(message['options']) ? message['options'].filter((option): option is string => typeof option === 'string') : [];
     const options = method === 'confirm'
       ? [{ id: 'yes', label: 'Yes' }, { id: 'no', label: 'No' }]
@@ -824,7 +841,7 @@ class PiSession {
       text: [textOf(message['title']) || 'pi asks', textOf(message['message']), textOf(message['prefill'])].filter(Boolean).join('\n\n'),
       options, allowText: method === 'input' || method === 'editor', multiple: false,
     };
-    const ticket = ctx.askQuestion(ask);
+    const ticket = live.askQuestion(ask);
     const index = turn.takeIndex();
     turn.part(index, { type: 'question', questionId: ticket.questionId, ...ask, answer: null });
     const answer = await Promise.race([ticket, turn.stopped.then(() => null)]);
