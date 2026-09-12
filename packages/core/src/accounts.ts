@@ -49,9 +49,37 @@ interface LoginRun {
   lastLine: string;
 }
 
+const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '[::1]', '::1']);
+
 /** A loopback callback a phone or a remote client pasted back into Boite. */
-function isLoopbackCallback(text: string): boolean {
-  return /^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?\//.test(text.trim());
+function loopbackCallback(text: string): URL | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(text.trim());
+  } catch {
+    return null;
+  }
+  if (parsed.protocol !== 'http:') return null;
+  if (!LOOPBACK_HOSTS.has(parsed.hostname)) return null;
+  return parsed;
+}
+
+/**
+ * The loopback address the agent asked the sign-in page to come back to, read
+ * out of the `redirect_uri` of the link the agent itself printed. Boite fetches
+ * that address on the machine the core runs on, so it is the agent that decides
+ * what gets fetched, never the pasted text.
+ */
+function announcedCallback(loginUrl: string | null): URL | null {
+  if (loginUrl === null) return null;
+  let parsed: URL;
+  try {
+    parsed = new URL(loginUrl);
+  } catch {
+    return null;
+  }
+  const redirect = parsed.searchParams.get('redirect_uri') ?? parsed.searchParams.get('redirect_url');
+  return redirect === null ? null : loopbackCallback(redirect);
 }
 
 export class AccountStore {
@@ -347,18 +375,39 @@ export class AccountStore {
    * takes the redirect URL the Google page came back to and fetches it once,
    * which is how a phone or a remote client finishes a sign-in whose loopback
    * listener runs on this machine.
+   *
+   * That fetch happens on the core's machine, on an address the sender chose, so
+   * the address is checked against the one the agent announced in its own
+   * sign-in link: same port, same path. Without it, any client holding a session
+   * key could aim a GET at any loopback port on the user's machine, and at
+   * anything a redirect led to.
    */
   loginInput(accountId: AccountId, text: string): { ok: true } {
     const run = this.logins.get(accountId);
     if (run === undefined) throw refused(`no login is running for ${accountId}`, { accountId });
     if (run.acp !== null) {
-      if (!isLoopbackCallback(text)) {
+      const pasted = loopbackCallback(text);
+      if (pasted === null) {
         throw refused('paste the whole redirect URL the Google sign-in page came back to', {
           accountId,
           field: 'text',
         });
       }
-      void this.forwardCallback(accountId, text.trim());
+      const expected = announcedCallback(run.url);
+      if (expected === null) {
+        throw refused('this login has not printed a sign-in link with a redirect address yet', {
+          accountId,
+          field: 'text',
+          url: run.url,
+        });
+      }
+      if (pasted.port !== expected.port || pasted.pathname !== expected.pathname) {
+        throw refused(
+          `this login listens on ${expected.host}${expected.pathname}, not ${pasted.host}${pasted.pathname}`,
+          { accountId, field: 'text', expected: `${expected.host}${expected.pathname}` },
+        );
+      }
+      void this.forwardCallback(accountId, pasted.toString());
       return { ok: true };
     }
     const spawned = run.spawned;
