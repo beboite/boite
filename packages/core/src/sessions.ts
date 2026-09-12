@@ -16,7 +16,6 @@ import type { PairedSession, PairingGrant, Principal } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { refused, unauthorized } from './errors.ts';
 import { newId, newToken } from './ids.ts';
-import type { Connection } from './router.ts';
 
 interface Grant {
   expiresAt: number;
@@ -119,21 +118,13 @@ export class SessionStore {
   }
 }
 
-/** Refuses a handler to anyone but the owner, naming the method. */
-function ownerOnly(connection: Connection, method: string): void {
-  if (connection.identity.principal !== 'owner') {
-    throw refused(`${method} is for the owner only`, { method, principal: connection.identity.principal });
-  }
-}
-
+// Who may call what is `access.ts`, applied by the router before any handler
+// runs: `pairing.grant` and `sessions.revoke` are absent from `DEVICE_METHODS`,
+// so a paired device is refused them by name.
 export function registerSessionMethods(core: Core): void {
-  core.router.register('pairing.grant', (_params, ctx) => {
-    ownerOnly(ctx.connection, 'pairing.grant');
-    return core.sessions.grant();
-  });
+  core.router.register('pairing.grant', () => core.sessions.grant());
   core.router.register('sessions.list', (_params, ctx) => core.sessions.list(ctx.connection.identity.sessionId));
-  core.router.register('sessions.revoke', (params, ctx) => {
-    ownerOnly(ctx.connection, 'sessions.revoke');
+  core.router.register('sessions.revoke', (params) => {
     core.sessions.revoke(params.sessionId);
     return { ok: true } as const;
   });

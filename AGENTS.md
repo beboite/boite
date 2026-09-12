@@ -94,6 +94,11 @@ that nothing in `bun run check` or `bun run test` will notice.
 6. Nothing heavy loads at core start. The Claude SDK costs about 69 MB and a Bun
    Worker about 31 MB, so the SDKs, the Job Object Worker and the guard Worker
    are all loaded on first use.
+7. A new RPC method is the owner's until `DEVICE_METHODS` in
+   `packages/core/src/access.ts` says otherwise. The router checks that list
+   before any handler runs, so opening a method to a paired phone is a decision
+   somebody makes on purpose, in one file, with the reason beside it.
+   [docs/phone.md](docs/phone.md).
 
 ## The core is the host, the shell is a client
 
