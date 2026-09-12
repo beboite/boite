@@ -4,7 +4,7 @@ import { chmod, rename, rm, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import type { PluginPool, PluginState, RpcParams } from '@boite/contracts';
 import type { Core } from './core.ts';
-import { invalidParams, refused } from './errors.ts';
+import { invalidParams, messageOf, refused } from './errors.ts';
 import { getDriver } from './drivers/index.ts';
 
 const ID = 'kebacc-switcher';
@@ -66,11 +66,25 @@ export class PluginStore {
   }
   private binary(): string { return join(this.directory(), process.platform === 'win32' ? 'kebacc.exe' : 'kebacc'); }
   private check(id: string): void { if (id !== ID) throw invalidParams(`unknown plugin ${id}; expected ${ID}`); }
+  /**
+   * A manifest a power loss truncated must not take the Plugins page with it:
+   * the state carries the file, the field and what was expected, and the page
+   * can still reinstall or remove.
+   */
   private version(): string | null {
     const manifest = join(this.directory(), 'installed.json');
     if (!existsSync(manifest) || !existsSync(this.binary())) return null;
-    const data = JSON.parse(readFileSync(manifest, 'utf8')) as { version?: unknown };
-    if (typeof data.version !== 'string') throw new Error('kebacc-switcher installed.json version must be a string.');
+    let data: { version?: unknown };
+    try {
+      data = JSON.parse(readFileSync(manifest, 'utf8')) as { version?: unknown };
+    } catch (error) {
+      this.error = `${manifest} is not readable JSON (${messageOf(error)}). Reinstall kebacc-switcher.`;
+      return null;
+    }
+    if (typeof data.version !== 'string') {
+      this.error = `${manifest} must carry a "version" string, found ${typeof data.version}. Reinstall kebacc-switcher.`;
+      return null;
+    }
     return data.version;
   }
   state(): PluginState {

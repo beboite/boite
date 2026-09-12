@@ -29,6 +29,14 @@ function sameFolder(a: string, b: string): boolean {
 }
 
 export class ImportStore {
+  /**
+   * The sessions being read right now. The server dispatches frames without
+   * awaiting the previous one, so a double click sends two `imports.run` for
+   * one session and both pass the "already a thread" check while the transcript
+   * is still being read.
+   */
+  private readonly running = new Set<string>();
+
   constructor(private readonly core: Core) {}
 
   /** The claude accounts and where each keeps its transcripts; an account with no directory is skipped. */
@@ -100,36 +108,49 @@ export class ImportStore {
     if (!SESSION_ID.test(params.sessionId)) {
       throw refused('a session id is letters, digits, dashes and underscores', { sessionId: params.sessionId });
     }
-    const taken = this.core.journal.listThreads().find((thread) => thread.sessionId === params.sessionId);
-    if (taken !== undefined) {
-      throw refused('this session is already a thread', { sessionId: params.sessionId, threadId: taken.id });
-    }
+    this.checkFree(params.sessionId);
     const dir = account.isolationDir ?? this.core.accounts.defaultLocation(provider);
     if (dir === null) throw refused('this account has no transcript directory', { accountId: account.id });
     const file = this.sessionFile(dir, project, params.sessionId);
     if (!existsSync(file)) throw notFound(`no transcript at ${file}`, { file, sessionId: params.sessionId });
 
-    const transcript = await readTranscript(file);
-    if (transcript.turns.length === 0) throw refused('this transcript has no prompt to import', { file });
-    const first = transcript.turns[0]!;
-    const known = transcript.model !== null && provider.models.some((model) => model.id === transcript.model);
-    const summary = this.core.threads.createImported(
-      {
-        projectId: project.id,
-        providerId: provider.id,
-        accountId: account.id,
-        title: transcript.agentTitle ?? titleFromPrompt(first.prompt),
-        cwd: project.path,
-        ...(known ? { model: transcript.model! } : {}),
-      },
-      {
-        sessionId: params.sessionId,
-        titleSource: transcript.agentTitle === null ? 'prompt' : 'agent',
-        turns: transcript.turns,
-      },
-    );
-    this.core.log('info', `imported claude session ${params.sessionId} into ${summary.id} (${transcript.turns.length} turns)`);
-    return summary;
+    this.running.add(params.sessionId);
+    try {
+      const transcript = await readTranscript(file);
+      if (transcript.turns.length === 0) throw refused('this transcript has no prompt to import', { file });
+      const first = transcript.turns[0]!;
+      const known = transcript.model !== null && provider.models.some((model) => model.id === transcript.model);
+      const summary = this.core.threads.createImported(
+        {
+          projectId: project.id,
+          providerId: provider.id,
+          accountId: account.id,
+          title: transcript.agentTitle ?? titleFromPrompt(first.prompt),
+          cwd: project.path,
+          ...(known ? { model: transcript.model! } : {}),
+        },
+        {
+          sessionId: params.sessionId,
+          titleSource: transcript.agentTitle === null ? 'prompt' : 'agent',
+          turns: transcript.turns,
+        },
+      );
+      this.core.log('info', `imported claude session ${params.sessionId} into ${summary.id} (${transcript.turns.length} turns)`);
+      return summary;
+    } finally {
+      this.running.delete(params.sessionId);
+    }
+  }
+
+  /** Refuses a session already imported, and one being imported right now. */
+  private checkFree(sessionId: string): void {
+    const taken = this.core.journal.listThreads().find((thread) => thread.sessionId === sessionId);
+    if (taken !== undefined) {
+      throw refused('this session is already a thread', { sessionId, threadId: taken.id });
+    }
+    if (this.running.has(sessionId)) {
+      throw refused('this session is already being imported', { sessionId });
+    }
   }
 }
 

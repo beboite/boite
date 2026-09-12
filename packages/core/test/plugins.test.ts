@@ -23,6 +23,31 @@ test('plugin RPC refuses unknown IDs and unavailable installs, uninstall keeps a
   const state = await client.call('plugins.uninstall', { id: 'kebacc-switcher' });
   expect(state.status).toBe('not-installed'); expect(existsSync(join(pool, 'keep'))).toBe(true);
 });
+test('a truncated manifest is an error on the card, not a Plugins page that will not open', async () => {
+  harness = await startTestCore(); const client = await harness.connect();
+  const dir = join(harness.dataDir, 'plugins', 'kebacc-switcher'); mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, process.platform === 'win32' ? 'kebacc.exe' : 'kebacc'), 'fixture');
+  // What a power loss during an install leaves: the binary is there, the
+  // manifest is half written. `JSON.parse` used to throw out of `state()`, so
+  // `plugins.list` failed and the page had no way to reinstall.
+  writeFileSync(join(dir, 'installed.json'), '{"version":');
+  const [broken] = await client.call('plugins.list', {});
+  expect(broken?.status).toBe('error');
+  expect(broken?.version).toBeNull();
+  expect(broken?.error).toContain('installed.json');
+  expect(broken?.error).toContain('Reinstall kebacc-switcher.');
+
+  // A manifest that parses but carries the wrong type says so just as plainly.
+  writeFileSync(join(dir, 'installed.json'), '{"version":2}');
+  const [typed] = await client.call('plugins.list', {});
+  expect(typed?.status).toBe('error');
+  expect(typed?.error).toContain('must carry a "version" string, found number');
+
+  // And the page can still act: uninstall clears both the files and the error.
+  const cleared = await client.call('plugins.uninstall', { id: 'kebacc-switcher' });
+  expect(cleared.status).toBe('not-installed');
+  expect(cleared.error).toBeNull();
+});
 test('the adapter runs the v2 pool flags through the process registry and normalizes JSON', async () => {
   harness = await startTestCore();
   const dir = join(harness.dataDir, 'plugins', 'kebacc-switcher'); mkdirSync(dir, { recursive: true });
