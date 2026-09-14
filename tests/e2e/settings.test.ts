@@ -78,6 +78,7 @@ test('remembered cores list every core and forget drops one', async () => {
   const text = await page.evaluate(`document.querySelector('${id('settings-envs')}').textContent`);
   expect(text).toContain('cet ordi');
   expect(text).toContain('100.64.0.15:3773');
+  await page.evaluate(`document.querySelector('${id('settings-envs')}').scrollIntoView({ block: 'center' })`);
   await capture('envs.png');
   await page.evaluate(`[...document.querySelectorAll('${id('settings-env-forget')}')][1].click()`);
   await page.waitFor(`document.querySelectorAll('${id('settings-envs')} li').length === 1`);
