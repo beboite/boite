@@ -354,6 +354,10 @@ export interface ThreadSummary {
   pinned: boolean;
   /** Provider session id once the first turn has run; used to resume. */
   sessionId: string | null;
+  /** Changes when the account changes; native sessions never cross this boundary. */
+  sessionGeneration?: number;
+  /** Optimistic revision of the selection for future turns. Missing on older clients means zero. */
+  selectionVersion?: number;
   load: ThreadLoad | null;
   /** The context meter, written at the end of every turn whose agent reports its usage. */
   context: ContextUse | null;
@@ -372,6 +376,11 @@ export interface Usage {
 
 export type TurnStatus = 'queued' | 'running' | 'done' | 'stopped' | 'error';
 
+/** Frozen when a prompt is accepted, including while it waits in the scheduler. */
+export type TurnExecution = Pick<ThreadSummary,
+  'providerId' | 'accountId' | 'model' | 'effort' | 'permissionMode' | 'sessionId'
+> & { sessionGeneration: number; selectionVersion: number };
+
 export interface Turn {
   id: TurnId;
   threadId: ThreadId;
@@ -381,6 +390,8 @@ export interface Turn {
   finishedAt: Timestamp | null;
   usage: Usage | null;
   error: string | null;
+  /** Absent only for turns saved before execution snapshots were introduced. */
+  execution?: TurnExecution;
 }
 
 export type MessageRole = 'user' | 'assistant' | 'system';
@@ -1018,13 +1029,16 @@ export interface RpcMethods {
    */
   'messages.list': {
     params: { threadId: ThreadId; before: MessageId; limit?: number };
-    result: { messages: Message[]; before: MessageId | null };
+    result: { messages: Message[]; before: MessageId | null; turns?: Turn[] };
   };
   'threads.update': {
     params: {
       threadId: ThreadId;
+      /** Select another account/provider for future turns in this conversation. */
+      accountId?: AccountId;
+      expectedSelectionVersion?: number;
       title?: string;
-      model?: string;
+      model?: string | null;
       effort?: string | null;
       permissionMode?: PermissionMode;
     };
@@ -1048,7 +1062,7 @@ export interface RpcMethods {
   'threads.unsubscribe': { params: { threadId: ThreadId }; result: { ok: true } };
 
   /** `attachments` ride with the prompt as image parts of the user message; see `ImageAttachment` for what is refused. */
-  'turns.start': { params: { threadId: ThreadId; prompt: string; attachments?: ImageAttachment[] }; result: Turn };
+  'turns.start': { params: { threadId: ThreadId; prompt: string; attachments?: ImageAttachment[]; expectedSelectionVersion?: number }; result: Turn };
   'turns.stop': { params: { threadId: ThreadId }; result: { stopped: boolean } };
 
   /**

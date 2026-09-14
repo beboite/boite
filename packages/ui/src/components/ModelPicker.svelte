@@ -16,12 +16,14 @@
     store,
     choice,
     locked = false,
+    disabled = false,
     onpick
   }: {
     store: Store;
     choice: Choice | null;
-    /** A thread keeps its provider and account; only the model may change. */
+    /** Optional restriction for callers that intentionally keep one account. */
     locked?: boolean;
+    disabled?: boolean;
     onpick: (patch: PickPatch) => void;
   } = $props();
 
@@ -310,6 +312,7 @@
     aria-label={strings.composer.picker}
     title={locked ? strings.composer.lockedHint : strings.composer.picker}
     data-testid="composer-picker"
+    {disabled}
     onclick={toggle}
     {onkeydown}
   >

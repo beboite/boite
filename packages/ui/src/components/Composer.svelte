@@ -30,6 +30,7 @@
   /** The images this prompt carries, the same array the strip above the box draws. */
   let attachments = $derived<ImageAttachment[]>(composer?.attachments ?? []);
   let choice = $state<Choice | null>(null);
+  let picking = $state(false);
   let box = $state<HTMLTextAreaElement | undefined>(undefined);
   let picker = $state<HTMLInputElement | undefined>(undefined);
   /** Where ArrowUp stands in this thread's sent prompts, or null outside recall. */
@@ -127,6 +128,7 @@
     (text.trim().length > 0 || attachments.length > 0) &&
       choice !== null &&
       store.connection === 'ready' &&
+      !picking &&
       !composer?.sending
   );
 
@@ -273,26 +275,32 @@
   let activeEffort = $derived(choice?.effort ?? store.modelOf(choice)?.effort?.default ?? null);
 
   /** On a thread only the model and the effort change and they are saved at once; on a draft the whole choice is remembered. */
-  function pick(patch: PickPatch) {
-    if (!choice) return;
+  async function pick(patch: PickPatch) {
+    if (!choice || picking) return;
     const thread = store.openThread;
+
+    if (thread) {
+      const target = { ...choice, ...patch, effort: patch.effort !== undefined ? patch.effort : null };
+      picking = true;
+      try {
+        const accepted = await store.update(thread.id, {
+          accountId: target.accountId, model: target.model, effort: target.effort,
+          expectedSelectionVersion: thread.selectionVersion ?? 0,
+        });
+        if (accepted) store.remember(target);
+      } finally { picking = false; }
+      return;
+    }
 
     // An effort alone: the model stays, so nothing else moves.
     if (patch.effort !== undefined) {
       if (patch.effort === choice.effort) return;
       choice = { ...choice, effort: patch.effort };
-      if (thread) void store.update(thread.id, { effort: patch.effort });
-      else store.remember(choice);
+      store.remember(choice);
       return;
     }
 
     // Another model runs on its own scale, so the effort goes back to that model's default.
-    if (thread) {
-      if (patch.model === choice.model) return;
-      choice = { ...choice, model: patch.model ?? null, effort: null };
-      void store.update(thread.id, { model: patch.model ?? '', effort: null });
-      return;
-    }
     choice = { ...choice, ...patch, effort: null };
     store.remember(choice);
   }
@@ -303,7 +311,7 @@
 
   function pickMode(id: string) {
     const mode = id as PermissionMode;
-    if (!choice) return;
+    if (!choice || picking) return;
     choice = { ...choice, permissionMode: mode };
     if (bound) void store.setPermissionMode(mode);
     else store.remember(choice);
@@ -716,7 +724,7 @@
 
     <div class="bar">
       <div class="chips">
-        <ModelPicker {store} {choice} locked={bound} onpick={pick} />
+        <ModelPicker {store} {choice} disabled={picking} onpick={pick} />
 
         {#if takesImages}
           <button

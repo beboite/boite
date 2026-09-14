@@ -60,8 +60,8 @@ The UI keeps its transport behind one `Client` interface, so it runs on three
 things: a WebSocket to a real core, a WebSocket to a remote core, and an
 in-memory fake.
 
-- `?fake=1` loads `lib/fake-client.ts` instead of the socket. No core, no agent,
-  no tokens spent, and the whole contract answered in memory. This is what the
+- In Vite development mode, `?fake=1` loads `lib/fake-client.ts` instead of the
+  socket. No core, no agent, no tokens spent, and the whole contract answered in memory. This is what the
   UI tests run on and the fastest way to look at a screen.
 - `?fake=1&long=1` adds a four-hundred-message thread, which is what the
   windowed message list is looked at on.
@@ -175,6 +175,16 @@ and `guard-worker.js` next to each copy. Without the first the trace degrades
 from exact events to polling; without the second the focus guard never starts.
 
 ## Captures
+
+The fake client is excluded from production bundles. Tests that need it must
+use the Vite development server. `tests/e2e/settings.test.ts` starts and closes
+one within the test process; the other end-to-end paths use a real temporary
+core with the echo driver.
+
+`tests/e2e/model-switch.test.ts` changes an existing conversation from Echo to
+an ACP fixture over real RPC and stdio. It checks history continuity and writes
+desktop and phone captures without using provider logins. Core regression tests
+also cover queued targets, stale selections, image transfer and schema migration.
 
 `tests/e2e/lib/cdp.ts` launches Chromium with `--headless=new`, on the real GPU
 through ANGLE, muted, in a throwaway profile, and drives it over CDP.

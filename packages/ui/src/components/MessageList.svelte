@@ -446,6 +446,12 @@
               {/if}
             </div>
           {:else}
+            {@const execution = store.openThread?.turns.find((turn) => turn.id === message.turnId)?.execution}
+            {#if message.role === 'assistant' && execution}
+              <div class="model-attribution" data-testid="message-model">
+                {store.modelsOf(execution.providerId, execution.accountId).find((model) => model.id === execution.model)?.name ?? execution.model ?? store.providerOf(execution.providerId)?.name}
+              </div>
+            {/if}
             {@const caretAt = message.state === 'streaming' ? lastTextIndex(message) : -1}
             {@const thinkingAt = message.state === 'streaming' ? lastThinkingIndex(message) : -1}
             <div class="parts">
@@ -527,6 +533,11 @@
 </div>
 
 <style>
+  .model-attribution {
+    color: var(--color-muted);
+    font-size: var(--text-xs);
+    margin-bottom: 4px;
+  }
   .timeline-wrap {
     position: relative;
     flex: 1;

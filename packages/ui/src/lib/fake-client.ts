@@ -875,18 +875,41 @@ export class FakeClient implements ObservableClient {
         }
         const asked = params.limit ?? MESSAGE_PAGE;
         const limit = Math.min(Math.max(1, Math.trunc(asked)), MESSAGE_PAGE_MAX);
-        return structuredClone(this.#page(thread.messages, at, limit));
+        const page = this.#page(thread.messages, at, limit);
+        const turns = new Set(page.messages.map((message) => message.turnId));
+        return structuredClone({ ...page, turns: thread.turns.filter((turn) => turns.has(turn.id)) });
       }
       case 'threads.update': {
         const params = rawParams as RpcParams<'threads.update'>;
         const thread = this.#thread(params.threadId);
+        if (params.expectedSelectionVersion !== undefined && params.expectedSelectionVersion !== (thread.selectionVersion ?? 0)) {
+          throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'the model selection changed; review the selected model and send again' });
+        }
+        const before = [thread.accountId, thread.model, thread.effort, thread.permissionMode].join('\0');
+        if (params.accountId !== undefined && params.accountId !== thread.accountId) {
+          const account = this.#accounts.find((entry) => entry.id === params.accountId);
+          const provider = account && this.#providers.find((entry) => entry.id === account.providerId);
+          if (!account || !provider?.available || account.status === 'unauthenticated') {
+            throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'the selected account is unavailable' });
+          }
+          thread.accountId = account.id;
+          thread.providerId = account.providerId;
+          thread.model = params.model === undefined ? provider.models.find((model) => model.default)?.id ?? null : params.model;
+          thread.effort = null;
+          thread.sessionId = null;
+          thread.sessionGeneration = (thread.sessionGeneration ?? 0) + 1;
+          thread.context = null;
+          thread.commands = [];
+          this.#emit('thread.commands', { threadId: thread.id, commands: [] });
+        }
         if (params.title !== undefined) {
           thread.title = params.title;
           thread.titleSource = 'user';
         }
-        if (params.model !== undefined) thread.model = params.model;
+        if (params.model !== undefined && params.model !== thread.model) { thread.model = params.model; thread.effort = null; }
         if (params.effort !== undefined) thread.effort = params.effort;
         if (params.permissionMode !== undefined) thread.permissionMode = params.permissionMode;
+        if (before !== [thread.accountId, thread.model, thread.effort, thread.permissionMode].join('\0')) thread.selectionVersion = (thread.selectionVersion ?? 0) + 1;
         return this.#touch(thread);
       }
       case 'threads.retitle': {
@@ -948,6 +971,9 @@ export class FakeClient implements ObservableClient {
 
       case 'turns.start': {
         const params = rawParams as RpcParams<'turns.start'>;
+        if (params.expectedSelectionVersion !== undefined && params.expectedSelectionVersion !== (this.#thread(params.threadId).selectionVersion ?? 0)) {
+          throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'the model selection changed; review the selected model and send again' });
+        }
         return this.#startTurn(params.threadId, params.prompt, params.attachments ?? []);
       }
       case 'turns.stop': {
@@ -1208,7 +1234,12 @@ export class FakeClient implements ObservableClient {
       startedAt: at,
       finishedAt: null,
       usage: null,
-      error: null
+      error: null,
+      execution: {
+        providerId: thread.providerId, accountId: thread.accountId, model: thread.model,
+        effort: thread.effort, permissionMode: thread.permissionMode, sessionId: thread.sessionId,
+        sessionGeneration: thread.sessionGeneration ?? 0, selectionVersion: thread.selectionVersion ?? 0,
+      }
     };
     thread.turns.push(turn);
 

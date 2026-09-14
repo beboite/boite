@@ -12,6 +12,8 @@ build commands in [../README.md](../README.md).
   providers, the models probe, and how each protocol takes a permission mode.
 - [accounts.md](accounts.md): isolation directories, the default account that is
   the user's own login, the login flow and what the core refuses.
+- [model-switching.md](model-switching.md): model, provider and account changes
+  within a conversation, historical context limits and execution snapshots.
 - [keybindings.md](keybindings.md): the chord grammar, every command and its
   default, the `keybindings.json` file the core watches, and what it refuses.
 - [titles.md](titles.md): the three sources of a thread's title, the call the

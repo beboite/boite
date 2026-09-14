@@ -42,6 +42,7 @@ import type {
 } from './drivers/types.ts';
 import type { SpawnedChild, SpawnOptions } from './procs.ts';
 import { cleanAgentTitle, textOf, titleFromPrompt } from './titles.ts';
+import { continuationInput } from './continuation.ts';
 
 const BASE64 = /^[A-Za-z0-9+/]+={0,2}$/;
 
@@ -197,6 +198,7 @@ export class ThreadStore {
   messages(params: { threadId: ThreadId; before: MessageId; limit?: number }): {
     messages: Message[];
     before: MessageId | null;
+    turns: Turn[];
   } {
     this.require(params.threadId);
     const rowid = this.core.journal.messageRowid(params.threadId, params.before);
@@ -208,7 +210,8 @@ export class ThreadStore {
     }
     const asked = params.limit ?? MESSAGE_PAGE;
     const limit = Math.min(Math.max(1, Math.trunc(asked)), MESSAGE_PAGE_MAX);
-    return this.core.journal.listMessagePage(params.threadId, { beforeRowid: rowid, limit });
+    const page = this.core.journal.listMessagePage(params.threadId, { beforeRowid: rowid, limit });
+    return { ...page, turns: this.core.journal.listTurnsFor(params.threadId, page.messages.map((message) => message.turnId)) };
   }
 
   // -- writes ---------------------------------------------------------------
@@ -392,29 +395,58 @@ export class ThreadStore {
 
   update(params: {
     threadId: ThreadId;
+    accountId?: AccountId;
+    expectedSelectionVersion?: number;
     title?: string;
-    model?: string;
+    model?: string | null;
     effort?: string | null;
     permissionMode?: ThreadSummary['permissionMode'];
   }): ThreadSummary {
     const thread = this.require(params.threadId);
+    this.checkSelection(thread, params.expectedSelectionVersion);
     const next: ThreadSummary = { ...thread };
     // A title the user typed is theirs: no turn and no retitle overwrites it unasked.
     if (params.title !== undefined && params.title.length > 0) {
       next.title = params.title;
       next.titleSource = 'user';
     }
-    const provider = this.core.providers.require(thread.providerId);
-    if (params.model !== undefined && params.model !== thread.model) {
+    const account = this.core.accounts.require(params.accountId ?? thread.accountId);
+    const switched = account.id !== thread.accountId;
+    const provider = this.core.providers.require(account.providerId);
+    if (switched) {
+      assertDriverRunnable(provider.protocol, this.core.providers.summary(provider.id), account);
+      next.accountId = account.id;
+      next.providerId = provider.id;
+      next.model = checkModel(provider, account.id, params.model === undefined ? defaultModel(provider) : params.model);
+      next.effort = null;
+      next.sessionId = null;
+      next.sessionGeneration = (thread.sessionGeneration ?? 0) + 1;
+      next.context = null;
+    }
+    if (params.model !== undefined && (params.model !== thread.model || switched)) {
       // A new model starts on its own default unless the call says otherwise.
-      next.model = checkModel(provider, thread.accountId, params.model);
+      next.model = checkModel(provider, account.id, params.model);
       next.effort = null;
     }
     if (params.permissionMode !== undefined) next.permissionMode = params.permissionMode;
     if (params.effort !== undefined) next.effort = params.effort;
     // The model may have changed in the same call, so the scale is the new one's.
-    next.effort = checkEffort(provider, thread.accountId, next.model, next.effort);
+    next.effort = checkEffort(provider, account.id, next.model, next.effort);
+    if (switched || next.model !== thread.model || next.effort !== thread.effort || next.permissionMode !== thread.permissionMode) {
+      next.selectionVersion = (thread.selectionVersion ?? 0) + 1;
+    }
+    if (switched) {
+      if (!['queued', 'running', 'waiting'].includes(thread.status)) releaseThread(thread.id);
+      this.commands.delete(thread.id);
+      this.core.bus.emit('thread.commands', { threadId: thread.id, commands: [] });
+    }
     return this.save(next, 'thread.updated');
+  }
+
+  private checkSelection(thread: ThreadSummary, expected?: number): void {
+    if (expected !== undefined && expected !== (thread.selectionVersion ?? 0)) {
+      throw refused('the model selection changed; review the selected model and send again', { threadId: thread.id });
+    }
   }
 
   archive(threadId: ThreadId, archived: boolean): ThreadSummary {
@@ -519,8 +551,9 @@ export class ThreadStore {
     });
   }
 
-  startTurn(threadId: ThreadId, prompt: string, attachments: ImageAttachment[] = []): Turn {
+  startTurn(threadId: ThreadId, prompt: string, attachments: ImageAttachment[] = [], expectedSelectionVersion?: number): Turn {
     const thread = this.require(threadId);
+    this.checkSelection(thread, expectedSelectionVersion);
     if (thread.archived) throw refused('cannot start a turn on an archived thread', { threadId });
     if (['queued', 'running', 'waiting'].includes(thread.status) || this.handles.has(threadId)) {
       throw refused('this thread already has an in-flight turn', { threadId });
@@ -543,6 +576,11 @@ export class ThreadStore {
       finishedAt: null,
       usage: null,
       error: null,
+      execution: {
+        providerId: thread.providerId, accountId: thread.accountId, model: thread.model,
+        effort: thread.effort, permissionMode: thread.permissionMode, sessionId: thread.sessionId,
+        sessionGeneration: thread.sessionGeneration ?? 0, selectionVersion: thread.selectionVersion ?? 0,
+      },
     };
     const message: Message = {
       id: newId('msg_'),
@@ -700,8 +738,9 @@ export class ThreadStore {
 
   async runTurn(turnId: TurnId, threadId: ThreadId): Promise<void> {
     const queued = this.core.journal.getTurn(turnId);
-    const thread = this.core.journal.getThread(threadId);
-    if (queued === null || thread === null) return;
+    const selected = this.core.journal.getThread(threadId);
+    if (queued === null || selected === null) return;
+    const thread = { ...selected, ...queued.execution };
 
     const running: Turn = { ...queued, status: 'running', startedAt: Date.now() };
     this.core.journal.append({ type: 'turn.started', threadId, version: 1, payload: running }, () => {
@@ -748,15 +787,16 @@ export class ThreadStore {
 
     const current = this.core.journal.getThread(threadId);
     if (current === null) return;
-    if (current.archived) releaseThread(threadId);
+    const sameSession = (current.sessionGeneration ?? 0) === (thread.sessionGeneration ?? 0);
+    if (current.archived || !sameSession) releaseThread(threadId);
     const next: ThreadSummary = {
       ...current,
-      sessionId: result.sessionId ?? current.sessionId,
+      sessionId: sameSession ? result.sessionId ?? current.sessionId : current.sessionId,
       status: result.status === 'error' ? 'error' : 'idle',
       unread: current.unread || !this.core.subscribers.hasSubscribers(threadId),
     };
     this.save(next, 'thread.finished');
-    if (result.status === 'done') this.autoTitle(threadId, turnId);
+    if (result.status === 'done' && sameSession) this.autoTitle(threadId, turnId);
   }
 
   /**
@@ -911,13 +951,16 @@ export class ThreadStore {
     };
 
     const input = this.lastUserInput(threadId, turn.id);
+    const continued = thread.sessionId === null && (thread.sessionGeneration ?? 0) > 0
+      ? continuationInput(this.core.journal, threadId, turn.id, input, provider)
+      : input;
     return {
       thread,
       account,
       provider,
       turn,
-      prompt: input.prompt,
-      attachments: input.attachments,
+      prompt: continued.prompt,
+      attachments: continued.attachments,
       sessionId: thread.sessionId,
       accountEnv: env,
       warmProcessMinutes: this.core.settings.get().warmProcessMinutes,
@@ -925,8 +968,12 @@ export class ThreadStore {
       log: (level, message) => {
         this.core.log(level, message);
       },
-      commands: (list: AgentCommand[]) => this.noteCommands(threadId, list),
-      context: (use) => this.noteContext(threadId, use),
+      commands: (list: AgentCommand[]) => {
+        if ((this.require(threadId).sessionGeneration ?? 0) === (thread.sessionGeneration ?? 0)) this.noteCommands(threadId, list);
+      },
+      context: (use) => {
+        if ((this.require(threadId).selectionVersion ?? 0) === (thread.selectionVersion ?? 0)) this.noteContext(threadId, use);
+      },
       requestPermission: (toolName: string, input: unknown, description: string | null): PermissionTicket =>
         this.requestPermission(thread, turn, toolName, input, description),
       askQuestion: (ask: QuestionAsk): QuestionTicket => this.askQuestion(thread, turn, ask),
@@ -1210,7 +1257,7 @@ export function registerThreadMethods(core: Core): void {
     return { ok: true } as const;
   });
   core.router.register('turns.start', (params) =>
-    core.threads.startTurn(params.threadId, params.prompt, params.attachments ?? []),
+    core.threads.startTurn(params.threadId, params.prompt, params.attachments ?? [], params.expectedSelectionVersion),
   );
   core.router.register('turns.stop', (params) => ({ stopped: core.threads.stopTurn(params.threadId) }));
   core.router.register('permissions.list', (params) => core.threads.listPermissions(params.threadId));

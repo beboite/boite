@@ -1167,6 +1167,8 @@ export class Store {
       const known = new Set(still.messages.map((m) => m.id));
       const older = page.messages.filter((m) => !known.has(m.id));
       still.messages.unshift(...older);
+      const knownTurns = new Set(still.turns.map((turn) => turn.id));
+      still.turns.push(...(page.turns ?? []).filter((turn) => !knownTurns.has(turn.id)));
       still.messagesBefore = page.before;
       return older.length;
     } catch (error) {
@@ -1280,6 +1282,7 @@ export class Store {
       await client.call('turns.start', {
         threadId,
         prompt,
+        expectedSelectionVersion: (this.openThread?.id === threadId ? this.openThread : this.threads.find((thread) => thread.id === threadId))?.selectionVersion ?? 0,
         ...(attachments.length > 0 ? { attachments } : {})
       });
       return true;
@@ -1390,17 +1393,19 @@ export class Store {
 
   async update(
     threadId: ThreadId,
-    patch: { title?: string; model?: string; effort?: string | null; permissionMode?: PermissionMode }
-  ): Promise<void> {
+    patch: { title?: string; accountId?: string; model?: string | null; effort?: string | null; permissionMode?: PermissionMode; expectedSelectionVersion?: number }
+  ): Promise<boolean> {
     const client = this.#client;
-    if (!client) return;
+    if (!client) return false;
     try {
       const summary = await client.call('threads.update', { threadId, ...patch });
       this.#upsertThread(summary);
       const open = this.openThread;
       if (open && open.id === threadId) Object.assign(open, summary);
+      return true;
     } catch (error) {
       this.#fail(error);
+      return false;
     }
   }
 

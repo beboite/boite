@@ -35,8 +35,10 @@ that nothing in `bun run check` or `bun run test` will notice.
   descriptor's `isolation` map so one login cannot see another. An account whose
   `isolationDir` is null runs on the provider's own default location, which is
   the user's real login.
-- thread: one conversation in one folder. It is a journal and a provider session
-  id, never a process that has to stay alive. turn: one prompt and the answer to
+- thread: one conversation in one folder. Its selected account owns a native
+  session, never a process that has to stay alive. Changing accounts keeps the
+  conversation and carries journal excerpts to a fresh native session.
+  [docs/model-switching.md](docs/model-switching.md). turn: one prompt and the answer to
   it. A turn is what the scheduler counts and what a process belongs to.
 - part: one piece of a message, as the contract spells it: `text`, `thinking`,
   `tool`, `permission`, `error`. A driver's whole job is turning its protocol
@@ -137,9 +139,10 @@ append-only, and the projection tables (`projects`, `threads`, `turns`,
 `messages`, `processes`, `accounts`, `settings`) are updated in the same
 transaction as the event that changes them. Every event type carries a version.
 Text deltas are coalesced per thread every 16 ms before they reach SQLite or a
-socket. The provider transcript is never remodelled: a thread keeps the
-provider's own `sessionId` and resumes from it, which is why an agent's own
-history stays authoritative.
+socket. The provider transcript is never remodelled. A thread resumes the
+selected account's native `sessionId`; changing accounts starts a fresh session
+with bounded journal excerpts. Each accepted turn freezes its execution target,
+so a later picker change cannot redirect queued work.
 
 ## The scheduler counts turns, not threads
 

@@ -23,6 +23,11 @@ export class Scheduler {
 
   constructor(private readonly core: Core) {}
 
+  /** Account ownership follows accepted turns even when their thread selects another model. */
+  activeAccountIds(): AccountId[] {
+    return [...new Set([...this.queue, ...this.running.values()].map((entry) => entry.accountId))];
+  }
+
   enqueue(turn: Turn, accountId: AccountId): void {
     this.queue.push({ turnId: turn.id, threadId: turn.threadId, accountId, queuedAt: turn.queuedAt });
     this.emitUpdated();

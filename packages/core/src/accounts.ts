@@ -126,7 +126,7 @@ export class AccountStore {
 
   async remove(accountId: AccountId): Promise<void> {
     const account = this.require(accountId);
-    if (this.core.journal.listThreads().some((thread) => thread.accountId === accountId)) {
+    if (this.core.scheduler.activeAccountIds().includes(accountId) || this.core.journal.listThreads().some((thread) => thread.accountId === accountId)) {
       throw refused('this account is used by a thread; remove its project before removing the account', { accountId });
     }
     const directory = account.isolationDir;
@@ -136,7 +136,7 @@ export class AccountStore {
     }
     await this.loginCancel(accountId);
     // Cancelling yields to RPC work; a new thread may have claimed this account.
-    if (this.core.journal.listThreads().some((thread) => thread.accountId === accountId)) {
+    if (this.core.scheduler.activeAccountIds().includes(accountId) || this.core.journal.listThreads().some((thread) => thread.accountId === accountId)) {
       throw refused('this account is used by a thread; remove its project before removing the account', { accountId });
     }
     if (directory !== null) rmSync(directory, { recursive: true, force: true });

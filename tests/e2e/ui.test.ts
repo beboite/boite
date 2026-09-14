@@ -104,7 +104,7 @@ test(
     await page.click(`${testid('composer-picker-menu')} [data-provider="echo"]`);
     await page.click(`${testid('composer-picker-menu')} [data-model="echo"]`);
     await page.waitFor(`!document.querySelector('${testid('composer-picker-menu')}')`);
-    await page.waitFor(`${textOf('composer-picker')}.startsWith('Echo')`);
+    await page.waitFor(`document.querySelector('[data-testid=composer-picker] .label')?.textContent.trim() === 'Echo'`);
 
     await page.type(testid('composer-input'), 'browser thread [permission]');
     await clickWhenEnabled(testid('composer-send'));
@@ -524,7 +524,7 @@ test(
     expect(await page.evaluate<string>(`document.querySelector('${testid('composer-worktree')}').getAttribute('aria-pressed')`)).toBe('false');
     await page.click(testid('composer-worktree'));
     await page.waitFor(`document.querySelector('${testid('composer-worktree')}').getAttribute('aria-pressed') === 'true'`);
-    await page.waitFor(`${textOf('composer-picker')}.startsWith('Echo')`);
+    await page.waitFor(`document.querySelector('[data-testid=composer-picker] .label')?.textContent.trim() === 'Echo'`);
     await page.type(testid('composer-input'), 'worktree thread');
     await clickWhenEnabled(testid('composer-send'));
 

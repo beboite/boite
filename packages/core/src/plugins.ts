@@ -191,6 +191,7 @@ export class PluginStore {
     this.actionProvider = params.provider;
     try {
       const affected = this.core.journal.listThreads().filter((thread) => this.blocksAccount(thread.accountId));
+      if (this.core.scheduler.activeAccountIds().some((accountId) => this.blocksAccount(accountId))) throw refused('Stop this provider\'s default-account turns before changing its saved login.');
       if (affected.some((thread) => ['running', 'queued', 'waiting'].includes(thread.status))) throw refused('Stop this provider\'s default-account turns before changing its saved login.');
       for (const thread of affected) {
         const provider = this.core.providers.require(thread.providerId);

@@ -13,7 +13,7 @@ import type {
   Usage,
 } from '@boite/contracts';
 
-export const SCHEMA_VERSION = 8;
+export const SCHEMA_VERSION = 9;
 const DELTA_WINDOW_MS = 16;
 
 /** What `listMessagePage` hands back: the page itself and the cursor for what is behind it. */
@@ -61,6 +61,8 @@ interface ThreadRow {
   archived: number;
   pinned: number;
   session_id: string | null;
+  session_generation: number;
+  selection_version: number;
   context: string | null;
   created_at: number;
   updated_at: number;
@@ -75,6 +77,7 @@ interface TurnRow {
   finished_at: number | null;
   usage: string | null;
   error: string | null;
+  execution: string | null;
 }
 
 interface MessageRow {
@@ -292,6 +295,15 @@ function migrate(db: Database): void {
     db.exec(SCHEMA_V8);
     version = 8;
   }
+  if (version < 9) {
+    db.transaction(() => {
+      db.exec('ALTER TABLE threads ADD COLUMN session_generation INTEGER NOT NULL DEFAULT 0');
+      db.exec('ALTER TABLE threads ADD COLUMN selection_version INTEGER NOT NULL DEFAULT 0');
+      db.exec('ALTER TABLE turns ADD COLUMN execution TEXT');
+      db.exec('PRAGMA user_version = 9');
+    })();
+    version = 9;
+  }
   db.exec(`PRAGMA user_version = ${version}`);
 }
 
@@ -325,6 +337,8 @@ function toThread(row: ThreadRow): ThreadSummary {
     archived: row.archived !== 0,
     pinned: row.pinned !== 0,
     sessionId: row.session_id,
+    sessionGeneration: row.session_generation,
+    selectionVersion: row.selection_version,
     load: null,
     context: row.context === null ? null : parseJson<ThreadSummary['context']>(row.context, `threads.context of ${row.id}`),
     createdAt: row.created_at,
@@ -342,6 +356,7 @@ function toTurn(row: TurnRow): Turn {
     finishedAt: row.finished_at,
     usage: row.usage === null ? null : parseJson<Usage>(row.usage, `turns.usage row ${row.id}`),
     error: row.error,
+    ...(row.execution === null ? {} : { execution: parseJson<NonNullable<Turn['execution']>>(row.execution, `turns.execution of ${row.id}`) }),
   };
 }
 
@@ -496,8 +511,8 @@ export class Journal {
     this.db
       .query(
         `INSERT OR REPLACE INTO threads
-         (id, project_id, title, title_source, provider_id, account_id, model, effort, cwd, branch, permission_mode, status, unread, archived, pinned, session_id, context, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (id, project_id, title, title_source, provider_id, account_id, model, effort, cwd, branch, permission_mode, status, unread, archived, pinned, session_id, context, created_at, updated_at, session_generation, selection_version)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         thread.id,
@@ -519,6 +534,8 @@ export class Journal {
         thread.context === null ? null : JSON.stringify(thread.context),
         thread.createdAt,
         thread.updatedAt,
+        thread.sessionGeneration ?? 0,
+        thread.selectionVersion ?? 0,
       );
   }
 
@@ -580,8 +597,8 @@ export class Journal {
   putTurn(turn: Turn): void {
     this.db
       .query(
-        `INSERT OR REPLACE INTO turns (id, thread_id, status, queued_at, started_at, finished_at, usage, error)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT OR REPLACE INTO turns (id, thread_id, status, queued_at, started_at, finished_at, usage, error, execution)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         turn.id,
@@ -592,6 +609,7 @@ export class Journal {
         turn.finishedAt,
         turn.usage === null ? null : JSON.stringify(turn.usage),
         turn.error,
+        turn.execution === undefined ? null : JSON.stringify(turn.execution),
       );
   }
 
@@ -657,6 +675,13 @@ export class Journal {
       .query('SELECT * FROM messages WHERE thread_id = ? ORDER BY rowid')
       .all(threadId) as MessageRow[];
     return rows.map(toMessage);
+  }
+
+  /** Stream history for a continuation without loading images from every message at once. */
+  *walkMessages(threadId: string): Iterable<Message> {
+    for (const row of this.db.query('SELECT * FROM messages WHERE thread_id = ? ORDER BY rowid').iterate(threadId)) {
+      yield toMessage(row as MessageRow);
+    }
   }
 
   /**

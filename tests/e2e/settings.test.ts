@@ -1,8 +1,12 @@
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { join } from 'node:path';
-import { BrowserPage } from './lib/cdp.ts';
-import { startCore, type RunningCore } from './lib/core.ts';
-let core: RunningCore;
+import { createRequire } from 'node:module';
+import { BrowserPage, freePort } from './lib/cdp.ts';
+// Vite belongs to the UI workspace, not the repository root.
+const uiRequire = createRequire(join(import.meta.dir, '../../packages/ui/package.json'));
+const { createServer } = await import(uiRequire.resolve('vite'));
+let server: { listen(): Promise<unknown>; close(): Promise<void> };
+let uiUrl: string;
 let page: BrowserPage;
 const id = (name: string) => `[data-testid="${name}"]`;
 async function settled() {
@@ -10,10 +14,15 @@ async function settled() {
 }
 async function capture(name: string) { await settled(); await page.screenshot(join(import.meta.dir, '.artifacts', name)); }
 beforeAll(async () => {
-  core = await startCore(); page = await BrowserPage.launch({ url: `${core.url}/?fake=1` });
+  // The fake client is deliberately absent from production bundles.
+  const port = await freePort();
+  server = await createServer({ root: join(import.meta.dir, '../../packages/ui'), server: { host: '127.0.0.1', port, strictPort: true }, clearScreen: false });
+  await server.listen();
+  uiUrl = `http://127.0.0.1:${port}`;
+  page = await BrowserPage.launch({ url: `${uiUrl}/?fake=1` });
   await page.waitFor(`document.querySelector('${id('nav-settings')}')`);
 });
-afterAll(async () => { await page?.close(); await core?.stop(); });
+afterAll(async () => { await page?.close(); await server?.close(); });
 
 test('provider settings show login controls and quota monitoring', async () => {
   await page.click(id('nav-settings')); await page.click(id('settings-tab-accounts'));
@@ -59,7 +68,7 @@ test('Grain is visible above solid and acrylic surfaces and the settings fit a p
 
 test('the compact quota page shows limits and reset times', async () => {
   await page.send('Emulation.setDeviceMetricsOverride', { width: 380, height: 460, deviceScaleFactor: 1, mobile: false });
-  await page.navigate(`${core.url}/?fake=1&view=quotas`);
+  await page.navigate(`${uiUrl}/?fake=1&view=quotas`);
   await page.waitFor(`document.querySelector('${id('quota-account')}')`);
   await capture('quota-popup.png');
   expect(await page.evaluate(`document.querySelector('${id('quota-popup')}').textContent`)).toContain('Resets');
@@ -71,7 +80,7 @@ test('remembered cores list every core and forget drops one', async () => {
     { url: 'http://127.0.0.1:9', label: 'cet ordi', token: 'x', paired: false },
     { url: 'http://100.64.0.15:3773', label: '100.64.0.15:3773', token: 'y', paired: true }
   ]))`);
-  await page.navigate(`${core.url}/?fake=1`);
+  await page.navigate(`${uiUrl}/?fake=1`);
   await page.waitFor(`document.querySelector('${id('nav-settings')}')`);
   await page.click(id('nav-settings'));
   await page.waitFor(`document.querySelector('${id('settings-envs')}')`);

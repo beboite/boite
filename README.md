@@ -7,6 +7,11 @@ dozens of conversations stay open without a process each and every one of them
 is traced. The desktop shell and a phone on the same network are both clients of
 that core, over an authenticated WebSocket.
 
+The model picker can change providers and accounts within the same conversation.
+The next prompt carries context from the journal into a fresh provider session;
+an already running turn keeps its model. Long histories transfer as bounded
+excerpts. [Model switching](docs/model-switching.md) describes the limits.
+
 ## Stack
 
 - Bun 1.4.2 for the core, the tests and the benches.
@@ -75,6 +80,8 @@ bench                measurements against Boite Legacy
 - [docs/providers.md](docs/providers.md): the descriptor format and the shipped
   providers.
 - [docs/accounts.md](docs/accounts.md): isolation directories and logins.
+- [docs/model-switching.md](docs/model-switching.md): changing models in one
+  conversation, context transfer and queued-turn behavior.
 - [docs/phone.md](docs/phone.md): pairing links and paired devices, the PWA,
   what is cached.
 - [docs/trace.md](docs/trace.md): Job Objects, the trace, the caps, the guards.
