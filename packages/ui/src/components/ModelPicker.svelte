@@ -313,7 +313,11 @@
     onclick={toggle}
     {onkeydown}
   >
-    <Sparkles size={14} strokeWidth={1.75} />
+    {#if provider}
+      <ProviderLogo providerId={provider.id} size={14} />
+    {:else}
+      <Sparkles size={14} strokeWidth={1.75} />
+    {/if}
     <span class="label">{label}</span>
     <ChevronDown size={12} strokeWidth={2} />
   </button>

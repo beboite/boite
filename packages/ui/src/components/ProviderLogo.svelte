@@ -2,8 +2,9 @@
   import { providerLogos } from '../lib/provider-logos';
 
   /**
-   * The provider's mark in `currentColor`, or its initial when nothing is drawn
-   * for that id. The tile around it carries the name and the colour.
+   * The provider's own mark in its own colours, or its initial in
+   * `currentColor` when nothing is drawn for that id. The tile around it
+   * carries the name.
    */
   let {
     providerId,
@@ -22,17 +23,33 @@
     class="logo"
     width={size}
     height={size}
-    viewBox="0 0 24 24"
+    viewBox={logo.viewBox}
     aria-hidden="true"
     focusable="false"
     data-logo={providerId}
-    fill={logo.stroke === undefined ? 'currentColor' : 'none'}
-    stroke={logo.stroke === undefined ? undefined : 'currentColor'}
-    stroke-width={logo.stroke}
-    stroke-linecap="round"
-    stroke-linejoin="round"
   >
-    <path d={logo.path} />
+    {#if logo.kind === 'image'}
+      <image href={logo.href} width={logo.width} height={logo.height} />
+    {:else}
+      {#if logo.tile}
+        <rect width={logo.tile.width} height={logo.tile.height} rx={logo.tile.rx} fill={logo.tile.fill} />
+      {/if}
+      {#each logo.paths as path, index (index)}
+        {#if typeof path.fill === 'string'}
+          <path d={path.d} fill={path.fill} fill-rule={path.evenOdd ? 'evenodd' : undefined} />
+        {:else}
+          <!-- The theme decides between the two, in CSS, so a switch repaints
+               the mark without touching the component. -->
+          <path
+            class="themed"
+            d={path.d}
+            fill-rule={path.evenOdd ? 'evenodd' : undefined}
+            style:--fill-dark={path.fill.dark}
+            style:--fill-light={path.fill.light}
+          />
+        {/if}
+      {/each}
+    {/if}
   </svg>
 {:else}
   <span
@@ -49,6 +66,14 @@
   .logo {
     display: block;
     flex: none;
+  }
+
+  .themed {
+    fill: var(--fill-dark);
+  }
+
+  :global(:root[data-theme='light']) .themed {
+    fill: var(--fill-light);
   }
 
   .initial {

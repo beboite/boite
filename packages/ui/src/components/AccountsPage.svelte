@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, untrack } from 'svelte';
+  import { ChevronRight } from '@lucide/svelte';
   import type { Account, AccountQuota, ProviderSummary } from '@boite/contracts';
   import QuotaList from './QuotaList.svelte';
   import ProviderIcon from './ProviderLogo.svelte';
@@ -116,31 +117,13 @@
 </script>
 
 <div class="page" data-testid="accounts-page">
-  <header>
+  <header class="head">
     <h1>{strings.providerSettings.heading}</h1>
     <button class="quiet" onclick={() => { connectAfterCreate = false; adding = !adding; }}>{strings.accounts.add}</button>
   </header>
-  <p class="intro">{strings.providerSettings.intro}</p>
-  <div class="providers">
-    {#each store.providers as provider (provider.id)}
-      <section class="card provider" data-testid="provider-settings" data-provider-id={provider.id}>
-        <div class="provider-title"><ProviderIcon providerId={provider.id} size={22} /><h2>{provider.name}</h2></div>
-        <p class="intro">{provider.available ? strings.providerSettings.available : strings.providerSettings.missing}</p>
-        {#if provider.executable}<details><summary>{strings.providerSettings.executable}</summary><code>{provider.executable}</code></details>{/if}
-        <button class="quiet" disabled={!provider.available || !provider.login} onclick={() => connect(provider)}>{strings.providerSettings.connect}</button>
-      </section>
-    {/each}
-  </div>
+  <p class="intro lead">{strings.providerSettings.intro}</p>
 
-  {#if managed.length > 0}
-    <section class="card managed" data-testid="managed-providers">
-      <h2>{strings.install.heading}</h2>
-      {#each managed as provider (provider.id)}
-        <InstallControl {store} {provider} />
-      {/each}
-    </section>
-  {/if}
-
+  <!-- Under the intro, where both of its buttons are: the heading's and a card's. -->
   {#if adding}
     <form class="card" onsubmit={submit}>
       <div class="field">
@@ -174,6 +157,41 @@
         </button>
       </div>
     </form>
+  {/if}
+
+  <div class="providers">
+    {#each store.providers as provider (provider.id)}
+      <section class="card provider" data-testid="provider-settings" data-provider-id={provider.id}>
+        <div class="provider-title"><ProviderIcon providerId={provider.id} size={22} /><h2>{provider.name}</h2></div>
+        <p class="intro state"><span class="dot" class:ok={provider.available}></span>{provider.available ? strings.providerSettings.available : strings.providerSettings.missing}</p>
+        {#if provider.executable}
+          <details>
+            <summary><span class="caret"><ChevronRight size={12} strokeWidth={2} /></span>{strings.providerSettings.executable}</summary>
+            <code>{provider.executable}</code>
+          </details>
+        {/if}
+        <!-- A provider whose login Boite cannot drive has no button to grey out. -->
+        {#if provider.login}
+          <button
+            class="small connect"
+            disabled={!provider.available}
+            title={provider.available ? undefined : strings.providerSettings.missing}
+            onclick={() => connect(provider)}
+          >
+            {strings.providerSettings.connect}
+          </button>
+        {/if}
+      </section>
+    {/each}
+  </div>
+
+  {#if managed.length > 0}
+    <section class="card managed" data-testid="managed-providers">
+      <h2>{strings.install.heading}</h2>
+      {#each managed as provider (provider.id)}
+        <InstallControl {store} {provider} />
+      {/each}
+    </section>
   {/if}
 
   {#if store.accounts.length === 0}
@@ -315,24 +333,78 @@
   }
 
   .intro { color: var(--color-muted-foreground); font-size: var(--text-sm); }
-  .providers { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: 10px; max-width: 960px; margin-bottom: 20px; }
+
+  /* Every block of the page stops on the cards' 720 px, the heading's action included. */
+  .head { max-width: 720px; margin-bottom: 4px; }
+  .head button { margin-left: auto; }
+  .lead { max-width: 720px; margin-bottom: 16px; }
+
+  .providers { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 220px), 1fr)); gap: 10px; max-width: 720px; margin-bottom: 20px; }
   .provider { display: flex; flex-direction: column; gap: 8px; margin: 0; }
-  .provider button { margin-top: auto; }
+  .provider .connect { margin-top: auto; align-self: flex-start; }
   .provider-title { display: flex; gap: 10px; align-items: center; }
-  .provider .provider-title h2, .account .provider-title h2 { margin: 0; font-size: var(--text-base); text-transform: none; }
+  .provider .provider-title h2, .account .provider-title h2 { margin: 0; font-size: var(--text-base); font-weight: 600; letter-spacing: normal; text-transform: none; color: var(--color-foreground); }
   .provider p { margin: 0; }
+
+  /* Hue is for status: the dot says whether the executable is on this machine. */
+  .state { display: flex; align-items: center; gap: 6px; }
+  .dot { width: 6px; height: 6px; flex: none; border-radius: 50%; background: var(--color-subtle); }
+  .dot.ok { background: var(--color-success); }
+
   details { font-size: var(--text-sm); }
+  summary { display: inline-flex; align-items: center; gap: 4px; list-style: none; cursor: pointer; color: var(--color-muted-foreground); transition: color var(--dur-2) var(--ease-out-quint); }
+  summary::-webkit-details-marker { display: none; }
+  summary:hover { color: var(--color-foreground); }
+  .caret { display: inline-flex; color: var(--color-subtle); transition: transform var(--dur-2) var(--ease-out-quint); }
+  details[open] .caret { transform: rotate(90deg); }
   details code { display: block; overflow-wrap: anywhere; margin-top: 6px; }
-  .account-list { display: grid; gap: 12px; max-width: 960px; margin: 16px 0; }
+  .account-list { display: grid; gap: 12px; max-width: 720px; margin: 16px 0; }
   .account { margin: 0; }
   .account header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
   .monitor { display: flex; align-items: center; justify-content: space-between; margin: 14px 0; gap: 12px; }
 
-  /* The first card of the page: one row per provider Boite downloads itself. */
+  /* General's switch, so the one toggle of this page is not a bare checkbox. */
+  .monitor input {
+    flex: none;
+    width: 28px;
+    height: 16px;
+    margin: 0;
+    appearance: none;
+    border-radius: 999px;
+    background: var(--color-edge);
+    position: relative;
+    cursor: pointer;
+    transition: background var(--dur-2) var(--ease-out-quint);
+  }
+
+  .monitor input::after {
+    content: '';
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--color-background);
+    transition: transform var(--dur-2) var(--ease-out-quint);
+  }
+
+  .monitor input:checked {
+    background: var(--color-foreground);
+  }
+
+  .monitor input:checked::after {
+    transform: translateX(12px);
+  }
+
+  .monitor input:focus-visible {
+    outline-offset: 3px;
+  }
+
+  /* One row per provider Boite downloads itself. */
   .managed {
     display: grid;
     gap: 2px;
-    max-width: 560px;
   }
 
 
