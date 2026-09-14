@@ -9,6 +9,7 @@ import type { Core } from './core.ts';
 import { RpcFailure, messageOf } from './errors.ts';
 import { newId } from './ids.ts';
 import type { Connection } from './router.ts';
+import { principalOf } from './sessions.ts';
 import type { Identity } from './sessions.ts';
 
 const DEFAULT_HELLO_TIMEOUT_MS = 5000;
@@ -345,7 +346,7 @@ async function handleFrame(core: Core, connection: ServerConnection, raw: string
       version: typeof params?.client?.version === 'string' ? params.client.version : '',
     };
 
-    let session: { id: string; token: string } | undefined;
+    let session: ReturnType<typeof core.sessions.exchange> | undefined;
     let identity: Identity;
     if (grant !== null && token === null) {
       // The exchange happens before the protocol check on purpose: a grant is
@@ -363,7 +364,7 @@ async function handleFrame(core: Core, connection: ServerConnection, raw: string
         refuse(messageOf(error), 'bad grant');
         return;
       }
-      identity = { principal: 'session', sessionId: session.id };
+      identity = { principal: principalOf(session.role), sessionId: session.id };
     } else if (token !== null && grant === null) {
       if (token === core.token) {
         identity = { principal: 'owner', sessionId: null };
@@ -373,7 +374,7 @@ async function handleFrame(core: Core, connection: ServerConnection, raw: string
           refuse('the token is wrong', 'bad token');
           return;
         }
-        identity = { principal: 'session', sessionId: found.id };
+        identity = { principal: principalOf(found.role), sessionId: found.id };
       }
     } else {
       refuse('hello takes a token or a grant, one of the two', 'bad hello');
@@ -391,7 +392,11 @@ async function handleFrame(core: Core, connection: ServerConnection, raw: string
     connection.sendResponse({
       jsonrpc: '2.0',
       id,
-      result: { core: core.info(), principal: identity.principal, ...(session === undefined ? {} : { session }) },
+      result: {
+        core: core.info(),
+        principal: identity.principal,
+        ...(session === undefined ? {} : { session: { id: session.id, token: session.token } }),
+      },
     });
     return;
   }

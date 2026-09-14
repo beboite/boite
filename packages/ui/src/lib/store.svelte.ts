@@ -10,6 +10,7 @@ import type {
   ModelInfo,
   PairedSession,
   PairingGrant,
+  PairingRole,
   PermissionMode,
   PermissionRequest,
   Principal,
@@ -40,7 +41,7 @@ import {
   type EventHandler,
   type ObservableClient
 } from './client';
-import { clearStoredEndpoint, resolveEndpoint, storeEndpoint } from './endpoint';
+import { clearStoredEndpoint, parsePairingLink, resolveEndpoint, storeEndpoint, type Endpoint } from './endpoint';
 import { isExperimentEnabled } from './experiments';
 import { titleFrom } from './format';
 import { chordLabel, commandForKey, resolveBindings } from './keybindings';
@@ -176,6 +177,12 @@ export class Store {
   /** The last one-time pairing link minted from Settings, until the page changes. */
   pairing = $state<PairingGrant | null>(null);
   sessions = $state<PairedSession[]>([]);
+  /** The address of the core this UI talks to; null on the fake client. */
+  endpointUrl = $state<string | null>(null);
+  /** This UI holds the key a pairing link became, not a token read off the machine. */
+  paired = $state(false);
+  /** The core is the one the shell started on this computer. */
+  localCore = $state(false);
   /** Toasts for threads the user is not looking at, per machine. */
   notifications = $state(readNotifications());
   /** The command palette, `Ctrl+K`. */
@@ -277,6 +284,15 @@ export class Store {
    */
   get owner(): boolean {
     return this.principal !== 'session';
+  }
+
+  /**
+   * The native folder dialog names a path on this computer, which is only a
+   * path the core can open when the core runs here too. A shell paired with a
+   * core on a server types the server's path instead.
+   */
+  get pickerAvailable(): boolean {
+    return window.__TAURI_INTERNALS__ !== undefined && this.localCore;
   }
 
   get unreadCount(): number {
@@ -682,32 +698,58 @@ export class Store {
           this.booted = true;
           return;
         }
-        const url = endpoint.url;
-        this.attach(
-          new WsClient({
-            url,
-            token: endpoint.token,
-            ...(endpoint.grant === undefined ? {} : { grant: endpoint.grant }),
-            // The session a grant became is this device's own credential: kept
-            // where the next load reads it, so the link is opened once, ever.
-            onSession: (session) => storeEndpoint({ url, token: session.token }),
-            // Revoked from the desktop: the dead key goes, and the page says
-            // what to do rather than retrying every ten seconds.
-            onRevoked: () => {
-              clearStoredEndpoint();
-              this.connection = 'closed';
-              this.error = strings.errors.revoked;
-            },
-            clientName: window.__TAURI_INTERNALS__ === undefined ? 'pwa' : 'shell',
-            version: UI_VERSION
-          })
-        );
+        this.#attachEndpoint(endpoint);
       }
       await this.connect();
       await this.openWhereLeft();
     } finally {
       this.booted = true;
     }
+  }
+
+  #attachEndpoint(endpoint: Endpoint): void {
+    const url = endpoint.url;
+    const paired = endpoint.paired === true || endpoint.grant !== undefined;
+    this.endpointUrl = url;
+    this.paired = paired;
+    this.localCore = endpoint.local === true;
+    this.attach(
+      new WsClient({
+        url,
+        token: endpoint.token,
+        ...(endpoint.grant === undefined ? {} : { grant: endpoint.grant }),
+        paired,
+        // The session a grant became is this device's own credential: kept
+        // where the next load reads it, so the link is opened once, ever.
+        onSession: (session) => storeEndpoint({ url, token: session.token, paired: true }),
+        // Revoked from the desktop: the dead key goes, and the page says
+        // what to do rather than retrying every ten seconds.
+        onRevoked: () => {
+          clearStoredEndpoint();
+          this.connection = 'closed';
+          this.error = strings.errors.revoked;
+        },
+        clientName: window.__TAURI_INTERNALS__ === undefined ? 'pwa' : 'shell',
+        version: UI_VERSION
+      })
+    );
+  }
+
+  /** Drops everything the last core said, then connects to the next one. */
+  async #switchTo(endpoint: Endpoint): Promise<void> {
+    this.#client?.close();
+    this.detach();
+    this.openThread = null;
+    this.draft = null;
+    this.pairing = null;
+    this.sessions = [];
+    this.projects = [];
+    this.threads = [];
+    this.principal = null;
+    this.core = null;
+    this.#attachEndpoint(endpoint);
+    await this.connect();
+    await this.openWhereLeft();
   }
 
   /** The most recent thread, a draft in the first project, or nothing on a first run. */
@@ -742,11 +784,11 @@ export class Store {
   // Pairing: the owner mints one-time links, sees every paired device, revokes.
   // -------------------------------------------------------------------------
 
-  async mintPairing(): Promise<void> {
+  async mintPairing(role: PairingRole = 'device'): Promise<void> {
     const client = this.#client;
     if (!client) return;
     try {
-      this.pairing = await client.call('pairing.grant', {});
+      this.pairing = await client.call('pairing.grant', { role });
     } catch (error) {
       this.#fail(error);
     }
@@ -775,14 +817,38 @@ export class Store {
 
   /** Point the UI at another core, from the Settings page. */
   async connectTo(url: string, token: string): Promise<void> {
-    this.#client?.close();
-    this.detach();
     storeEndpoint({ url, token });
-    this.openThread = null;
-    this.draft = null;
-    this.attach(new WsClient({ url, token, clientName: 'pwa', version: UI_VERSION }));
-    await this.connect();
-    await this.openWhereLeft();
+    await this.#switchTo({ url, token });
+  }
+
+  /**
+   * Pair this app with a core that runs elsewhere, from a link that core
+   * minted. The grant is spent on the first hello and the key it becomes is
+   * stored in its place; in the shell that key wins over the core the shell
+   * started, on every launch, until `useLocalCore`.
+   */
+  async pairWith(link: string): Promise<boolean> {
+    const parsed = parsePairingLink(link);
+    if (!parsed) {
+      this.error = strings.errors.pairingLink;
+      return false;
+    }
+    await this.#switchTo({ url: parsed.url, token: '', grant: parsed.grant });
+    return this.connection === 'ready';
+  }
+
+  /** Back to the core this shell started. The paired key is forgotten here, not revoked there. */
+  async useLocalCore(): Promise<void> {
+    clearStoredEndpoint();
+    const endpoint = await resolveEndpoint();
+    if (!endpoint) {
+      this.#client?.close();
+      this.detach();
+      this.connection = 'closed';
+      this.error = strings.errors.noEndpoint;
+      return;
+    }
+    await this.#switchTo(endpoint);
   }
 
   /**
@@ -900,7 +966,7 @@ export class Store {
 
   /** The native folder picker in the shell; a browser has no such thing and types a path. */
   async pickProject(): Promise<Project | null> {
-    if (window.__TAURI_INTERNALS__ === undefined) return null;
+    if (!this.pickerAvailable) return null;
     try {
       const { open } = await import('@tauri-apps/plugin-dialog');
       const picked = await open({ directory: true, multiple: false });

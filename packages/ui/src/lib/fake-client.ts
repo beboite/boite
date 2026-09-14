@@ -368,7 +368,8 @@ export class FakeClient implements ObservableClient {
   #core: CoreInfo;
   /** One phone already paired, so the devices list has a row to revoke. */
   #sessions: PairedSession[] = [
-    { id: 'ses-phone', client: { name: 'pwa', version: '2.0.0-beta.1' }, createdAt: T0, lastSeenAt: T0 + 600_000, current: false }
+    { id: 'ses-phone', client: { name: 'pwa', version: '2.0.0-beta.1' }, role: 'device', createdAt: T0, lastSeenAt: T0 + 600_000, current: false },
+    { id: 'ses-laptop', client: { name: 'shell', version: '2.0.0-beta.1' }, role: 'owner', createdAt: T0, lastSeenAt: T0 + 300_000, current: false }
   ];
 
   /** The request itself is kept beside its resolver, which is what `permissions.list` answers with. */
@@ -612,8 +613,14 @@ export class FakeClient implements ObservableClient {
       case 'hello':
         return { core: this.#core, principal: this.#principal };
       case 'pairing.grant': {
+        const params = rawParams as RpcParams<'pairing.grant'>;
         const grant = `fake-grant-${++this.#seq}`;
-        return { url: `http://192.168.1.20:8777/?grant=${grant}`, grant, expiresAt: this.#now() + 10 * 60 * 1000 };
+        return {
+          url: `http://192.168.1.20:8777/?grant=${grant}`,
+          grant,
+          role: params?.role ?? 'device',
+          expiresAt: this.#now() + 10 * 60 * 1000
+        };
       }
       case 'sessions.list':
         return structuredClone(this.#sessions);

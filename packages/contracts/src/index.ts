@@ -822,16 +822,26 @@ export interface CoreInfo {
 
 /**
  * Who a connection is. The owner said hello with the core token itself, which
- * only the shell and the tests hold; a session said hello with a token the
- * core minted for it when a pairing grant was exchanged. Minting grants and
- * revoking sessions are the owner's alone.
+ * only the shell, the tests and `boite-core pair` hold, or with the key of a
+ * pairing whose role was `owner`; a session said hello with a token the core
+ * minted for a `device` pairing. Minting grants and revoking sessions are the
+ * owner's alone.
  */
 export type Principal = 'owner' | 'session';
+
+/**
+ * What a pairing link hands over. `device` is the guest a phone is, held to
+ * `DEVICE_METHODS`. `owner` is another computer of the owner's driving a core
+ * that runs elsewhere, a server say: its session key says hello as `owner` and
+ * reaches every method, and it is still a row `sessions.revoke` can take away.
+ */
+export type PairingRole = 'device' | 'owner';
 
 /** One paired client, as `sessions.list` shows it. The token itself is never listed. */
 export interface PairedSession {
   id: string;
   client: { name: string; version: string };
+  role: PairingRole;
   createdAt: Timestamp;
   lastSeenAt: Timestamp;
   /** True on the connection that asked. */
@@ -846,6 +856,7 @@ export interface PairedSession {
 export interface PairingGrant {
   url: string;
   grant: string;
+  role: PairingRole;
   expiresAt: Timestamp;
 }
 
@@ -881,8 +892,8 @@ export interface RpcMethods {
     result: { core: CoreInfo; principal: Principal; session?: { id: string; token: string } };
   };
 
-  /** A fresh one-time pairing link. Owner only. */
-  'pairing.grant': { params: Record<string, never>; result: PairingGrant };
+  /** A fresh one-time pairing link, `device` unless the role says otherwise. Owner only. */
+  'pairing.grant': { params: { role?: PairingRole }; result: PairingGrant };
   /** Every paired client still able to connect. */
   'sessions.list': { params: Record<string, never>; result: PairedSession[] };
   /** Forget a paired client: its sockets close and its token opens nothing any more. Owner only. */
@@ -1263,6 +1274,8 @@ export const PAIR_QUERY_PARAM = 'token';
 export const GRANT_QUERY_PARAM = 'grant';
 /** How long a pairing grant can wait to be opened. */
 export const GRANT_TTL_MS = 10 * 60 * 1000;
+/** Every role `pairing.grant` takes; anything else is refused by name. */
+export const PAIRING_ROLES: readonly PairingRole[] = ['device', 'owner'];
 
-export const CLIENT_NAMES = ['shell', 'pwa', 'test', 'bench'] as const;
+export const CLIENT_NAMES = ['shell', 'pwa', 'cli', 'test', 'bench'] as const;
 export type ClientName = (typeof CLIENT_NAMES)[number];

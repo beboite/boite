@@ -50,9 +50,18 @@ forgotten on the spot. A link opened twice, or after its time, is refused by
 name. The core token itself stays in `<dataDir>/core.json`, where the shell
 reads it, and travels nowhere.
 
+A link carries a role. `device` is the default and the only one the QR code is
+drawn for: a phone, whose key says hello as `session` and reaches the list below.
+`owner` is for another computer of the owner's that drives a core running
+elsewhere, a server say: its key says hello as `owner` and reaches every method,
+minting links and revoking included. The "Full control" switch of the pairing
+card mints one, `boite-core pair --owner` mints one on a machine with no window
+([server.md](server.md)), and the Connection card of the other computer takes it
+pasted. A role anything but those two is refused by name.
+
 Session keys are stored hashed in the journal, so a core restart keeps every
 pairing and a copy of the journal holds no credential. `sessions.list` shows
-every paired device with the client it said it was and when it was last seen;
+every paired device with the client it said it was, its role and when it was last seen;
 `sessions.revoke`, the Revoke button of the same card, closes its sockets and
 deletes the row, after which its key opens nothing.
 
@@ -70,7 +79,7 @@ the shape: the gate is deny by default, so the boundary cannot be widened by
 forgetting. A refusal names the method (`projects.add is for the owner only`).
 
 The owner is whoever holds the core token, which means the desktop shell and
-anything else that can read `core.json`. Until this list existed, a paired phone
+anything else that can read `core.json`, or a key paired with the `owner` role. Until this list existed, a paired phone
 could add a project pointing anywhere on the machine, start a thread with a
 working directory of its own, turn on `listenOnLan` and read files through a
 provider dry run: everything the owner could do except pairing another device.

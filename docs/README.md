@@ -23,6 +23,8 @@ build commands in [../README.md](../README.md).
 - [phone.md](phone.md): listening on the LAN, the one-time pairing link and the
   session it becomes, revoking a device, the service worker, what is cached and
   what never is, and the limits.
+- [server.md](server.md): a core on a Linux machine with no window, the build,
+  a systemd user unit, `boite-core pair --owner`, and the desktop app driving it.
 - [trace.md](trace.md): Job Objects and exact process events, what the trace
   shows, the load, the CPU and memory caps, the focus guard, the audio mute, the
   settings that turn them off, and what Linux and macOS get today.

@@ -109,7 +109,7 @@ export function runCommand(store: Store, id: string, inShell: boolean): void {
     case 'new-thread': store.showChat(); store.startDraft(); break;
     case 'palette': store.paletteOpen = !store.paletteOpen; break;
     case 'add-project':
-      if (inShell) void store.pickProject();
+      if (inShell && store.pickerAvailable) void store.pickProject();
       else store.showSettings('general');
       break;
     case 'pin': if (open) void store.pin(open.id, !open.pinned); break;

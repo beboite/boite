@@ -438,6 +438,16 @@ export const strings = {
     materialMica: 'Mica',
     materialSolid: 'Solid',
     connection: 'Connection',
+    localCore: 'This app runs on the core it started on this computer.',
+    coreAt: 'Connected to the core at {url}.',
+    pairingLink: 'Pairing link',
+    pairingLinkPlaceholder: 'http://host:port/?grant=',
+    pair: 'Pair',
+    pairHint:
+      'Paste a link minted by the other core, from its own Settings or with boite-core pair --owner on the machine it runs on. The key it becomes stays on this computer.',
+    useLocal: "Use this computer's core",
+    useLocalHint: 'Forgets the paired key on this computer. Revoke it on the other core so it cannot come back.',
+    manual: 'Core URL and token',
     coreUrl: 'Core URL',
     token: 'Token',
     connect: 'Connect',
@@ -485,7 +495,12 @@ export const strings = {
       revoke: 'Revoke',
       revokeTitle: 'Revoke this device?',
       revokeBody: 'It disconnects now and its key opens nothing any more. Pair it again with a new link.',
-      paired: 'This device is paired with a key of its own. Pairing links are made from the desktop app.'
+      paired: 'This device is paired with a key of its own. Pairing links are made from the desktop app.',
+      owner: 'Full control',
+      ownerHint:
+        'For another computer of yours: its key drives this core as you do, accounts, projects and settings included. Leave it off for a phone.',
+      ownerTag: 'full control',
+      pasteOwner: 'Paste it in Settings, General, on the other computer.'
     }
   },
 
@@ -592,7 +607,8 @@ export const strings = {
     noEndpoint: 'No core endpoint could be resolved.',
     connect: 'Could not connect to the core.',
     clipboard: 'The clipboard refused the text.',
-    revoked: 'This device was revoked from the desktop app. Open a new pairing link to connect again.'
+    revoked: 'This device was revoked from the desktop app. Open a new pairing link to connect again.',
+    pairingLink: 'That is not a pairing link: it needs an http or https address carrying a grant.'
   },
 
   units: {

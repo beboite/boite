@@ -9,6 +9,14 @@ export interface Endpoint {
    * back is what gets stored in its place.
    */
   grant?: string;
+  /**
+   * The token is the session key a pairing link became, not a core token. In
+   * the shell this is what lets a stored endpoint win over the core the shell
+   * started itself: the user paired this app with a core somewhere else.
+   */
+  paired?: boolean;
+  /** The core the shell started on this computer, the one a native folder picker can name paths for. */
+  local?: boolean;
 }
 
 export const ENDPOINT_STORAGE_KEY = 'boite.core';
@@ -29,7 +37,8 @@ export function readStoredEndpoint(): Endpoint | null {
     const raw = window.localStorage.getItem(ENDPOINT_STORAGE_KEY);
     if (!raw) return null;
     const parsed: unknown = JSON.parse(raw);
-    return isEndpoint(parsed) ? { url: normalise(parsed.url), token: parsed.token } : null;
+    if (!isEndpoint(parsed)) return null;
+    return { url: normalise(parsed.url), token: parsed.token, ...(parsed.paired === true ? { paired: true } : {}) };
   } catch {
     return null;
   }
@@ -39,7 +48,7 @@ export function storeEndpoint(endpoint: Endpoint): void {
   try {
     window.localStorage.setItem(
       ENDPOINT_STORAGE_KEY,
-      JSON.stringify({ url: normalise(endpoint.url), token: endpoint.token })
+      JSON.stringify({ url: normalise(endpoint.url), token: endpoint.token, ...(endpoint.paired ? { paired: true } : {}) })
     );
   } catch {
     /* a browser that refuses storage still runs for this session */
@@ -52,6 +61,25 @@ export function clearStoredEndpoint(): void {
   } catch {
     /* nothing to clear */
   }
+}
+
+/**
+ * A pairing link pasted by hand: the core it names and the grant inside it.
+ * The core's own link is `<origin>/?grant=`, and a `core` parameter names a
+ * core other than the origin. Null when there is no http(s) URL or no grant.
+ */
+export function parsePairingLink(text: string): { url: string; grant: string } | null {
+  let link: URL;
+  try {
+    link = new URL(text.trim());
+  } catch {
+    return null;
+  }
+  if (link.protocol !== 'http:' && link.protocol !== 'https:') return null;
+  const grant = link.searchParams.get(GRANT_QUERY_PARAM);
+  if (!grant) return null;
+  const core = link.searchParams.get(CORE_QUERY_PARAM);
+  return { url: normalise(core ?? `${link.origin}${link.pathname}`), grant };
 }
 
 /**
@@ -85,7 +113,7 @@ function takeFromQuery(): Endpoint | null {
   return endpoint;
 }
 
-function insideTauri(): boolean {
+export function insideTauri(): boolean {
   return window.__TAURI_INTERNALS__ !== undefined;
 }
 
@@ -93,7 +121,7 @@ async function fromTauri(): Promise<Endpoint | null> {
   try {
     const { invoke } = await import('@tauri-apps/api/core');
     const result: unknown = await invoke('core_endpoint');
-    return isEndpoint(result) ? { url: normalise(result.url), token: result.token } : null;
+    return isEndpoint(result) ? { url: normalise(result.url), token: result.token, local: true } : null;
   } catch {
     return null;
   }
@@ -106,14 +134,19 @@ function fromOrigin(): Endpoint | null {
 }
 
 /**
- * Where the core is, in order: a pairing link, the Tauri shell, what was stored
- * by an earlier pairing, then the origin that served this page.
+ * Where the core is, in order: a pairing link, then in the Tauri shell a core
+ * this app was paired with and otherwise the one the shell started, then what
+ * was stored by an earlier pairing, then the origin that served this page.
  */
 export async function resolveEndpoint(): Promise<Endpoint | null> {
   const paired = takeFromQuery();
   if (paired) return paired;
 
-  if (insideTauri()) return await fromTauri();
+  if (insideTauri()) {
+    const stored = readStoredEndpoint();
+    if (stored?.paired) return stored;
+    return await fromTauri();
+  }
 
   const stored = readStoredEndpoint();
   if (stored) return stored;

@@ -9,8 +9,9 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
-import type { Channel, Settings } from '@boite/contracts';
-import { Core } from './core.ts';
+import type { Channel, PairingGrant, PairingRole, Settings } from '@boite/contracts';
+import { connect } from './client.ts';
+import { CORE_VERSION, Core } from './core.ts';
 import { newToken } from './ids.ts';
 import { resolveDataDir } from './paths.ts';
 import { startServer } from './server.ts';
@@ -166,7 +167,65 @@ export function resolveHost(flags: Flags, settings: Settings): string {
   return settings.listenOnLan ? '0.0.0.0' : '127.0.0.1';
 }
 
+/**
+ * `boite-core pair [--owner]`: a one-time pairing link from the core already
+ * running on this data directory. It is the Settings page of a machine with no
+ * window, a server say: the command reads the core token out of `core.json`,
+ * which only the account running the core can, asks that core for a grant over
+ * its own socket, and hands the link back. `--owner` makes it a link for a
+ * computer of the user's own, which then drives this core as its owner.
+ */
+export async function pair(argv: string[]): Promise<PairingGrant> {
+  const flags = parseFlags(argv);
+  const role: PairingRole = argv.includes('--owner') ? 'owner' : 'device';
+  const dataDir = resolveDataDir(flags.dataDir, flags.channel);
+  const file = join(dataDir, 'core.json');
+  if (!existsSync(file)) {
+    throw new Error(`no core has run on ${dataDir}: ${file} does not exist. Start the core first.`);
+  }
+  let state: Partial<CoreFile>;
+  try {
+    state = JSON.parse(readFileSync(file, 'utf8')) as Partial<CoreFile>;
+  } catch {
+    throw new Error(`${file} is not JSON`);
+  }
+  if (typeof state.port !== 'number' || typeof state.token !== 'string' || state.token.length === 0) {
+    throw new Error(`${file} has no port or no token`);
+  }
+  const bound = state.host ?? '127.0.0.1';
+  const host = bound === '0.0.0.0' || bound === '::' ? '127.0.0.1' : bound;
+  const url = `http://${host.includes(':') ? `[${host}]` : host}:${state.port}`;
+  let client: Awaited<ReturnType<typeof connect>>;
+  try {
+    client = await connect(url, state.token, { client: { name: 'cli', version: CORE_VERSION } });
+  } catch (error) {
+    throw new Error(`no core answers at ${url}, the address ${file} names: ${(error as Error).message}`);
+  }
+  try {
+    return await client.call('pairing.grant', { role });
+  } finally {
+    client.close();
+  }
+}
+
 export function main(argv: string[]): void {
+  if (argv[0] === 'pair') {
+    pair(argv.slice(1)).then(
+      (grant) => {
+        process.stdout.write(`${grant.url}\n`);
+        process.stderr.write(
+          `pairing link for the ${grant.role} role, good for one use until ${new Date(grant.expiresAt).toISOString()}\n`,
+        );
+        process.exit(0);
+      },
+      (error: unknown) => {
+        process.stderr.write(`boite-core pair: ${error instanceof Error ? error.message : String(error)}\n`);
+        process.exit(1);
+      },
+    );
+    return;
+  }
+
   const flags = parseFlags(argv);
   const dataDir = resolveDataDir(flags.dataDir, flags.channel);
   mkdirSync(dataDir, { recursive: true });
@@ -200,7 +259,8 @@ export function main(argv: string[]): void {
   // No pairing grant here. Every start used to mint a live one and print it,
   // so any log, any terminal scrollback and any shell that reprinted the line
   // handed out a session token nobody had asked for. A phone pairs when the
-  // owner asks for a link in settings, and that link is the only one.
+  // owner asks for a link in settings or with `boite-core pair`, and that link
+  // is the only one.
   process.stdout.write(`boite-core ready ${core.baseUrl()}\n`);
 
   let stopping = false;

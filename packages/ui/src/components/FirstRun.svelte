@@ -7,8 +7,10 @@
 
   let { store }: { store: Store } = $props();
 
-  const inShell = window.__TAURI_INTERNALS__ !== undefined;
-  let typing = $state(!inShell);
+  // The dialog names a folder on this computer, so a shell paired with a core
+  // elsewhere types that core's path instead.
+  const picker = $derived(store.pickerAvailable);
+  let typing = $state(false);
 </script>
 
 <div class="first-run" data-testid="first-run">
@@ -20,7 +22,7 @@
     <p class="muted">{store.owner ? strings.firstRun.body : strings.firstRun.deviceBody}</p>
 
     {#if store.owner}
-      {#if inShell}
+      {#if picker}
         <button type="button" class="primary big" data-testid="pick-project" onclick={() => void store.pickProject()}>
           <FolderOpen size={16} strokeWidth={1.75} />
           {strings.firstRun.pick}
@@ -28,8 +30,8 @@
         <p class="subtle drop-hint">{strings.firstRun.dropHint}</p>
       {/if}
 
-      {#if typing}
-        <ProjectForm {store} primary={!inShell} />
+      {#if typing || !picker}
+        <ProjectForm {store} primary={!picker} />
       {:else}
         <button type="button" class="ghost small type-path" data-testid="add-project" onclick={() => (typing = true)}>
           {strings.firstRun.typePath}

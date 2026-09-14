@@ -4,6 +4,7 @@ import type {
   Message,
   MessagePart,
   MessageRole,
+  PairingRole,
   Project,
   ProcessRecord,
   ThreadSummary,
@@ -12,7 +13,7 @@ import type {
   Usage,
 } from '@boite/contracts';
 
-export const SCHEMA_VERSION = 7;
+export const SCHEMA_VERSION = 8;
 const DELTA_WINDOW_MS = 16;
 
 /** What `listMessagePage` hands back: the page itself and the cursor for what is behind it. */
@@ -116,6 +117,8 @@ export interface SessionRow {
   token_hash: string;
   client_name: string;
   client_version: string;
+  /** What the pairing link granted: `owner` says hello as the owner. */
+  role: PairingRole;
   created_at: number;
   last_seen_at: number;
 }
@@ -249,6 +252,11 @@ const SCHEMA_V7 = `
 ALTER TABLE threads ADD COLUMN context TEXT;
 `;
 
+/** The role a pairing link carried. Every session from before this column was a phone's. */
+const SCHEMA_V8 = `
+ALTER TABLE sessions ADD COLUMN role TEXT NOT NULL DEFAULT 'device';
+`;
+
 function migrate(db: Database): void {
   const row = db.query('PRAGMA user_version').get() as { user_version: number } | null;
   let version = row?.user_version ?? 0;
@@ -279,6 +287,10 @@ function migrate(db: Database): void {
   if (version < 7) {
     db.exec(SCHEMA_V7);
     version = 7;
+  }
+  if (version < 8) {
+    db.exec(SCHEMA_V8);
+    version = 8;
   }
   db.exec(`PRAGMA user_version = ${version}`);
 }
@@ -537,10 +549,10 @@ export class Journal {
   putSession(row: SessionRow): void {
     this.db
       .query(
-        `INSERT OR REPLACE INTO sessions (id, token_hash, client_name, client_version, created_at, last_seen_at)
-         VALUES (?, ?, ?, ?, ?, ?)`,
+        `INSERT OR REPLACE INTO sessions (id, token_hash, client_name, client_version, role, created_at, last_seen_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
       )
-      .run(row.id, row.token_hash, row.client_name, row.client_version, row.created_at, row.last_seen_at);
+      .run(row.id, row.token_hash, row.client_name, row.client_version, row.role, row.created_at, row.last_seen_at);
   }
 
   getSessionByHash(tokenHash: string): SessionRow | null {

@@ -26,7 +26,7 @@
   let projectButton = $state<HTMLButtonElement | undefined>(undefined);
 
   function addProject() {
-    if (window.__TAURI_INTERNALS__ !== undefined) void store.pickProject();
+    if (store.pickerAvailable) void store.pickProject();
     else projectForm.toggle();
   }
 

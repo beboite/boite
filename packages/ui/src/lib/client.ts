@@ -84,6 +84,12 @@ export interface WsClientOptions {
    */
   grant?: string;
   onSession?: (session: Session) => void;
+  /**
+   * The token is the session key of a pairing, whatever role it speaks as. A
+   * key paired with the owner role says hello as the owner, so the principal
+   * alone cannot tell a revoked key from a core token that changed.
+   */
+  paired?: boolean;
   /** The session this client held stopped opening the core: it was revoked. The client is closed for good. */
   onRevoked?: () => void;
   clientName?: ClientName;
@@ -122,12 +128,14 @@ function browserSocket(url: string): SocketLike {
 }
 
 export class WsClient implements ObservableClient {
-  #options: Required<Omit<WsClientOptions, 'clientName' | 'version' | 'grant' | 'onSession' | 'onRevoked'>> & {
+  #options: Required<Omit<WsClientOptions, 'clientName' | 'version' | 'grant' | 'paired' | 'onSession' | 'onRevoked'>> & {
     clientName: ClientName;
     version: string;
   };
   /** Spent on the first hello that answers; a refused grant is not retried. */
   #grant: string | null;
+  /** The token is a pairing's session key, so a hello it no longer opens is a revoke. */
+  #paired: boolean;
   #onSession: ((session: Session) => void) | null;
   #onRevoked: (() => void) | null;
   #principal: Principal | null = null;
@@ -154,6 +162,7 @@ export class WsClient implements ObservableClient {
       backoff: options.backoff ?? defaultBackoff
     };
     this.#grant = options.grant ?? null;
+    this.#paired = options.paired ?? options.grant !== undefined;
     this.#onSession = options.onSession ?? null;
     this.#onRevoked = options.onRevoked ?? null;
   }
@@ -285,6 +294,7 @@ export class WsClient implements ObservableClient {
             if (result.session) {
               // The grant is spent: from here on this client is its session.
               this.#grant = null;
+              this.#paired = true;
               this.#options.token = result.session.token;
               this.#onSession?.(result.session);
             }
@@ -309,7 +319,10 @@ export class WsClient implements ObservableClient {
             // retry would only say so again.
             // A session whose key stopped opening the core was revoked from
             // the desktop: retrying every ten seconds would never pair it again.
-            const revoked = this.#principal === 'session' && error instanceof RpcFailure && error.code === RpcErrorCode.Unauthorized;
+            const revoked =
+              (this.#principal === 'session' || (this.#paired && grant === null)) &&
+              error instanceof RpcFailure &&
+              error.code === RpcErrorCode.Unauthorized;
             const permanent =
               revoked ||
               (error instanceof RpcFailure &&

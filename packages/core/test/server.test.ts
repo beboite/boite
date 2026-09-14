@@ -1,7 +1,9 @@
-import { existsSync } from 'node:fs';
+import { existsSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { PROTOCOL_VERSION, RPC_PATH, RpcCloseCode, RpcErrorCode } from '@boite/contracts';
 import { connect } from '../src/client.ts';
+import { pair } from '../src/main.ts';
 import { isAllowedOrigin, PLACEHOLDER_HTML, ServerConnection, UI_DIST } from '../src/server.ts';
 import { startTestCore } from './harness.ts';
 import type { TestCore } from './harness.ts';
@@ -250,6 +252,69 @@ describe('server', () => {
       after = (error as Error).message;
     }
     expect(['the socket closed', 'the client is closed']).toContain(after);
+  });
+
+  test('an owner pairing link becomes a key that drives the core as its owner, until it is revoked', async () => {
+    const owner = await harness.connect();
+    const minted = await owner.call('pairing.grant', { role: 'owner' });
+    expect(minted.role).toBe('owner');
+
+    const laptop = await connect(harness.url, '', { grant: minted.grant, client: { name: 'shell', version: '2.0.0-beta.1' } });
+    expect(laptop.principal).toBe('owner');
+    expect(laptop.session?.token).toHaveLength(64);
+    expect(laptop.session).not.toHaveProperty('role');
+
+    // The key alone says hello as the owner, reaches what a phone is refused,
+    // and is still a row the owner sees and can take away.
+    const again = await connect(harness.url, laptop.session?.token ?? '');
+    expect(again.principal).toBe('owner');
+    const phoneLink = await again.call('pairing.grant', {});
+    expect(phoneLink.role).toBe('device');
+    const rows = await owner.call('sessions.list', {});
+    expect(rows.map((row) => [row.role, row.client.name])).toEqual([['owner', 'shell']]);
+    expect(harness.core.journal.listSessions()[0]?.role).toBe('owner');
+
+    await owner.call('sessions.revoke', { sessionId: laptop.session?.id ?? '' });
+    let dead = 'none';
+    try {
+      await connect(harness.url, laptop.session?.token ?? '');
+    } catch (error) {
+      dead = (error as Error).message;
+    }
+    expect(dead).toBe('the token is wrong');
+  });
+
+  test('pairing.grant refuses a role it does not know, by name', async () => {
+    const owner = await harness.connect();
+    let refused = 'none';
+    try {
+      await owner.call('pairing.grant', { role: 'admin' as 'owner' });
+    } catch (error) {
+      refused = (error as Error).message;
+    }
+    expect(refused).toBe('pairing.grant role must be device or owner, got admin');
+  });
+
+  test('boite-core pair reads core.json and hands back a link of the role asked for', async () => {
+    let missing = 'none';
+    try {
+      await pair(['--data-dir', harness.dataDir]);
+    } catch (error) {
+      missing = (error as Error).message;
+    }
+    expect(missing).toContain('core.json does not exist');
+
+    const port = Number(new URL(harness.url).port);
+    const state = { port, host: '0.0.0.0', token: harness.token, pid: process.pid, startedAt: Date.now(), version: 'test' };
+    writeFileSync(join(harness.dataDir, 'core.json'), JSON.stringify(state));
+    const ownerLink = await pair(['--owner', '--data-dir', harness.dataDir]);
+    expect(ownerLink.role).toBe('owner');
+    expect(ownerLink.url).toBe(`${harness.url}/?grant=${ownerLink.grant}`);
+    const laptop = await connect(harness.url, '', { grant: ownerLink.grant, client: { name: 'shell', version: '0' } });
+    expect(laptop.principal).toBe('owner');
+
+    const phoneLink = await pair(['--data-dir', harness.dataDir]);
+    expect(phoneLink.role).toBe('device');
   });
 
   test('a grant expires, and hello with both a token and a grant is refused', async () => {

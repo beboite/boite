@@ -17,7 +17,19 @@
   let url = $state(
     untrack(() => stored?.url ?? (store.core ? `http://${store.core.endpoint.host}:${store.core.endpoint.port}` : ''))
   );
-  let token = $state(stored?.token ?? '');
+  let token = $state(stored?.paired ? '' : (stored?.token ?? ''));
+
+  // A link minted by a core somewhere else, pasted here to drive that core.
+  let pairingLink = $state('');
+  // Off mints a phone's link; on mints one for another computer of the owner's.
+  let ownerLink = $state(false);
+
+  async function pair(event: SubmitEvent) {
+    event.preventDefault();
+    const link = pairingLink.trim();
+    if (link.length === 0) return;
+    if (await store.pairWith(link)) pairingLink = '';
+  }
 
   // The devices list is read on arrival and after every `sessions.updated`;
   // the pairing link is minted on the button, never on its own.
@@ -122,7 +134,7 @@
          is told where the folders come from. -->
     {#if store.owner}
       <form class="row" onsubmit={addProject} data-testid="settings-add-project">
-        {#if inShell}
+        {#if store.pickerAvailable}
           <button type="button" onclick={() => void store.pickProject()}>{strings.firstRun.pick}</button>
         {/if}
         <input
@@ -190,6 +202,35 @@
 
   <section class="card">
     <h2>{strings.settings.connection}</h2>
+    {#if store.endpointUrl}
+      <p class="subtle hint" data-testid="settings-target">
+        {store.localCore ? strings.settings.localCore : fill(strings.settings.coreAt, { url: store.endpointUrl })}
+      </p>
+    {/if}
+    <form class="row" onsubmit={pair} data-testid="settings-pair-form">
+      <input
+        bind:value={pairingLink}
+        aria-label={strings.settings.pairingLink}
+        placeholder={strings.settings.pairingLinkPlaceholder}
+        data-testid="settings-pairing-link"
+        class="mono grow"
+        spellcheck="false"
+        autocomplete="off"
+      />
+      <button type="submit" class="primary" data-testid="settings-pair" disabled={pairingLink.trim().length === 0}>
+        {strings.settings.pair}
+      </button>
+    </form>
+    <p class="subtle hint below">{strings.settings.pairHint}</p>
+    {#if inShell && store.paired}
+      <div class="actions">
+        <button type="button" data-testid="settings-use-local" onclick={() => void store.useLocalCore()}>
+          {strings.settings.useLocal}
+        </button>
+        <span class="subtle small-hint">{strings.settings.useLocalHint}</span>
+      </div>
+    {/if}
+    <h3>{strings.settings.manual}</h3>
     <div class="grid">
       <label>
         <span>{strings.settings.coreUrl}</span>
@@ -215,8 +256,20 @@
       {#if store.settings && !store.settings.listenOnLan}
         <p class="subtle hint">{strings.settings.pairing.lanHint}</p>
       {/if}
+      <label class="switch-row">
+        <span class="text">
+          {strings.settings.pairing.owner}
+          <span class="hint">{strings.settings.pairing.ownerHint}</span>
+        </span>
+        <input type="checkbox" role="switch" data-testid="pairing-owner" bind:checked={ownerLink} />
+      </label>
       <div class="actions">
-        <button type="button" class="primary" data-testid="pairing-mint" onclick={() => void store.mintPairing()}>
+        <button
+          type="button"
+          class="primary"
+          data-testid="pairing-mint"
+          onclick={() => void store.mintPairing(ownerLink ? 'owner' : 'device')}
+        >
           {strings.settings.pairing.mint}
         </button>
         {#if store.pairing}
@@ -227,13 +280,17 @@
       </div>
       {#if store.pairing}
         <div class="minted">
-          {#if qr}
+          <!-- A computer takes the link pasted, so its QR code would only be
+               a camera away from the wrong device. -->
+          {#if qr && store.pairing.role !== 'owner'}
             <div class="qr" data-testid="pairing-qr" aria-label={strings.settings.pairing.qr}>{@html qr}</div>
           {/if}
           <div class="minted-text">
             <p class="mono wrap link" data-testid="pairing-link">{store.pairing.url}</p>
             <p class="subtle hint">{fill(strings.settings.pairing.expires, { time: time(store.pairing.expiresAt) })}</p>
-            <p class="subtle hint">{strings.settings.pairing.scan}</p>
+            <p class="subtle hint">
+              {store.pairing.role === 'owner' ? strings.settings.pairing.pasteOwner : strings.settings.pairing.scan}
+            </p>
           </div>
         </div>
       {/if}
@@ -249,6 +306,7 @@
           <li data-session-id={session.id}>
             <span class="name">
               {session.client.name} {session.client.version}
+              {#if session.role === 'owner'}<span class="subtle">({strings.settings.pairing.ownerTag})</span>{/if}
               {#if session.current}<span class="subtle">({strings.settings.pairing.thisDevice})</span>{/if}
             </span>
             <span class="subtle seen">{fill(strings.settings.pairing.lastSeen, { when: ago(session.lastSeenAt) })}</span>
@@ -346,6 +404,14 @@
   .hint {
     font-size: var(--text-sm);
     margin: 0 0 12px;
+  }
+
+  .hint.below {
+    margin: 6px 0 0;
+  }
+
+  .small-hint {
+    font-size: var(--text-sm);
   }
 
   .projects {
