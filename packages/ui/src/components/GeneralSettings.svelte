@@ -207,6 +207,37 @@
         {store.localCore ? strings.settings.localCore : fill(strings.settings.coreAt, { url: store.endpointUrl })}
       </p>
     {/if}
+    {#if store.environments.length > 0}
+      <h3>{strings.settings.environments}</h3>
+      <p class="subtle hint">{strings.settings.environmentsHint}</p>
+      <ul class="projects" data-testid="settings-envs">
+        {#each store.environments as env (env.url)}
+          <li>
+            <span class="name">{env.label}</span>
+            <span class="mono subtle path" title={env.url}>{env.url}</span>
+            {#if store.endpointUrl === env.url}
+              <span class="subtle" data-testid="settings-env-current">{strings.settings.envCurrent}</span>
+            {:else}
+              <button
+                type="button"
+                data-testid="settings-env-switch"
+                onclick={() => void store.switchEnvironment(env.url)}
+              >
+                {strings.settings.envSwitch}
+              </button>
+            {/if}
+            <button
+              type="button"
+              class="ghost small"
+              data-testid="settings-env-forget"
+              onclick={() => void store.forgetEnvironment(env.url)}
+            >
+              {strings.settings.envForget}
+            </button>
+          </li>
+        {/each}
+      </ul>
+    {/if}
     <form class="row" onsubmit={pair} data-testid="settings-pair-form">
       <input
         bind:value={pairingLink}

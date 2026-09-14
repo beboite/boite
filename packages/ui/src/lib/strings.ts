@@ -446,7 +446,12 @@ export const strings = {
     pairHint:
       'Paste a link minted by the other core, from its own Settings or with boite-core pair --owner on the machine it runs on. The key it becomes stays on this computer.',
     useLocal: "Use this computer's core",
-    useLocalHint: 'Forgets the paired key on this computer. Revoke it on the other core so it cannot come back.',
+    useLocalHint: 'The remembered cores below stay remembered.',
+    environments: 'Remembered cores',
+    environmentsHint: 'Paired or connected cores stay here. Switching back needs no new link: the key stays until revoked there or forgotten here.',
+    envCurrent: 'current',
+    envSwitch: 'Switch',
+    envForget: 'Forget',
     manual: 'Core URL and token',
     coreUrl: 'Core URL',
     token: 'Token',

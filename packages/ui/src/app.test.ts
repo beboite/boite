@@ -5,6 +5,7 @@ import App from './App.svelte';
 import { confirm } from './lib/confirm.svelte';
 import { store } from './lib/store.svelte';
 import { setExperiment, writeExperiments } from './lib/experiments';
+import { storeEndpoint, upsertEnvironment } from './lib/endpoint';
 
 // The opener plugin is the shell's system browser; nothing real may run here.
 const { openUrl } = vi.hoisted(() => ({ openUrl: vi.fn(async (_url: string) => {}) }));
@@ -1324,4 +1325,31 @@ test('the desktop still has every one of them', async () => {
   store.showSettings();
   await waitFor(() => document.querySelector('[data-testid=settings-page]') !== null);
   for (const selector of OWNER_ONLY_IN_SETTINGS) expect(document.querySelector(selector)).not.toBeNull();
+});
+
+test('remembered cores list, tag the current one, and forget without touching the connection', async () => {
+  storeEndpoint({ url: 'http://10.0.0.5:9000', token: 'remote', paired: true });
+  upsertEnvironment({ url: 'http://10.0.0.5:9000', token: 'remote', paired: true, label: 'serveur' });
+  upsertEnvironment({ url: 'http://10.0.0.6:9000', token: 'other', paired: false, label: 'labo' });
+  await mountOnFake();
+  // The fake transport leaves no endpoint behind, so name the current core by hand.
+  store.endpointUrl = 'http://10.0.0.5:9000';
+
+  store.showSettings();
+  await waitFor(() => document.querySelector('[data-testid=settings-envs]') !== null);
+  const rows = () => Array.from(document.querySelectorAll('[data-testid=settings-envs] li'));
+  expect(rows().map((row) => row.textContent)).toEqual([
+    expect.stringContaining('serveur'),
+    expect.stringContaining('labo')
+  ]);
+  expect(document.querySelectorAll('[data-testid=settings-env-current]').length).toBe(1);
+  expect(rows()[0]?.textContent).toContain('current');
+
+  // Forgetting the other core drops its row and leaves the connection alone.
+  const forgetButtons = document.querySelectorAll('[data-testid=settings-env-forget]');
+  (forgetButtons[1] as HTMLElement).click();
+  await waitFor(() => document.querySelectorAll('[data-testid=settings-envs] li').length === 1);
+  expect(store.environments.map((env) => env.url)).toEqual(['http://10.0.0.5:9000']);
+  expect(store.endpointUrl).toBe('http://10.0.0.5:9000');
+  expect(store.error).toBeNull();
 });

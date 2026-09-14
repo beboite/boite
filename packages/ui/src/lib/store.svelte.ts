@@ -41,7 +41,7 @@ import {
   type EventHandler,
   type ObservableClient
 } from './client';
-import { clearStoredEndpoint, parsePairingLink, resolveEndpoint, storeEndpoint, type Endpoint } from './endpoint';
+import { clearStoredEndpoint, parsePairingLink, readEnvironments, removeEnvironment, resolveEndpoint, storeEndpoint, upsertEnvironment, type Endpoint, type StoredEnvironment } from './endpoint';
 import { isExperimentEnabled } from './experiments';
 import { titleFrom } from './format';
 import { chordLabel, commandForKey, resolveBindings } from './keybindings';
@@ -183,6 +183,8 @@ export class Store {
   paired = $state(false);
   /** The core is the one the shell started on this computer. */
   localCore = $state(false);
+  /** The cores this device remembers: pairing or connecting adds one, forgetting removes one. */
+  environments = $state<StoredEnvironment[]>([]);
   /** Toasts for threads the user is not looking at, per machine. */
   notifications = $state(readNotifications());
   /** The command palette, `Ctrl+K`. */
@@ -675,6 +677,7 @@ export class Store {
   /** Picks the transport, connects, loads everything the UI opens on. */
   async boot(): Promise<void> {
     try {
+      this.environments = readEnvironments();
       const params = new URLSearchParams(window.location.search);
       // `import.meta.env.DEV` is a constant the bundler folds, so a production
       // build drops this branch whole and never carries the fake core, which
@@ -721,11 +724,18 @@ export class Store {
         paired,
         // The session a grant became is this device's own credential: kept
         // where the next load reads it, so the link is opened once, ever.
-        onSession: (session) => storeEndpoint({ url, token: session.token, paired: true }),
-        // Revoked from the desktop: the dead key goes, and the page says
-        // what to do rather than retrying every ten seconds.
+        // The core joins the remembered environments with it, so switching
+        // back later needs no new link.
+        onSession: (session) => {
+          storeEndpoint({ url, token: session.token, paired: true });
+          this.environments = upsertEnvironment({ url, token: session.token, paired: true });
+        },
+        // Revoked from the desktop: the dead key goes here and in the
+        // remembered cores, and the page says what to do rather than
+        // retrying every ten seconds.
         onRevoked: () => {
           clearStoredEndpoint();
+          this.environments = removeEnvironment(url);
           this.connection = 'closed';
           this.error = strings.errors.revoked;
         },
@@ -815,10 +825,31 @@ export class Store {
     }
   }
 
-  /** Point the UI at another core, from the Settings page. */
+  /** Point the UI at another core, from the Settings page. It stays remembered. */
   async connectTo(url: string, token: string): Promise<void> {
     storeEndpoint({ url, token });
+    this.environments = upsertEnvironment({ url, token, paired: false });
     await this.#switchTo({ url, token });
+  }
+
+  /** Drive a remembered core with the key the pairing left here. No new link needed. */
+  async switchEnvironment(url: string): Promise<void> {
+    const env = readEnvironments().find((entry) => entry.url === url);
+    if (!env) {
+      this.error = strings.errors.noEndpoint;
+      return;
+    }
+    storeEndpoint({ url: env.url, token: env.token, ...(env.paired ? { paired: true } : {}) });
+    await this.#switchTo({ url: env.url, token: env.token, ...(env.paired ? { paired: true } : {}) });
+  }
+
+  /**
+   * Drop a remembered core from this device. Its key stays valid there until
+   * revoked; forgetting the core under the UI falls back to the local one.
+   */
+  async forgetEnvironment(url: string): Promise<void> {
+    this.environments = removeEnvironment(url);
+    if (this.endpointUrl === url) await this.useLocalCore();
   }
 
   /**
@@ -837,7 +868,7 @@ export class Store {
     return this.connection === 'ready';
   }
 
-  /** Back to the core this shell started. The paired key is forgotten here, not revoked there. */
+  /** Back to the core this shell started. Remembered cores stay remembered. */
   async useLocalCore(): Promise<void> {
     clearStoredEndpoint();
     const endpoint = await resolveEndpoint();

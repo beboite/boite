@@ -65,3 +65,20 @@ test('the compact quota page shows limits and reset times', async () => {
   expect(await page.evaluate(`document.querySelector('${id('quota-popup')}').textContent`)).toContain('Resets');
   expect(await page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')).toBe(true);
 }, 30_000);
+
+test('remembered cores list every core and forget drops one', async () => {
+  await page.evaluate(`localStorage.setItem('boite.envs', JSON.stringify([
+    { url: 'http://127.0.0.1:9', label: 'cet ordi', token: 'x', paired: false },
+    { url: 'http://100.64.0.15:3773', label: '100.64.0.15:3773', token: 'y', paired: true }
+  ]))`);
+  await page.navigate(`${core.url}/?fake=1`);
+  await page.waitFor(`document.querySelector('${id('nav-settings')}')`);
+  await page.click(id('nav-settings'));
+  await page.waitFor(`document.querySelector('${id('settings-envs')}')`);
+  const text = await page.evaluate(`document.querySelector('${id('settings-envs')}').textContent`);
+  expect(text).toContain('cet ordi');
+  expect(text).toContain('100.64.0.15:3773');
+  await capture('envs.png');
+  await page.evaluate(`[...document.querySelectorAll('${id('settings-env-forget')}')][1].click()`);
+  await page.waitFor(`document.querySelectorAll('${id('settings-envs')} li').length === 1`);
+}, 30_000);

@@ -1,5 +1,13 @@
 import { beforeEach, describe, expect, test } from 'vitest';
-import { parsePairingLink, readStoredEndpoint, resolveEndpoint, storeEndpoint } from './endpoint';
+import {
+  parsePairingLink,
+  readEnvironments,
+  readStoredEndpoint,
+  removeEnvironment,
+  resolveEndpoint,
+  storeEndpoint,
+  upsertEnvironment
+} from './endpoint';
 
 function at(path: string): void {
   window.history.replaceState(null, '', path);
@@ -69,6 +77,64 @@ describe('resolveEndpoint', () => {
     } finally {
       delete window.__TAURI_INTERNALS__;
     }
+  });
+});
+
+describe('environments', () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    at('/');
+  });
+
+  test('empty when nothing was ever paired or connected', () => {
+    expect(readEnvironments()).toEqual([]);
+  });
+
+  test('upsert adds with the host as label, keyed by normalised URL', () => {
+    upsertEnvironment({ url: 'http://100.64.0.15:3773/', token: 'abc', paired: true });
+
+    expect(readEnvironments()).toEqual([
+      { url: 'http://100.64.0.15:3773', label: '100.64.0.15:3773', token: 'abc', paired: true }
+    ]);
+  });
+
+  test('a second upsert refreshes the key and keeps the label unless renamed', () => {
+    upsertEnvironment({ url: 'http://10.0.0.5:9000', token: 'old', paired: true });
+    upsertEnvironment({ url: 'http://10.0.0.5:9000/', token: 'new', paired: true });
+
+    expect(readEnvironments()).toEqual([
+      { url: 'http://10.0.0.5:9000', label: '10.0.0.5:9000', token: 'new', paired: true }
+    ]);
+
+    upsertEnvironment({ url: 'http://10.0.0.5:9000', token: 'new', paired: true, label: 'serveur' });
+    expect(readEnvironments()[0]?.label).toBe('serveur');
+  });
+
+  test('remove forgets one core and keeps the others', () => {
+    upsertEnvironment({ url: 'http://10.0.0.5:9000', token: 'a', paired: true });
+    upsertEnvironment({ url: 'http://10.0.0.6:9000', token: 'b', paired: false });
+
+    removeEnvironment('http://10.0.0.5:9000/');
+
+    expect(readEnvironments()).toEqual([
+      { url: 'http://10.0.0.6:9000', label: '10.0.0.6:9000', token: 'b', paired: false }
+    ]);
+  });
+
+  test('a paired endpoint stored before this list existed seeds one entry', () => {
+    storeEndpoint({ url: 'http://10.0.0.5:9000', token: 'key', paired: true });
+
+    expect(readEnvironments()).toEqual([
+      { url: 'http://10.0.0.5:9000', label: '10.0.0.5:9000', token: 'key', paired: true }
+    ]);
+  });
+
+  test('an unpaired stored endpoint and a broken list seed nothing', () => {
+    storeEndpoint({ url: 'http://10.0.0.5:9000', token: 'typed' });
+    expect(readEnvironments()).toEqual([]);
+
+    window.localStorage.setItem('boite.envs', 'not json');
+    expect(readEnvironments()).toEqual([]);
   });
 });
 

@@ -64,6 +64,104 @@ export function clearStoredEndpoint(): void {
 }
 
 /**
+ * A remembered core: one pairing or manual connection this device keeps, so
+ * switching back needs no new link. The token is the session key the link
+ * became, useless anywhere but on its own core, and dead once revoked there.
+ * The key is the normalised URL: one entry per core, never two.
+ */
+export interface StoredEnvironment {
+  url: string;
+  label: string;
+  token: string;
+  paired: boolean;
+}
+
+export const ENVIRONMENTS_STORAGE_KEY = 'boite.envs';
+
+/** The host part of the URL, port included; the raw URL when it parses as nothing. */
+export function defaultEnvironmentLabel(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
+  }
+}
+
+function isEnvironment(value: unknown): value is StoredEnvironment {
+  if (typeof value !== 'object' || value === null) return false;
+  const shape = value as Record<string, unknown>;
+  return (
+    typeof shape['url'] === 'string' &&
+    typeof shape['label'] === 'string' &&
+    typeof shape['token'] === 'string' &&
+    typeof shape['paired'] === 'boolean'
+  );
+}
+
+/**
+ * Every remembered core, oldest first. A device that paired before this list
+ * existed seeds one entry from its stored endpoint, so nothing is lost.
+ */
+export function readEnvironments(): StoredEnvironment[] {
+  let list: StoredEnvironment[] = [];
+  try {
+    const raw = window.localStorage.getItem(ENVIRONMENTS_STORAGE_KEY);
+    if (raw) {
+      const parsed: unknown = JSON.parse(raw);
+      if (Array.isArray(parsed)) list = parsed.filter(isEnvironment);
+    }
+  } catch {
+    list = [];
+  }
+  if (list.length > 0) return list;
+  const stored = readStoredEndpoint();
+  if (!stored?.paired) return [];
+  const seeded: StoredEnvironment = {
+    url: stored.url,
+    label: defaultEnvironmentLabel(stored.url),
+    token: stored.token,
+    paired: true
+  };
+  storeEnvironments([seeded]);
+  return [seeded];
+}
+
+export function storeEnvironments(envs: StoredEnvironment[]): void {
+  try {
+    window.localStorage.setItem(ENVIRONMENTS_STORAGE_KEY, JSON.stringify(envs));
+  } catch {
+    /* a browser that refuses storage still runs for this session */
+  }
+}
+
+/** Adds the core or refreshes its key, keeping an existing label unless a new one is given. */
+export function upsertEnvironment(entry: {
+  url: string;
+  token: string;
+  paired: boolean;
+  label?: string;
+}): StoredEnvironment[] {
+  const url = normalise(entry.url);
+  const list = readEnvironments();
+  const at = list.findIndex((env) => env.url === url);
+  const label = entry.label ?? list[at]?.label ?? defaultEnvironmentLabel(url);
+  if (at === -1) {
+    list.push({ url, label, token: entry.token, paired: entry.paired });
+  } else {
+    list[at] = { url, label, token: entry.token, paired: entry.paired };
+  }
+  storeEnvironments(list);
+  return list;
+}
+
+/** Forgets the core. Its key stays valid there until revoked; it just opens nothing from here. */
+export function removeEnvironment(url: string): StoredEnvironment[] {
+  const list = readEnvironments().filter((env) => env.url !== normalise(url));
+  storeEnvironments(list);
+  return list;
+}
+
+/**
  * A pairing link pasted by hand: the core it names and the grant inside it.
  * The core's own link is `<origin>/?grant=`, and a `core` parameter names a
  * core other than the origin. Null when there is no http(s) URL or no grant.
