@@ -13,7 +13,7 @@ import type {
   Usage,
 } from '@boite/contracts';
 
-export const SCHEMA_VERSION = 9;
+export const SCHEMA_VERSION = 10;
 const DELTA_WINDOW_MS = 16;
 
 /** What `listMessagePage` hands back: the page itself and the cursor for what is behind it. */
@@ -54,6 +54,7 @@ interface ThreadRow {
   account_id: string;
   model: string | null;
   effort: string | null;
+  speed: string | null;
   cwd: string;
   branch: string | null;
   permission_mode: string;
@@ -306,6 +307,7 @@ function migrate(db: Database): void {
     })();
     version = 9;
   }
+  if (version < 10) { db.exec('ALTER TABLE threads ADD COLUMN speed TEXT'); version = 10; }
   db.exec(`PRAGMA user_version = ${version}`);
 }
 
@@ -332,6 +334,7 @@ function toThread(row: ThreadRow): ThreadSummary {
     accountId: row.account_id,
     model: row.model,
     effort: row.effort,
+    speed: row.speed,
     cwd: row.cwd,
     branch: row.branch,
     permissionMode: row.permission_mode as ThreadSummary['permissionMode'],
@@ -514,8 +517,8 @@ export class Journal {
     this.db
       .query(
         `INSERT OR REPLACE INTO threads
-         (id, project_id, title, title_source, provider_id, account_id, model, effort, cwd, branch, permission_mode, status, unread, archived, pinned, session_id, context, created_at, updated_at, session_generation, selection_version)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (id, project_id, title, title_source, provider_id, account_id, model, effort, cwd, branch, permission_mode, status, unread, archived, pinned, session_id, context, created_at, updated_at, session_generation, selection_version, speed)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         thread.id,
@@ -539,6 +542,7 @@ export class Journal {
         thread.updatedAt,
         thread.sessionGeneration ?? 0,
         thread.selectionVersion ?? 0,
+        thread.speed ?? null,
       );
   }
 

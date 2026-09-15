@@ -146,6 +146,7 @@ BOITE_ECHO=1 bun run dev:core
 ```bash
 bun run check    # tsc on contracts and core, svelte-check --tsgo on the UI
 bun run test     # bun test in packages/core, vitest in packages/ui
+bun run build:ui # required by the core-backed browser tests on a fresh checkout
 bun run e2e      # tests/e2e
 ```
 
@@ -167,7 +168,8 @@ ever start that executable: a window on the user's screen is forbidden.
 `bun run test:shell` runs the Rust unit tests. A full `bun run e2e` fails when
 the shell executable or its workers are missing or stale. Set
 `BOITE_E2E_SKIP_SHELL=1` only for an explicitly partial core/UI run. The browser
-suite rebuilds the UI before starting so it cannot pass against an old bundle.
+UI test file rebuilds its bundle, but other core-backed tests can run first.
+Build the UI before the suite so those tests also load current assets.
 
 The end to end run drives
 `apps/shell/src-tauri/target/release/boite-shell.exe`, and the only command that

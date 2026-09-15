@@ -3,7 +3,7 @@ import type { ModelInfo } from '@boite/contracts';
 export interface FavoriteModel { providerId: string; accountId: string; model: ModelInfo }
 export const FAVORITES_KEY = 'boite.model-favorites.v1';
 export function isNamedModel(model: ModelInfo): boolean {
-  return !/^(default|auto)$/i.test(model.id) && !/\bdefault$/i.test(model.name);
+  return !/^(default|auto)(?:\b|[\[(/])/i.test(model.id) && !/\b(default|auto)(?:\b|$)/i.test(model.name);
 }
 /** Quality tiers, then numeric generation. Unknown families retain provider order. */
 export function orderedModels(models: ModelInfo[]): ModelInfo[] {

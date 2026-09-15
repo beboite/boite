@@ -102,6 +102,7 @@ export interface Choice {
   model: string | null;
   /** A level id of that model, or null for the model's own default. */
   effort: string | null;
+  speed?: string | null;
 }
 
 /** What the picker hands back: the instance and model together, or an effort alone. */
@@ -110,6 +111,7 @@ export interface PickPatch {
   accountId?: string;
   model?: string | null;
   effort?: string | null;
+  speed?: string | null;
 }
 
 export const UI_VERSION = '2.0.0-beta.1';
@@ -257,6 +259,22 @@ export class Store {
    * time, and an account that changes drops its own key.
    */
   probedModels = $state<Record<string, ModelInfo[]>>({});
+  #probeAttempts = new Set<string>();
+  #probeRequests = new Map<string, Promise<void>>();
+  #probeEpoch = 0;
+  #modelCacheKey(): string { return 'boite.models.v1:' + JSON.stringify([this.endpointUrl, this.core?.dataDir]); }
+  #saveModels(): void {
+    try { localStorage.setItem(this.#modelCacheKey(), JSON.stringify({ providers: this.providers, accounts: this.accounts, models: this.probedModels })); }
+    catch { /* Storage unavailable: keep the in-memory cache. */ }
+  }
+  #restoreModels(): void {
+    try {
+      const cached = JSON.parse(localStorage.getItem(this.#modelCacheKey()) ?? 'null');
+      if (!cached || JSON.stringify(cached.providers) !== JSON.stringify(this.providers) || JSON.stringify(cached.accounts) !== JSON.stringify(this.accounts)) return;
+      const entries = Object.entries(cached.models ?? {}).filter(([, models]) => Array.isArray(models) && models.every(m => typeof m?.id === 'string' && typeof m?.name === 'string'));
+      this.probedModels = { ...Object.fromEntries(entries) as Record<string, ModelInfo[]>, ...this.probedModels };
+    } catch { /* A missing or malformed cache is read again from the agent. */ }
+  }
   /** The keys a probe is running for, so the picker can say it is reading. */
   probingModels = $state<string[]>([]);
   accounts = $state<Account[]>([]);
@@ -372,7 +390,10 @@ export class Store {
    */
   modelsOf(providerId: ProviderId, accountId: string | null): ModelInfo[] {
     const probed = accountId ? this.probedModels[probeKey(providerId, accountId)] : undefined;
-    return probed ?? this.providerOf(providerId)?.models ?? [];
+    if (probed) return probed;
+    const provider = this.providerOf(providerId);
+    const models = provider?.models ?? [];
+    return provider?.protocol === 'claude-sdk' ? models.map(({ effort, speeds, ...model }) => model) : models;
   }
 
   /** The model a choice runs on, out of what its own instance offers: what the chips read. */
@@ -389,21 +410,32 @@ export class Store {
    * Ask the agent what it can run. Once per instance per session: the answer
    * stays until the core reloads its descriptors or the account changes.
    */
-  async probeModels(providerId: ProviderId, accountId: string): Promise<void> {
+  probeModels(providerId: ProviderId, accountId: string, refresh = false): Promise<void> {
     const client = this.#client;
     const key = probeKey(providerId, accountId);
-    // Probing starts an agent process, so it is the owner's. A device shows the
-    // models the descriptor and the core already named, and asks for nothing.
-    if (!client || !this.owner || this.probedModels[key] || this.probingModels.includes(key)) return;
+    const existing = this.#probeRequests.get(key);
+    if (existing) return existing;
+    if (!client || !this.owner || (!refresh && this.#probeAttempts.has(key))) return Promise.resolve();
+    this.#probeAttempts.add(key);
+    const epoch = this.#probeEpoch;
     this.probingModels = [...this.probingModels, key];
-    try {
-      const { models } = await client.call('providers.probe', { providerId, accountId });
-      this.probedModels = { ...this.probedModels, [key]: models };
-    } catch (error) {
-      this.#fail(error);
-    } finally {
-      this.probingModels = this.probingModels.filter((entry) => entry !== key);
-    }
+    let request!: Promise<void>;
+    request = (async () => {
+      try {
+        const { models } = await client.call('providers.probe', { providerId, accountId, ...(refresh ? { refresh: true } : {}) });
+        if (client !== this.#client || epoch !== this.#probeEpoch) return;
+        this.probedModels = { ...this.probedModels, [key]: models };
+        this.#saveModels();
+      } catch (error) { if (client === this.#client) this.#fail(error); }
+      finally {
+        if (this.#probeRequests.get(key) === request) {
+          this.#probeRequests.delete(key);
+          this.probingModels = this.probingModels.filter(entry => entry !== key);
+        }
+      }
+    })();
+    this.#probeRequests.set(key, request);
+    return request;
   }
 
   isCollapsed(projectId: ProjectId): boolean {
@@ -454,7 +486,8 @@ export class Store {
       accountId: account.id,
       permissionMode: this.prefs.permissionMode,
       model,
-      effort
+      effort,
+      speed: offered.find(m => m.id === model)?.speeds?.some(option => option.id === this.prefs.speed) ? this.prefs.speed : null
     };
   }
 
@@ -494,6 +527,11 @@ export class Store {
     this.logins = {};
     this.#loginChanges.clear();
     this.#client = client;
+    this.probedModels = {};
+    this.#probeEpoch++;
+    this.#probeAttempts.clear();
+    this.#probeRequests.clear();
+    this.probingModels = [];
     this.connection = client.state;
     this.prefs = readPrefs();
     this.favorites = readFavorites();
@@ -510,6 +548,8 @@ export class Store {
         client.onState((state) => {
           this.connection = state;
           if (state === 'ready') {
+            this.#probeEpoch++;
+            this.#probeAttempts.clear();
             this.error = null;
             this.core = client.core;
             // `WsClient` writes its principal from the hello answer before it
@@ -674,9 +714,14 @@ export class Store {
       // The core drops its own probes on a reload; holding stale ones would
       // offer a model it now refuses.
       this.probedModels = {};
+      this.#probeEpoch++;
+      this.#probeAttempts.clear();
+      this.#saveModels();
     });
     on('providers.probed', ({ providerId, accountId, models }) => {
       this.probedModels = { ...this.probedModels, [probeKey(providerId, accountId)]: models };
+      this.#probeAttempts.add(probeKey(providerId, accountId));
+      this.#saveModels();
     });
     on('project.added', (project) => {
       if (!this.projects.some((p) => p.id === project.id))
@@ -978,6 +1023,7 @@ export class Store {
       this.rejectedProviders = providers.rejected;
       this.installStates = installStatesOf(providers.loaded);
       this.accounts = accounts;
+      this.#restoreModels();
       this.#restoreLogins(logins, loginRevision);
       this.settings = settings;
       this.keybindings = keybindings;
@@ -1252,6 +1298,7 @@ export class Store {
     permissionMode?: PermissionMode;
     model?: string;
     effort?: string | null;
+    speed?: string | null;
     worktree?: { branch?: string };
   }): Promise<ThreadSummary | null> {
     const client = this.#client;
@@ -1301,6 +1348,7 @@ export class Store {
       permissionMode: choice.permissionMode,
       title: titleFrom(prompt) || undefined,
       effort: choice.effort,
+      speed: choice.speed ?? null,
       ...(choice.model ? { model: choice.model } : {}),
       ...(draft.worktree ? { worktree: {} } : {})
     });
@@ -1458,7 +1506,7 @@ export class Store {
 
   async update(
     threadId: ThreadId,
-    patch: { title?: string; accountId?: string; model?: string | null; effort?: string | null; permissionMode?: PermissionMode; expectedSelectionVersion?: number }
+    patch: { title?: string; accountId?: string; model?: string | null; effort?: string | null; speed?: string | null; permissionMode?: PermissionMode; expectedSelectionVersion?: number }
   ): Promise<boolean> {
     const client = this.#client;
     if (!client) return false;
@@ -1829,10 +1877,13 @@ export class Store {
 
   /** What was probed for one account, dropped: the account itself changed. */
   #dropProbes(accountId: string): void {
+    this.#probeEpoch++;
+    for (const key of this.#probeAttempts) if (key.endsWith(`::${accountId}`)) this.#probeAttempts.delete(key);
     const suffix = `::${accountId}`;
     const kept = Object.entries(this.probedModels).filter(([key]) => !key.endsWith(suffix));
     if (kept.length !== Object.keys(this.probedModels).length) {
       this.probedModels = Object.fromEntries(kept);
+      this.#saveModels();
     }
   }
 

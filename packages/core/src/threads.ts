@@ -231,6 +231,7 @@ export class ThreadStore {
     const { project, provider, account } = this.check(params);
     const model = checkModel(provider, account.id, params.model ?? defaultModel(provider));
     checkEffort(provider, account.id, model, params.effort ?? null);
+    checkSpeed(provider, account.id, model, params.speed ?? null);
     const id = newId('thr_');
     const placed = await this.core.worktrees.add(id, project, titleOf(params.title), params.worktree?.branch);
     try {
@@ -255,6 +256,7 @@ export class ThreadStore {
       accountId: account.id,
       model,
       effort: checkEffort(provider, account.id, model, params.effort ?? null),
+      speed: checkSpeed(provider, account.id, model, params.speed ?? null),
       // A worktree's directory is the core's own and sits beside the project;
       // anything a client names has to be inside it.
       cwd:
@@ -401,6 +403,7 @@ export class ThreadStore {
     title?: string;
     model?: string | null;
     effort?: string | null;
+    speed?: string | null;
     permissionMode?: ThreadSummary['permissionMode'];
   }): ThreadSummary {
     const thread = this.require(params.threadId);
@@ -420,6 +423,7 @@ export class ThreadStore {
       next.providerId = provider.id;
       next.model = checkModel(provider, account.id, params.model === undefined ? defaultModel(provider) : params.model);
       next.effort = null;
+      next.speed = null;
       next.sessionId = null;
       next.sessionGeneration = (thread.sessionGeneration ?? 0) + 1;
       next.context = null;
@@ -428,12 +432,15 @@ export class ThreadStore {
       // A new model starts on its own default unless the call says otherwise.
       next.model = checkModel(provider, account.id, params.model);
       next.effort = null;
+      next.speed = null;
     }
     if (params.permissionMode !== undefined) next.permissionMode = params.permissionMode;
     if (params.effort !== undefined) next.effort = params.effort;
+    if (params.speed !== undefined) next.speed = params.speed;
+    next.speed = checkSpeed(provider, account.id, next.model, next.speed ?? null);
     // The model may have changed in the same call, so the scale is the new one's.
     next.effort = checkEffort(provider, account.id, next.model, next.effort);
-    if (switched || next.model !== thread.model || next.effort !== thread.effort || next.permissionMode !== thread.permissionMode) {
+    if (switched || next.model !== thread.model || next.effort !== thread.effort || next.speed !== thread.speed || next.permissionMode !== thread.permissionMode) {
       next.selectionVersion = (thread.selectionVersion ?? 0) + 1;
     }
     if (switched) {
@@ -575,6 +582,8 @@ export class ThreadStore {
       this.core.providers.summary(thread.providerId),
       this.core.accounts.require(thread.accountId),
     );
+    checkEffort(provider, thread.accountId, thread.model, thread.effort);
+    checkSpeed(provider, thread.accountId, thread.model, thread.speed ?? null);
     checkAttachments(attachments, provider);
 
     const now = Date.now();
@@ -589,7 +598,7 @@ export class ThreadStore {
       error: null,
       execution: {
         providerId: thread.providerId, accountId: thread.accountId, model: thread.model,
-        effort: thread.effort, permissionMode: thread.permissionMode, sessionId: thread.sessionId,
+        effort: thread.effort, speed: thread.speed ?? null, permissionMode: thread.permissionMode, sessionId: thread.sessionId,
         sessionGeneration: thread.sessionGeneration ?? 0, selectionVersion: thread.selectionVersion ?? 0,
         ...(operation ? { operation } : {}),
       },
@@ -1290,4 +1299,11 @@ export function registerThreadMethods(core: Core): void {
     });
     return { ok: true } as const;
   });
+}
+
+function checkSpeed(provider: ProviderDescriptor, accountId: string, model: string | null, speed: string | null): string | null {
+  if (speed === null) return null;
+  const options = modelsFor(provider, accountId).find(entry => entry.id === model)?.speeds ?? [];
+  if (options.some(option => option.id === speed)) return speed;
+  throw refused('the model does not offer this speed', { providerId: provider.id, model, speed, expected: options.map(option => option.id) });
 }

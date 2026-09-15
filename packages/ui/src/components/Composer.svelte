@@ -78,7 +78,8 @@
         accountId: thread.accountId,
         permissionMode: thread.permissionMode,
         model: thread.model,
-        effort: thread.effort
+        effort: thread.effort,
+        speed: thread.speed ?? null
       };
     } else if (draft) {
       choice = store.defaultChoice();
@@ -121,6 +122,12 @@
   );
 
   let provider = $derived(choice ? store.providerOf(choice.providerId) : null);
+  $effect(() => {
+    if (provider?.available && provider.protocol !== 'echo' && choice) {
+      const id = provider.id, accountId = choice.accountId;
+      untrack(() => void store.probeModels(id, accountId));
+    }
+  });
   let bound = $derived(store.openThread !== null);
   /** The attach button is only there for an agent that reads images. */
   let takesImages = $derived(provider?.capabilities.images ?? false);
@@ -271,7 +278,8 @@
 
   // The reasoning chip belongs to the model the choice is on, and a model that
   // offers no scale (an agent that keeps its own) gets no chip at all.
-  let effortLevels = $derived(store.modelOf(choice)?.effort?.levels ?? []);
+  let effortLevels = $derived((store.modelOf(choice)?.effort?.levels ?? []).filter(level => provider?.protocol === 'claude-sdk' || level.id !== 'ultrathink'));
+  let speeds = $derived(store.modelOf(choice)?.speeds ?? []);
   let activeEffort = $derived(choice?.effort ?? store.modelOf(choice)?.effort?.default ?? null);
 
   /** On a thread only the model and the effort change and they are saved at once; on a draft the whole choice is remembered. */
@@ -280,11 +288,12 @@
     const thread = store.openThread;
 
     if (thread) {
-      const target = { ...choice, ...patch, effort: patch.effort !== undefined ? patch.effort : null };
+      const changedModel = patch.model !== undefined || patch.accountId !== undefined;
+      const target = { ...choice, ...patch, effort: patch.effort !== undefined ? patch.effort : changedModel ? null : choice.effort, speed: patch.speed !== undefined ? patch.speed : changedModel ? null : choice.speed ?? null };
       picking = true;
       try {
         const accepted = await store.update(thread.id, {
-          accountId: target.accountId, model: target.model, effort: target.effort,
+          accountId: target.accountId, model: target.model, effort: target.effort, speed: target.speed,
           expectedSelectionVersion: thread.selectionVersion ?? 0,
         });
         if (accepted) store.remember(target);
@@ -292,6 +301,7 @@
       return;
     }
 
+    if (patch.speed !== undefined) { choice = { ...choice, speed: patch.speed }; store.remember(choice); return; }
     // An effort alone: the model stays, so nothing else moves.
     if (patch.effort !== undefined) {
       if (patch.effort === choice.effort) return;
@@ -301,7 +311,7 @@
     }
 
     // Another model runs on its own scale, so the effort goes back to that model's default.
-    choice = { ...choice, ...patch, effort: null };
+    choice = { ...choice, ...patch, effort: null, speed: null };
     store.remember(choice);
   }
 
@@ -726,32 +736,8 @@
       <div class="chips">
         <ModelPicker {store} {choice} disabled={picking} onpick={pick} />
 
-        {#if takesImages}
-          <button
-            type="button"
-            class="chip attach"
-            data-testid="composer-attach"
-            title={strings.composer.attach}
-            aria-label={strings.composer.attach}
-            onclick={() => picker?.click()}
-          >
-            <Paperclip size={14} strokeWidth={1.75} />
-          </button>
-          <input
-            bind:this={picker}
-            class="file"
-            type="file"
-            accept="image/png,image/jpeg,image/gif,image/webp"
-            multiple
-            tabindex="-1"
-            aria-hidden="true"
-            data-testid="composer-file"
-            onchange={onchoose}
-          />
-        {/if}
-
-        {#if effortLevels.length > 0}
-          <EffortSlider levels={effortLevels} active={activeEffort} onpick={pickEffort} />
+        {#if effortLevels.length > 0 || speeds.length > 0}
+          <EffortSlider levels={effortLevels} active={activeEffort} onpick={pickEffort} {speeds} speed={choice?.speed ?? null} onspeed={(speed) => void pick({ speed })} />
         {/if}
 
         <Menu items={modeItems} onpick={pickMode} label={strings.composer.mode} testid="composer-mode">
@@ -778,11 +764,37 @@
       </div>
 
 
+
       {#if store.busy}
         <button type="button" class="icon stop" data-testid="composer-stop" title={strings.composer.stop} aria-label={strings.composer.stop} onclick={() => void store.stop()}>
           <Square size={12} strokeWidth={2.5} />
         </button>
       {/if}
+        {#if takesImages}
+          <button
+            type="button"
+            class="icon attach"
+            data-testid="composer-attach"
+            title={strings.composer.attach}
+            aria-label={strings.composer.attach}
+            onclick={() => picker?.click()}
+          >
+            <Paperclip size={14} strokeWidth={1.75} />
+          </button>
+          <input
+            bind:this={picker}
+            class="file"
+            type="file"
+            accept="image/png,image/jpeg,image/gif,image/webp"
+            multiple
+            tabindex="-1"
+            aria-hidden="true"
+            data-testid="composer-file"
+            onchange={onchoose}
+          />
+        {/if}
+
+
       <button
         type="button"
         class="primary icon send"
@@ -924,12 +936,14 @@
   }
 
   .chips {
+    flex: 1;
     display: flex;
     align-items: center;
     gap: 4px;
     flex-wrap: wrap;
     min-width: 0;
   }
+
 
   .send,
   .stop {

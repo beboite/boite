@@ -8,6 +8,7 @@ export interface ComposerPrefs {
   model: string | null;
   /** A level id of that model, or null for the model's own default. */
   effort: string | null;
+  speed?: string | null;
 }
 
 /** What the window remembers: the sidebar's width and whether it is folded. */
@@ -63,7 +64,8 @@ export function readPrefs(): ComposerPrefs {
       accountId: typeof parsed.accountId === 'string' ? parsed.accountId : null,
       permissionMode: mode !== undefined && MODES.includes(mode) ? mode : 'default',
       model: typeof parsed.model === 'string' ? parsed.model : null,
-      effort: typeof parsed.effort === 'string' ? parsed.effort : null
+      effort: typeof parsed.effort === 'string' ? parsed.effort : null,
+      speed: typeof parsed.speed === 'string' ? parsed.speed : null
     };
   });
 }

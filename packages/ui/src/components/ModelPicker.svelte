@@ -1,15 +1,16 @@
 <script lang="ts">
-  import { ChevronDown, ChevronRight, Search, Sparkles, Star } from '@lucide/svelte';
+  import { ChevronDown, ChevronRight, Search, Sparkles, Star, RefreshCw } from '@lucide/svelte';
   import { orderedModels, type FavoriteModel } from '../lib/model-order';
   import type { Account, ModelInfo, ProviderSummary } from '@boite/contracts';
   import ProviderLogo from './ProviderLogo.svelte';
+  import { floating } from '../lib/floating';
   import { Closing } from '../lib/closing.svelte';
   import { strings } from '../lib/strings';
   import type { Choice, PickPatch, Store } from '../lib/store.svelte';
 
   /**
-   * One popover: a rail of provider logos on the left, everything about the
-   * shown provider on the right. Its name heads the column, its accounts sit
+   * One popover: a row of provider logos above the selected provider's models.
+   * Its name heads the column, its accounts sit
    * beside the name as chips when there is more than one, and its models fill
    * the rest. A click on a model closes the picker; nothing else does.
    */
@@ -32,7 +33,10 @@
   const SEARCH_FROM = 12;
 
   const popover = new Closing();
-  let legacyOpen = $state(false);
+  const legacy = new Closing();
+  $effect(() => { if (!popover.open) legacy.hide(); });
+  let legacyOpen = $derived(legacy.open);
+  let menu = $state<HTMLDivElement | undefined>(undefined);
   let root = $state<HTMLDivElement | undefined>(undefined);
   let searchBox = $state<HTMLInputElement | undefined>(undefined);
   /** What the model column is filtered on; empty while the list is short. */
@@ -50,7 +54,7 @@
     favoritePending = true;
     try {
       const protocol = store.providerOf(entry.providerId)?.protocol;
-      if (protocol === 'acp' || protocol === 'codex-appserver' || protocol === 'pi') await store.probeModels(entry.providerId, entry.accountId);
+      if (protocol === 'claude-sdk' || protocol === 'acp' || protocol === 'codex-appserver' || protocol === 'pi') await store.probeModels(entry.providerId, entry.accountId);
       if (!store.modelsOf(entry.providerId, entry.accountId).some((m) => m.id === entry.model.id)) { store.error = strings.composer.favoriteUnavailable; return; }
       onpick({ providerId: entry.providerId, accountId: entry.accountId, model: entry.model.id });
       popover.hide();
@@ -86,13 +90,25 @@
   let shownModels = $derived(shown ? orderedModels(store.modelsOf(shown.id, shownAccountId)) : []);
   let probing = $derived(shown ? store.isProbing(shown.id, shownAccountId) : false);
 
+  async function refreshModels() {
+    if (favoritesOpen) {
+      const seen = new Set<string>();
+      for (const entry of favorites) {
+        const key = entry.providerId + '::' + entry.accountId;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        await store.probeModels(entry.providerId, entry.accountId, true);
+      }
+    } else if (shown && shownAccountId) await store.probeModels(shown.id, shownAccountId, true);
+  }
+
   // An ACP agent owns its model list, so the descriptor cannot carry it: the
   // core reads it from one short-lived agent process the first time the picker
   // shows that instance, and the answer stands for the rest of the session.
   // Nothing is asked of a provider whose executable is not on the machine.
   $effect(() => {
     if (!popover.open || favoritesOpen || !shown || needsInstall) return;
-    if (shown.protocol !== 'acp' && shown.protocol !== 'codex-appserver' && shown.protocol !== 'pi') return;
+    if (shown.protocol !== 'claude-sdk' && shown.protocol !== 'acp' && shown.protocol !== 'codex-appserver' && shown.protocol !== 'pi') return;
     const accountId = shownAccountId;
     if (accountId === null) return;
     void store.probeModels(shown.id, accountId);
@@ -209,7 +225,7 @@
     if (popover.open) {
       shownProviderId = choice?.providerId ?? null;
       favoritesOpen = favorites.length > 0;
-      legacyOpen = false;
+      legacy.hide();
       modelQuery = '';
     }
   }
@@ -219,7 +235,7 @@
     if (tile.held) return;
     favoritesOpen = false;
     shownProviderId = tile.provider.id;
-    legacyOpen = false;
+    legacy.hide();
     modelQuery = '';
   }
 
@@ -230,15 +246,20 @@
     onpick({ providerId: shown.id, accountId: seat.id, model: store.defaultModelOf(shown) });
   }
 
-  function pickModel(model: ModelInfo) {
+  async function pickModel(model: ModelInfo) {
     if (!shown) return;
     const instance =
       choice && choice.providerId === shown.id
         ? { providerId: choice.providerId, accountId: choice.accountId }
         : firstInstanceOf(shown.id);
-    if (!instance) return;
-    onpick({ ...instance, model: model.id });
-    popover.hide();
+    if (!instance || favoritePending) return;
+    favoritePending = true;
+    try {
+      await store.probeModels(instance.providerId, instance.accountId);
+      if (!store.modelsOf(instance.providerId, instance.accountId).some(m => m.id === model.id)) { store.error = strings.composer.favoriteUnavailable; return; }
+      onpick({ ...instance, model: model.id });
+      popover.hide();
+    } finally { favoritePending = false; }
   }
 
   /** The download happens on the Accounts page now, so the picker sends you there. */
@@ -266,10 +287,13 @@
   function onkeydown(event: KeyboardEvent) {
     if (!popover.open) return;
     const active = document.activeElement as HTMLElement | null;
+    if (event.key === 'ArrowRight' && active?.dataset.testid === 'picker-legacy') { event.preventDefault(); legacy.show(); queueMicrotask(() => root?.querySelector<HTMLElement>('[data-testid=picker-legacy-menu] [data-model]')?.focus()); return; }
+    if (event.key === 'ArrowLeft' && active?.closest('[data-testid=picker-legacy-menu]')) { event.preventDefault(); legacy.hide(); root?.querySelector<HTMLElement>('[data-testid=picker-legacy]')?.focus(); return; }
     const searching = searchable && (active === searchBox || (active?.hasAttribute('data-model') ?? false));
 
     if (event.key === 'Escape') {
       event.stopPropagation();
+      if (legacyOpen) { legacy.hide(); root?.querySelector<HTMLElement>('[data-testid=picker-legacy]')?.focus(); return; }
       // The query goes first: closing on it would throw away what was just typed.
       if (searchable && modelQuery !== '') {
         modelQuery = '';
@@ -352,11 +376,16 @@
       role="menu"
       tabindex="-1"
       aria-label={strings.composer.picker}
-      data-testid="composer-picker-menu"
+        data-testid="composer-picker-menu"
+      bind:this={menu}
+      use:floating={{ anchor: () => root?.closest<HTMLElement>("[data-testid=composer]") ?? null }}
       use:popover.attach
       onanimationend={popover.end}
       {onkeydown}
     >
+      {#if store.owner}
+        <button class="refresh" type="button" data-testid="picker-refresh" aria-label={strings.composer.refreshModels} title={strings.composer.refreshModels} disabled={probing || needsInstall} onclick={() => void refreshModels()}><RefreshCw size={14} class={probing ? 'spin' : ''} /></button>
+      {/if}
       <div class="column rail">
         <button type="button" class="tile" class:current={favoritesOpen} role="menuitem" data-row data-provider="favorites" title={strings.composer.favorites} aria-label={strings.composer.favorites} onclick={() => { favoritesOpen = true; modelQuery = ''; }}><Star size={18} /></button>
         {#each tiles as tile (tile.provider.id)}
@@ -404,8 +433,8 @@
           <div class="head"><span class="provider-name">{strings.composer.favorites}</span></div>
           {#each favorites as entry (`${entry.providerId}:${entry.accountId}:${entry.model.id}`)}
             <div class="model-entry">
-              <button type="button" class="row model" role="menuitem" data-row data-testid="favorite-model" disabled={favoritePending || !store.providerOf(entry.providerId)?.available} onclick={() => void pickFavorite(entry)}>
-                <ProviderLogo providerId={entry.providerId} size={16} /><span class="name">{entry.model.name}<small>{store.accountOf(entry.accountId)?.label}</small></span>
+              <button type="button" class="row model favorite-row" role="menuitem" data-row data-testid="favorite-model" disabled={favoritePending || !store.providerOf(entry.providerId)?.available} onclick={() => void pickFavorite(entry)}>
+                <ProviderLogo providerId={entry.providerId} size={16} /><span class="name">{entry.model.name}{#if favorites.some(other => other.providerId === entry.providerId && other.model.id === entry.model.id && other.accountId !== entry.accountId)}<span class="account-label">{store.accountOf(entry.accountId)?.label}</span>{/if}</span>
               </button>
               <button type="button" class="favorite-button" aria-label={strings.composer.unfavorite} onclick={() => store.toggleFavorite(entry.providerId, entry.accountId, entry.model)}><Star size={14} fill="currentColor" /></button>
             </div>
@@ -492,17 +521,27 @@
               data-row
               data-testid="picker-legacy"
               aria-expanded={legacyOpen}
-              onclick={() => (legacyOpen = !legacyOpen)}
+              onclick={() => legacy.toggle()}
             >
-              <span class="caret" class:open={legacyOpen}><ChevronRight size={12} strokeWidth={2} /></span>
               <span class="name muted">{strings.composer.legacyModels}</span>
-              <span class="count">{filteredLegacy.length}</span>
+              <ChevronRight size={14} strokeWidth={2} />
             </button>
-            <!-- Folded, the group is still here at zero height: that is what the
-                 `0fr` to `1fr` rows animate. The hooks come off with it, so a
-                 collapsed row is neither walked by the arrows nor picked. -->
-            <div class="fold-body" class:open={legacyOpen} inert={!legacyOpen}>
-              <div class="clip">
+          {/if}
+          {#if shown && shownModels.length === 0 && !probing}
+            <p class="none subtle">{strings.composer.noModels}</p>
+          {/if}
+          {#if probing}
+            <p class="none subtle probing" data-testid="picker-probing">{strings.composer.probing}</p>
+          {/if}
+        {/if}
+        {/if}
+      </div>
+    </div>
+  {/if}
+  {#if popover.shown && legacy.shown && !favoritesOpen && filteredLegacy.length > 0}
+    <div class="popover legacy-menu" class:closing={legacy.closing} role="menu" tabindex="-1" data-testid="picker-legacy-menu" aria-label={strings.composer.legacyModels} use:legacy.attach onanimationend={legacy.end} use:floating={{ anchor: () => menu ?? null, side: 'right' }} {onkeydown}>
+      <div class="column models">
+        <div class="head"><button type="button" class="icon small legacy-back" aria-label={strings.settings.back} onclick={() => legacy.hide()}><ChevronRight size={14} style="transform: rotate(180deg)" /></button><span class="provider-name">{strings.composer.legacyModels}</span></div>
                 {#each filteredLegacy as model (model.id)}
                   <div class="model-entry">
                   <button
@@ -521,17 +560,6 @@
                   <button type="button" class="favorite-button" tabindex={legacyOpen ? 0 : -1} aria-label={favorite(model) ? strings.composer.unfavorite : strings.composer.favorite} aria-pressed={favorite(model)} onclick={() => { if (shown && shownAccountId) store.toggleFavorite(shown.id, shownAccountId, model); }}><Star size={14} fill={favorite(model) ? 'currentColor' : 'none'} /></button>
                   </div>
                 {/each}
-              </div>
-            </div>
-          {/if}
-          {#if shown && shownModels.length === 0 && !probing}
-            <p class="none subtle">{strings.composer.noModels}</p>
-          {/if}
-          {#if probing}
-            <p class="none subtle probing" data-testid="picker-probing">{strings.composer.probing}</p>
-          {/if}
-        {/if}
-        {/if}
       </div>
     </div>
   {/if}
@@ -542,9 +570,10 @@
   .model-entry .model { flex: 1; min-width: 0; }
   .favorite-button { width: var(--control-sm); height: var(--control-sm); padding: 0; flex: none; color: var(--color-muted-foreground); background: transparent; border: none; }
   .favorite-button[aria-pressed='true'] { color: var(--color-foreground); }
-  .name small { display: block; font-size: var(--text-xs); color: var(--color-muted-foreground); }
+  .account-label { margin-left: 8px; font-size: var(--text-xs); color: var(--color-muted-foreground); }
+  .row.favorite-row { min-height: 42px; }
+  .legacy-menu { width: min(320px, calc(100vw - 24px)); grid-template-rows: minmax(0, 1fr); z-index: 41; }
   .picker {
-    position: relative;
     display: inline-flex;
     min-width: 0;
   }
@@ -572,20 +601,19 @@
   }
 
   .popover {
-    position: absolute;
-    bottom: calc(100% + 6px);
-    left: 0;
+    position: fixed;
     z-index: 40;
     display: grid;
-    grid-template-columns: 48px minmax(240px, 1fr);
-    width: min(460px, calc(100vw - 32px));
-    max-height: 340px;
+    grid-template-columns: minmax(0, 1fr);
+    width: min(400px, calc(100vw - 32px));
+    max-height: min(360px, 45dvh);
+    grid-template-rows: auto minmax(0, 1fr);
     background: var(--color-surface-2);
     border: 1px solid var(--color-border);
     border-radius: var(--radius-md);
     box-shadow: var(--shadow-e2);
     animation: pop var(--dur-2) var(--ease-out-quint);
-    transform-origin: bottom left;
+    transform-origin: top left;
     overflow: hidden;
   }
 
@@ -600,17 +628,22 @@
     gap: 1px;
     padding: 6px;
     min-height: 0;
-    overflow: auto;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    touch-action: pan-y;
   }
 
   /* Logos only: the name is the tile's title, and the column beside it names
      the one that is shown, so nothing is repeated. */
   .rail {
+    flex-direction: row;
+    flex-wrap: nowrap;
+    padding-right: 40px;
+    justify-content: flex-start;
     align-items: center;
     gap: 4px;
-    /* Exactly one tile wide: a horizontal scrollbar here would be a stripe. */
-    overflow-x: hidden;
-    border-right: 1px solid var(--color-border);
+    overflow-x: auto;
+    border-bottom: 1px solid var(--color-border);
     background: var(--color-surface);
   }
 
@@ -648,12 +681,15 @@
     opacity: 0.45;
   }
 
+  .models > * { flex-shrink: 0; }
+  .refresh { position: absolute; top: 8px; right: 8px; z-index: 3; display: grid; place-items: center; width: 28px; height: 28px; border: none; border-radius: var(--radius-sm); background: var(--color-surface-2); color: var(--color-muted-foreground); }
+  .refresh:hover:not(:disabled) { background: var(--color-surface-3); color: var(--color-foreground); }
   .head {
     display: flex;
     align-items: center;
     gap: 8px;
     min-height: var(--control-sm);
-    padding: 2px 4px 6px;
+    padding: 2px 34px 6px 4px;
   }
 
   .provider-name {
@@ -840,48 +876,6 @@
     min-height: var(--control-sm);
   }
 
-  /* The fold opens on its rows track, so the group grows to its own height. */
-  .fold-body {
-    display: grid;
-    grid-template-rows: 0fr;
-    opacity: 0;
-    transition:
-      grid-template-rows var(--dur-3) var(--ease-out-quint),
-      opacity var(--dur-3) var(--ease-out-quint);
-  }
-
-  .fold-body.open {
-    grid-template-rows: 1fr;
-    opacity: 1;
-  }
-
-  .fold-body .clip {
-    display: flex;
-    flex-direction: column;
-    gap: 1px;
-    min-height: 0;
-    overflow: hidden;
-  }
-
-  .caret {
-    display: inline-flex;
-    width: 6px;
-    justify-content: center;
-    color: var(--color-subtle);
-    transition: transform var(--dur-2) var(--ease-out-quint);
-  }
-
-  .caret.open {
-    transform: rotate(90deg);
-  }
-
-  .count {
-    margin-left: auto;
-    font-size: var(--text-xs);
-    color: var(--color-subtle);
-    font-variant-numeric: tabular-nums;
-  }
-
   p.none {
     padding: 6px 8px;
     font-size: var(--text-sm);
@@ -896,12 +890,15 @@
   @media (max-width: 720px) {
     .popover {
       grid-template-columns: 1fr;
-      max-height: 60vh;
+      grid-template-rows: auto minmax(0, 1fr);
+      width: calc(100vw - 24px);
     }
 
     .rail {
       flex-direction: row;
-      flex-wrap: wrap;
+      flex-wrap: nowrap;
+      overflow-x: auto;
+      padding-right: 40px;
       justify-content: flex-start;
       border-right: none;
       border-bottom: 1px solid var(--color-border);
