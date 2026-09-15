@@ -164,6 +164,8 @@ export interface ModelInfo {
   badge?: 'new';
   /** Reasoning effort this model offers. A model without it has no effort control. */
   effort?: { levels: EffortLevel[]; default: string };
+  /** Native service tiers advertised for this model; absent means no speed control. */
+  speeds?: { id: string; label: string; description?: string }[];
 }
 
 export interface ProviderCapabilities {
@@ -340,6 +342,7 @@ export interface ThreadSummary {
   model: string | null;
   /** One of the model's effort level ids. Null means the model's own default. */
   effort: string | null;
+  speed?: string | null;
   cwd: string;
   /**
    * The git branch the thread works on when it started in its own worktree;
@@ -379,7 +382,7 @@ export type TurnStatus = 'queued' | 'running' | 'done' | 'stopped' | 'error';
 
 /** Frozen when a prompt is accepted, including while it waits in the scheduler. */
 export type TurnExecution = Pick<ThreadSummary,
-  'providerId' | 'accountId' | 'model' | 'effort' | 'permissionMode' | 'sessionId'
+  'providerId' | 'accountId' | 'model' | 'effort' | 'speed' | 'permissionMode' | 'sessionId'
 > & { sessionGeneration: number; selectionVersion: number; operation?: 'compact' };
 
 export interface Turn {
@@ -936,14 +939,13 @@ export interface RpcMethods {
     result: { loaded: ProviderSummary[]; rejected: ProviderRejected[] };
   };
   /**
-   * ACP, Codex and pi list their own models through a temporary agent process.
-   * Claude and echo return the descriptor's models. Results are kept until
-   * `providers.reload` or a change to that account.
+   * Claude, ACP, Codex and pi list models through a temporary agent process.
+   * Results are kept until refresh, `providers.reload` or an account change.
    * For any other protocol they are the descriptor's models, with `probedAt`
    * the moment of the call.
    */
   'providers.probe': {
-    params: { providerId: ProviderId; accountId: AccountId };
+    params: { providerId: ProviderId; accountId: AccountId; refresh?: boolean };
     result: { models: ModelInfo[]; probedAt: Timestamp };
   };
   /**
@@ -1004,6 +1006,7 @@ export interface RpcMethods {
       cwd?: string;
       model?: string;
       effort?: string | null;
+      speed?: string | null;
       permissionMode?: PermissionMode;
       /**
        * Start the thread in a git worktree of the project on a branch of its
@@ -1041,6 +1044,7 @@ export interface RpcMethods {
       title?: string;
       model?: string | null;
       effort?: string | null;
+      speed?: string | null;
       permissionMode?: PermissionMode;
     };
     result: ThreadSummary;

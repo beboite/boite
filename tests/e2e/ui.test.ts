@@ -70,7 +70,7 @@ beforeAll(async () => {
   projectDir = mkdtempSync(join(tmpdir(), 'boite-e2e-ui-'));
   worktreesDir = join(tmpdir(), '.boite-worktrees', basename(projectDir));
   page = await BrowserPage.launch({ url: pairingUrlOf(core) });
-});
+}, TIMEOUT);
 
 afterAll(async () => {
   await page?.close();

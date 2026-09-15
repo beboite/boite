@@ -13,14 +13,15 @@ export function probeThreadId(providerId: ProviderId, accountId: AccountId): Thr
 }
 
 /**
- * ACP, Codex and pi list their own models through one temporary process.
- * Claude and echo use their descriptor. The probe's empty working directory
+ * Claude, ACP, Codex and pi list models through one temporary process.
+ * Echo uses its descriptor. The probe's empty working directory
  * keeps project instructions and the core's journal outside that session.
  */
 async function probeProvider(
   core: Core,
   providerId: ProviderId,
   accountId: AccountId,
+  isCurrent: () => boolean,
 ): Promise<RpcResult<'providers.probe'>> {
   const provider = core.providers.require(providerId);
   const account = core.accounts.require(accountId);
@@ -68,6 +69,7 @@ async function probeProvider(
         core.log(level, message);
       },
     });
+    if (!isCurrent()) throw refused('the provider or account changed during discovery; refresh models');
     core.bus.emit('providers.probed', { providerId: provider.id, accountId: account.id, models, probedAt });
     return { models, probedAt };
   } finally {
@@ -77,22 +79,36 @@ async function probeProvider(
 }
 
 export function registerProbeMethods(core: Core): void {
-  core.router.register('providers.probe', (params) => probeProvider(core, params.providerId, params.accountId));
+  let revision = 0;
+  const pending = new Map<string, Promise<RpcResult<'providers.probe'>>>();
+  core.router.register('providers.probe', (params) => {
+    const key = JSON.stringify([params.providerId, params.accountId]);
+    const existing = pending.get(key);
+    if (existing) return existing;
+    if (params.refresh) forgetProbes({ providerId: params.providerId, accountId: params.accountId });
+    const startedAtRevision = revision;
+    const request = probeProvider(core, params.providerId, params.accountId, () => revision === startedAtRevision).finally(() => pending.delete(key));
+    pending.set(key, request);
+    return request;
+  });
 
   core.bus.onAny((name, payload) => {
     // The descriptors were re-read, so what an agent listed under the old ones
     // says nothing about the new ones.
     if (name === 'providers.updated') {
+      revision++;
       forgetProbes();
       return;
     }
     // An account whose login or isolation changed may list other models.
     if (name === 'accounts.updated') {
+      revision++;
       const account = payload as RpcEvents['accounts.updated'];
       forgetProbes({ providerId: account.providerId, accountId: account.id });
       return;
     }
     if (name === 'accounts.removed') {
+      revision++;
       forgetProbes({ accountId: (payload as RpcEvents['accounts.removed']).accountId });
     }
   });

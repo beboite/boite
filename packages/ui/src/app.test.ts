@@ -306,6 +306,8 @@ test('the picker reads an ACP agent models, showing the descriptor and a probing
 
   // The reasoning scale comes from the same answer, not from the descriptor, and
   // it is the composer's own chip that carries it.
+  await waitFor(() => document.querySelector('[data-testid=composer-effort]') !== null);
+  await waitFor(() => document.querySelector('[data-testid=composer-effort]') !== null);
   query<HTMLButtonElement>('[data-testid=composer-effort]').click();
   await waitFor(() => document.querySelector('[data-testid=composer-effort-menu]') !== null);
   expect(effortDots()).toEqual(['think', 'think-hard']);
@@ -390,6 +392,7 @@ test('the reasoning slider sets the effort of the picked model, and the chip fol
   await waitFor(() => store.draft !== null);
   await waitFor(() => query('[data-testid=composer-picker]').textContent?.includes('Claude Sonnet 5') === true);
 
+  await waitFor(() => document.querySelector('[data-testid=composer-effort]') !== null);
   query<HTMLButtonElement>('[data-testid=composer-effort]').click();
   await waitFor(() => document.querySelector('[data-testid=composer-effort-menu]') !== null);
   expect(effortDots()).toEqual(['low', 'medium', 'high', 'xhigh', 'max', 'ultrathink']);

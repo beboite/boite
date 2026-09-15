@@ -50,6 +50,8 @@ function newestSource(roots: string[], extensions: string[]): SourceFile | null 
         walk(full);
         continue;
       }
+      // UI tests live beside components but are never bundled into the shell.
+      if (entry.name.endsWith('.test.ts')) continue;
       if (!extensions.some((extension) => entry.name.endsWith(extension))) continue;
       const mtimeMs = statSync(full).mtimeMs;
       if (newest === null || mtimeMs > newest.mtimeMs) newest = { path: full, mtimeMs };
@@ -405,6 +407,13 @@ shellTest(
   async () => {
     await page?.waitFor(`${textOf('status-connection')} === 'Connected'`, 30_000);
     await page?.waitFor(`document.querySelector('${testid('sidebar')}')`);
+    await page?.click(testid('nav-settings'));
+    await page?.click(testid('settings-tab-appearance'));
+    await page?.waitFor(`document.querySelector('${testid('accent-300')}')`);
+    await page?.click(testid('accent-300'));
+    expect(await page?.evaluate(`document.documentElement.style.getPropertyValue('--accent-hue')`)).toBe('300');
+    await page?.screenshot(join(import.meta.dir, '.artifacts', 'shell-accent.png'));
+    await page?.click(testid('settings-back'));
   },
   TIMEOUT,
 );

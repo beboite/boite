@@ -225,11 +225,12 @@ line by line with the first link it prints carried separately.
 
 ## The probe, because an agent owns its models
 
-A descriptor's model list is a starting point. An ACP, Codex or pi agent owns the
+A descriptor's model list is a starting point. A Claude, ACP, Codex or pi agent owns the
 real one, so `providers.probe` spawns one short-lived process under the synthetic
 thread `probe:<providerId>:<accountId>`, asks the protocol's own models call,
 kills the child on every path, and caches the answer per provider and account
-until `providers.reload` or a change to that account. `threads.create` and
+until `providers.reload`, a manual refresh or a change to that account. The UI
+keeps a persistent display cache while it reads models asynchronously. `threads.create` and
 `threads.update` accept what the last probe listed on top of the descriptor's;
 a model nobody probed is refused, saying to open the picker. Two callers at once
 share one process, and `providers.probed` lets a second client see the same

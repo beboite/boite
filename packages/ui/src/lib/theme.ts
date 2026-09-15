@@ -8,6 +8,7 @@
  */
 
 import { isExperimentEnabled, subscribeExperiments } from './experiments';
+import { startAccent } from './accent';
 
 export type Theme = 'system' | 'dark' | 'light' | 'grain';
 
@@ -81,9 +82,10 @@ export function setTheme(theme: Theme): void {
  * listeners.
  */
 export function startTheme(): () => void {
+  const stopAccent = startAccent();
   applyTheme(readTheme());
   const stopExperiments = subscribeExperiments(() => applyTheme(readTheme()));
-  if (typeof window.matchMedia !== 'function') return stopExperiments;
+  if (typeof window.matchMedia !== 'function') return () => { stopExperiments(); stopAccent(); };
   const query = window.matchMedia(LIGHT_QUERY);
   const onchange = () => {
     if (readTheme() === 'system') applyTheme('system');
@@ -91,6 +93,7 @@ export function startTheme(): () => void {
   query.addEventListener('change', onchange);
   return () => {
     stopExperiments();
+    stopAccent();
     query.removeEventListener('change', onchange);
   };
 }
