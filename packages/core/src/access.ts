@@ -38,6 +38,7 @@ export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>
   'messages.list',
   'threads.update',
   'threads.retitle',
+  'threads.compact', // A paired device can request the same session maintenance as the desktop.
   'threads.archive',
   'threads.pin',
   'threads.markRead',

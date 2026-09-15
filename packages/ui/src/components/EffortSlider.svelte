@@ -27,8 +27,9 @@
   let track = $state<HTMLDivElement | undefined>(undefined);
   let line = $state<HTMLDivElement | undefined>(undefined);
   let dragging = $state(false);
+  let preview = $state<number | null>(null);
 
-  let index = $derived(Math.max(0, levels.findIndex((level) => level.id === active)));
+  let index = $derived(preview ?? Math.max(0, levels.findIndex((level) => level.id === active)));
   let current = $derived(levels[index] ?? null);
   let last = $derived(Math.max(0, levels.length - 1));
 
@@ -68,17 +69,20 @@
     dragging = true;
     track?.focus({ preventScroll: true });
     track?.setPointerCapture(event.pointerId);
-    pick(nearest(event.clientX));
+    preview = nearest(event.clientX);
   }
 
   function onpointermove(event: PointerEvent) {
     if (!dragging) return;
-    pick(nearest(event.clientX));
+    preview = nearest(event.clientX);
   }
 
   function onpointerup(event: PointerEvent) {
     if (!dragging) return;
     dragging = false;
+    const chosen = preview;
+    preview = null;
+    if (chosen !== null) pick(chosen);
     if (track?.hasPointerCapture(event.pointerId)) track.releasePointerCapture(event.pointerId);
   }
 
@@ -143,7 +147,7 @@
       onanimationend={popover.end}
       {onkeydown}
     >
-      <span class="title">{strings.composer.effortTitle}</span>
+      <div class="heading"><span class="title">{strings.composer.effortTitle}</span><span class="level">{current?.label}</span></div>
 
       <div
         class="track"
@@ -163,6 +167,8 @@
         onpointercancel={onpointerup}
       >
         <div class="line" bind:this={line}>
+          <span class="progress" style="width: {offset(index)}"></span>
+          <span class="thumb" style="left: {offset(index)}"></span>
           {#each levels as level, at (level.id)}
             <span class="dot" class:on={at <= index} data-dot={level.id} style="left: {offset(at)}"></span>
           {/each}
@@ -187,176 +193,30 @@
         {/each}
       </div>
 
-      <p class="description" data-testid="effort-description">{current?.description ?? ''}</p>
+      <p class="description" data-testid="effort-description">{current?.description ?? strings.composer.effortHint}</p>
     </div>
   {/if}
 </div>
 
 <style>
-  .effort {
-    position: relative;
-    display: inline-flex;
-  }
-
-  .trigger {
-    cursor: pointer;
-    height: var(--control-sm);
-    transition:
-      background var(--dur-2) var(--ease-out-quint),
-      color var(--dur-2) var(--ease-out-quint);
-  }
-
-  .trigger:hover,
-  .trigger[aria-expanded='true'] {
-    background: var(--color-surface-3);
-    color: var(--color-foreground);
-  }
-
-  .popover {
-    position: absolute;
-    bottom: calc(100% + 6px);
-    left: 0;
-    z-index: 40;
-    display: flex;
-    flex-direction: column;
-    width: 260px;
-    padding: 10px 12px 8px;
-    background: var(--color-surface-2);
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-lg);
-    box-shadow: var(--shadow-e3);
-    animation: pop var(--dur-2) var(--ease-out-quint);
-    transform-origin: bottom left;
-  }
-
-  .popover.closing {
-    animation-name: pop-out;
-    pointer-events: none;
-  }
-
-  .title {
-    font-size: var(--text-sm);
-    color: var(--color-muted-foreground);
-  }
-
-  /* The whole band takes the pointer, so a click anywhere near the line lands
-     on the nearest dot instead of asking for a 10 px target. */
-  .track {
-    padding: 14px 5px 6px;
-    cursor: pointer;
-    touch-action: none;
-  }
-
-  .track:focus-visible {
-    outline: none;
-  }
-
-  .track:focus-visible .line {
-    box-shadow: 0 0 0 4px color-mix(in srgb, var(--color-foreground) 16%, transparent);
-  }
-
-  .line {
-    position: relative;
-    height: 2px;
-    border-radius: 999px;
-    background: var(--color-surface-3);
-  }
-
-  .dot {
-    position: absolute;
-    top: 50%;
-    width: 10px;
-    height: 10px;
-    margin-left: -5px;
-    margin-top: -5px;
-    border-radius: 50%;
-    border: 1px solid var(--color-edge);
-    background: var(--color-surface-3);
-    transition:
-      background var(--dur-2) var(--ease-out-quint),
-      border-color var(--dur-2) var(--ease-out-quint);
-  }
-
-  .dot.on {
-    background: var(--color-foreground);
-    border-color: var(--color-foreground);
-  }
-
-  /* The names ride the same percentages as the dots, so each one sits under its own. */
-  .ticks {
-    position: relative;
-    height: 16px;
-    margin: 0 5px;
-  }
-
-  .ticks.stagger {
-    height: 30px;
-  }
-
-  .tick {
-    position: absolute;
-    top: 0;
-    display: -webkit-box;
-    -webkit-box-orient: vertical;
-    -webkit-line-clamp: 2;
-    line-clamp: 2;
-    overflow: hidden;
-    max-width: 68px;
-    height: auto;
-    padding: 0;
-    transform: translateX(-50%);
-    border: none;
-    border-radius: var(--radius-sm);
-    background: transparent;
-    color: var(--color-muted-foreground);
-    font-size: var(--text-xs);
-    font-weight: 500;
-    line-height: 1.15;
-    text-align: center;
-    white-space: normal;
-    transition: color var(--dur-2) var(--ease-out-quint);
-  }
-
-  /* One name in two drops to the second row, and the extra room lets the long
-     ones ("Extra high", "Ultrathink") stay whole. One point smaller so the two
-     that meet in the middle of a row keep a gap. */
-  .ticks.stagger .tick {
-    max-width: 84px;
-    font-size: calc(var(--text-xs) - 1px);
-  }
-
-  .ticks.stagger .tick:nth-child(even) {
-    top: 16px;
-  }
-
-  /* The ends stay inside the popover instead of centring off its edge. */
-  .tick:first-child {
-    transform: none;
-    text-align: left;
-  }
-
-  .tick:last-child {
-    transform: translateX(-100%);
-    text-align: right;
-  }
-
-  .tick:hover:not(:disabled),
-  .tick:focus-visible {
-    background: transparent;
-    color: var(--color-foreground);
-    outline: none;
-  }
-
-  .tick.on {
-    color: var(--color-foreground);
-  }
-
-  /* Held at one line whatever the level says, so the popover never jumps. */
-  .description {
-    min-height: 18px;
-    margin-top: 8px;
-    font-size: var(--text-sm);
-    line-height: 1.4;
-    color: var(--color-muted-foreground);
-  }
+.effort { position: relative; display: inline-flex; }
+.trigger { cursor: pointer; height: var(--control-sm); }
+.trigger:hover, .trigger[aria-expanded='true'] { background: var(--color-surface-3); color: var(--color-foreground); }
+.popover { position: absolute; bottom: calc(100% + 10px); left: 0; z-index: 40; width: min(340px, calc(100vw - 36px)); padding: 18px; background: var(--color-surface-2); border: 1px solid var(--color-border); border-radius: var(--radius-lg); box-shadow: var(--shadow-e3); animation: pop var(--dur-2) var(--ease-out-quint); transform-origin: bottom left; }
+.popover.closing { animation-name: pop-out; pointer-events: none; }
+.heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.title { font-size: var(--text-sm); color: var(--color-muted-foreground); }
+.level { font-size: var(--text-base); font-weight: 600; }
+.track { padding: 26px 8px 20px; cursor: pointer; touch-action: none; }
+.track:focus-visible { outline: 1px solid var(--color-edge); border-radius: var(--radius-md); }
+.line { position: relative; height: 4px; border-radius: var(--radius-sm); background: var(--color-border); }
+.progress { position: absolute; height: 100%; border-radius: inherit; background: var(--color-foreground); }
+.dot { position: absolute; top: -3px; width: 2px; height: 10px; background: var(--color-muted-foreground); transform: translateX(-50%); }
+.dot.on { background: var(--color-foreground); }
+.thumb { position: absolute; top: 50%; width: 18px; height: 18px; transform: translate(-50%, -50%); border: 3px solid var(--color-surface-2); border-radius: 50%; background: var(--color-foreground); box-shadow: 0 0 0 1px var(--color-edge); z-index: 1; }
+.ticks { display: flex; justify-content: space-between; gap: 2px; }
+.tick { flex: 1; padding: 4px 1px; height: auto; border: none; border-radius: var(--radius-sm); background: transparent; color: var(--color-muted-foreground); font-size: var(--text-xs); line-height: 1.25; white-space: normal; }
+.tick.on { color: var(--color-foreground); background: var(--color-hover); }
+.description { margin-top: 16px; min-height: 36px; font-size: var(--text-sm); color: var(--color-muted-foreground); line-height: 1.5; }
+@media (max-width: 720px) { .popover { position: fixed; left: 18px; right: 18px; bottom: 126px; width: auto; } }
 </style>
