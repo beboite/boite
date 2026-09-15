@@ -85,6 +85,7 @@ export interface TurnContext {
    * when it changed. Names are deduplicated, the first wins.
    */
   commands(list: AgentCommand[]): void;
+  tasks?(list: import('@boite/contracts').AgentTask[]): void;
   /**
    * The context meter: what the agent's last request carried and the model's
    * window when the agent names it. The core writes it on the thread and

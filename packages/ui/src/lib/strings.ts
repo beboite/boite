@@ -135,6 +135,32 @@ export const strings = {
     mode: 'Change the permission mode'
   },
 
+  activity: {
+    goal: 'Goal',
+    loop: 'Loop',
+    tasks: 'Tasks',
+    taskCount: '{done}/{total} tasks',
+    showTasks: 'Show tasks',
+    goalDescription: 'Keep working toward an objective',
+    loopDescription: 'Repeat a prompt at an interval',
+    goalUsage: 'Use /goal followed by an objective.',
+    loopUsage: 'Use /loop [interval] prompt, for example /loop 5m check the build.',
+    intervalError: 'Loop intervals must be between 1 second and 24 hours.',
+    noAttachments: 'Send images in a message before starting a goal or loop.',
+    active: 'Active',
+    paused: 'Paused',
+    complete: 'Complete',
+    pause: 'Pause',
+    resume: 'Resume',
+    remove: 'Remove',
+    finish: 'Mark complete',
+    every: 'Every {interval}',
+    iterations: '{count} runs',
+    pending: 'Pending',
+    in_progress: 'In progress',
+    completed: 'Completed'
+  },
+
   /** The composer's `@` menu: the project's files, the picked one written in as `@path`. */
   mention: {
     label: 'Files',
@@ -175,6 +201,18 @@ export const strings = {
     renamePlaceholder: 'Thread title',
     /** The draft's own heading, the project's name in the dropdown after it. */
     startIn: 'Start a thread in',
+    start: 'Start a thread',
+    inWorktree: 'in a worktree',
+    inProject: 'in',
+    using: 'using',
+    onEffort: 'on {effort} effort',
+    draftMode: {
+      default: 'with approval requests',
+      acceptEdits: 'with edits allowed',
+      bypassPermissions: 'with all permissions',
+      plan: 'in plan mode',
+      dontAsk: 'with automatic denial of approval requests'
+    },
     changeProject: 'Change project',
     /** The header badge of a thread working in its own worktree; the title says where. */
     branchHint: 'Working in a worktree on this branch',
@@ -281,6 +319,7 @@ export const strings = {
     worktreeOn: 'Starts in a git worktree on its own branch',
     /** Images sent with the prompt: the strip above the box and what refuses one. */
     attach: 'Attach images',
+    editQueued: 'Edit this pending message, or press Up in the empty composer',
     attachRemove: 'Remove {name}',
     attachAlt: 'Attached image',
     attachUnnamed: 'the pasted image',
@@ -420,6 +459,9 @@ export const strings = {
 
   settings: {
     heading: 'Settings',
+    modelDefaults: 'Default models',
+    modelDefaultsHint: 'Model and reasoning effort for new threads, per provider. Saved on this device. Existing threads keep their choices.',
+    modelDefaultUnavailable: '{provider} does not offer the default model {model} on this account. Choose an available model in the picker or change the default in Settings.',
     tabs: {
       general: 'General',
       appearance: 'Appearance',

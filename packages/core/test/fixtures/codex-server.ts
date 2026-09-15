@@ -212,6 +212,7 @@ function commandItem(itemId: string, status: string, output: string | null): unk
 
 async function runTurn(turnId: string, text: string): Promise<void> {
   notify('turn/started', { threadId, turn: turnRecord(turnId, 'inProgress') });
+  if (text.includes('[tasks]')) notify('turn/plan/updated', { threadId, turnId, plan: [{ step: 'Inspect source', status: 'completed' }, { step: 'Run checks', status: 'inProgress' }] });
   const directives = directivesOf(text);
   const say = (chunk: string): void => {
     notify('item/agentMessage/delta', { threadId, turnId, itemId: 'msg-1', delta: chunk });

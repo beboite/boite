@@ -35,6 +35,9 @@ export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>
   'threads.list',
   'threads.create',
   'threads.get',
+  // A phone can manage continued prompts in the same thread it can already send to.
+  'threads.activity.set',
+  'threads.activity.control',
   'messages.list',
   'threads.update',
   'threads.retitle',

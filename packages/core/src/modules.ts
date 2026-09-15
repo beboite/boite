@@ -14,6 +14,8 @@ import { registerUsageMethods } from './usage.ts';
 
 /** Adding a module is one file plus one line here. `hello` is the server's own. */
 export function registerModules(core: Core): void {
+  core.router.register('threads.activity.set', (params) => core.activity.set(params));
+  core.router.register('threads.activity.control', (params) => core.activity.control(params));
   core.router.register('quotas.list', (params) => core.quotas.list(params.refresh));
   core.router.register('quotas.configure', (params) => core.quotas.configure(params.accountId, params.enabled));
   core.router.register('plugins.list', () => [core.plugins.state()]);

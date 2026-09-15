@@ -175,7 +175,13 @@
     if (modal) return;
     const command = store.commandForKey(event);
     if (command === null) {
-      if (event.key === 'Escape' && store.sidebarOpen) store.sidebarOpen = false;
+      if (event.key === 'Escape' && !event.defaultPrevented && !event.isComposing) {
+        if (store.sidebarOpen) store.sidebarOpen = false;
+        else if (!typing(event) && store.page === 'chat' && (store.busy || store.openThread?.activity?.goal?.status === 'active' || store.openThread?.activity?.loop?.status === 'active')) {
+          event.preventDefault();
+          void store.stop();
+        }
+      }
       return;
     }
     switch (command) {

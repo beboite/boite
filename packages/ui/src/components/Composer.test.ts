@@ -215,7 +215,7 @@ function effortDots(): (string | null)[] {
 async function openDraft(): Promise<void> {
   query<HTMLButtonElement>('[data-testid=new-thread]').click();
   await waitFor(() => store.draft !== null);
-  await waitFor(() => query('[data-testid=composer-picker]').textContent?.includes('Claude Sonnet 5') === true);
+  await waitFor(() => query('[data-testid=composer-picker]').textContent?.includes('Claude Opus 5') === true);
 }
 
 test('the reasoning chip reads the model default level and saves the pick on the open thread', async () => {
@@ -253,7 +253,7 @@ test('the reasoning chip remembers the level a draft picks', async () => {
   query<HTMLButtonElement>('[data-testid=composer-effort-menu] [data-value=xhigh]').click();
   await waitFor(() => store.prefs.effort === 'xhigh');
   expect(JSON.parse(window.localStorage.getItem(PREFS_STORAGE_KEY) ?? 'null')).toMatchObject({
-    model: 'claude-sonnet-5',
+    model: 'claude-opus-5',
     effort: 'xhigh'
   });
   await waitFor(() => effortChip()?.textContent?.trim() === 'Extra high');
@@ -344,6 +344,73 @@ test('reconnecting blocks keyboard and button sends without clearing text', asyn
   await new Promise((resolve) => setTimeout(resolve, 0));
   expect(submit).not.toHaveBeenCalled();
   expect(input().value).toBe('wait for connection');
+});
+
+test('ArrowUp removes the latest queued prompt and restores its images for editing', async () => {
+  await mountOnFake();
+  await store.open('t-trace');
+  store.openThread!.status = 'running';
+  await type('first pending');
+  press('Enter');
+  await type('edit this pending prompt');
+  const image = { kind: 'image' as const, mimeType: 'image/png' as const, data: 'aW1hZ2U=', name: 'draft.png' };
+  store.composerStates['t-trace']!.attachments = [image];
+  press('Enter');
+  await waitFor(() => input().value === '');
+  expect(document.querySelector('[data-testid=composer-queued]')?.textContent).toContain('edit this pending prompt');
+  press('ArrowUp');
+  await waitFor(() => input().value === 'edit this pending prompt');
+  expect(store.composerStates['t-trace']!.queued.map((entry) => entry.text)).toEqual(['first pending']);
+  expect(store.composerStates['t-trace']!.attachments).toEqual([image]);
+  await type('edited pending prompt');
+  press('Enter');
+  await waitFor(() => input().value === '');
+  expect(store.composerStates['t-trace']!.queued.map((entry) => entry.text)).toEqual(['first pending', 'edited pending prompt']);
+});
+
+test('Escape stops the running turn and sends pending input next', async () => {
+  await mountOnFake();
+  await store.open('t-trace');
+  await type('Wait for me [permission]');
+  press('Enter');
+  await waitFor(() => store.openThread?.status === 'waiting');
+  await type('Read this immediately');
+  press('Enter');
+  await waitFor(() => input().value === '');
+  press('Escape');
+  await waitFor(() => !store.busy && store.composerStates['t-trace']?.queued.length === 0);
+  const prompts = store.openThread!.messages.filter((message) => message.role === 'user');
+  expect(prompts.at(-1)?.parts).toEqual([{ type: 'text', text: 'Read this immediately' }]);
+  expect(store.openThread!.turns.some((turn) => turn.status === 'stopped')).toBe(true);
+});
+
+test('goal and loop coexist above the composer with expandable agent tasks', async () => {
+  await mountOnFake();
+  await store.open('t-trace');
+  const call = vi.spyOn(store.client!, 'call');
+  await type('/goal Finish the release');
+  press('Enter');
+  await waitFor(() => document.querySelector('[data-testid=activity-goal]') !== null);
+  expect(call.mock.calls.some(([method, params]) => method === 'threads.activity.set' && 'goal' in params)).toBe(true);
+  await store.stop();
+  await waitFor(() => !store.busy);
+  await type('/loop 5m Check CI');
+  press('Enter');
+  await waitFor(() => document.querySelector('[data-testid=activity-loop]') !== null);
+  await store.stop();
+  await waitFor(() => !store.busy);
+  store.openThread!.activity!.tasks = [
+    { id: '1', text: 'Run checks', status: 'completed' },
+    { id: '2', text: 'Review the result', status: 'in_progress' }
+  ];
+  await waitFor(() => document.querySelector('[data-testid=activity-tasks-toggle]') !== null);
+  const toggle = query<HTMLButtonElement>('[data-testid=activity-tasks-toggle]');
+  expect(toggle.getAttribute('aria-expanded')).toBe('false');
+  toggle.click();
+  await waitFor(() => toggle.getAttribute('aria-expanded') === 'true');
+  expect(query('[data-testid=activity-tasks]').textContent).toContain('Review the result');
+  expect(query('[data-testid=thread-activity]').textContent).toContain('Finish the release');
+  expect(query('[data-testid=thread-activity]').textContent).toContain('Check CI');
 });
 
 test('queued prompts stay on their thread and run as separate turns', async () => {

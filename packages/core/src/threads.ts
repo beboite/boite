@@ -181,6 +181,7 @@ export class ThreadStore {
       ...thread,
       messages: page.messages,
       commands: this.commands.get(threadId) ?? [],
+      activity: this.core.activity.get(threadId),
       messagesBefore: page.before,
       // The turns of that page and the ones still in flight, never the whole history.
       turns: this.core.journal.listTurnsFor(
@@ -985,6 +986,7 @@ export class ThreadStore {
       context: (use) => {
         if ((this.require(threadId).selectionVersion ?? 0) === (thread.selectionVersion ?? 0)) this.noteContext(threadId, use);
       },
+      tasks: (list) => this.core.activity.tasks(threadId, list),
       requestPermission: (toolName: string, input: unknown, description: string | null): PermissionTicket =>
         this.requestPermission(thread, turn, toolName, input, description),
       askQuestion: (ask: QuestionAsk): QuestionTicket => this.askQuestion(thread, turn, ask),
@@ -1271,7 +1273,10 @@ export function registerThreadMethods(core: Core): void {
   core.router.register('turns.start', (params) =>
     core.threads.startTurn(params.threadId, params.prompt, params.attachments ?? [], params.expectedSelectionVersion),
   );
-  core.router.register('turns.stop', (params) => ({ stopped: core.threads.stopTurn(params.threadId) }));
+  core.router.register('turns.stop', (params) => {
+    core.activity.pauseAll(params.threadId);
+    return { stopped: core.threads.stopTurn(params.threadId) };
+  });
   core.router.register('permissions.list', (params) => core.threads.listPermissions(params.threadId));
   core.router.register('permissions.answer', (params) => {
     core.threads.answerPermission({ requestId: params.requestId, decision: params.decision });

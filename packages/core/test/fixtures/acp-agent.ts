@@ -215,6 +215,7 @@ const app = agent({ name: 'acp-fake' })
       if (block.type === 'image') log(`image ${block.mimeType} ${block.data.length}`);
     }
     const send = (update: SessionUpdate): Promise<void> => client.notify('session/update', { sessionId, update });
+    if (text.includes('[tasks]')) await send({ sessionUpdate: 'plan', entries: [{ content: 'Inspect source', priority: 'medium', status: 'completed' }, { content: 'Run checks', priority: 'medium', status: 'in_progress' }] });
     const say = (chunk: string): Promise<void> =>
       send({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: chunk } });
 

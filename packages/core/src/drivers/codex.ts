@@ -810,6 +810,14 @@ class CodexSession {
       case 'item/agentMessage/delta':
         turn.writeText(textOf(params['delta']));
         break;
+      case 'turn/plan/updated': {
+        const plan = params['plan'];
+        if (Array.isArray(plan)) turn.ctx.tasks?.(plan.flatMap((entry, index) => {
+          if (!entry || typeof entry.step !== 'string') return [];
+          return [{ id: String(index), text: entry.step, status: entry.status === 'completed' ? 'completed' as const : entry.status === 'inProgress' || entry.status === 'in_progress' ? 'in_progress' as const : 'pending' as const }];
+        }));
+        break;
+      }
       case 'item/reasoning/textDelta':
       case 'item/reasoning/summaryTextDelta':
         turn.writeThinking(textOf(params['delta']));
