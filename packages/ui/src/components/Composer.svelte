@@ -14,6 +14,7 @@
   import MentionMenu from './MentionMenu.svelte';
   import SlashMenu from './SlashMenu.svelte';
   import ThreadActivity from './ThreadActivity.svelte';
+  import { visibleUserText } from '../lib/message-display';
 
   /**
    * `centered` is the draft's placement: the parent stacks the composer under
@@ -22,7 +23,7 @@
    */
   let { store, centered = false }: { store: Store; centered?: boolean } = $props();
 
-  const MODES: PermissionMode[] = ['default', 'acceptEdits', 'plan', 'bypassPermissions', 'dontAsk'];
+  const MODES: PermissionMode[] = ['bypassPermissions', 'acceptEdits', 'default'];
   const MAX_LINES = 8;
 
   let key = $derived(store.openThread?.id ?? DRAFT_STASH_KEY);
@@ -33,6 +34,8 @@
   let choice = $state<Choice | null>(null);
   let picking = $state(false);
   let box = $state<HTMLTextAreaElement | undefined>(undefined);
+  let inputWidth = $state(0);
+  let inputScroll = $state(0);
   let picker = $state<HTMLInputElement | undefined>(undefined);
   /** Where ArrowUp stands in this thread's sent prompts, or null outside recall. */
   let recall = $state<number | null>(null);
@@ -114,7 +117,7 @@
       .map((message) =>
         message.parts
           .filter((part) => part.type === 'text')
-          .map((part) => (part.type === 'text' ? part.text : ''))
+          .map((part) => (part.type === 'text' ? visibleUserText(part.text) : ''))
           .join('\n')
           .trim()
       )
@@ -264,18 +267,39 @@
 
   /** Agent commands first, so a tie goes to the agent's own. */
   let slashItems = $derived(rankItems(slashQuery ?? '', [...agentItems, ...boiteItems]));
+  let commandToken = $derived.by(() => {
+    const token = /^\/[^\s]+/.exec(text)?.[0];
+    return token && [...agentItems, ...boiteItems].some(item => item.label === token) ? token : '';
+  });
+
+  function syncInput() {
+    if (!box) return;
+    inputWidth = box.clientWidth;
+    inputScroll = box.scrollTop;
+  }
+
+  $effect(() => {
+    const element = box;
+    if (!element) return;
+    const observer = new ResizeObserver(syncInput);
+    observer.observe(element);
+    return () => observer.disconnect();
+  });
 
   $effect(() => {
     void slashItems;
     slashAt = 0;
   });
 
+  // Older modes keep their execution policy until the user makes a choice.
+  let displayedMode = $derived<PermissionMode>(choice?.permissionMode === 'bypassPermissions' || choice?.permissionMode === 'acceptEdits'
+    ? choice.permissionMode : 'default');
   let modeItems = $derived(
     MODES.map((mode) => ({
       id: mode,
       label: strings.permissionMode[mode],
       hint: strings.permissionModeLong[mode],
-      active: choice?.permissionMode === mode
+      active: displayedMode === mode
     }))
   );
 
@@ -337,6 +361,7 @@
     el.style.height = 'auto';
     const line = parseFloat(getComputedStyle(el).lineHeight) || 20;
     el.style.height = `${Math.min(el.scrollHeight, line * MAX_LINES + 16)}px`;
+    syncInput();
   }
 
   /** Typing is the user's own, so it takes the composer out of recall. */
@@ -732,13 +757,21 @@
       </div>
     {/if}
 
+    <div class="input-wrap">
+    {#if commandToken}
+      <div class="input-highlight" aria-hidden="true" data-testid="composer-highlight" style:width={`${inputWidth}px`}>
+        <div class="input-paint" style:transform={`translateY(${-inputScroll}px)`}><span class="command-token">{commandToken}</span>{text.slice(commandToken.length)}{'\n'}</div>
+      </div>
+    {/if}
     <textarea
+      class:highlighted={Boolean(commandToken)}
       bind:this={box}
       bind:value={() => text, setText}
       {oninput}
       {onkeydown}
       {onpaste}
       onkeyup={track}
+      onscroll={syncInput}
       onclick={track}
       onfocus={() => {
         focused = true;
@@ -749,8 +782,9 @@
       {placeholder}
       aria-label={placeholder}
       data-testid="composer-input"
-      spellcheck="true"
+      spellcheck={!commandToken}
     ></textarea>
+    </div>
 
     <SlashMenu
       open={slashOpen}
@@ -777,9 +811,9 @@
           <EffortSlider levels={effortLevels} active={activeEffort} onpick={pickEffort} {speeds} speed={choice?.speed ?? null} onspeed={(speed) => void pick({ speed })} />
         {/if}
 
-        <Menu items={modeItems} onpick={pickMode} label={strings.composer.mode} testid="composer-mode">
+        <Menu items={modeItems} onpick={pickMode} label={strings.composer.mode} testid="composer-mode" align="end">
           <ShieldCheck size={14} strokeWidth={1.75} />
-          {choice ? strings.permissionMode[choice.permissionMode] : strings.permissionMode.default}
+          {strings.permissionMode[displayedMode]}
         </Menu>
 
         <!-- A thread keeps its directory, so the switch exists on a draft alone. -->
@@ -849,6 +883,7 @@
 
 <style>
   .composer-wrap {
+    position: relative;
     flex: none;
     padding: 8px 20px 16px;
   }
@@ -953,7 +988,26 @@
     color: var(--color-foreground);
   }
 
-  textarea {
+  .input-wrap { position: relative; }
+
+  .input-highlight {
+    position: absolute;
+    inset: 0 auto 0 0;
+    overflow: hidden;
+    pointer-events: none;
+  }
+
+  .input-paint {
+    white-space: pre-wrap;
+    overflow-wrap: break-word;
+    color: var(--color-foreground);
+  }
+
+  .command-token { color: var(--color-accent); }
+  textarea.highlighted { color: transparent; caret-color: var(--color-foreground); }
+  textarea.highlighted::selection { background: var(--color-accent-soft); }
+
+  textarea, .input-paint {
     width: 100%;
     min-height: 44px;
     max-height: 200px;
@@ -963,6 +1017,9 @@
     font-size: var(--text-base);
     line-height: 1.5;
   }
+
+  textarea { display: block; }
+  .input-paint { max-height: none; }
 
   textarea:focus {
     outline: none;

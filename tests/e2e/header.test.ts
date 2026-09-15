@@ -64,6 +64,11 @@ test('header and project layout', async () => {
     throw error;
   }
   await capture('message-navigation.png');
+  await page.evaluate(`document.querySelector('[data-message-id="${target}"]').focus({preventScroll:true})`);
+  await page.waitFor(`document.querySelector('${id('message-preview')}')`);
+  expect(await page.evaluate(`document.querySelectorAll('[role=tooltip]').length`)).toBe(1);
+  expect(await page.evaluate(`document.querySelector('${id('message-outline')}').getBoundingClientRect().width`)).toBe(28);
+  expect(await page.evaluate(`(() => { const rail = document.querySelector('${id('message-outline')}').getBoundingClientRect(); const timeline = document.querySelector('${id('timeline')}').getBoundingClientRect(); return Math.abs(rail.top + rail.height / 2 - timeline.top - timeline.height / 2); })()`)).toBeLessThan(1);
   await capture('message-preview.png');
   await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 700, y: 100 });
   await page.evaluate(`document.querySelector('[data-message-id="${target}"]').focus({preventScroll:true})`);

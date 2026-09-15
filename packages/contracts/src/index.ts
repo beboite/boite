@@ -436,7 +436,7 @@ export interface ImageAttachment {
 }
 
 export type MessagePart =
-  | { type: 'text'; text: string }
+  | { type: 'text'; text: string; activity?: { kind: 'goal' | 'loop'; iteration: number } }
   /** An image the user sent with the prompt, journalled with the message. */
   | { type: 'image'; mimeType: ImageMimeType; data: string; alt: string | null }
   /** The model's reasoning as the provider streams it, folded in the UI. */
@@ -512,9 +512,19 @@ export interface AgentTask {
 }
 
 export interface ThreadActivity {
-  goal: { objective: string; status: 'active' | 'paused' | 'complete'; iterations: number; error: string | null } | null;
-  loop: { prompt: string; intervalMs: number; status: 'active' | 'paused'; iterations: number; nextRunAt: number | null; error: string | null } | null;
+  goal: { objective: string; status: 'active' | 'paused' | 'complete'; iterations: number; error: string | null; dismissed?: boolean } | null;
+  loop: { prompt: string; intervalMs: number; maxIterations?: number | null; status: 'active' | 'paused' | 'complete'; iterations: number; nextRunAt: number | null; error: string | null; history?: ActivityIteration[] } | null;
   tasks: AgentTask[];
+  tasksDismissed?: boolean;
+}
+
+export interface ActivityIteration {
+  iteration: number;
+  turnId: TurnId;
+  status: 'running' | 'done' | 'error' | 'stopped';
+  summary: string;
+  startedAt: Timestamp;
+  finishedAt: Timestamp | null;
 }
 
 export interface Thread extends ThreadSummary {
@@ -900,7 +910,7 @@ export interface PairingGrant {
 // ---------------------------------------------------------------------------
 
 export interface RpcMethods {
-  'threads.activity.set': { params: { threadId: ThreadId; goal?: { objective: string } | null; loop?: { prompt: string; intervalMs: number } | null }; result: ThreadActivity };
+  'threads.activity.set': { params: { threadId: ThreadId; goal?: { objective: string } | null; loop?: { prompt: string; intervalMs: number; maxIterations?: number | null } | null }; result: ThreadActivity };
   'threads.activity.control': { params: { threadId: ThreadId; kind: 'goal' | 'loop'; action: 'pause' | 'resume' | 'remove' | 'complete' }; result: ThreadActivity };
   'quotas.list': { params: { refresh?: boolean }; result: AccountQuota[] };
   'quotas.configure': { params: { accountId: AccountId; enabled: boolean }; result: AccountQuota[] };

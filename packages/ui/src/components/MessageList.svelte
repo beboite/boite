@@ -20,6 +20,8 @@
   import ThinkingPart from './ThinkingPart.svelte';
   import ToolCard from './ToolCard.svelte';
   import MessageOutline from './MessageOutline.svelte';
+  import { visibleAnswer, visibleUserText } from '../lib/message-display';
+  import { isNamedModel } from '../lib/model-order';
 
   let {
     store,
@@ -469,7 +471,9 @@
             <div class="bubble">
               {#each message.parts as part, index (index)}
                 {#if part.type === 'text'}
-                  <p class="user-text" data-testid="text-part">{part.text}</p>
+                  {@const text = visibleUserText(part.text)}
+                  {@const command = /^\/(goal|loop)(?=\s|$)/.exec(text)?.[0]}
+                  <p class="user-text" data-testid="text-part">{#if command}<span class="command-token">{command}</span>{text.slice(command.length)}{:else}{text}{/if}</p>
                 {/if}
               {/each}
               {#if images.length > 0}
@@ -496,8 +500,9 @@
           {:else}
             {@const execution = store.openThread?.turns.find((turn) => turn.id === message.turnId)?.execution}
             {#if message.role === 'assistant' && execution}
+              {@const model = store.modelsOf(execution.providerId, execution.accountId).find((model) => model.id === execution.model)}
               <div class="model-attribution" data-testid="message-model">
-                {store.modelsOf(execution.providerId, execution.accountId).find((model) => model.id === execution.model)?.name ?? execution.model ?? store.providerOf(execution.providerId)?.name}
+                {execution.model && isNamedModel(model ?? { id: execution.model, name: execution.model }) ? model?.name ?? execution.model : store.providerOf(execution.providerId)?.name}
               </div>
             {/if}
             {@const caretAt = message.state === 'streaming' ? lastTextIndex(message) : -1}
@@ -506,8 +511,8 @@
               {#each message.parts as part, index (index)}
                 <div class="part" data-kind={part.type}>
                   {#if part.type === 'text'}
-                    {#if part.text.length > 0 || index === caretAt}
-                      <Prose text={part.text} live={index === caretAt} />
+                    {#if visibleAnswer(part.text).length > 0 || index === caretAt}
+                      <Prose text={visibleAnswer(part.text)} live={index === caretAt} />
                     {/if}
                   {:else if part.type === 'thinking'}
                     <ThinkingPart text={part.text} live={index === thinkingAt} />
@@ -581,6 +586,7 @@
 </div>
 
 <style>
+  .command-token { color: var(--color-accent); font-weight: 600; }
   .model-attribution {
     color: var(--color-muted);
     font-size: var(--text-xs);
@@ -598,7 +604,9 @@
     flex: 1;
     min-height: 0;
     overflow: auto;
-    padding: 20px 20px 8px 38px;
+    /* A fixed reading margin keeps the last answer above the compact activity
+       overlay without moving the viewport when tasks appear or update. */
+    padding: 20px 20px 132px 38px;
     overscroll-behavior: contain;
   }
 
