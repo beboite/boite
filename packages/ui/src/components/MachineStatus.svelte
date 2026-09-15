@@ -13,7 +13,7 @@
   const issues = $derived(machines.filter(m => m.store.connection === 'closed' || (m.store.booted && m.store.connection !== 'ready')).length);
   const items = $derived([
     { id: 'all', label: strings.machines.all, active: filter === null },
-    ...machines.map(m => ({ id: m.id, label: m.label, hint: strings.connection[m.store.connection], active: m.id === filter })),
+    ...machines.map(m => ({ id: m.id, label: m.label, status: { tone: m.store.connection === 'ready' ? 'success' as const : m.store.connection === 'closed' ? 'danger' as const : 'warning' as const, label: strings.connection[m.store.connection] }, active: m.id === filter })),
     { id: 'manage', label: strings.connection.manage }
   ]);
   function pick(id: string) {

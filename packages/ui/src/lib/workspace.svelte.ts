@@ -6,6 +6,7 @@ import {
   storeEndpoint,
   upsertEnvironment,
   readStoredEndpoint,
+  fromTauri,
   type Endpoint
 } from './endpoint';
 import { strings } from './strings';
@@ -71,6 +72,10 @@ export class Workspace {
       return;
     }
     const primaryEndpoint = readStoredEndpoint();
+    if (window.__TAURI_INTERNALS__ && !store.localCore) {
+      const local = await fromTauri();
+      if (local && local.url !== store.endpointUrl) await this.add(local, strings.machines.local);
+    }
     if (!store.localCore && primaryEndpoint?.url === store.endpointUrl && primaryEndpoint.token) {
       upsertEnvironment({ ...primaryEndpoint, paired: primaryEndpoint.paired ?? false, label: this.machines[0]!.label });
     }

@@ -41,6 +41,8 @@ test('project and recent cards show both hosts, PRs and user-message ordering on
   expect(await page.evaluate(`document.querySelector('[data-testid=machine-filter]') === null`)).toBe(true);
   await page.click(id('machine-status'));
   await page.waitFor(`document.querySelector('[data-testid=machine-status-menu]')`);
+  expect(await page.evaluate(`document.querySelectorAll('[data-testid=machine-status-menu] .status-dot[data-tone=success]').length`)).toBe(2);
+  expect(await page.evaluate(`document.querySelector('[data-testid=machine-status-menu]').innerText.includes('Connected')`)).toBe(false);
   await capture('single-machine-menu.png');
   await page.click('[data-testid=machine-status-menu] [data-value="http://builder.test"]');
   await page.waitFor(`document.querySelectorAll('${id('thread-row')}').length === 4`);

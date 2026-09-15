@@ -3,12 +3,26 @@ import { Workspace } from './workspace.svelte';
 import { Store, store as primary } from './store.svelte';
 import { FakeClient } from './fake-client';
 import { upsertEnvironment } from './endpoint';
+import * as endpoints from './endpoint';
 
 let workspace: Workspace | undefined;
 afterEach(() => {
+  delete window.__TAURI_INTERNALS__;
   vi.restoreAllMocks();
   workspace?.close();
   localStorage.clear();
+});
+
+test('restoring a remote selection also connects the shell local core', async () => {
+  const { w, a } = await setup();
+  a.localCore = false;
+  a.endpointUrl = 'http://remote.test';
+  Object.defineProperty(window, '__TAURI_INTERNALS__', { value: {}, configurable: true });
+  vi.spyOn(a, 'boot').mockResolvedValue();
+  vi.spyOn(endpoints, 'fromTauri').mockResolvedValue({ url: 'http://127.0.0.1:41000', token: 'test', local: true });
+  const add = vi.spyOn(w, 'add').mockResolvedValue(true);
+  await w.boot();
+  expect(add).toHaveBeenCalledWith({ url: 'http://127.0.0.1:41000', token: 'test', local: true }, 'My computer');
 });
 
 test('an empty local core yields to the remembered journal on the same computer', async () => {
