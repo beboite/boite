@@ -322,6 +322,17 @@ describe('codex driver', () => {
     expect(thread.context?.breakdown).toEqual({input:60,cache:20,output:10});
   });
 
+  test('late usage from a previous turn does not overwrite the current turn', async () => {
+    const client = await startCore({ warmProcessMinutes: 1 });
+    const threadId = await codexThread(client);
+    await runTurn(client, threadId, '[late-context]');
+    const finished = client.next('turn.finished', turn => turn.threadId === threadId, 20000);
+    await client.call('turns.start', { threadId, prompt: '[slow]' });
+    await waitFor(() => harness!.core.threads.get(threadId).context?.tokens === 90);
+    await client.call('turns.stop', { threadId });
+    expect((await finished).usage).toBeNull();
+  });
+
   test('the turn usage carries the tokens the agent reported, with no price', async () => {
     const client = await startCore();
     const threadId = await codexThread(client);

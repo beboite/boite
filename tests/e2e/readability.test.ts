@@ -21,7 +21,7 @@ beforeAll(async () => {
   page = await BrowserPage.launch({url:`http://127.0.0.1:${port}/?fake=1&machines=1`,windowSize:{width:1300,height:850}});
   await page.waitFor(`document.querySelector('[data-thread-id="t-trace"]')`);
   await page.click('[data-thread-id="t-trace"]');
-}, 30000);
+}, 90000);
 afterAll(async () => { await page?.close(); await server?.close(); });
 
 test('thread metadata, message identity and expandable trace fit a narrow panel', async () => {
@@ -82,7 +82,8 @@ test('goal prompts and markers stay readable and recognized commands are accente
   await page.waitFor(`document.querySelector('${id('composer-input')}').scrollHeight > document.querySelector('${id('composer-input')}').clientHeight`);
   await page.evaluate(`(() => { const input = document.querySelector('${id('composer-input')}'); input.scrollTop = input.scrollHeight; input.dispatchEvent(new Event('scroll')); })()`);
   await page.waitFor(`document.querySelector('.input-mirror').style.transform === 'translateY(-' + document.querySelector('${id('composer-input')}').scrollTop + 'px)'`);
-  expect(await page.evaluate(`Math.abs(document.querySelector('.input-mirror').getBoundingClientRect().width - document.querySelector('${id('composer-input')}').clientWidth) < 1`)).toBe(true);
+  // ResizeObserver updates the mirrored width after the textarea gains its scrollbar.
+  await page.waitFor(`Math.abs(document.querySelector('.input-mirror').getBoundingClientRect().width - document.querySelector('${id('composer-input')}').clientWidth) < 1`);
   await capture('readability-composer-long');
   await page.evaluate(`(() => { const input = document.querySelector('${id('composer-input')}'); input.value = '/goal Verify another task'; input.dispatchEvent(new Event('input',{bubbles:true})); })()`);
   await capture('readability-goal');

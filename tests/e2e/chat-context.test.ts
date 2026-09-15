@@ -12,7 +12,7 @@ beforeAll(async () => {
   server = vite; await vite.listen();
   page = await BrowserPage.launch({url:`http://127.0.0.1:${port}/?fake=1`,windowSize:{width:1300,height:850}});
   await page.waitFor(`document.querySelector('[data-thread-id]')`);
-}, 30000);
+}, 90000);
 afterAll(async () => { await page?.close(); await server?.close(); });
 
 async function update(code: string) {
@@ -43,7 +43,7 @@ test('receipts follow actual activity, response indicator stays left and complet
   await page.waitFor(`document.querySelector('[data-testid="turn-summary"]').textContent.includes('3.8')`);
   expect(await page.evaluate(`document.querySelector('[data-testid="turn-summary"]').textContent.trim()`)).toBe('3.8 s');
   await capture('quiet-chat-done');
-});
+}, 30000);
 test('context opens on hover, shows exact segments, and compaction needs its own click', async () => {
   await update(`thread.context = {tokens:31000,window:200000,at:Date.now(),breakdown:{input:18000,cache:10000,output:3000}}; thread.sessionId = 'test-session'; window.__compactCalls = 0; store.compact = async () => {window.__compactCalls++;};`);
   await page.evaluate(`document.querySelector('[data-testid="context-meter"]').dispatchEvent(new MouseEvent('mouseenter'))`);

@@ -309,7 +309,7 @@ async function runTurn(turnId: string, text: string): Promise<void> {
       case 'late-context':
         notify('turn/completed', { threadId, turn: turnRecord(turnId, 'completed') });
         await Bun.sleep(80);
-        notify('thread/tokenUsage/updated', { threadId, tokenUsage: { last: { inputTokens: 80, cachedInputTokens: 20, outputTokens: 10 }, modelContextWindow: 200000 } });
+        notify('thread/tokenUsage/updated', { threadId, turnId, tokenUsage: { last: { inputTokens: 80, cachedInputTokens: 20, outputTokens: 10 }, modelContextWindow: 200000 } });
         return;
       case 'usage':
         notify('thread/tokenUsage/updated', {

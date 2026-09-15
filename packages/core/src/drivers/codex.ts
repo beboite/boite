@@ -810,7 +810,7 @@ class CodexSession {
       const usage = params['tokenUsage'] as { last?: CodexTokenUsage; modelContextWindow?: number } | undefined;
       const last = usage?.last;
       if (!last) return;
-      if (this.current) this.current.usage = mapUsage(last);
+      if (this.current && params['turnId'] === this.current.turnId) this.current.usage = mapUsage(last);
       const tokens = last.totalTokens ?? (typeof last.inputTokens === 'number' && typeof last.outputTokens === 'number' ? last.inputTokens + last.outputTokens : null);
       if (tokens !== null) {
         const cache = last.cachedInputTokens ?? 0;

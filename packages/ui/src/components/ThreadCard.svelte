@@ -228,7 +228,6 @@
   }
   .machine {
     flex: none;
-    pointer-events: auto;
   }
   .machine.offline {
     color: var(--color-danger);

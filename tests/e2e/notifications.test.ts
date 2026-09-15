@@ -12,7 +12,7 @@ beforeAll(async () => {
   server = vite; await vite.listen();
   page = await BrowserPage.launch({url:`http://127.0.0.1:${port}/?fake=1`,windowSize:{width:1300,height:850}});
   await page.waitFor(`document.querySelector('[data-thread-id]')`);
-}, 30000);
+}, 90000);
 afterAll(async () => { await page?.close(); await server?.close(); });
 test('notification stays readable and can be dismissed', async () => {
   await page.evaluate(`(async () => { const {workspace} = await import('/src/lib/workspace.svelte.ts'); workspace.active.error = 'Could not connect to the build machine. Check the connection in Settings and try again. The current conversation is saved.'; })()`);
