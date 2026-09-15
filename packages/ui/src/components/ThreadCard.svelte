@@ -8,6 +8,7 @@
   import { separator } from '../lib/menu';
   import { focusOnMount } from '../lib/actions';
   import { strings } from '../lib/strings';
+  import { lookupPullRequest } from '../lib/pull-request';
   import { ago } from '../lib/format';
   import MachineIcon from './MachineIcon.svelte';
   import StatusMark from './StatusMark.svelte';
@@ -21,11 +22,13 @@
   let pullRequest = $state<ThreadSummary['pullRequest']>(null);
 
   let prLoading = $state(false);
-  async function refreshPr() {
+  async function refreshPr(manual = false) {
     if (!owner.client || prLoading) return;
     prLoading = true;
     try {
-      pullRequest = await owner.client.call('threads.pullRequest', { threadId: thread.id });
+      const result = await lookupPullRequest(owner.client, thread.id);
+      pullRequest = result.supported ? result.pullRequest : null;
+      if (!result.supported && manual) owner.error = strings.errors.pullRequestUnsupported;
     } catch (error) {
       owner.error = error instanceof Error ? error.message : String(error);
     } finally {
@@ -65,7 +68,7 @@
         if (action === 'rename') rename();
         if (action === 'retitle') void owner.retitle(thread.id);
         if (action === 'pin') void owner.pin(thread.id, !thread.pinned);
-        if (action === 'pr') void refreshPr();
+        if (action === 'pr') void refreshPr(true);
         if (action === 'archive') void owner.archive(thread.id);
       }
     );

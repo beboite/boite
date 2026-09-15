@@ -68,6 +68,11 @@ has a ten-second deadline and runs through the process registry under
 `pull-request:<threadId>`. The thread menu can request a refresh. Missing `gh`,
 authentication failures and malformed responses use the error notification. A PR link opens in the system browser.
 
+Older cores that do not implement PR lookup are probed once per connection.
+Their cards omit the PR link. A manual refresh explains that the hosting
+machine needs an update; other RPC errors still appear in a notification.
+Reconnecting clears the capability check so an updated core is detected.
+
 ## Isolation and tests
 
 Each connection has its own Store. IDs remain native to that core and are never

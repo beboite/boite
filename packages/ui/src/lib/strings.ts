@@ -730,6 +730,7 @@ export const strings = {
 
   errors: {
     prefix: 'Error',
+    pullRequestUnsupported: 'Update Boite on the machine hosting this thread to show its pull request. This core does not support pull request lookup yet.',
     noEndpoint: 'No core endpoint could be resolved.',
     connect: 'Could not connect to the core.',
     clipboard: 'The clipboard refused the text.',

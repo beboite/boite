@@ -1,3 +1,4 @@
+import { resetPullRequestSupport } from './pull-request';
 import { activityCommand } from './activity-command';
 import type {
   Account,
@@ -570,6 +571,7 @@ export class Store {
         client.onState((state) => {
           this.connection = state;
           if (state === 'ready') {
+            resetPullRequestSupport(client);
             this.#probeEpoch++;
             this.#probeAttempts.clear();
             this.error = null;
