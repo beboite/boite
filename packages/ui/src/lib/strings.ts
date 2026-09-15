@@ -217,6 +217,15 @@ export const strings = {
   },
 
   thread: {
+    contextDetails: 'Context',
+    contextInput: 'Input',
+    contextCache: 'Cached input',
+    contextOutput: 'Output',
+    contextUsed: 'Used',
+    contextFree: 'Available',
+    contextNoBreakdown: 'This agent does not report a breakdown.',
+    contextNoReading: 'No measurement received from this agent yet.',
+    contextMeasured: 'Last measurement',
     none: 'No thread open',
     noneBody: 'Pick one on the left, or start a new one.',
     trace: 'Trace',
@@ -248,6 +257,8 @@ export const strings = {
   },
 
   chat: {
+    accepted: 'Request accepted',
+    responseStarted: 'Agent activity received',
     working: 'Working',
     writing: 'Writing',
     stopped: 'Stopped',

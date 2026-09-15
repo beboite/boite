@@ -580,7 +580,9 @@ test('the header wears the context meter, a compaction is a divider, and a turn 
   const meter = query('[data-testid=context-meter]');
   expect(meter.textContent?.trim()).toBe('16%');
   expect(meter.dataset.level).toBe('low');
-  expect(meter.title).toBe('Context: 31k of 200k tokens (16%) as of the last request');
+  query<HTMLButtonElement>('[data-testid=context-trigger]').click();
+  await waitFor(() => document.querySelector('[data-testid=context-popup]') !== null);
+  expect(query('[data-testid=context-popup]').textContent).toContain((31000).toLocaleString());
   expect(query('[data-testid=compaction-part]').textContent?.replace(/\s+/g, ' ').trim()).toBe(
     'Context compacted, 184k to 31k tokens'
   );
@@ -592,13 +594,14 @@ test('the header wears the context meter, a compaction is a divider, and a turn 
   query<HTMLButtonElement>('[data-testid=composer-send]').click();
   await waitFor(() => store.openThread?.status === 'idle' && (store.openThread?.context?.tokens ?? 0) > 31_000);
   // 31_000 + 600 + 13 * 4 = 31_652 of 200_000: still 16 percent, the tooltip moved.
-  expect(query('[data-testid=context-meter]').title).toBe('Context: 32k of 200k tokens (16%) as of the last request');
+  expect(query('[data-testid=context-meter]').dataset.percent).toBe('16');
 
   // A thread whose agent never reported wears no meter.
   query<HTMLButtonElement>('[data-thread-id="t-bench"]').click();
   await waitFor(() => store.openThread?.id === 't-bench');
-  expect(query('[data-testid=context-meter]').textContent).toContain('?');
-  expect(query('[data-testid=context-meter]').title).toBe('Context usage not reported');
+  query<HTMLButtonElement>('[data-testid=context-trigger]').click();
+  await waitFor(() => document.querySelector('[data-testid=context-popup]') !== null);
+  expect(query('[data-testid=context-popup]').textContent).toContain('No measurement received');
 });
 
 test('the trace panel shows the I/O a process moved, and none for a record that measured nothing', async () => {

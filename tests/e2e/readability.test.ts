@@ -39,7 +39,7 @@ test('thread metadata, message identity and expandable trace fit a narrow panel'
   await capture('readability-desktop');
   expect(await page.evaluate(`document.querySelector('${id('trace-row')}[data-pid="21140"]').open`)).toBe(true);
   expect(await page.evaluate(`document.querySelector('${id('trace-panel')}').scrollWidth <= document.querySelector('${id('trace-panel')}').clientWidth`)).toBe(true);
-  expect(await page.evaluate(`document.querySelector('${id('turn-summary')}').textContent`)).toContain('Done');
+  expect(await page.evaluate(`document.querySelector('${id('turn-summary')}').getAttribute('aria-label')`)).toBe('Done');
   await page.send('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true});
   await capture('readability-trace-phone');
   expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
@@ -59,11 +59,11 @@ test('paragraphs arrive whole, keep previous nodes and flush when stopped; reaso
   expect(await page.evaluate(`document.querySelector('${id('thinking-toggle')}').textContent`)).toContain('Checking results');
   await capture('readability-working');
   await update(`thread.messages.at(-1).parts.push({type:'text',text:'Last partial paragraph'});`);
-  await page.waitFor(`document.querySelector('${id('turn-summary')}').textContent.includes('Writing')`);
+  await page.waitFor(`document.querySelector('${id('turn-summary')}').dataset.status === 'running'`);
   expect(await page.evaluate(`document.querySelector('${id('timeline')}').textContent.includes('Last partial paragraph')`)).toBe(false);
   await update(`thread.turns[0].status = 'stopped'; thread.turns[0].finishedAt = Date.now(); thread.messages.at(-1).state = 'complete'; thread.status = 'idle';`);
   await page.waitFor(`document.querySelector('${id('timeline')}').textContent.includes('Last partial paragraph')`);
-  expect(await page.evaluate(`document.querySelector('${id('turn-summary')}').textContent`)).toContain('Stopped');
+  expect(await page.evaluate(`document.querySelector('${id('turn-summary')}').getAttribute('aria-label')`)).toBe('Stopped');
 });
 
 test('goal prompts and markers stay readable and recognized commands are accented while typing', async () => {

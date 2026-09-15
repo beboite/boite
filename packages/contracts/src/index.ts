@@ -327,6 +327,8 @@ export type TitleSource = 'prompt' | 'agent' | 'user';
  * Null on a thread whose agent never reported it.
  */
 export interface ContextUse {
+  /** Disjoint counts from the last request, when the provider reports them. */
+  breakdown?: { input: number; cache: number; output: number };
   tokens: number;
   window: number | null;
   at: Timestamp;

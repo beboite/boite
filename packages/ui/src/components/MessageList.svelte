@@ -9,7 +9,7 @@
 </script>
 
 <script lang="ts">
-  import { ArrowDown, User, Bot } from '@lucide/svelte';
+  import { ArrowDown, Check } from '@lucide/svelte';
   import type { Message } from '@boite/contracts';
   import { strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
@@ -18,7 +18,6 @@
   import QuestionCard from './QuestionCard.svelte';
   import Prose from './Prose.svelte';
   import ThinkingPart from './ThinkingPart.svelte';
-  import ProviderLogo from './ProviderLogo.svelte';
   import TurnSummary from './TurnSummary.svelte';
   import { promptText } from '../lib/message-display';
   import ToolCard from './ToolCard.svelte';
@@ -385,6 +384,7 @@
     }
     return result;
   });
+  const responded = $derived(new Set(messages.filter(m => m.role === 'assistant' && m.parts.some(p => p.type === 'text' || p.type === 'thinking' ? p.text.length > 0 : true)).map(m => m.turnId)));
   const lastInTurn = $derived.by(() => {
     const result = new Map<string, string>();
     for (const message of messages) result.set(message.turnId, message.id);
@@ -429,7 +429,6 @@
         >
           {#if message.role === 'user'}
             {@const images = imagesOf(message)}
-            <div class="author user-author"><User size={14} />{strings.chat.you}</div>
             <div class="bubble">
               {#each message.parts as part, index (index)}
                 {#if part.type === 'text'}
@@ -459,12 +458,11 @@
                 </div>
               {/if}
             </div>
-          {:else}
-            {@const execution = store.openThread?.turns.find((turn) => turn.id === message.turnId)?.execution}
-            <div class="author" data-testid="message-model">
-              {#if execution}<ProviderLogo providerId={execution.providerId} size={18} />{:else}<Bot size={18} />{/if}
-              {message.role === 'system' ? strings.chat.system : execution ? store.modelsOf(execution.providerId, execution.accountId).find((model) => model.id === execution.model)?.name ?? execution.model ?? store.providerOf(execution.providerId)?.name : strings.chat.assistant}
+            <div class="receipts" data-testid="message-receipts">
+              <span class:received={!!turn} title={strings.chat.accepted} aria-label={strings.chat.accepted}><Check size={12} /></span>
+              <span class:received={responded.has(message.turnId)} title={strings.chat.responseStarted} aria-label={strings.chat.responseStarted}><Check size={12} /></span>
             </div>
+          {:else}
             {@const caretAt = message.state === 'streaming' ? lastTextIndex(message) : -1}
             {@const thought = thoughts.get(message.turnId)}
             {#if thought?.host === message.id}<ThinkingPart text={thought.text} live={thought.live} />{/if}
@@ -529,7 +527,7 @@
             </div>
           {/if}
           {#if turn && lastInTurn.get(turn.id) === message.id}
-            <TurnSummary {turn} {messages} waiting={store.openThread?.status === 'waiting' && turn.status === 'running'} />
+            <TurnSummary {turn} waiting={store.openThread?.status === 'waiting' && turn.status === 'running'} />
           {/if}
         </article>
       {/each}
@@ -548,8 +546,9 @@
 </div>
 
 <style>
-  .author { display: flex; align-items: center; gap: 8px; color: var(--color-foreground); font-size: var(--text-sm); font-weight: 500; margin-bottom: 10px; }
-  .user-author { color: var(--color-muted-foreground); font-size: var(--text-xs); }
+  .receipts { display: flex; gap: 1px; margin: 4px 2px 0; color: var(--color-muted-foreground); }
+  .receipts span { display: flex; opacity: .45; }
+  .receipts .received { color: var(--color-accent); opacity: 1; }
   .command { color: var(--color-accent); font-weight: 600; }
   .timeline-wrap {
     position: relative;

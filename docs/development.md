@@ -316,3 +316,10 @@ Scheduled goal and loop prompts keep their execution instructions in `text` and
 carry a separate optional `displayText` on the text part. The journal retains
 both; drivers read the execution prompt. The UI shows the command and objective,
 including when recalling a sent prompt, and hides standalone goal control markers.
+
+Chat status uses two small receipts: core acceptance and the first nonempty
+assistant activity. Agent protocols do not provide a literal read receipt.
+The reply has one spinner while running, paused when the document is hidden
+and disabled for reduced motion. Finished turns show a check and elapsed time;
+usage totals remain in Usage settings. Context details open separately from
+compaction. `tests/e2e/chat-context.test.ts` covers these interactions.

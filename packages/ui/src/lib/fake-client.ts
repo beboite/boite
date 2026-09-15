@@ -2772,7 +2772,7 @@ export class FakeClient implements ObservableClient {
     finished.context = { tokens: 84_000, window: 200_000, at: T0 + 60_000 };
     finished.branch = 'boite/trace';
     finished.pullRequest = { number: 84, url: 'https://github.com/example/project/pull/84', state: 'OPEN' };
-    unread.context = { tokens: 31_000, window: 200_000, at: T0 + 340_000 };
+    unread.context = { tokens: 31_000, breakdown: {input: 18000, cache: 10000, output: 3000}, window: 200_000, at: T0 + 340_000 };
 
     for (const thread of [finished, running, waiting, unread]) this.#threads.set(thread.id, thread);
     if (this.#long) {

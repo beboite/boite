@@ -19,10 +19,10 @@
  */
 import { appendFileSync } from 'node:fs';
 
-const DIRECTIVE = /\[(command|approve|thought|usage|slow|crash|input)\]/g;
+const DIRECTIVE = /\[(command|approve|thought|usage|late-context|slow|crash|input)\]/g;
 const CHUNKS = 3;
 
-type Directive = 'command' | 'approve' | 'thought' | 'usage' | 'slow' | 'crash' | 'input';
+type Directive = 'command' | 'approve' | 'thought' | 'usage' | 'late-context' | 'slow' | 'crash' | 'input';
 
 let threadCounter = 0;
 let turnCounter = 0;
@@ -305,6 +305,11 @@ async function runTurn(turnId: string, text: string): Promise<void> {
         say(q1.length === 0 ? 'input refused' : `input answered ${q1}`);
         break;
       }
+      case 'late-context':
+        notify('turn/completed', { threadId, turn: turnRecord(turnId, 'completed') });
+        await Bun.sleep(80);
+        notify('thread/tokenUsage/updated', { threadId, tokenUsage: { last: { inputTokens: 80, cachedInputTokens: 20, outputTokens: 10 }, modelContextWindow: 200000 } });
+        return;
       case 'usage':
         notify('thread/tokenUsage/updated', {
           threadId,

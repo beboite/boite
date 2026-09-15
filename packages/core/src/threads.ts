@@ -1163,13 +1163,15 @@ export class ThreadStore {
   }
 
   /** The context meter, whole numbers only: a driver that misreads its agent writes nothing. */
-  private noteContext(threadId: ThreadId, use: { tokens: number; window: number | null }): void {
+  private noteContext(threadId: ThreadId, use: Omit<import('@boite/contracts').ContextUse, 'at'>): void {
     const tokens = Number.isFinite(use.tokens) && use.tokens >= 0 ? Math.round(use.tokens) : null;
     if (tokens === null) return;
     const window = use.window !== null && Number.isFinite(use.window) && use.window > 0 ? Math.round(use.window) : null;
     const thread = this.core.journal.getThread(threadId);
     if (thread === null) return;
-    this.save({ ...thread, context: { tokens, window, at: Date.now() } }, 'thread.context');
+    const breakdown = use.breakdown && Object.values(use.breakdown).every(n => Number.isFinite(n) && n >= 0)
+      && Math.abs(use.breakdown.input + use.breakdown.cache + use.breakdown.output - tokens) <= 1 ? use.breakdown : undefined;
+    this.save({ ...thread, context: { tokens, window, ...(breakdown ? {breakdown} : {}), at: Date.now() } }, 'thread.context');
   }
 
   private setStatus(threadId: ThreadId, status: ThreadStatus): void {
