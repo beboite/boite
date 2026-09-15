@@ -752,7 +752,9 @@ test(
       RECONNECT_TIMEOUT_MS,
     );
   },
-  RECONNECT_TIMEOUT_MS,
+  // The backoff still has 30 seconds; restarting the core and sending a turn
+  // need their own time within the complete scenario.
+  TIMEOUT,
 );
 
 test(

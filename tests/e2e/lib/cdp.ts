@@ -80,6 +80,7 @@ export class BrowserPage {
   #nextId = 1;
   #pending = new Map<number, Pending>();
   #closed = false;
+  #pageErrors: string[] = [];
 
   private constructor(socket: WebSocket, pid: number | null, userDataDir: string | null) {
     this.#socket = socket;
@@ -114,11 +115,15 @@ export class BrowserPage {
         '--no-first-run',
         '--no-default-browser-check',
         '--disable-background-networking',
+        // Keep hidden test pages responsive when another browser owns the active page.
+        '--disable-background-timer-throttling',
+        '--disable-backgrounding-occluded-windows',
+        '--disable-renderer-backgrounding',
         '--remote-allow-origins=*',
         `--window-size=${size.width},${size.height}`,
         `--user-data-dir=${userDataDir}`,
         `--remote-debugging-port=${port}`,
-        options.url,
+        'about:blank',
       ],
       stdout: 'ignore',
       stderr: 'ignore',
@@ -131,6 +136,7 @@ export class BrowserPage {
       const page = new BrowserPage(socket, proc.pid, ownsUserDataDir ? userDataDir : null);
       await page.send('Page.enable', {});
       await page.send('Runtime.enable', {});
+      await page.navigate(options.url);
       return page;
     } catch (error) {
       killProcessTree(proc.pid);
@@ -198,19 +204,32 @@ export class BrowserPage {
     let last = '';
     for (;;) {
       try {
-        const ok = await this.evaluate<boolean>(`!!(${expression})`);
+        const ok = await this.evaluate<boolean>(`(async () => !!(await (${expression})))()`);
         if (ok) return;
         last = 'it stayed false';
       } catch (error) {
         last = error instanceof Error ? error.message : String(error);
       }
-      if (Date.now() > deadline) throw new Error(`waitFor timed out on ${expression}: ${last}`);
+      if (Date.now() > deadline) {
+        const state = await this.evaluate(`({ location: location.origin + location.pathname, ready: document.readyState, title: document.title, text: document.body?.innerText.slice(0, 500) })`).catch(() => 'page unresponsive');
+        throw new Error(`waitFor timed out on ${expression}: ${last}\nPage: ${JSON.stringify(state)}\nErrors: ${JSON.stringify(this.#pageErrors)}`);
+      }
       await Bun.sleep(POLL_MS);
     }
   }
 
   async navigate(url: string): Promise<void> {
-    await this.send('Page.navigate', { url });
+    const result = await this.send('Page.navigate', { url }) as { errorText?: string; loaderId?: string };
+    if (result.errorText) throw new Error(`navigation failed: ${result.errorText}`);
+    if (result.loaderId) {
+      const deadline = Date.now() + CONNECT_TIMEOUT_MS;
+      for (;;) {
+        const tree = await this.send('Page.getFrameTree', {}) as { frameTree: { frame: { loaderId: string } } };
+        if (tree.frameTree.frame.loaderId === result.loaderId) break;
+        if (Date.now() > deadline) throw new Error('the requested navigation never committed');
+        await Bun.sleep(POLL_MS);
+      }
+    }
     await this.waitFor("document.readyState === 'complete'");
   }
 
@@ -276,13 +295,20 @@ export class BrowserPage {
 
   #receive(raw: string): void {
     if (raw === '') return;
-    let frame: { id?: unknown; result?: unknown; error?: { message?: string } };
+    let frame: { id?: unknown; method?: string; params?: { exceptionDetails?: { text?: string; exception?: { description?: string } } }; result?: unknown; error?: { message?: string } };
     try {
       frame = JSON.parse(raw) as typeof frame;
     } catch {
       return;
     }
-    if (typeof frame.id !== 'number') return;
+    if (typeof frame.id !== 'number') {
+      if (frame.method === 'Runtime.exceptionThrown') {
+        const detail = frame.params?.exceptionDetails;
+        this.#pageErrors.push(detail?.exception?.description ?? detail?.text ?? 'unknown page exception');
+        if (this.#pageErrors.length > 10) this.#pageErrors.shift();
+      }
+      return;
+    }
     const pending = this.#pending.get(frame.id);
     if (pending === undefined) return;
     this.#pending.delete(frame.id);
