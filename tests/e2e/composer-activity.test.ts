@@ -116,12 +116,14 @@ test('goal and loop commands share the activity panel with disclosed tasks and r
   await page.waitFor(`document.querySelector('${id('activity-tasks-toggle')}')`);
   await page.evaluate(`document.querySelector('${id('thread-activity')}').dispatchEvent(new PointerEvent('pointerenter'))`);
   await page.waitFor(`document.querySelector('${id('activity-tasks-toggle')}').getAttribute('aria-expanded') === 'true'`);
+  expect(await page.evaluate(`Array.from(document.querySelectorAll('.activity-action')).every(button => button.getBoundingClientRect().width >= 36 && button.getBoundingClientRect().height >= 36)`)).toBe(true);
   await capture('composer-activity-desktop');
   await page.evaluate(`document.querySelector('${id('thread-activity')}').dispatchEvent(new PointerEvent('pointerleave'))`);
   await page.waitFor(`document.querySelector('${id('activity-tasks-toggle')}').getAttribute('aria-expanded') === 'false'`);
   await size(true);
   await page.click(id('activity-tasks-toggle'));
   await page.waitFor(`document.querySelector('${id('activity-tasks-toggle')}').getAttribute('aria-expanded') === 'true'`);
+  expect(await page.evaluate(`Array.from(document.querySelectorAll('.activity-action')).every(button => button.getBoundingClientRect().width >= 40 && button.getBoundingClientRect().height >= 40)`)).toBe(true);
   await capture('composer-activity-phone');
   await page.click(`${id('activity-goal')} [aria-label="Remove"]`);
   await page.waitFor(`!document.querySelector('${id('activity-goal')}')`);

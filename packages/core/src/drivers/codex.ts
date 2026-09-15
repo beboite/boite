@@ -692,6 +692,7 @@ class CodexSession {
         approvalPolicy: policy.approvalPolicy,
         sandbox: policy.sandbox,
         ...(model === null ? {} : { model }),
+        config: { 'tools.update_plan.enabled': true },
         excludeTurns: true,
       });
       this.threadId = resumed.thread.id;
@@ -699,6 +700,7 @@ class CodexSession {
     }
 
     const created = await rpc.request<{ thread: { id: string } }>('thread/start', {
+      config: { 'tools.update_plan.enabled': true },
       cwd: ctx.thread.cwd,
       approvalPolicy: policy.approvalPolicy,
       sandbox: policy.sandbox,

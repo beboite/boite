@@ -156,5 +156,7 @@ test('goal messages expose a display command while the driver receives its instr
   await waitFor(() => received.length > 0);
   const thread = await client.call('threads.get', { threadId });
   expect(received).toContain('[BOITE_GOAL_COMPLETE]');
+  expect(received).toContain('Codex: update_plan');
+  expect(received).toContain('Boite displays those task updates');
   expect(thread.messages.find(m => m.role === 'user')?.parts[0]).toMatchObject({ text: received, displayText: '/goal Check two tasks' });
 });

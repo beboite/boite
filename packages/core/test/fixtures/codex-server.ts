@@ -28,6 +28,7 @@ let threadCounter = 0;
 let turnCounter = 0;
 let itemCounter = 0;
 let threadId = '';
+let planEnabled = false;
 /**
  * The turns an interrupt already arrived for, and what is waiting on one. A
  * real server knows a turn from the moment it answers `turn/start`, so an
@@ -213,7 +214,7 @@ function commandItem(itemId: string, status: string, output: string | null): unk
 
 async function runTurn(turnId: string, text: string): Promise<void> {
   notify('turn/started', { threadId, turn: turnRecord(turnId, 'inProgress') });
-  if (text.includes('[tasks]')) notify('turn/plan/updated', { threadId, turnId, plan: [{ step: 'Inspect source', status: 'completed' }, { step: 'Run checks', status: 'inProgress' }] });
+  if (planEnabled && text.includes('[tasks]')) notify('turn/plan/updated', { threadId, turnId, plan: [{ step: 'Inspect source', status: 'completed' }, { step: 'Run checks', status: 'inProgress' }] });
   const directives = directivesOf(text);
   const say = (chunk: string): void => {
     notify('item/agentMessage/delta', { threadId, turnId, itemId: 'msg-1', delta: chunk });
@@ -374,6 +375,7 @@ function handle(method: string, raw: unknown): unknown {
       // One page, and a null cursor: the driver stops asking on that.
       return { data: MODELS, nextCursor: null };
     case 'thread/start': {
+      planEnabled = (params['config'] as Record<string, unknown> | undefined)?.['tools.update_plan.enabled'] === true;
       threadCounter += 1;
       threadId = `codex-fake-${Math.random().toString(16).slice(2, 10)}-${threadCounter}`;
       log(
@@ -382,6 +384,7 @@ function handle(method: string, raw: unknown): unknown {
       return { thread: threadRecord(), model: 'fake-codex', modelProvider: 'fake', serviceTier: null };
     }
     case 'thread/resume': {
+      planEnabled = (params['config'] as Record<string, unknown> | undefined)?.['tools.update_plan.enabled'] === true;
       threadId = textOf(params['threadId']);
       log(
         `thread/resume ${threadId} approvalPolicy=${textOf(params['approvalPolicy'])} sandbox=${textOf(params['sandbox'])}`,
