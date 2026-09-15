@@ -121,7 +121,6 @@
       .reverse()
   );
 
-  let modelPickerHeight = $state(0);
   let provider = $derived(choice ? store.providerOf(choice.providerId) : null);
   $effect(() => {
     if (provider?.available && provider.protocol !== 'echo' && choice) {
@@ -670,7 +669,7 @@
 
 <div class="composer-wrap" class:centered>
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="composer" style:margin-bottom={modelPickerHeight ? `${modelPickerHeight + 12}px` : undefined} data-testid="composer" {ondragover} {ondrop}>
+  <div class="composer" data-testid="composer" {ondragover} {ondrop}>
     {#if composer && composer.queued.length > 0}
       <div class="queued subtle" data-testid="composer-queued">{strings.composer.queued}</div>
     {/if}
@@ -735,34 +734,10 @@
 
     <div class="bar">
       <div class="chips">
-        <ModelPicker {store} {choice} disabled={picking} onpick={pick} onheightchange={(height) => modelPickerHeight = height} />
-
-        {#if takesImages}
-          <button
-            type="button"
-            class="chip attach"
-            data-testid="composer-attach"
-            title={strings.composer.attach}
-            aria-label={strings.composer.attach}
-            onclick={() => picker?.click()}
-          >
-            <Paperclip size={14} strokeWidth={1.75} />
-          </button>
-          <input
-            bind:this={picker}
-            class="file"
-            type="file"
-            accept="image/png,image/jpeg,image/gif,image/webp"
-            multiple
-            tabindex="-1"
-            aria-hidden="true"
-            data-testid="composer-file"
-            onchange={onchoose}
-          />
-        {/if}
+        <ModelPicker {store} {choice} disabled={picking} onpick={pick} />
 
         {#if effortLevels.length > 0 || speeds.length > 0}
-          <EffortSlider levels={effortLevels} active={activeEffort} onpick={pickEffort} modelName={store.modelOf(choice)?.name ?? provider?.name ?? ''} {speeds} speed={choice?.speed ?? null} onspeed={(speed) => void pick({ speed })} />
+          <EffortSlider levels={effortLevels} active={activeEffort} onpick={pickEffort} {speeds} speed={choice?.speed ?? null} onspeed={(speed) => void pick({ speed })} />
         {/if}
 
         <Menu items={modeItems} onpick={pickMode} label={strings.composer.mode} testid="composer-mode">
@@ -788,13 +763,38 @@
         {/if}
       </div>
 
-      <span class="hint subtle">{strings.composer.hint}</span>
+
 
       {#if store.busy}
         <button type="button" class="icon stop" data-testid="composer-stop" title={strings.composer.stop} aria-label={strings.composer.stop} onclick={() => void store.stop()}>
           <Square size={12} strokeWidth={2.5} />
         </button>
       {/if}
+        {#if takesImages}
+          <button
+            type="button"
+            class="icon attach"
+            data-testid="composer-attach"
+            title={strings.composer.attach}
+            aria-label={strings.composer.attach}
+            onclick={() => picker?.click()}
+          >
+            <Paperclip size={14} strokeWidth={1.75} />
+          </button>
+          <input
+            bind:this={picker}
+            class="file"
+            type="file"
+            accept="image/png,image/jpeg,image/gif,image/webp"
+            multiple
+            tabindex="-1"
+            aria-hidden="true"
+            data-testid="composer-file"
+            onchange={onchoose}
+          />
+        {/if}
+
+
       <button
         type="button"
         class="primary icon send"
@@ -936,6 +936,7 @@
   }
 
   .chips {
+    flex: 1;
     display: flex;
     align-items: center;
     gap: 4px;
@@ -943,14 +944,6 @@
     min-width: 0;
   }
 
-  /* Read at rest, not a reward for focusing the box: the two keys are learned
-     here. It goes under 720 px, where the row has no width to spare. */
-  .hint {
-    margin-left: auto;
-    font-size: var(--text-sm);
-    color: var(--color-subtle);
-    white-space: nowrap;
-  }
 
   .send,
   .stop {
@@ -973,8 +966,5 @@
       padding: 0 10px;
     }
 
-    .hint {
-      display: none;
-    }
   }
 </style>

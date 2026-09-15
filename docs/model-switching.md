@@ -25,7 +25,8 @@ the account's current model list; a removed model is refused explicitly.
 The reasoning popover has one notch per level reported by the selected model.
 Dragging previews the level and saves on release. Arrow keys, Home, End and
 the dots select the same discrete values. The compact panel shows the model and
-current level above the track. Ultrathink belongs only to Claude and is offered
+current level centred above the track. The track reaches the thumb and becomes
+more saturated at higher levels. Ultrathink belongs only to Claude and is offered
 when its SDK reports adaptive thinking.
 
 Model catalogs persist in client storage, scoped to the core endpoint and data
@@ -33,17 +34,30 @@ directory and checked against the current provider/account records. Opening an
 agent shows the cached list immediately while discovery runs in the background.
 The top-right refresh button forces a new probe; concurrent requests share one
 operation. A failed refresh keeps the visible list and waits for a manual retry.
-The menu floats below the composer without enlarging its input area. Provider
-tabs sit above the models; the menu fits its content up to a scrollable height
-limit. Its measured height reserves space below the composer.
+The menu floats without changing the page layout. It prefers the space below the
+composer and flips above when needed. Provider tabs sit above the models; the
+menu fits its content up to a scrollable height limit. Legacy models open in a
+side submenu, with a left-side or in-viewport fallback on narrow screens.
+Favorites use a single row; an inline account label only distinguishes the same
+model starred on different accounts.
 
-The lightning button cycles through the selected model's advertised speeds and
+Claude aliases use their resolved id and versioned name. Default aliases are
+filtered before deduplication so they cannot hide the named Opus row or its Fast
+capability. Known legacy descriptor ids stay available; capabilities absent from
+native discovery remain absent instead of inheriting another model's settings.
+
+The lightning button beside the effort chip cycles through the model's advertised speeds and
 back to standard. Codex uses its per-model `serviceTiers` list, including Fast or
 Ultrafast only when listed, and sends the selected id as `turn/start.serviceTier`.
 Claude uses `supportsFastMode` and session-scoped `settings.fastMode`; changing it
 reopens the CLI on the same native session. ACP and pi expose no speed switch.
 A model/account change clears speed and effort. Schema 10 stores `threads.speed`,
 and each accepted turn freezes it with the other execution settings.
+
+Appearance offers accent swatches and a hue slider. The colour persists per
+client as `boite.accent-hue` and colours reasoning, primary buttons, links and
+focus indicators. The file attachment button sits beside Send; keyboard help
+stays out of the chatbar.
 
 ## Context transfer
 

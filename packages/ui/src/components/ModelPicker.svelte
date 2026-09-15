@@ -3,6 +3,7 @@
   import { orderedModels, type FavoriteModel } from '../lib/model-order';
   import type { Account, ModelInfo, ProviderSummary } from '@boite/contracts';
   import ProviderLogo from './ProviderLogo.svelte';
+  import { floating } from '../lib/floating';
   import { Closing } from '../lib/closing.svelte';
   import { strings } from '../lib/strings';
   import type { Choice, PickPatch, Store } from '../lib/store.svelte';
@@ -18,8 +19,7 @@
     choice,
     locked = false,
     disabled = false,
-    onpick,
-    onheightchange = () => {}
+    onpick
   }: {
     store: Store;
     choice: Choice | null;
@@ -27,16 +27,16 @@
     locked?: boolean;
     disabled?: boolean;
     onpick: (patch: PickPatch) => void;
-    onheightchange?: (height: number) => void;
   } = $props();
 
   /** Past this many models the column stops being a plain scroll and gets a search field. */
   const SEARCH_FROM = 12;
 
   const popover = new Closing();
-  let menuHeight = $state(0);
-  $effect(() => { onheightchange(popover.shown ? menuHeight : 0); });
-  let legacyOpen = $state(false);
+  const legacy = new Closing();
+  $effect(() => { if (!popover.open) legacy.hide(); });
+  let legacyOpen = $derived(legacy.open);
+  let menu = $state<HTMLDivElement | undefined>(undefined);
   let root = $state<HTMLDivElement | undefined>(undefined);
   let searchBox = $state<HTMLInputElement | undefined>(undefined);
   /** What the model column is filtered on; empty while the list is short. */
@@ -225,7 +225,7 @@
     if (popover.open) {
       shownProviderId = choice?.providerId ?? null;
       favoritesOpen = favorites.length > 0;
-      legacyOpen = false;
+      legacy.hide();
       modelQuery = '';
     }
   }
@@ -235,7 +235,7 @@
     if (tile.held) return;
     favoritesOpen = false;
     shownProviderId = tile.provider.id;
-    legacyOpen = false;
+    legacy.hide();
     modelQuery = '';
   }
 
@@ -287,10 +287,13 @@
   function onkeydown(event: KeyboardEvent) {
     if (!popover.open) return;
     const active = document.activeElement as HTMLElement | null;
+    if (event.key === 'ArrowRight' && active?.dataset.testid === 'picker-legacy') { event.preventDefault(); legacy.show(); queueMicrotask(() => root?.querySelector<HTMLElement>('[data-testid=picker-legacy-menu] [data-model]')?.focus()); return; }
+    if (event.key === 'ArrowLeft' && active?.closest('[data-testid=picker-legacy-menu]')) { event.preventDefault(); legacy.hide(); root?.querySelector<HTMLElement>('[data-testid=picker-legacy]')?.focus(); return; }
     const searching = searchable && (active === searchBox || (active?.hasAttribute('data-model') ?? false));
 
     if (event.key === 'Escape') {
       event.stopPropagation();
+      if (legacyOpen) { legacy.hide(); root?.querySelector<HTMLElement>('[data-testid=picker-legacy]')?.focus(); return; }
       // The query goes first: closing on it would throw away what was just typed.
       if (searchable && modelQuery !== '') {
         modelQuery = '';
@@ -374,7 +377,8 @@
       tabindex="-1"
       aria-label={strings.composer.picker}
         data-testid="composer-picker-menu"
-        bind:clientHeight={menuHeight}
+      bind:this={menu}
+      use:floating={{ anchor: () => root?.closest<HTMLElement>("[data-testid=composer]") ?? null }}
       use:popover.attach
       onanimationend={popover.end}
       {onkeydown}
@@ -429,8 +433,8 @@
           <div class="head"><span class="provider-name">{strings.composer.favorites}</span></div>
           {#each favorites as entry (`${entry.providerId}:${entry.accountId}:${entry.model.id}`)}
             <div class="model-entry">
-              <button type="button" class="row model" role="menuitem" data-row data-testid="favorite-model" disabled={favoritePending || !store.providerOf(entry.providerId)?.available} onclick={() => void pickFavorite(entry)}>
-                <ProviderLogo providerId={entry.providerId} size={16} /><span class="name">{entry.model.name}<small>{store.accountOf(entry.accountId)?.label}</small></span>
+              <button type="button" class="row model favorite-row" role="menuitem" data-row data-testid="favorite-model" disabled={favoritePending || !store.providerOf(entry.providerId)?.available} onclick={() => void pickFavorite(entry)}>
+                <ProviderLogo providerId={entry.providerId} size={16} /><span class="name">{entry.model.name}{#if favorites.some(other => other.providerId === entry.providerId && other.model.id === entry.model.id && other.accountId !== entry.accountId)}<span class="account-label">{store.accountOf(entry.accountId)?.label}</span>{/if}</span>
               </button>
               <button type="button" class="favorite-button" aria-label={strings.composer.unfavorite} onclick={() => store.toggleFavorite(entry.providerId, entry.accountId, entry.model)}><Star size={14} fill="currentColor" /></button>
             </div>
@@ -517,17 +521,27 @@
               data-row
               data-testid="picker-legacy"
               aria-expanded={legacyOpen}
-              onclick={() => (legacyOpen = !legacyOpen)}
+              onclick={() => legacy.toggle()}
             >
-              <span class="caret" class:open={legacyOpen}><ChevronRight size={12} strokeWidth={2} /></span>
               <span class="name muted">{strings.composer.legacyModels}</span>
-              <span class="count">{filteredLegacy.length}</span>
+              <ChevronRight size={14} strokeWidth={2} />
             </button>
-            <!-- Folded, the group is still here at zero height: that is what the
-                 `0fr` to `1fr` rows animate. The hooks come off with it, so a
-                 collapsed row is neither walked by the arrows nor picked. -->
-            <div class="fold-body" class:open={legacyOpen} inert={!legacyOpen}>
-              <div class="clip">
+          {/if}
+          {#if shown && shownModels.length === 0 && !probing}
+            <p class="none subtle">{strings.composer.noModels}</p>
+          {/if}
+          {#if probing}
+            <p class="none subtle probing" data-testid="picker-probing">{strings.composer.probing}</p>
+          {/if}
+        {/if}
+        {/if}
+      </div>
+    </div>
+  {/if}
+  {#if popover.shown && legacy.shown && !favoritesOpen && filteredLegacy.length > 0}
+    <div class="popover legacy-menu" class:closing={legacy.closing} role="menu" tabindex="-1" data-testid="picker-legacy-menu" aria-label={strings.composer.legacyModels} use:legacy.attach onanimationend={legacy.end} use:floating={{ anchor: () => menu ?? null, side: 'right' }} {onkeydown}>
+      <div class="column models">
+        <div class="head"><button type="button" class="icon small legacy-back" aria-label={strings.settings.back} onclick={() => legacy.hide()}><ChevronRight size={14} style="transform: rotate(180deg)" /></button><span class="provider-name">{strings.composer.legacyModels}</span></div>
                 {#each filteredLegacy as model (model.id)}
                   <div class="model-entry">
                   <button
@@ -546,17 +560,6 @@
                   <button type="button" class="favorite-button" tabindex={legacyOpen ? 0 : -1} aria-label={favorite(model) ? strings.composer.unfavorite : strings.composer.favorite} aria-pressed={favorite(model)} onclick={() => { if (shown && shownAccountId) store.toggleFavorite(shown.id, shownAccountId, model); }}><Star size={14} fill={favorite(model) ? 'currentColor' : 'none'} /></button>
                   </div>
                 {/each}
-              </div>
-            </div>
-          {/if}
-          {#if shown && shownModels.length === 0 && !probing}
-            <p class="none subtle">{strings.composer.noModels}</p>
-          {/if}
-          {#if probing}
-            <p class="none subtle probing" data-testid="picker-probing">{strings.composer.probing}</p>
-          {/if}
-        {/if}
-        {/if}
       </div>
     </div>
   {/if}
@@ -567,7 +570,9 @@
   .model-entry .model { flex: 1; min-width: 0; }
   .favorite-button { width: var(--control-sm); height: var(--control-sm); padding: 0; flex: none; color: var(--color-muted-foreground); background: transparent; border: none; }
   .favorite-button[aria-pressed='true'] { color: var(--color-foreground); }
-  .name small { display: block; font-size: var(--text-xs); color: var(--color-muted-foreground); }
+  .account-label { margin-left: 8px; font-size: var(--text-xs); color: var(--color-muted-foreground); }
+  .row.favorite-row { min-height: 42px; }
+  .legacy-menu { width: min(320px, calc(100vw - 24px)); grid-template-rows: minmax(0, 1fr); z-index: 41; }
   .picker {
     display: inline-flex;
     min-width: 0;
@@ -596,9 +601,7 @@
   }
 
   .popover {
-    position: absolute;
-    top: calc(100% + 8px);
-    left: 10px;
+    position: fixed;
     z-index: 40;
     display: grid;
     grid-template-columns: minmax(0, 1fr);
@@ -873,48 +876,6 @@
     min-height: var(--control-sm);
   }
 
-  /* The fold opens on its rows track, so the group grows to its own height. */
-  .fold-body {
-    display: grid;
-    grid-template-rows: 0fr;
-    opacity: 0;
-    transition:
-      grid-template-rows var(--dur-3) var(--ease-out-quint),
-      opacity var(--dur-3) var(--ease-out-quint);
-  }
-
-  .fold-body.open {
-    grid-template-rows: 1fr;
-    opacity: 1;
-  }
-
-  .fold-body .clip {
-    display: flex;
-    flex-direction: column;
-    gap: 1px;
-    min-height: 0;
-    overflow: hidden;
-  }
-
-  .caret {
-    display: inline-flex;
-    width: 6px;
-    justify-content: center;
-    color: var(--color-subtle);
-    transition: transform var(--dur-2) var(--ease-out-quint);
-  }
-
-  .caret.open {
-    transform: rotate(90deg);
-  }
-
-  .count {
-    margin-left: auto;
-    font-size: var(--text-xs);
-    color: var(--color-subtle);
-    font-variant-numeric: tabular-nums;
-  }
-
   p.none {
     padding: 6px 8px;
     font-size: var(--text-sm);
@@ -930,7 +891,7 @@
     .popover {
       grid-template-columns: 1fr;
       grid-template-rows: auto minmax(0, 1fr);
-      width: calc(100% - 20px);
+      width: calc(100vw - 24px);
     }
 
     .rail {

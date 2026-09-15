@@ -14,7 +14,6 @@
     levels,
     active,
     onpick,
-    modelName = '',
     speeds = [],
     speed = null,
     onspeed = () => {}
@@ -23,7 +22,6 @@
     /** The level the thread or draft runs, the model's own default when it picked none. */
     active: string | null;
     onpick: (id: string) => void;
-    modelName?: string;
     speeds?: { id: string; label: string; description?: string }[];
     speed?: string | null;
     onspeed?: (id: string | null) => void;
@@ -145,6 +143,13 @@
     {current?.label ?? selectedSpeed?.label ?? strings.composer.standardSpeed}
   </button>
 
+  {#if speeds.length > 0}
+    <button type="button" class="chip speed" class:active={!!selectedSpeed} data-testid="effort-speed" aria-label={strings.composer.speed} aria-pressed={!!selectedSpeed} title={selectedSpeed?.description ?? selectedSpeed?.label ?? strings.composer.standardSpeed} onclick={cycleSpeed}>
+      <Zap size={15} fill={selectedSpeed ? 'currentColor' : 'none'} />
+      {#if selectedSpeed}<span data-testid="effort-speed-label">{selectedSpeed.label}</span>{/if}
+    </button>
+  {/if}
+
   {#if popover.shown}
     <div
       class="popover"
@@ -158,16 +163,13 @@
       {onkeydown}
     >
       <div class="heading">
-        {#if speeds.length > 0}
-          <button type="button" class="speed" class:active={!!selectedSpeed} data-testid="effort-speed" aria-label={strings.composer.speed} title={selectedSpeed?.description ?? selectedSpeed?.label ?? strings.composer.standardSpeed} onclick={cycleSpeed}><Zap size={15} fill={selectedSpeed ? 'currentColor' : 'none'} /></button>
-        {:else}<Brain size={15} />{/if}
-        <span class="model-name">{modelName}</span><span class="level">{current?.label ?? ''}</span>
-        {#if selectedSpeed}<span class="speed-name" data-testid="effort-speed-label">{selectedSpeed.label}</span>{/if}
+        <span class="level">{current?.label ?? strings.composer.standardSpeed}</span>
       </div>
 
       {#if levels.length > 0}
       <div
         class="track"
+        style:--effort-intensity={`${40 + (last === 0 ? 1 : index / last) * 60}%`}
         bind:this={track}
         role="slider"
         tabindex="0"
@@ -184,7 +186,7 @@
         onpointercancel={onpointerup}
       >
         <div class="line" bind:this={line}>
-          <span class="progress" style="width: {offset(index)}"></span>
+          <span class="progress" style="width: calc({offset(index)} + 12px)"></span>
           <span class="thumb" style="left: {offset(index)}"></span>
           {#each levels as level, at (level.id)}
             <button type="button" class="dot" class:on={at <= index} data-dot={level.id} data-value={level.id} title={level.label} aria-label={level.label} tabindex="-1" style="left: {offset(at)}" onclick={() => pick(at)}></button>
@@ -198,21 +200,23 @@
 </div>
 
 <style>
-.effort { position: relative; display: inline-flex; }
+.effort { position: relative; display: inline-flex; gap: 4px; }
 .trigger { cursor: pointer; height: var(--control-sm); }
 .trigger:hover, .trigger[aria-expanded='true'] { background: var(--color-surface-3); color: var(--color-foreground); }
 .popover { position: absolute; bottom: calc(100% + 8px); left: 0; z-index: 40; width: 280px; padding: 10px 12px 12px; background: var(--color-surface-3); border: 1px solid var(--color-border); border-radius: var(--radius-lg); box-shadow: var(--shadow-e2); animation: pop var(--dur-2) var(--ease-out-quint); transform-origin: bottom left; }
 .popover.closing { animation-name: pop-out; pointer-events: none; }
-.heading { display: flex; align-items: center; gap: 5px; min-height: 26px; margin-bottom: 6px; color: var(--color-muted-foreground); font-size: var(--text-sm); }
-.model-name { margin-left: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-foreground); font-weight: 600; }
+.heading { display: flex; justify-content: center; align-items: center; min-height: 22px; margin-bottom: 8px; color: var(--color-foreground); font-size: var(--text-sm); font-weight: 600; }
 .level { white-space: nowrap; }
-.speed { flex: none; display: grid; place-items: center; width: 24px; height: 24px; border: none; padding: 0; border-radius: var(--radius-sm); background: transparent; color: var(--color-muted-foreground); }
-.speed.active { color: var(--color-reasoning); }
-.speed-name { font-size: var(--text-xs); color: var(--color-reasoning); white-space: nowrap; }
+.speed { height: var(--control-sm); color: var(--color-muted-foreground); transition: color var(--dur-2), background var(--dur-2), box-shadow var(--dur-2); }
+.speed :global(svg) { transition: transform var(--dur-2) var(--ease-out-quint); }
+.speed:hover { color: var(--color-accent); background: var(--color-accent-soft); box-shadow: 0 0 12px var(--color-accent-soft); }
+.speed:hover :global(svg) { transform: rotate(-12deg) scale(1.16); }
+.speed.active { color: var(--color-accent); background: var(--color-accent-soft); }
+.speed:active :global(svg) { transform: scale(.9); }
 .track { padding: 3px 12px; cursor: pointer; touch-action: none; height: 30px; background: var(--color-edge); border-radius: 999px; }
 .track:focus-visible { outline: 1px solid var(--color-reasoning); outline-offset: 3px; }
 .line { position: relative; height: 24px; }
-.progress { position: absolute; inset: 0 auto 0 -12px; border-radius: 999px 0 0 999px; background: var(--color-reasoning); }
+.progress { position: absolute; inset: 0 auto 0 -12px; border-radius: 999px 0 0 999px; background: color-mix(in oklch, var(--color-accent) var(--effort-intensity), var(--color-surface-3)); transition: background var(--dur-2); }
 .dot { position: absolute; top: 50%; width: 16px; height: 24px; padding: 0; border: none; background: transparent; transform: translate(-50%, -50%); }
 .dot::after { content: ""; display: block; width: 4px; height: 4px; margin: auto; border-radius: 50%; background: var(--color-muted-foreground); }
 .dot.on::after { background: var(--color-reasoning-on); opacity: .45; }

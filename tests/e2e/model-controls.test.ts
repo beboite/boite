@@ -65,8 +65,63 @@ test('favorites survive reload, reasoning has discrete stops, and the context ri
   expect(await page.evaluate(`JSON.parse(localStorage.getItem('boite.model-favorites.v1')).length`)).toBe(0);
 }, 30_000);
 
+test('legacy models open beside the picker and preserve the page position', async () => {
+  await page.send('Emulation.clearDeviceMetricsOverride', {});
+  await page.navigate(url);
+  await page.waitFor(`document.querySelector('[data-testid=composer-picker]')`);
+  const before = await page.evaluate<number>(`document.querySelector('[data-testid=composer]').getBoundingClientRect().top`);
+  await page.click('[data-testid=composer-picker]');
+  await page.click('[data-provider=claude]');
+  await page.click('[data-testid=picker-legacy]');
+  await page.waitFor(`document.querySelector('[data-testid=picker-legacy-menu] [data-model]')`);
+  await capture('picker-legacy-submenu.png');
+  const layout = await page.evaluate<any>(`(() => { const p=document.querySelector('[data-testid=composer-picker-menu]').getBoundingClientRect(); const l=document.querySelector('[data-testid=picker-legacy-menu]').getBoundingClientRect(); return {right:p.right,left:l.left}; })()`);
+  expect(layout.left).toBeGreaterThan(layout.right);
+  expect(await page.evaluate(`document.querySelector('[data-testid=composer]').getBoundingClientRect().top`)).toBe(before);
+  await page.click('[data-testid=picker-legacy-menu] [data-model]');
+  await page.waitFor(`!document.querySelector('[data-testid=composer-picker-menu]')`);
+  expect(await page.evaluate(`!!document.querySelector('[data-testid=picker-legacy-menu]')`)).toBe(false);
+}, 30_000);
 
-test('model picker opens below its trigger and scrolls long lists', async () => {
+test('the accent persists and colours the effort track continuously to the thumb', async () => {
+  await page.navigate(url);
+  await page.waitFor(`document.querySelector('[data-testid=nav-settings]')`);
+  await page.click('[data-testid=nav-settings]');
+  await page.click('[data-testid=settings-tab-appearance]');
+  await page.click('[data-testid=accent-300]');
+  await capture('appearance-accent.png');
+  await page.navigate(url);
+  await page.waitFor(`document.querySelector('[data-testid=composer-picker]')`);
+  expect(await page.evaluate(`document.documentElement.style.getPropertyValue('--accent-hue')`)).toBe('300');
+  await page.click('[data-testid=composer-picker]');
+  await page.click('[data-provider=claude]');
+  await page.click('[data-model=claude-opus-5]');
+  await page.waitFor(`document.querySelector('[data-testid=effort-speed]')`);
+  await page.click('[data-testid=composer-effort]');
+  await page.click('[data-value=low]');
+  const low = await page.evaluate(`getComputedStyle(document.querySelector('.progress')).backgroundColor`);
+  await page.click('[data-value=max]');
+  await capture('reasoning-accent-max.png');
+  expect(await page.evaluate(`getComputedStyle(document.querySelector('.progress')).backgroundColor`)).not.toBe(low);
+  const bounds = await page.evaluate<any>(`(() => { const p=document.querySelector('.progress').getBoundingClientRect(); const t=document.querySelector('.thumb').getBoundingClientRect(); return {edge:p.right,center:t.left+t.width/2}; })()`);
+  expect(Math.abs(bounds.edge - bounds.center)).toBeLessThan(1);
+  expect(await page.evaluate(`document.querySelector('[data-testid=composer-effort-menu] .heading').textContent.trim()`)).toBe('Max');
+  expect(await page.evaluate(`!!document.querySelector('[data-testid=composer-effort-menu] svg')`)).toBe(false);
+  expect(await page.evaluate(`!!document.querySelector('[data-testid=composer] .hint')`)).toBe(false);
+  const speed = await page.evaluate<any>(`(() => { const r=document.querySelector('[data-testid=effort-speed]').getBoundingClientRect(); return {x:r.left+r.width/2,y:r.top+r.height/2}; })()`);
+  await page.send('Input.dispatchMouseEvent', { type:'mouseMoved', ...speed });
+  await page.waitFor(`getComputedStyle(document.querySelector('[data-testid=effort-speed] svg')).transform !== 'none'`);
+  await capture('speed-hover.png');
+  await page.send('Emulation.setDeviceMetricsOverride', {width:390,height:844,deviceScaleFactor:1,mobile:true});
+  await page.click('[data-testid=nav-settings]');
+  await page.click('[data-testid=settings-tab-appearance]');
+  await capture('appearance-accent-phone.png');
+  await page.click('[data-testid=accent-260]');
+  await page.send('Emulation.clearDeviceMetricsOverride', {});
+}, 30_000);
+
+
+test('model picker flips upward without moving the composer and scrolls long lists', async () => {
   await page.send('Emulation.clearDeviceMetricsOverride', {});
   await page.navigate(url);
   await page.waitFor(`document.querySelector('[data-testid=composer-picker]')`);
@@ -75,7 +130,8 @@ test('model picker opens below its trigger and scrolls long lists', async () => 
   await page.waitFor(`document.querySelectorAll('[data-model]').length > 12`);
   await capture('picker-scroll-desktop.png');
   const layout = await page.evaluate<any>(`(() => { const menu=document.querySelector('[data-testid=composer-picker-menu]'); const rows=menu.querySelector('.models'); const trigger=document.querySelector('[data-testid=composer-picker]').getBoundingClientRect(); const rect=menu.getBoundingClientRect(); return {top:rect.top,bottom:rect.bottom,triggerBottom:trigger.bottom,height:innerHeight,scroll:rows.scrollHeight,client:rows.clientHeight,row:rows.querySelector('[data-model]').getBoundingClientRect().height}; })()`);
-  expect(layout.top).toBeGreaterThanOrEqual(layout.triggerBottom);
+  expect(layout.bottom).toBeLessThan(layout.triggerBottom);
+  expect(await page.evaluate(`document.querySelector('[data-testid=composer-picker-menu]').dataset.direction`)).toBe('up');
   expect(layout.bottom).toBeLessThanOrEqual(layout.height);
   expect(layout.scroll).toBeGreaterThan(layout.client);
   expect(layout.row).toBeGreaterThanOrEqual(28);
@@ -136,7 +192,7 @@ test('the draft keeps a compact composer above a detached favorites menu', async
   await page.navigate(url);
   await page.waitFor(`document.querySelector('[data-testid=new-thread]')`);
   await page.click('[data-testid=new-thread]');
-  const before = await page.evaluate<number>(`document.querySelector('[data-testid=composer]').getBoundingClientRect().height`);
+  const before = await page.evaluate<any>(`(() => { const r=document.querySelector('[data-testid=composer]').getBoundingClientRect(); return {height:r.height,top:r.top}; })()`);
   await page.click('[data-testid=composer-picker]');
   await page.click('[data-provider=claude]');
   await page.waitFor(`document.querySelector('[data-favorite-model="claude-fable-5-1"]')`);
@@ -145,8 +201,9 @@ test('the draft keeps a compact composer above a detached favorites menu', async
   }
   await page.click('[data-provider=favorites]');
   await capture('picker-draft-favorites.png');
-  const layout = await page.evaluate<any>(`(() => { const c=document.querySelector('[data-testid=composer]').getBoundingClientRect(); const m=document.querySelector('[data-testid=composer-picker-menu]').getBoundingClientRect(); return {composerHeight:c.height,composerBottom:c.bottom,menuTop:m.top,menuHeight:m.height}; })()`);
-  expect(layout.composerHeight).toBe(before);
+  const layout = await page.evaluate<any>(`(() => { const c=document.querySelector('[data-testid=composer]').getBoundingClientRect(); const m=document.querySelector('[data-testid=composer-picker-menu]').getBoundingClientRect(); return {composerHeight:c.height,composerTop:c.top,composerBottom:c.bottom,menuTop:m.top,menuHeight:m.height}; })()`);
+  expect(layout.composerHeight).toBe(before.height);
+  expect(layout.composerTop).toBe(before.top);
   expect(layout.menuTop).toBeGreaterThan(layout.composerBottom);
   expect(layout.menuHeight).toBeLessThan(260);
 }, 30_000);
