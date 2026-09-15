@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { ChevronRight, ShieldCheck, ArrowLeft, Coins, FlaskConical, Keyboard, Palette, Puzzle, Settings2, Users } from '@lucide/svelte';
+  import { Activity, ChevronRight, ShieldCheck, ArrowLeft, Coins, FlaskConical, Keyboard, Palette, Puzzle, Settings2, Users } from '@lucide/svelte';
   import KeyboardPage from './KeyboardPage.svelte';
   import PluginsPage from './PluginsPage.svelte';
   import { strings } from '../lib/strings';
@@ -8,6 +8,7 @@
   import AppearancePage from './AppearancePage.svelte';
   import ExperimentsPage from './ExperimentsPage.svelte';
   import GeneralSettings from './GeneralSettings.svelte';
+  import MachinesPage from './MachinesPage.svelte';
   import ResourcesPage from './ResourcesPage.svelte';
   import UsagePage from './UsagePage.svelte';
 
@@ -18,6 +19,7 @@
 
   const all: { id: SettingsTab; label: string; icon: typeof Settings2 }[] = [
     { id: 'general', label: strings.settings.tabs.general, icon: Settings2 },
+    { id: 'machines', label: strings.machines.heading, icon: Activity },
     { id: 'appearance', label: strings.settings.tabs.appearance, icon: Palette },
     { id: 'keyboard', label: strings.settings.tabs.keyboard, icon: Keyboard },
     { id: 'accounts', label: strings.settings.tabs.accounts, icon: Users },
@@ -35,7 +37,7 @@
     general: [
       { id: 'projects', label: strings.settings.projects },
       { id: 'background', label: strings.settings.background },
-      { id: 'connection', label: strings.settings.connection },
+      { id: 'machines', label: strings.machines.heading },
       { id: 'devices', label: strings.settings.pairing.heading },
       { id: 'scheduler', label: strings.settings.scheduler },
       { id: 'core', label: strings.settings.core }
@@ -111,6 +113,8 @@
     <section>
       {#if tab === 'general'}
         <GeneralSettings {store} />
+      {:else if tab === 'machines'}
+        <MachinesPage />
       {:else if tab === 'appearance'}
         <AppearancePage />
       {:else if tab === 'keyboard'}

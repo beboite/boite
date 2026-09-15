@@ -215,7 +215,7 @@ export function insideTauri(): boolean {
   return window.__TAURI_INTERNALS__ !== undefined;
 }
 
-async function fromTauri(): Promise<Endpoint | null> {
+export async function fromTauri(): Promise<Endpoint | null> {
   try {
     const { invoke } = await import('@tauri-apps/api/core');
     const result: unknown = await invoke('core_endpoint');
@@ -236,13 +236,13 @@ function fromOrigin(): Endpoint | null {
  * this app was paired with and otherwise the one the shell started, then what
  * was stored by an earlier pairing, then the origin that served this page.
  */
-export async function resolveEndpoint(): Promise<Endpoint | null> {
+export async function resolveEndpoint(preferLocal = false): Promise<Endpoint | null> {
   const paired = takeFromQuery();
   if (paired) return paired;
 
   if (insideTauri()) {
     const stored = readStoredEndpoint();
-    if (stored?.paired) return stored;
+    if (stored?.paired && !preferLocal) return stored;
     return await fromTauri();
   }
 

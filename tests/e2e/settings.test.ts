@@ -94,20 +94,15 @@ test('the compact quota page shows limits and reset times', async () => {
   expect(await page.evaluate(`getComputedStyle(document.documentElement).backgroundColor`)).toBe('rgba(0, 0, 0, 0)');
 }, 30_000);
 
-test('remembered cores list every core and forget drops one', async () => {
-  await page.evaluate(`localStorage.setItem('boite.envs', JSON.stringify([
-    { url: 'http://127.0.0.1:9', label: 'cet ordi', token: 'x', paired: false },
-    { url: 'http://100.64.0.15:3773', label: '100.64.0.15:3773', token: 'y', paired: true }
-  ]))`);
-  await page.navigate(`${uiUrl}/?fake=1`);
-  await page.waitFor(`document.querySelector('${id('nav-settings')}')`);
-  await page.click(id('nav-settings'));
-  await page.waitFor(`document.querySelector('${id('settings-envs')}')`);
-  const text = await page.evaluate(`document.querySelector('${id('settings-envs')}').textContent`);
-  expect(text).toContain('cet ordi');
-  expect(text).toContain('100.64.0.15:3773');
-  await page.evaluate(`document.querySelector('${id('settings-envs')}').scrollIntoView({ block: 'center' })`);
-  await capture('envs.png');
-  await page.evaluate(`[...document.querySelectorAll('${id('settings-env-forget')}')][1].click()`);
-  await page.waitFor(`document.querySelectorAll('${id('settings-envs')} li').length === 1`);
+test('machines list each execution host and disconnect only the selected host', async () => {
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1400, height: 1000, deviceScaleFactor: 1, mobile: false });
+  await page.navigate(`${uiUrl}/?fake=1&machines=1`);
+  await page.evaluate(`document.documentElement.dataset.theme = 'dark'`);
+  await page.waitFor(`document.querySelectorAll('[data-machine-id="http://builder.test"] [data-testid="thread-row"]').length > 0`);
+  await page.click(id('nav-machines'));
+  await page.waitFor(`document.querySelectorAll('[data-testid="machine-card"]').length === 2`);
+  expect(await page.evaluate(`document.querySelector('[data-testid="machines-page"]').textContent`)).toContain('Builder');
+  await capture('machines.png');
+  await page.click(id('machine-remove'));
+  await page.waitFor(`document.querySelectorAll('[data-testid="machine-card"]').length === 1`);
 }, 30_000);

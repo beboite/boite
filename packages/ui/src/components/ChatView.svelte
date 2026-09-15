@@ -6,6 +6,7 @@
   import { separator, type MenuItem } from '../lib/menu';
   import { strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
+  import { workspace } from '../lib/workspace.svelte';
   import ContextControl from './ContextControl.svelte';
   import Composer from './Composer.svelte';
   import Menu from './Menu.svelte';
@@ -82,16 +83,19 @@
 
   /** Every project, the draft's own marked: what the heading's dropdown lists. */
   let projectItems = $derived<MenuItem[]>(
-    store.projects.map((entry) => ({
-      id: entry.id,
+    (workspace.machines.length ? workspace.machines : [{ id: '', label: '', store }]).flatMap(machine => machine.store.projects.map((entry) => ({
+      id: JSON.stringify([machine.id, entry.id]),
       label: entry.name,
-      hint: entry.path,
-      active: entry.id === store.draft?.projectId
-    }))
+      hint: `${machine.label} · ${entry.path}`,
+      active: machine.store === store && entry.id === store.draft?.projectId
+    })))
   );
 
   function pickProject(id: string) {
-    store.setDraftProject(id as ProjectId);
+    const [machineId, projectId] = JSON.parse(id) as [string, ProjectId];
+    const target = workspace.machines.find(m => m.id === machineId)?.store ?? store;
+    if (target === store) store.setDraftProject(projectId);
+    else void workspace.select(target, undefined, projectId);
   }
 </script>
 

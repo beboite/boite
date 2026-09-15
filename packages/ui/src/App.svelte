@@ -20,9 +20,10 @@
   import { onNotificationOpen } from './lib/notify';
   import { strings } from './lib/strings';
   import { rightPanel } from './lib/right-panel.svelte';
-  import { store } from './lib/store.svelte';
+  import { workspace } from './lib/workspace.svelte';
   import { startTheme } from './lib/theme';
 
+  let store = $derived(workspace.active);
   const inShell = window.__TAURI_INTERNALS__ !== undefined;
   let sidebar = $state<Sidebar | undefined>(undefined);
   let appRoot = $state<HTMLDivElement | undefined>(undefined);
@@ -88,17 +89,18 @@
   });
 
   onMount(() => {
-    void store.boot();
+    void workspace.boot();
     // The stored theme, and the OS one while the setting reads `system`.
     const stopTheme = startTheme();
     // The stored window material, which only the shell wears.
     startGlass();
     // A click on a toast opens the thread it was about.
-    const stopToasts = onNotificationOpen((threadId) => void store.open(threadId));
+    const stopToasts = onNotificationOpen((threadId) => void workspace.openNotification(threadId));
     if (!inShell) {
       return () => {
         stopTheme();
         stopToasts();
+        workspace.close();
       };
     }
 
@@ -131,6 +133,7 @@
       stopTheme();
       stopToasts();
       quitHold?.dispose();
+      workspace.close();
     };
   });
 
@@ -262,17 +265,21 @@
         {#if firstRun}
           <FirstRun {store} />
         {:else}
-          <ChatView {store} />
+          {#key store}
+            <ChatView {store} />
+          {/key}
         {/if}
       </main>
       {#if panelSlot.shown && store.openThread}
-        <RightPanel
-          {store}
-          panel={store.panel}
-          closing={panelSlot.closing}
-          attach={panelSlot.attach}
-          onexit={panelSlot.end}
-        />
+        {#key store}
+          <RightPanel
+            {store}
+            panel={store.panel}
+            closing={panelSlot.closing}
+            attach={panelSlot.attach}
+            onexit={panelSlot.end}
+          />
+        {/key}
       {/if}
     {/if}
   </div>

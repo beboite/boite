@@ -35,6 +35,20 @@ export class SettingsStore {
   }
 
   set(patch: Partial<Settings>): Settings {
+    if (patch.browserOrigins !== undefined) {
+      const invalid = !Array.isArray(patch.browserOrigins) || patch.browserOrigins.length > 32 ||
+        patch.browserOrigins.some((origin) => {
+          try {
+            const url = new URL(origin);
+            return !['http:', 'https:'].includes(url.protocol) || url.origin !== origin;
+          } catch {
+            return true;
+          }
+        });
+      if (invalid) {
+        throw invalidParams('browserOrigins must contain at most 32 exact HTTP or HTTPS origins', { field: 'browserOrigins' });
+      }
+    }
     for (const key of ['maxConcurrentTurns', 'perAccountConcurrency'] as const) {
       const value = patch[key];
       if (value !== undefined && (!Number.isInteger(value) || value < 1)) {

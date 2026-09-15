@@ -30,6 +30,7 @@ import type {
 import type { Core } from './core.ts';
 import { messageOf, notFound, refused } from './errors.ts';
 import { newId } from './ids.ts';
+import { PullRequests } from './pull-requests.ts';
 import { assertDriverRunnable, getDriver, probedModelsOf, releaseThread } from './drivers/index.ts';
 import type {
   EmitSink,
@@ -1242,6 +1243,8 @@ function defaultModel(provider: ProviderDescriptor): string | null {
 }
 
 export function registerThreadMethods(core: Core): void {
+  const pullRequests = new PullRequests(core);
+  core.router.register('threads.pullRequest', params => pullRequests.read(params.threadId));
   core.router.register('threads.compact', (params) => core.threads.compact(params.threadId, params.expectedSelectionVersion));
   core.router.register('threads.list', (params) => core.threads.list(params));
   core.router.register('threads.create', (params) =>

@@ -130,6 +130,10 @@ bun run e2e      # tests/e2e
 Run all three once on a clean tree before writing anything. A failure you did not
 cause reads exactly like one you did, and that has cost time here before.
 
+`bun run e2e` builds the UI before loading any test. Tests earlier than
+`ui.test.ts` also serve that build, so building only inside the UI suite leaves
+them without a page in a fresh worktree.
+
 `bun run e2e` covers three surfaces in one go: a real core process over WS with
 the echo driver, the UI served by that core and driven in a throwaway browser,
 and the release shell executable driven over the WebView2 debugging port. The
