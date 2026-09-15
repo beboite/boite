@@ -6,6 +6,7 @@
   import { AGENT_PREFIX, appCommands, isAgentCommand, runCommand } from '../lib/commands.svelte';
   import { rankItems, type PaletteItem } from '../lib/palette';
   import { clearStash, DRAFT_STASH_KEY, readStash, writeStash } from '../lib/prefs';
+  import { promptText } from '../lib/message-display';
   import { fill, strings } from '../lib/strings';
   import type { Choice, PickPatch, Store } from '../lib/store.svelte';
   import EffortSlider from './EffortSlider.svelte';
@@ -114,7 +115,7 @@
       .map((message) =>
         message.parts
           .filter((part) => part.type === 'text')
-          .map((part) => (part.type === 'text' ? part.text : ''))
+          .map((part) => (part.type === 'text' ? promptText(part) : ''))
           .join('\n')
           .trim()
       )
@@ -261,6 +262,11 @@
       keywords: item.keywords
     }))
   ]);
+
+  let commandToken = $derived(/^\/[^\s]+/.exec(text)?.[0] ?? '');
+  let recognized = $derived([...agentItems, ...boiteItems].some(item => item.label === commandToken));
+  let inputScroll = $state(0);
+  let inputWidth = $state(0);
 
   /** Agent commands first, so a tie goes to the agent's own. */
   let slashItems = $derived(rankItems(slashQuery ?? '', [...agentItems, ...boiteItems]));
@@ -732,7 +738,14 @@
       </div>
     {/if}
 
+    <div class="input-wrap">
+      {#if recognized}
+        <div class="input-highlight" aria-hidden="true"><div class="input-mirror" style:width={inputWidth ? `${inputWidth}px` : '100%'} style:transform={`translateY(-${inputScroll}px)`}><span data-testid="command-highlight">{commandToken}</span>{text.slice(commandToken.length)}{'\n'}</div></div>
+      {/if}
     <textarea
+      bind:clientWidth={inputWidth}
+      class:highlighted={recognized}
+      onscroll={() => { inputScroll = box?.scrollTop ?? 0; }}
       bind:this={box}
       bind:value={() => text, setText}
       {oninput}
@@ -751,6 +764,7 @@
       data-testid="composer-input"
       spellcheck="true"
     ></textarea>
+    </div>
 
     <SlashMenu
       open={slashOpen}
@@ -953,6 +967,12 @@
     color: var(--color-foreground);
   }
 
+  .input-wrap { position: relative; }
+  .input-highlight { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+  .input-mirror { width: 100%; padding: 12px 14px 6px; font: inherit; font-size: var(--text-base); line-height: 1.5; white-space: pre-wrap; overflow-wrap: break-word; }
+  .input-mirror span { color: var(--color-accent); }
+  textarea.highlighted { color: transparent; caret-color: var(--color-foreground); }
+  textarea.highlighted::selection { color: var(--color-foreground); }
   textarea {
     width: 100%;
     min-height: 44px;

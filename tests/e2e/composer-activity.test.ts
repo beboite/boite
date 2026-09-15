@@ -90,6 +90,8 @@ test('default models can be changed in General on desktop and phone', async () =
 test('goal and loop commands share the activity panel with disclosed tasks and reversible controls', async () => {
   await command('/goal Review the queued prompts and verify every interaction');
   await page.waitFor(`document.querySelector('${id('activity-goal')}')`);
+  await page.waitFor(`document.querySelector('.user-text .command')?.textContent === '/goal'`);
+  expect(await page.evaluate(`document.querySelector('${id('timeline')}').textContent.includes('Continue until the objective')`)).toBe(false);
   await page.click(`${id('activity-goal')} [aria-label="Pause"]`);
   await page.waitFor(`document.querySelector('${id('activity-goal')}').textContent.includes('Paused')`);
   await page.waitFor(`!document.querySelector('${id('composer-stop')}')`);

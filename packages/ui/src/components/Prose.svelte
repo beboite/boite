@@ -1,61 +1,17 @@
 <script lang="ts">
   import { tick } from 'svelte';
-  import { renderMarkdown, withCaret } from '../lib/markdown';
+  import { renderMarkdown } from '../lib/markdown';
+  import { paragraphBlocks, answerText } from '../lib/message-display';
   import { strings } from '../lib/strings';
 
-  /**
-   * Markdown for one text part. While the part streams, the HTML is rebuilt at
-   * most every 48 ms instead of on every token: the render is linear in the
-   * text, so per-delta rendering was quadratic over a long answer.
-   */
   let { text, live = false }: { text: string; live?: boolean } = $props();
-
-  const MIN_GAP_MS = 48;
-
-  /** The caret rides inside the markdown, so it ends the last line rather than starting one. */
-  const CARET = `<span class="caret" aria-label="${strings.chat.streaming}"></span>`;
-
-  let html = $state('');
-  let timer = 0;
-  let renderedAt = 0;
-
-  function render() {
-    timer = 0;
-    html = renderMarkdown(text);
-    renderedAt = performance.now();
-  }
-
-  $effect(() => {
-    void text;
-    if (!live) {
-      if (timer) clearTimeout(timer);
-      render();
-      return;
-    }
-    if (timer) return;
-    const wait = Math.max(0, MIN_GAP_MS - (performance.now() - renderedAt));
-    timer = window.setTimeout(render, wait);
-  });
-
-  $effect(() => () => {
-    if (timer) clearTimeout(timer);
-  });
-
-  const shown = $derived(live ? withCaret(html, CARET) : html);
+  let blocks = $derived(paragraphBlocks(answerText(text, live), live));
 
   let host = $state<HTMLDivElement>();
 
-  /**
-   * A fenced block gets a copy button of its own. The markdown is written by
-   * `{@html}`, which replaces the whole subtree on every render, so the button
-   * is hung again after each one rather than kept: the wrapper and the listener
-   * die with the nodes they were on. While the part streams that pass is a walk
-   * over every block of the answer every 48 ms for a button nobody can hit on a
-   * block still being written, so it waits: the effect runs again on the render
-   * that follows `live` going false, and hangs them all then.
-   */
+  // Attach copy buttons once the final paragraph has reached the DOM.
   $effect(() => {
-    void shown;
+    void blocks;
     if (live) return;
     const node = host;
     if (!node) return;
@@ -100,7 +56,11 @@
   }
 </script>
 
-<div class="prose" data-testid="text-part" bind:this={host}>{@html shown}</div>
+<div class="prose" data-testid="text-part" bind:this={host}>
+  {#each blocks as block, index (index)}
+    <div class="paragraph" data-testid="paragraph">{@html renderMarkdown(block)}</div>
+  {/each}
+</div>
 
 <style>
   .prose {
@@ -258,14 +218,8 @@
     border-bottom: none;
   }
 
-  .prose :global(.caret) {
-    display: inline-block;
-    width: 7px;
-    height: 14px;
-    margin-left: 2px;
-    vertical-align: -2px;
-    background: var(--color-foreground);
-    border-radius: 1px;
-    animation: blink 1s steps(2, start) infinite;
-  }
+  .paragraph + .paragraph { margin-top: 12px; }
+  .paragraph { animation: paragraph-in var(--dur-3) var(--ease-out-quint); }
+  @keyframes paragraph-in { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: translateY(0); } }
+  @media (prefers-reduced-motion: reduce) { .paragraph { animation: none; } }
 </style>

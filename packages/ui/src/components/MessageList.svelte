@@ -9,7 +9,7 @@
 </script>
 
 <script lang="ts">
-  import { ArrowDown } from '@lucide/svelte';
+  import { ArrowDown, User, Bot } from '@lucide/svelte';
   import type { Message } from '@boite/contracts';
   import { strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
@@ -18,6 +18,9 @@
   import QuestionCard from './QuestionCard.svelte';
   import Prose from './Prose.svelte';
   import ThinkingPart from './ThinkingPart.svelte';
+  import ProviderLogo from './ProviderLogo.svelte';
+  import TurnSummary from './TurnSummary.svelte';
+  import { promptText } from '../lib/message-display';
   import ToolCard from './ToolCard.svelte';
 
   let {
@@ -364,22 +367,29 @@
     box.scrollTop = box.scrollHeight;
   });
 
-  /**
-   * The caret rides the last part when that part is text, empty or not, so it
-   * blinks at the end of what is being written. A text part further up is
-   * finished: the model has moved on to a card, and the block caret takes over.
-   */
   function lastTextIndex(message: Message): number {
     const last = message.parts.length - 1;
     return message.parts[last]?.type === 'text' ? last : -1;
   }
 
-  /** The pulse goes on the reasoning only while it is the last thing written. */
-  function lastThinkingIndex(message: Message): number {
-    const last = message.parts.length - 1;
-    return message.parts[last]?.type === 'thinking' ? last : -1;
-  }
-
+  // One reasoning disclosure per turn. New reasoning replaces its previous text.
+  const thoughts = $derived.by(() => {
+    const result = new Map<string, { host: string; text: string; live: boolean }>();
+    for (const message of messages) {
+      if (message.role !== 'assistant') continue;
+      for (const [index, part] of message.parts.entries()) {
+        if (part.type !== 'thinking') continue;
+        const previous = result.get(message.turnId);
+        result.set(message.turnId, { host: previous?.host ?? message.id, text: part.text || previous?.text || '', live: message.state === 'streaming' && index === message.parts.length - 1 });
+      }
+    }
+    return result;
+  });
+  const lastInTurn = $derived.by(() => {
+    const result = new Map<string, string>();
+    for (const message of messages) result.set(message.turnId, message.id);
+    return result;
+  });
   /**
    * The images a user message carries, shown at their natural size once
    * clicked: `message.id:index` per picture, so the pair survives the window
@@ -410,6 +420,7 @@
         <div class="spacer" data-testid="timeline-above" style="height: {view.above}px"></div>
       {/if}
       {#each rendered as message (message.id)}
+        {@const turn = store.openThread?.turns.find(turn => turn.id === message.turnId)}
         <article
           use:track={message.id}
           class="message {message.role}"
@@ -418,10 +429,13 @@
         >
           {#if message.role === 'user'}
             {@const images = imagesOf(message)}
+            <div class="author user-author"><User size={14} />{strings.chat.you}</div>
             <div class="bubble">
               {#each message.parts as part, index (index)}
                 {#if part.type === 'text'}
-                  <p class="user-text" data-testid="text-part">{part.text}</p>
+                  {@const prompt = promptText(part)}
+                  {@const command = /^\/(goal|loop)(?=\s|$)/.exec(prompt)?.[0]}
+                  <p class="user-text" data-testid="text-part">{#if command}<span class="command">{command}</span>{prompt.slice(command.length)}{:else}{prompt}{/if}</p>
                 {/if}
               {/each}
               {#if images.length > 0}
@@ -447,22 +461,22 @@
             </div>
           {:else}
             {@const execution = store.openThread?.turns.find((turn) => turn.id === message.turnId)?.execution}
-            {#if message.role === 'assistant' && execution}
-              <div class="model-attribution" data-testid="message-model">
-                {store.modelsOf(execution.providerId, execution.accountId).find((model) => model.id === execution.model)?.name ?? execution.model ?? store.providerOf(execution.providerId)?.name}
-              </div>
-            {/if}
+            <div class="author" data-testid="message-model">
+              {#if execution}<ProviderLogo providerId={execution.providerId} size={18} />{:else}<Bot size={18} />{/if}
+              {message.role === 'system' ? strings.chat.system : execution ? store.modelsOf(execution.providerId, execution.accountId).find((model) => model.id === execution.model)?.name ?? execution.model ?? store.providerOf(execution.providerId)?.name : strings.chat.assistant}
+            </div>
             {@const caretAt = message.state === 'streaming' ? lastTextIndex(message) : -1}
-            {@const thinkingAt = message.state === 'streaming' ? lastThinkingIndex(message) : -1}
+            {@const thought = thoughts.get(message.turnId)}
+            {#if thought?.host === message.id}<ThinkingPart text={thought.text} live={thought.live} />{/if}
             <div class="parts">
               {#each message.parts as part, index (index)}
+                {#if part.type !== 'thinking'}
                 <div class="part" data-kind={part.type}>
                   {#if part.type === 'text'}
                     {#if part.text.length > 0 || index === caretAt}
                       <Prose text={part.text} live={index === caretAt} />
                     {/if}
-                  {:else if part.type === 'thinking'}
-                    <ThinkingPart text={part.text} live={index === thinkingAt} />
+
                   {:else if part.type === 'tool'}
                     <ToolCard
                       name={part.name}
@@ -510,11 +524,12 @@
                     </div>
                   {/if}
                 </div>
+                {/if}
               {/each}
-              {#if message.state === 'streaming' && caretAt === -1 && thinkingAt === -1}
-                <span class="caret block" aria-label={strings.chat.streaming}></span>
-              {/if}
             </div>
+          {/if}
+          {#if turn && lastInTurn.get(turn.id) === message.id}
+            <TurnSummary {turn} {messages} waiting={store.openThread?.status === 'waiting' && turn.status === 'running'} />
           {/if}
         </article>
       {/each}
@@ -533,11 +548,9 @@
 </div>
 
 <style>
-  .model-attribution {
-    color: var(--color-muted);
-    font-size: var(--text-xs);
-    margin-bottom: 4px;
-  }
+  .author { display: flex; align-items: center; gap: 8px; color: var(--color-foreground); font-size: var(--text-sm); font-weight: 500; margin-bottom: 10px; }
+  .user-author { color: var(--color-muted-foreground); font-size: var(--text-xs); }
+  .command { color: var(--color-accent); font-weight: 600; }
   .timeline-wrap {
     position: relative;
     flex: 1;
@@ -589,8 +602,8 @@
   .bubble {
     max-width: 75%;
     padding: 10px 14px;
-    background: var(--color-surface-2);
-    border: 1px solid var(--color-border);
+    background: var(--color-accent-soft);
+    border: 1px solid color-mix(in oklch, var(--color-accent) 35%, transparent);
     border-radius: var(--radius-lg);
     border-bottom-right-radius: var(--radius-sm);
     box-shadow: var(--shadow-e1);
@@ -673,21 +686,6 @@
   /* An answer is read at its own measure; cards keep the whole column. */
   .part[data-kind='text'] {
     max-width: var(--prose);
-  }
-
-  .caret {
-    display: inline-block;
-    width: 7px;
-    height: 14px;
-    margin-left: 2px;
-    vertical-align: -2px;
-    background: var(--color-foreground);
-    border-radius: 1px;
-    animation: blink 1s steps(2, start) infinite;
-  }
-
-  .caret.block {
-    margin: 2px 0;
   }
 
   .error {

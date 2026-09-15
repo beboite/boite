@@ -303,3 +303,16 @@ original checkout: outside the worktree, outside the branch, outside the commit,
 and invisible to the review that follows. The tracked docs, this page included,
 are the ones a worktree can actually change. Check where a file you are about to
 edit really lives before editing it.
+
+
+## Chat readability
+
+`bun test tests/e2e/readability.test.ts` checks the sidebar metadata, process
+panel, paragraph buffering, reasoning replacement, goal display and command
+highlighting through the fake client. It writes desktop, phone and light-theme
+captures under `tests/e2e/.artifacts/`.
+
+Scheduled goal and loop prompts keep their execution instructions in `text` and
+carry a separate optional `displayText` on the text part. The journal retains
+both; drivers read the execution prompt. The UI shows the command and objective,
+including when recalling a sent prompt, and hides standalone goal control markers.

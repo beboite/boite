@@ -56,15 +56,17 @@ All machines can be narrowed to one machine from the filter button beside Settin
 matches thread titles, project names and machine names. The command palette and
 the draft's project picker also include every connected host.
 
-Cards have a title row and a second row for the PR, project and machine. PR
+Cards have a title row and a second row for the project and machine icon. The
+machine name remains in the tooltip and accessible label. An associated PR
+appears as a green underlined number immediately before the machine icon; no
+placeholder appears when there is no PR. PR
 metadata comes from the execution machine's `gh pr list`, using the worktree
 branch or the current branch of the working directory. Non-repositories and
 detached checkouts have no PR. The core caches results and errors for one minute,
 coalesces duplicate requests, and runs at most two lookups at once. Each command
 has a ten-second deadline and runs through the process registry under
 `pull-request:<threadId>`. The thread menu can request a refresh. Missing `gh`,
-authentication failures and malformed responses appear as unavailable metadata,
-not as a claim that no PR exists. A PR link opens in the system browser.
+authentication failures and malformed responses use the error notification. A PR link opens in the system browser.
 
 ## Isolation and tests
 

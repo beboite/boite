@@ -1,5 +1,7 @@
 <script lang="ts">
   import { ChevronRight } from '@lucide/svelte';
+  import { renderMarkdown } from '../lib/markdown';
+  import { paragraphBlocks, currentThought } from '../lib/message-display';
   import { strings } from '../lib/strings';
 
   let { text, live = false }: { text: string; live?: boolean } = $props();
@@ -14,37 +16,9 @@
     if (open) built = true;
   });
 
-  /**
-   * The same 48 ms gate as the markdown next door: while the reasoning streams,
-   * the text node is rewritten at most twenty times a second instead of on
-   * every token. What is not live lands at once.
-   */
-  const MIN_GAP_MS = 48;
-
-  let body = $state('');
-  let timer = 0;
-  let writtenAt = 0;
-
-  $effect(() => {
-    void text;
-    if (!live) {
-      if (timer) clearTimeout(timer);
-      timer = 0;
-      body = text;
-      return;
-    }
-    if (timer) return;
-    const wait = Math.max(0, MIN_GAP_MS - (performance.now() - writtenAt));
-    timer = window.setTimeout(() => {
-      timer = 0;
-      writtenAt = performance.now();
-      body = text;
-    }, wait);
-  });
-
-  $effect(() => () => {
-    if (timer) clearTimeout(timer);
-  });
+  let current = $derived(currentThought(text));
+  let body = $derived(paragraphBlocks(current.text, live).join('\n\n'));
+  let preview = $derived(current.title ?? strings.chat.thinking);
 </script>
 
 <div class="thinking" data-testid="thinking-part">
@@ -57,7 +31,7 @@
     onclick={() => (open = !open)}
   >
     <span class="caret" class:open><ChevronRight size={13} strokeWidth={2} /></span>
-    <span class="label">{strings.chat.thinking}</span>
+    <span class="label">{preview}</span>
     {#if live}
       <span class="dot" aria-label={strings.chat.streaming}></span>
     {/if}
@@ -66,7 +40,7 @@
   <div class="fold" class:open inert={!open}>
     <div class="clip">
       {#if built}
-        <p class="body" data-testid="thinking-text">{body}</p>
+        <div class="body" data-testid="thinking-text">{@html renderMarkdown(body)}</div>
       {/if}
     </div>
   </div>
@@ -81,7 +55,9 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    height: var(--control-sm);
+    min-height: var(--control-sm);
+    height: auto;
+    max-width: 100%;
     padding: 0 8px 0 4px;
     color: var(--color-muted-foreground);
     font-size: var(--text-sm);
@@ -103,6 +79,10 @@
 
   .label {
     font-weight: 500;
+    text-align: left;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .dot {

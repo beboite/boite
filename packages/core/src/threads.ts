@@ -570,7 +570,7 @@ export class ThreadStore {
     return this.startTurn(threadId, protocol === 'echo' ? '[compact]' : '/compact', [], expectedSelectionVersion, 'compact');
   }
 
-  startTurn(threadId: ThreadId, prompt: string, attachments: ImageAttachment[] = [], expectedSelectionVersion?: number, operation?: 'compact'): Turn {
+  startTurn(threadId: ThreadId, prompt: string, attachments: ImageAttachment[] = [], expectedSelectionVersion?: number, operation?: 'compact', displayPrompt?: string): Turn {
     const thread = this.require(threadId);
     this.checkSelection(thread, expectedSelectionVersion);
     if (thread.archived) throw refused('cannot start a turn on an archived thread', { threadId });
@@ -610,7 +610,7 @@ export class ThreadStore {
       turnId: turn.id,
       role: 'user',
       parts: [
-        { type: 'text', text: prompt },
+        { type: 'text', text: prompt, ...(displayPrompt ? { displayText: displayPrompt } : {}) },
         ...attachments.map((attachment): MessagePart => ({
           type: 'image',
           mimeType: attachment.mimeType,

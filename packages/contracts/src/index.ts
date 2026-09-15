@@ -436,7 +436,7 @@ export interface ImageAttachment {
 }
 
 export type MessagePart =
-  | { type: 'text'; text: string }
+  | { type: 'text'; text: string; /** User-facing command for internally scheduled prompts. */ displayText?: string }
   /** An image the user sent with the prompt, journalled with the message. */
   | { type: 'image'; mimeType: ImageMimeType; data: string; alt: string | null }
   /** The model's reasoning as the provider streams it, folded in the UI. */

@@ -248,6 +248,13 @@ export const strings = {
   },
 
   chat: {
+    working: 'Working',
+    writing: 'Writing',
+    stopped: 'Stopped',
+    toolCall: '1 tool call',
+    toolCount: '{count} tool calls',
+    inputTokens: '{count} input tokens',
+    outputTokens: '{count} output tokens',
     you: 'You',
     assistant: 'Agent',
     system: 'System',
@@ -393,6 +400,14 @@ export const strings = {
   },
 
   trace: {
+    exact: 'All child processes tracked',
+    limited: 'Limited process tracking',
+    finished: 'Finished',
+    parent: 'Parent PID',
+    cpuTime: 'CPU time',
+    currentMemory: 'Memory now',
+    active: 'active',
+    recorded: 'recorded',
     exe: 'Executable',
     pid: 'PID',
     started: 'Started',
