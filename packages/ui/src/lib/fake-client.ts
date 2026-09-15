@@ -69,6 +69,8 @@ const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>([
   'threads.pullRequest',
   'threads.create',
   'threads.get',
+  'threads.activity.set',
+  'threads.activity.control',
   'messages.list',
   'threads.update',
   'threads.retitle',
@@ -358,6 +360,8 @@ export class FakeClient implements ObservableClient {
   #installBefore = new Map<string, ProviderInstallState>();
   #accounts: Account[] = [];
   #threads = new Map<ThreadId, Thread>();
+  #activityTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  #activityTurns = new Map<string, { kind: 'goal' | 'loop'; goal: NonNullable<Thread['activity']>['goal'] }>();
   #processes: ProcessRecord[] = [];
   #usage = new Map<ThreadId, Usage>();
   #settings: Settings;
@@ -488,6 +492,7 @@ export class FakeClient implements ObservableClient {
   }
 
   close(): void {
+    for (const thread of this.#threads.values()) this.#pauseActivity(thread);
     this.#setState('closed');
     this.#dropPending('client closed');
   }
@@ -997,6 +1002,41 @@ export class FakeClient implements ObservableClient {
         }
         return this.#startTurn(params.threadId, params.prompt, params.attachments ?? []);
       }
+      case 'threads.activity.set': {
+        const params = rawParams as RpcParams<'threads.activity.set'>;
+        const thread = this.#thread(params.threadId);
+        if (thread.archived) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'activity requires an unarchived thread' });
+        const activity = structuredClone(thread.activity ?? { goal: null, loop: null, tasks: [] });
+        if (params.goal !== undefined) {
+          if (params.goal !== null && !params.goal.objective?.trim()) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'goal.objective must be non-empty text' });
+          activity.goal = params.goal === null ? null : { objective: params.goal.objective.trim(), status: 'active', iterations: 0, error: null };
+        }
+        if (params.loop !== undefined) {
+          if (params.loop !== null && (!params.loop.prompt?.trim() || !Number.isInteger(params.loop.intervalMs) || params.loop.intervalMs < 1000 || params.loop.intervalMs > 86400000)) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'loop requires text and an interval from 1000 to 86400000 ms' });
+          activity.loop = params.loop === null ? null : { prompt: params.loop.prompt.trim(), intervalMs: params.loop.intervalMs, status: 'active', iterations: 0, nextRunAt: Date.now(), error: null };
+        }
+        thread.activity = activity;
+        this.#publishActivity(thread);
+        this.#scheduleActivity(thread.id);
+        return structuredClone(activity);
+      }
+      case 'threads.activity.control': {
+        const params = rawParams as RpcParams<'threads.activity.control'>;
+        const thread = this.#thread(params.threadId);
+        const activity = thread.activity;
+        if (params.action === 'resume' && thread.archived) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'cannot resume activity on an archived thread' });
+        const item = activity?.[params.kind];
+        if (!activity || !item) throw new RpcFailure({ code: RpcErrorCode.Refused, message: `this thread has no ${params.kind}` });
+        if (params.action === 'complete' && params.kind !== 'goal') throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'only a goal can be completed' });
+        if (params.action === 'remove') activity[params.kind] = null;
+        else if (params.action === 'complete' && activity.goal) activity.goal.status = 'complete';
+        else { item.status = params.action === 'resume' ? 'active' : 'paused'; item.error = null; }
+        if (activity.loop && activity.loop.status !== 'active') activity.loop.nextRunAt = null;
+        if (params.kind === 'loop' && params.action === 'resume' && activity.loop) activity.loop.nextRunAt = Date.now();
+        this.#publishActivity(thread);
+        this.#scheduleActivity(thread.id);
+        return structuredClone(activity);
+      }
       case 'threads.compact': {
         const params = rawParams as RpcParams<'threads.compact'>;
         const thread = this.#thread(params.threadId);
@@ -1218,6 +1258,7 @@ export class FakeClient implements ObservableClient {
   // -------------------------------------------------------------------------
 
   async #stopTurn(threadId: ThreadId): Promise<boolean> {
+    this.#pauseActivity(this.#thread(threadId));
     const running = this.#inFlight.get(threadId);
     let stopped = running !== undefined;
     if (running) running.cancelled = true;
@@ -1847,7 +1888,67 @@ export class FakeClient implements ObservableClient {
     }
   }
 
+  #publishActivity(thread: Thread): void {
+    this.#emit('thread.activity', { threadId: thread.id, activity: structuredClone(thread.activity!) });
+  }
+
+  #pauseActivity(thread: Thread): void {
+    const timer = this.#activityTimers.get(thread.id);
+    if (timer) clearTimeout(timer);
+    this.#activityTimers.delete(thread.id);
+    if (!thread.activity) return;
+    for (const kind of ['goal', 'loop'] as const) {
+      const item = thread.activity[kind];
+      if (item?.status === 'active') item.status = 'paused';
+    }
+    if (thread.activity.loop) thread.activity.loop.nextRunAt = null;
+    this.#publishActivity(thread);
+  }
+
+  #scheduleActivity(threadId: string, delay = 0): void {
+    const old = this.#activityTimers.get(threadId);
+    if (old) clearTimeout(old);
+    this.#activityTimers.delete(threadId);
+    const thread = this.#threads.get(threadId);
+    const activity = thread?.activity;
+    if (!thread || thread.archived || !activity || (activity.goal?.status !== 'active' && activity.loop?.status !== 'active')) return;
+    this.#activityTimers.set(threadId, setTimeout(() => {
+      this.#activityTimers.delete(threadId);
+      if (this.#inFlight.has(threadId) || ['running', 'queued', 'waiting'].includes(thread.status)) return;
+      const kind = activity.loop?.status === 'active' && (activity.loop.nextRunAt ?? 0) <= Date.now() ? 'loop' : activity.goal?.status === 'active' ? 'goal' : null;
+      if (!kind) {
+        if (activity.loop?.status === 'active') this.#scheduleActivity(threadId, Math.max(0, (activity.loop.nextRunAt ?? Date.now()) - Date.now()));
+        return;
+      }
+      try {
+        const turn = this.#startTurn(threadId, kind === 'goal' ? activity.goal!.objective : activity.loop!.prompt);
+        this.#activityTurns.set(turn.id, { kind, goal: activity.goal });
+        activity[kind]!.iterations++;
+        if (kind === 'loop') activity.loop!.nextRunAt = Date.now() + activity.loop!.intervalMs;
+        this.#publishActivity(thread);
+      } catch (error) {
+        this.#pauseActivity(thread);
+        activity[kind]!.error = error instanceof Error ? error.message : String(error);
+        this.#publishActivity(thread);
+      }
+    }, delay));
+  }
+
   #emit<E extends RpcEventName>(event: E, payload: RpcEvents[E]): void {
+    if (event === 'turn.finished') {
+      const turn = payload as Turn;
+      const owned = this.#activityTurns.get(turn.id);
+      this.#activityTurns.delete(turn.id);
+      const thread = this.#threads.get(turn.threadId);
+      if (thread?.activity) {
+        if (turn.status !== 'done') this.#pauseActivity(thread);
+        else {
+          // The in-memory agent completes its fake goal after one echo turn.
+          if (owned?.kind === 'goal' && owned.goal === thread.activity.goal && thread.activity.goal?.status === 'active') { thread.activity.goal.status = 'complete'; this.#publishActivity(thread); }
+          this.#scheduleActivity(thread.id, 250);
+        }
+      }
+    }
     // A socket that is down carries nothing. Everything the core emitted
     // during the gap is lost, which is what `reload()` exists to repair.
     if (this.#state !== 'ready') return;

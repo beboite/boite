@@ -505,7 +505,20 @@ export interface AgentCommand {
   hint: string | null;
 }
 
+export interface AgentTask {
+  id: string;
+  text: string;
+  status: 'pending' | 'in_progress' | 'completed';
+}
+
+export interface ThreadActivity {
+  goal: { objective: string; status: 'active' | 'paused' | 'complete'; iterations: number; error: string | null } | null;
+  loop: { prompt: string; intervalMs: number; status: 'active' | 'paused'; iterations: number; nextRunAt: number | null; error: string | null } | null;
+  tasks: AgentTask[];
+}
+
 export interface Thread extends ThreadSummary {
+  activity?: ThreadActivity;
   /** The last `MESSAGE_PAGE` messages of the thread, oldest first. Older ones come from `messages.list`. */
   messages: Message[];
   /**
@@ -887,6 +900,8 @@ export interface PairingGrant {
 // ---------------------------------------------------------------------------
 
 export interface RpcMethods {
+  'threads.activity.set': { params: { threadId: ThreadId; goal?: { objective: string } | null; loop?: { prompt: string; intervalMs: number } | null }; result: ThreadActivity };
+  'threads.activity.control': { params: { threadId: ThreadId; kind: 'goal' | 'loop'; action: 'pause' | 'resume' | 'remove' | 'complete' }; result: ThreadActivity };
   'quotas.list': { params: { refresh?: boolean }; result: AccountQuota[] };
   'quotas.configure': { params: { accountId: AccountId; enabled: boolean }; result: AccountQuota[] };
   'plugins.list': { params: Record<string, never>; result: PluginState[] };
@@ -1150,6 +1165,7 @@ export type RpcParams<M extends RpcMethodName> = RpcMethods[M]['params'];
 export type RpcResult<M extends RpcMethodName> = RpcMethods[M]['result'];
 
 export interface RpcEvents {
+  'thread.activity': { threadId: ThreadId; activity: ThreadActivity };
   'quotas.updated': AccountQuota[];
   'plugins.updated': PluginState;
   /** A project `projects.add` created. A known path returns its project without one. */

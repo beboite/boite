@@ -23,6 +23,7 @@ import { ThreadStore } from './threads.ts';
 import { QuotaStore } from './quotas.ts';
 import { PluginStore } from './plugins.ts';
 import { Worktrees } from './worktree.ts';
+import { ActivityStore } from './activity.ts';
 
 export const CORE_VERSION: string = pkg.version;
 
@@ -63,6 +64,7 @@ export class Core {
   readonly worktrees: Worktrees;
   readonly keybindings: KeybindingStore;
   readonly imports: ImportStore;
+  readonly activity: ActivityStore;
 
   subscribers: SubscriptionSink = { hasSubscribers: () => false, closeSession: () => undefined };
 
@@ -90,6 +92,7 @@ export class Core {
     this.worktrees = new Worktrees(this);
     this.keybindings = new KeybindingStore(this);
     this.imports = new ImportStore(this);
+    this.activity = new ActivityStore(this);
 
     registerModules(this);
     this.procs.applySettings(this.settings.get());
@@ -131,6 +134,7 @@ export class Core {
   }
 
   async close(): Promise<void> {
+    this.activity.close();
     await this.plugins.close();
     await this.scheduler.drain();
     this.providers.installs.stop();

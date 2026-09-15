@@ -986,6 +986,9 @@ class AcpSession {
       case 'usage_update':
         if (update.cost != null && update.cost.currency === 'USD') turn.costUsdEquivalent = update.cost.amount;
         break;
+      case 'plan':
+        turn.ctx.tasks?.(update.entries.map((entry, index) => ({ id: String(index), text: entry.content, status: entry.status })));
+        break;
       default:
         // user_message_chunk, plan, plan_update, plan_removed,
         // config_option_update, session_info_update and the compaction

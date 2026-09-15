@@ -4,7 +4,7 @@
   import { focusOnMount } from '../lib/actions';
   import { contextMenu } from '../lib/context-menu.svelte';
   import { separator, type MenuItem } from '../lib/menu';
-  import { strings } from '../lib/strings';
+  import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
   import { workspace } from '../lib/workspace.svelte';
   import ContextControl from './ContextControl.svelte';
@@ -80,6 +80,12 @@
 
   let thread = $derived(store.openThread);
   let project = $derived(store.openProject);
+  let draftChoice = $derived(store.defaultChoice());
+  let draftModel = $derived(store.modelOf(draftChoice));
+  let draftProvider = $derived(draftChoice ? store.providerOf(draftChoice.providerId) : null);
+  let draftEffort = $derived(draftChoice?.effort ?? draftModel?.effort?.default ?? null);
+  let effortLabel = $derived(draftModel?.effort?.levels.find((level) => level.id === draftEffort)?.label ?? draftEffort);
+  let modelLabel = $derived(draftModel?.name ?? draftChoice?.model ?? draftProvider?.name ?? '');
 
   /** Every project, the draft's own marked: what the heading's dropdown lists. */
   let projectItems = $derived<MenuItem[]>(
@@ -188,8 +194,11 @@
       {/key}
     {:else}
       <div class="draft-body" data-testid="draft-empty">
-        <h1 class="start">
-          <span>{strings.thread.startIn}</span>
+        <h1 class="start" data-testid="draft-sentence">
+          <span>{strings.thread.start}</span>
+          {#if store.draft?.worktree}<span>{strings.thread.inWorktree}</span>{/if}
+          {#if draftChoice}<span>{strings.thread.draftMode[draftChoice.permissionMode]}</span>{/if}
+          <span>{strings.thread.inProject}</span>
           <!-- It opens upward, into the empty half of the column: under the
                heading it would land on the composer. -->
           <Menu
@@ -199,9 +208,13 @@
             label={strings.thread.changeProject}
             testid="draft-project"
           >
-            {project?.name ?? ''}
+            &quot;{project?.name ?? ''}&quot;
             <ChevronDown size={14} strokeWidth={2} />
           </Menu>
+          {#if draftChoice}
+            <span>{strings.thread.using} {modelLabel}</span>
+            {#if effortLabel}<span>{fill(strings.thread.onEffort, { effort: effortLabel })}</span>{/if}
+          {/if}
         </h1>
       </div>
     {/if}
@@ -336,12 +349,14 @@
     align-items: center;
     justify-content: center;
     flex-wrap: wrap;
-    gap: 2px;
+    gap: 2px 5px;
     width: 100%;
     max-width: var(--content);
     font-size: var(--text-lg);
     font-weight: 600;
     color: var(--color-foreground);
+    text-align: center;
+    line-height: 1.6;
   }
 
   @media (max-width: 720px) {

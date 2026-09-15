@@ -1,3 +1,4 @@
+import { activityCommand } from './activity-command';
 import type {
   Account,
   CoreInfo,
@@ -67,6 +68,7 @@ import {
 } from './prefs';
 import { rightPanel, type BoundPanel } from './right-panel.svelte';
 import { strings } from './strings';
+import { DEFAULT_MODEL_NAMES, INITIAL_MODEL_DEFAULTS, readModelDefaults, writeModelDefaults, resolveModelDefault, type ModelDefaults } from './model-defaults';
 import { FAVORITES_KEY, readFavorites, type FavoriteModel } from './model-order';
 
 export type Page = 'chat' | 'settings';
@@ -228,6 +230,8 @@ export class Store {
   loadingOlder = $state(false);
   draft = $state<Draft | null>(null);
   prefs = $state<ComposerPrefs>(defaultPrefs());
+  modelDefaults = $state<ModelDefaults>({});
+  draftChoice = $state<Choice | null>(null);
   favorites = $state<FavoriteModel[]>(readFavorites());
 
   toggleFavorite(providerId: string, accountId: string, model: ModelInfo): void {
@@ -399,7 +403,12 @@ export class Store {
   /** The model a choice runs on, out of what its own instance offers: what the chips read. */
   modelOf(choice: Choice | null): ModelInfo | null {
     if (!choice) return null;
-    return this.modelsOf(choice.providerId, choice.accountId).find((m) => m.id === choice.model) ?? null;
+    const offered = this.modelsOf(choice.providerId, choice.accountId).find((m) => m.id === choice.model);
+    if (offered) return offered;
+    const preferred = this.modelDefaults[choice.providerId] ?? INITIAL_MODEL_DEFAULTS[choice.providerId];
+    // Display the configured target before probing. It never joins modelsOf's selectable list.
+    return choice.model && choice.model === preferred?.model
+      ? { id: choice.model, name: DEFAULT_MODEL_NAMES[choice.model] ?? choice.model } : null;
   }
 
   isProbing(providerId: ProviderId, accountId: string | null): boolean {
@@ -448,11 +457,27 @@ export class Store {
       : [...this.collapsedProjects, projectId];
   }
 
-  /** The model a fresh thread on this provider gets: the flagged default, else the first current one. */
-  defaultModelOf(provider: ProviderSummary): string | null {
-    const flagged = provider.models.find((m) => m.default);
-    const current = provider.models.find((m) => !m.legacy);
-    return flagged?.id ?? current?.id ?? provider.models[0]?.id ?? null;
+  defaultModelOf(provider: ProviderSummary, accountId?: string): string | null {
+    const models = accountId ? this.modelsOf(provider.id, accountId) : provider.models;
+    const preferred = this.modelDefaults[provider.id] ?? INITIAL_MODEL_DEFAULTS[provider.id];
+    return preferred?.model ?? resolveModelDefault(provider.id, models, this.modelDefaults)?.model ?? null;
+  }
+
+  defaultEffortOf(providerId: string, accountId: string, model: string | null): string | null {
+    const offered = this.modelsOf(providerId, accountId);
+    const configured = this.modelDefaults[providerId] ?? INITIAL_MODEL_DEFAULTS[providerId];
+    if (configured?.model === model && (!offered.some((entry) => entry.id === model) ||
+      (this.providerOf(providerId)?.protocol === 'claude-sdk' && !this.probedModels[probeKey(providerId, accountId)]))) return configured.effort;
+    const preferred = resolveModelDefault(providerId, offered, this.modelDefaults);
+    return preferred?.model === model ? preferred.effort : offered.find((m) => m.id === model)?.effort?.default ?? null;
+  }
+
+  setModelDefault(providerId: string, accountId: string, model: string, effort: string | null): void {
+    const offered = this.modelsOf(providerId, accountId).find((m) => m.id === model);
+    if (!offered) return;
+    const validEffort = offered.effort?.levels.some((level) => level.id === effort) ? effort : offered.effort?.default ?? null;
+    this.modelDefaults = { ...this.modelDefaults, [providerId]: { model, effort: validEffort } };
+    writeModelDefaults(this.modelDefaults);
   }
 
   /**
@@ -460,6 +485,7 @@ export class Store {
    * still exist, else the first available provider and its first account.
    */
   defaultChoice(): Choice | null {
+    if (this.draft && this.draftChoice) return this.draftChoice;
     const remembered = this.prefs.providerId ? this.providerOf(this.prefs.providerId) : null;
     const provider =
       (remembered?.available ? remembered : null) ??
@@ -473,25 +499,20 @@ export class Store {
       accounts.find((a) => a.status === 'ok') ??
       accounts[0];
     if (!account) return null;
-    // A probed model is as remembered as a descriptor one: the agent listed it.
-    const offered = this.modelsOf(provider.id, account.id);
-    const model =
-      this.prefs.model && offered.some((m) => m.id === this.prefs.model)
-        ? this.prefs.model
-        : this.defaultModelOf(provider);
-    const levels = offered.find((m) => m.id === model)?.effort?.levels ?? [];
-    const effort = levels.some((level) => level.id === this.prefs.effort) ? this.prefs.effort : null;
+    const model = this.defaultModelOf(provider, account.id);
+    const effort = this.defaultEffortOf(provider.id, account.id, model);
     return {
       providerId: provider.id,
       accountId: account.id,
       permissionMode: this.prefs.permissionMode,
       model,
       effort,
-      speed: offered.find(m => m.id === model)?.speeds?.some(option => option.id === this.prefs.speed) ? this.prefs.speed : null
+      speed: this.modelsOf(provider.id, account.id).find(m => m.id === model)?.speeds?.some(option => option.id === this.prefs.speed) ? this.prefs.speed : null
     };
   }
 
   remember(choice: Choice): void {
+    if (this.draft) this.draftChoice = { ...choice };
     this.prefs = { ...choice };
     writePrefs(this.prefs);
   }
@@ -534,6 +555,7 @@ export class Store {
     this.probingModels = [];
     this.connection = client.state;
     this.prefs = readPrefs();
+    this.modelDefaults = readModelDefaults();
     this.favorites = readFavorites();
     const layout = readLayout();
     this.sidebarWidth = layout.sidebarWidth;
@@ -576,6 +598,9 @@ export class Store {
     on('thread.commands', ({ threadId, commands }) => {
       const open = this.openThread;
       if (open && open.id === threadId) open.commands = commands;
+    });
+    on('thread.activity', ({ threadId, activity }) => {
+      if (this.openThread?.id === threadId) this.openThread.activity = activity;
     });
     on('thread.removed', ({ threadId }) => {
       this.threads = this.threads.filter((t) => t.id !== threadId);
@@ -1164,6 +1189,7 @@ export class Store {
     if (target === undefined) return;
     void this.#unsubscribe();
     this.openThread = null;
+    this.draftChoice = null;
     this.trace = [];
     this.#keepRequestsOf(null);
     this.draft = { projectId: target, worktree: false };
@@ -1332,8 +1358,39 @@ export class Store {
    * from the prompt; on an open thread it starts a turn. An image alone is a
    * turn too, so an empty prompt with an attachment goes out.
    */
+  async prepareDraftChoice(choice: Choice): Promise<Choice | null> {
+    const provider = this.providerOf(choice.providerId);
+    if (!choice.model || !provider) return choice;
+    const models = this.modelsOf(choice.providerId, choice.accountId);
+    if ((!models.some((model) => model.id === choice.model) ||
+      (provider.protocol === 'claude-sdk' && !this.probedModels[probeKey(provider.id, choice.accountId)])) &&
+      ['claude-sdk', 'acp', 'codex-appserver', 'pi'].includes(provider.protocol)) {
+      const client = this.#client;
+      if (!client) return null;
+      try {
+        const result = await client.call('providers.probe', { providerId: choice.providerId, accountId: choice.accountId });
+        this.probedModels = { ...this.probedModels, [probeKey(choice.providerId, choice.accountId)]: result.models };
+      } catch (error) { this.#fail(error); return null; }
+    }
+    if (!this.modelsOf(provider.id, choice.accountId).some((model) => model.id === choice.model)) {
+      this.error = strings.settings.modelDefaultUnavailable.replace('{model}', choice.model).replace('{provider}', provider.name);
+      return null;
+    }
+    return choice;
+  }
+
   async submit(prompt: string, choice: Choice, attachments: ImageAttachment[] = []): Promise<boolean> {
     if ((prompt.trim().length === 0 && attachments.length === 0) || this.connection !== 'ready') return false;
+    try {
+      if (activityCommand(prompt) && attachments.length) throw new Error(strings.activity.noAttachments);
+    } catch (error) { this.#fail(error); return false; }
+    if (this.draft && !this.openThread) {
+      const draft = this.draft;
+      const selection = this.draftChoice;
+      const prepared = await this.prepareDraftChoice(choice);
+      if (!prepared || this.draft !== draft || this.draftChoice !== selection || this.openThread) return false;
+      choice = prepared;
+    }
     this.remember(choice);
     if (this.openThread) {
       return this.send(prompt, this.openThread.id, attachments);
@@ -1377,6 +1434,7 @@ export class Store {
     if (!(await this.submit(prompt, choice, attachments))) return false;
     if (projectId !== undefined && (threadId === undefined || this.openThread?.id === threadId)) {
       this.startDraft(projectId);
+      this.draftChoice = { ...choice };
     }
     return true;
   }
@@ -1390,6 +1448,13 @@ export class Store {
     if (!client || !threadId || this.connection !== 'ready') return false;
     if (prompt.trim().length === 0 && attachments.length === 0) return false;
     try {
+      const activity = activityCommand(prompt);
+      if (activity) {
+        if (attachments.length) throw new Error(strings.activity.noAttachments);
+        const accepted = await client.call('threads.activity.set', { threadId, ...activity });
+        if (this.openThread?.id === threadId) this.openThread.activity = accepted;
+        return true;
+      }
       // The key is left out when there is nothing to carry: a turn with no
       // image sends the params it always sent.
       await client.call('turns.start', {

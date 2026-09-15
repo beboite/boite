@@ -120,6 +120,39 @@ they are in its trace. Archiving the thread leaves the worktree and the branch
 where they are: the branch may carry work nobody merged, and deleting it is a
 person's call, `git worktree remove` from the project.
 
+## Pending prompts, goals and loops
+
+Enter during a running turn queues the message and its images. The composer
+shows each pending message. Up in an empty composer takes the newest pending
+message out of the queue for editing; clicking a pending message does the same.
+Escape stops the current turn. Pending messages then run in their original
+order. A failed send preserves the queue for an explicit retry.
+
+`/goal <objective>` starts work toward an objective. `/loop [interval] <prompt>`
+repeats a prompt, immediately once and then at the given interval. Intervals use
+`s`, `m` or `h`, from one second to 24 hours; the default is five minutes.
+Both commands belong to Boite and work with every driver. Goals and loops can
+coexist with the agent's task list above the composer. Hover or click the task
+row to expand it; its button also works from the keyboard and on a phone.
+
+The core owns this work, so switching threads or closing a client does not
+cancel it. A goal continues through scheduled turns until the agent emits
+`[BOITE_GOAL_COMPLETE]` on its own line. The prompt requests that marker only
+after verification. `[BOITE_GOAL_BLOCKED]`, an error or Escape pauses it.
+Escape also pauses a loop between runs. The activity bar has pause, resume,
+remove and manual goal completion controls. A restarted core preserves the
+activity but requires an explicit resume.
+
+Tasks come from ACP plans, Codex plan notifications or successful task tools
+such as Claude's TodoWrite and TaskCreate/TaskUpdate. An agent that reports no
+tasks gets no invented task list. Pi uses the same successful-tool observation.
+
+General settings stores a default model and effort per provider on this device.
+Initial defaults are Claude Opus 5 High, Codex GPT 5.6 Sol Medium and Grok 4.6
+High. The account must offer the model; a first send probes when needed and
+refuses an unavailable default by name. New thread uses these defaults;
+Ctrl+Enter preserves the current explicit choice. Existing threads keep theirs.
+
 ## The echo provider
 
 `echo` is the deterministic fake agent: it streams the prompt back, can call a

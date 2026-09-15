@@ -13,6 +13,7 @@
   import ModelPicker from './ModelPicker.svelte';
   import MentionMenu from './MentionMenu.svelte';
   import SlashMenu from './SlashMenu.svelte';
+  import ThreadActivity from './ThreadActivity.svelte';
 
   /**
    * `centered` is the draft's placement: the parent stacks the composer under
@@ -227,7 +228,7 @@
 
   /** The agent's own, in the order it reported them. Never on a draft: there is no agent yet. */
   let agentItems = $derived.by((): PaletteItem[] =>
-    (store.openThread?.commands ?? []).map((command) => ({
+    (store.openThread?.commands ?? []).filter((command) => !['goal', 'loop'].includes(command.name)).map((command) => ({
       id: `${AGENT_PREFIX}${command.name}`,
       kind: 'command' as const,
       label: `/${command.name}`,
@@ -241,6 +242,8 @@
    * itself. A row reads as the `/name` it is typed as, the sentence under it.
    */
   let boiteItems = $derived.by((): PaletteItem[] => [
+    { id: 'goal', kind: 'command', label: '/goal', description: strings.activity.goalDescription },
+    { id: 'loop', kind: 'command', label: '/loop', description: strings.activity.loopDescription },
     ...Object.entries(CHIP_COMMANDS).map(([name, chip]) => ({
       id: name,
       kind: 'command' as const,
@@ -311,7 +314,8 @@
     }
 
     // Another model runs on its own scale, so the effort goes back to that model's default.
-    choice = { ...choice, ...patch, effort: null, speed: null };
+    const target = { ...choice, ...patch };
+    choice = { ...target, effort: store.defaultEffortOf(target.providerId, target.accountId, target.model), speed: null };
     store.remember(choice);
   }
 
@@ -512,12 +516,27 @@
   /** ArrowUp: one prompt older, or nothing when the user typed the text themselves. */
   function older(): boolean {
     if (recall === null && text.length > 0) return false;
+    if (recall === null && composer?.queued.length && !composer.sending && attachments.length === 0) {
+      restoreQueued(composer.queued.length - 1);
+      return true;
+    }
     const next = recall === null ? 0 : recall + 1;
     const prompt = sent[next];
     if (prompt === undefined) return recall !== null;
     recall = next;
     put(prompt);
     return true;
+  }
+
+  function restoreQueued(at: number) {
+    const state = composer;
+    if (!state || state.sending || text.length > 0 || attachments.length > 0) return;
+    const entry = state.queued.splice(at, 1)[0];
+    if (!entry) return;
+    state.attachments = entry.attachments;
+    recall = null;
+    put(entry.text);
+    box?.focus();
   }
 
   /** ArrowDown: one prompt newer, and past the newest the composer is empty again. */
@@ -558,6 +577,11 @@
    * goes. Either way the text stops matching `/word`, so the menu closes itself.
    */
   function pickSlash(item: PaletteItem) {
+    if (item.id === 'goal' || item.id === 'loop') {
+      put(`/${item.id} `);
+      box?.focus();
+      return;
+    }
     if (isAgentCommand(item)) {
       put(`/${item.id.slice(AGENT_PREFIX.length)} `);
       box?.focus();
@@ -660,7 +684,7 @@
       if (older()) event.preventDefault();
     } else if (event.key === 'ArrowDown' && !event.shiftKey) {
       if (newer()) event.preventDefault();
-    } else if (event.key === 'Escape' && store.busy) {
+    } else if (event.key === 'Escape' && (store.busy || store.openThread?.activity?.goal?.status === 'active' || store.openThread?.activity?.loop?.status === 'active')) {
       event.preventDefault();
       void store.stop();
     }
@@ -668,10 +692,23 @@
 </script>
 
 <div class="composer-wrap" class:centered>
+  <ThreadActivity {store} />
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div class="composer" data-testid="composer" {ondragover} {ondrop}>
     {#if composer && composer.queued.length > 0}
-      <div class="queued subtle" data-testid="composer-queued">{strings.composer.queued}</div>
+      <div class="queued" data-testid="composer-queued">
+        <span class="subtle">{strings.composer.queued}</span>
+        {#each composer.queued as entry, at (entry)}
+          <button type="button" class="ghost queued-entry"
+            title={strings.composer.editQueued}
+            disabled={composer.sending || text.length > 0 || attachments.length > 0}
+            onclick={() => restoreQueued(at)}>
+            <span>{entry.text || strings.composer.attachAlt}</span>
+            {#if entry.attachments.length}<span class="subtle">{entry.attachments.length} <Paperclip size={12} /></span>{/if}
+            <ArrowUp size={12} />
+          </button>
+        {/each}
+      </div>
     {/if}
 
     {#if attachments.length > 0}
@@ -850,6 +887,10 @@
     padding: 6px 14px 0;
     font-size: var(--text-sm);
   }
+
+  .queued-entry { display: flex; gap: 8px; width: 100%; text-align: left; min-width: 0; }
+  .queued-entry > span:first-child { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .queued-entry > span { display: inline-flex; align-items: center; gap: 4px; }
 
   /* The images this prompt carries, above the box they were pasted into. */
   .attachments {

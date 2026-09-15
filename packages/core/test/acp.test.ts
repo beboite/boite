@@ -174,6 +174,17 @@ function configCount(pair: string): number {
 }
 
 describe('acp driver', () => {
+  test('native plan events populate thread activity tasks', async () => {
+    const client = await startCore();
+    const threadId = await acpThread(client);
+    const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 20000);
+    await client.call('turns.start', { threadId, prompt: '[tasks]' });
+    expect((await finished).status).toBe('done');
+    expect((await client.call('threads.get', { threadId })).activity?.tasks).toEqual([
+      { id: '0', text: 'Inspect source', status: 'completed' },
+      { id: '1', text: 'Run checks', status: 'in_progress' },
+    ]);
+  });
   test('getDriver returns the acp driver', () => {
     expect(getDriver('acp').protocol).toBe('acp');
   });

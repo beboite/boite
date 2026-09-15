@@ -212,7 +212,7 @@ test('a draft names its project in the heading and the dropdown moves it to anot
   await waitFor(() => store.draft !== null);
 
   const heading = query('[data-testid=draft-empty]');
-  expect(heading.textContent).toContain('Start a thread in');
+  expect(heading.textContent).toContain('with approval requests in');
   expect(heading.textContent).toContain('notes');
   // The heading says the project, so the header chip no longer repeats it.
   expect(query('[data-testid=chat] header').textContent).not.toContain('notes');
@@ -241,7 +241,7 @@ test('the picker rails the providers as logos and gives the shown one its accoun
   await waitFor(() => store.draft !== null);
 
   // A draft opens on the first available provider, its default model.
-  await waitFor(() => query('[data-testid=composer-picker]').textContent?.includes('Claude Sonnet 5') === true);
+  await waitFor(() => query('[data-testid=composer-picker]').textContent?.includes('Claude Opus 5') === true);
 
   query<HTMLButtonElement>('[data-testid=composer-picker]').click();
   await waitFor(() => document.querySelector('[data-testid=composer-picker-menu]') !== null);
@@ -286,7 +286,7 @@ test('the picker reads an ACP agent models, showing the descriptor and a probing
   await mountOnFake();
   query<HTMLButtonElement>('[data-testid=new-thread]').click();
   await waitFor(() => store.draft !== null);
-  await waitFor(() => query('[data-testid=composer-picker]').textContent?.includes('Claude Sonnet 5') === true);
+  await waitFor(() => query('[data-testid=composer-picker]').textContent?.includes('Claude Opus 5') === true);
 
   query<HTMLButtonElement>('[data-testid=composer-picker]').click();
   await waitFor(() => document.querySelector('[data-testid=composer-picker-menu]') !== null);
@@ -330,7 +330,7 @@ test('past twelve models the column gets a search field, prefix groups and keybo
   await mountOnFake();
   query<HTMLButtonElement>('[data-testid=new-thread]').click();
   await waitFor(() => store.draft !== null);
-  await waitFor(() => query('[data-testid=composer-picker]').textContent?.includes('Claude Sonnet 5') === true);
+  await waitFor(() => query('[data-testid=composer-picker]').textContent?.includes('Claude Opus 5') === true);
 
   query<HTMLButtonElement>('[data-testid=composer-picker]').click();
   await waitFor(() => document.querySelector('[data-testid=composer-picker-menu]') !== null);
@@ -392,7 +392,7 @@ test('the reasoning slider sets the effort of the picked model, and the chip fol
   await mountOnFake();
   query<HTMLButtonElement>('[data-testid=new-thread]').click();
   await waitFor(() => store.draft !== null);
-  await waitFor(() => query('[data-testid=composer-picker]').textContent?.includes('Claude Sonnet 5') === true);
+  await waitFor(() => query('[data-testid=composer-picker]').textContent?.includes('Claude Opus 5') === true);
 
   await waitFor(() => document.querySelector('[data-testid=composer-effort]') !== null);
   query<HTMLButtonElement>('[data-testid=composer-effort]').click();
@@ -408,7 +408,7 @@ test('the reasoning slider sets the effort of the picked model, and the chip fol
   // Picking a level keeps the popover open: it is a setting of the model, not a choice of its own.
   expect(document.querySelector('[data-testid=composer-effort-menu]')).not.toBeNull();
   // The level reads on its own chip; the picker's label names the model alone.
-  expect(query('[data-testid=composer-picker]').textContent).toContain('Claude Sonnet 5');
+  expect(query('[data-testid=composer-picker]').textContent).toContain('Claude Opus 5');
   expect(query('[data-testid=composer-picker]').textContent).not.toContain('Extra high');
   await waitFor(() => query('[data-testid=composer-effort]').textContent?.trim() === 'Extra high');
 

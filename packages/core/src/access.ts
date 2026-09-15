@@ -36,6 +36,9 @@ export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>
   'threads.pullRequest', // Read-only branch metadata shown on the same phone thread cards.
   'threads.create',
   'threads.get',
+  // A phone can manage continued prompts in the same thread it can already send to.
+  'threads.activity.set',
+  'threads.activity.control',
   'messages.list',
   'threads.update',
   'threads.retitle',
