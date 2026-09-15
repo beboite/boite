@@ -140,10 +140,40 @@ Claude subscription quotas come from its OAuth usage endpoint using the account'
 credentials file. Keychain-only Claude credentials are not supported. Codex quotas
 come from `account/rateLimits/read`, without starting a conversation.
 
+The tray Usage window always lists Claude, Codex, Antigravity, Grok and OpenCode
+Go. Each row shows the lowest remaining limit across its monitored accounts and
+the next reported reset. Open a row for individual windows, account names and
+monitoring switches. Missing accounts lead to Providers.
+
+The tray popup opens after 500 ms of continuous hover. Leaving the icon cancels
+that opening; a click does not bypass the delay. On Windows it stays inside the
+monitor's work area, above a bottom taskbar. Auto-hidden taskbars reserve their
+full height even while sliding offscreen. The popup keeps its position when the
+taskbar retracts and allows moving from the icon into the popup before closing.
+
+Grok reads the selected account's `GROK_HOME/auth.json` and requests its credit
+percentage from the Grok CLI billing endpoint. Expired logins require `grok login`.
+OpenCode Go reads the `opencode-go` API login in the account's
+`XDG_DATA_HOME/opencode/auth.json`; a default account can also use
+`OPENCODE_API_KEY`. It requests rolling, weekly and monthly limits from the Go
+usage API. It never substitutes another provider's login or local token totals.
+
+Antigravity uses a separate, opt-in `Antigravity CLI` source. Install `agy` 1.1.11
+or later and sign in once, then expand Antigravity in the tray and enable the
+switch. Boite reads `agy -p /usage --output-format json` in a temporary directory,
+with a version check, output limit and timeout. It does not send a model prompt.
+The report belongs to the CLI login on the core's computer, not an isolated ACP
+account. Its reserved quota id is `quota:antigravity-cli`; disabling monitoring
+persists like any account preference. No CLI process starts while it is disabled.
+
+The data formats follow the source notes in
+[CodexBar](https://github.com/steipete/CodexBar/tree/main/docs).
+
 Monitoring is configurable per account. Successful reads are cached for one minute,
 manual refreshes are at least ten seconds apart, and failures retry after five
-minutes. A failed refresh preserves the last reading and marks it stale. Other
-providers report that quotas are unsupported rather than inventing a balance.
+minutes. A failed refresh preserves the last reading and marks it stale. An
+unknown percentage is unavailable, not zero. Other providers report that quotas
+are unsupported rather than inventing a balance.
 
 The optional [kebacc-switcher plugin](plugins.md) manages external CLI account pools.
 There is no automatic rotation or relay.

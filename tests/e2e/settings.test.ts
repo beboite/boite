@@ -69,10 +69,29 @@ test('Grain is visible above solid and acrylic surfaces and the settings fit a p
 test('the compact quota page shows limits and reset times', async () => {
   await page.send('Emulation.setDeviceMetricsOverride', { width: 380, height: 460, deviceScaleFactor: 1, mobile: false });
   await page.navigate(`${uiUrl}/?fake=1&view=quotas`);
-  await page.waitFor(`document.querySelector('${id('quota-account')}')`);
+  await page.send('Emulation.setDefaultBackgroundColorOverride', { color: { r: 0, g: 0, b: 0, a: 0 } });
+  await page.waitFor(`document.querySelectorAll('${id('quota-provider')}').length === 5 && document.querySelector('progress')`);
+  expect(await page.evaluate(`getComputedStyle(document.documentElement).backgroundColor`)).toBe('rgba(0, 0, 0, 0)');
+  expect(await page.evaluate(`getComputedStyle(document.body).clipPath`)).toBe('inset(0px round 12px)');
   await capture('quota-popup.png');
+  expect(await page.evaluate(`Array.from(document.querySelectorAll('${id('quota-provider')}')).map(el => el.dataset.provider)`)).toEqual(['claude', 'codex', 'antigravity', 'grok', 'opencode']);
   expect(await page.evaluate(`document.querySelector('${id('quota-popup')}').textContent`)).toContain('Resets');
   expect(await page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')).toBe(true);
+  await page.click('[data-provider="antigravity"] .summary');
+  await page.click('[data-provider="antigravity"] input');
+  await page.waitFor(`document.querySelector('[data-provider="antigravity"] progress')`);
+  await page.click('[data-provider="antigravity"] input');
+  await page.waitFor(`!document.querySelector('[data-provider="antigravity"] progress')`);
+  await page.evaluate(`document.querySelector('[data-provider="antigravity"] input').scrollIntoView({ block: 'nearest' })`);
+  await capture('quota-popup-setup.png');
+  await page.click('[data-provider="antigravity"] .summary');
+  expect(await page.evaluate(`document.querySelector('section').scrollWidth <= document.querySelector('section').clientWidth`)).toBe(true);
+  expect(await page.evaluate(`document.querySelector('section').scrollHeight <= document.querySelector('section').clientHeight`)).toBe(true);
+  await page.evaluate(`document.documentElement.dataset.theme = 'light'`);
+  await capture('quota-popup-light.png');
+  await page.evaluate(`document.documentElement.dataset.theme = 'grain'`);
+  await capture('quota-popup-grain.png');
+  expect(await page.evaluate(`getComputedStyle(document.documentElement).backgroundColor`)).toBe('rgba(0, 0, 0, 0)');
 }, 30_000);
 
 test('remembered cores list every core and forget drops one', async () => {

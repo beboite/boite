@@ -1,13 +1,67 @@
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, Runtime, Webview, WebviewUrl};
 
 pub const LABEL: &str = "quotas";
+const HOVER_DELAY: Duration = Duration::from_millis(500);
 #[derive(Default)]
 pub struct HoverState {
     generation: AtomicU64,
     over_icon: AtomicBool,
 }
+
+impl HoverState {
+    fn ready(&self, generation: u64, elapsed: Duration) -> bool {
+        elapsed >= HOVER_DELAY && self.over_icon.load(Ordering::Acquire) && self.generation.load(Ordering::Acquire) == generation
+    }
+
+    pub fn cancel_open(&self) {
+        self.generation.fetch_add(1, Ordering::AcqRel);
+    }
+}
+
+type Bounds = (f64, f64, f64, f64);
+
+// Work area plus the full extent of any auto-hidden appbars on this monitor.
+fn available_area(monitor: Bounds, work: Bounds, hidden: &[(u32, f64)]) -> Bounds {
+    let mut area = (work.0.max(monitor.0), work.1.max(monitor.1), work.2.min(monitor.2), work.3.min(monitor.3));
+    for &(edge, thickness) in hidden {
+        match edge {
+            0 => area.0 = area.0.max(monitor.0 + thickness),
+            1 => area.1 = area.1.max(monitor.1 + thickness),
+            2 => area.2 = area.2.min(monitor.2 - thickness),
+            3 => area.3 = area.3.min(monitor.3 - thickness),
+            _ => {}
+        }
+    }
+    area
+}
+
+#[cfg(windows)]
+fn hidden_appbars(monitor: Bounds) -> Vec<(u32, f64)> {
+    use windows_sys::Win32::{Foundation::{HWND, RECT}, UI::{Shell::{SHAppBarMessage, APPBARDATA, ABM_GETAUTOHIDEBAREX}, WindowsAndMessaging::GetWindowRect}};
+    let mut bars = Vec::new();
+    for edge in 0..4 {
+        let mut data: APPBARDATA = unsafe { std::mem::zeroed() };
+        data.cbSize = std::mem::size_of::<APPBARDATA>() as u32;
+        data.uEdge = edge;
+        data.rc = RECT { left: monitor.0 as i32, top: monitor.1 as i32, right: monitor.2 as i32, bottom: monitor.3 as i32 };
+        // Unlike ABM_GETAUTOHIDEBAR, EX queries the specified monitor. Work
+        // area alone only reserves the thin activation strip in auto-hide mode.
+        let hwnd = unsafe { SHAppBarMessage(ABM_GETAUTOHIDEBAREX, &mut data) } as HWND;
+        if hwnd.is_null() { continue; }
+        let mut rect: RECT = unsafe { std::mem::zeroed() };
+        if unsafe { GetWindowRect(hwnd, &mut rect) } == 0 { continue; }
+        // An auto-hidden bar slides outside the monitor. Keep its full size,
+        // anchored to its registered edge, rather than its animated position.
+        let thickness = if edge == 0 || edge == 2 { rect.right - rect.left } else { rect.bottom - rect.top };
+        if thickness > 0 { bars.push((edge, thickness as f64)); }
+    }
+    bars
+}
+
+#[cfg(not(windows))]
+fn hidden_appbars(_monitor: Bounds) -> Vec<(u32, f64)> { Vec::new() }
 
 pub fn only_ui(webview: &Webview) -> Result<(), String> {
     match webview.label() {
@@ -28,6 +82,7 @@ pub fn show<R: Runtime>(app: &AppHandle<R>, point: PhysicalPosition<f64>) -> tau
         let mut builder = tauri::WebviewWindowBuilder::new(app, LABEL, WebviewUrl::App("index.html?view=quotas".into()))
             .title("Boite quotas").inner_size(380.0, 460.0).resizable(false)
             .decorations(false).skip_taskbar(true).always_on_top(true)
+            .transparent(cfg!(windows))
             .visible(false).focused(false).focusable(false)
             .on_navigation(|url| matches!(url.scheme(), "tauri" | "http" | "https") && matches!(url.host_str(), Some("tauri.localhost") | Some("localhost")));
         if let Some(profile) = crate::webview_profile() { builder = builder.data_directory(profile); }
@@ -36,8 +91,14 @@ pub fn show<R: Runtime>(app: &AppHandle<R>, point: PhysicalPosition<f64>) -> tau
     if let Some(monitor) = window.monitor_from_point(point.x, point.y)? {
         let scale = monitor.scale_factor();
         let origin = monitor.position(); let size = monitor.size();
-        let (x, y) = position(point.x, point.y, 380.0 * scale, 460.0 * scale,
-            (origin.x as f64, origin.y as f64, origin.x as f64 + size.width as f64, origin.y as f64 + size.height as f64));
+        let bounds = (origin.x as f64, origin.y as f64, origin.x as f64 + size.width as f64, origin.y as f64 + size.height as f64);
+        let work = monitor.work_area();
+        let area = available_area(bounds, (work.position.x as f64, work.position.y as f64,
+            work.position.x as f64 + work.size.width as f64, work.position.y as f64 + work.size.height as f64), &hidden_appbars(bounds));
+        let width = (380.0 * scale).min((area.2 - area.0 - 16.0).max(1.0));
+        let height = (460.0 * scale).min((area.3 - area.1 - 16.0).max(1.0));
+        window.set_size(tauri::PhysicalSize::new(width as u32, height as u32))?;
+        let (x, y) = position(point.x, point.y, width, height, area);
         window.set_position(PhysicalPosition::new(x as i32, y as i32))?;
     }
     // Test shells create and render the same page without ever showing a window.
@@ -51,11 +112,33 @@ pub fn show<R: Runtime>(app: &AppHandle<R>, point: PhysicalPosition<f64>) -> tau
     Ok(())
 }
 
-pub fn enter<R: Runtime>(app: &AppHandle<R>, point: PhysicalPosition<f64>) {
+pub fn enter<R: Runtime>(app: &AppHandle<R>) {
     let state = app.state::<HoverState>();
-    state.over_icon.store(true, Ordering::Release);
-    state.generation.fetch_add(1, Ordering::AcqRel);
-    if let Err(error) = show(app, point) { eprintln!("[shell] quota window: {error}"); }
+    if state.over_icon.swap(true, Ordering::AcqRel) { return; }
+    let generation = state.generation.fetch_add(1, Ordering::AcqRel) + 1;
+    let started = Instant::now();
+    let handle = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(HOVER_DELAY);
+        let app = handle.clone();
+        if let Err(error) = handle.run_on_main_thread(move || {
+            if !app.state::<HoverState>().ready(generation, started.elapsed()) { return; }
+            // Read the current icon bounds after the taskbar reveal animation.
+            // This also catches a missing Leave event when auto-hide moves it.
+            let Some(tray) = app.tray_by_id("boite") else { return; };
+            let Ok(Some(rect)) = tray.rect() else { return; };
+            let Ok(cursor) = app.cursor_position() else { return; };
+            let scale = app.monitor_from_point(cursor.x, cursor.y).ok().flatten().map(|monitor| monitor.scale_factor()).unwrap_or(1.0);
+            let origin = rect.position.to_physical::<f64>(scale);
+            let size = rect.size.to_physical::<f64>(scale);
+            if cursor.x < origin.x || cursor.x >= origin.x + size.width || cursor.y < origin.y || cursor.y >= origin.y + size.height {
+                app.state::<HoverState>().over_icon.store(false, Ordering::Release);
+                return;
+            }
+            let anchor = PhysicalPosition::new(origin.x + size.width / 2.0, origin.y);
+            if let Err(error) = show(&app, anchor) { eprintln!("[shell] quota window: {error}"); }
+        }) { eprintln!("[shell] quota hover: {error}"); }
+    });
 }
 
 pub fn leave<R: Runtime>(app: &AppHandle<R>) {
@@ -69,13 +152,25 @@ pub fn leave<R: Runtime>(app: &AppHandle<R>) {
         loop {
             let state = handle.state::<HoverState>();
             if state.generation.load(Ordering::Acquire) != generation || state.over_icon.load(Ordering::Acquire) { break; }
-            let Some(window) = handle.get_webview_window(LABEL) else { break; };
-            let inside = match (handle.cursor_position(), window.outer_position(), window.outer_size()) {
-                (Ok(cursor), Ok(origin), Ok(size)) => cursor.x >= origin.x as f64 && cursor.y >= origin.y as f64
-                    && cursor.x < origin.x as f64 + size.width as f64 && cursor.y < origin.y as f64 + size.height as f64,
-                _ => false,
-            };
-            if !inside { let _ = window.hide(); let _ = window.emit("tray://closed", ()); break; }
+            if handle.get_webview_window(LABEL).is_none() { break; }
+            let app = handle.clone();
+            // Opening and closing share the UI thread. Recheck after dispatch
+            // so an old Leave cannot close a newly entered or opened popup.
+            if handle.run_on_main_thread(move || {
+                let state = app.state::<HoverState>();
+                if state.generation.load(Ordering::Acquire) != generation || state.over_icon.load(Ordering::Acquire) { return; }
+                let Some(window) = app.get_webview_window(LABEL) else { return; };
+                let inside = match (app.cursor_position(), window.outer_position(), window.outer_size()) {
+                    (Ok(cursor), Ok(origin), Ok(size)) => cursor.x >= origin.x as f64 && cursor.y >= origin.y as f64
+                        && cursor.x < origin.x as f64 + size.width as f64 && cursor.y < origin.y as f64 + size.height as f64,
+                    _ => false,
+                };
+                if !inside {
+                    state.cancel_open();
+                    let _ = window.hide();
+                    let _ = window.emit("tray://closed", ());
+                }
+            }).is_err() { break; }
             std::thread::sleep(Duration::from_millis(200));
         }
     });
@@ -102,7 +197,41 @@ pub async fn quota_window(app: AppHandle, webview: Webview, action: String) -> R
 
 #[cfg(test)]
 mod tests {
-    use super::position;
+    use super::*;
+    #[test]
+    fn hover_requires_500ms_and_cannot_survive_leave_or_reentry() {
+        let state = HoverState::default();
+        state.over_icon.store(true, Ordering::Release);
+        assert!(!state.ready(0, Duration::from_millis(499)));
+        assert!(state.ready(0, Duration::from_millis(500)));
+        state.over_icon.store(false, Ordering::Release);
+        assert!(!state.ready(0, Duration::from_millis(600)));
+        state.generation.fetch_add(1, Ordering::AcqRel);
+        state.over_icon.store(true, Ordering::Release);
+        assert!(!state.ready(0, Duration::from_millis(900)));
+        assert!(!state.ready(1, Duration::from_millis(499)));
+    }
+    #[test]
+    fn visible_and_auto_hidden_taskbars_reserve_the_same_space() {
+        let screen = (0.0, 0.0, 1920.0, 1080.0);
+        let desktop = (0.0, 0.0, 1920.0, 1032.0);
+        assert_eq!(available_area(screen, desktop, &[]), desktop);
+        // Auto-hide restores the work area to almost the entire screen.
+        assert_eq!(available_area(screen, screen, &[(3, 48.0)]), desktop);
+        let (_, y) = position(1890.0, 1060.0, 380.0, 460.0, available_area(screen, screen, &[(3, 48.0)]));
+        assert!(y + 460.0 <= 1032.0 - 8.0);
+    }
+    #[test]
+    fn hidden_taskbars_use_their_own_monitor_and_physical_scale() {
+        let screen = (-2560.0, -1440.0, 0.0, 0.0);
+        for scale in [1.0, 1.25, 1.5, 2.0] {
+            let area = available_area(screen, screen, &[(3, 48.0 * scale)]);
+            let (x, y) = position(-20.0, -12.0, 380.0 * scale, 460.0 * scale, area);
+            assert!(y + 460.0 * scale <= -48.0 * scale - 8.0);
+            assert!(x >= -2560.0 && x + 380.0 * scale <= 0.0);
+        }
+        assert_eq!(available_area(screen, screen, &[(0, 60.0), (1, 40.0), (2, 50.0)]), (-2500.0, -1400.0, -50.0, 0.0));
+    }
     #[test]
     fn popup_stays_on_the_icon_monitor_at_every_edge() {
         for (x,y) in [(-1920.0, 0.0), (-1.0, 0.0), (-1920.0, 1080.0), (-1.0, 1080.0)] {

@@ -43,3 +43,18 @@ test('unsupported providers do not run a reader and failures are backed off', as
   await store.list(true); expect(calls).toBe(count);
   expect(first.filter((row) => row.error).every((row) => row.checkedAt === null && row.windows.length === 0)).toBe(true);
 });
+
+test('the standalone Antigravity source is opt-in, persists and never borrows an ACP account', async () => {
+  harness = await startTestCore();
+  const reads: string[] = [];
+  const read = async (account: { id: string }) => { reads.push(account.id); return [{ id: 'session', label: '5 hours', usedPercent: 30, resetsAt: null }]; };
+  const store = new QuotaStore(harness.core, read);
+  expect((await store.list()).find((row) => row.accountId === 'quota:antigravity-cli')?.status).toBe('disabled');
+  expect(reads).not.toContain('quota:antigravity-cli');
+  await store.configure('quota:antigravity-cli', true);
+  expect((await store.list()).find((row) => row.accountId === 'quota:antigravity-cli')?.status).toBe('ready');
+  expect(reads).toContain('quota:antigravity-cli');
+  await store.configure('quota:antigravity-cli', false);
+  const restored = new QuotaStore(harness.core, read);
+  expect((await restored.list()).find((row) => row.accountId === 'quota:antigravity-cli')?.status).toBe('disabled');
+});

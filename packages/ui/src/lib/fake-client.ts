@@ -1188,12 +1188,13 @@ export class FakeClient implements ObservableClient {
   }
 
   #quotas(): AccountQuota[] {
-    return this.#accounts.map((account, index) => ({
-      accountId: account.id, providerId: account.providerId, providerName: this.#providers.find((p) => p.id === account.providerId)?.name ?? account.providerId,
-      label: account.label, enabled: this.#quotaEnabled[account.id] !== false,
-      status: this.#quotaEnabled[account.id] === false ? 'disabled' : 'ready',
+    const accounts = [...this.#accounts, { id: 'quota:antigravity-cli', providerId: 'antigravity', label: 'Antigravity CLI' }];
+    return accounts.map((account, index) => ({
+      accountId: account.id, providerId: account.providerId, providerName: account.providerId === 'opencode' ? 'OpenCode Go' : this.#providers.find((p) => p.id === account.providerId)?.name ?? account.providerId,
+      label: account.label, enabled: account.id === 'quota:antigravity-cli' ? this.#quotaEnabled[account.id] === true : this.#quotaEnabled[account.id] !== false,
+      status: account.providerId === 'echo' || account.providerId === 'pi' || account.id === 'a-antigravity' ? 'unsupported' : this.#quotaEnabled[account.id] === false || account.id === 'quota:antigravity-cli' && this.#quotaEnabled[account.id] !== true ? 'disabled' : 'ready',
       checkedAt: Date.now(), error: null,
-      windows: this.#quotaEnabled[account.id] === false ? [] : [
+      windows: this.#quotaEnabled[account.id] === false || account.id === 'quota:antigravity-cli' && this.#quotaEnabled[account.id] !== true ? [] : [
         { id: 'primary', label: '5 hours', usedPercent: index === 0 ? 32 : 87, resetsAt: Date.now() + 2 * 3600_000 },
         { id: 'secondary', label: 'Weekly', usedPercent: 61, resetsAt: Date.now() + 3 * 86400_000 },
       ],
