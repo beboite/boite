@@ -1,6 +1,5 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { Copy, Minus, Square, X } from '@lucide/svelte';
   import type { Window as TauriWindow } from '@tauri-apps/api/window';
   import { strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
@@ -87,7 +86,6 @@
 <header class="titlebar" {onmousedown} data-testid="titlebar">
   <div class="left">
     <BoiteMark size={16} />
-    <span class="state {store.connection}" title={strings.connection[store.connection]}></span>
   </div>
   <div class="center">
     <span class="name">{title}</span>
@@ -99,7 +97,7 @@
   </div>
   <div class="controls">
     <button type="button" class="ctl" aria-label={strings.titlebar.minimize} title={strings.titlebar.minimize} onclick={() => void minimize()}>
-      <Minus size={15} strokeWidth={1.75} />
+      <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M1 6.5h10" /></svg>
     </button>
     <button
       type="button"
@@ -111,13 +109,13 @@
       onclick={() => void maximize()}
     >
       {#if maximized}
-        <Copy size={15} strokeWidth={1.75} />
+        <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M3.5 2.5v-1h7v7h-1" /><rect x="1.5" y="3.5" width="7" height="7" /></svg>
       {:else}
-        <Square size={15} strokeWidth={1.75} />
+        <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><rect x="1.5" y="1.5" width="9" height="9" /></svg>
       {/if}
     </button>
     <button type="button" class="ctl close" aria-label={strings.titlebar.close} title={strings.titlebar.close} onclick={() => void close()}>
-      <X size={15} strokeWidth={1.75} />
+      <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="m1.5 1.5 9 9m0-9-9 9" /></svg>
     </button>
   </div>
 </header>
@@ -142,26 +140,6 @@
     gap: 8px;
     padding-left: 12px;
     height: 100%;
-  }
-
-  .state {
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: var(--color-subtle);
-  }
-
-  .state.ready {
-    background: var(--color-success);
-  }
-
-  .state.connecting {
-    background: var(--color-live);
-    animation: pulse 1.6s ease-in-out infinite;
-  }
-
-  .state.closed {
-    background: var(--color-danger);
   }
 
   .center {
@@ -191,13 +169,18 @@
   }
 
   .ctl {
-    width: 44px;
+    width: 46px;
+    padding: 0;
+    display: grid;
+    place-items: center;
     height: 100%;
     border: none;
     border-radius: 0;
     background: transparent;
     color: var(--color-muted-foreground);
   }
+
+  .ctl svg { fill: none; stroke: currentColor; stroke-width: 1; }
 
   .ctl:hover:not(:disabled),
   .ctl:focus-visible {

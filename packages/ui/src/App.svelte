@@ -6,6 +6,7 @@
   import ContextMenu from './components/ContextMenu.svelte';
   import DropOverlay from './components/DropOverlay.svelte';
   import FirstRun from './components/FirstRun.svelte';
+  import ProjectPicker from './components/ProjectPicker.svelte';
   import ImportDialog from './components/ImportDialog.svelte';
   import RightPanel from './components/RightPanel.svelte';
   import SettingsShell from './components/SettingsShell.svelte';
@@ -146,7 +147,7 @@
   }
 
   /** Whether one of the two modal dialogs is up, waiting on the user. */
-  let modal = $derived(confirm.current !== null || store.imports !== null);
+  let modal = $derived(confirm.current !== null || store.imports !== null || store.projectPickerOpen);
 
   /** A key that belongs to whatever the user is typing in, not to the app. */
   function typing(event: KeyboardEvent): boolean {
@@ -233,6 +234,7 @@
     {#if !store.booted}
       <p class="empty boot">{strings.app.loading}</p>
     {:else if store.connection === 'closed' && !store.core}
+      <Sidebar bind:this={sidebar} {store} />
       <div class="notice">
         <h1>{strings.app.noEndpointTitle}</h1>
         <p class="muted">{strings.app.noEndpointBody}</p>
@@ -313,7 +315,8 @@
 </div>
 
 <ContextMenu />
-<ConfirmDialog />
+<ProjectPicker {store} />
+  <ConfirmDialog />
 <ImportDialog {store} />
 <CommandPalette {store} />
 

@@ -390,7 +390,7 @@ shellTest(
 shellTest(
   'the embedded UI connects to that core',
   async () => {
-    await page?.waitFor(`${textOf('status-connection')} === 'Connected'`, 30_000);
+    await page?.waitFor(`document.querySelector('[data-testid=status-connection]')?.dataset.state === 'ready'`, 30_000);
     await page?.waitFor(`document.querySelector('${testid('sidebar')}')`);
   },
   TIMEOUT,
@@ -431,14 +431,60 @@ shellTest(
   TIMEOUT,
 );
 
+shellTest('window controls draw maximize and restore without a second status indicator', async () => {
+  // Exercise the component's resize subscription without maximizing a hidden
+  // native window: ShowWindow could otherwise expose it on the desktop.
+  await page?.evaluate(`(() => {
+    const real = window.fetch.bind(window);
+    window.__windowMaximized = false;
+    window.__windowFetch = real;
+    window.fetch = (input, init) => {
+      const url = decodeURIComponent(typeof input === 'string' ? input : String(input?.url));
+      let value;
+      if (url.endsWith('/plugin:window|is_maximized')) value = window.__windowMaximized;
+      else if (url.endsWith('/plugin:window|toggle_maximize')) { window.__windowMaximized = !window.__windowMaximized; value = null; }
+      else return real(input, init);
+      return Promise.resolve(new Response(JSON.stringify(value), { status:200, headers:{'content-type':'application/json','Tauri-Response':'ok'} }));
+    };
+  })()`);
+  try {
+    expect(await page?.evaluate(`document.querySelectorAll('[data-testid=titlebar] .state').length`)).toBe(0);
+    await page?.click(testid('titlebar-maximize'));
+    await page?.evaluate(`window.__TAURI_INTERNALS__.invoke('plugin:event|emit', { event:'tauri://resize', payload:{width:1280,height:800} })`);
+    await page?.waitFor(`document.querySelector('[data-testid=titlebar-maximize]')?.dataset.maximized === 'true'`);
+    await page?.screenshot(join(import.meta.dir, '.artifacts', 'shell-titlebar-restore.png'));
+    await page?.click(testid('titlebar-maximize'));
+    await page?.evaluate(`window.__TAURI_INTERNALS__.invoke('plugin:event|emit', { event:'tauri://resize', payload:{width:1280,height:800} })`);
+    await page?.waitFor(`document.querySelector('[data-testid=titlebar-maximize]')?.dataset.maximized === 'false'`);
+  } finally {
+    await page?.evaluate(`window.fetch = window.__windowFetch`);
+  }
+}, TIMEOUT);
+
 shellTest(
   'a project, an echo thread and a turn go through the shell',
   async () => {
-    // The first-run card offers the native picker in the shell; the path field sits behind one click.
+    // The dialog IPC is answered here so this test never puts a native window on screen.
     await page?.waitFor(`document.querySelector('${testid('first-run')}')`);
     await page?.click(testid('add-project'));
-    await page?.type(testid('project-path'), projectDir);
-    await clickWhenEnabled(testid('project-add'));
+    await page?.waitFor(`document.querySelector('[data-testid=pick-project]') && !document.querySelector('[data-testid=pick-project]').disabled`);
+    await page?.evaluate(`document.fonts.ready`);
+    await page?.screenshot(join(import.meta.dir, '.artifacts', 'shell-project-picker.png'));
+    await page?.evaluate(`(() => {
+      const real = window.fetch.bind(window);
+      window.__projectDialog = null;
+      window.fetch = (input, init) => {
+        const url = typeof input === 'string' ? input : String(input?.url);
+        if (decodeURIComponent(url).endsWith('/plugin:dialog|open')) {
+          window.__projectDialog = JSON.parse(String(init.body));
+          return Promise.resolve(new Response(${JSON.stringify(JSON.stringify(projectDir))}, { status: 200, headers: { 'content-type':'application/json', 'Tauri-Response':'ok' } }));
+        }
+        return real(input, init);
+      };
+    })()`);
+    await page?.click(testid('pick-project'));
+    await page?.waitFor(`window.__projectDialog !== null`);
+    expect(await page?.evaluate(`window.__projectDialog.options.directory`)).toBe(true);
     await page?.waitFor(`${textOf('project-row')}.includes(${JSON.stringify(basename(projectDir))})`);
     await page?.waitFor(`document.querySelector('${testid('draft-row')}')`);
 
@@ -467,6 +513,47 @@ shellTest(
   },
   TIMEOUT,
 );
+
+shellTest('the machine picker opens a folder on the selected core and reports a lost connection', async () => {
+  const remote = await startCore();
+  const remoteClient = await connect(remote.url, remote.token);
+  try {
+    const grant = await remoteClient.call('pairing.grant', { role: 'owner' });
+    await page?.click(testid('nav-settings'));
+    await page?.type(testid('settings-pairing-link'), grant.url);
+    await page?.click(testid('settings-pair'));
+    await page?.waitFor(`document.querySelector('[data-testid=settings-endpoint]')?.textContent.includes('${remote.port}')`);
+    await page?.click(testid('settings-back'));
+    await page?.waitFor(`document.querySelector('[data-testid=status-connection]')?.textContent.includes('2 machines connected')`);
+    await page?.click(testid('add-project'));
+    await page?.waitFor(`document.querySelector('[data-testid=project-path]') && !document.querySelector('[data-testid=project-add]').disabled`);
+    expect(await page?.evaluate(`!!document.querySelector('[data-testid=pick-project]')`)).toBe(false);
+    await page?.click(testid('project-machine'));
+    await page?.click('[data-testid=project-machine-menu] [data-value=local]');
+    await page?.waitFor(`document.querySelector('[data-testid=pick-project]') && !document.querySelector('[data-testid=pick-project]').disabled`);
+    await page?.click(testid('project-machine'));
+    await page?.evaluate(`Array.from(document.querySelectorAll('[data-testid=project-machine-menu] [data-row]')).find(e => e.dataset.value === ${JSON.stringify(remote.url)}).click()`);
+    await page?.waitFor(`!document.querySelector('[data-testid=pick-project]') && !document.querySelector('[data-testid=project-add]').disabled`);
+    await page?.type(testid('project-path'), remote.dataDir);
+    await page?.click(testid('project-add'));
+    await page?.waitFor(`!document.querySelector('[data-testid=project-picker]') && document.querySelector('[data-testid=draft-row]')`);
+    expect((await remoteClient.call('projects.list', {})).map(p => p.path)).toContain(remote.dataDir);
+    // Deliver the same native event as a folder dragged onto the remote view.
+    // Its Windows path must be opened by the local core, not the selected one.
+    await page?.evaluate(`window.__TAURI_INTERNALS__.invoke('plugin:event|emit', { event:'tauri://drag-drop', payload:{paths:[${JSON.stringify(projectDir)}],position:{x:0,y:0}} })`);
+    await page?.waitFor(`document.querySelector('[data-testid=draft-row]') && document.querySelector('[data-testid=thread-row]')?.textContent.includes('shell turn')`);
+    expect((await remoteClient.call('projects.list', {})).map(p => p.path)).not.toContain(projectDir);
+    await page?.click(testid('thread-row'));
+    await page?.waitFor(`document.querySelector('[data-testid=thread-title]')?.textContent.includes('shell turn')`);
+    await remote.stop();
+    await page?.waitFor(`document.querySelector('[data-testid=status-connection]')?.classList.contains('problem')`);
+    expect(await page?.evaluate(`document.querySelector('[data-testid=status-connection]').textContent`)).toContain('1 machine connected');
+    await page?.screenshot(join(import.meta.dir, '.artifacts', 'shell-machine-disconnected.png'));
+    await page?.click(testid('nav-settings'));
+    await page?.evaluate(`Array.from(document.querySelectorAll('[data-testid=settings-envs] li')).find(e => e.textContent.includes(${JSON.stringify(remote.url)})).querySelector('[data-testid=settings-env-forget]').click()`);
+    await page?.click(testid('settings-back'));
+  } finally { remoteClient.close(); await remote.stop(); }
+}, TIMEOUT);
 
 shellTest(
   'a markdown link in an answer is handed to the system browser, not the webview',

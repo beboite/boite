@@ -1,5 +1,7 @@
 import { statSync } from 'node:fs';
-import { basename, resolve } from 'node:path';
+import { readdir } from 'node:fs/promises';
+import { homedir } from 'node:os';
+import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import type { Project, ProjectId } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { newId } from './ids.ts';
@@ -82,6 +84,23 @@ export class ProjectStore {
 }
 
 export function registerProjectMethods(core: Core): void {
+  core.router.register('projects.browse', async ({ path }) => {
+    if (path !== undefined && (typeof path !== 'string' || !isAbsolute(path)))
+      throw refused('projects.browse.path must be an absolute directory path');
+    const full = resolve(path ?? homedir());
+    try {
+      const entries = await readdir(full, { withFileTypes: true });
+      return {
+        path: full,
+        parent: dirname(full) === full ? null : dirname(full),
+        directories: entries.filter((entry) => entry.isDirectory())
+          .map((entry) => ({ name: entry.name, path: join(full, entry.name) }))
+          .sort((a, b) => a.name.localeCompare(b.name)),
+      };
+    } catch (error) {
+      throw refused(`projects.browse.path: cannot read directory "${full}": ${error instanceof Error ? error.message : String(error)}`);
+    }
+  });
   core.router.register('projects.list', () => core.projects.list());
   core.router.register('projects.add', (params) => core.projects.add(params.path, params.name));
   core.router.register('projects.remove', async (params) => {

@@ -913,6 +913,11 @@ export interface RpcMethods {
 
   'projects.list': { params: Record<string, never>; result: Project[] };
   'projects.add': { params: { path: string; name?: string }; result: Project };
+  /** Owner-only folder navigation on the machine running this core. */
+  'projects.browse': {
+    params: { path?: string };
+    result: { path: string; parent: string | null; directories: { name: string; path: string }[] };
+  };
   'projects.remove': { params: { projectId: ProjectId }; result: { ok: true } };
   /**
    * The files of a project a mention can name, ranked on the query: relative

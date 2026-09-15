@@ -107,6 +107,7 @@ async function mountOnFake(search = '/?fake=1'): Promise<void> {
   store.openThread = null;
   store.draft = null;
   store.composerStates = {};
+  store.projectPickerOpen = false;
   running = mount(App, { target });
   await waitFor(() => store.booted && store.openThread !== null);
 }
@@ -119,7 +120,7 @@ test('the app mounts against the fake core, lists the seeded threads and opens t
   const text = document.body.textContent ?? '';
   expect(text).toContain('boite');
   expect(text).toContain('Port the scheduler');
-  expect(text).toContain('Connected');
+  expect(text).toContain('1 machine connected');
   expect(document.querySelector('[data-testid=composer-input]')).not.toBeNull();
   expect(document.querySelectorAll('[data-testid=thread-row]').length).toBe(4);
   // The most recent thread opens on its own; nothing to click first.
@@ -1149,6 +1150,7 @@ test('browser Add project opens a path form and starts a draft in the added fold
 
 test('browser Add project keeps refused paths and Escape returns to its button', async () => {
   await mountOnFake();
+  query<HTMLButtonElement>('[data-testid=add-project]').focus();
   query<HTMLButtonElement>('[data-testid=add-project]').click();
   await waitFor(() => document.querySelector('[data-testid=project-path]') !== null);
   const field = query<HTMLInputElement>('[data-testid=project-path]');
@@ -1179,6 +1181,8 @@ test('first run uses the same path form to open its first project', async () => 
   store.openThread = null;
   store.draft = null;
   await waitFor(() => document.querySelector('[data-testid=first-run]') !== null);
+  query<HTMLButtonElement>('[data-testid=add-project]').click();
+  await waitFor(() => document.querySelector('[data-testid=project-path]') !== null);
   await type(query<HTMLInputElement>('[data-testid=project-path]'), 'D:\\work\\first-project');
   query<HTMLButtonElement>('[data-testid=project-add]').click();
   await waitFor(() => store.draft !== null);

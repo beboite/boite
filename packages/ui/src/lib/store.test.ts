@@ -4,6 +4,30 @@ import { FakeClient } from './fake-client';
 import { setNotificationSender, type Toast } from './notify';
 import { Store } from './store.svelte';
 
+test('dropped folders use the local core when a remote machine is selected', async () => {
+  const { store, client: remote } = await ready();
+  const local = new FakeClient({ delayMs: 0 });
+  const remoteCall = vi.spyOn(remote, 'call');
+  const localCall = vi.spyOn(local, 'call');
+  window.__TAURI_INTERNALS__ = {} as typeof window.__TAURI_INTERNALS__;
+  store.localCore = false;
+  const switchLocal = vi.spyOn(store, 'useLocalCore').mockImplementation(async () => {
+    store.attach(local);
+    store.localCore = true;
+    await store.connect();
+  });
+  try {
+    await store.addProjects(['D:\\work\\dropped folder']);
+    expect(switchLocal).toHaveBeenCalledOnce();
+    expect(remoteCall.mock.calls.filter(([method]) => method === 'projects.add')).toHaveLength(0);
+    expect(localCall).toHaveBeenCalledWith('projects.add', { path: 'D:\\work\\dropped folder' });
+    expect(store.openProject?.path).toBe('D:\\work\\dropped folder');
+  } finally {
+    delete window.__TAURI_INTERNALS__;
+    store.detach(); remote.close(); local.close();
+  }
+});
+
 async function ready(): Promise<{ store: Store; client: FakeClient }> {
   const client = new FakeClient({ delayMs: 0 });
   const store = new Store();

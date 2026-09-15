@@ -73,6 +73,17 @@ in-memory fake.
 The service worker never registers under `?fake=1`, so a rebuild is always what
 a reload shows.
 
+Opening a project uses one dialog from the sidebar, first-run card, settings
+and command palette. Choose a machine, then type an absolute path or browse
+its directories through the owner-only `projects.browse` method. The native
+folder button is available only for the shell's local core. A folder dropped
+from the desktop switches to that local core before opening the path.
+
+The sidebar footer counts authenticated machine connections. Remembered cores
+use separate sockets without thread subscriptions; failed connections retry
+every thirty seconds. The menu names disconnected machines and opens connection
+settings. The title bar has no second connection indicator.
+
 Two menus open over the composer while typing. `/` on an empty box lists the
 commands: the agent's own first (`Thread.commands`, whatever its protocol
 reported), then Boite's, the same list as the palette. `@` at the start of a
@@ -185,6 +196,10 @@ core with the echo driver.
 an ACP fixture over real RPC and stdio. It checks history continuity and writes
 desktop and phone captures without using provider logins. Core regression tests
 also cover queued targets, stale selections, image transfer and schema migration.
+
+`tests/e2e/project-picker.test.ts` covers folder navigation, a phone-width
+dialog and an unreachable remembered machine. The shell suite checks the native
+folder button with its dialog IPC stubbed, so no system dialog takes focus.
 
 `tests/e2e/lib/cdp.ts` launches Chromium with `--headless=new`, on the real GPU
 through ANGLE, muted, in a throwaway profile, and drives it over CDP.

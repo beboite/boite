@@ -3,7 +3,6 @@
   import type { Project, ProjectId, ThreadId, ThreadSummary } from '@boite/contracts';
   import { focusOnMount, riseOnce } from '../lib/actions';
   import { confirm } from '../lib/confirm.svelte';
-  import { Closing } from '../lib/closing.svelte';
   import { contextMenu } from '../lib/context-menu.svelte';
   import { experimentOn } from '../lib/experiments.svelte';
   import { ago, tokens } from '../lib/format';
@@ -14,7 +13,7 @@
   import BoiteMark from './BoiteMark.svelte';
   import LoadGauge from './LoadGauge.svelte';
   import StatusMark from './StatusMark.svelte';
-  import ProjectForm from './ProjectForm.svelte';
+  import MachineStatus from './MachineStatus.svelte';
 
   let { store }: { store: Store } = $props();
 
@@ -22,19 +21,6 @@
   let renaming = $state<ThreadId | null>(null);
   let renameText = $state('');
   let now = $state(Date.now());
-  const projectForm = new Closing();
-  let projectButton = $state<HTMLButtonElement | undefined>(undefined);
-
-  function addProject() {
-    if (store.pickerAvailable) void store.pickProject();
-    else projectForm.toggle();
-  }
-
-  function cancelProject() {
-    projectForm.hide();
-    projectButton?.focus();
-  }
-
   // Each list keeps its own set: a row rises the first time it is drawn and
   // never again, whatever a status tick or a reorder does to the node.
   const riseSection = riseOnce();
@@ -357,24 +343,15 @@
       type="button"
       class="ghost small add-project"
       data-testid="add-project"
-      bind:this={projectButton}
-      onclick={addProject}
+      onclick={() => (store.projectPickerOpen = true)}
     >
       <BoiteMark size={13} />
       {strings.sidebar.addProject}
     </button>
-    {#if projectForm.shown}
-      <div class="project-form" class:closing={projectForm.closing} use:projectForm.attach onanimationend={projectForm.end}>
-        <ProjectForm {store} focus onadded={() => projectForm.hide()} oncancel={cancelProject} />
-      </div>
-    {/if}
   {/if}
 
   <div class="foot">
-    <span class="conn {store.connection}" data-testid="status-connection">
-      <span class="dot"></span>
-      {strings.connection[store.connection]}
-    </span>
+    <MachineStatus {store} />
     {#if usageToday !== null && usageToday > 0}
       <button
         type="button"
@@ -412,19 +389,6 @@
 </aside>
 
 <style>
-  .project-form {
-    padding: 0 10px 10px;
-    animation: rise var(--dur-2) var(--ease-out-quint);
-  }
-
-  .project-form.closing {
-    animation: project-form-out var(--dur-2) var(--ease-out-quint);
-  }
-
-  @keyframes project-form-out {
-    to { opacity: 0; transform: translateY(4px); }
-  }
-
   .sidebar {
     position: relative;
     width: var(--sidebar-width);
@@ -744,35 +708,6 @@
     gap: 6px;
     padding: 6px 8px 6px 12px;
     border-top: 1px solid var(--color-border);
-  }
-
-  .conn {
-    flex: 1;
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    font-size: var(--text-sm);
-    color: var(--color-muted-foreground);
-  }
-
-  .dot {
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: var(--color-subtle);
-  }
-
-  .conn.ready .dot {
-    background: var(--color-success);
-  }
-
-  .conn.connecting .dot {
-    background: var(--color-live);
-    animation: pulse 1.6s ease-in-out infinite;
-  }
-
-  .conn.closed .dot {
-    background: var(--color-danger);
   }
 
   .usage {

@@ -65,7 +65,6 @@
     if (ok) await store.revokeSession(session.id);
   }
 
-  let projectPath = $state('');
 
   let maxConcurrentTurns = $state(untrack(() => store.settings?.maxConcurrentTurns ?? 6));
   let perAccountConcurrency = $state(untrack(() => store.settings?.perAccountConcurrency ?? 2));
@@ -101,13 +100,6 @@
     savedAt = Date.now();
   }
 
-  async function addProject(event: SubmitEvent) {
-    event.preventDefault();
-    const path = projectPath.trim();
-    if (path.length === 0) return;
-    const project = await store.addProject(path);
-    if (project) projectPath = '';
-  }
 </script>
 
 <div class="page" data-testid="settings-page">
@@ -133,21 +125,9 @@
     <!-- `projects.add` is the owner's, so a paired device reads the list and
          is told where the folders come from. -->
     {#if store.owner}
-      <form class="row" onsubmit={addProject} data-testid="settings-add-project">
-        {#if store.pickerAvailable}
-          <button type="button" onclick={() => void store.pickProject()}>{strings.firstRun.pick}</button>
-        {/if}
-        <input
-          bind:value={projectPath}
-          placeholder={strings.firstRun.pathPlaceholder}
-          data-testid="settings-project-path"
-          class="mono grow"
-          spellcheck="false"
-        />
-        <button type="submit" class="primary" data-testid="settings-project-add" disabled={projectPath.trim().length === 0}>
-          {strings.firstRun.add}
-        </button>
-      </form>
+      <div data-testid="settings-add-project">
+        <button type="button" data-testid="settings-project-add" onclick={() => (store.projectPickerOpen = true)}>{strings.firstRun.pick}</button>
+      </div>
     {:else}
       <p class="subtle hint">{strings.settings.projectsDevice}</p>
     {/if}

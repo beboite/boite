@@ -637,6 +637,12 @@ export class FakeClient implements ObservableClient {
 
       case 'projects.list':
         return structuredClone(this.#projects);
+      case 'projects.browse': {
+        const { path = '/workspace' } = rawParams as RpcParams<'projects.browse'>;
+        return { path, parent: path === '/' ? null : '/', directories: path === '/workspace' ? [
+          { name: 'boite', path: '/workspace/boite' }, { name: 'notes', path: '/workspace/notes' }
+        ] : [] };
+      }
       case 'projects.add': {
         const params = rawParams as RpcParams<'projects.add'>;
         const project: Project = {

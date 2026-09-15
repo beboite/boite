@@ -215,7 +215,7 @@ export function insideTauri(): boolean {
   return window.__TAURI_INTERNALS__ !== undefined;
 }
 
-async function fromTauri(): Promise<Endpoint | null> {
+export async function fromTauri(): Promise<Endpoint | null> {
   try {
     const { invoke } = await import('@tauri-apps/api/core');
     const result: unknown = await invoke('core_endpoint');

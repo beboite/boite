@@ -41,7 +41,7 @@ import {
   type EventHandler,
   type ObservableClient
 } from './client';
-import { clearStoredEndpoint, parsePairingLink, readEnvironments, removeEnvironment, resolveEndpoint, storeEndpoint, upsertEnvironment, type Endpoint, type StoredEnvironment } from './endpoint';
+import { clearStoredEndpoint, fromTauri, parsePairingLink, readEnvironments, removeEnvironment, resolveEndpoint, storeEndpoint, upsertEnvironment, type Endpoint, type StoredEnvironment } from './endpoint';
 import { isExperimentEnabled } from './experiments';
 import { titleFrom } from './format';
 import { chordLabel, commandForKey, resolveBindings } from './keybindings';
@@ -184,8 +184,11 @@ export class Store {
   paired = $state(false);
   /** The core is the one the shell started on this computer. */
   localCore = $state(false);
+  localEndpointUrl = $state<string | null>(null);
   /** The cores this device remembers: pairing or connecting adds one, forgetting removes one. */
   environments = $state<StoredEnvironment[]>([]);
+  projectPickerOpen = $state(false);
+  machineStates = $state<Record<string, { state: ClientState; error?: string }>>({});
   /** Toasts for threads the user is not looking at, per machine. */
   notifications = $state(readNotifications());
   /** The command palette, `Ctrl+K`. */
@@ -712,6 +715,13 @@ export class Store {
           })
         );
       } else {
+        if (window.__TAURI_INTERNALS__) {
+          const local = await fromTauri();
+          if (local) {
+            this.localEndpointUrl = local.url;
+            this.environments = upsertEnvironment({ ...local, paired: false, label: strings.connection.local });
+          }
+        }
         const endpoint = await resolveEndpoint();
         if (!endpoint) {
           this.connection = 'closed';
@@ -851,6 +861,7 @@ export class Store {
 
   /** Drive a remembered core with the key the pairing left here. No new link needed. */
   async switchEnvironment(url: string): Promise<void> {
+    if (url === this.localEndpointUrl) return this.useLocalCore();
     const env = readEnvironments().find((entry) => entry.url === url);
     if (!env) {
       this.error = strings.errors.noEndpoint;
@@ -1026,6 +1037,11 @@ export class Store {
     }
   }
 
+  browseProjects(path?: string) {
+    if (!this.#client) throw new Error(strings.errors.noEndpoint);
+    return this.#client.call('projects.browse', path ? { path } : {});
+  }
+
   async addProject(path: string): Promise<Project | null> {
     const client = this.#client;
     if (!client) return null;
@@ -1043,6 +1059,9 @@ export class Store {
 
   /** Folders dropped on the window. The core refuses a file, and the toast says so. */
   async addProjects(paths: string[]): Promise<void> {
+    // Explorer paths belong to this computer even while a remote core is open.
+    if (window.__TAURI_INTERNALS__ && !this.localCore) await this.useLocalCore();
+    if (!this.owner || this.connection !== 'ready') return;
     let first: Project | null = null;
     for (const path of paths) {
       const project = await this.addProject(path);

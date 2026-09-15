@@ -777,7 +777,6 @@
         {/if}
       </div>
 
-      <span class="hint subtle">{strings.composer.hint}</span>
 
       {#if store.busy}
         <button type="button" class="icon stop" data-testid="composer-stop" title={strings.composer.stop} aria-label={strings.composer.stop} onclick={() => void store.stop()}>
@@ -932,17 +931,9 @@
     min-width: 0;
   }
 
-  /* Read at rest, not a reward for focusing the box: the two keys are learned
-     here. It goes under 720 px, where the row has no width to spare. */
-  .hint {
-    margin-left: auto;
-    font-size: var(--text-sm);
-    color: var(--color-subtle);
-    white-space: nowrap;
-  }
-
   .send,
   .stop {
+    margin-left: auto;
     width: var(--control);
     height: var(--control);
     border-radius: var(--radius-md);
@@ -962,8 +953,5 @@
       padding: 0 10px;
     }
 
-    .hint {
-      display: none;
-    }
   }
 </style>
