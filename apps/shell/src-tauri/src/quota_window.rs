@@ -28,6 +28,7 @@ pub fn show<R: Runtime>(app: &AppHandle<R>, point: PhysicalPosition<f64>) -> tau
         let mut builder = tauri::WebviewWindowBuilder::new(app, LABEL, WebviewUrl::App("index.html?view=quotas".into()))
             .title("Boite quotas").inner_size(380.0, 460.0).resizable(false)
             .decorations(false).skip_taskbar(true).always_on_top(true)
+            .transparent(cfg!(windows))
             .visible(false).focused(false).focusable(false)
             .on_navigation(|url| matches!(url.scheme(), "tauri" | "http" | "https") && matches!(url.host_str(), Some("tauri.localhost") | Some("localhost")));
         if let Some(profile) = crate::webview_profile() { builder = builder.data_directory(profile); }

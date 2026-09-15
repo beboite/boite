@@ -244,6 +244,7 @@ export interface QuotaWindow {
 
 /** Provider-reported limits, never inferred from Boite's token ledger. */
 export interface AccountQuota {
+  /** Account id, or `quota:antigravity-cli` for the opt-in local CLI quota source. */
   accountId: AccountId;
   providerId: ProviderId;
   providerName: string;

@@ -152,6 +152,17 @@ body {
   height: 100%;
 }
 
+/* The tray window has no opaque canvas outside its rounded panel. Clip the
+ * body's theme textures too, including Grain's fixed pseudo-elements. */
+:root[data-view='quotas'],
+:root[data-view='quotas'] body {
+  background: transparent;
+}
+
+html[data-view='quotas'] body {
+  clip-path: inset(0 round var(--radius-lg));
+}
+
 ::selection {
   background: var(--color-selection);
 }

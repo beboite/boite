@@ -546,6 +546,18 @@ export const strings = {
   },
 
   quotas: {
+    trayHeading: 'Usage',
+    trayIntro: 'Subscription limits',
+    names: { claude: 'Claude', codex: 'Codex', antigravity: 'Antigravity', grok: 'Grok', opencode: 'OpenCode Go' },
+    off: 'Off',
+    noReading: 'Unavailable',
+    notConnected: 'Not connected',
+    autoConnect: 'Uses your connected account',
+    cliSource: 'Antigravity CLI account',
+    cliHint: 'Uses the account signed in through agy on this computer. Install Antigravity CLI 1.1.11 or later and sign in once, then enable monitoring below. Separate from Boite’s isolated Antigravity accounts.',
+    connectHint: 'Connect {provider} once in Providers. Usage appears here automatically.',
+    connect: 'Connect account',
+    noReset: 'Reset time not reported',
     heading: 'Provider quotas',
     intro: 'Subscription limits reported by your providers. Separate from tokens used in Boite.',
     remaining: '{percent}% left',

@@ -298,7 +298,7 @@ shellTest('close exits by default; the persisted setting hides instead; the nati
     await ownPage.evaluate(`window.__TAURI_INTERNALS__.invoke('quota_window', {action:'show'})`);
     popup = await BrowserPage.attach(secondPort, 'view=quotas');
     await popup.waitFor(`document.querySelector('[data-testid="quota-popup"]') && !document.querySelector('[role="alert"]')`);
-    await popup.waitFor(`document.querySelector('[data-testid="quota-list"]')`);
+    await popup.waitFor(`document.querySelectorAll('[data-testid="quota-provider"]').length === 5`);
     expect(await popup.evaluate(`window.__TAURI_INTERNALS__.invoke('core_endpoint').then(e => Boolean(e.url && e.token))`)).toBe(true);
     await popup.screenshot(join(import.meta.dir, '.artifacts', 'shell-quota-popup.png'));
     await popup.evaluate(`window.__TAURI_INTERNALS__.invoke('quota_window', {action:'hide'})`);

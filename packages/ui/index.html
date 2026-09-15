@@ -37,6 +37,7 @@
     </style>
     <!-- The same rule as lib/theme.ts, run before the first paint: dark stamps nothing. -->
     <script>
+      if (new URLSearchParams(location.search).get('view') === 'quotas') document.documentElement.dataset.view = 'quotas';
       try {
         var stored = localStorage.getItem('boite.theme');
         var theme = stored === 'dark' || stored === 'light' || stored === 'grain' ? stored : 'system';
