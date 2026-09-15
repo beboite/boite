@@ -42,14 +42,16 @@ jobs:
         run: |
           gh api "repos/$GITHUB_REPOSITORY/actions/workflows/release.yml/runs?head_sha=$GITHUB_SHA&status=success" --jq '.workflow_runs | length > 0' | grep -qx true
           gh release view "$RELEASE_TAG" --json isDraft --jq '.isDraft' | grep -qx false
-          echo 'tags<<EOF' >> "$GITHUB_OUTPUT"
-          echo "$RELEASE_TAG" >> "$GITHUB_OUTPUT"
-          echo "sha-$GITHUB_SHA" >> "$GITHUB_OUTPUT"
           # Only GitHub's current stable release may move latest. Publishing an
           # older release later must not silently roll every server back.
           latest=$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name 2>/dev/null || true)
-          [[ "$latest" != "$RELEASE_TAG" ]] || echo latest >> "$GITHUB_OUTPUT"
-          echo EOF >> "$GITHUB_OUTPUT"
+          {
+            echo 'tags<<EOF'
+            echo "$RELEASE_TAG"
+            echo "sha-$GITHUB_SHA"
+            [[ "$latest" != "$RELEASE_TAG" ]] || echo latest
+            echo EOF
+          } >> "$GITHUB_OUTPUT"
 
   publish:
     needs: verified
