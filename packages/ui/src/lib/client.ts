@@ -204,6 +204,8 @@ export class WsClient implements ObservableClient {
   }
 
   call<M extends RpcMethodName>(method: M, params: RpcParams<M>): Promise<RpcResult<M>> {
+    // Forget locally even when an offline host cannot acknowledge the unsubscribe.
+    if (method === 'threads.unsubscribe') this.#subscribed.delete((params as RpcParams<'threads.unsubscribe'>).threadId);
     const socket = this.#socket;
     if (!socket || this.#state !== 'ready') {
       return Promise.reject(transportFailure('not connected'));
@@ -211,8 +213,6 @@ export class WsClient implements ObservableClient {
     return this.#send(socket, method, params).then((value) => {
       if (method === 'threads.subscribe') {
         this.#subscribed.add((params as RpcParams<'threads.subscribe'>).threadId);
-      } else if (method === 'threads.unsubscribe') {
-        this.#subscribed.delete((params as RpcParams<'threads.unsubscribe'>).threadId);
       }
       return value;
     });

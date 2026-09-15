@@ -21,7 +21,7 @@
     "check": "bun run --cwd packages/contracts check && bun run --cwd packages/core check && bun run --cwd packages/ui check",
     "test": "bun run --cwd packages/core test && bun run --cwd packages/ui test",
     "test:shell": "cargo test --manifest-path apps/shell/src-tauri/Cargo.toml --lib",
-    "e2e": "bun test tests/e2e",
+    "e2e": "bun run build:ui && bun test tests/e2e",
     "bench": "bun run bench/run.ts"
   }
 }

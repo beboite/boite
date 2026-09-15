@@ -1,5 +1,16 @@
 # Development
 
+When several worktrees build the shell, preserve the completed shell executable
+and installer before another build replaces the shared Cargo output. Run shell
+checks against that copy with `BOITE_E2E_SHELL_EXE`. Installer names and timestamps
+alone do not identify the source branch. Verify the installed UI over CDP before
+reporting a desktop installation complete.
+
+When Cargo uses a shared target, preserve the shell executable, core and workers
+from your build together before running end-to-end tests. Set
+`BOITE_E2E_SHELL_EXE` to that preserved `boite-shell.exe`; the suite checks and
+runs its adjacent sidecar rather than a binary another worktree can replace.
+
 Everything below runs from the repository root, on a `bun install` that has
 already happened. The rules these commands are meant to prove are in
 [../AGENTS.md](../AGENTS.md).
@@ -140,6 +151,10 @@ bun run e2e      # tests/e2e
 
 Run all three once on a clean tree before writing anything. A failure you did not
 cause reads exactly like one you did, and that has cost time here before.
+
+`bun run e2e` builds the UI before loading any test. Tests earlier than
+`ui.test.ts` also serve that build, so building only inside the UI suite leaves
+them without a page in a fresh worktree.
 
 `bun run e2e` covers three surfaces in one go: a real core process over WS with
 the echo driver, the UI served by that core and driven in a throwaway browser,

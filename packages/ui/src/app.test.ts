@@ -4,6 +4,7 @@ import type { RpcMethodName } from '@boite/contracts';
 import App from './App.svelte';
 import { confirm } from './lib/confirm.svelte';
 import { store } from './lib/store.svelte';
+import { workspace } from './lib/workspace.svelte';
 import { setExperiment, writeExperiments } from './lib/experiments';
 import { storeEndpoint, upsertEnvironment } from './lib/endpoint';
 
@@ -221,7 +222,7 @@ test('a draft names its project in the heading and the dropdown moves it to anot
   const rows = Array.from(
     document.querySelectorAll<HTMLButtonElement>('[data-testid=draft-project-menu] [data-row]')
   );
-  expect(rows.map((row) => row.dataset['value'])).toEqual(['p-boite', 'p-notes']);
+  expect(rows.map((row) => JSON.parse(row.dataset['value']!)[1])).toEqual(['p-boite', 'p-notes']);
 
   rows[0]?.click();
   await waitFor(() => store.draft?.projectId === 'p-boite');
@@ -436,7 +437,7 @@ test('a right click on a thread row opens the context menu, and Archive removes 
   row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 40, clientY: 60 }));
   await waitFor(() => document.querySelector('[data-testid=context-menu]') !== null);
   const labels = Array.from(document.querySelectorAll('[data-testid=context-menu] [data-row]')).map((el) => el.textContent?.trim());
-  expect(labels).toEqual(['Open', 'Rename', 'Regenerate title', 'Pin', 'Archive']);
+  expect(labels).toEqual(['Open', 'Rename', 'Regenerate title', 'Pin', 'Refresh pull request', 'Archive']);
 
   query<HTMLButtonElement>('[data-testid=context-menu] [data-value=archive]').click();
   await waitFor(() => document.querySelector('[data-testid=context-menu]') === null);
@@ -1348,29 +1349,14 @@ test('the desktop still has every one of them', async () => {
 
 });
 
-test('remembered cores list, tag the current one, and forget without touching the connection', async () => {
-  storeEndpoint({ url: 'http://10.0.0.5:9000', token: 'remote', paired: true });
-  upsertEnvironment({ url: 'http://10.0.0.5:9000', token: 'remote', paired: true, label: 'serveur' });
-  upsertEnvironment({ url: 'http://10.0.0.6:9000', token: 'other', paired: false, label: 'labo' });
-  await mountOnFake();
-  // The fake transport leaves no endpoint behind, so name the current core by hand.
-  store.endpointUrl = 'http://10.0.0.5:9000';
-
-  store.showSettings();
-  await waitFor(() => document.querySelector('[data-testid=settings-envs]') !== null);
-  const rows = () => Array.from(document.querySelectorAll('[data-testid=settings-envs] li'));
-  expect(rows().map((row) => row.textContent)).toEqual([
-    expect.stringContaining('serveur'),
-    expect.stringContaining('labo')
-  ]);
-  expect(document.querySelectorAll('[data-testid=settings-env-current]').length).toBe(1);
-  expect(rows()[0]?.textContent).toContain('current');
-
-  // Forgetting the other core drops its row and leaves the connection alone.
-  const forgetButtons = document.querySelectorAll('[data-testid=settings-env-forget]');
-  (forgetButtons[1] as HTMLElement).click();
-  await waitFor(() => document.querySelectorAll('[data-testid=settings-envs] li').length === 1);
-  expect(store.environments.map((env) => env.url)).toEqual(['http://10.0.0.5:9000']);
-  expect(store.endpointUrl).toBe('http://10.0.0.5:9000');
-  expect(store.error).toBeNull();
+test('machines coexist and disconnecting a remote leaves the primary connected', async () => {
+  await mountOnFake('/?fake=1&machines=1');
+  await waitFor(() => workspace.machines.length === 2);
+  store.showSettings('machines');
+  await waitFor(() => document.querySelectorAll('[data-testid=machine-card]').length === 2);
+  expect(Array.from(document.querySelectorAll<HTMLInputElement>('[data-testid=machine-rename]')).map(input => input.value)).toContain('Builder');
+  query<HTMLButtonElement>('[data-testid=machine-remove]').click();
+  await waitFor(() => document.querySelectorAll('[data-testid=machine-card]').length === 1);
+  expect(store.connection).toBe('ready');
+  expect(workspace.active).toBe(store);
 });

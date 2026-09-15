@@ -599,10 +599,11 @@ test(
   async () => {
     await page.click(testid('nav-settings'));
     await page.waitFor(`document.querySelector('${testid('settings-page')}')`);
-    const url = await page.evaluate<string>(`document.querySelector('${testid('settings-core-url')}').value`);
-    expect(url).toBe(core.url);
     expect(await page.evaluate<string>(textOf('settings-endpoint'))).toBe(`127.0.0.1:${core.port}`);
     expect(await page.evaluate<string>(textOf('settings-version'))).toBe(corePackage.version);
+    await page.click(testid('settings-machines'));
+    await page.waitFor(`document.querySelector('${testid('machine-card')}')`);
+    expect(await page.evaluate<string>(textOf('machine-card'))).toContain(core.url);
 
     await page.click(testid('settings-back'));
     await page.waitFor(`document.querySelector('${testid('chat')}')`);

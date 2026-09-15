@@ -41,7 +41,7 @@ import {
   type EventHandler,
   type ObservableClient
 } from './client';
-import { clearStoredEndpoint, fromTauri, parsePairingLink, readEnvironments, removeEnvironment, resolveEndpoint, storeEndpoint, upsertEnvironment, type Endpoint, type StoredEnvironment } from './endpoint';
+import { clearStoredEndpoint, refreshLocalEnvironment, fromTauri, parsePairingLink, readEnvironments, removeEnvironment, resolveEndpoint, storeEndpoint, upsertEnvironment, type Endpoint, type StoredEnvironment } from './endpoint';
 import { isExperimentEnabled } from './experiments';
 import { titleFrom } from './format';
 import { chordLabel, commandForKey, resolveBindings } from './keybindings';
@@ -70,7 +70,7 @@ import { strings } from './strings';
 import { FAVORITES_KEY, readFavorites, type FavoriteModel } from './model-order';
 
 export type Page = 'chat' | 'settings';
-export type SettingsTab = 'general' | 'appearance' | 'keyboard' | 'accounts' | 'plugins' | 'usage' | 'resources' | 'experiments';
+export type SettingsTab = 'general' | 'machines' | 'appearance' | 'keyboard' | 'accounts' | 'plugins' | 'usage' | 'resources' | 'experiments';
 
 /** A login process the core runs for one account, as `account.login` reports it. */
 export interface LoginState {
@@ -171,6 +171,9 @@ const LIVE: ThreadStatusRank = { waiting: 0, running: 1, queued: 2, error: 3, id
 type ThreadStatusRank = Record<ThreadSummary['status'], number>;
 
 export class Store {
+  machineId = '';
+  visible = true;
+  threadKey(id: string): string { return this.machineId ? JSON.stringify([this.machineId, id]) : id; }
   connection = $state<ClientState>('idle');
   core = $state<CoreInfo | null>(null);
   /** Owner on the core token, session on a paired one; what decides who may pair a phone. */
@@ -538,7 +541,7 @@ export class Store {
       this.threads = this.threads.filter((t) => t.id !== threadId);
       this.#dropRequestsOf(threadId);
       // A thread that left Boite takes its panel layout with it.
-      rightPanel.forget(threadId);
+      rightPanel.forget(this.threadKey(threadId));
       if (this.openThread?.id !== threadId) return;
       this.openThread = null;
       // The two steps `archive()` takes when the thread on screen goes: the
@@ -694,8 +697,25 @@ export class Store {
     this.#subscribedThreadId = null;
   }
 
+  /** Stop streaming the hidden conversation while keeping machine summaries live. */
+  async suspend(): Promise<void> {
+    this.visible = false;
+    this.#openGeneration++;
+    await this.#unsubscribe();
+  }
+
+  async connectEndpoint(endpoint: Endpoint): Promise<void> {
+    this.#attachEndpoint(endpoint, false);
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([this.connect(), new Promise<void>(resolve => {
+        timeout = setTimeout(() => { this.error = strings.machines.timeout; this.#client?.close(); resolve(); }, 12_000);
+      })]);
+    } finally { clearTimeout(timeout); this.booted = true; }
+  }
+
   /** Picks the transport, connects, loads everything the UI opens on. */
-  async boot(): Promise<void> {
+  async boot(preferLocal = false): Promise<void> {
     try {
       this.environments = readEnvironments();
       const params = new URLSearchParams(window.location.search);
@@ -704,6 +724,10 @@ export class Store {
       // is a seeded copy of the app's data. It is true under vite's dev server
       // and under vitest, the two places `?fake=1` is used.
       if (import.meta.env.DEV && params.get('fake') === '1') {
+        this.machineId = '';
+        this.endpointUrl = null;
+        this.localCore = false;
+        this.paired = false;
         const { FakeClient } = await import('./fake-client');
         // `&long=1` adds the four-hundred-message thread the windowed list is
         // looked at on, `&principal=session` answers as a paired phone, so the
@@ -719,15 +743,16 @@ export class Store {
           const local = await fromTauri();
           if (local) {
             this.localEndpointUrl = local.url;
-            this.environments = upsertEnvironment({ ...local, paired: false, label: strings.connection.local });
+            this.environments = refreshLocalEnvironment(local);
           }
         }
-        const endpoint = await resolveEndpoint();
+        const endpoint = await resolveEndpoint(preferLocal);
         if (!endpoint) {
           this.connection = 'closed';
           this.booted = true;
           return;
         }
+        this.machineId = endpoint.url;
         this.#attachEndpoint(endpoint);
       }
       await this.connect();
@@ -737,8 +762,9 @@ export class Store {
     }
   }
 
-  #attachEndpoint(endpoint: Endpoint): void {
+  #attachEndpoint(endpoint: Endpoint, rememberActive = true): void {
     const url = endpoint.url;
+    this.machineId = endpoint.local ? 'local' : url;
     const paired = endpoint.paired === true || endpoint.grant !== undefined;
     this.endpointUrl = url;
     this.paired = paired;
@@ -754,14 +780,14 @@ export class Store {
         // The core joins the remembered environments with it, so switching
         // back later needs no new link.
         onSession: (session) => {
-          storeEndpoint({ url, token: session.token, paired: true });
+          if (rememberActive) storeEndpoint({ url, token: session.token, paired: true });
           this.environments = upsertEnvironment({ url, token: session.token, paired: true });
         },
         // Revoked from the desktop: the dead key goes here and in the
         // remembered cores, and the page says what to do rather than
         // retrying every ten seconds.
         onRevoked: () => {
-          clearStoredEndpoint();
+          if (rememberActive) clearStoredEndpoint();
           this.environments = removeEnvironment(url);
           this.connection = 'closed';
           this.error = strings.errors.revoked;
@@ -791,6 +817,7 @@ export class Store {
 
   /** The most recent thread, a draft in the first project, or nothing on a first run. */
   async openWhereLeft(): Promise<void> {
+    if (!this.visible) return;
     if (this.openThread || this.draft) return;
     const live = this.threads.filter((t) => !t.archived);
     const recent = [...live].sort((a, b) => b.updatedAt - a.updatedAt)[0];
@@ -956,7 +983,7 @@ export class Store {
       this.keybindings = keybindings;
       this.scheduler = scheduler;
       const open = this.openThread;
-      if (open) await this.open(open.id);
+      if (open && this.visible) await this.open(open.id, false);
     } catch (error) {
       this.#fail(error);
     }
@@ -1005,7 +1032,7 @@ export class Store {
 
   /** The right panel of the thread that is open, surfaces and all. */
   get panel(): BoundPanel {
-    return rightPanel.for(this.openThread?.id ?? null);
+    return rightPanel.for(this.openThread ? this.threadKey(this.openThread.id) : null);
   }
 
   /** Whether that panel is showing. The chat header's button reads it. */
@@ -1125,7 +1152,7 @@ export class Store {
    * refused subscribe leaves the thread on screen with the socket it had
    * rather than with none at all.
    */
-  async open(threadId: ThreadId): Promise<void> {
+  async open(threadId: ThreadId, navigate = true): Promise<void> {
     const client = this.#client;
     if (!client) return;
     const generation = ++this.#openGeneration;
@@ -1154,8 +1181,10 @@ export class Store {
       this.openThread = thread;
       // The thread that was open takes its permission and question cards with it.
       this.#keepRequestsOf(threadId);
-      this.page = 'chat';
-      this.sidebarOpen = false;
+      if (navigate) {
+        this.page = 'chat';
+        this.sidebarOpen = false;
+      }
       // The trace is the owner's: a device has no button for it, and asking
       // would refuse the rest of this open with it.
       const trace = this.owner ? await client.call('trace.get', { threadId }) : [];
@@ -1760,13 +1789,13 @@ export class Store {
     const go = shouldNotify({
       kind,
       threadId,
-      openThreadId: this.openThread?.id ?? null,
+      openThreadId: this.visible ? this.openThread?.id ?? null : null,
       focused: typeof document !== 'undefined' && document.hasFocus() && document.visibilityState === 'visible',
-      enabled: this.notifications
+      enabled: readNotifications()
     });
     if (!go) return;
     const title = this.threads.find((t) => t.id === threadId)?.title ?? strings.app.name;
-    void sendNotification(toastFor(kind, threadId, title, detail));
+    void sendNotification(toastFor(kind, this.threadKey(threadId), title, detail));
   }
 
   /** The switch of the Background card; the platform prompt comes with the first turn-on. */

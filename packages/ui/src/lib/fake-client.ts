@@ -66,6 +66,7 @@ const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>([
   'providers.list',
   'accounts.list',
   'threads.list',
+  'threads.pullRequest',
   'threads.create',
   'threads.get',
   'messages.list',
@@ -173,7 +174,7 @@ function fakeWorktree(projectPath: string, title: string, branch?: string): { br
 
 function toSummary(thread: Thread): ThreadSummary {
   const { messages: _messages, turns: _turns, ...rest } = thread;
-  return { ...rest };
+  return { ...rest, lastUserMessageAt: thread.messages.filter(m => m.role === 'user').at(-1)?.createdAt ?? null };
 }
 
 function emptyUsage(): Usage {
@@ -654,6 +655,11 @@ export class FakeClient implements ObservableClient {
         this.#projects.push(project);
         this.#emit('project.added', structuredClone(project));
         return structuredClone(project);
+      }
+      case 'threads.pullRequest': {
+        const params = rawParams as RpcParams<'threads.pullRequest'>;
+        const thread = this.#threads.get(params.threadId);
+        return thread?.pullRequest ?? null;
       }
       case 'projects.remove': {
         const params = rawParams as RpcParams<'projects.remove'>;
@@ -2648,6 +2654,8 @@ export class FakeClient implements ObservableClient {
     };
     // The meters: the trace thread at a comfortable share, the descriptor one just compacted.
     finished.context = { tokens: 84_000, window: 200_000, at: T0 + 60_000 };
+    finished.branch = 'boite/trace';
+    finished.pullRequest = { number: 84, url: 'https://github.com/example/project/pull/84', state: 'OPEN' };
     unread.context = { tokens: 31_000, window: 200_000, at: T0 + 340_000 };
 
     for (const thread of [finished, running, waiting, unread]) this.#threads.set(thread.id, thread);

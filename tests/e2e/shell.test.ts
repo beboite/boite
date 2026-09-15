@@ -13,7 +13,7 @@ const HARD_KILL_TIMEOUT_MS = 3_000;
 const POLL_MS = 100;
 
 const ROOT = join(import.meta.dir, '..', '..');
-const EXE = join(ROOT, 'apps', 'shell', 'src-tauri', 'target', 'release', 'boite-shell.exe');
+const EXE = process.env.BOITE_E2E_SHELL_EXE ?? join(ROOT, 'apps', 'shell', 'src-tauri', 'target', 'release', 'boite-shell.exe');
 const SCREENSHOT = join(import.meta.dir, '.artifacts', 'shell.png');
 
 const CORE_SUFFIX = process.platform === 'win32' ? '.exe' : '';
@@ -533,16 +533,16 @@ shellTest('the machine picker opens a folder on the selected core and reports a 
   try {
     const grant = await remoteClient.call('pairing.grant', { role: 'owner' });
     await page?.click(testid('nav-settings'));
-    await page?.type(testid('settings-pairing-link'), grant.url);
-    await page?.click(testid('settings-pair'));
-    await page?.waitFor(`document.querySelector('[data-testid=settings-endpoint]')?.textContent.includes('${remote.port}')`);
+    await page?.click(testid('settings-tab-machines'));
+    await page?.type(testid('machine-name'), 'Remote test');
+    await page?.type(testid('machine-link'), grant.url);
+    await page?.click(testid('machine-add'));
+    await page?.waitFor(`document.querySelectorAll('[data-testid=machine-card]').length === 2`);
     await page?.click(testid('settings-back'));
     await page?.waitFor(`document.querySelector('[data-testid=status-connection]')?.textContent.includes('2 machines connected')`);
     await page?.click(testid('add-project'));
     await page?.waitFor(`document.querySelector('[data-testid=project-path]') && !document.querySelector('[data-testid=project-add]').disabled`);
-    expect(await page?.evaluate(`!!document.querySelector('[data-testid=pick-project]')`)).toBe(false);
-    await page?.click(testid('project-machine'));
-    await page?.click('[data-testid=project-machine-menu] [data-value=local]');
+    expect(await page?.evaluate(`!!document.querySelector('[data-testid=pick-project]')`)).toBe(true);
     await page?.waitFor(`document.querySelector('[data-testid=pick-project]') && !document.querySelector('[data-testid=pick-project]').disabled`);
     await page?.click(testid('project-machine'));
     await page?.evaluate(`Array.from(document.querySelectorAll('[data-testid=project-machine-menu] [data-row]')).find(e => e.dataset.value === ${JSON.stringify(remote.url)}).click()`);
@@ -563,7 +563,8 @@ shellTest('the machine picker opens a folder on the selected core and reports a 
     expect(await page?.evaluate(`document.querySelector('[data-testid=status-connection]').textContent`)).toContain('1 machine connected');
     await page?.screenshot(join(import.meta.dir, '.artifacts', 'shell-machine-disconnected.png'));
     await page?.click(testid('nav-settings'));
-    await page?.evaluate(`Array.from(document.querySelectorAll('[data-testid=settings-envs] li')).find(e => e.textContent.includes(${JSON.stringify(remote.url)})).querySelector('[data-testid=settings-env-forget]').click()`);
+    await page?.click(testid('settings-tab-machines'));
+    await page?.evaluate(`document.querySelector('[data-machine-id="${remote.url}"] [data-testid=machine-remove]').click()`);
     await page?.click(testid('settings-back'));
   } finally { remoteClient.close(); await remote.stop(); }
 }, TIMEOUT);

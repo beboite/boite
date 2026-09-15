@@ -1,8 +1,8 @@
 <script lang="ts">
-  import { tick } from 'svelte';
+  import { tick, untrack } from 'svelte';
   import { ArrowUp, ChevronDown, ChevronRight, Folder, FolderOpen, Monitor, X } from '@lucide/svelte';
   import { Closing } from '../lib/closing.svelte';
-  import { defaultEnvironmentLabel } from '../lib/endpoint';
+  import { workspace } from '../lib/workspace.svelte';
   import { strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
   import Menu from './Menu.svelte';
@@ -17,19 +17,20 @@
   let error = $state('');
   let revision = 0;
   let previous: HTMLElement | null = null;
-  const machineName = $derived(store.localCore ? strings.connection.local : store.endpointUrl ? defaultEnvironmentLabel(store.endpointUrl) : strings.connection.current);
+  let target = $state<Store>();
+  const selected = $derived(target ?? store);
+  const available = $derived(workspace.machines.length ? workspace.machines : [{ id: 'current', label: strings.connection.local, store }]);
+  const machineName = $derived(available.find(m => m.store === selected)?.label ?? strings.connection.local);
   const machines = $derived([
-    { id: 'current', label: machineName, active: true },
-    ...(window.__TAURI_INTERNALS__ && !store.localCore ? [{ id: 'local', label: strings.connection.local }] : []),
-    ...store.environments.filter(e => e.url !== store.endpointUrl && e.url !== store.localEndpointUrl).map(e => ({ id: e.url, label: e.label })),
+    ...available.map(m => ({ id: m.id, label: m.label, active: m.store === selected })),
     { id: 'manage', label: strings.connection.manage }
   ]);
-
   $effect(() => {
     if (!store.projectPickerOpen) { overlay.hide(); return; }
+    target = store;
     previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     overlay.show();
-    void browse();
+    void untrack(() => browse());
     void tick().then(() => input?.focus({ preventScroll: true }));
   });
 
@@ -38,7 +39,7 @@
     busy = true;
     error = '';
     try {
-      const result = await store.browseProjects(target);
+      const result = await selected.browseProjects(target);
       if (current !== revision) return;
       path = result.path; parent = result.parent; directories = result.directories;
     } catch (failure) {
@@ -51,27 +52,25 @@
     previous?.focus({ preventScroll: true });
   }
   async function machine(id: string) {
-    if (id === 'current') return;
-    if (id === 'manage') { close(); store.showSettings('general'); return; }
-    ++revision; busy = true; error = ''; directories = []; path = ''; parent = null;
-    if (id === 'local') await store.useLocalCore(); else await store.switchEnvironment(id);
-    if (!store.projectPickerOpen) return;
-    if (store.connection !== 'ready') { busy = false; error = strings.connection.unavailable; return; }
-    if (!store.owner) { busy = false; error = strings.firstRun.deviceBody; return; }
+    if (id === 'manage') { close(); store.showSettings('machines'); return; }
+    const next = available.find(m => m.id === id)?.store;
+    if (!next || next === selected) return;
+    ++revision; target = next; busy = true; error = ''; directories = []; path = ''; parent = null;
+    if (next.connection !== 'ready') { busy = false; error = strings.connection.unavailable; return; }
+    if (!next.owner) { busy = false; error = strings.firstRun.deviceBody; return; }
     await browse();
-  }
-  async function open() {
+  }  async function open() {
     if (busy || !path.trim()) return;
     busy = true;
-    const project = await store.addProject(path.trim());
+    const project = await selected.addProject(path.trim());
     busy = false;
-    if (project) close(); else error = store.error ?? strings.connection.unavailable;
+    if (project) { close(); await workspace.select(selected, undefined, project.id); } else error = selected.error ?? strings.connection.unavailable;
   }
   async function native() {
     busy = true;
-    const project = await store.pickProject();
+    const project = await selected.pickProject();
     busy = false;
-    if (project) close();
+    if (project) { close(); await workspace.select(selected, undefined, project.id); }
   }
   function keydown(event: KeyboardEvent) {
     if (!store.projectPickerOpen) return;
@@ -97,7 +96,7 @@
         <form onsubmit={e => { e.preventDefault(); void browse(path); }} data-testid="add-project-form">
           <input id="project-folder" data-testid="project-path" bind:this={input} bind:value={path} spellcheck="false" autocomplete="off" placeholder={strings.firstRun.pathPlaceholder} />
           <button type="submit" class="ghost icon" disabled={busy || !path.trim()} aria-label={strings.connection.browse} title={strings.connection.browse}><ChevronRight size={16} /></button>
-          {#if store.pickerAvailable}<button type="button" class="ghost icon" data-testid="pick-project" disabled={busy} aria-label={strings.connection.nativeBrowse} title={strings.connection.nativeBrowse} onclick={() => void native()}><FolderOpen size={17} /></button>{/if}
+          {#if selected.pickerAvailable}<button type="button" class="ghost icon" data-testid="pick-project" disabled={busy} aria-label={strings.connection.nativeBrowse} title={strings.connection.nativeBrowse} onclick={() => void native()}><FolderOpen size={17} /></button>{/if}
         </form>
         <div class="folders" aria-busy={busy}>
           {#if parent}<button type="button" class="ghost folder" disabled={busy} onclick={() => void browse(parent!)}><ArrowUp size={15} />{strings.connection.parent}</button>{/if}
@@ -106,7 +105,7 @@
         </div>
         {#if error}<p class="error" role="alert">{error}</p>{/if}
       </div>
-      <footer><button type="button" class="ghost" data-testid="project-cancel" onclick={close}>{strings.common.cancel}</button><button type="button" class="primary" data-testid="project-add" disabled={busy || !path.trim() || !store.owner || store.connection !== 'ready'} onclick={() => void open()}><FolderOpen size={15} />{strings.firstRun.add}</button></footer>
+      <footer><button type="button" class="ghost" data-testid="project-cancel" onclick={close}>{strings.common.cancel}</button><button type="button" class="primary" data-testid="project-add" disabled={busy || !path.trim() || !selected.owner || selected.connection !== 'ready'} onclick={() => void open()}><FolderOpen size={15} />{strings.firstRun.add}</button></footer>
     </div>
   </div>
 {/if}

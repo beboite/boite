@@ -45,6 +45,7 @@ interface ProjectRow {
 }
 
 interface ThreadRow {
+  last_user_message_at?: number | null;
   id: string;
   project_id: string;
   title: string;
@@ -183,6 +184,7 @@ CREATE TABLE IF NOT EXISTS messages (
   created_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS messages_by_thread ON messages (thread_id);
+CREATE INDEX IF NOT EXISTS messages_user_time ON messages (thread_id, created_at DESC) WHERE role = 'user';
 
 CREATE TABLE IF NOT EXISTS processes (
   thread_id TEXT NOT NULL,
@@ -321,6 +323,7 @@ function toProject(row: ProjectRow): Project {
 
 function toThread(row: ThreadRow): ThreadSummary {
   return {
+    lastUserMessageAt: row.last_user_message_at ?? null,
     id: row.id,
     projectId: row.project_id,
     title: row.title,
@@ -540,15 +543,15 @@ export class Journal {
   }
 
   getThread(threadId: string): ThreadSummary | null {
-    const row = this.db.query('SELECT * FROM threads WHERE id = ?').get(threadId) as ThreadRow | null;
+    const row = this.db.query("SELECT *, (SELECT MAX(created_at) FROM messages WHERE thread_id = threads.id AND role = 'user') AS last_user_message_at FROM threads WHERE id = ?").get(threadId) as ThreadRow | null;
     return row === null ? null : toThread(row);
   }
 
   listThreads(projectId?: string): ThreadSummary[] {
     const rows =
       projectId === undefined
-        ? (this.db.query('SELECT * FROM threads ORDER BY rowid').all() as ThreadRow[])
-        : (this.db.query('SELECT * FROM threads WHERE project_id = ? ORDER BY rowid').all(projectId) as ThreadRow[]);
+        ? (this.db.query("SELECT *, (SELECT MAX(created_at) FROM messages WHERE thread_id = threads.id AND role = 'user') AS last_user_message_at FROM threads ORDER BY rowid").all() as ThreadRow[])
+        : (this.db.query("SELECT *, (SELECT MAX(created_at) FROM messages WHERE thread_id = threads.id AND role = 'user') AS last_user_message_at FROM threads WHERE project_id = ? ORDER BY rowid").all(projectId) as ThreadRow[]);
     return rows.map(toThread);
   }
 

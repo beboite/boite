@@ -3,7 +3,6 @@
   import type { Window as TauriWindow } from '@tauri-apps/api/window';
   import { strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
-  import BoiteMark from './BoiteMark.svelte';
 
   let { store }: { store: Store } = $props();
 
@@ -84,9 +83,7 @@
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <header class="titlebar" {onmousedown} data-testid="titlebar">
-  <div class="left">
-    <BoiteMark size={16} />
-  </div>
+  <div class="left"></div>
   <div class="center">
     <span class="name">{title}</span>
     {#if dev}
@@ -165,17 +162,20 @@
   .controls {
     display: flex;
     justify-content: flex-end;
+    align-items: center;
+    gap: 4px;
+    padding-right: 6px;
     height: 100%;
   }
 
   .ctl {
-    width: 46px;
+    width: 34px;
     padding: 0;
     display: grid;
     place-items: center;
-    height: 100%;
+    height: 26px;
     border: none;
-    border-radius: 0;
+    border-radius: var(--radius-sm);
     background: transparent;
     color: var(--color-muted-foreground);
   }

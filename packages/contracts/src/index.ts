@@ -331,6 +331,9 @@ export interface ContextUse {
 }
 
 export interface ThreadSummary {
+  /** Last accepted user message, independent of assistant activity and renames. */
+  lastUserMessageAt?: Timestamp | null;
+  pullRequest?: { number: number; url: string; state: 'OPEN' | 'CLOSED' | 'MERGED' } | null;
   id: ThreadId;
   projectId: ProjectId;
   title: string;
@@ -611,6 +614,8 @@ export interface SchedulerState {
 }
 
 export interface Settings {
+  /** Exact browser origins allowed to connect alongside the shell and this core's own origin. */
+  browserOrigins?: string[];
   maxConcurrentTurns: number;
   perAccountConcurrency: number;
   /** Minutes a Claude process stays warm after a turn. 0 releases it at once. */
@@ -819,6 +824,8 @@ export function parseChord(text: string): { ok: true; chord: Chord } | { ok: fal
 export type Channel = 'stable' | 'dev';
 
 export interface CoreInfo {
+  /** Display name reported by the execution host. */
+  hostname?: string;
   version: string;
   protocolVersion: typeof PROTOCOL_VERSION;
   os: Os;
@@ -1000,6 +1007,8 @@ export interface RpcMethods {
   'accounts.loginInput': { params: { accountId: AccountId; text: string }; result: { ok: true } };
 
   'threads.list': { params: { projectId?: ProjectId; includeArchived?: boolean }; result: ThreadSummary[] };
+  /** Read the working branch's PR using the execution machine's GitHub CLI. */
+  'threads.pullRequest': { params: { threadId: ThreadId }; result: ThreadSummary['pullRequest'] };
   'threads.create': {
     params: {
       projectId: ProjectId;

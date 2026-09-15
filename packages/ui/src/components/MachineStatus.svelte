@@ -1,50 +1,27 @@
 <script lang="ts">
-  import { untrack } from 'svelte';
+  import { workspace } from '../lib/workspace.svelte';
   import { Monitor, TriangleAlert } from '@lucide/svelte';
-  import { WsClient } from '../lib/client';
-  import { defaultEnvironmentLabel } from '../lib/endpoint';
+
+
   import { strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
   import Menu from './Menu.svelte';
   let { store }: { store: Store } = $props();
 
-  // Only the active core loads projects and threads. These sockets observe availability.
-  $effect(() => {
-    const active = store.endpointUrl;
-    const environments = store.environments;
-    const clients = untrack(() => environments.filter(e => e.url !== active).map(environment => {
-      const client = new WsClient({ ...environment, reconnect: false });
-      const stop = client.onState(state => {
-        store.machineStates = { ...store.machineStates, [environment.url]: { state } };
-      });
-      let timeout: ReturnType<typeof setTimeout>;
-      function connect() {
-        timeout = setTimeout(() => { if (client.state !== 'ready') client.close(); }, 8000);
-        void client.connect().catch(error => {
-          store.machineStates = { ...store.machineStates, [environment.url]: { state: 'closed', error: error instanceof Error ? error.message : String(error) } };
-        }).finally(() => clearTimeout(timeout));
-      }
-      connect();
-      const retry = setInterval(() => { if (client.state === 'closed') connect(); }, 30_000);
-      return () => { clearTimeout(timeout); clearInterval(retry); stop(); client.close(); };
-    }));
-    return () => clients.forEach(close => close());
-  });
-
-  const otherMachines = $derived(store.environments.filter(e => e.url !== store.endpointUrl));
-  const connected = $derived((store.connection === 'ready' ? 1 : 0) + otherMachines.filter(e => store.machineStates[e.url]?.state === 'ready').length);
-  const issues = $derived((store.connection === 'closed' ? 1 : 0) + otherMachines.filter(e => store.machineStates[e.url]?.state === 'closed').length);
-  const currentName = $derived(store.localCore ? strings.connection.local : store.endpointUrl ? defaultEnvironmentLabel(store.endpointUrl) : strings.connection.current);
+  const machines = $derived(workspace.machines.length ? workspace.machines : [{ id: 'current', label: strings.connection.local, store }]);
+  const connected = $derived(machines.filter(m => m.store.connection === 'ready').length);
+  const issues = $derived(machines.filter(m => m.store.connection === 'closed' || (m.store.booted && m.store.connection !== 'ready')).length);
   const items = $derived([
-    { id: 'current', label: currentName, hint: strings.connection[store.connection], active: true },
-    ...otherMachines.map(e => ({ id: e.url, label: e.label, hint: store.machineStates[e.url]?.error ?? strings.connection[store.machineStates[e.url]?.state ?? 'connecting'] })),
+    ...machines.map(m => ({ id: m.id, label: m.label, hint: strings.connection[m.store.connection], active: m.store === store })),
     { id: 'manage', label: strings.connection.manage }
   ]);
   function pick(id: string) {
-    if (id === 'manage') store.showSettings('general');
-    else if (id !== 'current') void store.switchEnvironment(id);
-  }
-</script>
+    if (id === 'manage') store.showSettings('machines');
+    else {
+      const target = machines.find(m => m.id === id);
+      if (target && target.store !== store) void workspace.select(target.store);
+    }
+  }</script>
 
 <div class="machines" class:problem={issues > 0} data-testid="status-connection" data-state={store.connection} aria-live="polite">
   <Menu {items} onpick={pick} label={strings.connection.manage} variant="ghost" testid="machine-status">

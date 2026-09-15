@@ -33,6 +33,7 @@ export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>
   'accounts.list',
   // The threads themselves.
   'threads.list',
+  'threads.pullRequest', // Read-only branch metadata shown on the same phone thread cards.
   'threads.create',
   'threads.get',
   'messages.list',

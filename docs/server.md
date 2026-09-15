@@ -75,12 +75,12 @@ says which role it carries and until when it works. Without `--owner` the link
 is a phone's. `--data-dir` and `--channel` name another core, as they do at
 start.
 
-On the desktop, open Settings, General, and paste the link in the Connection
-card, then Pair. The grant is spent on the first hello and the key it becomes is
-stored in that app, and from then on every launch connects to the server instead
-of the core the shell started. "Use this computer's core" in the same card goes
-back and forgets the key on that computer; Revoke on the server's paired devices
-list is what makes the key open nothing.
+On the desktop, open Settings, Machines, and paste the link under Add machine.
+The grant is spent on the first hello and the resulting key is stored in that
+app. The server's projects join those of the local core and any other connected
+machines. Disconnect forgets that host locally; Revoke on its paired-device list
+invalidates the key. [machines.md](machines.md) covers the two thread views,
+reconnection and the origins needed by a browser or phone.
 
 A key paired with `--owner` says hello as the owner, so it reaches every method:
 accounts, projects, settings, minting more links. The server lists it among the
