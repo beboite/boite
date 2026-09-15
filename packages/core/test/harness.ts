@@ -24,6 +24,14 @@ export interface TestCoreOptions {
   settings?: Partial<Settings>;
 }
 
+/** Scripted SDK tests need an available executable, never a real CLI install. */
+export function scriptedClaude(harness: TestCore): void {
+  const descriptor = harness.core.providers.require('claude');
+  for (const profile of Object.values(descriptor.profiles)) {
+    if (profile) profile.executable = [{ kind: 'file', value: process.execPath }];
+  }
+}
+
 export async function startTestCore(options: TestCoreOptions = {}): Promise<TestCore> {
   const dataDir = mkdtempSync(join(tmpdir(), 'boite-core-'));
   process.env.BOITE_DATA_DIR = dataDir;

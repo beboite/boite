@@ -14,7 +14,16 @@ import { echoThread, startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
 
 const onWindows = process.platform === 'win32';
-const describeWindows = onWindows ? describe : describe.skip;
+let hasAudioEndpoint = false;
+if (onWindows) {
+  coInitialize();
+  const probe = openSessions();
+  hasAudioEndpoint = probe !== null;
+  probe?.release();
+  coUninitialize();
+  if (!hasAudioEndpoint) console.info('Audio integration tests skipped: no default render endpoint on this host');
+}
+const describeWindows = hasAudioEndpoint ? describe : describe.skip;
 const FIXTURE = join(import.meta.dir, 'fixtures', 'silent-tone.ts');
 /**
  * How long the core has to mute a session that exists. Starting a Bun process

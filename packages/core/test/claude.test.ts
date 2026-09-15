@@ -14,7 +14,7 @@ import type { CoreClient } from '../src/client.ts';
 import { createClaudeDriver } from '../src/drivers/claude.ts';
 import type { QueryFn } from '../src/drivers/claude.ts';
 import { setDriver } from '../src/drivers/index.ts';
-import { startTestCore, waitFor } from './harness.ts';
+import { scriptedClaude, startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
 
 let harness: TestCore;
@@ -22,6 +22,7 @@ let restore: (() => void) | null = null;
 
 beforeEach(async () => {
   harness = await startTestCore();
+  scriptedClaude(harness);
 });
 
 afterEach(async () => {
