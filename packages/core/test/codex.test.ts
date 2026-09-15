@@ -139,9 +139,9 @@ describe('codex driver', () => {
     await client.call('threads.update', { threadId: thread.id, speed: null });
     expect((await finished).status).toBe('done');
     expect(fakeLog()).toContain('"serviceTier":"ultrafast"');
-    await expect(client.call('threads.update', { threadId: thread.id, model: 'fake-plain', speed: 'fast' })).rejects.toThrow(/does not offer this speed/);
     const switched = await client.call('threads.update', { threadId: thread.id, model: 'fake-plain' });
     expect(switched.speed).toBeNull();
+    expect(() => harness!.core.threads.update({ threadId: thread.id, speed: 'fast' })).toThrow(/does not offer this speed/);
   });
 
   test('manual compaction resumes the native session and waits for its completed turn', async () => {

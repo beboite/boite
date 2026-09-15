@@ -29,6 +29,8 @@ test('favorites survive reload, reasoning has discrete stops, and the context ri
   await page.click('[data-provider=favorites]');
   await page.waitFor(`document.querySelectorAll('[data-testid=favorite-model]').length === 1`);
   await capture('models-favorites.png');
+  expect(await page.evaluate(`document.querySelector('[data-testid=composer]').getBoundingClientRect().height`)).toBeLessThan(140);
+  expect(await page.evaluate(`document.querySelector('[data-testid=composer-picker-menu]').getBoundingClientRect().height`)).toBeLessThan(180);
   await page.navigate(url);
   await page.waitFor(`document.querySelector('[data-testid=composer-picker]')`);
   await page.click('[data-testid=composer-picker]');
@@ -127,4 +129,24 @@ test('speed controls follow the selected model and Codex never offers Ultrathink
   await page.click('[data-testid=composer-effort]');
   await page.waitFor(`document.querySelector('[data-testid=composer-effort-menu]')`);
   expect(await page.evaluate(`!!document.querySelector('[data-testid=effort-speed]')`)).toBe(false);
+}, 30_000);
+
+test('the draft keeps a compact composer above a detached favorites menu', async () => {
+  await page.send('Emulation.clearDeviceMetricsOverride', {});
+  await page.navigate(url);
+  await page.waitFor(`document.querySelector('[data-testid=new-thread]')`);
+  await page.click('[data-testid=new-thread]');
+  const before = await page.evaluate<number>(`document.querySelector('[data-testid=composer]').getBoundingClientRect().height`);
+  await page.click('[data-testid=composer-picker]');
+  await page.click('[data-provider=claude]');
+  await page.waitFor(`document.querySelector('[data-favorite-model="claude-fable-5-1"]')`);
+  for (const model of ['claude-fable-5-1', 'claude-opus-5', 'claude-sonnet-5']) {
+    await page.click(`[data-favorite-model="${model}"]`);
+  }
+  await page.click('[data-provider=favorites]');
+  await capture('picker-draft-favorites.png');
+  const layout = await page.evaluate<any>(`(() => { const c=document.querySelector('[data-testid=composer]').getBoundingClientRect(); const m=document.querySelector('[data-testid=composer-picker-menu]').getBoundingClientRect(); return {composerHeight:c.height,composerBottom:c.bottom,menuTop:m.top,menuHeight:m.height}; })()`);
+  expect(layout.composerHeight).toBe(before);
+  expect(layout.menuTop).toBeGreaterThan(layout.composerBottom);
+  expect(layout.menuHeight).toBeLessThan(260);
 }, 30_000);

@@ -8,8 +8,8 @@
   import type { Choice, PickPatch, Store } from '../lib/store.svelte';
 
   /**
-   * One popover: a rail of provider logos on the left, everything about the
-   * shown provider on the right. Its name heads the column, its accounts sit
+   * One popover: a row of provider logos above the selected provider's models.
+   * Its name heads the column, its accounts sit
    * beside the name as chips when there is more than one, and its models fill
    * the rest. A click on a model closes the picker; nothing else does.
    */
@@ -19,7 +19,7 @@
     locked = false,
     disabled = false,
     onpick,
-    onopenchange = () => {}
+    onheightchange = () => {}
   }: {
     store: Store;
     choice: Choice | null;
@@ -27,14 +27,15 @@
     locked?: boolean;
     disabled?: boolean;
     onpick: (patch: PickPatch) => void;
-    onopenchange?: (open: boolean) => void;
+    onheightchange?: (height: number) => void;
   } = $props();
 
   /** Past this many models the column stops being a plain scroll and gets a search field. */
   const SEARCH_FROM = 12;
 
   const popover = new Closing();
-  $effect(() => { onopenchange(popover.shown); return () => onopenchange(false); });
+  let menuHeight = $state(0);
+  $effect(() => { onheightchange(popover.shown ? menuHeight : 0); });
   let legacyOpen = $state(false);
   let root = $state<HTMLDivElement | undefined>(undefined);
   let searchBox = $state<HTMLInputElement | undefined>(undefined);
@@ -372,7 +373,8 @@
       role="menu"
       tabindex="-1"
       aria-label={strings.composer.picker}
-      data-testid="composer-picker-menu"
+        data-testid="composer-picker-menu"
+        bind:clientHeight={menuHeight}
       use:popover.attach
       onanimationend={popover.end}
       {onkeydown}
@@ -595,14 +597,14 @@
 
   .popover {
     position: absolute;
-    top: calc(100% - var(--picker-space) + 6px);
+    top: calc(100% + 8px);
     left: 10px;
     z-index: 40;
     display: grid;
-    grid-template-columns: 48px minmax(240px, 1fr);
-    width: min(460px, calc(100vw - 32px));
-    height: min(360px, 45dvh);
-    grid-template-rows: minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr);
+    width: min(400px, calc(100vw - 32px));
+    max-height: min(360px, 45dvh);
+    grid-template-rows: auto minmax(0, 1fr);
     background: var(--color-surface-2);
     border: 1px solid var(--color-border);
     border-radius: var(--radius-md);
@@ -631,11 +633,14 @@
   /* Logos only: the name is the tile's title, and the column beside it names
      the one that is shown, so nothing is repeated. */
   .rail {
+    flex-direction: row;
+    flex-wrap: nowrap;
+    padding-right: 40px;
+    justify-content: flex-start;
     align-items: center;
     gap: 4px;
-    /* Exactly one tile wide: a horizontal scrollbar here would be a stripe. */
-    overflow-x: hidden;
-    border-right: 1px solid var(--color-border);
+    overflow-x: auto;
+    border-bottom: 1px solid var(--color-border);
     background: var(--color-surface);
   }
 

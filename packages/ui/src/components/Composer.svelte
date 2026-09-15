@@ -121,7 +121,7 @@
       .reverse()
   );
 
-  let modelPickerOpen = $state(false);
+  let modelPickerHeight = $state(0);
   let provider = $derived(choice ? store.providerOf(choice.providerId) : null);
   $effect(() => {
     if (provider?.available && provider.protocol !== 'echo' && choice) {
@@ -670,7 +670,7 @@
 
 <div class="composer-wrap" class:centered>
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="composer" class:model-picker-open={modelPickerOpen} data-testid="composer" {ondragover} {ondrop}>
+  <div class="composer" style:margin-bottom={modelPickerHeight ? `${modelPickerHeight + 12}px` : undefined} data-testid="composer" {ondragover} {ondrop}>
     {#if composer && composer.queued.length > 0}
       <div class="queued subtle" data-testid="composer-queued">{strings.composer.queued}</div>
     {/if}
@@ -735,7 +735,7 @@
 
     <div class="bar">
       <div class="chips">
-        <ModelPicker {store} {choice} disabled={picking} onpick={pick} onopenchange={(open) => modelPickerOpen = open} />
+        <ModelPicker {store} {choice} disabled={picking} onpick={pick} onheightchange={(height) => modelPickerHeight = height} />
 
         {#if takesImages}
           <button
@@ -824,8 +824,6 @@
 
   /* The one raised object in the column: it floats over the timeline instead of
      repeating the sidebar's slab. e1 rides on e2 for the inset top highlight. */
-  .composer.model-picker-open { --picker-space: calc(min(360px, 45dvh) + 12px); padding-bottom: var(--picker-space); }
-
   .composer {
     position: relative;
     display: flex;

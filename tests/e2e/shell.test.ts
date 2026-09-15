@@ -50,6 +50,8 @@ function newestSource(roots: string[], extensions: string[]): SourceFile | null 
         walk(full);
         continue;
       }
+      // UI tests live beside components but are never bundled into the shell.
+      if (entry.name.endsWith('.test.ts')) continue;
       if (!extensions.some((extension) => entry.name.endsWith(extension))) continue;
       const mtimeMs = statSync(full).mtimeMs;
       if (newest === null || mtimeMs > newest.mtimeMs) newest = { path: full, mtimeMs };

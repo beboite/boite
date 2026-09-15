@@ -33,8 +33,9 @@ directory and checked against the current provider/account records. Opening an
 agent shows the cached list immediately while discovery runs in the background.
 The top-right refresh button forces a new probe; concurrent requests share one
 operation. A failed refresh keeps the visible list and waits for a manual retry.
-The menu opens below the composer controls, which reserve room for it, and its
-model column scrolls independently.
+The menu floats below the composer without enlarging its input area. Provider
+tabs sit above the models; the menu fits its content up to a scrollable height
+limit. Its measured height reserves space below the composer.
 
 The lightning button cycles through the selected model's advertised speeds and
 back to standard. Codex uses its per-model `serviceTiers` list, including Fast or
