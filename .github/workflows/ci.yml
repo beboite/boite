@@ -108,7 +108,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
         with:
           toolchain: stable
-      - uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
         with:
           workspaces: apps/shell/src-tauri -> target
           shared-key: desktop-release-v1
@@ -134,14 +134,14 @@ jobs:
       - run: bun test tests/e2e
         env:
           BOITE_E2E_PREBUILT_UI: '1'
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: windows-installer
           path: apps/shell/src-tauri/target/release/bundle/nsis/*.exe
           if-no-files-found: error
           compression-level: 0
           retention-days: 7
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: failure()
         with:
           name: desktop-failure-captures
