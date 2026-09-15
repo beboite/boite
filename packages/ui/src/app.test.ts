@@ -245,7 +245,7 @@ test('the picker rails the providers as logos and gives the shown one its accoun
   await waitFor(() => document.querySelector('[data-testid=composer-picker-menu]') !== null);
   // One tile per provider, in the core's order, the one whose files are still to
   // download included: it is picked like any other and its column says why.
-  expect(tiles()).toEqual(['claude', 'echo', 'opencode', 'antigravity', 'codex', 'pi', 'grok']);
+  expect(tiles()).toEqual(['favorites', 'claude', 'echo', 'opencode', 'antigravity', 'codex', 'pi', 'grok']);
   // Claude is the shown one and has two logins, so they sit beside its name.
   expect(seats()).toEqual(['claude::a-claude-main', 'claude::a-claude-side']);
   expect(shownModels()).toEqual(['claude-fable-5-1', 'claude-opus-5', 'claude-sonnet-5']);
@@ -292,12 +292,13 @@ test('the picker reads an ACP agent models, showing the descriptor and a probing
 
   // While the agent is being asked, its descriptor's one model stands.
   await waitFor(() => document.querySelector('[data-testid=picker-probing]') !== null);
-  expect(shownModels()).toEqual(['default']);
+  expect(shownModels()).toEqual([]);
 
   await waitFor(() => document.querySelector('[data-testid=picker-probing]') === null);
   // The agent lists more than the column shows at once; the first three are the ones it names first.
-  expect(shownModels().length).toBe(23);
-  expect(shownModels().slice(0, 3)).toEqual(['default', 'anthropic/claude-sonnet-5', 'openai/gpt-5-codex']);
+  expect(shownModels().length).toBe(22);
+  expect(shownModels()).not.toContain('default');
+  expect(shownModels()).toContain('openai/gpt-5-codex');
 
   query<HTMLButtonElement>('[data-model="openai/gpt-5-codex"]').click();
   await waitFor(() => document.querySelector('[data-testid=composer-picker-menu]') === null);
@@ -335,25 +336,23 @@ test('past twelve models the column gets a search field, prefix groups and keybo
   query<HTMLButtonElement>('[data-testid=composer-picker-menu] [data-provider=opencode]').click();
   await waitFor(() => document.querySelector('[data-testid=picker-probing]') === null);
   await waitFor(() => document.querySelector('[data-testid=picker-search]') !== null);
-  expect(shownModels().length).toBe(23);
-  expect(groupLabels()).toEqual(['anthropic', 'openai', 'openrouter', 'opencode', 'nvidia']);
+  expect(shownModels().length).toBe(22);
+  expect(groupLabels().sort()).toEqual(['anthropic', 'nvidia', 'openai', 'opencode', 'openrouter']);
   // The column opens on a long list, so the field already has the caret.
   const search = query<HTMLInputElement>('[data-testid=picker-search]');
   expect(document.activeElement).toBe(search);
 
   await type(search, 'sonnet');
-  await waitFor(() => shownModels().length === 4);
+  await waitFor(() => shownModels().length === 3);
   // The agent's own default is pinned first whatever the query.
   expect(shownModels()).toEqual([
-    'default',
     'anthropic/claude-sonnet-5',
-    'openrouter/anthropic/claude-sonnet-4-5',
-    'opencode/claude-sonnet-5'
+    'opencode/claude-sonnet-5',
+    'openrouter/anthropic/claude-sonnet-4-5'
   ]);
-  expect(groupLabels()).toEqual(['anthropic', 'openrouter', 'opencode']);
+  expect(groupLabels()).toEqual(['anthropic', 'opencode', 'openrouter']);
 
-  // Down onto the pinned row, down again onto the first match, Enter to take it.
-  press('ArrowDown');
+  // Down onto the first named match, Enter to take it.
   press('ArrowDown');
   expect((document.activeElement as HTMLElement).getAttribute('data-model')).toBe('anthropic/claude-sonnet-5');
   press('Enter');
@@ -365,10 +364,10 @@ test('past twelve models the column gets a search field, prefix groups and keybo
   await waitFor(() => document.querySelector('[data-testid=picker-search]') !== null);
   await type(query<HTMLInputElement>('[data-testid=picker-search]'), 'nothing here');
   await waitFor(() => document.querySelector('[data-testid=picker-no-models]') !== null);
-  expect(shownModels()).toEqual(['default']);
+  expect(shownModels()).toEqual([]);
 
   press('Escape');
-  await waitFor(() => shownModels().length === 23);
+  await waitFor(() => shownModels().length === 22);
   expect(document.querySelector('[data-testid=composer-picker-menu]')).not.toBeNull();
   expect(query<HTMLInputElement>('[data-testid=picker-search]').value).toBe('');
 
@@ -593,7 +592,8 @@ test('the header wears the context meter, a compaction is a divider, and a turn 
   // A thread whose agent never reported wears no meter.
   query<HTMLButtonElement>('[data-thread-id="t-bench"]').click();
   await waitFor(() => store.openThread?.id === 't-bench');
-  expect(document.querySelector('[data-testid=context-meter]')).toBeNull();
+  expect(query('[data-testid=context-meter]').textContent).toContain('?');
+  expect(query('[data-testid=context-meter]').title).toBe('Context usage not reported');
 });
 
 test('the trace panel shows the I/O a process moved, and none for a record that measured nothing', async () => {
@@ -891,8 +891,10 @@ test('a provider Boite installs says so in the picker and sends you to Settings,
   await waitFor(() => document.querySelector('[data-testid=picker-not-installed]') === null);
   await waitFor(() => shownModels().length > 0);
 
-  query<HTMLButtonElement>('[data-model=default]').click();
-  await waitFor(() => (query('[data-testid=composer-picker]').textContent ?? '').includes('Antigravity'));
+  expect(shownModels()).not.toContain('default');
+  query<HTMLButtonElement>('[data-testid=composer-picker-menu] [data-model]').click();
+  await waitFor(() => document.querySelector('[data-testid=composer-picker-menu]') === null);
+  expect(store.defaultChoice()?.providerId).toBe('antigravity');
 });
 
 test('the Providers page says where each managed install stands and offers Update on the one behind', async () => {

@@ -6,7 +6,7 @@
   import { resolveEndpoint } from './lib/endpoint';
   import { startTheme } from './lib/theme';
   import { strings } from './lib/strings';
-  import QuotaList from './components/QuotaList.svelte';
+  import QuotaOverview from './components/QuotaOverview.svelte';
   let rows = $state<AccountQuota[]>([]);
   let busy = $state(false);
   let error = $state('');
@@ -27,6 +27,14 @@
       if (action === 'quit') await invoke('quit_shell');
       else await invoke('quota_window', { action });
     } catch (cause) { error = String(cause); }
+  }
+  async function configure(accountId: string, enabled: boolean) {
+    if (!client || busy) return;
+    busy = true;
+    try { rows = await client.call('quotas.configure', { accountId, enabled }); error = ''; }
+    catch (cause) { error = String(cause); }
+    finally { busy = false; }
+    if (enabled) await refresh();
   }
   onMount(() => {
     const off = [startTheme()];
@@ -60,14 +68,14 @@
 </script>
 <svelte:window onkeydown={(event) => { if (event.key === 'Escape') void action('hide'); }} />
 <main data-testid="quota-popup">
-  <header><h1>{strings.quotas.heading}</h1><div class="actions">
+  <header><div><h1>{strings.quotas.trayHeading}</h1><p class="subtitle">{strings.quotas.trayIntro}</p></div><div class="actions">
     <button class="ghost icon" aria-label={strings.quotas.refresh} disabled={busy} onclick={() => void refresh(true)}><RefreshCw size={15} /></button>
     <button class="ghost icon" aria-label={strings.common.close} onclick={() => void action('hide')}><X size={15} /></button>
   </div></header>
   <section>
     {#if busy && rows.length === 0}<p class="muted" role="status">{strings.quotas.loading}</p>{/if}
     {#if error}<p class="error" role="alert">{error}</p>{/if}
-    <QuotaList rows={rows.filter((row) => row.enabled && row.status !== 'unsupported')} compact />
+    <QuotaOverview {rows} {busy} configure={(id, enabled) => void configure(id, enabled)} connect={() => void action('providers')} />
   </section>
   <footer><button class="ghost" onclick={() => void action('providers')}><Settings2 size={15} />{strings.quotas.providers}</button><button class="ghost icon" aria-label={strings.quotas.quit} onclick={() => void action('quit')}><Power size={15} /></button></footer>
 </main>
@@ -77,8 +85,9 @@
   header { border-bottom: 1px solid var(--color-border); }
   footer { border-top: 1px solid var(--color-border); }
   h1 { font-size: var(--text-md); }
+  .subtitle { margin: 2px 0 0; font-size: var(--text-xs); color: var(--color-muted-foreground); }
   .actions { display: flex; gap: 2px; }
-  section { flex: 1; min-height: 0; overflow: auto; padding: 12px; }
+  section { flex: 1; min-height: 0; overflow: auto; padding: 4px 12px; }
   .muted { color: var(--color-muted-foreground); }
   .error { color: var(--color-danger); }
 </style>

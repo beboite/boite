@@ -71,6 +71,7 @@ const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>([
   'messages.list',
   'threads.update',
   'threads.retitle',
+  'threads.compact',
   'threads.archive',
   'threads.pin',
   'threads.markRead',
@@ -976,6 +977,14 @@ export class FakeClient implements ObservableClient {
         }
         return this.#startTurn(params.threadId, params.prompt, params.attachments ?? []);
       }
+      case 'threads.compact': {
+        const params = rawParams as RpcParams<'threads.compact'>;
+        const thread = this.#thread(params.threadId);
+        if (params.expectedSelectionVersion !== undefined && params.expectedSelectionVersion !== (thread.selectionVersion ?? 0)) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'the model selection changed' });
+        if (!thread.sessionId) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'this thread has no native session to compact' });
+        if (this.#providers.find((p) => p.id === thread.providerId)?.protocol === 'acp' && !thread.commands.some((c) => c.name === 'compact')) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'this agent has not advertised a compact command' });
+        return this.#startTurn(params.threadId, '[compact]', [], 'compact');
+      }
       case 'turns.stop': {
         const params = rawParams as RpcParams<'turns.stop'>;
         return { stopped: await this.#stopTurn(params.threadId) };
@@ -1171,12 +1180,13 @@ export class FakeClient implements ObservableClient {
   }
 
   #quotas(): AccountQuota[] {
-    return this.#accounts.map((account, index) => ({
-      accountId: account.id, providerId: account.providerId, providerName: this.#providers.find((p) => p.id === account.providerId)?.name ?? account.providerId,
-      label: account.label, enabled: this.#quotaEnabled[account.id] !== false,
-      status: this.#quotaEnabled[account.id] === false ? 'disabled' : 'ready',
+    const accounts = [...this.#accounts, { id: 'quota:antigravity-cli', providerId: 'antigravity', label: 'Antigravity CLI' }];
+    return accounts.map((account, index) => ({
+      accountId: account.id, providerId: account.providerId, providerName: account.providerId === 'opencode' ? 'OpenCode Go' : this.#providers.find((p) => p.id === account.providerId)?.name ?? account.providerId,
+      label: account.label, enabled: account.id === 'quota:antigravity-cli' ? this.#quotaEnabled[account.id] === true : this.#quotaEnabled[account.id] !== false,
+      status: account.providerId === 'echo' || account.providerId === 'pi' || account.id === 'a-antigravity' ? 'unsupported' : this.#quotaEnabled[account.id] === false || account.id === 'quota:antigravity-cli' && this.#quotaEnabled[account.id] !== true ? 'disabled' : 'ready',
       checkedAt: Date.now(), error: null,
-      windows: this.#quotaEnabled[account.id] === false ? [] : [
+      windows: this.#quotaEnabled[account.id] === false || account.id === 'quota:antigravity-cli' && this.#quotaEnabled[account.id] !== true ? [] : [
         { id: 'primary', label: '5 hours', usedPercent: index === 0 ? 32 : 87, resetsAt: Date.now() + 2 * 3600_000 },
         { id: 'secondary', label: 'Weekly', usedPercent: 61, resetsAt: Date.now() + 3 * 86400_000 },
       ],
@@ -1207,7 +1217,7 @@ export class FakeClient implements ObservableClient {
     return stopped;
   }
 
-  #startTurn(threadId: ThreadId, prompt: string, attachments: ImageAttachment[] = []): Turn {
+  #startTurn(threadId: ThreadId, prompt: string, attachments: ImageAttachment[] = [], operation?: 'compact'): Turn {
     const thread = this.#thread(threadId);
     if (thread.archived) {
       throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'cannot start a turn on an archived thread', data: { threadId } });
@@ -1239,6 +1249,7 @@ export class FakeClient implements ObservableClient {
         providerId: thread.providerId, accountId: thread.accountId, model: thread.model,
         effort: thread.effort, permissionMode: thread.permissionMode, sessionId: thread.sessionId,
         sessionGeneration: thread.sessionGeneration ?? 0, selectionVersion: thread.selectionVersion ?? 0,
+        ...(operation ? { operation } : {}),
       }
     };
     thread.turns.push(turn);
@@ -1289,6 +1300,7 @@ export class FakeClient implements ObservableClient {
     record: { cancelled: boolean },
     attachments: ImageAttachment[] = []
   ): Promise<void> {
+    const compactAfter = Math.max(1, Math.floor((thread.context?.tokens ?? FAKE_CONTEXT_FLOOR) / 4));
     const message: Message = {
       id: `m-${++this.#seq}`,
       threadId: thread.id,
@@ -1388,6 +1400,12 @@ export class FakeClient implements ObservableClient {
       await this.#spawnProcess(thread, spawn[1]);
     }
 
+    if (!record.cancelled && prompt === '[compact]') {
+      const part: MessagePart = { type: 'compaction', trigger: 'manual', preTokens: thread.context?.tokens ?? null, postTokens: compactAfter };
+      const partIndex = message.parts.length;
+      message.parts.push(part);
+      this.#emitToThread(thread.id, 'message.part', { threadId: thread.id, messageId: message.id, partIndex, part });
+    }
     message.state = 'complete';
     this.#emitToThread(thread.id, 'message.completed', {
       threadId: thread.id,
@@ -1412,7 +1430,7 @@ export class FakeClient implements ObservableClient {
     thread.unread = !this.#subscribed.has(thread.id);
     // The context meter grows with every turn, the way a real session's does.
     thread.context = {
-      tokens: (thread.context?.tokens ?? FAKE_CONTEXT_FLOOR) + FAKE_CONTEXT_PER_TURN + prompt.length * 4,
+      tokens: prompt === '[compact]' && !record.cancelled ? compactAfter : (thread.context?.tokens ?? FAKE_CONTEXT_FLOOR) + FAKE_CONTEXT_PER_TURN + prompt.length * 4,
       window: FAKE_CONTEXT_WINDOW,
       at: this.#now()
     };

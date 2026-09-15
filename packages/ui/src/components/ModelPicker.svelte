@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { ChevronDown, ChevronRight, Search, Sparkles } from '@lucide/svelte';
+  import { ChevronDown, ChevronRight, Search, Sparkles, Star } from '@lucide/svelte';
+  import { orderedModels, type FavoriteModel } from '../lib/model-order';
   import type { Account, ModelInfo, ProviderSummary } from '@boite/contracts';
   import ProviderLogo from './ProviderLogo.svelte';
   import { Closing } from '../lib/closing.svelte';
@@ -38,6 +39,23 @@
   let modelQuery = $state('');
   /** The provider whose column is shown: the choice's until another tile is clicked. */
   let shownProviderId = $state<string | null>(null);
+  let favoritesOpen = $state(false);
+  let favoritePending = $state(false);
+  const favorites = $derived(store.favorites.filter((f) => store.accountOf(f.accountId)?.providerId === f.providerId));
+  function favorite(model: ModelInfo): boolean {
+    return store.favorites.some((f) => f.providerId === shown?.id && f.accountId === shownAccountId && f.model.id === model.id);
+  }
+  async function pickFavorite(entry: FavoriteModel) {
+    if (favoritePending) return;
+    favoritePending = true;
+    try {
+      const protocol = store.providerOf(entry.providerId)?.protocol;
+      if (protocol === 'acp' || protocol === 'codex-appserver' || protocol === 'pi') await store.probeModels(entry.providerId, entry.accountId);
+      if (!store.modelsOf(entry.providerId, entry.accountId).some((m) => m.id === entry.model.id)) { store.error = strings.composer.favoriteUnavailable; return; }
+      onpick({ providerId: entry.providerId, accountId: entry.accountId, model: entry.model.id });
+      popover.hide();
+    } finally { favoritePending = false; }
+  }
 
   interface Tile {
     provider: ProviderSummary;
@@ -65,7 +83,7 @@
     const install = store.installOf(shown.id);
     return install !== null && install.state !== 'installed';
   });
-  let shownModels = $derived(shown ? store.modelsOf(shown.id, shownAccountId) : []);
+  let shownModels = $derived(shown ? orderedModels(store.modelsOf(shown.id, shownAccountId)) : []);
   let probing = $derived(shown ? store.isProbing(shown.id, shownAccountId) : false);
 
   // An ACP agent owns its model list, so the descriptor cannot carry it: the
@@ -73,7 +91,7 @@
   // shows that instance, and the answer stands for the rest of the session.
   // Nothing is asked of a provider whose executable is not on the machine.
   $effect(() => {
-    if (!popover.open || !shown || needsInstall) return;
+    if (!popover.open || favoritesOpen || !shown || needsInstall) return;
     if (shown.protocol !== 'acp' && shown.protocol !== 'codex-appserver' && shown.protocol !== 'pi') return;
     const accountId = shownAccountId;
     if (accountId === null) return;
@@ -190,6 +208,7 @@
     popover.toggle();
     if (popover.open) {
       shownProviderId = choice?.providerId ?? null;
+      favoritesOpen = favorites.length > 0;
       legacyOpen = false;
       modelQuery = '';
     }
@@ -198,6 +217,7 @@
   /** A tile only moves the column: the choice follows a model or an account chip. */
   function pickTile(tile: Tile) {
     if (tile.held) return;
+    favoritesOpen = false;
     shownProviderId = tile.provider.id;
     legacyOpen = false;
     modelQuery = '';
@@ -338,11 +358,12 @@
       {onkeydown}
     >
       <div class="column rail">
+        <button type="button" class="tile" class:current={favoritesOpen} role="menuitem" data-row data-provider="favorites" title={strings.composer.favorites} aria-label={strings.composer.favorites} onclick={() => { favoritesOpen = true; modelQuery = ''; }}><Star size={18} /></button>
         {#each tiles as tile (tile.provider.id)}
           <button
             type="button"
             class="tile"
-            class:current={shown?.id === tile.provider.id}
+            class:current={!favoritesOpen && shown?.id === tile.provider.id}
             class:dim={tile.reason !== null}
             disabled={tile.held}
             role="menuitem"
@@ -359,6 +380,7 @@
 
       <div class="column models">
         {#snippet modelRow(model: ModelInfo)}
+          <div class="model-entry">
           <button
             type="button"
             class="row model"
@@ -374,8 +396,21 @@
               <span class="badge">{strings.composer.newBadge}</span>
             {/if}
           </button>
+          <button type="button" class="favorite-button" data-testid="model-favorite" data-favorite-model={model.id} aria-label={favorite(model) ? strings.composer.unfavorite : strings.composer.favorite} aria-pressed={favorite(model)} onclick={() => { if (shown && shownAccountId) store.toggleFavorite(shown.id, shownAccountId, model); }}><Star size={14} fill={favorite(model) ? 'currentColor' : 'none'} /></button>
+          </div>
         {/snippet}
 
+        {#if favoritesOpen}
+          <div class="head"><span class="provider-name">{strings.composer.favorites}</span></div>
+          {#each favorites as entry (`${entry.providerId}:${entry.accountId}:${entry.model.id}`)}
+            <div class="model-entry">
+              <button type="button" class="row model" role="menuitem" data-row data-testid="favorite-model" disabled={favoritePending || !store.providerOf(entry.providerId)?.available} onclick={() => void pickFavorite(entry)}>
+                <ProviderLogo providerId={entry.providerId} size={16} /><span class="name">{entry.model.name}<small>{store.accountOf(entry.accountId)?.label}</small></span>
+              </button>
+              <button type="button" class="favorite-button" aria-label={strings.composer.unfavorite} onclick={() => store.toggleFavorite(entry.providerId, entry.accountId, entry.model)}><Star size={14} fill="currentColor" /></button>
+            </div>
+          {:else}<p class="none subtle" data-testid="favorites-empty">{strings.composer.favoritesEmpty}</p>{/each}
+        {:else}
         <div class="head">
           <span class="provider-name">{shown ? shown.name : strings.composer.models}</span>
           {#if seats.length > 1}
@@ -469,6 +504,7 @@
             <div class="fold-body" class:open={legacyOpen} inert={!legacyOpen}>
               <div class="clip">
                 {#each filteredLegacy as model (model.id)}
+                  <div class="model-entry">
                   <button
                     type="button"
                     class="row model legacy"
@@ -482,16 +518,19 @@
                     <span class="mark"></span>
                     <span class="name">{model.name}</span>
                   </button>
+                  <button type="button" class="favorite-button" tabindex={legacyOpen ? 0 : -1} aria-label={favorite(model) ? strings.composer.unfavorite : strings.composer.favorite} aria-pressed={favorite(model)} onclick={() => { if (shown && shownAccountId) store.toggleFavorite(shown.id, shownAccountId, model); }}><Star size={14} fill={favorite(model) ? 'currentColor' : 'none'} /></button>
+                  </div>
                 {/each}
               </div>
             </div>
           {/if}
           {#if shown && shownModels.length === 0 && !probing}
-            <p class="none subtle">{strings.thread.defaultModel}</p>
+            <p class="none subtle">{strings.composer.noModels}</p>
           {/if}
           {#if probing}
             <p class="none subtle probing" data-testid="picker-probing">{strings.composer.probing}</p>
           {/if}
+        {/if}
         {/if}
       </div>
     </div>
@@ -499,6 +538,11 @@
 </div>
 
 <style>
+  .model-entry { display: flex; align-items: center; }
+  .model-entry .model { flex: 1; min-width: 0; }
+  .favorite-button { width: var(--control-sm); height: var(--control-sm); padding: 0; flex: none; color: var(--color-muted-foreground); background: transparent; border: none; }
+  .favorite-button[aria-pressed='true'] { color: var(--color-foreground); }
+  .name small { display: block; font-size: var(--text-xs); color: var(--color-muted-foreground); }
   .picker {
     position: relative;
     display: inline-flex;
