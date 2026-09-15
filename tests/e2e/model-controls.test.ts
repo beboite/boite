@@ -20,6 +20,44 @@ beforeAll(async () => {
 });
 afterAll(async () => { await page?.close(); await server?.close(); });
 
+test.each(['glass', 'grain'])('pointer clicks open and select models with %s', async (material) => {
+  await page.navigate(url);
+  await page.waitFor(`document.querySelector('[data-testid=composer-picker]')`);
+  await page.evaluate(material === 'glass' ? `document.documentElement.dataset.glass = 'acrylic'` : `document.documentElement.dataset.theme = 'grain'`);
+  async function pointerClick(selector: string) {
+    await page.waitFor(`document.querySelector(${JSON.stringify(selector)})`);
+    await page.evaluate(`Promise.all(document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {})))`);
+    const point = await page.evaluate<{ x: number; y: number }>(`(() => { const r = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return {x:r.left+r.width/2,y:r.top+r.height/2}; })()`);
+    await page.send('Input.dispatchMouseEvent', { type: 'mousePressed', ...point, button: 'left', clickCount: 1 });
+    await page.send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...point, button: 'left', clickCount: 1 });
+  }
+  await pointerClick('[data-testid=composer-picker]');
+  await capture(`picker-pointer-${material}.png`);
+  const bounds = await page.evaluate<any>(`(() => { const r=document.querySelector('[data-testid=composer-picker-menu]').getBoundingClientRect(); return {top:r.top,bottom:r.bottom,height:innerHeight}; })()`);
+  expect(bounds.top).toBeGreaterThanOrEqual(0);
+  expect(bounds.bottom).toBeLessThanOrEqual(bounds.height);
+  await pointerClick('[data-provider=claude]');
+  await pointerClick('[data-testid=picker-legacy]');
+  await pointerClick('[data-testid=picker-legacy-menu] [data-model]');
+  await page.waitFor(`!document.querySelector('[data-testid=composer-picker-menu]')`);
+  await pointerClick('[data-testid=composer-picker]');
+  await pointerClick('[data-provider=claude]');
+  await pointerClick('[data-model=claude-fable-5-1]');
+  await page.waitFor(`document.querySelector('[data-testid=composer-picker]')?.textContent.includes('Fable')`);
+  await capture('picker-pointer-selection.png');
+  await pointerClick('[data-testid=new-thread]');
+  await pointerClick('[data-testid=composer-picker]');
+  await pointerClick('[data-provider=claude]');
+  await pointerClick('[data-model=claude-sonnet-5]');
+  await page.waitFor(`document.querySelector('[data-testid=composer-picker]')?.textContent.includes('Sonnet')`);
+  await pointerClick('[data-testid=composer-picker]');
+  await capture(`picker-pointer-draft-${material}.png`);
+  await pointerClick('[data-testid=composer-picker]');
+  await page.waitFor(`!document.querySelector('[data-testid=composer-picker-menu]')`);
+  await page.navigate(url);
+  await page.waitFor(`document.querySelector('[data-testid=composer-picker]')`);
+}, 30_000);
+
 test('favorites survive reload, reasoning has discrete stops, and the context ring compacts', async () => {
   await page.click('[data-testid=composer-picker]');
   await page.click('[data-provider=claude]');

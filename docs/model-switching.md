@@ -38,6 +38,8 @@ The menu floats without changing the page layout. It prefers the space below the
 composer and flips above when needed. Provider tabs sit above the models; the
 menu fits its content up to a scrollable height limit. Legacy models open in a
 side submenu, with a left-side or in-viewport fallback on narrow screens.
+Both menus use the browser's top layer so the composer's glass or Grain blur
+cannot offset or clip them. Pointer-click checks cover both materials.
 Favorites use a single row; an inline account label only distinguishes the same
 model starred on different accounts.
 

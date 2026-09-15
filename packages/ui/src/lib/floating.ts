@@ -1,5 +1,12 @@
 /** Position an overlay without changing the page's layout. */
 export function floating(node: HTMLElement, options: { anchor: () => HTMLElement | null; side?: 'right' }) {
+  // The composer's glass blur establishes a containing block for fixed children.
+  // The top layer keeps viewport coordinates valid without moving the DOM node,
+  // so the picker's outside-click and keyboard handlers still own both menus.
+  node.setAttribute('popover', 'manual');
+  node.style.margin = '0';
+  node.style.inset = 'auto';
+  node.showPopover?.();
   const gap = 6;
   const margin = 12;
   function place() {
