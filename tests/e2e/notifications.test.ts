@@ -56,3 +56,27 @@ test('older cores do not flood sidebar errors and manual lookup explains the mis
   await page.waitFor(`document.querySelector('[data-testid="error-toast"]')?.textContent.includes('Update Boite')`);
   expect(await page.evaluate(`window.__prCalls`)).toBe(1);
 });
+
+test('unsupported goals identify the host without sending a normal turn', async () => {
+  await page.evaluate(`(async () => {
+    const {workspace} = await import('/src/lib/workspace.svelte.ts');
+    const {RpcFailure} = await import('/src/lib/client.ts');
+    const store = workspace.active; store.core.hostname = 'Older host';
+    const client = store.client; const call = client.call.bind(client);
+    window.__normalTurns = 0;
+    client.call = (method, params) => {
+      if (method === 'threads.activity.set') return Promise.reject(new RpcFailure({code:-32601,message:'unknown method threads.activity.set'}));
+      if (method === 'turns.start') window.__normalTurns++;
+      return call(method,params);
+    };
+    await store.send('/goal Verify two tasks');
+  })()`);
+  await page.waitFor(`document.querySelector('[data-testid="error-toast"]')?.textContent.includes('Update Boite on Older host')`);
+  expect(await page.evaluate(`window.__normalTurns`)).toBe(0);
+  await page.evaluate(`document.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true}));`);
+  await page.evaluate(`Promise.all(document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {})))`);
+  await page.screenshot(join(import.meta.dir,'.artifacts/goal-compat-desktop.png'));
+  await page.send('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true});
+  await page.evaluate(`Promise.all(document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {})))`);
+  await page.screenshot(join(import.meta.dir,'.artifacts/goal-compat-phone.png'));
+});

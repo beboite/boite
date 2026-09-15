@@ -1,3 +1,4 @@
+import { RpcErrorCode } from '@boite/contracts';
 import { resetPullRequestSupport } from './pull-request';
 import { activityCommand } from './activity-command';
 import type {
@@ -1453,7 +1454,12 @@ export class Store {
       const activity = activityCommand(prompt);
       if (activity) {
         if (attachments.length) throw new Error(strings.activity.noAttachments);
-        const accepted = await client.call('threads.activity.set', { threadId, ...activity });
+        const accepted = await client.call('threads.activity.set', { threadId, ...activity }).catch((error: unknown) => {
+          if (error instanceof RpcFailure && error.code === RpcErrorCode.MethodNotFound) {
+            throw new Error(strings.errors.activityUnsupported.replace('{machine}', this.core?.hostname ?? strings.app.name));
+          }
+          throw error;
+        });
         if (this.openThread?.id === threadId) this.openThread.activity = accepted;
         return true;
       }

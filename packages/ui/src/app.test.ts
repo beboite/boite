@@ -1352,3 +1352,28 @@ test('machines coexist and disconnecting a remote leaves the primary connected',
   expect(store.connection).toBe('ready');
   expect(workspace.active).toBe(store);
 });
+
+test('an older core names the host that needs goals support and keeps the unsent prompt', async () => {
+  await mountOnFake();
+  await waitFor(() => store.openThread !== null);
+  store.core!.hostname = 'Older host';
+  const client = store.client!;
+  const call = client.call.bind(client);
+  const { RpcFailure } = await import('./lib/client');
+  const spy = vi.spyOn(client, 'call').mockImplementation((method, params) => {
+    if (method === 'threads.activity.set') return Promise.reject(new RpcFailure({code:-32601,message:'unknown method threads.activity.set'}));
+    return call<RpcMethodName>(method, params);
+  });
+  try {
+    const field = query<HTMLTextAreaElement>('[data-testid=composer-input]');
+    field.value = '/goal Verify two tasks';
+    field.dispatchEvent(new Event('input', {bubbles:true}));
+    await waitFor(() => !query<HTMLButtonElement>('[data-testid=composer-send]').disabled);
+    query<HTMLButtonElement>('[data-testid=composer-send]').click();
+    await waitFor(() => store.error !== null);
+    expect(store.error).toContain(store.core!.hostname);
+    expect(store.error).toContain('Update Boite');
+    expect(field.value).toBe('/goal Verify two tasks');
+    expect(spy.mock.calls.some(([method]) => method === 'turns.start')).toBe(false);
+  } finally { spy.mockRestore(); }
+});
