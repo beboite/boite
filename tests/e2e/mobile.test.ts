@@ -58,6 +58,9 @@ test('draft survives navigation and the light phone layout fits landscape', asyn
 
 test('model sheets stay on screen and browser Back closes the sheet without losing the draft', async () => {
   await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+  await page.click('[data-testid=mobile-new]');
+  await page.waitFor(`document.querySelector('[data-testid=composer-input]')`);
+  await page.evaluate(`(() => { const t = document.querySelector('[data-testid=composer-input]'); t.value = 'Keep this draft'; t.dispatchEvent(new Event('input', {bubbles:true})); })()`);
   await page.click('[data-testid=composer-picker]');
   await page.waitFor(`document.querySelector('[data-testid=composer-picker-menu]')`);
   await capture('mobile-model-sheet.png');

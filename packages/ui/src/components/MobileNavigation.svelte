@@ -63,7 +63,7 @@
       <button class="ghost thread" data-testid="mobile-thread-{row.thread.id}" onclick={async () => { await workspace.select(row.machine.store, row.thread.id); show('chat'); }}>
         <StatusMark status={row.thread.status} />
         <span class="summary"><span class="title">{row.thread.title}</span><span class="detail">{row.project?.name} · {row.machine.label}</span></span>
-        {#if row.thread.unread}<span class="unread" aria-label={strings.mobile.unread}></span>{/if}
+        {#if row.thread.unread}<span class="unread" role="img" aria-label={strings.mobile.unread}></span>{/if}
       </button>
     {:else}
       <p class="empty">{screen === 'activity' ? strings.mobile.noActivity : strings.mobile.noThreads}</p>

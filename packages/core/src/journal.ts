@@ -565,7 +565,7 @@ export class Journal {
 
   deleteThreadsOfProject(projectId: string): string[] {
     const rows = this.db.query('SELECT id FROM threads WHERE project_id = ?').all(projectId) as { id: string }[];
-    for (const table of ['turns', 'messages', 'processes']) {
+    for (const table of ['turn_requests', 'turns', 'messages', 'processes']) {
       this.db.query(`DELETE FROM ${table} WHERE thread_id IN (SELECT id FROM threads WHERE project_id = ?)`).run(projectId);
     }
     this.db.query('DELETE FROM threads WHERE project_id = ?').run(projectId);
@@ -725,6 +725,9 @@ export class Journal {
    * the thread.
    */
   listMessagePage(threadId: string, options: { beforeRowid?: number; limit: number }): MessagePage {
+    // Subscribers have already received buffered deltas. A reload must not replace
+    // those messages with an older projection while the next delta is streaming.
+    this.flushDeltas();
     const limit = Math.max(1, Math.trunc(options.limit));
     // One row past the page is what says whether anything is left behind it.
     const rows =

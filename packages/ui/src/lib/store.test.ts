@@ -60,6 +60,20 @@ test('a lost start response retains its request id until the retry is acknowledg
   } finally { store.detach(); client.close(); }
 });
 
+test.each(['input', 'inputText', 'output', 'documents'])('reading cache excludes oversized tool %s', async (field) => {
+  const { store, client } = await ready();
+  try {
+    await store.open('t-bench');
+    const large = 'x'.repeat(2 * 1024 * 1024 + 1);
+    const part: any = { type: 'tool', toolId: 'large', name: 'read', input: {}, output: null, status: 'done' };
+    part[field] = field === 'documents' ? [{ kind: 'markdown', text: large }] : field === 'input' ? { nested: { text: large } } : large;
+    store.openThread!.messages.unshift({ id: 'cached-only', threadId: 't-bench', turnId: 'old', role: 'assistant', parts: [part], state: 'complete', createdAt: 0 });
+    await store.open('t-scheduler');
+    await store.open('t-bench');
+    expect(store.openThread!.messages.some(message => message.id === 'cached-only')).toBe(false);
+  } finally { store.detach(); client.close(); }
+});
+
 describe('Store', () => {
   beforeEach(() => {
     window.localStorage.clear();

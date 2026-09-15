@@ -184,8 +184,8 @@ export class Store {
     // The active timeline remains unrestricted; old visits must not retain every image forever.
     let bytes = 0;
     for (const message of thread.messages) for (const part of message.parts) {
-      if ('data' in part && typeof part.data === 'string') bytes += part.data.length * 2;
-      if ('text' in part && typeof part.text === 'string') bytes += part.text.length * 2;
+      // Include nested tool inputs and documents, with conservative JSON overhead.
+      bytes += JSON.stringify(part).length * 2;
     }
     this.#readingThreads.delete(thread.id);
     if (bytes <= 4 * 1024 * 1024 && thread.messages.length <= 2000) this.#readingThreads.set(thread.id, thread);
