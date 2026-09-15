@@ -9,12 +9,16 @@ when a dependency never starts. Documentation-only changes still produce it.
 | Change | Checks |
 | --- | --- |
 | Markdown docs, license, issue templates, topics | Local documentation links and CI decision tests |
-| Code, dependencies, build files, workflows, unknown paths | Above, type checks, core tests on Windows and Linux, UI tests, Windows shell tests, installer build, full end-to-end suite, Docker smoke tests on x64 and ARM64 |
+| Shell files or end-to-end tests | Windows shell tests, installer build and full end-to-end suite |
+| Dockerfile, .dockerignore, docker/ | Docker smoke tests on native x64 and ARM64 |
+| UI files | Type checks, UI tests, desktop checks and Docker smoke tests |
+| Core, contracts, dependencies, shared build files, workflows, unknown paths | All checks, including core tests on Windows and Linux |
 | Version tag | Complete checks, then a draft Windows release |
 | Enabled nightly with an unpublished commit | Complete checks, development installer, development server image, prerelease |
 
 Pull requests against any branch run CI. A newer commit cancels an older run of
-that same PR. Release and publication jobs finish instead of being interrupted
+that same PR. New main commits also cancel superseded ordinary CI runs.
+Release and publication jobs finish instead of being interrupted
 halfway through an upload. Live-provider tests stay disabled.
 
 ## Build cost
@@ -33,6 +37,8 @@ their merge ref.
 It builds the installer once, then copies the existing sidecar beside the shell
 for end-to-end testing. It does not recompile the core just to stage it again.
 The tested installer becomes the release artifact, with no second release build.
+CI sets `BOITE_E2E_PREBUILT_UI=1` to test the UI already built for that installer.
+The test refuses a missing UI build. Local end-to-end runs rebuild it by default.
 
 When Cargo uses a shared target directory, staging snapshots its shell into the
 checkout before the tests. Another checkout's later build cannot replace it.
@@ -82,6 +88,17 @@ The desktop uses the development identifier and data directory, shared with
 local Boite Dev builds and separate from stable Boite. The server uses the `dev`
 channel. Use a separate Compose project for nightly volumes. Nightly publication
 never changes the stable Docker `latest` tag or GitHub's latest stable release.
+Nightly verification skips the stable Docker job. Its publication job builds,
+smoke-tests and pushes the development image once per architecture after the
+other checks pass.
+
+## Pull request reviews
+
+`.coderabbit.yaml` configures CodeRabbit with advisory reviews. It does not
+request changes or become a required merge check. Draft PRs and generated build
+artifacts are excluded. Installing the GitHub App on this repository is a
+separate prerequisite. CodeRabbit controls free-plan eligibility and review
+limits; repository configuration does not override them.
 
 ## Releases and server images
 

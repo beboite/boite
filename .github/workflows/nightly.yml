@@ -58,6 +58,7 @@ jobs:
     if: needs.revision.outputs.changed == 'true'
     uses: ./.github/workflows/ci.yml
     with:
+      skip-server: true
       channel: nightly
       version: ${{ needs.revision.outputs.version }}
     permissions:
