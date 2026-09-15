@@ -53,7 +53,7 @@
     <h1>{strings.settings.tabs.appearance}</h1>
   </header>
 
-  <section class="card">
+  <section class="card" id="settings-theme">
     <h2>{strings.settings.appearance}</h2>
     <div class="switch-row">
       <span class="text">{strings.settings.theme}</span>

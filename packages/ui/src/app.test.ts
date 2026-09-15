@@ -1261,8 +1261,6 @@ const OWNER_ONLY_IN_SETTINGS = [
   '[data-testid=settings-tab-plugins]',
   '[data-testid=settings-tab-resources]',
   '[data-testid=settings-add-project]',
-  '[data-testid=setting-focus-guard]',
-  '[data-testid=setting-mute-agents]',
   '[data-testid=setting-listen-on-lan]',
   '[data-testid=pairing-mint]'
 ];
@@ -1327,6 +1325,23 @@ test('the desktop still has every one of them', async () => {
   store.showSettings();
   await waitFor(() => document.querySelector('[data-testid=settings-page]') !== null);
   for (const selector of OWNER_ONLY_IN_SETTINGS) expect(document.querySelector(selector)).not.toBeNull();
+  store.showSettings('resources');
+  await waitFor(() => document.querySelector('[data-testid=resources-page]') !== null);
+  for (const id of ['setting-focus-guard', 'setting-mute-agents']) {
+    const input = query(`[data-testid=${id}]`) as HTMLInputElement;
+    expect(input.checked).toBe(true);
+    input.click();
+    await waitFor(() => input.checked === false);
+  }
+  expect(store.settings?.focusGuard).toBe(false);
+  expect(store.settings?.muteAgents).toBe(false);
+  store.showSettings('general');
+  await waitFor(() => document.querySelector('[data-testid=settings-page]') !== null);
+  expect(document.querySelector('[data-testid=setting-focus-guard]')).toBeNull();
+  store.showSettings('resources');
+  await waitFor(() => document.querySelector('[data-testid=setting-focus-guard]') !== null);
+  expect((query('[data-testid=setting-focus-guard]') as HTMLInputElement).checked).toBe(false);
+
 });
 
 test('remembered cores list, tag the current one, and forget without touching the connection', async () => {
