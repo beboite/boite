@@ -551,7 +551,17 @@ export class ThreadStore {
     });
   }
 
-  startTurn(threadId: ThreadId, prompt: string, attachments: ImageAttachment[] = [], expectedSelectionVersion?: number): Turn {
+  compact(threadId: ThreadId, expectedSelectionVersion?: number): Turn {
+    const thread = this.require(threadId);
+    const protocol = this.core.providers.require(thread.providerId).protocol;
+    if (!thread.sessionId) throw refused('this thread has no native session to compact', { threadId });
+    if (protocol === 'acp' && !this.commands.get(threadId)?.some((command) => command.name === 'compact')) {
+      throw refused('this agent has not advertised a compact command', { threadId });
+    }
+    return this.startTurn(threadId, protocol === 'echo' ? '[compact]' : '/compact', [], expectedSelectionVersion, 'compact');
+  }
+
+  startTurn(threadId: ThreadId, prompt: string, attachments: ImageAttachment[] = [], expectedSelectionVersion?: number, operation?: 'compact'): Turn {
     const thread = this.require(threadId);
     this.checkSelection(thread, expectedSelectionVersion);
     if (thread.archived) throw refused('cannot start a turn on an archived thread', { threadId });
@@ -580,6 +590,7 @@ export class ThreadStore {
         providerId: thread.providerId, accountId: thread.accountId, model: thread.model,
         effort: thread.effort, permissionMode: thread.permissionMode, sessionId: thread.sessionId,
         sessionGeneration: thread.sessionGeneration ?? 0, selectionVersion: thread.selectionVersion ?? 0,
+        ...(operation ? { operation } : {}),
       },
     };
     const message: Message = {
@@ -796,7 +807,7 @@ export class ThreadStore {
       unread: current.unread || !this.core.subscribers.hasSubscribers(threadId),
     };
     this.save(next, 'thread.finished');
-    if (result.status === 'done' && sameSession) this.autoTitle(threadId, turnId);
+    if (result.status === 'done' && sameSession && queued.execution?.operation !== 'compact') this.autoTitle(threadId, turnId);
   }
 
   /**
@@ -1231,6 +1242,7 @@ function defaultModel(provider: ProviderDescriptor): string | null {
 }
 
 export function registerThreadMethods(core: Core): void {
+  core.router.register('threads.compact', (params) => core.threads.compact(params.threadId, params.expectedSelectionVersion));
   core.router.register('threads.list', (params) => core.threads.list(params));
   core.router.register('threads.create', (params) =>
     params.worktree === undefined ? core.threads.create(params) : core.threads.createInWorktree(params),

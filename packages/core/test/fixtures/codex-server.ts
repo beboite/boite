@@ -381,6 +381,17 @@ function handle(method: string, raw: unknown): unknown {
       );
       return { thread: threadRecord(), model: 'fake-codex', modelProvider: 'fake', serviceTier: null };
     }
+    case 'thread/compact/start': {
+      log('thread/compact/start');
+      const compactId = `compact-${++turnCounter}`;
+      setTimeout(() => {
+        send({ method: 'turn/started', params: { threadId, turn: turnRecord(compactId, 'inProgress') } });
+        send({ method: 'item/completed', params: { threadId, item: { id: 'compact-item', type: 'contextCompaction' } } });
+        send({ method: 'thread/tokenUsage/updated', params: { threadId, tokenUsage: { modelContextWindow: 200000, last: { inputTokens: 30000, outputTokens: 2000, totalTokens: 32000 } } } });
+        send({ method: 'turn/completed', params: { threadId, turn: turnRecord(compactId, 'completed') } });
+      }, 0);
+      return {};
+    }
     case 'turn/start': {
       turnCounter += 1;
       const turnId = `codex-fake-turn-${turnCounter}`;

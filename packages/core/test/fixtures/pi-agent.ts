@@ -299,6 +299,10 @@ function handle(message: Record<string, unknown>): void {
 
   log(type);
   switch (type) {
+    case 'compact': {
+      send({ id, type: 'response', command: 'compact', success: true, data: { tokensBefore: 150000, summary: 'remember this', firstKeptEntryId: 'm-1' } });
+      return;
+    }
     case 'prompt': {
       const images = message['images'];
       if (Array.isArray(images)) {

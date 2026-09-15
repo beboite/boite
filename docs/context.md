@@ -5,7 +5,8 @@ how much room the model gives it, and the header draws it as a ring with the
 percentage beside it. When the agent compacts its conversation mid-turn, the
 timeline gets a divider saying how many tokens went. Both come from the agent
 itself: the core never estimates a context size, and a provider whose protocol
-says nothing leaves the meter off.
+says nothing shows an unknown reading. The button inside the ring requests
+manual compaction of the native session.
 
 ## What is measured
 
@@ -32,17 +33,41 @@ finite or below zero writes nothing.
 |---|---|---|---|
 | Claude | `usage` on each `assistant` message of the SDK stream, the last one wins | `modelUsage[<model>].contextWindow` on the result message, the thread's model first, else the one model the turn ran on | the `compact_boundary` system message, with `pre_tokens` and `post_tokens` |
 | echo | 100 plus one token per character of the prompt | 2000 | `[compact]` in the prompt draws one, 1800 to 300 tokens, and lowers the reading to 300 |
-| Codex, OpenCode, Antigravity, Grok, pi | none yet | | |
+| Codex | `tokenUsage.last.totalTokens` in `thread/tokenUsage/updated` | `tokenUsage.modelContextWindow` when reported | completed `contextCompaction` items |
+| OpenCode, Antigravity, Grok, pi | none yet | | pi's manual compaction response |
 
-The ACP agents send compaction updates and Codex sends token counts on its
-own protocol; neither is read today, so those threads wear no meter.
+Codex's count includes the last request's output. Counts remain the last
+reported reading, not a prediction of the next request. ACP context updates
+are not read yet; an unknown reading never becomes a guessed percentage.
+
+## Manual compaction
+
+`threads.compact` creates a scheduled turn with `execution.operation: 'compact'`.
+It keeps the native session and visible history, freezes the selected account,
+and rejects missing sessions, busy threads and stale selection revisions.
+The existing Stop action cancels the maintenance turn. Paired devices may call it.
+
+| Driver | Native operation |
+|---|---|
+| Claude | `/compact` through the SDK prompt, without prompt-only reasoning suffixes |
+| Codex | `thread/compact/start`, completed by normal turn notifications |
+| pi | `compact` RPC, completed by its response; Stop closes the process because prompt abort does not cancel this RPC |
+| ACP | `/compact` only when the session advertised that command |
+| echo | `[compact]`, a deterministic test operation |
+
+The control is disabled while a turn runs, before a native session exists, or
+when an ACP agent has not advertised support. Compaction can make a provider
+call and incur usage. The driver does not invent a post-compaction token count.
+The protocol operations follow the [Codex app-server documentation](https://learn.chatgpt.com/docs/app-server#trigger-thread-compaction)
+and [pi RPC documentation](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/rpc.md#compact).
 
 ## The divider
 
 A compaction is a message part, `{ type: 'compaction', trigger, preTokens,
 postTokens }`, written into the assistant message at the point the agent
 compacted, so it sits between the text before and the text after. `trigger`
-is `auto` or `manual`; `postTokens` is null when the agent did not say what
+is `auto` or `manual`; `preTokens` is null when no prior count is known,
+and `postTokens` is null when the agent did not say what
 was left. An imported Claude Code session does not carry its compactions:
 the transcript reader keeps prompts, answers and tool calls only.
 

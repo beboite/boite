@@ -514,6 +514,11 @@ class PiSession {
     if (turn.settled) return;
     turn.markStopped();
     if (this.current !== turn) return;
+    if (turn.ctx.turn.execution?.operation === 'compact') {
+      turn.settleRun();
+      this.drop();
+      return;
+    }
     const peer = this.peer;
     if (peer === null) return;
     void peer.command('abort').catch(() => undefined);
@@ -549,11 +554,17 @@ class PiSession {
     turn.noteSession(sessionId);
     this.current = turn;
     try {
+      if (turn.ctx.turn.execution?.operation === 'compact') {
+        const result = dataOf(await peer.command('compact')) as { tokensBefore?: number };
+        turn.part(turn.takeIndex(), { type: 'compaction', trigger: 'manual', preTokens: result?.tokensBefore ?? turn.ctx.thread.context?.tokens ?? null, postTokens: null });
+        turn.settleRun();
+      } else {
       await peer.command('prompt', {
         message: turn.ctx.prompt,
         ...(turn.ctx.attachments.length === 0 ? {} : { images: imagesOf(turn.ctx.attachments) }),
       });
       if (turn.isStopped) void peer.command('abort').catch(() => undefined);
+      }
     } catch (error) {
       // A child that died takes the pipe with it, and its exit says more than
       // "the command failed": give it a moment to be reported.
