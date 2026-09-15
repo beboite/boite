@@ -1,0 +1,40 @@
+# yaml-language-server: $schema=https://storage.googleapis.com/coderabbit_public_assets/schema.v2.json
+language: en-US
+reviews:
+  profile: chill
+  request_changes_workflow: false
+  high_level_summary: false
+  poem: false
+  review_status: true
+  review_details: false
+  auto_review:
+    enabled: true
+    drafts: false
+  path_filters:
+    - '!bun.lock'
+    - '!**/Cargo.lock'
+    - '!**/dist/**'
+    - '!**/target/**'
+    - '!apps/shell/src-tauri/icons/**'
+  path_instructions:
+    - path: '**/*'
+      instructions: >-
+        Follow AGENTS.md. Prioritize reproducible bugs, regressions, security
+        boundaries and missing failure handling. Avoid cosmetic suggestions.
+        Tests must isolate application data and never use real provider logins
+        unless explicitly opted in. Do not suggest enabling live tests in CI.
+    - path: '.github/**'
+      instructions: >-
+        Check fork pull requests, skipped and cancelled dependencies, least
+        privilege, immutable action pins, cache correctness and publication
+        of the exact tested artifacts. Keep nightly publication opt-in.
+    - path: 'packages/core/**'
+      instructions: >-
+        Check owner versus paired-device authorization and provider-specific
+        behavior. Agent processes must use the traced process launcher.
+    - path: 'packages/ui/**'
+      instructions: >-
+        Check desktop and phone behavior, real and in-memory clients, and
+        routing through the Store belonging to the connected machine.
+chat:
+  auto_reply: true

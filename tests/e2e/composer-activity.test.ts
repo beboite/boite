@@ -29,8 +29,8 @@ beforeAll(async () => {
   page = await BrowserPage.launch({ url: `http://127.0.0.1:${port}/?fake=1` });
   await page.waitFor(`document.querySelector('${id('new-thread')}')`);
   await size(false);
-});
-afterAll(async () => { await page?.close(); await server?.close(); });
+}, 30_000);
+afterAll(async () => { await page?.close(); await server?.close(); }, 15_000);
 
 test('the draft sentence follows worktree, permissions, model and effort on desktop and phone', async () => {
   await page.click(id('new-thread'));
