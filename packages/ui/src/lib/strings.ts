@@ -310,6 +310,7 @@ export const strings = {
     /** The one line at the top of the timeline while an older page is being fetched. */
     loadingOlder: 'Loading earlier messages',
     outline: 'Messages in this conversation',
+    messageGroup: 'Browse {count} messages',
     earlierMessages: 'Load earlier messages',
     goToMessage: 'Go to message {number}: {text}',
     copy: 'Copy',

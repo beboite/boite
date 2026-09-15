@@ -123,6 +123,7 @@ test('tasks stay folded until requested and never move the reading position', as
     {id:'capture-phone',text:'Capture the phone layout',status:'pending'}
   ]}; })`);
   await page.waitFor(`document.querySelector('${id('activity-tasks-toggle')}')`);
+  expect(await page.evaluate(`(() => { const panel = document.querySelector('${id('thread-activity')}').getBoundingClientRect(); const composer = document.querySelector('.composer').getBoundingClientRect(); return composer.top - panel.bottom; })()`)).toBeLessThanOrEqual(4);
   await page.evaluate(`document.querySelector('${id('thread-activity')}').dispatchEvent(new PointerEvent('pointerenter'))`);
   expect(await page.evaluate(`document.querySelector('${id('activity-tasks-toggle')}').getAttribute('aria-expanded')`)).toBe('false');
   expect(await page.evaluate(`document.querySelector('${id('activity-tasks-toggle')}').textContent`)).toContain('Verify Escape sends queued prompts');

@@ -53,9 +53,14 @@ test('header and project layout', async () => {
   await capture('machine-menu.png');
   await page.click(`${id('machine-status-menu')} [data-value=all]`);
   // Choose a message outside the mounted virtual window.
-  const target = await page.evaluate<string>(`document.querySelectorAll('${id('message-marker')}')[12].dataset.messageId`);
-  await page.evaluate(`document.querySelector('${id('message-outline')}').scrollTop = document.querySelector('[data-message-id="${target}"]').offsetTop`);
-  await pointerClick(`[data-message-id="${target}"]`);
+  expect(await page.evaluate(`document.querySelectorAll('${id('message-outline')} button').length`)).toBeLessThanOrEqual(14);
+  expect(await page.evaluate(`document.querySelector('${id('message-marker')}').getBoundingClientRect().height`)).toBe(12);
+  await pointerClick(id('outline-group'));
+  await page.waitFor(`document.querySelector('${id('outline-group-menu')}')`);
+  await capture('message-groups.png');
+  const target = await page.evaluate<string>(`document.querySelectorAll('[data-group-message]')[12].dataset.groupMessage`);
+  await page.click(`[data-group-message="${target}"]`);
+  await page.waitFor(`!document.querySelector('${id('outline-group-menu')}')`);
   try {
     await page.waitFor(`(() => { const node = document.querySelector('[data-mid="${target}"]'); const box = document.querySelector('${id('timeline')}'); return node && Math.abs(node.getBoundingClientRect().top - box.getBoundingClientRect().top - 20) < 4; })()`);
   } catch (error) {
@@ -76,10 +81,11 @@ test('header and project layout', async () => {
   expect(await page.evaluate(`document.activeElement?.dataset.messageId !== '${target}'`)).toBe(true);
   expect(await page.evaluate(`document.querySelector('[data-message-id="${target}"]').getAttribute('aria-current')`)).toBe('location');
   // Loading the previous page keeps every earlier prompt reachable.
-  const count = await page.evaluate<number>(`document.querySelectorAll('${id('message-marker')}').length`);
+  const count = await page.evaluate<number>(`Number(document.querySelector('${id('message-outline')}').dataset.messageCount)`);
   await page.evaluate(`document.querySelector('${id('message-outline')}').scrollTop = 0`);
   await page.click(id('outline-earlier'));
-  await page.waitFor(`document.querySelectorAll('${id('message-marker')}').length > ${count}`);
+  await page.waitFor(`Number(document.querySelector('${id('message-outline')}').dataset.messageCount) > ${count}`);
+  expect(await page.evaluate(`document.querySelectorAll('${id('message-outline')} button').length`)).toBeLessThanOrEqual(14);
   await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
   await capture('header-phone.png');
   expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);

@@ -254,6 +254,11 @@ paged, virtualized conversation. It captures desktop, phone and light-theme
 layouts on the fake client. The shell suite checks that the thread controls sit
 inside the same title bar and that dragging excludes editable controls.
 
+The prompt outline uses at most 13 entries, keeping the first and last prompts
+and seven around the reading position. Distant prompts are grouped behind a
+keyboard-accessible list, so every loaded prompt remains reachable. Desktop
+markers are 12 px apart; the compact activity panel sits 4 px above the composer.
+
 The fake client is excluded from production bundles. Tests that need it must
 use the Vite development server. `tests/e2e/settings.test.ts` starts and closes
 one within the test process; the other end-to-end paths use a real temporary

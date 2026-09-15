@@ -109,7 +109,7 @@
 {/if}
 
 <style>
-  .activity { position: absolute; bottom: calc(100% + 8px); inset-inline: 0; z-index: 5; width: min(calc(100% - 40px), var(--content)); margin-inline: auto; max-height: 45vh; overflow-y: auto; padding: 8px 12px; border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-surface); box-shadow: var(--shadow-e1); font-size: var(--text-sm); transition: opacity var(--dur-3), transform var(--dur-3); }
+  .activity { position: absolute; bottom: calc(100% - 4px); inset-inline: 0; z-index: 5; width: min(calc(100% - 40px), var(--content)); margin-inline: auto; max-height: 45vh; overflow-y: auto; padding: 8px 12px; border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-surface); box-shadow: var(--shadow-e1); font-size: var(--text-sm); transition: opacity var(--dur-3), transform var(--dur-3); }
   .activity.hidden { opacity: 0; transform: translateY(8px); pointer-events: none; }
   .activity-row, .tasks-toggle { display: flex; align-items: center; gap: 8px; min-height: var(--control); min-width: 0; }
   .activity-row > :global(svg) { flex: none; color: var(--color-muted-foreground); }
@@ -141,6 +141,7 @@
   @media (max-width: 720px) { .activity { width: min(calc(100% - 20px), var(--content)); padding: 8px; } .activity-row { gap: 5px; } .action { width: calc(var(--control) + 6px); height: calc(var(--control) + 6px); } }
   @media (prefers-reduced-motion: reduce) { .activity, .task-disclosure, progress::-webkit-progress-value { transition: none; } }
 </style>
+
 
 
 
