@@ -36,7 +36,8 @@ if (import.meta.main) {
   let checks = affectedChecks(['unknown']);
   let workflows = true;
   if (process.env.FORCE_CHECKS !== 'true' && base && /^[a-f0-9]{40}$/.test(base) && !/^0+$/.test(base)) {
-    const diff = Bun.spawnSync(['git', 'diff', '--name-only', '-z', base, 'HEAD'], { stdout: 'pipe', stderr: 'pipe' });
+    // A move between packages affects both its old and new runtime.
+    const diff = Bun.spawnSync(['git', 'diff', '--no-renames', '--name-only', '-z', base, 'HEAD'], { stdout: 'pipe', stderr: 'pipe' });
     if (diff.exitCode !== 0) throw new Error(diff.stderr.toString());
     const files = diff.stdout.toString().split('\0').filter(Boolean);
     checks = affectedChecks(files);
