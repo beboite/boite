@@ -115,6 +115,8 @@ pending requests. It never replays outstanding RPC calls. An uncertain prompt
 retry keeps its `clientRequestId`: schema 11 records the accepted turn and
 content fingerprint atomically, so repeating the request returns that turn.
 Reusing the id with different content is refused. This applies to every driver.
+Changing the thread's model, effort or other selection before retrying creates
+a new request ID for that selection.
 
 ## HTTPS and installation
 
@@ -207,6 +209,11 @@ through the shared core event bus. Stopped turns do not. A click opens the
 conversation, preserving an existing page and its drafts. The worker only opens
 URLs on its own origin. Enable notifications from the machine's own page, not
 while viewing it through another machine's UI.
+
+A connected page retains its local notification path even when push is enabled.
+For its own core, it uses the service worker and the same per-thread notification
+tag as push, so the latest notification replaces the previous one. A saved push
+subscription is not treated as proof that a notification reached the phone.
 
 Disabling removes the server subscription and unsubscribes the browser.
 Revocation deletes the subscription with the pairing. Push services returning

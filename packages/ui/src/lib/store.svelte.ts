@@ -191,7 +191,7 @@ export class Store {
     if (bytes <= 4 * 1024 * 1024 && thread.messages.length <= 2000) this.#readingThreads.set(thread.id, thread);
     while (this.#readingThreads.size > 4) this.#readingThreads.delete(this.#readingThreads.keys().next().value!);
   }
-  #pendingSends = new Map<string, { id: string; prompt: string; attachments: ImageAttachment[] }>();
+  #pendingSends = new Map<string, { id: string; prompt: string; attachments: ImageAttachment[]; selectionVersion: number }>();
   machineId = '';
   visible = true;
   threadKey(id: string): string { return this.machineId ? JSON.stringify([this.machineId, id]) : id; }
@@ -1491,16 +1491,17 @@ export class Store {
       // The key is left out when there is nothing to carry: a turn with no
       // image sends the params it always sent.
       let pending = this.#pendingSends.get(threadId);
-      if (!pending || pending.prompt !== prompt || pending.attachments.length !== attachments.length || pending.attachments.some((a, i) => a.data !== attachments[i]?.data || a.mimeType !== attachments[i]?.mimeType || a.name !== attachments[i]?.name)) {
+      const selectionVersion = (this.openThread?.id === threadId ? this.openThread : this.threads.find((thread) => thread.id === threadId))?.selectionVersion ?? 0;
+      if (!pending || pending.selectionVersion !== selectionVersion || pending.prompt !== prompt || pending.attachments.length !== attachments.length || pending.attachments.some((a, i) => a.data !== attachments[i]?.data || a.mimeType !== attachments[i]?.mimeType || a.name !== attachments[i]?.name)) {
         const bytes = crypto.getRandomValues(new Uint8Array(16));
-        pending = { id: Array.from(bytes, b => b.toString(16).padStart(2, '0')).join(''), prompt, attachments: [...attachments] };
+        pending = { id: Array.from(bytes, b => b.toString(16).padStart(2, '0')).join(''), prompt, attachments: [...attachments], selectionVersion };
         this.#pendingSends.set(threadId, pending);
       }
       await client.call('turns.start', {
         threadId,
         prompt,
         clientRequestId: pending.id,
-        expectedSelectionVersion: (this.openThread?.id === threadId ? this.openThread : this.threads.find((thread) => thread.id === threadId))?.selectionVersion ?? 0,
+        expectedSelectionVersion: selectionVersion,
         ...(attachments.length > 0 ? { attachments } : {})
       });
       this.#pendingSends.delete(threadId);
@@ -1951,6 +1952,7 @@ export class Store {
     const title = this.threads.find((t) => t.id === threadId)?.title ?? strings.app.name;
     void sendNotification({
       ...toastFor(kind, this.threadKey(threadId), title, detail),
+      coreThreadId: threadId,
       origin: this.endpointUrl ? new URL(this.endpointUrl).origin : undefined
     });
   }

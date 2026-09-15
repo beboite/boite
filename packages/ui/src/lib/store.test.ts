@@ -36,7 +36,7 @@ async function ready(): Promise<{ store: Store; client: FakeClient }> {
   return { store, client };
 }
 
-test('a lost start response retains its request id until the retry is acknowledged', async () => {
+test.each([false, true])('a lost start response reuses its request id unless selection changes: %s', async (changeSelection) => {
   const { store, client } = await ready();
   const original = client.call.bind(client);
   const requests: string[] = [];
@@ -53,10 +53,14 @@ test('a lost start response retains its request id until the retry is acknowledg
     const thread = store.threads.find(thread => thread.status === 'idle')!;
     await store.open(thread.id);
     expect(await store.send('Retry this prompt')).toBe(false);
+    if (changeSelection) {
+      await client.settled();
+      expect(await store.update(thread.id, { effort: 'low' })).toBe(true);
+    }
     expect(await store.send('Retry this prompt')).toBe(true);
     expect(requests).toHaveLength(2);
     expect(requests[0]).toBeTruthy();
-    expect(requests[1]).toBe(requests[0]);
+    expect(requests[1] === requests[0]).toBe(!changeSelection);
   } finally { store.detach(); client.close(); }
 });
 
@@ -147,7 +151,7 @@ describe('Store', () => {
 
       await client.call('turns.start', { threadId: 't-trace', prompt: 'quietly' });
       await client.settled();
-      expect(sent).toEqual([{ title: 'Finish the trace tab', body: 'Done', threadId: 't-trace' }]);
+      expect(sent).toEqual([{ title: 'Finish the trace tab', body: 'Done', threadId: 't-trace', coreThreadId: 't-trace' }]);
 
       await store.send('in front of me');
       await client.settled();

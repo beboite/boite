@@ -33,7 +33,7 @@ function worker() {
 test('a push displays a notification and clicking it opens only a same-origin thread URL', async () => {
   const sw = worker();
   await sw.emit('push', { data: { json: () => ({ title: 'Review', body: 'Needs your answer', threadId: 'thread/&?test', tag: 'request-1' }) } });
-  expect(sw.notification).toHaveBeenCalledWith('Review', expect.objectContaining({ body: 'Needs your answer', tag: 'request-1', data: { threadId: 'thread/&?test' } }));
+  expect(sw.notification).toHaveBeenCalledWith('Review', expect.objectContaining({ body: 'Needs your answer', tag: 'thread-thread/&?test', data: { threadId: 'thread/&?test' } }));
   const close = vi.fn();
   await sw.emit('notificationclick', { notification: { close, data: { threadId: 'https://other.test' } } });
   expect(sw.navigate).not.toHaveBeenCalled();

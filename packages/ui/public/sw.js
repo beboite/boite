@@ -102,7 +102,7 @@ self.addEventListener('push', (event) => {
     await self.registration.showNotification(typeof payload.title === 'string' ? payload.title : 'Boite', {
       body: typeof payload.body === 'string' ? payload.body : '',
       icon: '/icons/icon-192.png', badge: '/icons/icon-192.png',
-      tag: typeof payload.tag === 'string' ? payload.tag : 'boite-update',
+      tag: threadId ? `thread-${threadId}` : typeof payload.tag === 'string' ? payload.tag : 'boite-update',
       data: { threadId }
     });
   })());
