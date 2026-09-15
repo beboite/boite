@@ -108,7 +108,8 @@ test('Ctrl+Enter sends and leaves a fresh draft open on the same picker values',
     accountId: thread.accountId,
     permissionMode: thread.permissionMode,
     model: thread.model,
-    effort: thread.effort
+    effort: thread.effort,
+    speed: null
   });
   expect(input().value).toBe('');
   await waitFor(() => document.activeElement === input());
@@ -234,7 +235,7 @@ test('the reasoning chip reads the model default level and saves the pick on the
 
   query<HTMLButtonElement>('[data-testid=composer-effort-menu] [data-value=low]').click();
   await waitFor(() => store.openThread?.effort === 'low');
-  expect(update).toHaveBeenCalledWith('t-trace', { accountId: 'a-echo', model: 'echo-1', effort: 'low', expectedSelectionVersion: 0 });
+  expect(update).toHaveBeenCalledWith('t-trace', { accountId: 'a-echo', model: 'echo-1', effort: 'low', speed: null, expectedSelectionVersion: 0 });
   // The chip names the level that is live, and the picker's own label leaves it alone.
   await waitFor(() => effortChip()?.textContent?.trim() === 'Low');
   expect(query('[data-testid=composer-picker]').textContent).not.toContain('Low');
@@ -278,14 +279,14 @@ test('the reasoning slider draws one dot per level and the arrows move it', asyn
   const update = vi.spyOn(store, 'update');
   expect(press('ArrowLeft')).toBe(false);
   await waitFor(() => store.openThread?.effort === 'low');
-  expect(update).toHaveBeenCalledWith('t-trace', { accountId: 'a-echo', model: 'echo-1', effort: 'low', expectedSelectionVersion: 0 });
+  expect(update).toHaveBeenCalledWith('t-trace', { accountId: 'a-echo', model: 'echo-1', effort: 'low', speed: null, expectedSelectionVersion: 0 });
   await waitFor(() => query('[data-testid=effort-track]').getAttribute('aria-valuenow') === '0');
   expect(effortChip()?.textContent?.trim()).toBe('Low');
 
   // One dot right takes the same save path, and the popover stays open under it.
   press('ArrowRight');
   await waitFor(() => store.openThread?.effort === 'high');
-  expect(update).toHaveBeenCalledWith('t-trace', { accountId: 'a-echo', model: 'echo-1', effort: 'high', expectedSelectionVersion: 1 });
+  expect(update).toHaveBeenCalledWith('t-trace', { accountId: 'a-echo', model: 'echo-1', effort: 'high', speed: null, expectedSelectionVersion: 1 });
   expect(document.querySelector('[data-testid=composer-effort-menu]')).not.toBeNull();
   await waitFor(() => effortChip()?.textContent?.trim() === 'High');
 

@@ -129,7 +129,7 @@ test('migration preserves legacy native sessions and persists new selections and
   const path = join(h.dataDir, 'migration.db');
   const legacy = new Journal(path);
   legacy.putThread({ ...h.core.threads.require(threadId), sessionId: 'legacy-session' });
-  legacy.db.exec('ALTER TABLE threads DROP COLUMN session_generation; ALTER TABLE threads DROP COLUMN selection_version; ALTER TABLE turns DROP COLUMN execution; PRAGMA user_version = 8;');
+  legacy.db.exec('ALTER TABLE threads DROP COLUMN speed; ALTER TABLE threads DROP COLUMN session_generation; ALTER TABLE threads DROP COLUMN selection_version; ALTER TABLE turns DROP COLUMN execution; PRAGMA user_version = 8;');
   legacy.close();
   const migrated = new Journal(path);
   try {

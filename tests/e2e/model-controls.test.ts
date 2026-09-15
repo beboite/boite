@@ -62,3 +62,69 @@ test('favorites survive reload, reasoning has discrete stops, and the context ri
   await page.waitFor(`document.querySelector('[data-testid=favorites-empty]')`);
   expect(await page.evaluate(`JSON.parse(localStorage.getItem('boite.model-favorites.v1')).length`)).toBe(0);
 }, 30_000);
+
+
+test('model picker opens below its trigger and scrolls long lists', async () => {
+  await page.send('Emulation.clearDeviceMetricsOverride', {});
+  await page.navigate(url);
+  await page.waitFor(`document.querySelector('[data-testid=composer-picker]')`);
+  await page.click('[data-testid=composer-picker]');
+  await page.click('[data-provider=opencode]');
+  await page.waitFor(`document.querySelectorAll('[data-model]').length > 12`);
+  await capture('picker-scroll-desktop.png');
+  const layout = await page.evaluate<any>(`(() => { const menu=document.querySelector('[data-testid=composer-picker-menu]'); const rows=menu.querySelector('.models'); const trigger=document.querySelector('[data-testid=composer-picker]').getBoundingClientRect(); const rect=menu.getBoundingClientRect(); return {top:rect.top,bottom:rect.bottom,triggerBottom:trigger.bottom,height:innerHeight,scroll:rows.scrollHeight,client:rows.clientHeight,row:rows.querySelector('[data-model]').getBoundingClientRect().height}; })()`);
+  expect(layout.top).toBeGreaterThanOrEqual(layout.triggerBottom);
+  expect(layout.bottom).toBeLessThanOrEqual(layout.height);
+  expect(layout.scroll).toBeGreaterThan(layout.client);
+  expect(layout.row).toBeGreaterThanOrEqual(28);
+  const wheel = await page.evaluate<any>(`(() => { const r=document.querySelector('[data-testid=composer-picker-menu] .models').getBoundingClientRect(); return { x:r.left+r.width/2, y:r.top+r.height/2 }; })()`);
+  await page.send('Input.dispatchMouseEvent', { type:'mouseWheel', ...wheel, deltaX:0, deltaY:180 });
+  await page.waitFor(`document.querySelector('[data-testid=composer-picker-menu] .models').scrollTop > 0`);
+  await page.click('[data-testid=picker-refresh]');
+  expect(await page.evaluate(`document.querySelectorAll('[data-model]').length`)).toBeGreaterThan(12);
+  await page.waitFor(`!document.querySelector('[data-testid=picker-refresh]').disabled`);
+  expect(await page.evaluate(`document.querySelector('[data-testid=composer-picker-menu] .models').scrollTop`)).toBeGreaterThan(0);
+  await page.send('Emulation.setDeviceMetricsOverride', { width:390,height:844,deviceScaleFactor:1,mobile:true });
+  await capture('picker-scroll-phone.png');
+  const phone = await page.evaluate<any>(`(() => { const r=document.querySelector('[data-testid=composer-picker-menu]').getBoundingClientRect();return {left:r.left,right:r.right,bottom:r.bottom}; })()`);
+  expect(phone.left).toBeGreaterThanOrEqual(0); expect(phone.right).toBeLessThanOrEqual(390);expect(phone.bottom).toBeLessThanOrEqual(844);
+}, 30_000);
+
+
+test('speed controls follow the selected model and Codex never offers Ultrathink', async () => {
+  await page.send('Emulation.clearDeviceMetricsOverride', {});
+  await page.navigate(url);
+  await page.waitFor(`document.querySelector('[data-testid=composer-picker]')`);
+  await page.click('[data-testid=composer-picker]');
+  await page.click('[data-provider=codex]');
+  await page.waitFor(`document.querySelector('[data-model=codex-demo]')`);
+  await page.click('[data-model=codex-demo]');
+  await page.waitFor(`document.querySelector('[data-testid=composer-effort]')`);
+  await page.click('[data-testid=composer-effort]');
+  await page.waitFor(`document.querySelector('[data-testid=effort-speed]')`);
+  expect(await page.evaluate(`!!document.querySelector('[data-value=ultrathink]')`)).toBe(false);
+  await page.click('[data-testid=effort-speed]');
+  await page.waitFor(`document.querySelector('[data-testid=effort-speed-label]')?.textContent === 'Fast'`);
+  await page.click('[data-testid=effort-speed]');
+  await page.waitFor(`document.querySelector('[data-testid=effort-speed-label]')?.textContent === 'Ultrafast'`);
+  await capture('reasoning-codex-ultrafast.png');
+  await page.click('[data-testid=effort-speed]');
+  await page.waitFor(`!document.querySelector('[data-testid=effort-speed-label]')`);
+  await page.evaluate(`document.dispatchEvent(new PointerEvent('pointerdown', { bubbles:true }))`);
+  await page.click('[data-testid=composer-picker]');
+  await page.click('[data-provider=claude]');
+  await page.waitFor(`document.querySelector('[data-model=claude-opus-5]')`);
+  await page.click('[data-model=claude-opus-5]');
+  await page.waitFor(`document.querySelector('[data-testid=composer-picker]')?.textContent.includes('Opus')`);
+  await page.click('[data-testid=composer-effort]');
+  await page.waitFor(`document.querySelector('[data-value=ultrathink]')`);
+  await page.click('[data-testid=effort-speed]');
+  await page.waitFor(`document.querySelector('[data-testid=effort-speed-label]')?.textContent === 'Fast'`);
+  await capture('reasoning-claude-fast.png');
+  await page.evaluate(`document.dispatchEvent(new PointerEvent('pointerdown', { bubbles:true }))`);
+  await page.click('[data-testid=composer-picker]'); await page.click('[data-provider=echo]'); await page.click('[data-model=echo-1]');
+  await page.waitFor(`document.querySelector('[data-testid=composer-picker]')?.textContent.includes('Echo')`);
+  await page.click('[data-testid=composer-effort]');
+  await page.waitFor(`document.querySelector('[data-testid=composer-effort-menu]')`);
+  expect(await page.evaluate(`!!document.querySelector('[data-testid=effort-speed]')`)).toBe(false);
+}, 30_000);

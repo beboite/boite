@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Brain } from '@lucide/svelte';
+  import { Brain, Zap } from '@lucide/svelte';
   import type { EffortLevel } from '@boite/contracts';
   import { Closing } from '../lib/closing.svelte';
   import { strings } from '../lib/strings';
@@ -13,12 +13,20 @@
   let {
     levels,
     active,
-    onpick
+    onpick,
+    modelName = '',
+    speeds = [],
+    speed = null,
+    onspeed = () => {}
   }: {
     levels: EffortLevel[];
     /** The level the thread or draft runs, the model's own default when it picked none. */
     active: string | null;
     onpick: (id: string) => void;
+    modelName?: string;
+    speeds?: { id: string; label: string; description?: string }[];
+    speed?: string | null;
+    onspeed?: (id: string | null) => void;
   } = $props();
 
   const popover = new Closing();
@@ -31,6 +39,8 @@
 
   let index = $derived(preview ?? Math.max(0, levels.findIndex((level) => level.id === active)));
   let current = $derived(levels[index] ?? null);
+  const selectedSpeed = $derived(speeds.find(entry => entry.id === speed));
+  function cycleSpeed() { const next = speeds.findIndex(entry => entry.id === speed) + 1; onspeed(next >= speeds.length ? null : speeds[next]!.id); }
   let last = $derived(Math.max(0, levels.length - 1));
 
   /** The dots are evenly spaced over the line, so a level sits at a plain percentage. */
@@ -132,7 +142,7 @@
     {onkeydown}
   >
     <Brain size={14} strokeWidth={1.75} />
-    {current?.label ?? ''}
+    {current?.label ?? selectedSpeed?.label ?? strings.composer.standardSpeed}
   </button>
 
   {#if popover.shown}
@@ -147,8 +157,15 @@
       onanimationend={popover.end}
       {onkeydown}
     >
-      <div class="heading"><span class="title">{strings.composer.effortTitle}</span><span class="level">{current?.label}</span></div>
+      <div class="heading">
+        {#if speeds.length > 0}
+          <button type="button" class="speed" class:active={!!selectedSpeed} data-testid="effort-speed" aria-label={strings.composer.speed} title={selectedSpeed?.description ?? selectedSpeed?.label ?? strings.composer.standardSpeed} onclick={cycleSpeed}><Zap size={15} fill={selectedSpeed ? 'currentColor' : 'none'} /></button>
+        {:else}<Brain size={15} />{/if}
+        <span class="model-name">{modelName}</span><span class="level">{current?.label ?? ''}</span>
+        {#if selectedSpeed}<span class="speed-name" data-testid="effort-speed-label">{selectedSpeed.label}</span>{/if}
+      </div>
 
+      {#if levels.length > 0}
       <div
         class="track"
         bind:this={track}
@@ -170,30 +187,12 @@
           <span class="progress" style="width: {offset(index)}"></span>
           <span class="thumb" style="left: {offset(index)}"></span>
           {#each levels as level, at (level.id)}
-            <span class="dot" class:on={at <= index} data-dot={level.id} style="left: {offset(at)}"></span>
+            <button type="button" class="dot" class:on={at <= index} data-dot={level.id} data-value={level.id} title={level.label} aria-label={level.label} tabindex="-1" style="left: {offset(at)}" onclick={() => pick(at)}></button>
           {/each}
         </div>
       </div>
+      {/if}
 
-      <!-- Past four levels the names cannot share one row in 226 px, so they
-           alternate between two: every name stays whole and under its own dot. -->
-      <div class="ticks" class:stagger={levels.length > 4}>
-        {#each levels as level, at (level.id)}
-          <button
-            type="button"
-            class="tick"
-            class:on={at === index}
-            data-value={level.id}
-            title={level.label}
-            style="left: {offset(at)}"
-            onclick={() => pick(at)}
-          >
-            {level.label}
-          </button>
-        {/each}
-      </div>
-
-      <p class="description" data-testid="effort-description">{current?.description ?? strings.composer.effortHint}</p>
     </div>
   {/if}
 </div>
@@ -202,21 +201,21 @@
 .effort { position: relative; display: inline-flex; }
 .trigger { cursor: pointer; height: var(--control-sm); }
 .trigger:hover, .trigger[aria-expanded='true'] { background: var(--color-surface-3); color: var(--color-foreground); }
-.popover { position: absolute; bottom: calc(100% + 10px); left: 0; z-index: 40; width: min(340px, calc(100vw - 36px)); padding: 18px; background: var(--color-surface-2); border: 1px solid var(--color-border); border-radius: var(--radius-lg); box-shadow: var(--shadow-e3); animation: pop var(--dur-2) var(--ease-out-quint); transform-origin: bottom left; }
+.popover { position: absolute; bottom: calc(100% + 8px); left: 0; z-index: 40; width: 280px; padding: 10px 12px 12px; background: var(--color-surface-3); border: 1px solid var(--color-border); border-radius: var(--radius-lg); box-shadow: var(--shadow-e2); animation: pop var(--dur-2) var(--ease-out-quint); transform-origin: bottom left; }
 .popover.closing { animation-name: pop-out; pointer-events: none; }
-.heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.title { font-size: var(--text-sm); color: var(--color-muted-foreground); }
-.level { font-size: var(--text-base); font-weight: 600; }
-.track { padding: 26px 8px 20px; cursor: pointer; touch-action: none; }
-.track:focus-visible { outline: 1px solid var(--color-edge); border-radius: var(--radius-md); }
-.line { position: relative; height: 4px; border-radius: var(--radius-sm); background: var(--color-border); }
-.progress { position: absolute; height: 100%; border-radius: inherit; background: var(--color-foreground); }
-.dot { position: absolute; top: -3px; width: 2px; height: 10px; background: var(--color-muted-foreground); transform: translateX(-50%); }
-.dot.on { background: var(--color-foreground); }
-.thumb { position: absolute; top: 50%; width: 18px; height: 18px; transform: translate(-50%, -50%); border: 3px solid var(--color-surface-2); border-radius: 50%; background: var(--color-foreground); box-shadow: 0 0 0 1px var(--color-edge); z-index: 1; }
-.ticks { display: flex; justify-content: space-between; gap: 2px; }
-.tick { flex: 1; padding: 4px 1px; height: auto; border: none; border-radius: var(--radius-sm); background: transparent; color: var(--color-muted-foreground); font-size: var(--text-xs); line-height: 1.25; white-space: normal; }
-.tick.on { color: var(--color-foreground); background: var(--color-hover); }
-.description { margin-top: 16px; min-height: 36px; font-size: var(--text-sm); color: var(--color-muted-foreground); line-height: 1.5; }
+.heading { display: flex; align-items: center; gap: 5px; min-height: 26px; margin-bottom: 6px; color: var(--color-muted-foreground); font-size: var(--text-sm); }
+.model-name { margin-left: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-foreground); font-weight: 600; }
+.level { white-space: nowrap; }
+.speed { flex: none; display: grid; place-items: center; width: 24px; height: 24px; border: none; padding: 0; border-radius: var(--radius-sm); background: transparent; color: var(--color-muted-foreground); }
+.speed.active { color: var(--color-reasoning); }
+.speed-name { font-size: var(--text-xs); color: var(--color-reasoning); white-space: nowrap; }
+.track { padding: 3px 12px; cursor: pointer; touch-action: none; height: 30px; background: var(--color-edge); border-radius: 999px; }
+.track:focus-visible { outline: 1px solid var(--color-reasoning); outline-offset: 3px; }
+.line { position: relative; height: 24px; }
+.progress { position: absolute; inset: 0 auto 0 -12px; border-radius: 999px 0 0 999px; background: var(--color-reasoning); }
+.dot { position: absolute; top: 50%; width: 16px; height: 24px; padding: 0; border: none; background: transparent; transform: translate(-50%, -50%); }
+.dot::after { content: ""; display: block; width: 4px; height: 4px; margin: auto; border-radius: 50%; background: var(--color-muted-foreground); }
+.dot.on::after { background: var(--color-reasoning-on); opacity: .45; }
+.thumb { position: absolute; top: 50%; width: 28px; height: 28px; transform: translate(-50%, -50%); border-radius: 50%; background: var(--color-reasoning-on); box-shadow: var(--shadow-e1); z-index: 1; }
 @media (max-width: 720px) { .popover { position: fixed; left: 18px; right: 18px; bottom: 126px; width: auto; } }
 </style>

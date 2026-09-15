@@ -16,6 +16,7 @@ import type {
 } from '@anthropic-ai/claude-agent-sdk';
 import type {
   AgentCommand,
+  ModelInfo,
   ImageAttachment,
   MessageId,
   MessagePart,
@@ -29,7 +30,7 @@ import { messageOf, unavailable } from '../errors.ts';
 import type { SpawnedChild } from '../procs.ts';
 import { profileFor, resolveExecutable } from '../providers/loader.ts';
 import { titleRequest } from '../titles.ts';
-import type { Driver, TitleContext, TurnContext, TurnHandle, TurnResult } from './types.ts';
+import type { ProbeContext, ProbeResult, Driver, TitleContext, TurnContext, TurnHandle, TurnResult } from './types.ts';
 
 /** How long `stop()` lets the CLI end its turn before the abort signal takes it. */
 const STOP_GRACE_MS = 3_000;
@@ -863,6 +864,7 @@ class ClaudeSession {
       allowDangerouslySkipPermissions: setup.permissionMode === 'bypassPermissions',
       pathToClaudeCodeExecutable: executable,
       settingSources: ['user', 'project', 'local'],
+      settings: { fastMode: ctx.thread.speed === 'fast' },
       includePartialMessages: true,
       abortController: this.abortController,
       env: childEnv(ctx.accountEnv),
@@ -946,6 +948,7 @@ function sessionKey(ctx: TurnContext): string {
     cwd: ctx.thread.cwd,
     accountId: ctx.account.id,
     env: ctx.accountEnv,
+    speed: ctx.thread.speed ?? null,
     bypass: ctx.thread.permissionMode === 'bypassPermissions',
   });
 }
@@ -1135,6 +1138,7 @@ function errorSentence(error: SDKAssistantMessageError): string {
  */
 export function createClaudeDriver(deps: ClaudeDeps): Driver {
   const sessions = new Map<ThreadId, ClaudeSession>();
+  const probes = new Map<string, { providerId: string; accountId: string; result?: ProbeResult; pending: Promise<ProbeResult> }>();
 
   /** The thread's session, started if it has none and replaced if it cannot serve this turn. */
   function acquire(ctx: TurnContext): ClaudeSession {
@@ -1176,6 +1180,19 @@ export function createClaudeDriver(deps: ClaudeDeps): Driver {
 
   return {
     protocol: 'claude-sdk',
+    probe(ctx: ProbeContext): Promise<ProbeResult> {
+      const key = ctx.provider.id + '::' + ctx.accountId;
+      const previous = probes.get(key);
+      if (previous) return previous.pending;
+      const entry = { providerId: ctx.provider.id, accountId: ctx.accountId, pending: Promise.resolve(null as unknown as ProbeResult), result: undefined as ProbeResult | undefined };
+      entry.pending = readClaudeModels(ctx, deps).then(result => { if (probes.get(key) === entry) entry.result = result; return result; }).catch(error => { if (probes.get(key) === entry) probes.delete(key); throw error; });
+      probes.set(key, entry);
+      return entry.pending;
+    },
+    probedModels(providerId, accountId) { return probes.get(providerId + '::' + accountId)?.result?.models ?? null; },
+    forgetProbes(filter = {}) {
+      for (const [key, entry] of probes) if ((!filter.providerId || filter.providerId === entry.providerId) && (!filter.accountId || filter.accountId === entry.accountId)) probes.delete(key);
+    },
 
     startTurn(ctx: TurnContext): TurnHandle {
       const turn = new ClaudeTurn(ctx);
@@ -1207,4 +1224,38 @@ export function createClaudeDriver(deps: ClaudeDeps): Driver {
       for (const session of open) session.close(null, 0);
     },
   };
+}
+
+async function readClaudeModels(ctx: ProbeContext, deps: ClaudeDeps): Promise<ProbeResult> {
+  const profile = profileFor(ctx.provider);
+  const executable = profile ? resolveExecutable(profile) : null;
+  if (!executable) throw unavailable('no Claude executable for model discovery');
+  const prompts = new PromptQueue();
+  const abortController = new AbortController();
+  let query: Query | undefined;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const queryFn = await deps.loadQuery();
+    query = queryFn({ prompt: prompts.stream(), options: {
+      cwd: ctx.cwd, pathToClaudeCodeExecutable: executable, abortController,
+      env: childEnv(ctx.accountEnv), settingSources: ['user'], persistSession: false,
+      tools: [], mcpServers: {},
+      spawnClaudeCodeProcess: (options: SdkSpawnOptions): SpawnedChild => {
+        const child = ctx.spawnChild(options.command, options.args, { cwd: options.cwd, env: options.env });
+        child.stderr.resume(); return child;
+      },
+    } });
+    const rows = await Promise.race([query.supportedModels(), new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error('Claude model discovery timed out after 20 seconds')), 20_000);
+    })]);
+    const models: ModelInfo[] = rows.map(row => {
+      const levels = row.supportsEffort ? (row.supportedEffortLevels ?? []).map(id => ({ id: String(id), label: id === 'xhigh' ? 'Extra high' : id.charAt(0).toUpperCase() + id.slice(1) })) : [];
+      if (row.supportsAdaptiveThinking) levels.push({ id: 'ultrathink', label: 'Ultrathink' });
+      return { id: row.resolvedModel ?? row.value, name: row.displayName,
+        ...(levels.length ? { effort: { levels, default: levels.some(l => l.id === 'high') ? 'high' : levels[0]!.id } } : {}),
+        ...(row.supportsFastMode ? { speeds: [{ id: 'fast', label: 'Fast' }] } : {}),
+      };
+    });
+    return { models: models.filter((model, index) => models.findIndex(m => m.id === model.id) === index), probedAt: Date.now() };
+  } finally { if (timer) clearTimeout(timer); prompts.end(); query?.close(); abortController.abort(); ctx.killTree(); }
 }

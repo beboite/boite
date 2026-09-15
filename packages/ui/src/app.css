@@ -35,6 +35,8 @@
   --color-muted-foreground: #a2a2ad;
   --color-subtle: #6f6f7a;
   --color-selection: rgba(228, 228, 231, 0.18);
+  --color-reasoning: #3b82f6;
+  --color-reasoning-on: #ffffff;
   --color-live: #eab308;
   --color-success: #4ade80;
   --color-danger: #f0716f;

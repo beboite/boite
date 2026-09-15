@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { ChevronDown, ChevronRight, Search, Sparkles, Star } from '@lucide/svelte';
+  import { ChevronDown, ChevronRight, Search, Sparkles, Star, RefreshCw } from '@lucide/svelte';
   import { orderedModels, type FavoriteModel } from '../lib/model-order';
   import type { Account, ModelInfo, ProviderSummary } from '@boite/contracts';
   import ProviderLogo from './ProviderLogo.svelte';
@@ -18,7 +18,8 @@
     choice,
     locked = false,
     disabled = false,
-    onpick
+    onpick,
+    onopenchange = () => {}
   }: {
     store: Store;
     choice: Choice | null;
@@ -26,12 +27,14 @@
     locked?: boolean;
     disabled?: boolean;
     onpick: (patch: PickPatch) => void;
+    onopenchange?: (open: boolean) => void;
   } = $props();
 
   /** Past this many models the column stops being a plain scroll and gets a search field. */
   const SEARCH_FROM = 12;
 
   const popover = new Closing();
+  $effect(() => { onopenchange(popover.shown); return () => onopenchange(false); });
   let legacyOpen = $state(false);
   let root = $state<HTMLDivElement | undefined>(undefined);
   let searchBox = $state<HTMLInputElement | undefined>(undefined);
@@ -50,7 +53,7 @@
     favoritePending = true;
     try {
       const protocol = store.providerOf(entry.providerId)?.protocol;
-      if (protocol === 'acp' || protocol === 'codex-appserver' || protocol === 'pi') await store.probeModels(entry.providerId, entry.accountId);
+      if (protocol === 'claude-sdk' || protocol === 'acp' || protocol === 'codex-appserver' || protocol === 'pi') await store.probeModels(entry.providerId, entry.accountId);
       if (!store.modelsOf(entry.providerId, entry.accountId).some((m) => m.id === entry.model.id)) { store.error = strings.composer.favoriteUnavailable; return; }
       onpick({ providerId: entry.providerId, accountId: entry.accountId, model: entry.model.id });
       popover.hide();
@@ -86,13 +89,25 @@
   let shownModels = $derived(shown ? orderedModels(store.modelsOf(shown.id, shownAccountId)) : []);
   let probing = $derived(shown ? store.isProbing(shown.id, shownAccountId) : false);
 
+  async function refreshModels() {
+    if (favoritesOpen) {
+      const seen = new Set<string>();
+      for (const entry of favorites) {
+        const key = entry.providerId + '::' + entry.accountId;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        await store.probeModels(entry.providerId, entry.accountId, true);
+      }
+    } else if (shown && shownAccountId) await store.probeModels(shown.id, shownAccountId, true);
+  }
+
   // An ACP agent owns its model list, so the descriptor cannot carry it: the
   // core reads it from one short-lived agent process the first time the picker
   // shows that instance, and the answer stands for the rest of the session.
   // Nothing is asked of a provider whose executable is not on the machine.
   $effect(() => {
     if (!popover.open || favoritesOpen || !shown || needsInstall) return;
-    if (shown.protocol !== 'acp' && shown.protocol !== 'codex-appserver' && shown.protocol !== 'pi') return;
+    if (shown.protocol !== 'claude-sdk' && shown.protocol !== 'acp' && shown.protocol !== 'codex-appserver' && shown.protocol !== 'pi') return;
     const accountId = shownAccountId;
     if (accountId === null) return;
     void store.probeModels(shown.id, accountId);
@@ -230,15 +245,20 @@
     onpick({ providerId: shown.id, accountId: seat.id, model: store.defaultModelOf(shown) });
   }
 
-  function pickModel(model: ModelInfo) {
+  async function pickModel(model: ModelInfo) {
     if (!shown) return;
     const instance =
       choice && choice.providerId === shown.id
         ? { providerId: choice.providerId, accountId: choice.accountId }
         : firstInstanceOf(shown.id);
-    if (!instance) return;
-    onpick({ ...instance, model: model.id });
-    popover.hide();
+    if (!instance || favoritePending) return;
+    favoritePending = true;
+    try {
+      await store.probeModels(instance.providerId, instance.accountId);
+      if (!store.modelsOf(instance.providerId, instance.accountId).some(m => m.id === model.id)) { store.error = strings.composer.favoriteUnavailable; return; }
+      onpick({ ...instance, model: model.id });
+      popover.hide();
+    } finally { favoritePending = false; }
   }
 
   /** The download happens on the Accounts page now, so the picker sends you there. */
@@ -357,6 +377,9 @@
       onanimationend={popover.end}
       {onkeydown}
     >
+      {#if store.owner}
+        <button class="refresh" type="button" data-testid="picker-refresh" aria-label={strings.composer.refreshModels} title={strings.composer.refreshModels} disabled={probing || needsInstall} onclick={() => void refreshModels()}><RefreshCw size={14} class={probing ? 'spin' : ''} /></button>
+      {/if}
       <div class="column rail">
         <button type="button" class="tile" class:current={favoritesOpen} role="menuitem" data-row data-provider="favorites" title={strings.composer.favorites} aria-label={strings.composer.favorites} onclick={() => { favoritesOpen = true; modelQuery = ''; }}><Star size={18} /></button>
         {#each tiles as tile (tile.provider.id)}
@@ -544,7 +567,6 @@
   .favorite-button[aria-pressed='true'] { color: var(--color-foreground); }
   .name small { display: block; font-size: var(--text-xs); color: var(--color-muted-foreground); }
   .picker {
-    position: relative;
     display: inline-flex;
     min-width: 0;
   }
@@ -573,19 +595,20 @@
 
   .popover {
     position: absolute;
-    bottom: calc(100% + 6px);
-    left: 0;
+    top: calc(100% - var(--picker-space) + 6px);
+    left: 10px;
     z-index: 40;
     display: grid;
     grid-template-columns: 48px minmax(240px, 1fr);
     width: min(460px, calc(100vw - 32px));
-    max-height: 340px;
+    height: min(360px, 45dvh);
+    grid-template-rows: minmax(0, 1fr);
     background: var(--color-surface-2);
     border: 1px solid var(--color-border);
     border-radius: var(--radius-md);
     box-shadow: var(--shadow-e2);
     animation: pop var(--dur-2) var(--ease-out-quint);
-    transform-origin: bottom left;
+    transform-origin: top left;
     overflow: hidden;
   }
 
@@ -600,7 +623,9 @@
     gap: 1px;
     padding: 6px;
     min-height: 0;
-    overflow: auto;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    touch-action: pan-y;
   }
 
   /* Logos only: the name is the tile's title, and the column beside it names
@@ -648,12 +673,15 @@
     opacity: 0.45;
   }
 
+  .models > * { flex-shrink: 0; }
+  .refresh { position: absolute; top: 8px; right: 8px; z-index: 3; display: grid; place-items: center; width: 28px; height: 28px; border: none; border-radius: var(--radius-sm); background: var(--color-surface-2); color: var(--color-muted-foreground); }
+  .refresh:hover:not(:disabled) { background: var(--color-surface-3); color: var(--color-foreground); }
   .head {
     display: flex;
     align-items: center;
     gap: 8px;
     min-height: var(--control-sm);
-    padding: 2px 4px 6px;
+    padding: 2px 34px 6px 4px;
   }
 
   .provider-name {
@@ -896,12 +924,15 @@
   @media (max-width: 720px) {
     .popover {
       grid-template-columns: 1fr;
-      max-height: 60vh;
+      grid-template-rows: auto minmax(0, 1fr);
+      width: calc(100% - 20px);
     }
 
     .rail {
       flex-direction: row;
-      flex-wrap: wrap;
+      flex-wrap: nowrap;
+      overflow-x: auto;
+      padding-right: 40px;
       justify-content: flex-start;
       border-right: none;
       border-bottom: 1px solid var(--color-border);

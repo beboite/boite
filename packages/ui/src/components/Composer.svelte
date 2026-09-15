@@ -78,7 +78,8 @@
         accountId: thread.accountId,
         permissionMode: thread.permissionMode,
         model: thread.model,
-        effort: thread.effort
+        effort: thread.effort,
+        speed: thread.speed ?? null
       };
     } else if (draft) {
       choice = store.defaultChoice();
@@ -120,7 +121,14 @@
       .reverse()
   );
 
+  let modelPickerOpen = $state(false);
   let provider = $derived(choice ? store.providerOf(choice.providerId) : null);
+  $effect(() => {
+    if (provider?.available && provider.protocol !== 'echo' && choice) {
+      const id = provider.id, accountId = choice.accountId;
+      untrack(() => void store.probeModels(id, accountId));
+    }
+  });
   let bound = $derived(store.openThread !== null);
   /** The attach button is only there for an agent that reads images. */
   let takesImages = $derived(provider?.capabilities.images ?? false);
@@ -271,7 +279,8 @@
 
   // The reasoning chip belongs to the model the choice is on, and a model that
   // offers no scale (an agent that keeps its own) gets no chip at all.
-  let effortLevels = $derived(store.modelOf(choice)?.effort?.levels ?? []);
+  let effortLevels = $derived((store.modelOf(choice)?.effort?.levels ?? []).filter(level => provider?.protocol === 'claude-sdk' || level.id !== 'ultrathink'));
+  let speeds = $derived(store.modelOf(choice)?.speeds ?? []);
   let activeEffort = $derived(choice?.effort ?? store.modelOf(choice)?.effort?.default ?? null);
 
   /** On a thread only the model and the effort change and they are saved at once; on a draft the whole choice is remembered. */
@@ -280,11 +289,12 @@
     const thread = store.openThread;
 
     if (thread) {
-      const target = { ...choice, ...patch, effort: patch.effort !== undefined ? patch.effort : null };
+      const changedModel = patch.model !== undefined || patch.accountId !== undefined;
+      const target = { ...choice, ...patch, effort: patch.effort !== undefined ? patch.effort : changedModel ? null : choice.effort, speed: patch.speed !== undefined ? patch.speed : changedModel ? null : choice.speed ?? null };
       picking = true;
       try {
         const accepted = await store.update(thread.id, {
-          accountId: target.accountId, model: target.model, effort: target.effort,
+          accountId: target.accountId, model: target.model, effort: target.effort, speed: target.speed,
           expectedSelectionVersion: thread.selectionVersion ?? 0,
         });
         if (accepted) store.remember(target);
@@ -292,6 +302,7 @@
       return;
     }
 
+    if (patch.speed !== undefined) { choice = { ...choice, speed: patch.speed }; store.remember(choice); return; }
     // An effort alone: the model stays, so nothing else moves.
     if (patch.effort !== undefined) {
       if (patch.effort === choice.effort) return;
@@ -301,7 +312,7 @@
     }
 
     // Another model runs on its own scale, so the effort goes back to that model's default.
-    choice = { ...choice, ...patch, effort: null };
+    choice = { ...choice, ...patch, effort: null, speed: null };
     store.remember(choice);
   }
 
@@ -659,7 +670,7 @@
 
 <div class="composer-wrap" class:centered>
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="composer" data-testid="composer" {ondragover} {ondrop}>
+  <div class="composer" class:model-picker-open={modelPickerOpen} data-testid="composer" {ondragover} {ondrop}>
     {#if composer && composer.queued.length > 0}
       <div class="queued subtle" data-testid="composer-queued">{strings.composer.queued}</div>
     {/if}
@@ -724,7 +735,7 @@
 
     <div class="bar">
       <div class="chips">
-        <ModelPicker {store} {choice} disabled={picking} onpick={pick} />
+        <ModelPicker {store} {choice} disabled={picking} onpick={pick} onopenchange={(open) => modelPickerOpen = open} />
 
         {#if takesImages}
           <button
@@ -750,8 +761,8 @@
           />
         {/if}
 
-        {#if effortLevels.length > 0}
-          <EffortSlider levels={effortLevels} active={activeEffort} onpick={pickEffort} />
+        {#if effortLevels.length > 0 || speeds.length > 0}
+          <EffortSlider levels={effortLevels} active={activeEffort} onpick={pickEffort} modelName={store.modelOf(choice)?.name ?? provider?.name ?? ''} {speeds} speed={choice?.speed ?? null} onspeed={(speed) => void pick({ speed })} />
         {/if}
 
         <Menu items={modeItems} onpick={pickMode} label={strings.composer.mode} testid="composer-mode">
@@ -813,6 +824,8 @@
 
   /* The one raised object in the column: it floats over the timeline instead of
      repeating the sidebar's slab. e1 rides on e2 for the inset top highlight. */
+  .composer.model-picker-open { --picker-space: calc(min(360px, 45dvh) + 12px); padding-bottom: var(--picker-space); }
+
   .composer {
     position: relative;
     display: flex;

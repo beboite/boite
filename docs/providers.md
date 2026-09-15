@@ -231,16 +231,21 @@ empty home opens a browser.
 a Job Object and in the trace like any other, then asks the protocol's own
 question:
 
+- Claude: SDK `supportedModels()` without a user prompt. Effort levels, adaptive
+  thinking and Fast support come from each returned model. Descriptor effort
+  controls stay hidden until that account has answered.
 - ACP: `initialize` and `session/new`, then whichever of two answers the agent
   sent. `models.availableModels` wins when it is there: each entry is a model of
   its own, and under the `grok` quirk it carries its own effort scale out of
   `_meta.reasoningEfforts`, the level flagged `default: true` the one preselected.
   Otherwise the `configOptions` whose category is `model` and `thought_level` are
-  read, and that gives one effort scale for the whole session, shared by every
-  model. An agent that sends neither leaves the descriptor's models standing.
+  read. That effort scale describes only the current model, so Boite does not
+  copy it to other models. An agent that sends neither leaves the descriptor's
+  models standing.
 - Codex: `initialize`, the `initialized` notification, then `model/list` until no
   cursor comes back. Each model carries its own efforts and its own default, so
-  two models on one account can offer two different scales, and it answers before
+  two models on one account can offer two different scales. `serviceTiers` supplies
+  speed choices without adding unlisted tiers. It answers before
   any login, so an unauthenticated account is no reason to skip the probe.
 - pi: `get_state`, `get_available_models` and `get_available_thinking_levels`.
   Each model id carries its provider prefix, because that is what pi's `--model`
@@ -252,7 +257,9 @@ The child is killed through the registry on every path. The answer keeps the
 descriptor's `default` first, so the choice can always go back to the agent, is
 cached per provider and account until `providers.reload` or a change to that
 account, and reaches every client as `providers.probed`. Two callers at once share
-one process. A probe that finds no executable, whose agent dies or that runs past
+one process. `refresh: true` bypasses a completed cache entry, sharing any probe
+already in flight. The UI keeps a persistent display cache and reads asynchronously.
+A probe that finds no executable, whose agent dies or that runs past
 twenty seconds throws with the reason and caches nothing. `threads.create` and
 `threads.update` accept what the last probe listed on top of the descriptor's; a
 model nobody probed is refused, saying to open the picker.

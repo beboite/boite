@@ -24,7 +24,25 @@ the account's current model list; a removed model is refused explicitly.
 
 The reasoning popover has one notch per level reported by the selected model.
 Dragging previews the level and saves on release. Arrow keys, Home, End and
-the level labels select the same discrete values.
+the dots select the same discrete values. The compact panel shows the model and
+current level above the track. Ultrathink belongs only to Claude and is offered
+when its SDK reports adaptive thinking.
+
+Model catalogs persist in client storage, scoped to the core endpoint and data
+directory and checked against the current provider/account records. Opening an
+agent shows the cached list immediately while discovery runs in the background.
+The top-right refresh button forces a new probe; concurrent requests share one
+operation. A failed refresh keeps the visible list and waits for a manual retry.
+The menu opens below the composer controls, which reserve room for it, and its
+model column scrolls independently.
+
+The lightning button cycles through the selected model's advertised speeds and
+back to standard. Codex uses its per-model `serviceTiers` list, including Fast or
+Ultrafast only when listed, and sends the selected id as `turn/start.serviceTier`.
+Claude uses `supportsFastMode` and session-scoped `settings.fastMode`; changing it
+reopens the CLI on the same native session. ACP and pi expose no speed switch.
+A model/account change clears speed and effort. Schema 10 stores `threads.speed`,
+and each accepted turn freezes it with the other execution settings.
 
 ## Context transfer
 

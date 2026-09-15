@@ -538,8 +538,10 @@ describe('acp driver', () => {
     await runTurn(client, threadId, 'first');
     await waitFor(() => configCount('model fake-fast') === 1);
 
-    await client.call('threads.update', { threadId, model: 'fake-smart', effort: 'high' });
+    await client.call('threads.update', { threadId, effort: 'high' });
     await runTurn(client, threadId, 'second');
+    await client.call('threads.update', { threadId, model: 'fake-smart' });
+    await runTurn(client, threadId, 'third');
 
     await waitFor(() => configCount('model fake-smart') === 1);
     await waitFor(() => configCount('thought_level high') === 1);
@@ -577,8 +579,10 @@ describe('acp driver', () => {
     // The descriptor's own model stays first and never claims to be the default.
     expect(result.models[0]).toMatchObject({ id: 'default', name: 'Agent default', default: false });
     expect(result.models.find((model) => model.default === true)?.id).toBe('fake-fast');
-    // `thought_level` is one scale for the session, so every model carries it.
-    for (const model of result.models) {
+    // A session scale only describes its current model.
+    expect(result.models[0]?.effort).toBeUndefined();
+    expect(result.models.find(model => model.id === 'fake-smart')?.effort).toBeUndefined();
+    for (const model of result.models.filter(model => model.id === 'fake-fast')) {
       expect(model.effort).toEqual({
         levels: [
           { id: 'low', label: 'Low' },
@@ -641,10 +645,10 @@ describe('acp driver', () => {
       accountId,
       title: 'after the probe',
       model: 'fake-smart',
-      effort: 'high',
     });
     expect(thread.model).toBe('fake-smart');
-    expect(thread.effort).toBe('high');
+    expect(thread.effort).toBeNull();
+    await expect(client.call('threads.update', { threadId: thread.id, effort: 'high' })).rejects.toThrow(/does not offer this reasoning effort/);
   });
 
   test('the thread permission mode becomes a session mode, and the one the agent is on sends nothing', async () => {
