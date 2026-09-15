@@ -88,6 +88,7 @@ interface CodexTurnRecord {
 
 /** `TokenUsageBreakdown`. */
 interface CodexTokenUsage {
+  totalTokens?: number;
   inputTokens?: number;
   outputTokens?: number;
   cachedInputTokens?: number;
@@ -601,6 +602,9 @@ class CodexSession {
       // app-server thread opened: that is what carries a changed model or
       // effort to a process that stayed up.
       const model = modelOf(ctx);
+      if (ctx.turn.execution?.operation === 'compact') {
+        await rpc.request('thread/compact/start', { threadId });
+      } else {
       const started = await rpc.request<{ turn: CodexTurnRecord }>('turn/start', {
         threadId,
         input: [{ type: 'text', text: ctx.prompt, text_elements: [] }, ...imageInputsOf(ctx.attachments)],
@@ -612,6 +616,7 @@ class CodexSession {
       // A server that answers with a turn already finished settles it here;
       // the one that answers `inProgress` settles on `turn/completed`.
       turn.finish(started.turn);
+      }
     } catch (error) {
       // A child that died takes the connection with it, and its exit says more
       // than "the request failed": give it a moment to be reported.
@@ -797,6 +802,11 @@ class CodexSession {
     if (turn === null) return;
     const params = (raw ?? {}) as Record<string, unknown>;
     switch (method) {
+      case 'turn/started': {
+        const record = params['turn'] as CodexTurnRecord | undefined;
+        if (record) { turn.turnId = record.id; if (turn.isStopped) this.interrupt(turn); }
+        break;
+      }
       case 'item/agentMessage/delta':
         turn.writeText(textOf(params['delta']));
         break;
@@ -808,14 +818,21 @@ class CodexSession {
       case 'item/completed': {
         const item = params['item'] as CodexItem | undefined;
         if (item === undefined || typeof item.id !== 'string') break;
+        if (item.type === 'contextCompaction' && method === 'item/completed') {
+          turn.part(turn.takeIndex(), { type: 'compaction', trigger: turn.ctx.turn.execution?.operation === 'compact' ? 'manual' : 'auto', preTokens: turn.ctx.thread.context?.tokens ?? null, postTokens: null });
+          break;
+        }
         const view = toolViewOf(item);
         if (view !== null) turn.upsertTool(item.id, view);
         break;
       }
       case 'thread/tokenUsage/updated': {
-        const usage = params['tokenUsage'] as { last?: CodexTokenUsage } | undefined;
+        const usage = params['tokenUsage'] as { last?: CodexTokenUsage; modelContextWindow?: number } | undefined;
         const last = usage?.last;
         if (last !== undefined) turn.usage = mapUsage(last);
+        if (last !== undefined && typeof last.totalTokens === 'number') {
+          turn.ctx.context({ tokens: last.totalTokens, window: usage?.modelContextWindow ?? null });
+        }
         break;
       }
       case 'turn/completed': {

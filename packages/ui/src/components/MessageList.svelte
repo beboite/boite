@@ -494,7 +494,7 @@
                     <div class="compaction" data-testid="compaction-part" data-trigger={part.trigger}>
                       <span class="rule"></span>
                       <span class="label">
-                        {part.postTokens === null
+                        {part.preTokens === null ? strings.chat.compactionUnknown : part.postTokens === null
                           ? strings.chat.compactionNoPost.replace('{pre}', formatTokens(part.preTokens))
                           : strings.chat.compaction
                               .replace('{pre}', formatTokens(part.preTokens))

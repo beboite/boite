@@ -67,6 +67,7 @@ import {
 } from './prefs';
 import { rightPanel, type BoundPanel } from './right-panel.svelte';
 import { strings } from './strings';
+import { FAVORITES_KEY, readFavorites, type FavoriteModel } from './model-order';
 
 export type Page = 'chat' | 'settings';
 export type SettingsTab = 'general' | 'appearance' | 'keyboard' | 'accounts' | 'plugins' | 'usage' | 'resources' | 'experiments';
@@ -219,6 +220,21 @@ export class Store {
   loadingOlder = $state(false);
   draft = $state<Draft | null>(null);
   prefs = $state<ComposerPrefs>(defaultPrefs());
+  favorites = $state<FavoriteModel[]>(readFavorites());
+
+  toggleFavorite(providerId: string, accountId: string, model: ModelInfo): void {
+    const matches = (f: FavoriteModel) => f.providerId === providerId && f.accountId === accountId && f.model.id === model.id;
+    this.favorites = this.favorites.some(matches) ? this.favorites.filter((f) => !matches(f))
+      : [...this.favorites, { providerId, accountId, model }];
+    try { localStorage.setItem(FAVORITES_KEY, JSON.stringify(this.favorites)); } catch { /* session only */ }
+  }
+
+  async compact(): Promise<void> {
+    const thread = this.openThread;
+    if (!thread || !this.#client) return;
+    try { await this.#client.call('threads.compact', { threadId: thread.id, expectedSelectionVersion: thread.selectionVersion ?? 0 }); }
+    catch (error) { this.#fail(error); }
+  }
   providers = $state<ProviderSummary[]>([]);
   rejectedProviders = $state<ProviderRejected[]>([]);
   /**
@@ -474,6 +490,7 @@ export class Store {
     this.#client = client;
     this.connection = client.state;
     this.prefs = readPrefs();
+    this.favorites = readFavorites();
     const layout = readLayout();
     this.sidebarWidth = layout.sidebarWidth;
     this.sidebarCollapsed = layout.sidebarCollapsed;

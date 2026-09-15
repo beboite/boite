@@ -10,6 +10,22 @@ model-switch path. Changing accounts clears the native session. The next turn
 starts a fresh session with context from the journal. Returning to an earlier
 account also starts fresh, so it receives the intervening work.
 
+## Picker and favorites
+
+The picker hides unnamed `default` and `auto` entries while retaining them in
+the provider contract for existing sessions. It lists named models by family
+tier and numeric version, with legacy models folded away. This is a display
+heuristic, not a benchmark ranking.
+
+Each model has a star. The first provider-rail entry, Favorites, contains only
+starred models and shows their associated account. Favorites persist in the
+client's local storage, not across devices. Selecting a dynamic favorite checks
+the account's current model list; a removed model is refused explicitly.
+
+The reasoning popover has one notch per level reported by the selected model.
+Dragging previews the level and saves on release. Arrow keys, Home, End and
+the level labels select the same discrete values.
+
 ## Context transfer
 
 The first prompt carries historical user and assistant text, tool outcomes and

@@ -272,6 +272,7 @@ class ClaudeTurn {
   /** `ultrathink` is not an option of the CLI: the word in the prompt is what asks for it. */
   promptText(): string {
     const text = this.ctx.prompt;
+    if (this.ctx.turn.execution?.operation === 'compact') return text;
     if (this.ctx.thread.effort !== PROMPT_EFFORT) return text;
     return text.length === 0 ? PROMPT_EFFORT : `${text} ${PROMPT_EFFORT}`;
   }

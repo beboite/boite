@@ -53,10 +53,10 @@ test('the picker changes native protocols in one conversation and carries histor
   const tile = '[data-testid="composer-picker-menu"] [data-provider="switch-acp"]';
   await page.waitFor(`document.querySelector('${tile}') && !document.querySelector('${tile}').disabled`);
   await page.click(tile);
-  await page.waitFor(`document.querySelector('[data-model="default"]') && !document.querySelector('[data-model="default"]').disabled`);
+  await page.waitFor(`document.querySelector('[data-model="fake-smart"]') && !document.querySelector('[data-model="fake-smart"]').disabled`);
   await capture('model-switch-picker.png');
-  await page.click('[data-model="default"]');
-  await page.waitFor(`document.querySelector('${selector('composer-picker')}')?.textContent.includes('Agent default')`);
+  await page.click('[data-model="fake-smart"]');
+  await page.waitFor(`document.querySelector('${selector('composer-picker')}')?.textContent.includes('Smart')`);
   expect((await client.call('threads.get', { threadId })).accountId).toBe(accountId);
   await page.type(selector('composer-input'), 'Continue using the release code.');
   await page.click(selector('composer-send'));

@@ -380,7 +380,7 @@ export type TurnStatus = 'queued' | 'running' | 'done' | 'stopped' | 'error';
 /** Frozen when a prompt is accepted, including while it waits in the scheduler. */
 export type TurnExecution = Pick<ThreadSummary,
   'providerId' | 'accountId' | 'model' | 'effort' | 'permissionMode' | 'sessionId'
-> & { sessionGeneration: number; selectionVersion: number };
+> & { sessionGeneration: number; selectionVersion: number; operation?: 'compact' };
 
 export interface Turn {
   id: TurnId;
@@ -467,7 +467,7 @@ export type MessagePart =
    * The agent compacted its context mid-turn: what it held before, what is
    * left after when it says so. Drawn as a divider in the timeline.
    */
-  | { type: 'compaction'; trigger: 'auto' | 'manual'; preTokens: number; postTokens: number | null }
+  | { type: 'compaction'; trigger: 'auto' | 'manual'; preTokens: number | null; postTokens: number | null }
   | { type: 'error'; message: string };
 
 export interface Message {
@@ -1054,6 +1054,7 @@ export interface RpcMethods {
    * saved, `titleSource` saying which of the two wrote it.
    */
   'threads.retitle': { params: { threadId: ThreadId }; result: ThreadSummary };
+  'threads.compact': { params: { threadId: ThreadId; expectedSelectionVersion?: number }; result: Turn };
   'threads.archive': { params: { threadId: ThreadId; archived?: boolean }; result: ThreadSummary };
   /** Pin or unpin (`pinned: false`) a thread. An archived thread keeps its pin for when it comes back. */
   'threads.pin': { params: { threadId: ThreadId; pinned?: boolean }; result: ThreadSummary };

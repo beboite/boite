@@ -125,6 +125,25 @@ async function codexThread(client: CoreClient, permissionMode?: PermissionMode, 
 }
 
 describe('codex driver', () => {
+  test('manual compaction resumes the native session and waits for its completed turn', async () => {
+    const client = await startCore();
+    const threadId = await codexThread(client);
+    let finished = client.next('turn.finished', (turn) => turn.threadId === threadId);
+    await client.call('turns.start', { threadId, prompt: 'remember this' });
+    await finished;
+    const before = await client.call('threads.get', { threadId });
+    finished = client.next('turn.finished', (turn) => turn.threadId === threadId);
+    const turn = await client.call('threads.compact', { threadId });
+    expect(turn.execution?.operation).toBe('compact');
+    expect((await finished).status).toBe('done');
+    const after = await client.call('threads.get', { threadId });
+    expect(after.sessionId).toBe(before.sessionId);
+    expect(after.context?.tokens).toBe(32000);
+    expect(after.context?.window).toBe(200000);
+    expect(after.messages.flatMap((m) => m.parts).some((p) => p.type === 'compaction')).toBe(true);
+    expect(fakeLog()).toContain('thread/compact/start');
+    client.close();
+  });
   test('getDriver returns the codex driver', () => {
     expect(getDriver('codex-appserver').protocol).toBe('codex-appserver');
   });
