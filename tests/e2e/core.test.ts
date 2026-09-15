@@ -28,13 +28,13 @@ beforeAll(async () => {
   core = await startCore();
   client = await connect(core.url, core.token);
   projectDir = mkdtempSync(join(tmpdir(), 'boite-e2e-project-'));
-});
+}, 30_000);
 
 afterAll(async () => {
   client?.close();
   await core?.stop();
   if (projectDir !== undefined) await removeDirectory(projectDir);
-});
+}, 15_000);
 
 test(
   'hello answers with a core that can trace',

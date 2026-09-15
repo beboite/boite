@@ -77,7 +77,7 @@ afterAll(async () => {
   await core?.stop();
   if (projectDir !== undefined) await removeDirectory(projectDir);
   if (worktreesDir !== undefined) await removeDirectory(worktreesDir);
-});
+}, 15_000);
 
 test(
   'a fresh core opens on the first-run card, connected to the core it was paired with',

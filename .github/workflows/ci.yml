@@ -97,7 +97,7 @@ jobs:
       - uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c
         with:
           workspaces: apps/shell/src-tauri -> target
-          cache-on-failure: true
+          shared-key: desktop-release-v1
       - name: Set nightly artifact version
         if: inputs.channel == 'nightly' && inputs.version != ''
         env:

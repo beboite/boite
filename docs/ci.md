@@ -26,8 +26,10 @@ The cache key includes the lockfile and the Svelte and Vitest configuration;
 Vitest validates individual source files when loading cached transforms.
 
 The Windows job builds the installer and runs Rust tests in the release profile,
-sharing compiled dependencies. Cargo caches are saved for PRs as well as main;
-GitHub keeps PR caches scoped to their merge ref.
+sharing compiled dependencies. Successful jobs save Cargo caches for PRs as well
+as main, under a release-specific key. Failed or interrupted jobs do not save an
+incomplete cache that GitHub would keep immutable. GitHub scopes PR caches to
+their merge ref.
 It builds the installer once, then copies the existing sidecar beside the shell
 for end-to-end testing. It does not recompile the core just to stage it again.
 The tested installer becomes the release artifact, with no second release build.

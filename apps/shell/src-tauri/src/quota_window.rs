@@ -96,10 +96,17 @@ pub fn show<R: Runtime>(app: &AppHandle<R>, point: PhysicalPosition<f64>) -> tau
         let work = monitor.work_area();
         let area = available_area(bounds, (work.position.x as f64, work.position.y as f64,
             work.position.x as f64 + work.size.width as f64, work.position.y as f64 + work.size.height as f64), &hidden_appbars(bounds));
-        let width = (380.0 * scale).min((area.2 - area.0 - 16.0).max(1.0));
-        let height = (460.0 * scale).min((area.3 - area.1 - 16.0).max(1.0));
+        // Windows can retain invisible frame borders on undecorated windows.
+        // Reserve those too: set_size takes an inner size, placement an outer one.
+        let inner = window.inner_size()?;
+        let outer = window.outer_size()?;
+        let frame_width = outer.width.saturating_sub(inner.width) as f64;
+        let frame_height = outer.height.saturating_sub(inner.height) as f64;
+        let width = (380.0 * scale).min((area.2 - area.0 - 16.0 - frame_width).max(1.0));
+        let height = (460.0 * scale).min((area.3 - area.1 - 16.0 - frame_height).max(1.0));
         window.set_size(tauri::PhysicalSize::new(width as u32, height as u32))?;
-        let (x, y) = position(point.x, point.y, width, height, area);
+        let outer = window.outer_size()?;
+        let (x, y) = position(point.x, point.y, outer.width as f64, outer.height as f64, area);
         window.set_position(PhysicalPosition::new(x as i32, y as i32))?;
     }
     // Test shells create and render the same page without ever showing a window.
