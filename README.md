@@ -1,9 +1,8 @@
-<h1 align="center">boite</h1>
-<p align="center"><sub>[bwat]</sub></p>
-<p align="center">One place for your coding agents.</p>
+<h1 align="center">boite <sub>[bwat]</sub></h1>
+<p align="center">All your work and agents in one place</p>
 
 <p align="center">
-  <img src="packages/ui/public/icons/icon-192.png" alt="boite logo" width="96" />
+  <img src="apps/shell/src-tauri/icons-dev/128x128@2x.png" alt="boite logo" width="96" />
 </p>
 
 <p align="center">
@@ -13,7 +12,7 @@
   <a href="LICENSE">MIT license</a>
 </p>
 
-boite is an open-source desktop app and self-hosted server for AI coding agents.
+boite is an open-source desktop app and self-hosted server for AI agents.
 Run Claude Code, Codex, OpenCode, Antigravity, Grok and pi in one chat interface,
 using their own protocols and your existing accounts.
 
@@ -77,7 +76,9 @@ bun run test
 ## Thanks
 
 Thanks to [T3 Code](https://github.com/pingdotgg/t3code) for the inspiration behind
-boite's chat workflow. This project also follows
+boite. We definitely took stuff from there, shoutout to them!
+
+This project also follows
 [Boite Legacy](https://github.com/beboite/boite-legacy), the earlier terminal-based app.
 
 ## License
