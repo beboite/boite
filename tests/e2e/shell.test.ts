@@ -239,7 +239,9 @@ function spawnHiddenShell(ownDataDir: string, debugPort?: number): number {
   env.BOITE_SHELL_HIDDEN = '1';
   env.BOITE_DATA_DIR = ownDataDir;
   env.BOITE_ECHO = '1';
+  delete env.BOITE_SHELL_DEBUG_PORT;
   if (debugPort !== undefined) {
+    env.BOITE_SHELL_DEBUG_PORT = String(debugPort);
     env.WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = `--remote-debugging-port=${debugPort} --remote-allow-origins=* --mute-audio --use-angle=d3d11`;
   }
   return Bun.spawn({ cmd: [EXE], env, stdout: 'ignore', stderr: 'ignore', windowsHide: true }).pid;

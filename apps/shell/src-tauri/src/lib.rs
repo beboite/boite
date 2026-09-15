@@ -871,6 +871,17 @@ fn build_main_window<R: Runtime>(
     if let Some(directory) = webview_profile() {
         builder = builder.data_directory(directory);
     }
+    // Elevated CI hosts ignore WebView2's environment-based debug switches.
+    // Pass the explicit test port through the API, only in hidden test mode.
+    if hidden() {
+        if let Ok(value) = std::env::var("BOITE_SHELL_DEBUG_PORT") {
+            let port: u16 = value.parse().expect("BOITE_SHELL_DEBUG_PORT must be a port number");
+            assert!(port > 0, "BOITE_SHELL_DEBUG_PORT must be greater than zero");
+            builder = builder.additional_browser_args(&format!(
+                "--remote-debugging-port={port} --remote-allow-origins=* --mute-audio --use-angle=d3d11"
+            ));
+        }
+    }
     builder.build()
 }
 

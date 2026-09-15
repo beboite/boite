@@ -25,7 +25,9 @@ use at most eight workers and persist transformed modules in Vitest's disk cache
 The cache key includes the lockfile and the Svelte and Vitest configuration;
 Vitest validates individual source files when loading cached transforms.
 
-The Windows job shares one Cargo cache between unit tests and the release build.
+The Windows job builds the installer and runs Rust tests in the release profile,
+sharing compiled dependencies. Cargo caches are saved for PRs as well as main;
+GitHub keeps PR caches scoped to their merge ref.
 It builds the installer once, then copies the existing sidecar beside the shell
 for end-to-end testing. It does not recompile the core just to stage it again.
 The tested installer becomes the release artifact, with no second release build.
@@ -40,6 +42,13 @@ the smoke test and combines both digests into one multi-platform tag.
 
 These are cache and job boundaries, not a promise of a particular runner time.
 Measure actual workflow durations after the first cold and warm runs on GitHub.
+
+Windows browser setup has an explicit startup timeout. The hidden shell test
+passes `BOITE_SHELL_DEBUG_PORT` through WebView2's API because elevated runners
+ignore environment-based WebView2 debug switches. Normal launches ignore this
+test port. Hardware audio tests skip hosts without a default render endpoint;
+the guard logic tests still run. Scripted Claude tests use Bun as their available
+executable and never need a real CLI or login.
 
 ## boite de nuit
 
