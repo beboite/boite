@@ -46,7 +46,7 @@ totals.
 The trace panel shows six columns at a fixed width, executable, duration, CPU,
 peak memory, I/O and exit, the four measurements right-aligned on tabular
 figures. It shows the base name of the executable, with the full path, the pid
-and the command line in the cell's tooltip. The Resources page under Settings
+and the command line in the cell's tooltip. The Protection page under Settings
 keeps a wider table with a pid column of its own.
 
 ## Caps

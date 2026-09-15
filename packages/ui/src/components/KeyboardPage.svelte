@@ -25,7 +25,7 @@
   </header>
 
   <section class="card">
-    <h2>{strings.keyboard.heading}</h2>
+    <h2 id="settings-shortcuts">{strings.keyboard.heading}</h2>
     <p class="intro">{strings.keyboard.intro}</p>
     <table>
       <thead>
@@ -69,7 +69,7 @@
   {/if}
 
   <section class="card">
-    <h2>{strings.keyboard.file}</h2>
+    <h2 id="settings-keybinding-file">{strings.keyboard.file}</h2>
     <p class="mono path" data-testid="keybindings-path">{store.keybindings?.path ?? ''}</p>
     <p class="intro">{strings.keyboard.fileHint}</p>
     <p class="subtle example-label">{strings.keyboard.example}</p>

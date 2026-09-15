@@ -145,6 +145,12 @@ Go. Each row shows the lowest remaining limit across its monitored accounts and
 the next reported reset. Open a row for individual windows, account names and
 monitoring switches. Missing accounts lead to Providers.
 
+The tray popup opens after 500 ms of continuous hover. Leaving the icon cancels
+that opening; a click does not bypass the delay. On Windows it stays inside the
+monitor's work area, above a bottom taskbar. Auto-hidden taskbars reserve their
+full height even while sliding offscreen. The popup keeps its position when the
+taskbar retracts and allows moving from the icon into the popup before closing.
+
 Grok reads the selected account's `GROK_HOME/auth.json` and requests its credit
 percentage from the Grok CLI billing endpoint. Expired logins require `grok login`.
 OpenCode Go reads the `opencode-go` API login in the account's

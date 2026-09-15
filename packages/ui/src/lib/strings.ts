@@ -351,8 +351,15 @@ export const strings = {
     modeLabel: 'Trace mode'
   },
 
+  protection: {
+    intro: 'Keep agents from interrupting your work and control what they use.',
+    quiet: 'Peace and quiet',
+    limits: 'Resource limits',
+    tasks: 'Task manager',
+    windows: 'Focus, audio and resource limits apply on the Windows host.',
+  },
   resources: {
-    heading: 'Resources',
+    heading: 'Protection',
     empty: 'No thread is using anything right now.',
     live: 'Live processes',
     totals: 'Totals',
@@ -440,7 +447,7 @@ export const strings = {
       accounts: 'Providers',
       plugins: 'Plugins',
       usage: 'Usage',
-      resources: 'Resources',
+      resources: 'Protection',
       experiments: 'Experiments'
     },
     back: 'Back to threads',
