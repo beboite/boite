@@ -86,6 +86,7 @@ pub fn show<R: Runtime>(app: &AppHandle<R>, point: PhysicalPosition<f64>) -> tau
             .visible(false).focused(false).focusable(false)
             .on_navigation(|url| matches!(url.scheme(), "tauri" | "http" | "https") && matches!(url.host_str(), Some("tauri.localhost") | Some("localhost")));
         if let Some(profile) = crate::webview_profile() { builder = builder.data_directory(profile); }
+        if let Some(args) = crate::test_browser_args() { builder = builder.additional_browser_args(&args); }
         builder.build()?
     };
     if let Some(monitor) = window.monitor_from_point(point.x, point.y)? {
