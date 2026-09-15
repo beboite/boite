@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { ChevronRight, Ellipsis, Folder, List, Plus, Search, Settings, Network } from '@lucide/svelte';
+  import { ChevronRight, Ellipsis, Folder, List, Plus, Search, Settings } from '@lucide/svelte';
   import type { Project } from '@boite/contracts';
   import type { Store } from '../lib/store.svelte';
   import { workspace, type Machine } from '../lib/workspace.svelte';
@@ -52,13 +52,6 @@
   }
   function addProject() {
     store.projectPickerOpen = true;
-  }
-  function filterMenu(event: MouseEvent) {
-    contextMenu.open(
-      event,
-      [{ id: 'all', label: strings.machines.all }, ...machines.map((m) => ({ id: m.id, label: m.label }))],
-      (id) => (filter = id === 'all' ? null : id)
-    );
   }
   function projectMenu(event: MouseEvent, machine: Machine, project: Project) {
     const owner = machine.store;
@@ -234,10 +227,7 @@
     >
   {/if}
   <div class="foot">
-    {#if machines.length > 1}
-      <button class="ghost icon" class:filtered={filter !== null} data-testid="machine-filter" title={filter ? machines.find(m => m.id === filter)?.label : strings.machines.filter} aria-label={strings.machines.filter} onclick={filterMenu}><Network size={15} /></button>
-    {/if}
-    <MachineStatus {store} />
+    <MachineStatus {store} {filter} onfilter={id => (filter = id)} />
     {#if usageToday > 0}<button
         class="chip usage"
         title={strings.usage.heading}
@@ -281,7 +271,6 @@
     border-right: 1px solid var(--color-border);
   }
 
-  .filtered { background: var(--color-surface-3); color: var(--color-foreground); }
   .top {
     display: flex;
     gap: 6px;

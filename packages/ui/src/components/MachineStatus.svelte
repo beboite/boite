@@ -6,21 +6,19 @@
   import { strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
   import Menu from './Menu.svelte';
-  let { store }: { store: Store } = $props();
+  let { store, filter = null, onfilter }: { store: Store; filter?: string | null; onfilter?: (id: string | null) => void } = $props();
 
   const machines = $derived(workspace.machines.length ? workspace.machines : [{ id: 'current', label: strings.connection.local, store }]);
   const connected = $derived(machines.filter(m => m.store.connection === 'ready').length);
   const issues = $derived(machines.filter(m => m.store.connection === 'closed' || (m.store.booted && m.store.connection !== 'ready')).length);
   const items = $derived([
-    ...machines.map(m => ({ id: m.id, label: m.label, hint: strings.connection[m.store.connection], active: m.store === store })),
+    { id: 'all', label: strings.machines.all, active: filter === null },
+    ...machines.map(m => ({ id: m.id, label: m.label, hint: strings.connection[m.store.connection], active: m.id === filter })),
     { id: 'manage', label: strings.connection.manage }
   ]);
   function pick(id: string) {
     if (id === 'manage') store.showSettings('machines');
-    else {
-      const target = machines.find(m => m.id === id);
-      if (target && target.store !== store) void workspace.select(target.store);
-    }
+    else onfilter?.(id === 'all' ? null : id);
   }</script>
 
 <div class="machines" class:problem={issues > 0} data-testid="status-connection" data-state={store.connection} aria-live="polite">

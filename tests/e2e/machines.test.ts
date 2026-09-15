@@ -38,6 +38,15 @@ afterAll(async () => {
 test('project and recent cards show both hosts, PRs and user-message ordering on desktop and phone', async () => {
   await page.waitFor(`document.querySelectorAll('${id('thread-row')}').length === 8`);
   await page.waitFor(`document.querySelectorAll('${id('thread-pr')}').length === 2`);
+  expect(await page.evaluate(`document.querySelector('[data-testid=machine-filter]') === null`)).toBe(true);
+  await page.click(id('machine-status'));
+  await page.waitFor(`document.querySelector('[data-testid=machine-status-menu]')`);
+  await capture('single-machine-menu.png');
+  await page.click('[data-testid=machine-status-menu] [data-value="http://builder.test"]');
+  await page.waitFor(`document.querySelectorAll('${id('thread-row')}').length === 4`);
+  await page.click(id('machine-status'));
+  await page.click('[data-testid=machine-status-menu] [data-value=all]');
+  await page.waitFor(`document.querySelectorAll('${id('thread-row')}').length === 8`);
   await capture('projects-machines-desktop.png');
   await page.click(id('view-recent'));
   const rows = await page.evaluate<string[]>(
