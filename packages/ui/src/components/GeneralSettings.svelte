@@ -4,32 +4,17 @@
   import ShellSettings from './ShellSettings.svelte';
   import { confirm } from '../lib/confirm.svelte';
   import { ago, time } from '../lib/format';
-  import { readStoredEndpoint } from '../lib/endpoint';
   import { qrSvg } from '../lib/qr';
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
 
   let { store }: { store: Store } = $props();
 
-  const stored = readStoredEndpoint();
   const inShell = window.__TAURI_INTERNALS__ !== undefined;
 
-  let url = $state(
-    untrack(() => stored?.url ?? (store.core ? `http://${store.core.endpoint.host}:${store.core.endpoint.port}` : ''))
-  );
-  let token = $state(stored?.paired ? '' : (stored?.token ?? ''));
-
-  // A link minted by a core somewhere else, pasted here to drive that core.
-  let pairingLink = $state('');
   // Off mints a phone's link; on mints one for another computer of the owner's.
   let ownerLink = $state(false);
 
-  async function pair(event: SubmitEvent) {
-    event.preventDefault();
-    const link = pairingLink.trim();
-    if (link.length === 0) return;
-    if (await store.pairWith(link)) pairingLink = '';
-  }
 
   // The devices list is read on arrival and after every `sessions.updated`;
   // the pairing link is minted on the button, never on its own.
@@ -65,7 +50,6 @@
     if (ok) await store.revokeSession(session.id);
   }
 
-  let projectPath = $state('');
 
   let maxConcurrentTurns = $state(untrack(() => store.settings?.maxConcurrentTurns ?? 6));
   let perAccountConcurrency = $state(untrack(() => store.settings?.perAccountConcurrency ?? 2));
@@ -83,13 +67,6 @@
     savedAt = Date.now();
   }
 
-  async function addProject(event: SubmitEvent) {
-    event.preventDefault();
-    const path = projectPath.trim();
-    if (path.length === 0) return;
-    const project = await store.addProject(path);
-    if (project) projectPath = '';
-  }
 </script>
 
 <div class="page" data-testid="settings-page">
@@ -115,21 +92,9 @@
     <!-- `projects.add` is the owner's, so a paired device reads the list and
          is told where the folders come from. -->
     {#if store.owner}
-      <form class="row" onsubmit={addProject} data-testid="settings-add-project">
-        {#if store.pickerAvailable}
-          <button type="button" onclick={() => void store.pickProject()}>{strings.firstRun.pick}</button>
-        {/if}
-        <input
-          bind:value={projectPath}
-          placeholder={strings.firstRun.pathPlaceholder}
-          data-testid="settings-project-path"
-          class="mono grow"
-          spellcheck="false"
-        />
-        <button type="submit" class="primary" data-testid="settings-project-add" disabled={projectPath.trim().length === 0}>
-          {strings.firstRun.add}
-        </button>
-      </form>
+      <div data-testid="settings-add-project">
+        <button type="button" data-testid="settings-project-add" onclick={() => (store.projectPickerOpen = true)}>{strings.firstRun.pick}</button>
+      </div>
     {:else}
       <p class="subtle hint">{strings.settings.projectsDevice}</p>
     {/if}
@@ -152,84 +117,12 @@
     </label>
   </section>
 
-  <section class="card" id="settings-connection">
-    <h2>{strings.settings.connection}</h2>
-    {#if store.endpointUrl}
-      <p class="subtle hint" data-testid="settings-target">
-        {store.localCore ? strings.settings.localCore : fill(strings.settings.coreAt, { url: store.endpointUrl })}
-      </p>
-    {/if}
-    {#if store.environments.length > 0}
-      <h3>{strings.settings.environments}</h3>
-      <p class="subtle hint">{strings.settings.environmentsHint}</p>
-      <ul class="projects" data-testid="settings-envs">
-        {#each store.environments as env (env.url)}
-          <li>
-            <span class="name">{env.label}</span>
-            <span class="mono subtle path" title={env.url}>{env.url}</span>
-            {#if store.endpointUrl === env.url}
-              <span class="subtle" data-testid="settings-env-current">{strings.settings.envCurrent}</span>
-            {:else}
-              <button
-                type="button"
-                data-testid="settings-env-switch"
-                onclick={() => void store.switchEnvironment(env.url)}
-              >
-                {strings.settings.envSwitch}
-              </button>
-            {/if}
-            <button
-              type="button"
-              class="ghost small"
-              data-testid="settings-env-forget"
-              onclick={() => void store.forgetEnvironment(env.url)}
-            >
-              {strings.settings.envForget}
-            </button>
-          </li>
-        {/each}
-      </ul>
-    {/if}
-    <form class="row" onsubmit={pair} data-testid="settings-pair-form">
-      <input
-        bind:value={pairingLink}
-        aria-label={strings.settings.pairingLink}
-        placeholder={strings.settings.pairingLinkPlaceholder}
-        data-testid="settings-pairing-link"
-        class="mono grow"
-        spellcheck="false"
-        autocomplete="off"
-      />
-      <button type="submit" class="primary" data-testid="settings-pair" disabled={pairingLink.trim().length === 0}>
-        {strings.settings.pair}
-      </button>
-    </form>
-    <p class="subtle hint below">{strings.settings.pairHint}</p>
-    {#if inShell && store.paired}
-      <div class="actions">
-        <button type="button" data-testid="settings-use-local" onclick={() => void store.useLocalCore()}>
-          {strings.settings.useLocal}
-        </button>
-        <span class="subtle small-hint">{strings.settings.useLocalHint}</span>
-      </div>
-    {/if}
-    <h3>{strings.settings.manual}</h3>
-    <div class="grid">
-      <label>
-        <span>{strings.settings.coreUrl}</span>
-        <input bind:value={url} data-testid="settings-core-url" placeholder="http://127.0.0.1:8777" class="mono" />
-      </label>
-      <label>
-        <span>{strings.settings.token}</span>
-        <input bind:value={token} type="password" autocomplete="off" />
-      </label>
-    </div>
-    <div class="actions">
-      <button type="button" class="primary" disabled={url.trim().length === 0} onclick={() => void store.connectTo(url.trim(), token)}>
-        {strings.settings.connect}
-      </button>
-      <span class="muted">{strings.connection[store.connection]}</span>
-    </div>
+  <section class="card" id="settings-machines">
+    <h2>{strings.machines.heading}</h2>
+    <p class="subtle hint">{strings.machines.intro}</p>
+    <button data-testid="settings-machines" onclick={() => store.showSettings('machines')}>
+      {strings.machines.heading}
+    </button>
   </section>
 
   <section class="card" id="settings-devices" data-testid="pairing-card">
@@ -381,13 +274,6 @@
     margin: 0 0 12px;
   }
 
-  .hint.below {
-    margin: 6px 0 0;
-  }
-
-  .small-hint {
-    font-size: var(--text-sm);
-  }
 
   .projects {
     list-style: none;
@@ -417,14 +303,7 @@
     font-size: var(--text-sm);
   }
 
-  .grow {
-    flex: 1;
-    min-width: 0;
-  }
 
-  form button {
-    flex: none;
-  }
 
   .switch-row {
     display: flex;

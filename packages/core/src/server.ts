@@ -213,7 +213,7 @@ export function startServer(options: ServerOptions): RunningServer {
 
       if (url.pathname === RPC_PATH) {
         const origin = request.headers.get('origin');
-        if (!isAllowedOrigin(origin, self.port ?? 0, host)) {
+        if (!isAllowedOrigin(origin, self.port ?? 0, host) && !(origin !== null && core.settings.get().browserOrigins?.includes(origin))) {
           core.log('warn', `refused a websocket from origin ${origin ?? '(none)'}`);
           return new Response('forbidden origin', { status: 403 });
         }

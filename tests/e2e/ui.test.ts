@@ -82,7 +82,7 @@ afterAll(async () => {
 test(
   'a fresh core opens on the first-run card, connected to the core it was paired with',
   async () => {
-    await page.waitFor(`${textOf('status-connection')} === 'Connected'`, 30_000);
+    await page.waitFor(`document.querySelector('[data-testid=status-connection]')?.dataset.state === 'ready'`, 30_000);
     await page.waitFor(`document.querySelector('${testid('first-run')}')`);
     await page.waitFor(`document.querySelector('${testid('sidebar')}')`);
   },
@@ -92,6 +92,8 @@ test(
 test(
   'opening a folder makes a project and a draft thread, and the first send creates the thread',
   async () => {
+    await page.click(testid('add-project'));
+    await page.waitFor(`document.querySelector('[data-testid=project-path]') && !document.querySelector('[data-testid=project-add]').disabled`);
     await page.type(testid('project-path'), projectDir);
     await clickWhenEnabled(testid('project-add'));
     await page.waitFor(`${textOf('project-row')}.includes(${JSON.stringify(basename(projectDir))})`);
@@ -597,10 +599,11 @@ test(
   async () => {
     await page.click(testid('nav-settings'));
     await page.waitFor(`document.querySelector('${testid('settings-page')}')`);
-    const url = await page.evaluate<string>(`document.querySelector('${testid('settings-core-url')}').value`);
-    expect(url).toBe(core.url);
     expect(await page.evaluate<string>(textOf('settings-endpoint'))).toBe(`127.0.0.1:${core.port}`);
     expect(await page.evaluate<string>(textOf('settings-version'))).toBe(corePackage.version);
+    await page.click(testid('settings-machines'));
+    await page.waitFor(`document.querySelector('${testid('machine-card')}')`);
+    expect(await page.evaluate<string>(textOf('machine-card'))).toContain(core.url);
 
     await page.click(testid('settings-back'));
     await page.waitFor(`document.querySelector('${testid('chat')}')`);
@@ -671,7 +674,7 @@ test(
     const grantUrl = await mintPairing(core);
     const phone = await BrowserPage.launch({ url: grantUrl });
     try {
-      await phone.waitFor(`${textOf('status-connection')} === 'Connected'`, 30_000);
+      await phone.waitFor(`document.querySelector('[data-testid=status-connection]')?.dataset.state === 'ready'`, 30_000);
       const stored = await phone.evaluate<{ url: string; token: string }>(`JSON.parse(localStorage.getItem('boite.core'))`);
       expect(stored.token).toHaveLength(64);
       expect(stored.token).not.toBe(core.token);
@@ -699,7 +702,7 @@ test(
       }
       await page.waitFor(`!document.querySelector('${testid('paired-devices')}')`, 30_000);
       // The phone's reconnect is refused once, then it stops, drops its dead key and says why.
-      await phone.waitFor(`${textOf('status-connection')} === 'Disconnected'`, 30_000);
+      await phone.waitFor(`document.querySelector('[data-testid=status-connection]')?.dataset.state === 'closed'`, 30_000);
       await phone.waitFor(`document.querySelector('${testid('error-toast')}')`, 30_000);
       expect(await phone.text(testid('error-toast'))).toContain('revoked');
       expect(await phone.evaluate<string | null>(`localStorage.getItem('boite.core')`)).toBeNull();
@@ -725,7 +728,7 @@ test(
     // minting one, which is what lets the page's own `hello` land again.
     const { port, dataDir, token } = core;
     await core.stop({ keepDataDir: true });
-    await page.waitFor(`${textOf('status-connection')} !== 'Connected'`, RECONNECT_TIMEOUT_MS);
+    await page.waitFor(`document.querySelector('[data-testid=status-connection]')?.dataset.state !== 'ready'`, RECONNECT_TIMEOUT_MS);
     core = await startCore({ port, dataDir });
     expect(core.port).toBe(port);
     expect(core.token).toBe(token);
@@ -733,7 +736,7 @@ test(
     // Nobody is awaiting this: the client's own backoff reopens the socket,
     // says `hello` again, resubscribes the open thread, and the store reloads
     // on `ready`.
-    await page.waitFor(`${textOf('status-connection')} === 'Connected'`, RECONNECT_TIMEOUT_MS);
+    await page.waitFor(`document.querySelector('[data-testid=status-connection]')?.dataset.state === 'ready'`, RECONNECT_TIMEOUT_MS);
     expect(await page.evaluate<string>('window.__boiteAlive')).toBe('before the drop');
     expect(await page.evaluate<number>(`performance.getEntriesByType('navigation').length`)).toBe(1);
 
@@ -765,7 +768,7 @@ test(
     // control, so they only reach the cache on the load after it: which is
     // exactly the phone that opens Boite a second time.
     await page.navigate(`${core.url}/`);
-    await page.waitFor(`${textOf('status-connection')} === 'Connected'`, RECONNECT_TIMEOUT_MS);
+    await page.waitFor(`document.querySelector('[data-testid=status-connection]')?.dataset.state === 'ready'`, RECONNECT_TIMEOUT_MS);
     const cachedPaths = `caches.open(${JSON.stringify(UI_CACHE)})
       .then((cache) => cache.keys())
       .then((keys) => keys.map((request) => new URL(request.url).pathname))`;
@@ -777,7 +780,7 @@ test(
     // The core goes away, and the reload has nothing but that cache to load from.
     const { port, dataDir, token } = core;
     await core.stop({ keepDataDir: true });
-    await page.waitFor(`${textOf('status-connection')} !== 'Connected'`, RECONNECT_TIMEOUT_MS);
+    await page.waitFor(`document.querySelector('[data-testid=status-connection]')?.dataset.state !== 'ready'`, RECONNECT_TIMEOUT_MS);
     await page.navigate(`${core.url}/`);
 
     // A browser with no worker gets its own error page here: no shell, no title.
@@ -790,16 +793,15 @@ test(
         `!!document.querySelector('${testid('first-run')}') || !!document.querySelector('${testid('chat')}')`,
       ),
     ).toBe(true);
-    const offline = await page.evaluate<string>(textOf('status-connection'));
-    expect(offline).not.toBe('Connected');
-    expect(['Connecting', 'Disconnected', 'Not connected']).toContain(offline);
+    const offline = await page.evaluate<string>(`document.querySelector('[data-testid=status-connection]').dataset.state`);
+    expect(['connecting', 'closed', 'idle']).toContain(offline);
     await page.screenshot(OFFLINE_SCREENSHOT);
     expect(existsSync(OFFLINE_SCREENSHOT)).toBe(true);
 
     // Back on the same port: the page finds the core again with no help.
     core = await startCore({ port, dataDir });
     expect(core.token).toBe(token);
-    await page.waitFor(`${textOf('status-connection')} === 'Connected'`, RECONNECT_TIMEOUT_MS);
+    await page.waitFor(`document.querySelector('[data-testid=status-connection]')?.dataset.state === 'ready'`, RECONNECT_TIMEOUT_MS);
   },
   TIMEOUT,
 );

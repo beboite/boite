@@ -538,7 +538,7 @@
 
   /** Ctrl+S: text goes aside for this thread, an empty composer takes it back. */
   function stash() {
-    const key = store.openThread?.id ?? DRAFT_STASH_KEY;
+    const key = store.threadKey(store.openThread?.id ?? DRAFT_STASH_KEY);
     if (text.trim().length > 0) {
       writeStash(key, text);
       recall = null;
@@ -947,6 +947,7 @@
 
   .send,
   .stop {
+    margin-left: auto;
     width: var(--control);
     height: var(--control);
     border-radius: var(--radius-md);

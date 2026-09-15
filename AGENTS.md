@@ -1,7 +1,8 @@
 # AGENTS.md
 
 What is easy to break here without a check failing, and the file that owns each
-rule. What Boite 2 is, the stack and the build commands: [README.md](README.md).
+rule. Machine connections and thread views: [docs/machines.md](docs/machines.md).
+What Boite 2 is, the stack and the build commands: [README.md](README.md).
 Running the core and the UI, the fake client, the tests and the captures:
 [docs/development.md](docs/development.md). Writing or reading a provider
 descriptor: [docs/providers.md](docs/providers.md). Isolation directories and
@@ -122,6 +123,8 @@ JSON-RPC 2.0 over a single WebSocket at `/rpc`. Two checks guard it, both from
 the first commit: the `Origin` header must be absent (a native client) or one of
 the shell origins or the core's own, then the first frame must be `hello`
 carrying the core token within five seconds, or the socket closes with `4001`.
+An owner can add exact browser origins in Machines to let a browser or phone
+connect to multiple cores. Authentication is still required for each socket.
 The token is 32 random bytes generated on first start and kept in
 `<dataDir>/core.json` beside the port and the pid.
 
@@ -239,7 +242,9 @@ seconds throws with the reason and caches nothing.
 
 ## The UI streams, and stops streaming
 
-Only the open thread streams. The rest of the list lives on `thread.updated`
+Each connected machine has its own client and Store. Route actions through the
+Store that owns the row; raw project and thread IDs can collide across machines.
+Only the open thread on the visible machine streams. The rest of the list lives on `thread.updated`
 summaries. Inside a message, the markdown of a streaming part is rebuilt at most
 every 48 ms rather than on every token, and a tool card opens on its own while
 the model is still typing its input, then folds back once the parsed input lands.

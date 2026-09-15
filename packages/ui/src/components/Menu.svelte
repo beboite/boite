@@ -137,7 +137,10 @@
           data-value={item.id}
           onclick={() => pick(item)}
         >
-          <span class="label">{item.label}</span>
+          <span class="label">
+            {#if item.status}<span class="status-dot" data-tone={item.status.tone} role="img" aria-label={item.status.label} title={item.status.label}></span>{/if}
+            {item.label}
+          </span>
           {#if item.hint}
             <span class="hint">{item.hint}</span>
           {/if}
@@ -148,6 +151,9 @@
 </div>
 
 <style>
+  .status-dot { display: inline-block; width: 6px; height: 6px; flex: none; border-radius: 50%; margin-right: 8px; vertical-align: middle; background: var(--color-live); }
+  .status-dot[data-tone='success'] { background: var(--color-success); }
+  .status-dot[data-tone='danger'] { background: var(--color-danger); }
   .menu {
     position: relative;
     display: inline-flex;
