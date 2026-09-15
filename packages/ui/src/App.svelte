@@ -6,6 +6,7 @@
   import ContextMenu from './components/ContextMenu.svelte';
   import DropOverlay from './components/DropOverlay.svelte';
   import FirstRun from './components/FirstRun.svelte';
+  import ProjectPicker from './components/ProjectPicker.svelte';
   import ImportDialog from './components/ImportDialog.svelte';
   import RightPanel from './components/RightPanel.svelte';
   import SettingsShell from './components/SettingsShell.svelte';
@@ -20,9 +21,10 @@
   import { onNotificationOpen } from './lib/notify';
   import { strings } from './lib/strings';
   import { rightPanel } from './lib/right-panel.svelte';
-  import { store } from './lib/store.svelte';
+  import { workspace } from './lib/workspace.svelte';
   import { startTheme } from './lib/theme';
 
+  let store = $derived(workspace.active);
   const inShell = window.__TAURI_INTERNALS__ !== undefined;
   let sidebar = $state<Sidebar | undefined>(undefined);
   let appRoot = $state<HTMLDivElement | undefined>(undefined);
@@ -88,17 +90,18 @@
   });
 
   onMount(() => {
-    void store.boot();
+    void workspace.boot();
     // The stored theme, and the OS one while the setting reads `system`.
     const stopTheme = startTheme();
     // The stored window material, which only the shell wears.
     startGlass();
     // A click on a toast opens the thread it was about.
-    const stopToasts = onNotificationOpen((threadId) => void store.open(threadId));
+    const stopToasts = onNotificationOpen((threadId) => void workspace.openNotification(threadId));
     if (!inShell) {
       return () => {
         stopTheme();
         stopToasts();
+        workspace.close();
       };
     }
 
@@ -118,7 +121,7 @@
         else if (payload.type === 'leave') store.dropping = false;
         else if (payload.type === 'drop') {
           store.dropping = false;
-          void store.addProjects(payload.paths);
+          void workspace.addLocalProjects(payload.paths);
         }
       });
       if (disposed) stop();
@@ -131,6 +134,7 @@
       stopTheme();
       stopToasts();
       quitHold?.dispose();
+      workspace.close();
     };
   });
 
@@ -146,7 +150,7 @@
   }
 
   /** Whether one of the two modal dialogs is up, waiting on the user. */
-  let modal = $derived(confirm.current !== null || store.imports !== null);
+  let modal = $derived(confirm.current !== null || store.imports !== null || store.projectPickerOpen);
 
   /** A key that belongs to whatever the user is typing in, not to the app. */
   function typing(event: KeyboardEvent): boolean {
@@ -233,6 +237,7 @@
     {#if !store.booted}
       <p class="empty boot">{strings.app.loading}</p>
     {:else if store.connection === 'closed' && !store.core}
+      <Sidebar bind:this={sidebar} {store} />
       <div class="notice">
         <h1>{strings.app.noEndpointTitle}</h1>
         <p class="muted">{strings.app.noEndpointBody}</p>
@@ -262,17 +267,21 @@
         {#if firstRun}
           <FirstRun {store} />
         {:else}
-          <ChatView {store} />
+          {#key store}
+            <ChatView {store} />
+          {/key}
         {/if}
       </main>
       {#if panelSlot.shown && store.openThread}
-        <RightPanel
-          {store}
-          panel={store.panel}
-          closing={panelSlot.closing}
-          attach={panelSlot.attach}
-          onexit={panelSlot.end}
-        />
+        {#key store}
+          <RightPanel
+            {store}
+            panel={store.panel}
+            closing={panelSlot.closing}
+            attach={panelSlot.attach}
+            onexit={panelSlot.end}
+          />
+        {/key}
       {/if}
     {/if}
   </div>
@@ -313,7 +322,8 @@
 </div>
 
 <ContextMenu />
-<ConfirmDialog />
+<ProjectPicker {store} />
+  <ConfirmDialog />
 <ImportDialog {store} />
 <CommandPalette {store} />
 

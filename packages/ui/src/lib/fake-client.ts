@@ -66,6 +66,7 @@ const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>([
   'providers.list',
   'accounts.list',
   'threads.list',
+  'threads.pullRequest',
   'threads.create',
   'threads.get',
   'messages.list',
@@ -173,7 +174,7 @@ function fakeWorktree(projectPath: string, title: string, branch?: string): { br
 
 function toSummary(thread: Thread): ThreadSummary {
   const { messages: _messages, turns: _turns, ...rest } = thread;
-  return { ...rest };
+  return { ...rest, lastUserMessageAt: thread.messages.filter(m => m.role === 'user').at(-1)?.createdAt ?? null };
 }
 
 function emptyUsage(): Usage {
@@ -352,6 +353,7 @@ export class FakeClient implements ObservableClient {
   /** The sessions Claude Code kept, each tagged with the project whose folder it sits under. */
   #importable: (ImportableSession & { projectId: string })[] = [];
   #providers: ProviderSummary[] = [];
+  #modelCatalogs = new Map<string, ModelInfo[]>();
   /** Where each managed install stood before the running one started, for a cancel. */
   #installBefore = new Map<string, ProviderInstallState>();
   #accounts: Account[] = [];
@@ -637,6 +639,12 @@ export class FakeClient implements ObservableClient {
 
       case 'projects.list':
         return structuredClone(this.#projects);
+      case 'projects.browse': {
+        const { path = '/workspace' } = rawParams as RpcParams<'projects.browse'>;
+        return { path, parent: path === '/' ? null : '/', directories: path === '/workspace' ? [
+          { name: 'boite', path: '/workspace/boite' }, { name: 'notes', path: '/workspace/notes' }
+        ] : [] };
+      }
       case 'projects.add': {
         const params = rawParams as RpcParams<'projects.add'>;
         const project: Project = {
@@ -648,6 +656,11 @@ export class FakeClient implements ObservableClient {
         this.#projects.push(project);
         this.#emit('project.added', structuredClone(project));
         return structuredClone(project);
+      }
+      case 'threads.pullRequest': {
+        const params = rawParams as RpcParams<'threads.pullRequest'>;
+        const thread = this.#threads.get(params.threadId);
+        return thread?.pullRequest ?? null;
       }
       case 'projects.remove': {
         const params = rawParams as RpcParams<'projects.remove'>;
@@ -822,6 +835,7 @@ export class FakeClient implements ObservableClient {
         const params = rawParams as RpcParams<'threads.create'>;
         const project = this.#projects.find((p) => p.id === params.projectId);
         if (!project) throw this.#notFound('project', params.projectId);
+        this.#checkSpeed(params.providerId, params.accountId, params.model ?? null, params.speed ?? null);
         const at = this.#now();
         const title = params.title ?? 'Untitled thread';
         // The core's own placement: a branch named after the title, the
@@ -836,6 +850,7 @@ export class FakeClient implements ObservableClient {
           accountId: params.accountId,
           model: params.model ?? null,
           effort: params.effort ?? null,
+          speed: params.speed ?? null,
           cwd: placed?.path ?? params.cwd ?? project.path,
           branch: placed?.branch ?? null,
           permissionMode: params.permissionMode ?? 'default',
@@ -886,7 +901,11 @@ export class FakeClient implements ObservableClient {
         if (params.expectedSelectionVersion !== undefined && params.expectedSelectionVersion !== (thread.selectionVersion ?? 0)) {
           throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'the model selection changed; review the selected model and send again' });
         }
-        const before = [thread.accountId, thread.model, thread.effort, thread.permissionMode].join('\0');
+        const nextAccountId = params.accountId ?? thread.accountId;
+        const nextProviderId = this.#accounts.find(a => a.id === nextAccountId)?.providerId ?? thread.providerId;
+        const changedModel = (params.model !== undefined && params.model !== thread.model) || nextAccountId !== thread.accountId;
+        this.#checkSpeed(nextProviderId, nextAccountId, params.model !== undefined ? params.model : thread.model, params.speed !== undefined ? params.speed : changedModel ? null : thread.speed ?? null);
+        const before = [thread.accountId, thread.model, thread.effort, thread.speed, thread.permissionMode].join('\0');
         if (params.accountId !== undefined && params.accountId !== thread.accountId) {
           const account = this.#accounts.find((entry) => entry.id === params.accountId);
           const provider = account && this.#providers.find((entry) => entry.id === account.providerId);
@@ -896,7 +915,7 @@ export class FakeClient implements ObservableClient {
           thread.accountId = account.id;
           thread.providerId = account.providerId;
           thread.model = params.model === undefined ? provider.models.find((model) => model.default)?.id ?? null : params.model;
-          thread.effort = null;
+          thread.effort = null; thread.speed = null;
           thread.sessionId = null;
           thread.sessionGeneration = (thread.sessionGeneration ?? 0) + 1;
           thread.context = null;
@@ -907,10 +926,11 @@ export class FakeClient implements ObservableClient {
           thread.title = params.title;
           thread.titleSource = 'user';
         }
-        if (params.model !== undefined && params.model !== thread.model) { thread.model = params.model; thread.effort = null; }
+        if (params.model !== undefined && params.model !== thread.model) { thread.model = params.model; thread.effort = null; thread.speed = null; }
         if (params.effort !== undefined) thread.effort = params.effort;
+        if (params.speed !== undefined) thread.speed = params.speed;
         if (params.permissionMode !== undefined) thread.permissionMode = params.permissionMode;
-        if (before !== [thread.accountId, thread.model, thread.effort, thread.permissionMode].join('\0')) thread.selectionVersion = (thread.selectionVersion ?? 0) + 1;
+        if (before !== [thread.accountId, thread.model, thread.effort, thread.speed, thread.permissionMode].join('\0')) thread.selectionVersion = (thread.selectionVersion ?? 0) + 1;
         return this.#touch(thread);
       }
       case 'threads.retitle': {
@@ -1247,7 +1267,7 @@ export class FakeClient implements ObservableClient {
       error: null,
       execution: {
         providerId: thread.providerId, accountId: thread.accountId, model: thread.model,
-        effort: thread.effort, permissionMode: thread.permissionMode, sessionId: thread.sessionId,
+        effort: thread.effort, speed: thread.speed ?? null, permissionMode: thread.permissionMode, sessionId: thread.sessionId,
         sessionGeneration: thread.sessionGeneration ?? 0, selectionVersion: thread.selectionVersion ?? 0,
         ...(operation ? { operation } : {}),
       }
@@ -1893,6 +1913,12 @@ export class FakeClient implements ObservableClient {
    * ACP, Codex and pi probe their own catalogs. Demo models are explicitly
    * named as such; only OpenCode uses the large catalog fixture.
    */
+  #checkSpeed(providerId: string, accountId: string, model: string | null, speed: string | null): void {
+    if (speed === null) return;
+    const models = this.#modelCatalogs.get(providerId + '::' + accountId) ?? this.#providers.find(p => p.id === providerId)?.models ?? [];
+    if (!models.find(m => m.id === model)?.speeds?.some(option => option.id === speed)) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'the model does not offer this speed' });
+  }
+
   async #probe(providerId: string, accountId: string): Promise<RpcResult<'providers.probe'>> {
     const provider = this.#providers.find((p) => p.id === providerId);
     if (!provider) {
@@ -1911,10 +1937,11 @@ export class FakeClient implements ObservableClient {
     if (dynamic) {
       models = provider.id === UPDATABLE_ID ? structuredClone(PROBED_MODELS) : [
         ...models,
-        { id: `${provider.id}-demo`, name: `${provider.name} demo model`, default: false }
+        { id: `${provider.id}-demo`, name: `${provider.name} demo model`, default: false, ...(provider.protocol === 'codex-appserver' ? { effort: { levels: [{ id: 'low', label: 'Low' }, { id: 'high', label: 'High' }], default: 'high' }, speeds: [{ id: 'fast', label: 'Fast' }, { id: 'ultrafast', label: 'Ultrafast' }] } : {}) }
       ];
       await new Promise((resolve) => setTimeout(resolve, PROBE_MS));
     }
+    this.#modelCatalogs.set(providerId + '::' + accountId, models);
     const probedAt = this.#now();
     this.#emit('providers.probed', { providerId, accountId, models: structuredClone(models), probedAt });
     return { models, probedAt };
@@ -2150,7 +2177,7 @@ export class FakeClient implements ObservableClient {
               ],
               default: 'high'
             } },
-          { id: 'claude-opus-5', name: 'Claude Opus 5', effort: {
+          { id: 'claude-opus-5', name: 'Claude Opus 5', speeds: [{ id: 'fast', label: 'Fast' }], effort: {
               levels: [
                 { id: 'low', label: 'Low' },
                 { id: 'medium', label: 'Medium' },
@@ -2642,6 +2669,8 @@ export class FakeClient implements ObservableClient {
     };
     // The meters: the trace thread at a comfortable share, the descriptor one just compacted.
     finished.context = { tokens: 84_000, window: 200_000, at: T0 + 60_000 };
+    finished.branch = 'boite/trace';
+    finished.pullRequest = { number: 84, url: 'https://github.com/example/project/pull/84', state: 'OPEN' };
     unread.context = { tokens: 31_000, window: 200_000, at: T0 + 340_000 };
 
     for (const thread of [finished, running, waiting, unread]) this.#threads.set(thread.id, thread);

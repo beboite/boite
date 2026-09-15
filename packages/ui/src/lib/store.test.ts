@@ -4,6 +4,30 @@ import { FakeClient } from './fake-client';
 import { setNotificationSender, type Toast } from './notify';
 import { Store } from './store.svelte';
 
+test('dropped folders use the local core when a remote machine is selected', async () => {
+  const { store, client: remote } = await ready();
+  const local = new FakeClient({ delayMs: 0 });
+  const remoteCall = vi.spyOn(remote, 'call');
+  const localCall = vi.spyOn(local, 'call');
+  window.__TAURI_INTERNALS__ = {} as typeof window.__TAURI_INTERNALS__;
+  store.localCore = false;
+  const switchLocal = vi.spyOn(store, 'useLocalCore').mockImplementation(async () => {
+    store.attach(local);
+    store.localCore = true;
+    await store.connect();
+  });
+  try {
+    await store.addProjects(['D:\\work\\dropped folder']);
+    expect(switchLocal).toHaveBeenCalledOnce();
+    expect(remoteCall.mock.calls.filter(([method]) => method === 'projects.add')).toHaveLength(0);
+    expect(localCall).toHaveBeenCalledWith('projects.add', { path: 'D:\\work\\dropped folder' });
+    expect(store.openProject?.path).toBe('D:\\work\\dropped folder');
+  } finally {
+    delete window.__TAURI_INTERNALS__;
+    store.detach(); remote.close(); local.close();
+  }
+});
+
 async function ready(): Promise<{ store: Store; client: FakeClient }> {
   const client = new FakeClient({ delayMs: 0 });
   const store = new Store();
@@ -195,6 +219,39 @@ describe('Store', () => {
     expect(store.threads.every((t) => t.projectId !== 'p-boite')).toBe(true);
     const reopened = await waitFor(() => store.openThread ?? undefined);
     expect(reopened.projectId).toBe('p-notes');
+  });
+
+  test('cached models survive reload and remain visible during a forced refresh', async () => {
+    const first = await ready();
+    await first.store.probeModels('opencode', 'a-opencode');
+    const expected = first.store.modelsOf('opencode', 'a-opencode');
+    first.store.detach();
+    const { store, client } = await ready();
+    expect(store.modelsOf('opencode', 'a-opencode')).toEqual(expected);
+    const original = client.call.bind(client);
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const calls = vi.spyOn(client, 'call').mockImplementation(async (method, params) => {
+      if (method === 'providers.probe') await gate;
+      return original(method, params);
+    });
+    const request = store.probeModels('opencode', 'a-opencode', true);
+    expect(store.isProbing('opencode', 'a-opencode')).toBe(true);
+    expect(store.modelsOf('opencode', 'a-opencode')).toEqual(expected);
+    const second = store.probeModels('opencode', 'a-opencode', true);
+    expect(calls.mock.calls.filter(([method]) => method === 'providers.probe')).toHaveLength(1);
+    release(); await Promise.all([request, second]);
+    expect(calls).toHaveBeenCalledWith('providers.probe', { providerId: 'opencode', accountId: 'a-opencode', refresh: true });
+  });
+
+  test('failed probes wait for manual retry instead of looping', async () => {
+    const { store, client } = await ready();
+    const calls = vi.spyOn(client, 'call').mockRejectedValue(new Error('agent offline'));
+    await store.probeModels('opencode', 'a-opencode');
+    await store.probeModels('opencode', 'a-opencode');
+    expect(calls).toHaveBeenCalledTimes(1);
+    await store.probeModels('opencode', 'a-opencode', true);
+    expect(calls).toHaveBeenCalledTimes(2);
   });
 
   test('a probe elsewhere fills the models of that instance, the descriptor until then', async () => {

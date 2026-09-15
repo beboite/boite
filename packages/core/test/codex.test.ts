@@ -125,6 +125,25 @@ async function codexThread(client: CoreClient, permissionMode?: PermissionMode, 
 }
 
 describe('codex driver', () => {
+  test('service tiers are model-specific, persisted and sent on the frozen turn', async () => {
+    const client = await startCore();
+    const { projectId, accountId } = await codexAccount(client);
+    const models = (await client.call('providers.probe', { providerId: 'codex-fake', accountId })).models;
+    expect(models.find(m => m.id === 'fake-smart')?.speeds?.map(s => s.id)).toEqual(['fast', 'ultrafast']);
+    expect(models.find(m => m.id === 'fake-plain')?.speeds).toBeUndefined();
+    const thread = await client.call('threads.create', { projectId, providerId: 'codex-fake', accountId, model: 'fake-smart', speed: 'ultrafast' });
+    expect((await client.call('threads.get', { threadId: thread.id })).speed).toBe('ultrafast');
+    const finished = client.next('turn.finished', t => t.threadId === thread.id);
+    const turn = await client.call('turns.start', { threadId: thread.id, prompt: 'hello' });
+    expect(turn.execution?.speed).toBe('ultrafast');
+    await client.call('threads.update', { threadId: thread.id, speed: null });
+    expect((await finished).status).toBe('done');
+    expect(fakeLog()).toContain('"serviceTier":"ultrafast"');
+    const switched = await client.call('threads.update', { threadId: thread.id, model: 'fake-plain' });
+    expect(switched.speed).toBeNull();
+    expect(() => harness!.core.threads.update({ threadId: thread.id, speed: 'fast' })).toThrow(/does not offer this speed/);
+  });
+
   test('manual compaction resumes the native session and waits for its completed turn', async () => {
     const client = await startCore();
     const threadId = await codexThread(client);

@@ -41,7 +41,7 @@ import {
   type EventHandler,
   type ObservableClient
 } from './client';
-import { clearStoredEndpoint, parsePairingLink, readEnvironments, removeEnvironment, resolveEndpoint, storeEndpoint, upsertEnvironment, type Endpoint, type StoredEnvironment } from './endpoint';
+import { clearStoredEndpoint, refreshLocalEnvironment, fromTauri, parsePairingLink, readEnvironments, removeEnvironment, resolveEndpoint, storeEndpoint, upsertEnvironment, type Endpoint, type StoredEnvironment } from './endpoint';
 import { isExperimentEnabled } from './experiments';
 import { titleFrom } from './format';
 import { chordLabel, commandForKey, resolveBindings } from './keybindings';
@@ -70,7 +70,7 @@ import { strings } from './strings';
 import { FAVORITES_KEY, readFavorites, type FavoriteModel } from './model-order';
 
 export type Page = 'chat' | 'settings';
-export type SettingsTab = 'general' | 'appearance' | 'keyboard' | 'accounts' | 'plugins' | 'usage' | 'resources' | 'experiments';
+export type SettingsTab = 'general' | 'machines' | 'appearance' | 'keyboard' | 'accounts' | 'plugins' | 'usage' | 'resources' | 'experiments';
 
 /** A login process the core runs for one account, as `account.login` reports it. */
 export interface LoginState {
@@ -102,6 +102,7 @@ export interface Choice {
   model: string | null;
   /** A level id of that model, or null for the model's own default. */
   effort: string | null;
+  speed?: string | null;
 }
 
 /** What the picker hands back: the instance and model together, or an effort alone. */
@@ -110,6 +111,7 @@ export interface PickPatch {
   accountId?: string;
   model?: string | null;
   effort?: string | null;
+  speed?: string | null;
 }
 
 export const UI_VERSION = '2.0.0-beta.1';
@@ -171,6 +173,9 @@ const LIVE: ThreadStatusRank = { waiting: 0, running: 1, queued: 2, error: 3, id
 type ThreadStatusRank = Record<ThreadSummary['status'], number>;
 
 export class Store {
+  machineId = '';
+  visible = true;
+  threadKey(id: string): string { return this.machineId ? JSON.stringify([this.machineId, id]) : id; }
   connection = $state<ClientState>('idle');
   core = $state<CoreInfo | null>(null);
   /** Owner on the core token, session on a paired one; what decides who may pair a phone. */
@@ -184,8 +189,11 @@ export class Store {
   paired = $state(false);
   /** The core is the one the shell started on this computer. */
   localCore = $state(false);
+  localEndpointUrl = $state<string | null>(null);
   /** The cores this device remembers: pairing or connecting adds one, forgetting removes one. */
   environments = $state<StoredEnvironment[]>([]);
+  projectPickerOpen = $state(false);
+  machineStates = $state<Record<string, { state: ClientState; error?: string }>>({});
   /** Toasts for threads the user is not looking at, per machine. */
   notifications = $state(readNotifications());
   /** The command palette, `Ctrl+K`. */
@@ -251,6 +259,22 @@ export class Store {
    * time, and an account that changes drops its own key.
    */
   probedModels = $state<Record<string, ModelInfo[]>>({});
+  #probeAttempts = new Set<string>();
+  #probeRequests = new Map<string, Promise<void>>();
+  #probeEpoch = 0;
+  #modelCacheKey(): string { return 'boite.models.v1:' + JSON.stringify([this.endpointUrl, this.core?.dataDir]); }
+  #saveModels(): void {
+    try { localStorage.setItem(this.#modelCacheKey(), JSON.stringify({ providers: this.providers, accounts: this.accounts, models: this.probedModels })); }
+    catch { /* Storage unavailable: keep the in-memory cache. */ }
+  }
+  #restoreModels(): void {
+    try {
+      const cached = JSON.parse(localStorage.getItem(this.#modelCacheKey()) ?? 'null');
+      if (!cached || JSON.stringify(cached.providers) !== JSON.stringify(this.providers) || JSON.stringify(cached.accounts) !== JSON.stringify(this.accounts)) return;
+      const entries = Object.entries(cached.models ?? {}).filter(([, models]) => Array.isArray(models) && models.every(m => typeof m?.id === 'string' && typeof m?.name === 'string'));
+      this.probedModels = { ...Object.fromEntries(entries) as Record<string, ModelInfo[]>, ...this.probedModels };
+    } catch { /* A missing or malformed cache is read again from the agent. */ }
+  }
   /** The keys a probe is running for, so the picker can say it is reading. */
   probingModels = $state<string[]>([]);
   accounts = $state<Account[]>([]);
@@ -366,7 +390,10 @@ export class Store {
    */
   modelsOf(providerId: ProviderId, accountId: string | null): ModelInfo[] {
     const probed = accountId ? this.probedModels[probeKey(providerId, accountId)] : undefined;
-    return probed ?? this.providerOf(providerId)?.models ?? [];
+    if (probed) return probed;
+    const provider = this.providerOf(providerId);
+    const models = provider?.models ?? [];
+    return provider?.protocol === 'claude-sdk' ? models.map(({ effort, speeds, ...model }) => model) : models;
   }
 
   /** The model a choice runs on, out of what its own instance offers: what the chips read. */
@@ -383,21 +410,32 @@ export class Store {
    * Ask the agent what it can run. Once per instance per session: the answer
    * stays until the core reloads its descriptors or the account changes.
    */
-  async probeModels(providerId: ProviderId, accountId: string): Promise<void> {
+  probeModels(providerId: ProviderId, accountId: string, refresh = false): Promise<void> {
     const client = this.#client;
     const key = probeKey(providerId, accountId);
-    // Probing starts an agent process, so it is the owner's. A device shows the
-    // models the descriptor and the core already named, and asks for nothing.
-    if (!client || !this.owner || this.probedModels[key] || this.probingModels.includes(key)) return;
+    const existing = this.#probeRequests.get(key);
+    if (existing) return existing;
+    if (!client || !this.owner || (!refresh && this.#probeAttempts.has(key))) return Promise.resolve();
+    this.#probeAttempts.add(key);
+    const epoch = this.#probeEpoch;
     this.probingModels = [...this.probingModels, key];
-    try {
-      const { models } = await client.call('providers.probe', { providerId, accountId });
-      this.probedModels = { ...this.probedModels, [key]: models };
-    } catch (error) {
-      this.#fail(error);
-    } finally {
-      this.probingModels = this.probingModels.filter((entry) => entry !== key);
-    }
+    let request!: Promise<void>;
+    request = (async () => {
+      try {
+        const { models } = await client.call('providers.probe', { providerId, accountId, ...(refresh ? { refresh: true } : {}) });
+        if (client !== this.#client || epoch !== this.#probeEpoch) return;
+        this.probedModels = { ...this.probedModels, [key]: models };
+        this.#saveModels();
+      } catch (error) { if (client === this.#client) this.#fail(error); }
+      finally {
+        if (this.#probeRequests.get(key) === request) {
+          this.#probeRequests.delete(key);
+          this.probingModels = this.probingModels.filter(entry => entry !== key);
+        }
+      }
+    })();
+    this.#probeRequests.set(key, request);
+    return request;
   }
 
   isCollapsed(projectId: ProjectId): boolean {
@@ -448,7 +486,8 @@ export class Store {
       accountId: account.id,
       permissionMode: this.prefs.permissionMode,
       model,
-      effort
+      effort,
+      speed: offered.find(m => m.id === model)?.speeds?.some(option => option.id === this.prefs.speed) ? this.prefs.speed : null
     };
   }
 
@@ -488,6 +527,11 @@ export class Store {
     this.logins = {};
     this.#loginChanges.clear();
     this.#client = client;
+    this.probedModels = {};
+    this.#probeEpoch++;
+    this.#probeAttempts.clear();
+    this.#probeRequests.clear();
+    this.probingModels = [];
     this.connection = client.state;
     this.prefs = readPrefs();
     this.favorites = readFavorites();
@@ -504,6 +548,8 @@ export class Store {
         client.onState((state) => {
           this.connection = state;
           if (state === 'ready') {
+            this.#probeEpoch++;
+            this.#probeAttempts.clear();
             this.error = null;
             this.core = client.core;
             // `WsClient` writes its principal from the hello answer before it
@@ -535,7 +581,7 @@ export class Store {
       this.threads = this.threads.filter((t) => t.id !== threadId);
       this.#dropRequestsOf(threadId);
       // A thread that left Boite takes its panel layout with it.
-      rightPanel.forget(threadId);
+      rightPanel.forget(this.threadKey(threadId));
       if (this.openThread?.id !== threadId) return;
       this.openThread = null;
       // The two steps `archive()` takes when the thread on screen goes: the
@@ -668,9 +714,14 @@ export class Store {
       // The core drops its own probes on a reload; holding stale ones would
       // offer a model it now refuses.
       this.probedModels = {};
+      this.#probeEpoch++;
+      this.#probeAttempts.clear();
+      this.#saveModels();
     });
     on('providers.probed', ({ providerId, accountId, models }) => {
       this.probedModels = { ...this.probedModels, [probeKey(providerId, accountId)]: models };
+      this.#probeAttempts.add(probeKey(providerId, accountId));
+      this.#saveModels();
     });
     on('project.added', (project) => {
       if (!this.projects.some((p) => p.id === project.id))
@@ -691,8 +742,25 @@ export class Store {
     this.#subscribedThreadId = null;
   }
 
+  /** Stop streaming the hidden conversation while keeping machine summaries live. */
+  async suspend(): Promise<void> {
+    this.visible = false;
+    this.#openGeneration++;
+    await this.#unsubscribe();
+  }
+
+  async connectEndpoint(endpoint: Endpoint): Promise<void> {
+    this.#attachEndpoint(endpoint, false);
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([this.connect(), new Promise<void>(resolve => {
+        timeout = setTimeout(() => { this.error = strings.machines.timeout; this.#client?.close(); resolve(); }, 12_000);
+      })]);
+    } finally { clearTimeout(timeout); this.booted = true; }
+  }
+
   /** Picks the transport, connects, loads everything the UI opens on. */
-  async boot(): Promise<void> {
+  async boot(preferLocal = false): Promise<void> {
     try {
       this.environments = readEnvironments();
       const params = new URLSearchParams(window.location.search);
@@ -701,6 +769,10 @@ export class Store {
       // is a seeded copy of the app's data. It is true under vite's dev server
       // and under vitest, the two places `?fake=1` is used.
       if (import.meta.env.DEV && params.get('fake') === '1') {
+        this.machineId = '';
+        this.endpointUrl = null;
+        this.localCore = false;
+        this.paired = false;
         const { FakeClient } = await import('./fake-client');
         // `&long=1` adds the four-hundred-message thread the windowed list is
         // looked at on, `&principal=session` answers as a paired phone, so the
@@ -712,12 +784,20 @@ export class Store {
           })
         );
       } else {
-        const endpoint = await resolveEndpoint();
+        if (window.__TAURI_INTERNALS__) {
+          const local = await fromTauri();
+          if (local) {
+            this.localEndpointUrl = local.url;
+            this.environments = refreshLocalEnvironment(local);
+          }
+        }
+        const endpoint = await resolveEndpoint(preferLocal);
         if (!endpoint) {
           this.connection = 'closed';
           this.booted = true;
           return;
         }
+        this.machineId = endpoint.url;
         this.#attachEndpoint(endpoint);
       }
       await this.connect();
@@ -727,8 +807,9 @@ export class Store {
     }
   }
 
-  #attachEndpoint(endpoint: Endpoint): void {
+  #attachEndpoint(endpoint: Endpoint, rememberActive = true): void {
     const url = endpoint.url;
+    this.machineId = endpoint.local ? 'local' : url;
     const paired = endpoint.paired === true || endpoint.grant !== undefined;
     this.endpointUrl = url;
     this.paired = paired;
@@ -744,14 +825,14 @@ export class Store {
         // The core joins the remembered environments with it, so switching
         // back later needs no new link.
         onSession: (session) => {
-          storeEndpoint({ url, token: session.token, paired: true });
+          if (rememberActive) storeEndpoint({ url, token: session.token, paired: true });
           this.environments = upsertEnvironment({ url, token: session.token, paired: true });
         },
         // Revoked from the desktop: the dead key goes here and in the
         // remembered cores, and the page says what to do rather than
         // retrying every ten seconds.
         onRevoked: () => {
-          clearStoredEndpoint();
+          if (rememberActive) clearStoredEndpoint();
           this.environments = removeEnvironment(url);
           this.connection = 'closed';
           this.error = strings.errors.revoked;
@@ -781,6 +862,7 @@ export class Store {
 
   /** The most recent thread, a draft in the first project, or nothing on a first run. */
   async openWhereLeft(): Promise<void> {
+    if (!this.visible) return;
     if (this.openThread || this.draft) return;
     const live = this.threads.filter((t) => !t.archived);
     const recent = [...live].sort((a, b) => b.updatedAt - a.updatedAt)[0];
@@ -851,6 +933,7 @@ export class Store {
 
   /** Drive a remembered core with the key the pairing left here. No new link needed. */
   async switchEnvironment(url: string): Promise<void> {
+    if (url === this.localEndpointUrl) return this.useLocalCore();
     const env = readEnvironments().find((entry) => entry.url === url);
     if (!env) {
       this.error = strings.errors.noEndpoint;
@@ -940,12 +1023,13 @@ export class Store {
       this.rejectedProviders = providers.rejected;
       this.installStates = installStatesOf(providers.loaded);
       this.accounts = accounts;
+      this.#restoreModels();
       this.#restoreLogins(logins, loginRevision);
       this.settings = settings;
       this.keybindings = keybindings;
       this.scheduler = scheduler;
       const open = this.openThread;
-      if (open) await this.open(open.id);
+      if (open && this.visible) await this.open(open.id, false);
     } catch (error) {
       this.#fail(error);
     }
@@ -994,7 +1078,7 @@ export class Store {
 
   /** The right panel of the thread that is open, surfaces and all. */
   get panel(): BoundPanel {
-    return rightPanel.for(this.openThread?.id ?? null);
+    return rightPanel.for(this.openThread ? this.threadKey(this.openThread.id) : null);
   }
 
   /** Whether that panel is showing. The chat header's button reads it. */
@@ -1026,6 +1110,11 @@ export class Store {
     }
   }
 
+  browseProjects(path?: string) {
+    if (!this.#client) throw new Error(strings.errors.noEndpoint);
+    return this.#client.call('projects.browse', path ? { path } : {});
+  }
+
   async addProject(path: string): Promise<Project | null> {
     const client = this.#client;
     if (!client) return null;
@@ -1043,6 +1132,9 @@ export class Store {
 
   /** Folders dropped on the window. The core refuses a file, and the toast says so. */
   async addProjects(paths: string[]): Promise<void> {
+    // Explorer paths belong to this computer even while a remote core is open.
+    if (window.__TAURI_INTERNALS__ && !this.localCore) await this.useLocalCore();
+    if (!this.owner || this.connection !== 'ready') return;
     let first: Project | null = null;
     for (const path of paths) {
       const project = await this.addProject(path);
@@ -1106,7 +1198,7 @@ export class Store {
    * refused subscribe leaves the thread on screen with the socket it had
    * rather than with none at all.
    */
-  async open(threadId: ThreadId): Promise<void> {
+  async open(threadId: ThreadId, navigate = true): Promise<void> {
     const client = this.#client;
     if (!client) return;
     const generation = ++this.#openGeneration;
@@ -1135,8 +1227,10 @@ export class Store {
       this.openThread = thread;
       // The thread that was open takes its permission and question cards with it.
       this.#keepRequestsOf(threadId);
-      this.page = 'chat';
-      this.sidebarOpen = false;
+      if (navigate) {
+        this.page = 'chat';
+        this.sidebarOpen = false;
+      }
       // The trace is the owner's: a device has no button for it, and asking
       // would refuse the rest of this open with it.
       const trace = this.owner ? await client.call('trace.get', { threadId }) : [];
@@ -1204,6 +1298,7 @@ export class Store {
     permissionMode?: PermissionMode;
     model?: string;
     effort?: string | null;
+    speed?: string | null;
     worktree?: { branch?: string };
   }): Promise<ThreadSummary | null> {
     const client = this.#client;
@@ -1253,6 +1348,7 @@ export class Store {
       permissionMode: choice.permissionMode,
       title: titleFrom(prompt) || undefined,
       effort: choice.effort,
+      speed: choice.speed ?? null,
       ...(choice.model ? { model: choice.model } : {}),
       ...(draft.worktree ? { worktree: {} } : {})
     });
@@ -1410,7 +1506,7 @@ export class Store {
 
   async update(
     threadId: ThreadId,
-    patch: { title?: string; accountId?: string; model?: string | null; effort?: string | null; permissionMode?: PermissionMode; expectedSelectionVersion?: number }
+    patch: { title?: string; accountId?: string; model?: string | null; effort?: string | null; speed?: string | null; permissionMode?: PermissionMode; expectedSelectionVersion?: number }
   ): Promise<boolean> {
     const client = this.#client;
     if (!client) return false;
@@ -1741,13 +1837,13 @@ export class Store {
     const go = shouldNotify({
       kind,
       threadId,
-      openThreadId: this.openThread?.id ?? null,
+      openThreadId: this.visible ? this.openThread?.id ?? null : null,
       focused: typeof document !== 'undefined' && document.hasFocus() && document.visibilityState === 'visible',
-      enabled: this.notifications
+      enabled: readNotifications()
     });
     if (!go) return;
     const title = this.threads.find((t) => t.id === threadId)?.title ?? strings.app.name;
-    void sendNotification(toastFor(kind, threadId, title, detail));
+    void sendNotification(toastFor(kind, this.threadKey(threadId), title, detail));
   }
 
   /** The switch of the Background card; the platform prompt comes with the first turn-on. */
@@ -1781,10 +1877,13 @@ export class Store {
 
   /** What was probed for one account, dropped: the account itself changed. */
   #dropProbes(accountId: string): void {
+    this.#probeEpoch++;
+    for (const key of this.#probeAttempts) if (key.endsWith(`::${accountId}`)) this.#probeAttempts.delete(key);
     const suffix = `::${accountId}`;
     const kept = Object.entries(this.probedModels).filter(([key]) => !key.endsWith(suffix));
     if (kept.length !== Object.keys(this.probedModels).length) {
       this.probedModels = Object.fromEntries(kept);
+      this.#saveModels();
     }
   }
 

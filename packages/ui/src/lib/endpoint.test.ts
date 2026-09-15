@@ -8,6 +8,16 @@ import {
   storeEndpoint,
   upsertEnvironment
 } from './endpoint';
+import { refreshLocalEnvironment } from './endpoint';
+
+test('a restarted shell replaces generated local addresses and preserves the paired remote', () => {
+  localStorage.clear();
+  upsertEnvironment({ url: 'http://127.0.0.1:41001', token: 'old', paired: false, label: 'This computer' });
+  upsertEnvironment({ url: 'http://localhost:41002', token: 'older', paired: false, label: 'This computer' });
+  upsertEnvironment({ url: 'http://remote.test:3773', token: 'remote', paired: true, label: 'Server' });
+  const entries = refreshLocalEnvironment({ url: 'http://127.0.0.1:41003', token: 'new' });
+  expect(entries.map(e => e.url)).toEqual(['http://remote.test:3773']);
+});
 
 function at(path: string): void {
   window.history.replaceState(null, '', path);

@@ -1,5 +1,16 @@
 # Development
 
+When several worktrees build the shell, preserve the completed shell executable
+and installer before another build replaces the shared Cargo output. Run shell
+checks against that copy with `BOITE_E2E_SHELL_EXE`. Installer names and timestamps
+alone do not identify the source branch. Verify the installed UI over CDP before
+reporting a desktop installation complete.
+
+When Cargo uses a shared target, preserve the shell executable, core and workers
+from your build together before running end-to-end tests. Set
+`BOITE_E2E_SHELL_EXE` to that preserved `boite-shell.exe`; the suite checks and
+runs its adjacent sidecar rather than a binary another worktree can replace.
+
 Everything below runs from the repository root, on a `bun install` that has
 already happened. The rules these commands are meant to prove are in
 [../AGENTS.md](../AGENTS.md).
@@ -73,6 +84,17 @@ in-memory fake.
 The service worker never registers under `?fake=1`, so a rebuild is always what
 a reload shows.
 
+Opening a project uses one dialog from the sidebar, first-run card, settings
+and command palette. Choose a machine, then type an absolute path or browse
+its directories through the owner-only `projects.browse` method. The native
+folder button is available only for the shell's local core. A folder dropped
+from the desktop switches to that local core before opening the path.
+
+The sidebar footer counts authenticated machine connections. Remembered cores
+use separate sockets without thread subscriptions; failed connections retry
+every thirty seconds. The menu names disconnected machines and opens connection
+settings. The title bar has no second connection indicator.
+
 Two menus open over the composer while typing. `/` on an empty box lists the
 commands: the agent's own first (`Thread.commands`, whatever its protocol
 reported), then Boite's, the same list as the palette. `@` at the start of a
@@ -124,11 +146,16 @@ BOITE_ECHO=1 bun run dev:core
 ```bash
 bun run check    # tsc on contracts and core, svelte-check --tsgo on the UI
 bun run test     # bun test in packages/core, vitest in packages/ui
+bun run build:ui # required by the core-backed browser tests on a fresh checkout
 bun run e2e      # tests/e2e
 ```
 
 Run all three once on a clean tree before writing anything. A failure you did not
 cause reads exactly like one you did, and that has cost time here before.
+
+`bun run e2e` builds the UI before loading any test. Tests earlier than
+`ui.test.ts` also serve that build, so building only inside the UI suite leaves
+them without a page in a fresh worktree.
 
 `bun run e2e` covers three surfaces in one go: a real core process over WS with
 the echo driver, the UI served by that core and driven in a throwaway browser,
@@ -141,7 +168,8 @@ ever start that executable: a window on the user's screen is forbidden.
 `bun run test:shell` runs the Rust unit tests. A full `bun run e2e` fails when
 the shell executable or its workers are missing or stale. Set
 `BOITE_E2E_SKIP_SHELL=1` only for an explicitly partial core/UI run. The browser
-suite rebuilds the UI before starting so it cannot pass against an old bundle.
+UI test file rebuilds its bundle, but other core-backed tests can run first.
+Build the UI before the suite so those tests also load current assets.
 
 The end to end run drives
 `apps/shell/src-tauri/target/release/boite-shell.exe`, and the only command that
@@ -185,6 +213,10 @@ core with the echo driver.
 an ACP fixture over real RPC and stdio. It checks history continuity and writes
 desktop and phone captures without using provider logins. Core regression tests
 also cover queued targets, stale selections, image transfer and schema migration.
+
+`tests/e2e/project-picker.test.ts` covers folder navigation, a phone-width
+dialog and an unreachable remembered machine. The shell suite checks the native
+folder button with its dialog IPC stubbed, so no system dialog takes focus.
 
 `tests/e2e/lib/cdp.ts` launches Chromium with `--headless=new`, on the real GPU
 through ANGLE, muted, in a throwaway profile, and drives it over CDP.

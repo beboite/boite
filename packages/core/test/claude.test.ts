@@ -72,6 +72,8 @@ class FakeQuery {
   refuse: string | null = null;
   /** What `supportedCommands()` answers, scripted before the query is used. */
   commandsAnswer: SlashCommand[] = [];
+  modelsAnswer: Awaited<ReturnType<Query["supportedModels"]>> = [];
+  supportedModels() { return Promise.resolve(this.modelsAnswer); }
 
   supportedCommands(): Promise<SlashCommand[]> {
     return Promise.resolve(this.commandsAnswer);
@@ -1060,4 +1062,34 @@ describe('claude driver', () => {
       { type: 'text', text: 'done' },
     ]);
   });
+});
+
+
+test('Claude discovery reports only its model capabilities, caches and refreshes without a prompt', async () => {
+  scripted(fake => { fake.modelsAnswer = [
+    { value: 'default', resolvedModel: 'claude-opus-5', displayName: 'Default (recommended)', description: '', supportsFastMode: true },
+    { value: 'opus', resolvedModel: 'claude-opus-5', displayName: 'Opus', description: 'Opus 5 with 1M context', supportsEffort: true, supportedEffortLevels: ['low', 'high'], supportsAdaptiveThinking: true, supportsFastMode: true },
+    { value: 'haiku', displayName: 'Haiku', description: '', supportsEffort: false, supportsFastMode: false },
+  ]; }, answerEach('native-speeds'));
+  const client = await harness.connect();
+  const id = await claudeThread(client);
+  const accountId = (await client.call('threads.get', { threadId: id })).accountId;
+  const result = await client.call('providers.probe', { providerId: 'claude', accountId });
+  expect(result.models[0]?.name).toBe('Claude Opus 5');
+  expect(result.models.some(model => /default/i.test(model.name))).toBe(false);
+  expect(result.models.find(model => model.id === 'claude-opus-4-8')).toMatchObject({ legacy: true, name: 'Claude Opus 4.8' });
+  expect(result.models.find(model => model.id === 'claude-opus-4-8')?.speeds).toBeUndefined();
+  expect(result.models[0]?.effort?.levels.map(level => level.id)).toEqual(['low', 'high', 'ultrathink']);
+  expect(result.models[0]?.speeds).toEqual([{ id: 'fast', label: 'Fast' }]);
+  expect(result.models[1]?.effort).toBeUndefined(); expect(result.models[1]?.speeds).toBeUndefined();
+  await client.call('providers.probe', { providerId: 'claude', accountId });
+  expect(calls).toHaveLength(1); expect(calls[0]?.prompts).toEqual([]); expect(queries[0]?.closes).toBe(1);
+  await client.call('providers.probe', { providerId: 'claude', accountId, refresh: true });
+  expect(calls).toHaveLength(2);
+  await client.call('threads.update', { threadId: id, model: 'claude-opus-5', speed: 'fast' });
+  expect(await runTurn(client, id, 'fast turn')).toBe('done');
+  expect(calls.at(-1)?.options.settings).toEqual({ fastMode: true });
+  await client.call('threads.update', { threadId: id, speed: null });
+  expect(await runTurn(client, id, 'standard turn')).toBe('done');
+  expect(calls.at(-1)?.options.settings).toEqual({ fastMode: false });
 });

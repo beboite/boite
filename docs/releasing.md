@@ -104,9 +104,9 @@ bun run build:shell:dev     # Boite Dev, com.boite.two.dev, boite2-dev
 The dev one passes a second overlay, `apps/shell/src-tauri/tauri.dev.conf.json`,
 after the bundle one. The Tauri CLI takes `--config` more than once and merges
 in the order given, so the dev overlay carries only what differs: the product
-name, the identifier and `bundle.icon` pointing at `icons-dev/`, which is the
-same mark inverted, white on black, rendered from
-`packages/ui/public/icons/icon-dev.svg`. Two identifiers mean two NSIS product
+name, the identifier and `bundle.icon` pointing at `icons/`, the black mark on
+white. The release uses `icons-dev/`, the white mark on black. These asset
+directory names are historical. Two identifiers mean two NSIS product
 codes, so the second installer installs beside the first instead of over it.
 
 The separate data directory is not a nicety. The shell finds its core by reading
@@ -171,16 +171,16 @@ It looks for the core in this order:
 
 ## Icons
 
-The app icon is one drawing, `packages/ui/public/icons/icon.svg`. The shell icon
-set and the two PWA pngs are rendered from it, the first through the Tauri CLI's
+The app icon is one drawing, `packages/ui/public/icons/icon.svg`. The light shell
+icon set and the two PWA pngs are rendered from it, the first through the Tauri CLI's
 own icon command from `apps/shell`. Nothing else draws the mark, and the UI's own
 copy of it is a Svelte component using `currentColor`.
 
-The dev channel gets the same drawing inverted,
+The release channel gets the same drawing inverted,
 `packages/ui/public/icons/icon-dev.svg`, so the two apps are told apart in the
 taskbar and the tray at a glance. Its set is rendered the same way, into a
 directory of its own, and the android and ios output the command also writes is
-deleted, as it is for the stable set:
+deleted, as it is for the light set:
 
 ```bash
 bun run --cwd apps/shell tauri icon ../../packages/ui/public/icons/icon-dev.svg -o src-tauri/icons-dev

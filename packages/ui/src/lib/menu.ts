@@ -3,6 +3,7 @@ export interface MenuItem {
   id: string;
   label: string;
   hint?: string;
+  status?: { tone: 'success' | 'warning' | 'danger'; label: string };
   active?: boolean;
   danger?: boolean;
   disabled?: boolean;

@@ -39,6 +39,8 @@
     <script>
       if (new URLSearchParams(location.search).get('view') === 'quotas') document.documentElement.dataset.view = 'quotas';
       try {
+        var accent = localStorage.getItem('boite.accent-hue');
+        if (accent !== null && Number.isFinite(Number(accent)) && Number(accent) >= 0 && Number(accent) <= 360) document.documentElement.style.setProperty('--accent-hue', accent);
         var stored = localStorage.getItem('boite.theme');
         var theme = stored === 'dark' || stored === 'light' || stored === 'grain' ? stored : 'system';
         // Grain rides behind an experiment: a stored choice with the switch off is System again.

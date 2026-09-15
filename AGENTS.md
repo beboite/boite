@@ -41,6 +41,8 @@ that sidecar beside a newly built shell for end-to-end tests.
   and application logic belong in the core.
 - UI colors, radii and durations come from `app.css`, strings from
   `lib/strings.ts`. No native `<select>`, `window.confirm` or hard-coded hex.
+- Each connected machine owns its client and Store. Route actions through the
+  owning Store; project and thread IDs can collide between machines.
 
 ## Check the affected paths
 
@@ -65,6 +67,7 @@ with the command and date. Live-provider tests spend tokens and stay opt-in.
 - [Model switching](docs/model-switching.md) and [context](docs/context.md):
   session reuse, queued turns and compaction.
 - [Phone](docs/phone.md) and [server](docs/server.md): pairing and deployment.
+- [Machines](docs/machines.md): connections, browser origins and thread views.
 - [Trace](docs/trace.md): process events, resource caps and Windows guards.
 - [Releasing](docs/releasing.md): build artifacts, channels and installers.
 

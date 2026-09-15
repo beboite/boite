@@ -20,6 +20,8 @@ JSON-RPC 2.0 over a single WebSocket at `/rpc`. Two checks guard it, both from
 the first commit: the `Origin` header must be absent (a native client) or one of
 the shell origins or the core's own, then the first frame must be `hello`
 carrying the core token within five seconds, or the socket closes with `4001`.
+Owners can add exact browser origins in Machines for connections to multiple
+cores. Each socket still requires authentication.
 The token is 32 random bytes generated on first start and kept in
 `<dataDir>/core.json` beside the port and the pid.
 
@@ -123,11 +125,12 @@ line by line with the first link it prints carried separately.
 
 ## The probe, because an agent owns its models
 
-A descriptor's model list is a starting point. An ACP, Codex or pi agent owns the
+A descriptor's model list is a starting point. A Claude, ACP, Codex or pi agent owns the
 real one, so `providers.probe` spawns one short-lived process under the synthetic
 thread `probe:<providerId>:<accountId>`, asks the protocol's own models call,
 kills the child on every path, and caches the answer per provider and account
-until `providers.reload` or a change to that account. `threads.create` and
+until `providers.reload`, a manual refresh or a change to that account. The UI
+keeps a persistent display cache while it reads models asynchronously. `threads.create` and
 `threads.update` accept what the last probe listed on top of the descriptor's;
 a model nobody probed is refused, saying to open the picker. Two callers at once
 share one process, and `providers.probed` lets a second client see the same
@@ -136,7 +139,9 @@ seconds throws with the reason and caches nothing.
 
 ## The UI streams, and stops streaming
 
-Only the open thread streams. The rest of the list lives on `thread.updated`
+Each machine owns its client and Store. Route actions through the owning Store;
+project and thread IDs can collide across machines. Only the open thread on the
+visible machine streams. The rest of the list lives on `thread.updated`
 summaries. Inside a message, the markdown of a streaming part is rebuilt at most
 every 48 ms rather than on every token, and a tool card opens on its own while
 the model is still typing its input, then folds back once the parsed input lands.
@@ -159,5 +164,4 @@ serves the shell, the worker and the manifest as `no-cache` and the hashed
 assets as immutable for a year. What a phone gets with the core asleep is the
 shell painting from disk and "Connecting" in the footer until the socket comes
 back. [docs/phone.md](phone.md).
-
 

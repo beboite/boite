@@ -108,6 +108,7 @@ interface CodexModel {
   hidden?: boolean;
   isDefault?: boolean;
   supportedReasoningEfforts?: CodexReasoningEffortOption[];
+  serviceTiers?: { id: string; name: string; description?: string }[];
   defaultReasoningEffort?: string;
 }
 
@@ -610,6 +611,7 @@ class CodexSession {
         input: [{ type: 'text', text: ctx.prompt, text_elements: [] }, ...imageInputsOf(ctx.attachments)],
         ...(model === null ? {} : { model }),
         ...(ctx.thread.effort === null ? {} : { effort: ctx.thread.effort }),
+        serviceTier: ctx.thread.speed ?? "default",
       });
       turn.turnId = started.turn.id;
       if (turn.isStopped) this.interrupt(turn);
@@ -1184,6 +1186,7 @@ function modelsFrom(provider: ProviderDescriptor, data: CodexModel[]): ModelInfo
       name: entry.displayName ?? id,
       default: entry.isDefault === true,
       ...(effort === null ? {} : { effort }),
+      ...(entry.serviceTiers?.length ? { speeds: entry.serviceTiers.filter(tier => tier.id !== "default").map(tier => ({ id: tier.id, label: tier.name, description: tier.description })) } : {}),
     });
   }
   // Only the descriptor's own entry came back: the server said nothing useful.

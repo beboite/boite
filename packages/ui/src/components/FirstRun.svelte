@@ -3,14 +3,9 @@
   import { strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
   import BoiteMark from './BoiteMark.svelte';
-  import ProjectForm from './ProjectForm.svelte';
 
   let { store }: { store: Store } = $props();
 
-  // The dialog names a folder on this computer, so a shell paired with a core
-  // elsewhere types that core's path instead.
-  const picker = $derived(store.pickerAvailable);
-  let typing = $state(false);
 </script>
 
 <div class="first-run" data-testid="first-run">
@@ -22,21 +17,11 @@
     <p class="muted">{store.owner ? strings.firstRun.body : strings.firstRun.deviceBody}</p>
 
     {#if store.owner}
-      {#if picker}
-        <button type="button" class="primary big" data-testid="pick-project" onclick={() => void store.pickProject()}>
-          <FolderOpen size={16} strokeWidth={1.75} />
-          {strings.firstRun.pick}
-        </button>
-        <p class="subtle drop-hint">{strings.firstRun.dropHint}</p>
-      {/if}
-
-      {#if typing || !picker}
-        <ProjectForm {store} primary={!picker} />
-      {:else}
-        <button type="button" class="ghost small type-path" data-testid="add-project" onclick={() => (typing = true)}>
-          {strings.firstRun.typePath}
-        </button>
-      {/if}
+      <button type="button" class="primary big" data-testid="add-project" onclick={() => (store.projectPickerOpen = true)}>
+        <FolderOpen size={16} strokeWidth={1.75} />
+        {strings.firstRun.pick}
+      </button>
+      <p class="subtle drop-hint">{strings.firstRun.dropHint}</p>
     {/if}
   </div>
 </div>
@@ -89,18 +74,6 @@
     font-size: var(--text-sm);
     max-width: none;
     white-space: nowrap;
-  }
-
-  /* The secondary way in, so it reads like the drop hint above it and not like
-     a label with no field under it. */
-  .type-path {
-    font-size: var(--text-sm);
-    font-weight: 400;
-    color: var(--color-subtle);
-  }
-
-  .type-path:hover {
-    color: var(--color-muted-foreground);
   }
 
 </style>

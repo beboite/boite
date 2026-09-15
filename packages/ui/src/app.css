@@ -1,7 +1,7 @@
 /*
  * Tokens of the Boite family (accshift, guardshift, Boite Legacy), rounded a
  * little. Dark is the default; light is a palette under [data-theme="light"].
- * No chromatic accent on the chrome: hue is for status only.
+ * The chosen accent marks interactive controls; status colours stay separate.
  */
 
 @font-face {
@@ -35,6 +35,13 @@
   --color-muted-foreground: #a2a2ad;
   --color-subtle: #6f6f7a;
   --color-selection: rgba(228, 228, 231, 0.18);
+  --accent-hue: 260;
+  --color-accent: oklch(68% 0.19 var(--accent-hue));
+  --color-accent-soft: color-mix(in oklch, var(--color-accent) 18%, transparent);
+  --color-accent-ink: #101013;
+  --color-reasoning: var(--color-accent);
+  --accent-spectrum: linear-gradient(to right, oklch(68% .19 0), oklch(68% .19 60), oklch(68% .19 120), oklch(68% .19 180), oklch(68% .19 240), oklch(68% .19 300), oklch(68% .19 360));
+  --color-reasoning-on: #ffffff;
   --color-live: #eab308;
   --color-success: #4ade80;
   --color-danger: #f0716f;
@@ -177,7 +184,7 @@ textarea {
 }
 
 :focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--color-foreground) 55%, transparent);
+  outline: 2px solid var(--color-accent);
   outline-offset: 2px;
 }
 
@@ -202,7 +209,7 @@ p {
 }
 
 a {
-  color: inherit;
+  color: var(--color-accent);
 }
 
 /* ------------------------------------------------------------------------- */
@@ -251,13 +258,13 @@ button:disabled {
 }
 
 button.primary {
-  background: var(--color-foreground);
-  border-color: var(--color-foreground);
-  color: var(--color-on-foreground);
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  color: var(--color-accent-ink);
 }
 
 button.primary:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--color-foreground) 88%, var(--color-background));
+  background: color-mix(in oklch, var(--color-accent) 88%, var(--color-foreground));
 }
 
 button.quiet,
@@ -736,6 +743,7 @@ html[data-glass] .composer {
   }
 }
 
+[data-accent-swatch] { --color-accent: oklch(68% 0.19 var(--accent-hue)); }
 /* Settings share one row and switch treatment across every category. */
 .settings .page { padding: 36px clamp(20px, 4vw, 64px); }
 .settings .page > header { margin-bottom: 28px; }

@@ -14,6 +14,7 @@ export default defineConfig({
     maxWorkers: 8,
     fsModuleCache: true,
     environment: 'jsdom',
+    setupFiles: ['./test-setup.ts'],
     include: ['src/**/*.test.ts'],
     globals: false,
     /* lucide ships .svelte sources; inlined so the plugin above compiles them too */
