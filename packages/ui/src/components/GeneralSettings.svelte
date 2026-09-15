@@ -71,32 +71,14 @@
   let perAccountConcurrency = $state(untrack(() => store.settings?.perAccountConcurrency ?? 2));
   let warmProcessMinutes = $state(untrack(() => store.settings?.warmProcessMinutes ?? 5));
   let listenOnLan = $state(untrack(() => store.settings?.listenOnLan ?? false));
-  let agentCpuCapPercent = $state(untrack(() => store.settings?.agentCpuCapPercent ?? 75));
-  let threadMemoryCapMb = $state(untrack(() => store.settings?.threadMemoryCapMb ?? 0));
-  let focusGuard = $state(untrack(() => store.settings?.focusGuard ?? true));
-  let muteAgents = $state(untrack(() => store.settings?.muteAgents ?? true));
   let savedAt = $state<number | null>(null);
-
-  // A switch is the whole control, so it writes on its own rather than waiting
-  // behind the scheduler card's Save button.
-  async function saveFocusGuard() {
-    await store.saveSettings({ focusGuard });
-  }
-
-  async function saveMuteAgents() {
-    await store.saveSettings({ muteAgents });
-  }
 
   async function save() {
     await store.saveSettings({
       maxConcurrentTurns,
       perAccountConcurrency,
       warmProcessMinutes,
-      listenOnLan,
-      agentCpuCapPercent,
-      threadMemoryCapMb,
-      focusGuard,
-      muteAgents
+      listenOnLan
     });
     savedAt = Date.now();
   }
@@ -117,7 +99,7 @@
 
   {#if inShell}<ShellSettings />{/if}
 
-  <section class="card">
+  <section class="card" id="settings-projects">
     <h2>{strings.settings.projects}</h2>
     {#if store.projects.length > 0}
       <ul class="projects">
@@ -153,7 +135,7 @@
     {/if}
   </section>
 
-  <section class="card">
+  <section class="card" id="settings-background">
     <h2>{strings.settings.background}</h2>
     <label class="switch-row">
       <span class="text">
@@ -168,39 +150,9 @@
         onchange={(event) => void store.setNotifications(event.currentTarget.checked)}
       />
     </label>
-    <!-- Both write `settings.set`, and both are about the machine the agents
-         run on, which is never the device reading this. -->
-    {#if store.owner}
-      <label class="switch-row">
-        <span class="text">
-          {strings.settings.focusGuard}
-          <span class="hint">{strings.settings.focusGuardHint}</span>
-        </span>
-        <input
-          type="checkbox"
-          role="switch"
-          data-testid="setting-focus-guard"
-          bind:checked={focusGuard}
-          onchange={() => void saveFocusGuard()}
-        />
-      </label>
-      <label class="switch-row">
-        <span class="text">
-          {strings.settings.muteAgents}
-          <span class="hint">{strings.settings.muteAgentsHint}</span>
-        </span>
-        <input
-          type="checkbox"
-          role="switch"
-          data-testid="setting-mute-agents"
-          bind:checked={muteAgents}
-          onchange={() => void saveMuteAgents()}
-        />
-      </label>
-    {/if}
   </section>
 
-  <section class="card">
+  <section class="card" id="settings-connection">
     <h2>{strings.settings.connection}</h2>
     {#if store.endpointUrl}
       <p class="subtle hint" data-testid="settings-target">
@@ -280,7 +232,7 @@
     </div>
   </section>
 
-  <section class="card" data-testid="pairing-card">
+  <section class="card" id="settings-devices" data-testid="pairing-card">
     <h2>{strings.settings.pairing.heading}</h2>
     {#if store.principal === 'owner'}
       <p class="subtle hint">{strings.settings.pairing.intro}</p>
@@ -356,7 +308,7 @@
        `listenOnLan` decides whether the phone can reach the core at all. The
        whole card is the owner's machine, so the device does not see it. -->
   {#if store.owner}
-    <section class="card">
+    <section class="card" id="settings-scheduler">
       <h2>{strings.settings.scheduler}</h2>
       <div class="grid">
         <label>
@@ -370,14 +322,6 @@
         <label>
           <span>{strings.settings.warmProcessMinutes}</span>
           <input type="number" min="0" max="120" bind:value={warmProcessMinutes} />
-        </label>
-        <label>
-          <span>{strings.settings.agentCpuCapPercent}</span>
-          <input type="number" min="0" max="100" bind:value={agentCpuCapPercent} />
-        </label>
-        <label>
-          <span>{strings.settings.threadMemoryCapMb}</span>
-          <input type="number" min="0" max="65536" bind:value={threadMemoryCapMb} />
         </label>
       </div>
       <label class="switch-row">
@@ -396,7 +340,7 @@
     </section>
   {/if}
 
-  <section class="card">
+  <section class="card" id="settings-core">
     <h2>{strings.settings.core}</h2>
     {#if store.core}
       <dl>

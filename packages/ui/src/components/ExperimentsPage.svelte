@@ -26,7 +26,7 @@
     <h2>{strings.settings.experiments.heading}</h2>
     <p class="intro">{strings.settings.experiments.intro}</p>
     {#each EXPERIMENT_IDS as id (id)}
-      <label class="switch-row">
+      <label class="switch-row" id="settings-{id}">
         <span class="text">
           {copy[id].title}
           <span class="hint">{copy[id].hint}</span>

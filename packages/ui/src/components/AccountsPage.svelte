@@ -161,7 +161,7 @@
 
   <div class="providers">
     {#each store.providers as provider (provider.id)}
-      <section class="card provider" data-testid="provider-settings" data-provider-id={provider.id}>
+      <section class="card provider" id="settings-provider-{provider.id}" data-testid="provider-settings" data-provider-id={provider.id}>
         <div class="provider-title"><ProviderIcon providerId={provider.id} size={22} /><h2>{provider.name}</h2></div>
         <p class="intro state"><span class="dot" class:ok={provider.available}></span>{provider.available ? strings.providerSettings.available : strings.providerSettings.missing}</p>
         {#if provider.executable}
