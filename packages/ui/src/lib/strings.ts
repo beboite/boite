@@ -1,7 +1,7 @@
 /** Every user-facing string of the UI. No literal UI text lives anywhere else. */
 export const strings = {
   machines: {
-    heading: 'Machines', local: 'My computer', projects: 'Projects', recent: 'Recent',
+    heading: 'Machines', local: 'This PC', projects: 'Projects', recent: 'Recent',
     dynamic: 'All machines', recentHint: 'Most recent user message first',
     intro: 'Connect machines to see their projects and threads together. Each machine runs its own agents and files.',
     label: 'Machine name', icon: 'Machine icon', icons: { desktop: 'Desktop', laptop: 'Laptop', server: 'Server', rack: 'Server rack', cloud: 'Cloud', cpu: 'Processor' }, link: 'Pairing link', add: 'Add machine', adding: 'Connecting',
@@ -36,7 +36,7 @@ export const strings = {
 
   connection: {
     machine: 'Machine',
-    local: 'This computer',
+    local: 'This PC',
     current: 'Current machine',
     machines: 'machines connected',
     oneMachine: 'machine connected',
@@ -299,6 +299,9 @@ export const strings = {
     jumpToLatest: 'Jump to latest',
     /** The one line at the top of the timeline while an older page is being fetched. */
     loadingOlder: 'Loading earlier messages',
+    outline: 'Messages in this conversation',
+    earlierMessages: 'Load earlier messages',
+    goToMessage: 'Go to message {number}: {text}',
     copy: 'Copy',
     copied: 'Copied',
     error: 'Error'

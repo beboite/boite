@@ -19,6 +19,7 @@
   import Prose from './Prose.svelte';
   import ThinkingPart from './ThinkingPart.svelte';
   import ToolCard from './ToolCard.svelte';
+  import MessageOutline from './MessageOutline.svelte';
 
   let {
     store,
@@ -53,6 +54,48 @@
 
   let scrollTop = $state(0);
   let viewHeight = $state(0);
+  let navigationTarget = $state<string | null>(null);
+  function releaseNavigation() { navigationTarget = null; }
+  const activePrompt = $derived.by(() => {
+    void measured;
+    const total = totals(messages);
+    const at = pinned ? messages.length - 1 : atOrBefore(total, messages.length, scrollTop + 24);
+    for (let index = Math.min(at, messages.length - 1); index >= 0; index--) {
+      if (messages[index]?.role === 'user') return messages[index]!.id;
+    }
+    return null;
+  });
+
+  function jumpToMessage(id: string) {
+    const box = viewport;
+    const index = messages.findIndex(message => message.id === id);
+    if (!box || index < 0) return;
+    navigationTarget = id;
+    pinned = false;
+    behind = true;
+    box.scrollTop = totals(messages)[index] ?? 0;
+    scrollTop = box.scrollTop;
+  }
+
+  // Keep the target aligned as estimated heights become real measurements.
+  // Wheel, touch, scrollbar and keyboard input return control to the reader.
+  $effect(() => {
+    const id = navigationTarget;
+    void measured;
+    void view;
+    if (!id) return;
+    const frame = requestAnimationFrame(() => {
+      const box = viewport;
+      if (!box || navigationTarget !== id) return;
+      const node = Array.from(box.querySelectorAll<HTMLElement>('[data-mid]')).find(node => node.dataset.mid === id);
+      if (!node) return;
+      node.style.animation = 'none';
+      const delta = node.getBoundingClientRect().top - box.getBoundingClientRect().top - 20;
+      if (Math.abs(delta) > 1) box.scrollTop += delta;
+      scrollTop = box.scrollTop;
+    });
+    return () => cancelAnimationFrame(frame);
+  });
 
   const windowed = $derived(messages.length > WINDOW_FROM);
 
@@ -284,6 +327,7 @@
     if (!box) return;
     scrollTop = box.scrollTop;
     viewHeight = box.clientHeight;
+    if (navigationTarget) return;
     pinned = atBottom(box);
     if (pinned) behind = false;
     pullOlder(box);
@@ -327,6 +371,7 @@
   function jump() {
     const box = viewport;
     if (!box) return;
+    navigationTarget = null;
     pinned = true;
     behind = false;
     box.scrollTop = box.scrollHeight;
@@ -400,7 +445,10 @@
 </script>
 
 <div class="timeline-wrap">
-  <div class="timeline" bind:this={viewport} {onscroll} data-testid="timeline">
+  <MessageOutline {messages} active={activePrompt} jump={id => void jumpToMessage(id)}
+    hasOlder={store.messagesBefore !== null} loading={store.loadingOlder} loadOlder={() => { if (viewport) { navigationTarget = null; viewport.scrollTop = 0; pinned = false; pullOlder(viewport); } }} />
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div class="timeline" bind:this={viewport} {onscroll} onwheel={releaseNavigation} onpointerdown={releaseNavigation} onkeydown={releaseNavigation} data-testid="timeline">
     <div class="column">
       <!-- paging: the one line the top of the list shows while a page is in flight. -->
       {#if store.loadingOlder}
@@ -550,7 +598,7 @@
     flex: 1;
     min-height: 0;
     overflow: auto;
-    padding: 20px 20px 8px;
+    padding: 20px 20px 8px 38px;
     overscroll-behavior: contain;
   }
 

@@ -558,7 +558,7 @@ test('a provider that reads no image hides the button and says so on a paste', a
   await mountOnFake();
   store.startDraft();
   await waitFor(() => store.draft !== null);
-  await waitFor(() => query('[data-testid=composer-picker]').textContent?.includes('OpenCode') === true);
+  await waitFor(() => store.defaultChoice()?.providerId === 'opencode');
 
   expect(document.querySelector('[data-testid=composer-attach]')).toBeNull();
 

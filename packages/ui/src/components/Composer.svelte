@@ -74,14 +74,14 @@
     store.providers;
     store.accounts;
     if (thread) {
-      choice = {
+      choice = store.composerChoice({
         providerId: thread.providerId,
         accountId: thread.accountId,
         permissionMode: thread.permissionMode,
         model: thread.model,
         effort: thread.effort,
         speed: thread.speed ?? null
-      };
+      });
     } else if (draft) {
       choice = store.defaultChoice();
     } else {
@@ -980,9 +980,28 @@
     flex: 1;
     display: flex;
     align-items: center;
-    gap: 4px;
+    gap: 6px;
     flex-wrap: wrap;
     min-width: 0;
+  }
+
+  .chips :global(.trigger), .chips :global(.speed), .chips .worktree {
+    height: var(--control);
+    padding: 0 10px;
+    gap: 7px;
+    border-radius: var(--radius-md);
+    font-size: var(--text-sm);
+    font-weight: 500;
+  }
+
+  .chips :global(.trigger) {
+    border-color: var(--color-edge);
+    background: var(--color-surface);
+    color: var(--color-foreground);
+  }
+
+  .chips :global(.trigger:hover) {
+    background: var(--color-surface-3);
   }
 
 

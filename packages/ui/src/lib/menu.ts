@@ -5,6 +5,8 @@ export interface MenuItem {
   hint?: string;
   status?: { tone: 'success' | 'warning' | 'danger'; label: string };
   active?: boolean;
+  hideActiveMark?: boolean;
+  icon?: 'settings';
   danger?: boolean;
   disabled?: boolean;
   separator?: boolean;

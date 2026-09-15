@@ -69,7 +69,7 @@ import {
 import { rightPanel, type BoundPanel } from './right-panel.svelte';
 import { strings } from './strings';
 import { DEFAULT_MODEL_NAMES, INITIAL_MODEL_DEFAULTS, readModelDefaults, writeModelDefaults, resolveModelDefault, type ModelDefaults } from './model-defaults';
-import { FAVORITES_KEY, readFavorites, type FavoriteModel } from './model-order';
+import { FAVORITES_KEY, isNamedModel, readFavorites, type FavoriteModel } from './model-order';
 
 export type Page = 'chat' | 'settings';
 export type SettingsTab = 'general' | 'machines' | 'appearance' | 'keyboard' | 'accounts' | 'plugins' | 'usage' | 'resources' | 'experiments';
@@ -463,6 +463,16 @@ export class Store {
     return preferred?.model ?? resolveModelDefault(provider.id, models, this.modelDefaults)?.model ?? null;
   }
 
+  /** Replace old agent-selected aliases for the next prompt, preserving named choices. */
+  composerChoice(choice: Choice): Choice {
+    const offered = this.modelOf(choice);
+    if (choice.model && isNamedModel(offered ?? { id: choice.model, name: choice.model })) return choice;
+    const provider = this.providerOf(choice.providerId);
+    if (!provider) return choice;
+    const model = this.defaultModelOf(provider, choice.accountId);
+    return { ...choice, model, effort: this.defaultEffortOf(provider.id, choice.accountId, model), speed: null };
+  }
+
   defaultEffortOf(providerId: string, accountId: string, model: string | null): string | null {
     const offered = this.modelsOf(providerId, accountId);
     const configured = this.modelDefaults[providerId] ?? INITIAL_MODEL_DEFAULTS[providerId];
@@ -474,7 +484,7 @@ export class Store {
 
   setModelDefault(providerId: string, accountId: string, model: string, effort: string | null): void {
     const offered = this.modelsOf(providerId, accountId).find((m) => m.id === model);
-    if (!offered) return;
+    if (!offered || !isNamedModel(offered)) return;
     const validEffort = offered.effort?.levels.some((level) => level.id === effort) ? effort : offered.effort?.default ?? null;
     this.modelDefaults = { ...this.modelDefaults, [providerId]: { model, effort: validEffort } };
     writeModelDefaults(this.modelDefaults);
@@ -1454,6 +1464,19 @@ export class Store {
         const accepted = await client.call('threads.activity.set', { threadId, ...activity });
         if (this.openThread?.id === threadId) this.openThread.activity = accepted;
         return true;
+      }
+      const thread = this.openThread?.id === threadId ? this.openThread : this.threads.find(thread => thread.id === threadId);
+      if (thread) {
+        const current: Choice = { providerId: thread.providerId, accountId: thread.accountId, model: thread.model,
+          effort: thread.effort, permissionMode: thread.permissionMode, speed: thread.speed ?? null };
+        const target = this.composerChoice(current);
+        if (target.model !== current.model) {
+          const revision = thread.selectionVersion ?? 0;
+          const prepared = await this.prepareDraftChoice(target);
+          if (!prepared || client !== this.#client) return false;
+          if (!(await this.update(threadId, { model: prepared.model, effort: prepared.effort, speed: prepared.speed ?? null,
+            expectedSelectionVersion: revision }))) return false;
+        }
       }
       // The key is left out when there is nothing to carry: a turn with no
       // image sends the params it always sent.

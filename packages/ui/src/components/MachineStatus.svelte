@@ -1,20 +1,23 @@
 <script lang="ts">
-  import { workspace } from '../lib/workspace.svelte';
+  import { isThisPC, workspace } from '../lib/workspace.svelte';
   import { Monitor, TriangleAlert } from '@lucide/svelte';
 
 
   import { strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
   import Menu from './Menu.svelte';
+  import { separator, type MenuItem } from '../lib/menu';
   let { store, filter = null, onfilter }: { store: Store; filter?: string | null; onfilter?: (id: string | null) => void } = $props();
 
-  const machines = $derived(workspace.machines.length ? workspace.machines : [{ id: 'current', label: strings.connection.local, store }]);
+  const machines = $derived((workspace.machines.length ? workspace.machines : [{ id: 'current', label: strings.machines.local, store }])
+    .toSorted((a, b) => Number(isThisPC(b)) - Number(isThisPC(a))));
   const connected = $derived(machines.filter(m => m.store.connection === 'ready').length);
   const issues = $derived(machines.filter(m => m.store.connection === 'closed' || (m.store.booted && m.store.connection !== 'ready')).length);
-  const items = $derived([
-    { id: 'all', label: strings.machines.all, active: filter === null },
+  const items = $derived<MenuItem[]>([
+    { id: 'all', label: strings.machines.all, active: filter === null, hideActiveMark: true },
     ...machines.map(m => ({ id: m.id, label: m.label, status: { tone: m.store.connection === 'ready' ? 'success' as const : m.store.connection === 'closed' ? 'danger' as const : 'warning' as const, label: strings.connection[m.store.connection] }, active: m.id === filter })),
-    { id: 'manage', label: strings.connection.manage }
+    separator('manage-separator'),
+    { id: 'manage', label: strings.connection.manage, icon: 'settings' }
   ]);
   function pick(id: string) {
     if (id === 'manage') store.showSettings('machines');
@@ -22,7 +25,7 @@
   }</script>
 
 <div class="machines" class:problem={issues > 0} data-testid="status-connection" data-state={store.connection} aria-live="polite">
-  <Menu {items} onpick={pick} label={strings.connection.manage} variant="ghost" testid="machine-status">
+  <Menu {items} onpick={pick} label={strings.machines.filter} variant="ghost" testid="machine-status">
     {#if issues}<TriangleAlert size={14} />{:else}<Monitor size={14} />{/if}
     <span>{connected} {connected === 1 ? strings.connection.oneMachine : strings.connection.machines}</span>
     {#if issues}<span class="count" title={`${issues} ${strings.connection.issues}`}>{issues}</span>{/if}

@@ -1,4 +1,5 @@
 import type { ModelInfo } from '@boite/contracts';
+import { isNamedModel } from './model-order';
 
 export interface ModelDefault { model: string; effort: string | null }
 export type ModelDefaults = Record<string, ModelDefault>;
@@ -20,6 +21,7 @@ export function readModelDefaults(): ModelDefaults {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
     return Object.fromEntries(Object.entries(raw).filter(([, value]) =>
       value && typeof value === 'object' && typeof value.model === 'string' &&
+      isNamedModel({ id: value.model, name: value.model }) &&
       (value.effort === null || typeof value.effort === 'string')));
   } catch { return {}; }
 }

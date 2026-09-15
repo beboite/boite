@@ -1,6 +1,6 @@
 <script lang="ts">
   import { ChevronDown, ChevronRight, Search, Sparkles, Star, RefreshCw } from '@lucide/svelte';
-  import { orderedModels, type FavoriteModel } from '../lib/model-order';
+  import { isNamedModel, orderedModels, type FavoriteModel } from '../lib/model-order';
   import type { Account, ModelInfo, ProviderSummary } from '@boite/contracts';
   import ProviderLogo from './ProviderLogo.svelte';
   import { floating } from '../lib/floating';
@@ -118,7 +118,8 @@
   // model and the account only: one place says the level.
   let label = $derived.by(() => {
     if (!choice || !provider) return strings.composer.noProvider;
-    const name = store.modelOf(choice)?.name ?? provider.name;
+    const model = store.modelOf(choice);
+    const name = model && isNamedModel(model) ? model.name : strings.composer.picker;
     const siblings = store.accountsOf(provider.id);
     return siblings.length > 1 && account ? `${name} · ${account.label}` : name;
   });
