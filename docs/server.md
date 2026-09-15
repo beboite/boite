@@ -6,9 +6,113 @@ that machine too, under the account that runs the core, with that account's
 logins and that machine's files. The desktop app on another computer drives it
 through a pairing key; the phone reaches it the same way it reaches any core.
 
-## Building it
+## Docker
+
+The image includes the built UI, Bun, Node.js, Git, ripgrep and pinned Claude
+Code, Codex, OpenCode and pi CLIs. It runs as UID 1000. Grok and Antigravity are
+not preinstalled; use a custom image or a supported managed installer. Agent
+authentication is still required. No login is built into the image.
+
+Release workflows publish `ghcr.io/beboite/boite/boite-server` for Linux x64 and ARM64.
+Until the first image has been published, build it from this checkout:
+
+```sh
+docker build -t boite-server:local .
+BOITE_IMAGE=boite-server:local docker compose up -d
+```
+
+For a published stable image, download [compose.yaml](../compose.yaml) into an
+empty directory, then:
+
+```sh
+docker compose pull
+docker compose up -d
+docker compose exec boite-server boite-server pair --owner
+```
+
+Open the printed one-time link. The default listener is
+`http://127.0.0.1:7337` on the Docker host. Pairing links are credentials;
+keep them out of logs and reports.
+
+| Named volume | Container path | Contents |
+| --- | --- | --- |
+| `boite-data` | `/data` | Journal, accounts, settings and core token |
+| `boite-home` | `/home/node` | Default CLI logins, sessions and user tools |
+| `boite-workspace` | `/workspace` | Project repositories and worktrees |
+
+Clone projects into `/workspace` or replace its volume with a bind mount.
+Bind-mounted files must be writable by UID 1000. Paths entered in boite refer
+to the container. Do not mount the Docker socket or the host's complete home.
+
+For a Codex login, for example:
+
+```sh
+docker compose exec boite-server codex login --device-auth
+```
+
+For isolated accounts, use the Providers page. Default CLI logins persist in
+the home volume; isolated accounts persist in the data volume. See
+[accounts](accounts.md). Install additional system tools in a derived image,
+or user tools under `/home/node/.local`, whose `bin` directory is on `PATH`.
+
+### Updates and rollback
+
+Record the current image digest and stop the core before backing up:
+
+```sh
+docker image inspect ghcr.io/beboite/boite/boite-server:latest --format '{{index .RepoDigests 0}}'
+docker compose stop
+```
+
+Back up all three volumes, including the complete SQLite data directory. Then:
+
+```sh
+docker compose pull
+docker compose up -d
+docker compose ps
+```
+
+The image health check polls `/health`. Compose restarts exited containers;
+Docker does not automatically restart an unhealthy process.
+
+To pin a release, set `BOITE_IMAGE=ghcr.io/beboite/boite/boite-server:v<version>` in
+a local `.env` file. To roll back, stop the server, restore the matching volume
+backup and set `BOITE_IMAGE` to the old recorded digest before starting again.
+An older binary may not understand a journal migrated by a newer one.
+`docker compose down -v` deletes the named volumes and is not an update command.
+
+Nightlies use the `nightly` image tag after [activation](ci.md). Use a separate
+Compose directory and project name, such as `boite-nightly`, with a different
+host port and separate volumes. Never share a stable journal with a nightly.
+
+### Remote access
+
+Keep the localhost binding for a local reverse proxy. For a private network or
+VPN, set `BOITE_BIND` to the host's private interface address. Change only the
+host part of the printed pairing URL to that reachable address.
+
+The core does not terminate TLS. Public access needs an HTTPS reverse proxy
+that forwards WebSocket upgrades and preserves `Host` and `Origin`. Serve the
+UI and `/rpc` from the same origin. Do not expose plain HTTP to the internet.
+
+### Image verification
+
+From a Linux checkout with Docker:
+
+```sh
+docker build -t boite-server:test .
+bash docker/smoke.sh boite-server:test
+```
+
+The test creates its own container and data volume. It verifies the built UI,
+authentication, installed provider executables, an echo turn, graceful shutdown
+and persistence after restart, then removes its container and volume. It makes
+no real provider call and uses no existing login directory.
+
+## Building without Docker
 
 ```bash
+bun run build:ui
 bun run build:core:linux
 ```
 

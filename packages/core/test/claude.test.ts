@@ -14,7 +14,7 @@ import type { CoreClient } from '../src/client.ts';
 import { createClaudeDriver } from '../src/drivers/claude.ts';
 import type { QueryFn } from '../src/drivers/claude.ts';
 import { setDriver } from '../src/drivers/index.ts';
-import { startTestCore, waitFor } from './harness.ts';
+import { scriptedClaude, startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
 
 let harness: TestCore;
@@ -22,6 +22,7 @@ let restore: (() => void) | null = null;
 
 beforeEach(async () => {
   harness = await startTestCore();
+  scriptedClaude(harness);
 });
 
 afterEach(async () => {
@@ -661,8 +662,8 @@ describe('claude driver', () => {
       const spawn = options.spawnClaudeCodeProcess;
       if (spawn === undefined) throw new Error('the driver must pass spawnClaudeCodeProcess');
       const child = spawn({
-        command: 'cmd',
-        args: ['/c', 'echo', 'hi'],
+        command: process.execPath,
+        args: ['-e', "console.log('hi')"],
         env: { ...process.env },
         signal: new AbortController().signal,
       });
@@ -683,7 +684,7 @@ describe('claude driver', () => {
     expect((await finished).status).toBe('done');
 
     expect(started).toHaveLength(1);
-    expect(started[0]?.commandLine).toContain('echo hi');
+    expect(started[0]?.commandLine).toContain("console.log('hi')");
     expect((await exited).exitCode).toBe(0);
 
     const trace = await client.call('trace.get', { threadId });

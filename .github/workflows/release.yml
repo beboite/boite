@@ -1,0 +1,92 @@
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      announcement:
+        description: Optional announcement above the automatic changelog.
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  version:
+    if: "!contains(github.ref, '-nightly.')"
+    runs-on: ubuntu-24.04
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+        with:
+          bun-version-file: package.json
+      - id: version
+        run: bun scripts/ci/release-version.ts
+
+  verify:
+    needs: version
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+      packages: write
+
+  draft:
+    needs: [version, verify]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+        with:
+          bun-version-file: package.json
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: windows-installer
+          path: artifacts
+      - name: Prepare release for review
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.version.outputs.tag }}
+          RELEASE_ANNOUNCEMENT: ${{ inputs.announcement }}
+        run: |
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases?per_page=100" > released.json
+          bun scripts/ci/changelog.ts released.json artifacts/release-notes.md
+          existing=$(jq --arg tag "$RELEASE_TAG" '[.[][] | select(.tag_name == $tag)] | first // empty' released.json)
+          cd artifacts
+          sha256sum ./*.exe > SHA256SUMS.txt
+          flags=()
+          [[ "$RELEASE_TAG" == *-* ]] && flags+=(--prerelease)
+          if [[ -n "$existing" ]]; then
+            echo "$existing" | jq -e '.draft == true' >/dev/null
+            if git show-ref --verify --quiet "refs/tags/$RELEASE_TAG"; then
+              test "$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")" = "$GITHUB_SHA"
+            else
+              test "$(echo "$existing" | jq -r .target_commitish)" = "$GITHUB_SHA"
+            fi
+            gh release upload "$RELEASE_TAG" ./*.exe SHA256SUMS.txt --clobber
+          else
+            # A manual dispatch creates the version tag only after all checks.
+            if git show-ref --verify --quiet "refs/tags/$RELEASE_TAG"; then
+              test "$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")" = "$GITHUB_SHA"
+            fi
+            gh release create "$RELEASE_TAG" ./*.exe SHA256SUMS.txt --target "$GITHUB_SHA" --draft --title "boite $RELEASE_TAG" --notes-file release-notes.md "${flags[@]}"
+          fi

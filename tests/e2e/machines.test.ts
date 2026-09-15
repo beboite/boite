@@ -28,12 +28,12 @@ beforeAll(async () => {
   await server.listen();
   url = `http://127.0.0.1:${port}`;
   page = await BrowserPage.launch({ url: `${url}/?fake=1&machines=1` });
-});
+}, 30_000);
 afterAll(async () => {
   await page?.close();
   await server?.close();
   for (const core of cores) await core.stop();
-});
+}, 15_000);
 
 test('project and recent cards show both hosts, PRs and user-message ordering on desktop and phone', async () => {
   await page.waitFor(`document.querySelectorAll('${id('thread-row')}').length === 8`);

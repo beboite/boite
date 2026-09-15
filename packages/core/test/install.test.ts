@@ -409,7 +409,10 @@ describe('managed installs', () => {
     expect(installs.leaseCount('echo')).toBe(0);
 
     await client.call('threads.subscribe', { threadId });
-    await client.call('turns.start', { threadId, prompt: 'go [spawn:ver]' });
+    // Stay alive long enough to observe the lease on both hosts. `ver` was a
+    // Windows-only command and could exit before the first polling sample.
+    const command = `${process.platform === 'win32' ? '' : 'exec '}bun -e "setTimeout(()=>{},250)"`;
+    await client.call('turns.start', { threadId, prompt: `go [spawn:${command}]` });
     await waitFor(() => installs.leaseCount('echo') > 0, 10_000);
     await waitFor(() => installs.leaseCount('echo') === 0, 10_000);
   });

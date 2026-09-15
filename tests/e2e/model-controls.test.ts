@@ -17,8 +17,8 @@ beforeAll(async () => {
   await server.listen(); url = `http://127.0.0.1:${port}/?fake=1`;
   page = await BrowserPage.launch({ url });
   await page.waitFor(`document.querySelector('[data-testid=composer-picker]')`);
-});
-afterAll(async () => { await page?.close(); await server?.close(); });
+}, 30_000);
+afterAll(async () => { await page?.close(); await server?.close(); }, 15_000);
 
 test.each(['glass', 'grain'])('pointer clicks open and select models with %s', async (material) => {
   await page.navigate(url);

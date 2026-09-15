@@ -1,0 +1,14 @@
+name: Feature request
+description: Describe a workflow boite could support.
+body:
+  - type: textarea
+    id: workflow
+    attributes:
+      label: What are you trying to do?
+      description: Explain the problem and how you work around it today.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior

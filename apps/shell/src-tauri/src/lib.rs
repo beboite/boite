@@ -453,6 +453,16 @@ fn hidden() -> bool {
     std::env::var("BOITE_SHELL_HIDDEN").ok().as_deref() == Some("1")
 }
 
+// Webviews sharing a profile must also share environment options. Elevated
+// hosts ignore WebView2's environment variables, so each builder uses the API.
+fn test_browser_args() -> Option<String> {
+    if !hidden() { return None; }
+    let value = std::env::var("BOITE_SHELL_DEBUG_PORT").ok()?;
+    let port: u16 = value.parse().expect("BOITE_SHELL_DEBUG_PORT must be a port number");
+    assert!(port > 0, "BOITE_SHELL_DEBUG_PORT must be greater than zero");
+    Some(format!("--remote-debugging-port={port} --remote-allow-origins=* --mute-audio --use-angle=d3d11"))
+}
+
 #[cfg(windows)]
 fn default_data_dir(channel: Channel) -> Result<PathBuf, String> {
     let local = std::env::var("LOCALAPPDATA")
@@ -870,6 +880,9 @@ fn build_main_window<R: Runtime>(
     }
     if let Some(directory) = webview_profile() {
         builder = builder.data_directory(directory);
+    }
+    if let Some(args) = test_browser_args() {
+        builder = builder.additional_browser_args(&args);
     }
     builder.build()
 }

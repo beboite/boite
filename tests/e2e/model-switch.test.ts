@@ -46,7 +46,7 @@ beforeAll(async () => {
   await page.waitFor(`document.querySelector('${selector('composer-picker')}')`);
 }, 30_000);
 
-afterAll(async () => { await page?.close(); client?.close(); await core?.stop(); });
+afterAll(async () => { await page?.close(); client?.close(); await core?.stop(); }, 15_000);
 
 test('the picker changes native protocols in one conversation and carries history over real RPC and stdio', async () => {
   await page.click(selector('composer-picker'));

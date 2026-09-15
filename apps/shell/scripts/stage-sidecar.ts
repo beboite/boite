@@ -91,6 +91,20 @@ if (triple === undefined) {
 const suffix = process.platform === 'win32' ? '.exe' : '';
 stageCore(binaries, `boite-core-${triple}${suffix}`);
 
+// Cargo may use a shared target directory. Snapshot its shell into this
+// checkout so a later build elsewhere cannot replace the executable under test.
+const metadata = Bun.spawnSync(['cargo', 'metadata', '--no-deps', '--format-version', '1', '--manifest-path', join(shell, 'src-tauri', 'Cargo.toml')], {
+  stdout: 'pipe', stderr: 'pipe', windowsHide: true,
+});
+if (metadata.exitCode !== 0) refuse(`cargo metadata failed: ${metadata.stderr.toString()}`);
+const target = JSON.parse(metadata.stdout.toString()).target_directory as string;
+const builtShell = join(target, 'release', `boite-shell${suffix}`);
+if (resolve(builtShell) !== resolve(shellExe) && existsSync(builtShell)) {
+  mkdirSync(release, { recursive: true });
+  copyFileSync(builtShell, shellExe);
+  console.log(`stage-sidecar: shell snapshot ${shellExe}`);
+}
+
 if (existsSync(shellExe)) {
   stageCore(release, `boite-core${suffix}`);
 } else {

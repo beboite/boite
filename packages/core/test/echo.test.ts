@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { ImageAttachment, MessagePart, RpcEvents, ToolDocument } from '@boite/contracts';
-import { echoThread, startTestCore, waitFor } from './harness.ts';
+import { echoThread, scriptedClaude, startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
 
 let harness: TestCore;
@@ -534,6 +534,7 @@ describe('echo driver', () => {
   });
 
   test('turns.start on a claude account with no login fails with Unavailable', async () => {
+    scriptedClaude(harness);
     const client = await harness.connect();
     const project = await client.call('projects.add', { path: harness.dataDir, name: 'claude project' });
     const account = await client.call('accounts.add', { providerId: 'claude', label: 'no login' });

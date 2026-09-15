@@ -5,6 +5,7 @@ description = "Boite desktop shell: window, tray, and the local core"
 edition = "2021"
 rust-version = "1.82"
 publish = false
+license = "MIT"
 
 [lib]
 name = "boite_shell_lib"

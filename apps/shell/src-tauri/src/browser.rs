@@ -195,6 +195,9 @@ pub async fn browser_create(
     if let Some(directory) = crate::webview_profile() {
         builder = builder.data_directory(directory);
     }
+    if let Some(args) = crate::test_browser_args() {
+        builder = builder.additional_browser_args(&args);
+    }
 
     let handle = app.clone();
     let surface = id.clone();

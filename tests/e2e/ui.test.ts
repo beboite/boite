@@ -77,7 +77,7 @@ afterAll(async () => {
   await core?.stop();
   if (projectDir !== undefined) await removeDirectory(projectDir);
   if (worktreesDir !== undefined) await removeDirectory(worktreesDir);
-});
+}, 15_000);
 
 test(
   'a fresh core opens on the first-run card, connected to the core it was paired with',
@@ -752,7 +752,9 @@ test(
       RECONNECT_TIMEOUT_MS,
     );
   },
-  RECONNECT_TIMEOUT_MS,
+  // The backoff still has 30 seconds; restarting the core and sending a turn
+  // need their own time within the complete scenario.
+  TIMEOUT,
 );
 
 test(

@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { afterAll, beforeAll, expect, test } from 'bun:test';
@@ -239,8 +239,10 @@ function spawnHiddenShell(ownDataDir: string, debugPort?: number): number {
   env.BOITE_SHELL_HIDDEN = '1';
   env.BOITE_DATA_DIR = ownDataDir;
   env.BOITE_ECHO = '1';
+  delete env.BOITE_SHELL_DEBUG_PORT;
   if (debugPort !== undefined) {
-    env.WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = `--remote-debugging-port=${debugPort} --remote-allow-origins=*`;
+    env.BOITE_SHELL_DEBUG_PORT = String(debugPort);
+    env.WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = `--remote-debugging-port=${debugPort} --remote-allow-origins=* --mute-audio --use-angle=d3d11`;
   }
   return Bun.spawn({ cmd: [EXE], env, stdout: 'ignore', stderr: 'ignore', windowsHide: true }).pid;
 }
@@ -302,19 +304,26 @@ shellTest('close exits by default; the persisted setting hides instead; the nati
     await popup.waitFor(`document.querySelector('[data-testid="quota-popup"]') && !document.querySelector('[role="alert"]')`);
     await popup.waitFor(`document.querySelectorAll('[data-testid="quota-provider"]').length === 5`);
     expect(await popup.evaluate(`window.__TAURI_INTERNALS__.invoke('core_endpoint').then(e => Boolean(e.url && e.token))`)).toBe(true);
-    const insideWorkArea = await ownPage.evaluate(`(async () => {
+    // The webview can be ready before Windows applies the native placement.
+    // Poll the geometry itself; a timeout still reports all offending bounds.
+    const geometry = await ownPage.evaluate<{ inside: boolean; position: unknown; size: unknown; work: unknown }>(`(async () => {
       const invoke = window.__TAURI_INTERNALS__.invoke;
-      const [position, size, monitor] = await Promise.all([
-        invoke('plugin:window|outer_position', { label: 'quotas' }),
-        invoke('plugin:window|outer_size', { label: 'quotas' }),
-        invoke('plugin:window|current_monitor', { label: 'quotas' })
-      ]);
-      const work = monitor.workArea;
-      return position.x >= work.position.x && position.y >= work.position.y
-        && position.x + size.width <= work.position.x + work.size.width
-        && position.y + size.height <= work.position.y + work.size.height;
+      const deadline = Date.now() + 2000;
+      for (;;) {
+        const [position, size, monitor] = await Promise.all([
+          invoke('plugin:window|outer_position', { label: 'quotas' }),
+          invoke('plugin:window|outer_size', { label: 'quotas' }),
+          invoke('plugin:window|current_monitor', { label: 'quotas' })
+        ]);
+        const work = monitor.workArea;
+        const inside = position.x >= work.position.x && position.y >= work.position.y
+          && position.x + size.width <= work.position.x + work.size.width
+          && position.y + size.height <= work.position.y + work.size.height;
+        if (inside || Date.now() >= deadline) return { inside, position, size, work };
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
     })()`);
-    expect(insideWorkArea).toBe(true);
+    expect(geometry.inside, JSON.stringify(geometry)).toBe(true);
     await popup.screenshot(join(import.meta.dir, '.artifacts', 'shell-quota-popup.png'));
     await popup.evaluate(`window.__TAURI_INTERNALS__.invoke('quota_window', {action:'hide'})`);
     await popup.close(); popup = undefined;
@@ -380,7 +389,18 @@ beforeAll(async () => {
   startToHealthMs = performance.now() - startedAt;
   console.log(`[shell.test] spawn to /health: ${startToHealthMs.toFixed(0)} ms`);
 
-  page = await BrowserPage.attach(debugPort);
+  try {
+    page = await BrowserPage.attach(debugPort);
+  } catch (error) {
+    const diagnostic = Bun.spawnSync(['powershell', '-NoProfile', '-Command',
+      `$all = Get-CimInstance Win32_Process; $ids = @(${shellPid}); do { $next = @($all | Where-Object { $_.ParentProcessId -in $ids -and $_.ProcessId -notin $ids } | Select-Object -ExpandProperty ProcessId); $ids += $next } while ($next.Count); $all | Where-Object { $_.ProcessId -in $ids } | Select-Object ProcessId,ParentProcessId,Name,CommandLine | ConvertTo-Json -Depth 3`,
+    ], { stdout: 'pipe', stderr: 'pipe', windowsHide: true });
+    const details = diagnostic.stdout.toString();
+    mkdirSync(join(import.meta.dir, '.artifacts'), { recursive: true });
+    writeFileSync(join(import.meta.dir, '.artifacts', 'shell-processes.json'), details);
+    console.error(`Shell debugging port ${debugPort} unavailable; process tree: ${details}`);
+    throw error;
+  }
 }, TIMEOUT);
 
 afterAll(async () => {
@@ -389,7 +409,7 @@ afterAll(async () => {
   if (coreFile !== undefined) killProcessTree(coreFile.pid);
   if (dataDir !== '') await removeDirectory(dataDir);
   if (projectDir !== '') await removeDirectory(projectDir);
-});
+}, 15_000);
 
 shellTest(
   'the hidden shell starts a core of its own and reaches it',
