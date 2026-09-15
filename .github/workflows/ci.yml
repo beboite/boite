@@ -98,8 +98,6 @@ jobs:
         with:
           workspaces: apps/shell/src-tauri -> target
           cache-on-failure: true
-          save-if: ${{ github.ref == 'refs/heads/main' || github.event_name != 'pull_request' }}
-      - run: bun run test:shell
       - name: Set nightly artifact version
         if: inputs.channel == 'nightly' && inputs.version != ''
         env:
@@ -118,7 +116,8 @@ jobs:
           }
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           bun run apps/shell/scripts/stage-sidecar.ts
-      - run: bun run e2e
+      - run: bun run test:shell --release
+      - run: bun test tests/e2e
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: windows-installer
@@ -131,6 +130,7 @@ jobs:
         with:
           name: desktop-failure-captures
           path: tests/e2e/.artifacts/
+          include-hidden-files: true
           retention-days: 7
 
   server:

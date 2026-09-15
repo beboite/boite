@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { afterAll, beforeAll, expect, test } from 'bun:test';
@@ -240,7 +240,7 @@ function spawnHiddenShell(ownDataDir: string, debugPort?: number): number {
   env.BOITE_DATA_DIR = ownDataDir;
   env.BOITE_ECHO = '1';
   if (debugPort !== undefined) {
-    env.WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = `--remote-debugging-port=${debugPort} --remote-allow-origins=*`;
+    env.WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = `--remote-debugging-port=${debugPort} --remote-allow-origins=* --mute-audio --use-angle=d3d11`;
   }
   return Bun.spawn({ cmd: [EXE], env, stdout: 'ignore', stderr: 'ignore', windowsHide: true }).pid;
 }
@@ -387,7 +387,18 @@ beforeAll(async () => {
   startToHealthMs = performance.now() - startedAt;
   console.log(`[shell.test] spawn to /health: ${startToHealthMs.toFixed(0)} ms`);
 
-  page = await BrowserPage.attach(debugPort);
+  try {
+    page = await BrowserPage.attach(debugPort);
+  } catch (error) {
+    const diagnostic = Bun.spawnSync(['powershell', '-NoProfile', '-Command',
+      `$all = Get-CimInstance Win32_Process; $ids = @(${shellPid}); do { $next = @($all | Where-Object { $_.ParentProcessId -in $ids -and $_.ProcessId -notin $ids } | Select-Object -ExpandProperty ProcessId); $ids += $next } while ($next.Count); $all | Where-Object { $_.ProcessId -in $ids } | Select-Object ProcessId,ParentProcessId,Name,CommandLine | ConvertTo-Json -Depth 3`,
+    ], { stdout: 'pipe', stderr: 'pipe', windowsHide: true });
+    const details = diagnostic.stdout.toString();
+    mkdirSync(join(import.meta.dir, '.artifacts'), { recursive: true });
+    writeFileSync(join(import.meta.dir, '.artifacts', 'shell-processes.json'), details);
+    console.error(`Shell debugging port ${debugPort} unavailable; process tree: ${details}`);
+    throw error;
+  }
 }, TIMEOUT);
 
 afterAll(async () => {
