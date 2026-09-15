@@ -750,7 +750,7 @@ test('queued prompts survive settings and wait for a ready connection', async ()
   store.connection = 'ready';
   await waitFor(() => store.busy);
   expect(rpc.mock.calls.filter(([method]) => method === 'turns.start')).toEqual([
-    ['turns.start', { threadId: 't-trace', prompt: 'queue through settings', expectedSelectionVersion: 0 }]
+    ['turns.start', { threadId: 't-trace', prompt: 'queue through settings', expectedSelectionVersion: 0, clientRequestId: expect.stringMatching(/^[a-f0-9]{32}$/) }]
   ]);
 });
 

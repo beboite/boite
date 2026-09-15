@@ -36,6 +36,30 @@ async function ready(): Promise<{ store: Store; client: FakeClient }> {
   return { store, client };
 }
 
+test('a lost start response retains its request id until the retry is acknowledged', async () => {
+  const { store, client } = await ready();
+  const original = client.call.bind(client);
+  const requests: string[] = [];
+  let loseResponse = true;
+  vi.spyOn(client, 'call').mockImplementation(async (method, params) => {
+    const result = await original(method, params);
+    if (method === 'turns.start') {
+      requests.push((params as { clientRequestId: string }).clientRequestId);
+      if (loseResponse) { loseResponse = false; throw new Error('connection lost'); }
+    }
+    return result;
+  });
+  try {
+    const thread = store.threads.find(thread => thread.status === 'idle')!;
+    await store.open(thread.id);
+    expect(await store.send('Retry this prompt')).toBe(false);
+    expect(await store.send('Retry this prompt')).toBe(true);
+    expect(requests).toHaveLength(2);
+    expect(requests[0]).toBeTruthy();
+    expect(requests[1]).toBe(requests[0]);
+  } finally { store.detach(); client.close(); }
+});
+
 describe('Store', () => {
   beforeEach(() => {
     window.localStorage.clear();

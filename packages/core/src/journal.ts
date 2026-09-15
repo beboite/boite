@@ -13,7 +13,7 @@ import type {
   Usage,
 } from '@boite/contracts';
 
-export const SCHEMA_VERSION = 10;
+export const SCHEMA_VERSION = 11;
 const DELTA_WINDOW_MS = 16;
 
 /** What `listMessagePage` hands back: the page itself and the cursor for what is behind it. */
@@ -308,6 +308,10 @@ function migrate(db: Database): void {
     version = 9;
   }
   if (version < 10) { db.exec('ALTER TABLE threads ADD COLUMN speed TEXT'); version = 10; }
+  if (version < 11) {
+    db.exec('CREATE TABLE turn_requests (thread_id TEXT NOT NULL, request_id TEXT NOT NULL, fingerprint TEXT NOT NULL, turn_id TEXT NOT NULL REFERENCES turns(id) ON DELETE CASCADE, PRIMARY KEY(thread_id, request_id))');
+    version = 11;
+  }
   db.exec(`PRAGMA user_version = ${version}`);
 }
 
@@ -623,6 +627,14 @@ export class Journal {
   getTurn(turnId: string): Turn | null {
     const row = this.db.query('SELECT * FROM turns WHERE id = ?').get(turnId) as TurnRow | null;
     return row === null ? null : toTurn(row);
+  }
+
+  turnRequest(threadId: string, requestId: string): { fingerprint: string; turn_id: string } | null {
+    return this.db.query('SELECT fingerprint, turn_id FROM turn_requests WHERE thread_id = ? AND request_id = ?').get(threadId, requestId) as { fingerprint: string; turn_id: string } | null;
+  }
+
+  putTurnRequest(threadId: string, requestId: string, fingerprint: string, turnId: string): void {
+    this.db.query('INSERT INTO turn_requests (thread_id, request_id, fingerprint, turn_id) VALUES (?, ?, ?, ?)').run(threadId, requestId, fingerprint, turnId);
   }
 
   listTurns(threadId?: string): Turn[] {

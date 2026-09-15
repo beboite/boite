@@ -1,6 +1,7 @@
 <script lang="ts">
   import { tick, type Snippet } from 'svelte';
   import { Closing } from '../lib/closing.svelte';
+  import { floating } from '../lib/floating';
   import type { MenuItem } from '../lib/menu';
 
   let {
@@ -122,6 +123,7 @@
       tabindex="-1"
       {onkeydown}
       use:popover.attach
+      use:floating={{ anchor: () => trigger ?? null, mobileOnly: true, dismiss: () => popover.hide() }}
       onanimationend={popover.end}
       data-testid={testid ? `${testid}-menu` : undefined}
     >

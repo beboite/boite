@@ -24,6 +24,7 @@ import { QuotaStore } from './quotas.ts';
 import { PluginStore } from './plugins.ts';
 import { Worktrees } from './worktree.ts';
 import { ActivityStore } from './activity.ts';
+import { PushStore } from './push.ts';
 
 export const CORE_VERSION: string = pkg.version;
 
@@ -65,6 +66,7 @@ export class Core {
   readonly keybindings: KeybindingStore;
   readonly imports: ImportStore;
   readonly activity: ActivityStore;
+  readonly push: PushStore;
 
   subscribers: SubscriptionSink = { hasSubscribers: () => false, closeSession: () => undefined };
 
@@ -93,6 +95,7 @@ export class Core {
     this.keybindings = new KeybindingStore(this);
     this.imports = new ImportStore(this);
     this.activity = new ActivityStore(this);
+    this.push = new PushStore(this);
 
     registerModules(this);
     this.procs.applySettings(this.settings.get());
@@ -134,6 +137,7 @@ export class Core {
   }
 
   async close(): Promise<void> {
+    await this.push.close();
     this.activity.close();
     await this.plugins.close();
     await this.scheduler.drain();

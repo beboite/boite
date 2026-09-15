@@ -94,6 +94,9 @@ host part of the printed pairing URL to that reachable address.
 The core does not terminate TLS. Public access needs an HTTPS reverse proxy
 that forwards WebSocket upgrades and preserves `Host` and `Origin`. Serve the
 UI and `/rpc` from the same origin. Do not expose plain HTTP to the internet.
+Set `BOITE_PUBLIC_URL` or `--public-url` to that exact HTTPS origin so pairing
+links and the WebSocket origin check use it. [Phone setup](phone.md) includes
+a Caddy example, installation steps and Web Push configuration.
 
 ### Image verification
 

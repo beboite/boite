@@ -21,10 +21,12 @@
     "@agentclientprotocol/sdk": "1.4.0",
     "@anthropic-ai/claude-agent-sdk": "0.3.263",
     "@boite/contracts": "workspace:*",
-    "fflate": "0.8.3"
+    "fflate": "0.8.3",
+    "web-push": "^3.6.7"
   },
   "devDependencies": {
     "@types/bun": "^1.4.2",
+    "@types/web-push": "^3.6.4",
     "typescript": "^7.0.2"
   }
 }

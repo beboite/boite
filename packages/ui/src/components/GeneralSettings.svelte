@@ -2,6 +2,7 @@
   import { untrack } from 'svelte';
   import type { PairedSession } from '@boite/contracts';
   import ShellSettings from './ShellSettings.svelte';
+  import PhoneSettings from './PhoneSettings.svelte';
   import ModelDefaultsSettings from './ModelDefaultsSettings.svelte';
   import { confirm } from '../lib/confirm.svelte';
   import { ago, time } from '../lib/format';
@@ -77,6 +78,7 @@
 
   {#if inShell}<ShellSettings />{/if}
 
+  <PhoneSettings {store} />
   <ModelDefaultsSettings {store} />
 
   <section class="card" id="settings-projects">

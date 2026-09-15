@@ -61,6 +61,7 @@ export interface FakeClientOptions {
  */
 const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>([
   'sessions.list',
+  'push.status', 'push.subscribe', 'push.unsubscribe', 'push.test',
   'projects.list',
   'projects.files',
   'providers.list',
@@ -393,6 +394,7 @@ export class FakeClient implements ObservableClient {
   /** The current output of every active fake login, also returned after reconnect. */
   #logins = new Map<string, RpcEvents['account.login']>();
   #seq = 0;
+  #turnRequests = new Map<string, { content: string; turn: Turn }>();
   #delayMs: number;
   #long: boolean;
   #principal: Principal;
@@ -632,6 +634,12 @@ export class FakeClient implements ObservableClient {
       }
       case 'sessions.list':
         return structuredClone(this.#sessions);
+      case 'push.status':
+        return { publicKey: '', subscribed: false };
+      case 'push.subscribe':
+      case 'push.unsubscribe':
+      case 'push.test':
+        throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'Web Push needs a paired connection to a real core' });
       case 'sessions.revoke': {
         const params = rawParams as RpcParams<'sessions.revoke'>;
         if (!this.#sessions.some((session) => session.id === params.sessionId)) {
@@ -997,10 +1005,20 @@ export class FakeClient implements ObservableClient {
 
       case 'turns.start': {
         const params = rawParams as RpcParams<'turns.start'>;
+        const key = params.clientRequestId ? `${params.threadId}:${params.clientRequestId}` : null;
+        const content = JSON.stringify([params.prompt, (params.attachments ?? []).map(a => [a.mimeType, a.data, a.name])]);
+        if (params.clientRequestId !== undefined && !/^[A-Za-z0-9_-]{8,128}$/.test(params.clientRequestId)) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'clientRequestId must contain 8 to 128 URL-safe characters' });
+        const previous = key ? this.#turnRequests.get(key) : undefined;
+        if (previous) {
+          if (previous.content !== content) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'clientRequestId was already used for different content' });
+          return previous.turn;
+        }
         if (params.expectedSelectionVersion !== undefined && params.expectedSelectionVersion !== (this.#thread(params.threadId).selectionVersion ?? 0)) {
           throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'the model selection changed; review the selected model and send again' });
         }
-        return this.#startTurn(params.threadId, params.prompt, params.attachments ?? []);
+        const turn = this.#startTurn(params.threadId, params.prompt, params.attachments ?? []);
+        if (key) this.#turnRequests.set(key, { content, turn });
+        return turn;
       }
       case 'threads.activity.set': {
         const params = rawParams as RpcParams<'threads.activity.set'>;

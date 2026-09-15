@@ -35,6 +35,14 @@ export class SettingsStore {
   }
 
   set(patch: Partial<Settings>): Settings {
+    if (patch.publicUrl !== undefined && patch.publicUrl !== null) {
+      try {
+        const url = new URL(patch.publicUrl);
+        if (url.protocol !== 'https:' || url.origin !== patch.publicUrl || url.username || url.password) throw new Error();
+      } catch {
+        throw invalidParams('publicUrl must be an exact HTTPS origin without path, credentials, query or fragment', { field: 'publicUrl' });
+      }
+    }
     if (patch.browserOrigins !== undefined) {
       const invalid = !Array.isArray(patch.browserOrigins) || patch.browserOrigins.length > 32 ||
         patch.browserOrigins.some((origin) => {

@@ -150,6 +150,8 @@ export class WsClient implements ObservableClient {
   #attempt = 0;
   #retryTimer: ReturnType<typeof setTimeout> | null = null;
   #manuallyClosed = false;
+  #opening: Promise<CoreInfo> | null = null;
+  #cancelOpen: (() => void) | null = null;
 
   constructor(options: WsClientOptions) {
     this.#options = {
@@ -199,8 +201,29 @@ export class WsClient implements ObservableClient {
 
   connect(): Promise<CoreInfo> {
     if (this.#state === 'ready' && this.#core) return Promise.resolve(this.#core);
+    if (this.#opening) return this.#opening;
     this.#manuallyClosed = false;
-    return this.#open();
+    return this.#startOpen();
+  }
+
+  /** A mobile browser can retain a dead socket after sleep without firing close. */
+  async resume(): Promise<void> {
+    if (this.#manuallyClosed || this.#state === 'idle') return;
+    // A one-time grant must finish its exchange before any connection replaces it.
+    if (this.#grant !== null && this.#opening) { await this.#opening; return; }
+    if (this.#retryTimer !== null) clearTimeout(this.#retryTimer);
+    this.#retryTimer = null;
+    this.#teardown('connection resumed; check the conversation before resending');
+    await this.#startOpen();
+  }
+
+  #startOpen(): Promise<CoreInfo> {
+    const opening = this.#open();
+    this.#opening = opening;
+    void opening.finally(() => {
+      if (this.#opening === opening) this.#opening = null;
+    }).catch(() => undefined);
+    return opening;
   }
 
   call<M extends RpcMethodName>(method: M, params: RpcParams<M>): Promise<RpcResult<M>> {
@@ -256,11 +279,17 @@ export class WsClient implements ObservableClient {
 
     return new Promise<CoreInfo>((resolve, reject) => {
       let settled = false;
+      const timeout = setTimeout(() => {
+        fail('connection did not answer within 10 seconds');
+        socket.close();
+      }, 10_000);
       const fail = (message: string) => {
         if (settled) return;
         settled = true;
+        clearTimeout(timeout);
         reject(transportFailure(message));
       };
+      this.#cancelOpen = () => fail('connection replaced');
 
       socket.onmessage = (event) => this.#receive(event.data);
       socket.onerror = () => fail('socket error');
@@ -305,12 +334,14 @@ export class WsClient implements ObservableClient {
             this.#resubscribe(socket);
             if (!settled) {
               settled = true;
+              clearTimeout(timeout);
               resolve(result.core);
             }
           },
           (error: unknown) => {
             if (!settled) {
               settled = true;
+              clearTimeout(timeout);
               reject(error instanceof Error ? error : transportFailure(String(error)));
             }
             // The hello parameters are fixed for this client. Retrying a
@@ -349,7 +380,7 @@ export class WsClient implements ObservableClient {
     this.#retryTimer = setTimeout(() => {
       this.#retryTimer = null;
       if (this.#manuallyClosed) return;
-      void this.#open().catch(() => undefined);
+      void this.#startOpen().catch(() => undefined);
     }, delay);
   }
 
@@ -360,6 +391,9 @@ export class WsClient implements ObservableClient {
   }
 
   #teardown(message: string): void {
+    this.#cancelOpen?.();
+    this.#cancelOpen = null;
+    this.#opening = null;
     const socket = this.#socket;
     this.#socket = null;
     if (socket) {

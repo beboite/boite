@@ -1,5 +1,21 @@
-/** Position an overlay without changing the page's layout. */
-export function floating(node: HTMLElement, options: { anchor: () => HTMLElement | null; side?: 'right' }) {
+import { mobileOverlay } from './mobile-history';
+import { strings } from './strings';
+/** Position desktop popovers at their anchor and phone menus above the keyboard. */
+export function floating(node: HTMLElement, options: { anchor: () => HTMLElement | null; side?: 'right'; mobileOnly?: boolean; dismiss?: () => void }) {
+  const mobile = window.matchMedia('(max-width: 720px)').matches;
+  if (options.mobileOnly && !mobile) return {};
+  let backdrop: HTMLButtonElement | null = null;
+  let closeHistory = () => {};
+  if (mobile && options.dismiss) {
+    backdrop = document.createElement('button');
+    backdrop.className = 'mobile-sheet-backdrop';
+    backdrop.setAttribute('popover', 'manual');
+    backdrop.setAttribute('aria-label', strings.common.close);
+    backdrop.onclick = options.dismiss;
+    document.body.append(backdrop);
+    backdrop.showPopover?.();
+    closeHistory = mobileOverlay(options.dismiss);
+  }
   // The composer's glass blur establishes a containing block for fixed children.
   // The top layer keeps viewport coordinates valid without moving the DOM node,
   // so the picker's outside-click and keyboard handlers still own both menus.
@@ -14,7 +30,18 @@ export function floating(node: HTMLElement, options: { anchor: () => HTMLElement
     if (!anchor) return;
     const box = anchor.getBoundingClientRect();
     const width = window.innerWidth;
-    const height = window.innerHeight;
+    const viewport = window.visualViewport;
+    const height = viewport?.height ?? window.innerHeight;
+    const offset = viewport?.offsetTop ?? 0;
+    if (mobile) {
+      node.dataset.mobileSheet = 'true';
+      node.style.width = `${width - margin * 2}px`;
+      node.style.maxHeight = `${Math.max(0, height - margin * 2) * .75}px`;
+      node.style.top = `${Math.max(offset + margin, offset + height - node.offsetHeight - margin)}px`;
+      node.style.left = `${margin}px`;
+      node.style.transformOrigin = 'bottom center';
+      return;
+    }
     let top: number;
     let left: number;
     if (options.side === 'right') {
@@ -44,5 +71,7 @@ export function floating(node: HTMLElement, options: { anchor: () => HTMLElement
   place();
   window.addEventListener('resize', place);
   window.addEventListener('scroll', place, true);
-  return { destroy() { observer.disconnect(); anchor?.removeEventListener('animationend', place); window.removeEventListener('resize', place); window.removeEventListener('scroll', place, true); } };
+  window.visualViewport?.addEventListener('resize', place);
+  window.visualViewport?.addEventListener('scroll', place);
+  return { destroy() { closeHistory(); backdrop?.remove(); observer.disconnect(); anchor?.removeEventListener('animationend', place); window.removeEventListener('resize', place); window.removeEventListener('scroll', place, true); window.visualViewport?.removeEventListener('resize', place); window.visualViewport?.removeEventListener('scroll', place); } };
 }

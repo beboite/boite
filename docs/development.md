@@ -284,6 +284,27 @@ One more is opt-in for a different reason. `BOITE_E2E_GUARD=1` runs
 for a blink. Every other focus guard case is decided on a fake of the Win32
 calls, so no other test creates a window.
 
+## Phone checks
+
+`bun test tests/e2e/mobile.test.ts` runs the phone navigation, portrait and
+landscape layouts, model sheet and browser Back, retained drafts, and the visible
+message when returning to a long conversation. It uses the in-memory client in
+a hidden browser. Captures go to `tests/e2e/.artifacts/mobile-*.png`.
+
+`bun test tests/e2e/ui.test.ts` covers a paired device against a temporary real
+core, device-only settings, revocation, reconnection and an offline app shell.
+`packages/core/test/push.test.ts` exercises subscription ownership and lifecycle
+with a substituted push sender. It does not prove delivery by a push provider.
+
+For USB Android checks, use an isolated core data directory and an echo account.
+Forward its port with `adb -s SERIAL reverse tcp:7337 tcp:7337`, then open the
+temporary core's pairing link on `http://localhost:7337`. The browser treats
+localhost as a secure context, so this exercises the service worker without a
+public certificate. Remove the mapping with
+`adb -s SERIAL reverse --remove tcp:7337` when finished. Actual keyboard resizing,
+installation, suspension and push delivery still need a connected device;
+external access needs the trusted HTTPS origin described in [phone.md](phone.md).
+
 ## Benches
 
 ```bash

@@ -35,6 +35,7 @@
     keyboard: [{id: 'shortcuts', label: strings.keyboard.heading}, {id: 'keybinding-file', label: strings.keyboard.file}],
     experiments: [{id: 'theme-grain', label: strings.experiments.themeGrain.title}, {id: 'session-import', label: strings.experiments.sessionImport.title}],
     general: [
+      { id: 'phone', label: strings.phone.heading },
       { id: 'projects', label: strings.settings.projects },
       { id: 'background', label: strings.settings.background },
       { id: 'machines', label: strings.machines.heading },
@@ -211,10 +212,11 @@
 
     nav {
       width: auto;
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      overflow-y: auto;
-      max-height: 220px;
+      display: flex;
+      flex-direction: row;
+      overflow-x: auto;
+      overflow-y: hidden;
+      padding: 8px 12px;
       align-items: flex-start;
       border-right: none;
       border-bottom: 1px solid var(--color-border);
@@ -223,7 +225,7 @@
     .subcategories { display: none; }
     .mobile-subcategories { display: flex; gap: 4px; padding: 8px 14px; overflow-x: auto; flex: none; border-bottom: 1px solid var(--color-border); }
     .mobile-subcategories button { flex: none; font-size: var(--text-sm); }
-    .back { grid-column: 1 / -1; margin-bottom: 0; }
+    .back { display: none; }
     .category { min-width: 0; }
     h1 {
       display: none;

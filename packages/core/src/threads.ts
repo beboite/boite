@@ -1,4 +1,5 @@
 import { statSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { relative, resolve } from 'node:path';
 import { ATTACHMENTS_PER_TURN, ATTACHMENT_MAX_BYTES, IMAGE_MIME_TYPES, MESSAGE_PAGE, MESSAGE_PAGE_MAX } from '@boite/contracts';
 import type {
@@ -570,8 +571,19 @@ export class ThreadStore {
     return this.startTurn(threadId, protocol === 'echo' ? '[compact]' : '/compact', [], expectedSelectionVersion, 'compact');
   }
 
-  startTurn(threadId: ThreadId, prompt: string, attachments: ImageAttachment[] = [], expectedSelectionVersion?: number, operation?: 'compact'): Turn {
+  startTurn(threadId: ThreadId, prompt: string, attachments: ImageAttachment[] = [], expectedSelectionVersion?: number, operation?: 'compact', clientRequestId?: string): Turn {
     const thread = this.require(threadId);
+    let fingerprint = '';
+    if (clientRequestId !== undefined) {
+      if (typeof clientRequestId !== 'string' || !/^[A-Za-z0-9_-]{8,128}$/.test(clientRequestId)) throw refused('clientRequestId must contain 8 to 128 URL-safe characters');
+      fingerprint = createHash('sha256').update(JSON.stringify([prompt, attachments.map(a => [a.mimeType, a.data, a.name])])).digest('hex');
+      const existing = this.core.journal.turnRequest(threadId, clientRequestId);
+      if (existing) {
+        if (existing.fingerprint !== fingerprint) throw refused('clientRequestId was already used for different content');
+        const accepted = this.core.journal.getTurn(existing.turn_id);
+        if (accepted) return accepted;
+      }
+    }
     this.checkSelection(thread, expectedSelectionVersion);
     if (thread.archived) throw refused('cannot start a turn on an archived thread', { threadId });
     if (['queued', 'running', 'waiting'].includes(thread.status) || this.handles.has(threadId)) {
@@ -625,6 +637,7 @@ export class ThreadStore {
     this.core.journal.append({ type: 'turn.queued', threadId, version: 1, payload: turn }, () => {
       this.core.journal.putTurn(turn);
       this.core.journal.putMessage(message);
+      if (clientRequestId) this.core.journal.putTurnRequest(threadId, clientRequestId, fingerprint, turn.id);
     });
     this.core.bus.emit('message.started', message);
     this.core.bus.emit('message.completed', { threadId, messageId: message.id, state: 'complete' });
@@ -1283,7 +1296,7 @@ export function registerThreadMethods(core: Core): void {
     return { ok: true } as const;
   });
   core.router.register('turns.start', (params) =>
-    core.threads.startTurn(params.threadId, params.prompt, params.attachments ?? [], params.expectedSelectionVersion),
+    core.threads.startTurn(params.threadId, params.prompt, params.attachments ?? [], params.expectedSelectionVersion, undefined, params.clientRequestId),
   );
   core.router.register('turns.stop', (params) => {
     core.activity.pauseAll(params.threadId);

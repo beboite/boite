@@ -14,6 +14,7 @@
  */
 
 import { strings } from './strings';
+import { PUSH_ENABLED_KEY } from './pwa';
 
 export const NOTIFICATIONS_STORAGE_KEY = 'boite.notifications';
 
@@ -55,6 +56,8 @@ export function writeNotifications(enabled: boolean): void {
 export interface Toast {
   title: string;
   body: string;
+  /** The core that owns this event, for per-origin Web Push deduplication. */
+  origin?: string;
   /** The thread a click on the toast opens. */
   threadId: string;
 }
@@ -109,6 +112,8 @@ async function shellSender(toast: Toast): Promise<void> {
 }
 
 async function webSender(toast: Toast): Promise<void> {
+  // This origin receives these events through the worker, including while closed.
+  if (toast.origin === location.origin && localStorage.getItem(PUSH_ENABLED_KEY) === 'on') return;
   if (typeof Notification === 'undefined') return;
   if (Notification.permission === 'default') await Notification.requestPermission();
   if (Notification.permission !== 'granted') return;

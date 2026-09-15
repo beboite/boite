@@ -1,0 +1,98 @@
+import { afterAll, beforeAll, expect, test } from 'bun:test';
+import { join } from 'node:path';
+import { createRequire } from 'node:module';
+import { BrowserPage, freePort } from './lib/cdp.ts';
+
+const uiRequire = createRequire(join(import.meta.dir, '../../packages/ui/package.json'));
+const { createServer } = await import(uiRequire.resolve('vite'));
+let server: { listen(): Promise<unknown>; close(): Promise<void> };
+let page: BrowserPage;
+async function capture(name: string) {
+  await page.evaluate(`Promise.all([document.fonts.ready, ...document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {}))])`);
+  await page.screenshot(join(import.meta.dir, '.artifacts', name));
+}
+beforeAll(async () => {
+  const port = await freePort();
+  server = await createServer({ root: join(import.meta.dir, '../../packages/ui'), server: { host: '127.0.0.1', port, strictPort: true }, clearScreen: false });
+  await server.listen();
+  page = await BrowserPage.launch({ url: `http://127.0.0.1:${port}/?fake=1&machines=1` });
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+  await page.waitFor(`document.querySelector('[data-testid=mobile-tabs]')`);
+}, 30_000);
+afterAll(async () => { await page?.close(); await server?.close(); }, 15_000);
+
+test('phone navigates conversations, activity and settings without a sidebar', async () => {
+  await page.click('[data-testid=mobile-tabs] button:nth-child(1)');
+  await page.waitFor(`document.querySelector('[data-testid=mobile-list] .thread')`);
+  const tabs = await page.evaluate<{ bottom: number; height: number }>(`(() => { const r = document.querySelector('[data-testid=mobile-tabs]').getBoundingClientRect(); return {bottom:r.bottom,height:r.height}; })()`);
+  expect(tabs.bottom).toBeLessThanOrEqual(844);
+  expect(tabs.height).toBeGreaterThanOrEqual(44);
+  expect(await page.evaluate(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true);
+  await capture('mobile-conversations.png');
+  await page.click('[data-testid=mobile-list] .thread');
+  await page.waitFor(`!document.querySelector('[data-testid=mobile-list]') && document.querySelector('[data-testid=chat]')`);
+  await capture('mobile-chat.png');
+  await page.click('[data-testid=mobile-tabs] button:nth-child(2)');
+  await page.waitFor(`document.querySelector('[data-testid=mobile-list] h1')?.textContent === 'Activity'`);
+  await capture('mobile-activity.png');
+  await page.click('[data-testid=mobile-tabs] button:nth-child(3)');
+  await page.waitFor(`document.querySelector('[data-testid=settings]')`);
+  await page.click('[data-testid=mobile-new]');
+  await page.waitFor(`document.querySelector('[data-testid=composer]') && !document.querySelector('[data-testid=settings]')`);
+  expect(page.errors()).toEqual([]);
+}, 30_000);
+
+test('draft survives navigation and the light phone layout fits landscape', async () => {
+  await page.evaluate(`(() => { const t = document.querySelector('[data-testid=composer-input]'); t.value = 'Keep this draft'; t.dispatchEvent(new Event('input', {bubbles:true})); })()`);
+  await page.click('[data-testid=mobile-tabs] button:nth-child(1)');
+  await page.click('[data-testid=mobile-header] [data-testid=mobile-new]');
+  expect(await page.evaluate(`document.querySelector('[data-testid=composer-input]').value`)).toBe('Keep this draft');
+  await page.evaluate(`document.documentElement.dataset.theme = 'light'`);
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 700, height: 390, deviceScaleFactor: 1, mobile: true });
+  await capture('mobile-landscape.png');
+  expect(await page.evaluate(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true);
+  const bounds = await page.evaluate<any>(`(() => { const r = document.querySelector('[data-testid=composer-input]').getBoundingClientRect(); return {top:r.top,bottom:r.bottom}; })()`);
+  expect(bounds.top).toBeGreaterThanOrEqual(0);
+  expect(bounds.bottom).toBeLessThanOrEqual(390);
+}, 15_000);
+
+test('model sheets stay on screen and browser Back closes the sheet without losing the draft', async () => {
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+  await page.click('[data-testid=composer-picker]');
+  await page.waitFor(`document.querySelector('[data-testid=composer-picker-menu]')`);
+  await capture('mobile-model-sheet.png');
+  const bounds = await page.evaluate<any>(`(() => { const r=document.querySelector('[data-testid=composer-picker-menu]').getBoundingClientRect(); return {left:r.left,right:r.right,top:r.top,bottom:r.bottom}; })()`);
+  expect(bounds.left).toBeGreaterThanOrEqual(0);
+  expect(bounds.right).toBeLessThanOrEqual(390);
+  expect(bounds.top).toBeGreaterThanOrEqual(0);
+  expect(bounds.bottom).toBeLessThanOrEqual(844);
+  await page.evaluate('history.back()');
+  await page.waitFor(`!document.querySelector('[data-testid=composer-picker-menu]')`);
+  expect(await page.evaluate(`document.querySelector('[data-testid=composer-input]').value`)).toBe('Keep this draft');
+  await page.click('[data-testid=mobile-tabs] button:nth-child(3)');
+  await page.waitFor(`document.querySelector('[data-testid=phone-settings]')`);
+  await capture('mobile-installation.png');
+}, 15_000);
+
+test('returning to a long conversation preserves the reading position', async () => {
+  const origin = await page.evaluate<string>('location.origin');
+  await page.navigate(`${origin}/?fake=1&long=1`);
+  await page.waitFor(`document.querySelector('[data-testid=thread-title]')?.textContent.includes('Four hundred')`);
+  await page.evaluate(`(() => { const t=document.querySelector('[data-testid=timeline]'); t.scrollTop = t.scrollHeight - t.clientHeight - 1200; t.dispatchEvent(new Event('scroll')); })()`);
+  await capture('mobile-long-reading.png');
+  const previous = await page.evaluate<number>(`document.querySelector('[data-testid=timeline]').scrollTop`);
+  const visibleAnchor = `(() => { const t=document.querySelector('[data-testid=timeline]'); const top=t.getBoundingClientRect().top; const m=[...t.querySelectorAll('[data-mid]')].find(m=>m.getBoundingClientRect().bottom>top); return {id:m.dataset.mid,offset:m.getBoundingClientRect().top-top}; })()`;
+  const anchor = await page.evaluate<{ id: string; offset: number }>(visibleAnchor);
+  await page.click('[data-testid=mobile-tabs] button:nth-child(1)');
+  await page.click('[data-testid=mobile-list] .thread:not([data-testid=mobile-thread-t-long])');
+  await page.waitFor(`!document.querySelector('[data-testid=mobile-list]')`);
+  await page.click('[data-testid=mobile-tabs] button:nth-child(1)');
+  await page.click('[data-testid=mobile-thread-t-long]');
+  await page.waitFor(`!document.querySelector('[data-testid=mobile-list]')`);
+  await capture('mobile-long-restored.png');
+  const restored = await page.evaluate<number>(`document.querySelector('[data-testid=timeline]').scrollTop`);
+  expect(Math.abs(restored - previous)).toBeLessThan(60);
+  const restoredAnchor = await page.evaluate<{ id: string; offset: number }>(visibleAnchor);
+  expect(restoredAnchor.id).toBe(anchor.id);
+  expect(Math.abs(restoredAnchor.offset - anchor.offset)).toBeLessThan(10);
+}, 15_000);

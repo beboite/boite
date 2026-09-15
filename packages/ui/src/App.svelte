@@ -9,7 +9,6 @@
   import ProjectPicker from './components/ProjectPicker.svelte';
   import ImportDialog from './components/ImportDialog.svelte';
   import RightPanel from './components/RightPanel.svelte';
-  import SettingsShell from './components/SettingsShell.svelte';
   import Sidebar from './components/Sidebar.svelte';
   import TitleBar from './components/TitleBar.svelte';
   import { Closing } from './lib/closing.svelte';
@@ -23,11 +22,60 @@
   import { rightPanel } from './lib/right-panel.svelte';
   import { workspace } from './lib/workspace.svelte';
   import { startTheme } from './lib/theme';
+  import MobileNavigation from './components/MobileNavigation.svelte';
+  import { startViewport } from './lib/viewport';
+  import { WsClient } from './lib/client';
+  import { listenForInstall } from './lib/pwa';
 
   let store = $derived(workspace.active);
   const inShell = window.__TAURI_INTERNALS__ !== undefined;
   let sidebar = $state<Sidebar | undefined>(undefined);
   let appRoot = $state<HTMLDivElement | undefined>(undefined);
+  let mobileScreen = $state<'chat' | 'threads' | 'activity'>('chat');
+  let SettingsShell = $state<typeof import('./components/SettingsShell.svelte').default>();
+  let settingsLoadError = $state('');
+  $effect(() => {
+    if (store.page !== 'settings' || SettingsShell) return;
+    settingsLoadError = '';
+    void import('./components/SettingsShell.svelte').then(module => { SettingsShell = module.default; })
+      .catch(() => { settingsLoadError = strings.phone.settingsOffline; });
+  });
+
+  onMount(() => {
+    const stopViewport = startViewport();
+    const stopInstall = listenForInstall();
+    let hidden = document.hidden;
+    const resume = () => {
+      if (document.hidden) return;
+      for (const machine of workspace.machines) {
+        const client = machine.store.client;
+        if (client instanceof WsClient) void client.resume().catch(() => undefined);
+      }
+    };
+    const visibility = () => {
+      if (document.hidden) hidden = true;
+      else if (hidden) { hidden = false; resume(); }
+    };
+    const pageshow = (event: PageTransitionEvent) => { if (event.persisted) resume(); };
+    document.addEventListener('visibilitychange', visibility);
+    window.addEventListener('online', resume);
+    window.addEventListener('pageshow', pageshow);
+    const notification = (event: MessageEvent) => {
+      if (event.data?.type !== 'boite.open-thread' || typeof event.data.threadId !== 'string') return;
+      const machine = workspace.machines.find(m => m.store.endpointUrl && new URL(m.store.endpointUrl).origin === location.origin);
+      if (machine) void workspace.select(machine.store, event.data.threadId);
+      mobileScreen = 'chat';
+    };
+    navigator.serviceWorker?.addEventListener('message', notification);
+    return () => {
+      stopViewport();
+      stopInstall();
+      document.removeEventListener('visibilitychange', visibility);
+      window.removeEventListener('online', resume);
+      window.removeEventListener('pageshow', pageshow);
+      navigator.serviceWorker?.removeEventListener('message', notification);
+    };
+  });
 
   // The three overlays of this file leave the way they arrived: one `--dur-2`
   // playing the reverse animation, then out of the DOM on `animationend`.
@@ -90,7 +138,14 @@
   });
 
   onMount(() => {
-    void workspace.boot();
+    const requestedThread = new URLSearchParams(location.search).get('thread');
+    void workspace.boot().then(async () => {
+      if (requestedThread) {
+        const url = new URL(location.href); url.searchParams.delete('thread'); history.replaceState(history.state, '', url);
+        const machine = workspace.machines.find(m => m.store.endpointUrl && new URL(m.store.endpointUrl).origin === location.origin);
+        if (machine) await workspace.select(machine.store, requestedThread);
+      }
+    });
     // The stored theme, and the OS one while the setting reads `system`.
     const stopTheme = startTheme();
     // The stored window material, which only the shell wears.
@@ -235,11 +290,12 @@
 <svelte:window {onkeydown} {onkeyup} {onblur} />
 
 <div class="app" class:shell={inShell} class:ready={store.booted} class:quitting bind:this={appRoot}>
+  {#if !inShell && store.booted}<MobileNavigation {store} bind:screen={mobileScreen} />{/if}
   {#if inShell}
     <TitleBar {store} />
   {/if}
 
-  <div class="body" class:panel-maximized={rightPanel.maximized && store.panelOpen}>
+  <div class="body" class:mobile-covered={!inShell && store.page === 'chat' && mobileScreen !== 'chat'} class:panel-maximized={rightPanel.maximized && store.panelOpen}>
     {#if !store.booted}
       <p class="empty boot">{strings.app.loading}</p>
     {:else if store.connection === 'closed' && !store.core}
@@ -252,10 +308,10 @@
         </button>
       </div>
       {#if store.page === 'settings'}
-        <SettingsShell {store} />
+        {#if SettingsShell}<SettingsShell {store} />{:else}<p class="empty">{settingsLoadError || strings.app.loading}</p>{/if}
       {/if}
     {:else if store.page === 'settings'}
-      <SettingsShell {store} />
+      {#if SettingsShell}<SettingsShell {store} />{:else}<p class="empty">{settingsLoadError || strings.app.loading}</p>{/if}
     {:else}
       <Sidebar bind:this={sidebar} {store} />
       {#if scrim.shown}
@@ -480,6 +536,9 @@
   }
 
   @media (max-width: 720px) {
+    .app:not(.shell) { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; grid-template-columns: minmax(0, 1fr); height: var(--app-height, 100dvh); top: var(--app-top, 0px); }
+    .app:not(.shell) .body { grid-row: 2; grid-column: 1; }
+    .body.mobile-covered { visibility: hidden; pointer-events: none; }
     .scrim {
       display: block;
       position: fixed;

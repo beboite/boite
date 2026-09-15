@@ -105,10 +105,16 @@ describe('sendNotification', () => {
       expect(opened).toEqual(['t-2']);
       expect(shown[0]?.closed).toBe(true);
 
+      localStorage.setItem('boite.web-push', 'on');
+      await sendNotification({ title: 'Local', body: 'Done', threadId: 't-local', origin: location.origin });
+      expect(shown).toHaveLength(1);
+      await sendNotification({ title: 'Remote', body: 'Done', threadId: 't-remote', origin: 'https://remote.test' });
+      expect(shown).toHaveLength(2);
+
       // Permission refused: nothing is shown, nothing throws.
       FakeNotification.permission = 'denied';
       await sendNotification({ title: 'x', body: 'y', threadId: 't-3' });
-      expect(shown).toHaveLength(1);
+      expect(shown).toHaveLength(2);
     } finally {
       stop();
       vi.unstubAllGlobals();

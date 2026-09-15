@@ -9,6 +9,7 @@
 </script>
 
 <script lang="ts">
+  import { onDestroy, onMount, tick, untrack } from 'svelte';
   import { ArrowDown } from '@lucide/svelte';
   import type { Message } from '@boite/contracts';
   import { strings } from '../lib/strings';
@@ -25,6 +26,7 @@
     threadId,
     messages
   }: { store: Store; threadId: string; messages: Message[] } = $props();
+  const savedReading = untrack(() => store.readingPositions?.get(threadId));
 
   /** Under this many messages the list renders whole: a window would cost more than it saves. */
   const WINDOW_FROM = 60;
@@ -38,20 +40,52 @@
   const TAIL_GAP_MS = 100;
 
   let viewport = $state<HTMLDivElement | undefined>(undefined);
-  let pinned = $state(true);
+  let pinned = $state(savedReading?.pinned ?? true);
   let behind = $state(false);
-  let shown = '';
+  let shown = savedReading ? untrack(() => threadId) : '';
 
   /** Measured slot heights by message id. What is not in here is worth ESTIMATE. */
-  const heights = new Map<string, number>();
+  const heights = new Map<string, number>(savedReading?.heights);
   /** Bumped by every measurement that moved a height, so the window recomputes on real numbers. */
   let measured = $state(0);
   /** Ids that already played the rise, so a message re-entering the window stays still. */
-  const risen = new Set<string>();
+  const risen = new Set<string>(savedReading?.heights.keys());
   /** One observer for the viewport's height and for every rendered message. */
   let boxes: ResizeObserver | undefined;
 
-  let scrollTop = $state(0);
+  let scrollTop = $state(savedReading?.top ?? 0);
+  let readingAnchor = savedReading?.anchor;
+  let restoringAnchor = Boolean(savedReading?.anchor && !savedReading.pinned);
+  function rememberAnchor() {
+    if (!viewport?.isConnected || !viewport.clientHeight || restoringAnchor) return;
+    const top = viewport.getBoundingClientRect().top;
+    const node = [...viewport.querySelectorAll<HTMLElement>('[data-mid]')].find(node => node.getBoundingClientRect().bottom > top);
+    if (node?.dataset.mid) readingAnchor = { id: node.dataset.mid, offset: node.getBoundingClientRect().top - top };
+  }
+  function restoreAnchor() {
+    if (!restoringAnchor || !readingAnchor || !viewport) return;
+    const node = [...viewport.querySelectorAll<HTMLElement>('[data-mid]')].find(node => node.dataset.mid === readingAnchor?.id);
+    if (!node) return;
+    const delta = node.getBoundingClientRect().top - viewport.getBoundingClientRect().top - readingAnchor.offset;
+    if (Math.abs(delta) > 1) { viewport.scrollTop += delta; scrollTop = viewport.scrollTop; }
+  }
+  function releaseAnchor() { restoringAnchor = false; }
+  onMount(() => {
+    // Capture the settled layout before a navigation click removes this list.
+    document.addEventListener('pointerdown', rememberAnchor, true);
+    document.addEventListener('keydown', rememberAnchor, true);
+    return () => {
+      document.removeEventListener('pointerdown', rememberAnchor, true);
+      document.removeEventListener('keydown', rememberAnchor, true);
+    };
+  });
+  let restoredReading = false;
+  onDestroy(() => {
+    if (!viewport || !store.readingPositions) return;
+    store.readingPositions.delete(threadId);
+    store.readingPositions.set(threadId, { top: scrollTop, pinned, heights: new Map(heights), anchor: readingAnchor });
+    while (store.readingPositions.size > 32) store.readingPositions.delete(store.readingPositions.keys().next().value!);
+  });
   let viewHeight = $state(0);
 
   const windowed = $derived(messages.length > WINDOW_FROM);
@@ -262,15 +296,34 @@
   $effect(() => {
     const box = viewport;
     if (!box) return;
+    if (!restoredReading) {
+      restoredReading = true;
+      if (savedReading && !savedReading.pinned) box.scrollTop = savedReading.top;
+    }
     viewHeight = box.clientHeight;
     scrollTop = box.scrollTop;
     if (typeof ResizeObserver === 'undefined') return;
-    const observer = new ResizeObserver(onMeasured);
+    let frame = 0;
+    const pending = new Map<Element, ResizeObserverEntry>();
+    const observer = new ResizeObserver(entries => {
+      for (const entry of entries) pending.set(entry.target, entry);
+      if (frame) return;
+      // Applying slot heights inside ResizeObserver can resize that same batch.
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        const batch = [...pending.values()].filter(entry => entry.target.isConnected);
+        pending.clear();
+        onMeasured(batch);
+        restoreAnchor();
+      });
+    });
     boxes = observer;
     observer.observe(box);
     for (const node of box.querySelectorAll<HTMLElement>('[data-mid]')) observer.observe(node);
     return () => {
       observer.disconnect();
+      cancelAnimationFrame(frame);
+      pending.clear();
       boxes = undefined;
     };
   });
@@ -285,6 +338,8 @@
     scrollTop = box.scrollTop;
     viewHeight = box.clientHeight;
     pinned = atBottom(box);
+    if (restoringAnchor) pinned = false;
+    void tick().then(rememberAnchor);
     if (pinned) behind = false;
     pullOlder(box);
   }
@@ -325,6 +380,7 @@
   // -- end paging ------------------------------------------------------------
 
   function jump() {
+    releaseAnchor();
     const box = viewport;
     if (!box) return;
     pinned = true;
@@ -400,7 +456,9 @@
 </script>
 
 <div class="timeline-wrap">
-  <div class="timeline" bind:this={viewport} {onscroll} data-testid="timeline">
+  <!-- Input releases the restored reading anchor; programmatic corrections keep it. -->
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div class="timeline" bind:this={viewport} {onscroll} onwheel={releaseAnchor} ontouchstart={releaseAnchor} onpointerdown={releaseAnchor} onkeydown={releaseAnchor} data-testid="timeline">
     <div class="column">
       <!-- paging: the one line the top of the list shows while a page is in flight. -->
       {#if store.loadingOlder}
