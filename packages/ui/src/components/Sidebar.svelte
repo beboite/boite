@@ -130,20 +130,6 @@
   style:--sidebar-width={`${store.sidebarWidth}px`}
   data-testid="sidebar"
 >
-  <div class="workspace-head">
-    <button class="ghost small scope" title={strings.machines.filter} onclick={filterMenu}
-      ><Network size={14} /><span
-        >{filter ? machines.find((m) => m.id === filter)?.label : strings.machines.dynamic}</span
-      ><ChevronRight size={12} /></button
-    >
-    <button
-      class="ghost small icon"
-      data-testid="nav-machines"
-      title={strings.machines.heading}
-      aria-label={strings.machines.heading}
-      onclick={() => store.showSettings('machines')}><Plus size={15} /></button
-    >
-  </div>
   {#if groups.length > 0}
     <div class="top">
       <label class="search"
@@ -221,7 +207,7 @@
               <span class="caret" class:collapsed><ChevronRight size={12} /></span><span class="tile"
                 >{project.name.slice(0, 1).toUpperCase()}</span
               ><span class="name">{project.name}</span><span class="host" title={machine.label}
-                ><MachineIcon os={owner.core?.os} /></span
+                ><MachineIcon icon={machine.icon} os={owner.core?.os} /></span
               >
             </button>
             <button
@@ -263,6 +249,9 @@
       </div>{/if}
   {/if}
   <div class="foot">
+    {#if machines.length > 1}
+      <button class="ghost icon" class:filtered={filter !== null} data-testid="machine-filter" title={filter ? machines.find(m => m.id === filter)?.label : strings.machines.filter} aria-label={strings.machines.filter} onclick={filterMenu}><Network size={15} /></button>
+    {/if}
     <span class="conn {store.connection}" data-testid="status-connection"
       ><span class="dot"></span>{strings.connection[store.connection]}</span
     >
@@ -308,25 +297,8 @@
     background: var(--color-surface);
     border-right: 1px solid var(--color-border);
   }
-  .workspace-head {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    padding: 10px 10px 0;
-  }
-  .scope {
-    flex: 1;
-    justify-content: flex-start;
-    min-width: 0;
-    color: var(--color-muted-foreground);
-  }
-  .scope span {
-    flex: 1;
-    text-align: left;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
+
+  .filtered { background: var(--color-surface-3); color: var(--color-foreground); }
   .top {
     display: flex;
     gap: 6px;

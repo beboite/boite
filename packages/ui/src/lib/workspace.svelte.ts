@@ -1,12 +1,11 @@
 import { Store, store } from './store.svelte';
 import {
-  fromTauri,
-  insideTauri,
   parsePairingLink,
   readEnvironments,
   removeEnvironment,
   storeEndpoint,
   upsertEnvironment,
+  readStoredEndpoint,
   type Endpoint
 } from './endpoint';
 import { strings } from './strings';
@@ -15,6 +14,18 @@ export interface Machine {
   id: string;
   label: string;
   store: Store;
+  icon?: MachineIconName;
+}
+
+export const machineIcons = ['desktop', 'laptop', 'server', 'rack', 'cloud', 'cpu'] as const;
+export type MachineIconName = typeof machineIcons[number];
+const PROFILE_KEY = 'boite.machine-profiles';
+function profileKey(machine: Machine): string {
+  const core = machine.store.core;
+  return core?.hostname ? JSON.stringify([core.hostname, core.dataDir, core.channel]) : machine.id;
+}
+function profiles(): Record<string, { label: string; icon?: MachineIconName }> {
+  try { return JSON.parse(localStorage.getItem(PROFILE_KEY) ?? '{}') ?? {}; } catch { return {}; }
 }
 
 /** Each host keeps its own ids, credentials and pending requests. */
@@ -35,12 +46,15 @@ export class Workspace {
     } catch {
       /* session only */
     }
-    await store.boot(true);
+    const selected = readStoredEndpoint();
+    const remembered = readEnvironments();
+    await store.boot();
     if (lifecycle !== this.#lifecycle) return;
     this.active = store;
     this.machines = [
-      { id: store.endpointUrl ?? 'local', label: store.core?.hostname ?? strings.machines.local, store }
+      { id: store.endpointUrl ?? 'local', label: remembered.find(e => e.url === selected?.url)?.label ?? (store.localCore ? strings.machines.local : store.core?.hostname) ?? strings.machines.local, store }
     ];
+    this.restoreProfile(this.machines[0]!);
     if (import.meta.env.DEV && new URLSearchParams(window.location.search).get('fake') === '1') {
       if (new URLSearchParams(window.location.search).get('machines') === '1') {
         const { FakeClient } = await import('./fake-client');
@@ -52,18 +66,49 @@ export class Workspace {
         remote.booted = true;
         if (remote.core) remote.core.os = 'linux';
         this.machines = [...this.machines, { id: remote.machineId, label: 'Builder', store: remote }];
+        this.restoreProfile(this.machines[1]!);
       }
       return;
     }
-    if (insideTauri() && !store.localCore) {
-      const local = await fromTauri();
-      if (local && local.url !== store.endpointUrl) await this.add(local, strings.machines.local);
+    const primaryEndpoint = readStoredEndpoint();
+    if (!store.localCore && primaryEndpoint?.url === store.endpointUrl && primaryEndpoint.token) {
+      upsertEnvironment({ ...primaryEndpoint, paired: primaryEndpoint.paired ?? false, label: this.machines[0]!.label });
     }
     await Promise.all(
       readEnvironments()
         .filter((e) => e.url !== store.endpointUrl)
         .map((e) => this.add(e, e.label))
     );
+    // Older workspaces added a fresh Dev core beside the paired core on the same PC.
+    // Keep that existing journal as the primary connection when the fresh core has no threads.
+    const populated = store.localCore && store.threads.length === 0 && store.core?.hostname
+      ? this.machines.find(m => m.store !== store && m.store.connection === 'ready' && m.store.threads.length > 0 && m.store.core?.hostname === store.core?.hostname)
+      : undefined;
+    if (populated && lifecycle === this.#lifecycle) {
+      await store.switchEnvironment(populated.id);
+      if (store.connection === 'ready') {
+        populated.store.client?.close();
+        populated.store.detach();
+        this.machines = [{ id: populated.id, label: populated.label, icon: populated.icon, store }, ...this.machines.filter(m => m.store !== store && m !== populated)];
+      }
+    }
+  }
+
+  restoreProfile(machine: Machine): void {
+    const saved = profiles()[profileKey(machine)];
+    if (typeof saved?.label === 'string' && saved.label.trim()) machine.label = saved.label;
+    if (saved?.icon && machineIcons.includes(saved.icon)) machine.icon = saved.icon;
+  }
+
+  customize(id: string, label: string, icon?: MachineIconName): void {
+    const machine = this.machines.find(m => m.id === id);
+    if (!machine || !label.trim() || (icon && !machineIcons.includes(icon))) return;
+    machine.label = label.trim();
+    machine.icon = icon;
+    try { localStorage.setItem(PROFILE_KEY, JSON.stringify({ ...profiles(), [profileKey(machine)]: { label: machine.label, icon } })); } catch { /* session only */ }
+    const saved = readEnvironments().find(e => e.url === machine.id);
+    if (saved) upsertEnvironment({ ...saved, label: machine.label });
+    this.machines = [...this.machines];
   }
 
   setView(view: 'projects' | 'recent'): void {
@@ -108,7 +153,17 @@ export class Workspace {
       this.error = `${machine.label}: ${target.error ?? strings.connection.closed}`;
       return false;
     }
+    const alias = target.core?.hostname && this.machines.find(m => m.store !== target && m.store.core?.hostname && profileKey(m) === profileKey(machine));
+    if (alias) {
+      target.client?.close();
+      target.detach();
+      this.machines = this.machines.filter(m => m.store !== target);
+      removeEnvironment(id);
+      this.error = null;
+      return true;
+    }
     machine.label = label?.trim() || target.core?.hostname || url.host;
+    this.restoreProfile(machine);
     // Grant credentials are persisted by WsClient's onSession, never the grant itself.
     if (!endpoint.grant && !endpoint.local)
       upsertEnvironment({ url: id, token: endpoint.token, paired: endpoint.paired ?? false, label: machine.label });
@@ -145,6 +200,8 @@ export class Workspace {
       target.search = previous.search;
       target.notifications = previous.notifications;
       this.active = target;
+      const saved = readEnvironments().find(e => e.url === target.endpointUrl);
+      if (saved) storeEndpoint(saved);
     }
     target.showChat();
     target.visible = true;

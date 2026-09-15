@@ -122,7 +122,7 @@
           class="machine"
           class:offline={owner.connection !== 'ready'}
           title={`${machine.label} · ${strings.connection[owner.connection]}`}
-          aria-label={machine.label}><MachineIcon os={owner.core?.os} /><span>{machine.label}</span></span
+          aria-label={machine.label}><MachineIcon icon={machine.icon} os={owner.core?.os} /><span>{machine.label}</span></span
         >
       </span>
     </button>

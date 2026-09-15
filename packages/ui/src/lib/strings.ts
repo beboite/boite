@@ -1,10 +1,10 @@
 /** Every user-facing string of the UI. No literal UI text lives anywhere else. */
 export const strings = {
   machines: {
-    heading: 'Machines', local: 'This computer', projects: 'Projects', recent: 'Recent',
+    heading: 'Machines', local: 'My computer', projects: 'Projects', recent: 'Recent',
     dynamic: 'All machines', recentHint: 'Most recent user message first',
     intro: 'Connect machines to see their projects and threads together. Each machine runs its own agents and files.',
-    label: 'Machine name', link: 'Pairing link', add: 'Add machine', adding: 'Connecting',
+    label: 'Machine name', icon: 'Machine icon', icons: { desktop: 'Desktop', laptop: 'Laptop', server: 'Server', rack: 'Server rack', cloud: 'Cloud', cpu: 'Processor' }, link: 'Pairing link', add: 'Add machine', adding: 'Connecting',
     remove: 'Disconnect', open: 'Open machine', invalidUrl: 'Machine URL must be an HTTP or HTTPS URL without credentials, query or fragment.',
     duplicate: 'This machine is already connected.', noPr: 'No PR', refreshPr: 'Refresh pull request',
     prUnavailable: 'Pull request unavailable', manual: 'Connect with URL and token',

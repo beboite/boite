@@ -2,11 +2,39 @@ import { afterEach, expect, test, vi } from 'vitest';
 import { Workspace } from './workspace.svelte';
 import { Store, store as primary } from './store.svelte';
 import { FakeClient } from './fake-client';
+import { upsertEnvironment } from './endpoint';
 
 let workspace: Workspace | undefined;
 afterEach(() => {
+  vi.restoreAllMocks();
   workspace?.close();
   localStorage.clear();
+});
+
+test('an empty local core yields to the remembered journal on the same computer', async () => {
+  const { w, a, b } = await setup();
+  a.localCore = true;
+  a.threads = [];
+  a.core = { ...a.core!, hostname: 'desktop', dataDir: '/fresh-dev' };
+  b.core = { ...b.core!, hostname: 'desktop', dataDir: '/existing' };
+  a.endpointUrl = 'http://local.test';
+  upsertEnvironment({ url: 'http://saved.test', token: 'fake', paired: true, label: 'Studio' });
+  const boot = vi.spyOn(a, 'boot').mockResolvedValue();
+  vi.spyOn(w, 'add').mockImplementation(async () => {
+    w.machines = [...w.machines, {id: 'http://saved.test', label: 'Studio', store: b}];
+    return true;
+  });
+  const restore = vi.spyOn(a, 'switchEnvironment').mockImplementation(async () => {
+    a.core = b.core;
+    a.threads = b.threads;
+    a.localCore = false;
+  });
+  await w.boot();
+  expect(boot).toHaveBeenCalledWith();
+  expect(restore).toHaveBeenCalledWith('http://saved.test');
+  expect(w.machines).toHaveLength(1);
+  expect(w.machines[0]?.label).toBe('Studio');
+  expect(a.threads.length).toBeGreaterThan(0);
 });
 async function setup() {
   workspace = new Workspace();
@@ -77,4 +105,18 @@ test('disconnecting the active remote keeps primary data and the view preference
   expect(w.machines).toHaveLength(1);
   expect(localStorage.getItem('boite.thread-view')).toBe('recent');
   expect(b.client).toBeNull();
+});
+
+test('machine names and icons persist independently and survive an endpoint change', async () => {
+  const { w, a, b } = await setup();
+  a.core = { ...a.core!, hostname: 'desktop', dataDir: '/local' };
+  b.core = { ...b.core!, hostname: 'server', dataDir: '/remote' };
+  w.customize('local', 'Studio', 'desktop');
+  w.customize('remote', 'Build server', 'rack');
+  const restored = { id: 'new-address', label: 'server', store: b };
+  w.restoreProfile(restored);
+  expect(restored).toMatchObject({ label: 'Build server', icon: 'rack' });
+  expect(w.machines[0]).toMatchObject({ label: 'Studio', icon: 'desktop' });
+  w.customize('local', '  ', 'cloud');
+  expect(w.machines[0]?.label).toBe('Studio');
 });

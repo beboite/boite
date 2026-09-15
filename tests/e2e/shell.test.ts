@@ -13,7 +13,7 @@ const HARD_KILL_TIMEOUT_MS = 3_000;
 const POLL_MS = 100;
 
 const ROOT = join(import.meta.dir, '..', '..');
-const EXE = join(ROOT, 'apps', 'shell', 'src-tauri', 'target', 'release', 'boite-shell.exe');
+const EXE = process.env.BOITE_E2E_SHELL_EXE ?? join(ROOT, 'apps', 'shell', 'src-tauri', 'target', 'release', 'boite-shell.exe');
 const SCREENSHOT = join(import.meta.dir, '.artifacts', 'shell.png');
 
 const CORE_SUFFIX = process.platform === 'win32' ? '.exe' : '';

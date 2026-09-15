@@ -1350,7 +1350,7 @@ test('machines coexist and disconnecting a remote leaves the primary connected',
   await waitFor(() => workspace.machines.length === 2);
   store.showSettings('machines');
   await waitFor(() => document.querySelectorAll('[data-testid=machine-card]').length === 2);
-  expect(document.querySelector('[data-testid=machines-page]')?.textContent).toContain('Builder');
+  expect(Array.from(document.querySelectorAll<HTMLInputElement>('[data-testid=machine-rename]')).map(input => input.value)).toContain('Builder');
   query<HTMLButtonElement>('[data-testid=machine-remove]').click();
   await waitFor(() => document.querySelectorAll('[data-testid=machine-card]').length === 1);
   expect(store.connection).toBe('ready');

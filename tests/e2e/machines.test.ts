@@ -67,6 +67,19 @@ test('project and recent cards show both hosts, PRs and user-message ordering on
   await page.evaluate(`document.documentElement.dataset.theme = 'light'`);
   await capture('recent-machines-phone-light.png');
   await page.send('Emulation.clearDeviceMetricsOverride');
+  await page.click(id('nav-settings'));
+  await page.click(id('settings-tab-machines'));
+  await page.evaluate(`(() => { const input = document.querySelectorAll('[data-testid="machine-rename"]')[1]; input.value = 'Build server'; input.dispatchEvent(new Event('change', {bubbles: true})); })()`);
+  await page.click('[data-testid="machine-card"]:nth-child(2) [data-testid="machine-icon-rack"]');
+  await capture('machine-customization.png');
+  await page.evaluate('location.reload()');
+  await page.waitFor(`document.querySelectorAll('${id('thread-row')}').length === 8`);
+  expect(await page.evaluate(`document.querySelector('[data-testid="sidebar"]').textContent.includes('Build server')`)).toBe(true);
+  expect(await page.evaluate(`document.querySelector('[data-testid="nav-machines"]') === null`)).toBe(true);
+  await page.click(id('nav-settings'));
+  await page.click(id('settings-tab-machines'));
+  expect(await page.evaluate(`document.querySelectorAll('[data-testid="machine-rename"]')[1].value`)).toBe('Build server');
+  expect(await page.evaluate(`document.querySelectorAll('[data-testid="machine-icon-rack"]')[1].getAttribute('aria-pressed')`)).toBe('true');
 }, 30_000);
 
 test('two real cores pair, route turns independently, reconnect and survive a reload', async () => {
@@ -94,7 +107,8 @@ test('two real cores pair, route turns independently, reconnect and survive a re
     const tb = await create(b, second.dataDir, 'Remote project');
     await page.navigate(`${url}/?core=${encodeURIComponent(first.url)}&token=${encodeURIComponent(first.token)}`);
     await page.waitFor(`document.querySelector('[data-thread-id="${ta.id}"]')`);
-    await page.click(id('nav-machines'));
+    await page.click(id('nav-settings'));
+    await page.click(id('settings-tab-machines'));
     const grant = await b.call('pairing.grant', { role: 'owner' });
     await page.type(id('machine-name'), 'Build host');
     await page.type(id('machine-link'), grant.url);
@@ -123,7 +137,8 @@ test('two real cores pair, route turns independently, reconnect and survive a re
     await page.waitFor(`document.querySelectorAll('${id('thread-row')}').length === 2`);
     await page.click(`[data-thread-id="${tb.id}"]`);
     await page.waitFor(`document.querySelector('${id('chat')}')?.textContent.includes('Only on the remote host')`);
-    await page.click(id('nav-machines'));
+    await page.click(id('nav-settings'));
+    await page.click(id('settings-tab-machines'));
     const admin = await connect(restarted.url, restarted.token);
     try {
       const session = (await admin.call('sessions.list', {}))[0]!;

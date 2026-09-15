@@ -1,5 +1,10 @@
 # Development
 
+When Cargo uses a shared target, preserve the shell executable, core and workers
+from your build together before running end-to-end tests. Set
+`BOITE_E2E_SHELL_EXE` to that preserved `boite-shell.exe`; the suite checks and
+runs its adjacent sidecar rather than a binary another worktree can replace.
+
 Everything below runs from the repository root, on a `bun install` that has
 already happened. The rules these commands are meant to prove are in
 [../AGENTS.md](../AGENTS.md).

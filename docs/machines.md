@@ -6,14 +6,15 @@ composer and settings. It does not move the thread or its processes.
 
 ## Connecting a machine
 
-Open Machines from the sidebar's top `+` or Settings. On the machine to add,
+Open Machines from Settings. On the machine to add,
 mint a full-control pairing link in General, or run `boite-core pair --owner`.
 Paste the link into Add machine, optionally name it, then connect. A manual URL
 and token form is available under the pairing form.
 
 Each successful pairing saves its session key locally. The one-time grant is
-discarded. Existing remembered cores are loaded on startup. The desktop keeps
-its local core and connects remembered machines beside it.
+discarded. Existing remembered cores are loaded on startup. The desktop restores its selected connection and connects remembered machines beside it. A fresh local core with no threads yields to a remembered core on the same computer that already holds threads.
+
+Machine names and icons can be changed in Settings. These preferences are saved on this client and follow the core across address changes. Connections to the same host, data directory and channel appear once.
 
 The machine list shows connection errors and lets you reopen a host or disconnect
 it. Disconnect closes that host's socket and forgets its saved key. It does not
@@ -46,7 +47,7 @@ sorts it by the most recent accepted user message. Assistant output, generated
 titles, pins and load events do not move a thread in Recent. Threads without
 a user message use their creation time. The view is remembered on this device.
 
-All machines can be narrowed to one machine from the sidebar's top menu. Search
+All machines can be narrowed to one machine from the filter button beside Settings at the bottom of the sidebar. Search
 matches thread titles, project names and machine names. The command palette and
 the draft's project picker also include every connected host.
 

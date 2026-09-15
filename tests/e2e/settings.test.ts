@@ -99,9 +99,10 @@ test('machines list each execution host and disconnect only the selected host', 
   await page.navigate(`${uiUrl}/?fake=1&machines=1`);
   await page.evaluate(`document.documentElement.dataset.theme = 'dark'`);
   await page.waitFor(`document.querySelectorAll('[data-machine-id="http://builder.test"] [data-testid="thread-row"]').length > 0`);
-  await page.click(id('nav-machines'));
+  await page.click(id('nav-settings'));
+    await page.click(id('settings-tab-machines'));
   await page.waitFor(`document.querySelectorAll('[data-testid="machine-card"]').length === 2`);
-  expect(await page.evaluate(`document.querySelector('[data-testid="machines-page"]').textContent`)).toContain('Builder');
+  expect(await page.evaluate(`Array.from(document.querySelectorAll('[data-testid="machine-rename"]')).map(input => input.value)`)).toContain('Builder');
   await capture('machines.png');
   await page.click(id('machine-remove'));
   await page.waitFor(`document.querySelectorAll('[data-testid="machine-card"]').length === 1`);
