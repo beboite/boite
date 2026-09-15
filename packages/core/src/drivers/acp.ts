@@ -1210,7 +1210,8 @@ function modelsFromConfig(provider: ProviderDescriptor, options: SessionConfigOp
   const option = categoryOption(options, 'model');
   if (option === null) return provider.models;
   const effort = effortFrom(categoryOption(options, 'thought_level'));
-  const withEffort = (model: ModelInfo): ModelInfo => (effort === null ? model : { ...model, effort });
+  const current = option.type === 'select' ? String(option.currentValue) : '';
+  const withEffort = (model: ModelInfo): ModelInfo => (effort === null || model.id !== current ? model : { ...model, effort });
 
   const models: ModelInfo[] = [];
   const seen = new Set<string>();
@@ -1219,7 +1220,6 @@ function modelsFromConfig(provider: ProviderDescriptor, options: SessionConfigOp
     models.push(withEffort({ id: AGENT_OWN_MODEL, name: own.name, default: false }));
     seen.add(AGENT_OWN_MODEL);
   }
-  const current = option.type === 'select' ? String(option.currentValue) : '';
   for (const choice of selectChoices(option)) {
     if (seen.has(choice.value)) continue;
     seen.add(choice.value);

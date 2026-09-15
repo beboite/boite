@@ -4,6 +4,10 @@
   import { glassSupported, readGlass, setGlass, type Glass } from '../lib/glass';
   import { strings } from '../lib/strings';
   import { readTheme, setTheme, type Theme } from '../lib/theme';
+  import { ACCENT_PRESETS, readAccent, setAccent } from '../lib/accent';
+
+  let accent = $state(untrack(() => readAccent()));
+  function pickAccent(hue: number) { accent = hue; setAccent(hue); }
 
   // Grain rides behind an experiment, so the fourth option comes and goes with
   // the switch on the Experiments page rather than on a reload.
@@ -53,7 +57,7 @@
     <h1>{strings.settings.tabs.appearance}</h1>
   </header>
 
-  <section class="card">
+  <section class="card" id="settings-theme">
     <h2>{strings.settings.appearance}</h2>
     <div class="switch-row">
       <span class="text">{strings.settings.theme}</span>
@@ -69,6 +73,17 @@
             {option.label}
           </button>
         {/each}
+      </div>
+    </div>
+    <div class="switch-row accent-row">
+      <span class="text">{strings.settings.accent}<span class="hint">{strings.settings.accentHint}</span></span>
+      <div class="accent-controls">
+        <div class="swatches" role="group" aria-label={strings.settings.accent}>
+          {#each ACCENT_PRESETS as hue, index (hue)}
+            <button type="button" class="swatch" data-accent-swatch style:--accent-hue={hue} aria-label={strings.settings.accentNames[index]} aria-pressed={accent === hue} data-testid="accent-{hue}" onclick={() => pickAccent(hue)}></button>
+          {/each}
+        </div>
+        <input class="hue" type="range" min="0" max="360" step="1" value={accent} aria-label={strings.settings.accentCustom} data-testid="accent-hue" oninput={event => pickAccent(Number(event.currentTarget.value))} />
       </div>
     </div>
     {#if hasMaterial}
@@ -96,6 +111,15 @@
 </div>
 
 <style>
+  .accent-controls { display: grid; gap: 10px; min-width: 220px; }
+  .swatches { display: flex; gap: 7px; }
+  .swatch { width: 26px; height: 26px; padding: 0; border-radius: 50%; background: var(--color-accent); border: 3px solid var(--color-surface-2); transition: transform var(--dur-2) var(--ease-out-quint); }
+  .swatch:hover { transform: scale(1.12); }
+  .swatch[aria-pressed='true'] { outline: 2px solid var(--color-foreground); outline-offset: 2px; }
+  .hue { appearance: none; width: 100%; min-height: 0; height: 8px; padding: 0; background: var(--accent-spectrum); border: none; border-radius: 999px; cursor: pointer; }
+  .hue::-webkit-slider-thumb { appearance: none; width: 16px; height: 16px; background: var(--color-foreground); border: 2px solid var(--color-surface-2); border-radius: 50%; box-shadow: var(--shadow-e1); }
+  .hue::-moz-range-thumb { width: 14px; height: 14px; background: var(--color-foreground); border: 2px solid var(--color-surface-2); border-radius: 50%; }
+  @media (max-width: 720px) { .accent-row { flex-direction: column; align-items: stretch; } }
   .switch-row {
     display: flex;
     align-items: center;

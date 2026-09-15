@@ -86,11 +86,12 @@ test('runCommand dispatches: the theme is stored and stamped, settings opens on 
   expect(store.page).toBe('settings');
   expect(store.settingsTab).toBe('accounts');
 
-  // Outside the shell there is no folder dialog, so adding a project is a page.
+  // Every entry opens the same machine and folder picker.
   store.showChat();
   runCommand(store, 'add-project', false);
-  expect(store.page).toBe('settings');
-  expect(store.settingsTab).toBe('general');
+  expect(store.page).toBe('chat');
+  expect(store.projectPickerOpen).toBe(true);
+  store.projectPickerOpen = false;
 
   // An id nothing answers does nothing at all.
   store.showChat();

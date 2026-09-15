@@ -134,6 +134,19 @@ export function storeEnvironments(envs: StoredEnvironment[]): void {
   }
 }
 
+/** The shell discovers its local endpoint on every start; its random port is not a machine identity. */
+export function refreshLocalEnvironment(local: Endpoint): StoredEnvironment[] {
+  const list = readEnvironments().filter(entry => {
+    if (entry.url === normalise(local.url)) return false;
+    let host: string;
+    try { host = new URL(entry.url).hostname; } catch { return true; }
+    const generated = !entry.paired && entry.label === 'This computer';
+    return !(generated && ['localhost', '127.0.0.1', '[::1]'].includes(host));
+  });
+  storeEnvironments(list);
+  return list;
+}
+
 /** Adds the core or refreshes its key, keeping an existing label unless a new one is given. */
 export function upsertEnvironment(entry: {
   url: string;
@@ -215,7 +228,7 @@ export function insideTauri(): boolean {
   return window.__TAURI_INTERNALS__ !== undefined;
 }
 
-async function fromTauri(): Promise<Endpoint | null> {
+export async function fromTauri(): Promise<Endpoint | null> {
   try {
     const { invoke } = await import('@tauri-apps/api/core');
     const result: unknown = await invoke('core_endpoint');
@@ -236,13 +249,13 @@ function fromOrigin(): Endpoint | null {
  * this app was paired with and otherwise the one the shell started, then what
  * was stored by an earlier pairing, then the origin that served this page.
  */
-export async function resolveEndpoint(): Promise<Endpoint | null> {
+export async function resolveEndpoint(preferLocal = false): Promise<Endpoint | null> {
   const paired = takeFromQuery();
   if (paired) return paired;
 
   if (insideTauri()) {
     const stored = readStoredEndpoint();
-    if (stored?.paired) return stored;
+    if (stored?.paired && !preferLocal) return stored;
     return await fromTauri();
   }
 

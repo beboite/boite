@@ -1,7 +1,7 @@
 /*
  * Tokens of the Boite family (accshift, guardshift, Boite Legacy), rounded a
  * little. Dark is the default; light is a palette under [data-theme="light"].
- * No chromatic accent on the chrome: hue is for status only.
+ * The chosen accent marks interactive controls; status colours stay separate.
  */
 
 @font-face {
@@ -9,7 +9,7 @@
   font-style: normal;
   font-weight: 100 900;
   font-display: block;
-  src: url('./fonts/Geist-Variable.woff2') format('woff2');
+  src: url('/fonts/Geist-Variable.woff2') format('woff2');
 }
 
 @font-face {
@@ -17,7 +17,7 @@
   font-style: normal;
   font-weight: 100 900;
   font-display: block;
-  src: url('./fonts/GeistMono-Variable.woff2') format('woff2');
+  src: url('/fonts/GeistMono-Variable.woff2') format('woff2');
 }
 
 :root {
@@ -35,6 +35,13 @@
   --color-muted-foreground: #a2a2ad;
   --color-subtle: #6f6f7a;
   --color-selection: rgba(228, 228, 231, 0.18);
+  --accent-hue: 260;
+  --color-accent: oklch(68% 0.19 var(--accent-hue));
+  --color-accent-soft: color-mix(in oklch, var(--color-accent) 18%, transparent);
+  --color-accent-ink: #101013;
+  --color-reasoning: var(--color-accent);
+  --accent-spectrum: linear-gradient(to right, oklch(68% .19 0), oklch(68% .19 60), oklch(68% .19 120), oklch(68% .19 180), oklch(68% .19 240), oklch(68% .19 300), oklch(68% .19 360));
+  --color-reasoning-on: #ffffff;
   --color-live: #eab308;
   --color-success: #4ade80;
   --color-danger: #f0716f;
@@ -152,6 +159,17 @@ body {
   height: 100%;
 }
 
+/* The tray window has no opaque canvas outside its rounded panel. Clip the
+ * body's theme textures too, including Grain's fixed pseudo-elements. */
+:root[data-view='quotas'],
+:root[data-view='quotas'] body {
+  background: transparent;
+}
+
+html[data-view='quotas'] body {
+  clip-path: inset(0 round var(--radius-lg));
+}
+
 ::selection {
   background: var(--color-selection);
 }
@@ -166,7 +184,7 @@ textarea {
 }
 
 :focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--color-foreground) 55%, transparent);
+  outline: 2px solid var(--color-accent);
   outline-offset: 2px;
 }
 
@@ -191,7 +209,7 @@ p {
 }
 
 a {
-  color: inherit;
+  color: var(--color-accent);
 }
 
 /* ------------------------------------------------------------------------- */
@@ -240,13 +258,13 @@ button:disabled {
 }
 
 button.primary {
-  background: var(--color-foreground);
-  border-color: var(--color-foreground);
-  color: var(--color-on-foreground);
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  color: var(--color-accent-ink);
 }
 
 button.primary:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--color-foreground) 88%, var(--color-background));
+  background: color-mix(in oklch, var(--color-accent) 88%, var(--color-foreground));
 }
 
 button.quiet,
@@ -723,4 +741,29 @@ html[data-glass] .composer {
   50% {
     opacity: 0;
   }
+}
+
+[data-accent-swatch] { --color-accent: oklch(68% 0.19 var(--accent-hue)); }
+/* Settings share one row and switch treatment across every category. */
+.settings .page { padding: 36px clamp(20px, 4vw, 64px); }
+.settings .page > header { margin-bottom: 28px; }
+.settings .page > .card { max-width: 880px; padding: 24px; margin-bottom: 20px; background: var(--color-surface); box-shadow: none; border-color: var(--color-border); scroll-margin-top: 24px; }
+.settings .page .card h2 { font-size: var(--text-md); color: var(--color-foreground); text-transform: none; letter-spacing: normal; margin-bottom: 18px; }
+.settings .page .switch-row { border: 0; border-radius: 0; padding: 16px 0; margin: 0; min-height: 66px; gap: 20px; }
+.settings .page .switch-row + .switch-row { border-top: 1px solid var(--color-border); }
+.settings .page .switch-row .hint { margin-bottom: 0; line-height: 1.5; }
+.settings input[type=checkbox][role=switch] { appearance: none; position: relative; flex: 0 0 40px; width: 40px; height: 24px; min-height: 24px; padding: 0; margin: 0; border: 1px solid var(--color-edge); border-radius: 999px; background: var(--color-surface-3); cursor: pointer; transition: background var(--dur-2), border-color var(--dur-2); }
+.settings input[type=checkbox][role=switch]::after { content: ''; position: absolute; width: 16px; height: 16px; top: 3px; left: 3px; border-radius: 50%; background: var(--color-muted-foreground); transition: transform var(--dur-2) var(--ease-out-quint); }
+.settings input[type=checkbox][role=switch]:checked { background: var(--color-foreground); border-color: var(--color-foreground); }
+.settings input[type=checkbox][role=switch]:checked::after { transform: translateX(16px); background: var(--color-background); }
+.settings input[type=checkbox][role=switch]:focus-visible { outline: 2px solid var(--color-foreground); outline-offset: 4px; }
+.settings input[type=checkbox][role=switch]:disabled { opacity: .45; cursor: not-allowed; }
+@media (max-width: 720px) {
+  .settings .page { padding: 24px 16px; }
+  .settings .page > .card { padding: 18px; }
+  .settings .page .row { flex-wrap: wrap; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .settings input[type=checkbox][role=switch], .settings input[type=checkbox][role=switch]::after { transition: none; }
 }

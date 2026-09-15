@@ -164,6 +164,8 @@ export interface ModelInfo {
   badge?: 'new';
   /** Reasoning effort this model offers. A model without it has no effort control. */
   effort?: { levels: EffortLevel[]; default: string };
+  /** Native service tiers advertised for this model; absent means no speed control. */
+  speeds?: { id: string; label: string; description?: string }[];
 }
 
 export interface ProviderCapabilities {
@@ -331,6 +333,9 @@ export interface ContextUse {
 }
 
 export interface ThreadSummary {
+  /** Last accepted user message, independent of assistant activity and renames. */
+  lastUserMessageAt?: Timestamp | null;
+  pullRequest?: { number: number; url: string; state: 'OPEN' | 'CLOSED' | 'MERGED' } | null;
   id: ThreadId;
   projectId: ProjectId;
   title: string;
@@ -340,6 +345,7 @@ export interface ThreadSummary {
   model: string | null;
   /** One of the model's effort level ids. Null means the model's own default. */
   effort: string | null;
+  speed?: string | null;
   cwd: string;
   /**
    * The git branch the thread works on when it started in its own worktree;
@@ -379,7 +385,7 @@ export type TurnStatus = 'queued' | 'running' | 'done' | 'stopped' | 'error';
 
 /** Frozen when a prompt is accepted, including while it waits in the scheduler. */
 export type TurnExecution = Pick<ThreadSummary,
-  'providerId' | 'accountId' | 'model' | 'effort' | 'permissionMode' | 'sessionId'
+  'providerId' | 'accountId' | 'model' | 'effort' | 'speed' | 'permissionMode' | 'sessionId'
 > & { sessionGeneration: number; selectionVersion: number; operation?: 'compact' };
 
 export interface Turn {
@@ -624,6 +630,8 @@ export interface SchedulerState {
 }
 
 export interface Settings {
+  /** Exact browser origins allowed to connect alongside the shell and this core's own origin. */
+  browserOrigins?: string[];
   maxConcurrentTurns: number;
   perAccountConcurrency: number;
   /** Minutes a Claude process stays warm after a turn. 0 releases it at once. */
@@ -832,6 +840,8 @@ export function parseChord(text: string): { ok: true; chord: Chord } | { ok: fal
 export type Channel = 'stable' | 'dev';
 
 export interface CoreInfo {
+  /** Display name reported by the execution host. */
+  hostname?: string;
   version: string;
   protocolVersion: typeof PROTOCOL_VERSION;
   os: Os;
@@ -928,6 +938,11 @@ export interface RpcMethods {
 
   'projects.list': { params: Record<string, never>; result: Project[] };
   'projects.add': { params: { path: string; name?: string }; result: Project };
+  /** Owner-only folder navigation on the machine running this core. */
+  'projects.browse': {
+    params: { path?: string };
+    result: { path: string; parent: string | null; directories: { name: string; path: string }[] };
+  };
   'projects.remove': { params: { projectId: ProjectId }; result: { ok: true } };
   /**
    * The files of a project a mention can name, ranked on the query: relative
@@ -951,14 +966,13 @@ export interface RpcMethods {
     result: { loaded: ProviderSummary[]; rejected: ProviderRejected[] };
   };
   /**
-   * ACP, Codex and pi list their own models through a temporary agent process.
-   * Claude and echo return the descriptor's models. Results are kept until
-   * `providers.reload` or a change to that account.
+   * Claude, ACP, Codex and pi list models through a temporary agent process.
+   * Results are kept until refresh, `providers.reload` or an account change.
    * For any other protocol they are the descriptor's models, with `probedAt`
    * the moment of the call.
    */
   'providers.probe': {
-    params: { providerId: ProviderId; accountId: AccountId };
+    params: { providerId: ProviderId; accountId: AccountId; refresh?: boolean };
     result: { models: ModelInfo[]; probedAt: Timestamp };
   };
   /**
@@ -1010,6 +1024,8 @@ export interface RpcMethods {
   'accounts.loginInput': { params: { accountId: AccountId; text: string }; result: { ok: true } };
 
   'threads.list': { params: { projectId?: ProjectId; includeArchived?: boolean }; result: ThreadSummary[] };
+  /** Read the working branch's PR using the execution machine's GitHub CLI. */
+  'threads.pullRequest': { params: { threadId: ThreadId }; result: ThreadSummary['pullRequest'] };
   'threads.create': {
     params: {
       projectId: ProjectId;
@@ -1019,6 +1035,7 @@ export interface RpcMethods {
       cwd?: string;
       model?: string;
       effort?: string | null;
+      speed?: string | null;
       permissionMode?: PermissionMode;
       /**
        * Start the thread in a git worktree of the project on a branch of its
@@ -1056,6 +1073,7 @@ export interface RpcMethods {
       title?: string;
       model?: string | null;
       effort?: string | null;
+      speed?: string | null;
       permissionMode?: PermissionMode;
     };
     result: ThreadSummary;

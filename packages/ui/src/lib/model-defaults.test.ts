@@ -29,11 +29,13 @@ test('a configured default survives reconnect and wins over the previous thread 
   await store.connect();
   const provider = store.providerOf('claude')!;
   const account = store.accountsOf('claude')[0]!;
+  await store.probeModels('claude', account.id);
   const models = store.modelsOf('claude', account.id);
   const preferred = models.find((model) => model.id === 'claude-opus-5')!;
   expect(preferred).toBeTruthy();
   store.remember({ providerId: provider.id, accountId: account.id, model: models[0]!.id, effort: null, permissionMode: 'plan' });
   store.setModelDefault(provider.id, account.id, preferred.id, 'medium');
+  store.startDraft(store.projects[0]!.id);
   expect(store.defaultChoice()).toMatchObject({ model: preferred.id, effort: 'medium', permissionMode: 'plan' });
   store.detach();
   const next = new Store();

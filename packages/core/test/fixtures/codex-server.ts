@@ -164,6 +164,7 @@ const MODELS = [
     id: 'fake-smart',
     model: 'fake-smart',
     displayName: 'Fake Smart',
+    serviceTiers: [{ id: 'fast', name: 'Fast', description: 'Priority processing' }, { id: 'ultrafast', name: 'Ultrafast', description: 'Access-controlled tier' }],
     description: 'the slow one',
     hidden: false,
     supportedReasoningEfforts: [
@@ -397,6 +398,7 @@ function handle(method: string, raw: unknown): unknown {
       turnCounter += 1;
       const turnId = `codex-fake-turn-${turnCounter}`;
       log(`turn/start model=${textOf(params['model'])} effort=${textOf(params['effort'])}`);
+      log(JSON.stringify({ serviceTier: params['serviceTier'] }));
       for (const url of imageUrlsOf(params)) log(`image ${url}`);
       // After the response is written, never before: a real server answers the
       // request and streams the turn afterwards.

@@ -7,6 +7,7 @@
   import { PALETTE_LIMIT, RECENT_THREADS, rankItems, type PaletteItem } from '../lib/palette';
   import { strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
+  import { workspace } from '../lib/workspace.svelte';
   import StatusMark from './StatusMark.svelte';
 
   let { store }: { store: Store } = $props();
@@ -30,22 +31,18 @@
     void tick().then(() => input?.focus({ preventScroll: true }));
   });
 
-  function projectName(thread: ThreadSummary): string {
-    return store.projects.find((p) => p.id === thread.projectId)?.name ?? '';
-  }
-
   /** Every live thread, most recent first; the list cuts it to the recents until something is typed. */
   let threadItems = $derived.by((): PaletteItem[] =>
-    [...store.threads]
+    (workspace.machines.length ? workspace.machines : [{ id: '', label: '', store }]).flatMap(machine => [...machine.store.threads]
       .filter((t) => !t.archived)
-      .sort((a, b) => b.updatedAt - a.updatedAt)
       .map((t) => ({
-        id: `thread:${t.id}`,
+        id: `thread:${machine.store.threadKey(t.id)}`,
         kind: 'thread' as const,
         label: t.title,
-        hint: projectName(t),
-        keywords: t.status
-      }))
+        hint: `${machine.store.projects.find(p => p.id === t.projectId)?.name ?? ''} · ${machine.label}`,
+        keywords: t.status,
+        at: t.lastUserMessageAt ?? t.createdAt
+      }))).sort((a,b) => b.at - a.at)
   );
 
   let commandItems = $derived.by((): PaletteItem[] => appCommands(store, inShell));
@@ -87,7 +84,8 @@
     close();
     if (item.kind === 'thread') {
       store.showChat();
-      void store.open(item.id.slice('thread:'.length));
+      if (workspace.machines.length) void workspace.openNotification(item.id.slice('thread:'.length));
+      else void store.open(item.id.slice('thread:'.length));
       return;
     }
     runCommand(store, item.id, inShell);
@@ -118,7 +116,9 @@
   function threadOf(item: PaletteItem): ThreadSummary | null {
     if (item.kind !== 'thread') return null;
     const id = item.id.slice('thread:'.length);
-    return store.threads.find((t) => t.id === id) ?? null;
+    const hosts = workspace.machines.length ? workspace.machines.map(m => m.store) : [store];
+    for (const host of hosts) { const thread = host.threads.find(t => host.threadKey(t.id) === id); if (thread) return thread; }
+    return null;
   }
 
   /** The heading before a row: only where the kind changes. */

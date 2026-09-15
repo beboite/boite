@@ -69,26 +69,41 @@ test('Grain is visible above solid and acrylic surfaces and the settings fit a p
 test('the compact quota page shows limits and reset times', async () => {
   await page.send('Emulation.setDeviceMetricsOverride', { width: 380, height: 460, deviceScaleFactor: 1, mobile: false });
   await page.navigate(`${uiUrl}/?fake=1&view=quotas`);
-  await page.waitFor(`document.querySelector('${id('quota-account')}')`);
+  await page.send('Emulation.setDefaultBackgroundColorOverride', { color: { r: 0, g: 0, b: 0, a: 0 } });
+  await page.waitFor(`document.querySelectorAll('${id('quota-provider')}').length === 5 && document.querySelector('progress')`);
+  expect(await page.evaluate(`getComputedStyle(document.documentElement).backgroundColor`)).toBe('rgba(0, 0, 0, 0)');
+  expect(await page.evaluate(`getComputedStyle(document.body).clipPath`)).toBe('inset(0px round 12px)');
   await capture('quota-popup.png');
+  expect(await page.evaluate(`Array.from(document.querySelectorAll('${id('quota-provider')}')).map(el => el.dataset.provider)`)).toEqual(['claude', 'codex', 'antigravity', 'grok', 'opencode']);
   expect(await page.evaluate(`document.querySelector('${id('quota-popup')}').textContent`)).toContain('Resets');
   expect(await page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')).toBe(true);
+  await page.click('[data-provider="antigravity"] .summary');
+  await page.click('[data-provider="antigravity"] input');
+  await page.waitFor(`document.querySelector('[data-provider="antigravity"] progress')`);
+  await page.click('[data-provider="antigravity"] input');
+  await page.waitFor(`!document.querySelector('[data-provider="antigravity"] progress')`);
+  await page.evaluate(`document.querySelector('[data-provider="antigravity"] input').scrollIntoView({ block: 'nearest' })`);
+  await capture('quota-popup-setup.png');
+  await page.click('[data-provider="antigravity"] .summary');
+  expect(await page.evaluate(`document.querySelector('section').scrollWidth <= document.querySelector('section').clientWidth`)).toBe(true);
+  expect(await page.evaluate(`document.querySelector('section').scrollHeight <= document.querySelector('section').clientHeight`)).toBe(true);
+  await page.evaluate(`document.documentElement.dataset.theme = 'light'`);
+  await capture('quota-popup-light.png');
+  await page.evaluate(`document.documentElement.dataset.theme = 'grain'`);
+  await capture('quota-popup-grain.png');
+  expect(await page.evaluate(`getComputedStyle(document.documentElement).backgroundColor`)).toBe('rgba(0, 0, 0, 0)');
 }, 30_000);
 
-test('remembered cores list every core and forget drops one', async () => {
-  await page.evaluate(`localStorage.setItem('boite.envs', JSON.stringify([
-    { url: 'http://127.0.0.1:9', label: 'cet ordi', token: 'x', paired: false },
-    { url: 'http://100.64.0.15:3773', label: '100.64.0.15:3773', token: 'y', paired: true }
-  ]))`);
-  await page.navigate(`${uiUrl}/?fake=1`);
-  await page.waitFor(`document.querySelector('${id('nav-settings')}')`);
+test('machines list each execution host and disconnect only the selected host', async () => {
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1400, height: 1000, deviceScaleFactor: 1, mobile: false });
+  await page.navigate(`${uiUrl}/?fake=1&machines=1`);
+  await page.evaluate(`document.documentElement.dataset.theme = 'dark'`);
+  await page.waitFor(`document.querySelectorAll('[data-machine-id="http://builder.test"] [data-testid="thread-row"]').length > 0`);
   await page.click(id('nav-settings'));
-  await page.waitFor(`document.querySelector('${id('settings-envs')}')`);
-  const text = await page.evaluate(`document.querySelector('${id('settings-envs')}').textContent`);
-  expect(text).toContain('cet ordi');
-  expect(text).toContain('100.64.0.15:3773');
-  await page.evaluate(`document.querySelector('${id('settings-envs')}').scrollIntoView({ block: 'center' })`);
-  await capture('envs.png');
-  await page.evaluate(`[...document.querySelectorAll('${id('settings-env-forget')}')][1].click()`);
-  await page.waitFor(`document.querySelectorAll('${id('settings-envs')} li').length === 1`);
+    await page.click(id('settings-tab-machines'));
+  await page.waitFor(`document.querySelectorAll('[data-testid="machine-card"]').length === 2`);
+  expect(await page.evaluate(`Array.from(document.querySelectorAll('[data-testid="machine-rename"]')).map(input => input.value)`)).toContain('Builder');
+  await capture('machines.png');
+  await page.click(id('machine-remove'));
+  await page.waitFor(`document.querySelectorAll('[data-testid="machine-card"]').length === 1`);
 }, 30_000);

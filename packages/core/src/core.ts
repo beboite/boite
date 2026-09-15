@@ -1,4 +1,5 @@
 import { mkdirSync } from 'node:fs';
+import { hostname } from 'node:os';
 import { join } from 'node:path';
 import { PROTOCOL_VERSION } from '@boite/contracts';
 import type { Channel, CoreInfo, ThreadId } from '@boite/contracts';
@@ -117,6 +118,7 @@ export class Core {
     return {
       version: this.version,
       protocolVersion: PROTOCOL_VERSION,
+      hostname: hostname(),
       os: currentOs(),
       channel: this.channel,
       pid: process.pid,

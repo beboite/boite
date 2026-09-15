@@ -7,6 +7,9 @@ import type { Account, AccountQuota, QuotaWindow } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { homePath } from './paths.ts';
 import { invalidParams } from './errors.ts';
+import { ANTIGRAVITY_QUOTA_ID, readExtraQuota } from './quota-readers.ts';
+
+const cliAccount: Account = { id: ANTIGRAVITY_QUOTA_ID, providerId: 'antigravity', label: 'Antigravity CLI', isolationDir: null, status: 'unknown', identity: null, createdAt: 0 };
 
 const CACHE_MS = 60_000;
 const RETRY_MS = 300_000;
@@ -113,7 +116,7 @@ export class QuotaStore {
   private cache = new Map<string, { value: AccountQuota; retryAt: number }>();
   private pending = new Map<string, Promise<AccountQuota>>();
   private generation = 0;
-  constructor(private core: Core, private read: QuotaReader = (account) => account.providerId === 'claude' ? readClaude(core, account) : readCodex(core, account)) {
+  constructor(private core: Core, private read: QuotaReader = (account) => account.providerId === 'claude' ? readClaude(core, account) : account.providerId === 'codex' ? readCodex(core, account) : readExtraQuota(core, account)) {
     core.bus.onAny((name) => {
       if (name === 'accounts.updated' || name === 'accounts.removed' || name === 'providers.updated') this.invalidate();
     });
@@ -121,14 +124,14 @@ export class QuotaStore {
   invalidate(): void { this.generation++; this.cache.clear(); }
   private base(account: Account): AccountQuota {
     const preferences = object(this.core.journal.getSetting('quota-accounts'));
-    const supported = account.providerId === 'claude' || account.providerId === 'codex';
-    const enabled = preferences[account.id] !== false;
-    return { accountId: account.id, providerId: account.providerId, providerName: this.core.providers.get(account.providerId)?.name ?? account.providerId,
+    const supported = ['claude', 'codex', 'grok', 'opencode'].includes(account.providerId) || account.id === ANTIGRAVITY_QUOTA_ID;
+    const enabled = account.id === ANTIGRAVITY_QUOTA_ID ? preferences[account.id] === true : preferences[account.id] !== false;
+    return { accountId: account.id, providerId: account.providerId, providerName: account.providerId === 'opencode' ? 'OpenCode Go' : this.core.providers.get(account.providerId)?.name ?? account.providerId,
       label: account.label, enabled, status: !supported ? 'unsupported' : !enabled ? 'disabled' : 'unavailable', windows: [], checkedAt: null, error: null };
   }
   async list(refresh = false): Promise<AccountQuota[]> {
     // Two requests at a time, including across accounts. No background polling.
-    const rows = this.core.accounts.list();
+    const rows = [...this.core.accounts.list(), cliAccount];
     const result: AccountQuota[] = [];
     for (let i = 0; i < rows.length; i += 2) result.push(...await Promise.all(rows.slice(i, i + 2).map((account) => this.one(account, refresh))));
     return result;
@@ -158,12 +161,12 @@ export class QuotaStore {
     try { return await running; } finally { this.pending.delete(account.id); }
   }
   async configure(accountId: string, enabled: boolean): Promise<AccountQuota[]> {
-    this.core.accounts.require(accountId);
+    if (accountId !== ANTIGRAVITY_QUOTA_ID) this.core.accounts.require(accountId);
     if (typeof enabled !== 'boolean') throw invalidParams('quotas.configure enabled must be a boolean');
     const next = { ...object(this.core.journal.getSetting('quota-accounts')), [accountId]: enabled };
     this.core.journal.append({ type: 'quotas.configured', threadId: null, version: 1, payload: { accountId, enabled } }, () => this.core.journal.setSetting('quota-accounts', next));
     this.invalidate();
-    const result = this.core.accounts.list().map((account) => this.base(account));
+    const result = [...this.core.accounts.list(), cliAccount].map((account) => this.base(account));
     this.core.bus.emit('quotas.updated', result);
     return result;
   }

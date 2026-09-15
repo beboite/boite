@@ -18,7 +18,7 @@ test('queued prompts keep their thread, and browser project and account actions 
     const a = await client.call('threads.create', { projectId: project.id, providerId: 'echo', accountId: account.id, title: 'Thread A' });
     const b = await client.call('threads.create', { projectId: project.id, providerId: 'echo', accountId: account.id, title: 'Thread B' });
     page = await BrowserPage.launch({ url: pairingUrlOf(core) });
-    await page.waitFor('document.querySelector("[data-testid=status-connection]")?.textContent.trim() === "Connected"');
+    await page.waitFor('document.querySelector("[data-testid=status-connection]")?.dataset.state === "ready"');
     await page.click(`[data-thread-id="${a.id}"]`);
     await page.waitFor('document.querySelector("[data-testid=thread-title]")?.textContent.trim() === "Thread A"');
     await page.type(selector('composer-input'), 'hold here [permission]');

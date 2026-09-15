@@ -13,7 +13,7 @@ import type {
   Usage,
 } from '@boite/contracts';
 
-export const SCHEMA_VERSION = 9;
+export const SCHEMA_VERSION = 10;
 const DELTA_WINDOW_MS = 16;
 
 /** What `listMessagePage` hands back: the page itself and the cursor for what is behind it. */
@@ -45,6 +45,7 @@ interface ProjectRow {
 }
 
 interface ThreadRow {
+  last_user_message_at?: number | null;
   id: string;
   project_id: string;
   title: string;
@@ -53,6 +54,7 @@ interface ThreadRow {
   account_id: string;
   model: string | null;
   effort: string | null;
+  speed: string | null;
   cwd: string;
   branch: string | null;
   permission_mode: string;
@@ -183,6 +185,7 @@ CREATE TABLE IF NOT EXISTS messages (
   created_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS messages_by_thread ON messages (thread_id);
+CREATE INDEX IF NOT EXISTS messages_user_time ON messages (thread_id, created_at DESC) WHERE role = 'user';
 
 CREATE TABLE IF NOT EXISTS processes (
   thread_id TEXT NOT NULL,
@@ -304,6 +307,7 @@ function migrate(db: Database): void {
     })();
     version = 9;
   }
+  if (version < 10) { db.exec('ALTER TABLE threads ADD COLUMN speed TEXT'); version = 10; }
   db.exec(`PRAGMA user_version = ${version}`);
 }
 
@@ -321,6 +325,7 @@ function toProject(row: ProjectRow): Project {
 
 function toThread(row: ThreadRow): ThreadSummary {
   return {
+    lastUserMessageAt: row.last_user_message_at ?? null,
     id: row.id,
     projectId: row.project_id,
     title: row.title,
@@ -329,6 +334,7 @@ function toThread(row: ThreadRow): ThreadSummary {
     accountId: row.account_id,
     model: row.model,
     effort: row.effort,
+    speed: row.speed,
     cwd: row.cwd,
     branch: row.branch,
     permissionMode: row.permission_mode as ThreadSummary['permissionMode'],
@@ -511,8 +517,8 @@ export class Journal {
     this.db
       .query(
         `INSERT OR REPLACE INTO threads
-         (id, project_id, title, title_source, provider_id, account_id, model, effort, cwd, branch, permission_mode, status, unread, archived, pinned, session_id, context, created_at, updated_at, session_generation, selection_version)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (id, project_id, title, title_source, provider_id, account_id, model, effort, cwd, branch, permission_mode, status, unread, archived, pinned, session_id, context, created_at, updated_at, session_generation, selection_version, speed)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         thread.id,
@@ -536,19 +542,20 @@ export class Journal {
         thread.updatedAt,
         thread.sessionGeneration ?? 0,
         thread.selectionVersion ?? 0,
+        thread.speed ?? null,
       );
   }
 
   getThread(threadId: string): ThreadSummary | null {
-    const row = this.db.query('SELECT * FROM threads WHERE id = ?').get(threadId) as ThreadRow | null;
+    const row = this.db.query("SELECT *, (SELECT MAX(created_at) FROM messages WHERE thread_id = threads.id AND role = 'user') AS last_user_message_at FROM threads WHERE id = ?").get(threadId) as ThreadRow | null;
     return row === null ? null : toThread(row);
   }
 
   listThreads(projectId?: string): ThreadSummary[] {
     const rows =
       projectId === undefined
-        ? (this.db.query('SELECT * FROM threads ORDER BY rowid').all() as ThreadRow[])
-        : (this.db.query('SELECT * FROM threads WHERE project_id = ? ORDER BY rowid').all(projectId) as ThreadRow[]);
+        ? (this.db.query("SELECT *, (SELECT MAX(created_at) FROM messages WHERE thread_id = threads.id AND role = 'user') AS last_user_message_at FROM threads ORDER BY rowid").all() as ThreadRow[])
+        : (this.db.query("SELECT *, (SELECT MAX(created_at) FROM messages WHERE thread_id = threads.id AND role = 'user') AS last_user_message_at FROM threads WHERE project_id = ? ORDER BY rowid").all(projectId) as ThreadRow[]);
     return rows.map(toThread);
   }
 

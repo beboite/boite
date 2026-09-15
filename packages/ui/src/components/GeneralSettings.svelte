@@ -5,32 +5,17 @@
   import ModelDefaultsSettings from './ModelDefaultsSettings.svelte';
   import { confirm } from '../lib/confirm.svelte';
   import { ago, time } from '../lib/format';
-  import { readStoredEndpoint } from '../lib/endpoint';
   import { qrSvg } from '../lib/qr';
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
 
   let { store }: { store: Store } = $props();
 
-  const stored = readStoredEndpoint();
   const inShell = window.__TAURI_INTERNALS__ !== undefined;
 
-  let url = $state(
-    untrack(() => stored?.url ?? (store.core ? `http://${store.core.endpoint.host}:${store.core.endpoint.port}` : ''))
-  );
-  let token = $state(stored?.paired ? '' : (stored?.token ?? ''));
-
-  // A link minted by a core somewhere else, pasted here to drive that core.
-  let pairingLink = $state('');
   // Off mints a phone's link; on mints one for another computer of the owner's.
   let ownerLink = $state(false);
 
-  async function pair(event: SubmitEvent) {
-    event.preventDefault();
-    const link = pairingLink.trim();
-    if (link.length === 0) return;
-    if (await store.pairWith(link)) pairingLink = '';
-  }
 
   // The devices list is read on arrival and after every `sessions.updated`;
   // the pairing link is minted on the button, never on its own.
@@ -66,49 +51,23 @@
     if (ok) await store.revokeSession(session.id);
   }
 
-  let projectPath = $state('');
 
   let maxConcurrentTurns = $state(untrack(() => store.settings?.maxConcurrentTurns ?? 6));
   let perAccountConcurrency = $state(untrack(() => store.settings?.perAccountConcurrency ?? 2));
   let warmProcessMinutes = $state(untrack(() => store.settings?.warmProcessMinutes ?? 5));
   let listenOnLan = $state(untrack(() => store.settings?.listenOnLan ?? false));
-  let agentCpuCapPercent = $state(untrack(() => store.settings?.agentCpuCapPercent ?? 75));
-  let threadMemoryCapMb = $state(untrack(() => store.settings?.threadMemoryCapMb ?? 0));
-  let focusGuard = $state(untrack(() => store.settings?.focusGuard ?? true));
-  let muteAgents = $state(untrack(() => store.settings?.muteAgents ?? true));
   let savedAt = $state<number | null>(null);
-
-  // A switch is the whole control, so it writes on its own rather than waiting
-  // behind the scheduler card's Save button.
-  async function saveFocusGuard() {
-    await store.saveSettings({ focusGuard });
-  }
-
-  async function saveMuteAgents() {
-    await store.saveSettings({ muteAgents });
-  }
 
   async function save() {
     await store.saveSettings({
       maxConcurrentTurns,
       perAccountConcurrency,
       warmProcessMinutes,
-      listenOnLan,
-      agentCpuCapPercent,
-      threadMemoryCapMb,
-      focusGuard,
-      muteAgents
+      listenOnLan
     });
     savedAt = Date.now();
   }
 
-  async function addProject(event: SubmitEvent) {
-    event.preventDefault();
-    const path = projectPath.trim();
-    if (path.length === 0) return;
-    const project = await store.addProject(path);
-    if (project) projectPath = '';
-  }
 </script>
 
 <div class="page" data-testid="settings-page">
@@ -120,7 +79,7 @@
 
   <ModelDefaultsSettings {store} />
 
-  <section class="card">
+  <section class="card" id="settings-projects">
     <h2>{strings.settings.projects}</h2>
     {#if store.projects.length > 0}
       <ul class="projects">
@@ -136,27 +95,15 @@
     <!-- `projects.add` is the owner's, so a paired device reads the list and
          is told where the folders come from. -->
     {#if store.owner}
-      <form class="row" onsubmit={addProject} data-testid="settings-add-project">
-        {#if store.pickerAvailable}
-          <button type="button" onclick={() => void store.pickProject()}>{strings.firstRun.pick}</button>
-        {/if}
-        <input
-          bind:value={projectPath}
-          placeholder={strings.firstRun.pathPlaceholder}
-          data-testid="settings-project-path"
-          class="mono grow"
-          spellcheck="false"
-        />
-        <button type="submit" class="primary" data-testid="settings-project-add" disabled={projectPath.trim().length === 0}>
-          {strings.firstRun.add}
-        </button>
-      </form>
+      <div data-testid="settings-add-project">
+        <button type="button" data-testid="settings-project-add" onclick={() => (store.projectPickerOpen = true)}>{strings.firstRun.pick}</button>
+      </div>
     {:else}
       <p class="subtle hint">{strings.settings.projectsDevice}</p>
     {/if}
   </section>
 
-  <section class="card">
+  <section class="card" id="settings-background">
     <h2>{strings.settings.background}</h2>
     <label class="switch-row">
       <span class="text">
@@ -171,119 +118,17 @@
         onchange={(event) => void store.setNotifications(event.currentTarget.checked)}
       />
     </label>
-    <!-- Both write `settings.set`, and both are about the machine the agents
-         run on, which is never the device reading this. -->
-    {#if store.owner}
-      <label class="switch-row">
-        <span class="text">
-          {strings.settings.focusGuard}
-          <span class="hint">{strings.settings.focusGuardHint}</span>
-        </span>
-        <input
-          type="checkbox"
-          role="switch"
-          data-testid="setting-focus-guard"
-          bind:checked={focusGuard}
-          onchange={() => void saveFocusGuard()}
-        />
-      </label>
-      <label class="switch-row">
-        <span class="text">
-          {strings.settings.muteAgents}
-          <span class="hint">{strings.settings.muteAgentsHint}</span>
-        </span>
-        <input
-          type="checkbox"
-          role="switch"
-          data-testid="setting-mute-agents"
-          bind:checked={muteAgents}
-          onchange={() => void saveMuteAgents()}
-        />
-      </label>
-    {/if}
   </section>
 
-  <section class="card">
-    <h2>{strings.settings.connection}</h2>
-    {#if store.endpointUrl}
-      <p class="subtle hint" data-testid="settings-target">
-        {store.localCore ? strings.settings.localCore : fill(strings.settings.coreAt, { url: store.endpointUrl })}
-      </p>
-    {/if}
-    {#if store.environments.length > 0}
-      <h3>{strings.settings.environments}</h3>
-      <p class="subtle hint">{strings.settings.environmentsHint}</p>
-      <ul class="projects" data-testid="settings-envs">
-        {#each store.environments as env (env.url)}
-          <li>
-            <span class="name">{env.label}</span>
-            <span class="mono subtle path" title={env.url}>{env.url}</span>
-            {#if store.endpointUrl === env.url}
-              <span class="subtle" data-testid="settings-env-current">{strings.settings.envCurrent}</span>
-            {:else}
-              <button
-                type="button"
-                data-testid="settings-env-switch"
-                onclick={() => void store.switchEnvironment(env.url)}
-              >
-                {strings.settings.envSwitch}
-              </button>
-            {/if}
-            <button
-              type="button"
-              class="ghost small"
-              data-testid="settings-env-forget"
-              onclick={() => void store.forgetEnvironment(env.url)}
-            >
-              {strings.settings.envForget}
-            </button>
-          </li>
-        {/each}
-      </ul>
-    {/if}
-    <form class="row" onsubmit={pair} data-testid="settings-pair-form">
-      <input
-        bind:value={pairingLink}
-        aria-label={strings.settings.pairingLink}
-        placeholder={strings.settings.pairingLinkPlaceholder}
-        data-testid="settings-pairing-link"
-        class="mono grow"
-        spellcheck="false"
-        autocomplete="off"
-      />
-      <button type="submit" class="primary" data-testid="settings-pair" disabled={pairingLink.trim().length === 0}>
-        {strings.settings.pair}
-      </button>
-    </form>
-    <p class="subtle hint below">{strings.settings.pairHint}</p>
-    {#if inShell && store.paired}
-      <div class="actions">
-        <button type="button" data-testid="settings-use-local" onclick={() => void store.useLocalCore()}>
-          {strings.settings.useLocal}
-        </button>
-        <span class="subtle small-hint">{strings.settings.useLocalHint}</span>
-      </div>
-    {/if}
-    <h3>{strings.settings.manual}</h3>
-    <div class="grid">
-      <label>
-        <span>{strings.settings.coreUrl}</span>
-        <input bind:value={url} data-testid="settings-core-url" placeholder="http://127.0.0.1:8777" class="mono" />
-      </label>
-      <label>
-        <span>{strings.settings.token}</span>
-        <input bind:value={token} type="password" autocomplete="off" />
-      </label>
-    </div>
-    <div class="actions">
-      <button type="button" class="primary" disabled={url.trim().length === 0} onclick={() => void store.connectTo(url.trim(), token)}>
-        {strings.settings.connect}
-      </button>
-      <span class="muted">{strings.connection[store.connection]}</span>
-    </div>
+  <section class="card" id="settings-machines">
+    <h2>{strings.machines.heading}</h2>
+    <p class="subtle hint">{strings.machines.intro}</p>
+    <button data-testid="settings-machines" onclick={() => store.showSettings('machines')}>
+      {strings.machines.heading}
+    </button>
   </section>
 
-  <section class="card" data-testid="pairing-card">
+  <section class="card" id="settings-devices" data-testid="pairing-card">
     <h2>{strings.settings.pairing.heading}</h2>
     {#if store.principal === 'owner'}
       <p class="subtle hint">{strings.settings.pairing.intro}</p>
@@ -359,7 +204,7 @@
        `listenOnLan` decides whether the phone can reach the core at all. The
        whole card is the owner's machine, so the device does not see it. -->
   {#if store.owner}
-    <section class="card">
+    <section class="card" id="settings-scheduler">
       <h2>{strings.settings.scheduler}</h2>
       <div class="grid">
         <label>
@@ -373,14 +218,6 @@
         <label>
           <span>{strings.settings.warmProcessMinutes}</span>
           <input type="number" min="0" max="120" bind:value={warmProcessMinutes} />
-        </label>
-        <label>
-          <span>{strings.settings.agentCpuCapPercent}</span>
-          <input type="number" min="0" max="100" bind:value={agentCpuCapPercent} />
-        </label>
-        <label>
-          <span>{strings.settings.threadMemoryCapMb}</span>
-          <input type="number" min="0" max="65536" bind:value={threadMemoryCapMb} />
         </label>
       </div>
       <label class="switch-row">
@@ -399,7 +236,7 @@
     </section>
   {/if}
 
-  <section class="card">
+  <section class="card" id="settings-core">
     <h2>{strings.settings.core}</h2>
     {#if store.core}
       <dl>
@@ -440,13 +277,6 @@
     margin: 0 0 12px;
   }
 
-  .hint.below {
-    margin: 6px 0 0;
-  }
-
-  .small-hint {
-    font-size: var(--text-sm);
-  }
 
   .projects {
     list-style: none;
@@ -476,14 +306,7 @@
     font-size: var(--text-sm);
   }
 
-  .grow {
-    flex: 1;
-    min-width: 0;
-  }
 
-  form button {
-    flex: none;
-  }
 
   .switch-row {
     display: flex;

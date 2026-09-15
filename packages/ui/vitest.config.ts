@@ -12,6 +12,7 @@ export default defineConfig({
   resolve: { conditions: ['browser'] },
   test: {
     environment: 'jsdom',
+    setupFiles: ['./test-setup.ts'],
     include: ['src/**/*.test.ts'],
     globals: false,
     /* lucide ships .svelte sources; inlined so the plugin above compiles them too */

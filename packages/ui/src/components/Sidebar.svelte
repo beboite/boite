@@ -1,430 +1,265 @@
 <script lang="ts">
-  import { ChevronRight, Ellipsis, Pin, Plus, Search, Settings } from '@lucide/svelte';
-  import type { Project, ProjectId, ThreadId, ThreadSummary } from '@boite/contracts';
-  import { focusOnMount, riseOnce } from '../lib/actions';
+  import { ChevronRight, Ellipsis, Folder, List, Plus, Search, Settings } from '@lucide/svelte';
+  import type { Project } from '@boite/contracts';
+  import type { Store } from '../lib/store.svelte';
+  import { workspace, type Machine } from '../lib/workspace.svelte';
   import { confirm } from '../lib/confirm.svelte';
-  import { Closing } from '../lib/closing.svelte';
   import { contextMenu } from '../lib/context-menu.svelte';
   import { experimentOn } from '../lib/experiments.svelte';
-  import { ago, tokens } from '../lib/format';
-  import { separator, type MenuItem } from '../lib/menu';
+  import { tokens } from '../lib/format';
+  import { separator } from '../lib/menu';
   import { clampSidebar, SIDEBAR_DEFAULT } from '../lib/prefs';
   import { fill, strings } from '../lib/strings';
-  import type { Store } from '../lib/store.svelte';
-  import BoiteMark from './BoiteMark.svelte';
-  import LoadGauge from './LoadGauge.svelte';
-  import StatusMark from './StatusMark.svelte';
-  import ProjectForm from './ProjectForm.svelte';
-
+  import MachineStatus from './MachineStatus.svelte';
+  import ThreadCard from './ThreadCard.svelte';
+  import MachineIcon from './MachineIcon.svelte';
   let { store }: { store: Store } = $props();
-
-  let searchBox = $state<HTMLInputElement | undefined>(undefined);
-  let renaming = $state<ThreadId | null>(null);
-  let renameText = $state('');
+  let searchBox = $state<HTMLInputElement>();
+  let projectButton = $state<HTMLButtonElement>();
   let now = $state(Date.now());
-  const projectForm = new Closing();
-  let projectButton = $state<HTMLButtonElement | undefined>(undefined);
-
-  function addProject() {
-    if (store.pickerAvailable) void store.pickProject();
-    else projectForm.toggle();
-  }
-
-  function cancelProject() {
-    projectForm.hide();
-    projectButton?.focus();
-  }
-
-  // Each list keeps its own set: a row rises the first time it is drawn and
-  // never again, whatever a status tick or a reorder does to the node.
-  const riseSection = riseOnce();
-  const riseThread = riseOnce();
-
+  let filter = $state<string | null>(null);
+  let machines = $derived(
+    workspace.machines.length ? workspace.machines : [{ id: 'local', label: strings.machines.local, store }]
+  );
+  let visible = $derived(machines.filter((m) => filter === null || m.id === filter));
+  let needle = $derived(store.search.trim().toLowerCase());
+  let groups = $derived(visible.flatMap((machine) => machine.store.projects.map((project) => ({ machine, project }))));
+  let recent = $derived(
+    groups
+      .flatMap(({ machine, project }) =>
+        machine.store
+          .threadsOf(project.id)
+          .filter((thread) => `${thread.title} ${project.name} ${machine.label}`.toLowerCase().includes(needle))
+          .map((thread) => ({ machine, project, thread }))
+      )
+      .sort(
+        (a, b) =>
+          (b.thread.lastUserMessageAt ?? b.thread.createdAt) - (a.thread.lastUserMessageAt ?? a.thread.createdAt)
+      )
+  );
+  let usageToday = $derived(store.usage ? store.usage.total.inputTokens + store.usage.total.outputTokens : 0);
+  let target = $derived(store.openProject ?? store.projects[0]);
+  let newLabel = $derived(
+    target ? fill(strings.sidebar.newThreadIn, { project: target.name }) : strings.sidebar.newThread
+  );
   $effect(() => {
     const timer = setInterval(() => (now = Date.now()), 30_000);
     return () => clearInterval(timer);
   });
-
-  export function focusSearch(): void {
+  export function focusSearch() {
     searchBox?.focus();
     searchBox?.select();
   }
-
-  function initial(name: string): string {
-    return (name.trim()[0] ?? '?').toUpperCase();
+  function addProject() {
+    store.projectPickerOpen = true;
   }
-
-  function isOpen(thread: ThreadSummary): boolean {
-    return store.openThread?.id === thread.id;
-  }
-
-  function beginRename(thread: ThreadSummary) {
-    renaming = thread.id;
-    renameText = thread.title;
-  }
-
-  async function commitRename() {
-    const id = renaming;
-    renaming = null;
-    if (id !== null) await store.rename(id, renameText);
-  }
-
-  function onRenameKey(event: KeyboardEvent) {
-    if (event.key === 'Enter') {
-      event.preventDefault();
-      void commitRename();
-    } else if (event.key === 'Escape') {
-      renaming = null;
-    }
-  }
-
-  // ---------------------------------------------------------------------------
-  // Menus: the right click and the hover button open the same one.
-  // ---------------------------------------------------------------------------
-
-  function threadItems(thread: ThreadSummary): MenuItem[] {
-    return [
-      { id: 'open', label: strings.sidebar.open, disabled: isOpen(thread) },
-      { id: 'rename', label: strings.sidebar.rename },
-      {
-        id: 'retitle',
-        label: store.retitling.includes(thread.id) ? strings.sidebar.retitling : strings.sidebar.retitle,
-        disabled: store.retitling.includes(thread.id)
-      },
-      { id: 'pin', label: thread.pinned ? strings.sidebar.unpin : strings.sidebar.pin },
-      separator(),
-      { id: 'archive', label: strings.sidebar.archive, danger: true }
-    ];
-  }
-
-  function openThreadMenu(event: MouseEvent, thread: ThreadSummary) {
-    contextMenu.open(event, threadItems(thread), (action) => {
-      if (action === 'open') void store.open(thread.id);
-      else if (action === 'rename') beginRename(thread);
-      else if (action === 'retitle') void store.retitle(thread.id);
-      else if (action === 'pin') void store.pin(thread.id, !thread.pinned);
-      else if (action === 'archive') void store.archive(thread.id);
-    });
-  }
-
-  function projectItems(project: Project): MenuItem[] {
-    // Reading a transcript is `imports.list` and dropping a folder is
-    // `projects.remove`, neither of which a paired device may call. Both come
-    // off the menu together with the rule that separated them, so a phone gets
-    // a two row menu rather than a row that answers with a red toast.
-    if (!store.owner) {
-      return [
+  function projectMenu(event: MouseEvent, machine: Machine, project: Project) {
+    const owner = machine.store;
+    contextMenu.open(
+      event,
+      [
         { id: 'new', label: fill(strings.sidebar.newThreadIn, { project: project.name }) },
-        { id: 'copy', label: strings.sidebar.copyPath, hint: project.path }
-      ];
-    }
-    return [
-      { id: 'new', label: fill(strings.sidebar.newThreadIn, { project: project.name }) },
-      { id: 'copy', label: strings.sidebar.copyPath, hint: project.path },
-      ...(experimentOn('session-import') ? [{ id: 'import', label: strings.sidebar.importSession }] : []),
-      separator(),
-      { id: 'remove', label: strings.sidebar.removeProject, danger: true }
-    ];
+        { id: 'copy', label: strings.sidebar.copyPath, hint: project.path },
+        ...(owner.owner
+          ? [
+              ...(experimentOn('session-import') ? [{ id: 'import', label: strings.sidebar.importSession }] : []),
+              separator(),
+              { id: 'remove', label: strings.sidebar.removeProject, danger: true }
+            ]
+          : [])
+      ],
+      async (action) => {
+        if (action === 'new') await workspace.select(owner, undefined, project.id);
+        if (action === 'copy') await owner.copy(project.path);
+        if (action === 'import') {
+          await workspace.select(owner);
+          await owner.openImports(project.id);
+        }
+        if (
+          action === 'remove' &&
+          (await confirm.ask({
+            title: fill(strings.sidebar.removeProjectTitle, { project: project.name }),
+            body: strings.sidebar.removeProjectBody,
+            confirmLabel: strings.sidebar.remove,
+            cancelLabel: strings.common.cancel,
+            danger: true
+          }))
+        )
+          await owner.removeProject(project.id);
+      }
+    );
   }
-
-  function openProjectMenu(event: MouseEvent, project: Project) {
-    contextMenu.open(event, projectItems(project), (action) => {
-      if (action === 'new') store.startDraft(project.id);
-      else if (action === 'copy') void store.copy(project.path);
-      else if (action === 'import') void store.openImports(project.id);
-      else if (action === 'remove') void removeProject(project);
-    });
-  }
-
-  async function removeProject(project: Project) {
-    const ok = await confirm.ask({
-      title: fill(strings.sidebar.removeProjectTitle, { project: project.name }),
-      body: strings.sidebar.removeProjectBody,
-      confirmLabel: strings.sidebar.remove,
-      cancelLabel: strings.common.cancel,
-      danger: true
-    });
-    if (ok) await store.removeProject(project.id);
-  }
-
-  // ---------------------------------------------------------------------------
-  // Width: dragged from the right edge, saved on release, double-click resets.
-  // ---------------------------------------------------------------------------
-
   function startResize(event: PointerEvent) {
     if (event.button !== 0) return;
     event.preventDefault();
     const handle = event.currentTarget as HTMLElement;
+    const start = event.clientX,
+      width = store.sidebarWidth;
     handle.setPointerCapture(event.pointerId);
-    document.body.style.cursor = 'col-resize';
-    const move = (ev: PointerEvent) => {
-      store.sidebarWidth = clampSidebar(ev.clientX);
-    };
-    const stop = () => {
+    const move = (e: PointerEvent) => (store.sidebarWidth = clampSidebar(width + e.clientX - start));
+    const end = () => {
       handle.removeEventListener('pointermove', move);
-      handle.removeEventListener('pointerup', stop);
-      handle.removeEventListener('pointercancel', stop);
-      document.body.style.cursor = '';
+      handle.removeEventListener('pointerup', end);
+      handle.removeEventListener('pointercancel', end);
       store.setSidebarWidth(store.sidebarWidth);
     };
     handle.addEventListener('pointermove', move);
-    handle.addEventListener('pointerup', stop);
-    handle.addEventListener('pointercancel', stop);
+    handle.addEventListener('pointerup', end);
+    handle.addEventListener('pointercancel', end);
   }
-
-  function onResizeKey(event: KeyboardEvent) {
-    if (event.key === 'ArrowLeft') store.setSidebarWidth(store.sidebarWidth - 16);
-    else if (event.key === 'ArrowRight') store.setSidebarWidth(store.sidebarWidth + 16);
-    else if (event.key === 'Home') store.setSidebarWidth(SIDEBAR_DEFAULT);
-    else return;
-    event.preventDefault();
-  }
-
-  let usageToday = $derived(store.usage ? store.usage.total.inputTokens + store.usage.total.outputTokens : null);
-
-  // The one plus left in the sidebar says which project it will open the draft
-  // in: the same fallback `startDraft` uses, the open project then the first.
-  let newThreadTarget = $derived(store.openProject ?? store.projects[0] ?? null);
-  let newThreadLabel = $derived(
-    newThreadTarget
-      ? fill(strings.sidebar.newThreadIn, { project: newThreadTarget.name })
-      : strings.sidebar.newThread
-  );
 </script>
 
 <aside
   class="sidebar"
   class:open={store.sidebarOpen}
   class:collapsed={store.sidebarCollapsed}
-  style="--sidebar-width: {store.sidebarWidth}px"
+  style:--sidebar-width={`${store.sidebarWidth}px`}
   data-testid="sidebar"
 >
-  <!-- With no project there is nothing to search and nothing to start a thread
-       in, so the row is not there at all. -->
-  {#if store.projects.length > 0}
+  {#if groups.length > 0}
     <div class="top">
-      <label class="search">
-        <Search size={16} strokeWidth={1.75} />
-        <input
+      <label class="search"
+        ><Search size={15} /><input
           bind:this={searchBox}
           bind:value={store.search}
           placeholder={strings.sidebar.search}
           aria-label={strings.sidebar.search}
           data-testid="sidebar-search"
           spellcheck="false"
-        />
-      </label>
-      <button
-        type="button"
-        class="icon"
-        title="{newThreadLabel}{store.keyHint('new-thread')}"
-        aria-label={newThreadLabel}
-        data-testid="new-thread"
-        onclick={() => store.startDraft()}
+        /></label
       >
-        <Plus size={16} strokeWidth={1.75} />
-      </button>
+      <button
+        class="icon"
+        title={`${newLabel}${store.keyHint('new-thread')}`}
+        aria-label={newLabel}
+        data-testid="new-thread"
+        onclick={() => store.startDraft()}><Plus size={16} /></button
+      >
     </div>
   {/if}
-
-  <div class="scroll">
-    {#if store.projects.length === 0}
-      <p class="empty">{strings.sidebar.noProjects}</p>
-    {/if}
-
-    {#each store.projects as project (project.id)}
-      {@const threads = store.sortedThreadsOf(project.id)}
-      {@const collapsed = store.isCollapsed(project.id)}
-      {@const draftHere = store.draft?.projectId === project.id}
-      <section class="project" data-testid="project" data-project-id={project.id} use:riseSection={project.id}>
-        <!-- svelte-ignore a11y_no_static_element_interactions -->
-        <div class="head" oncontextmenu={(event) => openProjectMenu(event, project)}>
-          <button
-            type="button"
-            class="ghost toggle"
-            data-testid="project-row"
-            data-project-id={project.id}
-            aria-expanded={!collapsed}
-            title={project.path}
-            onclick={() => store.toggleProject(project.id)}
-          >
-            <span class="tile">{initial(project.name)}</span>
-            <span class="name">{project.name}</span>
-            <span class="caret" class:collapsed><ChevronRight size={13} strokeWidth={2} /></span>
-          </button>
-          <button
-            type="button"
-            class="ghost small icon hover-only"
-            title={strings.sidebar.projectMenu}
-            aria-label={strings.sidebar.projectMenu}
-            data-testid="project-menu"
-            onclick={(event) => openProjectMenu(event, project)}
-          >
-            <Ellipsis size={16} strokeWidth={1.75} />
-          </button>
-        </div>
-
-        <!-- Folding a project is a height move, not a disappearance: the list
-             stays here at zero height and the rows track carries it both ways. -->
-        <div class="fold" class:open={!collapsed} inert={collapsed}>
-          <ul>
-            {#if draftHere}
-              <li>
-                <div class="thread draft open">
-                  <button
-                    type="button"
-                    class="ghost row"
-                    data-testid="draft-row"
-                    title={strings.sidebar.draft}
-                    onclick={() => store.startDraft(project.id)}
-                  >
-                    <span class="mark-slot"><span class="draft-mark"></span></span>
-                    <span class="title">{strings.sidebar.draft}</span>
-                  </button>
-                </div>
-              </li>
-            {/if}
-            {#each threads as thread (thread.id)}
-              <li use:riseThread={thread.id}>
-                {#if renaming === thread.id}
-                  <input
-                    class="rename"
-                    bind:value={renameText}
-                    onkeydown={onRenameKey}
-                    onblur={() => void commitRename()}
-                    data-testid="thread-rename"
-                    use:focusOnMount
-                  />
-                {:else}
-                  <!-- svelte-ignore a11y_no_static_element_interactions -->
-                  <div
-                    class="thread"
-                    class:open={isOpen(thread)}
-                    class:unread={thread.unread}
-                    class:pinned={thread.pinned}
-                    oncontextmenu={(event) => openThreadMenu(event, thread)}
-                  >
-                    <button
-                      type="button"
-                      class="ghost row"
-                      data-testid="thread-row"
-                      data-thread-id={thread.id}
-                      data-status={thread.status}
-                      data-pinned={thread.pinned ? 'true' : undefined}
-                      title={thread.title}
-                      onclick={() => void store.open(thread.id)}
-                      ondblclick={() => beginRename(thread)}
-                    >
-                      <span class="mark-slot"><StatusMark status={thread.status} unread={thread.unread} /></span>
-                      <span class="title">{thread.title}</span>
-                      {#if thread.load}
-                        <LoadGauge load={thread.load} />
-                      {/if}
-                      {#if thread.pinned}
-                        <span class="pin" title={strings.sidebar.pinned} aria-label={strings.sidebar.pinned}>
-                          <Pin size={12} strokeWidth={1.75} />
-                        </span>
-                      {/if}
-                      <span class="when">{ago(thread.updatedAt, now)}</span>
-                    </button>
-                    <button
-                      type="button"
-                      class="ghost small icon hover-only actions"
-                      title={strings.sidebar.threadMenu}
-                      aria-label={strings.sidebar.threadMenu}
-                      data-testid="thread-menu"
-                      onclick={(event) => openThreadMenu(event, thread)}
-                    >
-                      <Ellipsis size={16} strokeWidth={1.75} />
-                    </button>
-                  </div>
-                {/if}
-              </li>
-            {/each}
-            {#if threads.length === 0 && !draftHere}
-              <li class="none subtle">{store.search.trim() ? strings.sidebar.noMatch : strings.sidebar.noThreads}</li>
-            {/if}
-          </ul>
-        </div>
-      </section>
-    {/each}
-  </div>
-
-  <!-- The folder comes from the machine the core runs on, so `projects.add` is
-       the owner's and the device never sees the button or its form. -->
-  {#if store.projects.length > 0 && store.owner}
+  <div class="views" aria-label={strings.sidebar.search}>
     <button
-      type="button"
-      class="ghost small add-project"
-      data-testid="add-project"
-      bind:this={projectButton}
-      onclick={addProject}
+      class="ghost small"
+      class:chosen={workspace.view === 'projects'}
+      aria-pressed={workspace.view === 'projects'}
+      data-testid="view-projects"
+      onclick={() => workspace.setView('projects')}><Folder size={13} />{strings.machines.projects}</button
     >
-      <BoiteMark size={13} />
-      {strings.sidebar.addProject}
-    </button>
-    {#if projectForm.shown}
-      <div class="project-form" class:closing={projectForm.closing} use:projectForm.attach onanimationend={projectForm.end}>
-        <ProjectForm {store} focus onadded={() => projectForm.hide()} oncancel={cancelProject} />
-      </div>
+    <button
+      class="ghost small"
+      class:chosen={workspace.view === 'recent'}
+      aria-pressed={workspace.view === 'recent'}
+      title={strings.machines.recentHint}
+      data-testid="view-recent"
+      onclick={() => workspace.setView('recent')}><List size={14} />{strings.machines.recent}</button
+    >
+  </div>
+  <div class="scroll">
+    {#if groups.length === 0}<p class="empty">{strings.sidebar.noProjects}</p>{/if}
+    {#if workspace.view === 'recent'}
+      {#if store.draft}<button
+          class="ghost draft"
+          data-testid="draft-row"
+          onclick={() => store.startDraft(store.draft?.projectId)}>{strings.sidebar.draft}</button
+        >{/if}
+      {#each recent as entry (`${entry.machine.id}:${entry.thread.id}`)}<ThreadCard {...entry} {now} />{/each}
+      {#if groups.length > 0 && recent.length === 0}<p class="none">
+          {needle ? strings.sidebar.noMatch : strings.sidebar.noThreads}
+        </p>{/if}
+    {:else}
+      {#each groups as { machine, project } (`${machine.id}:${project.id}`)}
+        {@const owner = machine.store}
+        {@const threads = owner
+          .threadsOf(project.id)
+          .filter((t) => `${t.title} ${project.name} ${machine.label}`.toLowerCase().includes(needle))
+          .sort(
+            (a, b) =>
+              Number(b.pinned) - Number(a.pinned) ||
+              (b.lastUserMessageAt ?? b.createdAt) - (a.lastUserMessageAt ?? a.createdAt)
+          )}
+        {@const collapsed = owner.isCollapsed(project.id)}
+        {@const draftHere = store === owner && owner.draft?.projectId === project.id}
+        <section class="project" data-testid="project" data-project-id={project.id} data-machine-id={machine.id}>
+          <!-- svelte-ignore a11y_no_static_element_interactions -->
+          <div class="head" oncontextmenu={(e) => projectMenu(e, machine, project)}>
+            <button
+              class="ghost toggle"
+              data-testid="project-row"
+              data-project-id={project.id}
+              aria-expanded={!collapsed}
+              title={`${project.path} · ${machine.label}`}
+              onclick={() => owner.toggleProject(project.id)}
+            >
+              <span class="caret" class:collapsed><ChevronRight size={12} /></span><span class="tile"
+                >{project.name.slice(0, 1).toUpperCase()}</span
+              ><span class="name">{project.name}</span><span class="host" title={machine.label}
+                ><MachineIcon icon={machine.icon} os={owner.core?.os} /></span
+              >
+            </button>
+            <button
+              class="ghost small icon project-actions"
+              data-testid="project-menu"
+              title={strings.sidebar.projectMenu}
+              aria-label={strings.sidebar.projectMenu}
+              onclick={(e) => projectMenu(e, machine, project)}><Ellipsis size={15} /></button
+            >
+          </div>
+          <div class="fold" class:expanded={!collapsed} inert={collapsed}>
+            <div class="rows">
+              {#if draftHere}<button
+                  class="ghost draft"
+                  data-testid="draft-row"
+                  onclick={() => owner.startDraft(project.id)}>{strings.sidebar.draft}</button
+                >{/if}
+              {#each threads as thread (thread.id)}<ThreadCard {machine} {project} {thread} {now} />{/each}
+              {#if threads.length === 0 && !draftHere}<p class="none">
+                  {needle ? strings.sidebar.noMatch : strings.sidebar.noThreads}
+                </p>{/if}
+            </div>
+          </div>
+        </section>
+      {/each}
     {/if}
+  </div>
+  {#if store.projects.length > 0 && store.owner}
+    <button class="ghost small add-project" data-testid="add-project" bind:this={projectButton} onclick={addProject}
+      ><Plus size={13} />{strings.sidebar.addProject}</button
+    >
   {/if}
-
   <div class="foot">
-    <span class="conn {store.connection}" data-testid="status-connection">
-      <span class="dot"></span>
-      {strings.connection[store.connection]}
-    </span>
-    {#if usageToday !== null && usageToday > 0}
-      <button
-        type="button"
+    <MachineStatus {store} {filter} onfilter={id => (filter = id)} />
+    {#if usageToday > 0}<button
         class="chip usage"
         title={strings.usage.heading}
         data-testid="usage-pill"
-        onclick={() => store.showSettings('usage')}
-      >
-        {tokens(usageToday)}
-        {strings.units.tokens}
-      </button>
-    {/if}
+        onclick={() => store.showSettings('usage')}>{tokens(usageToday)} {strings.units.tokens}</button
+      >{/if}
     <button
-      type="button"
       class="ghost icon"
-      title="{strings.sidebar.settings}{store.keyHint('settings')}"
+      title={`${strings.sidebar.settings}${store.keyHint('settings')}`}
       aria-label={strings.sidebar.settings}
       data-testid="nav-settings"
-      onclick={() => store.showSettings()}
+      onclick={() => store.showSettings()}><Settings size={16} /></button
     >
-      <Settings size={16} strokeWidth={1.75} />
-    </button>
   </div>
-
   <button
-    type="button"
     class="resize"
     aria-label={strings.sidebar.resize}
     title={strings.sidebar.resize}
     data-testid="sidebar-resize"
     onpointerdown={startResize}
     ondblclick={() => store.setSidebarWidth(SIDEBAR_DEFAULT)}
-    onkeydown={onResizeKey}
+    onkeydown={(e) => {
+      if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+        e.preventDefault();
+        store.setSidebarWidth(store.sidebarWidth + (e.key === 'ArrowLeft' ? -16 : 16));
+      }
+      if (e.key === 'Home') store.setSidebarWidth(SIDEBAR_DEFAULT);
+    }}
   ></button>
 </aside>
 
 <style>
-  .project-form {
-    padding: 0 10px 10px;
-    animation: rise var(--dur-2) var(--ease-out-quint);
-  }
-
-  .project-form.closing {
-    animation: project-form-out var(--dur-2) var(--ease-out-quint);
-  }
-
-  @keyframes project-form-out {
-    to { opacity: 0; transform: translateY(4px); }
-  }
-
   .sidebar {
     position: relative;
     width: var(--sidebar-width);
@@ -436,6 +271,159 @@
     border-right: 1px solid var(--color-border);
   }
 
+  .top {
+    display: flex;
+    gap: 6px;
+    padding: 8px 10px;
+  }
+  .search {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    height: var(--control);
+    padding: 0 8px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    background: var(--color-surface-2);
+    color: var(--color-subtle);
+  }
+  .search:focus-within {
+    border-color: var(--color-edge);
+  }
+  .search input {
+    flex: 1;
+    min-width: 0;
+    height: 100%;
+    padding: 0;
+    border: none;
+    background: transparent;
+    font-size: var(--text-sm);
+  }
+  .search input:focus {
+    outline: none;
+  }
+  .views {
+    display: flex;
+    gap: 3px;
+    padding: 2px 10px 10px;
+    border-bottom: 1px solid var(--color-border);
+  }
+  .views button {
+    flex: 1;
+    color: var(--color-muted-foreground);
+  }
+  .views .chosen {
+    background: var(--color-active);
+    color: var(--color-foreground);
+  }
+  .scroll {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    padding: 8px 6px;
+  }
+  .project {
+    margin-bottom: 12px;
+  }
+  .head {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+  }
+  .toggle {
+    flex: 1;
+    min-width: 0;
+    height: var(--row);
+    padding: 0 4px;
+    justify-content: flex-start;
+    gap: 6px;
+  }
+  .tile {
+    display: grid;
+    place-items: center;
+    width: 20px;
+    height: 20px;
+    flex: none;
+    background: var(--color-surface-3);
+    border-radius: var(--radius-sm);
+    color: var(--color-muted-foreground);
+    font-size: var(--text-xs);
+  }
+  .name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    text-align: left;
+    white-space: nowrap;
+    font-weight: 600;
+  }
+  .host,
+  .caret {
+    display: flex;
+    color: var(--color-subtle);
+  }
+  .caret {
+    transform: rotate(90deg);
+    transition: transform var(--dur-2) var(--ease-out-quint);
+  }
+  .caret.collapsed {
+    transform: none;
+  }
+  .project-actions {
+    opacity: 0;
+  }
+  .head:hover .project-actions,
+  .head:focus-within .project-actions {
+    opacity: 1;
+  }
+  .fold {
+    display: grid;
+    grid-template-rows: 0fr;
+    transition: grid-template-rows var(--dur-3) var(--ease-out-quint);
+  }
+  .fold.expanded {
+    grid-template-rows: 1fr;
+  }
+  .rows {
+    min-height: 0;
+    overflow: hidden;
+  }
+  .draft {
+    width: 100%;
+    min-height: calc(var(--row) + 14px);
+    justify-content: flex-start;
+    padding-left: 28px;
+    background: var(--color-active);
+  }
+  .none {
+    padding: 4px 10px;
+    color: var(--color-subtle);
+    font-size: var(--text-sm);
+  }
+  .foot {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 8px 6px 12px;
+    border-top: 1px solid var(--color-border);
+  }
+  .usage {
+    font-size: var(--text-xs);
+    height: var(--control-sm);
+  }
+  .add-project {
+    margin: 0 8px 6px;
+    justify-content: flex-start;
+  }
+  @keyframes leave {
+    to {
+      opacity: 0;
+      transform: translateY(4px);
+    }
+  }
   .resize {
     position: absolute;
     top: 0;
@@ -449,378 +437,32 @@
     background: transparent;
     cursor: col-resize;
     z-index: 5;
-    transition: background var(--dur-2) var(--ease-out-quint);
   }
-
   .resize:hover,
   .resize:focus-visible {
-    background: color-mix(in srgb, var(--color-foreground) 18%, transparent);
-    outline: none;
+    background: var(--color-edge);
   }
-
-  .resize:active {
-    transform: none;
-    background: color-mix(in srgb, var(--color-foreground) 28%, transparent);
-  }
-
-  .top {
-    display: flex;
-    gap: 6px;
-    padding: 10px 10px 6px;
-  }
-
-  .search {
-    flex: 1;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    height: var(--control);
-    padding: 0 8px;
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-md);
-    background: var(--color-surface-2);
-    color: var(--color-subtle);
-    transition: border-color var(--dur-2) var(--ease-out-quint);
-  }
-
-  .search:focus-within {
-    border-color: var(--color-edge);
-    color: var(--color-muted-foreground);
-  }
-
-  .search input {
-    flex: 1;
-    min-width: 0;
-    height: 100%;
-    padding: 0;
-    border: none;
-    background: transparent;
-    font-size: var(--text-sm);
-  }
-
-  .search input:focus {
-    outline: none;
-  }
-
-  .scroll {
-    flex: 1;
-    min-height: 0;
-    overflow: auto;
-    padding: 4px 6px 8px;
-  }
-
-  .project {
-    margin-bottom: 8px;
-    animation: rise var(--dur-3) var(--ease-out-quint);
-  }
-
-  .head {
-    display: flex;
-    align-items: center;
-    gap: 2px;
-    padding-right: 2px;
-  }
-
-  .toggle {
-    flex: 1;
-    min-width: 0;
-    height: var(--row);
-    padding: 0 6px 0 4px;
-    justify-content: flex-start;
-    gap: 8px;
-    color: var(--color-foreground);
-  }
-
-  .tile {
-    display: grid;
-    place-items: center;
-    width: 20px;
-    height: 20px;
-    border-radius: var(--radius-sm);
-    background: var(--color-surface-3);
-    border: 1px solid var(--color-border);
-    font-size: var(--text-xs);
-    font-weight: 600;
-    color: var(--color-muted-foreground);
-    flex: none;
-  }
-
-  .name {
-    flex: 1;
-    min-width: 0;
-    text-align: left;
-    font-weight: 600;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .caret {
-    display: inline-flex;
-    color: var(--color-subtle);
-    transform: rotate(90deg);
-    transition: transform var(--dur-2) var(--ease-out-quint);
-  }
-
-  .caret.collapsed {
-    transform: none;
-  }
-
-  .hover-only {
-    opacity: 0;
-    transition: opacity var(--dur-2) var(--ease-out-quint);
-  }
-
-  .head:hover .hover-only,
-  .head:focus-within .hover-only,
-  .thread:hover .hover-only,
-  .thread:focus-within .hover-only {
-    opacity: 1;
-  }
-
-  /* The rows track goes 0fr to 1fr, so a project opens to its own height. */
-  .fold {
-    display: grid;
-    grid-template-rows: 0fr;
-    opacity: 0;
-    transition:
-      grid-template-rows var(--dur-3) var(--ease-out-quint),
-      opacity var(--dur-3) var(--ease-out-quint);
-  }
-
-  .fold.open {
-    grid-template-rows: 1fr;
-    opacity: 1;
-  }
-
-  ul {
-    list-style: none;
-    margin: 0;
-    padding: 0 0 0 4px;
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    min-height: 0;
-    overflow: hidden;
-  }
-
-  /* Each row and each section rises once, the first time it is drawn: the
-     `riseOnce` actions above turn the animation off on every later node. */
-  .project li {
-    animation: rise var(--dur-3) var(--ease-out-quint);
-  }
-
-  .thread {
-    position: relative;
-    display: flex;
-    align-items: center;
-    border-radius: var(--radius-md);
-    transition: background var(--dur-2) var(--ease-out-quint);
-  }
-
-  .thread:hover {
-    background: var(--color-hover);
-  }
-
-  .thread.open {
-    background: var(--color-active);
-  }
-
-  .row {
-    flex: 1;
-    min-width: 0;
-    height: var(--row);
-    padding: 0 6px 0 8px;
-    justify-content: flex-start;
-    gap: 8px;
-    color: var(--color-muted-foreground);
-    background: transparent;
-  }
-
-  .row:hover:not(:disabled) {
-    background: transparent;
-  }
-
-  /* A full width row does not shrink under the finger, it fills one step more. */
-  .row:active:not(:disabled) {
-    transform: none;
-    background: color-mix(in srgb, var(--color-surface-3) 85%, var(--color-foreground));
-  }
-
-  .thread.open .row,
-  .thread.unread .row {
-    color: var(--color-foreground);
-  }
-
-  .mark-slot {
-    display: inline-flex;
-    width: 10px;
-    justify-content: center;
-    flex: none;
-  }
-
-  /* An idle title is the row's own colour at rest, not a second muted line. */
-  .title {
-    flex: 1;
-    min-width: 0;
-    text-align: left;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    font-weight: 400;
-    color: var(--color-foreground);
-    opacity: 0.85;
-  }
-
-  .thread.open .title,
-  .thread.unread .title {
-    opacity: 1;
-  }
-
-  .thread.unread .title {
-    font-weight: 600;
-  }
-
-  .when {
-    font-size: var(--text-xs);
-    flex: none;
-    color: var(--color-muted-foreground);
-    font-variant-numeric: tabular-nums;
-    transition: opacity var(--dur-2) var(--ease-out-quint);
-  }
-
-  /* The date fades instead of leaving, so the title never lunges to the right. */
-  .thread:hover .when,
-  .thread:focus-within .when {
-    opacity: 0;
-  }
-
-  /* The pin sits where the time does, in the same quiet colour, and fades with it. */
-  .pin {
-    display: inline-flex;
-    flex: none;
-    color: var(--color-muted-foreground);
-    transition: opacity var(--dur-2) var(--ease-out-quint);
-  }
-
-  .thread:hover .pin,
-  .thread:focus-within .pin {
-    opacity: 0;
-  }
-
-  .actions {
-    position: absolute;
-    right: 4px;
-    top: 50%;
-    transform: translateY(-50%);
-  }
-
-  .draft .row {
-    color: var(--color-muted-foreground);
-  }
-
-  .draft-mark {
-    display: inline-block;
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    border: 1.5px dashed var(--color-muted-foreground);
-  }
-
-  .rename {
-    width: 100%;
-    height: var(--row);
-    font-size: var(--text-base);
-  }
-
-  .none {
-    padding: 4px 10px;
-    font-size: var(--text-sm);
-  }
-
-  .foot {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 6px 8px 6px 12px;
-    border-top: 1px solid var(--color-border);
-  }
-
-  .conn {
-    flex: 1;
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    font-size: var(--text-sm);
-    color: var(--color-muted-foreground);
-  }
-
-  .dot {
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: var(--color-subtle);
-  }
-
-  .conn.ready .dot {
-    background: var(--color-success);
-  }
-
-  .conn.connecting .dot {
-    background: var(--color-live);
-    animation: pulse 1.6s ease-in-out infinite;
-  }
-
-  .conn.closed .dot {
-    background: var(--color-danger);
-  }
-
-  .usage {
-    height: var(--control-sm);
-    font-size: var(--text-xs);
-    font-variant-numeric: tabular-nums;
-    gap: 4px;
-    cursor: pointer;
-    transition:
-      background var(--dur-2) var(--ease-out-quint),
-      color var(--dur-2) var(--ease-out-quint);
-  }
-
-  .usage:hover {
-    background: var(--color-surface-3);
-    color: var(--color-foreground);
-  }
-
-  .add-project {
-    margin: 0 8px 6px;
-    justify-content: flex-start;
-  }
-
   @media (min-width: 721px) {
     .sidebar.collapsed {
       display: none;
     }
   }
-
   @media (max-width: 720px) {
     .sidebar {
       position: fixed;
       inset: 0 auto 0 0;
       z-index: 30;
-      width: min(320px, 88vw);
+      width: min(340px, 90vw);
       transform: translateX(-100%);
       transition: transform var(--dur-3) var(--ease-out-quint);
       box-shadow: var(--shadow-e3);
     }
-
     .sidebar.open {
       transform: none;
     }
-
-    .hover-only {
+    .project-actions {
       opacity: 1;
     }
-
     .resize {
       display: none;
     }

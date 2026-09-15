@@ -92,6 +92,7 @@ test('goal and loop commands share the activity panel with disclosed tasks and r
   await page.waitFor(`document.querySelector('${id('activity-goal')}')`);
   await page.click(`${id('activity-goal')} [aria-label="Pause"]`);
   await page.waitFor(`document.querySelector('${id('activity-goal')}').textContent.includes('Paused')`);
+  await page.waitFor(`!document.querySelector('${id('composer-stop')}')`);
   await page.click(`${id('activity-goal')} [aria-label="Resume"]`);
   await page.waitFor(`document.querySelector('${id('activity-goal')} [aria-label="Pause"]')`);
   await page.click(`${id('activity-goal')} [aria-label="Pause"]`);

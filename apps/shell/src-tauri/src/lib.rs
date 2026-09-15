@@ -877,6 +877,7 @@ fn build_main_window<R: Runtime>(
 /// The window is created hidden and only reaches the screen here, once the
 /// core endpoint resolved, so an empty frame never flashes.
 fn show_main<R: Runtime>(app: &AppHandle<R>) {
+    if let Some(state) = app.try_state::<quota_window::HoverState>() { state.cancel_open(); }
     if let Some(popup) = app.get_webview_window(quota_window::LABEL) {
         let _ = popup.hide();
         let _ = popup.emit("tray://closed", ());
@@ -916,13 +917,10 @@ fn build_tray<R: Runtime>(app: &AppHandle<R>, channel: Channel) -> tauri::Result
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_tray_icon_event(|tray, event| {
-            use tauri::tray::{MouseButton, MouseButtonState, TrayIconEvent};
+            use tauri::tray::{MouseButton, TrayIconEvent};
             match event {
-                TrayIconEvent::Enter { position, .. } => quota_window::enter(tray.app_handle(), position),
+                TrayIconEvent::Enter { .. } => quota_window::enter(tray.app_handle()),
                 TrayIconEvent::Leave { .. } => quota_window::leave(tray.app_handle()),
-                TrayIconEvent::Click { position, button: MouseButton::Left, button_state: MouseButtonState::Up, .. } => {
-                    quota_window::enter(tray.app_handle(), position);
-                }
                 TrayIconEvent::DoubleClick { button: MouseButton::Left, .. } => show_main(tray.app_handle()),
                 _ => {}
             }
