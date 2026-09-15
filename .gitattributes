@@ -2,3 +2,5 @@
 *.png binary
 *.ico binary
 *.icns binary
+*.woff2 binary
+docker/boite-server text eol=lf

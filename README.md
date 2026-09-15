@@ -1,97 +1,85 @@
-# Boite 2
+<h1 align="center">boite</h1>
+<p align="center"><sub>[bwat]</sub></p>
+<p align="center">One place for your coding agents.</p>
 
-Boite 2 is a chat-first manager for coding agents: one conversation per task,
-each agent driven through its own protocol rather than through a terminal. A
-single Bun process, the core, hosts every thread and every agent process, so
-dozens of conversations stay open without a process each and every one of them
-is traced. The desktop shell and a phone on the same network are both clients of
-that core, over an authenticated WebSocket.
+<p align="center">
+  <img src="packages/ui/public/icons/icon-192.png" alt="boite logo" width="96" />
+</p>
 
-The model picker can change providers and accounts within the same conversation.
-The next prompt carries context from the journal into a fresh provider session;
-an already running turn keeps its model. Long histories transfer as bounded
-excerpts. [Model switching](docs/model-switching.md) describes the limits.
+<p align="center">
+  <a href="docs/server.md">Headless server</a> ·
+  <a href="docs/development.md">Build from source</a> ·
+  <a href="docs/README.md">Documentation</a> ·
+  <a href="LICENSE">MIT license</a>
+</p>
 
-## Stack
+boite is an open-source desktop app and self-hosted server for AI coding agents.
+Run Claude Code, Codex, OpenCode, Antigravity, Grok and pi in one chat interface,
+using their own protocols and your existing accounts.
 
-- Bun 1.4.2 for the core, the tests and the benches.
-- Svelte 5.57 and Vite 8.2 for the UI, plain CSS with the design tokens in
-  `app.css`, no component library.
-- Tauri 2.11 for the desktop shell, WebView2 on Windows.
-- TypeScript 7 across the workspace; the UI keeps a TypeScript 6 install beside
-  it because `svelte-check` refuses to start without one.
-- Claude Agent SDK 0.3.263 and Agent Client Protocol SDK 1.4.0, both loaded on
-  first use.
+Keep a conversation per task. Switch models or accounts inside it, give it a
+Git worktree, and follow the same work from your desktop or a paired phone.
+The agents run on the computer that holds your project.
 
-## Run it
+## What you can do
 
-```bash
-bun install
-bun run dev:core            # the host on 127.0.0.1, prints the url it listens on
-bun run dev:ui              # vite dev server for the UI; add ?fake=1 for the in-memory client
-bun run check               # tsc on contracts and core, svelte-check on the UI
-bun run test                # bun test in packages/core, vitest in packages/ui
-bun run e2e                 # core over WS, UI in a hidden Chromium, the shell over CDP
+- Manage projects and conversations without keeping an agent process alive for
+  every open thread.
+- Change providers mid-conversation with bounded context from the journal.
+- Read streaming answers, tool calls, reasoning and permission requests together.
+- Queue tasks with global and per-account concurrency limits.
+- Pair a phone with the web app, or connect the desktop to a headless server.
+- On Windows, trace agent processes and their resource use, mute their audio and
+  stop their windows from taking focus.
+
+## Get started
+
+boite is in beta. The desktop build currently targets Windows x64. The headless
+core runs on Linux; its process tracking is more limited than on Windows.
+
+For a local build, install the Bun version named in `package.json`, then:
+
+```sh
+bun install --frozen-lockfile
+bun run build:ui
+bun run dev:core
 ```
 
-The core takes `--port`, `--host`, `--lan`, `--data-dir` and `--channel`
-(`stable` or `dev`). Pass them to the entry point directly when you need one:
+In another terminal, create a one-time pairing link and open it in your browser:
 
-```bash
-bun packages/core/src/main.ts --lan --data-dir /tmp/boite-scratch
+```sh
+bun packages/core/src/main.ts pair --owner
 ```
 
-## Build it
+Install and authenticate the agents you want to use on that computer. Configure
+them in Settings, Providers. See [accounts](docs/accounts.md) and
+[provider support](docs/providers.md).
 
-```bash
-bun run build:ui            # packages/ui/dist, served by the core and bundled in the shell
-bun run build:core          # packages/core/dist: main.js, the two workers, the lazy SDK chunk
-bun run build:core:exe      # packages/core/dist/boite-core.exe, the shell's sidecar
-bun run stage:core          # compile the core and put it where the bundler and the e2e look
-bun run build:shell         # the NSIS installer, sidecar and UI included
-bun run build:shell:dev     # the same installer as "Boite Dev", beside the stable app
+For the Windows installer, see [building and releasing](docs/releasing.md).
+For Docker, persistent storage and image updates, see the
+[boite-server guide](docs/server.md).
+
+## Development
+
+Built with Bun, TypeScript, Svelte 5 and Tauri 2. The core runs the agents and
+owns the journal; the desktop shell and web app use the same RPC contract.
+
+```sh
+bun run dev:ui       # append ?fake=1 to the URL for a UI without an agent
+bun run check
+bun run test
 ```
 
-The installer is per user and asks for no elevation. It puts
-`boite-shell.exe`, the `boite-core.exe` sidecar, `jobs-worker.js`,
-`guard-worker.js` and `ui/` under `%LOCALAPPDATA%\Boite`. `build:shell:dev`
-builds the same thing under a second identifier, a second product name and a
-second data directory, so a beta installs beside the app in daily use rather
-than over it. Step by step: [docs/releasing.md](docs/releasing.md).
+[Contributing](CONTRIBUTING.md) covers setup and checks.
+[Architecture](docs/architecture.md) explains the boundaries.
+[Development](docs/development.md) covers integration tests and hidden captures.
 
-## Layout
+## Thanks
 
-```
-packages/contracts   the wire: every RPC method, event and shared type, no runtime
-packages/core        the host: server, journal, threads, scheduler, drivers, providers, accounts, trace
-packages/ui          the Svelte app, one build for the shell and the phone
-apps/shell           the Tauri client: window, tray, starts the local core
-tests/e2e            core over WS, UI in a browser, shell over CDP
-bench                measurements against Boite Legacy
-```
+Thanks to [T3 Code](https://github.com/pingdotgg/t3code) for the inspiration behind
+boite's chat workflow. This project also follows
+[Boite Legacy](https://github.com/beboite/boite-legacy), the earlier terminal-based app.
 
-## Docs
+## License
 
-- [AGENTS.md](AGENTS.md): the rules, the vocabulary, and why each mechanism is
-  shaped the way it is. Read it before changing anything here.
-- [docs/README.md](docs/README.md): the index, one line per file.
-- [docs/development.md](docs/development.md): running it, the fake client, the
-  tests, the captures.
-- [docs/providers.md](docs/providers.md): the descriptor format and the shipped
-  providers.
-- [docs/accounts.md](docs/accounts.md): isolation directories and logins.
-- [docs/model-switching.md](docs/model-switching.md): changing models in one
-  conversation, context transfer and queued-turn behavior.
-- [docs/phone.md](docs/phone.md): pairing links and paired devices, the PWA,
-  what is cached.
-- [docs/trace.md](docs/trace.md): Job Objects, the trace, the caps, the guards.
-- [docs/releasing.md](docs/releasing.md): from a clean tree to the installer.
-
-## Status
-
-Beta, version 2.0.0-beta.1. The core, the UI, the shell, the installer and
-five drivers (Claude, ACP for OpenCode, Antigravity and Grok, Codex, pi and the
-echo fake used by the tests) all run. The plugin host is not written, and the trace
-outside Windows polls a process group instead of reading exact process events.
-What the build holds, its gaps and its resource figures:
-[docs/releases/2.0.0-beta.1.md](docs/releases/2.0.0-beta.1.md).
+[MIT](LICENSE). Copyright © 2026 boite contributors.

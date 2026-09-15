@@ -1,0 +1,15 @@
+name: Install workspace
+description: Install the pinned Bun runtime and cached workspace dependencies.
+runs:
+  using: composite
+  steps:
+    - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+      with:
+        bun-version-file: package.json
+    - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+      with:
+        path: ~/.bun/install/cache
+        key: bun-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('bun.lock') }}
+        restore-keys: bun-${{ runner.os }}-${{ runner.arch }}-
+    - shell: bash
+      run: bun install --frozen-lockfile

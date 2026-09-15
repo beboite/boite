@@ -3,25 +3,23 @@
 From a clean tree to an installer. Every command below exists in the workspace
 `package.json` files and runs from the repository root.
 
+[CI and publication](ci.md) covers automated checks, draft releases, Docker
+images and the disabled nightly schedule.
+
 ## The order
 
 ```bash
 bun run check
 bun run test
 bun run test:shell
-bun run build:ui
-bun run build:core
-bun run build:core:exe
-bun run stage:core
 bun run build:shell
+bun run apps/shell/scripts/stage-sidecar.ts
 bun run e2e
 ```
 
-Each step feeds the next. The end to end suite refuses missing or stale shell
-artifacts. `bun run build:shell` runs `stage:core` itself, and `stage:core`
-runs `build:core:exe` itself, so the short version of that list is check, test,
-`build:shell`, `e2e`. The long version is what to run when a step has failed and
-you want to see which.
+`build:shell` builds the UI and compiles the core through `stage:core`. The
+staging command after it copies that existing core beside the newly built shell;
+it does not compile again. The end-to-end suite refuses missing or stale artifacts.
 
 ## What each step produces
 
@@ -141,7 +139,7 @@ name is `Boite`. The install is per user and asks for no elevation.
 - `guard-worker.js`, the focus guard and the audio mute.
 - `ui/`, the same build a phone gets over the pairing link.
 
-The identifier is fresh, so Boite 2 installs beside a version 1 rather than over
+The identifier is fresh, so Boite installs beside Boite Legacy rather than over
 it. To see the exact file list a build produced, read
 `apps/shell/src-tauri/target/release/nsis/x64/installer.nsi` before installing
 anything: it names every file and where it goes.

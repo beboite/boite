@@ -1,0 +1,22 @@
+name: Bug report
+description: Report a reproducible problem in boite.
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What happened?
+      description: Include the steps to reproduce and what you expected.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version and platform
+      placeholder: Version or commit, OS, desktop or browser
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Logs or screenshots
+      description: Remove tokens, pairing links, private paths and conversation content.

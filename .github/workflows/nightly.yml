@@ -1,0 +1,122 @@
+name: boite de nuit
+
+on:
+  schedule:
+    - cron: '23 3 * * *'
+  workflow_dispatch:
+    inputs:
+      announcement:
+        description: Optional announcement above the automatic changelog.
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: boite-de-nuit
+  cancel-in-progress: false
+
+jobs:
+  revision:
+    # Both entry points remain dormant until a maintainer enables the variable.
+    if: vars.NIGHTLY_ENABLED == 'true' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    outputs:
+      changed: ${{ steps.revision.outputs.changed }}
+      tag: ${{ steps.revision.outputs.tag }}
+      version: ${{ steps.revision.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+        with:
+          bun-version-file: package.json
+      - id: revision
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases?per_page=100" > released.json
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/tags?per_page=100" > tags.json
+          bun scripts/ci/nightly.ts released.json tags.json
+      - name: Reserve version for this commit
+        if: steps.revision.outputs.changed == 'true' && steps.revision.outputs.reserved != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.revision.outputs.tag }}
+        run: gh api "repos/$GITHUB_REPOSITORY/git/refs" --method POST -f "ref=refs/tags/$RELEASE_TAG" -f "sha=$GITHUB_SHA"
+
+  verify:
+    needs: revision
+    if: needs.revision.outputs.changed == 'true'
+    uses: ./.github/workflows/ci.yml
+    with:
+      channel: nightly
+      version: ${{ needs.revision.outputs.version }}
+    permissions:
+      contents: read
+      packages: write
+
+  image:
+    needs: [revision, verify]
+    uses: ./.github/workflows/server.yml
+    permissions:
+      contents: read
+      packages: write
+    with:
+      publish: true
+      channel: dev
+      version: ${{ needs.revision.outputs.version }}
+      tags: |
+        nightly
+        ${{ needs.revision.outputs.tag }}
+        sha-${{ github.sha }}
+
+  release:
+    needs: [revision, verify, image]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+        with:
+          bun-version-file: package.json
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: windows-installer
+          path: artifacts
+      - name: Publish prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.revision.outputs.tag }}
+          RELEASE_ANNOUNCEMENT: ${{ inputs.announcement }}
+        run: |
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases?per_page=100" > released.json
+          bun scripts/ci/changelog.ts released.json artifacts/release-notes.md
+          existing=$(jq --arg tag "$RELEASE_TAG" '[.[][] | select(.tag_name == $tag)] | first // empty' released.json)
+          cd artifacts
+          sha256sum ./*.exe > SHA256SUMS.txt
+          if [[ -n "$existing" ]]; then
+            echo "$existing" | jq -e '.draft == true' >/dev/null
+            if git show-ref --verify --quiet "refs/tags/$RELEASE_TAG"; then
+              test "$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")" = "$GITHUB_SHA"
+            else
+              test "$(echo "$existing" | jq -r .target_commitish)" = "$GITHUB_SHA"
+            fi
+            gh release upload "$RELEASE_TAG" ./*.exe SHA256SUMS.txt --clobber
+            gh release edit "$RELEASE_TAG" --draft=false --prerelease --latest=false
+          else
+            gh release create "$RELEASE_TAG" ./*.exe SHA256SUMS.txt --target "$GITHUB_SHA" --title "boite de nuit $RELEASE_TAG" --prerelease --latest=false --notes-file release-notes.md
+          fi

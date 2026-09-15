@@ -11,6 +11,8 @@ export default defineConfig({
   plugins: [svelte()],
   resolve: { conditions: ['browser'] },
   test: {
+    maxWorkers: 8,
+    fsModuleCache: true,
     environment: 'jsdom',
     include: ['src/**/*.test.ts'],
     globals: false,

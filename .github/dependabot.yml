@@ -1,0 +1,27 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ['*']
+  - package-ecosystem: npm
+    directory: /docker/agents
+    schedule:
+      interval: weekly
+    groups:
+      agent-clis:
+        patterns: ['*']
+  - package-ecosystem: cargo
+    directory: /apps/shell/src-tauri
+    schedule:
+      interval: weekly
+    groups:
+      rust:
+        patterns: ['*']
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly

@@ -2,8 +2,8 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { echoThread, startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
 
-const LONG_CHILD = process.platform === 'win32' ? 'ping -n 30 127.0.0.1' : 'sleep 30';
-/** `cmd /c ping` is two processes in the job; `sh -c sleep` execs into one. */
+const LONG_CHILD = process.platform === 'win32' ? 'ping -n 30 127.0.0.1' : 'exec sleep 30';
+/** POSIX tracks direct children only, so explicitly replace the fixture shell. */
 const TREE_SIZE = process.platform === 'win32' ? 2 : 1;
 
 let harness: TestCore;

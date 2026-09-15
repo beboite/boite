@@ -1,0 +1,18 @@
+services:
+  boite-server:
+    image: ${BOITE_IMAGE:-ghcr.io/beboite/boite/boite-server:latest}
+    ports:
+      - "${BOITE_BIND:-127.0.0.1}:7337:7337"
+    volumes:
+      - boite-data:/data
+      - boite-home:/home/node
+      - boite-workspace:/workspace
+    restart: unless-stopped
+    stop_grace_period: 30s
+    cpus: 4
+    mem_limit: 4g
+
+volumes:
+  boite-data:
+  boite-home:
+  boite-workspace:
