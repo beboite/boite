@@ -12,6 +12,7 @@
       "launch": { "args": [] },
       "install": {
         "version": "agy_acp_server_1.1.1",
+        "arch": "x64",
         "url": "https://dl.google.com/agy-extensions/releases/windows/agy-acp-server-agy_acp_server_1.1.1-windows-x86_64.zip",
         "sha256": "47cb50eef14f0a4655d78cfcfda869bcea7aaee5f9787e936bc2935ea612c3b8",
         "archiveBytes": 468238392,
@@ -55,12 +56,13 @@
       "launch": { "args": ["--uid="] },
       "install": {
         "version": "agy_acp_server_1.1.1",
+        "arch": "x64",
         "url": "https://dl.google.com/agy-extensions/releases/linux/agy-acp-server-agy_acp_server_1.1.1-linux-x86_64.zip",
         "sha256": "38f62d01b32deb0907b3d39a71ec301fd36369f6ffd1cf262d4af385177f79df",
         "archiveBytes": 681969407,
         "files": [
           { "path": "agy_acp_server.par", "bytes": 1880360328 },
-          { "path": "localharness_external", "bytes": 128966920 }
+          { "path": "localharness_external", "bytes": 128966920, "executable": true }
         ]
       },
       "isolation": { "GEMINI_HOME": "{isolationDir}" },
@@ -98,12 +100,13 @@
       "launch": { "args": [] },
       "install": {
         "version": "agy_acp_server_1.1.1",
+        "arch": "arm64",
         "url": "https://dl.google.com/agy-extensions/releases/macos/agy-acp-server-agy_acp_server_1.1.1-darwin-arm64.zip",
         "sha256": "fdfa915652cdb7ba8085cc8fffed072cbe009251aa2c951aabdda07a8c28a189",
         "archiveBytes": 316014828,
         "files": [
           { "path": "agy_acp_server.par", "bytes": 802163856 },
-          { "path": "localharness_external", "bytes": 116766704 }
+          { "path": "localharness_external", "bytes": 116766704, "executable": true }
         ]
       },
       "isolation": { "GEMINI_HOME": "{isolationDir}" },

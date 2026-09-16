@@ -51,8 +51,10 @@ export interface ProviderInstall {
   url: string;
   sha256: string;
   archiveBytes: number;
+  /** Omit for architecture-independent archives. */
+  arch?: 'x64' | 'arm64';
   /** Files expected inside the archive, relative paths inside it, with their sizes; the first one is the executable. */
-  files: { path: string; bytes: number }[];
+  files: { path: string; bytes: number; executable?: boolean }[];
 }
 
 /**

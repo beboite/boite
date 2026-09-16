@@ -126,6 +126,9 @@ export class InstallManager {
   /** What the summaries carry. Null when this profile has nothing to install. */
   stateOf(providerId: ProviderId, install: ProviderInstall | undefined): ProviderInstallState | null {
     if (install === undefined) return null;
+    if (install.arch && install.arch !== process.arch) {
+      return { state: 'failed', version: install.version, message: `${providerId} requires ${install.arch}; this machine is ${process.arch}` };
+    }
     const running = this.#running.get(providerId);
     if (running !== undefined) return running.state;
     const failed = this.#failed.get(providerId);
@@ -194,6 +197,9 @@ export class InstallManager {
    * it; `uninstall` takes the whole directory.
    */
   start(providerId: ProviderId, install: ProviderInstall): ProviderInstallState {
+    if (install.arch && install.arch !== process.arch) {
+      throw refused(`${providerId} requires ${install.arch}; this machine is ${process.arch}`, { providerId, expectedArch: install.arch, actualArch: process.arch });
+    }
     if (this.#running.has(providerId)) {
       throw refused(`an install of ${providerId} is already running`, {
         providerId,
@@ -495,9 +501,11 @@ export class InstallManager {
   /** Off Windows a zip carries no mode Boite trusts, so the executable is made one. */
   #markExecutable(install: ProviderInstall, releaseDir: string): void {
     if (currentOs() === 'windows') return;
-    const first = install.files[0];
-    if (first === undefined) return;
-    chmodSync(join(releaseDir, first.path.split('\\').join('/')), 0o755);
+    for (const [index, file] of install.files.entries()) {
+      if (index === 0 || file.executable === true) {
+        chmodSync(join(releaseDir, file.path.split('\\').join('/')), 0o755);
+      }
+    }
   }
 
   /**
