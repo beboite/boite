@@ -179,6 +179,8 @@ test('completed goals and tasks fade after the next prompt and new tasks return'
   await command('Thanks, continue with the next change');
   await page.waitFor(`document.querySelector('${id('thread-activity')}').classList.contains('hidden')`);
   await capture('goal-dismissed-desktop');
+  // The final thread update must arrive before replacing its tasks in the fixture.
+  await page.waitFor(`!document.querySelector('${id('composer-stop')}')`);
   await page.evaluate(`import('/src/lib/store.svelte.ts').then(({store}) => { store.openThread.activity.tasks = [{id:'new-work',text:'Check the next change',status:'in_progress'}]; store.openThread.activity.tasksDismissed = false; })`);
   await page.waitFor(`!document.querySelector('${id('thread-activity')}').classList.contains('hidden')`);
   if (await page.evaluate(`document.querySelector('${id('activity-tasks-toggle')}').getAttribute('aria-expanded') === 'true'`)) await page.click(id('activity-tasks-toggle'));
