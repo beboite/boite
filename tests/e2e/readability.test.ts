@@ -91,8 +91,16 @@ test('goal prompts and markers stay readable and recognized commands are accente
   await capture('readability-chat-phone');
   await page.evaluate(`(() => { const input = document.querySelector('${id('composer-input')}'); input.value = '/goal ' + 'Check a long prompt that wraps over several lines. '.repeat(8); input.dispatchEvent(new Event('input',{bubbles:true})); })()`);
   await page.waitFor(`Math.abs(document.querySelector('.input-mirror').getBoundingClientRect().width - document.querySelector('${id('composer-input')}').clientWidth) < 1`);
-  const phoneText = await page.evaluate<{ inputFont: string; mirrorFont: string; inputHeight: number; mirrorHeight: number }>(`(() => { const input = document.querySelector('${id('composer-input')}'); const mirror = document.querySelector('.input-mirror'); return { inputFont: getComputedStyle(input).fontSize, mirrorFont: getComputedStyle(mirror).fontSize, inputHeight: input.scrollHeight, mirrorHeight: mirror.scrollHeight }; })()`);
-  expect(phoneText.mirrorFont).toBe(phoneText.inputFont);
+  const phoneText = await page.evaluate<{ inputFont: string[]; mirrorFont: string[]; inputHeight: number; mirrorHeight: number }>(`(() => {
+    const input = document.querySelector('${id('composer-input')}');
+    const mirror = document.querySelector('.input-mirror');
+    const typography = element => {
+      const style = getComputedStyle(element);
+      return [style.fontFamily, style.fontSize, style.fontWeight, style.fontStyle, style.lineHeight, style.letterSpacing];
+    };
+    return { inputFont: typography(input), mirrorFont: typography(mirror), inputHeight: input.scrollHeight, mirrorHeight: mirror.scrollHeight };
+  })()`);
+  expect(phoneText.mirrorFont).toEqual(phoneText.inputFont);
   expect(Math.abs(phoneText.mirrorHeight - phoneText.inputHeight)).toBeLessThan(2);
   await capture('readability-composer-phone');
   await page.evaluate(`document.documentElement.dataset.theme = 'light'`);
