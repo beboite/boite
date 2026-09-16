@@ -71,7 +71,7 @@ test('PR metadata accepts absence and rejects unsafe URLs and malformed CLI outp
 });
 
 test('PR host detection accepts GitHub transports and an explicitly configured enterprise host', () => {
-  for (const url of ['https://github.com/example/repo.git', 'git@github.com:example/repo.git', 'ssh://git@github.com/example/repo.git']) {
+  for (const url of ['https://github.com/example/repo.git', 'git@github.com:example/repo.git', 'github.com:example/repo.git', 'ssh://git@github.com/example/repo.git']) {
     expect(hasGitHubRemote(`origin\t${url} (fetch)`, 'github.com')).toBe(true);
   }
   expect(hasGitHubRemote('origin\thttps://git.example/team/repo.git (fetch)', 'git.example')).toBe(true);

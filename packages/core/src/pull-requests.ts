@@ -10,9 +10,10 @@ export function hasGitHubRemote(remotes: string, host = process.env.GH_HOST ?? '
   return remotes.split('\n').some(line => {
     const url = line.trim().split(/\s+/)[1];
     if (!url) return false;
-    let remoteHost: string;
+    let remoteHost = '';
     try { remoteHost = new URL(url).hostname; }
-    catch { remoteHost = url.match(/^(?:[^@/\s]+@)?([^:/\s]+):/)?.[1] ?? ''; }
+    catch { /* Git also accepts SCP-style remotes. */ }
+    if (!remoteHost) remoteHost = url.match(/^(?:[^@/\s]+@)?([^:/\s]+):/)?.[1] ?? '';
     return remoteHost.toLowerCase() === host.toLowerCase();
   });
 }

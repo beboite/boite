@@ -337,7 +337,8 @@ test('four hundred messages, two hundred deltas: the window and the pin stay put
       `10 scroll steps ${scrolled.toFixed(1)} ms (${scrolls.recomputes} recomputes, ` +
       `${scrolls.slots} slot reads), ${articles().length} articles in the DOM`
   );
-});
+  // Shared CI runners need time for the full streaming and scrolling workload.
+}, 20_000);
 
 test('a page in flight shows one line at the top of the list', async () => {
   const messages = thread(200);
