@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, untrack } from 'svelte';
+  import { onMount, tick, untrack } from 'svelte';
   import { ChevronRight } from '@lucide/svelte';
   import type { Account, AccountQuota, ProviderSummary } from '@boite/contracts';
   import QuotaList from './QuotaList.svelte';
@@ -21,7 +21,8 @@
   let codes = $state<Record<string, string>>({});
   let quotas = $state<AccountQuota[]>([]);
   let quotaBusy = $state(false);
-  let connectAfterCreate = $state(false);
+  let connecting = $state<string | null>(null);
+  let signingIn = false;
   let submitting = $state(false);
   let verified = $state<Record<string, number>>({});
   let checking = $state<string | null>(null);
@@ -64,14 +65,47 @@
     } catch (error) { store.error = String(error); }
     finally { checking = null; }
   }
-  function connect(provider: ProviderSummary) {
-    providerId = provider.id; label = provider.name; useDefaultLocation = false;
-    connectAfterCreate = true; adding = true;
+  async function signIn(provider: ProviderSummary) {
+    if (signingIn) return;
+    signingIn = true;
+    try {
+      const account = store.accounts.find(account => account.providerId === provider.id && account.isolationDir !== null && account.status !== 'ok')
+        ?? await store.addAccount({ providerId: provider.id, label: provider.name, useDefaultLocation: false });
+      if (account) {
+        await store.loginAccount(account.id);
+        await tick();
+        document.querySelector(`[data-testid="account-row"][data-account-id="${CSS.escape(account.id)}"]`)
+          ?.scrollIntoView({ block: 'start' });
+      }
+    } finally { signingIn = false; connecting = null; }
+  }
+  async function connect(provider: ProviderSummary) {
+    if (!store.client || connecting !== null) return;
+    connecting = provider.id;
+    if (provider.available) { await signIn(provider); return; }
+    const install = store.installOf(provider.id);
+    if (!install) { connecting = null; return; }
+    try {
+      if (install.state === 'absent' || install.state === 'failed') {
+        await store.client.call('providers.install', { providerId: provider.id });
+      } else if (install.state === 'installed') {
+        store.error = strings.providerSettings.reinstall;
+        connecting = null;
+      }
+    } catch (error) { store.error = String(error); connecting = null; }
   }
   onMount(() => {
     void readQuotas();
     const off = store.client?.on('quotas.updated', (rows) => { quotas = rows; });
-    return () => off?.();
+    const offProviders = store.client?.on('providers.updated', ({ loaded }) => {
+      const provider = loaded.find(provider => provider.id === connecting && provider.available);
+      if (provider) void signIn(provider);
+    });
+    const offInstall = store.client?.on('providers.installProgress', event => {
+      if (event.providerId !== connecting) return;
+      if (event.state === 'failed' || event.state === 'absent') connecting = null;
+    });
+    return () => { off?.(); offProviders?.(); offInstall?.(); connecting = null; };
   });
 
   async function submit(event: SubmitEvent) {
@@ -84,7 +118,6 @@
     if (!account) return;
     label = '';
     adding = false;
-    if (connectAfterCreate && account.isolationDir !== null) await store.loginAccount(account.id);
   }
 
   /** The provider column of the add form, drawn as a menu: the family has no native select. */
@@ -133,7 +166,7 @@
 <div class="page" data-testid="accounts-page">
   <header class="head">
     <h1>{strings.providerSettings.heading}</h1>
-    <button class="quiet" onclick={() => { connectAfterCreate = false; adding = !adding; }}>{strings.accounts.add}</button>
+    <button class="quiet" onclick={() => { adding = !adding; }}>{strings.accounts.add}</button>
   </header>
   <p class="intro lead">{strings.providerSettings.intro}</p>
   <p class="intro lead">{strings.providerSettings.detectHint}</p>
@@ -196,13 +229,17 @@
         {#if store.installOf(provider.id) !== null}
           <InstallControl {store} {provider} />
         {/if}
-        {#if provider.login && provider.available}
+        {#if provider.login && (provider.available || store.installOf(provider.id) !== null)}
           <button
             class="small connect"
-            onclick={() => connect(provider)}
+            disabled={connecting !== null}
+            onclick={() => void connect(provider)}
           >
             {strings.providerSettings.connect}
           </button>
+        {/if}
+        {#if connecting === provider.id && !provider.available}
+          <p class="intro" role="status">{strings.providerSettings.connectInstalling}</p>
         {/if}
       </section>
     {/each}

@@ -422,6 +422,17 @@ export class InstallManager {
   ): Promise<void> {
     const wanted = new Map(install.files.map((file) => [file.path.split('\\').join('/'), file]));
     mkdirSync(releaseDir, { recursive: true });
+    if (install.format === 'binary') {
+      if (running.controller.signal.aborted) throw new Cancelled();
+      const file = install.files[0];
+      if (!file || install.files.length !== 1 || safeEntryPath(file.path) === null) {
+        throw refused('a binary install requires exactly one safe relative file path');
+      }
+      const target = join(releaseDir, file.path.split('\\').join('/'));
+      mkdirSync(dirname(target), { recursive: true });
+      renameSync(part, target);
+      return;
+    }
 
     const open = new Map<string, number>();
     let failure: Error | null = null;

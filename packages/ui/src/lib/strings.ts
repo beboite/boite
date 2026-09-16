@@ -737,6 +737,8 @@ export const strings = {
     detectHint: 'After installing an agent, detect providers again. If it is still missing, restart Boite to refresh its PATH.',
     setup: 'Installation instructions',
     connect: 'Connect an account',
+    connectInstalling: 'Installing the agent. Sign-in will start when the download finishes.',
+    reinstall: 'The managed agent is installed but its executable is missing. Remove it and install it again.',
     reconnect: 'Reconnect',
     available: 'Ready on this machine',
     missing: 'Executable not found',

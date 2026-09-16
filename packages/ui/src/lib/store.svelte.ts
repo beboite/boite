@@ -838,6 +838,7 @@ export class Store {
         this.attach(
           new FakeClient({
             long: params.get('long') === '1',
+            uninstalled: params.get('uninstalled') === '1',
             ...(params.get('principal') === 'session' ? { principal: 'session' as const } : {})
           })
         );

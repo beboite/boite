@@ -47,7 +47,9 @@ export interface ExecutableCandidate {
 export interface ProviderInstall {
   /** A version string shown to the user and written beside the files. */
   version: string;
-  /** A zip archive. */
+  /** Omitted for zip archives; binary downloads contain exactly one file. */
+  format?: 'zip' | 'binary';
+  /** The archive or executable download. */
   url: string;
   sha256: string;
   archiveBytes: number;
