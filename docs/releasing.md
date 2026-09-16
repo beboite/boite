@@ -59,6 +59,8 @@ Debian package and macOS application bundle. Signing, notarization and testing
 on older operating systems remain release prerequisites; a local unsigned
 bundle is not a notarized download. Native notifications and Windows process
 guards are not implemented on Linux or macOS.
+On a normal quit, the POSIX shell gives the core three seconds to handle
+`SIGTERM`, stop its direct children and close the journal before forcing exit.
 
 macOS requires 13.0 or newer. The bundle includes the JIT entitlements required
 by the [compiled Bun runtime](https://bun.sh/docs/bundler/executables).

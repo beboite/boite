@@ -63,3 +63,8 @@ pub fn assign(job: &CoreJob, child: &Child) -> Result<(), String> {
     }
     Ok(())
 }
+
+pub fn stop_core(child: &mut Child) {
+    let _ = child.kill();
+    let _ = child.wait();
+}

@@ -177,8 +177,7 @@ impl CoreState {
     fn kill_child(&self) {
         if let Ok(mut guard) = self.child.lock() {
             if let Some(mut child) = guard.take() {
-                let _ = child.kill();
-                let _ = child.wait();
+                job::stop_core(&mut child);
             }
         }
         // Dropping the job closes its handle, which kills whatever is still in

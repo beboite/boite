@@ -297,6 +297,7 @@ name = "boite-shell"
 version = "2.0.0-beta.1"
 dependencies = [
  "fs2",
+ "libc",
  "serde",
  "serde_json",
  "tauri",
