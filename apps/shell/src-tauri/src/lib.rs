@@ -9,6 +9,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 mod instance;
+mod platform;
+use platform::{job, default_data_dir};
+use platform::job::CoreJob;
 mod quota_window;
 
 use serde::{Deserialize, Serialize};
@@ -29,9 +32,6 @@ const READY_LINE: &str = "boite-core ready";
 const HEALTH_TIMEOUT: Duration = Duration::from_millis(500);
 const START_TIMEOUT: Duration = Duration::from_secs(15);
 const POLL_INTERVAL: Duration = Duration::from_millis(120);
-
-#[cfg(windows)]
-const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 // ---------------------------------------------------------------------------
 // The install channel.
@@ -85,109 +85,6 @@ impl Channel {
         }
     }
 }
-
-// ---------------------------------------------------------------------------
-// The Job Object that owns the core.
-// ---------------------------------------------------------------------------
-
-/// A Windows Job Object with `KILL_ON_JOB_CLOSE`, holding the core this shell
-/// started. `kill_child` covers a clean quit; this covers everything else, a
-/// crash or a `Stop-Process -Force` on the shell included: the last handle to
-/// the job dies with the process, the kernel closes it, and the core goes with
-/// it. An orphan `boite-core.exe` used to survive that and keep
-/// `%LOCALAPPDATA%\Boite\boite-core.exe` open, which the installer then could
-/// not overwrite.
-///
-/// The core creates Job Objects of its own (`boite-agents` and one per thread,
-/// `packages/core/src/platform/jobs.ts`), and a shell launched from a terminal
-/// that is itself in a job is in one too. Both are fine: jobs nest on Windows 8
-/// and later, and closing this one kills the whole tree underneath it.
-#[cfg(windows)]
-mod job {
-    use std::os::windows::io::AsRawHandle;
-    use std::process::Child;
-
-    use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, HANDLE};
-    use windows_sys::Win32::System::JobObjects::{
-        AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
-        SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
-        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
-    };
-
-    /// Owns the job handle and closes it on drop.
-    pub struct CoreJob(HANDLE);
-
-    // A job handle is a kernel handle: valid from every thread of the process,
-    // and this one is only moved into the shell state and dropped from there.
-    unsafe impl Send for CoreJob {}
-
-    impl Drop for CoreJob {
-        fn drop(&mut self) {
-            unsafe { CloseHandle(self.0) };
-        }
-    }
-
-    fn last_error() -> u32 {
-        unsafe { GetLastError() }
-    }
-
-    pub fn create_core_job() -> Result<CoreJob, String> {
-        let handle = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
-        if handle.is_null() {
-            return Err(format!("CreateJobObjectW failed, error {}", last_error()));
-        }
-        let job = CoreJob(handle);
-
-        let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
-        limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-        let set = unsafe {
-            SetInformationJobObject(
-                job.0,
-                JobObjectExtendedLimitInformation,
-                std::ptr::addr_of!(limits).cast(),
-                std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
-            )
-        };
-        if set == 0 {
-            return Err(format!(
-                "SetInformationJobObject(JobObjectExtendedLimitInformation) failed, error {}",
-                last_error()
-            ));
-        }
-        Ok(job)
-    }
-
-    pub fn assign(job: &CoreJob, child: &Child) -> Result<(), String> {
-        let assigned =
-            unsafe { AssignProcessToJobObject(job.0, child.as_raw_handle() as HANDLE) };
-        if assigned == 0 {
-            return Err(format!(
-                "AssignProcessToJobObject failed, error {}",
-                last_error()
-            ));
-        }
-        Ok(())
-    }
-}
-
-/// Nothing to own outside Windows: the core is killed on quit and on exit, and
-/// a process group is the story a later pass writes here.
-#[cfg(not(windows))]
-mod job {
-    use std::process::Child;
-
-    pub struct CoreJob;
-
-    pub fn create_core_job() -> Result<CoreJob, String> {
-        Ok(CoreJob)
-    }
-
-    pub fn assign(_job: &CoreJob, _child: &Child) -> Result<(), String> {
-        Ok(())
-    }
-}
-
-use job::CoreJob;
 
 #[derive(Clone, Serialize)]
 pub struct CoreEndpoint {
@@ -358,49 +255,12 @@ fn window_material_supported(webview: Webview) -> Result<bool, String> {
     Ok(cfg!(windows))
 }
 
-/// The AppUserModelID a toast is shown under. An installed Boite has a Start
-/// menu shortcut carrying the bundle identifier, which is what Windows needs
-/// to show a toast at all; an executable still under `target/` has none, and
-/// PowerShell's id is the one that works there, at the cost of the toast
-/// naming PowerShell as its source.
-#[cfg(windows)]
-fn toast_app_id(exe_dir: &Path, identifier: &str) -> String {
-    let profile = matches!(exe_dir.file_name().and_then(|name| name.to_str()), Some("debug" | "release"));
-    let under_target = exe_dir.parent().and_then(|parent| parent.file_name()) == Some(std::ffi::OsStr::new("target"));
-    if profile && under_target {
-        tauri_winrt_notification::Toast::POWERSHELL_APP_ID.to_string()
-    } else {
-        identifier.to_string()
-    }
-}
-
 /// A system toast for a thread. A click brings the window back and tells the
 /// UI which thread through `notification://open`; the UI opens it.
 #[tauri::command]
 fn notify(app: AppHandle, webview: Webview, title: String, body: String, thread_id: String) -> Result<(), String> {
     quota_window::only_ui(&webview)?;
-    #[cfg(windows)]
-    {
-        let exe = std::env::current_exe().map_err(|error| format!("the shell executable is unknown: {error}"))?;
-        let exe_dir = exe.parent().ok_or_else(|| "the shell executable has no directory".to_string())?;
-        let app_id = toast_app_id(exe_dir, &app.config().identifier);
-        let handle = app.clone();
-        tauri_winrt_notification::Toast::new(&app_id)
-            .title(&title)
-            .text1(&body)
-            .on_activated(move |_| {
-                show_main(&handle);
-                let _ = handle.emit("notification://open", &thread_id);
-                Ok(())
-            })
-            .show()
-            .map_err(|error| format!("the toast {title:?} was refused: {error}"))
-    }
-    #[cfg(not(windows))]
-    {
-        let _ = (app, title, body, thread_id);
-        Err("no system toast on this platform yet".to_string())
-    }
+    platform::notify(app, title, body, thread_id)
 }
 
 /// The core token rides in this answer, so the caller is checked like every
@@ -463,32 +323,6 @@ fn test_browser_args() -> Option<String> {
     Some(format!("--remote-debugging-port={port} --remote-allow-origins=* --mute-audio --use-angle=d3d11"))
 }
 
-#[cfg(windows)]
-fn default_data_dir(channel: Channel) -> Result<PathBuf, String> {
-    let local = std::env::var("LOCALAPPDATA")
-        .map_err(|_| "LOCALAPPDATA is not set, so the data directory cannot be found".to_string())?;
-    Ok(PathBuf::from(local).join(channel.data_dir_name()))
-}
-
-#[cfg(target_os = "macos")]
-fn default_data_dir(channel: Channel) -> Result<PathBuf, String> {
-    let home = std::env::var("HOME")
-        .map_err(|_| "HOME is not set, so the data directory cannot be found".to_string())?;
-    Ok(PathBuf::from(home)
-        .join("Library")
-        .join("Application Support")
-        .join(channel.data_dir_name()))
-}
-
-#[cfg(all(not(windows), not(target_os = "macos")))]
-fn default_data_dir(channel: Channel) -> Result<PathBuf, String> {
-    let home = std::env::var("HOME")
-        .map_err(|_| "HOME is not set, so the data directory cannot be found".to_string())?;
-    Ok(PathBuf::from(home)
-        .join(".local")
-        .join("share")
-        .join(channel.data_dir_name()))
-}
 
 fn data_dir(channel: Channel) -> Result<PathBuf, String> {
     match std::env::var("BOITE_DATA_DIR") {
@@ -729,11 +563,7 @@ fn spawn_core(channel: Channel) -> Result<(Child, Arc<AtomicBool>, CoreJob), Str
     if let Some(directory) = working_directory {
         command.current_dir(directory);
     }
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        command.creation_flags(CREATE_NO_WINDOW);
-    }
+    platform::prepare_command(&mut command);
 
     let mut child = command
         .spawn()
@@ -1123,7 +953,7 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn a_toast_carries_the_identifier_once_installed_and_powershells_id_under_target() {
-        use super::toast_app_id;
+        use crate::platform::windows::toast_app_id;
         use std::path::Path;
         let id = "com.boite.two";
         assert_eq!(toast_app_id(Path::new(r"C:\Users\x\AppData\Local\Boite"), id), id);

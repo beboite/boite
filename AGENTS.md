@@ -24,6 +24,9 @@ that sidecar beside a newly built shell for end-to-end tests.
 
 - Every agent process goes through `procs.spawn`, `procs.spawnChild` or
   `procs.spawnPiped`. The launcher owns tracing, Job Objects and the guards.
+- Native process code belongs behind `ProcessPlatform` in `packages/core/src/platform/`.
+  Drivers and RPC handlers must not import an OS backend. The shell's OS
+  integration belongs in `apps/shell/src-tauri/src/platform/`.
 - Change `packages/contracts/src/index.ts` before implementing an RPC method,
   event or shared type. Update the real core and the in-memory client together.
 - Tests and benches use a fresh temporary `BOITE_DATA_DIR`. Real data directories

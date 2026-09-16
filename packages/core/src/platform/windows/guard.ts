@@ -6,38 +6,15 @@
  * Nothing native happens here. The Worker is built on the first traced pid, the
  * same way the Job Object one is, so a core that never launches a process never
  * pays for a Worker, a `user32.dll` handle, a system-wide hook or a COM
- * apartment. Off Windows every function is a no-op.
+ * apartment. Other operating systems use the separate POSIX backend.
  */
 import { workerEntry } from './worker-entry.ts';
 import type { GuardWorkerCommand, GuardWorkerMessage } from './guard-worker.ts';
 
-/** What the registry wants to hear about. Set once by `ProcRegistry`. */
-export interface GuardEventSink {
-  pushed(threadId: string, pid: number, title: string, restored: boolean): void;
-  muted(threadId: string, pid: number): void;
-  note(message: string): void;
-}
-
-/** What a test reads to know the hook is really in and what is muted. */
-export interface GuardStatus {
-  /** True between the first traced pid and the core's own teardown. */
-  running: boolean;
-  /** The `HWINEVENTHOOK` in decimal, once the Worker answered `ready`. */
-  hook: string | null;
-  failure: string | null;
-  /**
-   * `on` while agent audio is being muted, `off` when the setting is off, and
-   * `failed` when Core Audio refused: no render endpoint, no COM, no device.
-   */
-  audio: 'on' | 'off' | 'failed';
-  /** Every pid whose audio session this core is holding muted. */
-  mutedPids: number[];
-}
+import type { GuardEventSink, GuardStatus } from '../types.ts';
 
 /** One bounded wait on the message queue before the stop flag is read again. */
 const WAIT_MS = 100;
-
-const isWindows = process.platform === 'win32';
 
 let refCount = 0;
 let sink: GuardEventSink | null = null;
@@ -77,13 +54,13 @@ export function setGuardMute(next: boolean): void {
 }
 
 export function guardPidAdded(threadId: string, pid: number): void {
-  if (!isWindows || pid <= 0) return;
+  if (pid <= 0) return;
   ensureWorker();
   post({ kind: 'pid-add', threadId, pid });
 }
 
 export function guardPidRemoved(threadId: string, pid: number): void {
-  if (!isWindows || pid <= 0) return;
+  if (pid <= 0) return;
   mutedPids.delete(pid);
   post({ kind: 'pid-remove', threadId, pid });
 }

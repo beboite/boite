@@ -67,7 +67,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, windows-2025]
+        os: [ubuntu-24.04, windows-2025, macos-15]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     steps:
@@ -149,6 +149,34 @@ jobs:
           include-hidden-files: true
           retention-days: 7
 
+  desktop-portable:
+    needs: changes
+    if: needs.changes.outputs.desktop == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - name: Install Linux shell dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+        with:
+          workspaces: apps/shell/src-tauri -> target
+          shared-key: desktop-portable-v1
+      - run: bun run build:ui
+      - run: bun run test:shell --release
+      - run: bun run --cwd apps/shell tauri build --no-bundle
+
   server:
     needs: changes
     if: needs.changes.outputs.server == 'true'
@@ -160,7 +188,7 @@ jobs:
   required:
     name: CI required
     if: always()
-    needs: [changes, core, web, desktop, server]
+    needs: [changes, core, web, desktop, desktop-portable, server]
     runs-on: ubuntu-24.04
     steps:
       - name: Require all applicable checks
@@ -171,8 +199,8 @@ jobs:
           import json, os
           jobs = json.loads(os.environ['RESULTS'])
           assert jobs['changes']['result'] == 'success', jobs
-          for name in ('core', 'web', 'desktop', 'server'):
-              required = jobs['changes']['outputs'][name] == 'true'
+          for name in ('core', 'web', 'desktop', 'desktop-portable', 'server'):
+              required = jobs['changes']['outputs']['desktop' if name == 'desktop-portable' else name] == 'true'
               assert jobs[name]['result'] == ('success' if required else 'skipped'), jobs
           print('All applicable checks passed')
           PY

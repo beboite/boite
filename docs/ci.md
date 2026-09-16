@@ -9,10 +9,10 @@ when a dependency never starts. Documentation-only changes still produce it.
 | Change | Checks |
 | --- | --- |
 | Markdown docs, license, issue templates, topics | Local documentation links and CI decision tests |
-| Shell files or end-to-end tests | Windows shell tests, installer build and full end-to-end suite |
+| Shell files or end-to-end tests | Windows shell tests, installer build and full end-to-end suite; Linux/macOS shell builds and Rust tests |
 | Dockerfile, .dockerignore, docker/ | Docker smoke tests on native x64 and ARM64 |
 | UI files | Type checks, UI tests, desktop checks and Docker smoke tests |
-| Core, contracts, dependencies, shared build files, workflows, unknown paths | All checks, including core tests on Windows and Linux |
+| Core, contracts, dependencies, shared build files, workflows, unknown paths | All checks, including core tests on Windows, Linux and macOS |
 | Version tag | Complete checks, then a draft Windows release |
 | Enabled nightly with an unpublished commit | Complete checks, development installer, development server image, prerelease |
 
@@ -20,6 +20,10 @@ Pull requests against any branch run CI. A newer commit cancels an older run of
 that same PR. New main commits also cancel superseded ordinary CI runs.
 Release and publication jobs finish instead of being interrupted
 halfway through an upload. Live-provider tests stay disabled.
+
+Linux and macOS build the unbundled Tauri shell and run Rust unit tests.
+These checks do not exercise desktop interactions or produce installers.
+The WebView2 shell end-to-end suite remains Windows-only.
 
 ## Build cost
 

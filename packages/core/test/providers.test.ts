@@ -1,3 +1,4 @@
+import { currentOs } from '../src/paths.ts';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join, sep } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
@@ -113,7 +114,7 @@ describe('providers', () => {
 
   test('the opencode profile carries the acp launch arguments and the xdg isolation', async () => {
     const descriptor = harness.core.providers.require('opencode');
-    const profile = descriptor.profiles[process.platform === 'win32' ? 'windows' : 'linux'];
+    const profile = descriptor.profiles[currentOs()];
     expect(profile?.launch?.args).toEqual(['acp', '--port', '0']);
     expect(profile?.isolation).toEqual({ XDG_DATA_HOME: '{isolationDir}', XDG_CONFIG_HOME: '{isolationDir}' });
     expect(descriptor.auth).toEqual({ kind: 'oauth-cli', session: ['opencode/auth.json'] });
@@ -169,7 +170,7 @@ describe('providers', () => {
     ]);
     expect(windows?.isolation).toEqual({ GEMINI_HOME: '{isolationDir}' });
 
-    const profile = descriptor.profiles[process.platform === 'win32' ? 'windows' : 'linux'];
+    const profile = descriptor.profiles[currentOs()];
     // Every process of this provider carries these, the default account's too.
     const env = profile?.env ?? {};
     expect(env['AGY_ACP_FORCE_FILE_STORAGE']).toBe('1');
@@ -189,7 +190,7 @@ describe('providers', () => {
     expect(executable?.kind).toBe('file');
     // `{agentsDir}` resolves under the data directory, so nothing outside it is ever launched.
     expect(executable?.value.startsWith(join(harness.dataDir, 'agents', 'antigravity'))).toBe(true);
-    if (process.platform !== 'win32') {
+    if (process.platform === 'linux') {
       expect(profile?.launch?.args).toEqual(['--uid=']);
     } else {
       expect(profile?.launch?.args).toEqual([]);
@@ -222,7 +223,7 @@ describe('providers', () => {
     // The device-code login prints a link and a code instead of opening a browser.
     expect(descriptor.login?.command).toEqual(['codex', 'login', '--device-auth']);
 
-    const profile = descriptor.profiles[process.platform === 'win32' ? 'windows' : 'linux'];
+    const profile = descriptor.profiles[currentOs()];
     expect(profile?.launch?.args).toEqual(['app-server']);
     expect(profile?.isolation).toEqual({ CODEX_HOME: '{isolationDir}' });
 
@@ -266,7 +267,7 @@ describe('providers', () => {
     // No login block: `/login` is a slash command inside the tui, not a cli one.
     expect(descriptor.login).toBeUndefined();
 
-    const profile = descriptor.profiles[process.platform === 'win32' ? 'windows' : 'linux'];
+    const profile = descriptor.profiles[currentOs()];
     expect(profile?.isolation).toEqual({ PI_CODING_AGENT_DIR: '{isolationDir}' });
     const args = profile?.launch?.args ?? [];
     expect(args.slice(-2)).toEqual(['--mode', 'rpc']);
