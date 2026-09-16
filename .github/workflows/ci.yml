@@ -155,7 +155,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-15]
+        os: [ubuntu-24.04, ubuntu-24.04-arm, macos-15, macos-15-intel]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 35
     steps:
@@ -163,6 +163,9 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup
+      - name: Test core on additional architectures
+        if: matrix.os == 'ubuntu-24.04-arm' || matrix.os == 'macos-15-intel'
+        run: bun run --cwd packages/core test
       - name: Install Linux shell dependencies
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf xvfb dbus-x11
@@ -196,7 +199,7 @@ jobs:
           ditto -c -k --keepParent "$RUNNER_TEMP/Boite.app" "$RUNNER_TEMP/Boite-macos.zip"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: desktop-${{ runner.os }}
+          name: desktop-${{ matrix.os }}
           path: |
             apps/shell/src-tauri/target/release/bundle/deb/*.deb
             apps/shell/src-tauri/target/release/bundle/appimage/*.AppImage

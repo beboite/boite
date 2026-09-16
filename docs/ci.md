@@ -27,6 +27,7 @@ The Debian install, extracted AppImage and signed macOS bundle each run the smok
 test, which checks core startup, bundled UI serving, authenticated RPC and an
 echo turn with a fresh data directory. It does not exercise native desktop controls.
 The WebView2 shell end-to-end suite remains Windows-only.
+Portable desktop checks run on x64 and ARM64 for both Linux and macOS.
 
 ## Build cost
 
