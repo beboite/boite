@@ -295,3 +295,11 @@ question card in the timeline and answers the agent with what the user picked;
 Codex's `item/tool/requestUserInput` is the one that does today. A question is
 not a permission mode and is never gated by one: an agent whose approvals are
 off can still ask.
+
+### Codex task tracking
+
+Boite enables `tools.update_plan.enabled` through the per-thread configuration
+on both `thread/start` and `thread/resume`. Codex disables this tool by default;
+listening for `turn/plan/updated` alone does not make it available to the agent.
+The native plan populates the thread's activity tasks. Goal instructions explain
+this mapping so the agent uses its planning tools instead of legacy Boite todos.

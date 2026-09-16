@@ -6,6 +6,7 @@
   import { AGENT_PREFIX, appCommands, isAgentCommand, runCommand } from '../lib/commands.svelte';
   import { rankItems, type PaletteItem } from '../lib/palette';
   import { clearStash, DRAFT_STASH_KEY, readStash, writeStash } from '../lib/prefs';
+  import { promptText } from '../lib/message-display';
   import { fill, strings } from '../lib/strings';
   import type { Choice, PickPatch, Store } from '../lib/store.svelte';
   import EffortSlider from './EffortSlider.svelte';
@@ -14,7 +15,6 @@
   import MentionMenu from './MentionMenu.svelte';
   import SlashMenu from './SlashMenu.svelte';
   import ThreadActivity from './ThreadActivity.svelte';
-  import { visibleUserText } from '../lib/message-display';
 
   /**
    * `centered` is the draft's placement: the parent stacks the composer under
@@ -117,7 +117,7 @@
       .map((message) =>
         message.parts
           .filter((part) => part.type === 'text')
-          .map((part) => (part.type === 'text' ? visibleUserText(part.text) : ''))
+          .map((part) => (part.type === 'text' ? promptText(part) : ''))
           .join('\n')
           .trim()
       )
@@ -264,6 +264,7 @@
       keywords: item.keywords
     }))
   ]);
+
 
   /** Agent commands first, so a tie goes to the agent's own. */
   let slashItems = $derived(rankItems(slashQuery ?? '', [...agentItems, ...boiteItems]));
@@ -759,7 +760,7 @@
     <div class="input-wrap">
     {#if commandToken}
       <div class="input-highlight" aria-hidden="true" data-testid="composer-highlight" style:width={`${inputWidth}px`}>
-        <div class="input-paint" style:transform={`translateY(${-inputScroll}px)`}><span class="command-token">{commandToken}</span>{text.slice(commandToken.length)}{'\n'}</div>
+        <div class="input-paint input-mirror" style:transform={`translateY(${-inputScroll}px)`}><span class="command-token" data-testid="command-highlight">{commandToken}</span>{text.slice(commandToken.length)}{'\n'}</div>
       </div>
     {/if}
     <textarea

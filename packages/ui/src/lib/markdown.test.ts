@@ -2,6 +2,13 @@ import { describe, expect, test } from 'vitest';
 import { renderMarkdown, withCaret } from './markdown';
 
 describe('renderMarkdown', () => {
+  test('inline code keeps emphasis and links literal', () => {
+    expect(renderMarkdown('`**literal**` and **bold**')).toBe('<p><code>**literal**</code> and <strong>bold</strong></p>');
+    expect(renderMarkdown('`[x](https://example.test)`')).toBe('<p><code>[x](https://example.test)</code></p>');
+    expect(renderMarkdown('``a ` b`` and `<tag>`')).toBe('<p><code>a ` b</code> and <code>&lt;tag&gt;</code></p>');
+    expect(renderMarkdown('**`code`** and `[x](https://example.test)`')).toBe('<p><strong><code>code</code></strong> and <code>[x](https://example.test)</code></p>');
+    expect(renderMarkdown('\0 `**code**`')).toBe('<p>\0 <code>**code**</code></p>');
+  });
   test('paragraphs, headings, inline marks and links, everything escaped', () => {
     expect(renderMarkdown('one\ntwo\n\nthree')).toBe('<p>one\ntwo</p><p>three</p>');
     expect(renderMarkdown('# Title\n## Sub')).toBe('<h3>Title</h3><h4>Sub</h4>');

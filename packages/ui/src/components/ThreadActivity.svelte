@@ -47,15 +47,15 @@
     {#each ['goal', 'loop'] as kind (kind)}
       {@const entry = kind === 'goal' ? goal : loop}
       {#if entry}
-        <div class="activity-row" data-testid="activity-{kind}">
+        <div class="activity-row" class:finished={entry.status === 'complete'} data-testid="activity-{kind}">
           {#if kind === 'goal'}<Target size={16} />{:else}<Repeat size={16} />{/if}
           <span class="kind">{kind === 'goal' ? strings.activity.goal : strings.activity.loop}</span>
           <span class="objective" title={'objective' in entry ? entry.objective : entry.prompt}>
             {#if 'objective' in entry}{entry.objective}{:else}{iteration(entry.iterations, entry.maxIterations)}{/if}
           </span>
-          <span class="meta">{strings.activity[entry.status]}</span>
+          <span class="meta status" class:live={entry.status === 'active'}>{strings.activity[entry.status]}</span>
           {#if entry.status !== 'complete'}
-            <button type="button" class="ghost icon action" disabled={saving || store.connection !== 'ready'}
+            <button type="button" class="activity-action icon" disabled={saving || store.connection !== 'ready'}
               aria-label={entry.status === 'active' ? strings.activity.pause : strings.activity.resume}
               title={entry.status === 'active' ? strings.activity.pause : strings.activity.resume}
               onclick={() => void control(kind as 'goal' | 'loop', entry.status === 'active' ? 'pause' : 'resume')}>
@@ -63,9 +63,9 @@
             </button>
           {/if}
           {#if kind === 'goal' && entry.status !== 'complete'}
-            <button type="button" class="ghost icon action" disabled={saving || store.connection !== 'ready'} aria-label={strings.activity.finish} title={strings.activity.finish} onclick={() => void control('goal', 'complete')}><Check size={17} /></button>
+            <button type="button" class="activity-action icon" disabled={saving || store.connection !== 'ready'} aria-label={strings.activity.finish} title={strings.activity.finish} onclick={() => void control('goal', 'complete')}><Check size={17} /></button>
           {/if}
-          <button type="button" class="ghost icon action" disabled={saving || store.connection !== 'ready'} aria-label={strings.activity.remove} title={strings.activity.remove} onclick={() => void control(kind as 'goal' | 'loop', 'remove')}><X size={17} /></button>
+          <button type="button" class="activity-action icon" disabled={saving || store.connection !== 'ready'} aria-label={strings.activity.remove} title={strings.activity.remove} onclick={() => void control(kind as 'goal' | 'loop', 'remove')}><X size={17} /></button>
         </div>
         {#if entry.error}<p class="error">{entry.error}</p>{/if}
       {/if}
@@ -113,10 +113,14 @@
   .activity.hidden { opacity: 0; transform: translateY(8px); pointer-events: none; }
   .activity-row, .tasks-toggle { display: flex; align-items: center; gap: 8px; min-height: var(--control); min-width: 0; }
   .activity-row > :global(svg) { flex: none; color: var(--color-muted-foreground); }
-  .kind { font-weight: 600; }
+  .kind { font-weight: 600; color: var(--color-accent); }
+  .activity-action { min-height: var(--control-lg); flex: none; gap: 6px; border-radius: var(--radius-md); }
+  .activity-action.icon { width: var(--control-lg); height: var(--control-lg); }
+  .status { padding: 3px 8px; border-radius: var(--radius-sm); background: var(--color-surface-2); }
+  .status.live { color: var(--color-accent); }
+  .finished .status { color: var(--color-success); }
   .objective, .current { flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; min-width: 0; text-align: left; }
   .meta, .count { color: var(--color-muted-foreground); font-size: var(--text-xs); flex: none; }
-  .action { width: var(--control); height: var(--control); flex: none; border: 1px solid var(--color-border); border-radius: var(--radius-md); }
   .tasks-toggle { width: 100%; padding: 0; margin-top: 2px; }
   .tasks-toggle :global(svg) { flex: none; }
   .tasks-toggle :global(svg:last-child) { transition: transform var(--dur-2); }
@@ -138,7 +142,7 @@
   .history p { margin: 4px 0 0; white-space: pre-wrap; }
   .cadence { margin: 8px 0 0; }
   .error { color: var(--color-danger); margin: 4px 0; overflow-wrap: anywhere; }
-  @media (max-width: 720px) { .activity { width: min(calc(100% - 20px), var(--content)); padding: 8px; } .activity-row { gap: 5px; } .action { width: calc(var(--control) + 6px); height: calc(var(--control) + 6px); } }
+  @media (max-width: 720px) { .activity { width: min(calc(100% - 20px), var(--content)); padding: 8px; } .activity-row { gap: 5px; } .activity-action.icon { width: var(--control-touch); height: var(--control-touch); } }
   @media (prefers-reduced-motion: reduce) { .activity, .task-disclosure, progress::-webkit-progress-value { transition: none; } }
 </style>
 

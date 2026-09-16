@@ -325,3 +325,24 @@ original checkout: outside the worktree, outside the branch, outside the commit,
 and invisible to the review that follows. The tracked docs, this page included,
 are the ones a worktree can actually change. Check where a file you are about to
 edit really lives before editing it.
+
+
+## Chat readability
+
+`bun test tests/e2e/readability.test.ts` checks the sidebar metadata, process
+panel, paragraph buffering, reasoning replacement, goal display and command
+highlighting through the fake client. It writes desktop, phone and light-theme
+captures under `tests/e2e/.artifacts/`.
+
+Scheduled goal and loop prompts journal the command and objective in `text`, with
+activity kind and iteration metadata. The core builds the execution instructions
+when starting the driver. Older messages can carry `displayText`, which the UI
+still honors when displaying or recalling a prompt. Terminal goal control markers
+stay hidden; examples inside answer text or code fences remain visible.
+
+Chat status uses two small receipts: core acceptance and the first nonempty
+assistant activity. Agent protocols do not provide a literal read receipt.
+The reply has one spinner while running, paused when the document is hidden
+and disabled for reduced motion. Finished turns show a check and elapsed time;
+usage totals remain in Usage settings. Context details open separately from
+compaction. `tests/e2e/chat-context.test.ts` covers these interactions.

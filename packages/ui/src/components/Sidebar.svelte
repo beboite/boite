@@ -6,7 +6,6 @@
   import { confirm } from '../lib/confirm.svelte';
   import { contextMenu } from '../lib/context-menu.svelte';
   import { experimentOn } from '../lib/experiments.svelte';
-  import { tokens } from '../lib/format';
   import { separator } from '../lib/menu';
   import { clampSidebar, SIDEBAR_DEFAULT } from '../lib/prefs';
   import { fill, strings } from '../lib/strings';
@@ -37,7 +36,6 @@
           (b.thread.lastUserMessageAt ?? b.thread.createdAt) - (a.thread.lastUserMessageAt ?? a.thread.createdAt)
       )
   );
-  let usageToday = $derived(store.usage ? store.usage.total.inputTokens + store.usage.total.outputTokens : 0);
   let target = $derived(store.openProject ?? store.projects[0]);
   let newLabel = $derived(
     target ? fill(strings.sidebar.newThreadIn, { project: target.name }) : strings.sidebar.newThread
@@ -228,12 +226,6 @@
   {/if}
   <div class="foot">
     <MachineStatus {store} {filter} onfilter={id => (filter = id)} />
-    {#if usageToday > 0}<button
-        class="chip usage"
-        title={strings.usage.heading}
-        data-testid="usage-pill"
-        onclick={() => store.showSettings('usage')}>{tokens(usageToday)} {strings.units.tokens}</button
-      >{/if}
     <button
       class="ghost icon"
       title={`${strings.sidebar.settings}${store.keyHint('settings')}`}
@@ -414,10 +406,7 @@
     padding: 6px 8px 6px 12px;
     border-top: 1px solid var(--color-border);
   }
-  .usage {
-    font-size: var(--text-xs);
-    height: var(--control-sm);
-  }
+
   .add-project {
     margin: 0 8px 6px;
     justify-content: flex-start;

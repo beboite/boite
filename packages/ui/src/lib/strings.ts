@@ -227,6 +227,15 @@ export const strings = {
   },
 
   thread: {
+    contextDetails: 'Context',
+    contextInput: 'Input',
+    contextCache: 'Cached input',
+    contextOutput: 'Output',
+    contextUsed: 'Used',
+    contextFree: 'Available',
+    contextNoBreakdown: 'This agent does not report a breakdown.',
+    contextNoReading: 'No measurement received from this agent yet.',
+    contextMeasured: 'Last measurement',
     none: 'No thread open',
     noneBody: 'Pick one on the left, or start a new one.',
     trace: 'Trace',
@@ -258,6 +267,15 @@ export const strings = {
   },
 
   chat: {
+    accepted: 'Request accepted',
+    responseStarted: 'Agent activity received',
+    working: 'Working',
+    writing: 'Writing',
+    stopped: 'Stopped',
+    toolCall: '1 tool call',
+    toolCount: '{count} tool calls',
+    inputTokens: '{count} input tokens',
+    outputTokens: '{count} output tokens',
     you: 'You',
     assistant: 'Agent',
     system: 'System',
@@ -407,6 +425,14 @@ export const strings = {
   },
 
   trace: {
+    exact: 'All child processes tracked',
+    limited: 'Limited process tracking',
+    finished: 'Finished',
+    parent: 'Parent PID',
+    cpuTime: 'CPU time',
+    currentMemory: 'Memory now',
+    active: 'active',
+    recorded: 'recorded',
     exe: 'Executable',
     pid: 'PID',
     started: 'Started',
@@ -729,6 +755,8 @@ export const strings = {
 
   errors: {
     prefix: 'Error',
+    activityUnsupported: 'This core does not support goals or loops. Update Boite on {machine}, then reconnect. Your command has not been sent.',
+    pullRequestUnsupported: 'Update Boite on the machine hosting this thread to show its pull request. This core does not support pull request lookup yet.',
     noEndpoint: 'No core endpoint could be resolved.',
     connect: 'Could not connect to the core.',
     clipboard: 'The clipboard refused the text.',

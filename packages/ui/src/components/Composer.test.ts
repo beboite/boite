@@ -313,6 +313,33 @@ test('a model with no reasoning scale gets no chip at all', async () => {
   expect(query('[data-testid=composer-picker]').textContent).toContain('Claude Haiku 4.5');
 });
 
+test('the picker keeps row, account and legacy keyboard navigation separate', async () => {
+  await mountOnFake();
+  await openDraft();
+  query<HTMLButtonElement>('[data-testid=composer-picker]').click();
+  await waitFor(() => document.querySelector('[data-testid=composer-picker-menu]') !== null);
+
+  const claudeTile = query<HTMLButtonElement>('[data-provider=claude]');
+  claudeTile.focus();
+  expect(press('ArrowDown')).toBe(false);
+  expect(document.activeElement).toBe(query('[data-provider=echo]'));
+
+  const firstSeat = query<HTMLButtonElement>('[data-instance="claude::a-claude-main"]');
+  const secondSeat = query<HTMLButtonElement>('[data-instance="claude::a-claude-side"]');
+  firstSeat.focus();
+  expect(press('ArrowRight')).toBe(false);
+  expect(document.activeElement).toBe(secondSeat);
+  expect(press('ArrowLeft')).toBe(false);
+  expect(document.activeElement).toBe(firstSeat);
+
+  const legacyRow = query<HTMLButtonElement>('[data-testid=picker-legacy]');
+  legacyRow.focus();
+  expect(press('ArrowRight')).toBe(false);
+  await waitFor(() => document.activeElement?.closest('[data-testid=picker-legacy-menu]') !== null);
+  expect(press('ArrowLeft')).toBe(false);
+  expect(document.activeElement).toBe(legacyRow);
+});
+
 test('a refused turn keeps the prompt for Enter and Ctrl+Enter', async () => {
   await mountOnFake();
   await store.open('t-trace');

@@ -26,5 +26,44 @@ export function visibleAnswer(text: string): string {
 }
 
 export function messagePreview(message: Message): string {
-  return message.parts.filter((part): part is Extract<MessagePart, { type: 'text' }> => part.type === 'text').map(part => visibleUserText(part.text)).join(' ').trim();
+  return message.parts.filter((part): part is Extract<MessagePart, { type: 'text' }> => part.type === 'text').map(part => promptText(part)).join(' ').trim();
+}
+
+export function promptText(part: Extract<MessagePart, { type: 'text' }>): string {
+  return part.displayText ?? visibleUserText(part.text);
+}
+
+export function answerText(text: string, _live: boolean): string {
+  return visibleAnswer(text);
+}
+
+/** Only complete paragraphs and fenced blocks enter the timeline while streaming. */
+export function paragraphBlocks(text: string, live: boolean): string[] {
+  const blocks: string[] = [];
+  let start = 0;
+  let offset = 0;
+  let fence = '';
+  for (const line of text.split(/(?<=\n)/)) {
+    const trimmed = line.trim();
+    const marker = /^(?:`{3,}|~{3,})/.exec(trimmed)?.[0];
+    if (marker) {
+      if (!fence) fence = marker;
+      else if (marker[0] === fence[0] && marker.length >= fence.length && trimmed === marker) fence = '';
+    }
+    offset += line.length;
+    if (!fence && !trimmed && line.endsWith('\n')) {
+      const block = text.slice(start, offset).trim();
+      if (block) blocks.push(block);
+      start = offset;
+    }
+  }
+  if (!live && text.slice(start).trim()) blocks.push(text.slice(start).trim());
+  return blocks;
+}
+
+/** Codex can append several bold thought headings inside the same part. */
+export function currentThought(text: string): { title: string | null; text: string } {
+  const headings = [...text.matchAll(/\*\*([^*\n]+)\*\*/g)];
+  const last = headings.at(-1);
+  return { title: last?.[1]?.trim() ?? null, text: last ? text.slice(last.index) : text };
 }

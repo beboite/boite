@@ -1122,10 +1122,8 @@ export class ThreadStore {
 
   /** The user message of the turn, read back from the journal: the text and the images it carried. */
   private lastUserInput(threadId: ThreadId, turnId: TurnId): { prompt: string; attachments: ImageAttachment[] } {
-    const messages = this.core.journal.listMessages(threadId);
-    for (let index = messages.length - 1; index >= 0; index -= 1) {
-      const message = messages[index];
-      if (message === undefined || message.turnId !== turnId || message.role !== 'user') continue;
+    const message = this.core.journal.lastUserMessage(threadId, turnId);
+    if (message !== null) {
       const attachments: ImageAttachment[] = [];
       for (const part of message.parts) {
         if (part.type === 'image') {
@@ -1165,13 +1163,15 @@ export class ThreadStore {
   }
 
   /** The context meter, whole numbers only: a driver that misreads its agent writes nothing. */
-  private noteContext(threadId: ThreadId, use: { tokens: number; window: number | null }): void {
+  private noteContext(threadId: ThreadId, use: Omit<import('@boite/contracts').ContextUse, 'at'>): void {
     const tokens = Number.isFinite(use.tokens) && use.tokens >= 0 ? Math.round(use.tokens) : null;
     if (tokens === null) return;
     const window = use.window !== null && Number.isFinite(use.window) && use.window > 0 ? Math.round(use.window) : null;
     const thread = this.core.journal.getThread(threadId);
     if (thread === null) return;
-    this.save({ ...thread, context: { tokens, window, at: Date.now() } }, 'thread.context');
+    const breakdown = use.breakdown && Object.values(use.breakdown).every(n => Number.isFinite(n) && n >= 0)
+      && Math.abs(use.breakdown.input + use.breakdown.cache + use.breakdown.output - tokens) <= 1 ? use.breakdown : undefined;
+    this.save({ ...thread, context: { tokens, window, ...(breakdown ? {breakdown} : {}), at: Date.now() } }, 'thread.context');
   }
 
   private setStatus(threadId: ThreadId, status: ThreadStatus): void {

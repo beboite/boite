@@ -19,11 +19,7 @@
 
 <div class="trace-surface" data-testid="trace-panel">
   <div class="bar">
-    {#if load}
-      <span class="chip live" title={strings.sidebar.loadTitle}>
-        {load.processes} {strings.resources.processes} / {percent(load.cpuPercent)} / {bytes(load.memoryBytes)}
-      </span>
-    {/if}
+    <span class="totals">{store.trace.length} {strings.trace.recorded} · {load?.processes ?? store.trace.filter(record => record.exitedAt === null).length} {strings.trace.active}</span>
     <span class="spacer"></span>
     <button
       type="button"
@@ -36,6 +32,9 @@
       <RefreshCw size={13} strokeWidth={1.75} />
     </button>
   </div>
+  {#if load}
+    <div class="load"><span>{strings.trace.cpu} <b>{percent(load.cpuPercent)}</b></span><span>{strings.trace.currentMemory} <b>{bytes(load.memoryBytes)}</b></span></div>
+  {/if}
   <div class="scroll">
     <TraceTable records={store.trace} capability={store.core?.trace ?? null} />
   </div>
@@ -62,11 +61,9 @@
     flex: 1;
   }
 
-  .live {
-    height: 20px;
-    font-size: var(--text-xs);
-    font-variant-numeric: tabular-nums;
-  }
+  .totals, .load { font-size: var(--text-xs); color: var(--color-muted-foreground); }
+  .load { display: flex; flex-wrap: wrap; gap: 14px; padding: 0 12px 8px; }
+  .load b { color: var(--color-foreground); font-weight: 500; margin-left: 4px; }
 
   .scroll {
     flex: 1;

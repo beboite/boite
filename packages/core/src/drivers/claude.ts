@@ -370,13 +370,7 @@ class ClaudeTurn {
       case 'content_block_delta': {
         // `signature_delta` signs the thinking block; it is not text.
         if (event.delta?.type === 'thinking_delta') {
-          const thinking = event.delta.thinking ?? '';
-          if (thinking.length === 0) break;
-          const seen = event.index === undefined ? undefined : this.thinkingBlocks.get(event.index);
-          const at = seen ?? this.openThinking();
-          if (event.index !== undefined) this.thinkingBlocks.set(event.index, at);
-          this.write(at, thinking);
-          this.streamedThinking.set(this.apiMessageId, (this.streamedThinking.get(this.apiMessageId) ?? '') + thinking);
+          this.streamContent('thinking', event.index, event.delta.thinking ?? '');
           break;
         }
         if (event.delta?.type === 'input_json_delta') {
@@ -390,18 +384,23 @@ class ClaudeTurn {
           break;
         }
         if (event.delta?.type !== 'text_delta') break;
-        const text = event.delta.text ?? '';
-        if (text.length === 0) break;
-        const known = event.index === undefined ? undefined : this.textBlocks.get(event.index);
-        const index = known ?? this.openText();
-        if (event.index !== undefined) this.textBlocks.set(event.index, index);
-        this.write(index, text);
-        this.streamedText.set(this.apiMessageId, (this.streamedText.get(this.apiMessageId) ?? '') + text);
+        this.streamContent('text', event.index, event.delta.text ?? '');
         break;
       }
       default:
         break;
     }
+  }
+
+  private streamContent(kind: 'text' | 'thinking', blockIndex: number | undefined, text: string): void {
+    if (!text.length) return;
+    const blocks = kind === 'text' ? this.textBlocks : this.thinkingBlocks;
+    const accumulated = kind === 'text' ? this.streamedText : this.streamedThinking;
+    const known = blockIndex === undefined ? undefined : blocks.get(blockIndex);
+    const index = known ?? (kind === 'text' ? this.openText() : this.openThinking());
+    if (blockIndex !== undefined) blocks.set(blockIndex, index);
+    this.write(index, text);
+    accumulated.set(this.apiMessageId, (accumulated.get(this.apiMessageId) ?? '') + text);
   }
 
   private handleAssistant(message: SDKAssistantMessage): void {

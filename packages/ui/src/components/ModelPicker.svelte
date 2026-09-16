@@ -285,51 +285,70 @@
     return root ? Array.from(root.querySelectorAll<HTMLElement>('.popover .models [data-row]:not(:disabled)')) : [];
   }
 
-  function onkeydown(event: KeyboardEvent) {
-    if (!popover.open) return;
-    const active = document.activeElement as HTMLElement | null;
-    if (event.key === 'ArrowRight' && active?.dataset.testid === 'picker-legacy') { event.preventDefault(); legacy.show(); queueMicrotask(() => root?.querySelector<HTMLElement>('[data-testid=picker-legacy-menu] [data-model]')?.focus()); return; }
-    if (event.key === 'ArrowLeft' && active?.closest('[data-testid=picker-legacy-menu]')) { event.preventDefault(); legacy.hide(); root?.querySelector<HTMLElement>('[data-testid=picker-legacy]')?.focus(); return; }
-    const searching = searchable && (active === searchBox || (active?.hasAttribute('data-model') ?? false));
-
-    if (event.key === 'Escape') {
-      event.stopPropagation();
-      if (legacyOpen) { legacy.hide(); root?.querySelector<HTMLElement>('[data-testid=picker-legacy]')?.focus(); return; }
-      // The query goes first: closing on it would throw away what was just typed.
-      if (searchable && modelQuery !== '') {
-        modelQuery = '';
-        searchBox?.focus();
-        return;
-      }
-      popover.hide();
+  function handleEscape(event: KeyboardEvent) {
+    event.stopPropagation();
+    if (legacyOpen) {
+      legacy.hide();
+      root?.querySelector<HTMLElement>('[data-testid=picker-legacy]')?.focus();
       return;
     }
-    if (event.key === 'Enter' && searching) {
+    // The query goes first: closing on it would throw away what was just typed.
+    if (searchable && modelQuery !== '') {
+      modelQuery = '';
+      searchBox?.focus();
+      return;
+    }
+    popover.hide();
+  }
+
+  function handleLegacyNavigation(event: KeyboardEvent, active: HTMLElement | null): boolean {
+    if (event.key === 'ArrowRight' && active?.dataset.testid === 'picker-legacy') {
+      event.preventDefault();
+      legacy.show();
+      queueMicrotask(() => root?.querySelector<HTMLElement>('[data-testid=picker-legacy-menu] [data-model]')?.focus());
+      return true;
+    }
+    if (event.key === 'ArrowLeft' && active?.closest('[data-testid=picker-legacy-menu]')) {
+      event.preventDefault();
+      legacy.hide();
+      root?.querySelector<HTMLElement>('[data-testid=picker-legacy]')?.focus();
+      return true;
+    }
+    return false;
+  }
+
+  function handleModelSearch(event: KeyboardEvent, active: HTMLElement | null): boolean {
+    if (!searchable || (active !== searchBox && !active?.hasAttribute('data-model'))) return false;
+    if (event.key === 'Enter') {
       // A focused row is activated by the browser too; taking the default keeps it to one pick.
       event.preventDefault();
       const row = active === searchBox ? modelRows()[0] : active;
       row?.click();
-      return;
+      return true;
     }
-    if (searching && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {
-      event.preventDefault();
-      const list = modelRows();
-      const here = active === searchBox || !active ? -1 : list.indexOf(active);
-      if (event.key === 'ArrowDown') list[Math.min(here + 1, list.length - 1)]?.focus();
-      else if (here <= 0) searchBox?.focus();
-      else list[here - 1]?.focus();
-      return;
-    }
-    if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
-      // The account chips are a segmented control: the arrows walk them.
-      const chips = root ? Array.from(root.querySelectorAll<HTMLElement>('.popover [data-seat]:not(:disabled)')) : [];
-      const here = chips.indexOf(document.activeElement as HTMLElement);
-      if (here === -1) return;
-      event.preventDefault();
-      const step = event.key === 'ArrowRight' ? 1 : -1;
-      chips[(here + step + chips.length) % chips.length]?.focus();
-      return;
-    }
+    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return false;
+    event.preventDefault();
+    const list = modelRows();
+    const here = active === searchBox || !active ? -1 : list.indexOf(active);
+    if (event.key === 'ArrowDown') list[Math.min(here + 1, list.length - 1)]?.focus();
+    else if (here <= 0) searchBox?.focus();
+    else list[here - 1]?.focus();
+    return true;
+  }
+
+  function handleAccountNavigation(event: KeyboardEvent, active: HTMLElement | null): boolean {
+    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return false;
+    // The account chips are a segmented control: the arrows walk them.
+    const chips = root ? Array.from(root.querySelectorAll<HTMLElement>('.popover [data-seat]:not(:disabled)')) : [];
+    const here = active ? chips.indexOf(active) : -1;
+    if (here === -1) return false;
+    event.preventDefault();
+    const step = event.key === 'ArrowRight' ? 1 : -1;
+    chips[(here + step + chips.length) % chips.length]?.focus();
+    return true;
+  }
+
+  function handleRowNavigation(event: KeyboardEvent, active: HTMLElement | null) {
     if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
     const list = focusable();
     if (list.length === 0) return;
@@ -337,6 +356,16 @@
     const index = active ? list.indexOf(active) : -1;
     const next = event.key === 'ArrowDown' ? (index + 1) % list.length : (index - 1 + list.length) % list.length;
     list[next]?.focus();
+  }
+
+  function onkeydown(event: KeyboardEvent) {
+    if (!popover.open) return;
+    const active = document.activeElement as HTMLElement | null;
+    if (event.key === 'Escape') return handleEscape(event);
+    if (handleLegacyNavigation(event, active)) return;
+    if (handleModelSearch(event, active)) return;
+    if (handleAccountNavigation(event, active)) return;
+    handleRowNavigation(event, active);
   }
 
   function onWindowPointerdown(event: PointerEvent) {

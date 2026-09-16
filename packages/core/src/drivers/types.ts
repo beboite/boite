@@ -91,7 +91,7 @@ export interface TurnContext {
    * window when the agent names it. The core writes it on the thread and
    * tells the clients; a driver calls it once per turn, at the end.
    */
-  context(use: { tokens: number; window: number | null }): void;
+  context(use: Omit<import('@boite/contracts').ContextUse, 'at'>): void;
   requestPermission(toolName: string, input: unknown, description: string | null): PermissionTicket;
   /** The inline question card. One call per question, and they are asked in order. */
   askQuestion(ask: QuestionAsk): QuestionTicket;

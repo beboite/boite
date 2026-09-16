@@ -580,7 +580,9 @@ test('the header wears the context meter, a compaction is a divider, and a turn 
   const meter = query('[data-testid=context-meter]');
   expect(meter.textContent?.trim()).toBe('16%');
   expect(meter.dataset.level).toBe('low');
-  expect(meter.title).toBe('Context: 31k of 200k tokens (16%) as of the last request');
+  query<HTMLButtonElement>('[data-testid=context-trigger]').click();
+  await waitFor(() => document.querySelector('[data-testid=context-popup]') !== null);
+  expect(query('[data-testid=context-popup]').textContent).toContain((31000).toLocaleString());
   expect(query('[data-testid=compaction-part]').textContent?.replace(/\s+/g, ' ').trim()).toBe(
     'Context compacted, 184k to 31k tokens'
   );
@@ -592,13 +594,14 @@ test('the header wears the context meter, a compaction is a divider, and a turn 
   query<HTMLButtonElement>('[data-testid=composer-send]').click();
   await waitFor(() => store.openThread?.status === 'idle' && (store.openThread?.context?.tokens ?? 0) > 31_000);
   // 31_000 + 600 + 13 * 4 = 31_652 of 200_000: still 16 percent, the tooltip moved.
-  expect(query('[data-testid=context-meter]').title).toBe('Context: 32k of 200k tokens (16%) as of the last request');
+  expect(query('[data-testid=context-meter]').dataset.percent).toBe('16');
 
   // A thread whose agent never reported wears no meter.
   query<HTMLButtonElement>('[data-thread-id="t-bench"]').click();
   await waitFor(() => store.openThread?.id === 't-bench');
-  expect(query('[data-testid=context-meter]').textContent).toContain('?');
-  expect(query('[data-testid=context-meter]').title).toBe('Context usage not reported');
+  query<HTMLButtonElement>('[data-testid=context-trigger]').click();
+  await waitFor(() => document.querySelector('[data-testid=context-popup]') !== null);
+  expect(query('[data-testid=context-popup]').textContent).toContain('No measurement received');
 });
 
 test('the trace panel shows the I/O a process moved, and none for a record that measured nothing', async () => {
@@ -610,7 +613,7 @@ test('the trace panel shows the I/O a process moved, and none for a record that 
   if (!store.panelOpen) query<HTMLButtonElement>('[data-testid=tab-trace]').click();
   await waitFor(() => document.querySelectorAll('[data-testid=trace-row]').length === 3);
 
-  expect(query('[data-testid=trace-panel] thead').textContent).toContain('I/O');
+  expect(query('[data-testid=trace-panel]').textContent).toContain('I/O');
   const cellOf = (pid: number): string =>
     query(`[data-testid=trace-row][data-pid="${pid}"] [data-testid=trace-io]`).textContent?.trim() ?? '';
   // 1_240_000 bytes through the same `bytes()` the memory column uses.
@@ -621,35 +624,21 @@ test('the trace panel shows the I/O a process moved, and none for a record that 
   expect(query('[data-testid=trace-row][data-pid="21460"]').textContent).toContain('none');
 });
 
-test('the trace table fits the panel: base names, no pid column, nothing scrolling sideways', async () => {
+test('trace processes disclose the command, PID and measurements without narrow columns', async () => {
   await mountOnFake();
   await waitFor(() => document.querySelector('[data-thread-id="t-trace"]') !== null);
   query<HTMLButtonElement>('[data-thread-id="t-trace"]').click();
   await waitFor(() => store.openThread?.id === 't-trace');
-
   if (!store.panelOpen) query<HTMLButtonElement>('[data-testid=tab-trace]').click();
   await waitFor(() => document.querySelectorAll('[data-testid=trace-row]').length === 3);
-
-  // The pid is not a column any more, only an attribute and a line of the tooltip.
-  const headers = Array.from(query('[data-testid=trace-panel] thead').querySelectorAll('th')).map(
-    (th) => th.textContent?.trim() ?? ''
-  );
-  expect(headers).toEqual(['Executable', 'Duration', 'CPU', 'Peak memory', 'I/O', 'Exit']);
-
-  const exe = query('[data-testid=trace-row][data-pid="21140"] td.exe');
-  expect(exe.textContent?.trim()).toBe('claude.exe');
-  expect(exe.getAttribute('data-exe')).toBe('C:\\tools\\claude\\claude.exe');
-  expect(exe.getAttribute('title')).toContain('C:\\tools\\claude\\claude.exe');
-  expect(exe.getAttribute('title')).toContain('pid 21140');
-
-  // Every measurement is right-aligned on tabular figures.
-  const row = query('[data-testid=trace-row][data-pid="21402"]');
-  expect(row.querySelectorAll('td.num').length).toBe(4);
-
-  // jsdom lays nothing out, so both are 0 here: the real widths are in
-  // scratchpad/trace-width-capture.ts and its capture.
-  const table = query<HTMLTableElement>('[data-testid=trace-table]');
-  expect(table.scrollWidth).toBe(table.clientWidth);
+  const row = query<HTMLDetailsElement>('[data-testid=trace-row][data-pid="21140"]');
+  expect(row.open).toBe(false);
+  expect(row.querySelector('.exe')?.textContent).toBe('claude.exe');
+  row.querySelector('summary')!.click();
+  expect(row.open).toBe(true);
+  expect(row.textContent).toContain('21140');
+  expect(row.textContent).toContain('CPU time');
+  expect(row.querySelector('.command')?.textContent).toContain('claude');
 });
 
 const SEEDED_THINKING = 'The table wants a row per process';
@@ -1362,4 +1351,52 @@ test('machines coexist and disconnecting a remote leaves the primary connected',
   await waitFor(() => document.querySelectorAll('[data-testid=machine-card]').length === 1);
   expect(store.connection).toBe('ready');
   expect(workspace.active).toBe(store);
+});
+
+test('an older core names the host that needs goals support and keeps the unsent prompt', async () => {
+  await mountOnFake();
+  await waitFor(() => store.openThread !== null);
+  store.core!.hostname = 'Older host';
+  const client = store.client!;
+  const call = client.call.bind(client);
+  const { RpcFailure } = await import('./lib/client');
+  const spy = vi.spyOn(client, 'call').mockImplementation((method, params) => {
+    if (method === 'threads.activity.set') return Promise.reject(new RpcFailure({code:-32601,message:'unknown method threads.activity.set'}));
+    return call<RpcMethodName>(method, params);
+  });
+  try {
+    const field = query<HTMLTextAreaElement>('[data-testid=composer-input]');
+    field.value = '/goal Verify two tasks';
+    field.dispatchEvent(new Event('input', {bubbles:true}));
+    await waitFor(() => !query<HTMLButtonElement>('[data-testid=composer-send]').disabled);
+    query<HTMLButtonElement>('[data-testid=composer-send]').click();
+    await waitFor(() => store.error !== null);
+    expect(store.error).toContain(store.core!.hostname);
+    expect(store.error).toContain('Update Boite');
+    expect(field.value).toBe('/goal Verify two tasks');
+    expect(spy.mock.calls.some(([method]) => method === 'turns.start')).toBe(false);
+  } finally { spy.mockRestore(); }
+});
+
+test('sending waits for reconnect history to finish loading', async () => {
+  await mountOnFake();
+  await waitFor(() => store.openThread !== null);
+  const client = store.client!;
+  const call = client.call.bind(client);
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const spy = vi.spyOn(client, 'call').mockImplementation((method, params) => {
+    if (method === 'threads.get') return gate.then(() => call<RpcMethodName>(method, params));
+    return call<RpcMethodName>(method, params);
+  });
+  try {
+    const loading = store.reload();
+    await waitFor(() => spy.mock.calls.some(([method]) => method === 'threads.get'));
+    const sending = store.send('after reconnect');
+    await Promise.resolve();
+    expect(spy.mock.calls.some(([method]) => method === 'turns.start')).toBe(false);
+    release();
+    await loading;
+    expect(await sending).toBe(true);
+  } finally { release(); spy.mockRestore(); }
 });

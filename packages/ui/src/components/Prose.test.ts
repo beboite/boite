@@ -54,12 +54,13 @@ test('a block that is still being written carries no button yet', async () => {
     props: { text: 'Run it:\n\n```sh\nbun run --cwd packages/ui te', live: true }
   });
   flushSync();
-  // Past the 48 ms the markdown itself is gated on, so the block is really there.
+  // An unfinished fenced block stays buffered while the complete paragraph is visible.
   await new Promise((resolve) => setTimeout(resolve, 120));
   flushSync();
   await tick();
 
-  expect(document.querySelector('pre')).not.toBeNull();
+  expect(document.querySelector('pre')).toBeNull();
+  expect(query('[data-testid=text-part]').textContent).toContain('Run it:');
   expect(document.querySelector('[data-testid=code-copy]')).toBeNull();
 });
 

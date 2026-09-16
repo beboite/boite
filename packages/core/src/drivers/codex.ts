@@ -515,8 +515,9 @@ class CodexSession {
   private exitCode: number | null = null;
   private exited: Promise<number | null> | null = null;
   private idle: Timer | null = null;
-  /** The turn whose `turn/start` is in flight; notifications outside one are dropped. */
+  /** The turn whose `turn/start` is in flight. Context updates also arrive while idle. */
   private current: CodexTurn | null = null;
+  private contextSink: CodexTurn['ctx']['context'] | null = null;
   private queue: Promise<void> = Promise.resolve();
   private running = 0;
   private closing = false;
@@ -597,6 +598,7 @@ class CodexSession {
 
     turn.noteSession(threadId);
     this.current = turn;
+    this.contextSink = turn.ctx.context;
     const ctx = turn.ctx;
     try {
       // The thread as it stands for this turn, not as it stood when the
@@ -690,6 +692,7 @@ class CodexSession {
         approvalPolicy: policy.approvalPolicy,
         sandbox: policy.sandbox,
         ...(model === null ? {} : { model }),
+        config: { 'tools.update_plan.enabled': true },
         excludeTurns: true,
       });
       this.threadId = resumed.thread.id;
@@ -697,6 +700,7 @@ class CodexSession {
     }
 
     const created = await rpc.request<{ thread: { id: string } }>('thread/start', {
+      config: { 'tools.update_plan.enabled': true },
       cwd: ctx.thread.cwd,
       approvalPolicy: policy.approvalPolicy,
       sandbox: policy.sandbox,
@@ -800,9 +804,24 @@ class CodexSession {
   // -- what the agent sends -------------------------------------------------
 
   private onNotification(method: string, raw: unknown): void {
+    const params = (raw ?? {}) as Record<string, unknown>;
+    if (method === 'thread/tokenUsage/updated') {
+      if (params['threadId'] !== this.threadId) return;
+      const usage = params['tokenUsage'] as { last?: CodexTokenUsage; modelContextWindow?: number } | undefined;
+      const last = usage?.last;
+      if (!last) return;
+      if (this.current && params['turnId'] === this.current.turnId) this.current.usage = mapUsage(last);
+      const tokens = last.totalTokens ?? (typeof last.inputTokens === 'number' && typeof last.outputTokens === 'number' ? last.inputTokens + last.outputTokens : null);
+      if (tokens !== null) {
+        const cache = last.cachedInputTokens ?? 0;
+        const breakdown = typeof last.inputTokens === 'number' && typeof last.outputTokens === 'number'
+          ? { input: last.inputTokens - cache, cache, output: last.outputTokens } : undefined;
+        this.contextSink?.({tokens, window: usage?.modelContextWindow ?? null, ...(breakdown ? {breakdown} : {})});
+      }
+      return;
+    }
     const turn = this.current;
     if (turn === null) return;
-    const params = (raw ?? {}) as Record<string, unknown>;
     switch (method) {
       case 'turn/started': {
         const record = params['turn'] as CodexTurnRecord | undefined;
@@ -834,15 +853,6 @@ class CodexSession {
         }
         const view = toolViewOf(item);
         if (view !== null) turn.upsertTool(item.id, view);
-        break;
-      }
-      case 'thread/tokenUsage/updated': {
-        const usage = params['tokenUsage'] as { last?: CodexTokenUsage; modelContextWindow?: number } | undefined;
-        const last = usage?.last;
-        if (last !== undefined) turn.usage = mapUsage(last);
-        if (last !== undefined && typeof last.totalTokens === 'number') {
-          turn.ctx.context({ tokens: last.totalTokens, window: usage?.modelContextWindow ?? null });
-        }
         break;
       }
       case 'turn/completed': {

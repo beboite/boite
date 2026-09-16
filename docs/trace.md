@@ -43,11 +43,13 @@ totals.
   many processes, what percentage of CPU, how many bytes of memory. It is what
   the gauge in the trace panel reads.
 
-The trace panel shows six columns at a fixed width, executable, duration, CPU,
-peak memory, I/O and exit, the four measurements right-aligned on tabular
-figures. It shows the base name of the executable, with the full path, the pid
-and the command line in the cell's tooltip. The Protection page under Settings
-keeps a wider table with a pid column of its own.
+The trace panel lists active processes first, then the most recently started.
+Each expandable row shows the executable name, running or exit status, duration
+and peak memory. Expanding it reveals the command, full path, PID, parent PID,
+CPU time and I/O. Unmeasured values remain unknown. The top summary separates
+recorded processes from active ones and labels current CPU and memory usage.
+The tracking capability disclosure explains the limits of polling hosts. The
+Protection page under Settings keeps its wider resource table.
 
 ## Caps
 
