@@ -682,10 +682,6 @@ fn build_main_window<R: Runtime>(
             .min_inner_size(880.0, 560.0)
             .resizable(true)
             .decorations(false)
-            // The compositor draws the material behind the window, so the window
-            // has to let it through. The page paints its own ground back over it
-            // unless the UI stamps `data-glass`, which it only does in the shell.
-            .transparent(cfg!(windows))
             .visible(false)
             .focused(!hidden())
             .skip_taskbar(hidden())
@@ -698,10 +694,10 @@ fn build_main_window<R: Runtime>(
             });
     // Acrylic is what a window opens on, and `lib/glass.ts` re-applies whatever
     // the setting says as soon as the UI mounts. Only Windows has a material;
-    // elsewhere the window is merely transparent under an opaque page.
+    // elsewhere the window stays opaque.
     #[cfg(windows)]
     {
-        builder = builder.effects(WindowEffectsConfig {
+        builder = builder.transparent(true).effects(WindowEffectsConfig {
             effects: vec![Effect::Acrylic, Effect::Mica, Effect::Blur],
             state: None,
             radius: None,
