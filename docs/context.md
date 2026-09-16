@@ -5,12 +5,12 @@ how much room the model gives it, and the header draws it as a ring with the
 percentage beside it. When the agent compacts its conversation mid-turn, the
 timeline gets a divider saying how many tokens went. Both come from the agent
 itself: the core never estimates a context size, and a provider whose protocol
-says nothing shows an unknown reading. The button inside the ring requests
-manual compaction of the native session.
+says nothing shows an unfilled ring. Hovering, focusing or tapping the ring
+opens exact counts and a separate manual compaction button.
 
 ## What is measured
 
-`ThreadSummary.context` is `{ tokens, window, at }` or null:
+`ThreadSummary.context` is `{ tokens, window, at, breakdown? }` or null:
 
 - `tokens` is what the last API request of the last turn carried: its input
   tokens, plus what it read from the prompt cache and what it wrote there.
@@ -21,6 +21,9 @@ manual compaction of the native session.
   With a window the header shows a percentage and the ring; without one it
   shows the count alone.
 - `at` is when the core wrote it.
+- `breakdown`, when available, contains disjoint input, cached-input and output
+  counts. The UI displays a single segmented bar and exact counts. Providers
+  without this detail show used and available capacity only.
 
 The core writes the meter at the end of every turn that reports one, through
 `thread.updated`, and keeps it in the journal (`threads.context`, schema 7),
@@ -36,7 +39,11 @@ finite or below zero writes nothing.
 | Codex | `tokenUsage.last.totalTokens` in `thread/tokenUsage/updated` | `tokenUsage.modelContextWindow` when reported | completed `contextCompaction` items |
 | OpenCode, Antigravity, Grok, pi | none yet | | pi's manual compaction response |
 
-Codex's count includes the last request's output. Counts remain the last
+Codex's count includes the last request's output. When `totalTokens` is absent,
+the driver adds the reported input and output counts. Context notifications
+arriving after a turn completes are retained while its session stays warm.
+Cached input is a subset of input, so the segmented bar subtracts it from the
+uncached input segment. Counts remain the last
 reported reading, not a prediction of the next request. ACP context updates
 are not read yet; an unknown reading never becomes a guessed percentage.
 
@@ -73,6 +80,8 @@ the transcript reader keeps prompts, answers and tool calls only.
 
 ## The colours
 
-The ring is the muted foreground under three quarters of the window, the
-foreground from there, and the danger colour past nine tenths, when the next
-compaction is close. The tooltip has the exact counts.
+The filled portion always uses the chosen accent, from zero to full capacity.
+The smaller ring opens details; it never starts compaction. The popup uses
+accent for uncached input, green for cached input, yellow for output and a
+neutral remainder for free capacity. These are provider token categories,
+not an estimated split between system instructions, files and tools.

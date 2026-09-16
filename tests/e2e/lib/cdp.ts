@@ -231,7 +231,8 @@ export class BrowserPage {
         await Bun.sleep(POLL_MS);
       }
     }
-    await this.waitFor("document.readyState === 'complete'");
+    // A cold Vite dependency build on the Windows runner can outlast the normal DOM wait.
+    await this.waitFor("document.readyState === 'complete'", 60_000);
   }
 
   async click(selector: string): Promise<void> {

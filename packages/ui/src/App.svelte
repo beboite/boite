@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import NotificationCard from './components/NotificationCard.svelte';
   import ChatView from './components/ChatView.svelte';
   import CommandPalette from './components/CommandPalette.svelte';
   import ConfirmDialog from './components/ConfirmDialog.svelte';
@@ -377,8 +378,7 @@
       onanimationend={toast.end}
       data-testid="error-toast"
     >
-      <span class="text" title={toastText}>{strings.errors.prefix}: {toastText}</span>
-      <button type="button" class="ghost small" onclick={() => (store.error = null)}>{strings.common.dismiss}</button>
+      <NotificationCard title={strings.errors.prefix} message={toastText} dismiss={() => (store.error = null)} />
     </div>
   {/if}
 </div>
@@ -444,34 +444,18 @@
 
   .toast {
     position: absolute;
-    right: 16px;
-    bottom: 16px;
+    right: max(16px, env(safe-area-inset-right));
+    top: calc(16px + env(safe-area-inset-top, 0px));
     z-index: 80;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    max-width: min(420px, calc(100vw - 32px));
-    padding: 8px 8px 8px 12px;
-    background: var(--color-surface-2);
-    border: 1px solid var(--color-border);
-    border-left: 3px solid var(--color-danger);
-    border-radius: var(--radius-md);
-    box-shadow: var(--shadow-e2);
+    width: min(380px, calc(100vw - 32px));
     animation: rise var(--dur-3) var(--ease-out-quint);
   }
+
+  .shell .toast { top: calc(var(--titlebar) + 16px); }
 
   .toast.closing {
     animation: fade-out var(--dur-2) var(--ease-out-quint);
     pointer-events: none;
-  }
-
-  .toast .text {
-    flex: 1;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    font-size: var(--text-sm);
   }
 
   /* The quit hint: a card at the top centre with a bar that fills over the

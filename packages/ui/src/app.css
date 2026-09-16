@@ -78,6 +78,8 @@
   /* Control heights, one token each: a plain button, a small one, a field. */
   --control: 30px;
   --control-sm: 26px;
+  --control-lg: 36px;
+  --control-touch: 40px;
   --input: 34px;
   --touch-target: 44px;
 

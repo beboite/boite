@@ -1,3 +1,5 @@
+import { RpcErrorCode } from '@boite/contracts';
+import { resetPullRequestSupport } from './pull-request';
 import { activityCommand } from './activity-command';
 import type {
   Account,
@@ -590,6 +592,7 @@ export class Store {
         client.onState((state) => {
           this.connection = state;
           if (state === 'ready') {
+            resetPullRequestSupport(client);
             this.#probeEpoch++;
             this.#probeAttempts.clear();
             this.error = null;
@@ -1481,10 +1484,18 @@ export class Store {
     if (!client || !threadId || this.connection !== 'ready') return false;
     if (prompt.trim().length === 0 && attachments.length === 0) return false;
     try {
+      // Reconnect snapshots must land before a new stream starts mutating the thread.
+      await this.#reloading;
+      if (this.#client !== client || this.connection !== 'ready') return false;
       const activity = activityCommand(prompt);
       if (activity) {
         if (attachments.length) throw new Error(strings.activity.noAttachments);
-        const accepted = await client.call('threads.activity.set', { threadId, ...activity });
+        const accepted = await client.call('threads.activity.set', { threadId, ...activity }).catch((error: unknown) => {
+          if (error instanceof RpcFailure && error.code === RpcErrorCode.MethodNotFound) {
+            throw new Error(strings.errors.activityUnsupported.replace('{machine}', this.core?.hostname ?? strings.app.name));
+          }
+          throw error;
+        });
         if (this.openThread?.id === threadId) this.openThread.activity = accepted;
         return true;
       }

@@ -167,16 +167,20 @@ describe('codex driver', () => {
     expect(getDriver('codex-appserver').protocol).toBe('codex-appserver');
   });
 
-  test('native plan events populate thread activity tasks', async () => {
-    const client = await startCore();
+  test('native plan tools are enabled on new and resumed sessions and populate activity', async () => {
+    const client = await startCore({ warmProcessMinutes: 0 });
     const threadId = await codexThread(client);
-    const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 20000);
-    await client.call('turns.start', { threadId, prompt: '[tasks]' });
-    expect((await finished).status).toBe('done');
-    expect((await client.call('threads.get', { threadId })).activity?.tasks).toEqual([
-      { id: '0', text: 'Inspect source', status: 'completed' },
-      { id: '1', text: 'Run checks', status: 'in_progress' },
-    ]);
+    for (let i = 0; i < 2; i++) {
+      harness!.core.activity.tasks(threadId, []);
+      const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 20000);
+      await client.call('turns.start', { threadId, prompt: '[tasks]' });
+      expect((await finished).status).toBe('done');
+      expect((await client.call('threads.get', { threadId })).activity?.tasks).toEqual([
+        { id: '0', text: 'Inspect source', status: 'completed' },
+        { id: '1', text: 'Run checks', status: 'in_progress' },
+      ]);
+    }
+    expect(fakeLog()).toContain('thread/resume');
   });
 
   test('a plain prompt streams back as one text part, and the codex thread id is kept', async () => {
@@ -305,6 +309,29 @@ describe('codex driver', () => {
       tool: parts.find((part) => part.type === 'tool'),
     };
   }
+
+  test('context reported after completion is retained, including a missing total', async () => {
+    const client = await startCore({warmProcessMinutes: 1});
+    const threadId = await codexThread(client);
+    const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 20000);
+    await client.call('turns.start', { threadId, prompt: '[late-context]' });
+    await finished;
+    await waitFor(() => harness?.core.journal.getThread(threadId)?.context?.tokens === 90, 1500);
+    const thread = await client.call('threads.get', {threadId});
+    expect(thread.context?.window).toBe(200000);
+    expect(thread.context?.breakdown).toEqual({input:60,cache:20,output:10});
+  });
+
+  test('late usage from a previous turn does not overwrite the current turn', async () => {
+    const client = await startCore({ warmProcessMinutes: 1 });
+    const threadId = await codexThread(client);
+    await runTurn(client, threadId, '[late-context]');
+    const finished = client.next('turn.finished', turn => turn.threadId === threadId, 20000);
+    await client.call('turns.start', { threadId, prompt: '[slow]' });
+    await waitFor(() => harness!.core.threads.get(threadId).context?.tokens === 90);
+    await client.call('turns.stop', { threadId });
+    expect((await finished).usage).toBeNull();
+  });
 
   test('the turn usage carries the tokens the agent reported, with no price', async () => {
     const client = await startCore();

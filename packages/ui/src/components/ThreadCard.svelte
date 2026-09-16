@@ -8,6 +8,7 @@
   import { separator } from '../lib/menu';
   import { focusOnMount } from '../lib/actions';
   import { strings } from '../lib/strings';
+  import { lookupPullRequest } from '../lib/pull-request';
   import { ago } from '../lib/format';
   import MachineIcon from './MachineIcon.svelte';
   import StatusMark from './StatusMark.svelte';
@@ -19,16 +20,17 @@
   let renaming = $state(false);
   let title = $state('');
   let pullRequest = $state<ThreadSummary['pullRequest']>(null);
-  let prError = $state('');
+
   let prLoading = $state(false);
-  async function refreshPr() {
+  async function refreshPr(manual = false) {
     if (!owner.client || prLoading) return;
     prLoading = true;
     try {
-      pullRequest = await owner.client.call('threads.pullRequest', { threadId: thread.id });
-      prError = '';
+      const result = await lookupPullRequest(owner.client, thread.id);
+      pullRequest = result.supported ? result.pullRequest : null;
+      if (!result.supported && manual) owner.error = strings.errors.pullRequestUnsupported;
     } catch (error) {
-      prError = error instanceof Error ? error.message : String(error);
+      owner.error = error instanceof Error ? error.message : String(error);
     } finally {
       prLoading = false;
     }
@@ -66,7 +68,7 @@
         if (action === 'rename') rename();
         if (action === 'retitle') void owner.retitle(thread.id);
         if (action === 'pin') void owner.pin(thread.id, !thread.pinned);
-        if (action === 'pr') void refreshPr();
+        if (action === 'pr') void refreshPr(true);
         if (action === 'archive') void owner.archive(thread.id);
       }
     );
@@ -107,32 +109,18 @@
         {#if thread.pinned}<Pin size={12} />{/if}
         <span class="when">{ago(thread.lastUserMessageAt ?? thread.createdAt, now)}</span>
       </span>
-      <span class="metadata">
-        <span class="pr" class:linked={!!pullRequest} title={prError || pullRequest?.state || strings.machines.noPr}
-          ><GitPullRequest size={12} /><span
-            >{prError
-              ? strings.machines.prUnavailable
-              : pullRequest
-                ? `#${pullRequest.number}`
-                : strings.machines.noPr}</span
-          ></span
-        >
-        <span class="project-name" title={project.path}><Folder size={12} /><span>{project.name}</span></span>
-        <span
-          class="machine"
-          class:offline={owner.connection !== 'ready'}
-          title={`${machine.label} · ${strings.connection[owner.connection]}`}
-          aria-label={machine.label}><MachineIcon icon={machine.icon} os={owner.core?.os} /><span>{machine.label}</span></span
-        >
-      </span>
     </button>
-    {#if pullRequest}<a
-        class="pr-link"
-        data-testid="thread-pr"
-        href={pullRequest.url}
-        title={pullRequest.url}
-        aria-label={`#${pullRequest.number}`}><GitPullRequest size={12} />#{pullRequest.number}</a
-      >{/if}
+    <div class="metadata">
+      <span class="project-name" title={project.path}><Folder size={12} /><span>{project.name}</span></span>
+      {#if pullRequest}
+        <a class="pr-link" data-testid="thread-pr" href={pullRequest.url} target="_blank" rel="noopener noreferrer"
+          title={pullRequest.url} aria-label={`#${pullRequest.number}`}><GitPullRequest size={12} />#{pullRequest.number}</a>
+      {/if}
+      <span class="machine" class:offline={owner.connection !== 'ready'}
+        title={`${machine.label} · ${strings.connection[owner.connection]}`} aria-label={machine.label}>
+        <MachineIcon icon={machine.icon} os={owner.core?.os} />
+      </span>
+    </div>
     <button
       type="button"
       class="ghost small icon actions"
@@ -163,7 +151,7 @@
     width: 100%;
     height: auto;
     min-height: calc(var(--row) + 22px);
-    padding: 9px 10px;
+    padding: 9px 10px 28px;
     gap: 7px;
     background: transparent;
   }
@@ -201,7 +189,11 @@
     display: flex;
     align-items: center;
     gap: 9px;
-    padding-left: 18px;
+    position: absolute;
+    bottom: 9px;
+    left: 28px;
+    right: 10px;
+    pointer-events: none;
     min-width: 0;
     font-size: var(--text-xs);
     color: var(--color-muted-foreground);
@@ -220,29 +212,22 @@
   .metadata :global(svg) {
     flex: none;
   }
-  .pr {
-    flex: none;
-    max-width: 90px;
-    color: var(--color-subtle);
-  }
-  .pr.linked {
-    visibility: hidden;
-  }
   .pr-link {
-    position: absolute;
-    left: 28px;
-    bottom: 9px;
     display: flex;
+    flex: none;
     gap: 4px;
     align-items: center;
+    pointer-events: auto;
     font-size: var(--text-xs);
     color: var(--color-success);
+    text-decoration: underline;
+    text-underline-offset: 3px;
   }
   .project-name {
     flex: 1;
   }
   .machine {
-    max-width: 34%;
+    flex: none;
   }
   .machine.offline {
     color: var(--color-danger);

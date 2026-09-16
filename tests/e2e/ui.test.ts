@@ -56,7 +56,7 @@ async function clickWhenEnabled(selector: string): Promise<void> {
 }
 
 beforeAll(async () => {
-  {
+  if (process.env.BOITE_E2E_PREBUILT_UI !== '1') {
     const built = Bun.spawnSync({
       cmd: ['bun', 'run', '--cwd', 'packages/ui', 'build'],
       cwd: ROOT,
@@ -66,6 +66,7 @@ beforeAll(async () => {
     });
     if (!built.success) throw new Error(`the ui did not build:\n${built.stderr.toString()}`);
   }
+  if (!existsSync(UI_INDEX)) throw new Error(`Missing prebuilt UI: ${UI_INDEX}. Run bun run build:ui first.`);
   core = await startCore();
   projectDir = mkdtempSync(join(tmpdir(), 'boite-e2e-ui-'));
   worktreesDir = join(tmpdir(), '.boite-worktrees', basename(projectDir));
