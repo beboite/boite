@@ -25,6 +25,23 @@
   let submitting = $state(false);
   let verified = $state<Record<string, number>>({});
   let checking = $state<string | null>(null);
+  let detecting = $state(false);
+  const setupUrls: Record<string, string> = {
+    claude: 'https://code.claude.com/docs/en/setup',
+    codex: 'https://developers.openai.com/codex/cli',
+    opencode: 'https://opencode.ai/docs/',
+    grok: 'https://grok.com/build',
+    pi: 'https://github.com/earendil-works/pi',
+  };
+  async function detect() {
+    if (!store.client || detecting) return;
+    detecting = true;
+    try {
+      await store.client.call('providers.reload', {});
+      for (const account of store.accounts) await store.checkAccount(account.id);
+    } catch (error) { store.error = String(error); }
+    finally { detecting = false; }
+  }
   async function readQuotas(refresh = false) {
     if (!store.client || quotaBusy) return;
     quotaBusy = true;
@@ -69,9 +86,6 @@
     adding = false;
     if (connectAfterCreate && account.isolationDir !== null) await store.loginAccount(account.id);
   }
-
-  /** The providers whose files Boite downloads itself, install block and all. */
-  let managed = $derived(store.providers.filter((p: ProviderSummary) => store.installOf(p.id) !== null));
 
   /** The provider column of the add form, drawn as a menu: the family has no native select. */
   let providerItems = $derived(
@@ -122,6 +136,8 @@
     <button class="quiet" onclick={() => { connectAfterCreate = false; adding = !adding; }}>{strings.accounts.add}</button>
   </header>
   <p class="intro lead">{strings.providerSettings.intro}</p>
+  <p class="intro lead">{strings.providerSettings.detectHint}</p>
+  <button class="quiet" data-testid="providers-refresh" disabled={detecting} onclick={() => void detect()}>{strings.providerSettings.refresh}</button>
 
   <!-- Under the intro, where both of its buttons are: the heading's and a card's. -->
   {#if adding}
@@ -171,11 +187,18 @@
           </details>
         {/if}
         <!-- A provider whose login Boite cannot drive has no button to grey out. -->
-        {#if provider.login}
+        {#if !provider.available && store.installOf(provider.id) === null}
+          <p class="intro">{strings.providerSettings.installHint.replace('{provider}', provider.name)}</p>
+          {#if setupUrls[provider.id]}
+            <a class="setup" href={setupUrls[provider.id]} target="_blank" rel="noreferrer">{strings.providerSettings.setup}</a>
+          {/if}
+        {/if}
+        {#if store.installOf(provider.id) !== null}
+          <InstallControl {store} {provider} />
+        {/if}
+        {#if provider.login && provider.available}
           <button
             class="small connect"
-            disabled={!provider.available}
-            title={provider.available ? undefined : strings.providerSettings.missing}
             onclick={() => connect(provider)}
           >
             {strings.providerSettings.connect}
@@ -184,15 +207,6 @@
       </section>
     {/each}
   </div>
-
-  {#if managed.length > 0}
-    <section class="card managed" data-testid="managed-providers">
-      <h2>{strings.install.heading}</h2>
-      {#each managed as provider (provider.id)}
-        <InstallControl {store} {provider} />
-      {/each}
-    </section>
-  {/if}
 
   {#if store.accounts.length === 0}
     <p class="empty">{strings.accounts.empty}</p>
@@ -338,6 +352,11 @@
   .head { max-width: 720px; margin-bottom: 4px; }
   .head button { margin-left: auto; }
   .lead { max-width: 720px; margin-bottom: 16px; }
+  [data-testid='providers-refresh'] { margin-bottom: 16px; }
+  .setup { color: var(--color-foreground); text-decoration: underline; font-size: var(--text-sm); }
+  .provider :global(.install-row) { flex-direction: column; align-items: flex-start; }
+  .provider :global(.install-row .name) { display: none; }
+  .provider :global(.install-row .note) { white-space: normal; }
 
   .providers { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 220px), 1fr)); gap: 10px; max-width: 720px; margin-bottom: 20px; }
   .provider { display: flex; flex-direction: column; gap: 8px; margin: 0; }
@@ -399,12 +418,6 @@
 
   .monitor input:focus-visible {
     outline-offset: 3px;
-  }
-
-  /* One row per provider Boite downloads itself. */
-  .managed {
-    display: grid;
-    gap: 2px;
   }
 
 

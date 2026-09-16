@@ -823,6 +823,7 @@ export function registerProviderMethods(core: Core): void {
   core.router.register('providers.list', () => core.providers.list());
   core.router.register('providers.reload', () => {
     const result = core.providers.load();
+    core.accounts.ensureDefaults();
     core.bus.emit('providers.updated', result);
     return result;
   });

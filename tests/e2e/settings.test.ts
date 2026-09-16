@@ -35,6 +35,22 @@ test('provider settings show login controls and quota monitoring', async () => {
   await capture('providers.png');
 }, 30_000);
 
+test('missing agents offer setup on desktop and phone, then redetection restores installed agents', async () => {
+  await page.evaluate(`import('/src/lib/workspace.svelte.ts').then(({workspace}) => {
+    workspace.active.providers = workspace.active.providers.map(p => ({...p, available: false, executable: null}));
+    workspace.active.accounts = [];
+  })`);
+  await page.waitFor(`document.querySelector('[data-provider-id="claude"] a')`);
+  expect(await page.evaluate(`document.querySelectorAll('.connect:disabled').length`)).toBe(0);
+  expect(await page.evaluate(`!!document.querySelector('[data-provider-id="antigravity"] [data-testid="install-start"]')`)).toBe(true);
+  await capture('providers-missing-desktop.png');
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+  await capture('providers-missing-phone.png');
+  await page.click(id('providers-refresh'));
+  await page.waitFor(`document.querySelector('[data-provider-id="claude"] .connect')`);
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1400, height: 1000, deviceScaleFactor: 1, mobile: false });
+}, 30_000);
+
 test('a plugin installs, switches an account and uninstalls through its page', async () => {
   await page.click(id('settings-tab-plugins'));
   await page.waitFor(`document.querySelector('${id('plugin-install')}') && !document.querySelector('${id('plugin-install')}').disabled`);

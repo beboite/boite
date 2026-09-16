@@ -54,6 +54,22 @@ afterEach(async () => {
 });
 
 describe('providers', () => {
+  test('reload discovers a newly installed provider account once and broadcasts it', async () => {
+    const body = validDescriptor();
+    body.profiles = Object.fromEntries(['windows', 'linux', 'macos'].map((os) => [os, {
+      detect: {}, executable: [{ kind: 'file', value: process.execPath }], isolation: {},
+    }]));
+    writeUserDescriptor('new-agent.json', body);
+    const client = await harness.connect();
+    const updates: string[] = [];
+    client.on('accounts.updated', (account) => { updates.push(account.providerId); });
+    await client.call('providers.reload', {});
+    await client.call('providers.reload', {});
+    const accounts = await client.call('accounts.list', {});
+    expect(accounts.filter((account) => account.providerId === 'mine')).toHaveLength(1);
+    expect(updates).toContain('mine');
+  });
+
   test('an unsupported executable resolver is rejected at its field', () => {
     const body = validDescriptor();
     body.profiles = { windows: { detect: {}, executable: [{ kind: 'registry', value: 'anything' }], isolation: {} } };

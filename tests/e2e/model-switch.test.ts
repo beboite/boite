@@ -31,8 +31,9 @@ beforeAll(async () => {
     capabilities: { approvals: true, hooks: false, checkpoint: false, images: true, planMode: false, resume: true },
   }));
   await client.call('providers.reload', {});
-  const account = await client.call('accounts.add', { providerId: 'switch-acp', label: 'Test account', useDefaultLocation: true });
-  accountId = account.id;
+  const detected = (await client.call('accounts.list', {})).filter((entry) => entry.providerId === 'switch-acp');
+  expect(detected).toHaveLength(1);
+  accountId = detected[0]!.id;
   const echo = (await client.call('accounts.list', {})).find((entry) => entry.providerId === 'echo')!;
   const project = await client.call('projects.add', { path: core.dataDir, name: 'Model continuity' });
   const thread = await client.call('threads.create', { projectId: project.id, providerId: 'echo', accountId: echo.id, title: 'One conversation' });

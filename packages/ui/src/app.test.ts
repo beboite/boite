@@ -900,8 +900,7 @@ test('the Providers page says where each managed install stands and offers Updat
   expect(query('[data-testid=settings-tab-accounts]').textContent?.trim()).toBe('Providers');
 
   query<HTMLButtonElement>('[data-testid=settings-tab-accounts]').click();
-  await waitFor(() => document.querySelector('[data-testid=managed-providers]') !== null);
-  expect(query('[data-testid=managed-providers] h2').textContent?.trim()).toBe('Installed by Boite');
+  await waitFor(() => document.querySelector('[data-provider-id=antigravity] [data-testid=install-control]') !== null);
 
   // Nothing on the machine: the size rides in the words, the button is one verb.
   const absent = query('[data-testid=install-control][data-provider=antigravity]');

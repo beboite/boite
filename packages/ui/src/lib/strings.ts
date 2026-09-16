@@ -732,7 +732,10 @@ export const strings = {
   },
   providerSettings: {
     heading: 'Providers',
-    intro: 'Connect accounts, verify access and choose which quotas to monitor.',
+    intro: 'Boite runs agents installed on the machine hosting your core. Existing command-line logins are detected automatically; website logins are separate.',
+    installHint: 'Install {provider} to connect an account.',
+    detectHint: 'After installing an agent, detect providers again. If it is still missing, restart Boite to refresh its PATH.',
+    setup: 'Installation instructions',
     connect: 'Connect an account',
     reconnect: 'Reconnect',
     available: 'Ready on this machine',
@@ -817,4 +820,3 @@ export type Strings = typeof strings;
 export function fill(template: string, values: Record<string, string>): string {
   return template.replace(/\{(\w+)\}/g, (match, key: string) => values[key] ?? match);
 }
-

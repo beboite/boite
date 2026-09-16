@@ -704,6 +704,17 @@ export class FakeClient implements ObservableClient {
       case 'providers.list':
         return { loaded: structuredClone(this.#providers), rejected: [] };
       case 'providers.reload': {
+        for (const provider of this.#providers) {
+          if (!provider.available || this.#accounts.some(account => account.providerId === provider.id)) continue;
+          const id = `a-${++this.#seq}`;
+          const account: Account = {
+            id, providerId: provider.id, label: 'Default',
+            isolationDir: provider.alwaysIsolated ? `${DATA_DIR}/accounts/${id}` : null,
+            status: provider.alwaysIsolated ? 'unauthenticated' : 'ok', identity: null, createdAt: this.#now(),
+          };
+          this.#accounts.push(account);
+          this.#emit('accounts.updated', structuredClone(account));
+        }
         const result = { loaded: structuredClone(this.#providers), rejected: [] };
         this.#emit('providers.updated', structuredClone(result));
         return result;
