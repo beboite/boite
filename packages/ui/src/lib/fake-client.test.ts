@@ -4,9 +4,43 @@ import { RpcErrorCode } from '@boite/contracts';
 
 afterEach(() => vi.useRealTimers());
 
+test.each(['goal', 'loop'] as const)('changing the other activity keeps the running %s completion', async kind => {
+  vi.useFakeTimers();
+  const client = new FakeClient({ delayMs: 1 });
+  await client.connect();
+  const { id: threadId } = await newThread(client);
+  await client.call('threads.activity.set', { threadId, [kind]: kind === 'goal' ? { objective: 'finish' } : { prompt: 'pong', intervalMs: 0, maxIterations: 1 } });
+  await vi.advanceTimersByTimeAsync(1);
+  const other = kind === 'goal' ? 'loop' : 'goal';
+  await client.call('threads.activity.set', { threadId, [other]: null });
+  await vi.runAllTimersAsync();
+  const activity = (await client.call('threads.get', { threadId })).activity!;
+  expect(activity[kind]?.status).toBe('complete');
+  expect(activity[kind]?.iterations).toBe(1);
+  if (kind === 'loop') expect(activity.loop?.history?.[0]?.status).toBe('done');
+  client.close();
+});
+
 async function newThread(client: FakeClient, projectId = 'p-boite') {
   return client.call('threads.create', { projectId, providerId: 'echo', accountId: 'a-echo' });
 }
+
+test.each(['remove', 'complete'] as const)('fake %s invalidates a goal before its delayed stop completes', async action => {
+  vi.useFakeTimers();
+  const client = new FakeClient({ delayMs: 10 });
+  await client.connect();
+  const { id: threadId } = await newThread(client);
+  await client.call('threads.activity.set', { threadId, goal: { objective: 'old work' } });
+  await vi.advanceTimersByTimeAsync(1);
+  await client.call('threads.activity.set', { threadId, loop: { prompt: 'other work', intervalMs: 0, maxIterations: 1 } });
+  await client.call('threads.activity.control', { threadId, kind: 'goal', action });
+  const stopping = client.call('turns.stop', { threadId });
+  await client.call('threads.activity.control', { threadId, kind: 'loop', action: 'resume' });
+  await vi.runAllTimersAsync();
+  await stopping;
+  expect((await client.call('threads.get', { threadId })).activity?.loop?.status).toBe('complete');
+  client.close();
+});
 
 test.each(['maxConcurrentTurns', 'perAccountConcurrency'] as const)('fake settings reject invalid %s atomically', async (field) => {
   const client = new FakeClient({ delayMs: 0 });

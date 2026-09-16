@@ -1,5 +1,6 @@
 import { statSync } from 'node:fs';
 import { createHash } from 'node:crypto';
+import { activityPrompt } from './activity-prompt.ts';
 import { relative, resolve } from 'node:path';
 import { ATTACHMENTS_PER_TURN, ATTACHMENT_MAX_BYTES, IMAGE_MIME_TYPES, MESSAGE_PAGE, MESSAGE_PAGE_MAX } from '@boite/contracts';
 import type {
@@ -571,7 +572,7 @@ export class ThreadStore {
     return this.startTurn(threadId, protocol === 'echo' ? '[compact]' : '/compact', [], expectedSelectionVersion, 'compact');
   }
 
-  startTurn(threadId: ThreadId, prompt: string, attachments: ImageAttachment[] = [], expectedSelectionVersion?: number, operation?: 'compact', displayPrompt?: string, clientRequestId?: string): Turn {
+  startTurn(threadId: ThreadId, prompt: string, attachments: ImageAttachment[] = [], expectedSelectionVersion?: number, operation?: 'compact', activity?: { kind: 'goal' | 'loop'; iteration: number }, clientRequestId?: string): Turn {
     const thread = this.require(threadId);
     let fingerprint = '';
     if (clientRequestId !== undefined) {
@@ -622,7 +623,7 @@ export class ThreadStore {
       turnId: turn.id,
       role: 'user',
       parts: [
-        { type: 'text', text: prompt, ...(displayPrompt ? { displayText: displayPrompt } : {}) },
+        { type: 'text', text: prompt, ...(activity ? { activity } : {}) },
         ...attachments.map((attachment): MessagePart => ({
           type: 'image',
           mimeType: attachment.mimeType,
@@ -639,6 +640,7 @@ export class ThreadStore {
       this.core.journal.putMessage(message);
       if (clientRequestId) this.core.journal.putTurnRequest(threadId, clientRequestId, fingerprint, turn.id);
     });
+    if (!activity && !operation) this.core.activity.userPrompt(threadId);
     this.core.bus.emit('message.started', message);
     this.core.bus.emit('message.completed', { threadId, messageId: message.id, state: 'complete' });
     this.setStatus(threadId, 'queued');
@@ -1133,10 +1135,8 @@ export class ThreadStore {
 
   /** The user message of the turn, read back from the journal: the text and the images it carried. */
   private lastUserInput(threadId: ThreadId, turnId: TurnId): { prompt: string; attachments: ImageAttachment[] } {
-    const messages = this.core.journal.listMessages(threadId);
-    for (let index = messages.length - 1; index >= 0; index -= 1) {
-      const message = messages[index];
-      if (message === undefined || message.turnId !== turnId || message.role !== 'user') continue;
+    const message = this.core.journal.lastUserMessage(threadId, turnId);
+    if (message !== null) {
       const attachments: ImageAttachment[] = [];
       for (const part of message.parts) {
         if (part.type === 'image') {
@@ -1144,7 +1144,7 @@ export class ThreadStore {
         }
       }
       return {
-        prompt: message.parts.map((part) => (part.type === 'text' ? part.text : '')).join(''),
+        prompt: message.parts.map((part) => part.type === 'text' ? part.activity ? activityPrompt(part.activity.kind, part.text, part.activity.iteration) : part.text : '').join(''),
         attachments,
       };
     }

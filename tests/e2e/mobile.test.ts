@@ -32,6 +32,7 @@ test('phone navigates conversations, activity and settings without a sidebar', a
   await page.click('[data-testid=mobile-list] .thread');
   await page.waitFor(`!document.querySelector('[data-testid=mobile-list]') && document.querySelector('[data-testid=chat]')`);
   await capture('mobile-chat.png');
+  expect(await page.evaluate(`document.querySelector('[data-testid=titlebar]').getBoundingClientRect().bottom <= document.querySelector('[data-testid=timeline]').getBoundingClientRect().top`)).toBe(true);
   await page.click('[data-testid=mobile-tabs] button:nth-child(2)');
   await page.waitFor(`document.querySelector('[data-testid=mobile-list] h1')?.textContent === 'Activity'`);
   await capture('mobile-activity.png');

@@ -100,8 +100,8 @@
     .activity-icon { position: relative; height: 20px; }
     .badge { position: absolute; top: -6px; left: 14px; min-width: 16px; border-radius: var(--radius-sm); padding: 0 3px; background: var(--color-live); color: var(--color-background); font-size: var(--text-xs); }
     .mobile-header { grid-row: 1; grid-column: 1; }
-    .mobile-list { grid-row: 2; grid-column: 1; position: relative; z-index: 1; min-height: 0; }
-    .mobile-tabs { grid-row: 3; grid-column: 1; }
+    .mobile-list { grid-row: 3; grid-column: 1; position: relative; z-index: 1; min-height: 0; }
+    .mobile-tabs { grid-row: 4; grid-column: 1; }
     :global(html[data-keyboard='open']) .mobile-tabs { display: none; }
   }
 </style>

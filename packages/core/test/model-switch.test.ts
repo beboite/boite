@@ -33,7 +33,9 @@ test('account switching keeps the thread, carries prior exchanges and never reus
   });
   const run = async (prompt: string) => {
     const turn = await client.call('turns.start', { threadId, prompt });
-    await waitFor(() => h.core.journal.getTurn(turn.id)?.status === 'done');
+    await waitFor(() => h.core.journal.getTurn(turn.id)?.finishedAt != null);
+    expect(h.core.journal.getTurn(turn.id)?.error).toBeNull();
+    expect(h.core.journal.getTurn(turn.id)?.status).toBe('done');
   };
   await run('the passwordless project uses blue widgets');
   const switched = await client.call('threads.update', { threadId, accountId: 'second-account', model: 'echo' });

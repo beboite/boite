@@ -98,6 +98,18 @@ Set `BOITE_PUBLIC_URL` or `--public-url` to that exact HTTPS origin so pairing
 links and the WebSocket origin check use it. [Phone setup](phone.md) includes
 a Caddy example, installation steps and Web Push configuration.
 
+Before connecting through the proxy, add its exact browser origin, such as
+`https://boite.example.com`, to the core's `browserOrigins` setting. Connect the
+desktop shell directly as an owner, select that machine, open Machines > Allowed
+browser origins, and configure the origins there. Keep any existing origins that are
+still needed. Origins contain a scheme, hostname and optional port, with no
+path or trailing slash. See [machine connections](machines.md).
+
+Preserving the proxy headers alone is not enough: an HTTPS origin on port 443
+differs from the core listening on port 7337. An origin that is not allowed gets
+HTTP 403 on `/rpc`, even when the pairing token is valid. Keep the allowlist
+explicit; do not strip the `Origin` header to bypass this check.
+
 ### Image verification
 
 From a Linux checkout with Docker:

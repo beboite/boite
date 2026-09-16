@@ -22,6 +22,9 @@
   import TurnSummary from './TurnSummary.svelte';
   import { promptText } from '../lib/message-display';
   import ToolCard from './ToolCard.svelte';
+  import MessageOutline from './MessageOutline.svelte';
+  import { visibleAnswer } from '../lib/message-display';
+  import { isNamedModel } from '../lib/model-order';
 
   let {
     store,
@@ -89,6 +92,49 @@
     while (store.readingPositions.size > 32) store.readingPositions.delete(store.readingPositions.keys().next().value!);
   });
   let viewHeight = $state(0);
+  let navigationTarget = $state<string | null>(null);
+  function releaseNavigation() { releaseAnchor(); navigationTarget = null; }
+  const activePrompt = $derived.by(() => {
+    void measured;
+    const total = totals(messages);
+    const at = pinned ? messages.length - 1 : atOrBefore(total, messages.length, scrollTop + 24);
+    for (let index = Math.min(at, messages.length - 1); index >= 0; index--) {
+      if (messages[index]?.role === 'user') return messages[index]!.id;
+    }
+    return null;
+  });
+
+  function jumpToMessage(id: string) {
+    releaseAnchor();
+    const box = viewport;
+    const index = messages.findIndex(message => message.id === id);
+    if (!box || index < 0) return;
+    navigationTarget = id;
+    pinned = false;
+    behind = true;
+    box.scrollTop = totals(messages)[index] ?? 0;
+    scrollTop = box.scrollTop;
+  }
+
+  // Keep the target aligned as estimated heights become real measurements.
+  // Wheel, touch, scrollbar and keyboard input return control to the reader.
+  $effect(() => {
+    const id = navigationTarget;
+    void measured;
+    void view;
+    if (!id) return;
+    const frame = requestAnimationFrame(() => {
+      const box = viewport;
+      if (!box || navigationTarget !== id) return;
+      const node = Array.from(box.querySelectorAll<HTMLElement>('[data-mid]')).find(node => node.dataset.mid === id);
+      if (!node) return;
+      node.style.animation = 'none';
+      const delta = node.getBoundingClientRect().top - box.getBoundingClientRect().top - 20;
+      if (Math.abs(delta) > 1) box.scrollTop += delta;
+      scrollTop = box.scrollTop;
+    });
+    return () => cancelAnimationFrame(frame);
+  });
 
   const windowed = $derived(messages.length > WINDOW_FROM);
 
@@ -339,6 +385,7 @@
     if (!box) return;
     scrollTop = box.scrollTop;
     viewHeight = box.clientHeight;
+    if (navigationTarget) return;
     pinned = atBottom(box);
     if (restoringAnchor) pinned = false;
     void tick().then(rememberAnchor);
@@ -385,6 +432,7 @@
     releaseAnchor();
     const box = viewport;
     if (!box) return;
+    navigationTarget = null;
     pinned = true;
     behind = false;
     box.scrollTop = box.scrollHeight;
@@ -466,9 +514,11 @@
 </script>
 
 <div class="timeline-wrap">
-  <!-- Input releases the restored reading anchor; programmatic corrections keep it. -->
+  <MessageOutline {messages} active={activePrompt} jump={id => void jumpToMessage(id)}
+    hasOlder={store.messagesBefore !== null} loading={store.loadingOlder} loadOlder={() => { if (viewport) { releaseNavigation(); viewport.scrollTop = 0; pinned = false; pullOlder(viewport); } }} />
+  <!-- Input releases restored and navigation anchors; programmatic corrections keep them. -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="timeline" bind:this={viewport} {onscroll} onwheel={releaseAnchor} ontouchstart={releaseAnchor} onpointerdown={releaseAnchor} onkeydown={releaseAnchor} data-testid="timeline">
+  <div class="timeline" bind:this={viewport} {onscroll} onwheel={releaseNavigation} ontouchstart={releaseNavigation} onpointerdown={releaseNavigation} onkeydown={releaseNavigation} data-testid="timeline">
     <div class="column">
       <!-- paging: the one line the top of the list shows while a page is in flight. -->
       {#if store.loadingOlder}
@@ -521,6 +571,13 @@
               <span class:received={responded.has(message.turnId)} title={strings.chat.responseStarted} aria-label={strings.chat.responseStarted}><Check size={12} /></span>
             </div>
           {:else}
+            {@const execution = store.openThread?.turns.find((turn) => turn.id === message.turnId)?.execution}
+            {#if message.role === 'assistant' && execution}
+              {@const model = store.modelsOf(execution.providerId, execution.accountId).find((model) => model.id === execution.model)}
+              <div class="model-attribution" data-testid="message-model">
+                {execution.model && isNamedModel(model ?? { id: execution.model, name: execution.model }) ? model?.name ?? execution.model : store.providerOf(execution.providerId)?.name}
+              </div>
+            {/if}
             {@const caretAt = message.state === 'streaming' ? lastTextIndex(message) : -1}
             {@const thought = thoughts.get(message.turnId)}
             {#if thought?.host === message.id}<ThinkingPart text={thought.text} live={thought.live} />{/if}
@@ -529,8 +586,8 @@
                 {#if part.type !== 'thinking'}
                 <div class="part" data-kind={part.type}>
                   {#if part.type === 'text'}
-                    {#if part.text.length > 0 || index === caretAt}
-                      <Prose text={part.text} live={index === caretAt} />
+                    {#if visibleAnswer(part.text).length > 0 || index === caretAt}
+                      <Prose text={visibleAnswer(part.text)} live={index === caretAt} />
                     {/if}
 
                   {:else if part.type === 'tool'}
@@ -604,6 +661,7 @@
 </div>
 
 <style>
+  .model-attribution { color: var(--color-muted-foreground); font-size: var(--text-xs); margin-bottom: 4px; }
   .receipts { display: flex; gap: 1px; margin: 4px 2px 0; color: var(--color-muted-foreground); }
   .receipts span { display: flex; opacity: .45; }
   .receipts .received { color: var(--color-accent); opacity: 1; }
@@ -620,7 +678,9 @@
     flex: 1;
     min-height: 0;
     overflow: auto;
-    padding: 20px 20px 8px;
+    /* A fixed reading margin keeps the last answer above the compact activity
+       overlay without moving the viewport when tasks appear or update. */
+    padding: 20px 20px 132px 38px;
     overscroll-behavior: contain;
   }
 

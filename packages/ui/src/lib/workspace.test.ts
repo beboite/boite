@@ -13,6 +13,18 @@ afterEach(() => {
   localStorage.clear();
 });
 
+test('old local labels become This PC while custom names stay intact', async () => {
+  const { w, a } = await setup();
+  a.localCore = false;
+  a.endpointUrl = 'http://127.0.0.1:41000';
+  const machine = { id: a.endpointUrl, label: 'My computer', store: a };
+  w.restoreProfile(machine);
+  expect(machine.label).toBe('This PC');
+  machine.label = 'Studio';
+  w.restoreProfile(machine);
+  expect(machine.label).toBe('Studio');
+});
+
 test('restoring a remote selection also connects the shell local core', async () => {
   const { w, a } = await setup();
   a.localCore = false;
@@ -22,8 +34,56 @@ test('restoring a remote selection also connects the shell local core', async ()
   vi.spyOn(endpoints, 'fromTauri').mockResolvedValue({ url: 'http://127.0.0.1:41000', token: 'test', local: true });
   const add = vi.spyOn(w, 'add').mockResolvedValue(true);
   await w.boot();
-  expect(add).toHaveBeenCalledWith({ url: 'http://127.0.0.1:41000', token: 'test', local: true }, 'My computer');
+  expect(add).toHaveBeenCalledWith({ url: 'http://127.0.0.1:41000', token: 'test', local: true }, 'This PC');
 });
+
+test('closing while the shell endpoint loads does not add a machine afterward', async () => {
+  const { w, a } = await setup();
+  a.localCore = false;
+  a.endpointUrl = 'http://remote.test';
+  Object.defineProperty(window, '__TAURI_INTERNALS__', { value: {}, configurable: true });
+  vi.spyOn(a, 'boot').mockResolvedValue();
+  let resolveLocal!: (endpoint: endpoints.Endpoint) => void;
+  const local = new Promise<endpoints.Endpoint>((resolve) => { resolveLocal = resolve; });
+  const fromTauri = vi.spyOn(endpoints, 'fromTauri').mockReturnValue(local);
+  const add = vi.spyOn(w, 'add');
+  const boot = w.boot();
+  await waitFor(() => fromTauri.mock.calls.length === 1);
+  w.close();
+  resolveLocal({ url: 'http://127.0.0.1:41000', token: 'test', local: true });
+  await boot;
+  expect(add).not.toHaveBeenCalled();
+  expect(w.machines).toEqual([]);
+});
+
+test('an old endpoint connection cannot update a newer workspace lifecycle', async () => {
+  const { w } = await setup();
+  let release!: () => void;
+  const connected = new Promise<void>((resolve) => { release = resolve; });
+  vi.spyOn(Store.prototype, 'connectEndpoint').mockImplementation(async function (this: Store) {
+    await connected;
+    this.connection = 'ready';
+  });
+  const endpoint = { url: 'http://late.test', token: 'test', paired: true };
+  const adding = w.add(endpoint, 'Old name');
+  await waitFor(() => w.machines.some((machine) => machine.id === endpoint.url));
+  const late = w.machines.find((machine) => machine.id === endpoint.url)!;
+  w.close();
+  const current = { ...late, label: 'New name' };
+  w.machines = [current];
+  release();
+  expect(await adding).toBe(false);
+  expect(w.machines[0]?.label).toBe('New name');
+  expect(endpoints.readEnvironments().some((saved) => saved.url === endpoint.url)).toBe(false);
+});
+
+async function waitFor(check: () => boolean): Promise<void> {
+  for (let attempt = 0; attempt < 200; attempt++) {
+    if (check()) return;
+    await new Promise((resolve) => setTimeout(resolve, 2));
+  }
+  throw new Error('workspace did not reach the expected state');
+}
 
 test('an empty local core yields to the remembered journal on the same computer', async () => {
   const { w, a, b } = await setup();

@@ -12,6 +12,8 @@ import type {
 export interface ConnectOptions {
   client?: { name: string; version: string };
   timeoutMs?: number;
+  /** Response deadline for ordinary RPC calls; the handshake uses timeoutMs. */
+  requestTimeoutMs?: number;
   /** Say hello with a pairing grant instead of the token; `session` then carries what came back. */
   grant?: string;
 }
@@ -52,18 +54,28 @@ function socketUrl(url: string): string {
 
 export async function connect(url: string, token: string, options: ConnectOptions = {}): Promise<CoreClient> {
   const timeoutMs = options.timeoutMs ?? 5000;
+  const deadline = Date.now() + timeoutMs;
   const socket = new WebSocket(socketUrl(url));
   const pending = new Map<number, Pending>();
   const listeners = new Map<string, Set<(payload: unknown) => void>>();
   let nextId = 1;
   let closed = false;
 
-  const send = (method: string, params: unknown): Promise<unknown> => {
+  const send = (method: string, params: unknown, waitMs = options.requestTimeoutMs ?? 120_000): Promise<unknown> => {
     const id = nextId;
     nextId += 1;
     return new Promise<unknown>((resolve, reject) => {
-      pending.set(id, { resolve, reject });
-      socket.send(JSON.stringify({ jsonrpc: '2.0', id, method, params }));
+      const timer = setTimeout(() => {
+        pending.delete(id);
+        reject(new Error(`timed out waiting for ${method}`));
+      }, waitMs);
+      const waiter: Pending = {
+        resolve(value) { clearTimeout(timer); resolve(value); },
+        reject(error) { clearTimeout(timer); reject(error); },
+      };
+      pending.set(id, waiter);
+      try { socket.send(JSON.stringify({ jsonrpc: '2.0', id, method, params })); }
+      catch (error) { pending.delete(id); waiter.reject(error as Error); }
     });
   };
 
@@ -75,6 +87,7 @@ export async function connect(url: string, token: string, options: ConnectOption
     } catch {
       return;
     }
+    if (frame === null || typeof frame !== 'object') return;
     if (typeof frame.id === 'number') {
       const waiter = pending.get(frame.id);
       if (waiter === undefined) return;
@@ -95,7 +108,7 @@ export async function connect(url: string, token: string, options: ConnectOption
   });
 
   await new Promise<void>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('the socket did not open')), timeoutMs);
+    const timer = setTimeout(() => reject(new Error('timed out opening the socket')), timeoutMs);
     socket.addEventListener('open', () => {
       clearTimeout(timer);
       resolve();
@@ -104,13 +117,17 @@ export async function connect(url: string, token: string, options: ConnectOption
       clearTimeout(timer);
       reject(new Error('the socket failed to open'));
     });
-  });
+    socket.addEventListener('close', () => {
+      clearTimeout(timer);
+      reject(new Error('the socket closed before opening'));
+    }, { once: true });
+  }).catch(error => { socket.close(); throw error; });
 
   const hello = (await send('hello', {
     ...(options.grant === undefined ? { token } : { grant: options.grant }),
     protocolVersion: PROTOCOL_VERSION,
     client: options.client ?? { name: 'test', version: '2.0.0-beta.1' },
-  })) as { core: CoreInfo; principal: Principal; session?: { id: string; token: string } };
+  }, Math.max(1, deadline - Date.now())).catch(error => { socket.close(); throw error; })) as { core: CoreInfo; principal: Principal; session?: { id: string; token: string } };
   if (hello.core.protocolVersion !== PROTOCOL_VERSION) {
     socket.close();
     throw new Error(`core protocol version must be ${PROTOCOL_VERSION}`);

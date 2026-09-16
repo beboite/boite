@@ -313,6 +313,33 @@ test('a model with no reasoning scale gets no chip at all', async () => {
   expect(query('[data-testid=composer-picker]').textContent).toContain('Claude Haiku 4.5');
 });
 
+test('the picker keeps row, account and legacy keyboard navigation separate', async () => {
+  await mountOnFake();
+  await openDraft();
+  query<HTMLButtonElement>('[data-testid=composer-picker]').click();
+  await waitFor(() => document.querySelector('[data-testid=composer-picker-menu]') !== null);
+
+  const claudeTile = query<HTMLButtonElement>('[data-provider=claude]');
+  claudeTile.focus();
+  expect(press('ArrowDown')).toBe(false);
+  expect(document.activeElement).toBe(query('[data-provider=echo]'));
+
+  const firstSeat = query<HTMLButtonElement>('[data-instance="claude::a-claude-main"]');
+  const secondSeat = query<HTMLButtonElement>('[data-instance="claude::a-claude-side"]');
+  firstSeat.focus();
+  expect(press('ArrowRight')).toBe(false);
+  expect(document.activeElement).toBe(secondSeat);
+  expect(press('ArrowLeft')).toBe(false);
+  expect(document.activeElement).toBe(firstSeat);
+
+  const legacyRow = query<HTMLButtonElement>('[data-testid=picker-legacy]');
+  legacyRow.focus();
+  expect(press('ArrowRight')).toBe(false);
+  await waitFor(() => document.activeElement?.closest('[data-testid=picker-legacy-menu]') !== null);
+  expect(press('ArrowLeft')).toBe(false);
+  expect(document.activeElement).toBe(legacyRow);
+});
+
 test('a refused turn keeps the prompt for Enter and Ctrl+Enter', async () => {
   await mountOnFake();
   await store.open('t-trace');
@@ -411,7 +438,8 @@ test('goal and loop coexist above the composer with expandable agent tasks', asy
   await waitFor(() => toggle.getAttribute('aria-expanded') === 'true');
   expect(query('[data-testid=activity-tasks]').textContent).toContain('Review the result');
   expect(query('[data-testid=thread-activity]').textContent).toContain('Finish the release');
-  expect(query('[data-testid=thread-activity]').textContent).toContain('Check CI');
+  expect(query('[data-testid=activity-loop]').textContent).toContain('Iteration');
+  expect(query('[data-testid=activity-loop] .objective').getAttribute('title')).toBe('Check CI');
 });
 
 test('queued prompts stay on their thread and run as separate turns', async () => {
@@ -558,7 +586,7 @@ test('a provider that reads no image hides the button and says so on a paste', a
   await mountOnFake();
   store.startDraft();
   await waitFor(() => store.draft !== null);
-  await waitFor(() => query('[data-testid=composer-picker]').textContent?.includes('OpenCode') === true);
+  await waitFor(() => store.defaultChoice()?.providerId === 'opencode');
 
   expect(document.querySelector('[data-testid=composer-attach]')).toBeNull();
 
@@ -579,6 +607,49 @@ function slashRows(): string[] {
 function slashMenu(): HTMLElement | null {
   return document.querySelector<HTMLElement>('[data-testid=slash-menu]');
 }
+
+test('recognized slash tokens are colored without changing the editable prompt', async () => {
+  await mountOnFake();
+  for (const prompt of ['/goal', '/loop 2 repeat this', '/shout hello\nnext line', '/model']) {
+    await type(prompt);
+    const highlight = query('[data-testid=composer-highlight]');
+    expect(highlight.getAttribute('aria-hidden')).toBe('true');
+    expect(highlight.querySelector('.command-token')?.textContent).toBe(prompt.split(/\s/)[0]);
+    expect(highlight.textContent).toBe(`${prompt}\n`);
+    expect(input().value).toBe(prompt);
+    expect(input().classList.contains('highlighted')).toBe(true);
+  }
+  input().scrollTop = 45;
+  input().dispatchEvent(new Event('scroll'));
+  await waitFor(() => query('.input-paint').style.transform === 'translateY(-45px)');
+  for (const prompt of ['/loo', '/unknown words', 'mention /goal here', '']) {
+    await type(prompt);
+    expect(document.querySelector('[data-testid=composer-highlight]')).toBeNull();
+    expect(input().classList.contains('highlighted')).toBe(false);
+  }
+});
+
+test('permission menu offers three policies and preserves legacy modes until picked', async () => {
+  await mountOnFake();
+  await waitFor(() => !store.busy);
+  for (const legacy of ['plan', 'dontAsk'] as const) {
+    store.openThread!.permissionMode = legacy;
+    await waitFor(() => query('[data-testid=composer-mode]').textContent?.trim() === (legacy === 'plan' ? 'Plan' : 'Auto-deny'));
+    expect(store.openThread?.permissionMode).toBe(legacy);
+  }
+  query('[data-testid=composer-mode]').click();
+  await waitFor(() => document.querySelector('[data-testid=composer-mode-menu]') !== null);
+  const menu = query('[data-testid=composer-mode-menu]');
+  expect(Array.from(menu.querySelectorAll('.label')).map(row => row.textContent?.trim())).toEqual(['Yolo', 'Auto decide', 'Ask']);
+  for (const [mode, label] of [['bypassPermissions', 'Yolo'], ['acceptEdits', 'Auto decide'], ['default', 'Ask']]) {
+    query(`[data-testid=composer-mode-menu] [data-value="${mode}"]`).click();
+    await waitFor(() => store.openThread?.permissionMode === mode);
+    expect(query('[data-testid=composer-mode]').textContent?.trim()).toBe(label);
+    await new Promise(resolve => setTimeout(resolve, 180));
+    query('[data-testid=composer-mode]').click();
+    await waitFor(() => document.querySelector('[data-testid=composer-mode-menu]') !== null);
+  }
+});
 
 test('a slash lists the agent commands first, filters, and completes the box', async () => {
   await mountOnFake();

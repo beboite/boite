@@ -9,3 +9,14 @@ vi.stubGlobal('ResizeObserver', class {
   unobserve() {}
   disconnect() {}
 });
+
+vi.stubGlobal('matchMedia', (media: string) => ({
+  media,
+  matches: false,
+  onchange: null,
+  addEventListener() {},
+  removeEventListener() {},
+  addListener() {},
+  removeListener() {},
+  dispatchEvent() { return true; }
+}));

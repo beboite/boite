@@ -290,11 +290,9 @@
 
 <svelte:window {onkeydown} {onkeyup} {onblur} />
 
-<div class="app" class:shell={inShell} class:ready={store.booted} class:quitting bind:this={appRoot}>
+<div class="app" class:shell={inShell} class:ready={store.booted} class:phone-chat={!inShell && store.page === 'chat' && mobileScreen === 'chat'} class:quitting bind:this={appRoot}>
   {#if !inShell && store.booted}<MobileNavigation {store} bind:screen={mobileScreen} />{/if}
-  {#if inShell}
-    <TitleBar {store} />
-  {/if}
+  <TitleBar {store} />
 
   <div class="body" class:mobile-covered={!inShell && store.page === 'chat' && mobileScreen !== 'chat'} class:panel-maximized={rightPanel.maximized && store.panelOpen}>
     {#if !store.booted}
@@ -520,13 +518,15 @@
   }
 
   @media (max-width: 720px) {
-    .app:not(.shell) { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; grid-template-columns: minmax(0, 1fr); height: var(--app-height, 100dvh); top: var(--app-top, 0px); }
-    .app:not(.shell) .body { grid-row: 2; grid-column: 1; }
+    .app:not(.shell) { display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; grid-template-columns: minmax(0, 1fr); height: var(--app-height, 100dvh); top: var(--app-top, 0px); }
+    .app:not(.shell) :global(.titlebar) { display: none; grid-row: 2; grid-column: 1; }
+    .app.phone-chat :global(.titlebar) { display: flex; }
+    .app:not(.shell) .body { grid-row: 3; grid-column: 1; }
     .body.mobile-covered { visibility: hidden; pointer-events: none; }
     .scrim {
       display: block;
       position: fixed;
-      inset: 0;
+      inset: var(--titlebar) 0 0;
       z-index: 20;
       border: none;
       border-radius: 0;

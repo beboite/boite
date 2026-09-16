@@ -473,35 +473,6 @@ shellTest(
   TIMEOUT,
 );
 
-shellTest('window controls draw maximize and restore without a second status indicator', async () => {
-  // Exercise the component's resize subscription without maximizing a hidden
-  // native window: ShowWindow could otherwise expose it on the desktop.
-  await page?.evaluate(`(() => {
-    const real = window.fetch.bind(window);
-    window.__windowMaximized = false;
-    window.__windowFetch = real;
-    window.fetch = (input, init) => {
-      const url = decodeURIComponent(typeof input === 'string' ? input : String(input?.url));
-      let value;
-      if (url.endsWith('/plugin:window|is_maximized')) value = window.__windowMaximized;
-      else if (url.endsWith('/plugin:window|toggle_maximize')) { window.__windowMaximized = !window.__windowMaximized; value = null; }
-      else return real(input, init);
-      return Promise.resolve(new Response(JSON.stringify(value), { status:200, headers:{'content-type':'application/json','Tauri-Response':'ok'} }));
-    };
-  })()`);
-  try {
-    expect(await page?.evaluate(`document.querySelectorAll('[data-testid=titlebar] .state').length`)).toBe(0);
-    await page?.click(testid('titlebar-maximize'));
-    await page?.evaluate(`window.__TAURI_INTERNALS__.invoke('plugin:event|emit', { event:'tauri://resize', payload:{width:1280,height:800} })`);
-    await page?.waitFor(`document.querySelector('[data-testid=titlebar-maximize]')?.dataset.maximized === 'true'`);
-    await page?.screenshot(join(import.meta.dir, '.artifacts', 'shell-titlebar-restore.png'));
-    await page?.click(testid('titlebar-maximize'));
-    await page?.evaluate(`window.__TAURI_INTERNALS__.invoke('plugin:event|emit', { event:'tauri://resize', payload:{width:1280,height:800} })`);
-    await page?.waitFor(`document.querySelector('[data-testid=titlebar-maximize]')?.dataset.maximized === 'false'`);
-  } finally {
-    await page?.evaluate(`window.fetch = window.__windowFetch`);
-  }
-}, TIMEOUT);
 
 shellTest(
   'a project, an echo thread and a turn go through the shell',
@@ -555,6 +526,48 @@ shellTest(
   },
   TIMEOUT,
 );
+
+shellTest('window controls draw maximize and restore without a second status indicator', async () => {
+  // Exercise the component's resize subscription without maximizing a hidden
+  // native window: ShowWindow could otherwise expose it on the desktop.
+  await page?.evaluate(`(() => {
+    const real = window.fetch.bind(window);
+    window.__windowMaximized = false;
+    window.__headerDrags = 0;
+    window.__windowFetch = real;
+    window.fetch = (input, init) => {
+      const url = decodeURIComponent(typeof input === 'string' ? input : String(input?.url));
+      let value;
+      if (url.endsWith('/plugin:window|is_maximized')) value = window.__windowMaximized;
+      else if (url.endsWith('/plugin:window|start_dragging')) { window.__headerDrags++; value = null; }
+      else if (url.endsWith('/plugin:window|toggle_maximize')) { window.__windowMaximized = !window.__windowMaximized; value = null; }
+      else return real(input, init);
+      return Promise.resolve(new Response(JSON.stringify(value), { status:200, headers:{'content-type':'application/json','Tauri-Response':'ok'} }));
+    };
+  })()`);
+  try {
+    expect(await page?.evaluate(`document.querySelectorAll('[data-testid=titlebar] .state').length`)).toBe(0);
+    expect(await page?.evaluate(`document.querySelector('[data-testid=titlebar]').contains(document.querySelector('[data-testid=thread-title]'))`)).toBe(true);
+    expect(await page?.evaluate(`document.querySelector('[data-testid=titlebar]').getBoundingClientRect().height`)).toBe(44);
+    await page?.evaluate(`document.querySelector('[data-testid=thread-header] .spacer').dispatchEvent(new MouseEvent('mousedown', { bubbles:true, button:0, detail:1 }))`);
+    await page?.waitFor(`window.__headerDrags === 1`);
+    await page?.evaluate(`document.querySelector('[data-testid=thread-title]').dispatchEvent(new MouseEvent('mousedown', {bubbles:true,button:0,detail:1}))`);
+    await page?.click(testid('thread-title'));
+    await page?.waitFor(`document.querySelector('[data-testid=thread-rename-input]')`);
+    await page?.evaluate(`document.querySelector('[data-testid=thread-rename-input]').dispatchEvent(new MouseEvent('mousedown', {bubbles:true,button:0,detail:1}))`);
+    expect(await page?.evaluate(`window.__headerDrags`)).toBe(1);
+    await page?.evaluate(`document.querySelector('[data-testid=thread-rename-input]').dispatchEvent(new KeyboardEvent('keydown', { key:'Escape', bubbles:true }))`);
+    await page?.click(testid('titlebar-maximize'));
+    await page?.evaluate(`window.__TAURI_INTERNALS__.invoke('plugin:event|emit', { event:'tauri://resize', payload:{width:1280,height:800} })`);
+    await page?.waitFor(`document.querySelector('[data-testid=titlebar-maximize]')?.dataset.maximized === 'true'`);
+    await page?.screenshot(join(import.meta.dir, '.artifacts', 'shell-titlebar-restore.png'));
+    await page?.click(testid('titlebar-maximize'));
+    await page?.evaluate(`window.__TAURI_INTERNALS__.invoke('plugin:event|emit', { event:'tauri://resize', payload:{width:1280,height:800} })`);
+    await page?.waitFor(`document.querySelector('[data-testid=titlebar-maximize]')?.dataset.maximized === 'false'`);
+  } finally {
+    await page?.evaluate(`window.fetch = window.__windowFetch`);
+  }
+}, TIMEOUT);
 
 shellTest('the machine picker opens a folder on the selected core and reports a lost connection', async () => {
   const remote = await startCore();

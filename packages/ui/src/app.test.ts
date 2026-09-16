@@ -215,7 +215,7 @@ test('a draft names its project in the heading and the dropdown moves it to anot
   expect(heading.textContent).toContain('with approval requests in');
   expect(heading.textContent).toContain('notes');
   // The heading says the project, so the header chip no longer repeats it.
-  expect(query('[data-testid=chat] header').textContent).not.toContain('notes');
+  expect(query('[data-testid=thread-header]').textContent).not.toContain('notes');
 
   query<HTMLButtonElement>('[data-testid=draft-project]').click();
   await waitFor(() => document.querySelector('[data-testid=draft-project-menu]') !== null);

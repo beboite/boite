@@ -1,5 +1,6 @@
 <script lang="ts">
   import { tick, type Snippet } from 'svelte';
+  import { Settings } from '@lucide/svelte';
   import { Closing } from '../lib/closing.svelte';
   import { floating } from '../lib/floating';
   import type { MenuItem } from '../lib/menu';
@@ -128,11 +129,15 @@
       data-testid={testid ? `${testid}-menu` : undefined}
     >
       {#each items as item (item.id)}
+        {#if item.separator}
+          <div class="separator" role="separator"></div>
+        {:else}
         <button
           type="button"
           class="item"
           class:active={item.active}
           class:danger={item.danger}
+          class:hide-mark={item.hideActiveMark}
           role="menuitem"
           disabled={item.disabled}
           data-row
@@ -140,6 +145,7 @@
           onclick={() => pick(item)}
         >
           <span class="label">
+            {#if item.icon === 'settings'}<Settings size={14} strokeWidth={1.75} />{/if}
             {#if item.status}<span class="status-dot" data-tone={item.status.tone} role="img" aria-label={item.status.label} title={item.status.label}></span>{/if}
             {item.label}
           </span>
@@ -147,12 +153,16 @@
             <span class="hint">{item.hint}</span>
           {/if}
         </button>
+        {/if}
       {/each}
     </div>
   {/if}
 </div>
 
 <style>
+  .separator { height: 1px; background: var(--color-border); margin: 5px 4px; }
+  .label { display: flex; align-items: center; gap: 6px; }
+  .item.hide-mark.active { background: var(--color-active); }
   .status-dot { display: inline-block; width: 6px; height: 6px; flex: none; border-radius: 50%; margin-right: 8px; vertical-align: middle; background: var(--color-live); }
   .status-dot[data-tone='success'] { background: var(--color-success); }
   .status-dot[data-tone='danger'] { background: var(--color-danger); }
@@ -275,7 +285,7 @@
     background: var(--color-active);
   }
 
-  .item.active .label::after {
+  .item.active:not(.hide-mark) .label::after {
     content: '';
     display: inline-block;
     width: 5px;

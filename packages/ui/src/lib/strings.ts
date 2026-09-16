@@ -23,7 +23,7 @@ export const strings = {
     search: 'Find a conversation', unread: 'Unread', noActivity: 'No agents need your attention.', noThreads: 'No matching conversations.'
   },
   machines: {
-    heading: 'Machines', local: 'My computer', projects: 'Projects', recent: 'Recent',
+    heading: 'Machines', local: 'This PC', projects: 'Projects', recent: 'Recent',
     dynamic: 'All machines', recentHint: 'Most recent user message first',
     intro: 'Connect machines to see their projects and threads together. Each machine runs its own agents and files.',
     label: 'Machine name', icon: 'Machine icon', icons: { desktop: 'Desktop', laptop: 'Laptop', server: 'Server', rack: 'Server rack', cloud: 'Cloud', cpu: 'Processor' }, link: 'Pairing link', add: 'Add machine', adding: 'Connecting',
@@ -58,7 +58,7 @@ export const strings = {
 
   connection: {
     machine: 'Machine',
-    local: 'This computer',
+    local: 'This PC',
     current: 'Current machine',
     machines: 'machines connected',
     oneMachine: 'machine connected',
@@ -190,9 +190,9 @@ export const strings = {
     taskCount: '{done}/{total} tasks',
     showTasks: 'Show tasks',
     goalDescription: 'Keep working toward an objective',
-    loopDescription: 'Repeat a prompt at an interval',
+    loopDescription: 'Repeat a task a set number of times or on a schedule',
     goalUsage: 'Use /goal followed by an objective.',
-    loopUsage: 'Use /loop [interval] prompt, for example /loop 5m check the build.',
+    loopUsage: 'Use /loop 2 prompt for two iterations, or /loop 5m prompt for a schedule. Choose 1 to 1000 iterations.',
     intervalError: 'Loop intervals must be between 1 second and 24 hours.',
     noAttachments: 'Send images in a message before starting a goal or loop.',
     active: 'Active',
@@ -204,6 +204,16 @@ export const strings = {
     finish: 'Mark complete',
     every: 'Every {interval}',
     iterations: '{count} runs',
+    iteration: 'Iteration {count}',
+    iterationOf: 'Iteration {count} of {total}',
+    history: 'Iteration history',
+    noHistory: 'No completed iterations yet',
+    allTasksDone: 'All tasks completed',
+    waitingTasks: 'Waiting for next task',
+    stopped: 'Stopped',
+    running: 'Running',
+    done: 'Done',
+    error: 'Failed',
     pending: 'Pending',
     in_progress: 'In progress',
     completed: 'Completed'
@@ -224,8 +234,8 @@ export const strings = {
 
   permissionMode: {
     default: 'Ask',
-    acceptEdits: 'Accept edits',
-    bypassPermissions: 'Bypass',
+    acceptEdits: 'Auto decide',
+    bypassPermissions: 'Yolo',
     plan: 'Plan',
     dontAsk: 'Auto-deny'
   },
@@ -339,6 +349,10 @@ export const strings = {
     jumpToLatest: 'Jump to latest',
     /** The one line at the top of the timeline while an older page is being fetched. */
     loadingOlder: 'Loading earlier messages',
+    outline: 'Messages in this conversation',
+    messageGroup: 'Browse {count} messages',
+    earlierMessages: 'Load earlier messages',
+    goToMessage: 'Go to message {number}: {text}',
     copy: 'Copy',
     copied: 'Copied',
     error: 'Error'
@@ -803,3 +817,4 @@ export type Strings = typeof strings;
 export function fill(template: string, values: Record<string, string>): string {
   return template.replace(/\{(\w+)\}/g, (match, key: string) => values[key] ?? match);
 }
+

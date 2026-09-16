@@ -769,6 +769,25 @@ test(
   TIMEOUT,
 );
 
+test('inline code stays literal at desktop and phone widths', async () => {
+  await page.type(testid('composer-input'), 'Keep `**literal**` and `[link](https://example.com)` as code.');
+  await clickWhenEnabled(testid('composer-send'));
+  const codes = `Array.from(document.querySelectorAll('[data-role=assistant] [data-testid=text-part] code'))`;
+  await page.waitFor(`${codes}.some(node => node.textContent === '**literal**')`);
+  await page.waitFor(`document.querySelector('[data-testid=thread-status]').dataset.status === 'idle'`);
+  expect(await page.evaluate<boolean>(`${codes}.some(node => node.querySelector('strong, a'))`)).toBe(false);
+  expect(await page.evaluate<boolean>(`${codes}.some(node => node.textContent === '[link](https://example.com)')`)).toBe(true);
+  try {
+    for (const [name, width, height] of [['desktop', 1280, 900], ['phone', 390, 844]] as const) {
+      await page.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: name === 'phone' });
+      await page.evaluate(`Promise.all([document.fonts.ready, ...document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {}))])`);
+      await page.screenshot(join(import.meta.dir, '.artifacts', `markdown-${name}.png`));
+    }
+  } finally {
+    await page.send('Emulation.clearDeviceMetricsOverride');
+  }
+}, TIMEOUT);
+
 test(
   'the service worker caches the shell, and the app still paints when the core is gone',
   async () => {

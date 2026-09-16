@@ -428,6 +428,7 @@ export class Journal {
     this.db.exec('PRAGMA busy_timeout = 5000');
     this.db.transaction(() => migrate(this.db))();
     this.db.exec('CREATE INDEX IF NOT EXISTS turns_by_status ON turns (status)');
+    this.db.exec('CREATE INDEX IF NOT EXISTS messages_by_turn ON messages (thread_id, turn_id)');
   }
 
   append<T>(event: JournalEvent, apply: (db: Database) => T): T {
@@ -696,11 +697,27 @@ export class Journal {
     return rows.map(toMessage);
   }
 
+  lastUserMessage(threadId: string, turnId: string): Message | null {
+    const row = this.db.query("SELECT * FROM messages WHERE thread_id = ? AND turn_id = ? AND role = 'user' ORDER BY rowid DESC LIMIT 1")
+      .get(threadId, turnId) as MessageRow | null;
+    return row === null ? null : toMessage(row);
+  }
+
+  *walkTurnMessages(threadId: string, turnId: string): Iterable<Message> {
+    const statement = this.db.prepare('SELECT * FROM messages WHERE thread_id = ? AND turn_id = ? ORDER BY rowid');
+    try {
+      for (const row of statement.iterate(threadId, turnId)) yield toMessage(row as MessageRow);
+    } finally { statement.finalize(); }
+  }
+
   /** Stream history for a continuation without loading images from every message at once. */
   *walkMessages(threadId: string): Iterable<Message> {
-    for (const row of this.db.query('SELECT * FROM messages WHERE thread_id = ? ORDER BY rowid').iterate(threadId)) {
-      yield toMessage(row as MessageRow);
-    }
+    // A caller may stop at its current turn. Do not leave a partially consumed
+    // cached statement for the next continuation to reuse.
+    const statement = this.db.prepare('SELECT * FROM messages WHERE thread_id = ? ORDER BY rowid');
+    try {
+      for (const row of statement.iterate(threadId)) yield toMessage(row as MessageRow);
+    } finally { statement.finalize(); }
   }
 
   /**

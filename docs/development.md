@@ -128,12 +128,18 @@ message out of the queue for editing; clicking a pending message does the same.
 Escape stops the current turn. Pending messages then run in their original
 order. A failed send preserves the queue for an explicit retry.
 
-`/goal <objective>` starts work toward an objective. `/loop [interval] <prompt>`
-repeats a prompt, immediately once and then at the given interval. Intervals use
-`s`, `m` or `h`, from one second to 24 hours; the default is five minutes.
+`/goal <objective>` starts work toward an objective. `/loop 2 <prompt>` runs two
+consecutive iterations and stops. Counts range from 1 to 1000. A count written
+as "2 iterations" or "2 itérations" in the prompt is also recognized.
+`/loop 5m <prompt>` explicitly schedules repetition, with the delay counted
+after each finished turn. Intervals use `s`, `m` or `h`, from one second to
+24 hours. A loop without a count or interval is refused; there is no default timer.
 Both commands belong to Boite and work with every driver. Goals and loops can
-coexist with the agent's task list above the composer. Hover or click the task
-row to expand it; its button also works from the keyboard and on a phone.
+coexist with the agent's task list above the composer. The compact overlay shows
+the current task and progress. Only a click expands it; updates and disclosure
+do not resize the timeline. Completed tasks and goals fade out on the next user
+prompt, and newly reported work brings the task list back. Loop details show
+the latest 50 iterations with their outcome and up to 4000 characters of result.
 
 The core owns this work, so switching threads or closing a client does not
 cancel it. A goal continues through scheduled turns until the agent emits
@@ -142,6 +148,11 @@ after verification. `[BOITE_GOAL_BLOCKED]`, an error or Escape pauses it.
 Escape also pauses a loop between runs. The activity bar has pause, resume,
 remove and manual goal completion controls. A restarted core preserves the
 activity but requires an explicit resume.
+
+Goal instructions are assembled only when invoking a driver. The journal stores
+the visible `/goal` or `/loop` message with its kind and iteration in the text
+part. The UI also cleans up goal prompts saved by older cores and hides standalone
+completion/blocker markers, including partial markers during streaming.
 
 Tasks come from ACP plans, Codex plan notifications or successful task tools
 such as Claude's TodoWrite and TaskCreate/TaskUpdate. An agent that reports no
@@ -236,6 +247,17 @@ and `guard-worker.js` next to each copy. Without the first the trace degrades
 from exact events to polling; without the second the focus guard never starts.
 
 ## Captures
+
+`tests/e2e/header.test.ts` checks the shared header, sidebar folding and saved
+state, project groups, machine menu ordering, and prompt navigation through a
+paged, virtualized conversation. It captures desktop, phone and light-theme
+layouts on the fake client. The shell suite checks that the thread controls sit
+inside the same title bar and that dragging excludes editable controls.
+
+The prompt outline uses at most 13 entries, keeping the first and last prompts
+and seven around the reading position. Distant prompts are grouped behind a
+keyboard-accessible list, so every loaded prompt remains reachable. Desktop
+markers are 12 px apart; the compact activity panel sits 4 px above the composer.
 
 The fake client is excluded from production bundles. Tests that need it must
 use the Vite development server. `tests/e2e/settings.test.ts` starts and closes
@@ -333,10 +355,11 @@ panel, paragraph buffering, reasoning replacement, goal display and command
 highlighting through the fake client. It writes desktop, phone and light-theme
 captures under `tests/e2e/.artifacts/`.
 
-Scheduled goal and loop prompts keep their execution instructions in `text` and
-carry a separate optional `displayText` on the text part. The journal retains
-both; drivers read the execution prompt. The UI shows the command and objective,
-including when recalling a sent prompt, and hides standalone goal control markers.
+Scheduled goal and loop prompts journal the command and objective in `text`, with
+activity kind and iteration metadata. The core builds the execution instructions
+when starting the driver. Older messages can carry `displayText`, which the UI
+still honors when displaying or recalling a prompt. Terminal goal control markers
+stay hidden; examples inside answer text or code fences remain visible.
 
 Chat status uses two small receipts: core acceptance and the first nonempty
 assistant activity. Agent protocols do not provide a literal read receipt.
