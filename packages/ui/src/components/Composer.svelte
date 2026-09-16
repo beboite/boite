@@ -15,6 +15,7 @@
   import MentionMenu from './MentionMenu.svelte';
   import SlashMenu from './SlashMenu.svelte';
   import ThreadActivity from './ThreadActivity.svelte';
+  import Dictation from './Dictation.svelte';
 
   /**
    * `centered` is the draft's placement: the parent stacks the composer under
@@ -33,6 +34,7 @@
   let attachments = $derived<ImageAttachment[]>(composer?.attachments ?? []);
   let choice = $state<Choice | null>(null);
   let picking = $state(false);
+  let dictating = $state(false);
   let box = $state<HTMLTextAreaElement | undefined>(undefined);
   let inputWidth = $state(0);
   let inputScroll = $state(0);
@@ -140,6 +142,7 @@
       choice !== null &&
       store.connection === 'ready' &&
       !picking &&
+      !dictating &&
       !composer?.sending
   );
 
@@ -866,6 +869,14 @@
         {/if}
 
 
+      {#key store}
+        {#key `${key}:${store.draft?.projectId ?? ''}`}
+          <Dictation {store} onbusy={(busy) => dictating = busy} ontext={(transcript) => {
+            const current = stateForInput().text;
+            put(current + (current && !/\s$/.test(current) ? ' ' : '') + transcript);
+          }} />
+        {/key}
+      {/key}
       <button
         type="button"
         class="primary icon send"

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Activity, ChevronRight, ShieldCheck, ArrowLeft, Coins, FlaskConical, Keyboard, Palette, Puzzle, Settings2, Users } from '@lucide/svelte';
+  import { Activity, ChevronRight, ShieldCheck, ArrowLeft, Coins, FlaskConical, Keyboard, Palette, Puzzle, Settings2, Users, Mic } from '@lucide/svelte';
   import KeyboardPage from './KeyboardPage.svelte';
   import PluginsPage from './PluginsPage.svelte';
   import { strings } from '../lib/strings';
@@ -11,6 +11,7 @@
   import MachinesPage from './MachinesPage.svelte';
   import ResourcesPage from './ResourcesPage.svelte';
   import UsagePage from './UsagePage.svelte';
+  import VoiceSettings from './VoiceSettings.svelte';
 
   let { store }: { store: Store } = $props();
 
@@ -19,6 +20,7 @@
 
   const all: { id: SettingsTab; label: string; icon: typeof Settings2 }[] = [
     { id: 'general', label: strings.settings.tabs.general, icon: Settings2 },
+    { id: 'voice', label: strings.speech.heading, icon: Mic },
     { id: 'machines', label: strings.machines.heading, icon: Activity },
     { id: 'appearance', label: strings.settings.tabs.appearance, icon: Palette },
     { id: 'keyboard', label: strings.settings.tabs.keyboard, icon: Keyboard },
@@ -112,7 +114,9 @@
        rather than swapping it in one frame. -->
   {#key tab}
     <section>
-      {#if tab === 'general'}
+      {#if tab === 'voice'}
+        <VoiceSettings {store} />
+      {:else if tab === 'general'}
         <GeneralSettings {store} />
       {:else if tab === 'machines'}
         <MachinesPage />

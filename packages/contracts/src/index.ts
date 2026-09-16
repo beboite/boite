@@ -913,7 +913,41 @@ export interface PairingGrant {
 // RPC surface. `hello` must be the first frame on every connection.
 // ---------------------------------------------------------------------------
 
+export type SpeechEngine = 'local' | 'api';
+export interface SpeechConfig {
+  engine: SpeechEngine;
+  language: string;
+  apiProvider: 'groq' | 'openrouter';
+  fallback: boolean;
+  executable: string;
+  modelPath: string;
+}
+export interface SpeechStatus {
+  revision: string;
+  engine: SpeechEngine;
+  ready: boolean;
+  localReady: boolean;
+  groqKeySet: boolean;
+  openrouterKeySet: boolean;
+  installing: boolean;
+  downloadedBytes: number;
+  totalBytes: number;
+  error: string | null;
+  canInstallRuntime: boolean;
+}
+export const SPEECH_MAX_SECONDS = 120;
+export const SPEECH_MAX_BYTES = 44 + 16000 * 2 * SPEECH_MAX_SECONDS;
+
 export interface RpcMethods {
+  'speech.status': { params: Record<string, never>; result: SpeechStatus };
+  'speech.configure': { params: SpeechConfig & { groqKey?: string; openrouterKey?: string }; result: SpeechStatus };
+  'speech.config': { params: Record<string, never>; result: SpeechConfig };
+  'speech.install': { params: Record<string, never>; result: SpeechStatus };
+  'speech.installCancel': { params: Record<string, never>; result: SpeechStatus };
+  'speech.uninstall': { params: Record<string, never>; result: SpeechStatus };
+  /** PCM WAV, mono 16 kHz. Each connection may have one request in flight. Audio is never journalled. */
+  'speech.transcribe': { params: { requestId: string; revision: string; audio: string }; result: { text: string } };
+  'speech.cancel': { params: { requestId: string }; result: { ok: true } };
   'threads.activity.set': { params: { threadId: ThreadId; goal?: { objective: string } | null; loop?: { prompt: string; intervalMs: number; maxIterations?: number | null } | null }; result: ThreadActivity };
   'threads.activity.control': { params: { threadId: ThreadId; kind: 'goal' | 'loop'; action: 'pause' | 'resume' | 'remove' | 'complete' }; result: ThreadActivity };
   'quotas.list': { params: { refresh?: boolean }; result: AccountQuota[] };

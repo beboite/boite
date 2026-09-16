@@ -527,6 +527,40 @@ shellTest(
   TIMEOUT,
 );
 
+shellTest('voice capture loads its packaged worklet under the native content security policy', async () => {
+  if (!page || !coreFile) throw new Error('shell is not ready');
+  const client = await connect(`http://127.0.0.1:${coreFile.port}`, coreFile.token);
+  const previous = await client.call('speech.config', {});
+  const model = join(dataDir, 'speech-fixture.bin');
+  writeFileSync(model, 'readiness fixture, never passed to a decoder');
+  try {
+    await client.call('speech.configure', { ...previous, engine: 'local', executable: process.execPath, modelPath: model });
+    expect(await page.evaluate('window.isSecureContext')).toBe(true);
+    await page.evaluate(`window.__realGetUserMedia = navigator.mediaDevices.getUserMedia;
+      navigator.mediaDevices.getUserMedia = async () => {
+        const context = new AudioContext(); await context.resume();
+        const oscillator = context.createOscillator(), destination = context.createMediaStreamDestination();
+        oscillator.connect(destination); oscillator.start();
+        window.__voiceFixture = {context, oscillator, destination};
+        for (const track of destination.stream.getTracks()) {
+          const stop = track.stop.bind(track);
+          track.stop = () => { stop(); oscillator.stop(); window.__voiceFixture = null; if (context.state !== 'closed') void context.close(); };
+        }
+        return destination.stream;
+      };`);
+    await page.send('Runtime.evaluate', { expression: `document.querySelector('[data-testid="dictation-start"]').click()`, userGesture: true });
+    await page.waitFor(`['recording','error'].includes(document.querySelector('[data-testid="dictation"]')?.dataset.phase)`);
+    expect(await page.text('[data-testid="dictation"]')).toContain('Listening');
+    await page.waitFor(`Number(document.querySelector('[data-testid="dictation"] .duration')?.textContent.split(':')[1]) >= 1`);
+    await page.screenshot(join(import.meta.dir, '.artifacts', 'speech-native-shell.png'));
+    await page.click('[data-testid="dictation-cancel"]');
+    await page.waitFor(`document.querySelector('[data-testid="dictation-start"]')`);
+  } finally {
+    await page.evaluate(`navigator.mediaDevices.getUserMedia = window.__realGetUserMedia; document.querySelector('[data-testid="dictation-cancel"]')?.click();`);
+    await client.call('speech.configure', previous); client.close();
+  }
+}, 30_000);
+
 shellTest('window controls draw maximize and restore without a second status indicator', async () => {
   // Exercise the component's resize subscription without maximizing a hidden
   // native window: ShowWindow could otherwise expose it on the desktop.

@@ -74,7 +74,7 @@ import { DEFAULT_MODEL_NAMES, INITIAL_MODEL_DEFAULTS, readModelDefaults, writeMo
 import { FAVORITES_KEY, isNamedModel, readFavorites, type FavoriteModel } from './model-order';
 
 export type Page = 'chat' | 'settings';
-export type SettingsTab = 'general' | 'machines' | 'appearance' | 'keyboard' | 'accounts' | 'plugins' | 'usage' | 'resources' | 'experiments';
+export type SettingsTab = 'voice' | 'general' | 'machines' | 'appearance' | 'keyboard' | 'accounts' | 'plugins' | 'usage' | 'resources' | 'experiments';
 
 /** A login process the core runs for one account, as `account.login` reports it. */
 export interface LoginState {

@@ -308,6 +308,9 @@ calls, so no other test creates a window.
 
 ## Phone checks
 
+Voice dictation checks and the opt-in local Whisper smoke test are listed in
+[voice.md](voice.md#verification).
+
 `bun test tests/e2e/mobile.test.ts` runs the phone navigation, portrait and
 landscape layouts, model sheet and browser Back, retained drafts, and the visible
 message when returning to a long conversation. It uses the in-memory client in

@@ -1,5 +1,28 @@
 /** Every user-facing string of the UI. No literal UI text lives anywhere else. */
 export const strings = {
+  speech: {
+    heading: 'Voice', description: 'Dictate into any conversation. Review the text before sending.',
+    start: 'Dictate', stop: 'Finish dictation', listening: 'Listening', opening: 'Waiting for microphone', transcribing: 'Transcribing',
+    private: 'On this core only', cloud: 'Transcribed by your API provider', retry: 'Retry transcription',
+    local: 'Local', api: 'API', localHint: 'Whisper runs on the machine hosting this conversation. Your phone uses the same model without downloading it.',
+    apiHint: 'Audio goes from this core to your chosen provider. Keys stay on this core.',
+    setup: 'Choose a voice engine in Settings to start dictating.', ownerSetup: 'Ask the owner to configure Voice on this core.',
+    https: 'Microphone access needs HTTPS or localhost. Open the secure pairing link for this core.',
+    denied: 'Microphone permission was denied. Allow it in your browser or system settings, then try again.',
+    noMicrophone: 'No microphone was found. Connect one and try again.', microphoneBusy: 'The microphone is unavailable. Check whether another app is using it.',
+    silence: 'No speech was detected. Try again closer to the microphone.', failed: 'Could not record audio. Try again.',
+    model: 'Whisper Small', modelHint: 'Multilingual, quantized. About 190 MB. Loaded only while transcribing, using up to four CPU threads.',
+    install: 'Download local model', installWindows: 'Download model and engine', remove: 'Remove download', ready: 'Ready', missing: 'Not installed',
+    downloading: 'Downloading', runtimeHint: 'Install whisper-cli on this core or set its absolute path below. The model download works on all platforms.',
+    advanced: 'Local paths', executable: 'Whisper executable', modelPath: 'Model file', pathHint: 'Leave empty to use the managed download or whisper-cli on PATH.',
+    provider: 'Transcription provider', groq: 'Groq', openrouter: 'OpenRouter', groqModel: 'Whisper Large V3 Turbo',
+    groqKey: 'Groq API key', openrouterKey: 'OpenRouter API key', keySaved: 'Key saved. Leave blank to keep it.', keyEmpty: 'Paste an API key', clearKey: 'Remove key',
+    fallback: 'Try the other API provider if the first fails', fallbackHint: 'Requires both keys. Local mode never sends audio to an API.',
+    language: 'Language', languageHint: 'Leave empty for automatic detection, or enter a two-letter code such as en or fr.',
+    save: 'Save voice settings', saved: 'Voice settings saved', ownerOnly: 'The owner manages this core\'s voice engine. You can dictate from any conversation once it is ready.',
+    privacy: 'Recordings stay in memory while you dictate. Local temporary audio is deleted after transcription. Nothing is sent as a message until you press Send.',
+    limit: 'Up to two minutes per dictation. Switching conversations or leaving the app cancels recording.',
+  },
   phone: {
     preparing: 'The app is still preparing offline files. Reload and try again.',
     settingsOffline: 'Settings have not been downloaded yet. Reconnect and open Settings again.',
@@ -817,4 +840,3 @@ export type Strings = typeof strings;
 export function fill(template: string, values: Record<string, string>): string {
   return template.replace(/\{(\w+)\}/g, (match, key: string) => values[key] ?? match);
 }
-

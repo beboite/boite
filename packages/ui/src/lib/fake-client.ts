@@ -31,6 +31,8 @@ import {
   type RpcResult,
   type SchedulerState,
   type Settings,
+  type SpeechConfig,
+  type SpeechStatus,
   type Thread,
   type ThreadId,
   type ThreadResources,
@@ -90,6 +92,7 @@ const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>([
   'scheduler.get',
   'usage.get',
   'settings.get',
+  'speech.status', 'speech.transcribe', 'speech.cancel',
   'keybindings.get'
 ]);
 
@@ -367,6 +370,9 @@ export class FakeClient implements ObservableClient {
   #processes: ProcessRecord[] = [];
   #usage = new Map<ThreadId, Usage>();
   #settings: Settings;
+  #speech: SpeechConfig = { engine: 'local', language: '', apiProvider: 'groq', fallback: false, executable: '', modelPath: '' };
+  #speechStatus: SpeechStatus = { revision: 'fake-voice', engine: 'local', ready: true, localReady: true, groqKeySet: false, openrouterKeySet: false, installing: false, downloadedBytes: 0, totalBytes: 190085487, error: null, canInstallRuntime: true };
+  #speechRequests = new Set<string>();
   #quotaEnabled: Record<string, boolean> = {};
   #plugin: PluginState = { id: 'kebacc-switcher', name: 'kebacc-switcher', version: null, availableVersion: '2.0.1', status: 'not-installed', progress: 0, error: null };
   #pluginPools: PluginPool[] = ['claude', 'codex', 'antigravity'].map((provider) => ({ provider, accounts: [
@@ -1160,6 +1166,33 @@ export class FakeClient implements ObservableClient {
 
       case 'settings.get':
         return { ...this.#settings };
+      case 'speech.config': return { ...this.#speech };
+      case 'speech.status': return { ...this.#speechStatus };
+      case 'speech.configure': {
+        const p = rawParams as RpcParams<'speech.configure'>;
+        this.#speech = { engine: p.engine, language: p.language, apiProvider: p.apiProvider, fallback: p.fallback, executable: p.executable, modelPath: p.modelPath };
+        if (p.groqKey !== undefined) this.#speechStatus.groqKeySet = !!p.groqKey;
+        if (p.openrouterKey !== undefined) this.#speechStatus.openrouterKeySet = !!p.openrouterKey;
+        this.#speechStatus.engine = p.engine; this.#speechStatus.revision = crypto.randomUUID();
+        this.#speechStatus.ready = p.engine === 'local' ? this.#speechStatus.localReady : p.apiProvider === 'groq' ? this.#speechStatus.groqKeySet : this.#speechStatus.openrouterKeySet;
+        return { ...this.#speechStatus };
+      }
+      case 'speech.install':
+        this.#speechStatus.localReady = true; this.#speechStatus.ready = this.#speech.engine === 'local' || this.#speechStatus.ready;
+        return { ...this.#speechStatus };
+      case 'speech.installCancel': return { ...this.#speechStatus };
+      case 'speech.uninstall':
+        this.#speechStatus.localReady = false; if (this.#speech.engine === 'local') this.#speechStatus.ready = false;
+        return { ...this.#speechStatus };
+      case 'speech.cancel': this.#speechRequests.delete((rawParams as RpcParams<'speech.cancel'>).requestId); return { ok: true };
+      case 'speech.transcribe': {
+        const p = rawParams as RpcParams<'speech.transcribe'>;
+        if (!this.#speechStatus.ready) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'Configure Voice first' });
+        this.#speechRequests.add(p.requestId);
+        await new Promise(resolve => setTimeout(resolve, 250));
+        if (!this.#speechRequests.delete(p.requestId)) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'Transcription cancelled' });
+        return { text: 'Please add a test for this change.' };
+      }
       case 'keybindings.get':
         // A file with one moved chord, one taken away, and one line the core refused.
         return {

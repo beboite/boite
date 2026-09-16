@@ -93,6 +93,7 @@ export class ServerConnection implements Connection {
   }
 
   close(code: number, reason?: string): void {
+    this.core.speech.cancel(this.id);
     this.catchUp.clear();
     this.socket?.close(code, reason);
   }
@@ -252,6 +253,7 @@ export function startServer(options: ServerOptions): RunningServer {
       drain(socket) { socket.data.connection.drain(); },
 
       close(socket) {
+        core.speech.cancel(socket.data.connection.id);
         clearTimeout(helloTimers.get(socket.data.connection));
         helloTimers.delete(socket.data.connection);
         connections.delete(socket.data.connection);
