@@ -161,9 +161,15 @@ describe('providers', () => {
     // `default` is Boite's own spelling for "the agent keeps its own model": the
     // real list comes from the agent, through the probe.
     expect(antigravity?.models).toEqual([{ id: 'default', name: 'Antigravity default', default: true }]);
-    // Nothing is downloaded here, so the summary is what the picker turns into
-    // an Install button, with the archive's size on it.
-    expect(antigravity?.install?.state).toBe('absent');
+    // Unsupported native architectures must show a reason instead of offering
+    // an archive that cannot run on this machine.
+    const requiredArch = currentOs() === 'macos' ? 'arm64' : 'x64';
+    if (process.arch === requiredArch) {
+      expect(antigravity?.install?.state).toBe('absent');
+    } else {
+      expect(antigravity?.install).toEqual({ state: 'failed', version: 'agy_acp_server_1.1.1',
+        message: `antigravity requires ${requiredArch}; this machine is ${process.arch}` });
+    }
     expect(antigravity?.install?.version).toBe('agy_acp_server_1.1.1');
     expect(antigravity?.available).toBe(false);
 
