@@ -494,10 +494,12 @@ fn sidecar() -> Result<Option<PathBuf>, String> {
     let directory = exe.parent().ok_or("the shell executable has no parent directory")?;
     let path = directory.join(name);
     if !path.exists() { return Ok(None); }
+    #[cfg(windows)]
     check_workers(directory)?;
     Ok(Some(path))
 }
 
+#[cfg(any(windows, test))]
 fn check_workers(directory: &Path) -> Result<(), String> {
     for name in ["jobs-worker.js", "guard-worker.js"] {
         let worker = directory.join(name);
@@ -550,7 +552,7 @@ fn core_program() -> Result<(String, Vec<String>, Option<PathBuf>), String> {
     ))
 }
 
-fn spawn_core(channel: Channel) -> Result<(Child, Arc<AtomicBool>, CoreJob), String> {
+fn spawn_core(channel: Channel, resources: Option<&Path>) -> Result<(Child, Arc<AtomicBool>, CoreJob), String> {
     let (program, args, working_directory) = core_command(channel)?;
     let job = job::create_core_job()?;
 
@@ -562,6 +564,9 @@ fn spawn_core(channel: Channel) -> Result<(Child, Arc<AtomicBool>, CoreJob), Str
         .stderr(Stdio::null());
     if let Some(directory) = working_directory {
         command.current_dir(directory);
+    }
+    if let Some(ui) = resources.map(|path| path.join("ui")).filter(|path| path.join("index.html").is_file()) {
+        command.env("BOITE_UI_DIR", ui);
     }
     platform::prepare_command(&mut command);
 
@@ -596,6 +601,7 @@ fn resolve_core(
     channel: Channel,
     child_slot: &Mutex<Option<Child>>,
     job_slot: &Mutex<Option<CoreJob>>,
+    resources: Option<&Path>,
 ) -> Result<CoreEndpoint, String> {
     let directory = data_dir(channel)?;
     let file = directory.join("core.json");
@@ -608,7 +614,7 @@ fn resolve_core(
         Err(error) => eprintln!("[shell] {error}"),
     }
 
-    let (child, ready, job) = spawn_core(channel)?;
+    let (child, ready, job) = spawn_core(channel, resources)?;
     if let Ok(mut guard) = child_slot.lock() {
         *guard = Some(child);
     }
@@ -641,9 +647,10 @@ fn start_core<R: Runtime>(app: &AppHandle<R>, state: &CoreState) {
     let job_slot = state.job.clone();
     let channel = state.channel;
     let handle = app.clone();
+    let resources = app.path().resource_dir().ok();
 
     std::thread::spawn(move || {
-        let outcome = resolve_core(channel, &child_slot, &job_slot);
+        let outcome = resolve_core(channel, &child_slot, &job_slot, resources.as_deref());
         {
             let (lock, ready) = &*slot;
             if let Ok(mut guard) = lock.lock() {

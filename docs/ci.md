@@ -21,8 +21,10 @@ that same PR. New main commits also cancel superseded ordinary CI runs.
 Release and publication jobs finish instead of being interrupted
 halfway through an upload. Live-provider tests stay disabled.
 
-Linux and macOS build the unbundled Tauri shell and run Rust unit tests.
-These checks do not exercise desktop interactions or produce installers.
+Linux and macOS run Rust tests, build a Debian package and a macOS application
+bundle, then launch the installed shell outside the checkout with a minimal PATH.
+The smoke test checks core startup, bundled UI serving, authenticated RPC and an
+echo turn with a fresh data directory. It does not exercise native desktop controls.
 The WebView2 shell end-to-end suite remains Windows-only.
 
 ## Build cost

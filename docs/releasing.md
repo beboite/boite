@@ -32,7 +32,7 @@ it does not compile again. The end-to-end suite refuses missing or stale artifac
   Keep every emitted file together when distributing this bundle. Lazy imports
   keep the SDKs off the start path. `bun run core` and the shell both prefer this
   bundle over the sources when it is there.
-- `build:core:exe` compiles `packages/core/dist/boite-core.exe`. The two worker
+- `build:core:exe` compiles `packages/core/dist/boite-core`, with `.exe` on Windows. The two worker
   files are not compiled into it: the core loads them by name from beside its own
   executable, so they travel with it.
 - `stage:core` puts that executable and both workers where the two things that
@@ -45,7 +45,25 @@ it does not compile again. The end-to-end suite refuses missing or stale artifac
   whenever that executable exists. The shell refuses a sidecar missing either
   worker and names the missing file.
 - `build:shell` runs the Tauri build with the bundle overlay and produces the
-  NSIS installer.
+  NSIS installer on Windows, Debian and AppImage packages on Linux, or an
+  application bundle and DMG on macOS. Build on the target OS and architecture;
+  staging supports Windows x64 and Linux/macOS x64 and ARM64.
+
+The shell passes Tauri's resource directory to the core through `BOITE_UI_DIR`,
+so the installed core can serve the phone UI from the macOS application bundle
+and Linux package. Windows workers are required only by the Windows shell.
+The compiled sidecar needs no separately installed Bun runtime.
+
+Portable CI runs `scripts/ci/desktop-smoke.ts <installed-shell>` against the
+Debian package and macOS application bundle. Signing, notarization and testing
+on older operating systems remain release prerequisites; a local unsigned
+bundle is not a notarized download. Native notifications and Windows process
+guards are not implemented on Linux or macOS.
+
+macOS requires 13.0 or newer. The bundle includes the JIT entitlements required
+by the [compiled Bun runtime](https://bun.sh/docs/bundler/executables).
+CI signs locally with an ad-hoc identity and starts that signed bundle. A public
+release still needs an Apple Developer ID and notarization credentials.
 
 A shell executable with no installer, for a quick look at the window:
 

@@ -20,11 +20,10 @@
 import { copyFileSync, existsSync, mkdirSync, statSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { nativeTarget } from './targets.ts';
 
 /** Only the platforms whose compiled core this repository actually produces. */
-const TRIPLES: Record<string, Record<string, string>> = {
-  win32: { x64: 'x86_64-pc-windows-msvc' },
-};
+const { triple, suffix } = nativeTarget();
 
 const here = dirname(fileURLToPath(import.meta.url));
 const shell = resolve(here, '..');
@@ -78,17 +77,6 @@ export function stageCore(targetDir: string, exeName: string): void {
   }
 }
 
-const triple = TRIPLES[process.platform]?.[process.arch];
-if (triple === undefined) {
-  refuse(
-    `no target triple for ${process.platform} ${process.arch}. ` +
-      `apps/shell/scripts/stage-sidecar.ts knows ${Object.entries(TRIPLES)
-        .flatMap(([platform, arches]) => Object.keys(arches).map((arch) => `${platform} ${arch}`))
-        .join(', ')} only; add this one to its TRIPLES table.`,
-  );
-}
-
-const suffix = process.platform === 'win32' ? '.exe' : '';
 stageCore(binaries, `boite-core-${triple}${suffix}`);
 
 // Cargo may use a shared target directory. Snapshot its shell into this

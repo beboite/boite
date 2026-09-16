@@ -165,7 +165,7 @@ jobs:
       - uses: ./.github/actions/setup
       - name: Install Linux shell dependencies
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf xvfb dbus-x11
       - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
         with:
           toolchain: stable
@@ -173,9 +173,22 @@ jobs:
         with:
           workspaces: apps/shell/src-tauri -> target
           shared-key: desktop-portable-v1
-      - run: bun run build:ui
+      - run: bun run stage:core
       - run: bun run test:shell --release
-      - run: bun run --cwd apps/shell tauri build --no-bundle
+      - name: Build and test installed Linux package
+        if: runner.os == 'Linux'
+        run: |
+          bun run --cwd apps/shell tauri build --config src-tauri/tauri.bundle.conf.json --bundles deb
+          sudo dpkg -i apps/shell/src-tauri/target/release/bundle/deb/*.deb
+          dbus-run-session -- xvfb-run -a bun scripts/ci/desktop-smoke.ts /usr/bin/boite-shell
+      - name: Build and test macOS application bundle
+        if: runner.os == 'macOS'
+        env:
+          APPLE_SIGNING_IDENTITY: '-'
+        run: |
+          bun run --cwd apps/shell tauri build --config src-tauri/tauri.bundle.conf.json --bundles app
+          cp -R apps/shell/src-tauri/target/release/bundle/macos/Boite.app "$RUNNER_TEMP/Boite.app"
+          bun scripts/ci/desktop-smoke.ts "$RUNNER_TEMP/Boite.app/Contents/MacOS/boite-shell"
 
   server:
     needs: changes
