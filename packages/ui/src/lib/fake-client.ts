@@ -445,6 +445,13 @@ export class FakeClient implements ObservableClient {
         install: RELEASES[provider.id] ? { state: 'absent', ...RELEASES[provider.id]! } : null,
       }));
       this.#accounts = [];
+      this.#threads.clear();
+      this.#importable = [];
+      this.#pendingPermissions.clear();
+      this.#pendingQuestions.clear();
+      this.#processes = [];
+      this.#usage.clear();
+      this.#scheduler = { ...this.#scheduler, running: [], queued: [] };
     }
   }
 

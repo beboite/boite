@@ -209,7 +209,8 @@ export class InstallManager {
     }
     this.#failed.delete(providerId);
 
-    const needed = install.archiveBytes + totalFileBytes(install) + FREE_SPACE_MARGIN;
+    const extractedBytes = install.format === 'binary' ? 0 : totalFileBytes(install);
+    const needed = install.archiveBytes + extractedBytes + FREE_SPACE_MARGIN;
     const free = freeBytesAt(this.dataDir);
     if (free === null) {
       this.#log('warn', `no free space reading on this platform, installing ${providerId} without the check`);

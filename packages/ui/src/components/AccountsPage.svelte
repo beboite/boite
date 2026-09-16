@@ -38,9 +38,8 @@
     if (!store.client || detecting) return;
     detecting = true;
     try {
-      await store.client.call('providers.reload', {});
-      for (const account of store.accounts) await store.checkAccount(account.id);
-    } catch (error) { store.error = String(error); }
+      await store.reloadProviders();
+    }
     finally { detecting = false; }
   }
   async function readQuotas(refresh = false) {
@@ -87,7 +86,7 @@
     if (!install) { connecting = null; return; }
     try {
       if (install.state === 'absent' || install.state === 'failed') {
-        await store.client.call('providers.install', { providerId: provider.id });
+        if (!await store.installProvider(provider.id)) connecting = null;
       } else if (install.state === 'installed') {
         store.error = strings.providerSettings.reinstall;
         connecting = null;
