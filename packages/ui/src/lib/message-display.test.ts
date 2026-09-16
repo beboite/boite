@@ -12,3 +12,12 @@ test('protocol markers are invisible while streaming and when complete', () => {
   expect(visibleAnswer('Verified.\n[BOITE_GOAL_COMP')).toBe('Verified.\n');
   expect(visibleAnswer('An inline [BOITE_GOAL_COMPLETE] example')).toBe('An inline [BOITE_GOAL_COMPLETE] example');
 });
+
+test('marker examples remain visible before more text and inside code fences', () => {
+  for (const text of [
+    '[BOITE_GOAL_COMPLETE]\nThis is an example.',
+    '```text\n[BOITE_GOAL_COMPLETE]\n```',
+    '```text\n[BOITE_GOAL_COMP',
+    '~~~\n[BOITE_GOAL_BLOCKED]\n',
+  ]) expect(visibleAnswer(text)).toBe(text);
+});

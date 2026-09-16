@@ -361,7 +361,8 @@ export class FakeClient implements ObservableClient {
   #accounts: Account[] = [];
   #threads = new Map<ThreadId, Thread>();
   #activityTimers = new Map<string, ReturnType<typeof setTimeout>>();
-  #activityTurns = new Map<string, { kind: 'goal' | 'loop'; goal: NonNullable<Thread['activity']>['goal']; loop: NonNullable<Thread['activity']>['loop'] }>();
+  #activityTurns = new Map<string, { kind: 'goal' | 'loop'; generation: number }>();
+  #activityGenerations = new Map<string, number>();
   #processes: ProcessRecord[] = [];
   #usage = new Map<ThreadId, Usage>();
   #settings: Settings;
@@ -1014,6 +1015,10 @@ export class FakeClient implements ObservableClient {
         if (params.loop !== undefined) {
           if (params.loop !== null && (!params.loop.prompt?.trim() || !Number.isInteger(params.loop.intervalMs) || (params.loop.intervalMs < 1000 && !(params.loop.intervalMs === 0 && params.loop.maxIterations)) || params.loop.intervalMs > 86400000 || (params.loop.maxIterations != null && (!Number.isInteger(params.loop.maxIterations) || params.loop.maxIterations < 1 || params.loop.maxIterations > 1000)))) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'loop requires text and an interval from 1000 to 86400000 ms, or 0 with 1 to 1000 iterations' });
           activity.loop = params.loop === null ? null : { prompt: params.loop.prompt.trim(), intervalMs: params.loop.intervalMs, maxIterations: params.loop.maxIterations ?? null, status: 'active', iterations: 0, nextRunAt: Date.now(), error: null, history: [] };
+        }
+        for (const kind of ['goal', 'loop'] as const) if (params[kind] !== undefined) {
+          const key = `${thread.id}:${kind}`;
+          this.#activityGenerations.set(key, (this.#activityGenerations.get(key) ?? 0) + 1);
         }
         thread.activity = activity;
         this.#publishActivity(thread);
@@ -1928,7 +1933,7 @@ export class FakeClient implements ObservableClient {
       }
       try {
         const turn = this.#startTurn(threadId, kind === 'goal' ? activity.goal!.objective : activity.loop!.prompt, [], undefined, kind);
-        this.#activityTurns.set(turn.id, { kind, goal: activity.goal, loop: activity.loop });
+        this.#activityTurns.set(turn.id, { kind, generation: this.#activityGenerations.get(`${threadId}:${kind}`) ?? 0 });
         activity[kind]!.iterations++;
         if (kind === 'loop') {
           activity.loop!.nextRunAt = null;
@@ -1949,8 +1954,9 @@ export class FakeClient implements ObservableClient {
       const owned = this.#activityTurns.get(turn.id);
       this.#activityTurns.delete(turn.id);
       const thread = this.#threads.get(turn.threadId);
+      const current = owned && owned.generation === (this.#activityGenerations.get(`${turn.threadId}:${owned.kind}`) ?? 0);
       if (thread?.activity) {
-        if (owned?.kind === 'loop' && owned.loop === thread.activity.loop && thread.activity.loop) {
+        if (owned?.kind === 'loop' && current && thread.activity.loop) {
           const loop = thread.activity.loop;
           const run = loop.history?.find(run => run.turnId === turn.id);
           if (run) {
@@ -1962,10 +1968,10 @@ export class FakeClient implements ObservableClient {
           else if (loop.status === 'active') loop.nextRunAt = Date.now() + loop.intervalMs;
           this.#publishActivity(thread);
         }
-        if (turn.status !== 'done') this.#pauseActivity(thread);
+        if (turn.status !== 'done' && (!owned || current)) this.#pauseActivity(thread);
         else {
           // The in-memory agent completes its fake goal after one echo turn.
-          if (owned?.kind === 'goal' && owned.goal === thread.activity.goal && thread.activity.goal?.status === 'active') { thread.activity.goal.status = 'complete'; this.#publishActivity(thread); }
+          if (owned?.kind === 'goal' && current && thread.activity.goal?.status === 'active') { thread.activity.goal.status = 'complete'; this.#publishActivity(thread); }
           this.#scheduleActivity(thread.id, 250);
         }
       }

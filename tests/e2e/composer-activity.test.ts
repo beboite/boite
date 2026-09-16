@@ -53,6 +53,16 @@ test('commands are colored with aligned wrapping and three permission choices', 
     await page.waitFor(`!document.querySelector('${id('composer-highlight')}')`);
   }
   await page.type(id('composer-input'), '');
+  for (const [mode, label] of [['plan', 'Plan'], ['dontAsk', 'Auto-deny']]) {
+    await page.evaluate(`import('/src/lib/store.svelte.ts').then(({store}) => { store.openThread.permissionMode = '${mode}'; })`);
+    await page.waitFor(`document.querySelector('${id('composer-mode')}').textContent.trim() === '${label}'`);
+    await page.click(id('composer-mode'));
+    await page.waitFor(`document.querySelector('${id('composer-mode-menu')}')`);
+    expect(await page.evaluate(`document.querySelectorAll('${id('composer-mode-menu')} [data-row]').length`)).toBe(3);
+    expect(await page.evaluate(`document.querySelectorAll('${id('composer-mode-menu')} .active').length`)).toBe(0);
+    await page.evaluate(`document.querySelector('${id('composer-mode-menu')}').dispatchEvent(new KeyboardEvent('keydown', {key:'Escape', bubbles:true}))`);
+    await page.waitFor(`!document.querySelector('${id('composer-mode-menu')}')`);
+  }
   await size(false);
 }, 30_000);
 afterAll(async () => { await page?.close(); await server?.close(); }, 15_000);

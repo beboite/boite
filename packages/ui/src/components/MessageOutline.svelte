@@ -17,9 +17,11 @@
   let group = $state<OutlineEntry | null>(null);
   let groupPosition = $state({ top: 0, left: 0 });
   let groupMenu = $state<HTMLDivElement>();
+  let groupTrigger: HTMLButtonElement | null = null;
   async function openGroup(event: MouseEvent, entry: OutlineEntry) {
     const rect = event.currentTarget instanceof HTMLElement ? event.currentTarget.getBoundingClientRect() : null;
     if (!rect) return;
+    groupTrigger = event.currentTarget as HTMLButtonElement;
     preview = null;
     group = entry;
     groupPosition = { top: Math.max(8, Math.min(window.innerHeight - 280, rect.top - 40)), left: rect.right + 8 };
@@ -28,7 +30,7 @@
     groupMenu?.querySelector<HTMLButtonElement>('button')?.focus();
   }
   function groupKeys(event: KeyboardEvent) {
-    if (event.key === 'Escape') { event.stopPropagation(); disclosure.hide(); rail?.querySelector<HTMLButtonElement>('.outline-group')?.focus(); return; }
+    if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); disclosure.hide(); groupTrigger?.focus({ preventScroll: true }); return; }
     if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
     event.preventDefault();
     const buttons = Array.from(groupMenu?.querySelectorAll<HTMLButtonElement>('button') ?? []);

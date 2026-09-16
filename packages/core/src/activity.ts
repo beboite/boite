@@ -156,7 +156,7 @@ export class ActivityStore {
       else if (state.loop.status === 'active') state.loop.nextRunAt = Date.now() + state.loop.intervalMs;
       this.save(turn.threadId);
     }
-    if (turn.status !== 'done') { this.pauseAll(turn.threadId, turn.error ?? 'Turn stopped. Resume to continue.'); return; }
+    if (turn.status !== 'done' && (!owned || current)) { this.pauseAll(turn.threadId, turn.error ?? 'Turn stopped. Resume to continue.'); return; }
     if (!state) return;
     if (owned?.kind === 'goal' && current && state.goal?.status === 'active') {
       const messages = this.core.threads.get(turn.threadId).messages;

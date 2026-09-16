@@ -179,3 +179,23 @@ test('replacing an in-flight goal cannot complete the replacement with the old a
   expect(h.core.activity.get(threadId).goal?.objective).toBe('second');
   await client.call('turns.stop', { threadId });
 });
+
+test.each(['error', 'stopped'] as const)('an obsolete %s turn cannot pause or strand its replacement', async status => {
+  const client = await h.connect();
+  const { threadId } = await echoThread(h, client);
+  let finish!: () => void;
+  let count = 0;
+  restore = setDriver('echo', { protocol: 'echo', startTurn() {
+    count++;
+    return { stop() {}, done: count === 1 ? new Promise(resolve => {
+      finish = () => resolve({ status, sessionId: null, usage: null });
+    }) : Promise.resolve({ status: 'done', sessionId: null, usage: null }) };
+  } });
+  await client.call('threads.activity.set', { threadId, loop: { prompt: 'old', intervalMs: 0, maxIterations: 1 } });
+  await waitFor(() => !!finish);
+  await client.call('threads.activity.set', { threadId, loop: { prompt: 'replacement', intervalMs: 0, maxIterations: 1 } });
+  finish();
+  await waitFor(() => h.core.activity.get(threadId).loop?.status === 'complete');
+  expect(count).toBe(2);
+  expect(h.core.activity.get(threadId).loop?.history).toHaveLength(1);
+});

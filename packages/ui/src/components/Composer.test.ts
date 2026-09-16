@@ -607,7 +607,7 @@ test('permission menu offers three policies and preserves legacy modes until pic
   await waitFor(() => !store.busy);
   for (const legacy of ['plan', 'dontAsk'] as const) {
     store.openThread!.permissionMode = legacy;
-    await waitFor(() => query('[data-testid=composer-mode]').textContent?.trim() === 'Ask');
+    await waitFor(() => query('[data-testid=composer-mode]').textContent?.trim() === (legacy === 'plan' ? 'Plan' : 'Auto-deny'));
     expect(store.openThread?.permissionMode).toBe(legacy);
   }
   query('[data-testid=composer-mode]').click();

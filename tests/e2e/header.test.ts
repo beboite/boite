@@ -69,6 +69,13 @@ test('header and project layout', async () => {
     throw error;
   }
   await capture('message-navigation.png');
+  // Both distant groups now exist. Escape must return to the second opener.
+  await page.waitFor(`document.querySelectorAll('${id('outline-group')}').length === 2`);
+  await page.evaluate(`document.querySelectorAll('${id('outline-group')}')[1].click()`);
+  await page.waitFor(`document.querySelector('${id('outline-group-menu')}')?.contains(document.activeElement)`);
+  await page.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+  await page.waitFor(`!document.querySelector('${id('outline-group-menu')}')`);
+  expect(await page.evaluate(`document.activeElement === document.querySelectorAll('${id('outline-group')}')[1]`)).toBe(true);
   await page.evaluate(`document.querySelector('[data-message-id="${target}"]').focus({preventScroll:true})`);
   await page.waitFor(`document.querySelector('${id('message-preview')}')`);
   expect(await page.evaluate(`document.querySelectorAll('[role=tooltip]').length`)).toBe(1);

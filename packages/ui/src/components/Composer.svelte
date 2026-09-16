@@ -292,8 +292,7 @@
   });
 
   // Older modes keep their execution policy until the user makes a choice.
-  let displayedMode = $derived<PermissionMode>(choice?.permissionMode === 'bypassPermissions' || choice?.permissionMode === 'acceptEdits'
-    ? choice.permissionMode : 'default');
+  let displayedMode = $derived<PermissionMode>(choice?.permissionMode ?? 'default');
   let modeItems = $derived(
     MODES.map((mode) => ({
       id: mode,
