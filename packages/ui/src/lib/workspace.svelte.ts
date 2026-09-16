@@ -19,6 +19,12 @@ export interface Machine {
   icon?: MachineIconName;
 }
 
+export function isThisPC(machine: Machine): boolean {
+  if (machine.store.localCore) return true;
+  try { return ['localhost', '127.0.0.1', '[::1]'].includes(new URL(machine.store.endpointUrl ?? machine.id).hostname); }
+  catch { return false; }
+}
+
 export const machineIcons = ['desktop', 'laptop', 'server', 'rack', 'cloud', 'cpu'] as const;
 export type MachineIconName = typeof machineIcons[number];
 const PROFILE_KEY = 'boite.machine-profiles';
@@ -144,6 +150,7 @@ export class Workspace {
     const saved = profiles()[profileKey(machine)];
     if (typeof saved?.label === 'string' && saved.label.trim()) machine.label = saved.label;
     if (saved?.icon && machineIcons.includes(saved.icon)) machine.icon = saved.icon;
+    if (isThisPC(machine) && ['My computer', 'This computer'].includes(machine.label)) machine.label = strings.machines.local;
   }
 
   customize(id: string, label: string, icon?: MachineIconName): void {

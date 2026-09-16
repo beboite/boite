@@ -1,4 +1,5 @@
 import { statSync } from 'node:fs';
+import { activityPrompt } from './activity-prompt.ts';
 import { relative, resolve } from 'node:path';
 import { ATTACHMENTS_PER_TURN, ATTACHMENT_MAX_BYTES, IMAGE_MIME_TYPES, MESSAGE_PAGE, MESSAGE_PAGE_MAX } from '@boite/contracts';
 import type {
@@ -570,7 +571,7 @@ export class ThreadStore {
     return this.startTurn(threadId, protocol === 'echo' ? '[compact]' : '/compact', [], expectedSelectionVersion, 'compact');
   }
 
-  startTurn(threadId: ThreadId, prompt: string, attachments: ImageAttachment[] = [], expectedSelectionVersion?: number, operation?: 'compact', displayPrompt?: string): Turn {
+  startTurn(threadId: ThreadId, prompt: string, attachments: ImageAttachment[] = [], expectedSelectionVersion?: number, operation?: 'compact', activity?: { kind: 'goal' | 'loop'; iteration: number }): Turn {
     const thread = this.require(threadId);
     this.checkSelection(thread, expectedSelectionVersion);
     if (thread.archived) throw refused('cannot start a turn on an archived thread', { threadId });
@@ -610,7 +611,7 @@ export class ThreadStore {
       turnId: turn.id,
       role: 'user',
       parts: [
-        { type: 'text', text: prompt, ...(displayPrompt ? { displayText: displayPrompt } : {}) },
+        { type: 'text', text: prompt, ...(activity ? { activity } : {}) },
         ...attachments.map((attachment): MessagePart => ({
           type: 'image',
           mimeType: attachment.mimeType,
@@ -626,6 +627,7 @@ export class ThreadStore {
       this.core.journal.putTurn(turn);
       this.core.journal.putMessage(message);
     });
+    if (!activity && !operation) this.core.activity.userPrompt(threadId);
     this.core.bus.emit('message.started', message);
     this.core.bus.emit('message.completed', { threadId, messageId: message.id, state: 'complete' });
     this.setStatus(threadId, 'queued');
@@ -1129,7 +1131,7 @@ export class ThreadStore {
         }
       }
       return {
-        prompt: message.parts.map((part) => (part.type === 'text' ? part.text : '')).join(''),
+        prompt: message.parts.map((part) => part.type === 'text' ? part.activity ? activityPrompt(part.activity.kind, part.text, part.activity.iteration) : part.text : '').join(''),
         attachments,
       };
     }

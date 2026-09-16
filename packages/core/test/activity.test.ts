@@ -88,6 +88,43 @@ test('goal continues across turns, reports tasks and stops only on completion', 
   const thread = await client.call('threads.get', { threadId });
   expect(thread.activity?.tasks[0]?.status).toBe('completed');
   expect(thread.activity?.goal?.iterations).toBe(2);
+  const prompt = thread.messages.find(message => message.role === 'user')?.parts[0];
+  expect(prompt).toEqual({ type: 'text', text: '/goal Verify the change', activity: { kind: 'goal', iteration: 1 } });
+});
+
+test('counted loops run consecutive iterations, retain each result and stop at the requested count', async () => {
+  const client = await h.connect();
+  const { threadId } = await echoThread(h, client);
+  let count = 0;
+  restore = setDriver('echo', { protocol: 'echo', startTurn(ctx) {
+    count++;
+    expect(ctx.prompt).toContain(`Iteration ${count}.`);
+    const id = ctx.emit.startMessage('assistant');
+    ctx.emit.part(id, 0, { type: 'text', text: `pong ${count}` });
+    ctx.emit.complete(id, 'complete');
+    return { stop() {}, done: Promise.resolve({ status: 'done', sessionId: null, usage: null }) };
+  } });
+  await client.call('threads.activity.set', { threadId, loop: { prompt: 'say pong', intervalMs: 0, maxIterations: 2 } });
+  await waitFor(() => h.core.activity.get(threadId).loop?.status === 'complete');
+  const loop = h.core.activity.get(threadId).loop!;
+  expect(count).toBe(2);
+  expect(loop.nextRunAt).toBeNull();
+  expect(loop.history?.map(run => [run.iteration, run.status, run.summary])).toEqual([[1, 'done', 'pong 1'], [2, 'done', 'pong 2']]);
+  await expect(client.call('threads.activity.control', { threadId, kind: 'loop', action: 'resume' })).rejects.toThrow('finished');
+  await Bun.sleep(400);
+  expect(count).toBe(2);
+});
+
+test('finished tasks retire on a user prompt and new work brings them back', async () => {
+  const client = await h.connect();
+  const { threadId } = await echoThread(h, client);
+  h.core.activity.tasks(threadId, [{ id: 'one', text: 'Done', status: 'completed' }]);
+  await client.call('turns.start', { threadId, prompt: 'next request' });
+  expect(h.core.activity.get(threadId).tasksDismissed).toBe(true);
+  h.core.activity.tasks(threadId, [{ id: 'one', text: 'Done', status: 'completed' }]);
+  expect(h.core.activity.get(threadId).tasksDismissed).toBe(true);
+  h.core.activity.tasks(threadId, [{ id: 'two', text: 'New task', status: 'in_progress' }]);
+  expect(h.core.activity.get(threadId).tasksDismissed).toBe(false);
 });
 
 test('loop repeats, Escape pauses it while idle, resume runs again, remove clears it', async () => {
@@ -200,6 +237,25 @@ test('replacing an in-flight goal cannot complete the replacement with the old a
   await client.call('turns.stop', { threadId });
 });
 
+test.each(['error', 'stopped'] as const)('an obsolete %s turn cannot pause or strand its replacement', async status => {
+  const client = await h.connect();
+  const { threadId } = await echoThread(h, client);
+  let finish!: () => void;
+  let count = 0;
+  restore = setDriver('echo', { protocol: 'echo', startTurn() {
+    count++;
+    return { stop() {}, done: count === 1 ? new Promise(resolve => {
+      finish = () => resolve({ status, sessionId: null, usage: null });
+    }) : Promise.resolve({ status: 'done', sessionId: null, usage: null }) };
+  } });
+  await client.call('threads.activity.set', { threadId, loop: { prompt: 'old', intervalMs: 0, maxIterations: 1 } });
+  await waitFor(() => !!finish);
+  await client.call('threads.activity.set', { threadId, loop: { prompt: 'replacement', intervalMs: 0, maxIterations: 1 } });
+  finish();
+  await waitFor(() => h.core.activity.get(threadId).loop?.status === 'complete');
+  expect(count).toBe(2);
+  expect(h.core.activity.get(threadId).loop?.history).toHaveLength(1);
+});
 
 test('goal messages expose a display command while the driver receives its instructions', async () => {
   const client = await h.connect();
@@ -215,5 +271,25 @@ test('goal messages expose a display command while the driver receives its instr
   expect(received).toContain('[BOITE_GOAL_COMPLETE]');
   expect(received).toContain('Codex: update_plan');
   expect(received).toContain('Boite displays those task updates');
-  expect(thread.messages.find(m => m.role === 'user')?.parts[0]).toMatchObject({ text: received, displayText: '/goal Check two tasks' });
+  expect(thread.messages.find(m => m.role === 'user')?.parts[0]).toMatchObject({ text: '/goal Check two tasks', activity: { kind: 'goal', iteration: 1 } });
+});
+
+test.each(['remove', 'complete'] as const)('%s invalidates a running goal before its late failure', async action => {
+  const client = await h.connect();
+  const { threadId } = await echoThread(h, client);
+  let finish!: () => void;
+  let count = 0;
+  restore = setDriver('echo', { protocol: 'echo', startTurn() {
+    count++;
+    return { stop() {}, done: count === 1 ? new Promise(resolve => {
+      finish = () => resolve({ status: 'error', sessionId: null, usage: null });
+    }) : Promise.resolve({ status: 'done', sessionId: null, usage: null }) };
+  } });
+  await client.call('threads.activity.set', { threadId, goal: { objective: 'old' } });
+  await waitFor(() => !!finish);
+  await client.call('threads.activity.set', { threadId, loop: { prompt: 'other work', intervalMs: 0, maxIterations: 1 } });
+  await client.call('threads.activity.control', { threadId, kind: 'goal', action });
+  finish();
+  await waitFor(() => h.core.activity.get(threadId).loop?.status === 'complete');
+  expect(count).toBe(2);
 });

@@ -7,6 +7,40 @@ import { FakeClient } from './fake-client';
 beforeEach(() => localStorage.clear());
 const levels = ['low', 'medium', 'high'].map((id) => ({ id, label: id }));
 
+test('an old default alias uses the configured target without changing an explicit model', async () => {
+  const store = new Store();
+  store.attach(new FakeClient({ delayMs: 0 }));
+  await store.connect();
+  const account = store.accountsOf('codex')[0]!;
+  const alias = { providerId: 'codex', accountId: account.id, model: 'default', effort: null, permissionMode: 'default' as const };
+  expect(store.composerChoice(alias)).toMatchObject({ model: 'gpt-5.6-sol', effort: 'medium' });
+  const explicit = { ...alias, model: 'codex-demo', effort: 'low' };
+  expect(store.composerChoice(explicit)).toEqual(explicit);
+  store.setModelDefault('codex', account.id, 'default', null);
+  expect(store.modelDefaults.codex).toBeUndefined();
+  store.detach();
+});
+
+test('sending on an old alias saves the named preset before starting the turn', async () => {
+  const client = new FakeClient({ delayMs: 0 });
+  const store = new Store();
+  store.attach(client);
+  await store.connect();
+  const account = store.accountsOf('codex')[0]!;
+  await store.probeModels('codex', account.id);
+  store.setModelDefault('codex', account.id, 'codex-demo', 'high');
+  const thread = await store.createThread({ projectId: store.projects[0]!.id, providerId: 'codex', accountId: account.id,
+    model: 'default', permissionMode: 'default' });
+  expect(thread).toBeTruthy();
+  const call = vi.spyOn(client, 'call');
+  expect(await store.send('Use the named model', thread!.id)).toBe(true);
+  const names = call.mock.calls.map(([name]) => name);
+  expect(names.indexOf('threads.update')).toBeLessThan(names.indexOf('turns.start'));
+  expect(store.openThread).toMatchObject({ model: 'codex-demo', effort: 'high' });
+  expect(store.openThread!.turns.at(-1)?.execution).toMatchObject({ model: 'codex-demo', effort: 'high' });
+  store.detach();
+});
+
 test.each(Object.entries(INITIAL_MODEL_DEFAULTS))('resolves the requested %s default after the account offers it', (provider, choice) => {
   const models: ModelInfo[] = [{ id: 'default', name: 'Default', default: true },
     { id: choice.model, name: choice.model, effort: { levels, default: 'low' } }];
@@ -19,6 +53,8 @@ test('persists an override and drops an effort the account no longer offers', ()
   const models: ModelInfo[] = [{ id: 'custom', name: 'Custom', effort: { levels: levels.slice(0, 2), default: 'medium' } }];
   expect(resolveModelDefault('codex', models, readModelDefaults())).toEqual({ model: 'custom', effort: 'medium' });
   localStorage.setItem(MODEL_DEFAULTS_KEY, '{');
+  expect(readModelDefaults()).toEqual({});
+  localStorage.setItem(MODEL_DEFAULTS_KEY, JSON.stringify({ codex: { model: 'default', effort: null } }));
   expect(readModelDefaults()).toEqual({});
 });
 

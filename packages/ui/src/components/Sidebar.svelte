@@ -317,7 +317,11 @@
     padding: 8px 6px;
   }
   .project {
-    margin-bottom: 12px;
+    margin-bottom: 10px;
+    padding: 4px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    background: color-mix(in srgb, var(--color-surface-2) 55%, transparent);
   }
   .head {
     display: flex;
@@ -439,7 +443,7 @@
   @media (max-width: 720px) {
     .sidebar {
       position: fixed;
-      inset: 0 auto 0 0;
+      inset: var(--titlebar) auto 0 0;
       z-index: 30;
       width: min(340px, 90vw);
       transform: translateX(-100%);

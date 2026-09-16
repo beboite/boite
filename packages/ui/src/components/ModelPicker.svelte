@@ -1,6 +1,6 @@
 <script lang="ts">
   import { ChevronDown, ChevronRight, Search, Sparkles, Star, RefreshCw } from '@lucide/svelte';
-  import { orderedModels, type FavoriteModel } from '../lib/model-order';
+  import { isNamedModel, orderedModels, type FavoriteModel } from '../lib/model-order';
   import type { Account, ModelInfo, ProviderSummary } from '@boite/contracts';
   import ProviderLogo from './ProviderLogo.svelte';
   import { floating } from '../lib/floating';
@@ -118,7 +118,8 @@
   // model and the account only: one place says the level.
   let label = $derived.by(() => {
     if (!choice || !provider) return strings.composer.noProvider;
-    const name = store.modelOf(choice)?.name ?? provider.name;
+    const model = store.modelOf(choice);
+    const name = model && isNamedModel(model) ? model.name : strings.composer.picker;
     const siblings = store.accountsOf(provider.id);
     return siblings.length > 1 && account ? `${name} · ${account.label}` : name;
   });
@@ -276,12 +277,16 @@
   }
 
   function focusable(): HTMLElement[] {
-    return root ? Array.from(root.querySelectorAll<HTMLElement>('.popover [data-row]:not(:disabled)')) : [];
+    return Array.from(activeMenu()?.querySelectorAll<HTMLElement>('[data-row]:not(:disabled)') ?? []);
+  }
+
+  function activeMenu(): HTMLElement | null {
+    return legacyOpen ? root?.querySelector<HTMLElement>('[data-testid=picker-legacy-menu]') ?? null : menu ?? null;
   }
 
   /** The model rows alone: what the arrows walk once the search field has the focus. */
   function modelRows(): HTMLElement[] {
-    return root ? Array.from(root.querySelectorAll<HTMLElement>('.popover .models [data-row]:not(:disabled)')) : [];
+    return Array.from(activeMenu()?.querySelectorAll<HTMLElement>('.models [data-row]:not(:disabled)') ?? []);
   }
 
   function handleEscape(event: KeyboardEvent) {
@@ -317,6 +322,7 @@
   }
 
   function handleModelSearch(event: KeyboardEvent, active: HTMLElement | null): boolean {
+    if (legacyOpen) return false;
     if (!searchable || (active !== searchBox && !active?.hasAttribute('data-model'))) return false;
     if (event.key === 'Enter') {
       // A focused row is activated by the browser too; taking the default keeps it to one pick.

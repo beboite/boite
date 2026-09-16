@@ -236,9 +236,7 @@
 <svelte:window {onkeydown} {onkeyup} {onblur} />
 
 <div class="app" class:shell={inShell} class:ready={store.booted} class:quitting bind:this={appRoot}>
-  {#if inShell}
-    <TitleBar {store} />
-  {/if}
+  <TitleBar {store} />
 
   <div class="body" class:panel-maximized={rightPanel.maximized && store.panelOpen}>
     {#if !store.booted}
@@ -467,7 +465,7 @@
     .scrim {
       display: block;
       position: fixed;
-      inset: 0;
+      inset: var(--titlebar) 0 0;
       z-index: 20;
       border: none;
       border-radius: 0;

@@ -115,6 +115,11 @@ test('legacy models open beside the picker and preserve the page position', asyn
   await page.click('[data-testid=picker-legacy]');
   await page.waitFor(`document.querySelector('[data-testid=picker-legacy-menu] [data-model]')`);
   await capture('picker-legacy-submenu.png');
+  await page.evaluate(`Array.from(document.querySelectorAll('[data-testid=picker-legacy-menu] [data-row]')).at(-1).focus()`);
+  await page.send('Input.dispatchKeyEvent', {type:'keyDown',key:'ArrowDown',code:'ArrowDown',windowsVirtualKeyCode:40});
+  expect(await page.evaluate(`document.activeElement === document.querySelector('[data-testid=picker-legacy-menu] [data-row]')`)).toBe(true);
+  await page.send('Input.dispatchKeyEvent', {type:'keyDown',key:'ArrowUp',code:'ArrowUp',windowsVirtualKeyCode:38});
+  expect(await page.evaluate(`document.activeElement === Array.from(document.querySelectorAll('[data-testid=picker-legacy-menu] [data-row]')).at(-1)`)).toBe(true);
   const layout = await page.evaluate<any>(`(() => { const p=document.querySelector('[data-testid=composer-picker-menu]').getBoundingClientRect(); const l=document.querySelector('[data-testid=picker-legacy-menu]').getBoundingClientRect(); return {right:p.right,left:l.left}; })()`);
   expect(layout.left).toBeGreaterThan(layout.right);
   expect(await page.evaluate(`document.querySelector('[data-testid=composer]').getBoundingClientRect().top`)).toBe(before);

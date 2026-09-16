@@ -1,10 +1,21 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { PanelLeftClose, PanelLeftOpen } from '@lucide/svelte';
+  import { MediaQuery } from 'svelte/reactivity';
+  import ThreadHeader from './ThreadHeader.svelte';
   import type { Window as TauriWindow } from '@tauri-apps/api/window';
   import { strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
 
   let { store }: { store: Store } = $props();
+
+  const inShell = window.__TAURI_INTERNALS__ !== undefined;
+  const mobile = new MediaQuery('(max-width: 720px)');
+  let expanded = $derived(mobile.current ? store.sidebarOpen : !store.sidebarCollapsed);
+  function toggleSidebar() {
+    if (mobile.current) store.sidebarOpen = !store.sidebarOpen;
+    else store.toggleSidebar();
+  }
 
   let maximized = $state(false);
 
@@ -16,6 +27,7 @@
   }
 
   onMount(() => {
+    if (!inShell) return;
     let disposed = false;
     let stop: (() => void) | undefined;
     void windowOf().then(async (win) => {
@@ -54,8 +66,8 @@
    * pairing it with a handler here would toggle twice.
    */
   function onmousedown(event: MouseEvent) {
-    if (event.button !== 0) return;
-    if (event.target instanceof Element && event.target.closest('button')) return;
+    if (!inShell || event.button !== 0) return;
+    if (event.target instanceof Element && event.target.closest('button, input, a, textarea, [role=button]')) return;
     if (event.detail === 2) {
       void maximize();
       return;
@@ -83,15 +95,23 @@
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <header class="titlebar" {onmousedown} data-testid="titlebar">
-  <div class="left"></div>
-  <div class="center">
-    <span class="name">{title}</span>
-    {#if dev}
-      <span class="channel" title={strings.app.channelDevTitle} data-testid="titlebar-channel">
-        {strings.app.channelDev}
-      </span>
-    {/if}
-  </div>
+  {#if store.page === 'chat' && store.booted}
+    <button type="button" class="ghost icon sidebar-toggle"
+      aria-label={expanded ? strings.sidebar.collapse : strings.sidebar.expand}
+      title={`${expanded ? strings.sidebar.collapse : strings.sidebar.expand}${store.keyHint('sidebar')}`}
+      aria-expanded={expanded} data-testid="sidebar-toggle" onclick={toggleSidebar}>
+      {#if expanded}<PanelLeftClose size={17} strokeWidth={1.75} />{:else}<PanelLeftOpen size={17} strokeWidth={1.75} />{/if}
+    </button>
+  {/if}
+  {#if store.page === 'chat' && (store.openThread || store.draft)}
+    {#key store}<ThreadHeader {store} />{/key}
+  {:else}
+    <span class="name">{store.page === 'settings' ? strings.settings.heading : title}</span>
+  {/if}
+  {#if dev}
+    <span class="channel" title={strings.app.channelDevTitle} data-testid="titlebar-channel">{strings.app.channelDev}</span>
+  {/if}
+  {#if inShell}
   <div class="controls">
     <button type="button" class="ctl" aria-label={strings.titlebar.minimize} title={strings.titlebar.minimize} onclick={() => void minimize()}>
       <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M1 6.5h10" /></svg>
@@ -115,12 +135,14 @@
       <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="m1.5 1.5 9 9m0-9-9 9" /></svg>
     </button>
   </div>
+  {/if}
 </header>
 
 <style>
   .titlebar {
-    display: grid;
-    grid-template-columns: 1fr auto 1fr;
+    display: flex;
+    gap: 8px;
+    padding-left: 8px;
     align-items: center;
     height: var(--titlebar);
     background: var(--color-titlebar);
@@ -131,23 +153,10 @@
     cursor: default;
   }
 
-  .left {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding-left: 12px;
-    height: 100%;
-  }
-
-  .center {
-    font-size: var(--text-sm);
-    font-weight: 500;
-    color: var(--color-muted-foreground);
-    height: 100%;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
+  .sidebar-toggle { flex: none; }
+  .name { flex: 1; min-width: 0; font-size: var(--text-sm); color: var(--color-muted-foreground); }
+  .titlebar { padding-right: 8px; }
+  .controls { flex: none; margin-left: 4px; }
 
   .channel {
     font-size: var(--text-xs);

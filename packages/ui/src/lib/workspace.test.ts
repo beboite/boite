@@ -13,6 +13,18 @@ afterEach(() => {
   localStorage.clear();
 });
 
+test('old local labels become This PC while custom names stay intact', async () => {
+  const { w, a } = await setup();
+  a.localCore = false;
+  a.endpointUrl = 'http://127.0.0.1:41000';
+  const machine = { id: a.endpointUrl, label: 'My computer', store: a };
+  w.restoreProfile(machine);
+  expect(machine.label).toBe('This PC');
+  machine.label = 'Studio';
+  w.restoreProfile(machine);
+  expect(machine.label).toBe('Studio');
+});
+
 test('restoring a remote selection also connects the shell local core', async () => {
   const { w, a } = await setup();
   a.localCore = false;
@@ -22,7 +34,7 @@ test('restoring a remote selection also connects the shell local core', async ()
   vi.spyOn(endpoints, 'fromTauri').mockResolvedValue({ url: 'http://127.0.0.1:41000', token: 'test', local: true });
   const add = vi.spyOn(w, 'add').mockResolvedValue(true);
   await w.boot();
-  expect(add).toHaveBeenCalledWith({ url: 'http://127.0.0.1:41000', token: 'test', local: true }, 'My computer');
+  expect(add).toHaveBeenCalledWith({ url: 'http://127.0.0.1:41000', token: 'test', local: true }, 'This PC');
 });
 
 test('closing while the shell endpoint loads does not add a machine afterward', async () => {

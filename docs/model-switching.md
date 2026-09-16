@@ -85,6 +85,13 @@ continuation of an image-bearing history explicitly.
 
 ## Storage and concurrent changes
 
+The composer resolves an old `default` or `auto` model alias to the configured
+provider preset for the next prompt when one is configured. A named model stays selected. Before sending
+on an old thread, the UI verifies the preset against the account's model catalog
+and saves it with the thread's selection revision. An unavailable preset or a
+concurrent selection change refuses the send; it never silently runs the alias.
+The picker also ignores saved presets containing these aliases.
+
 Schema 9 adds `threads.session_generation`, `threads.selection_version` and
 `turns.execution`. Existing native session IDs survive migration. Execution
 snapshots record the target at acceptance, and both scheduler and driver use it.
