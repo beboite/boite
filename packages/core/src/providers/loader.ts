@@ -190,10 +190,14 @@ function checkStringMap(value: unknown, file: string, field: string): Record<str
  */
 function checkInstall(value: unknown, file: string, field: string): ProviderInstall {
   const obj = asObject(value, file, field);
-  checkKeys(obj, ['version', 'url', 'sha256', 'archiveBytes', 'files', 'arch'], file, field);
+  checkKeys(obj, ['version', 'url', 'sha256', 'archiveBytes', 'files', 'arch', 'format'], file, field);
   const arch = obj['arch'];
   if (arch !== undefined && arch !== 'x64' && arch !== 'arm64') {
     reject(file, `${field}.arch`, 'x64 or arm64', `${field}.arch must be x64 or arm64`);
+  }
+  const format = obj['format'];
+  if (format !== undefined && format !== 'zip' && format !== 'binary') {
+    reject(file, `${field}.format`, 'zip or binary', `${field}.format must be zip or binary`);
   }
 
   const url = asString(obj['url'], file, `${field}.url`);
@@ -226,8 +230,12 @@ function checkInstall(value: unknown, file: string, field: string): ProviderInst
       ...(item['executable'] === undefined ? {} : { executable: asBoolean(item['executable'], file, `${entryField}.executable`) }) };
   });
 
+  if (format === 'binary' && (files.length !== 1 || files[0]?.bytes !== archiveBytes)) {
+    reject(file, `${field}.files`, 'one file whose bytes equal archiveBytes', `${field}.files must describe the downloaded binary`);
+  }
   return { version: asString(obj['version'], file, `${field}.version`), url, sha256, archiveBytes, files,
-    ...(arch === undefined ? {} : { arch: arch as 'x64' | 'arm64' }) };
+    ...(arch === undefined ? {} : { arch: arch as 'x64' | 'arm64' }),
+    ...(format === 'zip' || format === 'binary' ? { format } : {}) };
 }
 
 function checkProfile(value: unknown, file: string, field: string): OsProfile {
@@ -829,6 +837,7 @@ export function registerProviderMethods(core: Core): void {
   core.router.register('providers.list', () => core.providers.list());
   core.router.register('providers.reload', () => {
     const result = core.providers.load();
+    core.accounts.ensureDefaults();
     core.bus.emit('providers.updated', result);
     return result;
   });

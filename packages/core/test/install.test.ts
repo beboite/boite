@@ -119,6 +119,7 @@ beforeEach(async () => {
     async fetch(request) {
       const path = new URL(request.url).pathname;
       if (path === '/release.zip') return new Response(RELEASE);
+      if (path === '/agent.exe') return new Response(EXE);
       if (path === '/release-2.zip') return new Response(RELEASE_V2);
       if (path === '/escaping.zip') return new Response(ESCAPING);
       if (path === '/tampered.zip') return new Response(tampered());
@@ -167,6 +168,33 @@ describe('managed installs', () => {
       expect(statSync(agentDir('current', EXE_PATH)).mode & 0o111).toBe(0o111);
       expect(statSync(agentDir('current', NOTE_PATH)).mode & 0o111).toBe(0o111);
     }
+  });
+
+  test('a binary with the wrong digest never becomes available', async () => {
+    await loadDescriptor({ ...goodInstall(), format: 'binary', url: url('/agent.exe'),
+      sha256: '0'.repeat(64), archiveBytes: EXE.byteLength, files: [{ path: EXE_PATH, bytes: EXE.byteLength }] });
+    const client = await harness.connect();
+    const seen: ProviderInstallState[] = [];
+    client.on('providers.installProgress', state => { seen.push(state); });
+    await client.call('providers.install', { providerId: 'managed' });
+    await waitFor(() => seen.some(state => state.state === 'failed'));
+    expect(existsSync(agentDir('current', EXE_PATH))).toBe(false);
+    expect((await client.call('providers.list', {})).loaded.find(provider => provider.id === 'managed')?.available).toBe(false);
+  });
+
+  test('a binary download is verified, installed and removable without a zip', async () => {
+    await loadDescriptor({ ...goodInstall(), format: 'binary', url: url('/agent.exe'),
+      sha256: sha256(EXE), archiveBytes: EXE.byteLength, files: [{ path: EXE_PATH, bytes: EXE.byteLength }] });
+    const client = await harness.connect();
+    const seen: ProviderInstallState[] = [];
+    client.on('providers.installProgress', state => { seen.push(state); });
+    await client.call('providers.install', { providerId: 'managed' });
+    await waitFor(() => seen.some(state => state.state === 'installed' || state.state === 'failed'));
+    expect(seen.at(-1)?.state).toBe('installed');
+    expect(new Uint8Array(await Bun.file(agentDir('current', EXE_PATH)).arrayBuffer())).toEqual(EXE);
+    expect((await client.call('providers.list', {})).loaded.find(provider => provider.id === 'managed')?.available).toBe(true);
+    await client.call('providers.uninstall', { providerId: 'managed' });
+    expect(existsSync(agentDir('current', EXE_PATH))).toBe(false);
   });
 
   test('a corrupt completion record stays visible as a failed install', async () => {

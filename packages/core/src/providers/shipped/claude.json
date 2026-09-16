@@ -9,9 +9,18 @@
     "windows": {
       "detect": {},
       "executable": [
+        { "kind": "file", "value": "{agentsDir}/claude.exe" },
         { "kind": "file", "value": "{home}/.local/bin/claude.exe" },
         { "kind": "path", "value": "claude" }
       ],
+      "install": {
+        "format": "binary",
+        "version": "2.1.267",
+        "url": "https://downloads.claude.ai/claude-code-releases/2.1.267/win32-x64/claude.exe",
+        "sha256": "23dde2a47cf1d7d9c4a2d96d21fa80ea9bfc872dfde0ee06e9982d2908603350",
+        "archiveBytes": 220051616,
+        "files": [{ "path": "claude.exe", "bytes": 220051616 }]
+      },
       "isolation": { "CLAUDE_CONFIG_DIR": "{isolationDir}" },
       "close": { "processes": ["claude.exe"] }
     },
