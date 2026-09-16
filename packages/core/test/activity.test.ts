@@ -273,3 +273,23 @@ test('goal messages expose a display command while the driver receives its instr
   expect(received).toContain('Boite displays those task updates');
   expect(thread.messages.find(m => m.role === 'user')?.parts[0]).toMatchObject({ text: '/goal Check two tasks', activity: { kind: 'goal', iteration: 1 } });
 });
+
+test.each(['remove', 'complete'] as const)('%s invalidates a running goal before its late failure', async action => {
+  const client = await h.connect();
+  const { threadId } = await echoThread(h, client);
+  let finish!: () => void;
+  let count = 0;
+  restore = setDriver('echo', { protocol: 'echo', startTurn() {
+    count++;
+    return { stop() {}, done: count === 1 ? new Promise(resolve => {
+      finish = () => resolve({ status: 'error', sessionId: null, usage: null });
+    }) : Promise.resolve({ status: 'done', sessionId: null, usage: null }) };
+  } });
+  await client.call('threads.activity.set', { threadId, goal: { objective: 'old' } });
+  await waitFor(() => !!finish);
+  await client.call('threads.activity.set', { threadId, loop: { prompt: 'other work', intervalMs: 0, maxIterations: 1 } });
+  await client.call('threads.activity.control', { threadId, kind: 'goal', action });
+  finish();
+  await waitFor(() => h.core.activity.get(threadId).loop?.status === 'complete');
+  expect(count).toBe(2);
+});

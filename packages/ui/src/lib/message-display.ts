@@ -63,7 +63,7 @@ export function paragraphBlocks(text: string, live: boolean): string[] {
 
 /** Codex can append several bold thought headings inside the same part. */
 export function currentThought(text: string): { title: string | null; text: string } {
-  const headings = [...text.matchAll(/\*\*([^*\n]+)\*\*/g)];
+  const headings = [...text.matchAll(/^[\t ]*\*\*([^*\r\n]+)\*\*[\t ]*\r?$/gm)];
   const last = headings.at(-1);
   return { title: last?.[1]?.trim() ?? null, text: last ? text.slice(last.index) : text };
 }

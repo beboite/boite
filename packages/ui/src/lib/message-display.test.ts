@@ -52,6 +52,8 @@ test('display commands leave the execution prompt intact', () => {
 });
 
 test('a new thought replaces previous bold headings even within one protocol part', () => {
-  expect(currentThought('**First thought**old**Next thought**new')).toEqual({title:'Next thought',text:'**Next thought**new'});
+  expect(currentThought('**First thought**\nold\n**Next thought**\nnew')).toEqual({title:'Next thought',text:'**Next thought**\nnew'});
   expect(currentThought('plain reasoning')).toEqual({title:null,text:'plain reasoning'});
+  expect(currentThought('Check **all files** first')).toEqual({title:null,text:'Check **all files** first'});
+  expect(currentThought('**Heading**\nCheck **all files** first')).toEqual({title:'Heading',text:'**Heading**\nCheck **all files** first'});
 });

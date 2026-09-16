@@ -1037,6 +1037,10 @@ export class FakeClient implements ObservableClient {
         if (params.action === 'remove') activity[params.kind] = null;
         else if (params.action === 'complete' && activity.goal) activity.goal.status = 'complete';
         else { item.status = params.action === 'resume' ? 'active' : 'paused'; item.error = null; if (params.kind === 'goal' && activity.goal) activity.goal.dismissed = false; }
+        if (params.action === 'remove' || params.action === 'complete') {
+          const key = `${thread.id}:${params.kind}`;
+          this.#activityGenerations.set(key, (this.#activityGenerations.get(key) ?? 0) + 1);
+        }
         if (activity.loop && activity.loop.status !== 'active') activity.loop.nextRunAt = null;
         if (params.kind === 'loop' && params.action === 'resume' && activity.loop) activity.loop.nextRunAt = Date.now();
         this.#publishActivity(thread);

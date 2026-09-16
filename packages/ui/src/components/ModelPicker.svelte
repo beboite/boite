@@ -277,12 +277,16 @@
   }
 
   function focusable(): HTMLElement[] {
-    return root ? Array.from(root.querySelectorAll<HTMLElement>('.popover [data-row]:not(:disabled)')) : [];
+    return Array.from(activeMenu()?.querySelectorAll<HTMLElement>('[data-row]:not(:disabled)') ?? []);
+  }
+
+  function activeMenu(): HTMLElement | null {
+    return legacyOpen ? root?.querySelector<HTMLElement>('[data-testid=picker-legacy-menu]') ?? null : menu ?? null;
   }
 
   /** The model rows alone: what the arrows walk once the search field has the focus. */
   function modelRows(): HTMLElement[] {
-    return root ? Array.from(root.querySelectorAll<HTMLElement>('.popover .models [data-row]:not(:disabled)')) : [];
+    return Array.from(activeMenu()?.querySelectorAll<HTMLElement>('.models [data-row]:not(:disabled)') ?? []);
   }
 
   function handleEscape(event: KeyboardEvent) {
@@ -318,6 +322,7 @@
   }
 
   function handleModelSearch(event: KeyboardEvent, active: HTMLElement | null): boolean {
+    if (legacyOpen) return false;
     if (!searchable || (active !== searchBox && !active?.hasAttribute('data-model'))) return false;
     if (event.key === 'Enter') {
       // A focused row is activated by the browser too; taking the default keeps it to one pick.

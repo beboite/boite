@@ -81,6 +81,10 @@ export class ActivityStore {
     if (params.action === 'remove') state[params.kind] = null;
     else if (params.action === 'complete' && state.goal) state.goal.status = 'complete';
     else { item.status = params.action === 'resume' ? 'active' : 'paused'; item.error = null; if (params.kind === 'goal' && state.goal) state.goal.dismissed = false; }
+    if (params.action === 'remove' || params.action === 'complete') {
+      const key = `${params.threadId}:${params.kind}`;
+      this.generations.set(key, (this.generations.get(key) ?? 0) + 1);
+    }
     if (state.loop && state.loop.status !== 'active') state.loop.nextRunAt = null;
     if (params.kind === 'loop' && params.action === 'resume' && state.loop) state.loop.nextRunAt = Date.now();
     this.states.set(params.threadId, state);
