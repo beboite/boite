@@ -55,6 +55,10 @@ export function writeNotifications(enabled: boolean): void {
 export interface Toast {
   title: string;
   body: string;
+  /** The core that owns this event, for per-origin Web Push deduplication. */
+  origin?: string;
+  /** Unqualified ID for the same-origin service worker's click handler. */
+  coreThreadId?: string;
   /** The thread a click on the toast opens. */
   threadId: string;
 }
@@ -112,6 +116,21 @@ async function webSender(toast: Toast): Promise<void> {
   if (typeof Notification === 'undefined') return;
   if (Notification.permission === 'default') await Notification.requestPermission();
   if (Notification.permission !== 'granted') return;
+  // A subscription is not a delivery receipt. Keep the local path available,
+  // using the same worker and tag as push so the latest notice replaces it.
+  if (toast.origin === location.origin && toast.coreThreadId && navigator.serviceWorker) {
+    try {
+      const registration = await navigator.serviceWorker.getRegistration();
+      if (registration) {
+        await registration.showNotification(toast.title, {
+          body: toast.body, tag: `thread-${toast.coreThreadId}`,
+          icon: '/icons/icon-192.png', badge: '/icons/icon-192.png',
+          data: { threadId: toast.coreThreadId }
+        });
+        return;
+      }
+    } catch { /* A missing worker must not disable the browser fallback. */ }
+  }
   const notification = new Notification(toast.title, { body: toast.body, tag: toast.threadId });
   notification.onclick = () => {
     window.focus();

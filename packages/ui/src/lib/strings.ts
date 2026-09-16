@@ -1,5 +1,27 @@
 /** Every user-facing string of the UI. No literal UI text lives anywhere else. */
 export const strings = {
+  phone: {
+    preparing: 'The app is still preparing offline files. Reload and try again.',
+    settingsOffline: 'Settings have not been downloaded yet. Reconnect and open Settings again.',
+    heading: 'Phone app', publicUrl: 'Public HTTPS address', urlPlaceholder: 'https://boite.example.com',
+    publicUrlHint: 'Use the HTTPS origin configured on your reverse proxy. New pairing links use this address. The proxy must forward the page and /rpc to this core.',
+    install: 'Install Boite', installed: 'Boite is running as an installed app.',
+    installHint: 'On iPhone, open Share in Safari, then Add to Home Screen. On Android, use Install app or Add to Home screen in the browser menu.',
+    httpsRequired: 'This connection uses HTTP. Open Boite through HTTPS to enable offline files and notifications.',
+    ownOrigin: 'Open this machine’s own pairing link to enable notifications for it.',
+    pairFirst: 'Open a device pairing link before enabling notifications.',
+    unsupported: 'This browser does not support push here. On iPhone, add Boite to the Home Screen and open it from its icon.',
+    pushHint: 'Receive a notification when an agent finishes, fails or needs your answer, including while Boite is closed.',
+    enable: 'Enable notifications', disable: 'Disable notifications', test: 'Send test notification',
+    enabled: 'Notifications enabled for this device.', testSent: 'The push service accepted the test notification.',
+    denied: 'Notifications were not allowed. You can change this in the browser or device settings.',
+    subscriptionFailed: 'The browser did not return a complete push subscription.'
+  },
+  mobile: {
+    navigation: 'Navigation', threads: 'Conversations', activity: 'Activity', project: 'Choose project',
+    activityHint: 'Running agents and requests waiting for you.', threadsHint: 'Your conversations across machines.',
+    search: 'Find a conversation', unread: 'Unread', noActivity: 'No agents need your attention.', noThreads: 'No matching conversations.'
+  },
   machines: {
     heading: 'Machines', local: 'This PC', projects: 'Projects', recent: 'Recent',
     dynamic: 'All machines', recentHint: 'Most recent user message first',

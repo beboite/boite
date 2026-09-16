@@ -413,7 +413,7 @@
       aria-label={strings.composer.picker}
         data-testid="composer-picker-menu"
       bind:this={menu}
-      use:floating={{ anchor: () => root?.closest<HTMLElement>("[data-testid=composer]") ?? null }}
+      use:floating={{ anchor: () => root?.closest<HTMLElement>("[data-testid=composer]") ?? null, dismiss: () => popover.hide() }}
       use:popover.attach
       onanimationend={popover.end}
       {onkeydown}

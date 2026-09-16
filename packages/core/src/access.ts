@@ -25,6 +25,11 @@ import type { Connection } from './router.ts';
 export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>([
   // Its own pairing, so a phone can show itself in the device list.
   'sessions.list',
+  // Each authenticated pairing manages only its own push destination.
+  'push.status',
+  'push.subscribe',
+  'push.unsubscribe',
+  'push.test',
   // The sidebar and the composer's `@`.
   'projects.list',
   'projects.files',

@@ -36,6 +36,48 @@ async function ready(): Promise<{ store: Store; client: FakeClient }> {
   return { store, client };
 }
 
+test.each([false, true])('a lost start response reuses its request id unless selection changes: %s', async (changeSelection) => {
+  const { store, client } = await ready();
+  const original = client.call.bind(client);
+  const requests: string[] = [];
+  let loseResponse = true;
+  vi.spyOn(client, 'call').mockImplementation(async (method, params) => {
+    const result = await original(method, params);
+    if (method === 'turns.start') {
+      requests.push((params as { clientRequestId: string }).clientRequestId);
+      if (loseResponse) { loseResponse = false; throw new Error('connection lost'); }
+    }
+    return result;
+  });
+  try {
+    const thread = store.threads.find(thread => thread.status === 'idle')!;
+    await store.open(thread.id);
+    expect(await store.send('Retry this prompt')).toBe(false);
+    if (changeSelection) {
+      await client.settled();
+      expect(await store.update(thread.id, { effort: 'low' })).toBe(true);
+    }
+    expect(await store.send('Retry this prompt')).toBe(true);
+    expect(requests).toHaveLength(2);
+    expect(requests[0]).toBeTruthy();
+    expect(requests[1] === requests[0]).toBe(!changeSelection);
+  } finally { store.detach(); client.close(); }
+});
+
+test.each(['input', 'inputText', 'output', 'documents'])('reading cache excludes oversized tool %s', async (field) => {
+  const { store, client } = await ready();
+  try {
+    await store.open('t-bench');
+    const large = 'x'.repeat(2 * 1024 * 1024 + 1);
+    const part: any = { type: 'tool', toolId: 'large', name: 'read', input: {}, output: null, status: 'done' };
+    part[field] = field === 'documents' ? [{ kind: 'markdown', text: large }] : field === 'input' ? { nested: { text: large } } : large;
+    store.openThread!.messages.unshift({ id: 'cached-only', threadId: 't-bench', turnId: 'old', role: 'assistant', parts: [part], state: 'complete', createdAt: 0 });
+    await store.open('t-scheduler');
+    await store.open('t-bench');
+    expect(store.openThread!.messages.some(message => message.id === 'cached-only')).toBe(false);
+  } finally { store.detach(); client.close(); }
+});
+
 describe('Store', () => {
   beforeEach(() => {
     window.localStorage.clear();
@@ -109,7 +151,7 @@ describe('Store', () => {
 
       await client.call('turns.start', { threadId: 't-trace', prompt: 'quietly' });
       await client.settled();
-      expect(sent).toEqual([{ title: 'Finish the trace tab', body: 'Done', threadId: 't-trace' }]);
+      expect(sent).toEqual([{ title: 'Finish the trace tab', body: 'Done', threadId: 't-trace', coreThreadId: 't-trace' }]);
 
       await store.send('in front of me');
       await client.settled();

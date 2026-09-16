@@ -2,6 +2,7 @@
   import { Brain, Zap } from '@lucide/svelte';
   import type { EffortLevel } from '@boite/contracts';
   import { Closing } from '../lib/closing.svelte';
+  import { floating } from '../lib/floating';
   import { strings } from '../lib/strings';
 
   /**
@@ -159,6 +160,7 @@
       aria-label={strings.composer.effortTitle}
       data-testid="composer-effort-menu"
       use:popover.attach
+      use:floating={{ anchor: () => trigger ?? null, mobileOnly: true, dismiss: () => popover.hide() }}
       onanimationend={popover.end}
       {onkeydown}
     >

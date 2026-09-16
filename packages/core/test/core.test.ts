@@ -24,12 +24,14 @@ describe('projects', () => {
     const client = await harness.connect();
     const { threadId } = await echoThread(harness, client);
     const projectId = harness.core.threads.require(threadId).projectId;
-    await client.call('turns.start', { threadId, prompt: '[sleep:60000]' });
+    await client.call('turns.start', { threadId, prompt: '[sleep:60000]', clientRequestId: 'remove-request' });
+    expect(harness.core.journal.turnRequest(threadId, 'remove-request')).not.toBeNull();
     await client.call('projects.remove', { projectId });
     expect(harness.core.scheduler.state().running).toHaveLength(0);
     expect(harness.core.journal.listTurns(threadId)).toEqual([]);
     expect(harness.core.journal.listMessages(threadId)).toEqual([]);
     expect(harness.core.journal.getThread(threadId)).toBeNull();
+    expect(harness.core.journal.turnRequest(threadId, 'remove-request')).toBeNull();
   });
   test('removing a project stops remaining processes before deleting their rows', async () => {
     const client = await harness.connect();

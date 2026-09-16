@@ -81,6 +81,7 @@ export class BrowserPage {
   #pending = new Map<number, Pending>();
   #closed = false;
   #pageErrors: string[] = [];
+  errors(): string[] { return [...this.#pageErrors]; }
 
   private constructor(socket: WebSocket, pid: number | null, userDataDir: string | null) {
     this.#socket = socket;

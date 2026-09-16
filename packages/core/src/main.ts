@@ -28,6 +28,7 @@ interface CoreFile {
 }
 
 export interface Flags {
+  publicUrl?: string;
   port: number;
   host: string;
   /** True once `--host` or `--lan` named an address, so the setting no longer decides. */
@@ -49,6 +50,11 @@ export function parseFlags(argv: string[]): Flags {
     const flag = argv[index];
     const value = argv[index + 1];
     switch (flag) {
+      case '--public-url':
+        if (!value || value.startsWith('--')) throw new Error('--public-url expects an HTTPS origin');
+        flags.publicUrl = value;
+        index += 1;
+        break;
       case '--port': {
         const port = Number(value);
         if (!Number.isInteger(port) || port < 0 || port > 65535) {
@@ -235,6 +241,8 @@ export function main(argv: string[]): void {
   const coreFile = join(dataDir, 'core.json');
   const token = readToken(coreFile) ?? newToken();
   const core = new Core({ dataDir, token, channel: flags.channel });
+  const publicUrl = flags.publicUrl ?? process.env.BOITE_PUBLIC_URL;
+  if (publicUrl !== undefined) core.settings.set({ publicUrl });
   const settings = core.settings.get();
   const host = resolveHost(flags, settings);
   const server = startServer({ core, host, port: flags.port });

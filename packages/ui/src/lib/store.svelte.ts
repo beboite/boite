@@ -177,6 +177,23 @@ const LIVE: ThreadStatusRank = { waiting: 0, running: 1, queued: 2, error: 3, id
 type ThreadStatusRank = Record<ThreadSummary['status'], number>;
 
 export class Store {
+  readonly readingPositions = new Map<string, { top: number; pinned: boolean; heights: Map<string, number>; anchor?: { id: string; offset: number } }>();
+  #readingThreads = new Map<string, Thread>();
+  private rememberReadingThread(): void {
+    const thread = this.openThread;
+    if (!thread) return;
+    // Four recent timelines, with at most 4 MB of text/image data each.
+    // The active timeline remains unrestricted; old visits must not retain every image forever.
+    let bytes = 0;
+    for (const message of thread.messages) for (const part of message.parts) {
+      // Include nested tool inputs and documents, with conservative JSON overhead.
+      bytes += JSON.stringify(part).length * 2;
+    }
+    this.#readingThreads.delete(thread.id);
+    if (bytes <= 4 * 1024 * 1024 && thread.messages.length <= 2000) this.#readingThreads.set(thread.id, thread);
+    while (this.#readingThreads.size > 4) this.#readingThreads.delete(this.#readingThreads.keys().next().value!);
+  }
+  #pendingSends = new Map<string, { id: string; prompt: string; attachments: ImageAttachment[]; selectionVersion: number }>();
   machineId = '';
   visible = true;
   threadKey(id: string): string { return this.machineId ? JSON.stringify([this.machineId, id]) : id; }
@@ -557,6 +574,9 @@ export class Store {
 
   attach(client: Client): void {
     this.detach();
+    this.#readingThreads.clear();
+    this.readingPositions.clear();
+    this.#pendingSends.clear();
     this.logins = {};
     this.#loginChanges.clear();
     this.#client = client;
@@ -1200,6 +1220,7 @@ export class Store {
   startDraft(projectId?: ProjectId): void {
     const target = projectId ?? this.openProject?.id ?? this.projects[0]?.id;
     if (target === undefined) return;
+    this.rememberReadingThread();
     void this.#unsubscribe();
     this.openThread = null;
     this.draftChoice = null;
@@ -1260,6 +1281,18 @@ export class Store {
       }
       const thread = await client.call('threads.get', { threadId });
       if (!newest()) return;
+      this.rememberReadingThread();
+      const cached = this.#readingThreads.get(threadId);
+      const freshIds = new Set(thread.messages.map(m => m.id));
+      if (cached && cached.messages.some(m => freshIds.has(m.id))) {
+        const merged = new Map(cached.messages.map(m => [m.id, m]));
+        for (const message of thread.messages) merged.set(message.id, message);
+        thread.messages = [...merged.values()].sort((a, b) => a.createdAt - b.createdAt);
+        thread.messagesBefore = cached.messagesBefore;
+      } else {
+        this.#readingThreads.delete(threadId);
+        this.readingPositions.delete(threadId);
+      }
       this.draft = null;
       // The last page, pinned to the bottom; what is above it arrives on scroll.
       this.loadingOlder = false;
@@ -1491,12 +1524,21 @@ export class Store {
       }
       // The key is left out when there is nothing to carry: a turn with no
       // image sends the params it always sent.
+      let pending = this.#pendingSends.get(threadId);
+      const selectionVersion = (this.openThread?.id === threadId ? this.openThread : this.threads.find((thread) => thread.id === threadId))?.selectionVersion ?? 0;
+      if (!pending || pending.selectionVersion !== selectionVersion || pending.prompt !== prompt || pending.attachments.length !== attachments.length || pending.attachments.some((a, i) => a.data !== attachments[i]?.data || a.mimeType !== attachments[i]?.mimeType || a.name !== attachments[i]?.name)) {
+        const bytes = crypto.getRandomValues(new Uint8Array(16));
+        pending = { id: Array.from(bytes, b => b.toString(16).padStart(2, '0')).join(''), prompt, attachments: [...attachments], selectionVersion };
+        this.#pendingSends.set(threadId, pending);
+      }
       await client.call('turns.start', {
         threadId,
         prompt,
-        expectedSelectionVersion: (this.openThread?.id === threadId ? this.openThread : this.threads.find((thread) => thread.id === threadId))?.selectionVersion ?? 0,
+        clientRequestId: pending.id,
+        expectedSelectionVersion: selectionVersion,
         ...(attachments.length > 0 ? { attachments } : {})
       });
+      this.#pendingSends.delete(threadId);
       return true;
     } catch (error) {
       this.#fail(error);
@@ -1942,7 +1984,11 @@ export class Store {
     });
     if (!go) return;
     const title = this.threads.find((t) => t.id === threadId)?.title ?? strings.app.name;
-    void sendNotification(toastFor(kind, this.threadKey(threadId), title, detail));
+    void sendNotification({
+      ...toastFor(kind, this.threadKey(threadId), title, detail),
+      coreThreadId: threadId,
+      origin: this.endpointUrl ? new URL(this.endpointUrl).origin : undefined
+    });
   }
 
   /** The switch of the Background card; the platform prompt comes with the first turn-on. */

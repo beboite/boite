@@ -30,7 +30,7 @@ const RETITLE_SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui-retitle.png')
 const IMPORT_SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui-import.png');
 const EXPERIMENTS_SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui-experiments.png');
 /** The one name `public/sw.js` opens; every other cache is deleted on activate. */
-const UI_CACHE = 'boite-ui-v1';
+const UI_CACHE = 'boite-ui-v2';
 /** What the echo provider's `[tool-stream]` directive types, one piece at a time. */
 const STREAMED_TOOL_INPUT = '{"command":"echo streamed","description":"a streamed input"}';
 
@@ -675,11 +675,22 @@ test(
     const grantUrl = await mintPairing(core);
     const phone = await BrowserPage.launch({ url: grantUrl });
     try {
+      await phone.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
       await phone.waitFor(`document.querySelector('[data-testid=status-connection]')?.dataset.state === 'ready'`, 30_000);
       const stored = await phone.evaluate<{ url: string; token: string }>(`JSON.parse(localStorage.getItem('boite.core'))`);
       expect(stored.token).toHaveLength(64);
       expect(stored.token).not.toBe(core.token);
       expect(await phone.evaluate<string>('location.search')).toBe('');
+      await phone.waitFor(`document.querySelector('[data-testid=mobile-tabs]')`);
+      await phone.click('[data-testid=mobile-tabs] button:nth-child(3)');
+      await phone.waitFor(`document.querySelector('[data-testid=phone-settings]')`);
+      expect(await phone.evaluate(`document.querySelector('[data-testid=phone-public-url]') === null`)).toBe(true);
+      await phone.waitFor(`navigator.serviceWorker.controller !== null`, RECONNECT_TIMEOUT_MS);
+      await phone.waitFor(`Array.from(document.querySelectorAll('[data-testid=phone-settings] button')).some(button => button.textContent.includes('Enable notifications') && !button.disabled)`);
+      await phone.evaluate(`Promise.all([document.fonts.ready, ...document.getAnimations().filter(animation => animation.effect?.getTiming().iterations !== Infinity).map(animation => animation.finished.catch(() => {}))])`);
+      await phone.screenshot(join(import.meta.dir, '.artifacts', 'mobile-paired-settings.png'));
+      await phone.click('[data-testid=mobile-tabs] button:nth-child(1)');
+      await phone.waitFor(`document.querySelector('[data-testid=status-connection]')?.dataset.state === 'ready'`);
 
       // Same link again: refused, and the page says so instead of retrying forever.
       const again = await BrowserPage.launch({ url: grantUrl });

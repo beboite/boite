@@ -35,6 +35,13 @@ afterEach(() => {
 });
 
 describe('journal', () => {
+  test('a history snapshot includes deltas already delivered to subscribers', () => {
+    journal.putMessage(sampleMessage('streaming-snapshot'));
+    journal.appendDelta('thr_test', 'streaming-snapshot', 0, 'already delivered');
+    expect(journal.listMessagePage('thr_test', { limit: 120 }).messages[0]?.parts)
+      .toEqual([{ type: 'text', text: 'already delivered' }]);
+  });
+
   test('corrupt JSON names its table, row and column', () => {
     journal.putMessage(sampleMessage('broken-message'));
     journal.db.query('UPDATE messages SET parts = ? WHERE id = ?').run('{', 'broken-message');

@@ -644,6 +644,8 @@ export interface SchedulerState {
 export interface Settings {
   /** Exact browser origins allowed to connect alongside the shell and this core's own origin. */
   browserOrigins?: string[];
+  /** HTTPS origin served by the reverse proxy, used in phone pairing links. */
+  publicUrl?: string | null;
   maxConcurrentTurns: number;
   perAccountConcurrency: number;
   /** Minutes a Claude process stays warm after a turn. 0 releases it at once. */
@@ -947,6 +949,11 @@ export interface RpcMethods {
   'sessions.list': { params: Record<string, never>; result: PairedSession[] };
   /** Forget a paired client: its sockets close and its token opens nothing any more. Owner only. */
   'sessions.revoke': { params: { sessionId: string }; result: { ok: true } };
+  /** Push credentials are owned by the authenticated pairing, never a caller-supplied session id. */
+  'push.status': { params: Record<string, never>; result: { publicKey: string; subscribed: boolean } };
+  'push.subscribe': { params: { endpoint: string; keys: { p256dh: string; auth: string } }; result: { ok: true } };
+  'push.unsubscribe': { params: Record<string, never>; result: { ok: true } };
+  'push.test': { params: Record<string, never>; result: { ok: true } };
 
   'projects.list': { params: Record<string, never>; result: Project[] };
   'projects.add': { params: { path: string; name?: string }; result: Project };
@@ -1109,7 +1116,7 @@ export interface RpcMethods {
   'threads.unsubscribe': { params: { threadId: ThreadId }; result: { ok: true } };
 
   /** `attachments` ride with the prompt as image parts of the user message; see `ImageAttachment` for what is refused. */
-  'turns.start': { params: { threadId: ThreadId; prompt: string; attachments?: ImageAttachment[]; expectedSelectionVersion?: number }; result: Turn };
+  'turns.start': { params: { threadId: ThreadId; prompt: string; attachments?: ImageAttachment[]; expectedSelectionVersion?: number; clientRequestId?: string }; result: Turn };
   'turns.stop': { params: { threadId: ThreadId }; result: { stopped: boolean } };
 
   /**

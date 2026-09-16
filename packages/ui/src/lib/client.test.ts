@@ -84,6 +84,29 @@ describe('rpcUrl', () => {
 });
 
 describe('WsClient', () => {
+  test('resuming replaces a half-open socket without replaying a pending prompt', async () => {
+    const sockets: FakeSocket[] = [];
+    const client = new WsClient({ url: 'https://core.test', token: 'session', socketFactory: () => {
+      const socket = new FakeSocket(); sockets.push(socket); return socket;
+    } });
+    const connecting = client.connect();
+    const first = take(sockets, 0);
+    first.open();
+    first.receive({ id: first.frame(0).id, result: { core: CORE, principal: 'session' } });
+    await connecting;
+    const pending = client.call('turns.start', { threadId: 'thread', prompt: 'once' }).catch(error => error);
+    const resumed = client.resume();
+    expect(first.closed).toBe(true);
+    const second = take(sockets, 1);
+    second.open();
+    second.receive({ id: second.frame(0).id, result: { core: CORE, principal: 'session' } });
+    await resumed;
+    expect(await pending).toBeInstanceOf(Error);
+    expect(second.sent.map(raw => JSON.parse(raw).method)).toEqual(['hello']);
+    client.close();
+    await client.resume();
+    expect(sockets).toHaveLength(2);
+  });
   test('hello is the first frame, and it carries the token', async () => {
     const sockets: FakeSocket[] = [];
     const client = new WsClient({

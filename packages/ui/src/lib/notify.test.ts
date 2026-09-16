@@ -63,6 +63,23 @@ describe('toastFor', () => {
 describe('sendNotification', () => {
   afterEach(() => setNotificationSender(null));
 
+  test('a stale push flag still delivers through the worker with the push tag and raw thread id', async () => {
+    const showNotification = vi.fn().mockResolvedValue(undefined);
+    const browserNotification = vi.fn(function () {});
+    Object.assign(browserNotification, { permission: 'granted' });
+    vi.stubGlobal('Notification', browserNotification);
+    vi.stubGlobal('navigator', { serviceWorker: { getRegistration: vi.fn().mockResolvedValue({ showNotification }) } });
+    localStorage.setItem('boite.web-push', 'on');
+    try {
+      await sendNotification({ title: 'Done', body: 'Finished', threadId: '["machine","t-1"]', coreThreadId: 't-1', origin: location.origin });
+      expect(showNotification).toHaveBeenCalledWith('Done', expect.objectContaining({ tag: 'thread-t-1', data: { threadId: 't-1' } }));
+      expect(browserNotification).not.toHaveBeenCalled();
+      showNotification.mockRejectedValueOnce(new Error('worker unavailable'));
+      await sendNotification({ title: 'Done', body: 'Finished', threadId: 't-1', coreThreadId: 't-1', origin: location.origin });
+      expect(browserNotification).toHaveBeenCalledOnce();
+    } finally { localStorage.removeItem('boite.web-push'); vi.unstubAllGlobals(); }
+  });
+
   test('goes through the sender handed in, and swallows what it throws', async () => {
     const sent: Toast[] = [];
     setNotificationSender(async (toast) => {
@@ -105,10 +122,16 @@ describe('sendNotification', () => {
       expect(opened).toEqual(['t-2']);
       expect(shown[0]?.closed).toBe(true);
 
+      localStorage.setItem('boite.web-push', 'on');
+      await sendNotification({ title: 'Local', body: 'Done', threadId: 't-local', origin: location.origin });
+      expect(shown).toHaveLength(2);
+      await sendNotification({ title: 'Remote', body: 'Done', threadId: 't-remote', origin: 'https://remote.test' });
+      expect(shown).toHaveLength(3);
+
       // Permission refused: nothing is shown, nothing throws.
       FakeNotification.permission = 'denied';
       await sendNotification({ title: 'x', body: 'y', threadId: 't-3' });
-      expect(shown).toHaveLength(1);
+      expect(shown).toHaveLength(3);
     } finally {
       stop();
       vi.unstubAllGlobals();

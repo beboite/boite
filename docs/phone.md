@@ -94,11 +94,61 @@ session key that came back.
 
 ## The app on the phone
 
-The same build, under 720 px: the sidebar becomes a drawer opened from the title,
-the trace panel becomes a sheet, and the composer sticks to the bottom above the
-keyboard. Nothing else changes, which is the point of one build.
+The browser uses mobile navigation under 720 px. Conversations lists threads
+across connected machines; Activity puts waiting requests first, followed by
+running and queued turns. Settings is the third destination. The header names
+the machine, connection and project, and starts a new conversation.
 
-`packages/ui/public/sw.js` is what makes the second open instant. It is plain
+Model, effort and action menus open as bottom sheets. Back dismisses an open
+sheet. Controls have 44 px touch targets; `visualViewport` keeps the composer
+above the keyboard, and the bottom navigation hides while the keyboard is open.
+Safe-area insets keep controls clear of the home indicator and screen cutouts.
+
+Draft text stays with its conversation. Four recent timelines are retained in
+memory, each limited to 2,000 messages and 4 MB of text/image data, to preserve
+reading positions across switches. The journal remains on the core. Settings
+loads on demand, separately from the chat's initial JavaScript and stylesheet.
+
+On returning from the background or regaining a network connection, the client
+replaces a socket that may have stopped responding and reloads messages and
+pending requests. It never replays outstanding RPC calls. An uncertain prompt
+retry keeps its `clientRequestId`: schema 11 records the accepted turn and
+content fingerprint atomically, so repeating the request returns that turn.
+Reusing the id with different content is refused. This applies to every driver.
+Changing the thread's model, effort or other selection before retrying creates
+a new request ID for that selection.
+
+## HTTPS and installation
+
+HTTP on a LAN opens the chat, but service workers and push need a secure origin.
+Use HTTPS for a phone; `localhost` is the development exception. The core does
+not terminate TLS. A reverse proxy serves the UI and `/rpc` on one HTTPS origin.
+For example, with Caddy on the same machine as a core listening on port 7337:
+
+```caddyfile
+boite.example.com {
+    encode zstd gzip
+    reverse_proxy 127.0.0.1:7337
+}
+```
+
+Replace the example hostname with a domain pointing at the proxy. Caddy needs
+access to the ports required for its certificate challenge and public HTTPS.
+Keep the core bound to loopback when the proxy is local. A private VPN still
+needs a certificate the phone trusts for PWA features.
+
+Set the matching origin in General, Phone app, Public HTTPS address. A headless
+core accepts `--public-url https://boite.example.com` or `BOITE_PUBLIC_URL`.
+This saves `settings.publicUrl`, uses it in new pairing links, and permits that
+exact browser origin at the WebSocket gate. Clearing the setting returns links
+to the core's local address. No wildcard origin or forwarded header is trusted.
+
+On iPhone, open the pairing link in Safari, choose Share, then Add to Home Screen.
+On Android, use Install Boite in Phone app or the browser's installation menu.
+Open the installed icon and pair there if the browser did not carry the session
+across. Installing a PWA and using Web Push require no Apple Developer account.
+
+`packages/ui/public/sw.js` caches the files for later opens. It is plain
 JavaScript that Vite copies to `dist/sw.js` untouched, and `lib/sw.ts` registers
 it after the first paint, never before: the registration must not delay what the
 user sees. It registers only where it helps, which is the core's own http(s)
@@ -109,13 +159,14 @@ core behind it; both are skipped. A registration that fails is one
 
 ## What is cached, and what never is
 
-One cache, `boite-ui-v1`. Every other cache is deleted on activate before the
-worker claims its clients.
+One cache, `boite-ui-v2`. Activation deletes older `boite-ui-` caches and leaves
+other applications' caches alone before the worker claims its clients.
 
 | Request | Rule |
 |---|---|
 | a navigation | network first, the precached shell behind it |
 | `/assets/` | cache first, stored on its first whole 200 |
+| `/fonts/`, `/icons/` | cache first |
 | `/rpc` | never cached |
 | anything carrying an `upgrade` header | never cached |
 | `/sw.js` | never cached |
@@ -135,12 +186,39 @@ take the whole origin as its scope. A header test in
 end to end test stops the core, reloads the page and watches the shell paint
 anyway.
 
-One consequence worth knowing before writing a test about it: a service worker
-caches only what passed through it, and it passes through nothing until it
-controls the page. On the load that registers it, the page and its assets were
-already fetched, so the cache holds only what the install step precached. The
-hashed files land on the load after that, which is also the honest shape of the
-feature, the phone opening Boite a second time.
+Installation reads the entry HTML and precaches its hashed entry assets, the
+fonts, icon and manifest. Every successful navigation refreshes the offline
+HTML. Network errors and HTTP 5xx responses fall back to that cached shell.
+Secondary screens are cached when opened; an uncached Settings screen names
+the missing connection instead of silently failing.
+
+## Notifications while closed
+
+General, Phone app enables Web Push for the current pairing. On iPhone this
+requires a Home Screen web app on iOS 16.4 or later. Permission is requested from
+the Enable notifications button. Send test notification reports whether the
+push service accepted a test; delivery still depends on the device and service.
+
+The core generates VAPID keys on first use and keeps them in private journal
+settings. `push.status`, `push.subscribe`, `push.unsubscribe` and `push.test`
+operate only on the authenticated pairing. Subscription URLs and encryption
+keys are not placed in events or logs. The encryption library loads on demand.
+
+Finished turns, errors, permission requests and questions trigger notifications
+through the shared core event bus. Stopped turns do not. A click opens the
+conversation, preserving an existing page and its drafts. The worker only opens
+URLs on its own origin. Enable notifications from the machine's own page, not
+while viewing it through another machine's UI.
+
+A connected page retains its local notification path even when push is enabled.
+For its own core, it uses the service worker and the same per-thread notification
+tag as push, so the latest notification replaces the previous one. A saved push
+subscription is not treated as proof that a notification reached the phone.
+
+Disabling removes the server subscription and unsubscribes the browser.
+Revocation deletes the subscription with the pairing. Push services returning
+404 or 410 retire the destination. Other delivery failures leave it subscribed
+and write a generic diagnostic without the provider's credential-bearing body.
 
 ## The limits
 
@@ -151,9 +229,8 @@ feature, the phone opening Boite a second time.
 - Pairing is a link somebody carries over, by hand or by the QR code beside it,
   and it has to be opened within ten minutes. There is no discovery on the
   network.
-- There is no Android or iOS package. The phone runs the web app, and a Tauri
-  mobile build is a later job.
-- Nothing pushes: a notification while the app is closed does not exist, because
-  the only live channel is the WebSocket the page holds.
+- There is no Android or iOS package. The phone runs the installed web app.
+- Push is a notification channel, not background execution. The core must stay
+  running to run agents and send notifications; delivery is not guaranteed.
 - The core must be reachable. A different network, a VPN, or a firewall that
   blocks the port all end at the same screen.

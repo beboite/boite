@@ -1,0 +1,113 @@
+<script lang="ts">
+  import { untrack } from 'svelte';
+  import type { Store } from '../lib/store.svelte';
+  import { strings } from '../lib/strings';
+  import { installApp, installed, PUSH_ENABLED_KEY, worker } from '../lib/pwa';
+  let { store }: { store: Store } = $props();
+  const inShell = window.__TAURI_INTERNALS__ !== undefined;
+  const secure = window.isSecureContext;
+  const capable = secure && 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+  let standalone = $state(installed());
+  let publicUrl = $state(untrack(() => store.settings?.publicUrl ?? ''));
+  let key = $state('');
+  let subscribed = $state(false);
+  let busy = $state(false);
+  let message = $state('');
+  let error = $state('');
+  let ownOrigin = $derived(!store.endpointUrl || new URL(store.endpointUrl).origin === location.origin);
+  let paired = $derived(store.sessions.some(session => session.current));
+
+  $effect(() => {
+    if (inShell || !paired || !ownOrigin || store.connection !== 'ready') return;
+    let live = true;
+    void store.client?.call('push.status', {}).then(result => {
+      if (!live) return;
+      key = result.publicKey;
+      subscribed = result.subscribed;
+      if (!subscribed) localStorage.removeItem(PUSH_ENABLED_KEY);
+    }).catch(reason => { if (live) error = String(reason); });
+    return () => { live = false; };
+  });
+
+  async function enable() {
+    if (!capable || !key || !store.client) return;
+    // Safari requires the permission request directly in this click, before any await.
+    const permission = Notification.requestPermission();
+    busy = true; error = ''; message = '';
+    try {
+      if (await permission !== 'granted') throw new Error(strings.phone.denied);
+      const registration = await worker();
+      let subscription = await registration.pushManager.getSubscription();
+      const existingKey = subscription?.options.applicationServerKey;
+      const expectedKey = Uint8Array.from(atob(key.replace(/-/g, '+').replace(/_/g, '/')), character => character.charCodeAt(0));
+      if (subscription && (!existingKey || new Uint8Array(existingKey).some((byte, index) => byte !== expectedKey[index]) || existingKey.byteLength !== expectedKey.length)) {
+        await subscription.unsubscribe();
+        subscription = null;
+      }
+      if (!subscription) subscription = await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
+      const json = subscription.toJSON();
+      if (!json.endpoint || !json.keys?.p256dh || !json.keys.auth) throw new Error(strings.phone.subscriptionFailed);
+      await store.client.call('push.subscribe', { endpoint: json.endpoint, keys: { p256dh: json.keys.p256dh, auth: json.keys.auth } });
+      subscribed = true;
+      localStorage.setItem(PUSH_ENABLED_KEY, 'on');
+      message = strings.phone.enabled;
+    } catch (reason) { error = reason instanceof Error ? reason.message : String(reason); }
+    finally { busy = false; }
+  }
+  async function disable() {
+    if (!store.client) return;
+    busy = true; error = ''; message = '';
+    try {
+      await store.client.call('push.unsubscribe', {});
+      subscribed = false;
+      localStorage.removeItem(PUSH_ENABLED_KEY);
+      const registration = await navigator.serviceWorker.getRegistration('/');
+      await (await registration?.pushManager.getSubscription())?.unsubscribe();
+    } catch (reason) { error = reason instanceof Error ? reason.message : String(reason); }
+    finally { busy = false; }
+  }
+  async function testPush() {
+    busy = true; error = ''; message = '';
+    try { await store.client?.call('push.test', {}); message = strings.phone.testSent; }
+    catch (reason) { error = reason instanceof Error ? reason.message : String(reason); }
+    finally { busy = false; }
+  }
+</script>
+
+<section class="card" id="settings-phone" data-testid="phone-settings">
+  <h2>{strings.phone.heading}</h2>
+  {#if store.owner}
+    <label><span>{strings.phone.publicUrl}</span><input type="url" bind:value={publicUrl} placeholder={strings.phone.urlPlaceholder} data-testid="phone-public-url" /></label>
+    <p class="hint">{strings.phone.publicUrlHint}</p>
+    <button disabled={store.connection !== 'ready'} onclick={() => void store.saveSettings({ publicUrl: publicUrl.trim() || null })}>{strings.settings.save}</button>
+  {/if}
+  {#if !inShell}
+    {#if standalone}<p>{strings.phone.installed}</p>
+    {:else}
+      <p>{strings.phone.installHint}</p>
+      <button onclick={async () => { standalone = await installApp() || installed(); if (!standalone) message = strings.phone.installHint; }}>{strings.phone.install}</button>
+    {/if}
+    {#if !secure}<p class="hint">{strings.phone.httpsRequired}</p>
+    {:else if !ownOrigin}<p class="hint">{strings.phone.ownOrigin}</p>
+    {:else if !paired}<p class="hint">{strings.phone.pairFirst}</p>
+    {:else if !capable}<p class="hint">{strings.phone.unsupported}</p>
+    {:else}
+      <p>{strings.phone.pushHint}</p>
+      <div class="actions">
+        {#if subscribed}
+          <button disabled={busy} onclick={disable}>{strings.phone.disable}</button>
+          <button disabled={busy} onclick={testPush}>{strings.phone.test}</button>
+        {:else}<button disabled={busy || !key} onclick={enable}>{strings.phone.enable}</button>{/if}
+      </div>
+    {/if}
+    {#if message}<p role="status">{message}</p>{/if}
+    {#if error}<p role="alert">{error}</p>{/if}
+  {/if}
+</section>
+
+<style>
+  label { display: flex; flex-direction: column; gap: 8px; }
+  input { width: 100%; }
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  [role='alert'] { color: var(--color-danger); }
+</style>

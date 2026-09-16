@@ -81,6 +81,7 @@
   --control-lg: 36px;
   --control-touch: 40px;
   --input: 34px;
+  --touch-target: 44px;
 
   --dur-1: 90ms;
   --dur-2: 150ms;
@@ -761,6 +762,12 @@ html[data-glass] .composer {
 .settings input[type=checkbox][role=switch]:focus-visible { outline: 2px solid var(--color-foreground); outline-offset: 4px; }
 .settings input[type=checkbox][role=switch]:disabled { opacity: .45; cursor: not-allowed; }
 @media (max-width: 720px) {
+  .mobile-sheet-backdrop { position: fixed; inset: 0; width: 100%; height: 100%; max-width: none; max-height: none; margin: 0; padding: 0; border: 0; border-radius: 0; background: var(--color-scrim); }
+  [data-mobile-sheet='true'] { position: fixed !important; box-sizing: border-box; overflow-y: auto; overscroll-behavior: contain; border-radius: var(--radius-xl) !important; padding-bottom: max(12px, env(safe-area-inset-bottom)); }
+  :root { --control: var(--touch-target); --control-sm: var(--touch-target); --input: var(--touch-target); --row: var(--touch-target); }
+  input, textarea { font-size: var(--text-md); }
+  button.icon { min-width: var(--touch-target); min-height: var(--touch-target); }
+  .composer-wrap { padding-bottom: max(10px, env(safe-area-inset-bottom)); }
   .settings .page { padding: 24px 16px; }
   .settings .page > .card { padding: 18px; }
   .settings .page .row { flex-wrap: wrap; }

@@ -11,9 +11,11 @@ import { registerSettingsMethods } from './settings.ts';
 import { registerThreadMethods } from './threads.ts';
 import { registerTraceMethods } from './trace.ts';
 import { registerUsageMethods } from './usage.ts';
+import { registerPushMethods } from './push.ts';
 
 /** Adding a module is one file plus one line here. `hello` is the server's own. */
 export function registerModules(core: Core): void {
+  registerPushMethods(core);
   core.router.register('threads.activity.set', (params) => core.activity.set(params));
   core.router.register('threads.activity.control', (params) => core.activity.control(params));
   core.router.register('quotas.list', (params) => core.quotas.list(params.refresh));
