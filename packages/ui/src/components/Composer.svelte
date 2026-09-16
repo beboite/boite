@@ -1020,7 +1020,7 @@
   }
 
   @media (max-width: 720px) {
-    textarea { font-size: var(--text-md); }
+    textarea, .input-mirror { font-size: var(--text-md); }
     .composer-wrap {
       padding: 6px 10px 10px;
     }
