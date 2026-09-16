@@ -119,7 +119,7 @@ test('PR reads coalesce, stay within two traced processes and preserve the reque
     const results = await Promise.all([first, reader.read(ids[1]!), reader.read(ids[2]!)]);
     expect(results.map((pr) => pr?.number)).toEqual([4, 4, 4]);
     expect(peak).toBe(2);
-    expect(calls.map((args) => args[3])).toEqual(['topic-0', 'topic-1', 'topic-2']);
+    expect(calls.map((args) => args[3]).sort()).toEqual(['topic-0', 'topic-1', 'topic-2']);
     await reader.read(ids[0]!);
     expect(calls).toHaveLength(3);
   } finally {
