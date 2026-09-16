@@ -21,6 +21,7 @@ const child = Bun.spawn([executable], {
     BOITE_CORE_COMMAND: undefined, BOITE_UI_DIR: undefined, HOME: home,
     BOITE_DATA_DIR: data, BOITE_SHELL_HIDDEN: '1', BOITE_ECHO: '1' },
   stdout: 'pipe', stderr: 'pipe', windowsHide: true,
+  detached: process.platform !== 'win32',
 });
 const stdout = new Response(child.stdout).text();
 const stderr = new Response(child.stderr).text();
@@ -35,9 +36,9 @@ try {
   const endpoint = JSON.parse(readFileSync(file, 'utf8'));
   corePid = endpoint.pid;
   const origin = `http://127.0.0.1:${endpoint.port}`;
-  const health = await (await fetch(`${origin}/health`)).json() as { ok: boolean; pid: number };
+  const health = await (await fetch(`${origin}/health`, { signal: AbortSignal.timeout(5000) })).json() as { ok: boolean; pid: number };
   if (!health.ok || health.pid !== corePid) throw new Error('Core health did not match the launched instance');
-  const page = await (await fetch(origin)).text();
+  const page = await (await fetch(origin, { signal: AbortSignal.timeout(5000) })).text();
   if (!page.includes('<script') || page.includes('UI is not built')) throw new Error('Installed core did not serve the bundled UI');
   client = await connect(`ws://127.0.0.1:${endpoint.port}/rpc`, endpoint.token);
   const providers = await client.call('providers.list', {});
@@ -57,6 +58,11 @@ try {
   console.log('Installed desktop: core startup, bundled UI, authenticated RPC and echo turn passed');
 } finally {
   client?.close();
+  if (process.platform !== 'win32') {
+    // The group belongs to this spawn, including a core that failed before
+    // publishing core.json. Killing only the shell would leave it orphaned.
+    try { process.kill(-child.pid, 'SIGKILL'); } catch { /* Group already exited. */ }
+  }
   child.kill();
   await child.exited;
   if (corePid) {

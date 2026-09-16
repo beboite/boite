@@ -178,9 +178,13 @@ jobs:
       - name: Build and test installed Linux package
         if: runner.os == 'Linux'
         run: |
-          bun run --cwd apps/shell tauri build --config src-tauri/tauri.bundle.conf.json --bundles deb
+          bun run --cwd apps/shell tauri build --config src-tauri/tauri.bundle.conf.json --bundles deb,appimage
           sudo dpkg -i apps/shell/src-tauri/target/release/bundle/deb/*.deb
           dbus-run-session -- xvfb-run -a bun scripts/ci/desktop-smoke.ts /usr/bin/boite-shell
+          mkdir "$RUNNER_TEMP/appimage"
+          appimage=$(realpath apps/shell/src-tauri/target/release/bundle/appimage/*.AppImage)
+          (cd "$RUNNER_TEMP/appimage" && "$appimage" --appimage-extract > /dev/null)
+          dbus-run-session -- xvfb-run -a bun scripts/ci/desktop-smoke.ts "$RUNNER_TEMP/appimage/squashfs-root/AppRun"
       - name: Build and test macOS application bundle
         if: runner.os == 'macOS'
         env:
@@ -189,6 +193,17 @@ jobs:
           bun run --cwd apps/shell tauri build --config src-tauri/tauri.bundle.conf.json --bundles app
           cp -R apps/shell/src-tauri/target/release/bundle/macos/Boite.app "$RUNNER_TEMP/Boite.app"
           bun scripts/ci/desktop-smoke.ts "$RUNNER_TEMP/Boite.app/Contents/MacOS/boite-shell"
+          ditto -c -k --keepParent "$RUNNER_TEMP/Boite.app" "$RUNNER_TEMP/Boite-macos.zip"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: desktop-${{ runner.os }}
+          path: |
+            apps/shell/src-tauri/target/release/bundle/deb/*.deb
+            apps/shell/src-tauri/target/release/bundle/appimage/*.AppImage
+            ${{ runner.temp }}/Boite-macos.zip
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
 
   server:
     needs: changes
