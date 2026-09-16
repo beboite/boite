@@ -95,6 +95,18 @@ The core does not terminate TLS. Public access needs an HTTPS reverse proxy
 that forwards WebSocket upgrades and preserves `Host` and `Origin`. Serve the
 UI and `/rpc` from the same origin. Do not expose plain HTTP to the internet.
 
+Before connecting through the proxy, add its exact browser origin, such as
+`https://boite.example.com`, to the core's `browserOrigins` setting. Connect the
+desktop shell directly as an owner, select that machine, open Machines > Allowed
+browser origins, and configure the origins there. Keep any existing origins that are
+still needed. Origins contain a scheme, hostname and optional port, with no
+path or trailing slash. See [machine connections](machines.md).
+
+Preserving the proxy headers alone is not enough: an HTTPS origin on port 443
+differs from the core listening on port 7337. An origin that is not allowed gets
+HTTP 403 on `/rpc`, even when the pairing token is valid. Keep the allowlist
+explicit; do not strip the `Origin` header to bypass this check.
+
 ### Image verification
 
 From a Linux checkout with Docker:

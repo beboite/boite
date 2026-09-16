@@ -22,5 +22,4 @@
 - [CI](ci.md): checks, caching, nightly builds and image publication.
 - [Releasing](releasing.md): installers, channels and versioning.
 - [Release reports](releases/2.0.0-beta.1.md): the first beta's scope and measurements.
-- [Runtime audit](audits/2026-09-16-runtime.md): reproduced runtime issues and complexity priorities.
 - [Repository rules](../AGENTS.md): boundaries a contributor must preserve.

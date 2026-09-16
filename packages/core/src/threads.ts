@@ -1120,10 +1120,8 @@ export class ThreadStore {
 
   /** The user message of the turn, read back from the journal: the text and the images it carried. */
   private lastUserInput(threadId: ThreadId, turnId: TurnId): { prompt: string; attachments: ImageAttachment[] } {
-    const messages = this.core.journal.listMessages(threadId);
-    for (let index = messages.length - 1; index >= 0; index -= 1) {
-      const message = messages[index];
-      if (message === undefined || message.turnId !== turnId || message.role !== 'user') continue;
+    const message = this.core.journal.lastUserMessage(threadId, turnId);
+    if (message !== null) {
       const attachments: ImageAttachment[] = [];
       for (const part of message.parts) {
         if (part.type === 'image') {

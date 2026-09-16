@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { Core } from '../src/core.ts';
+import { ActivityStore } from '../src/activity.ts';
 import { connect } from '../src/client.ts';
 import { setDriver } from '../src/drivers/index.ts';
 import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
@@ -8,6 +9,62 @@ let h: TestCore;
 let restore: (() => void) | undefined;
 beforeEach(async () => { h = await startTestCore(); });
 afterEach(async () => { restore?.(); restore = undefined; await h.stop(); });
+
+test.each([
+  ['quoted complete', 'Not finished.\n```\n[BOITE_GOAL_COMPLETE]\n```', 0, 'active'],
+  ['quoted blocked', 'Continuing.\n~~~text\n[BOITE_GOAL_BLOCKED]\n~~~', 0, 'active'],
+  ['indented example', 'Example:\n    [BOITE_GOAL_COMPLETE]', 0, 'active'],
+  ['beyond page', '[BOITE_GOAL_COMPLETE]', 120, 'complete'],
+] as const)('goal marker: %s', async (_name, text, extraMessages, expected) => {
+  const client = await h.connect();
+  const { threadId } = await echoThread(h, client);
+  restore = setDriver('echo', {
+    protocol: 'echo', startTurn(ctx) {
+      for (let i = 0; i <= extraMessages; i++) {
+        const id = ctx.emit.startMessage('assistant');
+        ctx.emit.part(id, 0, { type: 'text', text: i === 0 ? text : 'Additional output.' });
+        ctx.emit.complete(id, 'complete');
+      }
+      return { stop() {}, done: Promise.resolve({ status: 'done', sessionId: null, usage: null }) };
+    },
+  });
+  h.core.activity.set({ threadId, goal: { objective: 'Check completion' } });
+  await waitFor(() => h.core.activity.get(threadId).goal!.iterations > 0 && h.core.threads.get(threadId).status === 'idle');
+  expect(h.core.activity.get(threadId).goal?.status).toBe(expected);
+  h.core.activity.pauseAll(threadId);
+});
+
+test('paused activity produces no new events when loaded or closed again', async () => {
+  const client = await h.connect();
+  const { threadId } = await echoThread(h, client);
+  h.core.activity.set({ threadId, goal: { objective: 'Wait' } });
+  h.core.activity.pauseAll(threadId);
+  const count = () => (h.core.journal.db.query("SELECT COUNT(*) AS n FROM events WHERE type = 'thread.activity'").get() as { n: number }).n;
+  const before = count();
+  h.core.activity.close();
+  expect(count()).toBe(before);
+  const loaded = new ActivityStore(h.core);
+  loaded.close();
+  expect(count()).toBe(before);
+});
+
+test('starting a turn does not decode historical messages to read its prompt', async () => {
+  const client = await h.connect();
+  const { threadId } = await echoThread(h, client);
+  h.core.journal.putMessage({ id: 'history', threadId, turnId: 'old', role: 'assistant', state: 'complete', createdAt: 0, parts: [{ type: 'text', text: 'old'.repeat(1000) }] });
+  const original = h.core.journal.listMessages.bind(h.core.journal);
+  h.core.journal.listMessages = () => { throw new Error('unbounded history read'); };
+  let prompt: string | undefined;
+  restore = setDriver('echo', { protocol: 'echo', startTurn(ctx) {
+    prompt = ctx.prompt;
+    return { stop() {}, done: Promise.resolve({ status: 'done', sessionId: null, usage: null }) };
+  } });
+  try {
+    const turn = h.core.threads.startTurn(threadId, 'current prompt');
+    await waitFor(() => h.core.journal.getTurn(turn.id)?.finishedAt !== null);
+    expect(prompt).toBe('current prompt');
+  } finally { h.core.journal.listMessages = original; }
+});
 
 test('goal continues across turns, reports tasks and stops only on completion', async () => {
   const client = await h.connect();

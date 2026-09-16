@@ -15,8 +15,19 @@ function escape(text: string): string {
 }
 
 function inline(text: string): string {
+  const code: string[] = [];
+  let marker = '\0';
+  while (text.includes(marker)) marker += '\0';
+  const protectedText = text.replace(/(?<!`)(`+)(.+?)\1(?!`)/g, (_match, _ticks: string, value: string) => {
+    code.push(`<code>${escape(value)}</code>`);
+    return `${marker}${code.length - 1}${marker}`;
+  });
+  // Format around opaque spans, then restore them without parsing their contents.
+  return inlineFormatting(protectedText).split(marker).map((part, index) => index % 2 ? code[Number(part)]! : part).join('');
+}
+
+function inlineFormatting(text: string): string {
   let out = escape(text);
-  out = out.replace(/`([^`\n]+)`/g, '<code>$1</code>');
   out = out.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
   out = out.replace(/(^|[^*\w])\*([^*\n]+)\*(?!\w)/g, '$1<em>$2</em>');
   out = out.replace(/~~([^~\n]+)~~/g, '<del>$1</del>');
@@ -89,9 +100,7 @@ export function renderMarkdown(source: string): string {
   const lines = source.replaceAll('\r\n', '\n').split('\n');
   const html: string[] = [];
   let paragraph: string[] = [];
-  let list: ListItem[] | null = null;
-  /** The items open at each indent, innermost last: where the next line nests. */
-  let stack: ListItem[] = [];
+  const list = new MarkdownList();
 
   const flushParagraph = (): void => {
     if (paragraph.length === 0) return;
@@ -99,10 +108,7 @@ export function renderMarkdown(source: string): string {
     paragraph = [];
   };
   const flushList = (): void => {
-    if (!list) return;
-    html.push(renderItems(list));
-    list = null;
-    stack = [];
+    html.push(list.flush());
   };
   const flushAll = (): void => {
     flushParagraph();
@@ -111,17 +117,11 @@ export function renderMarkdown(source: string): string {
 
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index] ?? '';
-    const fence = FENCE.exec(line);
+    const fence = readFence(lines, index);
     if (fence) {
       flushAll();
-      const code: string[] = [];
-      index += 1;
-      while (index < lines.length && !FENCE.test(lines[index] ?? '')) {
-        code.push(lines[index] ?? '');
-        index += 1;
-      }
-      const language = fence[1] ? ` data-language="${escape(fence[1])}"` : '';
-      html.push(`<pre${language}><code>${escape(code.join('\n'))}</code></pre>`);
+      html.push(fence.html);
+      index = fence.end;
       continue;
     }
 
@@ -144,70 +144,32 @@ export function renderMarkdown(source: string): string {
       continue;
     }
 
-    if (QUOTE.test(line)) {
+    const quote = readQuote(lines, index);
+    if (quote) {
       flushAll();
-      const quoted: string[] = [];
-      while (index < lines.length) {
-        const match = QUOTE.exec(lines[index] ?? '');
-        if (!match) break;
-        quoted.push(match[1] ?? '');
-        index += 1;
-      }
-      index -= 1;
-      html.push(`<blockquote>${renderMarkdown(quoted.join('\n'))}</blockquote>`);
+      html.push(quote.html);
+      index = quote.end;
       continue;
     }
 
     // A table is a row, a delimiter row, then rows until a blank or a line with no pipe.
-    const next = lines[index + 1] ?? '';
-    if (line.includes('|') && TABLE_DELIMITER.test(next) && cells(next).length >= 1 && !ITEM.test(line)) {
+    const table = readTable(lines, index);
+    if (table) {
       flushAll();
-      const body: string[] = [];
-      let cursor = index + 2;
-      while (cursor < lines.length) {
-        const candidate = lines[cursor] ?? '';
-        if (candidate.trim() === '' || !candidate.includes('|')) break;
-        body.push(candidate);
-        cursor += 1;
-      }
-      html.push(renderTable(line, next, body));
-      index = cursor - 1;
+      html.push(table.html);
+      index = table.end;
       continue;
     }
 
-    const item = ITEM.exec(line);
+    const item = parseListItem(line);
     if (item) {
       flushParagraph();
-      const indent = (item[1] ?? '').length;
-      const kind: 'ul' | 'ol' = BULLET_MARK.test(line) ? 'ul' : 'ol';
-      const task = TASK.exec(item[2] ?? '');
-      const entry: ListItem = {
-        indent,
-        kind,
-        text: task ? (task[2] ?? '') : (item[2] ?? ''),
-        task: task ? ((task[1] ?? ' ') === ' ' ? 'open' : 'done') : null,
-        children: []
-      };
-      // Pop every open item at this depth or deeper: the new one is their sibling or an uncle.
-      while (stack.length > 0 && (stack[stack.length - 1]?.indent ?? 0) >= indent) stack.pop();
-      const parent = stack[stack.length - 1];
-      if (!parent) {
-        if (list && list[0]?.kind !== kind && list[0]?.indent === indent) flushList();
-        if (!list) list = [];
-        list.push(entry);
-      } else {
-        parent.children.push(entry);
-      }
-      stack.push(entry);
+      html.push(list.add(item));
       continue;
     }
 
     // Indented text under an item continues that item.
-    const open = stack[stack.length - 1];
-    if (open && /^\s{2,}\S/.test(line)) {
-      open.text += ` ${line.trim()}`;
-      continue;
-    }
+    if (list.continue(line)) continue;
 
     flushList();
     paragraph.push(line);
@@ -215,6 +177,93 @@ export function renderMarkdown(source: string): string {
 
   flushAll();
   return html.join('');
+}
+
+interface Block { html: string; end: number }
+
+function readFence(lines: string[], start: number): Block | null {
+  const fence = FENCE.exec(lines[start] ?? '');
+  if (!fence) return null;
+  const code: string[] = [];
+  let end = start + 1;
+  while (end < lines.length && !FENCE.test(lines[end] ?? '')) code.push(lines[end++] ?? '');
+  const language = fence[1] ? ` data-language="${escape(fence[1])}"` : '';
+  return { html: `<pre${language}><code>${escape(code.join('\n'))}</code></pre>`, end };
+}
+
+function readQuote(lines: string[], start: number): Block | null {
+  const quoted: string[] = [];
+  let cursor = start;
+  while (cursor < lines.length) {
+    const match = QUOTE.exec(lines[cursor] ?? '');
+    if (!match) break;
+    quoted.push(match[1] ?? '');
+    cursor++;
+  }
+  return quoted.length ? { html: `<blockquote>${renderMarkdown(quoted.join('\n'))}</blockquote>`, end: cursor - 1 } : null;
+}
+
+function readTable(lines: string[], start: number): Block | null {
+  const head = lines[start] ?? '';
+  const delimiter = lines[start + 1] ?? '';
+  if (!head.includes('|') || !TABLE_DELIMITER.test(delimiter) || ITEM.test(head)) return null;
+  const body: string[] = [];
+  let cursor = start + 2;
+  while (cursor < lines.length) {
+    const line = lines[cursor] ?? '';
+    if (!line.trim() || !line.includes('|')) break;
+    body.push(line);
+    cursor++;
+  }
+  return { html: renderTable(head, delimiter, body), end: cursor - 1 };
+}
+
+function parseListItem(line: string): ListItem | null {
+  const item = ITEM.exec(line);
+  if (!item) return null;
+  const text = item[2] ?? '';
+  const task = TASK.exec(text);
+  return {
+    indent: (item[1] ?? '').length,
+    kind: BULLET_MARK.test(line) ? 'ul' : 'ol',
+    text: task ? task[2] ?? '' : text,
+    task: task ? (task[1] === ' ' ? 'open' : 'done') : null,
+    children: []
+  };
+}
+
+/** Open ancestors retain the list nesting while blocks consume source lines. */
+class MarkdownList {
+  private items: ListItem[] = [];
+  private stack: ListItem[] = [];
+
+  add(entry: ListItem): string {
+    while (this.stack.length && this.stack[this.stack.length - 1]!.indent >= entry.indent) this.stack.pop();
+    const parent = this.stack[this.stack.length - 1];
+    let previous = '';
+    if (parent) parent.children.push(entry);
+    else {
+      const first = this.items[0];
+      if (first && first.kind !== entry.kind && first.indent === entry.indent) previous = this.flush();
+      this.items.push(entry);
+    }
+    this.stack.push(entry);
+    return previous;
+  }
+
+  continue(line: string): boolean {
+    const open = this.stack[this.stack.length - 1];
+    if (!open || !/^\s{2,}\S/.test(line)) return false;
+    open.text += ` ${line.trim()}`;
+    return true;
+  }
+
+  flush(): string {
+    const html = this.items.length ? renderItems(this.items) : '';
+    this.items = [];
+    this.stack = [];
+    return html;
+  }
 }
 
 /** Where the caret goes when the text ends on a block that closes in several tags. */
