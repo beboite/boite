@@ -16,13 +16,9 @@ export class ActivityStore {
     for (const thread of core.journal.listThreads()) {
       const saved = core.journal.getSetting(`activity:${thread.id}`) as ThreadActivity | undefined;
       if (!saved) continue;
-      for (const kind of ['goal', 'loop'] as const) {
-        const item = saved[kind];
-        if (item?.status === 'active') { item.status = 'paused'; item.error = 'Core restarted. Resume to continue.'; }
-      }
-      if (saved.loop) saved.loop.nextRunAt = null;
+      const changed = pauseActivity(saved, 'Core restarted. Resume to continue.');
       this.states.set(thread.id, saved);
-      this.save(thread.id);
+      if (changed) this.save(thread.id);
     }
     core.bus.onAny((name, payload) => {
       if (this.closed) return;
@@ -103,12 +99,7 @@ export class ActivityStore {
       const state = this.get(threadId);
       let createdId: string | null = null;
       if (part.name.toLowerCase() === 'taskcreate') {
-        try {
-          const output = JSON.parse(part.output ?? 'null');
-          const id = output?.task?.id ?? output?.taskId ?? output?.id;
-          if (typeof id === 'string' || typeof id === 'number') createdId = String(id);
-        } catch { /* Some Claude versions return a human-readable result. */ }
-        createdId ??= /Task\s+#?(\d+)\s+created/i.exec(part.output ?? '')?.[1] ?? null;
+        createdId = createdTaskId(part.output);
         if (!createdId) return;
       }
       const id = String(input.taskId ?? createdId);
@@ -128,14 +119,26 @@ export class ActivityStore {
     const state = this.states.get(turn.threadId);
     if (!state) return;
     if (owned?.kind === 'goal' && owned.generation === (this.generations.get(turn.threadId) ?? 0) && state.goal?.status === 'active') {
-      const messages = this.core.threads.get(turn.threadId).messages;
-      const completed = messages.some((message) => message.turnId === turn.id && message.role === 'assistant' && message.parts.some((part) => part.type === 'text' && /^\s*\[BOITE_GOAL_COMPLETE\]\s*$/m.test(part.text)));
-      const blocked = messages.some((message) => message.turnId === turn.id && message.role === 'assistant' && message.parts.some((part) => part.type === 'text' && /^\s*\[BOITE_GOAL_BLOCKED\]\s*$/m.test(part.text)));
-      if (blocked) { state.goal.status = 'paused'; state.goal.error = 'The agent reported a blocker. Read its answer before resuming.'; this.save(turn.threadId); }
-      else if (completed) { state.goal.status = 'complete'; this.save(turn.threadId); }
+      const signal = this.goalResult(turn);
+      if (signal === 'blocked') { state.goal.status = 'paused'; state.goal.error = 'The agent reported a blocker. Read its answer before resuming.'; this.save(turn.threadId); }
+      else if (signal === 'complete') { state.goal.status = 'complete'; this.save(turn.threadId); }
     }
     // Let the scheduler release its running slot and clients submit queued user input first.
     this.schedule(turn.threadId, 250);
+  }
+
+  private goalResult(turn: Turn): 'complete' | 'blocked' | null {
+    let result: 'complete' | null = null;
+    for (const message of this.core.journal.walkTurnMessages(turn.threadId, turn.id)) {
+      if (message.role !== 'assistant') continue;
+      for (const part of message.parts) {
+        if (part.type !== 'text') continue;
+        const signal = goalSignal(part.text);
+        if (signal === 'blocked') return signal;
+        if (signal === 'complete') result = signal;
+      }
+    }
+    return result;
   }
 
   private run(threadId: string): void {
@@ -150,7 +153,7 @@ export class ActivityStore {
       return;
     }
     const prompt = kind === 'goal'
-      ? `Work toward this goal: ${state.goal!.objective}\nContinue until the objective is achieved. When you have verified completion, write [BOITE_GOAL_COMPLETE] alone on its own line. If blocked or waiting for user input, explain what is missing and write [BOITE_GOAL_BLOCKED] alone on its own line.`
+      ? `Work toward this goal: ${state.goal!.objective}\nContinue until the objective is achieved. When you have verified completion, end your answer with [BOITE_GOAL_COMPLETE] alone on its own line, outside code blocks. If blocked or waiting for user input, explain what is missing and end with [BOITE_GOAL_BLOCKED] alone on its own line, outside code blocks.`
       : state.loop!.prompt;
     const taskGuidance = kind === 'goal'
       ? '\nTrack the work with your native planning tool (Codex: update_plan; Claude: TodoWrite or TaskCreate/TaskUpdate). Boite displays those task updates in this thread. Create the plan before working and update its statuses as you verify results. The Boite goal already exists; do not create a second goal or use legacy Boite todo tools.'
@@ -180,9 +183,7 @@ export class ActivityStore {
     const state = this.states.get(threadId);
     if (!state) return;
     this.clearTimer(threadId);
-    for (const kind of ['goal', 'loop'] as const) { const item = state[kind]; if (item?.status === 'active') { item.status = 'paused'; item.error = error; } }
-    if (state.loop) state.loop.nextRunAt = null;
-    this.save(threadId);
+    if (pauseActivity(state, error)) this.save(threadId);
   }
 
   private save(threadId: string): void {
@@ -195,6 +196,49 @@ export class ActivityStore {
 }
 
 export function taskStatus(value: unknown): AgentTask['status'] { return value === 'completed' ? 'completed' : value === 'in_progress' || value === 'inProgress' ? 'in_progress' : 'pending'; }
+
+function createdTaskId(text: string | null): string | null {
+  try {
+    const output = JSON.parse(text ?? 'null');
+    const id = output?.task?.id ?? output?.taskId ?? output?.id;
+    if (typeof id === 'string' || typeof id === 'number') return String(id);
+  } catch { /* Older agents return a human-readable confirmation. */ }
+  return /Task\s+#?(\d+)\s+created/i.exec(text ?? '')?.[1] ?? null;
+}
+
+function pauseActivity(state: ThreadActivity, error: string | null): boolean {
+  let changed = false;
+  for (const item of [state.goal, state.loop]) {
+    if (item?.status !== 'active') continue;
+    item.status = 'paused';
+    item.error = error;
+    changed = true;
+  }
+  if (state.loop && state.loop.nextRunAt !== null) {
+    state.loop.nextRunAt = null;
+    changed = true;
+  }
+  return changed;
+}
+
+/** Only a final standalone marker outside fenced or indented code is a signal. */
+export function goalSignal(text: string): 'complete' | 'blocked' | null {
+  let fence: string | null = null;
+  let last = '';
+  for (const line of text.split(/\r?\n/)) {
+    const mark = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+    if (fence !== null) {
+      if (mark && mark[1]![0] === fence[0] && mark[1]!.length >= fence.length && mark[2]!.trim() === '') fence = null;
+      if (line.trim()) last = '';
+      continue;
+    }
+    if (mark) { fence = mark[1]!; last = ''; continue; }
+    if (line.trim()) last = line;
+  }
+  if (/^ {0,3}\[BOITE_GOAL_COMPLETE\][ \t]*$/.test(last)) return 'complete';
+  if (/^ {0,3}\[BOITE_GOAL_BLOCKED\][ \t]*$/.test(last)) return 'blocked';
+  return null;
+}
 export function normalizeTasks(items: unknown[]): AgentTask[] {
   return items.flatMap((value, index) => {
     if (!value || typeof value !== 'object') return [];

@@ -4,3 +4,13 @@
 *.icns binary
 *.woff2 binary
 docker/boite-server text eol=lf
+
+# Keep language statistics focused on TypeScript, Svelte and Rust.
+# Supporting styles, entry points and scripts remain visible in diffs.
+*.css -linguist-detectable
+*.html -linguist-detectable
+*.js -linguist-detectable
+*.ps1 -linguist-detectable
+*.sh -linguist-detectable
+Dockerfile -linguist-detectable
+docker/boite-server -linguist-detectable
