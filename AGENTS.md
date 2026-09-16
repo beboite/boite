@@ -58,6 +58,14 @@ Run the relevant checks before claiming success. Visual changes need captures
 opened at desktop and phone widths. Performance claims need fresh measurements,
 with the command and date. Live-provider tests spend tokens and stay opt-in.
 
+## Follow through on pull requests
+
+Opening a PR triggers automated code reviews by agents. Keep monitoring the PR
+until those reviews and CI checks finish. Read every finding, fix valid issues,
+and explain any finding you reject. After each push, check the new reviews and
+CI results again. Do not leave the PR unattended with unresolved feedback or
+failing checks; report any blocker that needs the user's decision.
+
 ## Documentation map
 
 - [Documentation index](docs/README.md): one page per subject.
