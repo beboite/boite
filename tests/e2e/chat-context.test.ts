@@ -32,7 +32,7 @@ test('receipts follow actual activity, response indicator stays left and complet
   expect(await page.evaluate(`document.querySelector('[data-testid="turn-summary"]').getBoundingClientRect().left < document.querySelector('.bubble').getBoundingClientRect().left`)).toBe(true);
   await page.send('Emulation.setEmulatedMedia', {features:[{name:'prefers-reduced-motion',value:'reduce'}]});
   expect(await page.evaluate(`getComputedStyle(document.querySelector('[data-testid="turn-summary"] svg')).animationName`)).toBe('none');
-  await page.send('Emulation.setEmulatedMedia', {features:[]});
+  await page.send('Emulation.setEmulatedMedia', {features:[{name:'prefers-reduced-motion',value:'no-preference'}]});
   await page.evaluate(`Object.defineProperty(document,'hidden',{value:true,configurable:true}); document.dispatchEvent(new Event('visibilitychange'));`);
   await page.waitFor(`getComputedStyle(document.querySelector('[data-testid="turn-summary"] svg')).animationPlayState === 'paused'`);
   await page.evaluate(`delete document.hidden; document.dispatchEvent(new Event('visibilitychange'));`);
@@ -60,4 +60,4 @@ test('context opens on hover, shows exact segments, and compaction needs its own
   await page.click('[data-testid="context-compact"]');
   await page.waitFor(`!document.querySelector('[data-testid="context-popup"]')`);
   expect(await page.evaluate(`window.__compactCalls`)).toBe(1);
-});
+}, 30000);

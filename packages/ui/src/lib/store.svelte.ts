@@ -1451,6 +1451,9 @@ export class Store {
     if (!client || !threadId || this.connection !== 'ready') return false;
     if (prompt.trim().length === 0 && attachments.length === 0) return false;
     try {
+      // Reconnect snapshots must land before a new stream starts mutating the thread.
+      await this.#reloading;
+      if (this.#client !== client || this.connection !== 'ready') return false;
       const activity = activityCommand(prompt);
       if (activity) {
         if (attachments.length) throw new Error(strings.activity.noAttachments);

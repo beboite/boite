@@ -1377,3 +1377,26 @@ test('an older core names the host that needs goals support and keeps the unsent
     expect(spy.mock.calls.some(([method]) => method === 'turns.start')).toBe(false);
   } finally { spy.mockRestore(); }
 });
+
+test('sending waits for reconnect history to finish loading', async () => {
+  await mountOnFake();
+  await waitFor(() => store.openThread !== null);
+  const client = store.client!;
+  const call = client.call.bind(client);
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const spy = vi.spyOn(client, 'call').mockImplementation((method, params) => {
+    if (method === 'threads.get') return gate.then(() => call<RpcMethodName>(method, params));
+    return call<RpcMethodName>(method, params);
+  });
+  try {
+    const loading = store.reload();
+    await waitFor(() => spy.mock.calls.some(([method]) => method === 'threads.get'));
+    const sending = store.send('after reconnect');
+    await Promise.resolve();
+    expect(spy.mock.calls.some(([method]) => method === 'turns.start')).toBe(false);
+    release();
+    await loading;
+    expect(await sending).toBe(true);
+  } finally { release(); spy.mockRestore(); }
+});
