@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { echoThread, startTestCore, type TestCore } from './harness.ts';
-import { parsePullRequests, PullRequests } from '../src/pull-requests.ts';
+import { hasGitHubRemote, parsePullRequests, PullRequests } from '../src/pull-requests.ts';
 let harness: TestCore;
 beforeEach(async () => {
   harness = await startTestCore();
@@ -70,6 +70,15 @@ test('PR metadata accepts absence and rejects unsafe URLs and malformed CLI outp
   expect(() => parsePullRequests('[null]')).toThrow('object');
 });
 
+test('PR host detection accepts GitHub transports and an explicitly configured enterprise host', () => {
+  for (const url of ['https://github.com/example/repo.git', 'git@github.com:example/repo.git', 'github.com:example/repo.git', 'ssh://git@github.com/example/repo.git']) {
+    expect(hasGitHubRemote(`origin\t${url} (fetch)`, 'github.com')).toBe(true);
+  }
+  expect(hasGitHubRemote('origin\thttps://git.example/team/repo.git (fetch)', 'git.example')).toBe(true);
+  expect(hasGitHubRemote('origin\thttps://github.com.other.example/team/repo.git (fetch)', 'github.com')).toBe(false);
+  expect(hasGitHubRemote('')).toBe(false);
+});
+
 test('PR reads coalesce, stay within two traced processes and preserve the requested branch', async () => {
   const client = await harness.connect();
   const ids: string[] = [];
@@ -86,6 +95,7 @@ test('PR reads coalesce, stay within two traced processes and preserve the reque
   const calls: string[][] = [];
   const replacement = spyOn(harness.core.procs, 'spawn').mockImplementation((scope, command, args, options) => {
     expect(scope).toStartWith('pull-request:');
+    if (command === 'git') return spawn(scope, process.execPath, ['-e', 'console.log("origin\\tgit@github.com:example/repo.git (fetch)")'], options);
     expect(command).toBe('gh');
     calls.push(args);
     running++;
@@ -109,10 +119,29 @@ test('PR reads coalesce, stay within two traced processes and preserve the reque
     const results = await Promise.all([first, reader.read(ids[1]!), reader.read(ids[2]!)]);
     expect(results.map((pr) => pr?.number)).toEqual([4, 4, 4]);
     expect(peak).toBe(2);
-    expect(calls.map((args) => args[3])).toEqual(['topic-0', 'topic-1', 'topic-2']);
+    expect(calls.map((args) => args[3]).sort()).toEqual(['topic-0', 'topic-1', 'topic-2']);
     await reader.read(ids[0]!);
     expect(calls).toHaveLength(3);
   } finally {
     replacement.mockRestore();
   }
+});
+
+test('a Forgejo project has no GitHub PR and never launches gh', async () => {
+  const client = await harness.connect();
+  const { threadId } = await echoThread(harness, client);
+  const thread = harness.core.threads.require(threadId);
+  mkdirSync(join(thread.cwd, '.git'), { recursive: true });
+  harness.core.journal.putThread({ ...thread, branch: 'main' });
+  const spawn = harness.core.procs.spawn.bind(harness.core.procs);
+  const commands: string[] = [];
+  const replacement = spyOn(harness.core.procs, 'spawn').mockImplementation((scope, command, args, options) => {
+    commands.push(command);
+    if (command === 'gh') throw new Error('Executable not found in PATH: gh');
+    return spawn(scope, process.execPath, ['-e', 'console.log("origin\\thttps://forgejo.example/team/project.git (fetch)")'], options);
+  });
+  try {
+    expect(await new PullRequests(harness.core).read(threadId)).toBeNull();
+    expect(commands).toEqual(['git']);
+  } finally { replacement.mockRestore(); }
 });

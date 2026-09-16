@@ -6,6 +6,18 @@ import { messageOf, refused } from './errors.ts';
 
 type PullRequest = ThreadSummary['pullRequest'];
 
+export function hasGitHubRemote(remotes: string, host = process.env.GH_HOST ?? 'github.com'): boolean {
+  return remotes.split('\n').some(line => {
+    const url = line.trim().split(/\s+/)[1];
+    if (!url) return false;
+    let remoteHost = '';
+    try { remoteHost = new URL(url).hostname; }
+    catch { /* Git also accepts SCP-style remotes. */ }
+    if (!remoteHost) remoteHost = url.match(/^(?:[^@/\s]+@)?([^:/\s]+):/)?.[1] ?? '';
+    return remoteHost.toLowerCase() === host.toLowerCase();
+  });
+}
+
 export function parsePullRequests(text: string): PullRequest {
   const values: unknown = JSON.parse(text);
   if (!Array.isArray(values)) throw new Error('gh output must be a pull request array');
@@ -50,6 +62,8 @@ export class PullRequests {
         if (parent === folder) return null;
         folder = parent;
       }
+      // Forgejo, GitLab and local repositories have no GitHub PR to query.
+      if (!hasGitHubRemote(await this.#run(thread, 'git', ['remote', '-v']))) return null;
       const branch = thread.branch ?? (await this.#run(thread, 'git', ['rev-parse', '--abbrev-ref', 'HEAD'])).trim();
       if (branch === 'HEAD') return null;
       return parsePullRequests(
