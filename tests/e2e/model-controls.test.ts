@@ -90,11 +90,13 @@ test('favorites survive reload, reasoning has discrete stops, and the context ri
   await capture('favorites-phone.png');
   await page.send('Emulation.clearDeviceMetricsOverride', {});
   await page.navigate(url);
+  await page.waitFor(`document.querySelector('[data-testid=context-trigger]')`);
+  await page.click('[data-testid=context-trigger]');
   await page.waitFor(`document.querySelector('[data-testid=context-compact]') && !document.querySelector('[data-testid=context-compact]').disabled`);
   await capture('context-compact-before.png');
   await page.click('[data-testid=context-compact]');
   await page.waitFor(`document.querySelector('[data-testid=compaction-part][data-trigger=manual]')`);
-  await page.waitFor(`document.querySelector('[data-testid=context-meter]')?.title.includes('7,8k') || document.querySelector('[data-testid=context-meter]')?.title.includes('7.8k') || document.querySelector('[data-testid=context-meter]')?.title.includes('8k')`);
+  await page.waitFor(`document.querySelector('[data-testid=context-meter]')?.dataset.percent === '4'`);
   await capture('context-compact-after.png');
   await page.click('[data-testid=composer-picker]');
   await page.waitFor(`document.querySelector('[data-testid=favorite-model]')`);

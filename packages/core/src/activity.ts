@@ -152,8 +152,11 @@ export class ActivityStore {
     const prompt = kind === 'goal'
       ? `Work toward this goal: ${state.goal!.objective}\nContinue until the objective is achieved. When you have verified completion, write [BOITE_GOAL_COMPLETE] alone on its own line. If blocked or waiting for user input, explain what is missing and write [BOITE_GOAL_BLOCKED] alone on its own line.`
       : state.loop!.prompt;
+    const taskGuidance = kind === 'goal'
+      ? '\nTrack the work with your native planning tool (Codex: update_plan; Claude: TodoWrite or TaskCreate/TaskUpdate). Boite displays those task updates in this thread. Create the plan before working and update its statuses as you verify results. The Boite goal already exists; do not create a second goal or use legacy Boite todo tools.'
+      : '';
     try {
-      const turn = this.core.threads.startTurn(threadId, prompt);
+      const turn = this.core.threads.startTurn(threadId, prompt + taskGuidance, [], undefined, undefined, kind === 'goal' ? `/goal ${state.goal!.objective}` : `/loop ${state.loop!.intervalMs / 1000}s ${state.loop!.prompt}`);
       this.ownTurns.set(turn.id, { kind, generation: this.generations.get(threadId) ?? 0 });
       // Drivers may synchronously report tasks while startTurn runs.
       const current = this.states.get(threadId)!;

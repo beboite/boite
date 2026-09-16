@@ -1278,7 +1278,7 @@ export class FakeClient implements ObservableClient {
     return stopped;
   }
 
-  #startTurn(threadId: ThreadId, prompt: string, attachments: ImageAttachment[] = [], operation?: 'compact'): Turn {
+  #startTurn(threadId: ThreadId, prompt: string, attachments: ImageAttachment[] = [], operation?: 'compact', displayPrompt?: string): Turn {
     const thread = this.#thread(threadId);
     if (thread.archived) {
       throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'cannot start a turn on an archived thread', data: { threadId } });
@@ -1322,7 +1322,7 @@ export class FakeClient implements ObservableClient {
       role: 'user',
       // The images ride after the text, the order the core journals them in.
       parts: [
-        { type: 'text', text: prompt },
+        { type: 'text', text: prompt, ...(displayPrompt ? { displayText: displayPrompt } : {}) },
         ...attachments.map((attachment): MessagePart => ({
           type: 'image',
           mimeType: attachment.mimeType,
@@ -1921,7 +1921,7 @@ export class FakeClient implements ObservableClient {
         return;
       }
       try {
-        const turn = this.#startTurn(threadId, kind === 'goal' ? activity.goal!.objective : activity.loop!.prompt);
+        const turn = this.#startTurn(threadId, kind === 'goal' ? activity.goal!.objective : activity.loop!.prompt, [], undefined, kind === 'goal' ? `/goal ${activity.goal!.objective}` : `/loop ${activity.loop!.intervalMs / 1000}s ${activity.loop!.prompt}`);
         this.#activityTurns.set(turn.id, { kind, goal: activity.goal });
         activity[kind]!.iterations++;
         if (kind === 'loop') activity.loop!.nextRunAt = Date.now() + activity.loop!.intervalMs;
@@ -2772,7 +2772,7 @@ export class FakeClient implements ObservableClient {
     finished.context = { tokens: 84_000, window: 200_000, at: T0 + 60_000 };
     finished.branch = 'boite/trace';
     finished.pullRequest = { number: 84, url: 'https://github.com/example/project/pull/84', state: 'OPEN' };
-    unread.context = { tokens: 31_000, window: 200_000, at: T0 + 340_000 };
+    unread.context = { tokens: 31_000, breakdown: {input: 18000, cache: 10000, output: 3000}, window: 200_000, at: T0 + 340_000 };
 
     for (const thread of [finished, running, waiting, unread]) this.#threads.set(thread.id, thread);
     if (this.#long) {
