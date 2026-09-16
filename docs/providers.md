@@ -136,6 +136,17 @@ and which has no installer of its own: a `version`, a zip `url`, its `sha256`, i
 `archiveBytes`, and every `files` entry expected out of the archive with its exact
 size, the first one the executable.
 
+`format` defaults to `zip`. A `binary` download installs one executable directly;
+its single `files` entry must have the same size as `archiveBytes`. Both formats
+verify the download's length and SHA-256 before making it available. Claude on
+Windows uses the official x64 binary this way. Its managed copy lives under
+Boite's data directory, without replacing a CLI installation elsewhere.
+
+For a missing managed agent, `Connect an account` downloads it and starts an
+isolated login after installation. Cancelling or leaving the Providers page
+cancels the pending login continuation. The download itself can be cancelled
+with its Cancel button. Existing CLI accounts are left unchanged.
+
 `providers.install` streams the archive to
 `<dataDir>/agents/<id>/downloads/<version>.zip.part`, hashing as it writes, and
 refuses a wrong digest or a wrong length naming both values. It unpacks with a

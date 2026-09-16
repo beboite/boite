@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, untrack } from 'svelte';
+  import { onMount, tick, untrack } from 'svelte';
   import { ChevronRight } from '@lucide/svelte';
   import type { Account, AccountQuota, ProviderSummary } from '@boite/contracts';
   import QuotaList from './QuotaList.svelte';
@@ -21,10 +21,27 @@
   let codes = $state<Record<string, string>>({});
   let quotas = $state<AccountQuota[]>([]);
   let quotaBusy = $state(false);
-  let connectAfterCreate = $state(false);
+  let connecting = $state<string | null>(null);
+  let signingIn = false;
   let submitting = $state(false);
   let verified = $state<Record<string, number>>({});
   let checking = $state<string | null>(null);
+  let detecting = $state(false);
+  const setupUrls: Record<string, string> = {
+    claude: 'https://code.claude.com/docs/en/setup',
+    codex: 'https://developers.openai.com/codex/cli',
+    opencode: 'https://opencode.ai/docs/',
+    grok: 'https://grok.com/build',
+    pi: 'https://github.com/earendil-works/pi',
+  };
+  async function detect() {
+    if (!store.client || detecting) return;
+    detecting = true;
+    try {
+      await store.reloadProviders();
+    }
+    finally { detecting = false; }
+  }
   async function readQuotas(refresh = false) {
     if (!store.client || quotaBusy) return;
     quotaBusy = true;
@@ -47,14 +64,47 @@
     } catch (error) { store.error = String(error); }
     finally { checking = null; }
   }
-  function connect(provider: ProviderSummary) {
-    providerId = provider.id; label = provider.name; useDefaultLocation = false;
-    connectAfterCreate = true; adding = true;
+  async function signIn(provider: ProviderSummary) {
+    if (signingIn) return;
+    signingIn = true;
+    try {
+      const account = store.accounts.find(account => account.providerId === provider.id && account.isolationDir !== null && account.status !== 'ok')
+        ?? await store.addAccount({ providerId: provider.id, label: provider.name, useDefaultLocation: false });
+      if (account) {
+        await store.loginAccount(account.id);
+        await tick();
+        document.querySelector(`[data-testid="account-row"][data-account-id="${CSS.escape(account.id)}"]`)
+          ?.scrollIntoView({ block: 'start' });
+      }
+    } finally { signingIn = false; connecting = null; }
+  }
+  async function connect(provider: ProviderSummary) {
+    if (!store.client || connecting !== null) return;
+    connecting = provider.id;
+    if (provider.available) { await signIn(provider); return; }
+    const install = store.installOf(provider.id);
+    if (!install) { connecting = null; return; }
+    try {
+      if (install.state === 'absent' || install.state === 'failed') {
+        if (!await store.installProvider(provider.id)) connecting = null;
+      } else if (install.state === 'installed') {
+        store.error = strings.providerSettings.reinstall;
+        connecting = null;
+      }
+    } catch (error) { store.error = String(error); connecting = null; }
   }
   onMount(() => {
     void readQuotas();
     const off = store.client?.on('quotas.updated', (rows) => { quotas = rows; });
-    return () => off?.();
+    const offProviders = store.client?.on('providers.updated', ({ loaded }) => {
+      const provider = loaded.find(provider => provider.id === connecting && provider.available);
+      if (provider) void signIn(provider);
+    });
+    const offInstall = store.client?.on('providers.installProgress', event => {
+      if (event.providerId !== connecting) return;
+      if (event.state === 'failed' || event.state === 'absent') connecting = null;
+    });
+    return () => { off?.(); offProviders?.(); offInstall?.(); connecting = null; };
   });
 
   async function submit(event: SubmitEvent) {
@@ -67,11 +117,7 @@
     if (!account) return;
     label = '';
     adding = false;
-    if (connectAfterCreate && account.isolationDir !== null) await store.loginAccount(account.id);
   }
-
-  /** The providers whose files Boite downloads itself, install block and all. */
-  let managed = $derived(store.providers.filter((p: ProviderSummary) => store.installOf(p.id) !== null));
 
   /** The provider column of the add form, drawn as a menu: the family has no native select. */
   let providerItems = $derived(
@@ -119,9 +165,11 @@
 <div class="page" data-testid="accounts-page">
   <header class="head">
     <h1>{strings.providerSettings.heading}</h1>
-    <button class="quiet" onclick={() => { connectAfterCreate = false; adding = !adding; }}>{strings.accounts.add}</button>
+    <button class="quiet" onclick={() => { adding = !adding; }}>{strings.accounts.add}</button>
   </header>
   <p class="intro lead">{strings.providerSettings.intro}</p>
+  <p class="intro lead">{strings.providerSettings.detectHint}</p>
+  <button class="quiet" data-testid="providers-refresh" disabled={detecting} onclick={() => void detect()}>{strings.providerSettings.refresh}</button>
 
   <!-- Under the intro, where both of its buttons are: the heading's and a card's. -->
   {#if adding}
@@ -171,28 +219,30 @@
           </details>
         {/if}
         <!-- A provider whose login Boite cannot drive has no button to grey out. -->
-        {#if provider.login}
+        {#if !provider.available && store.installOf(provider.id) === null}
+          <p class="intro">{strings.providerSettings.installHint.replace('{provider}', provider.name)}</p>
+          {#if setupUrls[provider.id]}
+            <a class="setup" href={setupUrls[provider.id]} target="_blank" rel="noreferrer">{strings.providerSettings.setup}</a>
+          {/if}
+        {/if}
+        {#if store.installOf(provider.id) !== null}
+          <InstallControl {store} {provider} />
+        {/if}
+        {#if provider.login && (provider.available || store.installOf(provider.id) !== null)}
           <button
             class="small connect"
-            disabled={!provider.available}
-            title={provider.available ? undefined : strings.providerSettings.missing}
-            onclick={() => connect(provider)}
+            disabled={connecting !== null}
+            onclick={() => void connect(provider)}
           >
             {strings.providerSettings.connect}
           </button>
         {/if}
+        {#if connecting === provider.id && !provider.available}
+          <p class="intro" role="status">{strings.providerSettings.connectInstalling}</p>
+        {/if}
       </section>
     {/each}
   </div>
-
-  {#if managed.length > 0}
-    <section class="card managed" data-testid="managed-providers">
-      <h2>{strings.install.heading}</h2>
-      {#each managed as provider (provider.id)}
-        <InstallControl {store} {provider} />
-      {/each}
-    </section>
-  {/if}
 
   {#if store.accounts.length === 0}
     <p class="empty">{strings.accounts.empty}</p>
@@ -338,6 +388,11 @@
   .head { max-width: 720px; margin-bottom: 4px; }
   .head button { margin-left: auto; }
   .lead { max-width: 720px; margin-bottom: 16px; }
+  [data-testid='providers-refresh'] { margin-bottom: 16px; }
+  .setup { color: var(--color-foreground); text-decoration: underline; font-size: var(--text-sm); }
+  .provider :global(.install-row) { flex-direction: column; align-items: flex-start; }
+  .provider :global(.install-row .name) { display: none; }
+  .provider :global(.install-row .note) { white-space: normal; }
 
   .providers { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 220px), 1fr)); gap: 10px; max-width: 720px; margin-bottom: 20px; }
   .provider { display: flex; flex-direction: column; gap: 8px; margin: 0; }
@@ -399,12 +454,6 @@
 
   .monitor input:focus-visible {
     outline-offset: 3px;
-  }
-
-  /* One row per provider Boite downloads itself. */
-  .managed {
-    display: grid;
-    gap: 2px;
   }
 
 

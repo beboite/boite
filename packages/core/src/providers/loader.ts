@@ -190,7 +190,11 @@ function checkStringMap(value: unknown, file: string, field: string): Record<str
  */
 function checkInstall(value: unknown, file: string, field: string): ProviderInstall {
   const obj = asObject(value, file, field);
-  checkKeys(obj, ['version', 'url', 'sha256', 'archiveBytes', 'files'], file, field);
+  checkKeys(obj, ['version', 'url', 'sha256', 'archiveBytes', 'files', 'format'], file, field);
+  const format = obj['format'];
+  if (format !== undefined && format !== 'zip' && format !== 'binary') {
+    reject(file, `${field}.format`, 'zip or binary', `${field}.format must be zip or binary`);
+  }
 
   const url = asString(obj['url'], file, `${field}.url`);
   if (!url.startsWith('http://') && !url.startsWith('https://')) {
@@ -221,7 +225,11 @@ function checkInstall(value: unknown, file: string, field: string): ProviderInst
     return { path, bytes: asPositiveInteger(item['bytes'], file, `${entryField}.bytes`) };
   });
 
-  return { version: asString(obj['version'], file, `${field}.version`), url, sha256, archiveBytes, files };
+  if (format === 'binary' && (files.length !== 1 || files[0]?.bytes !== archiveBytes)) {
+    reject(file, `${field}.files`, 'one file whose bytes equal archiveBytes', `${field}.files must describe the downloaded binary`);
+  }
+  return { version: asString(obj['version'], file, `${field}.version`), url, sha256, archiveBytes, files,
+    ...(format === 'zip' || format === 'binary' ? { format } : {}) };
 }
 
 function checkProfile(value: unknown, file: string, field: string): OsProfile {
@@ -823,6 +831,7 @@ export function registerProviderMethods(core: Core): void {
   core.router.register('providers.list', () => core.providers.list());
   core.router.register('providers.reload', () => {
     const result = core.providers.load();
+    core.accounts.ensureDefaults();
     core.bus.emit('providers.updated', result);
     return result;
   });
