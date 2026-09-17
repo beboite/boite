@@ -181,13 +181,13 @@ jobs:
       - name: Build and test installed Linux package
         if: runner.os == 'Linux'
         run: |
-          bun run --cwd apps/shell tauri build --config src-tauri/tauri.bundle.conf.json --bundles deb
+          bun apps/shell/scripts/tauri.ts build --config src-tauri/tauri.bundle.conf.json --bundles deb
           sudo dpkg -i apps/shell/src-tauri/target/release/bundle/deb/*.deb
           dbus-run-session -- xvfb-run -a bun scripts/ci/desktop-smoke.ts /usr/bin/boite-shell
       - name: Bundle and test Linux AppImage
         if: runner.os == 'Linux'
         run: |
-          bun run --cwd apps/shell tauri bundle --config src-tauri/tauri.bundle.conf.json --bundles appimage --verbose
+          bun apps/shell/scripts/tauri.ts bundle --config src-tauri/tauri.bundle.conf.json --bundles appimage --verbose
           mkdir "$RUNNER_TEMP/appimage"
           appimage=$(realpath apps/shell/src-tauri/target/release/bundle/appimage/*.AppImage)
           (cd "$RUNNER_TEMP/appimage" && "$appimage" --appimage-extract > /dev/null)
@@ -197,10 +197,20 @@ jobs:
         env:
           APPLE_SIGNING_IDENTITY: '-'
         run: |
-          bun run --cwd apps/shell tauri build --config src-tauri/tauri.bundle.conf.json --bundles app
+          bun apps/shell/scripts/tauri.ts build --config src-tauri/tauri.bundle.conf.json --bundles app
           cp -R apps/shell/src-tauri/target/release/bundle/macos/Boite.app "$RUNNER_TEMP/Boite.app"
           bun scripts/ci/desktop-smoke.ts "$RUNNER_TEMP/Boite.app/Contents/MacOS/boite-shell"
           ditto -c -k --keepParent "$RUNNER_TEMP/Boite.app" "$RUNNER_TEMP/Boite-macos.zip"
+      - name: Diagnose Linux packaging failures
+        if: failure() && runner.os == 'Linux'
+        run: |
+          patchelf --version
+          for binary in packages/core/dist/boite-core apps/shell/src-tauri/target/release/bundle/appimage/Boite.AppDir/usr/bin/boite-core; do
+            if [ -f "$binary" ]; then
+              file "$binary"
+              ldd "$binary" || true
+            fi
+          done
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: desktop-${{ matrix.os }}

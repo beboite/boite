@@ -55,6 +55,8 @@ and Linux package. Windows workers are required only by the Windows shell.
 The compiled sidecar needs no separately installed Bun runtime.
 Linux builds also need `xdg-utils`, alongside the WebKitGTK and appindicator
 development packages. The Debian package declares `xdg-utils` for opening links.
+Install `patchelf` too. The shell build wrapper selects it from PATH for
+linuxdeploy instead of using linuxdeploy's bundled copy to modify the Bun sidecar.
 
 Portable CI runs `scripts/ci/desktop-smoke.ts <installed-shell>` against the
 Debian package and macOS application bundle. Signing, notarization and testing
