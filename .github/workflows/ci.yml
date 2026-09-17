@@ -181,9 +181,13 @@ jobs:
       - name: Build and test installed Linux package
         if: runner.os == 'Linux'
         run: |
-          bun run --cwd apps/shell tauri build --config src-tauri/tauri.bundle.conf.json --bundles deb,appimage
+          bun run --cwd apps/shell tauri build --config src-tauri/tauri.bundle.conf.json --bundles deb
           sudo dpkg -i apps/shell/src-tauri/target/release/bundle/deb/*.deb
           dbus-run-session -- xvfb-run -a bun scripts/ci/desktop-smoke.ts /usr/bin/boite-shell
+      - name: Bundle and test Linux AppImage
+        if: runner.os == 'Linux'
+        run: |
+          bun run --cwd apps/shell tauri bundle --config src-tauri/tauri.bundle.conf.json --bundles appimage --verbose
           mkdir "$RUNNER_TEMP/appimage"
           appimage=$(realpath apps/shell/src-tauri/target/release/bundle/appimage/*.AppImage)
           (cd "$RUNNER_TEMP/appimage" && "$appimage" --appimage-extract > /dev/null)

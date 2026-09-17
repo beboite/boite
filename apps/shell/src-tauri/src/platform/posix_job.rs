@@ -32,6 +32,7 @@ mod tests {
 
     #[test]
     fn clean_shutdown_delivers_term_before_kill() {
+        let _process_guard = crate::PROCESS_TEST_LOCK.lock().unwrap();
         let mut child = Command::new("/bin/sh")
             .args(["-c", "trap 'exit 0' TERM; echo ready; read line"])
             .stdin(Stdio::piped()).stdout(Stdio::piped()).spawn().unwrap();

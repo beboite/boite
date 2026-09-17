@@ -33,6 +33,11 @@ const HEALTH_TIMEOUT: Duration = Duration::from_millis(500);
 const START_TIMEOUT: Duration = Duration::from_secs(15);
 const POLL_INTERVAL: Duration = Duration::from_millis(120);
 
+// A concurrent POSIX spawn can briefly inherit a flock until exec closes its
+// descriptor. Keep process creation separate from tests asserting lock release.
+#[cfg(test)]
+pub(crate) static PROCESS_TEST_LOCK: Mutex<()> = Mutex::new(());
+
 // ---------------------------------------------------------------------------
 // The install channel.
 // ---------------------------------------------------------------------------
