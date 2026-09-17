@@ -29,6 +29,8 @@ the checkerboard behind it tells transparency from white. A video or a sound
 uses the native player over the ticketed file route below. Anything else is a
 size and a download link.
 
+Captures: [changes](images/panel-changes-desktop.png) · [files](images/panel-files-desktop.png) · [editor](images/panel-file-text-desktop.png) · [picture, zoomed](images/panel-file-image-zoomed.png) · [video](images/panel-cli-video.png) · [tasks](images/panel-tasks-desktop.png) · [changes at phone width](images/panel-changes-phone.png) · [editor at phone width](images/panel-file-text-phone.png)
+
 ## What the core provides
 
 Every surface reads the thread's working directory through the core, never the
