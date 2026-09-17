@@ -683,6 +683,7 @@ test(
       expect(await phone.evaluate<string>('location.search')).toBe('');
       await phone.waitFor(`document.querySelector('[data-testid=mobile-tabs]')`);
       await phone.click('[data-testid=mobile-tabs] button:nth-child(3)');
+      await phone.click('[data-testid=mobile-settings-phone]');
       await phone.waitFor(`document.querySelector('[data-testid=phone-settings]')`);
       expect(await phone.evaluate(`document.querySelector('[data-testid=phone-public-url]') === null`)).toBe(true);
       await phone.waitFor(`navigator.serviceWorker.controller !== null`, RECONNECT_TIMEOUT_MS);

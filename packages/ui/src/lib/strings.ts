@@ -18,6 +18,12 @@ export const strings = {
     subscriptionFailed: 'The browser did not return a complete push subscription.'
   },
   mobile: {
+    settingsDevice: 'This phone', settingsDeviceHint: 'Preferences saved on this device.',
+    settingsPhone: 'App & notifications', settingsPhoneHint: 'Installation and alerts from your connected machine.',
+    settingsMachinesHint: 'Connect, switch or disconnect a remote machine.',
+    settingsAppearanceHint: 'Theme and accent for this phone.',
+    settingsRemoteHint: 'Providers, projects and server administration are managed from the desktop app.',
+    settingsBack: 'Back to settings',
     navigation: 'Navigation', threads: 'Conversations', activity: 'Activity', project: 'Choose project',
     activityHint: 'Running agents and requests waiting for you.', threadsHint: 'Your conversations across machines.',
     search: 'Find a conversation', unread: 'Unread', noActivity: 'No agents need your attention.', noThreads: 'No matching conversations.'

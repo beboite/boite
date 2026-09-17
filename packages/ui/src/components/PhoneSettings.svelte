@@ -3,7 +3,7 @@
   import type { Store } from '../lib/store.svelte';
   import { strings } from '../lib/strings';
   import { installApp, installed, PUSH_ENABLED_KEY, worker } from '../lib/pwa';
-  let { store }: { store: Store } = $props();
+  let { store, showServerSettings = true }: { store: Store; showServerSettings?: boolean } = $props();
   const inShell = window.__TAURI_INTERNALS__ !== undefined;
   const secure = window.isSecureContext;
   const capable = secure && 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
@@ -76,7 +76,7 @@
 
 <section class="card" id="settings-phone" data-testid="phone-settings">
   <h2>{strings.phone.heading}</h2>
-  {#if store.owner}
+  {#if store.owner && showServerSettings}
     <label><span>{strings.phone.publicUrl}</span><input type="url" bind:value={publicUrl} placeholder={strings.phone.urlPlaceholder} data-testid="phone-public-url" /></label>
     <p class="hint">{strings.phone.publicUrlHint}</p>
     <button disabled={store.connection !== 'ready'} onclick={() => void store.saveSettings({ publicUrl: publicUrl.trim() || null })}>{strings.settings.save}</button>
