@@ -47,12 +47,14 @@ it does not compile again. The end-to-end suite refuses missing or stale artifac
 - `build:shell` runs the Tauri build with the bundle overlay and produces the
   NSIS installer on Windows, Debian and AppImage packages on Linux, or an
   application bundle and DMG on macOS. Build on the target OS and architecture;
-  staging supports Windows x64 and Linux/macOS x64 and ARM64.
+staging supports Windows x64 and Linux/macOS x64 and ARM64.
 
 The shell passes Tauri's resource directory to the core through `BOITE_UI_DIR`,
 so the installed core can serve the phone UI from the macOS application bundle
 and Linux package. Windows workers are required only by the Windows shell.
 The compiled sidecar needs no separately installed Bun runtime.
+Linux builds also need `xdg-utils`, alongside the WebKitGTK and appindicator
+development packages. The Debian package declares `xdg-utils` for opening links.
 
 Portable CI runs `scripts/ci/desktop-smoke.ts <installed-shell>` against the
 Debian package and macOS application bundle. Signing, notarization and testing
