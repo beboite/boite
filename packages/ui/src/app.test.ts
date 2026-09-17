@@ -610,7 +610,7 @@ test('the trace panel shows the I/O a process moved, and none for a record that 
   query<HTMLButtonElement>('[data-thread-id="t-trace"]').click();
   await waitFor(() => store.openThread?.id === 't-trace');
 
-  if (!store.panelOpen) query<HTMLButtonElement>('[data-testid=tab-trace]').click();
+  store.panel.open('trace');
   await waitFor(() => document.querySelectorAll('[data-testid=trace-row]').length === 3);
 
   expect(query('[data-testid=trace-panel]').textContent).toContain('I/O');
@@ -629,7 +629,7 @@ test('trace processes disclose the command, PID and measurements without narrow 
   await waitFor(() => document.querySelector('[data-thread-id="t-trace"]') !== null);
   query<HTMLButtonElement>('[data-thread-id="t-trace"]').click();
   await waitFor(() => store.openThread?.id === 't-trace');
-  if (!store.panelOpen) query<HTMLButtonElement>('[data-testid=tab-trace]').click();
+  store.panel.open('trace');
   await waitFor(() => document.querySelectorAll('[data-testid=trace-row]').length === 3);
   const row = query<HTMLDetailsElement>('[data-testid=trace-row][data-pid="21140"]');
   expect(row.open).toBe(false);
@@ -639,6 +639,265 @@ test('trace processes disclose the command, PID and measurements without narrow 
   expect(row.textContent).toContain('21140');
   expect(row.textContent).toContain('CPU time');
   expect(row.querySelector('.command')?.textContent).toContain('claude');
+});
+
+test('the header button opens the panel on its launcher, which opens the changes surface', async () => {
+  await mountOnFake();
+  await waitFor(() => document.querySelector('[data-thread-id="t-trace"]') !== null);
+  query<HTMLButtonElement>('[data-thread-id="t-trace"]').click();
+  await waitFor(() => store.openThread?.id === 't-trace');
+
+  // The panel's layout is a module singleton: this test starts on an empty strip.
+  store.panel.closeAll();
+  expect(store.panelOpen).toBe(false);
+  query<HTMLButtonElement>('[data-testid=panel-toggle]').click();
+  // An empty panel opens on its cards rather than forcing one surface.
+  await waitFor(() => document.querySelector('[data-testid=panel-launcher]') !== null);
+  expect(query('[data-testid=panel-toggle]').getAttribute('aria-pressed')).toBe('true');
+  expect(document.querySelector('[data-testid=trace-panel]')).toBeNull();
+  for (const kind of ['browser', 'changes', 'files', 'tasks', 'trace']) {
+    expect(document.querySelector(`[data-testid=launch-${kind}]`)).not.toBeNull();
+  }
+
+  query<HTMLButtonElement>('[data-testid=launch-changes]').click();
+  await waitFor(() => document.querySelectorAll('[data-testid=changes-row]').length === 7);
+  expect(query('[data-testid=changes-count]').textContent).toContain('7');
+  // Every status of the contract has a row, so every badge is drawn once.
+  expect(
+    Array.from(document.querySelectorAll('[data-testid=changes-row]')).map((row) => row.getAttribute('data-status'))
+  ).toEqual(['modified', 'added', 'deleted', 'renamed', 'copied', 'untracked', 'conflict']);
+
+  // A row selects, and the selection rides the tab rather than the component.
+  query<HTMLButtonElement>('[data-testid=changes-row][data-path="src/components/RightPanel.svelte"]').click();
+  await waitFor(() => store.panel.active?.path === 'src/components/RightPanel.svelte');
+  await waitFor(() => document.querySelector('[data-testid=diff-view]') !== null);
+
+  // A second surface joins the strip rather than replacing the first.
+  store.panel.openTasks();
+  await waitFor(() => document.querySelector('[data-testid=tasks-panel]') !== null);
+  expect(document.querySelectorAll('[data-testid=panel-tab]').length).toBe(2);
+
+  query<HTMLButtonElement>('[data-testid=panel-toggle]').click();
+  await waitFor(() => !store.panelOpen);
+  // The panel plays its exit before it unmounts, so the button is what answers here.
+  expect(query('[data-testid=panel-toggle]').getAttribute('aria-pressed')).toBe('false');
+});
+
+test('the tasks surface lists the project todos and adds, claims and drops one', async () => {
+  await mountOnFake();
+  await waitFor(() => document.querySelector('[data-thread-id="t-trace"]') !== null);
+  query<HTMLButtonElement>('[data-thread-id="t-trace"]').click();
+  await waitFor(() => store.openThread?.id === 't-trace');
+
+  store.panel.closeAll();
+  store.panel.openTasks();
+  await waitFor(() => document.querySelectorAll('[data-testid=todo-row]').length === 3);
+  // The card the agent finished waits on the user, ahead of the one already done.
+  expect(
+    Array.from(document.querySelectorAll('[data-testid=todo-row]')).map((row) => row.getAttribute('data-status'))
+  ).toEqual(['claimed', 'open', 'done']);
+  expect(query('[data-testid=todo-awaiting]').textContent).toContain('Awaiting you');
+
+  const field = query<HTMLInputElement>('[data-testid=todo-input]');
+  await type(field, 'Capture the phone layout');
+  query<HTMLButtonElement>('[data-testid=todo-add]').click();
+  await waitFor(() => document.querySelectorAll('[data-testid=todo-row]').length === 4);
+  expect(document.body.textContent).toContain('Capture the phone layout');
+  // The whole list travels on `todos.updated`, keyed by the project.
+  expect(store.todos['p-boite']?.length).toBe(4);
+
+  const added = Array.from(document.querySelectorAll('[data-testid=todo-row]')).find((row) =>
+    row.textContent?.includes('Capture the phone layout')
+  ) as HTMLElement;
+  expect(added.getAttribute('data-status')).toBe('open');
+  added.querySelector<HTMLButtonElement>('[data-testid=todo-claim]')!.click();
+  await waitFor(() => store.todos['p-boite']?.some((todo) => todo.text === 'Capture the phone layout' && todo.status === 'claimed') === true);
+
+  added.querySelector<HTMLButtonElement>('[data-testid=todo-remove]')!.click();
+  await waitFor(() => document.querySelectorAll('[data-testid=todo-row]').length === 3);
+  expect(document.body.textContent).not.toContain('Capture the phone layout');
+});
+
+/** The thread every workbench test works in, with an empty strip to start on. */
+async function openWorkbench(): Promise<void> {
+  await mountOnFake();
+  await waitFor(() => document.querySelector('[data-thread-id="t-trace"]') !== null);
+  query<HTMLButtonElement>('[data-thread-id="t-trace"]').click();
+  await waitFor(() => store.openThread?.id === 't-trace');
+  store.panel.closeAll();
+}
+
+/** The paths the tree is drawing a row for, in order. */
+function treePaths(): (string | null)[] {
+  return Array.from(document.querySelectorAll('[data-testid=files-row]')).map((row) =>
+    row.getAttribute('data-path')
+  );
+}
+
+test('the file tree lists the root, expands a directory on click and opens a file on its own tab', async () => {
+  await openWorkbench();
+  store.panel.openFiles();
+  await waitFor(() => document.querySelectorAll('[data-testid=files-row]').length > 0);
+
+  // Directories first, then files, the order the core answers in.
+  expect(treePaths()).toEqual(['assets', 'docs', 'src', 'tests', 'package.json', 'README.md']);
+  // A size sits on a file and on nothing else.
+  expect(query('[data-testid=files-row][data-path="README.md"] [data-testid=files-size]')).not.toBeNull();
+  expect(query('[data-testid=files-row][data-path="docs"]').querySelector('[data-testid=files-size]')).toBeNull();
+
+  // Nothing under a directory is read before it opens.
+  expect(document.querySelector('[data-testid=files-row][data-path="docs/panel.md"]')).toBeNull();
+  query<HTMLButtonElement>('[data-testid=files-row][data-path="docs"]').click();
+  await waitFor(() => document.querySelector('[data-testid=files-row][data-path="docs/guide"]') !== null);
+  expect(treePaths().slice(0, 5)).toEqual(['assets', 'docs', 'docs/guide', 'docs/panel.md', 'docs/panel.svg']);
+  expect(query('[data-testid=files-row][data-path="docs/panel.md"]').getAttribute('data-depth')).toBe('1');
+  expect(query('[data-testid=files-row][data-path="docs"]').getAttribute('aria-expanded')).toBe('true');
+
+  // A third level, so the tree is a tree and not one nesting.
+  query<HTMLButtonElement>('[data-testid=files-row][data-path="docs/guide"]').click();
+  await waitFor(() => document.querySelector('[data-testid=files-row][data-path="docs/guide/editor.md"]') !== null);
+  expect(query('[data-testid=files-row][data-path="docs/guide/editor.md"]').getAttribute('data-depth')).toBe('2');
+
+  // The filter narrows the loaded rows and keeps the directories above a match.
+  const filter = query<HTMLInputElement>('[data-testid=files-filter]');
+  await type(filter, 'editor');
+  await waitFor(() => treePaths().length === 3);
+  expect(treePaths()).toEqual(['docs', 'docs/guide', 'docs/guide/editor.md']);
+  await type(filter, '');
+  await waitFor(() => treePaths().length > 3);
+
+  // A file click opens a tab of its own, named after the file.
+  query<HTMLButtonElement>('[data-testid=files-row][data-path="docs/panel.md"]').click();
+  await waitFor(() => store.panel.active?.kind === 'file');
+  expect(store.panel.active?.path).toBe('docs/panel.md');
+  await waitFor(() => document.querySelector('[data-testid=file-panel]') !== null);
+  expect(document.querySelectorAll('[data-testid=panel-tab]').length).toBe(2);
+});
+
+test('the editor shows the file, writes two spaces for a tab and saves what was typed', async () => {
+  await openWorkbench();
+  store.panel.openFile('src/lib/strings.ts');
+  await waitFor(() => document.querySelector('[data-testid=file-text]') !== null);
+  const area = query<HTMLTextAreaElement>('[data-testid=file-text]');
+  await waitFor(() => area.value.includes("save: 'Save'"));
+
+  // One gutter number per line, and the language the core named.
+  expect(document.querySelectorAll('[data-testid=file-line]').length).toBe(area.value.split('\n').length);
+  expect(query('[data-testid=file-language]').textContent).toBe('typescript');
+  expect(document.querySelector('[data-testid=file-dirty]')).toBeNull();
+
+  // Tab is two spaces in the text, not the next control.
+  area.focus();
+  area.setSelectionRange(0, 0);
+  const tab = new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true });
+  area.dispatchEvent(tab);
+  expect(tab.defaultPrevented).toBe(true);
+  await waitFor(() => query<HTMLTextAreaElement>('[data-testid=file-text]').value.startsWith('  export'));
+  await waitFor(() => document.querySelector('[data-testid=file-dirty]') !== null);
+
+  const edited = `${query<HTMLTextAreaElement>('[data-testid=file-text]').value}export const ready = true;\n`;
+  area.value = edited;
+  area.dispatchEvent(new Event('input', { bubbles: true }));
+  await waitFor(() => query('[data-testid=file-save]').textContent?.includes('Save') === true);
+  query<HTMLButtonElement>('[data-testid=file-save]').click();
+  await waitFor(() => document.querySelector('[data-testid=file-dirty]') === null);
+
+  // The bytes reached the fixture: a fresh read answers what was saved.
+  const answer = await store.client!.call('files.read', { threadId: 't-trace', path: 'src/lib/strings.ts' });
+  expect(answer.kind).toBe('text');
+  expect(answer.kind === 'text' ? answer.text : '').toBe(edited);
+});
+
+test('the image viewer measures the picture and the zoom buttons move the percentage', async () => {
+  await openWorkbench();
+  store.panel.openFile('assets/preview.png');
+  await waitFor(() => document.querySelector('[data-testid=file-image]') !== null);
+
+  // jsdom fetches no picture, so the size a browser would report is declared here.
+  const picture = query<HTMLImageElement>('[data-testid=file-image]');
+  Object.defineProperty(picture, 'naturalWidth', { value: 640, configurable: true });
+  Object.defineProperty(picture, 'naturalHeight', { value: 400, configurable: true });
+  picture.dispatchEvent(new Event('load'));
+  await waitFor(() => document.querySelector('[data-testid=file-natural]') !== null);
+  expect(query('[data-testid=file-natural]').textContent?.trim()).toBe('640 x 400');
+  // Nothing is laid out here, so the fit lands on the picture's own size.
+  expect(query('[data-testid=file-zoom]').textContent).toBe('100%');
+
+  query<HTMLButtonElement>('[data-testid=file-zoom-in]').click();
+  await waitFor(() => query('[data-testid=file-zoom]').textContent === '125%');
+  query<HTMLButtonElement>('[data-testid=file-zoom-in]').click();
+  await waitFor(() => query('[data-testid=file-zoom]').textContent === '156%');
+  query<HTMLButtonElement>('[data-testid=file-actual]').click();
+  await waitFor(() => query('[data-testid=file-zoom]').textContent === '100%');
+  // A picture is not text: it has no save and no gutter.
+  expect(document.querySelector('[data-testid=file-save]')).toBeNull();
+  expect(document.querySelector('[data-testid=file-text]')).toBeNull();
+});
+
+test('a file the agent opens at a line lands on that line, and asking again moves the same tab', async () => {
+  await openWorkbench();
+
+  // `panel.requested` is what the core emits for the `boite` CLI's `panel.open`.
+  await store.client!.call('panel.open', {
+    threadId: 't-trace',
+    surface: { kind: 'file', path: 'src/lib/store.svelte.ts', line: 42 }
+  });
+  await waitFor(() => document.querySelector('[data-testid=file-highlight]') !== null);
+  expect(query('[data-testid=file-highlight]').getAttribute('data-line')).toBe('42');
+  expect(query('[data-testid=file-line][data-line="42"]').classList.contains('on')).toBe(true);
+  expect(store.panel.surfaces.length).toBe(1);
+
+  // The same file again moves the tab it already has rather than opening a second.
+  await store.client!.call('panel.open', {
+    threadId: 't-trace',
+    surface: { kind: 'file', path: 'src/lib/store.svelte.ts', line: 7 }
+  });
+  await waitFor(() => query('[data-testid=file-highlight]').getAttribute('data-line') === '7');
+  expect(query('[data-testid=file-line][data-line="7"]').classList.contains('on')).toBe(true);
+  expect(store.panel.surfaces.length).toBe(1);
+});
+
+test('the panel query switch opens that surface on the thread the page lands on', async () => {
+  // `&panel=<kind>` is the capture path: the surface is there with no clicks.
+  await mountOnFake('/?fake=1&panel=tasks');
+  await waitFor(() => document.querySelector('[data-testid=tasks-panel]') !== null);
+  expect(store.panel.active?.kind).toBe('tasks');
+  store.panel.closeAll();
+});
+
+test('the panel query switch also names a directory to open the tree on and a file to read', async () => {
+  await mountOnFake('/?fake=1&panel=file:docs/guide/editor.md');
+  await waitFor(() => document.querySelector('[data-testid=file-panel]') !== null);
+  expect(store.panel.active?.path).toBe('docs/guide/editor.md');
+  await waitFor(() => query<HTMLTextAreaElement>('[data-testid=file-text]').value.includes('# The editor'));
+  store.panel.closeAll();
+});
+
+test('what the agent asks for through panel.open opens on the thread it named', async () => {
+  await mountOnFake();
+  await waitFor(() => document.querySelector('[data-thread-id="t-trace"]') !== null);
+  query<HTMLButtonElement>('[data-thread-id="t-trace"]').click();
+  await waitFor(() => store.openThread?.id === 't-trace');
+  store.panel.closeAll();
+  expect(store.panelOpen).toBe(false);
+
+  const shown = await store.client!.call('panel.open', {
+    threadId: 't-trace',
+    surface: { kind: 'diff', path: 'docs/panel.md' }
+  });
+  expect(shown).toEqual({ shown: true });
+  await waitFor(() => document.querySelector('[data-testid=changes-panel]') !== null);
+  expect(store.panel.active?.path).toBe('docs/panel.md');
+
+  // A file lands on its own tab, named after the file and holding the line.
+  await store.client!.call('panel.open', {
+    threadId: 't-trace',
+    surface: { kind: 'file', path: 'src/lib/store.svelte.ts', line: 42 }
+  });
+  await waitFor(() => document.querySelector('[data-testid=file-panel]') !== null);
+  expect(store.panel.active?.line).toBe(42);
+  expect(query('[data-testid=panel-tab][data-kind=file]').getAttribute('title')).toBe('src/lib/store.svelte.ts');
+  expect(query('[data-testid=panel-tab][data-kind=file] .name').textContent).toBe('store.svelte.ts');
 });
 
 const SEEDED_THINKING = 'The table wants a row per process';
@@ -1249,7 +1508,7 @@ test('a dialog waiting for an answer holds the window chords', async () => {
  */
 
 /** Everything owner-only that is drawn without leaving the chat. */
-const OWNER_ONLY_IN_CHAT = ['[data-testid=add-project]', '[data-testid=tab-trace]'];
+const OWNER_ONLY_IN_CHAT = ['[data-testid=add-project]', '[data-testid=panel-toggle]'];
 
 /** Everything owner-only on the settings nav and its General page. */
 const OWNER_ONLY_IN_SETTINGS = [

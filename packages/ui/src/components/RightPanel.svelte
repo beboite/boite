@@ -1,14 +1,31 @@
 <script lang="ts">
-  import { Activity, ChevronLeft, ChevronRight, Globe, Maximize2, Minimize2, Plus, X } from '@lucide/svelte';
+  import {
+    Activity,
+    ChevronLeft,
+    ChevronRight,
+    FileText,
+    FolderTree,
+    GitCompare,
+    Globe,
+    ListChecks,
+    Maximize2,
+    Minimize2,
+    Plus,
+    X
+  } from '@lucide/svelte';
   import { browserBridge } from '../lib/browser-bridge';
   import { contextMenu } from '../lib/context-menu.svelte';
   import { separator } from '../lib/menu';
-  import { PANEL_DEFAULT, clampPanel, rightPanel } from '../lib/right-panel.svelte';
+  import { PANEL_DEFAULT, baseName, clampPanel, rightPanel } from '../lib/right-panel.svelte';
   import type { BoundPanel, Surface, SurfaceKind } from '../lib/right-panel.svelte';
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
   import BrowserSurface from './BrowserSurface.svelte';
+  import ChangesSurface from './ChangesSurface.svelte';
+  import FileSurface from './FileSurface.svelte';
+  import FilesSurface from './FilesSurface.svelte';
   import Menu from './Menu.svelte';
+  import TasksSurface from './TasksSurface.svelte';
   import TraceSurface from './TraceSurface.svelte';
 
   let {
@@ -38,8 +55,49 @@
   let active = $derived(panel.active);
   let empty = $derived(surfaces.length === 0);
 
+  /**
+   * The launcher's five cards, in the order they are drawn. Each carries the
+   * letter its card shows, which is also the key the launcher answers to.
+   */
+  const CARDS: { kind: SurfaceKind; key: string }[] = [
+    { kind: 'browser', key: 'B' },
+    { kind: 'changes', key: 'C' },
+    { kind: 'files', key: 'F' },
+    { kind: 'tasks', key: 'K' },
+    { kind: 'trace', key: 'T' }
+  ];
+
+  /** The name of a kind, which a card, a tab and the new-surface menu all read. */
+  function kindName(kind: SurfaceKind): string {
+    if (kind === 'browser') return strings.rightPanel.browser;
+    if (kind === 'changes') return strings.rightPanel.changes;
+    if (kind === 'files') return strings.rightPanel.files;
+    if (kind === 'file') return strings.rightPanel.file;
+    if (kind === 'tasks') return strings.rightPanel.tasks;
+    return strings.rightPanel.trace;
+  }
+
+  function kindHint(kind: SurfaceKind): string {
+    if (kind === 'browser') return strings.rightPanel.browserHint;
+    if (kind === 'changes') return strings.rightPanel.changesHint;
+    if (kind === 'files') return strings.rightPanel.filesHint;
+    if (kind === 'tasks') return strings.rightPanel.tasksHint;
+    return strings.rightPanel.traceHint;
+  }
+
+  /** A page needs a webview; everything else reads what only the owner may ask for. */
+  function available(kind: SurfaceKind): boolean {
+    return kind === 'browser' ? inShell : store.owner;
+  }
+
+  function unavailable(kind: SurfaceKind): string {
+    return kind === 'browser' ? strings.rightPanel.desktopOnly : strings.rightPanel.ownerOnly;
+  }
+
   function label(surface: Surface): string {
-    if (surface.kind === 'trace') return strings.rightPanel.trace;
+    // A file tab reads as its name; the whole path is its tooltip.
+    if (surface.kind === 'file') return surface.path ? baseName(surface.path) : strings.rightPanel.file;
+    if (surface.kind !== 'browser') return kindName(surface.kind);
     if (surface.title) return surface.title;
     if (surface.url) {
       try {
@@ -49,6 +107,10 @@
       }
     }
     return strings.rightPanel.untitled;
+  }
+
+  function tooltip(surface: Surface): string {
+    return surface.kind === 'file' && surface.path ? surface.path : label(surface);
   }
 
   // What the pages report. Only the thread showing has browser views, because a
@@ -177,15 +239,13 @@
   }
 
   function launch(kind: SurfaceKind): void {
-    // A page needs a webview of its own, which only the desktop shell has.
-    if (kind === 'browser' && !inShell) return;
-    // The T key reaches this with no card to disable, and a trace a paired
-    // device may not read would open on an empty surface.
-    if (kind === 'trace' && !store.owner) return;
+    // A key reaches this with no card to disable, and a surface a paired device
+    // may not read would open empty.
+    if (!available(kind)) return;
     panel.open(kind);
   }
 
-  /** B and T while the launcher is showing and the panel has the pointer or the focus. */
+  /** A card's letter while the launcher shows and the panel has the pointer or the focus. */
   function onWindowKey(event: KeyboardEvent): void {
     if (!empty || !near) return;
     if (event.ctrlKey || event.metaKey || event.altKey) return;
@@ -197,9 +257,10 @@
       return;
     }
     const key = event.key.toLowerCase();
-    if (key !== 'b' && key !== 't') return;
+    const card = CARDS.find((one) => one.key.toLowerCase() === key);
+    if (!card) return;
     event.preventDefault();
-    launch(key === 'b' ? 'browser' : 'trace');
+    launch(card.kind);
   }
 
   // ---------------------------------------------------------------- the drag
@@ -241,15 +302,14 @@
     rightPanel.saveWidth();
   }
 
-  let menuItems = $derived([
-    {
-      id: 'browser',
-      label: strings.rightPanel.browser,
-      disabled: !inShell,
-      ...(inShell ? {} : { hint: strings.rightPanel.desktopOnly })
-    },
-    { id: 'trace', label: strings.rightPanel.trace }
-  ]);
+  let menuItems = $derived(
+    CARDS.map((card) => ({
+      id: card.kind,
+      label: kindName(card.kind),
+      disabled: !available(card.kind),
+      ...(available(card.kind) ? {} : { hint: unavailable(card.kind) })
+    }))
+  );
 </script>
 
 <svelte:window onkeydown={onWindowKey} />
@@ -324,7 +384,7 @@
           data-surface-id={surface.id}
           data-kind={surface.kind}
           data-testid="panel-tab"
-          title={label(surface)}
+          title={tooltip(surface)}
           onclick={() => panel.activate(surface.id)}
           onkeydown={(event) => onTabKey(event, surface)}
           onmousedown={(event) => onTabPointerDown(event, surface)}
@@ -343,6 +403,14 @@
             <span class="glyph">
               {#if surface.kind === 'trace'}
                 <Activity size={12} strokeWidth={1.75} />
+              {:else if surface.kind === 'changes'}
+                <GitCompare size={12} strokeWidth={1.75} />
+              {:else if surface.kind === 'files'}
+                <FolderTree size={12} strokeWidth={1.75} />
+              {:else if surface.kind === 'file'}
+                <FileText size={12} strokeWidth={1.75} />
+              {:else if surface.kind === 'tasks'}
+                <ListChecks size={12} strokeWidth={1.75} />
               {:else}
                 <Globe size={12} strokeWidth={1.75} />
               {/if}
@@ -369,7 +437,7 @@
     {#if !empty}
       <Menu
         items={menuItems}
-        onpick={(id) => launch(id === 'browser' ? 'browser' : 'trace')}
+        onpick={(id) => launch(id as SurfaceKind)}
         placement="bottom"
         variant="ghost"
         label={strings.rightPanel.newSurface}
@@ -415,39 +483,47 @@
       {#key active.id}
         <BrowserSurface surface={active} {panel} />
       {/key}
+    {:else if active?.kind === 'changes'}
+      <ChangesSurface {store} surface={active} {panel} />
+    {:else if active?.kind === 'files'}
+      <FilesSurface {store} surface={active} {panel} />
+    {:else if active?.kind === 'file'}
+      {#key active.id}
+        <FileSurface {store} surface={active} />
+      {/key}
+    {:else if active?.kind === 'tasks'}
+      <TasksSurface {store} />
     {:else}
       <div class="launcher" data-testid="panel-launcher">
         <p class="section-label">{strings.rightPanel.launcher}</p>
         <div class="cards">
-          <button
-            type="button"
-            class="card"
-            disabled={!inShell}
-            data-testid="launch-browser"
-            onclick={() => launch('browser')}
-          >
-            <Globe size={16} strokeWidth={1.75} />
-            <span class="card-name">{strings.rightPanel.browser}</span>
-            <span class="card-hint"
-              >{inShell ? strings.rightPanel.browserHint : strings.rightPanel.desktopOnly}</span
+          <!-- A card that cannot open stays and says why: a page needs the
+               desktop shell's webview, and the rest read what a paired device
+               is refused. -->
+          {#each CARDS as card (card.kind)}
+            <button
+              type="button"
+              class="card"
+              disabled={!available(card.kind)}
+              data-testid="launch-{card.kind}"
+              onclick={() => launch(card.kind)}
             >
-            <span class="kbd">B</span>
-          </button>
-          <!-- Same treatment as the browser card above: the launcher would be
-               empty without it, so the row stays and says whose app reads a
-               trace. `trace.get` is refused to a paired device. -->
-          <button
-            type="button"
-            class="card"
-            disabled={!store.owner}
-            data-testid="launch-trace"
-            onclick={() => launch('trace')}
-          >
-            <Activity size={16} strokeWidth={1.75} />
-            <span class="card-name">{strings.rightPanel.trace}</span>
-            <span class="card-hint">{store.owner ? strings.rightPanel.traceHint : strings.rightPanel.ownerOnly}</span>
-            <span class="kbd">T</span>
-          </button>
+              {#if card.kind === 'browser'}
+                <Globe size={16} strokeWidth={1.75} />
+              {:else if card.kind === 'changes'}
+                <GitCompare size={16} strokeWidth={1.75} />
+              {:else if card.kind === 'files'}
+                <FolderTree size={16} strokeWidth={1.75} />
+              {:else if card.kind === 'tasks'}
+                <ListChecks size={16} strokeWidth={1.75} />
+              {:else}
+                <Activity size={16} strokeWidth={1.75} />
+              {/if}
+              <span class="card-name">{kindName(card.kind)}</span>
+              <span class="card-hint">{available(card.kind) ? kindHint(card.kind) : unavailable(card.kind)}</span>
+              <span class="kbd">{card.key}</span>
+            </button>
+          {/each}
         </div>
       </div>
     {/if}
@@ -670,7 +746,9 @@
 
   .cards {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    /* Five cards now, on a panel dragged to any width: the row fills with what
+       fits instead of staying at two columns. */
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
     gap: 8px;
   }
 

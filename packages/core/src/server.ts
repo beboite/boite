@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs';
 import { hostname, networkInterfaces } from 'node:os';
 import { dirname, join, normalize, resolve, sep } from 'node:path';
 import type { ServerWebSocket } from 'bun';
-import { PROTOCOL_VERSION, RPC_PATH, RpcCloseCode, RpcErrorCode } from '@boite/contracts';
+import { FILE_ROUTE, PROTOCOL_VERSION, RPC_PATH, RpcCloseCode, RpcErrorCode } from '@boite/contracts';
 import type { RpcError, RpcEventName, RpcEvents, ThreadId } from '@boite/contracts';
 import { eventThreadId } from './bus.ts';
 import type { Core } from './core.ts';
@@ -66,7 +66,7 @@ export class ServerConnection implements Connection {
   readonly subscriptions = new Set<ThreadId>();
   authenticated = false;
   /** Owner until hello says otherwise; nothing reads it before `authenticated` is true. */
-  identity: Identity = { principal: 'owner', sessionId: null };
+  identity: Identity = { principal: 'owner', sessionId: null, threadId: null };
 
   private socket: ServerWebSocket<SocketData> | null = null;
   private congested = false;
@@ -194,6 +194,39 @@ function staticFile(pathname: string): string | null {
   return existsSync(full) ? full : null;
 }
 
+/**
+ * The file a ticket opens: what `files.read` could not put in a JSON frame.
+ * The ticket is the whole address, so no request here names a path and no
+ * answer says what an unknown one missed. A `Range` is honoured because that
+ * is how a video seeks, and nothing is cached because the ticket outlives
+ * neither the ten minutes nor the next write to the file.
+ */
+function ticketedFile(core: Core, ticket: string, range: string | null): Response {
+  const target = core.fileTickets.resolve(ticket);
+  if (target === null || !existsSync(target.path)) return new Response('unknown or expired ticket', { status: 404 });
+  const file = Bun.file(target.path);
+  const size = file.size;
+  const headers: Record<string, string> = {
+    'content-type': target.mime,
+    'accept-ranges': 'bytes',
+    'cache-control': 'no-store',
+  };
+  const asked = range === null ? null : /^bytes=(\d*)-(\d*)$/.exec(range.trim());
+  if (asked === null) return new Response(file, { headers });
+
+  const from = asked[1] ?? '';
+  const to = asked[2] ?? '';
+  const start = from.length > 0 ? Number(from) : Math.max(0, size - Number(to));
+  const end = from.length === 0 ? size - 1 : to.length > 0 ? Math.min(Number(to), size - 1) : size - 1;
+  if ((from.length === 0 && to.length === 0) || !Number.isFinite(start) || !Number.isFinite(end) || start > end || start >= size) {
+    return new Response('range not satisfiable', { status: 416, headers: { ...headers, 'content-range': `bytes */${size}` } });
+  }
+  return new Response(file.slice(start, end + 1), {
+    status: 206,
+    headers: { ...headers, 'content-range': `bytes ${start}-${end}/${size}`, 'content-length': String(end - start + 1) },
+  });
+}
+
 export function startServer(options: ServerOptions): RunningServer {
   const core = options.core;
   const host = options.host ?? '127.0.0.1';
@@ -214,6 +247,11 @@ export function startServer(options: ServerOptions): RunningServer {
 
       if (url.pathname === '/health') {
         return Response.json({ ok: true, version: core.version, pid: process.pid });
+      }
+
+      if (url.pathname.startsWith(`${FILE_ROUTE}/`)) {
+        if (request.method !== 'GET') return new Response('method not allowed', { status: 405 });
+        return ticketedFile(core, url.pathname.slice(FILE_ROUTE.length + 1), request.headers.get('range'));
       }
 
       if (url.pathname === RPC_PATH) {
@@ -282,7 +320,12 @@ export function startServer(options: ServerOptions): RunningServer {
 
   const off = core.bus.onAny((name, payload) => {
     const scoped =
-      name.startsWith('message.') || name.startsWith('permission.') || name.startsWith('question.');
+      name.startsWith('message.') ||
+      name.startsWith('permission.') ||
+      name.startsWith('question.') ||
+      // A panel request is for the clients watching that thread: a second
+      // window on another thread must not have its panel taken over.
+      name.startsWith('panel.');
     const threadId = eventThreadId(payload);
     for (const connection of connections) {
       if (!connection.authenticated) continue;
@@ -369,17 +412,22 @@ async function handleFrame(core: Core, connection: ServerConnection, raw: string
         refuse(messageOf(error), 'bad grant');
         return;
       }
-      identity = { principal: principalOf(session.role), sessionId: session.id };
+      identity = { principal: principalOf(session.role), sessionId: session.id, threadId: null };
     } else if (token !== null && grant === null) {
       if (token === core.token) {
-        identity = { principal: 'owner', sessionId: null };
+        identity = { principal: 'owner', sessionId: null, threadId: null };
       } else {
         const found = token.length > 0 ? core.sessions.authenticate(token) : null;
-        if (found === null) {
+        // A token that is neither the core's nor a pairing's may still be the
+        // one a thread put in the environment of a process it launched.
+        const threadId = found === null && token.length > 0 ? core.agents.authenticate(token) : null;
+        if (found === null && threadId === null) {
           refuse('the token is wrong', 'bad token');
           return;
         }
-        identity = { principal: principalOf(found.role), sessionId: found.id };
+        identity = found === null
+          ? { principal: 'agent', sessionId: null, threadId }
+          : { principal: principalOf(found.role), sessionId: found.id, threadId: null };
       }
     } else {
       refuse('hello takes a token or a grant, one of the two', 'bad hello');
@@ -401,13 +449,24 @@ async function handleFrame(core: Core, connection: ServerConnection, raw: string
         core: core.info(),
         principal: identity.principal,
         ...(session === undefined ? {} : { session: { id: session.id, token: session.token } }),
+        // The agent learns which thread it is in from its own hello, so the CLI
+        // needs nothing but the token to name it.
+        ...(identity.threadId === null ? {} : { threadId: identity.threadId }),
       },
     });
     return;
   }
 
   if (method === 'hello') {
-    connection.sendResponse({ jsonrpc: '2.0', id, result: { core: core.info(), principal: connection.identity.principal } });
+    connection.sendResponse({
+      jsonrpc: '2.0',
+      id,
+      result: {
+        core: core.info(),
+        principal: connection.identity.principal,
+        ...(connection.identity.threadId === null ? {} : { threadId: connection.identity.threadId }),
+      },
+    });
     return;
   }
 

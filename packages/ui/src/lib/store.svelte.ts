@@ -3,7 +3,12 @@ import { resetPullRequestSupport } from './pull-request';
 import { activityCommand } from './activity-command';
 import type {
   Account,
+  AgentTask,
   CoreInfo,
+  FileContent,
+  FileEntry,
+  GitDiff,
+  GitStatus,
   ImageAttachment,
   ImportableSession,
   Keybindings,
@@ -34,6 +39,7 @@ import type {
   ThreadId,
   ThreadResources,
   ThreadSummary,
+  Todo,
   Usage
 } from '@boite/contracts';
 import {
@@ -117,6 +123,13 @@ export interface PickPatch {
   effort?: string | null;
   speed?: string | null;
 }
+
+/**
+ * What one `files.*` call answers with: the value, or the sentence the surface
+ * that asked prints instead. A refused path belongs to that surface, not to the
+ * app's toast, so these calls hand the message back rather than raising it.
+ */
+export type FileAnswer<T> = { ok: true; value: T } | { ok: false; error: string };
 
 export const UI_VERSION = '2.0.0-beta.1';
 
@@ -312,6 +325,11 @@ export class Store {
   resources = $state<ThreadResources[]>([]);
   usage = $state<UsageReport | null>(null);
   trace = $state<ProcessRecord[]>([]);
+  /**
+   * The todo cards of each project, keyed by project id: the list is the
+   * project's, so every thread of it shows the same one.
+   */
+  todos = $state<Record<ProjectId, Todo[]>>({});
   pendingPermissions = $state<PermissionRequest[]>([]);
   /**
    * Kept after the answer so a resolved card still shows what was asked. Only
@@ -635,6 +653,16 @@ export class Store {
     on('thread.activity', ({ threadId, activity }) => {
       if (this.openThread?.id === threadId) this.openThread.activity = activity;
     });
+    // The agent of a thread asked its panel for something. The layout is per
+    // thread, so it is written on that thread's panel even while another one is
+    // on screen: opening the thread later shows what was asked for.
+    on('panel.requested', ({ threadId, surface }) => {
+      rightPanel.for(this.threadKey(threadId)).showSurface(surface);
+    });
+    // The project's whole list after any change, whoever moved a card.
+    on('todos.updated', ({ projectId, todos }) => {
+      this.todos = { ...this.todos, [projectId]: todos };
+    });
     on('thread.removed', ({ threadId }) => {
       this.threads = this.threads.filter((t) => t.id !== threadId);
       this.#dropRequestsOf(threadId);
@@ -861,9 +889,27 @@ export class Store {
       }
       await this.connect();
       await this.openWhereLeft();
+      // `&panel=<kind>` opens that surface on the thread the page lands on, so
+      // a capture of it needs no clicks. Fake core only, like `&long=1`.
+      if (import.meta.env.DEV && params.get('fake') === '1') this.#openQueryPanel(params.get('panel'));
     } finally {
       this.booted = true;
     }
+  }
+
+  #openQueryPanel(kind: string | null): void {
+    if (kind === null || !this.openThread) return;
+    const panel = this.panel;
+    // `file:<path>` and `files:<path>` carry what the surface opens on, which
+    // is how a capture reaches one file with no click.
+    const cut = kind.indexOf(':');
+    const name = cut < 0 ? kind : kind.slice(0, cut);
+    const path = cut < 0 ? '' : kind.slice(cut + 1);
+    if (name === 'changes') panel.openChanges(path === '' ? undefined : path);
+    else if (name === 'files') panel.openFiles(path === '' ? undefined : path);
+    else if (name === 'file' && path !== '') panel.openFile(path);
+    else if (name === 'tasks') panel.openTasks();
+    else if (name === 'trace') panel.open('trace');
   }
 
   #attachEndpoint(endpoint: Endpoint, rememberActive = true): void {
@@ -1145,10 +1191,12 @@ export class Store {
     return this.panel.isOpen;
   }
 
-  /** The header's Trace button: the panel opens on trace, or shuts on it. */
+  /**
+   * The header's Panel button: the panel itself, open or shut. An empty panel
+   * opens on its launcher rather than forcing one surface on the user.
+   */
   togglePanel(): void {
-    this.panel.toggleTrace();
-    if (this.panelOpen) void this.refreshTrace();
+    this.panel.toggle();
   }
 
   // -------------------------------------------------------------------------
@@ -1779,6 +1827,147 @@ export class Store {
     }
   }
 
+  // -------------------------------------------------------------------------
+  // The workbench: the working tree, its files and the project's todos. Every
+  // one of these is owner-only in `packages/core/src/access.ts`, so each is
+  // gated on `this.owner` the way `trace.get` is rather than thrown at a phone.
+  //
+  // The three `files.*` calls answer a `FileAnswer` rather than raising the
+  // app's toast: a refused path or a file that vanished under the editor is
+  // about the surface that asked, so it reads in that surface.
+  // -------------------------------------------------------------------------
+
+  /** The project of a thread, open or not: what keys the todo list. */
+  #projectOf(threadId: ThreadId): ProjectId | null {
+    if (this.openThread?.id === threadId) return this.openThread.projectId;
+    return this.threads.find((thread) => thread.id === threadId)?.projectId ?? null;
+  }
+
+  async gitStatus(threadId: ThreadId): Promise<GitStatus | null> {
+    const client = this.#client;
+    if (!client || !this.owner) return null;
+    try {
+      return await client.call('git.status', { threadId });
+    } catch (error) {
+      this.#fail(error);
+      return null;
+    }
+  }
+
+  async gitDiff(threadId: ThreadId, path: string, ref?: string): Promise<GitDiff | null> {
+    const client = this.#client;
+    if (!client || !this.owner) return null;
+    try {
+      return await client.call('git.diff', { threadId, path, ...(ref === undefined ? {} : { ref }) });
+    } catch (error) {
+      this.#fail(error);
+      return null;
+    }
+  }
+
+  async listFiles(threadId: ThreadId, path?: string): Promise<FileAnswer<FileEntry[]>> {
+    const client = this.#client;
+    if (!client || !this.owner) return { ok: false, error: strings.rightPanel.ownerOnly };
+    try {
+      const value = await client.call('files.list', { threadId, ...(path === undefined ? {} : { path }) });
+      return { ok: true, value };
+    } catch (error) {
+      return { ok: false, error: this.#reason(error) };
+    }
+  }
+
+  async readFile(threadId: ThreadId, path: string): Promise<FileAnswer<FileContent>> {
+    const client = this.#client;
+    if (!client || !this.owner) return { ok: false, error: strings.rightPanel.ownerOnly };
+    try {
+      const value = await client.call('files.read', { threadId, path });
+      // The core answers a path on its own HTTP server: the origin is the one
+      // this client reached it by, which a core cannot know from where it runs.
+      if (value.kind !== 'text' && value.url.startsWith('/') && this.endpointUrl !== null) {
+        return { ok: true, value: { ...value, url: new URL(value.url, this.endpointUrl).href } };
+      }
+      return { ok: true, value };
+    } catch (error) {
+      return { ok: false, error: this.#reason(error) };
+    }
+  }
+
+  /** The editor's save. The bytes that reached the disk, or why they did not. */
+  async writeFile(
+    threadId: ThreadId,
+    path: string,
+    text: string
+  ): Promise<FileAnswer<{ bytes: number; modifiedAt: number }>> {
+    const client = this.#client;
+    if (!client || !this.owner) return { ok: false, error: strings.rightPanel.ownerOnly };
+    try {
+      const value = await client.call('files.write', { threadId, path, text });
+      return { ok: true, value };
+    } catch (error) {
+      return { ok: false, error: this.#reason(error) };
+    }
+  }
+
+  /** The agent's task list, whole. The answer arrives as `thread.activity` too. */
+  async setTasks(threadId: ThreadId, tasks: AgentTask[]): Promise<void> {
+    const client = this.#client;
+    if (!client || !this.owner) return;
+    try {
+      const activity = await client.call('threads.tasks.set', { threadId, tasks });
+      if (this.openThread?.id === threadId) this.openThread.activity = activity;
+    } catch (error) {
+      this.#fail(error);
+    }
+  }
+
+  async loadTodos(threadId: ThreadId): Promise<void> {
+    const client = this.#client;
+    if (!client || !this.owner) return;
+    try {
+      const todos = await client.call('todos.list', { threadId });
+      // The list keys on the project, which an empty answer does not carry.
+      const projectId = todos[0]?.projectId ?? this.#projectOf(threadId);
+      if (projectId === null) return;
+      this.todos = { ...this.todos, [projectId]: todos };
+    } catch (error) {
+      this.#fail(error);
+    }
+  }
+
+  async addTodo(threadId: ThreadId, text: string): Promise<void> {
+    const client = this.#client;
+    if (!client || !this.owner || text.trim().length === 0) return;
+    try {
+      await client.call('todos.add', { threadId, text: text.trim() });
+    } catch (error) {
+      this.#fail(error);
+    }
+  }
+
+  async updateTodo(
+    threadId: ThreadId,
+    todoId: string,
+    patch: { status?: Todo['status']; text?: string }
+  ): Promise<void> {
+    const client = this.#client;
+    if (!client || !this.owner) return;
+    try {
+      await client.call('todos.update', { threadId, todoId, ...patch });
+    } catch (error) {
+      this.#fail(error);
+    }
+  }
+
+  async removeTodo(threadId: ThreadId, todoId: string): Promise<void> {
+    const client = this.#client;
+    if (!client || !this.owner) return;
+    try {
+      await client.call('todos.remove', { threadId, todoId });
+    } catch (error) {
+      this.#fail(error);
+    }
+  }
+
   async refreshResources(): Promise<void> {
     const client = this.#client;
     if (!client) return;
@@ -2049,10 +2238,15 @@ export class Store {
     }
   }
 
+  /** The sentence one failure reads as, whether it lands in a surface or the toast. */
+  #reason(error: unknown): string {
+    if (error instanceof RpcFailure) return `${error.message} (${error.code})`;
+    if (error instanceof Error) return error.message;
+    return String(error);
+  }
+
   #fail(error: unknown): void {
-    if (error instanceof RpcFailure) this.error = `${error.message} (${error.code})`;
-    else if (error instanceof Error) this.error = error.message;
-    else this.error = String(error);
+    this.error = this.#reason(error);
   }
 }
 

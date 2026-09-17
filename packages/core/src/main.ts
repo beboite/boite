@@ -10,6 +10,7 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import type { Channel, PairingGrant, PairingRole, Settings } from '@boite/contracts';
+import { processIo, runCli } from './cli.ts';
 import { connect } from './client.ts';
 import { CORE_VERSION, Core } from './core.ts';
 import { newToken } from './ids.ts';
@@ -215,6 +216,17 @@ export async function pair(argv: string[]): Promise<PairingGrant> {
 }
 
 export function main(argv: string[]): void {
+  // `boite-core cli ...` is the `boite` command an agent runs, behind its shim.
+  if (argv[0] === 'cli') {
+    runCli(argv.slice(1), processIo()).then(
+      (code) => process.exit(code),
+      (error: unknown) => {
+        process.stderr.write(`boite: ${error instanceof Error ? error.message : String(error)}\n`);
+        process.exit(1);
+      },
+    );
+    return;
+  }
   if (argv[0] === 'pair') {
     pair(argv.slice(1)).then(
       (grant) => {

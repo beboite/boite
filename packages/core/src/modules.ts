@@ -1,5 +1,6 @@
 import type { Core } from './core.ts';
 import { registerAccountMethods } from './accounts.ts';
+import { registerAgentMethods } from './agent.ts';
 import { registerImportMethods } from './imports.ts';
 import { registerKeybindingMethods } from './keybindings.ts';
 import { registerProjectMethods } from './projects.ts';
@@ -38,4 +39,6 @@ export function registerModules(core: Core): void {
   registerKeybindingMethods(core);
   registerSessionMethods(core);
   registerImportMethods(core);
+  // The agent's own door, and the thread surfaces a client shares with it.
+  registerAgentMethods(core);
 }

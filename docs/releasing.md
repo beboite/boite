@@ -35,10 +35,11 @@ it does not compile again. The end-to-end suite refuses missing or stale artifac
 - `build:core:exe` compiles `packages/core/dist/boite-core`, with `.exe` on Windows. The two worker
   files are not compiled into it: the core loads them by name from beside its own
   executable, so they travel with it.
-- `stage:core` puts that executable and both workers where the two things that
+- `stage:core` puts that executable, both workers and the two `boite` shims
+  (`packages/core/shims`, see [cli.md](cli.md)) where the two things that
   run them look. The bundler wants
   `apps/shell/src-tauri/binaries/boite-core-<target triple>`, with `.exe` on Windows, for
-  `bundle.externalBin`, plus the workers in that same directory for the resource
+  `bundle.externalBin`, plus the workers and the `boite` shims in that same directory for the resource
   entries that land them beside the installed sidecar. The end to end suite wants
   the same files beside `apps/shell/src-tauri/target/release/boite-shell`, with
   `.exe` on Windows, so the script copies there whenever that executable exists.
@@ -91,6 +92,8 @@ passes, and it is the only place `bundle.externalBin` and the resource map live:
     "resources": {
       "binaries/jobs-worker.js": "jobs-worker.js",
       "binaries/guard-worker.js": "guard-worker.js",
+      "binaries/boite": "boite",
+      "binaries/boite.cmd": "boite.cmd",
       "../../../packages/ui/dist": "ui"
     }
   }

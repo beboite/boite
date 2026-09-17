@@ -1,0 +1,3 @@
+#!/bin/sh
+# The `boite` CLI of an installed Boite: the compiled core beside this file answers it.
+exec "$(dirname "$0")/boite-core" cli "$@"

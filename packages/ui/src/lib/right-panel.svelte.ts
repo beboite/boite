@@ -1,13 +1,31 @@
 /**
  * The right panel is a strip of surfaces per thread, T3 Code's model: the
- * thread stays in the sidebar and what sits beside it is a tab. Trace is a
- * singleton, a browser page is one tab per id. Nothing of this reaches the
- * core: the panel is a client's layout, so it lives in `localStorage`.
+ * thread stays in the sidebar and what sits beside it is a tab. Trace, changes,
+ * files and tasks are singletons, a browser page is one tab per id and a file
+ * one tab per path. Nothing of this reaches the core: the panel is a client's
+ * layout, so it lives in `localStorage`.
  */
 
+import type { PanelSurface } from '@boite/contracts';
 import { browserBridge } from './browser-bridge';
 
-export type SurfaceKind = 'trace' | 'browser';
+export type SurfaceKind = 'trace' | 'browser' | 'changes' | 'files' | 'file' | 'tasks';
+
+/** Every kind a stored layout may name, and what `parse` checks a blob against. */
+export const SURFACE_KINDS: readonly SurfaceKind[] = [
+  'trace',
+  'browser',
+  'changes',
+  'files',
+  'file',
+  'tasks'
+];
+
+/**
+ * The kinds that get one tab and no more: asking for them again brings the tab
+ * that exists forward. A browser page and a file are the two that multiply.
+ */
+const SINGLETON_KINDS: readonly SurfaceKind[] = ['trace', 'changes', 'files', 'tasks'];
 
 export interface Surface {
   id: string;
@@ -18,6 +36,13 @@ export interface Surface {
   url?: string;
   /** A browser tab's zoom, one rung of `ZOOM_STEPS`. Absent means 1. */
   zoom?: number;
+  /**
+   * A file tab's own path, the changes tab's selected row and the directory the
+   * file tree opens on. Relative to the thread's working directory.
+   */
+  path?: string;
+  /** The line a file tab lands on, when whoever opened it named one. */
+  line?: number;
 }
 
 /** What one thread remembers about its panel. */
@@ -39,6 +64,12 @@ export const SIBLING_MIN = 360;
 export const PANEL_INLINE_MIN_VIEWPORT = 981;
 
 export const TRACE_SURFACE_ID = 'trace';
+export const CHANGES_SURFACE_ID = 'changes';
+export const FILES_SURFACE_ID = 'files';
+export const TASKS_SURFACE_ID = 'tasks';
+
+/** Past this the changes surface puts its diff beside the list rather than under it. */
+export const CHANGES_SPLIT_MIN = 900;
 
 /** The rungs `Ctrl+=`, `Ctrl+-` and `Ctrl+0` walk on a browser surface. */
 export const ZOOM_STEPS = [0.5, 0.67, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2];
@@ -61,9 +92,18 @@ function emptyState(): PanelState {
   return { isOpen: false, activeSurfaceId: null, surfaces: [] };
 }
 
-function surfaceId(kind: SurfaceKind): string {
-  if (kind === 'trace') return TRACE_SURFACE_ID;
+function surfaceId(kind: SurfaceKind, path?: string): string {
+  // A singleton's id is its kind, so a layout stored before the other kinds
+  // existed still names the trace tab the same way.
+  if (SINGLETON_KINDS.includes(kind)) return kind;
+  if (kind === 'file') return `file:${path ?? ''}`;
   return `browser:${crypto.randomUUID()}`;
+}
+
+/** The basename of a path the core wrote, which always uses forward slashes. */
+export function baseName(path: string): string {
+  const cut = path.split('/');
+  return cut[cut.length - 1] || path;
 }
 
 /** A stored blob is trusted only when it says version 1 and reads like one. */
@@ -80,9 +120,11 @@ function parse(raw: string): Record<string, PanelState> {
     const surfaces: Surface[] = [];
     for (const surface of raws) {
       if (typeof surface !== 'object' || surface === null) continue;
-      const { id, kind, title, url, zoom } = surface as Surface;
+      const { id, kind, title, url, zoom, path, line } = surface as Surface;
       if (typeof id !== 'string') continue;
-      if (kind !== 'trace' && kind !== 'browser') continue;
+      if (!SURFACE_KINDS.includes(kind)) continue;
+      // A file tab with no path has nothing to read, so it is not a tab.
+      if (kind === 'file' && typeof path !== 'string') continue;
       if (surfaces.some((kept) => kept.id === id)) continue;
       // A zoom that is not one of the ladder's rungs is dropped, not clamped:
       // the ladder is the whole vocabulary here.
@@ -92,7 +134,9 @@ function parse(raw: string): Record<string, PanelState> {
         kind,
         ...(typeof title === 'string' ? { title } : {}),
         ...(typeof url === 'string' ? { url } : {}),
-        ...stored
+        ...stored,
+        ...(typeof path === 'string' ? { path } : {}),
+        ...(typeof line === 'number' && Number.isFinite(line) ? { line } : {})
       });
     }
     const active = (value as PanelState).activeSurfaceId;
@@ -228,11 +272,11 @@ export class BoundPanel {
     this.#root.save();
   }
 
-  /** Opens a surface of that kind, or activates the trace one, which is a singleton. */
+  /** Opens a surface of that kind, or activates the one a singleton kind already has. */
   open(kind: SurfaceKind, url?: string): Surface {
     const current = this.state;
-    if (kind === 'trace') {
-      const existing = current.surfaces.find((surface) => surface.kind === 'trace');
+    if (SINGLETON_KINDS.includes(kind)) {
+      const existing = current.surfaces.find((surface) => surface.kind === kind);
       if (existing) {
         this.#write({ ...current, isOpen: true, activeSurfaceId: existing.id });
         return existing;
@@ -245,6 +289,60 @@ export class BoundPanel {
       surfaces: [...current.surfaces, surface]
     });
     return surface;
+  }
+
+  /**
+   * One tab per path. The same file again brings its tab forward and moves it
+   * to the new line, which is what an agent asking twice means.
+   */
+  openFile(path: string, line?: number): Surface {
+    const current = this.state;
+    const id = surfaceId('file', path);
+    const existing = current.surfaces.find((surface) => surface.id === id);
+    if (existing) {
+      const moved = line === undefined ? existing : { ...existing, line };
+      this.#write({
+        isOpen: true,
+        activeSurfaceId: id,
+        surfaces: current.surfaces.map((surface) => (surface.id === id ? moved : surface))
+      });
+      return moved;
+    }
+    const surface: Surface = { id, kind: 'file', path, ...(line === undefined ? {} : { line }) };
+    this.#write({ isOpen: true, activeSurfaceId: id, surfaces: [...current.surfaces, surface] });
+    return surface;
+  }
+
+  /** The changes surface, on one file when a path is named. */
+  openChanges(path?: string): Surface {
+    const opened = this.open('changes');
+    if (path !== undefined) this.update(opened.id, { path });
+    return this.state.surfaces.find((surface) => surface.id === opened.id) ?? opened;
+  }
+
+  /** The file tree, at a directory when one is named. */
+  openFiles(path?: string): Surface {
+    const opened = this.open('files');
+    if (path !== undefined) this.update(opened.id, { path });
+    return this.state.surfaces.find((surface) => surface.id === opened.id) ?? opened;
+  }
+
+  openTasks(): Surface {
+    return this.open('tasks');
+  }
+
+  /**
+   * What the core's `panel.open` asked for, mapped onto this panel. `diff` is
+   * the changes surface on one file, `browser` opens the url the way a page
+   * asking for a window does.
+   */
+  showSurface(surface: PanelSurface): void {
+    if (surface.kind === 'file') this.openFile(surface.path, surface.line);
+    else if (surface.kind === 'files') this.openFiles(surface.path);
+    else if (surface.kind === 'diff') this.openChanges(surface.path);
+    else if (surface.kind === 'browser') this.open('browser', surface.url);
+    else if (surface.kind === 'tasks') this.openTasks();
+    else this.open('trace');
   }
 
   /** Closing the active surface hands the panel to the one on its left. */
@@ -293,17 +391,19 @@ export class BoundPanel {
     this.#write({ ...current, isOpen: true, activeSurfaceId: id });
   }
 
-  /** What a browser tab learns from the page, plus the zoom the user set. */
-  update(id: string, patch: { title?: string; url?: string; zoom?: number }): void {
+  /**
+   * What a browser tab learns from the page, the zoom the user set, and the row
+   * the changes surface has selected.
+   */
+  update(id: string, patch: Partial<Omit<Surface, 'id' | 'kind'>>): void {
     const current = this.state;
     const index = current.surfaces.findIndex((surface) => surface.id === id);
     if (index < 0) return;
     const surface = current.surfaces[index];
     if (!surface) return;
     const next = { ...surface, ...patch };
-    if (next.title === surface.title && next.url === surface.url && next.zoom === surface.zoom) {
-      return;
-    }
+    const keys = Object.keys(patch) as (keyof Surface)[];
+    if (keys.every((key) => next[key] === surface[key])) return;
     const surfaces = [...current.surfaces];
     surfaces[index] = next;
     this.#write({ ...current, surfaces });
@@ -316,17 +416,22 @@ export class BoundPanel {
   }
 
   /**
-   * The chat header's Trace button: it opens the panel on the trace surface,
-   * and shuts the panel when trace is already the one showing.
+   * One kind's own key: the panel opens on that surface, and shuts when that
+   * surface is already the one showing.
    */
-  toggleTrace(): void {
+  toggleKind(kind: SurfaceKind): void {
     const current = this.state;
-    const trace = current.surfaces.find((surface) => surface.kind === 'trace');
-    if (current.isOpen && trace && current.activeSurfaceId === trace.id) {
+    const found = current.surfaces.find((surface) => surface.kind === kind);
+    if (current.isOpen && found && current.activeSurfaceId === found.id) {
       this.#write({ ...current, isOpen: false });
       return;
     }
-    this.open('trace');
+    this.open(kind);
+  }
+
+  /** The trace surface's own key, kept by name because the palette asks for it. */
+  toggleTrace(): void {
+    this.toggleKind('trace');
   }
 }
 

@@ -1,10 +1,12 @@
-import { mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync } from 'node:fs';
 import { hostname } from 'node:os';
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { PROTOCOL_VERSION } from '@boite/contracts';
 import type { Channel, CoreInfo, ThreadId } from '@boite/contracts';
 import pkg from '../package.json';
 import { AccountStore } from './accounts.ts';
+import { AgentTokens } from './agent.ts';
+import { FileTickets } from './workdir.ts';
 import { Bus } from './bus.ts';
 import { shutdownDrivers } from './drivers/index.ts';
 import { ImportStore } from './imports.ts';
@@ -42,6 +44,22 @@ export interface CoreOptions {
   channel?: Channel;
 }
 
+/**
+ * Where the `boite` shim a thread's processes find on their PATH lives.
+ * `BOITE_CLI_DIR` decides when it is set. An installed core is the compiled
+ * `boite-core`, and the shim is staged beside it. From the sources, it is
+ * `packages/core/bin`, which is one directory up from here whether this runs
+ * from `src` or from `dist`. Anything else has no CLI to offer and says so
+ * with null rather than putting a directory that holds nothing on PATH.
+ */
+function resolveCliDir(): string | null {
+  const named = process.env.BOITE_CLI_DIR;
+  if (named !== undefined && named.length > 0) return named;
+  if (basename(process.execPath).startsWith('boite-core')) return dirname(process.execPath);
+  const fromSources = join(import.meta.dir, '..', 'bin');
+  return existsSync(fromSources) ? fromSources : null;
+}
+
 export class Core {
   readonly version = CORE_VERSION;
   readonly dataDir: string;
@@ -67,7 +85,18 @@ export class Core {
   readonly imports: ImportStore;
   readonly activity: ActivityStore;
   readonly push: PushStore;
+  /** The per-thread tokens the agents of this core say hello with. */
+  readonly agents = new AgentTokens();
+  /** The one-shot urls `files.read` hands out for what it cannot send inline. */
+  readonly fileTickets = new FileTickets();
+  /** Where the `boite` shim is, prepended to the PATH of every process a thread launches. */
+  readonly cliDir: string | null = resolveCliDir();
 
+  /**
+   * The server tells the core what it alone can know. The default answers no
+   * to everything, which is what a core with no socket open should say:
+   * `panel.open` then reports that nobody saw the request.
+   */
   subscribers: SubscriptionSink = { hasSubscribers: () => false, closeSession: () => undefined };
 
   private endpoint = { host: '127.0.0.1', port: 0 };

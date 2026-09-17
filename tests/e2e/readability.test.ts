@@ -33,7 +33,9 @@ test('thread metadata, message identity and expandable trace fit a narrow panel'
   const prUrl = await page.evaluate<string>(`document.querySelector('${id('thread-pr')}').href`);
   await page.click(id('thread-pr'));
   expect(await page.evaluate(`window.__openedPr`)).toBe(prUrl);
-  await page.click(id('tab-trace'));
+  await page.click(id('panel-toggle'));
+  await page.waitFor(`document.querySelector('${id('launch-trace')}') || document.querySelector('${id('trace-panel')}')`);
+  await page.evaluate(`document.querySelector('${id('launch-trace')}')?.click()`);
   await page.waitFor(`document.querySelectorAll('${id('trace-row')}').length === 3`);
   await page.click(`${id('trace-row')}[data-pid="21140"] summary`);
   await capture('readability-desktop');
@@ -44,7 +46,7 @@ test('thread metadata, message identity and expandable trace fit a narrow panel'
   await capture('readability-trace-phone');
   expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
   await page.send('Emulation.setDeviceMetricsOverride',{width:1300,height:850,deviceScaleFactor:1,mobile:false});
-  await page.click(id('tab-trace'));
+  await page.click(id('panel-toggle'));
 });
 
 test('paragraphs arrive whole, keep previous nodes and flush when stopped; reasoning replaces itself', async () => {

@@ -29,6 +29,7 @@ import type {
   Turn,
   TurnId,
 } from '@boite/contracts';
+import { agentEnvOf } from './agent.ts';
 import type { Core } from './core.ts';
 import { messageOf, notFound, refused } from './errors.ts';
 import { newId } from './ids.ts';
@@ -1018,11 +1019,13 @@ export class ThreadStore {
       // Every driver reaches the launcher through these two, so this is the one
       // place a lease on the provider's managed files can be held for the life
       // of an agent process, warm sessions included. `providers.uninstall`
-      // refuses while the count is above zero.
+      // refuses while the count is above zero. It is also where the thread's
+      // own door goes into the environment: everything a thread launches finds
+      // the core, its token and the `boite` CLI, grandchildren included.
       spawn: (cmd: string, args: string[], opts?: SpawnOptions) => {
         const spawned = this.core.procs.spawn(threadId, cmd, args, {
           ...opts,
-          env: { ...(opts?.env ?? {}), ...env },
+          env: agentEnvOf(this.core, threadId, { ...(opts?.env ?? process.env), ...env }),
         });
         const installs = this.core.providers.installs;
         installs.acquire(provider.id);
@@ -1041,7 +1044,12 @@ export class ThreadStore {
     provider: ProviderDescriptor,
   ): (cmd: string, args: string[], opts?: SpawnOptions) => SpawnedChild {
     return (cmd, args, opts) => {
-      const child = this.core.procs.spawnChild(threadId, cmd, args, opts);
+      // The SDK drivers hand a whole environment here, so the agent's own
+      // variables are merged onto theirs rather than added to `process.env`.
+      const child = this.core.procs.spawnChild(threadId, cmd, args, {
+        ...opts,
+        env: agentEnvOf(this.core, threadId, opts?.env ?? process.env),
+      });
       const installs = this.core.providers.installs;
       installs.acquire(provider.id);
       let released = false;

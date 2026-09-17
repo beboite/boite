@@ -48,11 +48,14 @@ function sizeOf(path: string, missing: string): number {
 
 /** The Worker files the compiled core loads by name from beside its executable. */
 const WORKERS = ['jobs-worker.js', 'guard-worker.js'];
+/** The `boite` shims a thread's PATH reaches: each runs `boite-core cli` from beside itself. */
+const SHIMS = ['boite', 'boite.cmd'];
+const shims = join(repo, 'packages', 'core', 'shims');
 
 /**
- * The one copy both destinations share: the compiled core under `exeName`, and
+ * The one copy both destinations share: the compiled core under `exeName`,
  * every Worker beside it under its own name, which is the only name the core
- * looks for.
+ * looks for, and the two `boite` shims the core puts on an agent's PATH.
  */
 export function stageCore(targetDir: string, exeName: string): void {
   const exeSource = join(coreDist, process.platform === 'win32' ? 'boite-core.exe' : 'boite-core');
@@ -74,6 +77,13 @@ export function stageCore(targetDir: string, exeName: string): void {
     const target = join(targetDir, worker.name);
     copyFileSync(worker.source, target);
     console.log(`stage-sidecar: ${target} (${worker.bytes} bytes)`);
+  }
+  for (const name of SHIMS) {
+    const source = join(shims, name);
+    const bytes = sizeOf(source, `${source} does not exist; the shims are tracked in packages/core/shims`);
+    const target = join(targetDir, name);
+    copyFileSync(source, target);
+    console.log(`stage-sidecar: ${target} (${bytes} bytes)`);
   }
 }
 
