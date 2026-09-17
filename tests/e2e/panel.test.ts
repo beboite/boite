@@ -33,7 +33,8 @@ beforeAll(async () => {
   await page.waitFor(`document.querySelector('${id('timeline')}')`);
   await onStore(`await store.open('t-trace');`);
   await page.waitFor(`document.querySelector('${id('panel-toggle')}')`);
-}, 30_000);
+  // A cold vite and a cold Chromium on a loaded runner: the budget readability.test.ts gives the same start.
+}, 90_000);
 
 afterAll(async () => { await page?.close(); await server?.close(); }, 15_000);
 
