@@ -26,6 +26,7 @@ export class SpeechStore {
   readonly local: SpeechLocal;
   private config: SpeechConfig = { ...DEFAULT_SPEECH };
   private keys: Credentials = { groqKey: '', openrouterKey: '' };
+  private loadError: string | null = null;
   private readonly running = new Map<string, { id: string; controller: AbortController }>();
   private readonly file: string;
   constructor(private readonly core: Core) {
@@ -37,7 +38,11 @@ export class SpeechStore {
         this.validate(saved);
         this.config = this.publicConfig(saved);
         this.keys = { groqKey: saved.groqKey ?? '', openrouterKey: saved.openrouterKey ?? '' };
-      } catch { throw invalidParams(`${this.file}: invalid speech configuration`); }
+      } catch {
+        this.config = { ...DEFAULT_SPEECH };
+        this.keys = { groqKey: '', openrouterKey: '' };
+        this.loadError = 'speech.json: invalid voice configuration; choose an engine and save Voice settings to repair it';
+      }
     }
   }
   get(): SpeechConfig { return { ...this.config }; }
@@ -45,7 +50,7 @@ export class SpeechStore {
     const localReady = this.local.ready(this.config.executable, this.config.modelPath);
     const groqKeySet = this.keys.groqKey.length > 0;
     const openrouterKeySet = this.keys.openrouterKey.length > 0;
-    return { revision: this.revision, engine: this.config.engine, ready: this.config.engine === 'local' ? localReady && !this.local.installing : this.config.apiProvider === 'groq' ? groqKeySet : openrouterKeySet, localReady, groqKeySet, openrouterKeySet, installing: this.local.installing, downloadedBytes: this.local.downloadedBytes, totalBytes: this.local.totalBytes, error: this.local.error, canInstallRuntime: this.local.canInstallRuntime };
+    return { revision: this.revision, engine: this.config.engine, ready: this.loadError === null && (this.config.engine === 'local' ? localReady && !this.local.installing : this.config.apiProvider === 'groq' ? groqKeySet : openrouterKeySet), localReady, groqKeySet, openrouterKeySet, installing: this.local.installing, downloadedBytes: this.local.downloadedBytes, totalBytes: this.local.totalBytes, error: this.loadError ?? this.local.error, canInstallRuntime: this.local.canInstallRuntime };
   }
   private publicConfig(p: SpeechConfig): SpeechConfig { return { engine: p.engine, language: p.language, apiProvider: p.apiProvider, fallback: p.fallback, executable: p.executable, modelPath: p.modelPath }; }
   private validate(p: SpeechConfig & Partial<Credentials>): void {
@@ -63,6 +68,7 @@ export class SpeechStore {
     this.revision = crypto.randomUUID();
     this.config = config;
     this.keys = keys;
+    this.loadError = null;
     return this.status();
   }
   install(): SpeechStatus {

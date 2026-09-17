@@ -45,6 +45,9 @@ Keys live in `<dataDir>/speech.json`, outside the journal, with restrictive file
 creation permissions. Configuration reads never return key values. An empty
 key field preserves the saved key; Remove key deletes it on Save. Cloud mode
 sends audio to the provider, whose own retention policy applies.
+An invalid `speech.json` disables dictation and reports its error in Voice
+settings without preventing core startup. Saving a valid configuration repairs
+it; the invalid file is left untouched until then.
 
 ## Microphone and HTTPS
 

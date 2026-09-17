@@ -48,7 +48,8 @@
     // Permission is requested inside the click, before an RPC can consume activation.
     const capture = new SpeechRecorder(); recorder = capture;
     try {
-      const captureStarted = capture.start((value, elapsed) => { level = value; seconds = elapsed; }, () => { if (phase === 'recording') void stop(); });
+      let captureEnded = false;
+      const captureStarted = capture.start((value, elapsed) => { level = value; seconds = elapsed; }, () => { captureEnded = true; if (phase === 'recording') void stop(); });
       const statusPromise = client.call('speech.status', {});
       const [status] = await Promise.all([statusPromise, captureStarted]);
       if (run !== generation || disposed) { capture.dispose(); return; }
@@ -63,6 +64,7 @@
         if (run === generation && !disposed && phase === 'recording') onpreview(previewText, `${strings.speech.previewFailed} ${microphoneError(cause)}`, true);
       });
       previewTimer = setInterval(() => preview?.update(() => capture.snapshot()), 2500);
+      if (captureEnded) void stop();
     } catch (cause) { capture.dispose(); if (run === generation && !disposed) fail(cause); }
   }
   async function stop() {

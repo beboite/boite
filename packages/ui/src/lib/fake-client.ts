@@ -1217,6 +1217,7 @@ export class FakeClient implements ObservableClient {
         const p = rawParams as RpcParams<'speech.transcribe'>;
         if (!this.#speechStatus.ready) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'Configure Voice first' });
         if (p.revision !== this.#speechStatus.revision) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'Voice settings changed during recording; record again with the selected engine' });
+        if (this.#speechRequests.size) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'Another transcription is running; try again shortly' });
         this.#speechRequests.add(p.requestId);
         await new Promise(resolve => setTimeout(resolve, 250));
         if (!this.#speechRequests.delete(p.requestId)) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'Transcription cancelled' });

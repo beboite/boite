@@ -556,8 +556,12 @@ shellTest('voice capture loads its packaged worklet under the native content sec
     await page.click('[data-testid="dictation-cancel"]');
     await page.waitFor(`document.querySelector('[data-testid="dictation-start"]')`);
   } finally {
-    await page.evaluate(`navigator.mediaDevices.getUserMedia = window.__realGetUserMedia; document.querySelector('[data-testid="dictation-cancel"]')?.click();`);
-    await client.call('speech.configure', previous); client.close();
+    try {
+      await page.evaluate(`navigator.mediaDevices.getUserMedia = window.__realGetUserMedia; document.querySelector('[data-testid="dictation-cancel"]')?.click();`);
+    } finally {
+      try { await client.call('speech.configure', previous); }
+      finally { client.close(); }
+    }
   }
 }, 30_000);
 

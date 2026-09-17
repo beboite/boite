@@ -44,6 +44,7 @@
 <div class="page" data-testid="voice-settings">
   <header><Mic size={20} strokeWidth={1.75} /><div><h2>{strings.speech.heading}</h2><p>{strings.speech.description}</p></div></header>
   {#if error}<p class="error" role="alert">{error}</p>{/if}
+  {#if status?.error}<p class="error" role="alert">{status.error}</p>{/if}
   {#if !store.owner || readOnly}<div class="card"><p>{strings.speech.ownerOnly}</p><p class="subtle">{status?.ready ? strings.speech.ready : strings.speech.setup}</p></div>
   {:else if config && status}
     <form onsubmit={(event) => { event.preventDefault(); void save(); }} oninput={() => saved = false}>
@@ -63,7 +64,6 @@
             <div class="actions"><button type="button" data-testid="voice-install" disabled={busy} onclick={() => void manage('speech.install')}><Download size={15} />{status.canInstallRuntime ? strings.speech.installWindows : strings.speech.install}</button>
             {#if status.localReady}<button type="button" class="ghost" data-testid="voice-uninstall" disabled={busy} onclick={() => void manage('speech.uninstall')}><Trash2 size={15} />{strings.speech.remove}</button>{/if}</div>
           {/if}
-          {#if status.error}<p class="error" role="alert">{status.error}</p>{/if}
           {#if !status.canInstallRuntime}<p>{strings.speech.runtimeHint}</p>{/if}
           <details><summary>{strings.speech.advanced}</summary><p>{strings.speech.pathHint}</p>
             <label>{strings.speech.executable}<input data-testid="voice-executable" bind:value={config.executable} spellcheck="false" /></label>

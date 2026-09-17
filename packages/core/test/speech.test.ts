@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
-import { existsSync, readFileSync, mkdirSync } from 'node:fs';
+import { existsSync, readFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { connect } from '../src/client.ts';
-import { DEFAULT_SPEECH, decodeSpeechAudio } from '../src/speech.ts';
+import { DEFAULT_SPEECH, decodeSpeechAudio, SpeechStore } from '../src/speech.ts';
 import { startTestCore, waitFor, type TestCore } from './harness.ts';
 
 let harness: TestCore;
@@ -126,4 +126,19 @@ test('a failed download rename removes the partial file and preserves the destin
   await expect(harness.core.speech.local['download'](spec, target, new AbortController().signal)).rejects.toThrow();
   expect(existsSync(target)).toBe(true);
   expect(existsSync(`${target}.part`)).toBe(false);
+});
+
+test.each(['{"groqKey":"private-fixture",', '{"engine":"invalid","groqKey":"private-fixture"}'])('invalid persisted speech config stays repairable without leaking or overwriting it: %s', async raw => {
+  const file = join(harness.dataDir, 'speech.json');
+  writeFileSync(file, raw);
+  const loaded = new SpeechStore(harness.core);
+  try {
+    expect(loaded.get()).toEqual(DEFAULT_SPEECH);
+    expect(loaded.status().ready).toBe(false);
+    expect(loaded.status().error).toContain('speech.json');
+    expect(JSON.stringify(loaded.status())).not.toContain('private-fixture');
+    expect(readFileSync(file, 'utf8')).toBe(raw);
+    expect(loaded.configure({ ...DEFAULT_SPEECH, engine: 'api', groqKey: 'repaired-fixture' }).ready).toBe(true);
+    expect(loaded.status().error).toBeNull();
+  } finally { await loaded.close(); }
 });

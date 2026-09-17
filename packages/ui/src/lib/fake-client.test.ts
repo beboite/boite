@@ -4,6 +4,18 @@ import { RpcErrorCode } from '@boite/contracts';
 
 afterEach(() => vi.useRealTimers());
 
+test('fake speech refuses overlapping request IDs and accepts a retry after completion', async () => {
+  const client = new FakeClient({ delayMs: 0 });
+  await client.connect();
+  const { revision } = await client.call('speech.status', {});
+  const first = client.call('speech.transcribe', { requestId: 'first', revision, audio: '' });
+  try {
+    await expect(client.call('speech.transcribe', { requestId: 'second', revision, audio: '' })).rejects.toMatchObject({ code: RpcErrorCode.Refused });
+    await first;
+    expect((await client.call('speech.transcribe', { requestId: 'second', revision, audio: '' })).text).toBeTruthy();
+  } finally { await first.catch(() => {}); client.close(); }
+});
+
 test('fake speech refuses a recording made before configuration changed', async () => {
   const client = new FakeClient({ delayMs: 0 });
   await client.connect();

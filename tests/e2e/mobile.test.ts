@@ -116,7 +116,6 @@ test('returning to a long conversation preserves the reading position', async ()
   await page.waitFor(`document.querySelector('[data-testid=thread-title]')?.textContent.includes('Four hundred')`);
   await page.evaluate(`(() => { const t=document.querySelector('[data-testid=timeline]'); t.scrollTop = t.scrollHeight - t.clientHeight - 1200; t.dispatchEvent(new Event('scroll')); })()`);
   await capture('mobile-long-reading.png');
-  const previous = await page.evaluate<number>(`document.querySelector('[data-testid=timeline]').scrollTop`);
   const visibleAnchor = `(() => { const t=document.querySelector('[data-testid=timeline]'); const top=t.getBoundingClientRect().top; const m=[...t.querySelectorAll('[data-mid]')].find(m=>m.getBoundingClientRect().bottom>top); return {id:m.dataset.mid,offset:m.getBoundingClientRect().top-top}; })()`;
   const anchor = await page.evaluate<{ id: string; offset: number }>(visibleAnchor);
   await page.click('[data-testid=mobile-tabs] button:nth-child(1)');
@@ -126,8 +125,8 @@ test('returning to a long conversation preserves the reading position', async ()
   await page.click('[data-testid=mobile-thread-t-long]');
   await page.waitFor(`!document.querySelector('[data-testid=mobile-list]')`);
   await capture('mobile-long-restored.png');
-  const restored = await page.evaluate<number>(`document.querySelector('[data-testid=timeline]').scrollTop`);
-  expect(Math.abs(restored - previous)).toBeLessThan(60);
+  // Measurements can change the virtual spacer height without moving the text.
+  // The visible message and its viewport offset define the reading position.
   const restoredAnchor = await page.evaluate<{ id: string; offset: number }>(visibleAnchor);
   expect(restoredAnchor.id).toBe(anchor.id);
   expect(Math.abs(restoredAnchor.offset - anchor.offset)).toBeLessThan(10);
