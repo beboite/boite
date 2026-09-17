@@ -8,8 +8,8 @@
  */
 import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from 'bun:test';
-import { coInitialize, coUninitialize, openSessions } from '../src/platform/audio-sessions.ts';
-import type { AudioSession, AudioSessions } from '../src/platform/audio-sessions.ts';
+import { coInitialize, coUninitialize, openSessions } from '../src/platform/windows/audio-sessions.ts';
+import type { AudioSession, AudioSessions } from '../src/platform/windows/audio-sessions.ts';
 import { echoThread, startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
 

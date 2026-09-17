@@ -19,6 +19,11 @@ const DEFAULT_HELLO_TIMEOUT_MS = 5000;
  * repository above it and carries the build in a `ui` directory next to itself.
  */
 function resolveUiDist(): string {
+  const explicit = process.env.BOITE_UI_DIR;
+  if (explicit) {
+    if (!existsSync(join(explicit, 'index.html'))) throw new Error(`BOITE_UI_DIR must contain index.html: ${explicit}`);
+    return explicit;
+  }
   const fromModule = join(import.meta.dir, '..', '..', 'ui', 'dist');
   if (existsSync(fromModule)) return fromModule;
   const besideExecutable = join(dirname(process.execPath), 'ui');

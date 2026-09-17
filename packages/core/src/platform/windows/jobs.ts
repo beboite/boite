@@ -2,7 +2,7 @@
  * Windows Job Objects, reached with `bun:ffi`. Every process a thread launches
  * lands in that thread's job, direct child or not, so the trace sees a
  * grandchild that outlives its parent and `killTree` is one call instead of a
- * pid walk. Linux and macOS keep the no-op stubs and report `poll`.
+ * pid walk. Linux and macOS use the separate POSIX backend.
  *
  * One global job holds the machine-wide CPU cap; every thread job nests under
  * it, runs below normal priority and dies with the core (KILL_ON_JOB_CLOSE,
@@ -12,40 +12,10 @@ import { cpus } from 'node:os';
 import { dlopen, FFIType, ptr } from 'bun:ffi';
 import type { Pointer } from 'bun:ffi';
 import type { TraceCapability } from '@boite/contracts';
-import { currentOs } from '../paths.ts';
 import type { JobsWorkerMessage, JobsWorkerStart } from './jobs-worker.ts';
 import { workerEntry } from './worker-entry.ts';
 
-export interface JobProcessInfo {
-  exe: string;
-  commandLine: string | null;
-  parentPid: number | null;
-}
-
-export interface JobProcessExit {
-  exitCode: number | null;
-  cpuMs: number | null;
-  peakMemoryBytes: number | null;
-  ioBytes: number | null;
-}
-
-export interface JobLoad {
-  processes: number;
-  cpuPercent: number;
-  memoryBytes: number;
-}
-
-/** What the registry wants to hear about. Set once by `ProcRegistry`. */
-export interface JobEventSink {
-  started(threadId: string, pid: number, info: JobProcessInfo): void;
-  exited(threadId: string, pid: number, exit: JobProcessExit): void;
-  note(threadId: string, message: string): void;
-}
-
-export interface JobLimits {
-  agentCpuCapPercent: number;
-  threadMemoryCapMb: number;
-}
+import type { NativeProcessInfo, NativeProcessExit, ProcessSample, ProcessEventSink, ProcessLimits } from '../types.ts';
 
 // -- Win32 constants --------------------------------------------------------
 
@@ -242,7 +212,6 @@ interface ThreadJob {
 }
 
 const LOGICAL_CPUS = Math.max(1, cpus().length);
-const isWindows = process.platform === 'win32';
 
 let refCount = 0;
 let native: Native | null = null;
@@ -254,8 +223,8 @@ let workerFailure: string | null = null;
 let stopFlag: Int32Array | null = null;
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 let nestingRefused = false;
-let sink: JobEventSink | null = null;
-let limits: JobLimits = { agentCpuCapPercent: 75, threadMemoryCapMb: 0 };
+let sink: ProcessEventSink | null = null;
+let limits: ProcessLimits = { agentCpuCapPercent: 75, threadMemoryCapMb: 0 };
 let nextKey = 1;
 
 const threadJobs = new Map<string, ThreadJob>();
@@ -265,7 +234,7 @@ const ignored = new Set<number>();
 
 // -- lifecycle --------------------------------------------------------------
 
-export function retainJobs(events: JobEventSink): void {
+export function retainJobs(events: ProcessEventSink): void {
   refCount += 1;
   sink = events;
 }
@@ -281,19 +250,16 @@ export function releaseJobs(): void {
  * Before the first process nothing native exists, so the limits are only
  * recorded here; `ensureThreadJob` applies them when it builds the job.
  */
-export function setJobLimits(next: JobLimits): void {
+export function setProcessLimits(next: ProcessLimits): void {
   limits = { ...next };
   const api = native;
-  if (!isWindows || api === null) return;
+  if (api === null) return;
   if (globalJob !== 0) applyCpuCap(api, globalJob);
   for (const job of threadJobs.values()) applyThreadLimits(api, job.handle);
 }
 
 export function jobsCapability(): TraceCapability {
-  const os = currentOs();
-  if (!isWindows) {
-    return { os, mode: 'poll', note: 'direct children only; Job Objects are Windows-only' };
-  }
+  const os = 'windows' as const;
   if (native === null) {
     // Nothing has been spawned yet, so nothing was loaded: this says what the
     // Windows path will do, and a later failure moves it to `poll`.
@@ -320,7 +286,7 @@ export function jobsCapability(): TraceCapability {
 // -- the two seams `procs` calls --------------------------------------------
 
 export function assignToThreadJob(threadId: string, pid: number): boolean {
-  if (!isWindows || pid <= 0) return false;
+  if (pid <= 0) return false;
   const api = ensureNative();
   if (api === null) return false;
 
@@ -343,16 +309,16 @@ export function assignToThreadJob(threadId: string, pid: number): boolean {
 
 export function terminateThreadJob(threadId: string): boolean {
   const job = threadJobs.get(threadId);
-  if (!isWindows || job === undefined) return false;
+  if (job === undefined) return false;
   const api = ensureNative();
   if (api === null) return false;
   return api.terminateJob(job.handle, KILL_EXIT_CODE);
 }
 
 /** CPU over the interval since the previous sample, memory as the live working sets. */
-export function sampleThreadJob(threadId: string): JobLoad | null {
+export function sampleThreadJob(threadId: string): ProcessSample | null {
   const job = threadJobs.get(threadId);
-  if (!isWindows || job === undefined) return null;
+  if (job === undefined) return null;
   const api = ensureNative();
   if (api === null) return null;
 
@@ -389,10 +355,6 @@ export function sampleThreadJob(threadId: string): JobLoad | null {
 function ensureNative(): Native | null {
   if (native !== null) return native;
   if (nativeError !== null) return null;
-  if (!isWindows) {
-    nativeError = 'not Windows';
-    return null;
-  }
   try {
     const k32 = loadKernel32().symbols;
     let nt: Ntdll | null = null;
@@ -625,7 +587,7 @@ function onProcessExited(threadId: string, pid: number): void {
     return;
   }
   tracked.delete(pid);
-  const exit: JobProcessExit = {
+  const exit: NativeProcessExit = {
     exitCode: exitCodeOf(api, entry.handle),
     cpuMs: cpuMsOf(api, entry.handle),
     peakMemoryBytes: peakMemoryOf(api, entry),

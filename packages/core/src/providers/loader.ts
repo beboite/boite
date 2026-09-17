@@ -190,7 +190,11 @@ function checkStringMap(value: unknown, file: string, field: string): Record<str
  */
 function checkInstall(value: unknown, file: string, field: string): ProviderInstall {
   const obj = asObject(value, file, field);
-  checkKeys(obj, ['version', 'url', 'sha256', 'archiveBytes', 'files', 'format'], file, field);
+  checkKeys(obj, ['version', 'url', 'sha256', 'archiveBytes', 'files', 'arch', 'format'], file, field);
+  const arch = obj['arch'];
+  if (arch !== undefined && arch !== 'x64' && arch !== 'arm64') {
+    reject(file, `${field}.arch`, 'x64 or arm64', `${field}.arch must be x64 or arm64`);
+  }
   const format = obj['format'];
   if (format !== undefined && format !== 'zip' && format !== 'binary') {
     reject(file, `${field}.format`, 'zip or binary', `${field}.format must be zip or binary`);
@@ -213,7 +217,7 @@ function checkInstall(value: unknown, file: string, field: string): ProviderInst
   const files = rawFiles.map((entry, index) => {
     const entryField = `${field}.files[${index}]`;
     const item = asObject(entry, file, entryField);
-    checkKeys(item, ['path', 'bytes'], file, entryField);
+    checkKeys(item, ['path', 'bytes', 'executable'], file, entryField);
     const path = asString(item['path'], file, `${entryField}.path`);
     for (const segment of path.split(/[\\/]/)) {
       if (segment !== '..') continue;
@@ -222,13 +226,15 @@ function checkInstall(value: unknown, file: string, field: string): ProviderInst
     if (path.startsWith('/') || path.startsWith('\\') || /^[a-zA-Z]:/.test(path)) {
       reject(file, `${entryField}.path`, 'a relative path inside the archive', `${entryField}.path must be relative: ${path}`);
     }
-    return { path, bytes: asPositiveInteger(item['bytes'], file, `${entryField}.bytes`) };
+    return { path, bytes: asPositiveInteger(item['bytes'], file, `${entryField}.bytes`),
+      ...(item['executable'] === undefined ? {} : { executable: asBoolean(item['executable'], file, `${entryField}.executable`) }) };
   });
 
   if (format === 'binary' && (files.length !== 1 || files[0]?.bytes !== archiveBytes)) {
     reject(file, `${field}.files`, 'one file whose bytes equal archiveBytes', `${field}.files must describe the downloaded binary`);
   }
   return { version: asString(obj['version'], file, `${field}.version`), url, sha256, archiveBytes, files,
+    ...(arch === undefined ? {} : { arch: arch as 'x64' | 'arm64' }),
     ...(format === 'zip' || format === 'binary' ? { format } : {}) };
 }
 

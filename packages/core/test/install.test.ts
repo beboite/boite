@@ -146,6 +146,30 @@ afterEach(async () => {
 });
 
 describe('managed installs', () => {
+  test('an archive for another architecture is refused before download', async () => {
+    const arch = process.arch === 'arm64' ? 'x64' : 'arm64';
+    await loadDescriptor({ ...goodInstall(), arch });
+    const client = await harness.connect();
+    const provider = (await client.call('providers.list', {})).loaded.find(value => value.id === 'managed');
+    expect(provider?.install).toEqual({ state: 'failed', version: '1.0.0', message: `managed requires ${arch}; this machine is ${process.arch}` });
+    await expect(client.call('providers.install', { providerId: 'managed' })).rejects.toThrow(`requires ${arch}`);
+    expect(existsSync(agentDir('downloads'))).toBe(false);
+  });
+
+  test('additional declared executables receive execute permission on POSIX', async () => {
+    await loadDescriptor({ ...goodInstall(), files: [
+      { path: EXE_PATH, bytes: EXE.byteLength },
+      { path: NOTE_PATH, bytes: NOTE.byteLength, executable: true },
+    ] });
+    const client = await harness.connect();
+    await client.call('providers.install', { providerId: 'managed' });
+    await waitFor(() => existsSync(agentDir('current', '.install-complete.json')));
+    if (process.platform !== 'win32') {
+      expect(statSync(agentDir('current', EXE_PATH)).mode & 0o111).toBe(0o111);
+      expect(statSync(agentDir('current', NOTE_PATH)).mode & 0o111).toBe(0o111);
+    }
+  });
+
   test('a binary with the wrong digest never becomes available', async () => {
     await loadDescriptor({ ...goodInstall(), format: 'binary', url: url('/agent.exe'),
       sha256: '0'.repeat(64), archiveBytes: EXE.byteLength, files: [{ path: EXE_PATH, bytes: EXE.byteLength }] });

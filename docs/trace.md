@@ -5,6 +5,25 @@ only true because one launcher owns every spawn and, on Windows, puts the child
 in a kernel object before its first instruction. This page is what the claim
 covers, and where it stops.
 
+## Platform boundary
+
+The shared process registry calls `ProcessPlatform` in
+`packages/core/src/platform/types.ts`. `platform/index.ts` selects the backend:
+`platform/windows/` owns Job Objects, FFI, native workers, focus protection,
+audio mute and the `taskkill` fallback. `platform/posix.ts` supplies the current
+Linux and macOS behavior without importing the Windows modules. Both systems
+share that backend until their native tracking implementations differ.
+
+The registry owns spawning, journal entries, exit handling and thread events.
+Every driver uses the same registry. Adding native tracking for another OS
+means implementing this interface, not adding OS branches to drivers or RPC
+handlers. Unsupported protections stay off even when their settings are enabled.
+
+The shell follows the same boundary under `apps/shell/src-tauri/src/platform/`:
+core ownership, launch flags, data paths, toast delivery and native appbar queries
+live there. IPC caller checks remain in the shared shell commands. This split
+does not add system toasts or hard-exit process ownership on Linux or macOS.
+
 ## One launcher, one Job Object per thread
 
 `packages/core/src/procs.ts` is the only place a process is created:
@@ -36,7 +55,7 @@ totals.
 - `trace.get` gives one thread's processes, newest first.
 - `resources.list` gives every thread with its live processes and its totals.
 - `resources.killTree` kills one thread's tree, `TerminateJobObject` on Windows
-  and the process group elsewhere. It returns before the completion port has
+  and registered direct children elsewhere. It returns before the completion port has
   reported the exits, so anything that then reads the trace on the next line
   still sees them live: wait for the live count to reach zero instead.
 - `ThreadLoad` is sampled on a timer and carried on every thread summary: how

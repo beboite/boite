@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import type { AudioSession } from '../src/platform/audio-sessions.ts';
-import { GuardLogic, HWND_BOTTOM, PUSH_BACK_FLAGS } from '../src/platform/guard-logic.ts';
-import type { GuardWin32, WindowOwner } from '../src/platform/guard-logic.ts';
-import { MuteLogic } from '../src/platform/mute-logic.ts';
+import type { AudioSession } from '../src/platform/windows/audio-sessions.ts';
+import { GuardLogic, HWND_BOTTOM, PUSH_BACK_FLAGS } from '../src/platform/windows/guard-logic.ts';
+import type { GuardWin32, WindowOwner } from '../src/platform/windows/guard-logic.ts';
+import { MuteLogic } from '../src/platform/windows/mute-logic.ts';
 import { echoThread, startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
 

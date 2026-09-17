@@ -32,20 +32,45 @@ it does not compile again. The end-to-end suite refuses missing or stale artifac
   Keep every emitted file together when distributing this bundle. Lazy imports
   keep the SDKs off the start path. `bun run core` and the shell both prefer this
   bundle over the sources when it is there.
-- `build:core:exe` compiles `packages/core/dist/boite-core.exe`. The two worker
+- `build:core:exe` compiles `packages/core/dist/boite-core`, with `.exe` on Windows. The two worker
   files are not compiled into it: the core loads them by name from beside its own
   executable, so they travel with it.
 - `stage:core` puts that executable and both workers where the two things that
   run them look. The bundler wants
-  `apps/shell/src-tauri/binaries/boite-core-<target triple>.exe` for
+  `apps/shell/src-tauri/binaries/boite-core-<target triple>`, with `.exe` on Windows, for
   `bundle.externalBin`, plus the workers in that same directory for the resource
   entries that land them beside the installed sidecar. The end to end suite wants
-  the same files beside `apps/shell/src-tauri/target/release/boite-shell.exe`,
-  which is the shell executable it drives, so the script copies there too
-  whenever that executable exists. The shell refuses a sidecar missing either
-  worker and names the missing file.
+  the same files beside `apps/shell/src-tauri/target/release/boite-shell`, with
+  `.exe` on Windows, so the script copies there whenever that executable exists.
+  The Windows shell refuses a sidecar missing either worker and names the missing file.
 - `build:shell` runs the Tauri build with the bundle overlay and produces the
-  NSIS installer.
+  NSIS installer on Windows, Debian and AppImage packages on Linux, or an
+  application bundle and DMG on macOS. Build on the target OS and architecture;
+staging supports Windows x64 and Linux/macOS x64 and ARM64.
+
+The shell passes Tauri's resource directory to the core through `BOITE_UI_DIR`,
+so the installed core can serve the phone UI from the macOS application bundle
+and Linux package. Windows workers are required only by the Windows shell.
+The compiled sidecar needs no separately installed Bun runtime.
+Linux builds also need `xdg-utils`, alongside the WebKitGTK and appindicator
+development packages. The Debian package declares `xdg-utils` for opening links.
+Install `patchelf` too. The shell build wrapper selects it from PATH for
+linuxdeploy. On ARM64 it preserves the compiled Bun sidecar, whose ELF load
+segments break after an RPATH rewrite. The exception checks that the sidecar
+only needs glibc libraries; CI compares the packaged core with the original.
+
+Portable CI runs `scripts/ci/desktop-smoke.ts <installed-shell>` against the
+Debian package, extracted AppImage and macOS application bundle. Signing, notarization and testing
+on older operating systems remain release prerequisites; a local unsigned
+bundle is not a notarized download. Native notifications and Windows process
+guards are not implemented on Linux or macOS.
+On a normal quit, the POSIX shell gives the core three seconds to handle
+`SIGTERM`, stop its direct children and close the journal before forcing exit.
+
+macOS requires 13.0 or newer. The bundle includes the JIT entitlements required
+by the [compiled Bun runtime](https://bun.sh/docs/bundler/executables).
+CI signs locally with an ad-hoc identity and starts that signed bundle. A public
+release still needs an Apple Developer ID and notarization credentials.
 
 A shell executable with no installer, for a quick look at the window:
 
