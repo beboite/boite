@@ -37,13 +37,12 @@ it does not compile again. The end-to-end suite refuses missing or stale artifac
   executable, so they travel with it.
 - `stage:core` puts that executable and both workers where the two things that
   run them look. The bundler wants
-  `apps/shell/src-tauri/binaries/boite-core-<target triple>.exe` for
+  `apps/shell/src-tauri/binaries/boite-core-<target triple>`, with `.exe` on Windows, for
   `bundle.externalBin`, plus the workers in that same directory for the resource
   entries that land them beside the installed sidecar. The end to end suite wants
-  the same files beside `apps/shell/src-tauri/target/release/boite-shell.exe`,
-  which is the shell executable it drives, so the script copies there too
-  whenever that executable exists. The shell refuses a sidecar missing either
-  worker and names the missing file.
+  the same files beside `apps/shell/src-tauri/target/release/boite-shell`, with
+  `.exe` on Windows, so the script copies there whenever that executable exists.
+  The Windows shell refuses a sidecar missing either worker and names the missing file.
 - `build:shell` runs the Tauri build with the bundle overlay and produces the
   NSIS installer on Windows, Debian and AppImage packages on Linux, or an
   application bundle and DMG on macOS. Build on the target OS and architecture;

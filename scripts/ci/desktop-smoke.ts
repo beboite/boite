@@ -25,6 +25,7 @@ const child = Bun.spawn([executable], {
 });
 const stdout = new Response(child.stdout).text();
 const stderr = new Response(child.stderr).text();
+const failures: unknown[] = [];
 try {
   const file = join(data, 'core.json');
   const deadline = Date.now() + 30_000;
@@ -56,6 +57,8 @@ try {
   const turn = await finished;
   if (turn.status !== 'done') throw new Error(`Installed echo turn ended with ${turn.status}`);
   console.log('Installed desktop: core startup, bundled UI, authenticated RPC and echo turn passed');
+} catch (error) {
+  failures.push(error);
 } finally {
   client?.close();
   if (process.platform !== 'win32') {
@@ -73,6 +76,11 @@ try {
   // The core needs a moment to flush its journal and release its files.
   for (let attempt = 0; attempt < 50; attempt++) {
     try { rmSync(directory, { recursive: true, force: true }); break; }
-    catch (error) { if (attempt === 49) throw error; await Bun.sleep(100); }
+    catch (error) {
+      if (attempt === 49) { failures.push(error); break; }
+      await Bun.sleep(100);
+    }
   }
 }
+if (failures.length === 1) throw failures[0];
+if (failures.length > 1) throw new AggregateError(failures, 'Installed desktop test and cleanup failed');
