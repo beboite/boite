@@ -41,10 +41,15 @@ async function record() {
   expect(await page.evaluate(`document.querySelector('${id('dictation')}')?.textContent`)).toContain('Listening');
   await page.send('HeapProfiler.collectGarbage', {});
   try { await page.waitFor(`Number(document.querySelector('[data-testid="dictation"] .duration')?.textContent.split(':')[1]) >= 1`); } catch (error) { console.log(await page.evaluate(`({dictation: document.querySelector('[data-testid="dictation"]')?.outerHTML, contexts: [...window.__audioFixtures].map(f => ({state:f.context.state, time:f.context.currentTime})), hidden:document.hidden})`)); throw error; }
+  await page.waitFor(`document.querySelector('${id('dictation-preview')}')?.textContent.includes('Please add a test')`);
+  expect(await page.evaluate(`document.querySelector('${id('dictation')}').getBoundingClientRect().height <= 44`)).toBe(true);
+  expect(await page.evaluate(`!!document.querySelector('${id('dictation-stop')} svg')`)).toBe(true);
 }
 test('dictation captures audio and appends a transcript without sending or overwriting typed text', async () => {
   await type('Existing draft.');
+  await capture('speech-desktop-idle.png');
   await record();
+  expect(await page.evaluate(`document.querySelector('${id('composer-input')}').value`)).toBe('Existing draft.');
   await capture('speech-desktop-recording.png');
   expect(await page.evaluate(`document.querySelector('${id('composer-send')}').disabled`)).toBe(true);
   await type('Existing draft. Typed while talking.');
@@ -52,13 +57,14 @@ test('dictation captures audio and appends a transcript without sending or overw
   await page.waitFor(`document.querySelector('${id('composer-input')}').value.includes('Please add a test')`);
   expect(await page.evaluate(`document.querySelector('${id('composer-input')}').value`)).toBe('Existing draft. Typed while talking. Please add a test for this change.');
   expect(await page.evaluate('window.__stoppedTracks')).toBeGreaterThan(0);
-  expect(await page.evaluate(`!!document.querySelector('${id('dictation-start')}')`)).toBe(true);
+  expect(await page.evaluate(`document.querySelector('${id('dictation')}').dataset.phase`)).toBe('idle');
 }, 30_000);
 
 test('phone dictation fits, cancels with Escape, and does not change the draft', async () => {
   await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
-  await type('Keep this draft.'); await record(); await capture('speech-phone-recording.png');
+  await type('Keep this draft.'); await capture('speech-phone-idle.png'); await record(); await capture('speech-phone-recording.png');
   expect(await page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')).toBe(true);
+  expect(await page.evaluate(`document.querySelector('.composer .bar').getBoundingClientRect().height <= 56`)).toBe(true);
   await page.evaluate(`window.dispatchEvent(new KeyboardEvent('keydown', {key:'Escape',bubbles:true}))`);
   await page.waitFor(`!!document.querySelector('${id('dictation-start')}')`);
   expect(await page.evaluate(`document.querySelector('${id('composer-input')}').value`)).toBe('Keep this draft.');
@@ -93,7 +99,7 @@ test('a denied microphone preserves the draft and shows a readable light-theme e
   await type('Do not lose this.');
   await page.send('Runtime.evaluate', { expression: `document.querySelector('${id('dictation-start')}').click()`, userGesture: true });
   await page.waitFor(`document.querySelector('${id('dictation')}')?.dataset.phase === 'error'`);
-  expect(await page.text(id('dictation'))).toContain('Microphone permission was denied');
+  expect(await page.text(id('dictation-preview'))).toContain('Microphone permission was denied');
   await capture('speech-permission-light.png');
   await page.click(id('dictation-cancel'));
   expect(await page.evaluate(`document.querySelector('${id('composer-input')}').value`)).toBe('Do not lose this.');

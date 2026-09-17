@@ -1,11 +1,12 @@
 <script lang="ts">
-  import { Mic, Square, X, LoaderCircle, RotateCcw, Settings2 } from '@lucide/svelte';
+  import { Mic, X, LoaderCircle, RotateCcw, Settings2 } from '@lucide/svelte';
   import { onDestroy } from 'svelte';
   import type { Store } from '../lib/store.svelte';
   import type { Client } from '../lib/client';
   import { SpeechRecorder, audioBase64, microphoneError } from '../lib/speech-recorder';
+  import { SpeechPreview } from '../lib/speech-preview';
   import { strings } from '../lib/strings';
-  let { store, ontext, onbusy }: { store: Store; ontext: (text: string) => void; onbusy: (busy: boolean) => void } = $props();
+  let { store, ontext, onbusy, onpreview }: { store: Store; ontext: (text: string) => void; onbusy: (busy: boolean) => void; onpreview: (text: string, status: string, error: boolean) => void } = $props();
   let phase = $state<'idle' | 'opening' | 'recording' | 'transcribing' | 'error'>('idle');
   let seconds = $state(0);
   let level = $state(0);
@@ -19,21 +20,31 @@
   let revision = '';
   let disposed = false;
   let client: Client | null = null;
-  const bars = [0.4, 0.75, 1, 0.65, 0.9, 0.5, 0.8];
+  let preview: SpeechPreview | null = null;
+  let previewText = '';
+  let previewTimer: ReturnType<typeof setInterval> | null = null;
+  function stopPreview() {
+    if (previewTimer) clearInterval(previewTimer);
+    previewTimer = null;
+    const pending = preview?.stop(); preview = null;
+    return pending;
+  }
   function cancel() {
     generation++;
+    void stopPreview();
     recorder?.dispose(); recorder = null; audio = null;
     if (requestId && client) void client.call('speech.cancel', { requestId }).catch(() => {});
-    requestId = null; phase = 'idle'; onbusy(false);
+    requestId = null; phase = 'idle'; onbusy(false); onpreview('', '', false);
   }
   onDestroy(() => { disposed = true; cancel(); });
-  function fail(cause: unknown) { error = microphoneError(cause); phase = 'error'; onbusy(false); }
+  function fail(cause: unknown) { error = microphoneError(cause); phase = 'error'; onbusy(false); onpreview(previewText, error, true); }
   async function start() {
     client = store.client;
     if (!client) return;
     const run = ++generation;
-    error = ''; needsSetup = false; audio = null; seconds = 0; level = 0;
+    error = ''; needsSetup = false; audio = null; seconds = 0; level = 0; previewText = '';
     phase = 'opening'; onbusy(true);
+    onpreview('', strings.speech.opening, false);
     // Permission is requested inside the click, before an RPC can consume activation.
     const capture = new SpeechRecorder(); recorder = capture;
     try {
@@ -44,25 +55,36 @@
       engine = status.engine; revision = status.revision;
       if (!status.ready) { needsSetup = true; throw new Error(store.owner ? strings.speech.setup : strings.speech.ownerSetup); }
       phase = 'recording';
+      onpreview('', strings.speech.listening, false);
+      preview = new SpeechPreview(client, revision, text => {
+        if (run !== generation || disposed || phase !== 'recording') return;
+        previewText = text; onpreview(text, strings.speech.live, false);
+      }, cause => {
+        if (run === generation && !disposed && phase === 'recording') onpreview(previewText, `${strings.speech.previewFailed} ${microphoneError(cause)}`, true);
+      });
+      previewTimer = setInterval(() => preview?.update(() => capture.snapshot()), 2500);
     } catch (cause) { capture.dispose(); if (run === generation && !disposed) fail(cause); }
   }
   async function stop() {
     if (phase !== 'recording' || !recorder) return;
     const run = generation;
     phase = 'transcribing';
-    try { const recording = await recorder.stop(); if (run === generation && !disposed) { audio = recording; await transcribe(); } }
+    onpreview(previewText, strings.speech.transcribing, false);
+    const drained = stopPreview();
+    try { const recording = await recorder.stop(); await drained; if (run === generation && !disposed) { audio = recording; await transcribe(); } }
     catch (cause) { if (run === generation && !disposed) fail(cause); }
   }
   async function transcribe() {
     if (!audio || !client) return;
     const run = generation;
     phase = 'transcribing'; onbusy(true);
+    onpreview(previewText, strings.speech.transcribing, false);
     requestId = crypto.randomUUID();
     try {
       const result = await client.call('speech.transcribe', { requestId, revision, audio: audioBase64(audio) });
       if (run !== generation || disposed) return;
       if (!result.text.trim()) throw new Error(strings.speech.silence);
-      ontext(result.text); audio = null; phase = 'idle'; onbusy(false);
+      ontext(result.text); audio = null; phase = 'idle'; onbusy(false); onpreview('', '', false);
     } catch (cause) { if (run === generation && !disposed) fail(cause); }
     finally { if (run === generation) requestId = null; }
   }
@@ -74,40 +96,33 @@
 <svelte:window onkeydowncapture={keydown} onpagehide={cancel} />
 <svelte:document onvisibilitychange={() => { if (document.hidden && (phase === 'recording' || phase === 'opening')) cancel(); }} />
 
-{#if phase === 'idle'}
-  <button type="button" class="icon ghost microphone" data-testid="dictation-start" title={strings.speech.start} aria-label={strings.speech.start} disabled={store.connection !== 'ready'} onclick={() => void start()}><Mic size={16} strokeWidth={1.75} /></button>
-{:else}
-  <div class="dictation" class:error={phase === 'error'} data-testid="dictation" data-phase={phase}>
-    {#if phase === 'recording'}
-      <div class="meter" aria-hidden="true">{#each bars as height, index (index)}<i style:height={`${4 + level * height * 22}px`}></i>{/each}</div>
-      <div class="description"><span>{strings.speech.listening}</span><small>{engine === 'local' ? strings.speech.private : strings.speech.cloud}</small></div>
-      <span class="duration">{Math.floor(seconds / 60)}:{String(Math.floor(seconds % 60)).padStart(2, '0')}</span>
-      <button class="icon finish" data-testid="dictation-stop" aria-label={strings.speech.stop} title={strings.speech.stop} onclick={() => void stop()}><Square size={13} fill="currentColor" /></button>
-    {:else if phase === 'error'}
-      <span class="message" role="alert">{error}</span>
-      {#if audio}<button class="icon ghost" data-testid="dictation-retry" title={strings.speech.retry} aria-label={strings.speech.retry} onclick={() => void transcribe()}><RotateCcw size={16} /></button>{/if}
-      {#if needsSetup && store.owner}<button class="icon ghost" title={strings.speech.heading} aria-label={strings.speech.heading} onclick={() => store.showSettings('voice')}><Settings2 size={16} /></button>{/if}
-    {:else}
-      <LoaderCircle size={17} class="spinner" /><span class="message" role="status">{phase === 'opening' ? strings.speech.opening : strings.speech.transcribing}</span>
-    {/if}
-    <button class="icon ghost" data-testid="dictation-cancel" title={strings.common.cancel} aria-label={strings.common.cancel} onclick={cancel}><X size={16} /></button>
-  </div>
-{/if}
+<div class="dictation" data-testid="dictation" data-phase={phase}>
+  <button type="button" class="icon microphone" class:listening={phase === 'recording'}
+    data-testid={phase === 'recording' ? 'dictation-stop' : 'dictation-start'}
+    title={phase === 'recording' ? `${strings.speech.stop} · ${engine === 'local' ? strings.speech.private : strings.speech.cloud}` : strings.speech.start}
+    aria-label={phase === 'recording' ? strings.speech.stop : strings.speech.start} aria-pressed={phase === 'recording'}
+    disabled={store.connection !== 'ready' || phase === 'opening' || phase === 'transcribing'}
+    onclick={() => { if (phase === 'recording') void stop(); else { cancel(); void start(); } }}>
+    <Mic size={16} strokeWidth={1.75} />
+    {#if phase === 'recording'}<i class="level" style:opacity={0.4 + level * 0.6}></i>{/if}
+    {#if phase === 'opening' || phase === 'transcribing'}<LoaderCircle size={10} class="spinner" />{/if}
+  </button>
+  {#if phase === 'recording'}<span class="sr-only">{strings.speech.listening}<span class="duration">{Math.floor(seconds / 60)}:{String(Math.floor(seconds % 60)).padStart(2, '0')}</span></span>{/if}
+  {#if phase === 'error' && audio}<button class="icon ghost" data-testid="dictation-retry" title={strings.speech.retry} aria-label={strings.speech.retry} onclick={() => void transcribe()}><RotateCcw size={15} /></button>{/if}
+  {#if phase === 'error' && needsSetup && store.owner}<button class="icon ghost" title={strings.speech.heading} aria-label={strings.speech.heading} onclick={() => store.showSettings('voice')}><Settings2 size={15} /></button>{/if}
+  {#if phase !== 'idle'}<button class="icon ghost cancel" data-testid="dictation-cancel" title={strings.common.cancel} aria-label={strings.common.cancel} onclick={cancel}><X size={14} /></button>{/if}
+</div>
 
 <style>
-  .microphone { flex: none; color: var(--color-muted-foreground); }
-  .dictation { position: absolute; bottom: calc(100% + 8px); left: 0; right: 0; display: flex; align-items: center; gap: 12px; min-height: 56px; padding: 10px 12px; border: 1px solid var(--color-edge); border-radius: var(--radius-lg); background: var(--color-surface-2); box-shadow: var(--shadow-e2); animation: rise var(--dur-2) var(--ease-out-quint); }
-  .description { display: flex; flex-direction: column; flex: 1; font-size: var(--text-sm); }
-  small { color: var(--color-muted-foreground); font-size: var(--text-sm); }
-  .message { flex: 1; font-size: var(--text-sm); overflow-wrap: anywhere; }
-  .error .message { color: var(--color-danger); }
-  .duration { font-size: var(--text-sm); font-variant-numeric: tabular-nums; color: var(--color-muted-foreground); }
-  .meter { display: flex; gap: 3px; align-items: center; height: 28px; width: 39px; }
-  i { width: 3px; border-radius: var(--radius-sm); background: var(--color-accent); transition: height var(--dur-1); }
-  .finish { color: var(--color-on-foreground); background: var(--color-foreground); }
-  .dictation button { flex: none; }
-  :global(.dictation .spinner) { animation: spin 1s linear infinite; }
+  .dictation { display: flex; align-items: center; gap: 2px; flex: none; }
+  .microphone { position: relative; color: var(--color-foreground); background: var(--color-surface); border: 1px solid var(--color-edge); border-radius: var(--radius-md); }
+  .microphone.listening { color: var(--color-accent); background: var(--color-accent-soft); border-color: var(--color-accent); }
+  .level { position: absolute; bottom: 3px; width: 3px; height: 3px; border-radius: var(--radius-sm); background: currentColor; }
+  .dictation button { flex: none; width: var(--control); height: var(--control); }
+  .cancel { color: var(--color-muted-foreground); }
+  .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  :global(.dictation .spinner) { position: absolute; bottom: 1px; right: 1px; animation: spin 1s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
-  @media (max-width: 720px) { .dictation { gap: 8px; } .dictation button, .microphone { min-width: var(--touch-target); min-height: var(--touch-target); } }
+  @media (max-width: 720px) { .dictation button { width: var(--touch-target); height: var(--touch-target); } }
   @media (prefers-reduced-motion: reduce) { :global(.dictation .spinner) { animation: none; } }
 </style>

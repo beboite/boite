@@ -7,6 +7,16 @@ conversations, leaving the page or hiding the app cancels microphone capture.
 Recordings last at most two minutes. A failed transcription can be retried
 while the composer remains open; audio stays in memory until retry or cancel.
 
+The microphone remains in the toolbar during recording; press it again to
+finish. A compact live preview inside the composer refreshes approximately
+every 2.5 seconds, subject to engine latency. It transcribes at most the latest
+12 seconds, replaces the provisional text, and never edits the typed draft.
+Only one preview request runs at a time. Silence skips uploads; a failed
+preview pauses further previews and shows the error. Finish cancels and drains
+the preview before transcribing the full recording for the draft. These are
+bounded repeated transcription requests, not a provider token stream; API mode
+therefore sends additional requests while recording.
+
 ## Choose an engine
 
 Open Settings, Voice on the machine hosting the conversation. Its owner chooses

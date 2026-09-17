@@ -37,3 +37,38 @@ test('WAV encoding keeps duration, clamps peaks and preserves signed PCM', () =>
   expect([0, 1, 2, 3, 4].map(i => view.getInt16(44 + i * 2, true))).toEqual([-32768, -32768, 0, 32767, 32767]);
   expect(atob(audioBase64(bytes)).length).toBe(bytes.length);
 });
+
+test('preview bounds audio to the latest twelve seconds while finish keeps the full recording', async () => {
+  Object.defineProperty(window, 'isSecureContext', { configurable: true, value: true });
+  const track = { readyState: 'live', stop: vi.fn(), onended: null };
+  Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: { getUserMedia: async () => ({ getTracks: () => [track] }) } });
+  const port: { onmessage: ((event: { data: Float32Array | null }) => void) | null; postMessage: () => void } = {
+    onmessage: null, postMessage: () => port.onmessage?.({ data: null }),
+  };
+  vi.stubGlobal('AudioContext', class {
+    state = 'running'; sampleRate = 16000; destination = {};
+    resume = async () => {}; close = async () => {};
+    audioWorklet = { addModule: async () => {} };
+    createMediaStreamSource = () => ({ connect() {}, disconnect() {} });
+  });
+  vi.stubGlobal('AudioWorkletNode', class { port = port; connect() {} disconnect() {} });
+  vi.stubGlobal('OfflineAudioContext', class {
+    destination = {}; data = new Float32Array();
+    createBuffer(_channels: number, length: number) { this.data = new Float32Array(length); return { getChannelData: () => this.data }; }
+    createBufferSource() { return { buffer: null, connect() {}, start() {} }; }
+    async startRendering() { return { getChannelData: () => this.data }; }
+  });
+  const recorder = new SpeechRecorder();
+  try {
+    await recorder.start(vi.fn(), vi.fn());
+    for (let second = 1; second <= 14; second++) port.onmessage!({ data: new Float32Array(16000).fill(second / 100) });
+    const preview = (await recorder.snapshot())!;
+    expect(preview.length).toBe(44 + 12 * 16000 * 2);
+    expect(new DataView(preview.buffer).getInt16(44, true)).toBe(Math.round(0.03 * 32767));
+    expect(await recorder.snapshot()).toBeNull();
+    const full = await recorder.stop();
+    expect(full.length).toBe(44 + 14 * 16000 * 2);
+    expect(new DataView(full.buffer).getInt16(44, true)).toBe(Math.round(0.01 * 32767));
+    expect(track.stop).toHaveBeenCalled();
+  } finally { recorder.dispose(); }
+});

@@ -36,6 +36,8 @@ export class SpeechRecorder {
   private samples = 0;
   private disposed = false;
   private heard = false;
+  private lastVoice = 0;
+  private previewedVoice = 0;
   private flush: (() => void) | null = null;
   private deadline: ReturnType<typeof setTimeout> | null = null;
 
@@ -68,7 +70,7 @@ export class SpeechRecorder {
         let sum = 0;
         for (const sample of chunk) sum += sample * sample;
         const rms = Math.sqrt(sum / chunk.length);
-        if (rms > 0.008) this.heard = true;
+        if (rms > 0.008) { this.heard = true; this.lastVoice = this.samples; }
         level(Math.min(1, rms * 8), this.samples / context.sampleRate);
         if (this.samples >= context.sampleRate * SPEECH_MAX_SECONDS) ended();
       };
@@ -91,15 +93,31 @@ export class SpeechRecorder {
       this.stream?.getTracks().forEach(track => { track.onended = null; if (track.readyState !== 'ended') track.stop(); });
       this.node?.disconnect();
       if (!this.heard || this.samples < context.sampleRate * 0.2) throw new Error(strings.speech.silence);
-      const length = Math.min(16000 * SPEECH_MAX_SECONDS, Math.floor(this.samples * 16000 / context.sampleRate));
+      return await this.render(0, this.samples, context.sampleRate);
+    } finally { this.dispose(); }
+  }
+  /** A bounded, provisional window; final decoding still sees the entire recording. */
+  async snapshot(): Promise<Uint8Array | null> {
+    const context = this.context;
+    if (!context || this.disposed || this.lastVoice <= this.previewedVoice || this.samples < context.sampleRate * 0.4) return null;
+    this.previewedVoice = this.lastVoice;
+    return this.render(Math.max(0, this.samples - Math.floor(context.sampleRate * 12)), this.samples, context.sampleRate);
+  }
+  private async render(start: number, end: number, sampleRate: number): Promise<Uint8Array> {
+      const count = end - start;
+      const length = Math.min(16000 * SPEECH_MAX_SECONDS, Math.floor(count * 16000 / sampleRate));
       const offline = new OfflineAudioContext(1, length, 16000);
-      const buffer = offline.createBuffer(1, this.samples, context.sampleRate);
+      const buffer = offline.createBuffer(1, count, sampleRate);
       const data = buffer.getChannelData(0);
       let offset = 0;
-      for (const chunk of this.chunks) { data.set(chunk, offset); offset += chunk.length; }
+      for (const chunk of this.chunks) {
+        const from = Math.max(0, start - offset), to = Math.min(chunk.length, end - offset);
+        if (to > from) data.set(chunk.subarray(from, to), Math.max(0, offset - start));
+        offset += chunk.length;
+        if (offset >= end) break;
+      }
       const source = offline.createBufferSource(); source.buffer = buffer; source.connect(offline.destination); source.start();
       return pcmWav((await offline.startRendering()).getChannelData(0));
-    } finally { this.dispose(); }
   }
   dispose(): void {
     this.disposed = true;

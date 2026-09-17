@@ -4,6 +4,7 @@ export const strings = {
     heading: 'Voice', description: 'Dictate into any conversation. Review the text before sending.',
     start: 'Dictate', stop: 'Finish dictation', listening: 'Listening', opening: 'Waiting for microphone', transcribing: 'Transcribing',
     private: 'On this core only', cloud: 'Transcribed by your API provider', retry: 'Retry transcription',
+    live: 'Live preview', previewFailed: 'Live preview paused. Finish to transcribe the full recording.',
     local: 'Local', api: 'API', localHint: 'Whisper runs on the machine hosting this conversation. Your phone uses the same model without downloading it.',
     apiHint: 'Audio goes from this core to your chosen provider. Keys stay on this core.',
     setup: 'Choose a voice engine in Settings to start dictating.', ownerSetup: 'Ask the owner to configure Voice on this core.',

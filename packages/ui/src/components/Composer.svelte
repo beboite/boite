@@ -35,6 +35,7 @@
   let choice = $state<Choice | null>(null);
   let picking = $state(false);
   let dictating = $state(false);
+  let speechPreview = $state(''), speechStatus = $state(''), speechError = $state(false);
   let box = $state<HTMLTextAreaElement | undefined>(undefined);
   let inputWidth = $state(0);
   let inputScroll = $state(0);
@@ -806,6 +807,13 @@
       onhover={(index) => (mentionAt = index)}
     />
 
+    {#if speechStatus}
+      <div class="speech-preview" class:error={speechError} data-testid="dictation-preview">
+        <span class="speech-status" role={speechError ? 'alert' : 'status'}>{speechStatus}</span>
+        {#if speechPreview}<p aria-live="polite" aria-atomic="true">{speechPreview}</p>{/if}
+      </div>
+    {/if}
+
     <div class="bar">
       <div class="chips">
         <ModelPicker {store} {choice} disabled={picking} onpick={pick} />
@@ -871,7 +879,7 @@
 
       {#key store}
         {#key `${key}:${store.draft?.projectId ?? ''}`}
-          <Dictation {store} onbusy={(busy) => dictating = busy} ontext={(transcript) => {
+          <Dictation {store} onbusy={(busy) => dictating = busy} onpreview={(text, status, error) => { speechPreview = text; speechStatus = status; speechError = error; }} ontext={(transcript) => {
             const current = stateForInput().text;
             put(current + (current && !/\s$/.test(current) ? ' ' : '') + transcript);
           }} />
@@ -893,6 +901,10 @@
 </div>
 
 <style>
+  .speech-preview { padding: 0 14px 6px; min-width: 0; }
+  .speech-status { font-size: var(--text-xs); color: var(--color-muted-foreground); }
+  .speech-preview.error .speech-status { color: var(--color-danger); }
+  .speech-preview p { margin: 2px 0 0; font-size: var(--text-sm); line-height: 1.5; color: var(--color-foreground); overflow-wrap: anywhere; max-height: 3em; overflow-y: auto; }
   .composer-wrap {
     position: relative;
     flex: none;
@@ -1087,6 +1099,8 @@
   }
 
   @media (max-width: 720px) {
+    .chips { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+    .chips > :global(*) { flex-shrink: 0; }
     textarea, .input-mirror { font-size: var(--text-md); }
     .composer-wrap {
       padding: 6px 10px 10px;
