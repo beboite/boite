@@ -5,7 +5,7 @@
  * temporary directory the harness removes.
  */
 
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
@@ -28,6 +28,21 @@ beforeEach(async () => {
 afterEach(async () => {
   await harness.stop();
 });
+
+/**
+ * A file link, or false where the platform will not make one: Windows hands
+ * them out to developer mode and administrators only, and says EPERM to the
+ * rest. Any other failure is the test's to report, not to skip on.
+ */
+function linked(target: string, at: string): boolean {
+  try {
+    symlinkSync(target, at, 'file');
+    return true;
+  } catch (error) {
+    if (process.platform === 'win32' && (error as NodeJS.ErrnoException).code === 'EPERM') return false;
+    throw error;
+  }
+}
 
 /** A picture is bytes with a NUL early on: what it holds is not this test's business. */
 function picture(): Uint8Array<ArrayBuffer> {
@@ -184,13 +199,8 @@ describe('files.write', () => {
     try {
       const target = join(outside, 'theirs.txt');
       writeFileSync(target, 'untouched');
-      try {
-        symlinkSync(target, join(harness.dataDir, 'link.txt'), 'file');
-      } catch {
-        // Windows hands out file links to developer mode and administrators only;
-        // the Linux and macOS runs are the ones that prove this.
-        return;
-      }
+      // Where no link can be made, the Linux and macOS runs are the ones that prove this.
+      if (!linked(target, join(harness.dataDir, 'link.txt'))) return;
       let message = 'none';
       try {
         await client.call('files.write', { threadId, path: 'link.txt', text: 'overwritten' });
@@ -199,6 +209,24 @@ describe('files.write', () => {
       }
       expect(message).toBe("files.write path leaves the thread's working directory: link.txt");
       expect(readFileSync(target, 'utf8')).toBe('untouched');
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  test('a link to nothing is not written through either: the write would create its target', async () => {
+    const outside = mkdtempSync(join(tmpdir(), 'boite-outside-'));
+    try {
+      const target = join(outside, 'not-there.txt');
+      if (!linked(target, join(harness.dataDir, 'dangling.txt'))) return;
+      let message = 'none';
+      try {
+        await client.call('files.write', { threadId, path: 'dangling.txt', text: 'created outside' });
+      } catch (error) {
+        message = (error as Error).message;
+      }
+      expect(message).toBe('files.write path is a link to nothing: dangling.txt');
+      expect(existsSync(target)).toBe(false);
     } finally {
       rmSync(outside, { recursive: true, force: true });
     }

@@ -9,7 +9,7 @@
  * as base64 in a WebSocket message is paid for twice.
  */
 
-import { realpathSync, statSync } from 'node:fs';
+import { existsSync, lstatSync, realpathSync, statSync } from 'node:fs';
 import type { Stats } from 'node:fs';
 import { readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
@@ -239,15 +239,21 @@ export async function writeFileText(
   // Named by its relative form, so a refusal never prints where the data lives.
   const parent = found.relative.includes('/') ? found.relative.slice(0, found.relative.lastIndexOf('/')) : '.';
   existingInside(cwd, parent, 'dir', 'files.write path directory');
-  let current: Stats | null = null;
+  // The entry itself, not what it points at: a link to nothing is still there,
+  // and the write would follow it and create its target wherever that is.
+  let entry: Stats | null = null;
   try {
-    current = statSync(found.absolute);
+    entry = lstatSync(found.absolute);
   } catch {
-    current = null;
+    entry = null;
   }
-  // A path that is already there may be a link, and the write follows it: the
-  // real file has to be inside the working directory too.
-  if (current !== null) existingInside(cwd, path, 'file', 'files.write path');
+  if (entry !== null) {
+    if (entry.isSymbolicLink() && !existsSync(found.absolute)) {
+      throw refused(`files.write path is a link to nothing: ${path}`, { what: 'files.write path', path });
+    }
+    // The write follows a link: the real file has to be inside the working directory too.
+    existingInside(cwd, path, 'file', 'files.write path');
+  }
   const data = new TextEncoder().encode(text);
   await writeFile(found.absolute, data);
   const stats = await stat(found.absolute);

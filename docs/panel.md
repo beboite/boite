@@ -37,7 +37,8 @@ Every surface reads the thread's working directory through the core, never the
 browser's file system: `git.status`, `git.diff`, `files.list`, `files.read`,
 `files.write`, `todos.*`, `threads.tasks.*` in `packages/contracts/src/index.ts`.
 Paths are relative to the thread's cwd, or absolute inside it, and a path that
-resolves outside (a symlink out, a `..`) is refused by name.
+resolves outside (a symlink out, a `..`) is refused by name. `files.write` also
+refuses a link to nothing, since the write would create its target.
 
 `files.read` answers text inline, cut at `FILE_MAX_BYTES`. A picture, a video,
 a sound or another binary comes as a url on the core's HTTP server,
