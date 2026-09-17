@@ -165,7 +165,8 @@ describe('the todo list of a project', () => {
     });
     try {
       const seenByStranger: string[] = [];
-      void stranger.next<'todos.updated'>('todos.updated').then((event) => seenByStranger.push(event.projectId));
+      // A listener, not `next`: waiting for what must never come would time out into a later test.
+      stranger.on('todos.updated', (event) => seenByStranger.push(event.projectId));
       const seenByMine = mine.next<'todos.updated'>('todos.updated');
       const seenByOwner = client.next<'todos.updated'>('todos.updated');
       await client.call('todos.add', { threadId, text: 'for the first project' });
