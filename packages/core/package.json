@@ -11,8 +11,8 @@
   "scripts": {
     "start": "bun run bin/core.ts",
     "dev": "bun run --watch src/main.ts",
-    "build": "bun run bin/clean.ts && bun build src/main.ts src/platform/jobs-worker.ts src/platform/guard-worker.ts --target bun --outdir dist --splitting --sourcemap=none --entry-naming [name].[ext]",
-    "build:exe": "bun run build && bun build --compile src/main.ts --outfile dist/boite-core.exe",
+    "build": "bun run bin/clean.ts && bun build src/main.ts src/platform/windows/jobs-worker.ts src/platform/windows/guard-worker.ts --target bun --outdir dist --splitting --sourcemap=none --entry-naming [name].[ext]",
+    "build:exe": "bun run build && bun run bin/compile.ts",
     "build:linux": "bun run build && bun build --compile --target=bun-linux-x64 src/main.ts --outfile dist/boite-core-linux-x64",
     "check": "tsc -p tsconfig.json",
     "test": "bun test"

@@ -7,9 +7,9 @@ DPAPI, the OAuth callback on `127.0.0.1` and the user profile are all
 unreachable from session 0. Execution stays on the machine that owns the folder.
 The shell starts a local core and adopts one that already answers, and it can
 point at a core on another machine instead; the phone only ever points at one.
-The shell holds its core in a `KILL_ON_JOB_CLOSE` Job Object, so a shell killed
-hard takes its core down with it rather than leaving an orphan holding the
-installed executable open. It also carries a channel, read once from its own
+On Windows the shell holds a local core it starts in a `KILL_ON_JOB_CLOSE` Job
+Object, so a hard shell exit also stops that core. Adopted and remote cores are
+not owned by the shell and remain running. The shell also carries a channel, read once from its own
 bundle identifier: `Boite` and `Boite Dev` are two installs on one machine, and
 the channel is what keeps their data directories, and so their cores, apart.
 [docs/releasing.md](releasing.md).
@@ -53,7 +53,12 @@ lets a driver keep its own one for the next turn. Raising the global cap alone
 changes nothing when every thread shares one account, which is the shape of the
 bench.
 
-## Every process sits in a Job Object
+## Process tracking follows the host OS
+
+`procs.ts` calls the platform interface for native tracking and protections.
+The Windows backend and the shared Linux/macOS fallback live under
+`packages/core/src/platform/`; the journal and RPC stay shared.
+[Trace](trace.md#platform-boundary) describes that boundary and its limits.
 
 On Windows `procs` creates the thread's job on first use, nested in a global
 `boite-agents` job, `KILL_ON_JOB_CLOSE` on both and never `BREAKAWAY_OK`, and

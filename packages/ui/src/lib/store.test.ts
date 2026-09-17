@@ -36,6 +36,35 @@ async function ready(): Promise<{ store: Store; client: FakeClient }> {
   return { store, client };
 }
 
+test('uninstalled setup starts without account-dependent demo state', async () => {
+  const client = new FakeClient({ delayMs: 0, uninstalled: true });
+  const store = new Store();
+  store.attach(client);
+  try {
+    await store.connect();
+    await store.openWhereLeft();
+    expect(store.accounts).toEqual([]);
+    expect(store.threads).toEqual([]);
+    expect(store.openThread).toBeNull();
+    expect(await client.call('imports.list', { projectId: 'p-boite' })).toEqual([]);
+    expect(await client.call('scheduler.get', {})).toMatchObject({ running: [], queued: [] });
+    expect(store.projects.length).toBeGreaterThan(0);
+    expect((await client.call('sessions.list', {})).length).toBeGreaterThan(0);
+  } finally { store.detach(); client.close(); }
+});
+
+test('provider actions report RPC failures through their owning store', async () => {
+  const { store, client } = await ready();
+  vi.spyOn(client, 'call').mockRejectedValue(new Error('provider unavailable'));
+  try {
+    expect(await store.installProvider('claude')).toBe(false);
+    expect(store.error).toContain('provider unavailable');
+    store.error = null;
+    expect(await store.reloadProviders()).toBe(false);
+    expect(store.error).toContain('provider unavailable');
+  } finally { store.detach(); client.close(); }
+});
+
 test.each([false, true])('a lost start response reuses its request id unless selection changes: %s', async (changeSelection) => {
   const { store, client } = await ready();
   const original = client.call.bind(client);

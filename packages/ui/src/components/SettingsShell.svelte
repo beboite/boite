@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { MediaQuery } from 'svelte/reactivity';
+  import MobileSettings from './MobileSettings.svelte';
   import { Activity, ChevronRight, ShieldCheck, ArrowLeft, Coins, FlaskConical, Keyboard, Palette, Puzzle, Settings2, Users, Mic } from '@lucide/svelte';
   import KeyboardPage from './KeyboardPage.svelte';
   import PluginsPage from './PluginsPage.svelte';
@@ -14,6 +16,8 @@
   import VoiceSettings from './VoiceSettings.svelte';
 
   let { store }: { store: Store } = $props();
+  const narrow = new MediaQuery('(max-width: 720px)');
+  const inShell = window.__TAURI_INTERNALS__ !== undefined;
 
   /** Providers, Plugins and Resources call nothing a paired device may call. */
   const OWNER_TABS: SettingsTab[] = ['accounts', 'plugins', 'resources'];
@@ -62,6 +66,9 @@
   let tab = $derived(tabs.some((entry) => entry.id === store.settingsTab) ? store.settingsTab : 'general');
 </script>
 
+{#if narrow.current && !inShell}
+  <MobileSettings {store} />
+{:else}
 <div class="settings" data-testid="settings">
   <nav aria-label={strings.settings.heading}>
     <button type="button" class="ghost back" data-testid="settings-back" onclick={() => store.showChat()}>
@@ -138,6 +145,7 @@
     </section>
   {/key}
 </div>
+{/if}
 
 <style>
   .mobile-subcategories { display: none; }

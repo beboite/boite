@@ -135,6 +135,22 @@ An `install` block is how Boite ships an agent whose binary is not on the machin
 and which has no installer of its own: a `version`, a zip `url`, its `sha256`, its
 `archiveBytes`, and every `files` entry expected out of the archive with its exact
 size, the first one the executable.
+Additional executable files declare `executable: true`; the installer gives
+those files execute permissions on Linux and macOS. An optional `arch` field
+names `x64` or `arm64`. A mismatched archive stays visible with an explanation
+and is refused before downloading. Antigravity's pinned archives support x64
+on Windows/Linux and ARM64 on macOS.
+
+`format` defaults to `zip`. A `binary` download installs one executable directly;
+its single `files` entry must have the same size as `archiveBytes`. Both formats
+verify the download's length and SHA-256 before making it available. Claude on
+Windows uses the official x64 binary this way. Its managed copy lives under
+Boite's data directory, without replacing a CLI installation elsewhere.
+
+For a missing managed agent, `Connect an account` downloads it and starts an
+isolated login after installation. Cancelling or leaving the Providers page
+cancels the pending login continuation. The download itself can be cancelled
+with its Cancel button. Existing CLI accounts are left unchanged.
 
 `providers.install` streams the archive to
 `<dataDir>/agents/<id>/downloads/<version>.zip.part`, hashing as it writes, and

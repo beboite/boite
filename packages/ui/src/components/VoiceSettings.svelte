@@ -3,7 +3,7 @@
   import type { SpeechConfig, SpeechStatus } from '@boite/contracts';
   import type { Store } from '../lib/store.svelte';
   import { strings } from '../lib/strings';
-  let { store }: { store: Store } = $props();
+  let { store, readOnly = false }: { store: Store; readOnly?: boolean } = $props();
   let config = $state<SpeechConfig | null>(null);
   let status = $state<SpeechStatus | null>(null);
   let groqKey = $state(''), openrouterKey = $state('');
@@ -15,7 +15,7 @@
     let live = true;
     const refresh = async () => { try { const next = await client.call('speech.status', {}); if (live) status = next; } catch (cause) { if (live) error = String(cause instanceof Error ? cause.message : cause); } };
     void refresh();
-    if (store.owner) void client.call('speech.config', {}).then(value => { if (live) config = value; }).catch(cause => { if (live) error = cause.message; });
+    if (store.owner && !readOnly) void client.call('speech.config', {}).then(value => { if (live) config = value; }).catch(cause => { if (live) error = cause.message; });
     const timer = setInterval(() => { if (!document.hidden) void refresh(); }, 1000);
     return () => { live = false; clearInterval(timer); };
   });
@@ -44,7 +44,7 @@
 <div class="page" data-testid="voice-settings">
   <header><Mic size={20} strokeWidth={1.75} /><div><h2>{strings.speech.heading}</h2><p>{strings.speech.description}</p></div></header>
   {#if error}<p class="error" role="alert">{error}</p>{/if}
-  {#if !store.owner}<div class="card"><p>{strings.speech.ownerOnly}</p><p class="subtle">{status?.ready ? strings.speech.ready : strings.speech.setup}</p></div>
+  {#if !store.owner || readOnly}<div class="card"><p>{strings.speech.ownerOnly}</p><p class="subtle">{status?.ready ? strings.speech.ready : strings.speech.setup}</p></div>
   {:else if config && status}
     <form onsubmit={(event) => { event.preventDefault(); void save(); }} oninput={() => saved = false}>
       <div class="engines" aria-label={strings.speech.heading}>

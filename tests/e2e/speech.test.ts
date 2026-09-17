@@ -73,8 +73,11 @@ test('phone dictation fits, cancels with Escape, and does not change the draft',
 test('voice settings save API selection, hide credentials on reload, and fit phone and desktop', async () => {
   await page.evaluate(`document.querySelector('${id('nav-settings')}').click()`);
   await page.click(id('settings-tab-voice'));
-  await page.waitFor(`document.querySelector('${id('voice-local')}')`);
+  await page.waitFor(`document.querySelector('${id('voice-settings')}')?.textContent.includes('Ready')`);
+  expect(await page.evaluate(`document.querySelector('${id('voice-api')}')`)).toBeNull();
   await capture('speech-phone-settings.png');
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1360, height: 950, deviceScaleFactor: 1, mobile: false });
+  await page.waitFor(`document.querySelector('${id('voice-local')}')`);
   await page.click(id('voice-api'));
   await page.evaluate(`const input = document.querySelector('${id('voice-groq-key')}'); input.value = 'fixture-only'; input.dispatchEvent(new Event('input', {bubbles:true}));`);
   await page.click(id('voice-save'));

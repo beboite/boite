@@ -47,12 +47,16 @@ export interface ExecutableCandidate {
 export interface ProviderInstall {
   /** A version string shown to the user and written beside the files. */
   version: string;
-  /** A zip archive. */
+  /** Omitted for zip archives; binary downloads contain exactly one file. */
+  format?: 'zip' | 'binary';
+  /** The archive or executable download. */
   url: string;
   sha256: string;
   archiveBytes: number;
+  /** Omit for architecture-independent archives. */
+  arch?: 'x64' | 'arm64';
   /** Files expected inside the archive, relative paths inside it, with their sizes; the first one is the executable. */
-  files: { path: string; bytes: number }[];
+  files: { path: string; bytes: number; executable?: boolean }[];
 }
 
 /**

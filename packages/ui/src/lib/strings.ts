@@ -7,7 +7,8 @@ export const strings = {
     live: 'Live preview', previewFailed: 'Live preview paused. Finish to transcribe the full recording.',
     local: 'Local', api: 'API', localHint: 'Whisper runs on the machine hosting this conversation. Your phone uses the same model without downloading it.',
     apiHint: 'Audio goes from this core to your chosen provider. Keys stay on this core.',
-    setup: 'Choose a voice engine in Settings to start dictating.', ownerSetup: 'Ask the owner to configure Voice on this core.',
+    setup: 'Choose a voice engine in the desktop Voice settings to start dictating.', ownerSetup: 'Ask the owner to configure Voice on this core.',
+    phoneHint: 'Dictation uses the voice engine on the connected machine.',
     https: 'Microphone access needs HTTPS or localhost. Open the secure pairing link for this core.',
     denied: 'Microphone permission was denied. Allow it in your browser or system settings, then try again.',
     noMicrophone: 'No microphone was found. Connect one and try again.', microphoneBusy: 'The microphone is unavailable. Check whether another app is using it.',
@@ -42,6 +43,12 @@ export const strings = {
     subscriptionFailed: 'The browser did not return a complete push subscription.'
   },
   mobile: {
+    settingsDevice: 'This phone', settingsDeviceHint: 'Preferences saved on this device.',
+    settingsPhone: 'App & notifications', settingsPhoneHint: 'Installation and alerts from your connected machine.',
+    settingsMachinesHint: 'Connect, switch or disconnect a remote machine.',
+    settingsAppearanceHint: 'Theme and accent for this phone.',
+    settingsRemoteHint: 'Providers, projects and server administration are managed from the desktop app.',
+    settingsBack: 'Back to settings',
     navigation: 'Navigation', threads: 'Conversations', activity: 'Activity', project: 'Choose project',
     activityHint: 'Running agents and requests waiting for you.', threadsHint: 'Your conversations across machines.',
     search: 'Find a conversation', unread: 'Unread', noActivity: 'No agents need your attention.', noThreads: 'No matching conversations.'
@@ -756,8 +763,13 @@ export const strings = {
   },
   providerSettings: {
     heading: 'Providers',
-    intro: 'Connect accounts, verify access and choose which quotas to monitor.',
+    intro: 'Boite runs agents installed on the machine hosting your core. Existing command-line logins are detected automatically; website logins are separate.',
+    installHint: 'Install {provider} to connect an account.',
+    detectHint: 'After installing an agent, detect providers again. If it is still missing, restart Boite to refresh its PATH.',
+    setup: 'Installation instructions',
     connect: 'Connect an account',
+    connectInstalling: 'Installing the agent. Sign-in will start when the download finishes.',
+    reinstall: 'The managed agent is installed but its executable is missing. Remove it and install it again.',
     reconnect: 'Reconnect',
     available: 'Ready on this machine',
     missing: 'Executable not found',

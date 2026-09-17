@@ -838,6 +838,7 @@ export class Store {
         this.attach(
           new FakeClient({
             long: params.get('long') === '1',
+            uninstalled: params.get('uninstalled') === '1',
             ...(params.get('principal') === 'session' ? { principal: 'session' as const } : {})
           })
         );
@@ -1912,15 +1913,31 @@ export class Store {
   // Managed installs
   // -------------------------------------------------------------------------
 
-  /** Start the download. The rest arrives as `providers.installProgress`. */
-  async installProvider(providerId: ProviderId): Promise<void> {
+  async reloadProviders(): Promise<boolean> {
     const client = this.#client;
-    if (!client) return;
+    if (!client) return false;
+    try {
+      const { loaded } = await client.call('providers.reload', {});
+      this.providers = loaded;
+      for (const account of this.accounts) await this.checkAccount(account.id);
+      return true;
+    } catch (error) {
+      this.#fail(error);
+      return false;
+    }
+  }
+
+  /** Start the download. The rest arrives as `providers.installProgress`. */
+  async installProvider(providerId: ProviderId): Promise<boolean> {
+    const client = this.#client;
+    if (!client) return false;
     try {
       const state = await client.call('providers.install', { providerId });
       this.installStates = { ...this.installStates, [providerId]: state };
+      return true;
     } catch (error) {
       this.#fail(error);
+      return false;
     }
   }
 

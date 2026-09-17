@@ -50,6 +50,8 @@ export interface FakeClientOptions {
   delayMs?: number;
   /** Seeds one thread of 400 messages, what `?fake=1&long=1` opens the list on. */
   long?: boolean;
+  /** A fresh machine with no agents or accounts, for the setup flow. */
+  uninstalled?: boolean;
   /** Who this client is. `'session'` makes it a paired phone, refused like one. */
   principal?: Principal;
 }
@@ -153,6 +155,7 @@ const UPDATABLE_ARCHIVE_BYTES = 41_268_224;
 
 /** What one `providers.install` on that provider would fetch, and how big it is. */
 const RELEASES: Record<string, { version: string; archiveBytes: number }> = {
+  claude: { version: '2.1.267', archiveBytes: 220_051_616 },
   [MANAGED_ID]: { version: MANAGED_VERSION, archiveBytes: MANAGED_ARCHIVE_BYTES },
   [UPDATABLE_ID]: { version: UPDATABLE_AVAILABLE, archiveBytes: UPDATABLE_ARCHIVE_BYTES }
 };
@@ -442,6 +445,20 @@ export class FakeClient implements ObservableClient {
       queued: []
     };
     this.#seed();
+    if (options.uninstalled) {
+      this.#providers = this.#providers.filter(provider => provider.id !== 'echo').map(provider => ({
+        ...provider, available: false, executable: null,
+        install: RELEASES[provider.id] ? { state: 'absent', ...RELEASES[provider.id]! } : null,
+      }));
+      this.#accounts = [];
+      this.#threads.clear();
+      this.#importable = [];
+      this.#pendingPermissions.clear();
+      this.#pendingQuestions.clear();
+      this.#processes = [];
+      this.#usage.clear();
+      this.#scheduler = { ...this.#scheduler, running: [], queued: [] };
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -710,6 +727,17 @@ export class FakeClient implements ObservableClient {
       case 'providers.list':
         return { loaded: structuredClone(this.#providers), rejected: [] };
       case 'providers.reload': {
+        for (const provider of this.#providers) {
+          if (!provider.available || this.#accounts.some(account => account.providerId === provider.id)) continue;
+          const id = `a-${++this.#seq}`;
+          const account: Account = {
+            id, providerId: provider.id, label: 'Default',
+            isolationDir: provider.alwaysIsolated ? `${DATA_DIR}/accounts/${id}` : null,
+            status: provider.alwaysIsolated ? 'unauthenticated' : 'ok', identity: null, createdAt: this.#now(),
+          };
+          this.#accounts.push(account);
+          this.#emit('accounts.updated', structuredClone(account));
+        }
         const result = { loaded: structuredClone(this.#providers), rejected: [] };
         this.#emit('providers.updated', structuredClone(result));
         return result;
@@ -2226,7 +2254,7 @@ export class FakeClient implements ObservableClient {
     if (!running()) return;
     this.#installBefore.delete(provider.id);
     provider.available = true;
-    provider.executable = provider.id === MANAGED_ID ? MANAGED_EXE : provider.executable;
+    provider.executable = provider.id === MANAGED_ID ? MANAGED_EXE : provider.executable ?? `${DATA_DIR}/agents/${provider.id}/current/${provider.id}.exe`;
     this.#setInstall(provider, {
       state: 'installed',
       version: release.version,

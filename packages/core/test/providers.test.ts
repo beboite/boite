@@ -1,3 +1,4 @@
+import { currentOs } from '../src/paths.ts';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join, sep } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
@@ -54,6 +55,22 @@ afterEach(async () => {
 });
 
 describe('providers', () => {
+  test('reload discovers a newly installed provider account once and broadcasts it', async () => {
+    const body = validDescriptor();
+    body.profiles = Object.fromEntries(['windows', 'linux', 'macos'].map((os) => [os, {
+      detect: {}, executable: [{ kind: 'file', value: process.execPath }], isolation: {},
+    }]));
+    writeUserDescriptor('new-agent.json', body);
+    const client = await harness.connect();
+    const updates: string[] = [];
+    client.on('accounts.updated', (account) => { updates.push(account.providerId); });
+    await client.call('providers.reload', {});
+    await client.call('providers.reload', {});
+    const accounts = await client.call('accounts.list', {});
+    expect(accounts.filter((account) => account.providerId === 'mine')).toHaveLength(1);
+    expect(updates).toContain('mine');
+  });
+
   test('an unsupported executable resolver is rejected at its field', () => {
     const body = validDescriptor();
     body.profiles = { windows: { detect: {}, executable: [{ kind: 'registry', value: 'anything' }], isolation: {} } };
@@ -113,7 +130,7 @@ describe('providers', () => {
 
   test('the opencode profile carries the acp launch arguments and the xdg isolation', async () => {
     const descriptor = harness.core.providers.require('opencode');
-    const profile = descriptor.profiles[process.platform === 'win32' ? 'windows' : 'linux'];
+    const profile = descriptor.profiles[currentOs()];
     expect(profile?.launch?.args).toEqual(['acp', '--port', '0']);
     expect(profile?.isolation).toEqual({ XDG_DATA_HOME: '{isolationDir}', XDG_CONFIG_HOME: '{isolationDir}' });
     expect(descriptor.auth).toEqual({ kind: 'oauth-cli', session: ['opencode/auth.json'] });
@@ -144,9 +161,15 @@ describe('providers', () => {
     // `default` is Boite's own spelling for "the agent keeps its own model": the
     // real list comes from the agent, through the probe.
     expect(antigravity?.models).toEqual([{ id: 'default', name: 'Antigravity default', default: true }]);
-    // Nothing is downloaded here, so the summary is what the picker turns into
-    // an Install button, with the archive's size on it.
-    expect(antigravity?.install?.state).toBe('absent');
+    // Unsupported native architectures must show a reason instead of offering
+    // an archive that cannot run on this machine.
+    const requiredArch = currentOs() === 'macos' ? 'arm64' : 'x64';
+    if (process.arch === requiredArch) {
+      expect(antigravity?.install?.state).toBe('absent');
+    } else {
+      expect(antigravity?.install).toEqual({ state: 'failed', version: 'agy_acp_server_1.1.1',
+        message: `antigravity requires ${requiredArch}; this machine is ${process.arch}` });
+    }
     expect(antigravity?.install?.version).toBe('agy_acp_server_1.1.1');
     expect(antigravity?.available).toBe(false);
 
@@ -169,7 +192,7 @@ describe('providers', () => {
     ]);
     expect(windows?.isolation).toEqual({ GEMINI_HOME: '{isolationDir}' });
 
-    const profile = descriptor.profiles[process.platform === 'win32' ? 'windows' : 'linux'];
+    const profile = descriptor.profiles[currentOs()];
     // Every process of this provider carries these, the default account's too.
     const env = profile?.env ?? {};
     expect(env['AGY_ACP_FORCE_FILE_STORAGE']).toBe('1');
@@ -189,7 +212,7 @@ describe('providers', () => {
     expect(executable?.kind).toBe('file');
     // `{agentsDir}` resolves under the data directory, so nothing outside it is ever launched.
     expect(executable?.value.startsWith(join(harness.dataDir, 'agents', 'antigravity'))).toBe(true);
-    if (process.platform !== 'win32') {
+    if (process.platform === 'linux') {
       expect(profile?.launch?.args).toEqual(['--uid=']);
     } else {
       expect(profile?.launch?.args).toEqual([]);
@@ -222,7 +245,7 @@ describe('providers', () => {
     // The device-code login prints a link and a code instead of opening a browser.
     expect(descriptor.login?.command).toEqual(['codex', 'login', '--device-auth']);
 
-    const profile = descriptor.profiles[process.platform === 'win32' ? 'windows' : 'linux'];
+    const profile = descriptor.profiles[currentOs()];
     expect(profile?.launch?.args).toEqual(['app-server']);
     expect(profile?.isolation).toEqual({ CODEX_HOME: '{isolationDir}' });
 
@@ -266,7 +289,7 @@ describe('providers', () => {
     // No login block: `/login` is a slash command inside the tui, not a cli one.
     expect(descriptor.login).toBeUndefined();
 
-    const profile = descriptor.profiles[process.platform === 'win32' ? 'windows' : 'linux'];
+    const profile = descriptor.profiles[currentOs()];
     expect(profile?.isolation).toEqual({ PI_CODING_AGENT_DIR: '{isolationDir}' });
     const args = profile?.launch?.args ?? [];
     expect(args.slice(-2)).toEqual(['--mode', 'rpc']);

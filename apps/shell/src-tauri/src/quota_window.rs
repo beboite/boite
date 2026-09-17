@@ -37,31 +37,7 @@ fn available_area(monitor: Bounds, work: Bounds, hidden: &[(u32, f64)]) -> Bound
     area
 }
 
-#[cfg(windows)]
-fn hidden_appbars(monitor: Bounds) -> Vec<(u32, f64)> {
-    use windows_sys::Win32::{Foundation::{HWND, RECT}, UI::{Shell::{SHAppBarMessage, APPBARDATA, ABM_GETAUTOHIDEBAREX}, WindowsAndMessaging::GetWindowRect}};
-    let mut bars = Vec::new();
-    for edge in 0..4 {
-        let mut data: APPBARDATA = unsafe { std::mem::zeroed() };
-        data.cbSize = std::mem::size_of::<APPBARDATA>() as u32;
-        data.uEdge = edge;
-        data.rc = RECT { left: monitor.0 as i32, top: monitor.1 as i32, right: monitor.2 as i32, bottom: monitor.3 as i32 };
-        // Unlike ABM_GETAUTOHIDEBAR, EX queries the specified monitor. Work
-        // area alone only reserves the thin activation strip in auto-hide mode.
-        let hwnd = unsafe { SHAppBarMessage(ABM_GETAUTOHIDEBAREX, &mut data) } as HWND;
-        if hwnd.is_null() { continue; }
-        let mut rect: RECT = unsafe { std::mem::zeroed() };
-        if unsafe { GetWindowRect(hwnd, &mut rect) } == 0 { continue; }
-        // An auto-hidden bar slides outside the monitor. Keep its full size,
-        // anchored to its registered edge, rather than its animated position.
-        let thickness = if edge == 0 || edge == 2 { rect.right - rect.left } else { rect.bottom - rect.top };
-        if thickness > 0 { bars.push((edge, thickness as f64)); }
-    }
-    bars
-}
-
-#[cfg(not(windows))]
-fn hidden_appbars(_monitor: Bounds) -> Vec<(u32, f64)> { Vec::new() }
+use crate::platform::appbars::hidden_appbars;
 
 pub fn only_ui(webview: &Webview) -> Result<(), String> {
     match webview.label() {
@@ -82,9 +58,10 @@ pub fn show<R: Runtime>(app: &AppHandle<R>, point: PhysicalPosition<f64>) -> tau
         let mut builder = tauri::WebviewWindowBuilder::new(app, LABEL, WebviewUrl::App("index.html?view=quotas".into()))
             .title("Boite quotas").inner_size(380.0, 460.0).resizable(false)
             .decorations(false).skip_taskbar(true).always_on_top(true)
-            .transparent(cfg!(windows))
             .visible(false).focused(false).focusable(false)
             .on_navigation(|url| matches!(url.scheme(), "tauri" | "http" | "https") && matches!(url.host_str(), Some("tauri.localhost") | Some("localhost")));
+        #[cfg(windows)]
+        { builder = builder.transparent(true); }
         if let Some(profile) = crate::webview_profile() { builder = builder.data_directory(profile); }
         if let Some(args) = crate::test_browser_args() { builder = builder.additional_browser_args(&args); }
         builder.build()?

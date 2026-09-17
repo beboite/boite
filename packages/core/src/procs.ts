@@ -4,26 +4,8 @@ import type { Readable, Writable } from 'node:stream';
 import type { ProcessRecord, Settings, ThreadId, ThreadLoad, TraceCapability } from '@boite/contracts';
 import type { Bus } from './bus.ts';
 import type { Journal } from './journal.ts';
-import {
-  assignToThreadJob,
-  jobsCapability,
-  releaseJobs,
-  retainJobs,
-  sampleThreadJob,
-  setJobLimits,
-  terminateThreadJob,
-} from './platform/jobs.ts';
-import type { JobProcessExit, JobProcessInfo } from './platform/jobs.ts';
-import {
-  guardPidAdded,
-  guardPidRemoved,
-  guardStatus,
-  releaseGuard,
-  retainGuard,
-  setGuardEnabled,
-  setGuardMute,
-} from './platform/guard.ts';
-import type { GuardStatus } from './platform/guard.ts';
+import { processPlatform } from './platform/index.ts';
+import type { GuardStatus, NativeProcessExit, NativeProcessInfo, ProcessPlatform } from './platform/types.ts';
 
 export interface SpawnOptions {
   cwd?: string | undefined;
@@ -85,8 +67,9 @@ export class ProcRegistry {
   constructor(
     private readonly journal: Journal,
     private readonly bus: Bus,
+    private readonly platform: ProcessPlatform = processPlatform,
   ) {
-    retainJobs({
+    this.platform.retain({
       started: (threadId, pid, info) => {
         this.onJobStarted(threadId, pid, info);
       },
@@ -96,8 +79,7 @@ export class ProcRegistry {
       note: (threadId, message) => {
         this.bus.emit('core.log', { level: 'warn', message: `thread ${threadId}: ${message}`, at: Date.now() });
       },
-    });
-    retainGuard({
+    }, {
       pushed: (threadId, pid, title, restored) => {
         this.bus.emit('process.focusPushed', { threadId, pid, title, restored, at: Date.now() });
         this.bus.emit('core.log', {
@@ -125,21 +107,16 @@ export class ProcRegistry {
   }
 
   capability(): TraceCapability {
-    return jobsCapability();
+    return this.platform.capability();
   }
 
   applySettings(settings: Settings): void {
-    setJobLimits({
-      agentCpuCapPercent: settings.agentCpuCapPercent,
-      threadMemoryCapMb: settings.threadMemoryCapMb,
-    });
-    setGuardEnabled(settings.focusGuard);
-    setGuardMute(settings.muteAgents);
+    this.platform.applySettings(settings);
   }
 
   /** What the guard Worker is doing, focus and audio. Read by the tests, not by a client. */
   guardStatus(): GuardStatus {
-    return guardStatus();
+    return this.platform.guardStatus();
   }
 
   close(): void {
@@ -148,8 +125,7 @@ export class ProcRegistry {
     this.exitTimers.clear();
     for (const timer of this.forgetTimers.values()) clearTimeout(timer);
     this.forgetTimers.clear();
-    releaseJobs();
-    releaseGuard();
+    this.platform.release();
   }
 
   spawn(threadId: ThreadId, cmd: string, args: string[], opts: SpawnOptions = {}): SpawnedProcess {
@@ -273,7 +249,7 @@ export class ProcRegistry {
       ioBytes: null,
     };
 
-    if (!assignToThreadJob(threadId, pid)) this.unassigned.add(pid);
+    if (!this.platform.attach(threadId, pid)) this.unassigned.add(pid);
     this.track(threadId, record, control);
     return record;
   }
@@ -292,7 +268,7 @@ export class ProcRegistry {
     byPid.set(record.pid, { record, ...control });
     // Both spawn paths and the job's own grandchild events land here, so this is
     // the one place the guard learns a pid whose windows it has to push back.
-    guardPidAdded(threadId, record.pid);
+    this.platform.pidAdded(threadId, record.pid);
 
     let seen = this.known.get(threadId);
     if (seen === undefined) {
@@ -308,7 +284,7 @@ export class ProcRegistry {
   }
 
   /** A process the job reported that this registry never spawned: a grandchild. */
-  private onJobStarted(threadId: ThreadId, pid: number, info: JobProcessInfo): void {
+  private onJobStarted(threadId: ThreadId, pid: number, info: NativeProcessInfo): void {
     // A short child can be gone from `live` before its job event is handled, so
     // the guard is on what was ever registered, never on what is still running.
     if (this.known.get(threadId)?.has(pid) === true) return;
@@ -336,7 +312,7 @@ export class ProcRegistry {
     );
   }
 
-  private onJobExited(threadId: ThreadId, pid: number, exit: JobProcessExit): void {
+  private onJobExited(threadId: ThreadId, pid: number, exit: NativeProcessExit): void {
     this.onExit(threadId, pid, exit.exitCode, exit);
   }
 
@@ -364,22 +340,11 @@ export class ProcRegistry {
   killTree(threadId: ThreadId): number {
     const byPid = this.live.get(threadId);
     const entries = byPid === undefined ? [] : [...byPid.values()];
-    const terminated = terminateThreadJob(threadId);
+    const terminated = this.platform.terminate(threadId);
     for (const entry of entries) {
       if (terminated && !this.unassigned.has(entry.record.pid)) continue;
       if (entry.record.pid <= 0) continue;
-      if (process.platform === 'win32') {
-        try {
-          Bun.spawnSync({
-            cmd: ['taskkill', '/T', '/F', '/PID', String(entry.record.pid)],
-            stdout: 'ignore',
-            stderr: 'ignore',
-            windowsHide: true,
-          });
-        } catch {
-          // taskkill fails when the process is already gone; entry.kill() below covers it.
-        }
-      }
+      this.platform.terminateUnassigned(entry.record.pid);
       try {
         entry.kill();
       } catch {
@@ -403,7 +368,7 @@ export class ProcRegistry {
     }
   }
 
-  private onExit(threadId: ThreadId, pid: number, code: number | null, fromJob?: JobProcessExit): void {
+  private onExit(threadId: ThreadId, pid: number, code: number | null, fromJob?: NativeProcessExit): void {
     const entry = this.live.get(threadId)?.get(pid);
     if (entry === undefined) return;
     // Node's exit has no usage. Let the completion-port event carry it, while
@@ -421,7 +386,7 @@ export class ProcRegistry {
     this.unassigned.delete(pid);
     this.live.get(threadId)?.delete(pid);
     this.forgetWhenIdle(threadId);
-    guardPidRemoved(threadId, pid);
+    this.platform.pidRemoved(threadId, pid);
     if (this.journal.isClosed()) return;
     const record = entry.record;
     const usage = entry.usage();
@@ -466,7 +431,7 @@ export class ProcRegistry {
   }
 
   private measure(threadId: ThreadId, processes: number): ThreadLoad {
-    const sample = sampleThreadJob(threadId);
+    const sample = this.platform.sample(threadId);
     if (sample === null) return { processes, cpuPercent: 0, memoryBytes: 0 };
     return { processes, cpuPercent: sample.cpuPercent, memoryBytes: sample.memoryBytes };
   }

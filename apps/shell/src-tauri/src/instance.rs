@@ -26,6 +26,7 @@ mod tests {
 
     #[test]
     fn one_owner_per_directory_until_the_handle_closes() {
+        let _process_guard = crate::PROCESS_TEST_LOCK.lock().unwrap();
         let root = std::env::temp_dir().join(format!("boite-instance-{}", std::process::id()));
         let first = acquire(&root).unwrap().unwrap();
         assert!(acquire(&root).unwrap().is_none());

@@ -119,6 +119,7 @@ beforeEach(async () => {
     async fetch(request) {
       const path = new URL(request.url).pathname;
       if (path === '/release.zip') return new Response(RELEASE);
+      if (path === '/agent.exe') return new Response(EXE);
       if (path === '/release-2.zip') return new Response(RELEASE_V2);
       if (path === '/escaping.zip') return new Response(ESCAPING);
       if (path === '/tampered.zip') return new Response(tampered());
@@ -145,6 +146,57 @@ afterEach(async () => {
 });
 
 describe('managed installs', () => {
+  test('an archive for another architecture is refused before download', async () => {
+    const arch = process.arch === 'arm64' ? 'x64' : 'arm64';
+    await loadDescriptor({ ...goodInstall(), arch });
+    const client = await harness.connect();
+    const provider = (await client.call('providers.list', {})).loaded.find(value => value.id === 'managed');
+    expect(provider?.install).toEqual({ state: 'failed', version: '1.0.0', message: `managed requires ${arch}; this machine is ${process.arch}` });
+    await expect(client.call('providers.install', { providerId: 'managed' })).rejects.toThrow(`requires ${arch}`);
+    expect(existsSync(agentDir('downloads'))).toBe(false);
+  });
+
+  test('additional declared executables receive execute permission on POSIX', async () => {
+    await loadDescriptor({ ...goodInstall(), files: [
+      { path: EXE_PATH, bytes: EXE.byteLength },
+      { path: NOTE_PATH, bytes: NOTE.byteLength, executable: true },
+    ] });
+    const client = await harness.connect();
+    await client.call('providers.install', { providerId: 'managed' });
+    await waitFor(() => existsSync(agentDir('current', '.install-complete.json')));
+    if (process.platform !== 'win32') {
+      expect(statSync(agentDir('current', EXE_PATH)).mode & 0o111).toBe(0o111);
+      expect(statSync(agentDir('current', NOTE_PATH)).mode & 0o111).toBe(0o111);
+    }
+  });
+
+  test('a binary with the wrong digest never becomes available', async () => {
+    await loadDescriptor({ ...goodInstall(), format: 'binary', url: url('/agent.exe'),
+      sha256: '0'.repeat(64), archiveBytes: EXE.byteLength, files: [{ path: EXE_PATH, bytes: EXE.byteLength }] });
+    const client = await harness.connect();
+    const seen: ProviderInstallState[] = [];
+    client.on('providers.installProgress', state => { seen.push(state); });
+    await client.call('providers.install', { providerId: 'managed' });
+    await waitFor(() => seen.some(state => state.state === 'failed'));
+    expect(existsSync(agentDir('current', EXE_PATH))).toBe(false);
+    expect((await client.call('providers.list', {})).loaded.find(provider => provider.id === 'managed')?.available).toBe(false);
+  });
+
+  test('a binary download is verified, installed and removable without a zip', async () => {
+    await loadDescriptor({ ...goodInstall(), format: 'binary', url: url('/agent.exe'),
+      sha256: sha256(EXE), archiveBytes: EXE.byteLength, files: [{ path: EXE_PATH, bytes: EXE.byteLength }] });
+    const client = await harness.connect();
+    const seen: ProviderInstallState[] = [];
+    client.on('providers.installProgress', state => { seen.push(state); });
+    await client.call('providers.install', { providerId: 'managed' });
+    await waitFor(() => seen.some(state => state.state === 'installed' || state.state === 'failed'));
+    expect(seen.at(-1)?.state).toBe('installed');
+    expect(new Uint8Array(await Bun.file(agentDir('current', EXE_PATH)).arrayBuffer())).toEqual(EXE);
+    expect((await client.call('providers.list', {})).loaded.find(provider => provider.id === 'managed')?.available).toBe(true);
+    await client.call('providers.uninstall', { providerId: 'managed' });
+    expect(existsSync(agentDir('current', EXE_PATH))).toBe(false);
+  });
+
   test('a corrupt completion record stays visible as a failed install', async () => {
     await loadDescriptor(goodInstall());
     mkdirSync(agentDir('current'), { recursive: true });

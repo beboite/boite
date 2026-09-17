@@ -21,6 +21,36 @@ beforeAll(async () => {
 }, 30_000);
 afterAll(async () => { await page?.close(); await server?.close(); }, 15_000);
 
+test('phone settings separate device preferences from remote administration, including owner sessions', async () => {
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 360, height: 800, deviceScaleFactor: 1, mobile: true });
+  await page.click('[data-testid=mobile-tabs] button:nth-child(3)');
+  await page.waitFor(`document.querySelector('[data-testid=mobile-settings-home]')`);
+  expect(await page.evaluate(`document.querySelector('[data-testid=settings-tab-resources]') === null && document.querySelector('[data-testid=settings-tab-keyboard]') === null`)).toBe(true);
+  await capture('phone-settings-home-dark.png');
+  await page.click('[data-testid=mobile-settings-phone]');
+  await page.waitFor(`document.querySelector('[data-testid=phone-settings]')`);
+  expect(await page.evaluate(`document.querySelector('[data-testid=phone-public-url]') === null && document.querySelector('[data-testid=pairing-card]') === null`)).toBe(true);
+  await capture('phone-settings-notifications.png');
+  await page.evaluate('history.back()');
+  await page.waitFor(`document.querySelector('[data-testid=mobile-settings-home]')`);
+  await page.click('[data-testid=settings-tab-machines]');
+  await page.waitFor(`document.querySelector('[data-testid=machine-link]')`);
+  expect(await page.evaluate(`document.querySelector('.origins') === null`)).toBe(true);
+  await capture('phone-settings-machines.png');
+  await page.click('[data-testid=mobile-settings-back]');
+  await page.click('[data-testid=settings-tab-appearance]');
+  await page.click('[data-testid=theme-light]');
+  expect(await page.evaluate(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true);
+  await capture('phone-settings-appearance-light.png');
+  await page.click('[data-testid=mobile-settings-back]');
+  await capture('phone-settings-home-light.png');
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
+  await page.waitFor(`document.querySelector('[data-testid=settings-tab-resources]')`);
+  await capture('phone-settings-desktop-unchanged.png');
+  await page.click('[data-testid=settings-back]');
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+}, 30_000);
+
 test('phone navigates conversations, activity and settings without a sidebar', async () => {
   await page.click('[data-testid=mobile-tabs] button:nth-child(1)');
   await page.waitFor(`document.querySelector('[data-testid=mobile-list] .thread')`);
@@ -38,6 +68,7 @@ test('phone navigates conversations, activity and settings without a sidebar', a
   await capture('mobile-activity.png');
   await page.click('[data-testid=mobile-tabs] button:nth-child(3)');
   await page.waitFor(`document.querySelector('[data-testid=settings]')`);
+  await page.click('[data-testid=mobile-tabs] button:nth-child(1)');
   await page.click('[data-testid=mobile-new]');
   await page.waitFor(`document.querySelector('[data-testid=composer]') && !document.querySelector('[data-testid=settings]')`);
   expect(page.errors()).toEqual([]);
@@ -74,6 +105,7 @@ test('model sheets stay on screen and browser Back closes the sheet without losi
   await page.waitFor(`!document.querySelector('[data-testid=composer-picker-menu]')`);
   expect(await page.evaluate(`document.querySelector('[data-testid=composer-input]').value`)).toBe('Keep this draft');
   await page.click('[data-testid=mobile-tabs] button:nth-child(3)');
+  await page.click('[data-testid=mobile-settings-phone]');
   await page.waitFor(`document.querySelector('[data-testid=phone-settings]')`);
   await capture('mobile-installation.png');
 }, 15_000);
