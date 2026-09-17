@@ -191,6 +191,9 @@ jobs:
           mkdir "$RUNNER_TEMP/appimage"
           appimage=$(realpath apps/shell/src-tauri/target/release/bundle/appimage/*.AppImage)
           (cd "$RUNNER_TEMP/appimage" && "$appimage" --appimage-extract > /dev/null)
+          if [ "$(uname -m)" = aarch64 ]; then
+            cmp packages/core/dist/boite-core "$RUNNER_TEMP/appimage/squashfs-root/usr/bin/boite-core"
+          fi
           dbus-run-session -- xvfb-run -a bun scripts/ci/desktop-smoke.ts "$RUNNER_TEMP/appimage/squashfs-root/AppRun"
       - name: Build and test macOS application bundle
         if: runner.os == 'macOS'

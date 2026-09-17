@@ -56,10 +56,12 @@ The compiled sidecar needs no separately installed Bun runtime.
 Linux builds also need `xdg-utils`, alongside the WebKitGTK and appindicator
 development packages. The Debian package declares `xdg-utils` for opening links.
 Install `patchelf` too. The shell build wrapper selects it from PATH for
-linuxdeploy instead of using linuxdeploy's bundled copy to modify the Bun sidecar.
+linuxdeploy. On ARM64 it preserves the compiled Bun sidecar, whose ELF load
+segments break after an RPATH rewrite. The exception checks that the sidecar
+only needs glibc libraries; CI compares the packaged core with the original.
 
 Portable CI runs `scripts/ci/desktop-smoke.ts <installed-shell>` against the
-Debian package and macOS application bundle. Signing, notarization and testing
+Debian package, extracted AppImage and macOS application bundle. Signing, notarization and testing
 on older operating systems remain release prerequisites; a local unsigned
 bundle is not a notarized download. Native notifications and Windows process
 guards are not implemented on Linux or macOS.
