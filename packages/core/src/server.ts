@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs';
 import { hostname, networkInterfaces } from 'node:os';
-import { dirname, join, normalize, resolve, sep } from 'node:path';
+import { basename, dirname, join, normalize, resolve, sep } from 'node:path';
 import type { ServerWebSocket } from 'bun';
 import { FILE_ROUTE, PROTOCOL_VERSION, RPC_PATH, RpcCloseCode, RpcErrorCode } from '@boite/contracts';
 import type { RpcError, RpcEventName, RpcEvents, ThreadId } from '@boite/contracts';
@@ -195,6 +195,23 @@ function staticFile(pathname: string): string | null {
 }
 
 /**
+ * A project's cards go where `todos.list` would answer: the owner, and an agent
+ * whose thread belongs to that project. A paired device has no todo method, so
+ * it gets no todo event either.
+ */
+function mayReadTodos(core: Core, connection: Connection, projectId: string): boolean {
+  const identity = connection.identity;
+  if (identity.principal === 'owner') return true;
+  if (identity.principal !== 'agent' || identity.threadId === null) return false;
+  try {
+    return core.threads.require(identity.threadId).projectId === projectId;
+  } catch {
+    // The thread went away while its agent was still connected.
+    return false;
+  }
+}
+
+/**
  * The file a ticket opens: what `files.read` could not put in a JSON frame.
  * The ticket is the whole address, so no request here names a path and no
  * answer says what an unknown one missed. A `Range` is honoured because that
@@ -210,6 +227,12 @@ function ticketedFile(core: Core, ticket: string, range: string | null): Respons
     'content-type': target.mime,
     'accept-ranges': 'bytes',
     'cache-control': 'no-store',
+    // The type is the one the extension named and nothing the bytes suggest,
+    // and a ticket opened as a page downloads instead of rendering: an agent
+    // picks what the panel opens, so no file of its may run in a window.
+    // Neither header touches an <img> or a <video> loading the same address.
+    'x-content-type-options': 'nosniff',
+    'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(basename(target.path))}`,
   };
   const asked = range === null ? null : /^bytes=(\d*)-(\d*)$/.exec(range.trim());
   if (asked === null) return new Response(file, { headers });
@@ -330,6 +353,7 @@ export function startServer(options: ServerOptions): RunningServer {
     for (const connection of connections) {
       if (!connection.authenticated) continue;
       if (scoped && (threadId === null || !connection.subscriptions.has(threadId))) continue;
+      if (name === 'todos.updated' && !mayReadTodos(core, connection, (payload as RpcEvents['todos.updated']).projectId)) continue;
       connection.sendEvent(name, payload);
     }
   });

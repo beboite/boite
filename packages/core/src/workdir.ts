@@ -245,7 +245,9 @@ export async function writeFileText(
   } catch {
     current = null;
   }
-  if (current !== null && !current.isFile()) throw refused(`files.write path is not a file: ${path}`, { path });
+  // A path that is already there may be a link, and the write follows it: the
+  // real file has to be inside the working directory too.
+  if (current !== null) existingInside(cwd, path, 'file', 'files.write path');
   const data = new TextEncoder().encode(text);
   await writeFile(found.absolute, data);
   const stats = await stat(found.absolute);

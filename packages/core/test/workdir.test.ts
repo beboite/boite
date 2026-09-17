@@ -5,7 +5,8 @@
  * temporary directory the harness removes.
  */
 
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { FILE_MAX_BYTES, FILE_ROUTE, FILE_TICKET_TTL_MS } from '@boite/contracts';
@@ -112,6 +113,9 @@ describe('files.read', () => {
     expect(whole.headers.get('content-type')).toBe('image/png');
     expect(whole.headers.get('accept-ranges')).toBe('bytes');
     expect(whole.headers.get('cache-control')).toBe('no-store');
+    // Opened as a page, a ticket downloads under its name and is never sniffed into something else.
+    expect(whole.headers.get('x-content-type-options')).toBe('nosniff');
+    expect(whole.headers.get('content-disposition')).toBe("attachment; filename*=UTF-8''shot.png");
     expect(new Uint8Array(await whole.arrayBuffer())).toEqual(data);
 
     const part = await fetch(address, { headers: { range: 'bytes=10-19' } });
@@ -173,5 +177,30 @@ describe('files.write', () => {
     }
     expect(failures[0]).toContain('files.write path directory does not exist');
     expect(failures[1]).toBe("files.write path leaves the thread's working directory: ../escaped.txt");
+  });
+
+  test('a link that points out of the working directory is not written through', async () => {
+    const outside = mkdtempSync(join(tmpdir(), 'boite-outside-'));
+    try {
+      const target = join(outside, 'theirs.txt');
+      writeFileSync(target, 'untouched');
+      try {
+        symlinkSync(target, join(harness.dataDir, 'link.txt'), 'file');
+      } catch {
+        // Windows hands out file links to developer mode and administrators only;
+        // the Linux and macOS runs are the ones that prove this.
+        return;
+      }
+      let message = 'none';
+      try {
+        await client.call('files.write', { threadId, path: 'link.txt', text: 'overwritten' });
+      } catch (error) {
+        message = (error as Error).message;
+      }
+      expect(message).toBe("files.write path leaves the thread's working directory: link.txt");
+      expect(readFileSync(target, 'utf8')).toBe('untouched');
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
+    }
   });
 });

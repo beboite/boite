@@ -32,6 +32,8 @@
   let filter = $state('');
   let cursor = $state(0);
   let list = $state<HTMLDivElement | undefined>(undefined);
+  /** The thread whose directories `loaded` holds. */
+  let shownFor: string | null = null;
 
   let threadId = $derived(store.openThread?.id ?? null);
 
@@ -192,7 +194,19 @@
     const id = threadId;
     const wanted = surface.path ?? '';
     if (id === null) return;
-    untrack(() => void openAt(wanted));
+    untrack(() => {
+      // The panel is not remounted between threads, and the cache is keyed by
+      // path alone: another thread's tree must not answer for this one.
+      if (shownFor !== id) {
+        shownFor = id;
+        loaded = {};
+        expanded = {};
+        problem = null;
+        cursor = 0;
+        filter = '';
+      }
+      void openAt(wanted);
+    });
   });
 </script>
 

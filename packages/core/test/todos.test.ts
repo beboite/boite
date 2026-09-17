@@ -130,6 +130,56 @@ describe('the todo list of a project', () => {
     ]);
   });
 
+  test('an agent claims a card and is refused the confirmation, which belongs to the user', async () => {
+    const todo = await client.call('todos.add', { threadId, text: 'one card' });
+    const agent = await agentClient();
+    try {
+      let message = 'none';
+      try {
+        await agent.call('todos.update', { threadId, todoId: todo.id, status: 'done' });
+      } catch (error) {
+        message = (error as Error).message;
+      }
+      expect(message).toBe("todos.update status done is the owner's: an agent claims a card, the user confirms it");
+      expect((await client.call('todos.list', { threadId }))[0]?.status).toBe('open');
+    } finally {
+      agent.close();
+    }
+  });
+
+  test('the cards of a project reach its own agents and no agent of another project', async () => {
+    const path = join(harness.dataDir, 'second-project');
+    mkdirSync(path, { recursive: true });
+    const other = await client.call('projects.add', { path, name: 'second' });
+    const accounts = await client.call('accounts.list', {});
+    const account = accounts.find((entry) => entry.providerId === 'echo');
+    const elsewhere = await client.call('threads.create', {
+      projectId: other.id,
+      providerId: 'echo',
+      accountId: account?.id ?? '',
+      title: 'another project',
+    });
+    const mine = await agentClient();
+    const stranger = await connect(harness.url, harness.core.agents.tokenFor(elsewhere.id), {
+      client: { name: 'boite-cli', version: 'test' },
+    });
+    try {
+      const seenByStranger: string[] = [];
+      void stranger.next<'todos.updated'>('todos.updated').then((event) => seenByStranger.push(event.projectId));
+      const seenByMine = mine.next<'todos.updated'>('todos.updated');
+      const seenByOwner = client.next<'todos.updated'>('todos.updated');
+      await client.call('todos.add', { threadId, text: 'for the first project' });
+      expect((await seenByMine).todos.map((todo) => todo.text)).toEqual(['for the first project']);
+      await seenByOwner;
+      // Both of the others have it by now, on the same loop of the same server.
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(seenByStranger).toEqual([]);
+    } finally {
+      mine.close();
+      stranger.close();
+    }
+  });
+
   test('the list survives a core that reads it back from the journal', async () => {
     const projectId = harness.core.threads.require(threadId).projectId;
     const todo = await client.call('todos.add', { threadId, text: 'kept across a restart' });

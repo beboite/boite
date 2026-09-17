@@ -12,6 +12,7 @@ import { AGENT_ENV } from '@boite/contracts';
 import type { CoreClient } from '../src/client.ts';
 import { connect } from '../src/client.ts';
 import { agentEnvFor } from '../src/agent.ts';
+import { resolveCliDir } from '../src/core.ts';
 import { echoThread, startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
 
@@ -74,25 +75,41 @@ describe('the per-thread token', () => {
 
 describe('the environment a thread launches with', () => {
   test('agentEnvFor writes the three variables and puts the CLI first on PATH', () => {
-    const env = agentEnvFor(
-      { Path: `C:\\bin${delimiter}C:\\other`, KEEP: 'kept' },
-      { threadId: 'thr_one', coreUrl: 'http://127.0.0.1:7777', token: 'secret', cliDir: 'C:\\boite\\bin' },
-    );
+    // No drive letter in these: a colon is the delimiter itself off Windows.
+    const cliDir = join('opt', 'boite', 'bin');
+    const before = `${join('usr', 'bin')}${delimiter}${join('usr', 'other')}`;
+    const fields = { threadId: 'thr_one', coreUrl: 'http://127.0.0.1:7777', token: 'secret', cliDir };
+    const env = agentEnvFor({ Path: before, KEEP: 'kept' }, fields);
     expect(env[AGENT_ENV.threadId]).toBe('thr_one');
     expect(env[AGENT_ENV.coreUrl]).toBe('http://127.0.0.1:7777');
     expect(env[AGENT_ENV.token]).toBe('secret');
     expect(env['KEEP']).toBe('kept');
     // Windows spells it `Path`; a second PATH would be the one nothing reads.
-    expect(env['Path']).toBe(`C:\\boite\\bin${delimiter}C:\\bin${delimiter}C:\\other`);
+    expect(env['Path']).toBe(`${cliDir}${delimiter}${before}`);
     expect(env['PATH']).toBeUndefined();
 
-    const again = agentEnvFor(env, {
-      threadId: 'thr_one',
-      coreUrl: 'http://127.0.0.1:7777',
-      token: 'secret',
-      cliDir: 'C:\\boite\\bin',
-    });
-    expect(again['Path']).toBe(`C:\\boite\\bin${delimiter}C:\\bin${delimiter}C:\\other`);
+    // A second turn must not grow PATH by one entry.
+    expect(agentEnvFor(env, fields)['Path']).toBe(`${cliDir}${delimiter}${before}`);
+  });
+
+  test('the shim directory is the named one, the one beside a compiled core, or the sources', () => {
+    const dir = join(harness.dataDir, 'cli');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'boite'), '');
+    writeFileSync(join(dir, 'boite.cmd'), '');
+    expect(resolveCliDir({ BOITE_CLI_DIR: dir }, '/usr/bin/bun')).toBe(dir);
+    // A compiled core offers the directory it sits in, when the shims were staged there.
+    expect(resolveCliDir({}, join(dir, 'boite-core'))).toBe(dir);
+    expect(resolveCliDir({}, join(harness.dataDir, 'boite-core'))).toBeNull();
+    // From the sources it is packages/core/bin, tracked with both shims.
+    expect(resolveCliDir({}, '/usr/bin/bun')).toBe(join(import.meta.dir, '..', 'bin'));
+
+    const empty = join(harness.dataDir, 'empty');
+    mkdirSync(empty, { recursive: true });
+    const shim = process.platform === 'win32' ? 'boite.cmd' : 'boite';
+    expect(() => resolveCliDir({ BOITE_CLI_DIR: empty }, '/usr/bin/bun')).toThrow(
+      `BOITE_CLI_DIR is ${empty}, which holds no ${shim}: expected the directory of the boite shims`,
+    );
   });
 
   test('no CLI directory leaves PATH alone, and an empty one is still written', () => {

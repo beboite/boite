@@ -10,7 +10,7 @@
  */
 
 import { TODO_STATUSES } from '@boite/contracts';
-import type { ProjectId, RpcParams, ThreadId, Todo } from '@boite/contracts';
+import type { Principal, ProjectId, RpcParams, ThreadId, Todo } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { refused } from './errors.ts';
 import { newId } from './ids.ts';
@@ -89,7 +89,14 @@ export function addTodo(core: Core, params: RpcParams<'todos.add'>): Todo {
   return todo;
 }
 
-export function updateTodo(core: Core, params: RpcParams<'todos.update'>): Todo {
+export function updateTodo(core: Core, params: RpcParams<'todos.update'>, principal: Principal = 'owner'): Todo {
+  // Claiming asks the user to confirm; the confirmation itself is the user's.
+  if (principal !== 'owner' && params.status === 'done') {
+    throw refused("todos.update status done is the owner's: an agent claims a card, the user confirms it", {
+      status: params.status,
+      principal,
+    });
+  }
   const projectId = projectOfThread(core, params.threadId);
   const todos = stored(core, projectId);
   const current = todos.find((todo) => todo.id === params.todoId);
@@ -121,7 +128,7 @@ export function removeTodo(core: Core, params: RpcParams<'todos.remove'>): void 
 export function registerTodoMethods(core: Core): void {
   core.router.register('todos.list', (params) => listTodos(core, params.threadId));
   core.router.register('todos.add', (params) => addTodo(core, params));
-  core.router.register('todos.update', (params) => updateTodo(core, params));
+  core.router.register('todos.update', (params, ctx) => updateTodo(core, params, ctx.connection.identity.principal));
   // Deleting a card is the user's: an agent that is done with one claims it.
   core.router.register('todos.remove', (params) => {
     removeTodo(core, params);

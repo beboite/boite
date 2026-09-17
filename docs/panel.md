@@ -43,16 +43,20 @@ resolves outside (a symlink out, a `..`) is refused by name.
 a sound or another binary comes as a url on the core's HTTP server,
 `GET /file/<ticket>`, where the ticket is a random value bound to one path and
 good for `FILE_TICKET_TTL_MS`. The route answers range requests, which is what
-lets a video seek, and is never cached. The answer carries the path only, and
-the UI resolves it against the origin it reached the core by.
+lets a video seek, and is never cached. It answers `nosniff` and
+`content-disposition: attachment`, so a ticket opened as a page downloads
+instead of rendering. The answer carries the path only, and the UI resolves it
+against the origin it reached the core by.
 
 The shell's content security policy lets pictures and media load from
 `http://127.0.0.1:*` and nothing wider. A shell driving a core on another
 machine therefore reads and edits text there, and shows no picture or video
 from it; a browser opened on that core's own address shows them.
 
-These methods are the owner's and the thread's own agent's. A paired phone
-has no Panel button.
+The reads (`git.*`, `files.list`, `files.read`, `todos.list`, the tasks) are
+the owner's and the thread's own agent's. `files.write`, `todos.remove` and a
+todo's `done` are the owner's alone, and `todos.updated` goes to the owner and
+to the agents of that project. A paired phone has no Panel button.
 
 ## What the agent can ask
 

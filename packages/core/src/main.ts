@@ -218,11 +218,15 @@ export async function pair(argv: string[]): Promise<PairingGrant> {
 export function main(argv: string[]): void {
   // `boite-core cli ...` is the `boite` command an agent runs, behind its shim.
   if (argv[0] === 'cli') {
+    // The exit code is set and the process left to end on its own: `process.exit`
+    // would cut what a piped stdout has not flushed yet, and a long list is piped.
     runCli(argv.slice(1), processIo()).then(
-      (code) => process.exit(code),
+      (code) => {
+        process.exitCode = code;
+      },
       (error: unknown) => {
         process.stderr.write(`boite: ${error instanceof Error ? error.message : String(error)}\n`);
-        process.exit(1);
+        process.exitCode = 1;
       },
     );
     return;

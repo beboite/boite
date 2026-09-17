@@ -774,6 +774,36 @@ test('the file tree lists the root, expands a directory on click and opens a fil
   expect(document.querySelectorAll('[data-testid=panel-tab]').length).toBe(2);
 });
 
+test('the tree of one thread is not shown for the next: a thread switch starts it over', async () => {
+  await mountOnFake();
+  await waitFor(() => document.querySelector('[data-thread-id="t-bench"]') !== null);
+  // Both threads keep the tree as their active tab, so the surface is never
+  // remounted between them and only its own reset can empty it.
+  query<HTMLButtonElement>('[data-thread-id="t-trace"]').click();
+  await waitFor(() => store.openThread?.id === 't-trace');
+  store.panel.closeAll();
+  store.panel.openFiles();
+  await waitFor(() => treePaths().length > 0);
+
+  query<HTMLButtonElement>('[data-thread-id="t-bench"]').click();
+  await waitFor(() => store.openThread?.id === 't-bench');
+  store.panel.closeAll();
+  store.panel.openFiles();
+  await waitFor(() => treePaths().length > 0);
+  query<HTMLButtonElement>('[data-testid=files-row][data-path="docs"]').click();
+  await waitFor(() => treePaths().includes('docs/panel.md'));
+
+  query<HTMLButtonElement>('[data-thread-id="t-trace"]').click();
+  await waitFor(() => store.openThread?.id === 't-trace');
+  await waitFor(() => treePaths().length > 0 && !treePaths().includes('docs/panel.md'));
+  expect(query('[data-testid=files-row][data-path="docs"]').getAttribute('aria-expanded')).toBe('false');
+
+  store.panel.closeAll();
+  query<HTMLButtonElement>('[data-thread-id="t-bench"]').click();
+  await waitFor(() => store.openThread?.id === 't-bench');
+  store.panel.closeAll();
+});
+
 test('the editor shows the file, writes two spaces for a tab and saves what was typed', async () => {
   await openWorkbench();
   store.panel.openFile('src/lib/strings.ts');

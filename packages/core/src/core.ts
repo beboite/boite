@@ -50,14 +50,29 @@ export interface CoreOptions {
  * `boite-core`, and the shim is staged beside it. From the sources, it is
  * `packages/core/bin`, which is one directory up from here whether this runs
  * from `src` or from `dist`. Anything else has no CLI to offer and says so
- * with null rather than putting a directory that holds nothing on PATH.
+ * with null rather than putting a directory that holds nothing on PATH. A
+ * `BOITE_CLI_DIR` that holds no shim is a mistake somebody made on purpose, so
+ * it stops the core instead of giving every agent a PATH that finds nothing.
  */
-function resolveCliDir(): string | null {
-  const named = process.env.BOITE_CLI_DIR;
-  if (named !== undefined && named.length > 0) return named;
-  if (basename(process.execPath).startsWith('boite-core')) return dirname(process.execPath);
+export function resolveCliDir(
+  env: Record<string, string | undefined> = process.env,
+  execPath: string = process.execPath,
+  platform: NodeJS.Platform = process.platform,
+): string | null {
+  const shim = platform === 'win32' ? 'boite.cmd' : 'boite';
+  const named = env.BOITE_CLI_DIR;
+  if (named !== undefined && named.length > 0) {
+    if (!existsSync(join(named, shim))) {
+      throw new Error(`BOITE_CLI_DIR is ${named}, which holds no ${shim}: expected the directory of the boite shims`);
+    }
+    return named;
+  }
+  if (basename(execPath).startsWith('boite-core')) {
+    const beside = dirname(execPath);
+    return existsSync(join(beside, shim)) ? beside : null;
+  }
   const fromSources = join(import.meta.dir, '..', 'bin');
-  return existsSync(fromSources) ? fromSources : null;
+  return existsSync(join(fromSources, shim)) ? fromSources : null;
 }
 
 export class Core {

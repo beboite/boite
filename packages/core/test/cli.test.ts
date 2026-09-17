@@ -185,11 +185,15 @@ describe('from inside a turn', () => {
 
 describe('access', () => {
   test('another thread id is refused', async () => {
-    const run = await boite(['where', '--thread', 'thread_other'], {
-      // `--thread` switches to the owner path and needs a core.json; here it
-      // must not even get there with the agent token in hand.
-      [AGENT_ENV.threadId]: threadId,
-    });
+    // Inside a thread `--thread` is no way out to the owner's token in core.json.
+    const run = await boite(['where', '--thread', 'thread_other']);
     expect(run.code).toBe(1);
+    expect(run.err).toBe(`error: this CLI speaks for thread ${threadId}, not thread thread_other\n`);
+  });
+
+  test('its own thread id named out loud is the same call', async () => {
+    const run = await boite(['where', '--thread', threadId]);
+    expect(run.code).toBe(0);
+    expect(run.out).toContain(`thread: ${threadId}`);
   });
 });

@@ -104,8 +104,16 @@ interface Target {
 function targetOf(parsed: Parsed, env: CliIo['env']): Target {
   const url = env[AGENT_ENV.coreUrl] || undefined;
   const token = env[AGENT_ENV.token] || undefined;
-  const threadId = parsed.thread ?? (env[AGENT_ENV.threadId] || undefined);
-  if (parsed.thread === undefined && url && token && threadId) return { url, token, threadId };
+  const own = env[AGENT_ENV.threadId] || undefined;
+  if (url && token && own) {
+    // Inside a thread the CLI speaks for that thread and no other: `--thread`
+    // is the owner's way in from a terminal, not an agent's way out of its own.
+    if (parsed.thread !== undefined && parsed.thread !== own) {
+      throw new Error(`this CLI speaks for thread ${own}, not thread ${parsed.thread}`);
+    }
+    return { url, token, threadId: own };
+  }
+  const threadId = parsed.thread ?? own;
   if (threadId === undefined) {
     throw new Error(`not inside a Boite thread (${AGENT_ENV.threadId} is not set); pass --thread <id>`);
   }

@@ -50,9 +50,12 @@ async function gitBytes(core: Core, threadId: ThreadId, cwd: string, args: strin
   } catch (error) {
     throw refused(`git did not start (${messageOf(error)}): reading a file at a ref needs git on PATH`, { args });
   }
-  const [buffer, code] = await Promise.all([new Response(spawned.proc.stdout).arrayBuffer(), spawned.exited]);
-  // Drained so a git that has something to say never blocks on a full pipe.
-  await new Response(spawned.proc.stderr).text();
+  // Drained with the rest, so a git that has something to say never blocks on a full pipe.
+  const [buffer, , code] = await Promise.all([
+    new Response(spawned.proc.stdout).arrayBuffer(),
+    new Response(spawned.proc.stderr).text(),
+    spawned.exited,
+  ]);
   return { code, data: new Uint8Array(buffer) };
 }
 

@@ -33,7 +33,8 @@ removed and never written to disk.
 Outside a thread, `boite --thread <id>` reads the owner token out of
 `core.json` like `boite-core pair` does (`--data-dir`, `--channel dev`) and
 drives that thread as the owner. That is for a person at a terminal, not for an
-agent.
+agent: inside a thread, `--thread` naming another thread is refused before any
+token is read.
 
 ## Commands
 
@@ -76,7 +77,7 @@ copies both beside `boite-core.exe` and the bundle overlay lists them as
 resources. From the sources, `packages/core/bin/boite` and `boite.cmd` run the
 same subcommand through `bun`, and the core puts that directory on the PATH
 when it runs from the sources. `BOITE_CLI_DIR` overrides the directory in both
-cases.
+cases, and a core refuses to start on one that holds no shim.
 
 The `panel.open` request becomes a `panel.requested` event on every client
 subscribed to the thread; [panel.md](panel.md) says what the UI does with it.

@@ -165,6 +165,8 @@ name is `Boite`. The install is per user and asks for no elevation.
 - `jobs-worker.js`, beside the core because that is where the core looks for it.
   Without it the trace reports `poll` instead of `events`.
 - `guard-worker.js`, the focus guard and the audio mute.
+- `boite` and `boite.cmd`, the CLI shims the core puts on an agent's PATH; each
+  runs `boite-core cli` from beside itself ([cli.md](cli.md)).
 - `ui/`, the same build a phone gets over the pairing link.
 
 The identifier is fresh, so Boite installs beside Boite Legacy rather than over
