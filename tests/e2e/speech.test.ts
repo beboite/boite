@@ -4,14 +4,16 @@ import { createRequire } from 'node:module';
 import { BrowserPage, freePort } from './lib/cdp.ts';
 const requireUi = createRequire(join(import.meta.dir, '../../packages/ui/package.json'));
 const { createServer } = await import(requireUi.resolve('vite'));
-let server: { listen(): Promise<unknown>; close(): Promise<void> };
+let server: Awaited<ReturnType<typeof createServer>>;
 let page: BrowserPage;
 let url: string;
 const id = (name: string) => `[data-testid="${name}"]`;
 beforeAll(async () => {
   const port = await freePort(); url = `http://127.0.0.1:${port}`;
-  server = await createServer({ root: join(import.meta.dir, '../../packages/ui'), server: { host: '127.0.0.1', port, strictPort: true }, clearScreen: false });
-  await server.listen(); page = await BrowserPage.launch({ url: `${url}/?fake=1` });
+  server = await createServer({ root: join(import.meta.dir, '../../packages/ui'), server: { host: '127.0.0.1', port, strictPort: true, hmr: false }, clearScreen: false });
+  await server.listen();
+  page = await BrowserPage.launch({ url: `${url}/?fake=1` });
+  await server.waitForRequestsIdle();
   await page.waitFor(`document.querySelector('${id('dictation-start')}')`);
   // Exercise the real AudioWorklet and resampler without touching a physical microphone.
   await page.evaluate(`window.__audioFixtures = new Set(); window.__stoppedTracks = 0; navigator.mediaDevices.getUserMedia = async () => {
@@ -25,7 +27,10 @@ beforeAll(async () => {
     return destination.stream;
   }`);
 }, 30_000);
-afterAll(async () => { await page?.close(); await server?.close(); }, 15_000);
+afterAll(async () => {
+  try { await page?.close(); }
+  finally { await server?.close(); }
+}, 15_000);
 
 async function capture(name: string) {
   await page.evaluate(`document.fonts.ready`);
@@ -63,8 +68,19 @@ test('dictation captures audio and appends a transcript without sending or overw
 test('phone dictation fits, cancels with Escape, and does not change the draft', async () => {
   await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
   await type('Keep this draft.'); await capture('speech-phone-idle.png'); await record(); await capture('speech-phone-recording.png');
-  expect(await page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')).toBe(true);
-  expect(await page.evaluate(`document.querySelector('.composer .bar').getBoundingClientRect().height <= 56`)).toBe(true);
+  for (const width of [320, 390, 430]) {
+    await page.send('Emulation.setDeviceMetricsOverride', { width, height: 844, deviceScaleFactor: 1, mobile: true });
+    expect(await page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')).toBe(true);
+    expect(await page.evaluate(`(() => {
+      const chips = document.querySelector('.composer .chips').getBoundingClientRect();
+      return [...document.querySelectorAll('.composer .chips button')].every(button => {
+        const r = button.getBoundingClientRect();
+        return r.left >= chips.left && r.right <= chips.right && r.top >= chips.top && r.bottom <= chips.bottom;
+      });
+    })()`)).toBe(true);
+    if (width === 320) await capture('speech-phone-narrow-recording.png');
+  }
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
   await page.evaluate(`window.dispatchEvent(new KeyboardEvent('keydown', {key:'Escape',bubbles:true}))`);
   await page.waitFor(`!!document.querySelector('${id('dictation-start')}')`);
   expect(await page.evaluate(`document.querySelector('${id('composer-input')}').value`)).toBe('Keep this draft.');

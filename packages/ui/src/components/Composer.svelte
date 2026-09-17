@@ -1099,7 +1099,8 @@
   }
 
   @media (max-width: 720px) {
-    .chips { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+    .bar { flex-wrap: wrap; }
+    .chips { flex-basis: 100%; }
     .chips > :global(*) { flex-shrink: 0; }
     textarea, .input-mirror { font-size: var(--text-md); }
     .composer-wrap {
