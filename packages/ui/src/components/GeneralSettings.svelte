@@ -7,7 +7,8 @@
   import { confirm } from '../lib/confirm.svelte';
   import { ago, time } from '../lib/format';
   import { qrSvg } from '../lib/qr';
-  import { fill, strings } from '../lib/strings';
+  import { fill, strings } from '../lib/i18n.svelte';
+  import { openTour } from '../lib/onboarding.svelte';
   import type { Store } from '../lib/store.svelte';
 
   let { store }: { store: Store } = $props();
@@ -237,6 +238,14 @@
       </div>
     </section>
   {/if}
+
+  <section class="card" id="settings-tour">
+    <h2>{strings.onboarding.label}</h2>
+    <p class="subtle hint">{strings.onboarding.replayHint}</p>
+    <button type="button" data-testid="settings-tour" onclick={() => { store.showChat(); openTour(); }}>
+      {strings.onboarding.replay}
+    </button>
+  </section>
 
   <section class="card" id="settings-core">
     <h2>{strings.settings.core}</h2>

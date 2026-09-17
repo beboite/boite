@@ -2,7 +2,7 @@
   import type { ProviderSummary } from '@boite/contracts';
   import { confirm } from '../lib/confirm.svelte';
   import { bytes, percent } from '../lib/format';
-  import { strings } from '../lib/strings';
+  import { strings } from '../lib/i18n.svelte';
   import type { Store } from '../lib/store.svelte';
 
   /**

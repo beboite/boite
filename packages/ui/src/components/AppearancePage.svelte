@@ -2,7 +2,7 @@
   import { onMount, untrack } from 'svelte';
   import { isExperimentEnabled, subscribeExperiments } from '../lib/experiments';
   import { glassSupported, readGlass, setGlass, type Glass } from '../lib/glass';
-  import { strings } from '../lib/strings';
+  import { LOCALES, localeSetting, setLocaleSetting, strings, type LocaleSetting } from '../lib/i18n.svelte';
   import { readTheme, setTheme, type Theme } from '../lib/theme';
   import { ACCENT_PRESETS, readAccent, setAccent } from '../lib/accent';
 
@@ -29,11 +29,20 @@
     setTheme(next);
   }
 
-  const materials: { id: Glass; label: string }[] = [
+  // The labels follow the language, so the list is derived rather than built
+  // once when the page mounts.
+  let materials = $derived<{ id: Glass; label: string }[]>([
     { id: 'acrylic', label: strings.settings.materialAcrylic },
     { id: 'mica', label: strings.settings.materialMica },
     { id: 'solid', label: strings.settings.materialSolid }
-  ];
+  ]);
+
+  let locale = $state<LocaleSetting>(untrack(() => localeSetting()));
+  function pickLocale(next: LocaleSetting) {
+    locale = next;
+    setLocaleSetting(next);
+  }
+
   let glass = $state<Glass>(untrack(() => readGlass()));
   // The shell answers on Windows alone, so the row stays away everywhere else.
   let hasMaterial = $state(false);
@@ -59,6 +68,19 @@
 
   <section class="card" id="settings-theme">
     <h2>{strings.settings.appearance}</h2>
+    <div class="switch-row">
+      <span class="text">{strings.settings.language}<span class="hint">{strings.settings.languageHint}</span></span>
+      <div class="segmented" role="group" aria-label={strings.settings.language}>
+        <button type="button" class:on={locale === 'system'} aria-pressed={locale === 'system'} data-testid="locale-system" onclick={() => pickLocale('system')}>
+          {strings.settings.languageSystem}
+        </button>
+        {#each LOCALES as id (id)}
+          <button type="button" class:on={locale === id} aria-pressed={locale === id} data-testid="locale-{id}" onclick={() => pickLocale(id)}>
+            {strings.settings.languageNames[id]}
+          </button>
+        {/each}
+      </div>
+    </div>
     <div class="switch-row">
       <span class="text">{strings.settings.theme}</span>
       <div class="segmented" role="group" aria-label={strings.settings.theme}>

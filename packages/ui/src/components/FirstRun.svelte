@@ -1,6 +1,6 @@
 <script lang="ts">
   import { FolderOpen } from '@lucide/svelte';
-  import { strings } from '../lib/strings';
+  import { strings } from '../lib/i18n.svelte';
   import type { Store } from '../lib/store.svelte';
   import BoiteMark from './BoiteMark.svelte';
 

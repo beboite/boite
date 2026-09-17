@@ -1,9 +1,10 @@
 <script lang="ts">
-  import { ArrowLeft, Bell, ChevronRight, Monitor, Palette } from '@lucide/svelte';
+  import { ArrowLeft, Bell, ChevronRight, Compass, Monitor, Palette } from '@lucide/svelte';
   import type { Store } from '../lib/store.svelte';
   import { workspace } from '../lib/workspace.svelte';
-  import { strings } from '../lib/strings';
+  import { strings } from '../lib/i18n.svelte';
   import { mobileOverlay } from '../lib/mobile-history';
+  import { openTour } from '../lib/onboarding.svelte';
   import AppearancePage from './AppearancePage.svelte';
   import MachinesPage from './MachinesPage.svelte';
   import PhoneSettings from './PhoneSettings.svelte';
@@ -37,6 +38,9 @@
           </button>
           <button class="ghost row" data-testid="settings-tab-appearance" onclick={() => store.showSettings('appearance')}>
             <Palette size={20} /><span><strong>{strings.settings.tabs.appearance}</strong><small>{strings.mobile.settingsAppearanceHint}</small></span><ChevronRight size={18} />
+          </button>
+          <button class="ghost row" data-testid="settings-tour" onclick={() => { store.showChat(); openTour(); }}>
+            <Compass size={20} /><span><strong>{strings.onboarding.replay}</strong><small>{strings.onboarding.replayHint}</small></span><ChevronRight size={18} />
           </button>
         </div>
       </section>

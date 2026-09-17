@@ -12,7 +12,7 @@
   import { onDestroy, onMount, tick, untrack } from 'svelte';
   import { ArrowDown, Check } from '@lucide/svelte';
   import type { Message } from '@boite/contracts';
-  import { strings } from '../lib/strings';
+  import { strings } from '../lib/i18n.svelte';
   import type { Store } from '../lib/store.svelte';
   import { formatTokens } from '../lib/tokens';
   import PermissionCard from './PermissionCard.svelte';

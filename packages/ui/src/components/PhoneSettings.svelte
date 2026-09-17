@@ -1,7 +1,7 @@
 <script lang="ts">
   import { untrack } from 'svelte';
   import type { Store } from '../lib/store.svelte';
-  import { strings } from '../lib/strings';
+  import { strings } from '../lib/i18n.svelte';
   import { installApp, installed, PUSH_ENABLED_KEY, worker } from '../lib/pwa';
   let { store, showServerSettings = true }: { store: Store; showServerSettings?: boolean } = $props();
   const inShell = window.__TAURI_INTERNALS__ !== undefined;

@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { ThreadLoad } from '@boite/contracts';
   import { bytes, percent } from '../lib/format';
-  import { strings } from '../lib/strings';
+  import { strings } from '../lib/i18n.svelte';
 
   let { load }: { load: ThreadLoad } = $props();
 

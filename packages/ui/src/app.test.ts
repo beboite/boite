@@ -7,6 +7,8 @@ import { store } from './lib/store.svelte';
 import { workspace } from './lib/workspace.svelte';
 import { setExperiment, writeExperiments } from './lib/experiments';
 import { storeEndpoint, upsertEnvironment } from './lib/endpoint';
+import { closeTour } from './lib/onboarding.svelte';
+import { count } from './lib/format';
 
 // The opener plugin is the shell's system browser; nothing real may run here.
 const { openUrl } = vi.hoisted(() => ({ openUrl: vi.fn(async (_url: string) => {}) }));
@@ -109,6 +111,9 @@ async function mountOnFake(search = '/?fake=1'): Promise<void> {
   store.draft = null;
   store.composerStates = {};
   store.projectPickerOpen = false;
+  // A device that has never seen the tour gets it over everything on boot,
+  // which is the point of it and not what these tests are about.
+  closeTour();
   running = mount(App, { target });
   await waitFor(() => store.booted && store.openThread !== null);
 }
@@ -582,7 +587,7 @@ test('the header wears the context meter, a compaction is a divider, and a turn 
   expect(meter.dataset.level).toBe('low');
   query<HTMLButtonElement>('[data-testid=context-trigger]').click();
   await waitFor(() => document.querySelector('[data-testid=context-popup]') !== null);
-  expect(query('[data-testid=context-popup]').textContent).toContain((31000).toLocaleString());
+  expect(query('[data-testid=context-popup]').textContent).toContain(count(31000));
   expect(query('[data-testid=compaction-part]').textContent?.replace(/\s+/g, ' ').trim()).toBe(
     'Context compacted, 184k to 31k tokens'
   );

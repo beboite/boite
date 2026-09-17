@@ -2,7 +2,7 @@
   import { Plus, ArrowUpRight } from '@lucide/svelte';
   import { workspace, machineIcons } from '../lib/workspace.svelte';
   import { store as primary } from '../lib/store.svelte';
-  import { strings } from '../lib/strings';
+  import { strings } from '../lib/i18n.svelte';
   import MachineIcon from './MachineIcon.svelte';
   let { mobile = false }: { mobile?: boolean } = $props();
   let label = $state(''),

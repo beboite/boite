@@ -8,7 +8,7 @@
   import Menu from './Menu.svelte';
   import { confirm } from '../lib/confirm.svelte';
   import type { MenuItem } from '../lib/menu';
-  import { strings } from '../lib/strings';
+  import { strings } from '../lib/i18n.svelte';
   import type { Store } from '../lib/store.svelte';
 
   let { store }: { store: Store } = $props();

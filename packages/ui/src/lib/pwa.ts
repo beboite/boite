@@ -1,4 +1,4 @@
-import { strings } from './strings';
+import { strings } from './i18n.svelte';
 interface InstallPrompt extends Event { prompt(): Promise<{ outcome: string }> }
 let prompt: InstallPrompt | null = null;
 export function listenForInstall(): () => void {

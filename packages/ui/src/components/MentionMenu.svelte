@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { PaletteItem } from '../lib/palette';
-  import { fill, strings } from '../lib/strings';
+  import { fill, strings } from '../lib/i18n.svelte';
   import ComposerMenu from './ComposerMenu.svelte';
 
   /**

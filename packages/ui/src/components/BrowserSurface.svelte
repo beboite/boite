@@ -3,7 +3,7 @@
   import { ArrowLeft, ArrowRight, ExternalLink, RotateCw } from '@lucide/svelte';
   import { browserBridge, normalizeUrl } from '../lib/browser-bridge';
   import { openExternal } from '../lib/links';
-  import { strings } from '../lib/strings';
+  import { strings } from '../lib/i18n.svelte';
   import { ZOOM_DEFAULT, stepZoom } from '../lib/right-panel.svelte';
   import type { BoundPanel, Surface } from '../lib/right-panel.svelte';
 

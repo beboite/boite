@@ -1,6 +1,6 @@
 <script lang="ts">
   import { diffCounts, diffRows } from '../lib/diff';
-  import { fill, strings } from '../lib/strings';
+  import { fill, strings } from '../lib/i18n.svelte';
 
   let { path, oldText, newText }: { path: string; oldText: string; newText: string } = $props();
 
