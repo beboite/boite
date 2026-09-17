@@ -39,7 +39,7 @@
   }
 </script>
 
-<header class="mobile-header" data-testid="mobile-header">
+<header class="mobile-header" class:settings={store.page === 'settings'} data-testid="mobile-header">
   {#if screen === 'chat' && store.page === 'chat'}
     <button class="ghost icon" aria-label={strings.mobile.threads} onclick={() => show('threads')}><ArrowLeft size={20} /></button>
   {/if}
@@ -80,6 +80,7 @@
 <style>
   .mobile-header, .mobile-list, .mobile-tabs { display: none; }
   @media (max-width: 720px) {
+    .mobile-header.settings { display: none; }
     .mobile-header { display: flex; align-items: center; gap: 8px; min-height: 60px; padding: 4px max(12px, env(safe-area-inset-right)) 4px max(12px, env(safe-area-inset-left)); border-bottom: 1px solid var(--color-border); background: var(--color-titlebar); padding-top: max(4px, env(safe-area-inset-top)); }
     .identity { min-width: 0; flex: 1; }
     .machine { display: block; font-size: var(--text-xs); color: var(--color-muted-foreground); padding-left: 4px; }

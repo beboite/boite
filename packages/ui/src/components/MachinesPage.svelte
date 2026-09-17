@@ -4,6 +4,7 @@
   import { store as primary } from '../lib/store.svelte';
   import { strings } from '../lib/strings';
   import MachineIcon from './MachineIcon.svelte';
+  let { mobile = false }: { mobile?: boolean } = $props();
   let label = $state(''),
     link = $state(''),
     url = $state(''),
@@ -41,11 +42,11 @@
         <span class="logo"><MachineIcon icon={machine.icon} os={machine.store.core?.os} size={22} /></span>
         <div class="identity">
           <input class="machine-name" data-testid="machine-rename" aria-label={strings.machines.label} value={machine.label} maxlength="80" onchange={(event) => { workspace.customize(machine.id, event.currentTarget.value, machine.icon); event.currentTarget.value = machine.label; }} />
-          <div class="icon-choices" role="group" aria-label={strings.machines.icon}>
+          {#if !mobile}<div class="icon-choices" role="group" aria-label={strings.machines.icon}>
             {#each machineIcons as icon (icon)}
               <button class="ghost icon" class:chosen={machine.icon === icon} data-testid="machine-icon-{icon}" aria-label={strings.machines.icons[icon]} title={strings.machines.icons[icon]} aria-pressed={machine.icon === icon} onclick={() => workspace.customize(machine.id, machine.label, icon)}><MachineIcon {icon} size={17} /></button>
             {/each}
-          </div>
+          </div>{/if}
           <span class="address">{machine.store.localCore ? strings.machines.local : machine.id}</span>
           <span class="status" class:ready={machine.store.connection === 'ready'}
             >{strings.connection[machine.store.connection]}</span
@@ -122,7 +123,7 @@
     </details>
     {#if workspace.error}<p class="error" role="alert">{workspace.error}</p>{/if}
   </section>
-  {#if workspace.active.owner}
+  {#if workspace.active.owner && !mobile}
     <section class="card add origins">
       <h2>{strings.machines.browserOrigins}</h2>
       <p class="intro">{strings.machines.browserOriginsHint}</p>
