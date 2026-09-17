@@ -1,7 +1,7 @@
 <script lang="ts">
   import { ChevronUp } from '@lucide/svelte';
   import type { Message } from '@boite/contracts';
-  import { fill, strings } from '../lib/strings';
+  import { fill, strings } from '../lib/i18n.svelte';
   import { messagePreview } from '../lib/message-display';
   import { outlineEntries, type OutlineEntry } from '../lib/message-outline';
   import { tick } from 'svelte';

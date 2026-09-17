@@ -4,7 +4,7 @@
   import { Activity, ChevronRight, ShieldCheck, ArrowLeft, Coins, FlaskConical, Keyboard, Palette, Puzzle, Settings2, Users } from '@lucide/svelte';
   import KeyboardPage from './KeyboardPage.svelte';
   import PluginsPage from './PluginsPage.svelte';
-  import { strings } from '../lib/strings';
+  import { strings } from '../lib/i18n.svelte';
   import type { SettingsTab, Store } from '../lib/store.svelte';
   import AccountsPage from './AccountsPage.svelte';
   import AppearancePage from './AppearancePage.svelte';
@@ -21,7 +21,9 @@
   /** Providers, Plugins and Resources call nothing a paired device may call. */
   const OWNER_TABS: SettingsTab[] = ['accounts', 'plugins', 'resources'];
 
-  const all: { id: SettingsTab; label: string; icon: typeof Settings2 }[] = [
+  // Derived, not built once: the nav is written in the language the app is
+  // speaking, and the language changes without a reload.
+  let all = $derived<{ id: SettingsTab; label: string; icon: typeof Settings2 }[]>([
     { id: 'general', label: strings.settings.tabs.general, icon: Settings2 },
     { id: 'machines', label: strings.machines.heading, icon: Activity },
     { id: 'appearance', label: strings.settings.tabs.appearance, icon: Palette },
@@ -31,7 +33,7 @@
     { id: 'usage', label: strings.settings.tabs.usage, icon: Coins },
     { id: 'resources', label: strings.settings.tabs.resources, icon: ShieldCheck },
     { id: 'experiments', label: strings.settings.tabs.experiments, icon: FlaskConical }
-  ];
+  ]);
 
   let children: Partial<Record<SettingsTab, { id: string; label: string }[]>> = $derived({
     accounts: store.providers.map(provider => ({id: `provider-${provider.id}`, label: provider.name})),
@@ -45,6 +47,7 @@
       { id: 'machines', label: strings.machines.heading },
       { id: 'devices', label: strings.settings.pairing.heading },
       { id: 'scheduler', label: strings.settings.scheduler },
+      { id: 'tour', label: strings.onboarding.label },
       { id: 'core', label: strings.settings.core }
     ],
     resources: [
@@ -152,7 +155,9 @@
   .subcategories { display: grid; grid-template-rows: 0fr; opacity: 0; transition: grid-template-rows var(--dur-3) var(--ease-out-quint), opacity var(--dur-2); }
   .subcategories.open { grid-template-rows: 1fr; opacity: 1; }
   .subcategories > div { overflow: hidden; min-height: 0; }
-  .subsection { display: flex; justify-content: flex-start; width: calc(100% - 24px); margin-left: 24px; padding-left: 15px; border-left: 1px solid var(--color-edge); border-radius: 0; color: var(--color-muted-foreground); font-size: var(--text-sm); }
+  /* Block rather than flex, so a label longer than the rail ends in an ellipsis
+     instead of being cut mid-word: French says most of these in more letters. */
+  .subsection { display: block; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; width: calc(100% - 24px); margin-left: 24px; padding-left: 15px; border-left: 1px solid var(--color-edge); border-radius: 0; color: var(--color-muted-foreground); font-size: var(--text-sm); }
   .subsection.chosen { color: var(--color-foreground); border-left-color: var(--color-foreground); background: var(--color-hover); }
   @media (prefers-reduced-motion: reduce) { .subcategories, .tab :global(svg:last-child) { transition: none; } }
 

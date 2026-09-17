@@ -3,6 +3,7 @@ import { mount, unmount } from 'svelte';
 import App from '../App.svelte';
 import { defaultPrefs, PREFS_STORAGE_KEY, STASH_STORAGE_KEY } from '../lib/prefs';
 import { store } from '../lib/store.svelte';
+import { closeTour } from '../lib/onboarding.svelte';
 
 /**
  * The three composer keys, on the whole app over the in-memory fake: Ctrl+Enter
@@ -66,6 +67,8 @@ async function mountOnFake(): Promise<void> {
   store.composerStates = {};
   store.openThread = null;
   store.draft = null;
+  // The tour would be up over the composer on a device that has not seen it.
+  closeTour();
   running = mount(App, { target });
   await waitFor(() => store.booted && store.openThread !== null);
 }

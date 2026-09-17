@@ -3,7 +3,7 @@
   import { ArrowUp, ChevronDown, ChevronRight, Folder, FolderOpen, Monitor, X } from '@lucide/svelte';
   import { Closing } from '../lib/closing.svelte';
   import { workspace } from '../lib/workspace.svelte';
-  import { strings } from '../lib/strings';
+  import { strings } from '../lib/i18n.svelte';
   import type { Store } from '../lib/store.svelte';
   import Menu from './Menu.svelte';
   let { store }: { store: Store } = $props();

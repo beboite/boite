@@ -581,6 +581,11 @@ export const strings = {
     projectsHint: 'Right-click a project in the sidebar to remove it from Boite.',
     projectsDevice: 'Folders are added and removed from the app the core runs in.',
     appearance: 'Appearance',
+    /** The language the UI speaks, on this device. `system` follows the machine. */
+    language: 'Language',
+    languageHint: 'Saved on this device. System follows the language your machine is set to.',
+    languageSystem: 'System',
+    languageNames: { en: 'English', fr: 'Français' },
     theme: 'Theme',
     accent: 'Accent colour',
     accentHint: 'Reasoning, buttons, links and focus indicators',
@@ -819,6 +824,93 @@ export const strings = {
     dismiss: 'Dismiss',
     cancel: 'Cancel',
     confirm: 'Confirm'
+  },
+
+  /**
+   * The tour a machine sees once, the first time Boite opens on it. Every
+   * screen carries the switch for what it explains, so reading it and setting
+   * it up are the same pass.
+   */
+  onboarding: {
+    label: 'Getting started',
+    skip: 'Skip',
+    back: 'Back',
+    next: 'Next',
+    done: 'Open Boite',
+    step: 'Step {index} of {total}',
+    progress: 'Go to step {index}: {title}',
+    replay: 'Show the tour again',
+    replayHint: 'The same screens as the first launch. Nothing you have set is undone.',
+    changeLater: 'All of this is in Settings afterwards.',
+
+    welcome: {
+      title: 'Boite runs your agents',
+      body: 'One conversation per task, each one in a project folder, all of them side by side. The agents run on the machine hosting this core, not in this window, so a turn keeps going while you do something else.',
+      pick: 'Two things worth picking now.'
+    },
+
+    /** Switching model inside a live conversation, the composer's picker. */
+    agents: {
+      title: 'Change the agent inside a conversation',
+      body: 'The chip at the bottom left of the composer holds every provider you connected, its accounts and its models. Change the model in the middle of a thread and nothing is lost: the history stays, and the process already running is told rather than dropped.',
+      effort: 'The chip beside it sets how hard the model thinks, on that model\'s own scale.',
+      locked: 'A thread keeps the provider and the account it started on. The model and the reasoning effort change whenever you want.',
+      demoModel: 'Claude Sonnet 5',
+      demoEffort: 'High',
+      demoMode: 'Ask'
+    },
+
+    /**
+     * Dictation. The screen is written and translated; `VOICE_STEP` in
+     * `lib/onboarding.ts` is what puts it in the tour, once the feature it
+     * describes has landed.
+     */
+    voice: {
+      title: 'Talk instead of typing',
+      body: 'Hold the microphone in the composer and speak. The recording is transcribed on the machine hosting this core and lands in the box as text, which you read before anything is sent.',
+      hint: 'Pick an engine once and dictation works in every conversation, on the phone as well.',
+      open: 'Voice settings'
+    },
+
+    /** The quota bars and the token count, and the switch that fills them. */
+    usage: {
+      title: 'See what you are spending',
+      body: 'Your providers report how much of your subscription is left. Boite draws one bar per window with the hour it resets, in the tray and on the Providers page.',
+      tokens: 'Tokens spent inside Boite are counted apart, in Settings, Usage, with what the same turns would have cost on the API.',
+      monitor: 'Read subscription limits for {account}',
+      noAccounts: 'No provider account yet. Connect one and its limits appear here on their own.',
+      connect: 'Connect a provider',
+      deviceHint: 'Limits are read on the machine hosting the core.'
+    },
+
+    /** The two ways this core reaches further: a phone, and another core. */
+    reach: {
+      title: 'Your phone, and your other machines',
+      phone: 'On your phone',
+      phoneBody: 'A one-time link, or the QR code beside it, opens Boite on your phone with a key of its own. Same conversations, and a notification when a turn finishes or asks you something.',
+      pair: 'Pair a phone',
+      machines: 'Another Boite',
+      machinesBody: 'This app also drives a Boite running somewhere else, a server or a second computer. Connect it once and its projects and threads sit beside the local ones, each machine still running its own agents on its own files.',
+      connect: 'Connect a machine',
+      deviceHint: 'Pairing and machines are managed from the app the core runs in.'
+    },
+
+    /** The switches everyone ends up looking for on the first evening. */
+    quiet: {
+      title: 'Agents that do not interrupt you',
+      body: 'Boite is built to run while you work on something else. These are the switches worth deciding now.',
+      windows: 'The last two apply on a Windows host and are ignored elsewhere.',
+      deviceHint: 'Focus and audio are settings of the machine hosting the core.'
+    },
+
+    /** The last screen, and the only one that does something irreversible: it opens a folder. */
+    project: {
+      title: 'Open your first project',
+      body: 'A project is the folder an agent works in. Threads live inside it, and an agent sees nothing outside it unless you point it there.',
+      opened: '{count} project open. You can add more from the sidebar.',
+      openedMany: '{count} projects open. You can add more from the sidebar.',
+      deviceBody: 'Projects are opened from the app the core runs in. The ones it holds show up here on their own.'
+    }
   }
 } as const;
 

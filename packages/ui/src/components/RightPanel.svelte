@@ -5,7 +5,7 @@
   import { separator } from '../lib/menu';
   import { PANEL_DEFAULT, clampPanel, rightPanel } from '../lib/right-panel.svelte';
   import type { BoundPanel, Surface, SurfaceKind } from '../lib/right-panel.svelte';
-  import { fill, strings } from '../lib/strings';
+  import { fill, strings } from '../lib/i18n.svelte';
   import type { Store } from '../lib/store.svelte';
   import BrowserSurface from './BrowserSurface.svelte';
   import Menu from './Menu.svelte';

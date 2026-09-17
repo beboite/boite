@@ -7,8 +7,9 @@
 
 import type { KeybindingCommand } from '@boite/contracts';
 import { experimentOn } from './experiments.svelte';
+import { openTour } from './onboarding.svelte';
 import type { PaletteItem } from './palette';
-import { strings } from './strings';
+import { strings } from './i18n.svelte';
 import type { Store } from './store.svelte';
 import { setTheme } from './theme';
 
@@ -61,6 +62,9 @@ export function appCommands(store: Store, inShell: boolean): PaletteItem[] {
     items.push(row('providers', strings.palette.providers, 'accounts login install'));
     items.push(row('pair', strings.palette.pair, 'phone link devices'));
   }
+  // The tour again. It is no chord's command, so it is written here rather
+  // than through `row`, which reads the keyboard table.
+  items.push({ id: 'tour', kind: 'command', label: strings.onboarding.replay, keywords: 'onboarding guide tour intro' });
   items.push(row('theme-dark', strings.palette.themeDark));
   items.push(row('theme-light', strings.palette.themeLight));
   items.push(row('theme-system', strings.palette.themeSystem));
@@ -121,6 +125,7 @@ export function runCommand(store: Store, id: string, inShell: boolean): void {
     case 'appearance': store.showSettings('appearance'); break;
     case 'providers': store.showSettings('accounts'); break;
     case 'pair': store.showSettings('general'); break;
+    case 'tour': store.showChat(); openTour(); break;
     case 'theme-dark': setTheme('dark'); break;
     case 'theme-light': setTheme('light'); break;
     case 'theme-system': setTheme('system'); break;

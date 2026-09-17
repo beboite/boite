@@ -43,7 +43,9 @@ that sidecar beside a newly built shell for end-to-end tests.
 - The shell owns windows, the tray, native dialogs and core startup. Execution
   and application logic belong in the core.
 - UI colors, radii and durations come from `app.css`, strings from
-  `lib/strings.ts`. No native `<select>`, `window.confirm` or hard-coded hex.
+  `lib/i18n.svelte.ts`, whose English lives in `lib/strings.ts` and which every
+  translation mirrors ([docs/language.md](docs/language.md)). No native
+  `<select>`, `window.confirm` or hard-coded hex.
 - Each connected machine owns its client and Store. Route actions through the
   owning Store; project and thread IDs can collide between machines.
 

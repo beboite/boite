@@ -2,7 +2,7 @@
   import { ChevronRight } from '@lucide/svelte';
   import { renderMarkdown } from '../lib/markdown';
   import { paragraphBlocks, currentThought } from '../lib/message-display';
-  import { strings } from '../lib/strings';
+  import { strings } from '../lib/i18n.svelte';
 
   let { text, live = false }: { text: string; live?: boolean } = $props();
 

@@ -3,7 +3,7 @@
   import { Puzzle, Download, RefreshCw } from '@lucide/svelte';
   import type { PluginPool, PluginState, RpcParams } from '@boite/contracts';
   import type { Store } from '../lib/store.svelte';
-  import { strings } from '../lib/strings';
+  import { strings } from '../lib/i18n.svelte';
   import { confirm } from '../lib/confirm.svelte';
   import QuotaList from './QuotaList.svelte';
   let { store }: { store: Store } = $props();

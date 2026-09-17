@@ -1,8 +1,9 @@
 <script lang="ts">
   import type { AccountQuota } from '@boite/contracts';
-  import { strings } from '../lib/strings';
+  import { strings } from '../lib/i18n.svelte';
+  import { weekdayTime } from '../lib/format';
   let { rows, compact = false }: { rows: AccountQuota[]; compact?: boolean } = $props();
-  const date = (at: number) => new Date(at).toLocaleString(undefined, { weekday: 'short', hour: '2-digit', minute: '2-digit' });
+  const date = (at: number) => weekdayTime(at);
 </script>
 
 <div class="quota-list" class:compact data-testid="quota-list">

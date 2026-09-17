@@ -1,6 +1,6 @@
 <script lang="ts">
   import { cost, tokens } from '../lib/format';
-  import { strings } from '../lib/strings';
+  import { strings } from '../lib/i18n.svelte';
   import type { Store } from '../lib/store.svelte';
 
   let { store }: { store: Store } = $props();
