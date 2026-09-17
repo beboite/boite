@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, mkdirSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { connect } from '../src/client.ts';
 import { DEFAULT_SPEECH, decodeSpeechAudio } from '../src/speech.ts';
@@ -114,4 +115,15 @@ test('changing engines invalidates recordings made under the previous privacy ch
   fetchSpy = spyOn(globalThis, 'fetch');
   await expect(harness.core.speech.transcribe('one', { revision, requestId: 'old-recording', audio: testWav() })).rejects.toThrow('settings changed');
   expect(fetchSpy).not.toHaveBeenCalled();
+});
+
+test('a failed download rename removes the partial file and preserves the destination', async () => {
+  const target = join(harness.dataDir, 'blocked-model');
+  mkdirSync(target);
+  const bytes = Buffer.from('verified model fixture');
+  fetchSpy = stubFetch(async () => new Response(bytes));
+  const spec = { url: 'https://fixture.invalid/model', bytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') };
+  await expect(harness.core.speech.local['download'](spec, target, new AbortController().signal)).rejects.toThrow();
+  expect(existsSync(target)).toBe(true);
+  expect(existsSync(`${target}.part`)).toBe(false);
 });

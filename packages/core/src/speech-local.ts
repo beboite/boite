@@ -69,7 +69,7 @@ export class SpeechLocal {
   }
   private async download(spec: typeof MODEL, target: string, signal: AbortSignal): Promise<void> {
     const part = `${target}.part`;
-    const fd = openSync(part, 'w', 0o600);
+    let fd: number | null = openSync(part, 'w', 0o600);
     const hash = createHash('sha256');
     let bytes = 0;
     try {
@@ -84,13 +84,14 @@ export class SpeechLocal {
         this.downloadedBytes += chunk.length;
       }
       if (bytes !== spec.bytes || hash.digest('hex') !== spec.sha256) throw new Error('speech download: size or SHA-256 mismatch');
-    } catch (error) {
       closeSync(fd);
-      rmSync(part, { force: true });
+      fd = null;
+      renameSync(part, target);
+    } catch (error) {
+      try { if (fd !== null) closeSync(fd); }
+      finally { rmSync(part, { force: true }); }
       throw error;
     }
-    closeSync(fd);
-    renameSync(part, target);
   }
   private async install(signal: AbortSignal): Promise<void> {
     mkdirSync(this.root, { recursive: true });

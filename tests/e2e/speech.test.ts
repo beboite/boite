@@ -15,7 +15,7 @@ beforeAll(async () => {
   await page.waitFor(`document.querySelector('${id('dictation-start')}')`);
   // Exercise the real AudioWorklet and resampler without touching a physical microphone.
   await page.evaluate(`window.__audioFixtures = new Set(); window.__stoppedTracks = 0; navigator.mediaDevices.getUserMedia = async () => {
-    const context = new AudioContext(); await context.resume();
+    const context = new AudioContext({sinkId: {type:'none'}}); await context.resume();
     const oscillator = context.createOscillator(); oscillator.frequency.value = 220;
     const destination = context.createMediaStreamDestination(); oscillator.connect(destination); oscillator.start();
     const fixture = {context, oscillator, destination}; window.__audioFixtures.add(fixture);
@@ -76,6 +76,13 @@ test('voice settings save API selection, hide credentials on reload, and fit pho
   expect(await page.evaluate(`document.querySelector('${id('voice-groq-key')}').value`)).toBe('');
   await page.send('Emulation.setDeviceMetricsOverride', { width: 1360, height: 950, deviceScaleFactor: 1, mobile: false });
   await capture('speech-desktop-settings.png');
+  for (const provider of ['OpenRouter', 'Groq']) {
+    await page.evaluate(`Array.from(document.querySelectorAll('.segmented button')).find(button => button.textContent === ${JSON.stringify(provider)}).click()`);
+    expect(await page.evaluate(`!!document.querySelector('.saved')`)).toBe(false);
+    await capture('speech-provider-unsaved.png');
+    await page.click(id('voice-save'));
+    await page.waitFor(`document.querySelector('.saved')`);
+  }
   expect(await page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')).toBe(true);
   expect(page.errors()).toEqual([]);
 }, 30_000);

@@ -43,7 +43,10 @@ export class SpeechRecorder {
     if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) throw new Error(strings.speech.https);
     try {
       // Create/resume inside the gesture, including Safari's user activation window.
-      this.context = new AudioContext();
+      // Dictation needs an audio clock, not a working speaker or headset output.
+      const options: AudioContextOptions & { sinkId?: { type: 'none' } } =
+        'setSinkId' in AudioContext.prototype ? { sinkId: { type: 'none' } } : {};
+      this.context = new AudioContext(options);
       const resumed = this.context.resume();
       void resumed.catch(() => {});
       const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } });

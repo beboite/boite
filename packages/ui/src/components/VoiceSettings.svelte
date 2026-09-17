@@ -73,7 +73,7 @@
       {:else}
         <div class="card">
           <h3>{strings.speech.provider}</h3>
-          <div class="segmented"><button type="button" aria-pressed={config.apiProvider === 'groq'} onclick={() => config!.apiProvider = 'groq'}>{strings.speech.groq}</button><button type="button" aria-pressed={config.apiProvider === 'openrouter'} onclick={() => config!.apiProvider = 'openrouter'}>{strings.speech.openrouter}</button></div>
+          <div class="segmented"><button type="button" aria-pressed={config.apiProvider === 'groq'} onclick={() => { config!.apiProvider = 'groq'; saved = false; }}>{strings.speech.groq}</button><button type="button" aria-pressed={config.apiProvider === 'openrouter'} onclick={() => { config!.apiProvider = 'openrouter'; saved = false; }}>{strings.speech.openrouter}</button></div>
           <p>{strings.speech.groqModel}</p>
           <label>{strings.speech.groqKey}<input type="password" autocomplete="new-password" data-testid="voice-groq-key" bind:value={groqKey} disabled={clearGroq} placeholder={status.groqKeySet ? strings.speech.keySaved : strings.speech.keyEmpty} /></label>
           {#if status.groqKeySet}<label class="check"><input type="checkbox" bind:checked={clearGroq} />{strings.speech.clearKey}</label>{/if}

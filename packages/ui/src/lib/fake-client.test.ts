@@ -4,6 +4,18 @@ import { RpcErrorCode } from '@boite/contracts';
 
 afterEach(() => vi.useRealTimers());
 
+test('fake speech refuses a recording made before configuration changed', async () => {
+  const client = new FakeClient({ delayMs: 0 });
+  await client.connect();
+  try {
+    const { revision } = await client.call('speech.status', {});
+    const config = await client.call('speech.config', {});
+    await client.call('speech.configure', { ...config, language: 'fr' });
+    await expect(client.call('speech.transcribe', { requestId: 'old', revision, audio: '' }))
+      .rejects.toMatchObject({ code: RpcErrorCode.Refused, message: expect.stringContaining('settings changed') });
+  } finally { client.close(); }
+});
+
 test.each(['goal', 'loop'] as const)('changing the other activity keeps the running %s completion', async kind => {
   vi.useFakeTimers();
   const client = new FakeClient({ delayMs: 1 });

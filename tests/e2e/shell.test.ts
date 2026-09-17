@@ -538,7 +538,7 @@ shellTest('voice capture loads its packaged worklet under the native content sec
     expect(await page.evaluate('window.isSecureContext')).toBe(true);
     await page.evaluate(`window.__realGetUserMedia = navigator.mediaDevices.getUserMedia;
       navigator.mediaDevices.getUserMedia = async () => {
-        const context = new AudioContext(); await context.resume();
+        const context = new AudioContext({sinkId: {type:'none'}}); await context.resume();
         const oscillator = context.createOscillator(), destination = context.createMediaStreamDestination();
         oscillator.connect(destination); oscillator.start();
         window.__voiceFixture = {context, oscillator, destination};
