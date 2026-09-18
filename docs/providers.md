@@ -207,8 +207,8 @@ through `node`; Grok is reached through the binary its own installer puts under
 `{home}/.grok/bin`, with PATH behind it.
 
 Antigravity is the one that only exists as a managed install: its binary is nowhere until
-`providers.install` downloads Google's release, so the picker offers Install
-first. It is also the one whose accounts are all isolated, the descriptor says
+`providers.install` downloads Google's release, so its row on the Providers
+page offers Install first and the model picker only links there. It is also the one whose accounts are all isolated, the descriptor says
 `isolation.alwaysIsolated`, because the user's own IDE login is never what it
 runs on. Four descriptor fields exist for it and are open to any provider:
 
