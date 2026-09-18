@@ -26,13 +26,24 @@ afterAll(async () => { await page?.close(); await server?.close(); }, 15_000);
 
 test('provider settings show login controls and quota monitoring', async () => {
   await page.click(id('nav-settings')); await page.click(id('settings-tab-accounts'));
+  await page.waitFor(`document.querySelectorAll('${id('provider-settings')}').length > 1`);
+  // The page opens as a checklist: one row and at most one next step per provider.
+  expect(await page.evaluate(`[...document.querySelectorAll('${id('provider-settings')}')].every(row => row.querySelectorAll('.act .primary').length <= 1)`)).toBe(true);
+  expect(await page.evaluate(`document.querySelector('${id('account-row')}') === null`)).toBe(true);
+  await capture('providers.png');
+  // Accounts, quotas and the uninstall sit behind each row's chevron.
+  await page.evaluate(`document.querySelectorAll('${id('provider-details-toggle')}').forEach(button => button.click())`);
   await page.waitFor(`document.querySelector('${id('quota-monitor')}')`);
-  expect(await page.evaluate(`document.querySelectorAll('${id('provider-settings')}').length`)).toBeGreaterThan(1);
   await page.click(id('quota-monitor'));
   await page.waitFor(`!document.querySelector('${id('quota-monitor')}').checked`);
   expect(await page.evaluate(`document.querySelector('${id('accounts-page')}').textContent`)).toContain('Quota monitoring is off');
   await page.click(id('quota-monitor'));
-  await capture('providers.png');
+  await capture('providers-details.png');
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 760, height: 900, deviceScaleFactor: 1, mobile: false });
+  await capture('providers-details-narrow.png');
+  expect(await page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')).toBe(true);
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1400, height: 1000, deviceScaleFactor: 1, mobile: false });
+  await page.evaluate(`document.querySelectorAll('${id('provider-details-toggle')}').forEach(button => button.click())`);
 }, 30_000);
 
 test('missing agents offer desktop setup while phone settings omit provider administration', async () => {
@@ -41,7 +52,7 @@ test('missing agents offer desktop setup while phone settings omit provider admi
     workspace.active.accounts = [];
   })`);
   await page.waitFor(`document.querySelector('[data-provider-id="claude"] a')`);
-  expect(await page.evaluate(`document.querySelectorAll('.connect:disabled').length`)).toBe(0);
+  expect(await page.evaluate(`document.querySelectorAll('${id('accounts-page')} button:disabled').length`)).toBe(0);
   expect(await page.evaluate(`!!document.querySelector('[data-provider-id="antigravity"] [data-testid="install-start"]')`)).toBe(true);
   await capture('providers-missing-desktop.png');
   await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
@@ -50,7 +61,7 @@ test('missing agents offer desktop setup while phone settings omit provider admi
   await capture('providers-missing-phone.png');
   await page.send('Emulation.setDeviceMetricsOverride', { width: 1400, height: 1000, deviceScaleFactor: 1, mobile: false });
   await page.click(id('providers-refresh'));
-  await page.waitFor(`document.querySelector('[data-provider-id="claude"] .connect')`);
+  await page.waitFor(`document.querySelector('[data-provider-id="claude"][data-step="sign-in"]')`);
   await page.send('Emulation.setDeviceMetricsOverride', { width: 1400, height: 1000, deviceScaleFactor: 1, mobile: false });
 }, 30_000);
 
@@ -68,19 +79,21 @@ test('a plugin installs, switches an account and uninstalls through its page', a
   await page.waitFor(`document.querySelector('${id('plugin-install')}')`);
 }, 30_000);
 
-test('connecting a missing managed agent installs it and opens its login without a terminal', async () => {
+test('installing a missing agent goes on to its sign-in without a second click or a terminal', async () => {
   await page.navigate(`${uiUrl}/?fake=1&uninstalled=1`);
   await page.waitFor(`document.querySelector('${id('nav-settings')}')`);
   await page.click(id('nav-settings')); await page.click(id('settings-tab-accounts'));
-  const connect = '[data-provider-id="claude"] .connect';
-  expect(await page.evaluate(`!!document.querySelector('${connect}')`)).toBe(true);
+  const connect = '[data-provider-id="claude"] [data-testid="install-start"]';
+  const downloading = '[data-provider-id="claude"][data-install="downloading"]';
+  await page.waitFor(`document.querySelector('${connect}')`);
+  await capture('connect-fresh.png');
   await page.click(connect);
-  await page.waitFor(`document.querySelector('[data-provider="claude"][data-state="downloading"]')`);
-  await page.click('[data-provider="claude"] [data-testid="install-cancel"]');
-  await page.waitFor(`!document.querySelector('${connect}').disabled`);
+  await page.waitFor(`document.querySelector('${downloading}')`);
+  await page.click('[data-provider-id="claude"] [data-testid="install-cancel"]');
+  await page.waitFor(`document.querySelector('${connect}')`);
   expect(await page.evaluate(`document.querySelectorAll('[data-testid="account-login-row"]').length`)).toBe(0);
   await page.click(connect);
-  await page.waitFor(`document.querySelector('[data-provider="claude"][data-state="downloading"]')`);
+  await page.waitFor(`document.querySelector('${downloading}')`);
   await capture('connect-installing.png');
   await page.waitFor(`document.querySelector('[data-testid="account-login-row"] a')`);
   expect(await page.evaluate(`document.querySelector('[data-testid="account-login-row"] a').href`)).toContain('https://');

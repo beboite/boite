@@ -827,6 +827,10 @@ export function registerProviderMethods(core: Core): void {
       core.bus.emit('providers.installProgress', payload);
     },
     updated: () => {
+      // A provider that just landed may already be logged in through the user's
+      // own CLI: its default account has to exist before the clients hear of it,
+      // or they start a sign-in nobody needs.
+      core.accounts.ensureDefaults();
       core.bus.emit('providers.updated', core.providers.list());
     },
     log: (level, message) => {

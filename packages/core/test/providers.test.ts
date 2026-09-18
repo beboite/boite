@@ -139,7 +139,8 @@ describe('providers', () => {
 
   test('{appdata} expands at load, so the windows candidate is a real absolute path', () => {
     const windows = harness.core.providers.require('opencode').profiles.windows;
-    const candidate = windows?.executable[0];
+    // Boite's own release is named first, the npm copy right behind it.
+    const candidate = windows?.executable[1];
     expect(candidate?.kind).toBe('file');
     expect(candidate?.value).not.toContain('{appdata}');
     if (process.platform === 'win32') {
@@ -253,15 +254,16 @@ describe('providers', () => {
       expect(profile?.executable).toEqual([{ kind: 'path', value: 'codex' }]);
       return;
     }
-    // npm installs a `.cmd` shim Bun cannot spawn, so the real vendored exe is
-    // named first and `{appdata}` has to be a real path by the time it runs.
-    const candidate = profile?.executable[0];
+    // Boite's own release is named first. npm installs a `.cmd` shim Bun cannot
+    // spawn, so the real vendored exe is named next, and `{appdata}` has to be a
+    // real path by the time it runs.
+    const candidate = profile?.executable[1];
     expect(candidate?.kind).toBe('file');
     expect(candidate?.value).not.toContain('{appdata}');
     expect(candidate?.value.startsWith(process.env['APPDATA'] ?? '')).toBe(true);
     expect(candidate?.value.toLowerCase()).toEndWith('codex.exe');
     expect(profile?.executable.at(-1)).toEqual({ kind: 'path', value: 'codex' });
-    expect(profile?.close?.processes).toEqual(['codex.exe']);
+    expect(profile?.close?.processes).toEqual(['codex.exe', 'codex-x86_64-pc-windows-msvc.exe']);
 
     if (codex?.available !== true) {
       console.log('codex is not installed here, the executable assertion is skipped');

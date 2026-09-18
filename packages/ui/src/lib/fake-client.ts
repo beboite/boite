@@ -153,6 +153,7 @@ const UPDATABLE_ARCHIVE_BYTES = 41_268_224;
 /** What one `providers.install` on that provider would fetch, and how big it is. */
 const RELEASES: Record<string, { version: string; archiveBytes: number }> = {
   claude: { version: '2.1.267', archiveBytes: 220_051_616 },
+  codex: { version: '0.155.1', archiveBytes: 107_573_195 },
   [MANAGED_ID]: { version: MANAGED_VERSION, archiveBytes: MANAGED_ARCHIVE_BYTES },
   [UPDATABLE_ID]: { version: UPDATABLE_AVAILABLE, archiveBytes: UPDATABLE_ARCHIVE_BYTES }
 };

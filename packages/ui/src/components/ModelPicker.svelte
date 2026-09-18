@@ -81,9 +81,13 @@
     return store.accountsOf(shown.id)[0]?.id ?? null;
   });
   let seats = $derived(shown ? store.accountsOf(shown.id) : []);
-  /** The files are still to download, so this provider has no models to offer yet. */
+  /**
+   * The files are still to download, so this provider has no models to offer
+   * yet. An agent the user installed on their own is there whatever Boite's own
+   * release says.
+   */
   let needsInstall = $derived.by((): boolean => {
-    if (!shown) return false;
+    if (!shown || shown.available) return false;
     const install = store.installOf(shown.id);
     return install !== null && install.state !== 'installed';
   });
@@ -127,9 +131,7 @@
   /** One tile per provider, in the order the core listed them. */
   let tiles = $derived.by((): Tile[] =>
     store.providers.map((entry) => {
-      const install = store.installOf(entry.id);
-      const pending = install !== null && install.state !== 'installed';
-      const reason = pending || !entry.available
+      const reason = !entry.available
         ? strings.composer.unavailable
         : store.accountsOf(entry.id).length === 0
           ? strings.composer.noAccount

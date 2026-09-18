@@ -1,47 +1,148 @@
 <script lang="ts">
-  import { onMount, tick, untrack } from 'svelte';
+  import { onMount } from 'svelte';
   import { ChevronRight } from '@lucide/svelte';
   import type { Account, AccountQuota, ProviderSummary } from '@boite/contracts';
   import QuotaList from './QuotaList.svelte';
   import ProviderIcon from './ProviderLogo.svelte';
-  import InstallControl from './InstallControl.svelte';
-  import Menu from './Menu.svelte';
   import { confirm } from '../lib/confirm.svelte';
-  import type { MenuItem } from '../lib/menu';
+  import { bytes, percent } from '../lib/format';
+  import { nextAccountLabel, setupStep, signInTarget, type SetupStep } from '../lib/provider-setup';
   import { strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
 
+  /**
+   * One row per provider, one next step per row: install what is missing, sign
+   * in when nothing is signed in, otherwise ready. Everything a second account,
+   * a quota or an uninstall needs sits behind the row's chevron.
+   */
   let { store }: { store: Store } = $props();
 
-  let adding = $state(false);
-  let providerId = $state(untrack(() => store.providers[0]?.id ?? ''));
-  let label = $state('');
-  let useDefaultLocation = $state(false);
   /** One pending code per account, so two logins never share a field. */
   let codes = $state<Record<string, string>>({});
   let quotas = $state<AccountQuota[]>([]);
   let quotaBusy = $state(false);
-  let connecting = $state<string | null>(null);
-  let signingIn = false;
-  let submitting = $state(false);
+  let open = $state<Record<string, boolean>>({});
+  /** Providers whose install was asked for from a row: sign-in follows the download. */
+  let chained = $state<Record<string, boolean>>({});
+  let busy = $state<string | null>(null);
   let verified = $state<Record<string, number>>({});
   let checking = $state<string | null>(null);
   let detecting = $state(false);
+  let lastDetect = 0;
+
+  /** Agents Boite cannot download: their own installer is one click away. */
   const setupUrls: Record<string, string> = {
     claude: 'https://code.claude.com/docs/en/setup',
     codex: 'https://developers.openai.com/codex/cli',
     opencode: 'https://opencode.ai/docs/',
     grok: 'https://grok.com/build',
-    pi: 'https://github.com/earendil-works/pi',
+    pi: 'https://github.com/earendil-works/pi'
   };
+
+  const loggingIn = (accountId: string): boolean => store.logins[accountId]?.state === 'running';
+
+  function stepOf(provider: ProviderSummary): SetupStep {
+    return setupStep(provider, store.installOf(provider.id), store.accountsOf(provider.id), loggingIn);
+  }
+
+  /** What the row says under the name. */
+  function stateText(provider: ProviderSummary, step: SetupStep): string {
+    const install = store.installOf(provider.id);
+    if (step === 'installing' && install) {
+      if (install.state === 'downloading') {
+        const ratio = install.totalBytes > 0 ? Math.min(100, (install.receivedBytes / install.totalBytes) * 100) : 0;
+        return strings.install.downloading.replace('{percent}', percent(ratio));
+      }
+      return install.state === 'verifying' ? strings.install.verifying : strings.install.extracting;
+    }
+    if (step === 'install' && install) {
+      if (install.state === 'failed') return install.message;
+      if (install.state === 'absent') return strings.install.absent.replace('{size}', bytes(install.archiveBytes));
+    }
+    if (step === 'ready') {
+      const signedIn = store.accountsOf(provider.id).filter((account) => account.status === 'ok');
+      const identity = signedIn.find((account) => account.identity)?.identity ?? null;
+      if (signedIn.length > 1) {
+        return `${strings.providerSettings.step.ready} · ${
+          identity
+            ? strings.providerSettings.readyMore.replace('{identity}', identity).replace('{count}', String(signedIn.length - 1))
+            : strings.providerSettings.accountsCount.replace('{count}', String(signedIn.length))
+        }`;
+      }
+      return identity ? `${strings.providerSettings.step.ready} · ${identity}` : strings.providerSettings.step.ready;
+    }
+    return strings.providerSettings.step[step];
+  }
+
+  function ratioOf(provider: ProviderSummary): number {
+    const install = store.installOf(provider.id);
+    if (install?.state !== 'downloading' || install.totalBytes <= 0) return 0;
+    return Math.min(100, (install.receivedBytes / install.totalBytes) * 100);
+  }
+
+  function updatable(provider: ProviderSummary): boolean {
+    const install = store.installOf(provider.id);
+    return install?.state === 'installed' && install.available !== install.version;
+  }
+
+  /** The login a row shows: the running one first, else the last that failed. */
+  function shownLogin(provider: ProviderSummary): Account | null {
+    const accounts = store.accountsOf(provider.id);
+    return accounts.find((account) => loggingIn(account.id)) ?? accounts.find((account) => store.logins[account.id]) ?? null;
+  }
+
+  async function signIn(provider: ProviderSummary, another = false) {
+    if (busy !== null) return;
+    busy = provider.id;
+    try {
+      const accounts = store.accountsOf(provider.id);
+      const account = (another ? null : signInTarget(accounts))
+        ?? await store.addAccount({ providerId: provider.id, label: nextAccountLabel(provider, accounts), useDefaultLocation: false });
+      if (account) await store.loginAccount(account.id);
+    } finally { busy = null; }
+  }
+
+  async function startInstall(provider: ProviderSummary, thenSignIn: boolean) {
+    if (thenSignIn) chained = { ...chained, [provider.id]: true };
+    if (!await store.installProvider(provider.id)) unchain(provider.id);
+  }
+
+  /** Recorded as installed, nothing resolves: the files go, then come back. */
+  async function repair(provider: ProviderSummary) {
+    await store.uninstallProvider(provider.id);
+    if (store.installOf(provider.id)?.state === 'absent') await startInstall(provider, true);
+  }
+
+  function unchain(providerId: string) {
+    const { [providerId]: _gone, ...rest } = chained;
+    chained = rest;
+  }
+
+  async function cancelInstall(provider: ProviderSummary) {
+    unchain(provider.id);
+    await store.cancelInstall(provider.id);
+  }
+
+  async function uninstall(provider: ProviderSummary) {
+    const ok = await confirm.ask({
+      title: strings.install.removeTitle.replace('{provider}', provider.name),
+      body: strings.install.removeBody,
+      confirmLabel: strings.install.removeConfirm,
+      cancelLabel: strings.install.removeCancel,
+      danger: true
+    });
+    if (ok) await store.uninstallProvider(provider.id);
+  }
+
+  /** Something the user installed or signed into outside Boite: look again. */
   async function detect() {
     if (!store.client || detecting) return;
     detecting = true;
-    try {
-      await store.reloadProviders();
-    }
+    lastDetect = Date.now();
+    try { await store.reloadProviders(); }
     finally { detecting = false; }
   }
+
   async function readQuotas(refresh = false) {
     if (!store.client || quotaBusy) return;
     quotaBusy = true;
@@ -49,97 +150,25 @@
     catch (error) { store.error = String(error); }
     finally { quotaBusy = false; }
   }
+
   async function monitor(accountId: string, enabled: boolean) {
     if (!store.client) return;
     try { quotas = await store.client.call('quotas.configure', { accountId, enabled }); if (enabled) await readQuotas(); }
     catch (error) { store.error = String(error); }
   }
+
+  /** The session file, then the agent itself: how many models it answers with. */
   async function verify(account: Account) {
     if (!store.client) return;
     checking = account.id;
     try {
       await store.checkAccount(account.id);
-      const { models } = await store.client.call('providers.probe', { providerId: account.providerId, accountId: account.id });
-      verified = { ...verified, [account.id]: models.length };
+      if (store.providerOf(account.providerId)?.available) {
+        const { models } = await store.client.call('providers.probe', { providerId: account.providerId, accountId: account.id });
+        verified = { ...verified, [account.id]: models.length };
+      }
     } catch (error) { store.error = String(error); }
     finally { checking = null; }
-  }
-  async function signIn(provider: ProviderSummary) {
-    if (signingIn) return;
-    signingIn = true;
-    try {
-      const account = store.accounts.find(account => account.providerId === provider.id && account.isolationDir !== null && account.status !== 'ok')
-        ?? await store.addAccount({ providerId: provider.id, label: provider.name, useDefaultLocation: false });
-      if (account) {
-        await store.loginAccount(account.id);
-        await tick();
-        document.querySelector(`[data-testid="account-row"][data-account-id="${CSS.escape(account.id)}"]`)
-          ?.scrollIntoView({ block: 'start' });
-      }
-    } finally { signingIn = false; connecting = null; }
-  }
-  async function connect(provider: ProviderSummary) {
-    if (!store.client || connecting !== null) return;
-    connecting = provider.id;
-    if (provider.available) { await signIn(provider); return; }
-    const install = store.installOf(provider.id);
-    if (!install) { connecting = null; return; }
-    try {
-      if (install.state === 'absent' || install.state === 'failed') {
-        if (!await store.installProvider(provider.id)) connecting = null;
-      } else if (install.state === 'installed') {
-        store.error = strings.providerSettings.reinstall;
-        connecting = null;
-      }
-    } catch (error) { store.error = String(error); connecting = null; }
-  }
-  onMount(() => {
-    void readQuotas();
-    const off = store.client?.on('quotas.updated', (rows) => { quotas = rows; });
-    const offProviders = store.client?.on('providers.updated', ({ loaded }) => {
-      const provider = loaded.find(provider => provider.id === connecting && provider.available);
-      if (provider) void signIn(provider);
-    });
-    const offInstall = store.client?.on('providers.installProgress', event => {
-      if (event.providerId !== connecting) return;
-      if (event.state === 'failed' || event.state === 'absent') connecting = null;
-    });
-    return () => { off?.(); offProviders?.(); offInstall?.(); connecting = null; };
-  });
-
-  async function submit(event: SubmitEvent) {
-    event.preventDefault();
-    if (!providerId || label.trim().length === 0) return;
-    if (submitting) return;
-    submitting = true;
-    const account = await store.addAccount({ providerId, label: label.trim(), useDefaultLocation: !alwaysIsolated && useDefaultLocation });
-    submitting = false;
-    if (!account) return;
-    label = '';
-    adding = false;
-  }
-
-  /** The provider column of the add form, drawn as a menu: the family has no native select. */
-  let providerItems = $derived(
-    store.providers.map(
-      (provider: ProviderSummary): MenuItem => ({
-        id: provider.id,
-        label: provider.name,
-        active: provider.id === providerId
-      })
-    )
-  );
-  let providerName = $derived(store.providerOf(providerId)?.name ?? strings.common.none);
-  let alwaysIsolated = $derived(store.providerOf(providerId)?.alwaysIsolated ?? false);
-
-  /**
-   * The provider's own login is the user's to run; Boite only drives isolated
-   * accounts. A provider whose files are not on the machine yet has nothing to
-   * log in with either: that row offers the install instead.
-   */
-  function canLogIn(account: Account, provider: ProviderSummary | null): boolean {
-    if (!provider?.available || !provider.login) return false;
-    return account.isolationDir !== null && store.logins[account.id]?.state !== 'running';
   }
 
   async function remove(account: Account) {
@@ -147,7 +176,7 @@
       title: strings.accounts.removeTitle.replace('{account}', account.label),
       body: account.isolationDir === null ? strings.accounts.removeDefaultBody : strings.accounts.removeBody,
       confirmLabel: strings.accounts.remove,
-      cancelLabel: strings.accounts.cancel,
+      cancelLabel: strings.install.removeCancel,
       danger: true
     });
     if (accepted) await store.removeAccount(account.id);
@@ -160,263 +189,289 @@
     codes = { ...codes, [accountId]: '' };
     await store.sendLoginInput(accountId, text);
   }
+
+  onMount(() => {
+    void readQuotas();
+    const offQuotas = store.client?.on('quotas.updated', (rows) => { quotas = rows; });
+    // The download the row asked for is on disk. The core made the default
+    // account before it said so, which means an existing command-line login already
+    // reads as ready here and only a provider nobody is signed into goes on.
+    const offProviders = store.client?.on('providers.updated', ({ loaded }) => {
+      for (const provider of loaded) {
+        if (!chained[provider.id] || !provider.available) continue;
+        unchain(provider.id);
+        if (stepOf(provider) === 'sign-in') void signIn(provider);
+      }
+    });
+    const offInstall = store.client?.on('providers.installProgress', (event) => {
+      if (event.state === 'failed' || event.state === 'absent') unchain(event.providerId);
+    });
+    // Coming back from an installer or a terminal is the moment to look again,
+    // so nobody has to find a button for it.
+    const onFocus = () => {
+      if (Date.now() - lastDetect < 5000) return;
+      const steps = store.providers.map((provider) => stepOf(provider));
+      if (steps.includes('manual')) void detect();
+      else if (steps.includes('external')) {
+        lastDetect = Date.now();
+        for (const provider of store.providers) {
+          if (stepOf(provider) !== 'external') continue;
+          for (const account of store.accountsOf(provider.id)) void store.checkAccount(account.id);
+        }
+      }
+    };
+    window.addEventListener('focus', onFocus);
+    return () => { offQuotas?.(); offProviders?.(); offInstall?.(); window.removeEventListener('focus', onFocus); chained = {}; };
+  });
 </script>
 
 <div class="page" data-testid="accounts-page">
   <header class="head">
     <h1>{strings.providerSettings.heading}</h1>
-    <button class="quiet" onclick={() => { adding = !adding; }}>{strings.accounts.add}</button>
   </header>
   <p class="intro lead">{strings.providerSettings.intro}</p>
-  <p class="intro lead">{strings.providerSettings.detectHint}</p>
-  <button class="quiet" data-testid="providers-refresh" disabled={detecting} onclick={() => void detect()}>{strings.providerSettings.refresh}</button>
 
-  <!-- Under the intro, where both of its buttons are: the heading's and a card's. -->
-  {#if adding}
-    <form class="card" onsubmit={submit}>
-      <div class="field">
-        <span>{strings.accounts.provider}</span>
-        <Menu
-          items={providerItems}
-          onpick={(id) => (providerId = id)}
-          placement="bottom"
-          label={strings.accounts.provider}
-          testid="account-provider"
-        >
-          {providerName}
-        </Menu>
-      </div>
-      <label>
-        <span>{strings.accounts.label}</span>
-        <input bind:value={label} placeholder={strings.accounts.labelPlaceholder} />
-      </label>
-      {#if !alwaysIsolated}
-        <label class="check">
-          <input type="checkbox" bind:checked={useDefaultLocation} data-testid="account-default-location" />
-          {strings.accounts.useDefaultLocation}
-        </label>
-      {/if}
-      <div class="actions">
-        <button type="submit" class="primary" disabled={submitting || label.trim().length === 0}>
-          {strings.accounts.create}
-        </button>
-        <button type="button" class="quiet" onclick={() => (adding = false)}>
-          {strings.accounts.cancel}
-        </button>
-      </div>
-    </form>
-  {/if}
-
-  <div class="providers">
+  <div class="card list">
     {#each store.providers as provider (provider.id)}
-      <section class="card provider" id="settings-provider-{provider.id}" data-testid="provider-settings" data-provider-id={provider.id}>
-        <div class="provider-title"><ProviderIcon providerId={provider.id} size={22} /><h2>{provider.name}</h2></div>
-        <p class="intro state"><span class="dot" class:ok={provider.available}></span>{provider.available ? strings.providerSettings.available : strings.providerSettings.missing}</p>
-        {#if provider.executable}
-          <details>
-            <summary><span class="caret"><ChevronRight size={12} strokeWidth={2} /></span>{strings.providerSettings.executable}</summary>
-            <code>{provider.executable}</code>
-          </details>
-        {/if}
-        <!-- A provider whose login Boite cannot drive has no button to grey out. -->
-        {#if !provider.available && store.installOf(provider.id) === null}
-          <p class="intro">{strings.providerSettings.installHint.replace('{provider}', provider.name)}</p>
-          {#if setupUrls[provider.id]}
-            <a class="setup" href={setupUrls[provider.id]} target="_blank" rel="noreferrer">{strings.providerSettings.setup}</a>
-          {/if}
-        {/if}
-        {#if store.installOf(provider.id) !== null}
-          <InstallControl {store} {provider} />
-        {/if}
-        {#if provider.login && (provider.available || store.installOf(provider.id) !== null)}
+      {@const step = stepOf(provider)}
+      {@const install = store.installOf(provider.id)}
+      {@const accounts = store.accountsOf(provider.id)}
+      {@const loginAccount = shownLogin(provider)}
+      {@const login = loginAccount ? store.logins[loginAccount.id] : undefined}
+      <section
+        class="provider"
+        id="settings-provider-{provider.id}"
+        data-testid="provider-settings"
+        data-provider-id={provider.id}
+        data-step={step}
+        data-install={install?.state ?? 'none'}
+      >
+        <div class="line">
+          <ProviderIcon providerId={provider.id} size={22} />
+          <div class="who">
+            <h2>{provider.name}</h2>
+            <p class="state" class:bad={install?.state === 'failed' && step === 'install'} data-testid="provider-state">
+              <span class="dot" class:ok={step === 'ready'} class:live={step === 'installing' || step === 'signing-in'}></span>
+              {stateText(provider, step)}
+            </p>
+          </div>
+          <div class="act">
+            {#if step === 'install'}
+              <button class="primary small" data-testid="install-start" disabled={busy !== null} onclick={() => void startInstall(provider, true)}>
+                {install?.state === 'failed' ? strings.install.retry : strings.install.action}
+              </button>
+            {:else if step === 'repair'}
+              <button class="primary small" data-testid="install-repair" onclick={() => void repair(provider)}>{strings.install.repair}</button>
+            {:else if step === 'installing'}
+              <button class="quiet small" data-testid="install-cancel" onclick={() => void cancelInstall(provider)}>{strings.install.cancel}</button>
+            {:else if step === 'manual'}
+              {#if setupUrls[provider.id]}
+                <a class="button" href={setupUrls[provider.id]} target="_blank" rel="noreferrer" data-testid="provider-setup">{strings.providerSettings.setup}</a>
+              {/if}
+            {:else if step === 'sign-in'}
+              <button class="primary small" data-testid="provider-sign-in" disabled={busy !== null} onclick={() => void signIn(provider)}>{strings.accounts.login}</button>
+            {:else if step === 'ready' && updatable(provider)}
+              <button class="quiet small" data-testid="install-update" onclick={() => void startInstall(provider, false)}>{strings.install.update}</button>
+            {/if}
+            {#if step === 'manual' || step === 'external'}
+              <button class="quiet small" data-testid="providers-refresh" disabled={detecting} onclick={() => void detect()}>{strings.providerSettings.refresh}</button>
+            {/if}
+          </div>
           <button
-            class="small connect"
-            disabled={connecting !== null}
-            onclick={() => void connect(provider)}
+            class="quiet icon small fold"
+            class:open={open[provider.id]}
+            aria-expanded={open[provider.id] === true}
+            aria-label="{strings.providerSettings.details}: {provider.name}"
+            data-testid="provider-details-toggle"
+            onclick={() => (open = { ...open, [provider.id]: !open[provider.id] })}
           >
-            {strings.providerSettings.connect}
+            <ChevronRight size={16} strokeWidth={2} />
           </button>
+        </div>
+
+        {#if step === 'installing'}
+          <div
+            class="track"
+            data-testid="install-progress"
+            role="progressbar"
+            aria-label={strings.install.progress}
+            aria-valuenow={Math.round(ratioOf(provider))}
+            aria-valuemin={0}
+            aria-valuemax={100}
+          >
+            <span class="bar" class:indeterminate={install?.state !== 'downloading'} style="width: {ratioOf(provider)}%"></span>
+          </div>
+          {#if chained[provider.id]}<p class="hint" role="status">{strings.providerSettings.thenSignIn}</p>{/if}
+        {:else if step === 'manual'}
+          <p class="hint">{strings.providerSettings.manualHint.replace('{provider}', provider.name)}</p>
+        {:else if step === 'external'}
+          <p class="hint">{strings.providerSettings.externalHint.replace('{provider}', provider.name)}</p>
         {/if}
-        {#if connecting === provider.id && !provider.available}
-          <p class="intro" role="status">{strings.providerSettings.connectInstalling}</p>
+
+        {#if loginAccount && login}
+          <div class="login" data-testid="account-login-row" data-account-id={loginAccount.id}>
+            {#if login.state === 'running'}
+              {#if login.url}
+                <a class="button primary" href={login.url} target="_blank" rel="noreferrer" data-testid="account-login-url">
+                  {strings.accounts.loginOpen}
+                </a>
+                <p class="hint">{strings.accounts.loginHint}</p>
+              {/if}
+              <p class="output" data-testid="account-login-output">
+                {login.output.length > 0 ? login.output : strings.accounts.loginStarting}
+              </p>
+              <form class="code" onsubmit={(event) => void sendCode(event, loginAccount.id)}>
+                <input
+                  data-testid="account-login-input"
+                  placeholder={provider.login && provider.login.kind === 'acp'
+                    ? strings.accounts.loginRedirectPlaceholder
+                    : strings.accounts.loginInputPlaceholder}
+                  value={codes[loginAccount.id] ?? ''}
+                  oninput={(event) => (codes = { ...codes, [loginAccount.id]: event.currentTarget.value })}
+                />
+                <button type="submit" class="quiet small" data-testid="account-login-send">{strings.accounts.loginSend}</button>
+                <button type="button" class="quiet small" data-testid="account-login-cancel" data-account-id={loginAccount.id} onclick={() => void store.cancelLogin(loginAccount.id)}>
+                  {strings.accounts.loginCancel}
+                </button>
+              </form>
+            {:else}
+              <p class="output bad" data-testid="account-login-output">{login.output}</p>
+            {/if}
+          </div>
+        {/if}
+
+        {#if open[provider.id]}
+          <div class="details" data-testid="provider-details">
+            {#each accounts as account (account.id)}
+              {@const quota = quotas.find((row) => row.accountId === account.id)}
+              <div class="account" data-testid="account-row" data-account-id={account.id}>
+                <div class="account-line">
+                  <div class="who">
+                    <h3>{account.identity ?? account.label}</h3>
+                    <p class="state">
+                      {account.isolationDir === null ? strings.providerSettings.default : strings.providerSettings.isolated}
+                      {#if account.status !== 'ok'}
+                        · <span class:bad={account.status !== 'unknown'}>{strings.accounts.status[account.status]}</span>
+                      {/if}
+                    </p>
+                  </div>
+                  <div class="act">
+                    {#if provider.available && provider.login && account.isolationDir !== null && !loggingIn(account.id)}
+                      <button class="quiet small" data-testid="account-login" data-account-id={account.id} onclick={() => void store.loginAccount(account.id)}>
+                        {account.status === 'ok' ? strings.providerSettings.reconnect : strings.accounts.login}
+                      </button>
+                    {/if}
+                    <button class="quiet small" disabled={checking !== null} data-testid="account-verify" onclick={() => void verify(account)}>{strings.providerSettings.check}</button>
+                    <button class="quiet small" data-testid="account-remove" data-account-id={account.id} onclick={() => void remove(account)}>{strings.accounts.remove}</button>
+                  </div>
+                </div>
+                {#if verified[account.id] !== undefined}<p class="hint" role="status">{strings.providerSettings.models.replace('{count}', String(verified[account.id]))}</p>{/if}
+                {#if quota && quota.status !== 'unsupported'}
+                  <label class="monitor"><span>{strings.quotas.monitor}</span><input type="checkbox" role="switch" data-testid="quota-monitor" checked={quota.enabled} onchange={(event) => void monitor(account.id, event.currentTarget.checked)} /></label>
+                  <QuotaList rows={[quota]} />
+                {/if}
+              </div>
+            {/each}
+
+            <div class="more">
+              {#if provider.available && provider.login}
+                <button class="quiet small" data-testid="account-add" disabled={busy !== null} onclick={() => void signIn(provider, true)}>{strings.providerSettings.addAccount}</button>
+              {/if}
+              {#if provider.available && !provider.alwaysIsolated && !accounts.some((account) => account.isolationDir === null)}
+                <button class="quiet small" data-testid="account-use-cli" onclick={() => void store.addAccount({ providerId: provider.id, label: nextAccountLabel(provider, accounts), useDefaultLocation: true })}>
+                  {strings.providerSettings.useCli}
+                </button>
+              {/if}
+              {#if quotas.some((row) => row.providerId === provider.id && row.status !== 'unsupported')}
+                <button class="quiet small" disabled={quotaBusy} onclick={() => void readQuotas(true)}>{strings.quotas.refresh}</button>
+              {/if}
+            </div>
+
+            {#if install?.state === 'installed'}
+              <div class="account-line managed">
+                <p class="state" data-testid="install-status">
+                  {updatable(provider)
+                    ? strings.install.updateAvailable.replace('{installed}', install.version).replace('{available}', install.available)
+                    : strings.install.upToDate.replace('{version}', install.version)}
+                </p>
+                <button class="quiet small" data-testid="install-remove" onclick={() => void uninstall(provider)}>{strings.install.remove}</button>
+              </div>
+            {/if}
+            {#if provider.executable}
+              <p class="state path">{strings.providerSettings.executable} <code>{provider.executable}</code></p>
+            {/if}
+          </div>
         {/if}
       </section>
     {/each}
   </div>
-
-  {#if store.accounts.length === 0}
-    <p class="empty">{strings.accounts.empty}</p>
-  {:else}
-    <div class="account-list">
-        {#each store.accounts as account (account.id)}
-          {@const login = store.logins[account.id]}
-          {@const provider = store.providerOf(account.providerId)}
-          {@const quota = quotas.find((row) => row.accountId === account.id)}
-          <section class="card account" data-testid="account-row" data-account-id={account.id}>
-            <header><div class="provider-title"><ProviderIcon providerId={account.providerId} size={20} /><h2>{account.label}</h2></div>
-              <span
-                class="status"
-                class:ok={account.status === 'ok'}
-                class:bad={account.status === 'unauthenticated' || account.status === 'error'}
-              >
-                {strings.accounts.status[account.status]}
-              </span>
-            </header>
-            <p class="intro">{provider?.name ?? account.providerId} · {account.isolationDir === null ? strings.providerSettings.default : strings.providerSettings.isolated}{account.identity ? ` · ${account.identity}` : ''}</p>
-            <p class="intro">{account.isolationDir === null ? strings.providerSettings.defaultHint : strings.providerSettings.isolatedHint}</p>
-            <div class="row-actions">
-              {#if canLogIn(account, provider)}
-                <button
-                  class="quiet"
-                  data-testid="account-login"
-                  data-account-id={account.id}
-                  onclick={() => void store.loginAccount(account.id)}
-                >
-                  {account.status === 'ok' ? strings.providerSettings.reconnect : strings.accounts.login}
-                </button>
-              {/if}
-              <button class="quiet" onclick={() => void store.checkAccount(account.id)}>
-                {strings.accounts.check}
-              </button>
-              <button class="quiet" disabled={!provider?.available || checking !== null} data-testid="account-verify" onclick={() => void verify(account)}>{strings.providerSettings.modelCheck}</button>
-              <button class="quiet" data-testid="account-remove" data-account-id={account.id} onclick={() => void remove(account)}>
-                {strings.accounts.remove}
-              </button>
-            </div>
-            {#if verified[account.id] !== undefined}<p class="intro" role="status">{strings.providerSettings.models.replace('{count}', String(verified[account.id]))}</p>{/if}
-            {#if quota && quota.status !== 'unsupported'}
-              <label class="monitor"><span>{strings.quotas.monitor}</span><input type="checkbox" role="switch" data-testid="quota-monitor" checked={quota.enabled} onchange={(event) => void monitor(account.id, event.currentTarget.checked)} /></label>
-              <QuotaList rows={[quota]} />
-            {/if}
-          {#if login}
-            <div class="login" data-testid="account-login-row" data-account-id={account.id}>
-                <div class="login-box">
-                {#if login.url}
-                  <a
-                    class="link"
-                    href={login.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    data-testid="account-login-url"
-                    title={strings.accounts.loginOpen}
-                  >
-                    {login.url}
-                  </a>
-                {/if}
-                <p class="output" class:bad={login.state === 'failed'} data-testid="account-login-output">
-                  {login.output.length > 0 ? login.output : strings.accounts.loginStarting}
-                </p>
-                {#if login.state === 'running'}
-                  <button type="button" class="quiet" data-testid="account-login-cancel" data-account-id={account.id} onclick={() => void store.cancelLogin(account.id)}>
-                    {strings.accounts.loginCancel}
-                  </button>
-                  <form class="code" onsubmit={(event) => void sendCode(event, account.id)}>
-                    <input
-                      data-testid="account-login-input"
-                      placeholder={provider?.login && provider.login.kind === 'acp'
-                        ? strings.accounts.loginRedirectPlaceholder
-                        : strings.accounts.loginInputPlaceholder}
-                      value={codes[account.id] ?? ''}
-                      oninput={(event) =>
-                        (codes = { ...codes, [account.id]: event.currentTarget.value })}
-                    />
-                    <button type="submit" class="quiet" data-testid="account-login-send">
-                      {strings.accounts.loginSend}
-                    </button>
-                  </form>
-                {/if}
-                </div>
-            </div>
-          {/if}
-          </section>
-        {/each}
-    </div>
-  {/if}
-  <button class="quiet" disabled={quotaBusy} onclick={() => void readQuotas(true)}>{strings.quotas.refresh}</button>
 </div>
 
 <style>
-  /* The form appears on a press, so it rises rather than popping into place. */
-  form {
-    display: grid;
-    gap: 6px;
-    padding: 8px;
-    margin-bottom: 10px;
-    max-width: 420px;
-    animation: rise var(--dur-3) var(--ease-out-quint);
-  }
-
-  form input:not([type]) {
-    width: 100%;
-  }
-
-  /* A label with a button inside is not a label, so the row is a div and the
-     menu is stretched to the width the fields around it take. */
-  .field {
-    display: grid;
-    gap: 2px;
-  }
-
-  .field :global(.menu) {
-    display: flex;
-  }
-
-  .field :global(.menu > .trigger) {
-    width: 100%;
-    justify-content: flex-start;
-  }
-
-  .field :global(.menu > .popover) {
-    min-width: 100%;
-  }
-
-  .check {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: var(--text-sm);
-  }
-
-  .actions {
-    display: flex;
-    gap: 6px;
-  }
-
-  .intro { color: var(--color-muted-foreground); font-size: var(--text-sm); }
-
-  /* Every block of the page stops on the cards' 720 px, the heading's action included. */
   .head { max-width: 720px; margin-bottom: 4px; }
-  .head button { margin-left: auto; }
-  .lead { max-width: 720px; margin-bottom: 16px; }
-  [data-testid='providers-refresh'] { margin-bottom: 16px; }
-  .setup { color: var(--color-foreground); text-decoration: underline; font-size: var(--text-sm); }
-  .provider :global(.install-row) { flex-direction: column; align-items: flex-start; }
-  .provider :global(.install-row .name) { display: none; }
-  .provider :global(.install-row .note) { white-space: normal; }
+  .lead { max-width: 720px; margin-bottom: 16px; color: var(--color-muted-foreground); font-size: var(--text-sm); }
 
-  .providers { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 220px), 1fr)); gap: 10px; max-width: 720px; margin-bottom: 20px; }
-  .provider { display: flex; flex-direction: column; gap: 8px; margin: 0; }
-  .provider .connect { margin-top: auto; align-self: flex-start; }
-  .provider-title { display: flex; gap: 10px; align-items: center; }
-  .provider .provider-title h2, .account .provider-title h2 { margin: 0; font-size: var(--text-base); font-weight: 600; letter-spacing: normal; text-transform: none; color: var(--color-foreground); }
-  .provider p { margin: 0; }
+  /* One card, one row per provider: the page reads top to bottom as a checklist. */
+  .page .list { padding: 0; overflow: hidden; }
+  .provider { padding: 12px 16px; display: grid; gap: 10px; }
+  .provider + .provider { border-top: 1px solid var(--color-border); }
 
-  /* Hue is for status: the dot says whether the executable is on this machine. */
-  .state { display: flex; align-items: center; gap: 6px; }
+  .line, .account-line { display: flex; align-items: center; gap: 12px; min-width: 0; }
+  .who { flex: 1; min-width: 0; display: grid; gap: 2px; }
+  .page .card h2, h3 { margin: 0; font-size: var(--text-base); font-weight: 600; letter-spacing: normal; text-transform: none; color: var(--color-foreground); }
+  h3 { font-size: var(--text-sm); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  .state { margin: 0; display: flex; align-items: center; gap: 6px; font-size: var(--text-sm); color: var(--color-muted-foreground); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+  .bad { color: var(--color-danger); }
+  .hint { margin: 0; font-size: var(--text-sm); color: var(--color-muted-foreground); }
+
+  /* Hue is for status only: green once an account is signed in, amber while Boite works. */
   .dot { width: 6px; height: 6px; flex: none; border-radius: 50%; background: var(--color-subtle); }
   .dot.ok { background: var(--color-success); }
+  .dot.live { background: var(--color-live); }
 
-  details { font-size: var(--text-sm); }
-  summary { display: inline-flex; align-items: center; gap: 4px; list-style: none; cursor: pointer; color: var(--color-muted-foreground); transition: color var(--dur-2) var(--ease-out-quint); }
-  summary::-webkit-details-marker { display: none; }
-  summary:hover { color: var(--color-foreground); }
-  .caret { display: inline-flex; color: var(--color-subtle); transition: transform var(--dur-2) var(--ease-out-quint); }
-  details[open] .caret { transform: rotate(90deg); }
-  details code { display: block; overflow-wrap: anywhere; margin-top: 6px; }
-  .account-list { display: grid; gap: 12px; max-width: 720px; margin: 16px 0; }
-  .account { margin: 0; }
-  .account header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-  .monitor { display: flex; align-items: center; justify-content: space-between; margin: 14px 0; gap: 12px; }
+  .act { display: flex; align-items: center; gap: 6px; flex: none; flex-wrap: wrap; justify-content: flex-end; }
+
+  /* A link that does a button's job: leaving for a sign-in page or an installer. */
+  a.button {
+    display: inline-flex;
+    align-items: center;
+    min-height: var(--control-sm);
+    padding: 2px 10px;
+    border: 1px solid var(--color-edge);
+    border-radius: var(--radius-sm);
+    font-size: var(--text-sm);
+    font-weight: 500;
+    color: var(--color-foreground);
+    text-decoration: none;
+    transition: background var(--dur-2) var(--ease-out-quint);
+  }
+  a.button:hover { background: var(--color-hover); }
+  a.button.primary { background: var(--color-foreground); border-color: transparent; color: var(--color-on-foreground); justify-self: start; }
+  a.button.primary:hover { opacity: 0.9; }
+
+  .fold { flex: none; color: var(--color-muted-foreground); }
+  .fold :global(svg) { width: 16px; height: 16px; transition: transform var(--dur-2) var(--ease-out-quint); }
+  .fold.open :global(svg) { transform: rotate(90deg); }
+
+  .track { height: 2px; border-radius: 999px; background: var(--color-surface-3); overflow: hidden; }
+  .bar { display: block; height: 100%; background: var(--color-foreground); transition: width var(--dur-2) var(--ease-out-quint); }
+  /* Checking and unpacking give no byte count, so the bar sits full and pale. */
+  .bar.indeterminate { width: 100% !important; opacity: 0.4; }
+
+  .login { display: grid; gap: 8px; padding: 12px; border-radius: var(--radius-md); background: var(--color-surface-2); animation: rise var(--dur-3) var(--ease-out-quint); }
+  .output { margin: 0; font-family: var(--font-mono); font-size: var(--text-sm); color: var(--color-muted-foreground); overflow-wrap: anywhere; }
+  .code { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  .code input { flex: 1; min-width: 0; max-width: 360px; }
+
+  .details { display: grid; gap: 10px; padding-top: 10px; border-top: 1px solid var(--color-border); animation: rise var(--dur-3) var(--ease-out-quint); }
+  .account { display: grid; gap: 8px; }
+  .more { display: flex; gap: 6px; flex-wrap: wrap; }
+  .managed { justify-content: space-between; }
+  .path { display: block; }
+  .path code { overflow-wrap: anywhere; }
+
+  .monitor { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: var(--text-sm); }
 
   /* General's switch, so the one toggle of this page is not a bare checkbox. */
   .monitor input {
@@ -444,78 +499,15 @@
     transition: transform var(--dur-2) var(--ease-out-quint);
   }
 
-  .monitor input:checked {
-    background: var(--color-foreground);
-  }
+  .monitor input:checked { background: var(--color-foreground); }
+  .monitor input:checked::after { transform: translateX(12px); }
+  .monitor input:focus-visible { outline-offset: 3px; }
 
-  .monitor input:checked::after {
-    transform: translateX(12px);
-  }
-
-  .monitor input:focus-visible {
-    outline-offset: 3px;
-  }
-
-
-  .status {
-    font-size: var(--text-xs);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: var(--color-muted-foreground);
-  }
-
-  .status.ok {
-    color: var(--color-success);
-  }
-
-  .status.bad {
-    color: var(--color-danger);
-  }
-
-  .row-actions {
-    display: flex;
-    gap: 6px;
-    flex-wrap: wrap;
-  }
-
-  .login {
-    background: var(--color-surface-2);
-    border-left: 2px solid var(--color-live);
-    padding: 12px;
-    margin-top: 12px;
-  }
-
-  .login .login-box {
-    display: grid;
-    gap: 6px;
-  }
-
-  .login .link {
-    font-family: var(--font-mono);
-    font-size: var(--text-sm);
-    overflow-wrap: anywhere;
-  }
-
-  .login .output {
-    margin: 0;
-    font-family: var(--font-mono);
-    font-size: var(--text-sm);
-    color: var(--color-muted-foreground);
-    overflow-wrap: anywhere;
-  }
-
-  .login .output.bad {
-    color: var(--color-danger);
-  }
-
-  .login .code {
-    display: flex;
-    gap: 6px;
-    align-items: center;
-  }
-
-  .login .code input {
-    flex: 1;
-    max-width: 360px;
+  /* Phones never reach this page. Beside the settings nav a small window leaves
+     the row about 480 px, where the action drops under the name. */
+  @media (max-width: 900px) {
+    .line, .account-line { flex-wrap: wrap; }
+    .line .act, .account-line .act { order: 3; flex-basis: 100%; justify-content: flex-start; padding-left: 34px; }
+    .account-line .act { padding-left: 0; }
   }
 </style>

@@ -546,6 +546,10 @@ test('an isolated account that is not logged in logs in from the Accounts page',
   await waitFor(() => document.querySelector('[data-testid=settings-tab-accounts]') !== null);
   query<HTMLButtonElement>('[data-testid=settings-tab-accounts]').click();
   await waitFor(() => document.querySelector('[data-testid=accounts-page]') !== null);
+  // Claude is ready on the default login, so its row asks for nothing.
+  expect(query('[data-provider-id=claude]').getAttribute('data-step')).toBe('ready');
+  expect(document.querySelector('[data-provider-id=claude] [data-testid=provider-sign-in]')).toBeNull();
+  await openProviderDetails('claude');
 
   // Only the isolated seat is unauthenticated; the default login has no button.
   expect(document.querySelectorAll('[data-testid=account-login]').length).toBe(1);
@@ -564,7 +568,7 @@ test('an isolated account that is not logged in logs in from the Accounts page',
 
   await waitFor(() => store.accountOf('a-claude-side')?.status === 'ok');
   await waitFor(() => document.querySelector('[data-testid=account-login-row]') === null);
-  expect(document.querySelector('[data-testid=account-login]')?.textContent).toContain('Reconnect');
+  expect(document.querySelector('[data-testid=account-login]')?.textContent).toContain('Sign in again');
 
   // The store is one module-level singleton: leave the next test on the chat.
   query<HTMLButtonElement>('[data-testid=settings-back]').click();
@@ -679,6 +683,15 @@ test('a thinking part is folded, opens on its toggle, and a new turn shows it be
   expect(document.querySelectorAll('[data-testid=thinking-part]').length).toBe(2);
 });
 
+/** A provider's accounts sit behind its row's chevron. */
+async function openProviderDetails(providerId: string): Promise<void> {
+  const row = `[data-testid=provider-settings][data-provider-id=${providerId}]`;
+  await waitFor(() => document.querySelector(row) !== null);
+  if (document.querySelector(`${row} [data-testid=provider-details]`) === null)
+    query<HTMLButtonElement>(`${row} [data-testid=provider-details-toggle]`).click();
+  await waitFor(() => document.querySelector(`${row} [data-testid=provider-details]`) !== null);
+}
+
 /** Opens the Accounts page on the fake and returns the login link it shows. */
 async function loginLink(): Promise<HTMLAnchorElement> {
   await mountOnFake();
@@ -686,6 +699,7 @@ async function loginLink(): Promise<HTMLAnchorElement> {
   await waitFor(() => document.querySelector('[data-testid=settings-tab-accounts]') !== null);
   query<HTMLButtonElement>('[data-testid=settings-tab-accounts]').click();
   await waitFor(() => document.querySelector('[data-testid=accounts-page]') !== null);
+  await openProviderDetails('claude');
   query<HTMLButtonElement>('[data-testid=account-login]').click();
   await waitFor(() => document.querySelector('[data-testid=account-login-url]') !== null);
   return query<HTMLAnchorElement>('[data-testid=account-login-url]');
@@ -900,40 +914,30 @@ test('the Providers page says where each managed install stands and offers Updat
   expect(query('[data-testid=settings-tab-accounts]').textContent?.trim()).toBe('Providers');
 
   query<HTMLButtonElement>('[data-testid=settings-tab-accounts]').click();
-  await waitFor(() => document.querySelector('[data-provider-id=antigravity] [data-testid=install-control]') !== null);
+  const absent = '[data-testid=provider-settings][data-provider-id=antigravity]';
+  await waitFor(() => document.querySelector(absent) !== null);
 
   // Nothing on the machine: the size rides in the words, the button is one verb.
-  const absent = query('[data-testid=install-control][data-provider=antigravity]');
-  expect(absent.querySelector('[data-testid=install-status]')?.textContent?.trim()).toBe(
-    'Not installed, 447 MB'
-  );
-  expect(absent.querySelector('[data-testid=install-start]')?.textContent?.trim()).toBe('Install');
-  expect(absent.querySelector('[data-testid=install-remove]')).toBeNull();
+  expect(query(absent).getAttribute('data-step')).toBe('install');
+  expect(query(`${absent} [data-testid=provider-state]`).textContent?.trim()).toBe('Not installed · 447 MB');
+  expect(query(`${absent} [data-testid=install-start]`).textContent?.trim()).toBe('Install');
 
-  // Down and one release behind: both versions in the row, Update beside Remove.
-  const behind = query('[data-testid=install-control][data-provider=opencode]');
-  expect(behind.getAttribute('data-update')).toBe('true');
-  expect(behind.querySelector('[data-testid=install-status]')?.textContent?.trim()).toBe(
-    'Version 0.4.12, 0.5.0 available'
-  );
-  expect(behind.querySelector('[data-testid=install-update]')?.textContent?.trim()).toBe('Update');
-  expect(behind.querySelector('[data-testid=install-remove]')).not.toBeNull();
+  // Down and one release behind: the row offers Update, the details name both versions.
+  const behind = '[data-testid=provider-settings][data-provider-id=opencode]';
+  expect(query(`${behind} [data-testid=install-update]`).textContent?.trim()).toBe('Update');
+  await openProviderDetails('opencode');
+  expect(query(`${behind} [data-testid=install-status]`).textContent?.trim()).toBe('Version 0.4.12 · 0.5.0 is available');
+  expect(document.querySelector(`${behind} [data-testid=install-remove]`)).not.toBeNull();
 
-  // The update is the same download, and the row settles on the new version alone.
-  query<HTMLButtonElement>('[data-testid=install-update]').click();
-  // While it runs the row is the track and Cancel, the same one a first install draws.
-  await waitFor(() => document.querySelector('[data-testid=install-progress]') !== null);
-  expect(document.querySelector('[data-testid=install-cancel]')).not.toBeNull();
+  // The update is the same download: the track and Cancel, the same a first install draws.
+  query<HTMLButtonElement>(`${behind} [data-testid=install-update]`).click();
+  await waitFor(() => document.querySelector(`${behind} [data-testid=install-progress]`) !== null);
+  expect(document.querySelector(`${behind} [data-testid=install-cancel]`)).not.toBeNull();
 
   await waitFor(
-    () =>
-      query(
-        '[data-testid=install-control][data-provider=opencode] [data-testid=install-status]'
-      ).textContent?.trim() === 'Version 0.5.0',
+    () => document.querySelector(`${behind} [data-testid=install-status]`)?.textContent?.trim() === 'Installed by Boite · version 0.5.0',
     2000
   );
-  const updated = query('[data-testid=install-control][data-provider=opencode]');
-  expect(updated.getAttribute('data-update')).toBe('false');
   expect(document.querySelector('[data-testid=install-update]')).toBeNull();
 
   // The store is one module-level singleton: leave the next test on the chat.
@@ -1048,37 +1052,33 @@ test('the chat header keeps the mark and the title, the status word riding the m
   expect(query('[data-testid=thread-title]').textContent?.trim()).toBe(store.openThread?.title);
 });
 
-test('the Accounts page picks a provider with the menu, never a native select', async () => {
+test('Add another account names the account itself and goes straight to the sign-in', async () => {
   store.draft = null;
   await mountOnFake();
-  query<HTMLButtonElement>('[data-testid=nav-settings]').click();
-  await waitFor(() => document.querySelector('[data-testid=settings-tab-accounts]') !== null);
-  query<HTMLButtonElement>('[data-testid=settings-tab-accounts]').click();
+  store.showSettings('accounts');
   await waitFor(() => document.querySelector('[data-testid=accounts-page]') !== null);
-
-  query<HTMLButtonElement>('[data-testid=accounts-page] header button').click();
-  await waitFor(() => document.querySelector('[data-testid=account-provider]') !== null);
+  // Nothing to fill in: no form, no label, no provider to choose.
   expect(document.querySelector('[data-testid=accounts-page] select')).toBeNull();
-
-  const trigger = query<HTMLButtonElement>('[data-testid=account-provider]');
-  expect(trigger.textContent?.trim()).toBe('Claude');
-
-  trigger.click();
-  await waitFor(() => document.querySelector('[data-testid=account-provider-menu]') !== null);
-  query<HTMLButtonElement>('[data-testid=account-provider-menu] [data-value=opencode]').click();
-  await waitFor(() => (query('[data-testid=account-provider]').textContent ?? '').includes('OpenCode'));
-  expect(document.querySelector('[data-testid=account-provider-menu]')).toBeNull();
+  await openProviderDetails('claude');
+  const before = store.accountsOf('claude').length;
+  query<HTMLButtonElement>('[data-provider-id=claude] [data-testid=account-add]').click();
+  await waitFor(() => store.accountsOf('claude').length === before + 1);
+  const added = store.accountsOf('claude').at(-1)!;
+  expect(added.label).toBe('Claude');
+  expect(added.isolationDir).not.toBeNull();
+  await waitFor(() => document.querySelector(`[data-testid=account-login-row][data-account-id=${added.id}]`) !== null);
 });
 
 test('account lifecycle removal asks first and cancellation keeps the account', async () => {
   await mountOnFake();
   store.showSettings('accounts');
   await waitFor(() => document.querySelector('[data-testid=accounts-page]') !== null);
+  await openProviderDetails('claude');
   const selector = '[data-testid=account-remove][data-account-id=a-claude-side]';
   expect(document.querySelector(selector)).not.toBeNull();
   query<HTMLButtonElement>(selector).click();
   await waitFor(() => document.querySelector('[data-testid=confirm-dialog]') !== null);
-  expect(query('[data-testid=confirm-dialog]').textContent).toContain('isolation directory');
+  expect(query('[data-testid=confirm-dialog]').textContent).toContain('deletes its files');
   query<HTMLButtonElement>('[data-testid=confirm-cancel]').click();
   await waitFor(() => document.querySelector('[data-testid=confirm-dialog]') === null);
   expect(store.accounts.some((a) => a.id === 'a-claude-side')).toBe(true);
@@ -1091,7 +1091,7 @@ test('account lifecycle removal asks first and cancellation keeps the account', 
 test('account lifecycle cancel button stops login and restores retry', async () => {
   await mountOnFake();
   store.showSettings('accounts');
-  await waitFor(() => document.querySelector('[data-testid=account-login]') !== null);
+  await openProviderDetails('claude');
   query<HTMLButtonElement>('[data-testid=account-login]').click();
   await waitFor(() => document.querySelector('[data-testid=account-login-cancel]') !== null);
   query<HTMLButtonElement>('[data-testid=account-login-cancel]').click();
@@ -1099,28 +1099,26 @@ test('account lifecycle cancel button stops login and restores retry', async () 
   expect(document.querySelector('[data-testid=account-login]')).not.toBeNull();
 });
 
-test('account lifecycle provider metadata gates login and default-location controls', async () => {
+test('account lifecycle provider metadata gates login and the command-line login', async () => {
   await mountOnFake();
   store.showSettings('accounts');
-  await waitFor(() => document.querySelector('[data-testid=accounts-page]') !== null);
+  await openProviderDetails('claude');
   const side = store.accounts.find((a) => a.id === 'a-claude-side')!;
   const provider = store.providers.find((p) => p.id === 'claude')!;
   side.status = 'unknown';
   await waitFor(() => document.querySelector('[data-testid=account-login]') !== null);
   store.logins[side.id] = { state: 'failed', output: 'refused', url: null, exitCode: 1 };
-  await new Promise((resolve) => setTimeout(resolve, 0));
+  await waitFor(() => document.querySelector('[data-testid=account-login-output]')?.textContent?.trim() === 'refused');
   expect(document.querySelector('[data-testid=account-login]')).not.toBeNull();
   provider.login = false;
   await waitFor(() => document.querySelector('[data-testid=account-login]') === null);
-  query<HTMLButtonElement>('[data-testid=accounts-page] header button').click();
-  await waitFor(() => document.querySelector('[data-testid=account-default-location]') !== null);
-  query<HTMLInputElement>('[data-testid=account-default-location]').click();
+  // The command-line login is offered only while no account uses it, and never
+  // on a provider whose accounts are all isolated.
+  expect(document.querySelector('[data-provider-id=claude] [data-testid=account-use-cli]')).toBeNull();
+  store.accounts = store.accounts.filter((a) => !(a.providerId === 'claude' && a.isolationDir === null));
+  await waitFor(() => document.querySelector('[data-provider-id=claude] [data-testid=account-use-cli]') !== null);
   provider.alwaysIsolated = true;
-  await waitFor(() => document.querySelector('[data-testid=account-default-location]') === null);
-  await type(query<HTMLInputElement>('[data-testid=accounts-page] form input:not([type])'), 'isolated seat');
-  query<HTMLFormElement>('[data-testid=accounts-page] form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-  await waitFor(() => store.accounts.some((a) => a.label === 'isolated seat'));
-  expect(store.accounts.find((a) => a.label === 'isolated seat')?.isolationDir).not.toBeNull();
+  await waitFor(() => document.querySelector('[data-provider-id=claude] [data-testid=account-use-cli]') === null);
 });
 
 test('browser Add project opens a path form and starts a draft in the added folder', async () => {
@@ -1187,14 +1185,15 @@ test('an ACP login accepts the phone redirect URL through the login input', asyn
   store.showSettings('accounts');
   await store.installProvider('antigravity');
   await waitFor(() => store.providerOf('antigravity')?.available === true, 2000);
-  const loginButton = '[data-testid=account-login][data-account-id=a-antigravity]';
+  // Installed and nobody signed in: the row's one button is the sign-in.
+  const loginButton = '[data-provider-id=antigravity] [data-testid=provider-sign-in]';
   await waitFor(() => document.querySelector(loginButton) !== null);
   query<HTMLButtonElement>(loginButton).click();
   const row = '[data-testid=account-login-row][data-account-id=a-antigravity]';
   await waitFor(() => document.querySelector(row) !== null);
   const field = document.querySelector<HTMLInputElement>(`${row} [data-testid=account-login-input]`);
   expect(field).not.toBeNull();
-  expect(field!.placeholder).toMatch(/redirect URL/i);
+  expect(field!.placeholder).toMatch(/localhost address/i);
   const send = vi.spyOn(store, 'sendLoginInput');
   try {
     const redirect = 'http://127.0.0.1:54321/oauth/callback?code=demo';

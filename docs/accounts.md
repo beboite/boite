@@ -134,8 +134,12 @@ that runs under `node` names nothing there, because the process in the job is
 
 ## Quotas and account pools
 
-Providers shows connection actions, account checks and model discovery. Isolated
-accounts can reconnect there; default-location accounts keep their external login.
+Providers shows one row per provider and its next step. A row's chevron opens
+its accounts: sign in again for an isolated one, Check (the session file, then a
+model probe), Remove, quotas, `Add another account`, which names the account
+after the provider and starts its sign-in, and `Use my command-line login` when
+no account uses the default location. Default-location accounts keep their
+external login.
 Claude subscription quotas come from its OAuth usage endpoint using the account's
 credentials file. Keychain-only Claude credentials are not supported. Codex quotas
 come from `account/rateLimits/read`, without starting a conversation.
