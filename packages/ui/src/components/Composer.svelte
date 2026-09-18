@@ -16,6 +16,7 @@
   import SlashMenu from './SlashMenu.svelte';
   import ThreadActivity from './ThreadActivity.svelte';
   import Dictation from './Dictation.svelte';
+  import ComposerOptions from './ComposerOptions.svelte';
 
   /**
    * `centered` is the draft's placement: the parent stacks the composer under
@@ -629,6 +630,7 @@
   async function openChip(testid: string) {
     await tick();
     const bar = box?.closest('[data-testid="composer"]');
+    if (window.matchMedia('(max-width: 720px)').matches && testid !== 'composer-picker') testid = 'composer-options';
     bar?.querySelector<HTMLElement>(`[data-testid="${testid}"]`)?.click();
   }
 
@@ -723,7 +725,7 @@
 <div class="composer-wrap" class:centered>
   <ThreadActivity {store} />
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="composer" data-testid="composer" {ondragover} {ondrop}>
+  <div class="composer" class:dictating data-testid="composer" {ondragover} {ondrop}>
     {#if composer && composer.queued.length > 0}
       <div class="queued" data-testid="composer-queued">
         <span class="subtle">{strings.composer.queued}</span>
@@ -815,9 +817,13 @@
     {/if}
 
     <div class="bar">
+      {#key `${key}:${store.draft?.projectId ?? ''}`}
+      <ComposerOptions busy={picking} levels={effortLevels} effort={activeEffort} {speeds} speed={choice?.speed ?? null} mode={displayedMode} worktree={store.draft ? store.draft.worktree : null} canAttach={takesImages} onattach={() => picker?.click()} oneffort={pickEffort} onspeed={(speed) => void pick({ speed })} onmode={pickMode} onworktree={() => store.setDraftWorktree(!store.draft?.worktree)} />
+      {/key}
       <div class="chips">
         <ModelPicker {store} {choice} disabled={picking} onpick={pick} />
 
+        <div class="desktop-options">
         {#if effortLevels.length > 0 || speeds.length > 0}
           <EffortSlider levels={effortLevels} active={activeEffort} onpick={pickEffort} {speeds} speed={choice?.speed ?? null} onspeed={(speed) => void pick({ speed })} />
         {/if}
@@ -843,6 +849,7 @@
             {strings.composer.worktree}
           </button>
         {/if}
+        </div>
       </div>
 
 
@@ -1064,6 +1071,7 @@
     flex-wrap: wrap;
     min-width: 0;
   }
+  .desktop-options { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
 
   .chips :global(.trigger), .chips :global(.speed), .chips .worktree {
     height: var(--control);
@@ -1099,9 +1107,18 @@
   }
 
   @media (max-width: 720px) {
-    .bar { flex-wrap: wrap; }
-    .chips { flex-basis: 100%; }
-    .chips > :global(*) { flex-shrink: 0; }
+    .bar { gap: 2px; padding: 0 8px 6px; }
+    .desktop-options, .attach { display: none; }
+    .chips { flex: 1; flex-wrap: nowrap; }
+    .chips :global(.picker) { min-width: 0; max-width: 100%; }
+    .chips :global(.picker > .trigger) { max-width: 100%; height: var(--touch-target); padding: 0 6px; border: none; background: transparent; font-weight: 500; color: var(--color-muted-foreground); }
+    .chips :global(.picker > .trigger > .label) { min-width: 0; max-width: none; }
+    .composer { box-shadow: none; border-radius: var(--radius-xl); }
+    .composer:focus-within { box-shadow: none; border-color: var(--color-edge); }
+    .send, .stop { border-radius: 50%; margin-left: 2px; }
+    .dictating .send { display: none; }
+    .speech-preview { padding: 0 16px 8px; }
+    .speech-status { color: var(--color-accent); }
     textarea, .input-mirror { font-size: var(--text-md); }
     .composer-wrap {
       padding: 6px 10px 10px;

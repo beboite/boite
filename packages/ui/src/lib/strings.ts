@@ -390,6 +390,7 @@ export const strings = {
   },
 
   composer: {
+    options: 'Message options',
     placeholder: 'Message {provider} in {project}',
     placeholderNoProject: 'Message the agent',
     send: 'Send',

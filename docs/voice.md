@@ -17,6 +17,12 @@ the preview before transcribing the full recording for the draft. These are
 bounded repeated transcription requests, not a provider token stream; API mode
 therefore sends additional requests while recording.
 
+On phones, the composer keeps one row for message options, model, microphone
+and Send. The plus button opens image attachments, reasoning, permissions and
+the draft's worktree switch. While recording, Cancel and Finish replace Send;
+the transcript stays above these controls. Back or Escape closes the options
+panel without losing the draft.
+
 ## Choose an engine
 
 Open Settings, Voice on the machine hosting the conversation. Its owner chooses

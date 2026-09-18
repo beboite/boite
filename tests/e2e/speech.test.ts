@@ -3,17 +3,19 @@ import { join } from 'node:path';
 import { createRequire } from 'node:module';
 import { BrowserPage, freePort } from './lib/cdp.ts';
 const requireUi = createRequire(join(import.meta.dir, '../../packages/ui/package.json'));
-const { createServer } = await import(requireUi.resolve('vite'));
-let server: Awaited<ReturnType<typeof createServer>>;
+const { build, preview } = await import(requireUi.resolve('vite'));
+let server: Awaited<ReturnType<typeof preview>>;
 let page: BrowserPage;
 let url: string;
 const id = (name: string) => `[data-testid="${name}"]`;
 beforeAll(async () => {
   const port = await freePort(); url = `http://127.0.0.1:${port}`;
-  server = await createServer({ root: join(import.meta.dir, '../../packages/ui'), server: { host: '127.0.0.1', port, strictPort: true, hmr: false }, clearScreen: false });
-  await server.listen();
+  const root = join(import.meta.dir, '../../packages/ui');
+  const outDir = join(import.meta.dir, '.artifacts/speech-ui');
+  // A test-only bundle keeps fixtures while avoiding dev-server reloads mid-recording.
+  await build({ root, define: { 'import.meta.env.DEV': 'true' }, build: { outDir, emptyOutDir: true }, logLevel: 'error' });
+  server = await preview({ root, build: { outDir }, preview: { host: '127.0.0.1', port, strictPort: true }, logLevel: 'error' });
   page = await BrowserPage.launch({ url: `${url}/?fake=1` });
-  await server.waitForRequestsIdle();
   await page.waitFor(`document.querySelector('${id('dictation-start')}')`);
   // Exercise the real AudioWorklet and resampler without touching a physical microphone.
   await page.evaluate(`window.__audioFixtures = new Set(); window.__stoppedTracks = 0; navigator.mediaDevices.getUserMedia = async () => {
@@ -29,7 +31,7 @@ beforeAll(async () => {
 }, 30_000);
 afterAll(async () => {
   try { await page?.close(); }
-  finally { await server?.close(); }
+  finally { if (server) await new Promise<void>((resolve, reject) => server.httpServer.close((error?: Error) => error ? reject(error) : resolve())); }
 }, 15_000);
 
 async function capture(name: string) {
@@ -73,7 +75,7 @@ test('phone dictation fits, cancels with Escape, and does not change the draft',
     expect(await page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')).toBe(true);
     expect(await page.evaluate(`(() => {
       const chips = document.querySelector('.composer .chips').getBoundingClientRect();
-      return [...document.querySelectorAll('.composer .chips button')].every(button => {
+      return [...document.querySelectorAll('.composer .chips button')].filter(button => button.getClientRects().length).every(button => {
         const r = button.getBoundingClientRect();
         return r.left >= chips.left && r.right <= chips.right && r.top >= chips.top && r.bottom <= chips.bottom;
       });
@@ -85,6 +87,43 @@ test('phone dictation fits, cancels with Escape, and does not change the draft',
   await page.waitFor(`!!document.querySelector('${id('dictation-start')}')`);
   expect(await page.evaluate(`document.querySelector('${id('composer-input')}').value`)).toBe('Keep this draft.');
 }, 30_000);
+
+test('phone options change effort and permissions without losing the draft', async () => {
+  await page.click(id('composer-options'));
+  await page.waitFor(`document.querySelector('${id('composer-options-sheet')}')`);
+  await capture('speech-phone-options.png');
+  await page.click('input[name="mobile-effort"][value="low"]');
+  await page.waitFor(`document.querySelector('input[name="mobile-effort"][value="low"]')?.checked`);
+  await page.click('input[name="mobile-mode"][value="acceptEdits"]');
+  await page.waitFor(`document.querySelector('input[name="mobile-mode"][value="acceptEdits"]')?.checked`);
+  await page.evaluate('history.back()');
+  await page.waitFor(`!document.querySelector('${id('composer-options-sheet')}')`);
+  expect(await page.evaluate(`document.querySelector('${id('composer-input')}').value`)).toBe('Keep this draft.');
+  await page.click(id('composer-options'));
+  await page.waitFor(`document.querySelector('input[name="mobile-effort"][value="low"]')?.checked`);
+  expect(await page.evaluate(`document.querySelector('input[name="mobile-mode"][value="acceptEdits"]').checked`)).toBe(true);
+  await page.evaluate(`document.querySelector('${id('composer-options-sheet')}').dispatchEvent(new KeyboardEvent('keydown', {key:'Escape',bubbles:true}))`);
+  await page.waitFor(`!document.querySelector('${id('composer-options-sheet')}')`);
+  await page.evaluate(`document.documentElement.dataset.theme = 'light'`);
+  await capture('speech-phone-light.png');
+  await page.evaluate(`delete document.documentElement.dataset.theme`);
+}, 15_000);
+
+test('phone draft options preserve worktree choice and close when returning to desktop', async () => {
+  await page.click(id('mobile-new'));
+  await type('A new task.');
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 320, height: 600, deviceScaleFactor: 1, mobile: true });
+  await page.click(id('composer-options'));
+  await page.click(id('composer-options-worktree'));
+  await page.waitFor(`document.querySelector('${id('composer-options-worktree')}')?.getAttribute('aria-pressed') === 'true'`);
+  expect(await page.evaluate(`(() => { const r=document.querySelector('${id('composer-options-sheet')}').getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth && r.top >= 0 && r.bottom <= innerHeight; })()`)).toBe(true);
+  await capture('speech-phone-draft-options.png');
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1360, height: 950, deviceScaleFactor: 1, mobile: false });
+  await page.waitFor(`!document.querySelector('${id('composer-options-sheet')}')`);
+  expect(await page.evaluate(`document.querySelector('${id('composer-worktree')}').getAttribute('aria-pressed')`)).toBe('true');
+  expect(await page.evaluate(`document.querySelector('${id('composer-input')}').value`)).toBe('A new task.');
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+}, 15_000);
 
 test('voice settings save API selection, hide credentials on reload, and fit phone and desktop', async () => {
   await page.evaluate(`document.querySelector('${id('nav-settings')}').click()`);

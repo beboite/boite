@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Mic, X, LoaderCircle, RotateCcw, Settings2 } from '@lucide/svelte';
+  import { Check, Mic, X, LoaderCircle, RotateCcw, Settings2 } from '@lucide/svelte';
   import { onDestroy } from 'svelte';
   import type { Store } from '../lib/store.svelte';
   import type { Client } from '../lib/client';
@@ -105,7 +105,7 @@
     aria-label={phase === 'recording' ? strings.speech.stop : strings.speech.start} aria-pressed={phase === 'recording'}
     disabled={store.connection !== 'ready' || phase === 'opening' || phase === 'transcribing'}
     onclick={() => { if (phase === 'recording') void stop(); else { cancel(); void start(); } }}>
-    <Mic size={16} strokeWidth={1.75} />
+    {#if phase === 'recording'}<Check size={18} strokeWidth={2} />{:else}<Mic size={18} strokeWidth={1.75} />{/if}
     {#if phase === 'recording'}<i class="level" style:opacity={0.4 + level * 0.6}></i>{/if}
     {#if phase === 'opening' || phase === 'transcribing'}<LoaderCircle size={10} class="spinner" />{/if}
   </button>
@@ -125,6 +125,12 @@
   .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   :global(.dictation .spinner) { position: absolute; bottom: 1px; right: 1px; animation: spin 1s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
-  @media (max-width: 720px) { .dictation button { width: var(--touch-target); height: var(--touch-target); } }
+  @media (max-width: 720px) {
+    .dictation button { width: var(--touch-target); height: var(--touch-target); border-radius: 50%; }
+    .microphone { background: transparent; border-color: transparent; }
+    .microphone.listening { background: var(--color-accent-soft); border-color: transparent; }
+    .cancel { order: -1; }
+    .level { bottom: 6px; }
+  }
   @media (prefers-reduced-motion: reduce) { :global(.dictation .spinner) { animation: none; } }
 </style>
