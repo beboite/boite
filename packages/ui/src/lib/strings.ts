@@ -433,14 +433,15 @@ export const strings = {
     worktreeOff: 'Start in a git worktree on its own branch',
     worktreeOn: 'Starts in a git worktree on its own branch',
     /** Images sent with the prompt: the strip above the box and what refuses one. */
-    attach: 'Attach images',
+    attach: 'Attach files',
     editQueued: 'Edit this pending message, or press Up in the empty composer',
+    attachReadError: '{name} could not be read.',
     attachRemove: 'Remove {name}',
-    attachAlt: 'Attached image',
-    attachUnnamed: 'the pasted image',
+    attachAlt: 'Attached file',
+    attachUnnamed: 'the attachment',
     attachFormat: '{name} is {type}, and an image must be one of {formats}.',
-    attachTooLarge: '{name} is too big: an image may weigh {max} at most.',
-    attachTooMany: 'A turn carries at most {max} images, so {name} was left out.',
+    attachTooLarge: '{name} is too big: a file may weigh {max} at most.',
+    attachTooMany: 'A turn carries at most {max} files, so {name} was left out.',
     attachNoImages: '{provider} takes no images: send the prompt without them.'
   },
 

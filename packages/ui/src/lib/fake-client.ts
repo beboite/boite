@@ -9,7 +9,7 @@ import {
   type PluginState,
   type PluginPool,
   type CoreInfo,
-  type ImageAttachment,
+  type Attachment,
   type ImportableSession,
   type Message,
   type MessageId,
@@ -1041,7 +1041,7 @@ export class FakeClient implements ObservableClient {
       case 'turns.start': {
         const params = rawParams as RpcParams<'turns.start'>;
         const key = params.clientRequestId ? `${params.threadId}:${params.clientRequestId}` : null;
-        const content = JSON.stringify([params.prompt, (params.attachments ?? []).map(a => [a.mimeType, a.data, a.name])]);
+        const content = JSON.stringify([params.prompt, (params.attachments ?? []).map(a => [a.kind, a.mimeType, a.data, a.name])]);
         if (params.clientRequestId !== undefined && !/^[A-Za-z0-9_-]{8,128}$/.test(params.clientRequestId)) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'clientRequestId must contain 8 to 128 URL-safe characters' });
         const previous = key ? this.#turnRequests.get(key) : undefined;
         if (previous) {
@@ -1369,7 +1369,7 @@ export class FakeClient implements ObservableClient {
     return stopped;
   }
 
-  #startTurn(threadId: ThreadId, prompt: string, attachments: ImageAttachment[] = [], operation?: 'compact', activityKind?: 'goal' | 'loop'): Turn {
+  #startTurn(threadId: ThreadId, prompt: string, attachments: Attachment[] = [], operation?: 'compact', activityKind?: 'goal' | 'loop'): Turn {
     const thread = this.#thread(threadId);
     if (thread.archived) {
       throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'cannot start a turn on an archived thread', data: { threadId } });
@@ -1414,7 +1414,7 @@ export class FakeClient implements ObservableClient {
       // The images ride after the text, the order the core journals them in.
       parts: [
         { type: 'text', text: activityKind ? `/${activityKind} ${prompt}` : prompt, ...(activityKind ? { activity: { kind: activityKind, iteration: (thread.activity?.[activityKind]?.iterations ?? 0) + 1 } } : {}) },
-        ...attachments.map((attachment): MessagePart => ({
+        ...attachments.map((attachment): MessagePart => attachment.kind === 'file' ? { type: 'file', mimeType: attachment.mimeType, data: attachment.data, name: attachment.name } : ({
           type: 'image',
           mimeType: attachment.mimeType,
           data: attachment.data,
@@ -1455,7 +1455,7 @@ export class FakeClient implements ObservableClient {
     turn: Turn,
     prompt: string,
     record: { cancelled: boolean },
-    attachments: ImageAttachment[] = []
+    attachments: Attachment[] = []
   ): Promise<void> {
     const compactAfter = Math.max(1, Math.floor((thread.context?.tokens ?? FAKE_CONTEXT_FLOOR) / 4));
     const message: Message = {
@@ -1505,7 +1505,7 @@ export class FakeClient implements ObservableClient {
       attachments
         .map(
           (attachment) =>
-            `[image ${attachment.mimeType}, ${decodedBytes(attachment.data)} bytes${
+            `[${attachment.kind} ${attachment.mimeType}, ${decodedBytes(attachment.data)} bytes${
               attachment.name === null ? '' : `, ${attachment.name}`
             }] `
         )

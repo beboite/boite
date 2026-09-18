@@ -422,9 +422,9 @@ export type ToolDocument =
 /** The image formats every agent that takes images accepts. */
 export const IMAGE_MIME_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'] as const;
 export type ImageMimeType = (typeof IMAGE_MIME_TYPES)[number];
-/** The most one image may weigh once decoded: the smallest of the agents' own caps. */
+/** The maximum decoded bytes per attachment, including non-image files. */
 export const ATTACHMENT_MAX_BYTES = 5 * 1024 * 1024;
-/** The most images one turn carries. */
+/** The maximum total number of attachments per turn. */
 export const ATTACHMENTS_PER_TURN = 8;
 
 /**
@@ -441,10 +441,21 @@ export interface ImageAttachment {
   name: string | null;
 }
 
+/** A file uploaded to the core and made available to the agent as a local path. */
+export interface FileAttachment {
+  kind: 'file';
+  mimeType: string;
+  data: string;
+  name: string | null;
+}
+
+export type Attachment = ImageAttachment | FileAttachment;
+
 export type MessagePart =
   | { type: 'text'; text: string; displayText?: string; activity?: { kind: 'goal' | 'loop'; iteration: number } }
   /** An image the user sent with the prompt, journalled with the message. */
   | { type: 'image'; mimeType: ImageMimeType; data: string; alt: string | null }
+  | { type: 'file'; mimeType: string; data: string; name: string | null }
   /** The model's reasoning as the provider streams it, folded in the UI. */
   | { type: 'thinking'; text: string }
   | {
@@ -1153,8 +1164,8 @@ export interface RpcMethods {
   'threads.subscribe': { params: { threadId: ThreadId }; result: { ok: true } };
   'threads.unsubscribe': { params: { threadId: ThreadId }; result: { ok: true } };
 
-  /** `attachments` ride with the prompt as image parts of the user message; see `ImageAttachment` for what is refused. */
-  'turns.start': { params: { threadId: ThreadId; prompt: string; attachments?: ImageAttachment[]; expectedSelectionVersion?: number; clientRequestId?: string }; result: Turn };
+  /** `attachments` are journalled with the prompt. Files become host paths; images use native provider payloads. */
+  'turns.start': { params: { threadId: ThreadId; prompt: string; attachments?: Attachment[]; expectedSelectionVersion?: number; clientRequestId?: string }; result: Turn };
   'turns.stop': { params: { threadId: ThreadId }; result: { stopped: boolean } };
 
   /**

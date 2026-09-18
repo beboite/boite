@@ -4,7 +4,7 @@ import { activityCommand } from './activity-command';
 import type {
   Account,
   CoreInfo,
-  ImageAttachment,
+  Attachment,
   ImportableSession,
   Keybindings,
   KeybindingCommand,
@@ -193,7 +193,7 @@ export class Store {
     if (bytes <= 4 * 1024 * 1024 && thread.messages.length <= 2000) this.#readingThreads.set(thread.id, thread);
     while (this.#readingThreads.size > 4) this.#readingThreads.delete(this.#readingThreads.keys().next().value!);
   }
-  #pendingSends = new Map<string, { id: string; prompt: string; attachments: ImageAttachment[]; selectionVersion: number }>();
+  #pendingSends = new Map<string, { id: string; prompt: string; attachments: Attachment[]; selectionVersion: number }>();
   machineId = '';
   visible = true;
   threadKey(id: string): string { return this.machineId ? JSON.stringify([this.machineId, id]) : id; }
@@ -1394,8 +1394,8 @@ export class Store {
    */
   composerStates = $state<Record<string, {
     text: string;
-    attachments: ImageAttachment[];
-    queued: { text: string; attachments: ImageAttachment[] }[];
+    attachments: Attachment[];
+    queued: { text: string; attachments: Attachment[] }[];
     sending: boolean;
     paused: boolean;
   }>>({});
@@ -1426,7 +1426,7 @@ export class Store {
     return choice;
   }
 
-  async submit(prompt: string, choice: Choice, attachments: ImageAttachment[] = []): Promise<boolean> {
+  async submit(prompt: string, choice: Choice, attachments: Attachment[] = []): Promise<boolean> {
     if ((prompt.trim().length === 0 && attachments.length === 0) || this.connection !== 'ready') return false;
     try {
       if (activityCommand(prompt) && attachments.length) throw new Error(strings.activity.noAttachments);
@@ -1474,7 +1474,7 @@ export class Store {
   async submitAndDraft(
     prompt: string,
     choice: Choice,
-    attachments: ImageAttachment[] = []
+    attachments: Attachment[] = []
   ): Promise<boolean> {
     const projectId = this.openThread?.projectId ?? this.draft?.projectId;
     const threadId = this.openThread?.id;
@@ -1489,7 +1489,7 @@ export class Store {
   async send(
     prompt: string,
     threadId = this.openThread?.id,
-    attachments: ImageAttachment[] = []
+    attachments: Attachment[] = []
   ): Promise<boolean> {
     const client = this.#client;
     if (!client || !threadId || this.connection !== 'ready') return false;

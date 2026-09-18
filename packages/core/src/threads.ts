@@ -7,7 +7,7 @@ import type {
   Account,
   AccountId,
   AgentCommand,
-  ImageAttachment,
+  Attachment,
   ImageMimeType,
   Message,
   MessageId,
@@ -45,6 +45,7 @@ import type {
 } from './drivers/types.ts';
 import type { SpawnedChild, SpawnOptions } from './procs.ts';
 import { cleanAgentTitle, textOf, titleFromPrompt } from './titles.ts';
+import { prepareAttachments, fileReference } from './attachments.ts';
 import { continuationInput } from './continuation.ts';
 
 const BASE64 = /^[A-Za-z0-9+/]+={0,2}$/;
@@ -91,34 +92,38 @@ function decodedBytes(data: string): number {
  * many, a format no agent reads, a body that is not base64, one over the cap.
  * Each refusal names the attachment by its index and what was expected.
  */
-export function checkAttachments(attachments: ImageAttachment[], provider: ProviderDescriptor): void {
+export function checkAttachments(attachments: Attachment[], provider: ProviderDescriptor): void {
+  if (!Array.isArray(attachments)) throw refused('attachments must be an array');
   if (attachments.length === 0) return;
-  if (!provider.capabilities.images) {
+  if (!provider.capabilities.images && attachments.some(a => a?.kind === 'image')) {
     throw refused(`${provider.name} takes no images: send the prompt without them`, { providerId: provider.id });
   }
   if (attachments.length > ATTACHMENTS_PER_TURN) {
-    throw refused(`a turn carries at most ${ATTACHMENTS_PER_TURN} images, this one has ${attachments.length}`, {
+    throw refused(`a turn carries at most ${ATTACHMENTS_PER_TURN} attachments, this one has ${attachments.length}`, {
       count: attachments.length,
       max: ATTACHMENTS_PER_TURN,
     });
   }
   attachments.forEach((attachment, index) => {
+    if (!attachment || typeof attachment !== 'object') throw refused(`attachment ${index + 1}: expected an object`);
+    if (attachment.name !== null && (typeof attachment.name !== 'string' || attachment.name.length > 255)) throw refused(`attachment ${index + 1}: name must be null or a string of at most 255 characters`);
     const label = attachment.name ?? `attachment ${index + 1}`;
-    if (attachment.kind !== 'image') {
-      throw refused(`${label}: an attachment is an image, got kind ${JSON.stringify(attachment.kind)}`, { index });
+    if (attachment.kind !== 'image' && attachment.kind !== 'file') {
+      throw refused(`${label}: expected an image or file attachment`, { index });
     }
-    if (!(IMAGE_MIME_TYPES as readonly string[]).includes(attachment.mimeType)) {
+    if (typeof attachment.mimeType !== 'string' || !/^[\w.+-]+\/[\w.+-]+$/.test(attachment.mimeType) || attachment.mimeType.length > 128) throw refused(`${label}: mimeType must be a media type such as application/pdf`, { index });
+    if (attachment.kind === 'image' && !(IMAGE_MIME_TYPES as readonly string[]).includes(attachment.mimeType)) {
       throw refused(`${label}: ${attachment.mimeType} is not an image format an agent reads (${IMAGE_MIME_TYPES.join(', ')})`, {
         index,
         mimeType: attachment.mimeType,
       });
     }
-    if (typeof attachment.data !== 'string' || attachment.data.length === 0 || attachment.data.length % 4 !== 0 || !BASE64.test(attachment.data)) {
-      throw refused(`${label}: the image data is not base64 (no data: prefix, no line breaks)`, { index });
+    if (typeof attachment.data !== 'string' || (attachment.kind === 'image' && attachment.data.length === 0) || attachment.data.length % 4 !== 0 || (attachment.data !== '' && !BASE64.test(attachment.data))) {
+      throw refused(`${label}: the attachment data is not base64 (no data: prefix, no line breaks)`, { index });
     }
     const bytes = decodedBytes(attachment.data);
     if (bytes > ATTACHMENT_MAX_BYTES) {
-      throw refused(`${label}: ${(bytes / 1048576).toFixed(1)} MB is over the ${ATTACHMENT_MAX_BYTES / 1048576} MB an image may weigh`, {
+      throw refused(`${label}: ${(bytes / 1048576).toFixed(1)} MB is over the ${ATTACHMENT_MAX_BYTES / 1048576} MB a file may weigh`, {
         index,
         bytes,
         max: ATTACHMENT_MAX_BYTES,
@@ -572,12 +577,12 @@ export class ThreadStore {
     return this.startTurn(threadId, protocol === 'echo' ? '[compact]' : '/compact', [], expectedSelectionVersion, 'compact');
   }
 
-  startTurn(threadId: ThreadId, prompt: string, attachments: ImageAttachment[] = [], expectedSelectionVersion?: number, operation?: 'compact', activity?: { kind: 'goal' | 'loop'; iteration: number }, clientRequestId?: string): Turn {
+  startTurn(threadId: ThreadId, prompt: string, attachments: Attachment[] = [], expectedSelectionVersion?: number, operation?: 'compact', activity?: { kind: 'goal' | 'loop'; iteration: number }, clientRequestId?: string): Turn {
     const thread = this.require(threadId);
     let fingerprint = '';
     if (clientRequestId !== undefined) {
       if (typeof clientRequestId !== 'string' || !/^[A-Za-z0-9_-]{8,128}$/.test(clientRequestId)) throw refused('clientRequestId must contain 8 to 128 URL-safe characters');
-      fingerprint = createHash('sha256').update(JSON.stringify([prompt, attachments.map(a => [a.mimeType, a.data, a.name])])).digest('hex');
+      fingerprint = createHash('sha256').update(JSON.stringify([prompt, attachments.map(a => [a.kind, a.mimeType, a.data, a.name])])).digest('hex');
       const existing = this.core.journal.turnRequest(threadId, clientRequestId);
       if (existing) {
         if (existing.fingerprint !== fingerprint) throw refused('clientRequestId was already used for different content');
@@ -624,7 +629,7 @@ export class ThreadStore {
       role: 'user',
       parts: [
         { type: 'text', text: prompt, ...(activity ? { activity } : {}) },
-        ...attachments.map((attachment): MessagePart => ({
+        ...attachments.map((attachment): MessagePart => attachment.kind === 'file' ? { type: 'file', mimeType: attachment.mimeType, data: attachment.data, name: attachment.name } : ({
           type: 'image',
           mimeType: attachment.mimeType,
           data: attachment.data,
@@ -989,15 +994,16 @@ export class ThreadStore {
 
     const input = this.lastUserInput(threadId, turn.id);
     const continued = thread.sessionId === null && (thread.sessionGeneration ?? 0) > 0
-      ? continuationInput(this.core.journal, threadId, turn.id, input, provider)
+      ? continuationInput(this.core.journal, threadId, turn.id, input, provider, part => fileReference(this.core.dataDir, part))
       : input;
+    const prepared = prepareAttachments(this.core.dataDir, continued);
     return {
       thread,
       account,
       provider,
       turn,
-      prompt: continued.prompt,
-      attachments: continued.attachments,
+      prompt: prepared.prompt,
+      attachments: prepared.attachments,
       sessionId: thread.sessionId,
       accountEnv: env,
       warmProcessMinutes: this.core.settings.get().warmProcessMinutes,
@@ -1134,11 +1140,12 @@ export class ThreadStore {
   }
 
   /** The user message of the turn, read back from the journal: the text and the images it carried. */
-  private lastUserInput(threadId: ThreadId, turnId: TurnId): { prompt: string; attachments: ImageAttachment[] } {
+  private lastUserInput(threadId: ThreadId, turnId: TurnId): { prompt: string; attachments: Attachment[] } {
     const message = this.core.journal.lastUserMessage(threadId, turnId);
     if (message !== null) {
-      const attachments: ImageAttachment[] = [];
+      const attachments: Attachment[] = [];
       for (const part of message.parts) {
+        if (part.type === 'file') attachments.push({ kind: 'file', mimeType: part.mimeType, data: part.data, name: part.name });
         if (part.type === 'image') {
           attachments.push({ kind: 'image', mimeType: part.mimeType, data: part.data, name: part.alt });
         }

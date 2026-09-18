@@ -10,8 +10,10 @@
 
 <script lang="ts">
   import { onDestroy, onMount, tick, untrack } from 'svelte';
-  import { ArrowDown, Check } from '@lucide/svelte';
+  import { ArrowDown, Check, FileText } from '@lucide/svelte';
   import type { Message } from '@boite/contracts';
+  import { bytes } from '../lib/format';
+  import { decodedBytes } from '../lib/attachments';
   import { strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
   import { formatTokens } from '../lib/tokens';
@@ -543,6 +545,11 @@
                   {@const prompt = promptText(part)}
                   {@const command = /^\/(goal|loop)(?=\s|$)/.exec(prompt)?.[0]}
                   <p class="user-text" data-testid="text-part">{#if command}<span class="command">{command}</span>{prompt.slice(command.length)}{:else}{prompt}{/if}</p>
+                {:else if part.type === 'file'}
+                  <a class="file-attachment" data-testid="file-part" href="data:application/octet-stream;base64,{part.data}" download={part.name ?? strings.composer.attachAlt}>
+                    <FileText size={20} strokeWidth={1.5} />
+                    <span><span>{part.name ?? strings.composer.attachAlt}</span><small>{bytes(decodedBytes(part.data))}</small></span>
+                  </a>
                 {/if}
               {/each}
               {#if images.length > 0}
@@ -732,6 +739,11 @@
   }
 
   /* The images sent with the prompt, in a row that wraps under the text. */
+  .file-attachment { display: flex; align-items: center; gap: 10px; margin-top: 8px; padding: 10px 12px; border: 1px solid var(--color-border); border-radius: var(--radius-md); color: inherit; text-decoration: none; max-width: 280px; }
+  .file-attachment:hover { background: var(--color-surface); }
+  .file-attachment > span { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+  .file-attachment > span > span { overflow-wrap: anywhere; font-size: var(--text-sm); }
+  .file-attachment small { color: var(--color-muted-foreground); font-size: var(--text-xs); }
   .images {
     display: flex;
     flex-wrap: wrap;

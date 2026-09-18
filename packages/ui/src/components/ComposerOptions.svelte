@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { GitBranch, ImagePlus, Plus, X } from '@lucide/svelte';
+  import { GitBranch, Paperclip, Plus, X } from '@lucide/svelte';
   import { tick } from 'svelte';
   import { MediaQuery } from 'svelte/reactivity';
   import type { EffortLevel, PermissionMode } from '@boite/contracts';
@@ -44,7 +44,7 @@
       use:panel.attach onanimationend={panel.end} use:floating={{ anchor: () => trigger ?? null, dismiss: close }}>
       <header><h2>{strings.composer.options}</h2><button class="icon ghost" aria-label={strings.common.close} onclick={close}><X size={19} /></button></header>
       {#if canAttach}
-        <button class="attachment" data-testid="composer-options-attach" onclick={() => { onattach(); close(); }}><ImagePlus size={20} /><span>{strings.composer.attach}</span></button>
+        <button class="attachment" data-testid="composer-options-attach" onclick={() => { onattach(); close(); }}><Paperclip size={20} /><span>{strings.composer.attach}</span></button>
       {/if}
       {#if levels.length}
         <fieldset disabled={busy}><legend>{strings.composer.effortTitle}</legend><div class="choices">

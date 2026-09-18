@@ -249,13 +249,13 @@ describe('echo driver', () => {
     ).rejects.toThrow('pixel.png: image/bmp is not an image format an agent reads');
     await expect(
       client.call('turns.start', { threadId, prompt: 'x', attachments: [image({ data: 'data:image/png;base64,abcd' })] }),
-    ).rejects.toThrow('pixel.png: the image data is not base64');
+    ).rejects.toThrow('pixel.png: the attachment data is not base64');
     await expect(
       client.call('turns.start', { threadId, prompt: 'x', attachments: [image({ data: 'A'.repeat(7 * 1048576), name: null })] }),
-    ).rejects.toThrow('attachment 1: 5.3 MB is over the 5 MB an image may weigh');
+    ).rejects.toThrow('attachment 1: 5.3 MB is over the 5 MB a file may weigh');
     await expect(
       client.call('turns.start', { threadId, prompt: 'x', attachments: Array.from({ length: 9 }, () => image({})) }),
-    ).rejects.toThrow('a turn carries at most 8 images, this one has 9');
+    ).rejects.toThrow('a turn carries at most 8 attachments, this one has 9');
 
     // Nothing above started a turn, so the thread is still idle and empty.
     const thread = await client.call('threads.get', { threadId });

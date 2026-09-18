@@ -122,7 +122,7 @@ person's call, `git worktree remove` from the project.
 
 ## Pending prompts, goals and loops
 
-Enter during a running turn queues the message and its images. The composer
+Enter during a running turn queues the message and its attachments. The composer
 shows each pending message. Up in an empty composer takes the newest pending
 message out of the queue for editing; clicking a pending message does the same.
 Escape stops the current turn. Pending messages then run in their original
@@ -370,3 +370,24 @@ The reply has one spinner while running, paused when the document is hidden
 and disabled for reduced motion. Finished turns show a check and elapsed time;
 usage totals remain in Usage settings. Context details open separately from
 compaction. `tests/e2e/chat-context.test.ts` covers these interactions.
+
+
+### File attachments
+
+Desktop and paired phones can pick, paste or drop files into the composer.
+A turn accepts eight attachments, each at most 5 MB. PNG, JPEG, GIF and WebP
+use the provider's native image input. Other formats, including PDF, text,
+source files and archives, use `kind: 'file'` and do not require image support.
+The core validates and journals their base64 bytes, then writes a sanitized,
+content-addressed copy under its data directory's `attachments/` folder. Every
+driver receives an absolute host path in its prompt and can read it with its
+existing tools. Reading a format depends on the agent's tools and permissions;
+Boite does not extract archives or execute uploads. Copies persist with the core
+data directory so resumed sessions can still read them. They are not currently
+removed when a conversation is archived or a project is removed.
+
+The timeline shows downloadable file cards with names and sizes. Images retain
+thumbnails. `bun test tests/e2e/attachments.test.ts` checks owner desktop and
+paired phone uploads against the real core, reads back host bytes and verifies
+the timeline download payload. `bun test packages/core/test/attachments.test.ts`
+checks validation, path containment, empty files and continuation references.
