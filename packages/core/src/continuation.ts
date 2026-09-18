@@ -1,4 +1,4 @@
-import { ATTACHMENTS_PER_TURN, type ImageAttachment, type MessagePart, type ProviderDescriptor } from '@boite/contracts';
+import { ATTACHMENTS_PER_TURN, type Attachment, type ImageAttachment, type MessagePart, type ProviderDescriptor } from '@boite/contracts';
 import type { Journal } from './journal.ts';
 import { refused } from './errors.ts';
 
@@ -29,9 +29,10 @@ export function continuationInput(
   journal: Journal,
   threadId: string,
   turnId: string,
-  input: { prompt: string; attachments: ImageAttachment[] },
+  input: { prompt: string; attachments: Attachment[] },
   provider: ProviderDescriptor,
-): { prompt: string; attachments: ImageAttachment[] } {
+  fileReference: (file: Extract<MessagePart, { type: 'file' }>) => string = file => `[File: ${file.name ?? 'attachment'}]`,
+): { prompt: string; attachments: Attachment[] } {
   const first: string[] = [];
   const recent: string[] = [];
   let firstSize = 0;
@@ -47,7 +48,7 @@ export function continuationInput(
       images.push({ kind: 'image', mimeType: part.mimeType, data: part.data, name: part.alt });
       if (images.length > ATTACHMENTS_PER_TURN - input.attachments.length) images.shift();
     }
-    const text = message.parts.map(textPart).filter(Boolean).map((part) => excerpt(part, ENTRY_LIMIT)).join('\n');
+    const text = message.parts.map(part => part.type === 'file' ? fileReference(part) : textPart(part)).filter(Boolean).map((part) => excerpt(part, ENTRY_LIMIT)).join('\n');
     if (!text) continue;
     const entry = `[${message.role}, ${message.state}]\n${excerpt(text, ENTRY_LIMIT)}`;
     if (firstSize + entry.length <= FIRST_LIMIT && recent.length === 0 && omitted === 0) {

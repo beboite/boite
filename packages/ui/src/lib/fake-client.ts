@@ -9,7 +9,8 @@ import {
   type PluginState,
   type PluginPool,
   type CoreInfo,
-  type ImageAttachment,
+  type Attachment,
+  attachmentError,
   type ImportableSession,
   type Message,
   type MessageId,
@@ -31,6 +32,8 @@ import {
   type RpcResult,
   type SchedulerState,
   type Settings,
+  type SpeechConfig,
+  type SpeechStatus,
   type Thread,
   type ThreadId,
   type ThreadResources,
@@ -92,6 +95,7 @@ const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>([
   'scheduler.get',
   'usage.get',
   'settings.get',
+  'speech.status', 'speech.transcribe', 'speech.cancel',
   'keybindings.get'
 ]);
 
@@ -370,6 +374,9 @@ export class FakeClient implements ObservableClient {
   #processes: ProcessRecord[] = [];
   #usage = new Map<ThreadId, Usage>();
   #settings: Settings;
+  #speech: SpeechConfig = { engine: 'local', language: '', apiProvider: 'groq', fallback: false, executable: '', modelPath: '' };
+  #speechStatus: SpeechStatus = { revision: 'fake-voice', engine: 'local', ready: true, localReady: true, groqKeySet: false, openrouterKeySet: false, installing: false, downloadedBytes: 0, totalBytes: 190085487, error: null, canInstallRuntime: true };
+  #speechRequests = new Map<string, symbol>();
   #quotaEnabled: Record<string, boolean> = {};
   #plugin: PluginState = { id: 'kebacc-switcher', name: 'kebacc-switcher', version: null, availableVersion: '2.0.1', status: 'not-installed', progress: 0, error: null };
   #pluginPools: PluginPool[] = ['claude', 'codex', 'antigravity'].map((provider) => ({ provider, accounts: [
@@ -875,6 +882,7 @@ export class FakeClient implements ObservableClient {
       }
       case 'threads.create': {
         const params = rawParams as RpcParams<'threads.create'>;
+        if (!this.#providers.some(provider => provider.id === params.providerId)) throw this.#notFound('provider', params.providerId);
         const project = this.#projects.find((p) => p.id === params.projectId);
         if (!project) throw this.#notFound('project', params.projectId);
         this.#checkSpeed(params.providerId, params.accountId, params.model ?? null, params.speed ?? null);
@@ -1034,8 +1042,9 @@ export class FakeClient implements ObservableClient {
 
       case 'turns.start': {
         const params = rawParams as RpcParams<'turns.start'>;
+        if (params.attachments !== undefined && (!Array.isArray(params.attachments) || params.attachments.some(a => !a || typeof a !== 'object'))) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'attachments must be an array of attachment objects' });
         const key = params.clientRequestId ? `${params.threadId}:${params.clientRequestId}` : null;
-        const content = JSON.stringify([params.prompt, (params.attachments ?? []).map(a => [a.mimeType, a.data, a.name])]);
+        const content = JSON.stringify([params.prompt, (params.attachments ?? []).map(a => [a.kind, a.mimeType, a.data, a.name])]);
         if (params.clientRequestId !== undefined && !/^[A-Za-z0-9_-]{8,128}$/.test(params.clientRequestId)) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'clientRequestId must contain 8 to 128 URL-safe characters' });
         const previous = key ? this.#turnRequests.get(key) : undefined;
         if (previous) {
@@ -1045,6 +1054,11 @@ export class FakeClient implements ObservableClient {
         if (params.expectedSelectionVersion !== undefined && params.expectedSelectionVersion !== (this.#thread(params.threadId).selectionVersion ?? 0)) {
           throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'the model selection changed; review the selected model and send again' });
         }
+        const providerId = this.#thread(params.threadId).providerId;
+        const provider = this.#providers.find(p => p.id === providerId);
+        if (!provider) throw this.#notFound('provider', providerId);
+        const error = attachmentError(params.attachments ?? [], provider);
+        if (error) throw new RpcFailure({ code: RpcErrorCode.Refused, ...error });
         const turn = this.#startTurn(params.threadId, params.prompt, params.attachments ?? []);
         if (key) this.#turnRequests.set(key, { content, turn });
         return turn;
@@ -1188,6 +1202,37 @@ export class FakeClient implements ObservableClient {
 
       case 'settings.get':
         return { ...this.#settings };
+      case 'speech.config': return { ...this.#speech };
+      case 'speech.status': return { ...this.#speechStatus };
+      case 'speech.configure': {
+        const p = rawParams as RpcParams<'speech.configure'>;
+        this.#speech = { engine: p.engine, language: p.language, apiProvider: p.apiProvider, fallback: p.fallback, executable: p.executable, modelPath: p.modelPath };
+        if (p.groqKey !== undefined) this.#speechStatus.groqKeySet = !!p.groqKey;
+        if (p.openrouterKey !== undefined) this.#speechStatus.openrouterKeySet = !!p.openrouterKey;
+        this.#speechStatus.engine = p.engine; this.#speechStatus.revision = crypto.randomUUID();
+        this.#speechStatus.ready = p.engine === 'local' ? this.#speechStatus.localReady : p.apiProvider === 'groq' ? this.#speechStatus.groqKeySet : this.#speechStatus.openrouterKeySet;
+        return { ...this.#speechStatus };
+      }
+      case 'speech.install':
+        this.#speechStatus.localReady = true; this.#speechStatus.ready = this.#speech.engine === 'local' || this.#speechStatus.ready;
+        return { ...this.#speechStatus };
+      case 'speech.installCancel': return { ...this.#speechStatus };
+      case 'speech.uninstall':
+        this.#speechStatus.localReady = false; if (this.#speech.engine === 'local') this.#speechStatus.ready = false;
+        return { ...this.#speechStatus };
+      case 'speech.cancel': this.#speechRequests.delete((rawParams as RpcParams<'speech.cancel'>).requestId); return { ok: true };
+      case 'speech.transcribe': {
+        const p = rawParams as RpcParams<'speech.transcribe'>;
+        if (!this.#speechStatus.ready) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'Configure Voice first' });
+        if (p.revision !== this.#speechStatus.revision) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'Voice settings changed during recording; record again with the selected engine' });
+        if (this.#speechRequests.size) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'Another transcription is running; try again shortly' });
+        const request = Symbol(p.requestId);
+        this.#speechRequests.set(p.requestId, request);
+        await new Promise(resolve => setTimeout(resolve, 250));
+        if (this.#speechRequests.get(p.requestId) !== request) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'Transcription cancelled' });
+        this.#speechRequests.delete(p.requestId);
+        return { text: 'Please add a test for this change.' };
+      }
       case 'keybindings.get':
         // A file with one moved chord, one taken away, and one line the core refused.
         return {
@@ -1334,7 +1379,7 @@ export class FakeClient implements ObservableClient {
     return stopped;
   }
 
-  #startTurn(threadId: ThreadId, prompt: string, attachments: ImageAttachment[] = [], operation?: 'compact', activityKind?: 'goal' | 'loop'): Turn {
+  #startTurn(threadId: ThreadId, prompt: string, attachments: Attachment[] = [], operation?: 'compact', activityKind?: 'goal' | 'loop'): Turn {
     const thread = this.#thread(threadId);
     if (thread.archived) {
       throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'cannot start a turn on an archived thread', data: { threadId } });
@@ -1379,7 +1424,7 @@ export class FakeClient implements ObservableClient {
       // The images ride after the text, the order the core journals them in.
       parts: [
         { type: 'text', text: activityKind ? `/${activityKind} ${prompt}` : prompt, ...(activityKind ? { activity: { kind: activityKind, iteration: (thread.activity?.[activityKind]?.iterations ?? 0) + 1 } } : {}) },
-        ...attachments.map((attachment): MessagePart => ({
+        ...attachments.map((attachment): MessagePart => attachment.kind === 'file' ? { type: 'file', mimeType: attachment.mimeType, data: attachment.data, name: attachment.name } : ({
           type: 'image',
           mimeType: attachment.mimeType,
           data: attachment.data,
@@ -1420,7 +1465,7 @@ export class FakeClient implements ObservableClient {
     turn: Turn,
     prompt: string,
     record: { cancelled: boolean },
-    attachments: ImageAttachment[] = []
+    attachments: Attachment[] = []
   ): Promise<void> {
     const compactAfter = Math.max(1, Math.floor((thread.context?.tokens ?? FAKE_CONTEXT_FLOOR) / 4));
     const message: Message = {
@@ -1470,7 +1515,7 @@ export class FakeClient implements ObservableClient {
       attachments
         .map(
           (attachment) =>
-            `[image ${attachment.mimeType}, ${decodedBytes(attachment.data)} bytes${
+            `[${attachment.kind} ${attachment.mimeType}, ${decodedBytes(attachment.data)} bytes${
               attachment.name === null ? '' : `, ${attachment.name}`
             }] `
         )
@@ -1942,6 +1987,7 @@ export class FakeClient implements ObservableClient {
   }
 
   #dropPending(message: string): void {
+    this.#speechRequests.clear();
     const pending = [...this.#pending];
     this.#pending.clear();
     for (const entry of pending) {

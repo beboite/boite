@@ -94,7 +94,7 @@
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
-<header class="titlebar" {onmousedown} data-testid="titlebar">
+<header class="titlebar" class:browser={!inShell} {onmousedown} data-testid="titlebar">
   {#if store.page === 'chat' && store.booted}
     <button type="button" class="ghost icon sidebar-toggle"
       aria-label={expanded ? strings.sidebar.collapse : strings.sidebar.expand}
@@ -154,6 +154,10 @@
   }
 
   .sidebar-toggle { flex: none; }
+  @media (max-width: 720px) {
+    .titlebar.browser { background: var(--color-background); padding: 0 16px; }
+    .browser .sidebar-toggle { display: none; }
+  }
   .name { flex: 1; min-width: 0; font-size: var(--text-sm); color: var(--color-muted-foreground); }
   .titlebar { padding-right: 8px; }
   .controls { flex: none; margin-left: 4px; }

@@ -25,6 +25,7 @@ import { PluginStore } from './plugins.ts';
 import { Worktrees } from './worktree.ts';
 import { ActivityStore } from './activity.ts';
 import { PushStore } from './push.ts';
+import { SpeechStore } from './speech.ts';
 
 export const CORE_VERSION: string = pkg.version;
 
@@ -67,6 +68,7 @@ export class Core {
   readonly imports: ImportStore;
   readonly activity: ActivityStore;
   readonly push: PushStore;
+  readonly speech: SpeechStore;
 
   subscribers: SubscriptionSink = { hasSubscribers: () => false, closeSession: () => undefined };
 
@@ -96,6 +98,7 @@ export class Core {
     this.imports = new ImportStore(this);
     this.activity = new ActivityStore(this);
     this.push = new PushStore(this);
+    this.speech = new SpeechStore(this);
 
     registerModules(this);
     this.procs.applySettings(this.settings.get());
@@ -137,6 +140,7 @@ export class Core {
   }
 
   async close(): Promise<void> {
+    await this.speech.close();
     await this.push.close();
     this.activity.close();
     await this.plugins.close();

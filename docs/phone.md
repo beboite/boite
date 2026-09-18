@@ -12,6 +12,8 @@ App & notifications, Appearance, and Machines. The back button or browser Back
 returns to that list. Theme and accent belong to the current device; the
 notification screen names the connected machine that will send its alerts.
 Machines lets the phone pair, switch, reconnect, or remove saved connections.
+Voice shows the connected core's dictation readiness. Engine installation and
+API credentials stay in desktop Voice settings, including for owner sessions.
 
 Provider accounts, keyboard shortcuts, plugins, resource limits, pairing
 administration and server configuration stay in desktop settings. This smaller

@@ -578,7 +578,48 @@ test('a pasted image becomes a chip, comes off again, and rides the prompt', asy
   expect(document.querySelector('[data-testid=composer-attachments]')).toBeNull();
 });
 
-test('a provider that reads no image hides the button and says so on a paste', async () => {
+test('sending waits for a file read so the attachment cannot land in the next prompt', async () => {
+  await mountOnFake();
+  await store.open('t-trace');
+  await type('Read these notes');
+  const original = FileReader.prototype.readAsDataURL;
+  let release!: () => void;
+  vi.spyOn(FileReader.prototype, 'readAsDataURL').mockImplementation(function (this: FileReader, blob: Blob) {
+    release = () => original.call(this, blob);
+  });
+  paste(new File(['notes'], 'notes.txt', { type: 'text/plain' }));
+  await waitFor(() => query<HTMLButtonElement>('[data-testid=composer-send]').disabled);
+  const before = store.openThread!.messages.length;
+  press('Enter');
+  expect(store.openThread!.messages.length).toBe(before);
+  release();
+  await waitFor(() => !query<HTMLButtonElement>('[data-testid=composer-send]').disabled);
+  press('Enter');
+  await waitFor(() => store.openThread!.messages.length > before && !store.busy);
+  const sent = store.openThread!.messages.filter(m => m.role === 'user').at(-1)!;
+  expect(sent.parts).toContainEqual({ type: 'file', mimeType: 'text/plain', name: 'notes.txt', data: btoa('notes') });
+});
+
+test('a file read uses the original provider even if the user switches threads', async () => {
+  window.localStorage.setItem(PREFS_STORAGE_KEY, JSON.stringify({ ...defaultPrefs(), providerId: 'opencode', accountId: 'a-opencode', model: 'default' }));
+  await mountOnFake();
+  store.startDraft();
+  await waitFor(() => store.draft !== null && store.defaultChoice()?.providerId === 'opencode');
+  const original = FileReader.prototype.readAsDataURL;
+  let release!: () => void;
+  vi.spyOn(FileReader.prototype, 'readAsDataURL').mockImplementation(function (this: FileReader, blob: Blob) {
+    release = () => original.call(this, blob);
+  });
+  paste(pngFile());
+  await store.open('t-trace');
+  await waitFor(() => store.openThread?.id === 't-trace');
+  release();
+  await waitFor(() => store.error !== null);
+  expect(store.error).toBe('OpenCode takes no images: send the prompt without them.');
+  expect(Object.values(store.composerStates).every(state => state.attachments.length === 0)).toBe(true);
+});
+
+test('a provider that reads no image still takes files and refuses an image paste', async () => {
   window.localStorage.setItem(
     PREFS_STORAGE_KEY,
     JSON.stringify({ ...defaultPrefs(), providerId: 'opencode', accountId: 'a-opencode', model: 'default' })
@@ -588,12 +629,15 @@ test('a provider that reads no image hides the button and says so on a paste', a
   await waitFor(() => store.draft !== null);
   await waitFor(() => store.defaultChoice()?.providerId === 'opencode');
 
-  expect(document.querySelector('[data-testid=composer-attach]')).toBeNull();
+  expect(document.querySelector('[data-testid=composer-attach]')).not.toBeNull();
 
   paste(pngFile());
   await waitFor(() => store.error !== null);
   expect(store.error).toBe('OpenCode takes no images: send the prompt without them.');
   expect(document.querySelector('[data-testid=composer-attachments]')).toBeNull();
+  paste(new File(['hello'], 'notes.txt', { type: 'text/plain' }));
+  await waitFor(() => document.querySelector('[data-testid=composer-attachment]') !== null);
+  expect(query('[data-testid=composer-attachment]').textContent).toContain('notes.txt');
 });
 
 // -- the slash menu -----------------------------------------------------------
