@@ -2,7 +2,7 @@ import { statSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { activityPrompt } from './activity-prompt.ts';
 import { relative, resolve } from 'node:path';
-import { ATTACHMENTS_PER_TURN, ATTACHMENT_MAX_BYTES, IMAGE_MIME_TYPES, MESSAGE_PAGE, MESSAGE_PAGE_MAX } from '@boite/contracts';
+import { attachmentError, MESSAGE_PAGE, MESSAGE_PAGE_MAX } from '@boite/contracts';
 import type {
   Account,
   AccountId,
@@ -48,8 +48,6 @@ import { cleanAgentTitle, textOf, titleFromPrompt } from './titles.ts';
 import { prepareAttachments, fileReference } from './attachments.ts';
 import { continuationInput } from './continuation.ts';
 
-const BASE64 = /^[A-Za-z0-9+/]+={0,2}$/;
-
 type CreateParams = RpcParams<'threads.create'>;
 
 function titleOf(title: string | undefined): string {
@@ -81,12 +79,6 @@ function checkCwd(project: Project, cwd: string): string {
   return resolved;
 }
 
-/** How many bytes a base64 string decodes to, without decoding it. */
-function decodedBytes(data: string): number {
-  const padding = data.endsWith('==') ? 2 : data.endsWith('=') ? 1 : 0;
-  return Math.floor((data.length * 3) / 4) - padding;
-}
-
 /**
  * The attachments of a turn, or the refusal: the provider takes none, too
  * many, a format no agent reads, a body that is not base64, one over the cap.
@@ -100,42 +92,8 @@ function checkAttachmentArray(attachments: Attachment[]): void {
 }
 
 export function checkAttachments(attachments: Attachment[], provider: ProviderDescriptor): void {
-  checkAttachmentArray(attachments);
-  if (attachments.length === 0) return;
-  if (!provider.capabilities.images && attachments.some(a => a?.kind === 'image')) {
-    throw refused(`${provider.name} takes no images: send the prompt without them`, { providerId: provider.id });
-  }
-  if (attachments.length > ATTACHMENTS_PER_TURN) {
-    throw refused(`a turn carries at most ${ATTACHMENTS_PER_TURN} attachments, this one has ${attachments.length}`, {
-      count: attachments.length,
-      max: ATTACHMENTS_PER_TURN,
-    });
-  }
-  attachments.forEach((attachment, index) => {
-    if (attachment.name !== null && (typeof attachment.name !== 'string' || attachment.name.length > 255)) throw refused(`attachment ${index + 1}: name must be null or a string of at most 255 characters`);
-    const label = attachment.name ?? `attachment ${index + 1}`;
-    if (attachment.kind !== 'image' && attachment.kind !== 'file') {
-      throw refused(`${label}: expected an image or file attachment`, { index });
-    }
-    if (typeof attachment.mimeType !== 'string' || !/^[\w.+-]+\/[\w.+-]+$/.test(attachment.mimeType) || attachment.mimeType.length > 128) throw refused(`${label}: mimeType must be a media type such as application/pdf`, { index });
-    if (attachment.kind === 'image' && !(IMAGE_MIME_TYPES as readonly string[]).includes(attachment.mimeType)) {
-      throw refused(`${label}: ${attachment.mimeType} is not an image format an agent reads (${IMAGE_MIME_TYPES.join(', ')})`, {
-        index,
-        mimeType: attachment.mimeType,
-      });
-    }
-    if (typeof attachment.data !== 'string' || (attachment.kind === 'image' && attachment.data.length === 0) || attachment.data.length % 4 !== 0 || (attachment.data !== '' && !BASE64.test(attachment.data))) {
-      throw refused(`${label}: the attachment data is not base64 (no data: prefix, no line breaks)`, { index });
-    }
-    const bytes = decodedBytes(attachment.data);
-    if (bytes > ATTACHMENT_MAX_BYTES) {
-      throw refused(`${label}: ${(bytes / 1048576).toFixed(1)} MB is over the ${ATTACHMENT_MAX_BYTES / 1048576} MB a file may weigh`, {
-        index,
-        bytes,
-        max: ATTACHMENT_MAX_BYTES,
-      });
-    }
-  });
+  const error = attachmentError(attachments, provider);
+  if (error) throw refused(error.message, error.data);
 }
 
 /** What a turn a dead core left behind says, once the next core has closed it. */

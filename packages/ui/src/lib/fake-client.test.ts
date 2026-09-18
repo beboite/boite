@@ -4,6 +4,16 @@ import { RpcErrorCode } from '@boite/contracts';
 
 afterEach(() => vi.useRealTimers());
 
+test.each([{ data: '?' }, { mimeType: '' }, { name: 42 }, { kind: 'unknown' }, { data: 'A'.repeat(7 * 1048576) }])('fake uploads refuse malformed attachment fields before creating a turn: %#', async change => {
+  const client = new FakeClient({ delayMs: 0 });
+  await client.connect();
+  try {
+    const before = await client.call('threads.get', { threadId: 't-trace' });
+    await expect(client.call('turns.start', { threadId: 't-trace', prompt: 'Read', attachments: [{ kind: 'file', mimeType: 'text/plain', data: 'YWJj', name: 'notes.txt', ...change }] as never })).rejects.toMatchObject({ code: RpcErrorCode.Refused });
+    expect((await client.call('threads.get', { threadId: 't-trace' })).turns).toEqual(before.turns);
+  } finally { client.close(); }
+});
+
 test('fake speech refuses overlapping request IDs and accepts a retry after completion', async () => {
   const client = new FakeClient({ delayMs: 0 });
   await client.connect();

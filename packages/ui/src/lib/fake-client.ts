@@ -10,6 +10,7 @@ import {
   type PluginPool,
   type CoreInfo,
   type Attachment,
+  attachmentError,
   type ImportableSession,
   type Message,
   type MessageId,
@@ -1052,6 +1053,9 @@ export class FakeClient implements ObservableClient {
         if (params.expectedSelectionVersion !== undefined && params.expectedSelectionVersion !== (this.#thread(params.threadId).selectionVersion ?? 0)) {
           throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'the model selection changed; review the selected model and send again' });
         }
+        const provider = this.#providers.find(p => p.id === this.#thread(params.threadId).providerId)!;
+        const error = attachmentError(params.attachments ?? [], provider);
+        if (error) throw new RpcFailure({ code: RpcErrorCode.Refused, ...error });
         const turn = this.#startTurn(params.threadId, params.prompt, params.attachments ?? []);
         if (key) this.#turnRequests.set(key, { content, turn });
         return turn;
