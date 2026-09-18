@@ -182,3 +182,19 @@ test('fake probes reject invalid provider/account pairs and unavailable agents',
   await expect(client.call('providers.probe', { providerId: 'antigravity', accountId: 'a-antigravity' })).rejects.toThrow(/not available/);
   client.close();
 });
+
+
+test.each(['drop', 'close'] as const)('fake speech releases abandoned requests on %s, even when the retry reuses its ID', async action => {
+  const client = new FakeClient({ delayMs: 0 });
+  await client.connect();
+  const { revision } = await client.call('speech.status', {});
+  const first = client.call('speech.transcribe', { requestId: 'same', revision, audio: '' });
+  const abandoned = expect(first).rejects.toThrow();
+  await expect(client.call('speech.transcribe', { requestId: 'overlap', revision, audio: '' })).rejects.toMatchObject({ code: RpcErrorCode.Refused });
+  client[action]();
+  await abandoned;
+  await client.restore();
+  try {
+    expect((await client.call('speech.transcribe', { requestId: 'same', revision, audio: '' })).text).toBeTruthy();
+  } finally { client.close(); }
+});

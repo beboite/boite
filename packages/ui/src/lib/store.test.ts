@@ -65,7 +65,7 @@ test('provider actions report RPC failures through their owning store', async ()
   } finally { store.detach(); client.close(); }
 });
 
-test.each([false, true])('a lost start response reuses its request id unless selection changes: %s', async (changeSelection) => {
+test.each(['same', 'selection', 'kind'])('a lost start response reuses its request id only for identical content and selection: %s', async (change) => {
   const { store, client } = await ready();
   const original = client.call.bind(client);
   const requests: string[] = [];
@@ -81,15 +81,17 @@ test.each([false, true])('a lost start response reuses its request id unless sel
   try {
     const thread = store.threads.find(thread => thread.status === 'idle')!;
     await store.open(thread.id);
-    expect(await store.send('Retry this prompt')).toBe(false);
-    if (changeSelection) {
+    const attachments = change === 'kind' ? [{ kind: 'image' as const, mimeType: 'image/png' as const, data: 'YWJj', name: 'test.png' }] : [];
+    expect(await store.send('Retry this prompt', thread.id, attachments)).toBe(false);
+    if (change === 'kind') await client.settled();
+    if (change === 'selection') {
       await client.settled();
       expect(await store.update(thread.id, { effort: 'low' })).toBe(true);
     }
-    expect(await store.send('Retry this prompt')).toBe(true);
+    expect(await store.send('Retry this prompt', thread.id, change === 'kind' ? attachments.map(a => ({ ...a, kind: 'file' as const })) : attachments)).toBe(true);
     expect(requests).toHaveLength(2);
     expect(requests[0]).toBeTruthy();
-    expect(requests[1] === requests[0]).toBe(!changeSelection);
+    expect(requests[1] === requests[0]).toBe(change === 'same');
   } finally { store.detach(); client.close(); }
 });
 

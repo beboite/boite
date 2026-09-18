@@ -1527,7 +1527,7 @@ export class Store {
       // image sends the params it always sent.
       let pending = this.#pendingSends.get(threadId);
       const selectionVersion = (this.openThread?.id === threadId ? this.openThread : this.threads.find((thread) => thread.id === threadId))?.selectionVersion ?? 0;
-      if (!pending || pending.selectionVersion !== selectionVersion || pending.prompt !== prompt || pending.attachments.length !== attachments.length || pending.attachments.some((a, i) => a.data !== attachments[i]?.data || a.mimeType !== attachments[i]?.mimeType || a.name !== attachments[i]?.name)) {
+      if (!pending || pending.selectionVersion !== selectionVersion || pending.prompt !== prompt || pending.attachments.length !== attachments.length || pending.attachments.some((a, i) => a.kind !== attachments[i]?.kind || a.data !== attachments[i]?.data || a.mimeType !== attachments[i]?.mimeType || a.name !== attachments[i]?.name)) {
         const bytes = crypto.getRandomValues(new Uint8Array(16));
         pending = { id: Array.from(bytes, b => b.toString(16).padStart(2, '0')).join(''), prompt, attachments: [...attachments], selectionVersion };
         this.#pendingSends.set(threadId, pending);

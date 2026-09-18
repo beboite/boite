@@ -375,7 +375,7 @@ export class FakeClient implements ObservableClient {
   #settings: Settings;
   #speech: SpeechConfig = { engine: 'local', language: '', apiProvider: 'groq', fallback: false, executable: '', modelPath: '' };
   #speechStatus: SpeechStatus = { revision: 'fake-voice', engine: 'local', ready: true, localReady: true, groqKeySet: false, openrouterKeySet: false, installing: false, downloadedBytes: 0, totalBytes: 190085487, error: null, canInstallRuntime: true };
-  #speechRequests = new Set<string>();
+  #speechRequests = new Map<string, symbol>();
   #quotaEnabled: Record<string, boolean> = {};
   #plugin: PluginState = { id: 'kebacc-switcher', name: 'kebacc-switcher', version: null, availableVersion: '2.0.1', status: 'not-installed', progress: 0, error: null };
   #pluginPools: PluginPool[] = ['claude', 'codex', 'antigravity'].map((provider) => ({ provider, accounts: [
@@ -1040,6 +1040,7 @@ export class FakeClient implements ObservableClient {
 
       case 'turns.start': {
         const params = rawParams as RpcParams<'turns.start'>;
+        if (params.attachments !== undefined && (!Array.isArray(params.attachments) || params.attachments.some(a => !a || typeof a !== 'object'))) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'attachments must be an array of attachment objects' });
         const key = params.clientRequestId ? `${params.threadId}:${params.clientRequestId}` : null;
         const content = JSON.stringify([params.prompt, (params.attachments ?? []).map(a => [a.kind, a.mimeType, a.data, a.name])]);
         if (params.clientRequestId !== undefined && !/^[A-Za-z0-9_-]{8,128}$/.test(params.clientRequestId)) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'clientRequestId must contain 8 to 128 URL-safe characters' });
@@ -1218,9 +1219,11 @@ export class FakeClient implements ObservableClient {
         if (!this.#speechStatus.ready) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'Configure Voice first' });
         if (p.revision !== this.#speechStatus.revision) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'Voice settings changed during recording; record again with the selected engine' });
         if (this.#speechRequests.size) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'Another transcription is running; try again shortly' });
-        this.#speechRequests.add(p.requestId);
+        const request = Symbol(p.requestId);
+        this.#speechRequests.set(p.requestId, request);
         await new Promise(resolve => setTimeout(resolve, 250));
-        if (!this.#speechRequests.delete(p.requestId)) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'Transcription cancelled' });
+        if (this.#speechRequests.get(p.requestId) !== request) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'Transcription cancelled' });
+        this.#speechRequests.delete(p.requestId);
         return { text: 'Please add a test for this change.' };
       }
       case 'keybindings.get':
@@ -1977,6 +1980,7 @@ export class FakeClient implements ObservableClient {
   }
 
   #dropPending(message: string): void {
+    this.#speechRequests.clear();
     const pending = [...this.#pending];
     this.#pending.clear();
     for (const entry of pending) {

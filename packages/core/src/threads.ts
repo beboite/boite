@@ -92,8 +92,15 @@ function decodedBytes(data: string): number {
  * many, a format no agent reads, a body that is not base64, one over the cap.
  * Each refusal names the attachment by its index and what was expected.
  */
-export function checkAttachments(attachments: Attachment[], provider: ProviderDescriptor): void {
+function checkAttachmentArray(attachments: Attachment[]): void {
   if (!Array.isArray(attachments)) throw refused('attachments must be an array');
+  attachments.forEach((attachment, index) => {
+    if (!attachment || typeof attachment !== 'object') throw refused(`attachment ${index + 1}: expected an object`);
+  });
+}
+
+export function checkAttachments(attachments: Attachment[], provider: ProviderDescriptor): void {
+  checkAttachmentArray(attachments);
   if (attachments.length === 0) return;
   if (!provider.capabilities.images && attachments.some(a => a?.kind === 'image')) {
     throw refused(`${provider.name} takes no images: send the prompt without them`, { providerId: provider.id });
@@ -105,7 +112,6 @@ export function checkAttachments(attachments: Attachment[], provider: ProviderDe
     });
   }
   attachments.forEach((attachment, index) => {
-    if (!attachment || typeof attachment !== 'object') throw refused(`attachment ${index + 1}: expected an object`);
     if (attachment.name !== null && (typeof attachment.name !== 'string' || attachment.name.length > 255)) throw refused(`attachment ${index + 1}: name must be null or a string of at most 255 characters`);
     const label = attachment.name ?? `attachment ${index + 1}`;
     if (attachment.kind !== 'image' && attachment.kind !== 'file') {
@@ -579,6 +585,7 @@ export class ThreadStore {
 
   startTurn(threadId: ThreadId, prompt: string, attachments: Attachment[] = [], expectedSelectionVersion?: number, operation?: 'compact', activity?: { kind: 'goal' | 'loop'; iteration: number }, clientRequestId?: string): Turn {
     const thread = this.require(threadId);
+    checkAttachmentArray(attachments);
     let fingerprint = '';
     if (clientRequestId !== undefined) {
       if (typeof clientRequestId !== 'string' || !/^[A-Za-z0-9_-]{8,128}$/.test(clientRequestId)) throw refused('clientRequestId must contain 8 to 128 URL-safe characters');

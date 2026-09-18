@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { isAbsolute, relative } from 'node:path';
 import type { Attachment, FileAttachment } from '@boite/contracts';
-import { ATTACHMENT_MAX_BYTES } from '@boite/contracts';
+import { ATTACHMENT_MAX_BYTES, RpcErrorCode } from '@boite/contracts';
 import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
 import { checkAttachments } from '../src/threads.ts';
 import { fileReference, prepareAttachments } from '../src/attachments.ts';
@@ -59,4 +59,13 @@ test('only images depend on provider image support; malformed and oversized file
   const prepared = prepareAttachments(harness.dataDir, { prompt: 'Compare', attachments: [file, image] });
   expect(prepared.attachments).toEqual([image]);
   expect(prepared.prompt).toContain('report.pdf');
+});
+
+test('malformed attachment arrays are refused before retry fingerprinting', async () => {
+  const client = await harness.connect();
+  const { threadId } = await echoThread(harness, client);
+  for (const attachments of [{}, [null]]) {
+    await expect(client.call('turns.start', { threadId, prompt: 'Read', clientRequestId: 'invalid-files', attachments: attachments as never })).rejects.toMatchObject({ rpc: { code: RpcErrorCode.Refused, message: expect.stringContaining('attachment') } });
+  }
+  expect(harness.core.journal.listTurns(threadId)).toEqual([]);
 });

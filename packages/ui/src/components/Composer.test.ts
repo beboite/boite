@@ -600,6 +600,25 @@ test('sending waits for a file read so the attachment cannot land in the next pr
   expect(sent.parts).toContainEqual({ type: 'file', mimeType: 'text/plain', name: 'notes.txt', data: btoa('notes') });
 });
 
+test('a file read uses the original provider even if the user switches threads', async () => {
+  window.localStorage.setItem(PREFS_STORAGE_KEY, JSON.stringify({ ...defaultPrefs(), providerId: 'opencode', accountId: 'a-opencode', model: 'default' }));
+  await mountOnFake();
+  store.startDraft();
+  await waitFor(() => store.draft !== null && store.defaultChoice()?.providerId === 'opencode');
+  const original = FileReader.prototype.readAsDataURL;
+  let release!: () => void;
+  vi.spyOn(FileReader.prototype, 'readAsDataURL').mockImplementation(function (this: FileReader, blob: Blob) {
+    release = () => original.call(this, blob);
+  });
+  paste(pngFile());
+  await store.open('t-trace');
+  await waitFor(() => store.openThread?.id === 't-trace');
+  release();
+  await waitFor(() => store.error !== null);
+  expect(store.error).toBe('OpenCode takes no images: send the prompt without them.');
+  expect(Object.values(store.composerStates).every(state => state.attachments.length === 0)).toBe(true);
+});
+
 test('a provider that reads no image still takes files and refuses an image paste', async () => {
   window.localStorage.setItem(
     PREFS_STORAGE_KEY,

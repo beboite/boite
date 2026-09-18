@@ -483,6 +483,7 @@
   async function take(files: File[]) {
     if (files.length === 0) return;
     const state = stateForInput();
+    const attachmentProvider = provider;
     readingFiles += 1;
     try {
     for (const file of files) {
@@ -496,8 +497,8 @@
       }
       try {
         const attachment = await readAttachmentFile(file);
-        if (attachment.kind === 'image' && provider && !provider.capabilities.images) {
-          store.error = fill(strings.composer.attachNoImages, { provider: provider.name });
+        if (attachment.kind === 'image' && attachmentProvider && !attachmentProvider.capabilities.images) {
+          store.error = fill(strings.composer.attachNoImages, { provider: attachmentProvider.name });
           continue;
         }
         const { accepted, refused } = acceptAttachments(state.attachments, [attachment]);
