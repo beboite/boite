@@ -23,6 +23,10 @@ import type { Connection } from './router.ts';
  * process of its own or changes what the core trusts.
  */
 export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>([
+  // Dictation uses the owner's configured engine. Devices cannot change paths or credentials.
+  'speech.status',
+  'speech.transcribe',
+  'speech.cancel',
   // Its own pairing, so a phone can show itself in the device list.
   'sessions.list',
   // Each authenticated pairing manages only its own push destination.

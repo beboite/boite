@@ -4,6 +4,50 @@ import { RpcErrorCode } from '@boite/contracts';
 
 afterEach(() => vi.useRealTimers());
 
+test('fake threads reject unknown providers even when speed is omitted', async () => {
+  const client = new FakeClient({ delayMs: 0 });
+  await client.connect();
+  try {
+    const before = await client.call('threads.list', {});
+    await expect(client.call('threads.create', { projectId: 'p-boite', providerId: 'unknown', accountId: 'a-echo' })).rejects.toMatchObject({ code: RpcErrorCode.NotFound });
+    expect(await client.call('threads.list', {})).toEqual(before);
+  } finally { client.close(); }
+});
+
+test.each([{ data: '?' }, { mimeType: '' }, { name: 42 }, { kind: 'unknown' }, { data: 'A'.repeat(7 * 1048576) }])('fake uploads refuse malformed attachment fields before creating a turn: %#', async change => {
+  const client = new FakeClient({ delayMs: 0 });
+  await client.connect();
+  try {
+    const before = await client.call('threads.get', { threadId: 't-trace' });
+    await expect(client.call('turns.start', { threadId: 't-trace', prompt: 'Read', attachments: [{ kind: 'file', mimeType: 'text/plain', data: 'YWJj', name: 'notes.txt', ...change }] as never })).rejects.toMatchObject({ code: RpcErrorCode.Refused });
+    expect((await client.call('threads.get', { threadId: 't-trace' })).turns).toEqual(before.turns);
+  } finally { client.close(); }
+});
+
+test('fake speech refuses overlapping request IDs and accepts a retry after completion', async () => {
+  const client = new FakeClient({ delayMs: 0 });
+  await client.connect();
+  const { revision } = await client.call('speech.status', {});
+  const first = client.call('speech.transcribe', { requestId: 'first', revision, audio: '' });
+  try {
+    await expect(client.call('speech.transcribe', { requestId: 'second', revision, audio: '' })).rejects.toMatchObject({ code: RpcErrorCode.Refused });
+    await first;
+    expect((await client.call('speech.transcribe', { requestId: 'second', revision, audio: '' })).text).toBeTruthy();
+  } finally { await first.catch(() => {}); client.close(); }
+});
+
+test('fake speech refuses a recording made before configuration changed', async () => {
+  const client = new FakeClient({ delayMs: 0 });
+  await client.connect();
+  try {
+    const { revision } = await client.call('speech.status', {});
+    const config = await client.call('speech.config', {});
+    await client.call('speech.configure', { ...config, language: 'fr' });
+    await expect(client.call('speech.transcribe', { requestId: 'old', revision, audio: '' }))
+      .rejects.toMatchObject({ code: RpcErrorCode.Refused, message: expect.stringContaining('settings changed') });
+  } finally { client.close(); }
+});
+
 test.each(['goal', 'loop'] as const)('changing the other activity keeps the running %s completion', async kind => {
   vi.useFakeTimers();
   const client = new FakeClient({ delayMs: 1 });
@@ -157,4 +201,20 @@ test('fake probes reject invalid provider/account pairs and unavailable agents',
   await expect(client.call('providers.probe', { providerId: 'opencode', accountId: 'a-echo' })).rejects.toThrow(/another provider/);
   await expect(client.call('providers.probe', { providerId: 'antigravity', accountId: 'a-antigravity' })).rejects.toThrow(/not available/);
   client.close();
+});
+
+
+test.each(['drop', 'close'] as const)('fake speech releases abandoned requests on %s, even when the retry reuses its ID', async action => {
+  const client = new FakeClient({ delayMs: 0 });
+  await client.connect();
+  const { revision } = await client.call('speech.status', {});
+  const first = client.call('speech.transcribe', { requestId: 'same', revision, audio: '' });
+  const abandoned = expect(first).rejects.toThrow();
+  await expect(client.call('speech.transcribe', { requestId: 'overlap', revision, audio: '' })).rejects.toMatchObject({ code: RpcErrorCode.Refused });
+  client[action]();
+  await abandoned;
+  await client.restore();
+  try {
+    expect((await client.call('speech.transcribe', { requestId: 'same', revision, audio: '' })).text).toBeTruthy();
+  } finally { client.close(); }
 });

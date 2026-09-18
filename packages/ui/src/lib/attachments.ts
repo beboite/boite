@@ -1,5 +1,5 @@
 /**
- * Images on their way to a prompt: a file read into the shape the contract
+ * Files on their way to a prompt: a file read into the shape the contract
  * carries, and the three caps the core enforces again on its side. Nothing here
  * touches the store or the DOM beyond `FileReader`, so every rule is testable
  * on its own.
@@ -8,7 +8,7 @@ import {
   ATTACHMENT_MAX_BYTES,
   ATTACHMENTS_PER_TURN,
   IMAGE_MIME_TYPES,
-  type ImageAttachment,
+  type Attachment,
   type ImageMimeType
 } from '@boite/contracts';
 import { bytes } from './format';
@@ -38,20 +38,17 @@ export function decodedBytes(data: string): number {
 
 /**
  * One file as an attachment, its base64 body stripped of the `data:` prefix.
- * The mime type is the file's own and is not checked here: `acceptAttachments`
- * is what refuses a format no agent reads, so a refusal can name the file.
+ * Supported raster images use the native image input; everything else is a file.
  */
-export function readImageFile(file: File): Promise<ImageAttachment> {
-  return new Promise<ImageAttachment>((resolve, reject) => {
+export function readAttachmentFile(file: File): Promise<Attachment> {
+  return new Promise<Attachment>((resolve, reject) => {
     const reader = new FileReader();
     reader.onerror = () => reject(new Error(`${file.name || 'the file'} could not be read`));
     reader.onload = () => {
-      resolve({
-        kind: 'image',
-        mimeType: file.type as ImageMimeType,
-        data: stripDataPrefix(typeof reader.result === 'string' ? reader.result : ''),
-        name: file.name === '' ? null : file.name
-      });
+      const common = { data: stripDataPrefix(typeof reader.result === 'string' ? reader.result : ''), name: file.name || null };
+      resolve(isImageMimeType(file.type)
+        ? { kind: 'image', mimeType: file.type, ...common }
+        : { kind: 'file', mimeType: file.type || 'application/octet-stream', ...common });
     };
     reader.readAsDataURL(file);
   });
@@ -59,20 +56,20 @@ export function readImageFile(file: File): Promise<ImageAttachment> {
 
 export interface AcceptResult {
   /** What the composer should hold now: the ones it had plus the ones that passed. */
-  accepted: ImageAttachment[];
+  accepted: Attachment[];
   /** The first refusal, naming the file and the limit it hit, or null. */
   refused: string | null;
 }
 
 /**
- * The incoming images against the three caps, in the order a user meets them:
+ * The incoming attachments against the caps, in the order a user meets them:
  * a format no agent reads, a body over `ATTACHMENT_MAX_BYTES`, then more than
  * `ATTACHMENTS_PER_TURN` in one turn. Everything that passes is kept, so one
  * bad file in a drop of five does not lose the other four.
  */
 export function acceptAttachments(
-  current: ImageAttachment[],
-  incoming: ImageAttachment[]
+  current: Attachment[],
+  incoming: Attachment[]
 ): AcceptResult {
   const accepted = [...current];
   let refused: string | null = null;
@@ -82,7 +79,7 @@ export function acceptAttachments(
 
   for (const attachment of incoming) {
     const name = attachment.name ?? strings.composer.attachUnnamed;
-    if (!isImageMimeType(attachment.mimeType)) {
+    if (attachment.kind === 'image' && !isImageMimeType(attachment.mimeType)) {
       refuse(fill(strings.composer.attachFormat, { name, type: attachment.mimeType, formats: FORMATS }));
       continue;
     }
