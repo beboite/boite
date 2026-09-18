@@ -882,6 +882,7 @@ export class FakeClient implements ObservableClient {
       }
       case 'threads.create': {
         const params = rawParams as RpcParams<'threads.create'>;
+        if (!this.#providers.some(provider => provider.id === params.providerId)) throw this.#notFound('provider', params.providerId);
         const project = this.#projects.find((p) => p.id === params.projectId);
         if (!project) throw this.#notFound('project', params.projectId);
         this.#checkSpeed(params.providerId, params.accountId, params.model ?? null, params.speed ?? null);
@@ -1053,7 +1054,9 @@ export class FakeClient implements ObservableClient {
         if (params.expectedSelectionVersion !== undefined && params.expectedSelectionVersion !== (this.#thread(params.threadId).selectionVersion ?? 0)) {
           throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'the model selection changed; review the selected model and send again' });
         }
-        const provider = this.#providers.find(p => p.id === this.#thread(params.threadId).providerId)!;
+        const providerId = this.#thread(params.threadId).providerId;
+        const provider = this.#providers.find(p => p.id === providerId);
+        if (!provider) throw this.#notFound('provider', providerId);
         const error = attachmentError(params.attachments ?? [], provider);
         if (error) throw new RpcFailure({ code: RpcErrorCode.Refused, ...error });
         const turn = this.#startTurn(params.threadId, params.prompt, params.attachments ?? []);

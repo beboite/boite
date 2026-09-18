@@ -4,6 +4,16 @@ import { RpcErrorCode } from '@boite/contracts';
 
 afterEach(() => vi.useRealTimers());
 
+test('fake threads reject unknown providers even when speed is omitted', async () => {
+  const client = new FakeClient({ delayMs: 0 });
+  await client.connect();
+  try {
+    const before = await client.call('threads.list', {});
+    await expect(client.call('threads.create', { projectId: 'p-boite', providerId: 'unknown', accountId: 'a-echo' })).rejects.toMatchObject({ code: RpcErrorCode.NotFound });
+    expect(await client.call('threads.list', {})).toEqual(before);
+  } finally { client.close(); }
+});
+
 test.each([{ data: '?' }, { mimeType: '' }, { name: 42 }, { kind: 'unknown' }, { data: 'A'.repeat(7 * 1048576) }])('fake uploads refuse malformed attachment fields before creating a turn: %#', async change => {
   const client = new FakeClient({ delayMs: 0 });
   await client.connect();
