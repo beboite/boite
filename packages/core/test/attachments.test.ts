@@ -38,6 +38,15 @@ test('file names cannot escape storage or use Windows device names; empty files 
   }
 });
 
+test('re-uploading a file does not reuse an agent-modified copy', async () => {
+  const { writeFileSync } = await import('node:fs');
+  const first = JSON.parse(fileReference(harness.dataDir, file));
+  writeFileSync(first.path, 'changed by an agent');
+  const next = JSON.parse(fileReference(harness.dataDir, file));
+  expect(readFileSync(next.path).toString()).toBe('%PDF-test');
+  expect(readFileSync(first.path).toString()).toBe('changed by an agent');
+});
+
 test('only images depend on provider image support; malformed and oversized files are refused', () => {
   const provider = structuredClone(harness.core.providers.require('echo'));
   provider.capabilities.images = false;

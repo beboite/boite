@@ -1,5 +1,5 @@
-import { createHash } from 'node:crypto';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { createHash, randomUUID } from 'node:crypto';
+import { lstatSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Attachment, FileAttachment, ImageAttachment, MessagePart } from '@boite/contracts';
 
@@ -11,9 +11,17 @@ export function fileReference(dataDir: string, file: FileAttachment | Extract<Me
   const name = `file-${(file.name ?? 'attachment').replace(/[^\p{L}\p{N}._ -]/gu, '_').slice(-120).replace(/[. ]+$/, '') || 'attachment'}`;
   const directory = join(dataDir, 'attachments', hash);
   mkdirSync(directory, { recursive: true });
-  const path = join(directory, name);
+  let path = join(directory, name);
   try { writeFileSync(path, body, { flag: 'wx', mode: 0o600 }); }
-  catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error; }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+    // Agents can edit files. Preserve their edits, but never present changed bytes as a new upload.
+    const unchanged = lstatSync(path).isFile() && readFileSync(path).equals(body);
+    if (!unchanged) {
+      path = join(directory, `${randomUUID()}-${name}`);
+      writeFileSync(path, body, { flag: 'wx', mode: 0o600 });
+    }
+  }
   return JSON.stringify({ name: file.name, path, mimeType: file.mimeType, bytes: body.length });
 }
 
