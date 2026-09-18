@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { ArrowLeft, Bell, ChevronRight, Monitor, Palette } from '@lucide/svelte';
+  import { ArrowLeft, Bell, ChevronRight, Monitor, Palette, Mic } from '@lucide/svelte';
   import type { Store } from '../lib/store.svelte';
   import { workspace } from '../lib/workspace.svelte';
   import { strings } from '../lib/strings';
@@ -7,14 +7,15 @@
   import AppearancePage from './AppearancePage.svelte';
   import MachinesPage from './MachinesPage.svelte';
   import PhoneSettings from './PhoneSettings.svelte';
+  import VoiceSettings from './VoiceSettings.svelte';
 
   let { store }: { store: Store } = $props();
   let phone = $state(false);
-  let page = $derived(store.settingsTab === 'appearance' || store.settingsTab === 'machines'
+  let page = $derived(store.settingsTab === 'appearance' || store.settingsTab === 'machines' || store.settingsTab === 'voice'
     ? store.settingsTab : phone ? 'phone' : 'home');
   let machine = $derived(workspace.machines.find(machine => machine.store === store));
   let title = $derived(page === 'phone' ? strings.mobile.settingsPhone
-    : page === 'appearance' ? strings.settings.tabs.appearance : strings.machines.heading);
+    : page === 'voice' ? strings.speech.heading : page === 'appearance' ? strings.settings.tabs.appearance : strings.machines.heading);
   let detail = $derived(page !== 'home');
   $effect(() => { if (detail) return mobileOverlay(back); });
 
@@ -46,6 +47,9 @@
           <button class="ghost row" data-testid="settings-tab-machines" onclick={() => store.showSettings('machines')}>
             <Monitor size={20} /><span><strong>{strings.connection.manage}</strong><small>{strings.mobile.settingsMachinesHint}</small></span><ChevronRight size={18} />
           </button>
+          <button class="ghost row" data-testid="settings-tab-voice" onclick={() => store.showSettings('voice')}>
+            <Mic size={20} /><span><strong>{strings.speech.heading}</strong><small>{strings.speech.phoneHint}</small></span><ChevronRight size={18} />
+          </button>
         </div>
         <p>{strings.mobile.settingsRemoteHint}</p>
       </section>
@@ -61,6 +65,8 @@
           <p class="scope" data-testid="mobile-settings-scope">{machine?.label ?? store.endpointUrl ?? strings.connection.current} · {strings.connection[store.connection]}</p>
           <PhoneSettings {store} showServerSettings={false} />
         </div>
+      {:else if page === 'voice'}
+        <VoiceSettings {store} readOnly />
       {:else if page === 'appearance'}
         <AppearancePage />
       {:else}

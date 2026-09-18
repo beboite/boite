@@ -9,7 +9,7 @@ import type {
   FileEntry,
   GitDiff,
   GitStatus,
-  ImageAttachment,
+  Attachment,
   ImportableSession,
   Keybindings,
   KeybindingCommand,
@@ -80,7 +80,7 @@ import { DEFAULT_MODEL_NAMES, INITIAL_MODEL_DEFAULTS, readModelDefaults, writeMo
 import { FAVORITES_KEY, isNamedModel, readFavorites, type FavoriteModel } from './model-order';
 
 export type Page = 'chat' | 'settings';
-export type SettingsTab = 'general' | 'machines' | 'appearance' | 'keyboard' | 'accounts' | 'plugins' | 'usage' | 'resources' | 'experiments';
+export type SettingsTab = 'voice' | 'general' | 'machines' | 'appearance' | 'keyboard' | 'accounts' | 'plugins' | 'usage' | 'resources' | 'experiments';
 
 /** A login process the core runs for one account, as `account.login` reports it. */
 export interface LoginState {
@@ -206,7 +206,7 @@ export class Store {
     if (bytes <= 4 * 1024 * 1024 && thread.messages.length <= 2000) this.#readingThreads.set(thread.id, thread);
     while (this.#readingThreads.size > 4) this.#readingThreads.delete(this.#readingThreads.keys().next().value!);
   }
-  #pendingSends = new Map<string, { id: string; prompt: string; attachments: ImageAttachment[]; selectionVersion: number }>();
+  #pendingSends = new Map<string, { id: string; prompt: string; attachments: Attachment[]; selectionVersion: number }>();
   machineId = '';
   visible = true;
   threadKey(id: string): string { return this.machineId ? JSON.stringify([this.machineId, id]) : id; }
@@ -1442,8 +1442,8 @@ export class Store {
    */
   composerStates = $state<Record<string, {
     text: string;
-    attachments: ImageAttachment[];
-    queued: { text: string; attachments: ImageAttachment[] }[];
+    attachments: Attachment[];
+    queued: { text: string; attachments: Attachment[] }[];
     sending: boolean;
     paused: boolean;
   }>>({});
@@ -1474,7 +1474,7 @@ export class Store {
     return choice;
   }
 
-  async submit(prompt: string, choice: Choice, attachments: ImageAttachment[] = []): Promise<boolean> {
+  async submit(prompt: string, choice: Choice, attachments: Attachment[] = []): Promise<boolean> {
     if ((prompt.trim().length === 0 && attachments.length === 0) || this.connection !== 'ready') return false;
     try {
       if (activityCommand(prompt) && attachments.length) throw new Error(strings.activity.noAttachments);
@@ -1522,7 +1522,7 @@ export class Store {
   async submitAndDraft(
     prompt: string,
     choice: Choice,
-    attachments: ImageAttachment[] = []
+    attachments: Attachment[] = []
   ): Promise<boolean> {
     const projectId = this.openThread?.projectId ?? this.draft?.projectId;
     const threadId = this.openThread?.id;
@@ -1537,7 +1537,7 @@ export class Store {
   async send(
     prompt: string,
     threadId = this.openThread?.id,
-    attachments: ImageAttachment[] = []
+    attachments: Attachment[] = []
   ): Promise<boolean> {
     const client = this.#client;
     if (!client || !threadId || this.connection !== 'ready') return false;
@@ -1575,7 +1575,7 @@ export class Store {
       // image sends the params it always sent.
       let pending = this.#pendingSends.get(threadId);
       const selectionVersion = (this.openThread?.id === threadId ? this.openThread : this.threads.find((thread) => thread.id === threadId))?.selectionVersion ?? 0;
-      if (!pending || pending.selectionVersion !== selectionVersion || pending.prompt !== prompt || pending.attachments.length !== attachments.length || pending.attachments.some((a, i) => a.data !== attachments[i]?.data || a.mimeType !== attachments[i]?.mimeType || a.name !== attachments[i]?.name)) {
+      if (!pending || pending.selectionVersion !== selectionVersion || pending.prompt !== prompt || pending.attachments.length !== attachments.length || pending.attachments.some((a, i) => a.kind !== attachments[i]?.kind || a.data !== attachments[i]?.data || a.mimeType !== attachments[i]?.mimeType || a.name !== attachments[i]?.name)) {
         const bytes = crypto.getRandomValues(new Uint8Array(16));
         pending = { id: Array.from(bytes, b => b.toString(16).padStart(2, '0')).join(''), prompt, attachments: [...attachments], selectionVersion };
         this.#pendingSends.set(threadId, pending);

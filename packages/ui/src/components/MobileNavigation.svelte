@@ -19,10 +19,10 @@
   let rows = $derived((screen === 'activity' ? active : entries)
     .filter(e => `${e.thread.title} ${e.project?.name} ${e.machine.label}`.toLowerCase().includes(search.toLowerCase()))
     .toSorted((a, b) => (Number(b.thread.status === 'waiting') - Number(a.thread.status === 'waiting')) || b.thread.updatedAt - a.thread.updatedAt));
-  let projects = $derived(machines.flatMap(m => m.store.projects.map(p => ({
+  let projects = $derived([...machines.flatMap(m => m.store.projects.map(p => ({
     id: JSON.stringify([m.id, p.id]), label: p.name, hint: m.label,
     active: m.store === store && p.id === project?.id
-  }))));
+  }))), ...(store.owner ? [{ id: 'add-project', label: strings.sidebar.addProject, hint: '', active: false }] : [])]);
 
   function show(next: typeof screen) {
     store.showChat();
@@ -31,6 +31,7 @@
     screen = next;
   }
   async function pickProject(key: string) {
+    if (key === 'add-project') { store.projectPickerOpen = true; return; }
     const [id, projectId] = JSON.parse(key) as [string, string];
     const target = machines.find(m => m.id === id);
     if (!target) return;
@@ -45,7 +46,7 @@
   {/if}
   <div class="identity">
     <span class="machine">{machine?.label} · {strings.connection[store.connection]}</span>
-    <Menu items={projects} onpick={pickProject} label={strings.mobile.project} placement="bottom" variant="text">
+    <Menu items={projects} onpick={pickProject} label={strings.mobile.project} placement="bottom" variant="text" testid="mobile-project">
       {project?.name ?? strings.mobile.project}<ChevronDown size={14} />
     </Menu>
   </div>
@@ -81,7 +82,7 @@
   .mobile-header, .mobile-list, .mobile-tabs { display: none; }
   @media (max-width: 720px) {
     .mobile-header.settings { display: none; }
-    .mobile-header { display: flex; align-items: center; gap: 8px; min-height: 60px; padding: 4px max(12px, env(safe-area-inset-right)) 4px max(12px, env(safe-area-inset-left)); border-bottom: 1px solid var(--color-border); background: var(--color-titlebar); padding-top: max(4px, env(safe-area-inset-top)); }
+    .mobile-header { display: flex; align-items: center; gap: 8px; min-height: 56px; padding: 4px max(12px, env(safe-area-inset-right)) 4px max(12px, env(safe-area-inset-left)); background: var(--color-background); padding-top: max(4px, env(safe-area-inset-top)); }
     .identity { min-width: 0; flex: 1; }
     .machine { display: block; font-size: var(--text-xs); color: var(--color-muted-foreground); padding-left: 4px; }
     .identity :global(.trigger) { max-width: 100%; font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
@@ -95,9 +96,9 @@
     .title { font-size: var(--text-base); font-weight: 500; white-space: normal; overflow-wrap: anywhere; }
     .detail { font-size: var(--text-xs); color: var(--color-muted-foreground); }
     .unread { width: 7px; height: 7px; border-radius: 50%; background: var(--color-accent); }
-    .mobile-tabs { display: flex; flex-shrink: 0; padding: 4px max(8px, env(safe-area-inset-right)) max(4px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left)); border-top: 1px solid var(--color-border); background: var(--color-titlebar); }
-    .mobile-tabs button { flex: 1; display: flex; flex-direction: column; justify-content: center; gap: 4px; height: 56px; color: var(--color-muted-foreground); font-size: var(--text-xs); }
-    .mobile-tabs button.active { color: var(--color-accent); background: var(--color-accent-soft); }
+    .mobile-tabs { display: flex; flex-shrink: 0; padding: 2px max(8px, env(safe-area-inset-right)) max(4px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left)); background: var(--color-background); }
+    .mobile-tabs button { flex: 1; display: flex; flex-direction: column; justify-content: center; gap: 4px; height: 52px; color: var(--color-muted-foreground); font-size: var(--text-xs); }
+    .mobile-tabs button.active { color: var(--color-accent); background: transparent; }
     .activity-icon { position: relative; height: 20px; }
     .badge { position: absolute; top: -6px; left: 14px; min-width: 16px; border-radius: var(--radius-sm); padding: 0 3px; background: var(--color-live); color: var(--color-background); font-size: var(--text-xs); }
     .mobile-header { grid-row: 1; grid-column: 1; }

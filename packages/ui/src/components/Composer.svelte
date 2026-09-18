@@ -1,8 +1,10 @@
 <script lang="ts">
-  import { ArrowUp, GitBranch, Paperclip, ShieldCheck, Square, X } from '@lucide/svelte';
+  import { ArrowUp, FileText, GitBranch, Paperclip, ShieldCheck, Square, X } from '@lucide/svelte';
   import { tick, untrack } from 'svelte';
-  import type { ImageAttachment, PermissionMode } from '@boite/contracts';
-  import { acceptAttachments, readImageFile } from '../lib/attachments';
+  import type { Attachment, PermissionMode } from '@boite/contracts';
+  import { bytes } from '../lib/format';
+  import { ATTACHMENT_MAX_BYTES, ATTACHMENTS_PER_TURN } from '@boite/contracts';
+  import { acceptAttachments, decodedBytes, readAttachmentFile } from '../lib/attachments';
   import { AGENT_PREFIX, appCommands, isAgentCommand, runCommand } from '../lib/commands.svelte';
   import { rankItems, type PaletteItem } from '../lib/palette';
   import { clearStash, DRAFT_STASH_KEY, readStash, writeStash } from '../lib/prefs';
@@ -15,6 +17,8 @@
   import MentionMenu from './MentionMenu.svelte';
   import SlashMenu from './SlashMenu.svelte';
   import ThreadActivity from './ThreadActivity.svelte';
+  import Dictation from './Dictation.svelte';
+  import ComposerOptions from './ComposerOptions.svelte';
 
   /**
    * `centered` is the draft's placement: the parent stacks the composer under
@@ -29,10 +33,13 @@
   let key = $derived(store.openThread?.id ?? DRAFT_STASH_KEY);
   let composer = $derived(store.composerStates[key]);
   let text = $derived(composer?.text ?? '');
-  /** The images this prompt carries, the same array the strip above the box draws. */
-  let attachments = $derived<ImageAttachment[]>(composer?.attachments ?? []);
+  /** The attachments this prompt carries, the same array the strip above the box draws. */
+  let attachments = $derived<Attachment[]>(composer?.attachments ?? []);
   let choice = $state<Choice | null>(null);
   let picking = $state(false);
+  let readingFiles = $state(0);
+  let dictating = $state(false);
+  let speechPreview = $state(''), speechStatus = $state(''), speechError = $state(false);
   let box = $state<HTMLTextAreaElement | undefined>(undefined);
   let inputWidth = $state(0);
   let inputScroll = $state(0);
@@ -133,13 +140,15 @@
     }
   });
   let bound = $derived(store.openThread !== null);
-  /** The attach button is only there for an agent that reads images. */
-  let takesImages = $derived(provider?.capabilities.images ?? false);
+  /** Every agent can read uploaded files through its local tools. */
+  let canAttach = $derived(provider !== null && provider !== undefined);
   let canSend = $derived(
     (text.trim().length > 0 || attachments.length > 0) &&
+      readingFiles === 0 &&
       choice !== null &&
       store.connection === 'ready' &&
       !picking &&
+      !dictating &&
       !composer?.sending
   );
 
@@ -464,34 +473,47 @@
     state.sending = false;
   }
 
-  // -- images -----------------------------------------------------------------
-  // Three ways in, one path: the attach button, a paste carrying image items,
-  // and image files dropped on the box. `lib/attachments.ts` owns the caps.
+  // -- attachments -----------------------------------------------------------------
+  // Three ways in, one path: the attach button, pasted files,
+  // and files dropped on the box. `lib/attachments.ts` owns the caps.
 
   /**
-   * Reads the files and keeps what the caps allow. A provider that reads no
-   * image refuses the lot by name rather than dropping them in silence.
+   * Reads files one at a time, checking their sizes before allocating base64.
    */
   async function take(files: File[]) {
     if (files.length === 0) return;
-    if (provider && !provider.capabilities.images) {
-      store.error = fill(strings.composer.attachNoImages, { provider: provider.name });
-      return;
-    }
     const state = stateForInput();
-    const read = await Promise.all(files.map(readImageFile));
-    const { accepted, refused } = acceptAttachments(state.attachments, read);
-    state.attachments = accepted;
-    if (refused !== null) store.error = refused;
-  }
-
-  function imagesOf(list: FileList | null | undefined): File[] {
-    return Array.from(list ?? []).filter((file) => file.type.startsWith('image/'));
+    const attachmentProvider = provider;
+    readingFiles += 1;
+    try {
+    for (const file of files) {
+      if (file.size > ATTACHMENT_MAX_BYTES) {
+        store.error = fill(strings.composer.attachTooLarge, { name: file.name, max: bytes(ATTACHMENT_MAX_BYTES) });
+        continue;
+      }
+      if (state.attachments.length >= ATTACHMENTS_PER_TURN) {
+        store.error = fill(strings.composer.attachTooMany, { name: file.name, max: String(ATTACHMENTS_PER_TURN) });
+        break;
+      }
+      try {
+        const attachment = await readAttachmentFile(file);
+        if (attachment.kind === 'image' && attachmentProvider && !attachmentProvider.capabilities.images) {
+          store.error = fill(strings.composer.attachNoImages, { provider: attachmentProvider.name });
+          continue;
+        }
+        const { accepted, refused } = acceptAttachments(state.attachments, [attachment]);
+        state.attachments = accepted;
+        if (refused !== null) store.error = refused;
+      } catch {
+        store.error = fill(strings.composer.attachReadError, { name: file.name });
+      }
+    }
+    } finally { readingFiles -= 1; }
   }
 
   function onchoose(event: Event) {
     const field = event.currentTarget as HTMLInputElement;
-    const files = imagesOf(field.files);
+    const files = Array.from(field.files ?? []);
     // The same picture picked twice in a row must fire `change` both times.
     field.value = '';
     void take(files);
@@ -499,7 +521,7 @@
 
   function onpaste(event: ClipboardEvent) {
     const files = Array.from(event.clipboardData?.items ?? [])
-      .filter((item) => item.kind === 'file' && item.type.startsWith('image/'))
+      .filter((item) => item.kind === 'file')
       .map((item) => item.getAsFile())
       .filter((file): file is File => file !== null);
     if (files.length === 0) return;
@@ -508,15 +530,15 @@
     void take(files);
   }
 
-  /** Only an image is taken here; a folder falls through to the app's own drop. */
+  /** File drops belong to the composer. */
   function ondragover(event: DragEvent) {
-    if (!Array.from(event.dataTransfer?.items ?? []).some((item) => item.type.startsWith('image/'))) return;
+    if (!Array.from(event.dataTransfer?.items ?? []).some((item) => item.kind === 'file')) return;
     event.preventDefault();
     event.stopPropagation();
   }
 
   function ondrop(event: DragEvent) {
-    const files = imagesOf(event.dataTransfer?.files);
+    const files = Array.from(event.dataTransfer?.files ?? []);
     if (files.length === 0) return;
     event.preventDefault();
     event.stopPropagation();
@@ -625,6 +647,7 @@
   async function openChip(testid: string) {
     await tick();
     const bar = box?.closest('[data-testid="composer"]');
+    if (window.matchMedia('(max-width: 720px)').matches && testid !== 'composer-picker') testid = 'composer-options';
     bar?.querySelector<HTMLElement>(`[data-testid="${testid}"]`)?.click();
   }
 
@@ -719,7 +742,7 @@
 <div class="composer-wrap" class:centered>
   <ThreadActivity {store} />
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="composer" data-testid="composer" {ondragover} {ondrop}>
+  <div class="composer" class:dictating data-testid="composer" {ondragover} {ondrop}>
     {#if composer && composer.queued.length > 0}
       <div class="queued" data-testid="composer-queued">
         <span class="subtle">{strings.composer.queued}</span>
@@ -740,8 +763,13 @@
       <div class="attachments" data-testid="composer-attachments">
         {#each attachments as attachment, at (at)}
           {@const label = attachment.name ?? strings.composer.attachAlt}
-          <div class="attachment" data-testid="composer-attachment" title={label}>
-            <img src="data:{attachment.mimeType};base64,{attachment.data}" alt={label} />
+          <div class="attachment" class:document={attachment.kind === 'file'} data-testid="composer-attachment" title={label}>
+            {#if attachment.kind === 'image'}
+              <img src="data:{attachment.mimeType};base64,{attachment.data}" alt={label} />
+            {:else}
+              <FileText size={20} strokeWidth={1.5} />
+              <span class="file-info"><span>{label}</span><small>{bytes(decodedBytes(attachment.data))}</small></span>
+            {/if}
             <button
               type="button"
               class="icon small remove"
@@ -803,10 +831,21 @@
       onhover={(index) => (mentionAt = index)}
     />
 
+    {#if speechStatus}
+      <div class="speech-preview" class:error={speechError} data-testid="dictation-preview">
+        <span class="speech-status" role={speechError ? 'alert' : 'status'}>{speechStatus}</span>
+        {#if speechPreview}<p aria-live="polite" aria-atomic="true">{speechPreview}</p>{/if}
+      </div>
+    {/if}
+
     <div class="bar">
+      {#key `${key}:${store.draft?.projectId ?? ''}`}
+      <ComposerOptions busy={picking} levels={effortLevels} effort={activeEffort} {speeds} speed={choice?.speed ?? null} mode={displayedMode} worktree={store.draft ? store.draft.worktree : null} {canAttach} onattach={() => picker?.click()} oneffort={pickEffort} onspeed={(speed) => void pick({ speed })} onmode={pickMode} onworktree={() => store.setDraftWorktree(!store.draft?.worktree)} />
+      {/key}
       <div class="chips">
         <ModelPicker {store} {choice} disabled={picking} onpick={pick} />
 
+        <div class="desktop-options">
         {#if effortLevels.length > 0 || speeds.length > 0}
           <EffortSlider levels={effortLevels} active={activeEffort} onpick={pickEffort} {speeds} speed={choice?.speed ?? null} onspeed={(speed) => void pick({ speed })} />
         {/if}
@@ -832,6 +871,7 @@
             {strings.composer.worktree}
           </button>
         {/if}
+        </div>
       </div>
 
 
@@ -841,7 +881,7 @@
           <Square size={12} strokeWidth={2.5} />
         </button>
       {/if}
-        {#if takesImages}
+        {#if canAttach}
           <button
             type="button"
             class="icon attach"
@@ -856,7 +896,6 @@
             bind:this={picker}
             class="file"
             type="file"
-            accept="image/png,image/jpeg,image/gif,image/webp"
             multiple
             tabindex="-1"
             aria-hidden="true"
@@ -866,6 +905,14 @@
         {/if}
 
 
+      {#key store}
+        {#key `${key}:${store.draft?.projectId ?? ''}`}
+          <Dictation {store} onbusy={(busy) => dictating = busy} onpreview={(text, status, error) => { speechPreview = text; speechStatus = status; speechError = error; }} ontext={(transcript) => {
+            const current = stateForInput().text;
+            put(current + (current && !/\s$/.test(current) ? ' ' : '') + transcript);
+          }} />
+        {/key}
+      {/key}
       <button
         type="button"
         class="primary icon send"
@@ -882,6 +929,10 @@
 </div>
 
 <style>
+  .speech-preview { padding: 0 14px 6px; min-width: 0; }
+  .speech-status { font-size: var(--text-xs); color: var(--color-muted-foreground); }
+  .speech-preview.error .speech-status { color: var(--color-danger); }
+  .speech-preview p { margin: 2px 0 0; font-size: var(--text-sm); line-height: 1.5; color: var(--color-foreground); overflow-wrap: anywhere; max-height: 3em; overflow-y: auto; }
   .composer-wrap {
     position: relative;
     flex: none;
@@ -927,7 +978,7 @@
   .queued-entry > span:first-child { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .queued-entry > span { display: inline-flex; align-items: center; gap: 4px; }
 
-  /* The images this prompt carries, above the box they were pasted into. */
+  /* The attachments this prompt carries, above the box they were pasted into. */
   .attachments {
     display: flex;
     flex-wrap: wrap;
@@ -946,6 +997,11 @@
     animation: pop var(--dur-2) var(--ease-out-quint);
   }
 
+  .attachment.document { width: min(240px, 100%); display: flex; align-items: center; gap: 10px; padding: 0 48px 0 12px; }
+  .file-info { min-width: 0; display: flex; flex-direction: column; gap: 3px; font-size: var(--text-sm); }
+  .file-info > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .file-info small { color: var(--color-muted-foreground); font-size: var(--text-xs); }
+  .attachment.document .remove { width: 44px; height: 44px; top: 5px; right: 0; background: transparent; }
   .attachment img {
     width: 100%;
     height: 100%;
@@ -1041,6 +1097,7 @@
     flex-wrap: wrap;
     min-width: 0;
   }
+  .desktop-options { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
 
   .chips :global(.trigger), .chips :global(.speed), .chips .worktree {
     height: var(--control);
@@ -1076,6 +1133,18 @@
   }
 
   @media (max-width: 720px) {
+    .bar { gap: 2px; padding: 0 8px 6px; }
+    .desktop-options, .attach { display: none; }
+    .chips { flex: 1; flex-wrap: nowrap; }
+    .chips :global(.picker) { min-width: 0; max-width: 100%; }
+    .chips :global(.picker > .trigger) { max-width: 100%; height: var(--touch-target); padding: 0 6px; border: none; background: transparent; font-weight: 500; color: var(--color-muted-foreground); }
+    .chips :global(.picker > .trigger > .label) { min-width: 0; max-width: none; }
+    .composer { box-shadow: none; border-radius: var(--radius-xl); }
+    .composer:focus-within { box-shadow: none; border-color: var(--color-edge); }
+    .send, .stop { border-radius: 50%; margin-left: 2px; }
+    .dictating .send { display: none; }
+    .speech-preview { padding: 0 16px 8px; }
+    .speech-status { color: var(--color-accent); }
     textarea, .input-mirror { font-size: var(--text-md); }
     .composer-wrap {
       padding: 6px 10px 10px;

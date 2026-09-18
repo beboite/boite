@@ -41,8 +41,8 @@ test('queued prompts keep their thread, and browser project and account actions 
     expect((await client.call('threads.get', { threadId: b.id })).messages).toHaveLength(0);
 
     await page.send('Emulation.setDeviceMetricsOverride', { width: 420, height: 860, deviceScaleFactor: 1, mobile: true });
-    await page.click(selector('sidebar-toggle'));
-    await page.click(selector('add-project'));
+    await page.click(selector('mobile-project'));
+    await page.click('[data-value="add-project"]');
     await page.waitFor('document.querySelector("[data-testid=project-path]")');
     await page.screenshot(join(artifacts, 'phone-add-project.png'));
     const directory = join(core.dataDir, 'second-project');

@@ -27,6 +27,7 @@ import { PluginStore } from './plugins.ts';
 import { Worktrees } from './worktree.ts';
 import { ActivityStore } from './activity.ts';
 import { PushStore } from './push.ts';
+import { SpeechStore } from './speech.ts';
 
 export const CORE_VERSION: string = pkg.version;
 
@@ -106,6 +107,7 @@ export class Core {
   readonly fileTickets = new FileTickets();
   /** Where the `boite` shim is, prepended to the PATH of every process a thread launches. */
   readonly cliDir: string | null = resolveCliDir();
+  readonly speech: SpeechStore;
 
   /**
    * The server tells the core what it alone can know. The default answers no
@@ -140,6 +142,7 @@ export class Core {
     this.imports = new ImportStore(this);
     this.activity = new ActivityStore(this);
     this.push = new PushStore(this);
+    this.speech = new SpeechStore(this);
 
     registerModules(this);
     this.procs.applySettings(this.settings.get());
@@ -181,6 +184,7 @@ export class Core {
   }
 
   async close(): Promise<void> {
+    await this.speech.close();
     await this.push.close();
     this.activity.close();
     await this.plugins.close();
