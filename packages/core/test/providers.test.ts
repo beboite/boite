@@ -84,7 +84,7 @@ describe('providers', () => {
     const { loaded, rejected } = await client.call('providers.list', {});
     expect(rejected).toEqual([]);
     const ids = loaded.map((provider) => provider.id).sort();
-    expect(ids).toEqual(['antigravity', 'claude', 'codex', 'echo', 'grok', 'opencode', 'pi']);
+    expect(ids).toEqual(['antigravity', 'antigravity-cli', 'claude', 'codex', 'echo', 'grok', 'opencode', 'pi']);
 
     const echo = loaded.find((provider) => provider.id === 'echo');
     expect(echo?.source).toBe('shipped');
@@ -218,6 +218,45 @@ describe('providers', () => {
     } else {
       expect(profile?.launch?.args).toEqual([]);
     }
+  });
+
+  test('the shipped antigravity cli descriptor runs the installed agy on the user s own login', async () => {
+    const client = await harness.connect();
+    const { loaded, rejected } = await client.call('providers.list', {});
+    expect(rejected).toEqual([]);
+
+    const cli = loaded.find((provider) => provider.id === 'antigravity-cli');
+    expect(cli?.source).toBe('shipped');
+    expect(cli?.protocol).toBe('agy');
+    expect(cli?.name).toBe('Antigravity CLI');
+    expect(cli?.shortName).toBe('agy');
+    expect(cli?.models).toEqual([{ id: 'default', name: 'Antigravity CLI default', default: true }]);
+    // Print mode has no approval gate, and a plan mode behind `--mode plan`.
+    expect(cli?.capabilities.approvals).toBe(false);
+    expect(cli?.capabilities.planMode).toBe(true);
+    // Nothing to download: the user installs agy, so there is no install state.
+    expect(cli?.install).toBeNull();
+
+    const descriptor = harness.core.providers.require('antigravity-cli');
+    // The token sits in the system keyring and nothing moves the config
+    // directory, so there is no session file to read and no isolation to offer.
+    expect(descriptor.auth).toEqual({ kind: 'none' });
+    expect(descriptor.login).toBeUndefined();
+    expect(descriptor.isolation).toBeUndefined();
+
+    const profile = descriptor.profiles[currentOs()];
+    expect(profile?.isolation).toEqual({});
+    expect(profile?.launch).toBeUndefined();
+    expect(profile?.unsetEnv).toBeUndefined();
+    // Never a process closed by name: the user's own agy runs beside Boite's.
+    expect(profile?.close?.processes).toEqual([]);
+    expect(profile?.env?.['BROWSER']).toBe(join(harness.dataDir, currentOs() === 'windows' ? 'browser-noop.cmd' : 'browser-noop.sh'));
+
+    const windows = descriptor.profiles['windows'];
+    expect(windows?.executable[0]).toEqual({ kind: 'path', value: 'agy' });
+    expect(windows?.executable[1]?.kind).toBe('file');
+    expect(windows?.executable[1]?.value.endsWith(join('AppData', 'Local', 'agy', 'bin', 'agy.exe'))).toBe(true);
+    expect(windows?.executable[1]?.value).not.toContain('{home}');
   });
 
   test('the shipped codex descriptor loads and is launched as the app-server', async () => {

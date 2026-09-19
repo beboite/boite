@@ -25,6 +25,7 @@ import { InstallManager } from './install.ts';
 import { isNpmSpec, resolveNpm } from './npm.ts';
 import { notFound, refused } from '../errors.ts';
 import antigravityShipped from './shipped/antigravity.json';
+import antigravityCliShipped from './shipped/antigravity-cli.json';
 import claudeShipped from './shipped/claude.json';
 import codexShipped from './shipped/codex.json';
 import grokShipped from './shipped/grok.json';
@@ -52,6 +53,7 @@ const SHIPPED_DIR = join(import.meta.dir, 'shipped');
 
 const SHIPPED_SOURCES: { file: string; raw: unknown; when?: () => boolean }[] = [
   { file: 'shipped/antigravity.json', raw: antigravityShipped },
+  { file: 'shipped/antigravity-cli.json', raw: antigravityCliShipped },
   { file: 'shipped/claude.json', raw: claudeShipped },
   { file: 'shipped/codex.json', raw: codexShipped },
   { file: 'shipped/grok.json', raw: grokShipped },
@@ -60,7 +62,7 @@ const SHIPPED_SOURCES: { file: string; raw: unknown; when?: () => boolean }[] = 
   { file: 'shipped/echo.json', raw: echoShipped, when: echoEnabled },
 ];
 
-const PROTOCOLS: readonly Protocol[] = ['claude-sdk', 'codex-appserver', 'pi', 'acp', 'echo'];
+const PROTOCOLS: readonly Protocol[] = ['claude-sdk', 'codex-appserver', 'pi', 'acp', 'agy', 'echo'];
 const OS_KEYS: readonly Os[] = ['windows', 'linux', 'macos'];
 const AUTH_KINDS: readonly ProviderAuth['kind'][] = ['oauth-cli', 'api-key', 'none'];
 const CANDIDATE_KINDS: readonly ExecutableCandidate['kind'][] = ['path', 'file', 'npm'];

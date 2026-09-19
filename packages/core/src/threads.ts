@@ -539,6 +539,8 @@ export class ThreadStore {
     if (protocol === 'acp' && !this.commands.get(threadId)?.some((command) => command.name === 'compact')) {
       throw refused('this agent has not advertised a compact command', { threadId });
     }
+    // agy's print mode refuses every interactive-only slash command, `/compact` among them.
+    if (protocol === 'agy') throw refused('the Antigravity CLI takes no /compact in print mode', { threadId });
     return this.startTurn(threadId, protocol === 'echo' ? '[compact]' : '/compact', [], expectedSelectionVersion, 'compact');
   }
 
@@ -1006,6 +1008,9 @@ export class ThreadStore {
         return spawned;
       },
       spawnChild: this.leasedSpawnChild(threadId, provider),
+      killTree: () => {
+        this.core.procs.killTree(threadId);
+      },
     };
   }
 
@@ -1189,7 +1194,7 @@ export class ThreadStore {
 }
 
 /** The protocols whose models come from the agent, not from the descriptor. */
-const PROBED_PROTOCOLS: readonly Protocol[] = ['acp', 'codex-appserver', 'pi'];
+const PROBED_PROTOCOLS: readonly Protocol[] = ['acp', 'codex-appserver', 'pi', 'agy'];
 
 /**
  * What this account may run: the descriptor's models, plus the ones the last

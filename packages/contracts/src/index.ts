@@ -29,7 +29,12 @@ export type Timestamp = number;
 // Providers: one JSON descriptor per provider, shipped or user-supplied.
 // ---------------------------------------------------------------------------
 
-export type Protocol = 'claude-sdk' | 'codex-appserver' | 'pi' | 'acp' | 'echo';
+/**
+ * How the core talks to an agent. `agy` is the Antigravity CLI's own print
+ * mode, `agy -p= --input-format stream-json --output-format stream-json`: one
+ * JSON prompt per line on stdin, one JSON event per line on stdout.
+ */
+export type Protocol = 'claude-sdk' | 'codex-appserver' | 'pi' | 'acp' | 'agy' | 'echo';
 
 export type Os = 'windows' | 'linux' | 'macos';
 

@@ -82,6 +82,24 @@ function announcedCallback(loginUrl: string | null): URL | null {
   return redirect === null ? null : loopbackCallback(redirect);
 }
 
+/**
+ * An account of its own needs something that points the agent at its
+ * directory: an isolation variable, or a login Boite runs there. A provider
+ * with neither would take the directory and then read the user's own login
+ * anyway, so the second account would be the first one under another name.
+ * The Antigravity CLI is that case: nothing moves `~/.gemini/antigravity-cli`
+ * and its token sits in the system keyring.
+ */
+function refuseUnisolable(provider: ProviderDescriptor): void {
+  const profile = profileFor(provider);
+  if (profile === undefined) return;
+  if (Object.keys(profile.isolation).length > 0 || provider.login !== undefined) return;
+  throw refused(
+    `${provider.name} has no variable that moves its login and no login command Boite can run, so an account of its own would still use your own login: use the default account`,
+    { providerId: provider.id, field: `profiles.${currentOs()}.isolation`, expected: 'an isolation variable or a login block' },
+  );
+}
+
 export class AccountStore {
   private readonly logins = new Map<AccountId, LoginRun>();
 
@@ -103,6 +121,7 @@ export class AccountStore {
     // A provider that is always isolated has no default location to fall back
     // on: its own login belongs to the user's IDE and is never Boite's to use.
     const useDefault = params.useDefaultLocation === true && provider.isolation?.alwaysIsolated !== true;
+    if (!useDefault) refuseUnisolable(provider);
     let isolationDir: string | null = null;
     if (!useDefault) {
       isolationDir = join(this.core.dataDir, 'accounts', id);
