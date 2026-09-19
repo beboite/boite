@@ -9,8 +9,8 @@ through a pairing key; the phone reaches it the same way it reaches any core.
 ## Docker
 
 The image includes the built UI, Bun, Node.js, Git, ripgrep and pinned Claude
-Code, Codex, OpenCode and pi CLIs. It runs as UID 1000. Grok and Antigravity are
-not preinstalled; use a custom image or a supported managed installer. Agent
+Code, Codex, OpenCode and pi CLIs. It runs as UID 1000. Grok, Antigravity and
+Muse Code are not preinstalled; use a custom image or a supported managed installer. Agent
 authentication is still required. No login is built into the image.
 
 Release workflows publish `ghcr.io/beboite/boite/boite-server` for Linux x64 and ARM64.

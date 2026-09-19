@@ -782,7 +782,8 @@ const PROBED_MODELS: ModelInfo[] = [
 const PROBE_PROVIDERS: Pick<ProviderSummary, 'id' | 'name' | 'protocol' | 'login'>[] = [
   { id: 'codex', name: 'Codex', protocol: 'codex-appserver', login: { kind: 'command' } },
   { id: 'pi', name: 'pi', protocol: 'pi', login: false },
-  { id: 'grok', name: 'Grok', protocol: 'acp', login: { kind: 'command' } }
+  { id: 'grok', name: 'Grok', protocol: 'acp', login: { kind: 'command' } },
+  { id: 'muse', name: 'Muse Code', protocol: 'muse', login: { kind: 'command' } }
 ];
 
 /**
@@ -2837,7 +2838,7 @@ export class FakeClient implements ObservableClient {
     if (account.providerId !== providerId) {
       throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'the account belongs to another provider' });
     }
-    const dynamic = ['acp', 'codex-appserver', 'pi'].includes(provider.protocol);
+    const dynamic = ['acp', 'codex-appserver', 'muse', 'pi'].includes(provider.protocol);
     if (dynamic && !provider.available) {
       throw new RpcFailure({ code: RpcErrorCode.Unavailable, message: `${provider.name} is not available on this machine` });
     }

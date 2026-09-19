@@ -106,7 +106,10 @@ agent's own spelling out of a candidate list, because ACP standardises the call
 and never the ids. `codex-appserver` carries its own ndjson JSON-RPC peer, since
 OpenAI ships the protocol as generated TypeScript rather than a client, and its
 permission mode is part of the session key: Codex takes the approval policy and
-the sandbox when the thread opens and has no call that changes them later. `pi`
+the sandbox when the thread opens and has no call that changes them later.
+`muse` has its own peer too, for Muse Code's session protocol: the approval
+mode is a call on the running host and the sandbox is a host flag, so only the
+flags are in the session key. `pi`
 takes its session on the command line rather than through a call, so the driver
 mints the id itself. `echo` streams the prompt back, can call a fake tool, ask a
 permission and spawn a child on request, and never touches the network.
