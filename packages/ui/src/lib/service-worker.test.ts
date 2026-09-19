@@ -17,7 +17,7 @@ function worker() {
   const cache = { put, match: vi.fn().mockResolvedValue(cached), addAll: vi.fn().mockResolvedValue(undefined) };
   const caches = { open: vi.fn().mockResolvedValue(cache), keys: vi.fn().mockResolvedValue(['boite-ui-v1', 'another-app']), delete: vi.fn().mockResolvedValue(true) };
   const fetch = vi.fn().mockResolvedValue(new Response('current shell'));
-  runInNewContext(source, { URL, fetch, caches, self: {
+  runInNewContext(source, { URL, fetch, caches, setTimeout, clearTimeout, self: {
     addEventListener: (name: string, listener: (event: any) => void) => listeners.set(name, listener),
     location: { origin: 'https://boite.test' }, registration: { showNotification: notification },
     clients: { matchAll, openWindow, claim: vi.fn().mockResolvedValue(undefined) }, skipWaiting: vi.fn().mockResolvedValue(undefined)
@@ -54,6 +54,25 @@ test('the current navigation replaces the offline shell and a failed core uses t
   sw.fetch.mockResolvedValue(new Response('proxy unavailable', { status: 503 }));
   const offline = await sw.emit('fetch', { request }) as Response;
   expect(await offline.text()).toBe('previous shell');
+});
+
+test('a core slower than the patience gets the cached shell now and its answer kept for the next open', async () => {
+  vi.useFakeTimers();
+  try {
+    const sw = worker();
+    let land!: (response: Response) => void;
+    sw.fetch.mockReturnValue(new Promise<Response>((resolve) => { land = resolve; }));
+    const request = { method: 'GET', mode: 'navigate', url: 'https://boite.test/', headers: new Headers() };
+    const answered = sw.emit('fetch', { request }) as Promise<Response>;
+    await vi.advanceTimersByTimeAsync(2500);
+    expect(await (await answered).text()).toBe('previous shell');
+    expect(sw.put).not.toHaveBeenCalled();
+    land(new Response('current shell'));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(sw.put).toHaveBeenCalledWith('/', expect.any(Response));
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 test('installation caches entry scripts, styles and fonts before taking control', async () => {
