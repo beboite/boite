@@ -70,7 +70,9 @@ usage error (the usage text on stderr).
 ## Where the command lives
 
 `boite` is `boite-core cli`: the same executable, one more subcommand, so the
-installer carries no second Bun binary. Two shims put it on the PATH,
+installer carries no second Bun binary. On Windows, where the sidecar is the
+runtime and the core a bundle beside it ([releasing.md](releasing.md)), both
+shims pass `core/main.js` before the subcommand. Two shims put it on the PATH,
 `packages/core/shims/boite` for a POSIX shell (Git Bash included) and
 `packages/core/shims/boite.cmd` for cmd and PowerShell; `stage-sidecar.ts`
 copies both beside `boite-core.exe` and the bundle overlay lists them as

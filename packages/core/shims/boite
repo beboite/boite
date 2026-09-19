@@ -1,3 +1,6 @@
 #!/bin/sh
-# The `boite` CLI of an installed Boite: the compiled core beside this file answers it.
-exec "$(dirname "$0")/boite-core" cli "$@"
+# The `boite` CLI of an installed Boite: the core beside this file answers it.
+# On Windows that core is the runtime plus the bundle in `core`, elsewhere the compiled core alone.
+here="$(dirname "$0")"
+if [ -f "$here/core/main.js" ]; then exec "$here/boite-core" "$here/core/main.js" cli "$@"; fi
+exec "$here/boite-core" cli "$@"
