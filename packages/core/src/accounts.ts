@@ -5,7 +5,7 @@ import type { Core } from './core.ts';
 import { newId } from './ids.ts';
 import { invalidParams, messageOf, notFound, refused } from './errors.ts';
 import { runAcpLogin, type AcpLoginRun } from './drivers/acp.ts';
-import { agentEnv, profileFor, resolveExecutable } from './providers/loader.ts';
+import { agentEnv, launchPrefix, profileFor, resolveExecutable } from './providers/loader.ts';
 import { browserNoopPath, browserNoopScript, currentOs, homePath } from './paths.ts';
 import type { SpawnedPipedProcess } from './procs.ts';
 
@@ -309,7 +309,7 @@ export class AccountStore {
       acp = runAcpLogin({
         methodId,
         executable,
-        args: profile?.launch?.args ?? [],
+        args: [...launchPrefix(profile), ...(profile?.launch?.args ?? [])],
         cwd: account.isolationDir ?? this.core.dataDir,
         env,
         spawnChild: (cmd, args, opts) => this.core.procs.spawnChild(loginThreadId(accountId), cmd, args, opts),

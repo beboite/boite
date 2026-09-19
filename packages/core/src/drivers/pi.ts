@@ -34,7 +34,7 @@ import type {
 import { messageOf, unavailable } from '../errors.ts';
 import { resolveDataDir } from '../paths.ts';
 import type { SpawnedChild } from '../procs.ts';
-import { profileFor, resolveExecutable } from '../providers/loader.ts';
+import { launchPrefix, profileFor, resolveExecutable } from '../providers/loader.ts';
 import type {
   Driver,
   ProbeContext,
@@ -617,6 +617,7 @@ class PiSession {
     }
 
     const args = [
+      ...launchPrefix(profile),
       ...(profile?.launch?.args ?? []),
       '--session-id',
       sessionId,
@@ -1085,7 +1086,7 @@ async function readModels(ctx: ProbeContext): Promise<ModelInfo[]> {
   }
 
   let lastStderr = '';
-  const child = ctx.spawnChild(executable, [...(profile?.launch?.args ?? []), '--no-session'], {
+  const child = ctx.spawnChild(executable, [...launchPrefix(profile), ...(profile?.launch?.args ?? []), '--no-session'], {
     cwd: ctx.cwd,
     env: agentEnv(ctx.accountEnv),
   });

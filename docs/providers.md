@@ -97,12 +97,19 @@ speaks, so `codex.ts` reports none.
 
 - `detect` is `{ command }` or `{ file }`. A provider whose detect does not
   resolve reports unavailable rather than failing at spawn.
-- `executable` is an ordered candidate list: `kind: "file"` is an exact path,
-  `kind: "path"` a name looked up on PATH, first hit wins.
-- `launch.args` put the agent into the mode Boite speaks to, and they let a
-  descriptor name a script rather than a program: npm installs several of these
-  agents as a shim Bun cannot spawn, so the profile runs `node` with the
-  package's own `dist/cli.js` as the first argument.
+- `executable` is an ordered candidate list, first hit wins. `kind: "file"` is
+  an exact path and `kind: "path"` a name looked up on PATH. `kind: "npm"` names
+  a globally installed package, `@scope/name#bin`, for the agents npm installs
+  as a `.cmd` shim Bun cannot spawn. The core looks for the package under the
+  npm prefix (`npm_config_prefix`, `%APPDATA%/npm`, the directory of `npm`,
+  `node` or the bin on PATH), pnpm's and Bun's global directories and the usual
+  Unix prefixes. It reads the bin script from the package's own `package.json`
+  and runs it with the Node installed beside that prefix, else Node on PATH,
+  else Bun. The script goes first on the command line, before `launch.args`, and
+  the summary shows the script as the executable. Only the `pi` and `acp`
+  protocols take an `npm` candidate: the SDK and app-server drivers spawn the
+  program with no leading argument.
+- `launch.args` put the agent into the mode Boite speaks to.
 - `isolation` is the environment that makes one account blind to the others, with
   `{isolationDir}` substituted per account at spawn ([accounts.md](accounts.md)).
 - `close.processes` names what the core closes when an account is removed, and is
@@ -196,14 +203,15 @@ is the deterministic fake the tests and the bench run on, loaded only under
 | Antigravity | `acp` | `agy_acp_server.exe` from the managed install | `GEMINI_HOME`, every account | `antigravity-acp/acp_token.json` | the protocol's `authenticate` |
 | Grok | `acp` | `grok [--permission-mode <mode>] agent [--always-approve] stdio` | `GROK_HOME` | `auth.json` | `grok login --device-auth` |
 | Codex | `codex-appserver` | `codex app-server` | `CODEX_HOME` | `auth.json` | `codex login --device-auth` |
-| pi | `pi` | `pi --mode rpc` | `PI_CODING_AGENT_DIR` | `auth.json` | none |
+| pi | `pi` | `node <the package's bin> --mode rpc`, or `pi --mode rpc` from PATH off Windows | `PI_CODING_AGENT_DIR` | `auth.json` | none |
 | Echo | `echo` | nothing | nothing | none | a script beside the descriptor |
 
 Claude is the one whose model list is entirely in the descriptor, current and
 legacy, each with its own effort scale; the other five carry `default` alone and
 let the probe fill the rest. On Windows, Codex and pi are both reached around an
 npm shim Bun cannot spawn, one through a vendored executable and the other
-through `node`; Grok is reached through the binary its own installer puts under
+through an `npm` candidate under either package scope pi has shipped from
+(`@earendil-works` and `@mariozechner`); Grok is reached through the binary its own installer puts under
 `{home}/.grok/bin`, with PATH behind it.
 
 Antigravity is the one that only exists as a managed install: its binary is nowhere until

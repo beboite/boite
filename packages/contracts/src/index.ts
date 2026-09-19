@@ -34,8 +34,13 @@ export type Protocol = 'claude-sdk' | 'codex-appserver' | 'pi' | 'acp' | 'echo';
 export type Os = 'windows' | 'linux' | 'macos';
 
 export interface ExecutableCandidate {
-  /** Where to look, in order. The user override always wins over all of these. */
-  kind: 'path' | 'file' | 'registry' | 'acp-registry';
+  /**
+   * Where to look, in order. The user override always wins over all of these.
+   * `npm` names a package (`@scope/name`, `#bin` to pick one of several) that
+   * Boite finds in the global npm, pnpm or Bun install directories and runs as
+   * `node <its bin script>`; only the `pi` and `acp` protocols take one.
+   */
+  kind: 'path' | 'file' | 'registry' | 'acp-registry' | 'npm';
   value: string;
 }
 
