@@ -76,6 +76,11 @@ in-memory fake.
   UI tests run on and the fastest way to look at a screen.
 - `?fake=1&long=1` adds a four-hundred-message thread, which is what the
   windowed message list is looked at on.
+- The app opens on a new thread's draft in the last used project, as if New
+  thread had been pressed: the project last opened or drafted in on that
+  device (kept per core in `localStorage`), else the project of the most recent
+  thread, else the first one. `?fake=1&open=recent` opens the most recent
+  thread instead, which is the page most captures and e2e tests look at.
 - `?grant=<grant>` is a pairing link: the page exchanges it once for a session
   key of its own and stores that. `?token=<token>` opens the page on a token
   one already holds, and `?core=<url>` points it somewhere else. All three are
