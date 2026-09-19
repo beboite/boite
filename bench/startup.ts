@@ -8,7 +8,8 @@
  *   bun run bench/startup.ts [--runs 7] [--exe path/to/boite-shell.exe] [--core-command "bun path/to/main.js"]
  *
  * `--core-command` is handed to the shell as `BOITE_CORE_COMMAND`, to time a
- * core other than the sidecar beside the executable.
+ * core other than the sidecar beside the executable. The shell splits it on
+ * whitespace, so neither path in it may hold a space.
  *
  * The first run of a fresh WebView2 profile pays for creating the profile, so
  * every run here is that cold case. Medians are what to quote.
@@ -94,7 +95,12 @@ async function once(): Promise<Run> {
     let timing: { paint: number; ready: number } | undefined;
     while (timing === undefined) {
       try {
-        timing = await page.evaluate<{ paint: number; ready: number }>(probe);
+        // The probe's own limit is the CDP call's 20 s: the run's deadline ends it sooner, and `finally` then closes what was started.
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const expired = new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error('the UI never reported ready before the deadline')), Math.max(0, deadline - Date.now()));
+        });
+        timing = await Promise.race([page.evaluate<{ paint: number; ready: number }>(probe), expired]).finally(() => clearTimeout(timer));
       } catch (error) {
         if (!String(error).includes('context') || Date.now() > deadline) throw error;
         await Bun.sleep(10);

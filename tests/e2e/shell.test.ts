@@ -89,7 +89,7 @@ function staleCoreReason(): string | null {
   // On Windows the sidecar is the runtime and the core is the bundle beside it, which is the file that goes stale.
   const bundle = join(dirname(sidecar), 'core', 'main.js');
   const newest = newestSource(SOURCE_ROOTS, SOURCE_EXTENSIONS);
-  for (const artifact of [built, ...(built === sidecar && existsSync(bundle) ? [bundle] : []), join(dirname(built), 'jobs-worker.js'), join(dirname(built), 'guard-worker.js')]) {
+  for (const artifact of [built, ...(built === sidecar && process.platform === 'win32' ? [bundle] : []), join(dirname(built), 'jobs-worker.js'), join(dirname(built), 'guard-worker.js')]) {
     if (!existsSync(artifact)) return `missing core artifact: ${artifact}. Run bun run stage:core`;
     const builtAtMs = statSync(artifact).mtimeMs;
     if (newest !== null && builtAtMs < newest.mtimeMs) {
