@@ -1,0 +1,67 @@
+{
+  "id": "muse",
+  "schemaVersion": 1,
+  "name": "Muse Code",
+  "shortName": "Muse",
+  "protocol": "muse",
+  "roots": ["{home}/.config/muse", "{home}/.local/share/muse", "{home}/.local/state/muse", "{agentsDir}", "{isolationDir}"],
+  "profiles": {
+    "windows": {
+      "detect": {},
+      "executable": [
+        { "kind": "file", "value": "{agentsDir}/muse.exe" },
+        { "kind": "file", "value": "{home}/AppData/Local/Programs/muse/muse.cmd" },
+        { "kind": "path", "value": "muse" }
+      ],
+      "install": {
+        "format": "binary",
+        "arch": "x64",
+        "version": "1.3.0-R3401.1",
+        "url": "https://lookaside.facebook.com/lookaside/muse/download/?channel=muse&version=1.3.0-R3401.1&file=muse-x86-windows.exe",
+        "sha256": "e0a7cfef0755a6c7d249ad66a4d3cccdc52671563c8f1ff3a66881cdb11a6bba",
+        "archiveBytes": 415378168,
+        "files": [{ "path": "muse.exe", "bytes": 415378168 }]
+      },
+      "launch": { "args": ["serve", "--trust-workspace"] },
+      "isolation": { "XDG_CONFIG_HOME": "{isolationDir}", "XDG_DATA_HOME": "{isolationDir}", "XDG_STATE_HOME": "{isolationDir}" },
+      "env": { "MUSE_NO_AUTO_UPDATE": "1" },
+      "unsetEnv": ["META_API_KEY"],
+      "close": { "processes": ["muse.exe"] }
+    },
+    "linux": {
+      "detect": {},
+      "executable": [
+        { "kind": "file", "value": "{home}/.local/bin/muse" },
+        { "kind": "path", "value": "muse" }
+      ],
+      "launch": { "args": ["serve", "--trust-workspace"] },
+      "isolation": { "XDG_CONFIG_HOME": "{isolationDir}", "XDG_DATA_HOME": "{isolationDir}", "XDG_STATE_HOME": "{isolationDir}" },
+      "env": { "MUSE_NO_AUTO_UPDATE": "1" },
+      "unsetEnv": ["META_API_KEY"],
+      "close": { "processes": ["muse"] }
+    },
+    "macos": {
+      "detect": {},
+      "executable": [
+        { "kind": "file", "value": "{home}/.local/bin/muse" },
+        { "kind": "path", "value": "muse" }
+      ],
+      "launch": { "args": ["serve", "--trust-workspace"] },
+      "isolation": { "XDG_CONFIG_HOME": "{isolationDir}", "XDG_DATA_HOME": "{isolationDir}", "XDG_STATE_HOME": "{isolationDir}" },
+      "env": { "MUSE_NO_AUTO_UPDATE": "1" },
+      "unsetEnv": ["META_API_KEY"],
+      "close": { "processes": ["muse"] }
+    }
+  },
+  "auth": { "kind": "oauth-cli", "session": ["muse/auth.json"] },
+  "login": { "command": ["muse", "login"] },
+  "models": [{ "id": "default", "name": "Muse default", "default": true }],
+  "capabilities": {
+    "approvals": true,
+    "hooks": false,
+    "checkpoint": false,
+    "images": true,
+    "planMode": true,
+    "resume": true
+  }
+}

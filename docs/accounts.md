@@ -24,6 +24,9 @@ environment variables, with `{isolationDir}` substituted at spawn:
   one variable is enough and the session file is `auth.json` under it.
 - Claude moves with `CLAUDE_CONFIG_DIR`, and files `.credentials.json`.
 - Grok moves with `GROK_HOME`, and files `auth.json`.
+- Muse Code moves with the three XDG homes, `XDG_CONFIG_HOME`, `XDG_DATA_HOME`
+  and `XDG_STATE_HOME`, and files its login at `muse/auth.json` under the config
+  one, which is `~/.config/muse/auth.json` for the default account.
 - Antigravity moves with `GEMINI_HOME`, files `antigravity-acp/acp_token.json`
   under it, and has no default account at all: its descriptor says
   `isolation.alwaysIsolated`, so `accounts.add` gives every account a directory
