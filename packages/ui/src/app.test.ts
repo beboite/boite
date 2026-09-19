@@ -108,6 +108,7 @@ async function mountOnFake(search = '/?fake=1'): Promise<void> {
   store.booted = false;
   store.openThread = null;
   store.draft = null;
+  store.page = 'chat';
   store.composerStates = {};
   store.projectPickerOpen = false;
   running = mount(App, { target });
@@ -143,6 +144,13 @@ test('the app opens on a new thread in the project last worked in', async () => 
   await mountOnFake('/?fake=1&open=landing');
   await waitFor(() => store.draft !== null);
   expect(store.draft?.projectId).toBe('p-boite');
+
+  // Settings opened before the core answered is not taken back by the landing.
+  store.draft = null;
+  store.showSettings();
+  await store.openLanding();
+  expect(store.draft).toBeNull();
+  expect(store.page).toBe('settings');
 });
 
 test('New thread opens a draft and the first send creates the thread titled from the prompt', async () => {

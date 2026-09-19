@@ -384,7 +384,7 @@
                 {#if quota}
                   <div class="quota">
                     <label class="monitor"><span>{strings.quotas.monitor}</span><input type="checkbox" role="switch" data-testid="quota-monitor" checked={quota.enabled} onchange={(event) => void monitor(account.id, event.currentTarget.checked)} /></label>
-                    {#if quota.enabled}<QuotaList rows={[quota]} bare />{/if}
+                    <QuotaList rows={[quota]} bare />
                   </div>
                 {/if}
               </div>

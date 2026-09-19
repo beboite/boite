@@ -879,11 +879,13 @@ export class Store {
         this.machineId = endpoint.url;
         this.#attachEndpoint(endpoint);
       }
+      const opens = this.#openGeneration;
       await this.connect();
       // `&open=recent` lands on the most recent thread instead of a draft, the
       // page most captures are about. Fake core only, like `&long=1`.
       if (import.meta.env.DEV && params.get('fake') === '1' && params.get('open') === 'recent') await this.openWhereLeft();
-      else await this.openLanding();
+      // A thread clicked while the lists arrived is still opening: it wins.
+      else if (this.#openGeneration === opens) await this.openLanding();
       // `&panel=<kind>` opens that surface on the thread the page lands on, so
       // a capture of it needs no clicks. Fake core only, like `&long=1`.
       if (import.meta.env.DEV && params.get('fake') === '1') this.#openQueryPanel(params.get('panel'));
@@ -979,7 +981,8 @@ export class Store {
   /** Where the app opens: a new thread's draft in the last used project, as if New thread had been pressed. */
   async openLanding(): Promise<void> {
     if (!this.visible) return;
-    if (this.openThread || this.draft) return;
+    // Settings opened while the core was still answering stays open.
+    if (this.openThread || this.draft || this.page !== 'chat') return;
     const project = this.lastProject();
     if (project) this.startDraft(project);
   }

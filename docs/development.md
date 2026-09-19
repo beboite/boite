@@ -286,7 +286,9 @@ visual: a diff, a passing test and a green build all say nothing about what a
 screen looks like.
 
 `BOITE_E2E_BROWSER` overrides the browser lookup when the candidates in that file
-find nothing.
+find nothing. Helium is the last of them: on a fresh profile it reloads the tab
+a few seconds after launch, so a test that acts in that window sees the page
+boot twice, and its dictation tests fail.
 
 ## The opt-in live tests
 
