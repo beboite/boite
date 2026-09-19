@@ -84,8 +84,9 @@ async function shellFromNetworkFirst(event) {
   // The request carries the pairing query, the precached entry does not, so
   // the shell is matched by its own path rather than by this request.
   const cached = await cache.match(SHELL);
-  const response = fetch(event.request).then(async (answer) => {
-    if (answer.ok) await cache.put(SHELL, answer.clone());
+  const response = fetch(event.request).then((answer) => {
+    // A full disk must not cost the navigation its answer: the write is on its own.
+    if (answer.ok) event.waitUntil(cache.put(SHELL, answer.clone()).catch(() => undefined));
     return answer;
   });
   // Nothing to fall back on: the core's own answer, a 5xx included, beats a

@@ -75,6 +75,14 @@ test('a core slower than the patience gets the cached shell now and its answer k
   }
 });
 
+test('a cache that refuses the write still lets the navigation through', async () => {
+  const sw = worker();
+  sw.put.mockRejectedValue(new Error('QuotaExceededError'));
+  const request = { method: 'GET', mode: 'navigate', url: 'https://boite.test/', headers: new Headers() };
+  const answer = await sw.emit('fetch', { request }) as Response;
+  expect(await answer.text()).toBe('current shell');
+});
+
 test('with no cached shell a failing core answers for itself', async () => {
   const sw = worker();
   sw.cache.match.mockResolvedValue(undefined);
