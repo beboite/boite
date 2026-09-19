@@ -56,3 +56,39 @@ test('an engine that is not there yet is one click away, and choices apply witho
   // Keys still wait for their button: nothing typed, nothing to save.
   expect(document.querySelector<HTMLButtonElement>('[data-testid="voice-save"]')!.disabled).toBe(true);
 });
+
+test('a status poll that succeeds keeps the error of a failed action, and a hidden window polls nothing', async () => {
+  vi.useFakeTimers();
+  const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(false);
+  try {
+    const call = vi.fn(async (method: string) => {
+      if (method === 'speech.status') return status();
+      if (method === 'speech.config') return config;
+      if (method === 'speech.install') throw new Error('disk full');
+      throw new Error(method);
+    });
+    show(call);
+    await settle();
+    document.querySelector<HTMLButtonElement>('[data-testid="voice-install"]')!.click();
+    await settle();
+    expect(document.querySelector('.error')?.textContent).toBe('disk full');
+
+    const polls = () => call.mock.calls.filter(([method]) => method === 'speech.status').length;
+    const before = polls();
+    await vi.advanceTimersByTimeAsync(5000);
+    await settle();
+    expect(polls()).toBe(before + 1);
+    expect(document.querySelector('.error')?.textContent).toBe('disk full');
+
+    hidden.mockReturnValue(true);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(polls()).toBe(before + 1);
+    hidden.mockReturnValue(false);
+    document.dispatchEvent(new Event('visibilitychange'));
+    await settle();
+    expect(polls()).toBe(before + 2);
+  } finally {
+    hidden.mockRestore();
+    vi.useRealTimers();
+  }
+});

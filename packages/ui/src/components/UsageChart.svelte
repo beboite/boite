@@ -132,7 +132,7 @@
   tabindex="0"
   bind:clientWidth={width}
   onkeydown={keydown}
-  onfocus={() => { if (active === null) active = buckets.length - 1; }}
+  onfocus={() => { if (active === null && buckets.length > 0) active = buckets.length - 1; }}
   onblur={() => { active = null; }}
   data-testid="usage-chart"
 >

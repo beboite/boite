@@ -14,7 +14,7 @@
  */
 
 import { existsSync, mkdirSync } from 'node:fs';
-import { rm } from 'node:fs/promises';
+import { readdir, rm, stat } from 'node:fs/promises';
 import { isAbsolute, join, resolve } from 'node:path';
 import { PLUGIN_MANIFEST_FILE } from '@boite/contracts';
 import type { Core } from '../core.ts';
@@ -24,6 +24,7 @@ import { MANIFEST_MAX_BYTES, httpsProblem } from './manifest.ts';
 
 const REF_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/;
 const FETCH_TIMEOUT_MS = 60_000;
+const STALE_FETCH_MS = 15 * 60_000;
 const OUTPUT_MAX_BYTES = 1024 * 1024;
 
 let sequence = 0;
@@ -96,6 +97,7 @@ export async function fetchManifest(
   const allowLocal = options.allowLocal === true;
   const root = resolve(core.dataDir, 'plugins');
   mkdirSync(root, { recursive: true });
+  await sweepStale(core, root);
   const dir = join(root, `.fetch-${newId('')}`);
   const threadId = `plugin:fetch:${++sequence}`;
   const config = [
@@ -165,18 +167,46 @@ export async function fetchManifest(
     options.signal?.removeEventListener('abort', stop);
     // A helper git left behind (git-remote-https) goes with the job before the directory does.
     core.procs.killTree(threadId);
-    await removeWithRetry(dir);
+    await removeWithRetry(core, dir);
   }
 }
 
-/** Windows holds a pack file a moment after git exits. */
-async function removeWithRetry(dir: string): Promise<void> {
+/** Windows holds a pack file a moment after git exits. A directory that stays is logged and swept later. */
+async function removeWithRetry(core: Core, dir: string): Promise<void> {
+  let last: unknown = null;
   for (let attempt = 0; attempt < 20; attempt += 1) {
     try {
       await rm(dir, { recursive: true, force: true });
       return;
-    } catch {
+    } catch (error) {
+      last = error;
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
+  }
+  core.log('warn', `plugin fetch directory ${dir} was not removed (${messageOf(last)}); the next inspection sweeps it`);
+}
+
+/**
+ * The fetch directories a failed removal or a core killed mid-fetch left
+ * behind. Past this age no git of theirs can still run: a fetch is five gits
+ * of `FETCH_TIMEOUT_MS` at most.
+ */
+async function sweepStale(core: Core, root: string): Promise<void> {
+  let names: string[];
+  try {
+    names = await readdir(root);
+  } catch {
+    return;
+  }
+  const now = Date.now();
+  for (const name of names) {
+    if (!name.startsWith('.fetch-')) continue;
+    const dir = join(root, name);
+    try {
+      if (now - (await stat(dir)).mtimeMs < STALE_FETCH_MS) continue;
+    } catch {
+      continue;
+    }
+    await removeWithRetry(core, dir);
   }
 }

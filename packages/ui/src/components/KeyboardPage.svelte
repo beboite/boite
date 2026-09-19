@@ -133,10 +133,17 @@
     if (!event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey) held = [];
   }
 
+  /** A press or a focus anywhere but the row being recorded ends the recording, so the filter gets its keys back. */
+  function onoutside(event: Event) {
+    if (recording === null) return;
+    if (event.target instanceof Element && event.target.closest('[data-recording]')) return;
+    stop();
+  }
+
   const example = '{\n  "new-thread": "mod+shift+n",\n  "palette": "mod+p",\n  "sidebar": null\n}';
 </script>
 
-<svelte:window onkeydowncapture={onkeydown} onkeyupcapture={onkeyup} onblur={stop} />
+<svelte:window onkeydowncapture={onkeydown} onkeyupcapture={onkeyup} onpointerdowncapture={onoutside} onfocusincapture={onoutside} onblur={stop} />
 
 <div class="page" data-testid="keyboard-page">
   <header class="top">
@@ -171,7 +178,7 @@
       <h2 class="section-label" id="settings-keys-{group.id}">{strings.keyboard.groups[group.id]}</h2>
       <div class="card list">
         {#each group.rows as row (row.id)}
-          <div class="row" data-testid="keybinding-row" data-command={row.id} class:custom={row.custom} class:recording={recording === row.id}>
+          <div class="row" data-testid="keybinding-row" data-command={row.id} data-recording={recording === row.id || undefined} class:custom={row.custom} class:recording={recording === row.id}>
             <div class="what">
               <span class="label" title={row.id}>{row.label}</span>
               {#if row.custom}<span class="tag">{strings.keyboard.custom}</span>{/if}

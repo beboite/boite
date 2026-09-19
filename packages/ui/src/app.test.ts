@@ -587,6 +587,14 @@ test('a shortcut is recorded from the keys pressed, a taken one asks first, and 
   query<HTMLButtonElement>('[data-testid=keybindings-reset-all]').click();
   await waitFor(() => store.bindings.palette.text === 'mod+k' && store.bindings['theme-light'].text === null);
   expect(document.querySelector('[data-testid=keybindings-reset-all]')).toBeNull();
+
+  // Moving to the filter ends the recording, so its keys type instead of binding.
+  query<HTMLButtonElement>(`${row('pin')} [data-testid=keybinding-edit]`).click();
+  await waitFor(() => document.querySelector(`${row('pin')} [data-testid=keybinding-capture]`) !== null);
+  query('[data-testid=keybindings-filter]').dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
+  await waitFor(() => document.querySelector(`${row('pin')} [data-testid=keybinding-capture]`) === null);
+  expect(press({ key: 'p', ctrlKey: true, altKey: true })).toBe(true);
+  expect(store.bindings.pin.text).toBe(null);
 });
 
 test('removing a project asks first, and Cancel keeps it', async () => {

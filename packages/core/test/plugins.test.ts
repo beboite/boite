@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import { PLUGIN_MANIFEST_FILE } from '@boite/contracts';
@@ -275,6 +275,20 @@ describe('plugins from a git URL', () => {
     harness.core.plugins.allowLocalSources = false;
     await expect(client.call('plugins.inspect', { url: extra.path })).rejects.toThrow('plugin url must be an https URL');
     expect(readdirSync(join(harness.dataDir, 'plugins'))).toEqual([]);
+  }, 30_000);
+
+  test('the next inspection sweeps a fetch directory left behind, and leaves a running one alone', async () => {
+    harness = await startTestCore(); const client = await harness.connect();
+    harness.core.plugins.allowLocalSources = true;
+    const root = join(harness.dataDir, 'plugins');
+    const stale = join(root, '.fetch-stale');
+    const running = join(root, '.fetch-running');
+    for (const dir of [stale, running]) mkdirSync(join(dir, 'objects'), { recursive: true });
+    const hourAgo = new Date(Date.now() - 60 * 60_000);
+    utimesSync(stale, hourAgo, hourAgo);
+
+    await client.call('plugins.inspect', { url: repository('sweep', manifest({})).path });
+    expect(readdirSync(root).sort()).toEqual(['.fetch-running']);
   }, 30_000);
 
   test('an id added from one URL is not taken over by another', async () => {

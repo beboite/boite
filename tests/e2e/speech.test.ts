@@ -145,7 +145,7 @@ test('voice settings save API selection, hide credentials on reload, and fit pho
   for (const provider of ['OpenRouter', 'Groq']) {
     await page.evaluate(`Array.from(document.querySelectorAll('.segmented button')).find(button => button.textContent === ${JSON.stringify(provider)}).click()`);
     await page.waitFor(`Array.from(document.querySelectorAll('.segmented button')).find(button => button.textContent === ${JSON.stringify(provider)})?.getAttribute('aria-checked') === 'true'`);
-    await capture('speech-provider.png');
+    await capture(`speech-provider-${provider.toLowerCase()}.png`);
   }
   await page.click(id('voice-local'));
   await page.waitFor(`document.querySelector('${id('voice-status')}')?.dataset.state === 'ready' && document.querySelector('${id('voice-local')}')?.getAttribute('aria-checked') === 'true'`);

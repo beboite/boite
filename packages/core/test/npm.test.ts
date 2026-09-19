@@ -60,8 +60,9 @@ describe('npm candidates', () => {
 
   test('a manifest naming another package, a bin outside the package or a missing script is not a match', () => {
     install('@boite-test/renamed', { name: '@boite-test/other', bin: 'cli.js' }, ['cli.js']);
-    install('@boite-test/escape', { bin: '../../outside.js' }, []);
-    writeFileSync(join(prefix, 'outside.js'), '', 'utf8');
+    // The bin resolves beside the scope directory, so the file exists and only the containment check refuses it.
+    const escape = install('@boite-test/escape', { bin: '../../outside.js' }, []);
+    writeFileSync(join(escape, '..', '..', 'outside.js'), '', 'utf8');
     install('@boite-test/unbuilt', { bin: 'dist/cli.js' }, []);
 
     expect(resolveNpm('@boite-test/renamed')).toBeNull();

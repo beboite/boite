@@ -10,6 +10,8 @@
   let groqKey = $state(''), openrouterKey = $state('');
   let clearGroq = $state(false), clearOpenrouter = $state(false);
   let busy = $state(false), saved = $state(false), error = $state('');
+  // The poll's own failure, kept apart so a status that comes back never wipes the error of an action.
+  let pollError = $state('');
   // A core older than the voice engine answers MethodNotFound: say which machine to update, once.
   let unsupported = $state(false);
   let savedTimer: ReturnType<typeof setTimeout> | undefined;
@@ -23,24 +25,32 @@
     if (!client || store.connection !== 'ready') return;
     let live = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    // A hidden window asks nothing; the check that came due meanwhile runs when it shows again.
+    let due = false;
     unsupported = false;
     const refresh = async () => {
       try {
         const next = await client.call('speech.status', {});
         if (!live) return;
         status = next;
-        error = '';
+        pollError = '';
       } catch (cause) {
         if (!live) return;
         if (missing(cause)) { unsupported = true; return; }
-        error = message(cause);
+        pollError = message(cause);
       }
       // A download reports its progress every second; otherwise a slow check keeps the state honest.
-      if (live) timer = setTimeout(() => { if (!document.hidden) void refresh(); else timer = setTimeout(refresh, 1000); }, status?.installing ? 1000 : 5000);
+      if (live) timer = setTimeout(() => { if (document.hidden) due = true; else void refresh(); }, status?.installing ? 1000 : 5000);
     };
+    const visible = () => {
+      if (!live || !due || document.hidden) return;
+      due = false;
+      void refresh();
+    };
+    document.addEventListener('visibilitychange', visible);
     void refresh();
     if (store.owner && !readOnly) void client.call('speech.config', {}).then((value) => { if (live) config = value; }).catch((cause) => { if (live && !missing(cause)) error = message(cause); });
-    return () => { live = false; clearTimeout(timer); };
+    return () => { live = false; clearTimeout(timer); document.removeEventListener('visibilitychange', visible); };
   });
 
   function flash() {
@@ -150,6 +160,7 @@
     </section>
 
     {#if error}<p class="error" role="alert">{error}</p>{/if}
+    {#if pollError && pollError !== error}<p class="error" role="alert" data-testid="voice-poll-error">{pollError}</p>{/if}
 
     <h2 class="section-label">{strings.speech.engine}</h2>
     <div class="engines" role="radiogroup" aria-label={strings.speech.engine}>
@@ -206,7 +217,7 @@
     {/if}
 
     <section class="card">
-      <label>{strings.speech.language}<input class="language" data-testid="voice-language" maxlength="2" pattern="[a-z]{2}|" value={config.language} placeholder="auto" aria-describedby="voice-language-hint"
+      <label>{strings.speech.language}<input class="language" data-testid="voice-language" maxlength="2" pattern={'[a-z]{2}|'} value={config.language} placeholder="auto" aria-describedby="voice-language-hint"
         onchange={(event) => { const value = event.currentTarget.value.trim().toLowerCase(); if (value !== config!.language && /^([a-z]{2})?$/.test(value)) void apply({ language: value }); }} /></label>
       <p id="voice-language-hint">{strings.speech.languageHint}</p>
     </section>
