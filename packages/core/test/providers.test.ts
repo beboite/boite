@@ -311,7 +311,7 @@ describe('providers', () => {
   test('an npm candidate is refused on a protocol that cannot take a script argument', async () => {
     const body = validDescriptor();
     body.protocol = 'codex-appserver';
-    (body.profiles as Record<string, { executable: unknown }>).windows.executable = [{ kind: 'npm', value: '@scope/tool#tool' }];
+    (body.profiles as Record<string, { executable: unknown }>)['windows']!.executable = [{ kind: 'npm', value: '@scope/tool#tool' }];
     writeUserDescriptor('npm-codex.json', body);
     const client = await harness.connect();
     const { rejected } = await client.call('providers.reload', {});
@@ -322,7 +322,7 @@ describe('providers', () => {
 
   test('an npm candidate that is not a package name is refused', async () => {
     const body = validDescriptor();
-    (body.profiles as Record<string, { executable: unknown }>).linux.executable = [{ kind: 'npm', value: '../../escape' }];
+    (body.profiles as Record<string, { executable: unknown }>)['linux']!.executable = [{ kind: 'npm', value: '../../escape' }];
     writeUserDescriptor('npm-bad.json', body);
     const client = await harness.connect();
     const { rejected } = await client.call('providers.reload', {});

@@ -44,6 +44,12 @@
       {id: 'keybinding-file', label: strings.keyboard.file}
     ],
     experiments: [{id: 'theme-grain', label: strings.experiments.themeGrain.title}, {id: 'session-import', label: strings.experiments.sessionImport.title}],
+    usage: [
+      { id: 'usage-overview', label: strings.usage.overview },
+      { id: 'usage-breakdown', label: strings.usage.breakdown },
+      { id: 'usage-threads', label: strings.usage.threads },
+      { id: 'usage-limits', label: strings.usage.limits }
+    ],
     general: [
       { id: 'phone', label: strings.phone.heading },
       { id: 'projects', label: strings.settings.projects },

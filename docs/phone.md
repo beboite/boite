@@ -14,6 +14,8 @@ notification screen names the connected machine that will send its alerts.
 Machines lets the phone pair, switch, reconnect, or remove saved connections.
 Voice shows the connected core's dictation readiness. Engine installation and
 API credentials stay in desktop Voice settings, including for owner sessions.
+Usage shows the connected core's tokens and API cost per day, provider and
+model; its subscription limits need an owner session ([usage.md](usage.md)).
 
 Provider accounts, keyboard shortcuts, plugins, resource limits, pairing
 administration and server configuration stay in desktop settings. This smaller

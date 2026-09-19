@@ -5,6 +5,7 @@
 - [Accounts](accounts.md): agent logins and isolated accounts.
 - [Model switching](model-switching.md): changing models and providers in one conversation.
 - [Context](context.md): context usage and compaction.
+- [Usage](usage.md): tokens, API cost and limits per day, provider and model.
 - [Keyboard shortcuts](keybindings.md): defaults and customization.
 - [The right panel](panel.md): browser, changes, files, tasks and trace beside the chat.
 - [The `boite` CLI](cli.md): what an agent runs to reach its thread and its panel.

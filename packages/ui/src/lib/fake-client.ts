@@ -59,6 +59,7 @@ import {
 } from '@boite/contracts';
 import { decodedBytes } from './attachments';
 import { RpcFailure, type ClientState, type EventHandler, type ObservableClient } from './client';
+import { fakeUsageHistory, type FakeFinishedTurn } from './fake-usage';
 
 export interface FakeClientOptions {
   /** Milliseconds between two streamed chunks. Tests pass 0. */
@@ -108,6 +109,7 @@ const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>([
   'questions.answer',
   'scheduler.get',
   'usage.get',
+  'usage.history',
   'settings.get',
   'speech.status', 'speech.transcribe', 'speech.cancel',
   'keybindings.get'
@@ -817,6 +819,9 @@ export class FakeClient implements ObservableClient {
   #activityGenerations = new Map<string, number>();
   #processes: ProcessRecord[] = [];
   #usage = new Map<ThreadId, Usage>();
+  /** Turns this session finished, added to the seeded ledger `usage.history` draws. */
+  #finished: FakeFinishedTurn[] = [];
+  #usageSeeded = true;
   /** The project todo lists, every thread of a project reading the same cards. */
   #todos: Todo[] = [];
   /** The working tree `files.list`, `files.read` and `files.write` share. */
@@ -913,6 +918,7 @@ export class FakeClient implements ObservableClient {
       this.#processes = [];
       this.#todos = [];
       this.#usage.clear();
+      this.#usageSeeded = false;
       this.#scheduler = { ...this.#scheduler, running: [], queued: [] };
     }
   }
@@ -1654,6 +1660,13 @@ export class FakeClient implements ObservableClient {
         }
         return { byThread, total };
       }
+      case 'usage.history': {
+        const { edges } = rawParams as RpcParams<'usage.history'>;
+        const valid = Array.isArray(edges) && edges.length >= 2 && edges.length <= 367 &&
+          edges.every((edge, index) => typeof edge === 'number' && Number.isFinite(edge) && (index === 0 || edge > edges[index - 1]!));
+        if (!valid) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'edges: expected 2 to 367 strictly ascending timestamps in milliseconds' });
+        return fakeUsageHistory(edges, { seeded: this.#usageSeeded, finished: this.#finished });
+      }
 
       case 'settings.get':
         return { ...this.#settings };
@@ -2007,8 +2020,8 @@ export class FakeClient implements ObservableClient {
       status: account.providerId === 'echo' || account.providerId === 'pi' || account.id === 'a-antigravity' ? 'unsupported' : this.#quotaEnabled[account.id] === false || account.id === 'quota:antigravity-cli' && this.#quotaEnabled[account.id] !== true ? 'disabled' : 'ready',
       checkedAt: Date.now(), error: null,
       windows: this.#quotaEnabled[account.id] === false || account.id === 'quota:antigravity-cli' && this.#quotaEnabled[account.id] !== true ? [] : [
-        { id: 'primary', label: '5 hours', usedPercent: index === 0 ? 32 : 87, resetsAt: Date.now() + 2 * 3600_000 },
-        { id: 'secondary', label: 'Weekly', usedPercent: 61, resetsAt: Date.now() + 3 * 86400_000 },
+        { id: 'primary', label: '5 hours', usedPercent: [32, 87, 14, 48, 71, 6, 23, 40][index % 8]!, resetsAt: Date.now() + (1 + index % 4) * 3600_000 },
+        { id: 'secondary', label: 'Weekly', usedPercent: [61, 94, 38, 27, 55, 12, 73, 66][index % 8]!, resetsAt: Date.now() + (1 + index % 6) * 86400_000 },
       ],
     }));
   }
@@ -2250,6 +2263,7 @@ export class FakeClient implements ObservableClient {
     turn.finishedAt = this.#now();
     turn.usage = usage;
     this.#usage.set(thread.id, addUsage(this.#usage.get(thread.id) ?? emptyUsage(), usage));
+    this.#finished.push({ at: turn.finishedAt, threadId: thread.id, title: thread.title, projectId: thread.projectId, providerId: thread.providerId, model: thread.model, usage });
 
     this.#inFlight.delete(thread.id);
     thread.status = 'idle';

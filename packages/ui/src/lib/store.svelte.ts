@@ -39,8 +39,7 @@ import type {
   ThreadId,
   ThreadResources,
   ThreadSummary,
-  Todo,
-  Usage
+  Todo
 } from '@boite/contracts';
 import {
   RpcFailure,
@@ -90,11 +89,6 @@ export interface LoginState {
   /** The first https link it printed, once there is one. */
   url: string | null;
   exitCode: number | null;
-}
-
-export interface UsageReport {
-  byThread: Record<ThreadId, Usage>;
-  total: Usage;
 }
 
 /** A thread that exists only in the UI until its first message is sent. */
@@ -323,7 +317,6 @@ export class Store {
   /** Every command with its chord: the defaults, the file's entries over them. */
   bindings = $derived(resolveBindings(this.keybindings?.bindings ?? {}));
   resources = $state<ThreadResources[]>([]);
-  usage = $state<UsageReport | null>(null);
   trace = $state<ProcessRecord[]>([]);
   /**
    * The todo cards of each project, keyed by project id: the list is the
@@ -682,7 +675,6 @@ export class Store {
     on('turn.started', (turn) => this.#upsertTurn(turn.threadId, turn));
     on('turn.finished', (turn) => {
       this.#upsertTurn(turn.threadId, turn);
-      void this.refreshUsage();
       // A stop is the user's own doing: nothing to tell them.
       if (turn.status === 'done') this.#notify('done', turn.threadId, null);
       else if (turn.status === 'error') this.#notify('error', turn.threadId, turn.error);
@@ -1230,7 +1222,6 @@ export class Store {
   showSettings(tab: SettingsTab = 'general'): void {
     this.settingsTab = tab;
     this.page = 'settings';
-    if (tab === 'usage') void this.refreshUsage();
     if (tab === 'resources') void this.refreshResources();
   }
 
@@ -2033,16 +2024,6 @@ export class Store {
     if (!client) return;
     try {
       this.resources = await client.call('resources.list', {});
-    } catch (error) {
-      this.#fail(error);
-    }
-  }
-
-  async refreshUsage(): Promise<void> {
-    const client = this.#client;
-    if (!client) return;
-    try {
-      this.usage = await client.call('usage.get', {});
     } catch (error) {
       this.#fail(error);
     }

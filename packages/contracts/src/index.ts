@@ -392,6 +392,49 @@ export interface Usage {
   costUsdEquivalent: number | null;
 }
 
+/**
+ * The finished turns of one provider and model whose `finishedAt` falls in
+ * `[edges[bucket], edges[bucket + 1])` of a `usage.history` call.
+ */
+export interface UsageHistoryRow {
+  bucket: number;
+  providerId: ProviderId;
+  /** Null when the turn ran on the provider's default model. */
+  model: string | null;
+  /** Finished turns, whether or not the agent reported its usage. */
+  turns: number;
+  /** Turns among them that carried a usage report. */
+  reported: number;
+  /** Turns among them that carried an API-equivalent price. */
+  priced: number;
+  /**
+   * Sums over the reported turns. `inputTokens` never includes the cache reads,
+   * whatever the provider counts, so the four token fields add up to the tokens
+   * processed. `costUsdEquivalent` is null when no turn of the row was priced.
+   */
+  usage: Usage;
+}
+
+export interface UsageHistoryThread {
+  threadId: ThreadId;
+  title: string;
+  projectId: ProjectId;
+  providerId: ProviderId;
+  archived: boolean;
+  turns: number;
+  usage: Usage;
+}
+
+export interface UsageHistory {
+  edges: Timestamp[];
+  rows: UsageHistoryRow[];
+  /**
+   * The threads that spent the most over the whole range, by tokens, by cost
+   * and by turns, so a client can rank by any of the three. Unordered.
+   */
+  threads: UsageHistoryThread[];
+}
+
 export type TurnStatus = 'queued' | 'running' | 'done' | 'stopped' | 'error';
 
 /** Frozen when a prompt is accepted, including while it waits in the scheduler. */
@@ -1377,6 +1420,12 @@ export interface RpcMethods {
     params: { threadId?: ThreadId };
     result: { byThread: Record<ThreadId, Usage>; total: Usage };
   };
+  /**
+   * Finished turns summed per bucket, provider and model. `edges` are 2 to 367
+   * ascending timestamps chosen by the client, usually its local midnights, so
+   * a day follows the reader's calendar whatever the core's time zone.
+   */
+  'usage.history': { params: { edges: Timestamp[] }; result: UsageHistory };
 
   'settings.get': { params: Record<string, never>; result: Settings };
   'settings.set': { params: Partial<Settings>; result: Settings };
