@@ -11,7 +11,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { FILE_MAX_BYTES, FILE_ROUTE, FILE_TICKET_TTL_MS } from '@boite/contracts';
 import type { CoreClient } from '../src/client.ts';
-import { languageOf, mediaOf } from '../src/workdir.ts';
+import { languageOf, mediaOf, writeLandsInside } from '../src/workdir.ts';
 import { echoThread, startTestCore } from './harness.ts';
 import type { TestCore } from './harness.ts';
 
@@ -227,6 +227,31 @@ describe('files.write', () => {
       }
       expect(message).toBe('files.write path is a link to nothing: dangling.txt');
       expect(existsSync(target)).toBe(false);
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('writeLandsInside', () => {
+  test('a new file is judged by its nearest existing parent, with every link followed', () => {
+    const root = harness.dataDir;
+    const outside = mkdtempSync(join(tmpdir(), 'boite-outside-'));
+    try {
+      mkdirSync(join(root, 'real'), { recursive: true });
+      // Junctions need no privilege on Windows and read as directory links elsewhere.
+      symlinkSync(outside, join(root, 'out'), 'junction');
+      symlinkSync(join(root, 'real'), join(root, 'in'), 'junction');
+      expect(writeLandsInside(root, 'notes.md')).toBe(true);
+      expect(writeLandsInside(root, 'deep/new/notes.md')).toBe(true);
+      expect(writeLandsInside(root, 'in/notes.md')).toBe(true);
+      expect(writeLandsInside(root, '../notes.md')).toBe(false);
+      expect(writeLandsInside(root, join(outside, 'notes.md'))).toBe(false);
+      expect(writeLandsInside(root, 'out/notes.md')).toBe(false);
+      expect(writeLandsInside(root, 'out/deep/new/notes.md')).toBe(false);
+      if (linked(join(outside, 'not-there.txt'), join(root, 'dangling.txt'))) {
+        expect(writeLandsInside(root, 'dangling.txt')).toBe(false);
+      }
     } finally {
       rmSync(outside, { recursive: true, force: true });
     }

@@ -15,7 +15,7 @@
 import { appendFileSync } from 'node:fs';
 
 const DIRECTIVE =
-  /\[(command|approve|edit|edit-out|thought|usage|tasks|slow|crash|input|auth|server-request)\]/g;
+  /\[(command|approve|edit|edit-out|edit-link|thought|usage|tasks|slow|crash|input|auth|server-request)\]/g;
 const CHUNKS = 3;
 const UUID_V7 = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
@@ -24,6 +24,7 @@ type Directive =
   | 'approve'
   | 'edit'
   | 'edit-out'
+  | 'edit-link'
   | 'thought'
   | 'usage'
   | 'tasks'
@@ -215,9 +216,10 @@ async function runTurn(turnId: string, text: string): Promise<void> {
         break;
       }
       case 'edit':
-      case 'edit-out': {
+      case 'edit-out':
+      case 'edit-link': {
         const approvalId = `ap-${nextItemId()}`;
-        const path = directive === 'edit' ? 'notes.md' : '../outside.md';
+        const path = directive === 'edit' ? 'notes.md' : directive === 'edit-out' ? '../outside.md' : 'out-link/notes.md';
         const choice = await askApproval(turnId, approvalId, { kind: 'fileAccess', access: 'write', path });
         const allowed = choice === 'c-once' || choice === 'c-session';
         notify('approval/resolved', { approvalId, decision: allowed ? 'approved' : 'denied' });

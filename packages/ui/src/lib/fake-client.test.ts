@@ -164,6 +164,12 @@ test('fake probes expose distinct OpenCode, Codex, pi, Grok, Muse and Antigravit
     const pending = client.call('providers.probe', { providerId, accountId: `a-${providerId}` });
     const [result] = await Promise.all([pending, vi.runAllTimersAsync()]);
     catalogs.set(providerId, result.models.map((model) => model.id));
+    if (providerId === 'muse') {
+      // Like the real probe, each Muse model carries its own effort scale.
+      const demo = result.models.find((model) => model.id === 'muse-demo');
+      expect(demo?.effort?.levels.map((level) => level.id)).toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
+      expect(demo?.effort?.default).toBe('high');
+    }
   }
   expect(catalogs.get('opencode')).toContain('anthropic/claude-sonnet-5');
   for (const providerId of ['codex', 'pi', 'grok', 'muse', 'antigravity']) {
