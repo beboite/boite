@@ -38,6 +38,14 @@ export type ProviderLogo =
       href: string;
     };
 
+const antigravityLogo: ProviderLogo = {
+  kind: 'image',
+  viewBox: '0 0 128 128',
+  width: 128,
+  height: 128,
+  href: antigravityTile
+};
+
 export const providerLogos: Record<string, ProviderLogo> = {
   // `ClaudeAI`.
   claude: {
@@ -86,13 +94,9 @@ export const providerLogos: Record<string, ProviderLogo> = {
     ]
   },
   // `AntigravityIcon`: its png, taken out of T3 Code's data url byte for byte.
-  antigravity: {
-    kind: 'image',
-    viewBox: '0 0 128 128',
-    width: 128,
-    height: 128,
-    href: antigravityTile
-  },
+  antigravity: antigravityLogo,
+  // The Antigravity CLI is the same company's agent, installed by the user.
+  'antigravity-cli': antigravityLogo,
   // `PiAgentIcon`: the white mark on its black rounded square.
   pi: {
     kind: 'paths',

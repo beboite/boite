@@ -88,7 +88,7 @@ mute across restarts. Both decisions are pure logic classes tested on a fake of
 the Win32 calls, so no test ever creates a window or plays a sound.
 [docs/trace.md](trace.md) has the caps and the settings.
 
-## Five drivers, one interface
+## Six drivers, one interface
 
 `Driver.startTurn(ctx) -> TurnHandle`, and the driver's whole job is mapping one
 protocol onto the contract's parts. What they share: one process and one agent
@@ -108,7 +108,10 @@ OpenAI ships the protocol as generated TypeScript rather than a client, and its
 permission mode is part of the session key: Codex takes the approval policy and
 the sandbox when the thread opens and has no call that changes them later. `pi`
 takes its session on the command line rather than through a call, so the driver
-mints the id itself. `echo` streams the prompt back, can call a fake tool, ask a
+mints the id itself. `agy` runs the installed Antigravity CLI in its stream-json
+print mode, one JSON line per prompt and per event, with no SDK or protocol
+library behind it; the model, the effort and the permission mode are launch
+flags, and a later process resumes the conversation with `--conversation`. `echo` streams the prompt back, can call a fake tool, ask a
 permission and spawn a child on request, and never touches the network.
 
 ## Descriptors, tokens, managed installs
@@ -138,7 +141,7 @@ line by line with the first link it prints carried separately.
 
 ## The probe, because an agent owns its models
 
-A descriptor's model list is a starting point. A Claude, ACP, Codex or pi agent owns the
+A descriptor's model list is a starting point. A Claude, ACP, Codex, pi or agy agent owns the
 real one, so `providers.probe` spawns one short-lived process under the synthetic
 thread `probe:<providerId>:<accountId>`, asks the protocol's own models call,
 kills the child on every path, and caches the answer per provider and account

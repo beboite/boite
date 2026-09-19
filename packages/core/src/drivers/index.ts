@@ -84,9 +84,10 @@ const DRIVERS = new Map<Protocol, Driver>([
     lazyDriver('codex-appserver', () => import('./codex.ts').then((module) => module.createCodexDriver())),
   ],
   ['pi', lazyDriver('pi', () => import('./pi.ts').then((module) => module.createPiDriver()))],
+  ['agy', lazyDriver('agy', () => import('./agy.ts').then((module) => module.createAgyDriver()))],
 ]);
 
-const RUNNABLE = new Set<Protocol>(['echo', 'claude-sdk', 'acp', 'codex-appserver', 'pi']);
+const RUNNABLE = new Set<Protocol>(['echo', 'claude-sdk', 'acp', 'codex-appserver', 'pi', 'agy']);
 
 export function getDriver(protocol: Protocol): Driver {
   const driver = DRIVERS.get(protocol);

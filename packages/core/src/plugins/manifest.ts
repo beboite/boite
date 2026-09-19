@@ -10,7 +10,7 @@ import { PLUGIN_MANIFEST_SCHEMA, PLUGIN_PLATFORMS } from '@boite/contracts';
 import type { PluginArtifact, PluginManifest, PluginPlatform, PluginRejected, ProviderId } from '@boite/contracts';
 
 /** The shipped providers an account pool may name. `echo` is the tests' fake agent. */
-export const POOL_PROVIDERS: readonly ProviderId[] = ['antigravity', 'claude', 'codex', 'grok', 'opencode', 'pi'];
+export const POOL_PROVIDERS: readonly ProviderId[] = ['antigravity', 'antigravity-cli', 'claude', 'codex', 'grok', 'opencode', 'pi'];
 /** A manifest is a few hundred bytes; anything past this is not one. */
 export const MANIFEST_MAX_BYTES = 64 * 1024;
 
