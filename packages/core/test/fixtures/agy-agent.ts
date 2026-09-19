@@ -9,7 +9,8 @@
  * appends to: one `argv conversation=<id> model=<m> mode=<m> skip=<bool> stream=<bool>`
  * line per conversation process, one `env BROWSER=<value>` line with it, one
  * `prompt <text>` line per prompt, and `models` for each listing.
- * `AGY_FAKE_SIGNED_OUT=1` makes it answer like an agy nobody signed in to.
+ * `AGY_FAKE_SIGNED_OUT=1` makes it answer like an agy nobody signed in to, and
+ * `AGY_FAKE_MODELS_DELAY_MS` holds the listing back that long.
  *
  * Prompt directives: `[tool]` runs one tool between two answers, `[toolerror]`
  * runs one that fails, `[error]` ends the turn with an ERROR result, `[silent]`
@@ -43,6 +44,8 @@ function flag(name: string): string {
 if (args[0] === 'models') {
   log('models');
   process.stdout.write('Fetching available models...\n');
+  const delay = Number(process.env['AGY_FAKE_MODELS_DELAY_MS'] ?? '0');
+  if (delay > 0) await Bun.sleep(delay);
   if (process.env['AGY_FAKE_SIGNED_OUT'] === '1') {
     process.stdout.write('Please sign in to Antigravity before listing models.\n');
     process.exit(1);

@@ -151,7 +151,9 @@ keeps a persistent display cache while it reads models asynchronously. `threads.
 a model nobody probed is refused, saying to open the picker. Two callers at once
 share one process, and `providers.probed` lets a second client see the same
 answer. A probe that finds no executable, whose agent dies, or that passes twenty
-seconds throws with the reason and caches nothing.
+seconds throws with the reason and caches nothing. One whose own account changed
+or whose descriptors were reloaded while it ran is refused as stale; another
+account changing does not touch it, and the UI asks again without a toast.
 
 ## The UI streams, and stops streaming
 

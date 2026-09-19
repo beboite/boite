@@ -465,7 +465,13 @@ export class Store {
         if (client !== this.#client || epoch !== this.#probeEpoch) return;
         this.probedModels = { ...this.probedModels, [key]: models };
         this.#saveModels();
-      } catch (error) { if (client === this.#client) this.#fail(error); }
+      } catch (error) {
+        if (client !== this.#client) return;
+        // The account or the descriptors changed while the agent answered: the
+        // core refused a stale list, and the next look asks again.
+        if (epoch !== this.#probeEpoch) this.#probeAttempts.delete(key);
+        else this.#fail(error);
+      }
       finally {
         if (this.#probeRequests.get(key) === request) {
           this.#probeRequests.delete(key);

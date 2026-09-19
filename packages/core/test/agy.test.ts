@@ -28,6 +28,7 @@ afterEach(async () => {
   harness = null;
   delete process.env['AGY_FAKE_LOG'];
   delete process.env['AGY_FAKE_SIGNED_OUT'];
+  delete process.env['AGY_FAKE_MODELS_DELAY_MS'];
   if (open !== null) await open.stop();
 });
 
@@ -370,6 +371,22 @@ describe('agy driver', () => {
     const { accountId } = await agyAccount(client);
     process.env['AGY_FAKE_SIGNED_OUT'] = '1';
     await expect(client.call('providers.probe', { providerId: 'agy-fake', accountId })).rejects.toThrow(/not signed in/);
+  });
+
+  test('a probe outlives another account changing, and is refused when its own account changes', async () => {
+    const client = await startCore();
+    const { accountId } = await agyAccount(client);
+    process.env['AGY_FAKE_MODELS_DELAY_MS'] = '800';
+
+    const kept = client.call('providers.probe', { providerId: 'agy-fake', accountId });
+    await waitFor(() => linesStarting('models').length === 1);
+    await client.call('accounts.add', { providerId: 'echo', label: 'Another' });
+    expect((await kept).models.some((model) => model.id === 'gemini-3.8-flash')).toBe(true);
+
+    const refused = client.call('providers.probe', { providerId: 'agy-fake', accountId, refresh: true });
+    await waitFor(() => linesStarting('models').length === 2);
+    await client.call('accounts.check', { accountId });
+    await expect(refused).rejects.toThrow(/changed during discovery/);
   });
 
   test('an account of its own is refused: nothing moves the agy login', async () => {

@@ -79,7 +79,14 @@ async function probeProvider(
 }
 
 export function registerProbeMethods(core: Core): void {
+  /** Bumped when the descriptors are re-read, which outdates every probe. */
   let revision = 0;
+  /** Bumped per account: another account signing in says nothing about this one's models. */
+  const accountRevisions = new Map<AccountId, number>();
+  const accountRevision = (accountId: AccountId): number => accountRevisions.get(accountId) ?? 0;
+  const bumpAccount = (accountId: AccountId): void => {
+    accountRevisions.set(accountId, accountRevision(accountId) + 1);
+  };
   const pending = new Map<string, Promise<RpcResult<'providers.probe'>>>();
   core.router.register('providers.probe', (params) => {
     const key = JSON.stringify([params.providerId, params.accountId]);
@@ -87,7 +94,9 @@ export function registerProbeMethods(core: Core): void {
     if (existing) return existing;
     if (params.refresh) forgetProbes({ providerId: params.providerId, accountId: params.accountId });
     const startedAtRevision = revision;
-    const request = probeProvider(core, params.providerId, params.accountId, () => revision === startedAtRevision).finally(() => pending.delete(key));
+    const startedAtAccount = accountRevision(params.accountId);
+    const isCurrent = () => revision === startedAtRevision && accountRevision(params.accountId) === startedAtAccount;
+    const request = probeProvider(core, params.providerId, params.accountId, isCurrent).finally(() => pending.delete(key));
     pending.set(key, request);
     return request;
   });
@@ -102,14 +111,15 @@ export function registerProbeMethods(core: Core): void {
     }
     // An account whose login or isolation changed may list other models.
     if (name === 'accounts.updated') {
-      revision++;
       const account = payload as RpcEvents['accounts.updated'];
+      bumpAccount(account.id);
       forgetProbes({ providerId: account.providerId, accountId: account.id });
       return;
     }
     if (name === 'accounts.removed') {
-      revision++;
-      forgetProbes({ accountId: (payload as RpcEvents['accounts.removed']).accountId });
+      const { accountId } = payload as RpcEvents['accounts.removed'];
+      bumpAccount(accountId);
+      forgetProbes({ accountId });
     }
   });
 }
