@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { ArrowLeft, Bell, ChevronRight, Monitor, Palette, Mic } from '@lucide/svelte';
+  import { ArrowLeft, Bell, ChevronRight, Coins, Monitor, Palette, Mic } from '@lucide/svelte';
   import type { Store } from '../lib/store.svelte';
   import { workspace } from '../lib/workspace.svelte';
   import { strings } from '../lib/strings';
@@ -7,15 +7,17 @@
   import AppearancePage from './AppearancePage.svelte';
   import MachinesPage from './MachinesPage.svelte';
   import PhoneSettings from './PhoneSettings.svelte';
+  import UsagePage from './UsagePage.svelte';
   import VoiceSettings from './VoiceSettings.svelte';
 
   let { store }: { store: Store } = $props();
   let phone = $state(false);
-  let page = $derived(store.settingsTab === 'appearance' || store.settingsTab === 'machines' || store.settingsTab === 'voice'
+  let page = $derived(store.settingsTab === 'appearance' || store.settingsTab === 'machines' || store.settingsTab === 'voice' || store.settingsTab === 'usage'
     ? store.settingsTab : phone ? 'phone' : 'home');
   let machine = $derived(workspace.machines.find(machine => machine.store === store));
   let title = $derived(page === 'phone' ? strings.mobile.settingsPhone
-    : page === 'voice' ? strings.speech.heading : page === 'appearance' ? strings.settings.tabs.appearance : strings.machines.heading);
+    : page === 'voice' ? strings.speech.heading : page === 'appearance' ? strings.settings.tabs.appearance
+    : page === 'usage' ? strings.usage.heading : strings.machines.heading);
   let detail = $derived(page !== 'home');
   $effect(() => { if (detail) return mobileOverlay(back); });
 
@@ -50,6 +52,9 @@
           <button class="ghost row" data-testid="settings-tab-voice" onclick={() => store.showSettings('voice')}>
             <Mic size={20} /><span><strong>{strings.speech.heading}</strong><small>{strings.speech.phoneHint}</small></span><ChevronRight size={18} />
           </button>
+          <button class="ghost row" data-testid="settings-tab-usage" onclick={() => store.showSettings('usage')}>
+            <Coins size={20} /><span><strong>{strings.usage.heading}</strong><small>{strings.usage.phoneHint}</small></span><ChevronRight size={18} />
+          </button>
         </div>
         <p>{strings.mobile.settingsRemoteHint}</p>
       </section>
@@ -69,6 +74,8 @@
         <VoiceSettings {store} readOnly />
       {:else if page === 'appearance'}
         <AppearancePage />
+      {:else if page === 'usage'}
+        <UsagePage {store} />
       {:else}
         <MachinesPage mobile />
       {/if}
