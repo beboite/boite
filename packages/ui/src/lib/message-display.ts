@@ -33,6 +33,11 @@ export function promptText(part: Extract<MessagePart, { type: 'text' }>): string
   return part.displayText ?? visibleUserText(part.text);
 }
 
+/** The Boite command a prompt opens with, drawn in the accent wherever the prompt is shown. */
+export function promptCommand(text: string): string | undefined {
+  return /^\/(goal|loop)(?=\s|$)/.exec(text)?.[0];
+}
+
 export function answerText(text: string, _live: boolean): string {
   return visibleAnswer(text);
 }
