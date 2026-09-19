@@ -5,6 +5,7 @@
   import KeyboardPage from './KeyboardPage.svelte';
   import PluginsPage from './PluginsPage.svelte';
   import { strings } from '../lib/strings';
+  import { COMMAND_GROUPS } from '../lib/keybindings';
   import type { SettingsTab, Store } from '../lib/store.svelte';
   import AccountsPage from './AccountsPage.svelte';
   import AppearancePage from './AppearancePage.svelte';
@@ -38,7 +39,10 @@
   let children: Partial<Record<SettingsTab, { id: string; label: string }[]>> = $derived({
     accounts: store.providers.map(provider => ({id: `provider-${provider.id}`, label: provider.name})),
     appearance: [{id: 'theme', label: strings.settings.theme}],
-    keyboard: [{id: 'shortcuts', label: strings.keyboard.heading}, {id: 'keybinding-file', label: strings.keyboard.file}],
+    keyboard: [
+      ...COMMAND_GROUPS.map(group => ({id: `keys-${group.id}`, label: strings.keyboard.groups[group.id]})),
+      {id: 'keybinding-file', label: strings.keyboard.file}
+    ],
     experiments: [{id: 'theme-grain', label: strings.experiments.themeGrain.title}, {id: 'session-import', label: strings.experiments.sessionImport.title}],
     general: [
       { id: 'phone', label: strings.phone.heading },

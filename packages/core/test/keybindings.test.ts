@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
@@ -97,6 +97,44 @@ describe('the keybindings file', () => {
     const removed = client.next('keybindings.updated', (payload) => Object.keys(payload.bindings).length === 0);
     rmSync(path);
     expect(await removed).toEqual({ path, bindings: {}, errors: [] });
+  });
+
+  test('the settings page writes one entry at a time and keeps what the user wrote by hand', async () => {
+    const path = join(harness.dataDir, 'keybindings.json');
+    writeFileSync(path, JSON.stringify({ palette: 'mod+p', nope: 'mod+x' }));
+    await client.next('keybindings.updated', (payload) => payload.bindings.palette === 'mod+p');
+
+    const set = await client.call('keybindings.set', { command: 'new-thread', chord: 'Mod+Shift+N' });
+    expect(set.bindings).toEqual({ palette: 'mod+p', 'new-thread': 'mod+shift+n' });
+    expect(JSON.parse(readFileSync(path, 'utf8'))).toEqual({ palette: 'mod+p', nope: 'mod+x', 'new-thread': 'mod+shift+n' });
+
+    const unbound = await client.call('keybindings.set', { command: 'sidebar', chord: null });
+    expect(unbound.bindings.sidebar).toBeNull();
+
+    const one = await client.call('keybindings.reset', { command: 'palette' });
+    expect(one.bindings).toEqual({ 'new-thread': 'mod+shift+n', sidebar: null });
+    expect(await client.call('keybindings.get', {})).toEqual(one);
+
+    // Every command entry goes; an entry that is no command stays for its owner to read.
+    const all = await client.call('keybindings.reset', {});
+    expect(all.bindings).toEqual({});
+    expect(JSON.parse(readFileSync(path, 'utf8'))).toEqual({ nope: 'mod+x' });
+    rmSync(path);
+    await client.next('keybindings.updated', (payload) => payload.errors.length === 0);
+    await client.call('keybindings.set', { command: 'pin', chord: 'mod+alt+p' });
+    expect((await client.call('keybindings.reset', {})).bindings).toEqual({});
+    expect(existsSync(path)).toBe(false);
+  });
+
+  test('a chord it cannot read and a file that is not JSON are refused, the file untouched', async () => {
+    await expect(client.call('keybindings.set', { command: 'pin', chord: 'p' })).rejects.toThrow(
+      'chord: "p" has no modifier: a chord needs mod, ctrl, alt or meta before its key',
+    );
+    await expect(client.call('keybindings.set', { command: 'nope' as 'pin', chord: 'mod+p' })).rejects.toThrow('command: "nope" is not a command Boite has');
+    const path = join(harness.dataDir, 'keybindings.json');
+    writeFileSync(path, '{"pin": ');
+    await expect(client.call('keybindings.set', { command: 'pin', chord: 'mod+p' })).rejects.toThrow('keybindings.json: not valid JSON');
+    expect(readFileSync(path, 'utf8')).toBe('{"pin": ');
   });
 
   test('a file present at start is read before any client connects', async () => {

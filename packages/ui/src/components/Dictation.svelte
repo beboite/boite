@@ -2,7 +2,8 @@
   import { Check, Mic, X, LoaderCircle, RotateCcw, Settings2 } from '@lucide/svelte';
   import { onDestroy } from 'svelte';
   import type { Store } from '../lib/store.svelte';
-  import type { Client } from '../lib/client';
+  import { RpcErrorCode } from '@boite/contracts';
+  import { RpcFailure, type Client } from '../lib/client';
   import { SpeechRecorder, audioBase64, microphoneError } from '../lib/speech-recorder';
   import { SpeechPreview } from '../lib/speech-preview';
   import { strings } from '../lib/strings';
@@ -50,7 +51,13 @@
     try {
       let captureEnded = false;
       const captureStarted = capture.start((value, elapsed) => { level = value; seconds = elapsed; }, () => { captureEnded = true; if (phase === 'recording') void stop(); });
-      const statusPromise = client.call('speech.status', {});
+      // A core from before dictation has no voice engine: name the machine to update instead of the raw RPC error.
+      const statusPromise = client.call('speech.status', {}).catch((cause: unknown) => {
+        if (cause instanceof RpcFailure && cause.code === RpcErrorCode.MethodNotFound) {
+          throw new Error(strings.speech.unsupportedDictation.replace('{machine}', store.core?.hostname ?? strings.app.name));
+        }
+        throw cause;
+      });
       const [status] = await Promise.all([statusPromise, captureStarted]);
       if (run !== generation || disposed) { capture.dispose(); return; }
       engine = status.engine; revision = status.revision;

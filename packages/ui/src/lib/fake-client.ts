@@ -1,4 +1,7 @@
 import {
+  KEYBINDING_COMMANDS,
+  parseChord,
+  type Keybindings,
   MESSAGE_PAGE,
   MESSAGE_PAGE_MAX,
   PANEL_SURFACE_KINDS,
@@ -822,6 +825,12 @@ export class FakeClient implements ObservableClient {
   #speech: SpeechConfig = { engine: 'local', language: '', apiProvider: 'groq', fallback: false, executable: '', modelPath: '' };
   #speechStatus: SpeechStatus = { revision: 'fake-voice', engine: 'local', ready: true, localReady: true, groqKeySet: false, openrouterKeySet: false, installing: false, downloadedBytes: 0, totalBytes: 190085487, error: null, canInstallRuntime: true };
   #speechRequests = new Map<string, symbol>();
+  /** A file with one moved chord, one taken away, and one line the core refused. */
+  #keybindings: Keybindings = {
+    path: `${DATA_DIR}\\keybindings.json`,
+    bindings: { 'theme-light': 'mod+shift+l', panel: null },
+    errors: ['keybindings.json: "trace": "t" has no modifier: a chord needs mod, ctrl, alt or meta before its key']
+  };
   #quotaEnabled: Record<string, boolean> = {};
   #plugin: PluginState = { id: 'kebacc-switcher', name: 'kebacc-switcher', version: null, availableVersion: '2.0.1', status: 'not-installed', progress: 0, error: null };
   #pluginPools: PluginPool[] = ['claude', 'codex', 'antigravity'].map((provider) => ({ provider, accounts: [
@@ -1680,12 +1689,29 @@ export class FakeClient implements ObservableClient {
         return { text: 'Please add a test for this change.' };
       }
       case 'keybindings.get':
-        // A file with one moved chord, one taken away, and one line the core refused.
-        return {
-          path: `${DATA_DIR}\\keybindings.json`,
-          bindings: { 'theme-light': 'mod+shift+l', panel: null },
-          errors: ['keybindings.json: "trace": "t" has no modifier: a chord needs mod, ctrl, alt or meta before its key']
-        };
+        return structuredClone(this.#keybindings);
+      case 'keybindings.set': {
+        const { command, chord } = rawParams as RpcParams<'keybindings.set'>;
+        if (!(KEYBINDING_COMMANDS as readonly string[]).includes(command)) {
+          throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: `command: "${command}" is not a command Boite has` });
+        }
+        if (chord !== null) {
+          const parsed = parseChord(chord);
+          if (!parsed.ok) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: `chord: ${parsed.reason}` });
+        }
+        this.#keybindings = { ...this.#keybindings, bindings: { ...this.#keybindings.bindings, [command]: chord === null ? null : chord.trim().toLowerCase() } };
+        this.#emit('keybindings.updated', structuredClone(this.#keybindings));
+        return structuredClone(this.#keybindings);
+      }
+      case 'keybindings.reset': {
+        const { command } = rawParams as RpcParams<'keybindings.reset'>;
+        const bindings = { ...this.#keybindings.bindings };
+        if (command === undefined) for (const id of KEYBINDING_COMMANDS) delete bindings[id];
+        else delete bindings[command];
+        this.#keybindings = { ...this.#keybindings, bindings };
+        this.#emit('keybindings.updated', structuredClone(this.#keybindings));
+        return structuredClone(this.#keybindings);
+      }
       case 'settings.set': {
         const params = rawParams as RpcParams<'settings.set'>;
         for (const field of ['maxConcurrentTurns', 'perAccountConcurrency'] as const) {

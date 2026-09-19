@@ -1377,6 +1377,14 @@ export interface RpcMethods {
   'settings.set': { params: Partial<Settings>; result: Settings };
   /** The keybindings file as last read: the path, the entries it names, and what it got wrong. */
   'keybindings.get': { params: Record<string, never>; result: Keybindings };
+  /**
+   * Writes one entry of the keybindings file: a chord, `mod+shift+k` style, or
+   * null to leave the command with no key. The other entries stay as written.
+   * A file that is not JSON is refused rather than overwritten.
+   */
+  'keybindings.set': { params: { command: KeybindingCommand; chord: string | null }; result: Keybindings };
+  /** Takes entries out of the file so they fall back to the default: one command, or every one when omitted. */
+  'keybindings.reset': { params: { command?: KeybindingCommand }; result: Keybindings };
 
   /**
    * The sessions the project's folder has on disk across every account whose

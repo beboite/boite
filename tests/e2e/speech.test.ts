@@ -15,7 +15,7 @@ beforeAll(async () => {
   // A test-only bundle keeps fixtures while avoiding dev-server reloads mid-recording.
   await build({ root, define: { 'import.meta.env.DEV': 'true' }, build: { outDir, emptyOutDir: true }, logLevel: 'error' });
   server = await preview({ root, build: { outDir }, preview: { host: '127.0.0.1', port, strictPort: true }, logLevel: 'error' });
-  page = await BrowserPage.launch({ url: `${url}/?fake=1` });
+  page = await BrowserPage.launch({ url: `${url}/?fake=1&open=recent` });
   await page.waitFor(`document.querySelector('${id('dictation-start')}')`);
   // Exercise the real AudioWorklet and resampler without touching a physical microphone.
   await page.evaluate(`window.__audioFixtures = new Set(); window.__stoppedTracks = 0; navigator.mediaDevices.getUserMedia = async () => {
@@ -133,20 +133,22 @@ test('voice settings save API selection, hide credentials on reload, and fit pho
   await capture('speech-phone-settings.png');
   await page.send('Emulation.setDeviceMetricsOverride', { width: 1360, height: 950, deviceScaleFactor: 1, mobile: false });
   await page.waitFor(`document.querySelector('${id('voice-local')}')`);
+  // Choosing the engine applies it at once; the keys wait for their own button.
   await page.click(id('voice-api'));
+  await page.waitFor(`document.querySelector('${id('voice-api')}')?.getAttribute('aria-checked') === 'true' && document.querySelector('${id('voice-status')}')?.dataset.state === 'api'`);
   await page.evaluate(`const input = document.querySelector('${id('voice-groq-key')}'); input.value = 'fixture-only'; input.dispatchEvent(new Event('input', {bubbles:true}));`);
   await page.click(id('voice-save'));
-  await page.waitFor(`document.querySelector('.saved')`);
+  await page.waitFor(`document.querySelector('${id('voice-status')}')?.dataset.state === 'ready'`);
   expect(await page.evaluate(`document.querySelector('${id('voice-groq-key')}').value`)).toBe('');
   await page.send('Emulation.setDeviceMetricsOverride', { width: 1360, height: 950, deviceScaleFactor: 1, mobile: false });
   await capture('speech-desktop-settings.png');
   for (const provider of ['OpenRouter', 'Groq']) {
     await page.evaluate(`Array.from(document.querySelectorAll('.segmented button')).find(button => button.textContent === ${JSON.stringify(provider)}).click()`);
-    expect(await page.evaluate(`!!document.querySelector('.saved')`)).toBe(false);
-    await capture('speech-provider-unsaved.png');
-    await page.click(id('voice-save'));
-    await page.waitFor(`document.querySelector('.saved')`);
+    await page.waitFor(`Array.from(document.querySelectorAll('.segmented button')).find(button => button.textContent === ${JSON.stringify(provider)})?.getAttribute('aria-checked') === 'true'`);
+    await capture('speech-provider.png');
   }
+  await page.click(id('voice-local'));
+  await page.waitFor(`document.querySelector('${id('voice-status')}')?.dataset.state === 'ready' && document.querySelector('${id('voice-local')}')?.getAttribute('aria-checked') === 'true'`);
   expect(await page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')).toBe(true);
   expect(page.errors()).toEqual([]);
 }, 30_000);

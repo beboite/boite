@@ -888,7 +888,10 @@ export class Store {
         this.#attachEndpoint(endpoint);
       }
       await this.connect();
-      await this.openWhereLeft();
+      // `&open=recent` lands on the most recent thread instead of a draft, the
+      // page most captures are about. Fake core only, like `&long=1`.
+      if (import.meta.env.DEV && params.get('fake') === '1' && params.get('open') === 'recent') await this.openWhereLeft();
+      else await this.openLanding();
       // `&panel=<kind>` opens that surface on the thread the page lands on, so
       // a capture of it needs no clicks. Fake core only, like `&long=1`.
       if (import.meta.env.DEV && params.get('fake') === '1') this.#openQueryPanel(params.get('panel'));
@@ -963,6 +966,30 @@ export class Store {
     this.#attachEndpoint(endpoint);
     await this.connect();
     await this.openWhereLeft();
+  }
+
+  /** Per core, so two machines each land on their own project. */
+  #lastProjectKey(): string { return 'boite.lastProject.v1:' + JSON.stringify([this.endpointUrl, this.core?.dataDir]); }
+  #rememberProject(projectId: ProjectId): void {
+    try { localStorage.setItem(this.#lastProjectKey(), projectId); } catch { /* storage unavailable: the recent thread decides */ }
+  }
+
+  /** The project last opened or drafted in on this device, else the one of the most recent thread, else the first. */
+  lastProject(): ProjectId | null {
+    let stored: string | null = null;
+    try { stored = localStorage.getItem(this.#lastProjectKey()); } catch { /* storage unavailable */ }
+    const known = this.projects.find((p) => p.id === stored);
+    if (known) return known.id;
+    const recent = this.threads.filter((t) => !t.archived).sort((a, b) => b.updatedAt - a.updatedAt)[0];
+    return recent?.projectId ?? this.projects[0]?.id ?? null;
+  }
+
+  /** Where the app opens: a new thread's draft in the last used project, as if New thread had been pressed. */
+  async openLanding(): Promise<void> {
+    if (!this.visible) return;
+    if (this.openThread || this.draft) return;
+    const project = this.lastProject();
+    if (project) this.startDraft(project);
   }
 
   /** The most recent thread, a draft in the first project, or nothing on a first run. */
@@ -1160,6 +1187,36 @@ export class Store {
     return chord === null ? null : chordLabel(chord);
   }
 
+  /**
+   * A chord for one command, null for none, or `default` to take the command
+   * out of the file. The refusal comes back for the row that asked, not as
+   * the app's error.
+   */
+  async setKeybinding(id: KeybindingCommand, chord: string | null | 'default'): Promise<string | null> {
+    const client = this.#client;
+    if (!client) return strings.connection.unavailable;
+    try {
+      this.keybindings = chord === 'default'
+        ? await client.call('keybindings.reset', { command: id })
+        : await client.call('keybindings.set', { command: id, chord });
+      return null;
+    } catch (error) {
+      return error instanceof Error ? error.message : String(error);
+    }
+  }
+
+  /** Every command back on its default. */
+  async resetKeybindings(): Promise<string | null> {
+    const client = this.#client;
+    if (!client) return strings.connection.unavailable;
+    try {
+      this.keybindings = await client.call('keybindings.reset', {});
+      return null;
+    } catch (error) {
+      return error instanceof Error ? error.message : String(error);
+    }
+  }
+
   /** ` (Ctrl+N)` for a tooltip, or nothing while the command has no key. */
   keyHint(id: KeybindingCommand): string {
     const label = this.keyLabel(id);
@@ -1276,6 +1333,7 @@ export class Store {
     this.trace = [];
     this.#keepRequestsOf(null);
     this.draft = { projectId: target, worktree: false };
+    this.#rememberProject(target);
     this.page = 'chat';
     this.sidebarOpen = false;
   }
@@ -1290,6 +1348,7 @@ export class Store {
     if (!draft || draft.projectId === projectId) return;
     if (!this.projects.some((p) => p.id === projectId)) return;
     this.draft = { projectId, worktree: draft.worktree };
+    this.#rememberProject(projectId);
     this.collapsedProjects = this.collapsedProjects.filter((id) => id !== projectId);
   }
 
@@ -1351,6 +1410,7 @@ export class Store {
       if (navigate) {
         this.page = 'chat';
         this.sidebarOpen = false;
+        this.#rememberProject(thread.projectId);
       }
       // The trace is the owner's: a device has no button for it, and asking
       // would refuse the rest of this open with it.

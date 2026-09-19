@@ -98,6 +98,6 @@
   .scope { overflow-wrap: anywhere; }
   .phone-page :global(.card) { padding: 18px; }
   .detail :global(.page), .detail :global(.machines-page) { padding: 16px; }
-  .detail :global(.page > header), .detail :global(.machines-page > h1) { display: none; }
+  .detail :global(.page > header), .detail :global(.machines-page > .head h1) { display: none; }
   .detail :global(.switch-row) { flex-wrap: wrap; gap: 12px; }
 </style>
