@@ -705,6 +705,9 @@ export const KEYBINDING_COMMANDS = [
   'sidebar',
   'panel',
   'browser',
+  'changes',
+  'files',
+  'tasks',
   'close-surface',
   'settings',
   'stash',
@@ -888,10 +891,136 @@ export interface CoreInfo {
  * Who a connection is. The owner said hello with the core token itself, which
  * only the shell, the tests and `boite-core pair` hold, or with the key of a
  * pairing whose role was `owner`; a session said hello with a token the core
- * minted for a `device` pairing. Minting grants and revoking sessions are the
- * owner's alone.
+ * minted for a `device` pairing; an agent said hello with the per-thread token
+ * the core put in the environment of a process that thread launched, and is
+ * held to `AGENT_METHODS` on that one thread. Minting grants and revoking
+ * sessions are the owner's alone.
  */
-export type Principal = 'owner' | 'session';
+export type Principal = 'owner' | 'session' | 'agent';
+
+// ---------------------------------------------------------------------------
+// The agent's door. Every process a thread launches carries these variables
+// and the `boite` CLI on its PATH. The CLI says hello with the token, becomes
+// the `agent` principal of that thread, and every call it makes names that
+// thread: a call that names another one is refused.
+// ---------------------------------------------------------------------------
+
+export const AGENT_ENV = {
+  threadId: 'BOITE_THREAD_ID',
+  coreUrl: 'BOITE_CORE_URL',
+  token: 'BOITE_AGENT_TOKEN',
+} as const;
+
+/** Where the agent is, as `agent.where` answers and the CLI prints it. */
+export interface AgentWhere {
+  threadId: ThreadId;
+  title: string;
+  projectId: ProjectId;
+  projectPath: string;
+  /** The thread's working directory: the project, or its worktree. */
+  cwd: string;
+  branch: string | null;
+  worktree: boolean;
+  providerId: ProviderId;
+  model: string;
+}
+
+/**
+ * What the right panel shows on request. `file` opens the file at the line;
+ * `diff` opens the changes, on one file when a path is given; `browser` opens
+ * the url in the panel's browser; `trace` and `tasks` open those surfaces.
+ * Paths are relative to the thread's working directory or absolute inside it.
+ */
+export type PanelSurface =
+  | { kind: 'file'; path: string; line?: number }
+  | { kind: 'files'; path?: string }
+  | { kind: 'diff'; path?: string }
+  | { kind: 'browser'; url: string }
+  | { kind: 'trace' }
+  | { kind: 'tasks' };
+
+export const PANEL_SURFACE_KINDS = ['file', 'files', 'diff', 'browser', 'trace', 'tasks'] as const;
+export type PanelSurfaceKind = (typeof PANEL_SURFACE_KINDS)[number];
+
+/**
+ * One card of a project's todo list, shared by every thread of the project.
+ * `claimed` is a card a thread finished and the user has not confirmed yet.
+ */
+export interface Todo {
+  id: string;
+  projectId: ProjectId;
+  text: string;
+  status: 'open' | 'claimed' | 'done';
+  /** The thread that added or last moved it, null when the user did. */
+  threadId: ThreadId | null;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+}
+
+export const TODO_STATUSES: readonly Todo['status'][] = ['open', 'claimed', 'done'];
+
+export type GitChangeStatus = 'added' | 'modified' | 'deleted' | 'renamed' | 'copied' | 'untracked' | 'conflict';
+
+/** One path `git status` reports, staged or not, with the numbers `git diff --numstat` gives it. */
+export interface GitChange {
+  path: string;
+  status: GitChangeStatus;
+  /** The previous path of a rename or copy. */
+  oldPath: string | null;
+  staged: boolean;
+  /** Null on a binary or untracked file. */
+  additions: number | null;
+  deletions: number | null;
+}
+
+export interface GitStatus {
+  branch: string | null;
+  upstream: string | null;
+  ahead: number;
+  behind: number;
+  changes: GitChange[];
+}
+
+/** Both sides of one file, the working tree against `ref` (HEAD by default). */
+export interface GitDiff {
+  path: string;
+  oldPath: string | null;
+  status: GitChangeStatus;
+  /** Null when the side does not exist: an added or a deleted file. */
+  oldText: string | null;
+  newText: string | null;
+  binary: boolean;
+  /** Either side was cut at `DIFF_MAX_BYTES`. */
+  truncated: boolean;
+}
+
+export interface FileEntry {
+  name: string;
+  /** Relative to the thread's working directory, forward slashes. */
+  path: string;
+  kind: 'file' | 'dir';
+  bytes: number | null;
+  modifiedAt: Timestamp;
+}
+
+/**
+ * What `files.read` answers. Text comes inline; a picture, a video, a sound or
+ * anything else binary comes as a `url` that is a path on the core's HTTP
+ * server (`/file/<ticket>`), for the client to resolve against the origin it
+ * reached the core by. It is valid for `FILE_TICKET_TTL_MS` and answers range
+ * requests so a video seeks.
+ */
+export type FileContent =
+  | { kind: 'text'; path: string; bytes: number; modifiedAt: Timestamp; text: string; truncated: boolean; language: string | null }
+  | { kind: 'image' | 'video' | 'audio' | 'binary'; path: string; bytes: number; modifiedAt: Timestamp; mime: string; url: string };
+
+/** Path prefix of the ticketed file route: `GET <core>/file/<ticket>`. */
+export const FILE_ROUTE = '/file';
+export const FILE_TICKET_TTL_MS = 10 * 60 * 1000;
+/** A text file is read whole up to this size, then cut and marked truncated. */
+export const FILE_MAX_BYTES = 2 * 1024 * 1024;
+export const DIFF_MAX_BYTES = 1024 * 1024;
+export const FILES_LIST_MAX = 2000;
 
 /**
  * What a pairing link hands over. `device` is the guest a phone is, held to
@@ -989,8 +1118,47 @@ export interface RpcMethods {
       protocolVersion: number;
       client: { name: string; version: string };
     };
-    result: { core: CoreInfo; principal: Principal; session?: { id: string; token: string } };
+    result: {
+      core: CoreInfo;
+      principal: Principal;
+      session?: { id: string; token: string };
+      /** The one thread an `agent` reaches. */
+      threadId?: ThreadId;
+    };
   };
+
+  // -- The agent's own methods: the CLI, and the owner's UI behind the same surfaces.
+
+  /** Where the calling thread is. */
+  'agent.where': { params: { threadId: ThreadId }; result: AgentWhere };
+  /**
+   * Show something in the thread's right panel. Every client subscribed to the
+   * thread receives `panel.requested`; `shown` says whether one was. The core
+   * checks a path exists inside the working directory and a url is http(s),
+   * and refuses by name otherwise.
+   */
+  'panel.open': { params: { threadId: ThreadId; surface: PanelSurface }; result: { shown: boolean } };
+  /** The agent's task list, whole, as the tasks surface shows it. */
+  'threads.tasks.set': { params: { threadId: ThreadId; tasks: AgentTask[] }; result: ThreadActivity };
+  'threads.tasks.get': { params: { threadId: ThreadId }; result: AgentTask[] };
+
+  /** The project's todo list, the thread naming the project. Done cards last. */
+  'todos.list': { params: { threadId: ThreadId }; result: Todo[] };
+  'todos.add': { params: { threadId: ThreadId; text: string }; result: Todo };
+  /** A status or a text change. An agent moves a card to `claimed`; `done` is the user's confirmation. */
+  'todos.update': { params: { threadId: ThreadId; todoId: string; status?: Todo['status']; text?: string }; result: Todo };
+  'todos.remove': { params: { threadId: ThreadId; todoId: string }; result: { ok: true } };
+
+  /** `git status` of the thread's working directory. Refused by name outside a repository. */
+  'git.status': { params: { threadId: ThreadId }; result: GitStatus };
+  /** One file's two sides. `ref` is what the working tree is compared to, HEAD by default. */
+  'git.diff': { params: { threadId: ThreadId; path: string; ref?: string }; result: GitDiff };
+
+  /** One directory of the working directory, `path` relative to it or empty for the root. Directories first. */
+  'files.list': { params: { threadId: ThreadId; path?: string }; result: FileEntry[] };
+  'files.read': { params: { threadId: ThreadId; path: string }; result: FileContent };
+  /** The editor's save. Owner only: the agent has its own hands on the disk. */
+  'files.write': { params: { threadId: ThreadId; path: string; text: string }; result: { bytes: number; modifiedAt: Timestamp } };
 
   /** A fresh one-time pairing link, `device` unless the role says otherwise. Owner only. */
   'pairing.grant': { params: { role?: PairingRole }; result: PairingGrant };
@@ -1234,6 +1402,10 @@ export type RpcResult<M extends RpcMethodName> = RpcMethods[M]['result'];
 
 export interface RpcEvents {
   'thread.activity': { threadId: ThreadId; activity: ThreadActivity };
+  /** Subscribed threads only: the agent asked for something in the panel. */
+  'panel.requested': { threadId: ThreadId; surface: PanelSurface; at: Timestamp };
+  /** The project's whole list, after any change. */
+  'todos.updated': { projectId: ProjectId; todos: Todo[] };
   'quotas.updated': AccountQuota[];
   'plugins.updated': PluginState;
   /** A project `projects.add` created. A known path returns its project without one. */

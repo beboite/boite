@@ -15,6 +15,10 @@ export const DEFAULT_BINDINGS: Record<KeybindingCommand, string | null> = {
   sidebar: 'mod+b',
   panel: 'mod+alt+b',
   browser: 'mod+shift+j',
+  // The three workbench surfaces take the letter their launcher card shows.
+  changes: 'mod+shift+c',
+  files: 'mod+shift+f',
+  tasks: 'mod+shift+k',
   'close-surface': 'mod+w',
   settings: 'mod+,',
   stash: 'mod+s',

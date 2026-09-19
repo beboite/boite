@@ -182,6 +182,9 @@ export const strings = {
     sidebar: 'Toggle the sidebar',
     panel: 'Toggle the right panel',
     trace: 'Show the trace',
+    changes: 'Show the changes',
+    files: 'Show the files',
+    tasks: 'Show the tasks',
     pin: 'Pin this thread',
     unpin: 'Unpin this thread',
     rename: 'Rename this thread',
@@ -293,6 +296,9 @@ export const strings = {
     noneBody: 'Pick one on the left, or start a new one.',
     trace: 'Trace',
     traceHint: 'Processes this thread launched',
+    /** The header's button: it shows or hides the panel, whatever surface is in it. */
+    panel: 'Panel',
+    panelHint: 'The workbench beside this thread',
     cwd: 'Working directory',
     model: 'Model',
     defaultModel: 'Default model',
@@ -464,10 +470,103 @@ export const strings = {
     traceHint: 'Processes this thread launched',
     browser: 'Browser',
     browserHint: 'A page beside the thread',
+    changes: 'Changes',
+    changesHint: 'What the working tree has that HEAD does not',
+    files: 'Files',
+    filesHint: "The thread's working directory",
+    file: 'File',
+    tasks: 'Tasks',
+    tasksHint: "The goal, the agent's tasks and the project's todos",
     desktopOnly: 'Only in the desktop app',
     ownerOnly: "Only in the owner's app",
     launcher: 'Open a surface in this panel',
     untitled: 'Browser'
+  },
+
+  /** The changes surface: `git status` of the thread's working directory. */
+  changes: {
+    clean: 'Working tree clean',
+    noBranch: 'No branch',
+    ahead: '{count} ahead',
+    behind: '{count} behind',
+    count: '{count} changed',
+    oneCount: '1 changed',
+    staged: 'Staged',
+    stagedShort: 'S',
+    binary: 'Binary file, nothing to show line by line',
+    truncated: 'This file was cut short: the diff below is not the whole file.',
+    pick: 'Pick a file to see its diff',
+    loading: 'Reading the working tree',
+    renamedFrom: 'Renamed from {path}',
+    status: {
+      added: 'Added',
+      modified: 'Modified',
+      deleted: 'Deleted',
+      renamed: 'Renamed',
+      copied: 'Copied',
+      untracked: 'Untracked',
+      conflict: 'Conflict'
+    }
+  },
+
+  /** The tasks surface: the thread's activity, the agent's tasks, the project's todos. */
+  tasks: {
+    goalSection: 'Goal and loop',
+    noActivity: 'No goal and no loop on this thread',
+    nextRun: 'Next run {time}',
+    iterations: '{count} iterations',
+    agentSection: 'Agent tasks',
+    noTasks: 'The agent has reported no task list',
+    todoSection: 'Project todos',
+    noTodos: 'No todo on this project',
+    addPlaceholder: 'Add a todo',
+    add: 'Add',
+    // The chip on a claimed card. Short enough to leave the card's own text
+    // readable on a narrow panel; the whole sentence is its tooltip.
+    awaiting: 'Awaiting you',
+    awaitingHint: 'This card waits on your confirmation',
+    markOpen: 'Move back to open',
+    markClaimed: 'Mark it waiting on you',
+    markDone: 'Confirm it is done',
+    removeTodo: 'Remove this todo',
+    collapse: 'Fold this section',
+    expand: 'Unfold this section'
+  },
+
+  /** The file tree and the file viewer, the two surfaces reading the working directory. */
+  files: {
+    tree: 'Files of the working directory',
+    noRoot: 'No working directory',
+    filter: 'Filter',
+    filterHint: 'Narrow the rows already loaded',
+    reading: 'Reading this directory',
+    empty: 'This directory is empty',
+    noMatch: 'No loaded row matches',
+    failed: 'This directory could not be read. {reason}',
+    capped: 'Only the first {count} entries of this directory are listed.',
+    expandRow: 'Unfold this directory',
+    collapseRow: 'Fold this directory',
+    openRow: 'Open this file',
+    // The viewer and the editor, one file per tab.
+    readFailed: 'This file could not be read. {reason}',
+    writeFailed: 'This file could not be saved. {reason}',
+    readingFile: 'Reading this file',
+    noFile: 'This tab carries no path',
+    truncated: 'This file was cut short at its size limit, so what is below is not the whole file and cannot be saved.',
+    readOnly: "Saving a file is the owner's, so this one opens read only.",
+    save: 'Save',
+    saving: 'Saving',
+    unsaved: 'Unsaved changes',
+    editorLabel: 'File contents',
+    lineOf: 'Line {line}',
+    zoomIn: 'Zoom in',
+    zoomOut: 'Zoom out',
+    fit: 'Fit',
+    actual: '1:1',
+    natural: '{width} x {height}',
+    picture: 'The picture of this file',
+    download: 'Download this file',
+    binary: 'Nothing here reads as text.'
   },
 
   browser: {
@@ -706,6 +805,9 @@ export const strings = {
     commands: {
       palette: 'Open the command palette',
       browser: 'Open the browser surface',
+      changes: 'Open the changes surface',
+      files: 'Open the file tree',
+      tasks: 'Open the tasks surface',
       closeSurface: 'Close the active surface',
       stash: 'Stash the composer text, or take it back',
       sendAndDraft: 'Send and open a new draft',

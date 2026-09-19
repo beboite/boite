@@ -7,6 +7,7 @@ import type {
   RpcEvents,
   RpcMethodName,
   RpcMethods,
+  ThreadId,
 } from '@boite/contracts';
 
 export interface ConnectOptions {
@@ -23,6 +24,8 @@ export interface CoreClient {
   readonly principal: Principal;
   /** The session a grant was exchanged for, absent on a token hello. */
   readonly session: { id: string; token: string } | null;
+  /** The one thread an agent token opens, null for the owner and a paired device. */
+  readonly threadId: ThreadId | null;
   call<M extends RpcMethodName>(method: M, params: RpcMethods[M]['params']): Promise<RpcMethods[M]['result']>;
   on<E extends RpcEventName>(event: E, handler: (payload: RpcEvents[E]) => void): () => void;
   onAny(handler: (event: RpcEventName, payload: unknown) => void): () => void;
@@ -127,7 +130,7 @@ export async function connect(url: string, token: string, options: ConnectOption
     ...(options.grant === undefined ? { token } : { grant: options.grant }),
     protocolVersion: PROTOCOL_VERSION,
     client: options.client ?? { name: 'test', version: '2.0.0-beta.1' },
-  }, Math.max(1, deadline - Date.now())).catch(error => { socket.close(); throw error; })) as { core: CoreInfo; principal: Principal; session?: { id: string; token: string } };
+  }, Math.max(1, deadline - Date.now())).catch(error => { socket.close(); throw error; })) as { core: CoreInfo; principal: Principal; session?: { id: string; token: string }; threadId?: ThreadId };
   if (hello.core.protocolVersion !== PROTOCOL_VERSION) {
     socket.close();
     throw new Error(`core protocol version must be ${PROTOCOL_VERSION}`);
@@ -149,6 +152,7 @@ export async function connect(url: string, token: string, options: ConnectOption
     core: hello.core,
     principal: hello.principal,
     session: hello.session ?? null,
+    threadId: hello.threadId ?? null,
     async call<M extends RpcMethodName>(method: M, params: RpcMethods[M]['params']): Promise<RpcMethods[M]['result']> {
       if (closed) throw new Error('the client is closed');
       return (await send(method, params)) as RpcMethods[M]['result'];

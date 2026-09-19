@@ -263,6 +263,21 @@
         else store.panel.open('browser');
         break;
       }
+      case 'changes':
+      case 'files':
+      case 'tasks': {
+        // Each of these reads the working directory or the project's todos,
+        // which the core refuses to a paired device.
+        if (!store.openThread || !store.owner) return;
+        event.preventDefault();
+        // The panel lives in the chat: from the settings the key brings the chat
+        // back with the surface open, rather than toggling what nobody sees.
+        if (store.page !== 'chat') {
+          store.showChat();
+          store.panel.open(command);
+        } else store.panel.toggleKind(command);
+        break;
+      }
       case 'close-surface': {
         // The active surface, never the window: only while the panel is showing.
         const active = store.panel.activeSurfaceId;

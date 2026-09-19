@@ -47,8 +47,9 @@ export class Router {
       throw new RpcFailure(RpcErrorCode.MethodNotFound, `unknown method ${method}`, { method });
     }
     // Every method goes through the same gate, so a new one is the owner's
-    // until `DEVICE_METHODS` says otherwise.
-    assertAllowed(method as RpcMethodName, ctx.connection);
+    // until `DEVICE_METHODS` or `AGENT_METHODS` says otherwise. The params go
+    // with it: an agent is held to the thread its token was minted for.
+    assertAllowed(method as RpcMethodName, ctx.connection, params);
     return await handler(params as never, ctx);
   }
 }

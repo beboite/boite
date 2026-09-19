@@ -1,0 +1,3 @@
+#!/bin/sh
+# The `boite` CLI from the sources: what a thread's PATH carries in development.
+exec bun run "$(dirname "$0")/core.ts" cli "$@"

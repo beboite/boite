@@ -443,8 +443,10 @@ shellTest(
   async () => {
     // `csp: null` shipped a window where any origin was fair game. What proves
     // a policy is live is the browser refusing a load, never a string read back
-    // out of tauri.conf.json. Port 1 answers nothing, so a missing policy ends
-    // in a refused connection rather than a request that leaves the machine.
+    // out of tauri.conf.json. `.invalid` never resolves, so a missing policy
+    // ends in a failed lookup rather than a request that leaves the machine.
+    // The loopback is no longer the origin to try: the panel's file viewer
+    // draws pictures the local core serves, so `img-src` names it.
     const refused = await page?.evaluate<string>(`(() => new Promise((resolve) => {
       const seen = [];
       const onViolation = (event) => seen.push(event.violatedDirective);
@@ -456,12 +458,12 @@ shellTest(
       const img = new Image();
       img.onerror = () => setTimeout(done, 100);
       img.onload = () => setTimeout(done, 100);
-      img.src = 'http://127.0.0.1:1/blocked.png';
+      img.src = 'http://blocked.invalid/blocked.png';
     }))()`);
     expect(refused).toContain('img-src');
 
     // And the policy still lets the app draw what it draws: a composer
-    // attachment is a data: URI, which `img-src 'self' data:` names on purpose.
+    // attachment is a data: URI, which `img-src` names on purpose.
     const inline = await page?.evaluate<string>(`(() => new Promise((resolve) => {
       const img = new Image();
       img.onload = () => resolve('loaded');

@@ -27,10 +27,18 @@ The token is 32 random bytes generated on first start and kept in
 
 Broadcast events (`project.*`, `settings.updated`, `providers.*`, `accounts.*`)
 reach every authenticated connection, so a second shell or a phone follows a
-change without a reload. `message.*` and `permission.*` reach only the sockets
-subscribed to that thread. A client that connects mid-turn rebuilds the pending
-permission card from `permissions.list`, because `permission.requested` only
-reached the sockets that existed when it fired.
+change without a reload. `message.*`, `permission.*`, `question.*` and
+`panel.*` reach only the sockets subscribed to that thread. A client that
+connects mid-turn rebuilds the pending permission card from
+`permissions.list`, because `permission.requested` only reached the sockets
+that existed when it fired.
+
+Three principals say hello. The owner holds the core token or an owner
+pairing; a session is a paired phone, held to `DEVICE_METHODS`; an agent is a
+process a thread launched, holding the per-thread token the core put in its
+environment, held to `AGENT_METHODS` on that thread alone. Both lists live in
+`packages/core/src/access.ts` with the reason for each entry;
+[cli.md](cli.md) says how an agent uses its door.
 
 ## The journal is the truth, the tables are a projection
 

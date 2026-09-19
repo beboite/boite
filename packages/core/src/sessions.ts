@@ -18,7 +18,7 @@
 
 import { createHash } from 'node:crypto';
 import { GRANT_QUERY_PARAM, GRANT_TTL_MS, PAIRING_ROLES } from '@boite/contracts';
-import type { PairedSession, PairingGrant, PairingRole, Principal } from '@boite/contracts';
+import type { PairedSession, PairingGrant, PairingRole, Principal, ThreadId } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { refused, unauthorized } from './errors.ts';
 import { newId, newToken } from './ids.ts';
@@ -38,6 +38,8 @@ export interface Identity {
   principal: Principal;
   /** Set on a session connection: the row `sessions.list` shows and `sessions.revoke` takes. */
   sessionId: string | null;
+  /** Set on an agent connection: the one thread its token was minted for. */
+  threadId: ThreadId | null;
 }
 
 /** Who a session key speaks as: an owner link's key is the owner, a device link's the guest. */

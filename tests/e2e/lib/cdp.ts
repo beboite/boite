@@ -116,6 +116,9 @@ export class BrowserPage {
         '--no-first-run',
         '--no-default-browser-check',
         '--disable-background-networking',
+        // No outside host resolves. A Chromium that ships a content blocker holds
+        // every request of the page while its list update waits on a connect.
+        '--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1, EXCLUDE localhost',
         // Keep hidden test pages responsive when another browser owns the active page.
         '--disable-background-timer-throttling',
         '--disable-backgrounding-occluded-windows',

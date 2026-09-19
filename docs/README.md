@@ -6,6 +6,8 @@
 - [Model switching](model-switching.md): changing models and providers in one conversation.
 - [Context](context.md): context usage and compaction.
 - [Keyboard shortcuts](keybindings.md): defaults and customization.
+- [The right panel](panel.md): browser, changes, files, tasks and trace beside the chat.
+- [The `boite` CLI](cli.md): what an agent runs to reach its thread and its panel.
 - [Titles](titles.md): automatic and manual conversation titles.
 - [Session import](imports.md): bringing in a Claude Code conversation.
 - [Phone access](phone.md): pairing, permissions and offline behavior.

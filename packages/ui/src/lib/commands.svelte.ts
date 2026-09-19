@@ -16,7 +16,16 @@ import { setTheme } from './theme';
 export const AGENT_PREFIX = 'agent:';
 
 /** The commands that end in a method only the owner may call. */
-const OWNER_COMMANDS = new Set<string>(['add-project', 'import-session', 'trace', 'providers', 'pair']);
+const OWNER_COMMANDS = new Set<string>([
+  'add-project',
+  'import-session',
+  'trace',
+  'changes',
+  'files',
+  'tasks',
+  'providers',
+  'pair'
+]);
 
 /** True while this row is a command the agent reported, not one of Boite's. */
 export function isAgentCommand(item: PaletteItem): boolean {
@@ -52,7 +61,14 @@ export function appCommands(store: Store, inShell: boolean): PaletteItem[] {
     items.push(row('rename', strings.palette.rename, 'title'));
     items.push(row('retitle', strings.palette.retitle, 'title agent name'));
     items.push(row('panel', strings.palette.panel, 'browser surface'));
-    if (store.owner) items.push(row('trace', strings.palette.trace, 'processes load'));
+    // The three read the working directory or the project's todos, which
+    // `packages/core/src/access.ts` refuses to a paired device.
+    if (store.owner) {
+      items.push(row('changes', strings.palette.changes, 'git diff working tree'));
+      items.push(row('files', strings.palette.files, 'tree directory explorer'));
+      items.push(row('tasks', strings.palette.tasks, 'todo goal loop'));
+      items.push(row('trace', strings.palette.trace, 'processes load'));
+    }
   }
   items.push(row('sidebar', strings.palette.sidebar));
   items.push(row('settings', strings.palette.settings, 'preferences'));
@@ -76,6 +92,9 @@ export function commandLabel(id: KeybindingCommand): string {
     case 'sidebar': return strings.palette.sidebar;
     case 'panel': return strings.palette.panel;
     case 'browser': return strings.keyboard.commands.browser;
+    case 'changes': return strings.keyboard.commands.changes;
+    case 'files': return strings.keyboard.commands.files;
+    case 'tasks': return strings.keyboard.commands.tasks;
     case 'close-surface': return strings.keyboard.commands.closeSurface;
     case 'settings': return strings.palette.settings;
     case 'stash': return strings.keyboard.commands.stash;
@@ -115,7 +134,10 @@ export function runCommand(store: Store, id: string, inShell: boolean): void {
     case 'rename': store.showChat(); store.renameRequested = true; break;
     case 'retitle': if (open) void store.retitle(open.id); break;
     case 'panel': store.showChat(); store.panel.toggle(); break;
-    case 'trace': store.showChat(); if (!store.panelOpen || store.panel.activeSurfaceId !== 'trace') store.togglePanel(); break;
+    case 'trace': store.showChat(); store.panel.toggleKind('trace'); break;
+    case 'changes': store.showChat(); store.panel.toggleKind('changes'); break;
+    case 'files': store.showChat(); store.panel.toggleKind('files'); break;
+    case 'tasks': store.showChat(); store.panel.toggleKind('tasks'); break;
     case 'sidebar': store.toggleSidebar(); break;
     case 'settings': store.showSettings(); break;
     case 'appearance': store.showSettings('appearance'); break;

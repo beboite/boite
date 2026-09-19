@@ -119,6 +119,131 @@ describe('the right panel', () => {
     expect(bound.surfaces.some((surface) => surface.id === browser.id)).toBe(true);
   });
 
+  test('changes, files and tasks each get one tab, a file one per path', () => {
+    const { bound } = panel();
+
+    bound.openChanges();
+    bound.openChanges('src/app.ts');
+    bound.openFiles();
+    bound.openTasks();
+    bound.openTasks();
+
+    expect(bound.surfaces.map((surface) => surface.id)).toEqual(['changes', 'files', 'tasks']);
+    // The row a second call named rides the tab that was already there.
+    expect(bound.surfaces[0]?.path).toBe('src/app.ts');
+
+    const first = bound.openFile('src/main.ts', 12);
+    const other = bound.openFile('docs/panel.md');
+    expect(first.id).toBe('file:src/main.ts');
+    expect(bound.surfaces).toHaveLength(5);
+
+    // The same path again is the same tab, moved to the line that was asked for.
+    const again = bound.openFile('src/main.ts', 40);
+    expect(again.id).toBe(first.id);
+    expect(bound.surfaces).toHaveLength(5);
+    expect(bound.activeSurfaceId).toBe(first.id);
+    expect(bound.surfaces.find((surface) => surface.id === first.id)?.line).toBe(40);
+    expect(other.line).toBe(undefined);
+  });
+
+  test('a kind key opens its surface, and shuts the panel when it is the one showing', () => {
+    const { bound } = panel();
+
+    bound.toggleKind('changes');
+    expect(bound.isOpen).toBe(true);
+    expect(bound.active?.kind).toBe('changes');
+
+    bound.toggleKind('changes');
+    expect(bound.isOpen).toBe(false);
+    expect(bound.surfaces).toHaveLength(1);
+
+    bound.toggleKind('tasks');
+    expect(bound.active?.kind).toBe('tasks');
+    // The changes tab is still there, so the key brings it forward rather than shutting.
+    bound.toggleKind('changes');
+    expect(bound.isOpen).toBe(true);
+    expect(bound.active?.kind).toBe('changes');
+    expect(bound.surfaces).toHaveLength(2);
+  });
+
+  test('what the core asks for lands on the surface that answers it', () => {
+    const { bound } = panel();
+
+    bound.showSurface({ kind: 'trace' });
+    expect(bound.active?.kind).toBe('trace');
+
+    bound.showSurface({ kind: 'tasks' });
+    expect(bound.active?.kind).toBe('tasks');
+
+    bound.showSurface({ kind: 'diff', path: 'src/app.ts' });
+    expect(bound.active?.kind).toBe('changes');
+    expect(bound.active?.path).toBe('src/app.ts');
+
+    bound.showSurface({ kind: 'files', path: 'src' });
+    expect(bound.active?.kind).toBe('files');
+    expect(bound.active?.path).toBe('src');
+
+    bound.showSurface({ kind: 'file', path: 'src/main.ts', line: 3 });
+    expect(bound.active?.kind).toBe('file');
+    expect(bound.active?.line).toBe(3);
+
+    bound.showSurface({ kind: 'browser', url: 'https://example.test/' });
+    expect(bound.active?.kind).toBe('browser');
+    expect(bound.active?.url).toBe('https://example.test/');
+
+    expect(bound.isOpen).toBe(true);
+  });
+
+  test('a layout stored before the other kinds existed still reads, and a new one too', () => {
+    // Exactly what version 1 wrote when trace and browser were the only kinds.
+    window.localStorage.setItem(
+      PANEL_STORAGE_KEY,
+      JSON.stringify({
+        version: 1,
+        threads: {
+          't-1': {
+            isOpen: true,
+            activeSurfaceId: 'trace',
+            surfaces: [
+              { id: 'trace', kind: 'trace' },
+              { id: 'browser:one', kind: 'browser', title: 'Boite', url: 'https://example.test/' }
+            ]
+          },
+          't-2': {
+            isOpen: true,
+            activeSurfaceId: 'file:src/main.ts',
+            surfaces: [
+              { id: 'changes', kind: 'changes', path: 'src/app.ts' },
+              { id: 'files', kind: 'files' },
+              { id: 'tasks', kind: 'tasks' },
+              { id: 'file:src/main.ts', kind: 'file', path: 'src/main.ts', line: 12 },
+              { id: 'file:nothing', kind: 'file' },
+              { id: 'ghost', kind: 'terminal' }
+            ]
+          }
+        }
+      })
+    );
+
+    const root = new RightPanelStore();
+    const old = root.for('t-1');
+    expect(old.surfaces.map((surface) => surface.kind)).toEqual(['trace', 'browser']);
+    expect(old.activeSurfaceId).toBe('trace');
+    expect(old.surfaces[1]?.url).toBe('https://example.test/');
+
+    const fresh = root.for('t-2');
+    // The kind nobody knows and the file tab with no path are both dropped.
+    expect(fresh.surfaces.map((surface) => surface.id)).toEqual([
+      'changes',
+      'files',
+      'tasks',
+      'file:src/main.ts'
+    ]);
+    expect(fresh.surfaces[0]?.path).toBe('src/app.ts');
+    expect(fresh.surfaces[3]?.line).toBe(12);
+    expect(fresh.activeSurfaceId).toBe('file:src/main.ts');
+  });
+
   test('a panel comes back from localStorage, thread by thread', () => {
     const first = panel('t-1');
     first.bound.open('trace');

@@ -6,10 +6,14 @@
  * got through a pairing link, and it is a guest: it reads the threads, answers
  * what an agent asks and sends prompts, and that is all.
  *
- * The list below is the whole boundary, so it is the one place to read when
- * asking what a stolen phone is worth. A method that is not in it is the
- * owner's: a new method added tomorrow is refused to a device until someone
- * decides otherwise, on purpose.
+ * An agent holds the per-thread token the core put in the environment of a
+ * process its thread launched. It is the narrowest of the three: it reaches
+ * `AGENT_METHODS` and only ever on its own thread.
+ *
+ * The two lists below are the whole boundary, so this is the one place to read
+ * when asking what a stolen phone, or an agent that went off, is worth. A
+ * method that is in neither is the owner's: a new method added tomorrow is
+ * refused to both until someone decides otherwise, on purpose.
  */
 
 import type { RpcMethodName } from '@boite/contracts';
@@ -75,9 +79,52 @@ export function isDeviceMethod(method: RpcMethodName): boolean {
   return DEVICE_METHODS.has(method);
 }
 
-/** Throws unless the connection may call the method, naming the method. */
-export function assertAllowed(method: RpcMethodName, connection: Connection): void {
-  if (connection.identity.principal === 'owner') return;
+/**
+ * What the agent of a thread reaches, and why each one is worth the risk of a
+ * token that sits in the environment of a process the user did not write. Read
+ * this as the CLI's manual: the agent says where it is, shows the user
+ * something, keeps its task list and the project's cards, reads the changes and
+ * the files around it. Nothing here writes a file, starts a process, reads
+ * another thread or changes what the core trusts, and every call is held to the
+ * thread whose token it carries.
+ */
+export const AGENT_METHODS: ReadonlyMap<RpcMethodName, string> = new Map<RpcMethodName, string>([
+  ['agent.where', 'the thread, its project, its working directory and its branch: what the CLI prints first'],
+  ['panel.open', 'showing the user a file, a diff or a page instead of pasting it into the transcript'],
+  ['threads.tasks.set', 'the plan the tasks surface draws, from an agent whose protocol carries no todo tool'],
+  ['threads.tasks.get', 'the same plan read back, so a new process continues the list it did not write'],
+  ['todos.list', 'the project cards, shared with the other threads of the project'],
+  ['todos.add', 'what surfaced during the work and belongs to the project, not to this turn'],
+  ['todos.update', 'claiming a card it finished, which is a request for confirmation, never the confirmation'],
+  ['git.status', 'what it changed in the working directory, without spawning a git of its own'],
+  ['git.diff', 'both sides of one file, for the same reason'],
+  ['files.list', 'one directory of the working directory it already runs in'],
+  ['files.read', 'one file of it, text inline and anything else through a ticket'],
+]);
+
+export function isAgentMethod(method: RpcMethodName): boolean {
+  return AGENT_METHODS.has(method);
+}
+
+/**
+ * Throws unless the connection may call the method, naming the method. The
+ * params are read for one thing only: an agent speaks for its own thread, so a
+ * call naming another one is refused before the handler sees it.
+ */
+export function assertAllowed(method: RpcMethodName, connection: Connection, params?: unknown): void {
+  const identity = connection.identity;
+  if (identity.principal === 'owner') return;
+  if (identity.principal === 'agent') {
+    if (!isAgentMethod(method)) throw refused(`${method} is not one of the agent's methods`, { method, principal: 'agent' });
+    const named = (params as { threadId?: unknown } | null | undefined)?.threadId;
+    if (identity.threadId === null || named !== identity.threadId) {
+      throw refused(`${method} is for thread ${identity.threadId ?? 'none'}, not thread ${String(named)}`, {
+        method,
+        threadId: named,
+      });
+    }
+    return;
+  }
   if (isDeviceMethod(method)) return;
-  throw refused(`${method} is for the owner only`, { method, principal: connection.identity.principal });
+  throw refused(`${method} is for the owner only`, { method, principal: identity.principal });
 }

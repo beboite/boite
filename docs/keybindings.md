@@ -53,6 +53,9 @@ A chord is modifiers, then one key, joined with `+`, case and spaces ignored.
 | `sidebar` | `mod+b` | Fold or unfold the sidebar |
 | `panel` | `mod+alt+b` | The right panel, on an open thread |
 | `browser` | `mod+shift+j` | The browser surface, in the shell |
+| `changes` | `mod+shift+c` | The changes surface, the working tree of the thread |
+| `files` | `mod+shift+f` | The files surface, the tree of the working directory |
+| `tasks` | `mod+shift+k` | The tasks surface, the agent's list and the project's |
 | `close-surface` | `mod+w` | The active surface of the panel, never the window |
 | `settings` | `mod+,` | Settings |
 | `stash` | `mod+s` | Put the composer text aside, or take it back |

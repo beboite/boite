@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Activity, GitBranch } from '@lucide/svelte';
+  import { GitBranch, PanelRight } from '@lucide/svelte';
   import { focusOnMount } from '../lib/actions';
   import { contextMenu } from '../lib/context-menu.svelte';
   import { separator } from '../lib/menu';
@@ -112,20 +112,20 @@
         </span>
       {/if}
       {#if thread}<ContextControl {store} />{/if}
-      <!-- `trace.get` is the owner's, so the button that opens the trace surface
-           is not in the device's header at all. -->
+      <!-- Every surface of the panel reads something only the owner may ask
+           for, so the button is not in a paired device's header at all. -->
       {#if thread && store.owner}
         <button
           type="button"
           class="ghost trace"
           class:on={store.panelOpen}
-          title={strings.thread.traceHint}
+          title={strings.thread.panelHint}
           aria-pressed={store.panelOpen}
-          data-testid="tab-trace"
+          data-testid="panel-toggle"
           onclick={() => store.togglePanel()}
         >
-          <Activity size={16} strokeWidth={1.75} />
-          {strings.thread.trace}
+          <PanelRight size={16} strokeWidth={1.75} />
+          {strings.thread.panel}
         </button>
       {/if}
 </div>

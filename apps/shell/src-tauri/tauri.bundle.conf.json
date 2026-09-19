@@ -5,6 +5,8 @@
     "resources": {
       "binaries/jobs-worker.js": "jobs-worker.js",
       "binaries/guard-worker.js": "guard-worker.js",
+      "binaries/boite": "boite",
+      "binaries/boite.cmd": "boite.cmd",
       "../../../packages/ui/dist": "ui"
     }
   }
