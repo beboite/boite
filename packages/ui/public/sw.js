@@ -10,12 +10,14 @@
  * Bump CACHE whenever the strategy below changes. `activate` deletes older
  * Boite caches when a new worker takes over, leaving other apps alone.
  */
-const CACHE = 'boite-ui-v2';
+const CACHE = 'boite-ui-v3';
 const SHELL = '/';
 const MANIFEST = '/manifest.webmanifest';
 const WORKER = '/sw.js';
 const RPC_PATH = '/rpc';
 const ASSETS_PREFIX = '/assets/';
+/** How long a navigation waits on the core before the cached shell is served instead. */
+const SHELL_PATIENCE_MS = 2500;
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -61,7 +63,7 @@ self.addEventListener('fetch', (event) => {
   if (url.pathname === WORKER || url.pathname === MANIFEST) return;
 
   if (request.mode === 'navigate') {
-    event.respondWith(shellFromNetworkFirst(request));
+    event.respondWith(shellFromNetworkFirst(event));
     return;
   }
 
@@ -73,24 +75,37 @@ self.addEventListener('fetch', (event) => {
 /**
  * A navigation goes to the core first, because the shell it serves is the one
  * that matches the core's version. The cached shell is what a phone gets when
- * the core is asleep or off the network.
+ * the core is asleep or off the network, and also when the network is there
+ * but slow: past SHELL_PATIENCE_MS the cached shell is served and the answer,
+ * when it lands, is kept for the next open.
  */
-async function shellFromNetworkFirst(request) {
+async function shellFromNetworkFirst(event) {
+  const cache = await caches.open(CACHE);
+  // The request carries the pairing query, the precached entry does not, so
+  // the shell is matched by its own path rather than by this request.
+  const cached = await cache.match(SHELL);
+  const response = fetch(event.request).then((answer) => {
+    // A full disk must not cost the navigation its answer: the write is on its own.
+    if (answer.ok) event.waitUntil(cache.put(SHELL, answer.clone()).catch(() => undefined));
+    return answer;
+  });
+  // Nothing to fall back on: the core's own answer, a 5xx included, beats a
+  // network error page.
+  if (!cached) return response;
+  const fromNetwork = response.then((answer) => {
+    if (answer.status >= 500) throw new Error('core unavailable');
+    return answer;
+  });
+  // Keeps the worker alive until the late answer is stored.
+  event.waitUntil(fromNetwork.catch(() => undefined));
+  let timer;
+  const patience = new Promise((resolve) => { timer = setTimeout(() => resolve(cached), SHELL_PATIENCE_MS); });
   try {
-    const response = await fetch(request);
-    if (response.ok) {
-      const cache = await caches.open(CACHE);
-      await cache.put(SHELL, response.clone());
-    }
-    if (response.status >= 500) throw new Error('core unavailable');
-    return response;
-  } catch (error) {
-    const cache = await caches.open(CACHE);
-    // The request carries the pairing query, the precached entry does not, so
-    // the shell is matched by its own path rather than by this request.
-    const cached = await cache.match(SHELL);
-    if (cached) return cached;
-    throw error;
+    return await Promise.race([fromNetwork, patience]);
+  } catch {
+    return cached;
+  } finally {
+    clearTimeout(timer);
   }
 }
 

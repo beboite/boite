@@ -17,6 +17,8 @@ export interface ConnectOptions {
   requestTimeoutMs?: number;
   /** Say hello with a pairing grant instead of the token; `session` then carries what came back. */
   grant?: string;
+  /** Extra upgrade headers. The bench names a `Host` here to be served as a remote client. */
+  headers?: Record<string, string>;
 }
 
 export interface CoreClient {
@@ -58,7 +60,9 @@ function socketUrl(url: string): string {
 export async function connect(url: string, token: string, options: ConnectOptions = {}): Promise<CoreClient> {
   const timeoutMs = options.timeoutMs ?? 5000;
   const deadline = Date.now() + timeoutMs;
-  const socket = new WebSocket(socketUrl(url));
+  const socket = options.headers === undefined
+    ? new WebSocket(socketUrl(url))
+    : new WebSocket(socketUrl(url), { headers: options.headers } as unknown as string[]);
   const pending = new Map<number, Pending>();
   const listeners = new Map<string, Set<(payload: unknown) => void>>();
   let nextId = 1;

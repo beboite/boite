@@ -28,6 +28,7 @@ export const strings = {
   phone: {
     preparing: 'The app is still preparing offline files. Reload and try again.',
     settingsOffline: 'Settings have not been downloaded yet. Reconnect and open Settings again.',
+    dialogOffline: 'This dialog has not been downloaded yet. Reconnect and open it again.',
     heading: 'Phone app', publicUrl: 'Public HTTPS address', urlPlaceholder: 'https://boite.example.com',
     publicUrlHint: 'Use the HTTPS origin configured on your reverse proxy. New pairing links use this address. The proxy must forward the page and /rpc to this core.',
     install: 'Install Boite', installed: 'Boite is running as an installed app.',
