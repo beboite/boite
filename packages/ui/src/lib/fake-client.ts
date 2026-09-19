@@ -772,6 +772,18 @@ const PROBED_CATALOGUE: [string, string][] = [
   ['nvidia/phi-4-reasoning', 'Phi 4 Reasoning']
 ];
 
+/** The scale the Muse probe falls back to when its model catalog lists none. */
+const MUSE_EFFORT: NonNullable<ModelInfo['effort']> = {
+  levels: [
+    { id: 'low', label: 'Low' },
+    { id: 'medium', label: 'Medium' },
+    { id: 'high', label: 'High' },
+    { id: 'xhigh', label: 'Extra high' },
+    { id: 'max', label: 'Max' }
+  ],
+  default: 'high'
+};
+
 const PROBED_MODELS: ModelInfo[] = [
   { id: 'default', name: 'OpenCode default', default: false, effort: PROBED_EFFORT },
   { id: 'anthropic/claude-sonnet-5', name: 'Claude Sonnet 5', default: true, effort: PROBED_EFFORT },
@@ -2846,7 +2858,7 @@ export class FakeClient implements ObservableClient {
     if (dynamic) {
       models = provider.id === UPDATABLE_ID ? structuredClone(PROBED_MODELS) : [
         ...models,
-        { id: `${provider.id}-demo`, name: `${provider.name} demo model`, default: false, ...(provider.protocol === 'codex-appserver' ? { effort: { levels: [{ id: 'low', label: 'Low' }, { id: 'high', label: 'High' }], default: 'high' }, speeds: [{ id: 'fast', label: 'Fast' }, { id: 'ultrafast', label: 'Ultrafast' }] } : {}) }
+        { id: `${provider.id}-demo`, name: `${provider.name} demo model`, default: false, ...(provider.protocol === 'codex-appserver' ? { effort: { levels: [{ id: 'low', label: 'Low' }, { id: 'high', label: 'High' }], default: 'high' }, speeds: [{ id: 'fast', label: 'Fast' }, { id: 'ultrafast', label: 'Ultrafast' }] } : provider.protocol === 'muse' ? { effort: MUSE_EFFORT } : {}) }
       ];
       await new Promise((resolve) => setTimeout(resolve, PROBE_MS));
     }

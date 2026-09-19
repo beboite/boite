@@ -88,7 +88,7 @@ mute across restarts. Both decisions are pure logic classes tested on a fake of
 the Win32 calls, so no test ever creates a window or plays a sound.
 [docs/trace.md](trace.md) has the caps and the settings.
 
-## Five drivers, one interface
+## Six drivers, one interface
 
 `Driver.startTurn(ctx) -> TurnHandle`, and the driver's whole job is mapping one
 protocol onto the contract's parts. What they share: one process and one agent
@@ -109,9 +109,8 @@ permission mode is part of the session key: Codex takes the approval policy and
 the sandbox when the thread opens and has no call that changes them later.
 `muse` has its own peer too, for Muse Code's session protocol: the approval
 mode is a call on the running host and the sandbox is a host flag, so only the
-flags are in the session key. `pi`
-takes its session on the command line rather than through a call, so the driver
-mints the id itself. `echo` streams the prompt back, can call a fake tool, ask a
+flags are in the session key. `pi` takes its session on the command line rather
+than through a call, so the driver mints the id itself. `echo` streams the prompt back, can call a fake tool, ask a
 permission and spawn a child on request, and never touches the network.
 
 ## Descriptors, tokens, managed installs

@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -249,7 +249,7 @@ describe('muse driver', () => {
     expect(countLines('approval/decide c-deny stage=0')).toBe(1);
   });
 
-  test('acceptEdits approves a write inside the folder and asks for one outside it', async () => {
+  test('acceptEdits approves a write inside the folder and asks for one outside it, through a link too', async () => {
     const client = await startCore();
     const threadId = await museThread(client, { permissionMode: 'acceptEdits' });
     const asked: string[] = [];
@@ -271,6 +271,22 @@ describe('muse driver', () => {
     await client.call('permissions.answer', { requestId: request.id, decision: 'deny' });
     expect((await finished).status).toBe('done');
     expect(textsOf(await lastParts(client, threadId))).toEqual(['kept']);
+
+    // A junction inside the folder that points out of it: the path reads as inside, the write would not be.
+    const outside = mkdtempSync(join(tmpdir(), 'muse-outside-'));
+    try {
+      symlinkSync(outside, join(harness?.dataDir ?? '', 'out-link'), 'junction');
+      const linked = client.next('permission.requested', (request) => request.threadId === threadId, 20000);
+      const linkedDone = client.next('turn.finished', (turn) => turn.threadId === threadId, 20000);
+      await client.call('turns.start', { threadId, prompt: '[edit-link]' });
+      const linkRequest = await linked;
+      expect(linkRequest.input).toMatchObject({ kind: 'fileAccess', access: 'write', path: 'out-link/notes.md' });
+      await client.call('permissions.answer', { requestId: linkRequest.id, decision: 'deny' });
+      expect((await linkedDone).status).toBe('done');
+      expect(textsOf(await lastParts(client, threadId))).toEqual(['kept']);
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
+    }
   });
 
   test('a question draws a card, and the picked label reaches the host', async () => {

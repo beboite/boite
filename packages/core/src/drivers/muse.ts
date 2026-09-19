@@ -21,7 +21,7 @@
  *   from `item/delta` is skipped, only the unseen suffix is drawn.
  */
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import type {
   AccountId,
   AgentTask,
@@ -43,6 +43,7 @@ import pkg from '../../package.json';
 import { messageOf, unavailable } from '../errors.ts';
 import type { SpawnedChild } from '../procs.ts';
 import { agentEnv, profileFor, resolveExecutable } from '../providers/loader.ts';
+import { writeLandsInside } from '../workdir.ts';
 import type {
   Driver,
   ProbeContext,
@@ -1260,7 +1261,8 @@ class MuseSession {
   /**
    * `acceptEdits`: a file write inside the thread's folder, which Muse neither
    * marks as a protected path nor escalated through its own judge, is approved
-   * without a card, once.
+   * without a card, once. Inside means after the links are followed, so a
+   * junction in the folder pointing out of it still gets a card.
    */
   private editAllowed(turn: MuseTurn, open: OpenApproval): boolean {
     if (turn.ctx.thread.permissionMode !== 'acceptEdits') return false;
@@ -1270,8 +1272,8 @@ class MuseSession {
     if (subject.access !== 'write' && subject.access !== 'readWrite') return false;
     if (typeof subject.path !== 'string' || subject.path.trim().length === 0) return false;
     const root = resolve(turn.ctx.thread.cwd);
-    const inside = relative(root, resolve(root, subject.path));
-    return inside.length > 0 && !inside.startsWith('..') && !isAbsolute(inside);
+    if (resolve(root, subject.path) === root) return false;
+    return writeLandsInside(root, subject.path);
   }
 
   // -- questions ------------------------------------------------------------

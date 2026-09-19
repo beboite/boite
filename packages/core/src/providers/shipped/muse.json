@@ -4,7 +4,7 @@
   "name": "Muse Code",
   "shortName": "Muse",
   "protocol": "muse",
-  "roots": ["{home}/.config/muse", "{home}/.local/share/muse", "{home}/.local/state/muse", "{isolationDir}"],
+  "roots": ["{home}/.config/muse", "{home}/.local/share/muse", "{home}/.local/state/muse", "{agentsDir}", "{isolationDir}"],
   "profiles": {
     "windows": {
       "detect": {},
