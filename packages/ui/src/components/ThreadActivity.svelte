@@ -91,7 +91,7 @@
             <ul data-testid="activity-tasks">
               {#each tasks as task (task.id)}
                 <li class:done={task.status === 'completed'}>
-                  <span class="task-mark" data-status={task.status} title={strings.activity[task.status]} aria-label={strings.activity[task.status]}>
+                  <span class="task-mark" data-status={task.status} title={strings.activity[task.status]} role="img" aria-label={strings.activity[task.status]}>
                     {#if task.status === 'completed'}<CircleCheck size={14} />{:else if task.status === 'in_progress'}<CircleDot size={14} />{:else}<Circle size={14} />{/if}
                   </span>
                   <span>{task.text}</span>
