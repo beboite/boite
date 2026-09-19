@@ -188,9 +188,18 @@ describe('managed installs', () => {
     const client = await harness.connect();
     const seen: ProviderInstallState[] = [];
     client.on('providers.installProgress', state => { seen.push(state); });
+    // The account the install brings has to be known before the provider reads
+    // as available, or a client starts a sign-in the user's own login makes useless.
+    const order: string[] = [];
+    client.on('accounts.updated', account => { if (account.providerId === 'managed') order.push('account'); });
+    client.on('providers.updated', ({ loaded }) => { if (loaded.some(provider => provider.id === 'managed' && provider.available)) order.push('provider'); });
+    expect((await client.call('accounts.list', {})).some(account => account.providerId === 'managed')).toBe(false);
     await client.call('providers.install', { providerId: 'managed' });
     await waitFor(() => seen.some(state => state.state === 'installed' || state.state === 'failed'));
     expect(seen.at(-1)?.state).toBe('installed');
+    await waitFor(() => order.includes('provider'));
+    expect(order[0]).toBe('account');
+    expect((await client.call('accounts.list', {})).filter(account => account.providerId === 'managed').length).toBe(1);
     expect(new Uint8Array(await Bun.file(agentDir('current', EXE_PATH)).arrayBuffer())).toEqual(EXE);
     expect((await client.call('providers.list', {})).loaded.find(provider => provider.id === 'managed')?.available).toBe(true);
     await client.call('providers.uninstall', { providerId: 'managed' });

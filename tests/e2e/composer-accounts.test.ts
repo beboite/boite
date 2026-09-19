@@ -56,6 +56,9 @@ test('queued prompts keep their thread, and browser project and account actions 
     const isolated = await client.call('accounts.add', { providerId: 'echo', label: 'Temporary account' });
     await page.click(selector('nav-settings'));
     await page.click(selector('settings-tab-accounts'));
+    // Accounts sit behind their provider's chevron.
+    await page.waitFor('document.querySelector("[data-provider-id=echo] [data-testid=provider-details-toggle]")');
+    await page.click('[data-provider-id=echo] [data-testid=provider-details-toggle]');
     await page.waitFor(`document.querySelector('[data-testid=account-remove][data-account-id="${isolated.id}"]')`);
     await page.screenshot(join(artifacts, 'accounts-remove.png'));
     await page.click(`[data-testid=account-remove][data-account-id="${isolated.id}"]`);

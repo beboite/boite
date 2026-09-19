@@ -157,6 +157,7 @@ const UPDATABLE_ARCHIVE_BYTES = 41_268_224;
 /** What one `providers.install` on that provider would fetch, and how big it is. */
 const RELEASES: Record<string, { version: string; archiveBytes: number }> = {
   claude: { version: '2.1.267', archiveBytes: 220_051_616 },
+  codex: { version: '0.155.1', archiveBytes: 107_573_195 },
   [MANAGED_ID]: { version: MANAGED_VERSION, archiveBytes: MANAGED_ARCHIVE_BYTES },
   [UPDATABLE_ID]: { version: UPDATABLE_AVAILABLE, archiveBytes: UPDATABLE_ARCHIVE_BYTES }
 };
@@ -2267,13 +2268,17 @@ export class FakeClient implements ObservableClient {
     this.#installBefore.delete(provider.id);
     provider.available = true;
     provider.executable = provider.id === MANAGED_ID ? MANAGED_EXE : provider.executable ?? `${DATA_DIR}/agents/${provider.id}/current/${provider.id}.exe`;
-    this.#setInstall(provider, {
+    // Same order as the core: the provider list first, so no client sees
+    // `installed` on a provider it still believes is missing.
+    const installed: ProviderInstallState = {
       state: 'installed',
       version: release.version,
       installedAt: this.#now(),
       available: release.version
-    });
+    };
+    provider.install = installed;
     this.#emit('providers.updated', { loaded: structuredClone(this.#providers), rejected: [] });
+    this.#setInstall(provider, installed);
   }
 
   #cancelInstall(providerId: string, operationId: string): ProviderInstallState {

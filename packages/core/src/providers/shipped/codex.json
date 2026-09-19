@@ -9,6 +9,7 @@
     "windows": {
       "detect": {},
       "executable": [
+        { "kind": "file", "value": "{agentsDir}/codex-x86_64-pc-windows-msvc.exe" },
         {
           "kind": "file",
           "value": "{appdata}/npm/node_modules/@openai/codex/node_modules/@openai/codex-win32-x64/vendor/x86_64-pc-windows-msvc/bin/codex.exe"
@@ -19,9 +20,21 @@
         },
         { "kind": "path", "value": "codex" }
       ],
+      "install": {
+        "arch": "x64",
+        "version": "0.155.1",
+        "url": "https://github.com/openai/codex/releases/download/rust-v0.155.1/codex-x86_64-pc-windows-msvc.exe.zip",
+        "sha256": "ce2269bdb7dfc06bb85c014c9c4e6b1601ffa0d646a2ae5b9b8cc8a427ef61fb",
+        "archiveBytes": 107573195,
+        "files": [
+          { "path": "codex-x86_64-pc-windows-msvc.exe", "bytes": 307108144 },
+          { "path": "codex-command-runner.exe", "bytes": 8217904 },
+          { "path": "codex-windows-sandbox-setup.exe", "bytes": 15498544 }
+        ]
+      },
       "launch": { "args": ["app-server"] },
       "isolation": { "CODEX_HOME": "{isolationDir}" },
-      "close": { "processes": ["codex.exe"] }
+      "close": { "processes": ["codex.exe", "codex-x86_64-pc-windows-msvc.exe"] }
     },
     "linux": {
       "detect": {},

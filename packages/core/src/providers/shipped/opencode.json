@@ -9,9 +9,18 @@
     "windows": {
       "detect": {},
       "executable": [
+        { "kind": "file", "value": "{agentsDir}/opencode.exe" },
         { "kind": "file", "value": "{appdata}/npm/node_modules/opencode-ai/bin/opencode.exe" },
         { "kind": "path", "value": "opencode" }
       ],
+      "install": {
+        "arch": "x64",
+        "version": "1.18.31",
+        "url": "https://github.com/sst/opencode/releases/download/v1.18.31/opencode-windows-x64.zip",
+        "sha256": "0ecd7ffc7f26390ce7799e7bcd409e4f11c410144308a6a5b0fcdce63d871006",
+        "archiveBytes": 60718498,
+        "files": [{ "path": "opencode.exe", "bytes": 179998248 }]
+      },
       "launch": { "args": ["acp", "--port", "0"] },
       "isolation": { "XDG_DATA_HOME": "{isolationDir}", "XDG_CONFIG_HOME": "{isolationDir}" },
       "close": { "processes": ["opencode.exe"] }

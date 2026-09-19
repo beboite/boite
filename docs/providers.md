@@ -147,10 +147,24 @@ verify the download's length and SHA-256 before making it available. Claude on
 Windows uses the official x64 binary this way. Its managed copy lives under
 Boite's data directory, without replacing a CLI installation elsewhere.
 
-For a missing managed agent, `Connect an account` downloads it and starts an
-isolated login after installation. Cancelling or leaving the Providers page
-cancels the pending login continuation. The download itself can be cancelled
-with its Cancel button. Existing CLI accounts are left unchanged.
+Codex and OpenCode ship a Windows x64 release the same way, from their GitHub
+releases; the Codex archive also carries `codex-command-runner.exe` and
+`codex-windows-sandbox-setup.exe`, unpacked beside the agent as upstream ships them. The
+managed copy is the first executable candidate, so an update reaches the agent
+Boite runs even when an npm copy exists. `test/shipped-installs.live.test.ts`,
+opt-in behind `BOITE_E2E_INSTALLS=1`, downloads both and runs `--version`.
+Grok and pi have no archive Boite can pin, so their row links to the agent's own
+install guide.
+
+The Providers page draws one row per provider with one next step
+(`packages/ui/src/lib/provider-setup.ts`): Install when Boite can download the
+agent, the install guide when it cannot, Sign in when the agent is there and no
+account is logged in, and nothing once one is. Install goes on to the sign-in by
+itself, unless the install brought a logged-in account: the core creates the
+provider's default account before it emits `providers.updated`, so an existing
+command-line login reads as ready and no sign-in starts. Cancelling the download
+or leaving the page drops that continuation. Returning to the window looks for
+missing agents again, so installing one outside Boite needs no button.
 
 `providers.install` streams the archive to
 `<dataDir>/agents/<id>/downloads/<version>.zip.part`, hashing as it writes, and
@@ -192,9 +206,9 @@ npm shim Bun cannot spawn, one through a vendored executable and the other
 through `node`; Grok is reached through the binary its own installer puts under
 `{home}/.grok/bin`, with PATH behind it.
 
-Antigravity is the one on the managed install: its binary is nowhere until
-`providers.install` downloads Google's release, so the picker offers Install
-first. It is also the one whose accounts are all isolated, the descriptor says
+Antigravity is the one that only exists as a managed install: its binary is nowhere until
+`providers.install` downloads Google's release, so its row on the Providers
+page offers Install first and the model picker links to the Providers page. It is also the one whose accounts are all isolated, the descriptor says
 `isolation.alwaysIsolated`, because the user's own IDE login is never what it
 runs on. Four descriptor fields exist for it and are open to any provider:
 

@@ -326,8 +326,10 @@ export class InstallManager {
         available: install.version,
       };
       this.#running.delete(providerId);
-      this.#emit(providerId, state);
+      // The provider list goes out first: a client that saw `installed` while it
+      // still held the provider as missing would offer a repair for one frame.
       this.#sink?.updated();
+      this.#emit(providerId, state);
     } catch (error) {
       rmSync(part, { force: true });
       rmSync(releaseDir, { recursive: true, force: true });
