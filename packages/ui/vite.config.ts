@@ -1,5 +1,5 @@
 import { readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { brotliCompressSync, constants, gzipSync } from 'node:zlib';
 import { defineConfig, type Plugin } from 'vite';
 import { svelte } from '@sveltejs/vite-plugin-svelte';
@@ -23,7 +23,8 @@ function precompress(): Plugin {
     name: 'boite-precompress',
     apply: 'build',
     configResolved(config) {
-      outDir = join(config.root, config.build.outDir);
+      // resolve, not join: a caller may pass an absolute --outDir.
+      outDir = resolve(config.root, config.build.outDir);
     },
     closeBundle() {
       for (const file of walk(outDir)) {
