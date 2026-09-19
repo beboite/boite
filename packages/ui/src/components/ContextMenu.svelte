@@ -170,7 +170,7 @@
   /* A full width row does not shrink under the finger, it fills one step more. */
   .row:active:not(:disabled) {
     transform: none;
-    background: color-mix(in srgb, var(--color-surface-3) 85%, var(--color-foreground));
+    background: var(--color-active);
   }
 
   .row.danger {
@@ -196,7 +196,7 @@
 
   .rule {
     height: 1px;
-    margin: 3px 6px;
+    margin: 4px 6px;
     background: var(--color-border);
   }
 </style>

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Check, ChevronDown, ListTodo, Pause, Play, Repeat, Target, X } from '@lucide/svelte';
+  import { Check, ChevronDown, Circle, CircleCheck, CircleDot, ListTodo, Pause, Play, Repeat, Target, X } from '@lucide/svelte';
   import type { Store } from '../lib/store.svelte';
   import { fill, strings } from '../lib/strings';
 
@@ -55,17 +55,17 @@
           </span>
           <span class="meta status" class:live={entry.status === 'active'}>{strings.activity[entry.status]}</span>
           {#if entry.status !== 'complete'}
-            <button type="button" class="activity-action icon" disabled={saving || store.connection !== 'ready'}
+            <button type="button" class="ghost small icon" disabled={saving || store.connection !== 'ready'}
               aria-label={entry.status === 'active' ? strings.activity.pause : strings.activity.resume}
               title={entry.status === 'active' ? strings.activity.pause : strings.activity.resume}
               onclick={() => void control(kind as 'goal' | 'loop', entry.status === 'active' ? 'pause' : 'resume')}>
-              {#if entry.status === 'active'}<Pause size={17} />{:else}<Play size={17} />{/if}
+              {#if entry.status === 'active'}<Pause size={16} />{:else}<Play size={16} />{/if}
             </button>
           {/if}
           {#if kind === 'goal' && entry.status !== 'complete'}
-            <button type="button" class="activity-action icon" disabled={saving || store.connection !== 'ready'} aria-label={strings.activity.finish} title={strings.activity.finish} onclick={() => void control('goal', 'complete')}><Check size={17} /></button>
+            <button type="button" class="ghost small icon" disabled={saving || store.connection !== 'ready'} aria-label={strings.activity.finish} title={strings.activity.finish} onclick={() => void control('goal', 'complete')}><Check size={16} /></button>
           {/if}
-          <button type="button" class="activity-action icon" disabled={saving || store.connection !== 'ready'} aria-label={strings.activity.remove} title={strings.activity.remove} onclick={() => void control(kind as 'goal' | 'loop', 'remove')}><X size={17} /></button>
+          <button type="button" class="ghost small icon" disabled={saving || store.connection !== 'ready'} aria-label={strings.activity.remove} title={strings.activity.remove} onclick={() => void control(kind as 'goal' | 'loop', 'remove')}><X size={16} /></button>
         </div>
         {#if entry.error}<p class="error">{entry.error}</p>{/if}
       {/if}
@@ -74,21 +74,26 @@
       <button type="button" class="ghost tasks-toggle" aria-expanded={expanded} aria-controls={detailsId}
         data-testid="activity-tasks-toggle" onclick={() => (expanded = !expanded)}
         onkeydown={(event) => { if (event.key === 'Escape') { expanded = false; event.stopPropagation(); } }}>
-        <ListTodo size={16} />
-        <span class="current">{tasks.length ? current : strings.activity.history}</span>
-        {#if tasks.length}<span class="count">{fill(strings.activity.taskCount, { done: String(done), total: String(tasks.length) })}</span>{/if}
-        <ChevronDown size={16} class={expanded ? 'turned' : ''} />
+        <span class="toggle-line">
+          <ListTodo size={16} />
+          <span class="current">{tasks.length ? current : strings.activity.history}</span>
+          {#if tasks.length}<span class="count">{fill(strings.activity.taskCount, { done: String(done), total: String(tasks.length) })}</span>{/if}
+          <ChevronDown size={16} class={expanded ? 'turned' : ''} />
+        </span>
+        <!-- Inside the toggle so its hover fill covers the bar and the card's air
+             is the same above the first line and under the bar. The count
+             already says it in words, the bar only draws it. -->
+        {#if tasks.length}<progress max={tasks.length} value={done} aria-hidden="true"></progress>{/if}
       </button>
-      {#if tasks.length}
-        <progress max={tasks.length} value={done} aria-label={strings.activity.tasks}></progress>
-      {/if}
       <div class="task-disclosure" class:open={expanded} inert={!expanded}>
         <div class="task-clip" id={detailsId}>
           {#if tasks.length}
             <ul data-testid="activity-tasks">
               {#each tasks as task (task.id)}
                 <li class:done={task.status === 'completed'}>
-                  <span class="task-mark" title={strings.activity[task.status]} aria-label={strings.activity[task.status]}>{task.status === 'completed' ? '✓' : task.status === 'in_progress' ? '•' : '○'}</span>
+                  <span class="task-mark" data-status={task.status} title={strings.activity[task.status]} aria-label={strings.activity[task.status]}>
+                    {#if task.status === 'completed'}<CircleCheck size={14} />{:else if task.status === 'in_progress'}<CircleDot size={14} />{:else}<Circle size={14} />{/if}
+                  </span>
                   <span>{task.text}</span>
                 </li>
               {/each}
@@ -109,43 +114,44 @@
 {/if}
 
 <style>
-  .activity { position: absolute; bottom: calc(100% - 4px); inset-inline: 0; z-index: 5; width: min(calc(100% - 40px), var(--content)); margin-inline: auto; max-height: 45vh; overflow-y: auto; padding: 8px 12px; border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-surface); box-shadow: var(--shadow-e1); font-size: var(--text-sm); transition: opacity var(--dur-3), transform var(--dur-3); }
+  /* Four pixels of card around every line: the rows and the toggle carry their
+     own inline padding, so a hover fill sits inset by the same four pixels on
+     every side and the air above the first line equals the air under the last. */
+  .activity { position: absolute; bottom: calc(100% - 4px); inset-inline: 0; z-index: 5; width: min(calc(100% - 40px), var(--content)); margin-inline: auto; max-height: 45vh; overflow-y: auto; padding: 4px; border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-surface); box-shadow: var(--shadow-e1); font-size: var(--text-sm); transition: opacity var(--dur-3), transform var(--dur-3); }
   .activity.hidden { opacity: 0; transform: translateY(8px); pointer-events: none; }
-  .activity-row, .tasks-toggle { display: flex; align-items: center; gap: 8px; min-height: var(--control); min-width: 0; }
+  .activity-row { display: flex; align-items: center; gap: 8px; min-height: var(--control); min-width: 0; padding: 0 2px 0 8px; }
   .activity-row > :global(svg) { flex: none; color: var(--color-muted-foreground); }
+  .activity-row button { flex: none; }
   .kind { font-weight: 600; color: var(--color-accent); }
-  .activity-action { min-height: var(--control-lg); flex: none; gap: 6px; border-radius: var(--radius-md); }
-  .activity-action.icon { width: var(--control-lg); height: var(--control-lg); }
-  .status { padding: 3px 8px; border-radius: var(--radius-sm); background: var(--color-surface-2); }
+  .status { padding: 2px 8px; border-radius: var(--radius-sm); background: var(--color-surface-2); }
   .status.live { color: var(--color-accent); }
   .finished .status { color: var(--color-success); }
   .objective, .current { flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; min-width: 0; text-align: left; }
   .meta, .count { color: var(--color-muted-foreground); font-size: var(--text-xs); flex: none; }
-  .tasks-toggle { width: 100%; padding: 0; margin-top: 2px; }
-  .tasks-toggle :global(svg) { flex: none; }
-  .tasks-toggle :global(svg:last-child) { transition: transform var(--dur-2); }
-  .tasks-toggle :global(.turned) { transform: rotate(180deg); }
-  progress { display: block; appearance: none; width: 100%; height: 3px; margin-top: 5px; border: none; border-radius: var(--radius-sm); overflow: hidden; background: var(--color-surface-3); }
+  .tasks-toggle { display: flex; flex-direction: column; align-items: stretch; justify-content: center; gap: 6px; width: 100%; height: auto; min-height: var(--control); padding: 6px 8px; font-weight: 400; color: var(--color-foreground); }
+  .toggle-line { display: flex; align-items: center; gap: 8px; min-width: 0; line-height: 16px; }
+  .toggle-line > :global(svg) { flex: none; color: var(--color-muted-foreground); }
+  .toggle-line > :global(svg:last-child) { transition: transform var(--dur-2) var(--ease-out-quint); }
+  .toggle-line > :global(.turned) { transform: rotate(180deg); }
+  progress { display: block; appearance: none; width: 100%; height: 3px; border: none; border-radius: var(--radius-sm); overflow: hidden; background: var(--color-surface-3); }
   progress::-webkit-progress-bar { background: var(--color-surface-3); }
   progress::-webkit-progress-value { background: var(--color-accent); transition: width var(--dur-3); }
   progress::-moz-progress-bar { background: var(--color-accent); }
   .task-disclosure { display: grid; grid-template-rows: 0fr; transition: grid-template-rows var(--dur-3) var(--ease-out-quint); }
   .task-disclosure.open { grid-template-rows: 1fr; }
   .task-clip { overflow: hidden; min-height: 0; }
-  ul, ol { list-style: none; margin: 0; padding: 6px 0; }
-  li { display: flex; gap: 8px; padding: 5px 0; overflow-wrap: anywhere; }
-  .task-mark { width: 15px; flex: none; text-align: center; }
+  ul, ol { list-style: none; margin: 0; padding: 2px 8px 6px; }
+  li { display: flex; align-items: flex-start; gap: 8px; padding: 4px 0; line-height: 1.5; overflow-wrap: anywhere; }
+  /* The same box as the toggle's icon, so the task text starts under its line. */
+  .task-mark { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 1.5em; flex: none; color: var(--color-muted-foreground); }
+  .task-mark[data-status='completed'] { color: var(--color-success); }
+  .task-mark[data-status='in_progress'] { color: var(--color-live); }
   .done { color: var(--color-muted-foreground); }
-  .done .task-mark { color: var(--color-success); }
   .history li { display: block; border-top: 1px solid var(--color-border); padding-block: 8px; }
   .run-heading { display: flex; justify-content: space-between; gap: 12px; }
   .history p { margin: 4px 0 0; white-space: pre-wrap; }
-  .cadence { margin: 8px 0 0; }
-  .error { color: var(--color-danger); margin: 4px 0; overflow-wrap: anywhere; }
-  @media (max-width: 720px) { .activity { width: min(calc(100% - 20px), var(--content)); padding: 8px; } .activity-row { gap: 5px; } .activity-action.icon { width: var(--control-touch); height: var(--control-touch); } }
-  @media (prefers-reduced-motion: reduce) { .activity, .task-disclosure, progress::-webkit-progress-value { transition: none; } }
+  .cadence { margin: 8px 8px 0; }
+  .error { color: var(--color-danger); margin: 2px 8px 6px; overflow-wrap: anywhere; }
+  @media (max-width: 720px) { .activity { width: min(calc(100% - 20px), var(--content)); } .activity-row { gap: 6px; } }
+  @media (prefers-reduced-motion: reduce) { .activity, .task-disclosure, progress::-webkit-progress-value, .toggle-line > :global(svg:last-child) { transition: none; } }
 </style>
-
-
-
-

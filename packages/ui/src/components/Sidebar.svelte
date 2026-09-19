@@ -158,7 +158,7 @@
       {#if store.draft}<button
           class="ghost draft"
           data-testid="draft-row"
-          onclick={() => store.startDraft(store.draft?.projectId)}>{strings.sidebar.draft}</button
+          onclick={() => store.startDraft(store.draft?.projectId)}><span class="draft-mark" aria-hidden="true"></span>{strings.sidebar.draft}</button
         >{/if}
       {#each recent as entry (`${entry.machine.id}:${entry.thread.id}`)}<ThreadCard {...entry} {now} />{/each}
       {#if groups.length > 0 && recent.length === 0}<p class="none">
@@ -207,7 +207,7 @@
               {#if draftHere}<button
                   class="ghost draft"
                   data-testid="draft-row"
-                  onclick={() => owner.startDraft(project.id)}>{strings.sidebar.draft}</button
+                  onclick={() => owner.startDraft(project.id)}><span class="draft-mark" aria-hidden="true"></span>{strings.sidebar.draft}</button
                 >{/if}
               {#each threads as thread (thread.id)}<ThreadCard {machine} {project} {thread} {now} />{/each}
               {#if threads.length === 0 && !draftHere}<p class="none">
@@ -387,12 +387,21 @@
     min-height: 0;
     overflow: hidden;
   }
+  /* Laid out like a thread row: the same mark column, the title on the same line. */
   .draft {
     width: 100%;
     min-height: calc(var(--row) + 14px);
     justify-content: flex-start;
-    padding-left: 28px;
+    gap: 8px;
+    padding: 0 10px;
     background: var(--color-active);
+  }
+  .draft-mark {
+    width: 8px;
+    height: 8px;
+    flex: none;
+    border-radius: 50%;
+    border: 1.5px dashed var(--color-muted-foreground);
   }
   .none {
     padding: 4px 10px;

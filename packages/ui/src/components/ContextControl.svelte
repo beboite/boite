@@ -52,7 +52,7 @@
     <div class="popup" style:left={`${left}px`} style:top={`${top}px`} class:closing={popup.closing} role="dialog" aria-label={strings.thread.contextDetails} tabindex="-1" data-testid="context-popup" use:popup.attach onanimationend={popup.end}>
       <div class="heading"><span>{strings.thread.contextDetails}</span>{#if percent !== null}<span class="mono">{percent}%</span>{/if}</div>
       {#if context}
-        <p class="total mono">{exact(context.tokens)}{#if context.window !== null} / {exact(context.window)}{/if}</p>
+        <p class="total mono">{exact(context.tokens)}{#if context.window !== null}{' / '}{exact(context.window)}{/if}</p>
         <div class="bar" aria-hidden="true">
           {#each segments as segment (segment.kind)}<span class={segment.kind} style:width={`${Math.min(100, segment.count / Math.max(1, context.window ?? context.tokens) * 100)}%`}></span>{/each}
         </div>

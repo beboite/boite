@@ -58,7 +58,6 @@
   </header>
 
   <section class="card" id="settings-theme">
-    <h2>{strings.settings.appearance}</h2>
     <div class="switch-row">
       <span class="text">{strings.settings.theme}</span>
       <div class="segmented" role="group" aria-label={strings.settings.theme}>
@@ -119,31 +118,8 @@
   .hue { appearance: none; width: 100%; min-height: 0; height: 8px; padding: 0; background: var(--accent-spectrum); border: none; border-radius: 999px; cursor: pointer; }
   .hue::-webkit-slider-thumb { appearance: none; width: 16px; height: 16px; background: var(--color-foreground); border: 2px solid var(--color-surface-2); border-radius: 50%; box-shadow: var(--shadow-e1); }
   .hue::-moz-range-thumb { width: 14px; height: 14px; background: var(--color-foreground); border: 2px solid var(--color-surface-2); border-radius: 50%; }
-  @media (max-width: 720px) { .accent-row { flex-direction: column; align-items: stretch; } }
-  .switch-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    margin-top: 12px;
-    padding: 8px 10px;
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-md);
-  }
-
-  .switch-row .text {
-    color: var(--color-foreground);
-    font-size: var(--text-base);
-    margin: 0;
-  }
-
-  .switch-row .hint {
-    display: block;
-    color: var(--color-muted-foreground);
-    font-size: var(--text-sm);
-    margin-top: 2px;
-  }
-
+  /* Scoped under the page so it outranks the shared row, which centres its children. */
+  @media (max-width: 720px) { :global(.settings .page) .accent-row { flex-direction: column; align-items: stretch; } }
   /* The options in one track, the chosen one filled like a primary button. */
   .segmented {
     display: inline-flex;

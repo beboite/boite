@@ -1,6 +1,5 @@
 <script lang="ts">
   import { untrack } from 'svelte';
-  import { ShieldCheck, VolumeX, AppWindow, Activity } from '@lucide/svelte';
   import type { ThreadId } from '@boite/contracts';
   import { bytes, duration, millis, time } from '../lib/format';
   import { strings } from '../lib/strings';
@@ -21,26 +20,23 @@
 
 <div class="page" data-testid="resources-page">
   <header>
-    <ShieldCheck size={24} strokeWidth={1.5} /><h1>{strings.settings.tabs.resources}</h1>
-    <button class="quiet" onclick={() => void store.refreshResources()}>
-      {strings.common.refresh}
-    </button>
+    <div>
+      <h1>{strings.settings.tabs.resources}</h1>
+      <p>{strings.protection.intro}</p>
+    </div>
   </header>
 
-  <p class="note">{strings.protection.intro}</p>
   <section class="card" id="settings-quiet">
     <h2>{strings.protection.quiet}</h2>
     <label class="switch-row">
-      <AppWindow size={20} strokeWidth={1.5} />
       <span class="text">{strings.settings.focusGuard}<span class="hint">{strings.settings.focusGuardHint}</span></span>
       <input type="checkbox" role="switch" data-testid="setting-focus-guard" checked={store.settings?.focusGuard ?? true} onchange={(event) => void store.saveSettings({focusGuard: event.currentTarget.checked})} />
     </label>
     <label class="switch-row">
-      <VolumeX size={20} strokeWidth={1.5} />
       <span class="text">{strings.settings.muteAgents}<span class="hint">{strings.settings.muteAgentsHint}</span></span>
       <input type="checkbox" role="switch" data-testid="setting-mute-agents" checked={store.settings?.muteAgents ?? true} onchange={(event) => void store.saveSettings({muteAgents: event.currentTarget.checked})} />
     </label>
-    <p class="note platform">{strings.protection.windows}</p>
+    <p class="hint">{strings.protection.windows}</p>
   </section>
   <section class="card" id="settings-limits">
     <h2>{strings.protection.limits}</h2>
@@ -50,14 +46,17 @@
       <button type="submit" class="primary">{strings.settings.save}</button>
     </form>
   </section>
-  <div class="task-heading" id="settings-tasks"><Activity size={18} /><h2>{strings.protection.tasks}</h2></div>
+  <div class="group-heading" id="settings-tasks">
+    <h2>{strings.protection.tasks}</h2>
+    <button class="quiet" onclick={() => void store.refreshResources()}>{strings.common.refresh}</button>
+  </div>
 
   {#if store.resources.length === 0}
     <p class="empty">{strings.resources.empty}</p>
   {/if}
 
   {#each store.resources as entry (entry.threadId)}
-    <section class="card" data-testid="resource-row" data-thread-id={entry.threadId}>
+    <section class="card flush" data-testid="resource-row" data-thread-id={entry.threadId}>
       <div class="head">
         <button class="quiet title" onclick={() => void store.open(entry.threadId)}>
           {entry.title}
@@ -119,14 +118,8 @@
 </div>
 
 <style>
-  .switch-row { display: flex; align-items: center; gap: 16px; }
-  .text { flex: 1; }
-  .hint { display: block; color: var(--color-muted-foreground); font-size: var(--text-sm); margin-top: 4px; }
-  .platform { margin: 16px 0 0; font-size: var(--text-sm); }
   form { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: end; }
   form button { justify-self: start; }
-  .task-heading { display: flex; align-items: center; gap: 10px; margin: 32px 0 16px; }
-  .task-heading h2 { font-size: var(--text-md); }
   td:not(:first-child), th:not(:first-child) { text-align: right; font-variant-numeric: tabular-nums; }
   .process-table { overflow-x: auto; }
   @media (max-width: 720px) { form { grid-template-columns: 1fr; } .head { flex-wrap: wrap; } .totals { margin-left: 0; } }
@@ -140,7 +133,7 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 5px 8px;
+    padding: 8px 10px 8px 12px;
     border-bottom: 1px solid var(--color-border);
     background: var(--color-surface-2);
   }

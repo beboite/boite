@@ -668,7 +668,8 @@
 </div>
 
 <style>
-  .model-attribution { color: var(--color-muted-foreground); font-size: var(--text-xs); margin-bottom: 4px; }
+  /* On the same 4 px rest as the parts it names. */
+  .model-attribution { color: var(--color-muted-foreground); font-size: var(--text-xs); margin-bottom: 4px; padding-left: 4px; }
   .receipts { display: flex; gap: 1px; margin: 4px 2px 0; color: var(--color-muted-foreground); }
   .receipts span { display: flex; opacity: .45; }
   .receipts .received { color: var(--color-accent); opacity: 1; }

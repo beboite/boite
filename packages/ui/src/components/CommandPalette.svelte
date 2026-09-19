@@ -176,9 +176,8 @@
             onmousemove={() => (selected = index)}
             onclick={() => pick(item)}
           >
-            {#if thread}
-              <span class="mark-slot"><StatusMark status={thread.status} unread={thread.unread} /></span>
-            {/if}
+            <!-- Empty for a command, so every label starts on the same line. -->
+            <span class="mark-slot">{#if thread}<StatusMark status={thread.status} unread={thread.unread} />{/if}</span>
             <span class="label">{item.label}</span>
             {#if item.hint}
               <span class="hint" class:kbd={item.kind === 'command'}>{item.hint}</span>
@@ -230,6 +229,12 @@
     animation-name: pop-out;
   }
 
+  /* The list scrolls, the field and the foot keep their height. */
+  .field,
+  .foot {
+    flex: none;
+  }
+
   .field {
     display: flex;
     align-items: center;
@@ -263,7 +268,7 @@
   }
 
   .section-label {
-    padding: 8px 8px 4px;
+    padding: 8px 10px 4px;
   }
 
   .row {

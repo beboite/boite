@@ -88,12 +88,12 @@
     </span>
     {#if status && status.ahead > 0}
       <span class="track" title={fill(strings.changes.ahead, { count: String(status.ahead) })}>
-        <ArrowUp size={12} strokeWidth={1.75} />{status.ahead}
+        <ArrowUp size={13} strokeWidth={1.75} />{status.ahead}
       </span>
     {/if}
     {#if status && status.behind > 0}
       <span class="track" title={fill(strings.changes.behind, { count: String(status.behind) })}>
-        <ArrowDown size={12} strokeWidth={1.75} />{status.behind}
+        <ArrowDown size={13} strokeWidth={1.75} />{status.behind}
       </span>
     {/if}
     <span class="spacer"></span>
@@ -296,14 +296,14 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 16px;
-    height: 16px;
+    width: 18px;
+    height: 18px;
     flex: none;
     border-radius: var(--radius-sm);
     background: color-mix(in srgb, var(--mark) 18%, transparent);
     color: var(--mark);
     font-family: var(--font-mono);
-    font-size: 10px;
+    font-size: var(--text-xs);
     font-weight: 600;
   }
 
@@ -361,11 +361,12 @@
 
   .staged {
     flex: none;
-    padding: 0 4px;
+    padding: 0 5px;
     border-radius: var(--radius-sm);
     background: var(--color-surface-3);
     color: var(--color-muted-foreground);
-    font-size: 10px;
+    font-size: var(--text-xs);
+    line-height: 18px;
     font-weight: 600;
   }
 

@@ -33,9 +33,8 @@
   }
 </script>
 
-<div class="machines-page" data-testid="machines-page">
-  <h1>{strings.machines.heading}</h1>
-  <p class="intro">{strings.machines.intro}</p>
+<div class="page" data-testid="machines-page">
+  <header><div><h1>{strings.machines.heading}</h1><p>{strings.machines.intro}</p></div></header>
   <div class="machines">
     {#each workspace.machines as machine (machine.id)}
       <section class="card machine-card" data-testid="machine-card" data-machine-id={machine.id}>
@@ -92,7 +91,7 @@
         ><Plus size={14} />{busy ? strings.machines.adding : strings.machines.add}</button
       >
     </form>
-    <details>
+    <details class="disclosure">
       <summary>{strings.machines.manual}</summary>
       <form
         onsubmit={(e) => {
@@ -126,17 +125,19 @@
   {#if workspace.active.owner && !mobile}
     <section class="card add origins">
       <h2>{strings.machines.browserOrigins}</h2>
-      <p class="intro">{strings.machines.browserOriginsHint}</p>
+      <p class="hint">{strings.machines.browserOriginsHint}</p>
       <textarea bind:value={origins} aria-label={strings.machines.browserOrigins} rows="3"></textarea>
-      <button
-        onclick={() =>
-          void workspace.active.saveSettings({
-            browserOrigins: origins
-              .split('\n')
-              .map((s) => s.trim())
-              .filter(Boolean)
-          })}>{strings.settings.save}</button
-      >
+      <div class="actions">
+        <button
+          onclick={() =>
+            void workspace.active.saveSettings({
+              browserOrigins: origins
+                .split('\n')
+                .map((s) => s.trim())
+                .filter(Boolean)
+            })}>{strings.settings.save}</button
+        >
+      </div>
     </section>
   {/if}
 </div>
@@ -145,121 +146,24 @@
   .machine-name { width: 100%; font-weight: 600; }
   .icon-choices { display: flex; flex-wrap: wrap; gap: 4px; margin: 8px 0; }
   .icon-choices .chosen { color: var(--color-foreground); background: var(--color-surface-3); box-shadow: inset 0 0 0 1px var(--color-border); }
-  .machines-page {
-    max-width: 820px;
-    padding: 28px;
-    margin: 0 auto;
-  }
-  h1 {
-    font-size: var(--text-lg);
-    margin: 0 0 10px;
-  }
-  h2 {
-    font-size: var(--text-base);
-    margin: 0 0 6px;
-  }
-  .intro {
-    color: var(--color-muted-foreground);
-    line-height: 1.6;
-    margin-bottom: 24px;
-  }
-  .machines {
-    display: grid;
-    gap: 10px;
-    margin-bottom: 24px;
-  }
-  .machine-card {
-    display: flex;
-    align-items: flex-start;
-    gap: 14px;
-    padding: 18px;
-  }
-  .logo {
-    display: grid;
-    place-items: center;
-    width: 42px;
-    height: 42px;
-    border-radius: var(--radius-md);
-    background: var(--color-surface-3);
-    color: var(--color-muted-foreground);
-    flex: none;
-  }
-  .identity {
-    flex: 1;
-    min-width: 0;
-  }
-  .address {
-    display: block;
-    color: var(--color-subtle);
-    font-size: var(--text-sm);
-    overflow-wrap: anywhere;
-  }
-  .status {
-    display: block;
-    margin-top: 7px;
-    font-size: var(--text-xs);
-    color: var(--color-live);
-  }
-  .status.ready {
-    color: var(--color-success);
-  }
-  .actions {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-end;
-    gap: 4px;
-  }
-  .add {
-    padding: 20px;
-  }
-  form {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-    align-items: flex-start;
-    margin-top: 16px;
-  }
-  .origins {
-    margin-top: 20px;
-  }
-  textarea {
-    display: block;
-    width: 100%;
-    margin-bottom: 12px;
-  }
-  label {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    width: 100%;
-    font-size: var(--text-sm);
-    color: var(--color-muted-foreground);
-  }
-  input {
-    width: 100%;
-  }
-  details {
-    margin-top: 20px;
-    color: var(--color-muted-foreground);
-    font-size: var(--text-sm);
-  }
-  summary {
-    cursor: pointer;
-  }
-  .error {
-    color: var(--color-danger);
-    overflow-wrap: anywhere;
-  }
+  /* The machines are a list of cards, so they share the page's column and gap. */
+  .machines { display: grid; gap: 10px; max-width: 880px; margin-bottom: 20px; }
+  .machine-card { display: flex; align-items: flex-start; gap: 14px; padding: 18px; box-shadow: none; }
+  .logo { display: grid; place-items: center; width: 42px; height: 42px; border-radius: var(--radius-md); background: var(--color-surface-3); color: var(--color-muted-foreground); flex: none; }
+  .identity { flex: 1; min-width: 0; }
+  .address { display: block; color: var(--color-subtle); font-size: var(--text-sm); overflow-wrap: anywhere; }
+  .status { display: block; margin-top: 7px; font-size: var(--text-xs); color: var(--color-live); }
+  .status.ready { color: var(--color-success); }
+  .machine-card .actions { flex-direction: column; align-items: flex-end; gap: 4px; }
+  form { display: flex; flex-direction: column; gap: 12px; align-items: flex-start; }
+  textarea { display: block; width: 100%; margin: 18px 0 12px; }
+  label { display: flex; flex-direction: column; gap: 6px; width: 100%; color: var(--color-muted-foreground); font-size: var(--text-sm); }
+  label > :global(input) { width: 100%; }
+  details { margin-top: 20px; }
+  details form { margin-top: 12px; }
+  .error { margin-top: 12px; color: var(--color-danger); overflow-wrap: anywhere; }
   @media (max-width: 720px) {
-    .machines-page {
-      padding: 16px;
-    }
-    .machine-card {
-      flex-wrap: wrap;
-    }
-    .actions {
-      flex-direction: row;
-      width: 100%;
-    }
+    .machine-card { flex-wrap: wrap; }
+    .machine-card .actions { flex-direction: row; width: 100%; }
   }
 </style>

@@ -16,16 +16,17 @@
 
 <div class="page" data-testid="usage-page">
   <header>
-    <h1>{strings.usage.heading}</h1>
+    <div>
+      <h1>{strings.usage.heading}</h1>
+      <p>{strings.usage.note}</p>
+    </div>
     <button class="quiet" onclick={() => void store.refreshUsage()}>{strings.common.refresh}</button>
   </header>
-
-  <p class="note">{strings.usage.note}</p>
 
   {#if rows.length === 0}
     <p class="empty">{strings.usage.empty}</p>
   {:else}
-    <table class="card">
+    <table class="card flush">
       <thead>
         <tr>
           <th>{strings.usage.thread}</th>
@@ -67,16 +68,8 @@
 </div>
 
 <style>
-  .note {
-    margin: 0 0 10px;
-    color: var(--color-muted-foreground);
-    border-left: 2px solid var(--color-edge);
-    padding-left: 8px;
-    max-width: 620px;
-  }
-
   table {
-    max-width: 780px;
+    max-width: 880px;
   }
 
   tfoot td {

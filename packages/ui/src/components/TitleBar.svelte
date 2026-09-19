@@ -159,6 +159,8 @@
     .browser .sidebar-toggle { display: none; }
   }
   .name { flex: 1; min-width: 0; font-size: var(--text-sm); color: var(--color-muted-foreground); }
+  /* Alone in the bar, the label starts where the toggle's icon would: 16 px in. */
+  .name:first-child { padding-left: 8px; }
   .titlebar { padding-right: 8px; }
   .controls { flex: none; margin-left: 4px; }
 
