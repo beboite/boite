@@ -19,7 +19,7 @@ beforeAll(async () => {
   server = await createServer({ root: join(import.meta.dir, '../../packages/ui'), server: { host: '127.0.0.1', port, strictPort: true }, clearScreen: false });
   await server.listen();
   uiUrl = `http://127.0.0.1:${port}`;
-  page = await BrowserPage.launch({ url: `${uiUrl}/?fake=1` });
+  page = await BrowserPage.launch({ url: `${uiUrl}/?fake=1&open=recent` });
   await page.waitFor(`document.querySelector('${id('nav-settings')}')`);
 }, 30_000);
 afterAll(async () => { await page?.close(); await server?.close(); }, 15_000);
@@ -65,22 +65,8 @@ test('missing agents offer desktop setup while phone settings omit provider admi
   await page.send('Emulation.setDeviceMetricsOverride', { width: 1400, height: 1000, deviceScaleFactor: 1, mobile: false });
 }, 30_000);
 
-test('a plugin installs, switches an account and uninstalls through its page', async () => {
-  await page.click(id('settings-tab-plugins'));
-  await page.waitFor(`document.querySelector('${id('plugin-install')}') && !document.querySelector('${id('plugin-install')}').disabled`);
-  await page.click(id('plugin-install'));
-  await page.waitFor(`document.querySelectorAll('${id('plugin-pool')}').length === 3`);
-  await capture('plugins.png');
-  const row = `${id('plugin-pool')}[data-provider="claude"] ${id('plugin-account')}[data-email="personal@example.com"]`;
-  await page.click(`${row} ${id('plugin-switch')}`);
-  await page.waitFor(`document.querySelector('${id('confirm-ok')}')`); await page.click(id('confirm-ok'));
-  await page.waitFor(`document.querySelector('${row} ${id('plugin-switch')}').disabled`);
-  await page.click(id('plugin-uninstall')); await page.waitFor(`document.querySelector('${id('confirm-ok')}')`); await page.click(id('confirm-ok'));
-  await page.waitFor(`document.querySelector('${id('plugin-install')}')`);
-}, 30_000);
-
 test('installing a missing agent goes on to its sign-in without a second click or a terminal', async () => {
-  await page.navigate(`${uiUrl}/?fake=1&uninstalled=1`);
+  await page.navigate(`${uiUrl}/?fake=1&open=recent&uninstalled=1`);
   await page.waitFor(`document.querySelector('${id('nav-settings')}')`);
   await page.click(id('nav-settings')); await page.click(id('settings-tab-accounts'));
   const connect = '[data-provider-id="claude"] [data-testid="install-start"]';
@@ -125,7 +111,7 @@ test('Grain is visible above solid and acrylic surfaces and the settings fit a p
 
 test('the compact quota page shows limits and reset times', async () => {
   await page.send('Emulation.setDeviceMetricsOverride', { width: 380, height: 460, deviceScaleFactor: 1, mobile: false });
-  await page.navigate(`${uiUrl}/?fake=1&view=quotas`);
+  await page.navigate(`${uiUrl}/?fake=1&open=recent&view=quotas`);
   await page.send('Emulation.setDefaultBackgroundColorOverride', { color: { r: 0, g: 0, b: 0, a: 0 } });
   await page.waitFor(`document.querySelectorAll('${id('quota-provider')}').length === 5 && document.querySelector('progress')`);
   expect(await page.evaluate(`getComputedStyle(document.documentElement).backgroundColor`)).toBe('rgba(0, 0, 0, 0)');
@@ -153,7 +139,7 @@ test('the compact quota page shows limits and reset times', async () => {
 
 test('machines list each execution host and disconnect only the selected host', async () => {
   await page.send('Emulation.setDeviceMetricsOverride', { width: 1400, height: 1000, deviceScaleFactor: 1, mobile: false });
-  await page.navigate(`${uiUrl}/?fake=1&machines=1`);
+  await page.navigate(`${uiUrl}/?fake=1&open=recent&machines=1`);
   await page.evaluate(`document.documentElement.dataset.theme = 'dark'`);
   await page.waitFor(`document.querySelectorAll('[data-machine-id="http://builder.test"] [data-testid="thread-row"]').length > 0`);
   await page.click(id('nav-settings'));

@@ -28,7 +28,7 @@ function pathsOf(providerId: string) {
 }
 
 test('every agent Boite ships has a mark, and only those', () => {
-  expect(Object.keys(providerLogos).sort()).toEqual(['antigravity', 'claude', 'codex', 'grok', 'opencode', 'pi']);
+  expect(Object.keys(providerLogos).sort()).toEqual(['antigravity', 'antigravity-cli', 'claude', 'codex', 'grok', 'opencode', 'pi']);
 });
 
 test('a mark in one colour draws its path at the size it was given, in that colour', () => {

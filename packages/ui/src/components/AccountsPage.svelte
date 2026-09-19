@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { ChevronRight } from '@lucide/svelte';
+  import { slide } from 'svelte/transition';
+  import { ChevronRight, Plus, RefreshCw, Terminal } from '@lucide/svelte';
   import type { Account, AccountQuota, ProviderSummary } from '@boite/contracts';
   import QuotaList from './QuotaList.svelte';
   import ProviderIcon from './ProviderLogo.svelte';
@@ -38,6 +39,10 @@
     grok: 'https://grok.com/build',
     pi: 'https://github.com/earendil-works/pi'
   };
+
+  /** The fold's duration, nothing when the system or the app asks for less motion. */
+  const fold = (): number =>
+    window.matchMedia('(prefers-reduced-motion: reduce)').matches || document.documentElement.dataset.motion === 'reduced' ? 0 : 180;
 
   const loggingIn = (accountId: string): boolean => store.logins[accountId]?.state === 'running';
 
@@ -247,14 +252,25 @@
         data-install={install?.state ?? 'none'}
       >
         <div class="line">
-          <ProviderIcon providerId={provider.id} size={22} />
-          <div class="who">
-            <h2>{provider.name}</h2>
-            <p class="state" class:bad={install?.state === 'failed' && step === 'install'} data-testid="provider-state">
-              <span class="dot" class:ok={step === 'ready'} class:live={step === 'installing' || step === 'signing-in'}></span>
-              {stateText(provider, step)}
-            </p>
-          </div>
+          <!-- The whole name side folds the row, the chevron only says which way. -->
+          <button
+            class="summary"
+            class:open={open[provider.id]}
+            aria-expanded={open[provider.id] === true}
+            aria-label="{strings.providerSettings.details}: {provider.name}"
+            data-testid="provider-details-toggle"
+            onclick={() => (open = { ...open, [provider.id]: !open[provider.id] })}
+          >
+            <span class="chevron"><ChevronRight size={16} strokeWidth={2.25} /></span>
+            <ProviderIcon providerId={provider.id} size={22} />
+            <span class="who">
+              <span class="name">{provider.name}</span>
+              <span class="state" class:bad={install?.state === 'failed' && step === 'install'} data-testid="provider-state">
+                <span class="dot" class:ok={step === 'ready'} class:live={step === 'installing' || step === 'signing-in'}></span>
+                {stateText(provider, step)}
+              </span>
+            </span>
+          </button>
           <div class="act">
             {#if step === 'install'}
               <button class="primary small" data-testid="install-start" disabled={busy !== null} onclick={() => void startInstall(provider, true)}>
@@ -277,16 +293,6 @@
               <button class="quiet small" data-testid="providers-refresh" disabled={detecting} onclick={() => void detect()}>{strings.providerSettings.refresh}</button>
             {/if}
           </div>
-          <button
-            class="quiet icon small fold"
-            class:open={open[provider.id]}
-            aria-expanded={open[provider.id] === true}
-            aria-label="{strings.providerSettings.details}: {provider.name}"
-            data-testid="provider-details-toggle"
-            onclick={() => (open = { ...open, [provider.id]: !open[provider.id] })}
-          >
-            <ChevronRight size={16} strokeWidth={2} />
-          </button>
         </div>
 
         {#if step === 'installing'}
@@ -341,17 +347,26 @@
         {/if}
 
         {#if open[provider.id]}
-          <div class="details" data-testid="provider-details">
+          {@const quotaRows = quotas.filter((row) => row.providerId === provider.id && row.status !== 'unsupported')}
+          <div class="details" data-testid="provider-details" transition:slide={{ duration: fold() }}>
+            <div class="section-head">
+              <span class="section-label">{strings.providerSettings.accounts}</span>
+              {#if quotaRows.length > 0}
+                <button class="quiet small" disabled={quotaBusy} onclick={() => void readQuotas(true)}><RefreshCw size={13} />{strings.quotas.refresh}</button>
+              {/if}
+            </div>
+            {#if accounts.length === 0}<p class="hint">{strings.providerSettings.noAccounts}</p>{/if}
             {#each accounts as account (account.id)}
-              {@const quota = quotas.find((row) => row.accountId === account.id)}
+              {@const quota = quotaRows.find((row) => row.accountId === account.id)}
               <div class="account" data-testid="account-row" data-account-id={account.id}>
                 <div class="account-line">
                   <div class="who">
                     <h3>{account.identity ?? account.label}</h3>
                     <p class="state">
-                      {account.isolationDir === null ? strings.providerSettings.default : strings.providerSettings.isolated}
+                      <span class="kind">{account.isolationDir === null ? strings.providerSettings.default : strings.providerSettings.isolated}</span>
+                      {#if account.identity && account.identity !== account.label}<span>· {account.label}</span>{/if}
                       {#if account.status !== 'ok'}
-                        · <span class:bad={account.status !== 'unknown'}>{strings.accounts.status[account.status]}</span>
+                        <span class:bad={account.status !== 'unknown'}>· {strings.accounts.status[account.status]}</span>
                       {/if}
                     </p>
                   </div>
@@ -366,39 +381,49 @@
                   </div>
                 </div>
                 {#if verified[account.id] !== undefined}<p class="hint" role="status">{strings.providerSettings.models.replace('{count}', String(verified[account.id]))}</p>{/if}
-                {#if quota && quota.status !== 'unsupported'}
-                  <label class="monitor"><span>{strings.quotas.monitor}</span><input type="checkbox" role="switch" data-testid="quota-monitor" checked={quota.enabled} onchange={(event) => void monitor(account.id, event.currentTarget.checked)} /></label>
-                  <QuotaList rows={[quota]} />
+                {#if quota}
+                  <div class="quota">
+                    <label class="monitor"><span>{strings.quotas.monitor}</span><input type="checkbox" role="switch" data-testid="quota-monitor" checked={quota.enabled} onchange={(event) => void monitor(account.id, event.currentTarget.checked)} /></label>
+                    <QuotaList rows={[quota]} bare />
+                  </div>
                 {/if}
               </div>
             {/each}
 
-            <div class="more">
-              {#if provider.available && provider.login}
-                <button class="quiet small" data-testid="account-add" disabled={busy !== null} onclick={() => void signIn(provider, true)}>{strings.providerSettings.addAccount}</button>
-              {/if}
-              {#if provider.available && !provider.alwaysIsolated && !accounts.some((account) => account.isolationDir === null)}
-                <button class="quiet small" data-testid="account-use-cli" onclick={() => void store.addAccount({ providerId: provider.id, label: nextAccountLabel(provider, accounts), useDefaultLocation: true })}>
-                  {strings.providerSettings.useCli}
-                </button>
-              {/if}
-              {#if quotas.some((row) => row.providerId === provider.id && row.status !== 'unsupported')}
-                <button class="quiet small" disabled={quotaBusy} onclick={() => void readQuotas(true)}>{strings.quotas.refresh}</button>
-              {/if}
-            </div>
-
-            {#if install?.state === 'installed'}
-              <div class="account-line managed">
-                <p class="state" data-testid="install-status">
-                  {updatable(provider)
-                    ? strings.install.updateAvailable.replace('{installed}', install.version).replace('{available}', install.available)
-                    : strings.install.upToDate.replace('{version}', install.version)}
-                </p>
-                <button class="quiet small" data-testid="install-remove" onclick={() => void uninstall(provider)}>{strings.install.remove}</button>
+            {#if provider.available && (provider.login || (!provider.alwaysIsolated && !accounts.some((account) => account.isolationDir === null)))}
+              <div class="more">
+                {#if provider.login}
+                  <button class="quiet small" data-testid="account-add" disabled={busy !== null} onclick={() => void signIn(provider, true)}><Plus size={14} />{strings.providerSettings.addAccount}</button>
+                {/if}
+                {#if !provider.alwaysIsolated && !accounts.some((account) => account.isolationDir === null)}
+                  <button class="quiet small" data-testid="account-use-cli" onclick={() => void store.addAccount({ providerId: provider.id, label: nextAccountLabel(provider, accounts), useDefaultLocation: true })}>
+                    <Terminal size={14} />{strings.providerSettings.useCli}
+                  </button>
+                {/if}
               </div>
             {/if}
-            {#if provider.executable}
-              <p class="state path">{strings.providerSettings.executable} <code>{provider.executable}</code></p>
+
+            {#if install?.state === 'installed' || provider.executable}
+              <div class="section-head"><span class="section-label">{strings.providerSettings.installation}</span></div>
+              <dl class="facts">
+                {#if install?.state === 'installed'}
+                  <div class="fact">
+                    <dt>{strings.providerSettings.version}</dt>
+                    <dd class="managed">
+                      <span data-testid="install-status">{updatable(provider)
+                        ? strings.install.updateAvailable.replace('{installed}', install.version).replace('{available}', install.available)
+                        : strings.install.upToDate.replace('{version}', install.version)}</span>
+                      <button class="quiet small" data-testid="install-remove" onclick={() => void uninstall(provider)}>{strings.install.remove}</button>
+                    </dd>
+                  </div>
+                {/if}
+                {#if provider.executable}
+                  <div class="fact">
+                    <dt>{strings.providerSettings.executable}</dt>
+                    <dd><code>{provider.executable}</code></dd>
+                  </div>
+                {/if}
+              </dl>
             {/if}
           </div>
         {/if}
@@ -417,9 +442,42 @@
   .provider + .provider { border-top: 1px solid var(--color-border); }
 
   .line, .account-line { display: flex; align-items: center; gap: 12px; min-width: 0; }
-  .who { flex: 1; min-width: 0; display: grid; gap: 2px; }
-  .page .card h2, h3 { margin: 0; font-size: var(--text-base); font-weight: 600; letter-spacing: normal; text-transform: none; color: var(--color-foreground); }
-  h3 { font-size: var(--text-sm); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .who { flex: 1; min-width: 0; display: grid; gap: 2px; text-align: left; }
+  .name { font-size: var(--text-base); font-weight: 600; color: var(--color-foreground); }
+  h3 { margin: 0; font-size: var(--text-sm); font-weight: 600; color: var(--color-foreground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* The name side is the fold's button: a large target, the chevron in front of it. */
+  .summary {
+    flex: 1;
+    min-width: 0;
+    height: auto;
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 10px;
+    margin: -6px 0 -6px -8px;
+    padding: 6px 8px;
+    border: 0;
+    border-radius: var(--radius-md);
+    background: transparent;
+    box-shadow: none;
+    font-weight: normal;
+  }
+  .summary:hover { background: var(--color-hover); }
+  .summary:active:not(:disabled) { transform: none; }
+  .chevron {
+    display: grid;
+    place-items: center;
+    width: 22px;
+    height: 22px;
+    flex: none;
+    border-radius: var(--radius-sm);
+    color: var(--color-muted-foreground);
+    background: var(--color-surface-3);
+  }
+  .chevron :global(svg) { transition: transform var(--dur-2) var(--ease-out-quint); }
+  .summary:hover .chevron, .summary.open .chevron { color: var(--color-foreground); }
+  .summary.open .chevron :global(svg) { transform: rotate(90deg); }
 
   .state { margin: 0; display: flex; align-items: center; gap: 6px; font-size: var(--text-sm); color: var(--color-muted-foreground); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
   .bad { color: var(--color-danger); }
@@ -450,9 +508,6 @@
   a.button.primary { background: var(--color-foreground); border-color: transparent; color: var(--color-on-foreground); justify-self: start; }
   a.button.primary:hover { opacity: 0.9; }
 
-  .fold { flex: none; color: var(--color-muted-foreground); }
-  .fold :global(svg) { width: 16px; height: 16px; transition: transform var(--dur-2) var(--ease-out-quint); }
-  .fold.open :global(svg) { transform: rotate(90deg); }
 
   .track { height: 2px; border-radius: 999px; background: var(--color-surface-3); overflow: hidden; }
   .bar { display: block; height: 100%; background: var(--color-foreground); transition: width var(--dur-2) var(--ease-out-quint); }
@@ -464,12 +519,19 @@
   .code { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
   .code input { flex: 1; min-width: 0; max-width: 360px; }
 
-  .details { display: grid; gap: 10px; padding-top: 10px; border-top: 1px solid var(--color-border); animation: rise var(--dur-3) var(--ease-out-quint); }
-  .account { display: grid; gap: 8px; }
+  /* Under the name, not under the chevron: the fold reads as belonging to the row. */
+  .details { display: grid; gap: 10px; margin-left: 32px; padding: 4px 0 6px; }
+  .section-head { display: flex; align-items: center; justify-content: space-between; min-height: var(--control-sm); margin-top: 6px; }
+  .account { display: grid; gap: 10px; padding: 12px 14px; border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface-2); }
+  .kind { color: var(--color-muted-foreground); }
+  .quota { display: grid; gap: 10px; padding-top: 10px; border-top: 1px solid var(--color-border); }
   .more { display: flex; gap: 6px; flex-wrap: wrap; }
-  .managed { justify-content: space-between; }
-  .path { display: block; }
-  .path code { overflow-wrap: anywhere; }
+  .facts { display: grid; gap: 6px; margin: 0; }
+  .fact { display: grid; grid-template-columns: 96px 1fr; gap: 12px; align-items: baseline; font-size: var(--text-sm); }
+  dt { color: var(--color-subtle); }
+  dd { margin: 0; min-width: 0; color: var(--color-muted-foreground); }
+  dd code { font-size: var(--text-xs); overflow-wrap: anywhere; }
+  .managed { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 
   .monitor { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: var(--text-sm); }
 
@@ -507,7 +569,9 @@
      the row about 480 px, where the action drops under the name. */
   @media (max-width: 900px) {
     .line, .account-line { flex-wrap: wrap; }
-    .line .act, .account-line .act { order: 3; flex-basis: 100%; justify-content: flex-start; padding-left: 34px; }
+    .line .act, .account-line .act { order: 3; flex-basis: 100%; justify-content: flex-start; padding-left: 64px; }
     .account-line .act { padding-left: 0; }
+    .details { margin-left: 0; }
+    .fact { grid-template-columns: 1fr; gap: 2px; }
   }
 </style>

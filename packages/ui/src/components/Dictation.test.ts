@@ -1,5 +1,7 @@
 import { afterEach, expect, test, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
+import { RpcErrorCode } from '@boite/contracts';
+import { RpcFailure } from '../lib/client';
 import type { Store } from '../lib/store.svelte';
 import Dictation from './Dictation.svelte';
 
@@ -35,4 +37,19 @@ test('a microphone ending before speech status resolves finishes instead of stic
   expect(recorder.stop).toHaveBeenCalledOnce();
   expect(ontext).toHaveBeenCalledWith('Captured before unplugging.');
   expect(document.querySelector('[data-testid="dictation"]')?.getAttribute('data-phase')).toBe('idle');
+});
+
+test('a core without the voice engine names the machine to update instead of the raw RPC error', async () => {
+  const call = vi.fn(async () => { throw new RpcFailure({ code: RpcErrorCode.MethodNotFound, message: 'unknown method speech.status' }); });
+  const onpreview = vi.fn();
+  mounted = mount(Dictation, { target: document.body, props: {
+    store: { client: { call }, connection: 'ready', owner: true, core: { hostname: 'build-box' } } as unknown as Store,
+    ontext: vi.fn(), onbusy: vi.fn(), onpreview,
+  } });
+  flushSync();
+  document.querySelector<HTMLButtonElement>('[data-testid="dictation-start"]')!.click();
+  for (let i = 0; i < 20; i++) { await Promise.resolve(); flushSync(); }
+  expect(document.querySelector('[data-testid="dictation"]')?.getAttribute('data-phase')).toBe('error');
+  expect(onpreview).toHaveBeenLastCalledWith('', expect.stringContaining('newer Boite on build-box'), true);
+  expect(JSON.stringify(onpreview.mock.calls)).not.toContain('unknown method');
 });

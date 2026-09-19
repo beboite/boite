@@ -84,7 +84,7 @@ describe('providers', () => {
     const { loaded, rejected } = await client.call('providers.list', {});
     expect(rejected).toEqual([]);
     const ids = loaded.map((provider) => provider.id).sort();
-    expect(ids).toEqual(['antigravity', 'claude', 'codex', 'echo', 'grok', 'opencode', 'pi']);
+    expect(ids).toEqual(['antigravity', 'antigravity-cli', 'claude', 'codex', 'echo', 'grok', 'opencode', 'pi']);
 
     const echo = loaded.find((provider) => provider.id === 'echo');
     expect(echo?.source).toBe('shipped');
@@ -220,6 +220,45 @@ describe('providers', () => {
     }
   });
 
+  test('the shipped antigravity cli descriptor runs the installed agy on the user s own login', async () => {
+    const client = await harness.connect();
+    const { loaded, rejected } = await client.call('providers.list', {});
+    expect(rejected).toEqual([]);
+
+    const cli = loaded.find((provider) => provider.id === 'antigravity-cli');
+    expect(cli?.source).toBe('shipped');
+    expect(cli?.protocol).toBe('agy');
+    expect(cli?.name).toBe('Antigravity CLI');
+    expect(cli?.shortName).toBe('agy');
+    expect(cli?.models).toEqual([{ id: 'default', name: 'Antigravity CLI default', default: true }]);
+    // Print mode has no approval gate, and a plan mode behind `--mode plan`.
+    expect(cli?.capabilities.approvals).toBe(false);
+    expect(cli?.capabilities.planMode).toBe(true);
+    // Nothing to download: the user installs agy, so there is no install state.
+    expect(cli?.install).toBeNull();
+
+    const descriptor = harness.core.providers.require('antigravity-cli');
+    // The token sits in the system keyring and nothing moves the config
+    // directory, so there is no session file to read and no isolation to offer.
+    expect(descriptor.auth).toEqual({ kind: 'none' });
+    expect(descriptor.login).toBeUndefined();
+    expect(descriptor.isolation).toBeUndefined();
+
+    const profile = descriptor.profiles[currentOs()];
+    expect(profile?.isolation).toEqual({});
+    expect(profile?.launch).toBeUndefined();
+    expect(profile?.unsetEnv).toBeUndefined();
+    // Never a process closed by name: the user's own agy runs beside Boite's.
+    expect(profile?.close?.processes).toEqual([]);
+    expect(profile?.env?.['BROWSER']).toBe(join(harness.dataDir, currentOs() === 'windows' ? 'browser-noop.cmd' : 'browser-noop.sh'));
+
+    const windows = descriptor.profiles['windows'];
+    expect(windows?.executable[0]).toEqual({ kind: 'path', value: 'agy' });
+    expect(windows?.executable[1]?.kind).toBe('file');
+    expect(windows?.executable[1]?.value.endsWith(join('AppData', 'Local', 'agy', 'bin', 'agy.exe'))).toBe(true);
+    expect(windows?.executable[1]?.value).not.toContain('{home}');
+  });
+
   test('the shipped codex descriptor loads and is launched as the app-server', async () => {
     const client = await harness.connect();
     const { loaded, rejected } = await client.call('providers.list', {});
@@ -272,7 +311,7 @@ describe('providers', () => {
     expect(codex.executable?.toLowerCase()).toEndWith('codex.exe');
   });
 
-  test('the shipped pi descriptor loads and is launched as node with the cli entry in rpc mode', async () => {
+  test('the shipped pi descriptor loads and finds the npm package wherever it was installed', async () => {
     const client = await harness.connect();
     const { loaded, rejected } = await client.call('providers.list', {});
     expect(rejected).toEqual([]);
@@ -293,25 +332,41 @@ describe('providers', () => {
 
     const profile = descriptor.profiles[currentOs()];
     expect(profile?.isolation).toEqual({ PI_CODING_AGENT_DIR: '{isolationDir}' });
-    const args = profile?.launch?.args ?? [];
-    expect(args.slice(-2)).toEqual(['--mode', 'rpc']);
-    if (process.platform !== 'win32') {
-      expect(args).toEqual(['--mode', 'rpc']);
-      return;
-    }
-    // npm installs a `.ps1` and a `.cmd` shim Bun cannot spawn, so the entry is
-    // node plus the package's own js, expanded to a real path by the time it runs.
-    expect(profile?.executable[0]).toEqual({ kind: 'path', value: 'node' });
-    const entry = args[0] ?? '';
-    expect(entry).not.toContain('{appdata}');
-    expect(entry.startsWith(process.env['APPDATA'] ?? '')).toBe(true);
-    expect(entry).toEndWith('cli.js');
+    expect(profile?.launch?.args).toEqual(['--mode', 'rpc']);
+    // npm installs a `.ps1` and a `.cmd` shim Bun cannot spawn, so the package
+    // is named rather than a shim, under both scopes pi has shipped from.
+    const packages = profile?.executable.filter((candidate) => candidate.kind === 'npm').map((candidate) => candidate.value);
+    expect(packages).toEqual(['@earendil-works/pi-coding-agent#pi', '@mariozechner/pi-coding-agent#pi']);
+    if (process.platform === 'win32') expect(profile?.executable.some((candidate) => candidate.kind === 'path')).toBe(false);
 
     if (pi?.available !== true) {
       console.log('pi is not installed here, the executable assertion is skipped');
       return;
     }
-    expect(pi.executable?.toLowerCase()).toContain('node');
+    // The summary shows the script a person recognises, not the Node running it.
+    expect(pi.executable).toMatch(/pi-coding-agent/);
+  });
+
+  test('an npm candidate is refused on a protocol that cannot take a script argument', async () => {
+    const body = validDescriptor();
+    body.protocol = 'codex-appserver';
+    (body.profiles as Record<string, { executable: unknown }>)['windows']!.executable = [{ kind: 'npm', value: '@scope/tool#tool' }];
+    writeUserDescriptor('npm-codex.json', body);
+    const client = await harness.connect();
+    const { rejected } = await client.call('providers.reload', {});
+    expect(rejected).toHaveLength(1);
+    expect(rejected[0]?.field).toBe('profiles.windows.executable[0].kind');
+    expect(rejected[0]?.message).toContain('pi or acp');
+  });
+
+  test('an npm candidate that is not a package name is refused', async () => {
+    const body = validDescriptor();
+    (body.profiles as Record<string, { executable: unknown }>)['linux']!.executable = [{ kind: 'npm', value: '../../escape' }];
+    writeUserDescriptor('npm-bad.json', body);
+    const client = await harness.connect();
+    const { rejected } = await client.call('providers.reload', {});
+    expect(rejected).toHaveLength(1);
+    expect(rejected[0]?.field).toBe('profiles.linux.executable[0].value');
   });
 
   test('the shipped models carry the reasoning effort scale they are meant to', async () => {

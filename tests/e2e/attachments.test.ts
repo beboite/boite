@@ -17,6 +17,8 @@ test('desktop and paired phone upload files, preserve bytes and show downloadabl
       page = await BrowserPage.launch({ url: mobile ? await mintPairing(core) : pairingUrlOf(core) });
       await page.waitFor('document.querySelector("[data-testid=status-connection]")?.dataset.state === "ready"');
       await page.click(`[data-thread-id="${thread.id}"]`);
+      // The app opens on a draft with its own composer; wait for the thread's.
+      await page.waitFor('document.querySelector("[data-testid=thread-status]")');
       await page.waitFor('document.querySelector("[data-testid=composer-file]")');
       if (mobile) {
         await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });

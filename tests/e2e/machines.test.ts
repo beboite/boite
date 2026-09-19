@@ -27,7 +27,7 @@ beforeAll(async () => {
   });
   await server.listen();
   url = `http://127.0.0.1:${port}`;
-  page = await BrowserPage.launch({ url: `${url}/?fake=1&machines=1` });
+  page = await BrowserPage.launch({ url: `${url}/?fake=1&open=recent&machines=1` });
 }, 30_000);
 afterAll(async () => {
   await page?.close();
@@ -81,6 +81,7 @@ test('project and recent cards show both hosts, PRs and user-message ordering on
   await page.click(id('nav-settings'));
   await page.click(id('settings-tab-machines'));
   await page.evaluate(`(() => { const input = document.querySelectorAll('[data-testid="machine-rename"]')[1]; input.value = 'Build server'; input.dispatchEvent(new Event('change', {bubbles: true})); })()`);
+  await page.click('[data-testid="machine-card"]:nth-child(2) [data-testid="machine-customize"]');
   await page.click('[data-testid="machine-card"]:nth-child(2) [data-testid="machine-icon-rack"]');
   await capture('machine-customization.png');
   await page.evaluate('location.reload()');
@@ -121,6 +122,7 @@ test('two real cores pair, route turns independently, reconnect and survive a re
     await page.click(id('nav-settings'));
     await page.click(id('settings-tab-machines'));
     const grant = await b.call('pairing.grant', { role: 'owner' });
+    await page.click(id('machine-add-open'));
     await page.type(id('machine-name'), 'Build host');
     await page.type(id('machine-link'), grant.url);
     await page.click(id('machine-add'));
@@ -156,14 +158,16 @@ test('two real cores pair, route turns independently, reconnect and survive a re
       await admin.call('sessions.revoke', { sessionId: session.id });
       await page.waitFor(`document.querySelector('[data-testid="machine-card"][data-machine-id="${second.url}"] .status')?.textContent === 'Disconnected'`);
       const replacement = await admin.call('pairing.grant', { role: 'owner' });
+      await page.click(id('machine-add-open'));
       await page.type(id('machine-link'), replacement.url);
       await page.click(id('machine-add'));
       await page.waitFor(`document.querySelector('[data-testid="machine-card"][data-machine-id="${second.url}"] .status')?.textContent === 'Connected'`);
       expect(await page.evaluate(`document.querySelectorAll('${id('machine-card')}').length`)).toBe(2);
     } finally { admin.close(); }
     await page.click(id('machine-remove'));
+    // Back on the first machine: its thread, or the draft it opened on after the reload.
     await page.waitFor(
-      `document.querySelectorAll('${id('machine-card')}').length === 1 || document.querySelector('${id('thread-title')}')?.textContent === 'Primary project'`
+      `document.querySelectorAll('${id('machine-card')}').length === 1 || document.querySelector('${id('thread-title')}')?.textContent === 'Primary project' || document.querySelector('${id('draft-sentence')}')?.textContent.includes('Primary project')`
     );
   } finally {
     a.close();

@@ -23,7 +23,7 @@ beforeAll(async () => {
   const port = await freePort();
   server = await createServer({ root: join(import.meta.dir, '../../packages/ui'), server: { host: '127.0.0.1', port, strictPort: true }, clearScreen: false });
   await server.listen();
-  url = `http://127.0.0.1:${port}/?fake=1&long=1&machines=1`;
+  url = `http://127.0.0.1:${port}/?fake=1&open=recent&long=1&machines=1`;
   page = await BrowserPage.launch({ url, windowSize: { width: 1310, height: 820 } });
   await page.waitFor(`document.querySelector('${id('timeline')}')`);
 }, 30_000);
