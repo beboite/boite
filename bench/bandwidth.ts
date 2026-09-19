@@ -145,6 +145,8 @@ async function main(): Promise<void> {
   const direct = await connect(core.url, core.token, { client: { name: 'bench', version: '2.0.0-beta.1' } });
   const directory = mkdtempSync(join(tmpdir(), 'boite-bench-project-'));
   const rows: Row[] = [];
+  let wire: ReturnType<typeof startWire> | undefined;
+  let client: CoreClient | undefined;
 
   try {
     await direct.call('settings.set', { maxConcurrentTurns: 8, perAccountConcurrency: 8 });
@@ -163,39 +165,43 @@ async function main(): Promise<void> {
       await done;
     }
 
-    const wire = startWire(core.port, RTT_MS / 2);
+    const relay = startWire(core.port, RTT_MS / 2);
+    wire = relay;
     const measure = async (name: string, run: () => Promise<number | void>): Promise<void> => {
-      wire.reset();
+      relay.reset();
       const startedAt = performance.now();
       const reported = await run();
       const ms = typeof reported === 'number' ? reported : performance.now() - startedAt;
       await settle();
-      const { up, down, chunksDown } = wire.read();
+      const { up, down, chunksDown } = relay.read();
       rows.push({ name, downBytes: down, upBytes: up, chunksDown, ms });
     };
 
     await measure('page load, cold cache (html, js, css, fonts, manifest, worker)', async () => {
-      await staticLoad(wire.url);
+      await staticLoad(relay.url);
     });
     await measure('every other script and stylesheet (idle prefetch, settings, highlighters)', async () => {
-      await lazyLoad(wire.url);
+      await lazyLoad(relay.url);
     });
 
-    let client!: CoreClient;
     await measure('connect, hello and the boot calls', async () => {
-      client = await connect(wire.url, core.token, REMOTE);
+      client = await connect(relay.url, core.token, REMOTE);
       await boot(client);
     });
+    const remote = (): CoreClient => {
+      if (client === undefined) throw new Error('the remote client is not connected');
+      return client;
+    };
 
     let firstMessagesMs = 0;
     await measure(`open a ${SEED_TURNS} turn thread, whole sequence`, async () => {
-      firstMessagesMs = (await openThread(client, long.id)).firstMessagesMs;
+      firstMessagesMs = (await openThread(remote(), long.id)).firstMessagesMs;
     });
     rows.push({ name: `open a ${SEED_TURNS} turn thread, until the messages are in hand`, downBytes: 0, upBytes: 0, chunksDown: 0, ms: firstMessagesMs });
 
     await measure(`one streamed turn of ${SEED_WORDS} words, subscribed`, async () => {
-      const done = client.next('turn.finished', (event) => event.threadId === long.id, 60_000);
-      await client.call('turns.start', { threadId: long.id, prompt: words(SEED_WORDS) });
+      const done = remote().next('turn.finished', (event) => event.threadId === long.id, 60_000);
+      await remote().call('turns.start', { threadId: long.id, prompt: words(SEED_WORDS) });
       await done;
     });
     // What the UI holds when the link drops: the thread as of now.
@@ -203,7 +209,7 @@ async function main(): Promise<void> {
 
     await measure('a turn streaming on another thread, not subscribed', async () => {
       const other = await direct.call('threads.create', { projectId: project.id, providerId: 'echo', accountId: account.id, title: 'other' });
-      wire.reset();
+      relay.reset();
       const done = direct.next('turn.finished', (event) => event.threadId === other.id, 60_000);
       await direct.call('turns.start', { threadId: other.id, prompt: words(SEED_WORDS) });
       await done;
@@ -213,15 +219,15 @@ async function main(): Promise<void> {
       await Bun.sleep(30_000);
     });
 
-    client.close();
+    remote().close();
     await measure('reconnect: hello, boot calls and the open thread again', async () => {
-      client = await connect(wire.url, core.token, REMOTE);
+      client = await connect(relay.url, core.token, REMOTE);
       await boot(client);
-      await openThread(client, long.id, held);
+      await openThread(remote(), long.id, held);
     });
-    client.close();
-    wire.stop();
   } finally {
+    client?.close();
+    wire?.stop();
     direct.close();
     await core.stop();
     await removeDirectory(directory);
@@ -229,7 +235,7 @@ async function main(): Promise<void> {
 
   const kb = (bytes: number): string => (bytes / 1024).toFixed(1);
   console.log(`\nround trip ${RTT_MS} ms, ${SEQUENCE} client, ${new Date().toISOString().slice(0, 10)}\n`);
-  console.log('| scenario | down KB | up KB | chunks down | ms |');
+  console.log('| scenario | down KB | up KB | relay reads down | ms |');
   console.log('| --- | ---: | ---: | ---: | ---: |');
   for (const row of rows) {
     console.log(`| ${row.name} | ${row.downBytes === 0 && row.upBytes === 0 ? '' : kb(row.downBytes)} | ${row.downBytes === 0 && row.upBytes === 0 ? '' : kb(row.upBytes)} | ${row.chunksDown === 0 ? '' : row.chunksDown} | ${Math.round(row.ms)} |`);

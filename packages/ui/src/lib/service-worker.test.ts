@@ -75,6 +75,16 @@ test('a core slower than the patience gets the cached shell now and its answer k
   }
 });
 
+test('with no cached shell a failing core answers for itself', async () => {
+  const sw = worker();
+  sw.cache.match.mockResolvedValue(undefined);
+  sw.fetch.mockResolvedValue(new Response('proxy unavailable', { status: 503 }));
+  const request = { method: 'GET', mode: 'navigate', url: 'https://boite.test/', headers: new Headers() };
+  const answer = await sw.emit('fetch', { request }) as Response;
+  expect(answer.status).toBe(503);
+  expect(sw.put).not.toHaveBeenCalled();
+});
+
 test('installation caches entry scripts, styles and fonts before taking control', async () => {
   const sw = worker();
   sw.fetch.mockResolvedValue(new Response('<script src="/assets/index-ab.js"></script><link href="/assets/index-cd.css"><script src="/assets/index-ab.js"></script>'));

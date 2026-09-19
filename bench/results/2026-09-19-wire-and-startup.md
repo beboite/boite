@@ -22,10 +22,12 @@ remote client. KB received by the client; static files fetched with
 | connect, hello and the boot calls | 41.8 | 4.4 | 464 | 463 |
 | open the 40 turn thread, whole sequence | 155.7 | 33.0 | 764 | 157 |
 | open it, until the messages are in hand | | | 307 | 156 |
-| one streamed turn of 250 words | 13.7 in 37 chunks | 6.6 in 13 chunks | 711 | 715 |
+| one streamed turn of 250 words | 13.7 in 37 reads | 6.6 in 13 reads | 711 | 715 |
 | a turn on a thread not subscribed | 5.1 | 3.2 | 561 | 560 |
 | thirty seconds idle, connected | 0 | 0 | | |
 | reconnect: hello, boot and the open thread again | 202.0 | 6.1 | 1222 | 614 |
+
+"Reads" are receive callbacks of the relay, which TCP may split or join: they show the trend in frame count, not an exact one.
 
 The page load row does not move in time because the relay delays but does not
 cap throughput; on a link that does, the 426 KB less is the gain.

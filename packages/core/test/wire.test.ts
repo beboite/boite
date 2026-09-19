@@ -103,6 +103,11 @@ describe('static files', () => {
       expect(gz.headers.get('vary')).toBe('accept-encoding');
       expect(new TextDecoder().decode(Bun.gunzipSync(new Uint8Array(await gz.arrayBuffer())))).toBe(body);
 
+      // A coding named at q=0 is refused, not asked for.
+      const refused = staticResponse(file, '/assets/index-ab.js', 'gzip;q=0, identity');
+      expect(refused.headers.get('content-encoding')).toBeNull();
+      expect(staticResponse(file, '/assets/index-ab.js', 'br;q=0.2, gzip;q=0.8').headers.get('content-encoding')).toBe('gzip');
+
       // No `.br` beside it, and a client that reads nothing compressed.
       const plain = staticResponse(file, '/assets/index-ab.js', null);
       expect(plain.headers.get('content-encoding')).toBeNull();

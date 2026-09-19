@@ -81,16 +81,20 @@ self.addEventListener('fetch', (event) => {
  */
 async function shellFromNetworkFirst(event) {
   const cache = await caches.open(CACHE);
-  const fromNetwork = (async () => {
-    const response = await fetch(event.request);
-    if (response.ok) await cache.put(SHELL, response.clone());
-    if (response.status >= 500) throw new Error('core unavailable');
-    return response;
-  })();
   // The request carries the pairing query, the precached entry does not, so
   // the shell is matched by its own path rather than by this request.
   const cached = await cache.match(SHELL);
-  if (!cached) return fromNetwork;
+  const response = fetch(event.request).then(async (answer) => {
+    if (answer.ok) await cache.put(SHELL, answer.clone());
+    return answer;
+  });
+  // Nothing to fall back on: the core's own answer, a 5xx included, beats a
+  // network error page.
+  if (!cached) return response;
+  const fromNetwork = response.then((answer) => {
+    if (answer.status >= 500) throw new Error('core unavailable');
+    return answer;
+  });
   // Keeps the worker alive until the late answer is stored.
   event.waitUntil(fromNetwork.catch(() => undefined));
   let timer;
@@ -103,6 +107,7 @@ async function shellFromNetworkFirst(event) {
     clearTimeout(timer);
   }
 }
+
 self.addEventListener('push', (event) => {
   event.waitUntil((async () => {
     let payload = {};

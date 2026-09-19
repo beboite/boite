@@ -50,8 +50,17 @@
     requested.add(name);
     void deferredLoaders[name]()
       .then((module) => { deferred = { ...deferred, [name]: module.default }; })
-      // Offline with a cold cache: the next ask tries again.
-      .catch(() => { requested.delete(name); });
+      // Offline with a cold cache: the next ask tries again. A dialog that was
+      // asked for is closed and said to be missing, or its open state would
+      // hold the keyboard for something that never draws.
+      .catch(() => {
+        requested.delete(name);
+        if (name === 'ProjectPicker' && store.projectPickerOpen) store.projectPickerOpen = false;
+        else if (name === 'ImportDialog' && store.imports) store.closeImports();
+        else if (name === 'CommandPalette' && store.paletteOpen) store.paletteOpen = false;
+        else return;
+        store.error = strings.phone.dialogOffline;
+      });
   }
   function needAll(): void {
     for (const name of Object.keys(deferredLoaders) as (keyof Deferred)[]) need(name);

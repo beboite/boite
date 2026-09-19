@@ -96,7 +96,8 @@ async function once(): Promise<Run> {
 
 function median(values: number[]): number {
   const sorted = [...values].sort((left, right) => left - right);
-  return sorted[Math.floor(sorted.length / 2)] as number;
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 1 ? (sorted[middle] as number) : ((sorted[middle - 1] as number) + (sorted[middle] as number)) / 2;
 }
 
 if (!existsSync(EXE)) throw new Error(`${EXE} is missing: bun run --cwd apps/shell tauri build --no-bundle, then bun run stage:core`);

@@ -1357,10 +1357,11 @@ export class Store {
         return;
       }
       this.#subscribedThreadId = threadId;
-      const unsubscribed = previous && previous !== threadId
-        ? client.call('threads.unsubscribe', { threadId: previous })
+      // A thread already left that the core will not let go of costs a few
+      // events, not the open of this one.
+      const unsubscribed: Promise<unknown> = previous && previous !== threadId
+        ? client.call('threads.unsubscribe', { threadId: previous }).catch(() => undefined)
         : Promise.resolve();
-      unsubscribed.catch(() => undefined);
       const thread = await fetched;
       if (!newest()) return;
       this.rememberReadingThread();

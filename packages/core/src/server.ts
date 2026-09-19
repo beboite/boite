@@ -269,7 +269,12 @@ const ENCODINGS: readonly { token: string; suffix: string }[] = [
  */
 export function staticResponse(file: string, pathname: string, acceptEncoding: string | null): Response {
   const headers = cacheHeaders(pathname);
-  const accepted = (acceptEncoding ?? '').toLowerCase().split(',').map((entry) => entry.trim().split(';')[0]);
+  // `br;q=0` names a coding to refuse it, so an entry at zero is not accepted.
+  const accepted = (acceptEncoding ?? '').toLowerCase().split(',').flatMap((entry) => {
+    const [token = '', ...params] = entry.split(';').map((piece) => piece.trim());
+    const quality = params.find((param) => param.startsWith('q='));
+    return quality !== undefined && Number(quality.slice(2)) === 0 ? [] : [token];
+  });
   for (const { token, suffix } of ENCODINGS) {
     if (!accepted.includes(token)) continue;
     const candidate = file + suffix;
