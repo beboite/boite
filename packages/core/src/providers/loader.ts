@@ -829,8 +829,10 @@ export function registerProviderMethods(core: Core): void {
     updated: () => {
       // A provider that just landed may already be logged in through the user's
       // own CLI: its default account has to exist before the clients hear of it,
-      // or they start a sign-in nobody needs.
-      core.accounts.ensureDefaults();
+      // or they start a sign-in nobody needs. A failure here must not reach the
+      // installer, which would take it for a failed install and delete the release.
+      try { core.accounts.ensureDefaults(); }
+      catch (error) { core.log('error', `default accounts after an install: ${error instanceof Error ? error.message : String(error)}`); }
       core.bus.emit('providers.updated', core.providers.list());
     },
     log: (level, message) => {

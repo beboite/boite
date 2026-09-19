@@ -2268,13 +2268,17 @@ export class FakeClient implements ObservableClient {
     this.#installBefore.delete(provider.id);
     provider.available = true;
     provider.executable = provider.id === MANAGED_ID ? MANAGED_EXE : provider.executable ?? `${DATA_DIR}/agents/${provider.id}/current/${provider.id}.exe`;
-    this.#setInstall(provider, {
+    // Same order as the core: the provider list first, so no client sees
+    // `installed` on a provider it still believes is missing.
+    const installed: ProviderInstallState = {
       state: 'installed',
       version: release.version,
       installedAt: this.#now(),
       available: release.version
-    });
+    };
+    provider.install = installed;
     this.#emit('providers.updated', { loaded: structuredClone(this.#providers), rejected: [] });
+    this.#setInstall(provider, installed);
   }
 
   #cancelInstall(providerId: string, operationId: string): ProviderInstallState {
