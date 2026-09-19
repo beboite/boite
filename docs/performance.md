@@ -92,13 +92,13 @@ mapped starts in 105 ms and would flatter the result:
 | compiled `boite-core.exe` | 902 |
 | runtime copied as `boite-core.exe`, running `dist/main.js` | 260 |
 
-`bench/startup.ts` on the same release shell, medians of 7, first with its
-compiled sidecar, then with `--core-command "<runtime copy> <dist/main.js>"`:
+`bun run bench/startup.ts --runs 7`, medians, on a release shell with the
+compiled core beside it, then on one staged with the runtime and the bundle:
 
 | spawn to | compiled | runtime and bundle |
 | --- | ---: | ---: |
-| core answering `/health` | 1215 | 586 |
+| core answering `/health` | 1215 | 559 |
 | first contentful paint | 749 | 604 |
-| UI holding its data | 1245 | 712 |
+| UI holding its data | 1245 | 716 |
 
 Linux and macOS keep the compiled core: nothing was measured there.
