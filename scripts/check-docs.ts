@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 
-const files = ['README.md', 'AGENTS.md', 'CONTRIBUTING.md'];
+const files = ['README.md', 'AGENTS.md', 'CONTRIBUTING.md', 'SECURITY.md', 'CODE_OF_CONDUCT.md'];
 function walk(path: string): void {
   for (const entry of readdirSync(path, { withFileTypes: true })) {
     const file = join(path, entry.name);
