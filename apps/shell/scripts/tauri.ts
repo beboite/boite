@@ -1,4 +1,4 @@
-/** Use the host's maintained ELF tools when packaging Linux sidecars. */
+/** The Tauri CLI with what each platform's packaging needs: the host's maintained ELF tools on Linux, the core bundle overlay on Windows. */
 import { resolve } from 'node:path';
 import { chmodSync } from 'node:fs';
 
@@ -14,7 +14,13 @@ if (process.platform === 'linux') {
     env.PATCHELF = wrapper;
   }
 }
-const child = Bun.spawn(['bun', 'run', '--cwd', resolve(import.meta.dir, '..'), 'tauri', ...process.argv.slice(2)], {
+// The Windows sidecar is the runtime plus a `core` directory (stage-sidecar.ts): a build that bundles names it too.
+const args = process.argv.slice(2);
+const bundleConfig = args.findIndex((arg) => arg.endsWith('tauri.bundle.conf.json'));
+if (process.platform === 'win32' && bundleConfig !== -1) {
+  args.splice(bundleConfig + 1, 0, '--config', 'src-tauri/tauri.bundle.windows.conf.json');
+}
+const child = Bun.spawn(['bun', 'run', '--cwd', resolve(import.meta.dir, '..'), 'tauri', ...args], {
   env, stdout: 'inherit', stderr: 'inherit', stdin: 'inherit', windowsHide: true,
 });
 process.exit(await child.exited);

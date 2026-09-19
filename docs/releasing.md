@@ -35,7 +35,16 @@ it does not compile again. The end-to-end suite refuses missing or stale artifac
 - `build:core:exe` compiles `packages/core/dist/boite-core`, with `.exe` on Windows. The two worker
   files are not compiled into it: the core loads them by name from beside its own
   executable, so they travel with it.
-- `stage:core` puts that executable, both workers and the two `boite` shims
+- On Windows the installed sidecar is not that executable. It is the Bun runtime
+  the build ran under, copied as `boite-core.exe`, with every file of the bundle
+  but the workers in a `core` directory beside it, and the shell starts it as
+  `boite-core.exe core/main.js`. The runtime carries its publisher's signature;
+  an unsigned compiled core costs about 650 ms more at every start on Windows 11
+  ([performance.md](performance.md)). `stage-sidecar.ts` warns when the runtime's
+  signature is not valid. `apps/shell/scripts/tauri.ts` adds
+  `tauri.bundle.windows.conf.json`, which names the `core` directory as a
+  resource, to any Windows build that passes the bundle overlay.
+- `stage:core` puts the sidecar, both workers and the two `boite` shims
   (`packages/core/shims`, see [cli.md](cli.md)) where the two things that
   run them look. The bundler wants
   `apps/shell/src-tauri/binaries/boite-core-<target triple>`, with `.exe` on Windows, for
@@ -52,7 +61,7 @@ staging supports Windows x64 and Linux/macOS x64 and ARM64.
 The shell passes Tauri's resource directory to the core through `BOITE_UI_DIR`,
 so the installed core can serve the phone UI from the macOS application bundle
 and Linux package. Windows workers are required only by the Windows shell.
-The compiled sidecar needs no separately installed Bun runtime.
+Neither form of the sidecar needs a separately installed Bun runtime.
 Linux builds also need `xdg-utils`, alongside the WebKitGTK and appindicator
 development packages. The Debian package declares `xdg-utils` for opening links.
 Install `patchelf` too. The shell build wrapper selects it from PATH for
@@ -161,7 +170,10 @@ name is `Boite`. The install is per user and asks for no elevation.
 `%LOCALAPPDATA%\Boite` ends up holding:
 
 - `boite-shell.exe`, the window and the tray icon.
-- `boite-core.exe`, the sidecar it starts.
+- `boite-core.exe`, the sidecar it starts: the Bun runtime under the core's name.
+  Run by hand with no script it is `bun`, so a subcommand goes after the bundle:
+  `boite-core.exe core\main.js pair --owner`.
+- `core/`, the bundled core that runtime runs: `main.js` and its lazy chunks.
 - `jobs-worker.js`, beside the core because that is where the core looks for it.
   Without it the trace reports `poll` instead of `events`.
 - `guard-worker.js`, the focus guard and the audio mute.
@@ -192,7 +204,8 @@ It looks for the core in this order:
 
 1. `BOITE_CORE_COMMAND`, split on whitespace. This is the override the tests and
    the bench use.
-2. `boite-core.exe` beside the shell executable. This is the installed case, and
+2. `boite-core.exe` beside the shell executable, given `core/main.js` as its
+   script when that file is beside it too. This is the installed case, and
    it is also what the end to end suite drives, which is why a stale staged
    sidecar is refused rather than tolerated.
 3. `packages/core/dist/main.js` through bun, when a repository root is found

@@ -49,7 +49,7 @@ and fresh WebView2 profile every run, medians of 7, ms after the spawn.
 
 Of the 1024 ms left, 791 ms is the compiled core alone (spawned by hand, 7
 runs), and about 650 ms of that passes before the process runs its first line:
-see "Known cost" in [docs/performance.md](../../docs/performance.md).
+see "The Windows sidecar is the signed runtime" in [docs/performance.md](../../docs/performance.md).
 
 ## UI bundle
 

@@ -73,12 +73,32 @@ WebView2 profile, and reads the page's own timings over the debugging port.
 
 Results: [bench/results/2026-09-19-wire-and-startup.md](../bench/results/2026-09-19-wire-and-startup.md).
 
-## Known cost, not fixed here
+## The Windows sidecar is the signed runtime
 
-The compiled core (`bun build --compile`, 86 MB, unsigned) spends about 650 ms
-between its spawn and its first line of script on Windows 11, 5 ms of it inside
-the process; a compiled hello-world costs the same. The signed `bun.exe`
-running the same script from the same folder takes 170 ms. The core from
-source answers `/health` 105 ms after spawn, the compiled one after 791 ms.
-Signing the release core or shipping the signed runtime beside `main.js` would
-recover most of the remaining startup time.
+`bun build --compile` writes an 86 MB executable with no signature, and Windows
+11 inspects it at every start: about 650 ms pass between the spawn and the
+first line of script, 5 ms of it inside the process, and a compiled hello-world
+costs the same. The Bun runtime carries its publisher's signature and skips
+that. So the Windows installer ships the runtime as `boite-core.exe` with the
+bundled core in `core/` beside it ([releasing.md](releasing.md)). Renaming the
+runtime changes nothing: the signature is in the file.
+
+Core alone, spawn to `/health`, medians of 7, 2026-09-19. The parent is a
+second copy of the runtime, because a child whose image the parent already has
+mapped starts in 105 ms and would flatter the result:
+
+| core started as | ms |
+| --- | ---: |
+| compiled `boite-core.exe` | 902 |
+| runtime copied as `boite-core.exe`, running `dist/main.js` | 260 |
+
+`bun run bench/startup.ts --runs 7`, medians, on a release shell with the
+compiled core beside it, then on one staged with the runtime and the bundle:
+
+| spawn to | compiled | runtime and bundle |
+| --- | ---: | ---: |
+| core answering `/health` | 1215 | 559 |
+| first contentful paint | 749 | 604 |
+| UI holding its data | 1245 | 716 |
+
+Linux and macOS keep the compiled core: nothing was measured there.
