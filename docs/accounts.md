@@ -179,5 +179,5 @@ minutes. A failed refresh preserves the last reading and marks it stale. An
 unknown percentage is unavailable, not zero. Other providers report that quotas
 are unsupported rather than inventing a balance.
 
-The optional [kebacc-switcher plugin](plugins.md) manages external CLI account pools.
+[Plugins](plugins.md) such as the recommended kebacc-switcher manage external CLI account pools.
 There is no automatic rotation or relay.

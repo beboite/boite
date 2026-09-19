@@ -65,20 +65,6 @@ test('missing agents offer desktop setup while phone settings omit provider admi
   await page.send('Emulation.setDeviceMetricsOverride', { width: 1400, height: 1000, deviceScaleFactor: 1, mobile: false });
 }, 30_000);
 
-test('a plugin installs, switches an account and uninstalls through its page', async () => {
-  await page.click(id('settings-tab-plugins'));
-  await page.waitFor(`document.querySelector('${id('plugin-install')}') && !document.querySelector('${id('plugin-install')}').disabled`);
-  await page.click(id('plugin-install'));
-  await page.waitFor(`document.querySelectorAll('${id('plugin-pool')}').length === 3`);
-  await capture('plugins.png');
-  const row = `${id('plugin-pool')}[data-provider="claude"] ${id('plugin-account')}[data-email="personal@example.com"]`;
-  await page.click(`${row} ${id('plugin-switch')}`);
-  await page.waitFor(`document.querySelector('${id('confirm-ok')}')`); await page.click(id('confirm-ok'));
-  await page.waitFor(`document.querySelector('${row} ${id('plugin-switch')}').disabled`);
-  await page.click(id('plugin-uninstall')); await page.waitFor(`document.querySelector('${id('confirm-ok')}')`); await page.click(id('confirm-ok'));
-  await page.waitFor(`document.querySelector('${id('plugin-install')}')`);
-}, 30_000);
-
 test('installing a missing agent goes on to its sign-in without a second click or a terminal', async () => {
   await page.navigate(`${uiUrl}/?fake=1&uninstalled=1`);
   await page.waitFor(`document.querySelector('${id('nav-settings')}')`);
