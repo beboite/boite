@@ -361,7 +361,7 @@
         aria-label={strings.rightPanel.scrollLeft}
         onclick={() => scrollBy(-1)}
       >
-        <ChevronLeft size={12} strokeWidth={1.75} />
+        <ChevronLeft size={14} strokeWidth={1.75} />
       </button>
     {/if}
 
@@ -402,20 +402,20 @@
           >
             <span class="glyph">
               {#if surface.kind === 'trace'}
-                <Activity size={12} strokeWidth={1.75} />
+                <Activity size={14} strokeWidth={1.75} />
               {:else if surface.kind === 'changes'}
-                <GitCompare size={12} strokeWidth={1.75} />
+                <GitCompare size={14} strokeWidth={1.75} />
               {:else if surface.kind === 'files'}
-                <FolderTree size={12} strokeWidth={1.75} />
+                <FolderTree size={14} strokeWidth={1.75} />
               {:else if surface.kind === 'file'}
-                <FileText size={12} strokeWidth={1.75} />
+                <FileText size={14} strokeWidth={1.75} />
               {:else if surface.kind === 'tasks'}
-                <ListChecks size={12} strokeWidth={1.75} />
+                <ListChecks size={14} strokeWidth={1.75} />
               {:else}
-                <Globe size={12} strokeWidth={1.75} />
+                <Globe size={14} strokeWidth={1.75} />
               {/if}
             </span>
-            <span class="cross"><X size={12} strokeWidth={2} /></span>
+            <span class="cross"><X size={14} strokeWidth={2} /></span>
           </button>
           <span class="name">{label(surface)}</span>
         </div>
@@ -430,7 +430,7 @@
         aria-label={strings.rightPanel.scrollRight}
         onclick={() => scrollBy(1)}
       >
-        <ChevronRight size={12} strokeWidth={1.75} />
+        <ChevronRight size={14} strokeWidth={1.75} />
       </button>
     {/if}
 
@@ -443,7 +443,7 @@
         label={strings.rightPanel.newSurface}
         testid="panel-add"
       >
-        <Plus size={12} strokeWidth={1.75} />
+        <Plus size={14} strokeWidth={1.75} />
       </Menu>
     {/if}
 
@@ -459,9 +459,9 @@
       onclick={() => (rightPanel.maximized = !rightPanel.maximized)}
     >
       {#if rightPanel.maximized}
-        <Minimize2 size={12} strokeWidth={1.75} />
+        <Minimize2 size={14} strokeWidth={1.75} />
       {:else}
-        <Maximize2 size={12} strokeWidth={1.75} />
+        <Maximize2 size={14} strokeWidth={1.75} />
       {/if}
     </button>
     <button
@@ -472,7 +472,7 @@
       data-testid="panel-close"
       onclick={() => panel.toggle()}
     >
-      <X size={12} strokeWidth={1.75} />
+      <X size={14} strokeWidth={1.75} />
     </button>
   </header>
 
@@ -615,11 +615,11 @@
     min-width: 0;
   }
 
-  /* The strip keeps its own scale, so its controls stay 24 px beside the pills. */
+  /* The strip's controls are as tall as its tabs. */
   .strip button.small.icon,
   .strip :global(.trigger.ghost) {
-    height: 24px;
-    width: 24px;
+    height: var(--control-sm);
+    width: var(--control-sm);
   }
 
   .tabs {
@@ -641,13 +641,12 @@
     display: flex;
     align-items: center;
     gap: 2px;
-    height: 24px;
+    height: var(--control-sm);
     max-width: 144px;
     flex: none;
     padding: 0 8px 0 5px;
     border-radius: var(--radius-md);
     color: var(--color-muted-foreground);
-    /* The strip keeps its own scale: 24 px pills on 12 px type. */
     font-size: var(--text-xs);
     cursor: pointer;
     user-select: none;

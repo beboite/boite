@@ -26,7 +26,7 @@
 
   <section class="card">
     <h2 id="settings-shortcuts">{strings.keyboard.heading}</h2>
-    <p class="intro">{strings.keyboard.intro}</p>
+    <p class="hint">{strings.keyboard.intro}</p>
     <table>
       <thead>
         <tr>
@@ -59,7 +59,7 @@
   {#if store.keybindings && store.keybindings.errors.length > 0}
     <section class="card problems" data-testid="keybinding-problems">
       <h2>{strings.keyboard.problems}</h2>
-      <p class="intro">{strings.keyboard.problemsHint}</p>
+      <p class="hint">{strings.keyboard.problemsHint}</p>
       <ul>
         {#each store.keybindings.errors as error (error)}
           <li class="mono" data-testid="keybinding-error">{error}</li>
@@ -71,16 +71,15 @@
   <section class="card">
     <h2 id="settings-keybinding-file">{strings.keyboard.file}</h2>
     <p class="mono path" data-testid="keybindings-path">{store.keybindings?.path ?? ''}</p>
-    <p class="intro">{strings.keyboard.fileHint}</p>
+    <p class="hint file-hint">{strings.keyboard.fileHint}</p>
     <p class="subtle example-label">{strings.keyboard.example}</p>
     <pre class="mono">{example}</pre>
   </section>
 </div>
 
 <style>
-  .intro {
-    color: var(--color-muted-foreground);
-    margin: 0 0 12px;
+  .file-hint {
+    margin-bottom: 12px;
   }
 
   table {

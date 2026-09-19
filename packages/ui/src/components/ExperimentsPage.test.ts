@@ -27,9 +27,9 @@ test('the page carries one switch per experiment and a toggle writes the enabled
   flushSync();
   await tick();
 
-  // The card says these are unfinished before it offers anything.
-  expect(query('[data-testid=experiments-page] .card h2').textContent?.trim()).toBe('Experiments');
-  expect(query('[data-testid=experiments-page] .card p').textContent).toContain('unfinished');
+  // The page says these are unfinished before it offers anything.
+  expect(query('[data-testid=experiments-page] > header h1').textContent?.trim()).toBe('Experiments');
+  expect(query('[data-testid=experiments-page] > header p').textContent).toContain('unfinished');
 
   const grain = query<HTMLInputElement>('[data-testid=experiment-theme-grain]');
   expect(grain.checked).toBe(false);

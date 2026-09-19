@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { Puzzle, Download, RefreshCw } from '@lucide/svelte';
+  import { ArrowUpRight, Download, Puzzle, RefreshCw } from '@lucide/svelte';
   import type { PluginPool, PluginState, RpcParams } from '@boite/contracts';
   import type { Store } from '../lib/store.svelte';
   import { strings } from '../lib/strings';
@@ -57,29 +57,28 @@
   });
 </script>
 <div class="page" data-testid="plugins-page">
-  <header><h1>{strings.plugins.heading}</h1></header>
-  <p class="intro">{strings.plugins.intro}</p>
+  <header><div><h1>{strings.plugins.heading}</h1><p>{strings.plugins.intro}</p></div></header>
   <section class="card plugin">
-    <header><div class="identity"><Puzzle size={24} /><div><h2>kebacc-switcher</h2><span>{plugin?.version ? `${strings.plugins.installed} · ${plugin.version}` : `v${plugin?.availableVersion ?? '2.0.1'}`}</span></div></div>
+    <div class="head"><div class="identity"><span class="logo"><Puzzle size={20} strokeWidth={1.75} /></span><div><h2>kebacc-switcher</h2><span class="version">{plugin?.version ? `${strings.plugins.installed} · ${plugin.version}` : `v${plugin?.availableVersion ?? '2.0.1'}`}</span></div></div>
       {#if plugin?.status === 'installing'}<button class="quiet" onclick={() => void change('plugins.cancel')}>{strings.common.cancel}</button>
       {:else if plugin?.version}<div class="actions">
         {#if plugin.version !== plugin.availableVersion}<button disabled={busy} onclick={() => void change('plugins.install')}>{strings.plugins.update}</button>{/if}
         <button class="quiet" disabled={busy} data-testid="plugin-uninstall" onclick={() => void change('plugins.uninstall')}>{strings.plugins.remove}</button>
       </div>
       {:else}<button class="primary" disabled={busy || !plugin} data-testid="plugin-install" onclick={() => void change('plugins.install')}><Download size={15} />{strings.plugins.install}</button>{/if}
-    </header>
-    <p>{strings.plugins.description}</p>
-    <a href="https://github.com/kebab1337420/kebacc-switch" target="_blank" rel="noreferrer">{strings.plugins.source}</a>
-    {#if plugin?.status === 'installing'}<p role="status">{strings.plugins.installing} · {plugin.progress}%</p><progress max="100" value={plugin.progress}></progress>{/if}
+    </div>
+    <p class="hint description">{strings.plugins.description}</p>
+    <a class="source" href="https://github.com/kebab1337420/kebacc-switch" target="_blank" rel="noreferrer">{strings.plugins.source}<ArrowUpRight size={13} /></a>
+    {#if plugin?.status === 'installing'}<p class="hint" role="status">{strings.plugins.installing} · {plugin.progress}%</p><progress max="100" value={plugin.progress}></progress>{/if}
     {#if plugin?.error}<p class="error" role="alert">{plugin.error}</p>{/if}
   </section>
   {#if error}<p class="error" role="alert">{error}</p>{/if}
   {#if plugin?.version}
-    <div class="pool-heading"><p class="intro">{strings.plugins.cliScope}</p><button class="quiet" disabled={busy} onclick={() => void loadPools(true)}><RefreshCw size={15} />{strings.plugins.refresh}</button></div>
+    <div class="group-heading"><p>{strings.plugins.cliScope}</p><button class="quiet" disabled={busy} onclick={() => void loadPools(true)}><RefreshCw size={15} />{strings.plugins.refresh}</button></div>
     {#each pools as pool (pool.provider)}
       <section class="card pool" data-testid="plugin-pool" data-provider={pool.provider}>
-        <header><h2>{pool.provider}</h2><button class="quiet" disabled={busy} onclick={() => void accountAction(pool.provider, 'add')}>{strings.plugins.add}</button></header>
-        {#if pool.accounts.length === 0}<p class="intro">{strings.plugins.empty}</p>{/if}
+        <div class="head"><h2>{pool.provider}</h2><button class="quiet" disabled={busy} onclick={() => void accountAction(pool.provider, 'add')}>{strings.plugins.add}</button></div>
+        {#if pool.accounts.length === 0}<p class="hint">{strings.plugins.empty}</p>{/if}
         {#each pool.accounts as account (account.email)}
           <div class="saved-account" data-testid="plugin-account" data-email={account.email}>
             <QuotaList rows={[{ accountId: account.email, providerId: pool.provider, providerName: account.email, label: account.active ? strings.plugins.active : '', enabled: true,
@@ -96,16 +95,19 @@
   {/if}
 </div>
 <style>
-  .intro, .identity span, .plugin p { color: var(--color-muted-foreground); font-size: var(--text-sm); }
-  .plugin, .pool { max-width: 800px; }
-  header, .identity, .actions, .pool-heading { display: flex; align-items: center; gap: 12px; }
-  header, .pool-heading { justify-content: space-between; }
-  .identity h2 { margin: 0 0 4px; text-transform: none; font-size: var(--text-md); }
-  .pool h2 { text-transform: capitalize; }
+  .head, .identity, .actions { display: flex; align-items: center; gap: 12px; }
+  .head { justify-content: space-between; }
+  .card .head h2 { margin: 0; }
+  .pool .head { margin-bottom: 12px; }
+  .pool .head h2 { text-transform: capitalize; }
+  .logo { display: grid; place-items: center; width: 36px; height: 36px; flex: none; border-radius: var(--radius-md); background: var(--color-surface-3); color: var(--color-muted-foreground); }
+  .version { display: block; margin-top: 2px; color: var(--color-muted-foreground); font-size: var(--text-sm); }
+  .description { margin-top: 16px; }
+  .source { display: inline-flex; align-items: center; gap: 4px; margin-top: 6px; font-size: var(--text-sm); text-decoration: none; }
+  .source:hover { text-decoration: underline; }
   .saved-account { margin-top: 12px; }
   .saved-account .actions { justify-content: flex-end; margin-top: 6px; }
   .error { color: var(--color-danger); }
-  .pool-heading { max-width: 800px; margin: 20px 0 12px; }
-  progress { width: 100%; accent-color: var(--color-foreground); }
-  @media (max-width: 720px) { header, .pool-heading { align-items: flex-start; flex-wrap: wrap; } .actions { flex-wrap: wrap; } }
+  progress { width: 100%; margin-top: 8px; accent-color: var(--color-foreground); }
+  @media (max-width: 720px) { .head { align-items: flex-start; flex-wrap: wrap; } .actions { flex-wrap: wrap; } }
 </style>

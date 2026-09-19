@@ -77,37 +77,51 @@
 <section class="card" id="settings-phone" data-testid="phone-settings">
   <h2>{strings.phone.heading}</h2>
   {#if store.owner && showServerSettings}
-    <label><span>{strings.phone.publicUrl}</span><input type="url" bind:value={publicUrl} placeholder={strings.phone.urlPlaceholder} data-testid="phone-public-url" /></label>
-    <p class="hint">{strings.phone.publicUrlHint}</p>
-    <button disabled={store.connection !== 'ready'} onclick={() => void store.saveSettings({ publicUrl: publicUrl.trim() || null })}>{strings.settings.save}</button>
+    <div class="block">
+      <label><span>{strings.phone.publicUrl}</span><input type="url" bind:value={publicUrl} placeholder={strings.phone.urlPlaceholder} data-testid="phone-public-url" /></label>
+      <p class="hint">{strings.phone.publicUrlHint}</p>
+      <div class="actions">
+        <button disabled={store.connection !== 'ready'} onclick={() => void store.saveSettings({ publicUrl: publicUrl.trim() || null })}>{strings.settings.save}</button>
+      </div>
+    </div>
   {/if}
   {#if !inShell}
-    {#if standalone}<p>{strings.phone.installed}</p>
-    {:else}
-      <p>{strings.phone.installHint}</p>
-      <button onclick={async () => { standalone = await installApp() || installed(); if (!standalone) message = strings.phone.installHint; }}>{strings.phone.install}</button>
-    {/if}
-    {#if !secure}<p class="hint">{strings.phone.httpsRequired}</p>
-    {:else if !ownOrigin}<p class="hint">{strings.phone.ownOrigin}</p>
-    {:else if !paired}<p class="hint">{strings.phone.pairFirst}</p>
-    {:else if !capable}<p class="hint">{strings.phone.unsupported}</p>
-    {:else}
-      <p>{strings.phone.pushHint}</p>
-      <div class="actions">
-        {#if subscribed}
-          <button disabled={busy} onclick={disable}>{strings.phone.disable}</button>
-          <button disabled={busy} onclick={testPush}>{strings.phone.test}</button>
-        {:else}<button disabled={busy || !key} onclick={enable}>{strings.phone.enable}</button>{/if}
-      </div>
-    {/if}
-    {#if message}<p role="status">{message}</p>{/if}
-    {#if error}<p role="alert">{error}</p>{/if}
+    <div class="block">
+      {#if standalone}<p class="hint">{strings.phone.installed}</p>
+      {:else}
+        <p class="hint">{strings.phone.installHint}</p>
+        <div class="actions">
+          <button onclick={async () => { standalone = await installApp() || installed(); if (!standalone) message = strings.phone.installHint; }}>{strings.phone.install}</button>
+        </div>
+      {/if}
+    </div>
+    <div class="block">
+      {#if !secure}<p class="hint">{strings.phone.httpsRequired}</p>
+      {:else if !ownOrigin}<p class="hint">{strings.phone.ownOrigin}</p>
+      {:else if !paired}<p class="hint">{strings.phone.pairFirst}</p>
+      {:else if !capable}<p class="hint">{strings.phone.unsupported}</p>
+      {:else}
+        <p class="hint">{strings.phone.pushHint}</p>
+        <div class="actions">
+          {#if subscribed}
+            <button disabled={busy} onclick={disable}>{strings.phone.disable}</button>
+            <button disabled={busy} onclick={testPush}>{strings.phone.test}</button>
+          {:else}<button disabled={busy || !key} onclick={enable}>{strings.phone.enable}</button>{/if}
+        </div>
+      {/if}
+      {#if message}<p class="hint" role="status">{message}</p>{/if}
+      {#if error}<p class="hint" role="alert">{error}</p>{/if}
+    </div>
   {/if}
 </section>
 
 <style>
-  label { display: flex; flex-direction: column; gap: 8px; }
+  /* One block per subject, separated like the rows of the other cards: the
+     field or the sentence first, its buttons under it. */
+  .block { display: flex; flex-direction: column; gap: 10px; }
+  .block + .block { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--color-border); }
+  label { display: flex; flex-direction: column; gap: 6px; }
+  label > span { margin: 0; }
   input { width: 100%; }
-  .actions { display: flex; gap: 8px; flex-wrap: wrap; }
   [role='alert'] { color: var(--color-danger); }
 </style>
