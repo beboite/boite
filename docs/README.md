@@ -14,7 +14,7 @@
 - [Phone access](phone.md): pairing, permissions and offline behavior.
 - [Voice dictation](voice.md): local Whisper, API transcription and microphone access.
 - [Headless server](server.md): Docker, persistent storage and remote access.
-- [Plugins](plugins.md): managed plugins and their settings.
+- [Plugins](plugins.md): recommended plugins, adding one from a git URL, and writing your own.
 
 ## Building and contributing
 

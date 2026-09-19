@@ -8,9 +8,9 @@ live('the published kebacc binary installs with its pinned digest, reports its v
   const harness = await startTestCore();
   try {
     harness.core.plugins.install('kebacc-switcher');
-    await waitFor(() => harness.core.plugins.state().status !== 'installing', 120_000);
-    expect(harness.core.plugins.state().error).toBeNull();
-    expect(harness.core.plugins.state().version).toBe('2.0.1');
+    await waitFor(() => harness.core.plugins.state('kebacc-switcher').status !== 'installing', 120_000);
+    expect(harness.core.plugins.state('kebacc-switcher').error).toBeNull();
+    expect(harness.core.plugins.state('kebacc-switcher').version).toBe('2.0.1');
     const binary = join(harness.dataDir, 'plugins', 'kebacc-switcher', process.platform === 'win32' ? 'kebacc.exe' : 'kebacc');
     const spawned = harness.core.procs.spawn('plugin:version-test', binary, ['--version']);
     const text = await new Response(spawned.proc.stdout).text();
