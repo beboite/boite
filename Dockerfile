@@ -15,11 +15,11 @@ ARG BOITE_VERSION
 RUN if [ -n "$BOITE_VERSION" ]; then bun -e 'const v=process.env.BOITE_VERSION; if (!/^\d+\.\d+\.\d+-nightly\.\d{8}\.[1-9]\d*$/.test(v)) throw Error("invalid nightly version"); const p="packages/core/package.json"; const j=await Bun.file(p).json(); j.version=v; await Bun.write(p,JSON.stringify(j));'; fi
 RUN bun run build:ui && bun run build:core
 
-FROM node:24-bookworm-slim@sha256:2fe369e969550cde8e867afc3fe370b260140cab4a23d467074295b42163d553 AS agents
+FROM node:26-bookworm-slim@sha256:cd9f682fa2885cd1056e830424764158570061c59736a1da836bc3d73df095ae AS agents
 COPY docker/agents/package.json docker/agents/package-lock.json /opt/agents/
 RUN cd /opt/agents && npm ci --omit=dev && npm cache clean --force
 
-FROM node:24-bookworm-slim@sha256:2fe369e969550cde8e867afc3fe370b260140cab4a23d467074295b42163d553 AS runtime
+FROM node:26-bookworm-slim@sha256:cd9f682fa2885cd1056e830424764158570061c59736a1da836bc3d73df095ae AS runtime
 ARG BOITE_CHANNEL=stable
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates git ripgrep tini bash \
