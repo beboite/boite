@@ -45,7 +45,7 @@ export interface ExecutableCandidate {
    * Boite finds in the global npm, pnpm or Bun install directories and runs as
    * `node <its bin script>`; only the `pi` and `acp` protocols take one.
    */
-  kind: 'path' | 'file' | 'registry' | 'acp-registry' | 'npm';
+  kind: 'path' | 'file' | 'npm';
   value: string;
 }
 
