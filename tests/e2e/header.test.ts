@@ -54,7 +54,7 @@ test('header and project layout', async () => {
   await page.click(`${id('machine-status-menu')} [data-value=all]`);
   // Choose a message outside the mounted virtual window.
   expect(await page.evaluate(`document.querySelectorAll('${id('message-outline')} button').length`)).toBeLessThanOrEqual(14);
-  expect(await page.evaluate(`document.querySelector('${id('message-marker')}').getBoundingClientRect().height`)).toBe(12);
+  expect(await page.evaluate(`document.querySelector('${id('message-marker')}').getBoundingClientRect().height`)).toBe(6);
   await pointerClick(id('outline-group'));
   await page.waitFor(`document.querySelector('${id('outline-group-menu')}')`);
   await capture('message-groups.png');
@@ -82,7 +82,29 @@ test('header and project layout', async () => {
   expect(await page.evaluate(`document.querySelector('${id('message-outline')}').getBoundingClientRect().width`)).toBe(28);
   expect(await page.evaluate(`(() => { const rail = document.querySelector('${id('message-outline')}').getBoundingClientRect(); const timeline = document.querySelector('${id('timeline')}').getBoundingClientRect(); return Math.abs(rail.top + rail.height / 2 - timeline.top - timeline.height / 2); })()`)).toBeLessThan(1);
   await capture('message-preview.png');
+  // The rail opens around the pointer, and the bar under it stays under it.
+  const bar = await page.evaluate<{ x: number; y: number }>(`(() => { const r = document.querySelectorAll('${id('message-marker')}')[4].getBoundingClientRect(); return { x: r.left + 10, y: r.top + r.height / 2 }; })()`);
+  await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...bar });
+  await page.waitFor(`document.querySelectorAll('${id('message-marker')}')[4].classList.contains('hot')`);
+  await capture('message-lens.png');
+  expect(await page.evaluate(`(() => { const bars = document.querySelectorAll('${id('message-marker')}'); return bars[5].getBoundingClientRect().top - bars[4].getBoundingClientRect().top; })()`)).toBeGreaterThan(12);
+  expect(await page.evaluate(`document.elementFromPoint(${bar.x}, ${bar.y})?.closest('${id('message-marker')}') === document.querySelectorAll('${id('message-marker')}')[4]`)).toBe(true);
+  // Hovering a chevron slides the rail's window over the conversation; the timeline stays where it is.
+  const numbered = `Array.from(document.querySelectorAll('${id('message-marker')}')).map(node => Number(/message ([0-9]+)/.exec(node.getAttribute('aria-label'))[1]))`;
+  const shown = await page.evaluate<number>(`(${numbered})[1]`);
+  const scrolled = await page.evaluate<number>(`document.querySelector('${id('timeline')}').scrollTop`);
+  const chevron = await page.evaluate<{ x: number; y: number }>(`(() => { const r = document.querySelector('${id('outline-earlier')}').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+  await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...chevron });
+  await page.waitFor(`(${numbered})[1] < ${shown}`);
+  await capture('message-outline-earlier.png');
+  expect(await page.evaluate(`document.querySelector('${id('timeline')}').scrollTop`)).toBe(scrolled);
+  // The other chevron appears once entries are hidden below, and brings the window back down.
+  const back = await page.evaluate<{ x: number; y: number }>(`(() => { const r = document.querySelector('${id('outline-later')}').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+  await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...back });
+  await page.waitFor(`(${numbered})[1] >= ${shown}`);
+  // Leaving the rail puts its window back on the active prompt.
   await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 700, y: 100 });
+  await page.waitFor(`(${numbered})[1] === ${shown}`);
   await page.evaluate(`document.querySelector('[data-message-id="${target}"]').focus({preventScroll:true})`);
   await page.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
   expect(await page.evaluate(`document.activeElement?.dataset.messageId !== '${target}'`)).toBe(true);
