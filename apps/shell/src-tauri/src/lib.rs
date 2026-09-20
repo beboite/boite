@@ -31,7 +31,10 @@ use browser::MAIN_LABEL;
 const READY_LINE: &str = "boite-core ready";
 const HEALTH_TIMEOUT: Duration = Duration::from_millis(500);
 const START_TIMEOUT: Duration = Duration::from_secs(15);
-const POLL_INTERVAL: Duration = Duration::from_millis(120);
+/// How often the wait on a starting core looks again. The check is a flag read
+/// until the ready line came, so 10 ms costs nothing, and at 120 ms the window
+/// opened 60 ms late on average for a core that is up in about as long.
+const POLL_INTERVAL: Duration = Duration::from_millis(10);
 
 // A concurrent POSIX spawn can briefly inherit a flock until exec closes its
 // descriptor. Keep process creation separate from tests asserting lock release.
@@ -669,6 +672,12 @@ fn start_core<R: Runtime>(app: &AppHandle<R>, state: &CoreState) {
         if let Err(error) = outcome {
             eprintln!("[shell] {error}");
         }
+        // The core is started before the window is built and is usually first
+        // to be ready; showing a window that does not exist yet shows nothing.
+        let waited = Instant::now();
+        while handle.get_webview_window(MAIN_LABEL).is_none() && waited.elapsed() < START_TIMEOUT {
+            std::thread::sleep(POLL_INTERVAL);
+        }
         show_main(&handle);
     });
 }
@@ -836,11 +845,14 @@ pub fn run() {
         ])
         .setup(move |app| {
             let handle = app.handle().clone();
+            // First, so the core starts while WebView2 does: building the window
+            // holds this thread for several hundred milliseconds, and the core
+            // used to wait behind it for no reason (bench/startup.ts).
+            start_core(&handle, &app.state::<CoreState>());
             let window = build_main_window(&handle, channel)?;
             if !hidden() {
                 build_tray(&handle, channel)?;
             }
-            start_core(&handle, &app.state::<CoreState>());
 
             let closing = handle.clone();
             window.on_window_event(move |event| {

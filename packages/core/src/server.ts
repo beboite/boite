@@ -13,6 +13,7 @@ import { principalOf } from './sessions.ts';
 import type { Identity } from './sessions.ts';
 
 const DEFAULT_HELLO_TIMEOUT_MS = 5000;
+const REMOTE_DELTA_WINDOW_MS = 80;
 /**
  * The UI build. `packages/core/src` and `packages/core/dist` are the same depth,
  * so `../../ui/dist` is `packages/ui/dist` from either; a compiled core has no
@@ -71,14 +72,59 @@ export class ServerConnection implements Connection {
   private socket: ServerWebSocket<SocketData> | null = null;
   private congested = false;
   private readonly catchUp = new Set<string>();
+  private readonly paced = new Map<string, RpcEvents['message.delta']>();
+  private paceTimer: ReturnType<typeof setTimeout> | null = null;
 
-  constructor(private readonly core: Core) {}
+  /**
+   * `remote` is a client that reached the core by a name other than this
+   * machine's loopback: a phone, a laptop, a tunnel. Its frames are deflated
+   * and its deltas paced; the shell on 127.0.0.1 gets neither, because there
+   * the bytes are free and the CPU is not.
+   */
+  constructor(private readonly core: Core, readonly remote = false) {}
 
   attach(socket: ServerWebSocket<SocketData>): void {
     this.socket = socket;
   }
 
   sendEvent<E extends RpcEventName>(name: E, payload: RpcEvents[E]): void {
+    if (name === 'message.delta' && this.remote && !this.congested) {
+      this.pace(payload as RpcEvents['message.delta']);
+      return;
+    }
+    this.flushPaced();
+    this.sendNow(name, payload);
+  }
+
+  /**
+   * A remote client gets its text every `REMOTE_DELTA_WINDOW_MS` rather than
+   * every 16 ms. Each frame costs its envelope, its ids and the headers under
+   * it whatever text it carries, so five deltas in one frame are a fifth of
+   * the bytes, and the UI redraws a streaming part every 48 ms anyway. Any
+   * other frame on this socket, an event or a response, sends what is held
+   * first: a client never sees a card, or a snapshot, before the text that
+   * came before it.
+   */
+  private pace(delta: RpcEvents['message.delta']): void {
+    const key = `${delta.messageId}|${delta.partIndex}`;
+    const held = this.paced.get(key);
+    if (held) held.text += delta.text;
+    else this.paced.set(key, { ...delta });
+    this.paceTimer ??= setTimeout(() => this.flushPaced(), REMOTE_DELTA_WINDOW_MS);
+  }
+
+  private flushPaced(): void {
+    if (this.paceTimer !== null) {
+      clearTimeout(this.paceTimer);
+      this.paceTimer = null;
+    }
+    if (this.paced.size === 0) return;
+    const held = [...this.paced.values()];
+    this.paced.clear();
+    for (const delta of held) this.sendNow('message.delta', delta);
+  }
+
+  private sendNow<E extends RpcEventName>(name: E, payload: RpcEvents[E]): void {
     if (name === 'message.delta' && this.congested) {
       this.queueCatchUp(payload);
       return;
@@ -94,11 +140,15 @@ export class ServerConnection implements Connection {
   }
 
   sendResponse(response: OutgoingResponse): void {
+    this.flushPaced();
     if (this.write(response) === 0) this.close(1013, 'connection dropped a response; reconnect');
   }
 
   close(code: number, reason?: string): void {
     this.core.speech.cancel(this.id);
+    if (this.paceTimer !== null) clearTimeout(this.paceTimer);
+    this.paceTimer = null;
+    this.paced.clear();
     this.catchUp.clear();
     this.socket?.close(code, reason);
   }
@@ -109,7 +159,7 @@ export class ServerConnection implements Connection {
 
   private write(frame: unknown): number {
     if (this.socket === null) return 0;
-    return this.socket.send(JSON.stringify(frame));
+    return this.socket.send(JSON.stringify(frame), this.remote);
   }
 
   /** Backpressure: deltas are dropped, then the whole part is resent once the socket drains. */
@@ -166,6 +216,17 @@ export function isAllowedOrigin(origin: string | null, port: number, host: strin
   }
 }
 
+/**
+ * The name the client dialled, from its `Host` header. A tunnel or a reverse
+ * proxy on this machine connects from 127.0.0.1 too, so the peer address says
+ * nothing; the name it forwards is the public one.
+ */
+export function isLoopbackHost(header: string | null): boolean {
+  if (header === null) return false;
+  const name = header.trim().toLowerCase().replace(/:\d+$/, '').replace(/^\[|\]$/g, '');
+  return name === '127.0.0.1' || name === 'localhost' || name === '::1';
+}
+
 const IMMUTABLE_FOR_A_YEAR = 'public, max-age=31536000, immutable';
 
 /**
@@ -193,6 +254,36 @@ function staticFile(pathname: string): string | null {
   const root = resolve(UI_DIST);
   if (!resolve(full).startsWith(root + sep) && resolve(full) !== root) return null;
   return existsSync(full) ? full : null;
+}
+
+const ENCODINGS: readonly { token: string; suffix: string }[] = [
+  { token: 'br', suffix: '.br' },
+  { token: 'gzip', suffix: '.gz' },
+];
+
+/**
+ * The UI build compresses its own text files (`packages/ui/vite.config.ts`),
+ * so the core never deflates anything: it hands out the file the browser says
+ * it can read. A browser only offers `br` on https, so a phone on the LAN gets
+ * the `.gz`. `Vary` keeps a cache between the two from mixing them up.
+ */
+export function staticResponse(file: string, pathname: string, acceptEncoding: string | null): Response {
+  const headers = cacheHeaders(pathname);
+  // `br;q=0` names a coding to refuse it, so an entry at zero is not accepted.
+  const accepted = (acceptEncoding ?? '').toLowerCase().split(',').flatMap((entry) => {
+    const [token = '', ...params] = entry.split(';').map((piece) => piece.trim());
+    const quality = params.find((param) => param.startsWith('q='));
+    return quality !== undefined && Number(quality.slice(2)) === 0 ? [] : [token];
+  });
+  for (const { token, suffix } of ENCODINGS) {
+    if (!accepted.includes(token)) continue;
+    const candidate = file + suffix;
+    if (!existsSync(candidate)) continue;
+    return new Response(Bun.file(candidate), {
+      headers: { ...headers, 'content-type': Bun.file(file).type, 'content-encoding': token, vary: 'accept-encoding' },
+    });
+  }
+  return new Response(Bun.file(file), { headers: { ...headers, vary: 'accept-encoding' } });
 }
 
 /**
@@ -292,13 +383,13 @@ export function startServer(options: ServerOptions): RunningServer {
           core.log('warn', `refused a websocket from origin ${origin ?? '(none)'}`);
           return new Response('forbidden origin', { status: 403 });
         }
-        const connection = new ServerConnection(core);
+        const connection = new ServerConnection(core, !isLoopbackHost(request.headers.get('host')));
         if (self.upgrade(request, { data: { connection } })) return undefined;
         return new Response('expected a websocket upgrade', { status: 400 });
       }
 
       const file = staticFile(url.pathname);
-      if (file !== null) return new Response(Bun.file(file), { headers: cacheHeaders(url.pathname) });
+      if (file !== null) return staticResponse(file, url.pathname, request.headers.get('accept-encoding'));
       if (url.pathname === '/') {
         return new Response(PLACEHOLDER_HTML, { headers: { 'content-type': 'text/html; charset=utf-8' } });
       }
@@ -306,6 +397,15 @@ export function startServer(options: ServerOptions): RunningServer {
     },
 
     websocket: {
+      // The shared compressor, no window kept between frames. Bun 1.4.2's
+      // per-socket window (`dedicated`, or any size) was measured on
+      // 2026-09-19 and does no matching inside a frame: a 30 KB `threads.list`
+      // left at 20.9 KB, against 1.6 KB here. What a kept window would have
+      // saved on small delta frames is won back by pacing them
+      // (`ServerConnection.sendEvent`). Whether a frame is deflated at all is
+      // the connection's call, in `ServerConnection.write`.
+      perMessageDeflate: true,
+
       open(socket) {
         const connection = socket.data.connection;
         connection.attach(socket);

@@ -1523,6 +1523,12 @@ export class FakeClient implements ObservableClient {
       case 'threads.get': {
         const params = rawParams as RpcParams<'threads.get'>;
         const thread = this.#thread(params.threadId);
+        // The core's rule: from the named message on, unless it is unknown or
+        // the tail is longer than a page, and then the whole page as before.
+        const from = params.after === undefined ? -1 : thread.messages.findIndex((message) => message.id === params.after);
+        if (from !== -1 && thread.messages.length - from <= MESSAGE_PAGE) {
+          return structuredClone({ ...thread, messages: thread.messages.slice(from), messagesBefore: null, messagesFrom: params.after });
+        }
         const page = this.#page(thread.messages, thread.messages.length, MESSAGE_PAGE);
         return structuredClone({ ...thread, messages: page.messages, messagesBefore: page.before });
       }

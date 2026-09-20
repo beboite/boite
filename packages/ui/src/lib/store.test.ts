@@ -3,7 +3,7 @@ import { RpcErrorCode, type ThreadStatus } from '@boite/contracts';
 import { RpcFailure } from './client';
 import { FakeClient } from './fake-client';
 import { setNotificationSender, type Toast } from './notify';
-import { Store } from './store.svelte';
+import { resumeAnchor, Store } from './store.svelte';
 
 test('dropped folders use the local core when a remote machine is selected', async () => {
   const { store, client: remote } = await ready();
@@ -442,6 +442,9 @@ describe('Store', () => {
     await Promise.all([store.open('t-bench'), store.open('t-scheduler')]);
 
     expect(store.openThread?.id).toBe('t-scheduler');
+    // Nobody is looking at the trace, so opening reads none and drops the last thread's.
+    expect(store.trace).toEqual([]);
+    await store.refreshTrace();
     expect(store.trace).toEqual(await client.call('trace.get', { threadId: 't-scheduler' }));
     expect(client.coreSubscribers).toEqual(['t-scheduler']);
     expect(client.clientSubscriptions).toEqual(['t-scheduler']);
@@ -494,6 +497,36 @@ describe('Store', () => {
     expect(store.openThread?.projectId).toBe('p-boite');
     expect(client.clientSubscriptions).toEqual([store.openThread?.id]);
     spy.mockRestore();
+  });
+
+  test('opening the thread already held asks only for what is past its last message, and keeps the rest', async () => {
+    const { store, client } = await ready();
+    await store.open('t-scheduler');
+    const before = store.openThread!.messages.map((message) => message.id);
+    expect(before.length).toBeGreaterThan(1);
+    const spy = vi.spyOn(client, 'call');
+
+    // What a reconnect does: the same thread again.
+    await store.open('t-scheduler', false);
+
+    const asked = spy.mock.calls.find(([method]) => method === 'threads.get')?.[1] as { after?: string };
+    expect(asked.after).toBe(resumeAnchor(store.openThread!) ?? undefined);
+    expect(before).toContain(asked.after);
+    expect(store.openThread!.messages.map((message) => message.id)).toEqual(before);
+    expect(store.openThread!.messagesFrom).toBeUndefined();
+    expect(spy.mock.calls.some(([method]) => method === 'trace.get')).toBe(false);
+    spy.mockRestore();
+  });
+
+  test('the resume anchor is the oldest message still moving, else the last one', () => {
+    const message = (id: string, turnId: string, state: 'done' | 'streaming') => ({ id, turnId, state }) as never;
+    const turn = (id: string, finishedAt: number | null) => ({ id, finishedAt }) as never;
+    expect(resumeAnchor({ messages: [], turns: [] } as never)).toBeNull();
+    expect(resumeAnchor({ messages: [message('m1', 'a', 'done'), message('m2', 'a', 'done')], turns: [turn('a', 1)] } as never)).toBe('m2');
+    expect(resumeAnchor({
+      messages: [message('m1', 'a', 'done'), message('m2', 'b', 'done'), message('m3', 'b', 'streaming')],
+      turns: [turn('a', 1), turn('b', null)],
+    } as never)).toBe('m2');
   });
 
   test('a boot loads the core once, not twice', async () => {

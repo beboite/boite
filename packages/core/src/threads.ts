@@ -147,11 +147,21 @@ export class ThreadStore {
    * one page here; the rest is walked back through `messages`, whose cursor is
    * `messagesBefore`.
    */
-  get(threadId: ThreadId): Thread {
+  get(threadId: ThreadId, after?: MessageId): Thread {
     const thread = this.withLoad(this.require(threadId));
-    const page = this.core.journal.listMessagePage(threadId, { limit: MESSAGE_PAGE });
+    // A snapshot taken mid-stream holds every delta up to this line, and every
+    // one of them has left for the sockets: what arrives after the answer is
+    // text the answer does not have.
+    this.core.journal.flushDeltas();
+    this.core.bus.flush();
+    const fromRowid = after === undefined ? null : this.core.journal.messageRowid(threadId, after);
+    const tail = fromRowid === null ? null : this.core.journal.listMessagesFrom(threadId, fromRowid, MESSAGE_PAGE);
+    const page = tail === null
+      ? this.core.journal.listMessagePage(threadId, { limit: MESSAGE_PAGE })
+      : { messages: tail, before: null };
     return {
       ...thread,
+      ...(tail === null || after === undefined ? {} : { messagesFrom: after }),
       messages: page.messages,
       commands: this.commands.get(threadId) ?? [],
       activity: this.core.activity.get(threadId),
@@ -1298,7 +1308,7 @@ export function registerThreadMethods(core: Core): void {
   core.router.register('threads.create', (params) =>
     params.worktree === undefined ? core.threads.create(params) : core.threads.createInWorktree(params),
   );
-  core.router.register('threads.get', (params) => core.threads.get(params.threadId));
+  core.router.register('threads.get', (params) => core.threads.get(params.threadId, params.after));
   core.router.register('messages.list', (params) => core.threads.messages(params));
   core.router.register('threads.update', (params) => core.threads.update(params));
   core.router.register('threads.retitle', (params) => core.threads.retitle(params.threadId));

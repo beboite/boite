@@ -30,7 +30,7 @@ const RETITLE_SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui-retitle.png')
 const IMPORT_SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui-import.png');
 const EXPERIMENTS_SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui-experiments.png');
 /** The one name `public/sw.js` opens; every other cache is deleted on activate. */
-const UI_CACHE = 'boite-ui-v2';
+const UI_CACHE = 'boite-ui-v3';
 /** What the echo provider's `[tool-stream]` directive types, one piece at a time. */
 const STREAMED_TOOL_INPUT = '{"command":"echo streamed","description":"a streamed input"}';
 

@@ -24,6 +24,7 @@
 - [Architecture](architecture.md): the core, clients, journal and drivers.
 - [Providers](providers.md): descriptors, protocols and supported capabilities.
 - [Process tracing](trace.md): resource use and platform limits.
+- [Performance](performance.md): what a remote client is sent, startup, and the benches that measure both.
 - [CI](ci.md): checks, caching, nightly builds and image publication.
 - [Releasing](releasing.md): installers, channels and versioning.
 - [Release reports](releases/2.0.0-beta.1.md): the first beta's scope and measurements.

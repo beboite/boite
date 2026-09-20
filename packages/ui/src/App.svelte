@@ -2,14 +2,12 @@
   import { onMount } from 'svelte';
   import NotificationCard from './components/NotificationCard.svelte';
   import ChatView from './components/ChatView.svelte';
-  import CommandPalette from './components/CommandPalette.svelte';
+
   import ConfirmDialog from './components/ConfirmDialog.svelte';
   import ContextMenu from './components/ContextMenu.svelte';
   import DropOverlay from './components/DropOverlay.svelte';
   import FirstRun from './components/FirstRun.svelte';
-  import ProjectPicker from './components/ProjectPicker.svelte';
-  import ImportDialog from './components/ImportDialog.svelte';
-  import RightPanel from './components/RightPanel.svelte';
+
   import Sidebar from './components/Sidebar.svelte';
   import TitleBar from './components/TitleBar.svelte';
   import { Closing } from './lib/closing.svelte';
@@ -33,6 +31,40 @@
   let sidebar = $state<Sidebar | undefined>(undefined);
   let appRoot = $state<HTMLDivElement | undefined>(undefined);
   let mobileScreen = $state<'chat' | 'threads' | 'activity'>('chat');
+  // What the first screen does not draw stays out of the first chunk: the right
+  // panel and its six surfaces, the palette and the two dialogs were a third of
+  // it. Each loads the moment it is asked for, and all of them once the app is
+  // idle, so a key pressed a second after boot finds them and the service
+  // worker has them for a phone that loses its link.
+  const deferredLoaders = {
+    RightPanel: () => import('./components/RightPanel.svelte'),
+    CommandPalette: () => import('./components/CommandPalette.svelte'),
+    ProjectPicker: () => import('./components/ProjectPicker.svelte'),
+    ImportDialog: () => import('./components/ImportDialog.svelte')
+  };
+  type Deferred = { [K in keyof typeof deferredLoaders]?: Awaited<ReturnType<(typeof deferredLoaders)[K]>>['default'] };
+  let deferred = $state.raw<Deferred>({});
+  const requested = new Set<keyof Deferred>();
+  function need(name: keyof Deferred): void {
+    if (requested.has(name)) return;
+    requested.add(name);
+    void deferredLoaders[name]()
+      .then((module) => { deferred = { ...deferred, [name]: module.default }; })
+      // Offline with a cold cache: the next ask tries again. A dialog that was
+      // asked for is closed and said to be missing, or its open state would
+      // hold the keyboard for something that never draws.
+      .catch(() => {
+        requested.delete(name);
+        if (name === 'ProjectPicker' && store.projectPickerOpen) store.projectPickerOpen = false;
+        else if (name === 'ImportDialog' && store.imports) store.closeImports();
+        else if (name === 'CommandPalette' && store.paletteOpen) store.paletteOpen = false;
+        else return;
+        store.error = strings.phone.dialogOffline;
+      });
+  }
+  function needAll(): void {
+    for (const name of Object.keys(deferredLoaders) as (keyof Deferred)[]) need(name);
+  }
   let SettingsShell = $state<typeof import('./components/SettingsShell.svelte').default>();
   let settingsLoadError = $state('');
   $effect(() => {
@@ -42,9 +74,24 @@
       .catch(() => { settingsLoadError = strings.phone.settingsOffline; });
   });
 
+  $effect(() => {
+    if (panelSlot.shown) need('RightPanel');
+  });
+
+  // Asked for before the idle prefetch got to it: fetch it now.
+  $effect(() => {
+    if (store.paletteOpen) need('CommandPalette');
+    if (store.projectPickerOpen) need('ProjectPicker');
+    if (store.imports) need('ImportDialog');
+  });
+
   onMount(() => {
     const stopViewport = startViewport();
     const stopInstall = listenForInstall();
+    // After the first paint, not in its way. Safari has no requestIdleCallback.
+    const idle = typeof requestIdleCallback === 'function'
+      ? requestIdleCallback(needAll, { timeout: 1500 })
+      : setTimeout(needAll, 300);
     let hidden = document.hidden;
     const resume = () => {
       if (document.hidden) return;
@@ -69,6 +116,8 @@
     };
     navigator.serviceWorker?.addEventListener('message', notification);
     return () => {
+      if (typeof cancelIdleCallback === 'function') cancelIdleCallback(idle as number);
+      else clearTimeout(idle);
       stopViewport();
       stopInstall();
       document.removeEventListener('visibilitychange', visibility);
@@ -348,7 +397,8 @@
           {/key}
         {/if}
       </main>
-      {#if panelSlot.shown && store.openThread}
+      {#if panelSlot.shown && store.openThread && deferred.RightPanel}
+        {@const RightPanel = deferred.RightPanel}
         {#key store}
           <RightPanel
             {store}
@@ -397,10 +447,10 @@
 </div>
 
 <ContextMenu />
-<ProjectPicker {store} />
-  <ConfirmDialog />
-<ImportDialog {store} />
-<CommandPalette {store} />
+{#if deferred.ProjectPicker}{@const ProjectPicker = deferred.ProjectPicker}<ProjectPicker {store} />{/if}
+<ConfirmDialog />
+{#if deferred.ImportDialog}{@const ImportDialog = deferred.ImportDialog}<ImportDialog {store} />{/if}
+{#if deferred.CommandPalette}{@const CommandPalette = deferred.CommandPalette}<CommandPalette {store} />{/if}
 
 <style>
   .app {
