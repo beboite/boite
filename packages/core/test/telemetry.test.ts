@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'bun:test';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { Bus } from '../src/bus.ts';
@@ -32,6 +32,19 @@ test('fresh hosts send nothing, including before consent and on shutdown', async
   await telemetry.close();
   expect(requests).toEqual([]);
   expect(telemetry.state().mode).toBe('off');
+});
+
+test('invalid consent fails closed with repair guidance and preserves the deletion ledger', async () => {
+  const f = fixture();
+  await f.telemetry.close();
+  const file = join(f.dataDir, 'telemetry.json');
+  for (const text of ['{"forget":[', JSON.stringify({ mode: 'invalid', forget: [crypto.randomUUID()] }), 'null']) {
+    writeFileSync(file, text);
+    expect(() => new Telemetry(f.host, 'https://relay.example', f.send)).toThrow('telemetry.json: cannot load consent');
+    expect(() => new Telemetry(f.host, 'https://relay.example', f.send)).toThrow('docs/analytics.md');
+    expect(readFileSync(file, 'utf8')).toBe(text);
+  }
+  expect(f.requests).toEqual([]);
 });
 
 test('basic counts are bounded, RAM-only, and drop arbitrary event fields', async () => {

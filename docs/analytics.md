@@ -55,6 +55,24 @@ up to an hour, preserving event UUIDs for deduplication. Old events can be lost
 when the queue fills or the host exits. Only consent, identifiers and pending
 deletion are persisted in `telemetry.json`, outside the application journal.
 
+## Repairing consent state
+
+An unreadable or invalid `telemetry.json` stops host startup. The host does not
+replace it with defaults: its `forget` array may contain outstanding deletion
+requests, and its `installId` may identify an enhanced profile still to delete.
+
+With the host stopped, keep a copy of the damaged file. Check its read permissions
+and JSON syntax first. Restore a valid backup only if it retains every pending
+deletion ID and the current installation ID. Do not delete the file or clear
+these fields to bypass the error. If repairing individual fields, preserve valid
+UUIDs in `forget` and `installId`; ask the project maintainer for help if their
+values cannot be recovered. Never publish the consent file in an issue.
+
+Once the file loads, turning enhanced analytics off moves its installation ID
+into the deletion queue. Use "Retry deletion" in settings and wait for the
+pending-deletion warning to disappear. Relay URL configuration errors are
+separate and require correcting `BOITE_TELEMETRY_URL`, not this file.
+
 ## Relay and dashboard
 
 The dedicated relay is configured in `telemetry/wrangler.toml`. Set

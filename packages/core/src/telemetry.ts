@@ -77,13 +77,18 @@ export class Telemetry {
     this.file = join(core.dataDir, 'telemetry.json');
     this.consent = { mode: 'off', anonymousId: crypto.randomUUID(), installId: null, forget: [], firstRun: false, pingDay: '' };
     if (existsSync(this.file)) {
-      const saved = JSON.parse(readFileSync(this.file, 'utf8')) as Consent;
-      if (!MODES.includes(saved.mode) || !UUID.test(saved.anonymousId) ||
-          (saved.installId !== null && !UUID.test(saved.installId)) ||
-          !Array.isArray(saved.forget) || saved.forget.some(id => !UUID.test(id)) ||
-          typeof saved.firstRun !== 'boolean' || typeof saved.pingDay !== 'string' ||
-          (saved.mode === 'enhanced' && !saved.installId)) throw invalid('telemetry.json: expected valid consent and UUID identifiers');
-      this.consent = saved;
+      try {
+        const saved = JSON.parse(readFileSync(this.file, 'utf8')) as Consent;
+        if (!MODES.includes(saved.mode) || !UUID.test(saved.anonymousId) ||
+            (saved.installId !== null && !UUID.test(saved.installId)) ||
+            !Array.isArray(saved.forget) || saved.forget.some(id => !UUID.test(id)) ||
+            typeof saved.firstRun !== 'boolean' || typeof saved.pingDay !== 'string' ||
+            (saved.mode === 'enhanced' && !saved.installId)) throw invalid('telemetry.json: expected valid consent and UUID identifiers');
+        this.consent = saved;
+      } catch {
+        // Never overwrite an unreadable deletion ledger with fresh consent.
+        throw invalid('telemetry.json: cannot load consent; expected readable JSON with valid consent and UUID identifiers. Preserve this file and restore a valid backup or repair it while retaining forget and installId; see docs/analytics.md#repairing-consent-state.');
+      }
     }
     this.unsubscribe = core.bus.onAny((name, payload) => {
       if (name === 'project.added') this.track('project_added');
