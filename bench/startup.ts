@@ -28,6 +28,7 @@ const ROOT = join(import.meta.dir, '..');
 const EXE = flag('exe', process.env.BOITE_E2E_SHELL_EXE ?? join(ROOT, 'apps', 'shell', 'src-tauri', 'target', 'release', 'boite-shell.exe'));
 const RUNS = Number(flag('runs', '7'));
 const CORE_COMMAND = flag('core-command', '');
+if (process.argv.at(-1) === '--core-command') throw new Error('--core-command needs a value: the command that starts the core');
 
 interface Run {
   coreMs: number;
@@ -129,7 +130,7 @@ for (let index = 0; index < RUNS; index += 1) {
   runs.push(run);
   console.log(`run ${index + 1}: core ${Math.round(run.coreMs)} ms, first paint ${Math.round(run.paintMs)} ms, ui ready ${Math.round(run.readyMs)} ms`);
 }
-console.log(`\n${EXE}\n${new Date().toISOString().slice(0, 10)}, ${RUNS} runs, medians, fresh WebView2 profile each run`);
+console.log(`\n${EXE}\ncore: ${CORE_COMMAND === '' ? 'the sidecar beside it' : CORE_COMMAND}\n${new Date().toISOString().slice(0, 10)}, ${RUNS} runs, medians, fresh WebView2 profile each run`);
 console.log('| spawn to | ms |\n| --- | ---: |');
 console.log(`| core answering /health | ${Math.round(median(runs.map((run) => run.coreMs)))} |`);
 console.log(`| first contentful paint | ${Math.round(median(runs.map((run) => run.paintMs)))} |`);
