@@ -111,6 +111,9 @@ test('counted loops run consecutive iterations, retain each result and stop at t
   expect(loop.nextRunAt).toBeNull();
   expect(loop.history?.map(run => [run.iteration, run.status, run.summary])).toEqual([[1, 'done', 'pong 1'], [2, 'done', 'pong 2']]);
   await expect(client.call('threads.activity.control', { threadId, kind: 'loop', action: 'resume' })).rejects.toThrow('finished');
+  // Pausing a finished loop used to flip it to `paused`, which nothing could leave.
+  await expect(client.call('threads.activity.control', { threadId, kind: 'loop', action: 'pause' })).rejects.toThrow('complete');
+  expect(h.core.activity.get(threadId).loop?.status).toBe('complete');
   await Bun.sleep(400);
   expect(count).toBe(2);
 });

@@ -301,6 +301,8 @@ export class Store {
    */
   probedModels = $state<Record<string, ModelInfo[]>>({});
   #probeAttempts = new Set<string>();
+  /** One per-model effort read per provider, account and model, see `probeModelEffort`. */
+  #effortAttempts = new Set<string>();
   #probeRequests = new Map<string, Promise<void>>();
   #probeEpoch = 0;
   #modelCacheKey(): string { return 'boite.models.v1:' + JSON.stringify([this.endpointUrl, this.core?.dataDir]); }
@@ -453,6 +455,34 @@ export class Store {
     // Display the configured target before probing. It never joins modelsOf's selectable list.
     return choice.model && choice.model === preferred?.model
       ? { id: choice.model, name: DEFAULT_MODEL_NAMES[choice.model] ?? choice.model } : null;
+  }
+
+  /**
+   * OpenCode names a model's reasoning efforts only once a session is on that
+   * model, so the list a probe reads carries none. The composer asks for the
+   * model it landed on, once per model, and the effort chip fills in.
+   */
+  async probeModelEffort(providerId: ProviderId, accountId: string, model: string): Promise<void> {
+    const client = this.#client;
+    if (!client || !this.owner) return;
+    const key = `${probeKey(providerId, accountId)}::${model}`;
+    if (this.#effortAttempts.has(key)) return;
+    await this.probeModels(providerId, accountId);
+    const listed = this.modelsOf(providerId, accountId).find(entry => entry.id === model);
+    if (!listed || listed.effort !== undefined || this.#effortAttempts.has(key)) return;
+    this.#effortAttempts.add(key);
+    const epoch = this.#probeEpoch;
+    try {
+      const { models } = await client.call('providers.probe', { providerId, accountId, model });
+      if (client !== this.#client || epoch !== this.#probeEpoch) return;
+      this.probedModels = { ...this.probedModels, [probeKey(providerId, accountId)]: models };
+      this.#saveModels();
+    } catch (error) {
+      // An older core refuses nothing here, it just answers the plain list; a
+      // real failure is the agent's, and the chip simply stays absent.
+      if (client === this.#client) this.#effortAttempts.delete(key);
+      console.warn('reading the model efforts failed', error);
+    }
   }
 
   isProbing(providerId: ProviderId, accountId: string | null): boolean {
@@ -614,6 +644,7 @@ export class Store {
     this.probedModels = {};
     this.#probeEpoch++;
     this.#probeAttempts.clear();
+    this.#effortAttempts.clear();
     this.#probeRequests.clear();
     this.probingModels = [];
     this.connection = client.state;
@@ -636,6 +667,7 @@ export class Store {
             resetPullRequestSupport(client);
             this.#probeEpoch++;
             this.#probeAttempts.clear();
+    this.#effortAttempts.clear();
             this.error = null;
             this.core = client.core;
             // `WsClient` writes its principal from the hello answer before it
@@ -814,6 +846,7 @@ export class Store {
       this.probedModels = {};
       this.#probeEpoch++;
       this.#probeAttempts.clear();
+    this.#effortAttempts.clear();
       this.#saveModels();
     });
     on('providers.probed', ({ providerId, accountId, models }) => {

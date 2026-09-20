@@ -139,6 +139,13 @@
       untrack(() => void store.probeModels(id, accountId));
     }
   });
+  // OpenCode names a model's efforts only once a session is on it.
+  $effect(() => {
+    if (provider?.available && provider.protocol === 'acp' && choice?.model) {
+      const id = provider.id, accountId = choice.accountId, model = choice.model;
+      untrack(() => void store.probeModelEffort(id, accountId, model));
+    }
+  });
   let bound = $derived(store.openThread !== null);
   /** Every agent can read uploaded files through its local tools. */
   let canAttach = $derived(provider !== null && provider !== undefined);

@@ -1367,7 +1367,13 @@ export interface RpcMethods {
    * the moment of the call.
    */
   'providers.probe': {
-    params: { providerId: ProviderId; accountId: AccountId; refresh?: boolean };
+    /**
+     * `model` also asks for that model's own reasoning efforts. OpenCode names an
+     * effort scale per model and only once the session is on it, so the list a
+     * plain probe reads carries none; the picker names the model it landed on
+     * and the answer comes back with that model's `effort` filled in.
+     */
+    params: { providerId: ProviderId; accountId: AccountId; refresh?: boolean; model?: string };
     result: { models: ModelInfo[]; probedAt: Timestamp };
   };
   /**

@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Core } from '../core.ts';
 import { forgetProbes, probeModels } from '../drivers/index.ts';
-import { refused } from '../errors.ts';
+import { invalidParams, refused } from '../errors.ts';
 
 /** The synthetic thread a probe process runs under, so the trace shows it like a login. */
 export function probeThreadId(providerId: ProviderId, accountId: AccountId): ThreadId {
@@ -22,6 +22,7 @@ async function probeProvider(
   providerId: ProviderId,
   accountId: AccountId,
   isCurrent: () => boolean,
+  model?: string,
 ): Promise<RpcResult<'providers.probe'>> {
   const provider = core.providers.require(providerId);
   const account = core.accounts.require(accountId);
@@ -42,6 +43,7 @@ async function probeProvider(
       accountId: account.id,
       accountEnv: core.accounts.accountEnv(account, provider),
       cwd: directory,
+      ...(model === undefined ? {} : { model }),
       // A probe runs the same executable a turn would, so it holds the same lease:
       // removing a managed install under a probe would be the same crash.
       spawnChild: (cmd, args, opts) => {
@@ -89,14 +91,17 @@ export function registerProbeMethods(core: Core): void {
   };
   const pending = new Map<string, Promise<RpcResult<'providers.probe'>>>();
   core.router.register('providers.probe', (params) => {
-    const key = JSON.stringify([params.providerId, params.accountId]);
+    if (params.model !== undefined && (typeof params.model !== 'string' || params.model.length === 0)) {
+      throw invalidParams('model must be a non-empty string when given');
+    }
+    const key = JSON.stringify([params.providerId, params.accountId, params.model ?? null]);
     const existing = pending.get(key);
     if (existing) return existing;
     if (params.refresh) forgetProbes({ providerId: params.providerId, accountId: params.accountId });
     const startedAtRevision = revision;
     const startedAtAccount = accountRevision(params.accountId);
     const isCurrent = () => revision === startedAtRevision && accountRevision(params.accountId) === startedAtAccount;
-    const request = probeProvider(core, params.providerId, params.accountId, isCurrent).finally(() => pending.delete(key));
+    const request = probeProvider(core, params.providerId, params.accountId, isCurrent, params.model).finally(() => pending.delete(key));
     pending.set(key, request);
     return request;
   });

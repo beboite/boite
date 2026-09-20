@@ -245,6 +245,7 @@ class ClaudeTurn {
 
   private sessionId: string | null;
   private usage: Usage | null = null;
+  private costBefore = 0;
   /** What the last API request of the turn carried, the context meter's reading. */
   private contextTokens: number | null = null;
   private status: TurnResult['status'] = 'done';
@@ -304,6 +305,11 @@ class ClaudeTurn {
   }
 
   // -- messages -------------------------------------------------------------
+
+  /** What the CLI process had already charged to earlier turns when this one's result arrived. */
+  noteCostBefore(costUsd: number): void {
+    this.costBefore = costUsd;
+  }
 
   handle(message: SDKMessage): void {
     switch (message.type) {
@@ -442,7 +448,7 @@ class ClaudeTurn {
   }
 
   private handleResult(message: SDKResultMessage): void {
-    this.usage = mapUsage(message);
+    this.usage = mapUsage(message, this.costBefore);
     if (this.contextTokens !== null) {
       this.ctx.context({ tokens: this.contextTokens, window: contextWindowOf(message, this.ctx.thread.model) });
     }
@@ -589,6 +595,8 @@ class ClaudeSession {
   private started = false;
   private closing = false;
   private ended = false;
+  /** The last `total_cost_usd` this CLI process reported, which the next result includes. */
+  private costSoFar = 0;
   /** What the query was last told to be: the options it opened on, plus every setter since. */
   private applied: LiveSetup | null = null;
   /** The setters of one turn run to the end before the next turn's, and before its prompt. */
@@ -778,9 +786,16 @@ class ClaudeSession {
     const turn = this.head();
     if (turn === null) return;
     if (this.sessionId !== null) turn.noteSession(this.sessionId);
+    // `total_cost_usd` counts from the start of the CLI process, so on a warm
+    // query every result after the first carries the turns before it too. The
+    // turn is told what was already charged before it reads the result.
+    if (message.type === 'result') turn.noteCostBefore(this.costSoFar);
     turn.handle(message);
     // One result per user message: that is the end of this turn, not of the CLI.
-    if (message.type === 'result') this.endTurn(turn);
+    if (message.type === 'result') {
+      if (typeof message.total_cost_usd === 'number') this.costSoFar = message.total_cost_usd;
+      this.endTurn(turn);
+    }
   }
 
   private endTurn(turn: ClaudeTurn): void {
@@ -1059,7 +1074,9 @@ function stringify(value: unknown): string {
   }
 }
 
-function mapUsage(result: SDKResultMessage): Usage {
+/** `costBefore` is what the same CLI process already charged to earlier turns of a warm query. */
+function mapUsage(result: SDKResultMessage, costBefore: number): Usage {
+  const total = typeof result.total_cost_usd === 'number' ? result.total_cost_usd : null;
   const usage = result.usage as
     | {
         input_tokens?: number;
@@ -1073,7 +1090,8 @@ function mapUsage(result: SDKResultMessage): Usage {
     outputTokens: usage?.output_tokens ?? 0,
     cacheReadTokens: usage?.cache_read_input_tokens ?? 0,
     cacheWriteTokens: usage?.cache_creation_input_tokens ?? 0,
-    costUsdEquivalent: typeof result.total_cost_usd === 'number' ? result.total_cost_usd : null,
+    // A total under what was already charged is a process that started over.
+    costUsdEquivalent: total === null ? null : total >= costBefore ? total - costBefore : total,
   };
 }
 

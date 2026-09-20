@@ -6,7 +6,7 @@ import type { SessionNotification } from '@agentclientprotocol/sdk';
 import type { MessagePart, PermissionMode, RpcEvents, Settings } from '@boite/contracts';
 import type { CoreClient } from '../src/client.ts';
 import type { AcpSdk } from '../src/drivers/acp.ts';
-import { createAcpDriver } from '../src/drivers/acp.ts';
+import { createAcpDriver, toolOutputText } from '../src/drivers/acp.ts';
 import { getDriver, setDriver } from '../src/drivers/index.ts';
 import { startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
@@ -613,6 +613,64 @@ describe('acp driver', () => {
     const trace = await client.call('trace.get', { threadId: `probe:acp-fake:${accountId}` });
     expect(trace).toHaveLength(1);
     expect(trace[0]?.exitedAt).not.toBeNull();
+  });
+
+  test('a tool result reads as text, whatever shape the agent wrapped it in', () => {
+    expect(toolOutputText('plain')).toBe('plain');
+    // Grok: the bytes of the output, plus the text it showed the model.
+    expect(toolOutputText({ type: 'Bash', output: [...new TextEncoder().encode('héllo')] })).toBe('héllo');
+    expect(toolOutputText({ type: 'Bash', output_for_prompt: 'shown' })).toBe('shown');
+    // OpenCode: the text beside its metadata.
+    expect(toolOutputText({ output: 'done', metadata: { exit: 0 } })).toBe('done');
+    // Anything else stays readable JSON rather than vanishing.
+    expect(toolOutputText({ other: 1 })).toContain('"other"');
+  });
+
+  test('a probe naming a model reads the scale the agent gives that model', async () => {
+    const client = await startCore();
+    const { accountId, projectId } = await acpAccount(client);
+
+    const plain = await client.call('providers.probe', { providerId: 'acp-fake', accountId });
+    expect(plain.models.find((model) => model.id === 'fake-smart')?.effort).toBeUndefined();
+
+    const named = await client.call('providers.probe', { providerId: 'acp-fake', accountId, model: 'fake-smart' });
+    expect(named.models.find((model) => model.id === 'fake-smart')?.effort).toEqual({
+      levels: [
+        { id: 'low', label: 'Low' },
+        { id: 'high', label: 'High' },
+        { id: 'max', label: 'Max' },
+      ],
+      default: 'high',
+    });
+    // The scale read first stays with its model.
+    expect(named.models.find((model) => model.id === 'fake-fast')?.effort?.default).toBe('medium');
+    expect(fakeLog()).toContain('set_config_option model fake-smart');
+
+    // Asked again, the same model costs no third agent process.
+    await client.call('providers.probe', { providerId: 'acp-fake', accountId, model: 'fake-smart' });
+    expect(initializeCount()).toBe(2);
+
+    // The effort the model offers is now accepted on a thread.
+    const thread = await client.call('threads.create', {
+      projectId,
+      providerId: 'acp-fake',
+      accountId,
+      model: 'fake-smart',
+      effort: 'max',
+      title: 'a scale of its own',
+    });
+    expect(thread.effort).toBe('max');
+
+    // A restart forgets the probed scales. The effort the thread carries was
+    // checked when it was chosen, so its next turn still runs.
+    await client.call('providers.reload', {});
+    const finished = client.next('turn.finished', (turn) => turn.threadId === thread.id, 20000);
+    await client.call('turns.start', { threadId: thread.id, prompt: 'hello' });
+    expect((await finished).status).toBe('done');
+
+    await expect(
+      client.call('providers.probe', { providerId: 'acp-fake', accountId, model: '' }),
+    ).rejects.toThrow(/model must be a non-empty string/);
   });
 
   test('a second probe answers from the cache, and providers.reload empties it', async () => {

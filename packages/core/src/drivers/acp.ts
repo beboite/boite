@@ -407,7 +407,7 @@ class AcpTurn {
       if (native.output !== undefined) entry.output = native.output;
     } else {
       if (input !== undefined) entry.input = input;
-      if (output !== undefined && output !== null) entry.output = stringify(output);
+      if (output !== undefined && output !== null) entry.output = toolOutputText(output);
     }
     if (status !== null && status !== undefined) entry.status = toolStatus(status);
     if (content !== null && content !== undefined) entry.documents = documentsOf(content);
@@ -422,6 +422,33 @@ class AcpTurn {
       ...(entry.documents.length > 0 ? { documents: entry.documents } : {}),
     });
   }
+}
+
+/**
+ * `rawOutput` as the text a person reads. Agents wrap it their own way: OpenCode
+ * answers `{ output, metadata }`, Grok answers a tagged object whose `output`
+ * is the bytes of the text with `output_for_prompt` beside it, and its file
+ * tools nest the text under `FileContent.content` or `Content.content`. A shape
+ * nobody knows stays the JSON it was.
+ */
+export function toolOutputText(output: unknown): string {
+  if (typeof output === 'string') return output;
+  if (output === null || typeof output !== 'object' || Array.isArray(output)) return stringify(output);
+  const record = output as Record<string, unknown>;
+  const inner = record['output'];
+  if (typeof inner === 'string') return inner;
+  if (Array.isArray(inner) && inner.every((byte) => Number.isInteger(byte) && byte >= 0 && byte <= 255)) {
+    return new TextDecoder().decode(Uint8Array.from(inner as number[]));
+  }
+  if (typeof record['output_for_prompt'] === 'string') return record['output_for_prompt'];
+  for (const key of ['FileContent', 'Content']) {
+    const nested = record[key];
+    if (nested !== null && typeof nested === 'object') {
+      const content = (nested as Record<string, unknown>)['content'];
+      if (typeof content === 'string') return content;
+    }
+  }
+  return stringify(output);
 }
 
 /**
@@ -1233,7 +1260,14 @@ function modelsFromConfig(provider: ProviderDescriptor, options: SessionConfigOp
  * options, then the child goes through the registry that traced it. Nothing of
  * this session is kept; a turn opens its own.
  */
-async function readModels(ctx: ProbeContext, deps: AcpDeps, noteOptions: (options: SessionConfigOption[]) => void): Promise<ModelInfo[]> {
+/** What one probe session read: the list, and the named model's own effort scale when one was asked for. */
+interface ProbeReading {
+  models: ModelInfo[];
+  /** Null when no model was named, or the agent has no per-model scale to read. */
+  effort: { model: string; scale: ModelInfo['effort'] | null } | null;
+}
+
+async function readModels(ctx: ProbeContext, deps: AcpDeps, noteOptions: (options: SessionConfigOption[]) => void): Promise<ProbeReading> {
   const sdk = await deps.loadSdk();
   const profile = profileFor(ctx.provider);
   const executable = profile === undefined ? null : resolveExecutable(profile);
@@ -1296,19 +1330,35 @@ async function readModels(ctx: ProbeContext, deps: AcpDeps, noteOptions: (option
     const open = sdk.client({ name: CLIENT_NAME }).connect(stream);
     connection = open;
 
-    const read = (async (): Promise<{ options: SessionConfigOption[] | null; listed: AgentModels | null }> => {
+    const read = (async (): Promise<{ options: SessionConfigOption[] | null; listed: AgentModels | null; effort: ProbeReading['effort'] }> => {
       await open.agent.request('initialize', {
         protocolVersion: sdk.PROTOCOL_VERSION,
         clientCapabilities: {},
         clientInfo: { name: CLIENT_NAME, version: pkg.version },
       });
       const created = await open.agent.request('session/new', { cwd: ctx.cwd, mcpServers: [] });
-      return { options: created.configOptions ?? null, listed: agentModelsOf(created) };
+      const options = created.configOptions ?? null;
+      // OpenCode lists a model's efforts only once the session is on that model:
+      // the `thought_level` option is absent from `session/new` and arrives in
+      // the answer to the model change. Grok writes its scales in `_meta`.
+      let effort: ProbeReading['effort'] = null;
+      const wanted = ctx.model;
+      const modelOption = categoryOption(options, 'model');
+      if (wanted !== undefined && !isGrok(ctx.provider) && modelOption !== null && selectValues(modelOption).includes(wanted)) {
+        const answer = await open.agent.request('session/set_config_option', {
+          sessionId: created.sessionId,
+          configId: modelOption.id,
+          value: wanted,
+        });
+        const listed = (answer as { configOptions?: SessionConfigOption[] | null }).configOptions ?? null;
+        effort = { model: wanted, scale: effortFrom(categoryOption(listed, 'thought_level')) };
+      }
+      return { options, listed: agentModelsOf(created), effort };
     })();
 
     const answer = await Promise.race([read, died, expired]);
     noteOptions(answer.options ?? []);
-    return modelsFrom(ctx.provider, answer.options, answer.listed);
+    return { models: modelsFrom(ctx.provider, answer.options, answer.listed), effort: answer.effort };
   } finally {
     if (timer !== null) clearTimeout(timer);
     try {
@@ -1499,6 +1549,15 @@ interface ProbeEntry {
   /** The one process in flight for this key, so two callers share it. */
   running: Promise<ProbeResult> | null;
   result: ProbeResult | null;
+  /** Models whose own effort scale was asked for already, found or not, so each costs one process at most. */
+  effortRead: Set<string>;
+}
+
+/** The list with one model's effort scale written in; a scale of null leaves the model as it was. */
+function withModelEffort(models: ModelInfo[], effort: ProbeReading['effort']): ModelInfo[] {
+  if (effort === null || effort.scale === null) return models;
+  const scale = effort.scale;
+  return models.map((model) => (model.id === effort.model ? { ...model, effort: scale } : model));
 }
 
 /** One ACP agent process per thread, kept between turns the way the Claude one is. */
@@ -1519,12 +1578,28 @@ export function createAcpDriver(deps: AcpDeps): Driver {
         accountId: ctx.accountId,
         running: null,
         result: null,
+        effortRead: new Set<string>(),
       };
       probes.set(key, entry);
-      if (entry.result !== null) return entry.result;
-      if (entry.running !== null) return entry.running;
+      // One process at a time per account: a caller naming a model waits for the
+      // list, then looks again at what is still missing.
+      while (entry.running !== null) {
+        try { await entry.running; } catch { /* that caller hears it; this one reads again */ }
+      }
+      const wanted = ctx.model;
+      const known = entry.result;
+      const missing = wanted !== undefined
+        && !entry.effortRead.has(wanted)
+        && (known === null || known.models.some((model) => model.id === wanted && model.effort === undefined));
+      if (known !== null && !missing) return known;
 
-      const running = readModels(ctx, deps, (options) => { entry.options = options; }).then((models) => ({ models, probedAt: Date.now() }));
+      const running = readModels(missing ? ctx : { ...ctx, model: undefined }, deps, (options) => { entry.options = options; }).then((reading) => {
+        if (reading.effort !== null) entry.effortRead.add(reading.effort.model);
+        // A second look keeps the scales the earlier ones found.
+        const earlier = new Map((known?.models ?? []).filter((model) => model.effort !== undefined).map((model) => [model.id, model.effort]));
+        const models = withModelEffort(reading.models, reading.effort).map((model) => (model.effort === undefined && earlier.has(model.id) ? { ...model, effort: earlier.get(model.id) } : model));
+        return { models, probedAt: Date.now() };
+      });
       entry.running = running;
       try {
         const result = await running;
@@ -1533,7 +1608,8 @@ export function createAcpDriver(deps: AcpDeps): Driver {
         if (probes.get(key) === entry) entry.result = result;
         return result;
       } catch (error) {
-        if (probes.get(key) === entry) probes.delete(key);
+        // A failed look at one model's efforts leaves the list already read standing.
+        if (probes.get(key) === entry && known === null) probes.delete(key);
         throw error;
       } finally {
         entry.running = null;

@@ -579,7 +579,7 @@ export class ThreadStore {
       this.core.providers.summary(thread.providerId),
       this.core.accounts.require(thread.accountId),
     );
-    checkEffort(provider, thread.accountId, thread.model, thread.effort);
+    checkStoredEffort(provider, thread.accountId, thread.model, thread.effort);
     checkSpeed(provider, thread.accountId, thread.model, thread.speed ?? null);
     checkAttachments(attachments, provider);
 
@@ -1255,6 +1255,23 @@ function checkEffort(
     effort,
     expected: levels.length === 0 ? 'null: this model has no effort levels' : levels.map((level) => level.id),
   });
+}
+
+/**
+ * The effort a thread already carries was checked when it was chosen. A probed
+ * scale lives in memory, so after a core restart it may not be read yet: only a
+ * scale that is known and lacks the level refuses the turn.
+ */
+function checkStoredEffort(
+  provider: ProviderDescriptor,
+  accountId: AccountId,
+  model: string | null,
+  effort: string | null,
+): void {
+  if (effort === null) return;
+  const known = modelsFor(provider, accountId).find((entry) => entry.id === model)?.effort;
+  if (known === undefined) return;
+  checkEffort(provider, accountId, model, effort);
 }
 
 function defaultModel(provider: ProviderDescriptor): string | null {
