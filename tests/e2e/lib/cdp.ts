@@ -144,6 +144,11 @@ export class BrowserPage {
       const page = new BrowserPage(socket, proc.pid, ownsUserDataDir ? userDataDir : null);
       await page.send('Page.enable', {});
       await page.send('Runtime.enable', {});
+      // Headless window sizing can be clamped by the Windows display. Pin the
+      // CSS viewport before app startup so responsive layouts stay deterministic.
+      await page.send('Emulation.setDeviceMetricsOverride', {
+        width: size.width, height: size.height, deviceScaleFactor: 1, mobile: false,
+      });
       await page.navigate(options.url);
       return page;
     } catch (error) {
