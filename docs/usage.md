@@ -82,6 +82,10 @@ The cost is the provider's own figure: the Claude SDK's `total_cost_usd`, an
 ACP `usage_update` priced in USD, or pi's reported cost. Codex never reports
 one, and an ACP agent that sends no USD cost has none either. The API cost
 measure names those providers under the chart instead of counting them as free.
+Claude's `total_cost_usd` is a running total: it grows across the turns of a
+warm process, and a process that resumes a session restores it. The driver
+charges each turn the difference, reading the earlier turns of the session from
+the journal, and takes the total as it stands when the CLI started from zero.
 On a subscription the figure is what the same tokens would cost on the API, not
 money spent.
 

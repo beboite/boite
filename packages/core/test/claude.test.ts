@@ -772,6 +772,33 @@ describe('claude driver', () => {
     expect(costs[1]).toBeCloseTo(0.05, 10);
   });
 
+  test('a cold query that resumes a session is charged its own share, whether or not the CLI restored its totals', async () => {
+    const client = await harness.connect();
+    const threadId = await claudeThread(client);
+
+    // Each turn uses 26 tokens. The second process restores the session (52 tokens held, 0.25 + 0.05);
+    // the third has lost it and counts from zero.
+    const held = (tokens: number) => ({ 'claude-test': { inputTokens: tokens, outputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, webSearchRequests: 0, costUSD: 0, contextWindow: 0, maxOutputTokens: 0 } });
+    const results = [{ total_cost_usd: 0.25, modelUsage: held(26) }, { total_cost_usd: 0.3, modelUsage: held(52) }, { total_cost_usd: 0.07, modelUsage: held(26) }];
+    let turn = 0;
+    scripted(() => undefined, (fake) => {
+      fake.emit(init('sess-resumed'));
+      fake.emit(sdk({ ...(success('sess-resumed') as object), ...results[turn++] }));
+    });
+
+    const costs: (number | null)[] = [];
+    for (const prompt of ['first', 'second', 'third']) {
+      const finished = client.next('turn.finished', (finishedTurn) => finishedTurn.threadId === threadId, 10000);
+      await client.call('turns.start', { threadId, prompt });
+      costs.push((await finished).usage?.costUsdEquivalent ?? null);
+    }
+
+    expect(queries).toHaveLength(3);
+    expect(costs[0]).toBeCloseTo(0.25, 10);
+    expect(costs[1]).toBeCloseTo(0.05, 10);
+    expect(costs[2]).toBeCloseTo(0.07, 10);
+  });
+
   test('warmProcessMinutes at zero keeps one query per turn', async () => {
     const client = await harness.connect();
     const threadId = await claudeThread(client);

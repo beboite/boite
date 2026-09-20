@@ -597,6 +597,8 @@ class ClaudeSession {
   private ended = false;
   /** The last `total_cost_usd` this CLI process reported, which the next result includes. */
   private costSoFar = 0;
+  /** A resumed session's earlier turns, until the first result says whether the CLI restored them. */
+  private carried: { costUsd: number; tokens: number } | null;
   /** What the query was last told to be: the options it opened on, plus every setter since. */
   private applied: LiveSetup | null = null;
   /** The setters of one turn run to the end before the next turn's, and before its prompt. */
@@ -613,6 +615,7 @@ class ClaudeSession {
   ) {
     this.ctx = ctx;
     this.sessionId = ctx.sessionId;
+    this.carried = ctx.sessionId === null ? null : (ctx.sessionBefore ?? null);
     this.ready = new Promise<void>((resolve) => {
       this.markReady = resolve;
     });
@@ -788,8 +791,13 @@ class ClaudeSession {
     if (this.sessionId !== null) turn.noteSession(this.sessionId);
     // `total_cost_usd` counts from the start of the CLI process, so on a warm
     // query every result after the first carries the turns before it too. The
-    // turn is told what was already charged before it reads the result.
-    if (message.type === 'result') turn.noteCostBefore(this.costSoFar);
+    // turn is told what was already charged before it reads the result. A cold
+    // process that resumed a session starts from that session's restored total.
+    if (message.type === 'result') {
+      if (this.carried !== null) this.costSoFar = restoredCost(message, this.carried);
+      this.carried = null;
+      turn.noteCostBefore(this.costSoFar);
+    }
     turn.handle(message);
     // One result per user message: that is the end of this turn, not of the CLI.
     if (message.type === 'result') {
@@ -1072,6 +1080,20 @@ function stringify(value: unknown): string {
   } catch {
     return String(value);
   }
+}
+
+/**
+ * A resumed CLI restores the session's running totals when it still holds them,
+ * and `total_cost_usd` then includes the earlier turns. Its per-model token
+ * counts are restored with it, so they exceed this turn's own by what those
+ * turns used; a CLI that started from zero shows no such gap.
+ */
+function restoredCost(result: SDKResultMessage, before: { costUsd: number; tokens: number }): number {
+  if (before.costUsd <= 0 || before.tokens <= 0) return 0;
+  const held = Object.values(result.modelUsage ?? {}).reduce((sum, model) => sum + model.inputTokens + model.outputTokens + model.cacheReadInputTokens + model.cacheCreationInputTokens, 0);
+  const own = mapUsage(result, 0);
+  const turn = own.inputTokens + own.outputTokens + own.cacheReadTokens + own.cacheWriteTokens;
+  return held - turn >= before.tokens / 2 ? before.costUsd : 0;
 }
 
 /** `costBefore` is what the same CLI process already charged to earlier turns of a warm query. */

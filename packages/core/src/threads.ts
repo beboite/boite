@@ -983,6 +983,7 @@ export class ThreadStore {
       prompt: prepared.prompt,
       attachments: prepared.attachments,
       sessionId: thread.sessionId,
+      sessionBefore: this.sessionBefore(thread, turn.id),
       accountEnv: env,
       warmProcessMinutes: this.core.settings.get().warmProcessMinutes,
       emit,
@@ -1128,6 +1129,19 @@ export class ThreadStore {
   }
 
   /** The user message of the turn, read back from the journal: the text and the images it carried. */
+  /** What the agent session this turn resumes already used, summed over its recorded turns. */
+  private sessionBefore(thread: ThreadSummary, turnId: TurnId): { costUsd: number; tokens: number } {
+    const before = { costUsd: 0, tokens: 0 };
+    if (thread.sessionId === null) return before;
+    for (const earlier of this.core.journal.listTurns(thread.id)) {
+      if (earlier.id === turnId || earlier.usage === null) continue;
+      if (earlier.execution?.sessionGeneration !== (thread.sessionGeneration ?? 0)) continue;
+      before.costUsd += earlier.usage.costUsdEquivalent ?? 0;
+      before.tokens += earlier.usage.inputTokens + earlier.usage.outputTokens + earlier.usage.cacheReadTokens + earlier.usage.cacheWriteTokens;
+    }
+    return before;
+  }
+
   private lastUserInput(threadId: ThreadId, turnId: TurnId): { prompt: string; attachments: Attachment[] } {
     const message = this.core.journal.lastUserMessage(threadId, turnId);
     if (message !== null) {

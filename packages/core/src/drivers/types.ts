@@ -69,6 +69,11 @@ export interface TurnContext {
    */
   attachments: ImageAttachment[];
   sessionId: string | null;
+  /**
+   * What the finished turns of this agent session already used, for an agent
+   * whose running totals survive a resume. Absent or zero on a fresh session.
+   */
+  sessionBefore?: { costUsd: number; tokens: number };
   /** The isolation environment of this account, empty for the provider's own login. */
   accountEnv: Record<string, string>;
   /**
