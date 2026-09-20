@@ -1,4 +1,5 @@
 <script lang="ts">
+  import TelemetrySettings from './TelemetrySettings.svelte';
   import { ArrowLeft, Bell, ChevronRight, Coins, Gauge, Monitor, Palette, Mic } from '@lucide/svelte';
   import type { Store } from '../lib/store.svelte';
   import { workspace } from '../lib/workspace.svelte';
@@ -74,6 +75,7 @@
         <div class="page phone-page">
           <p class="scope" data-testid="mobile-settings-scope">{machine?.label ?? store.endpointUrl ?? strings.connection.current} · {strings.connection[store.connection]}</p>
           <PhoneSettings {store} showServerSettings={false} />
+          <TelemetrySettings {store} />
         </div>
       {:else if page === 'voice'}
         <VoiceSettings {store} readOnly />

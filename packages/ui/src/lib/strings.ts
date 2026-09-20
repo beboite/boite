@@ -1,5 +1,16 @@
 /** Every user-facing string of the UI. No literal UI text lives anywhere else. */
 export const strings = {
+  telemetry: {
+    heading: 'Privacy and analytics',
+    description: 'Optional usage counts from this host. No prompts, messages, project names, paths, account details or recordings are collected. Both switches start off.',
+    basic: 'Anonymous counters',
+    basicHint: 'Count active installations, launches, conversations and turn outcomes. Usage identifiers change daily; a separate identifier counts active installations only.',
+    enhanced: 'Enhanced analytics',
+    enhancedHint: 'Use a stable random installation ID to measure return visits and feature use over time. Turning this off requests deletion of its profile and events.',
+    unconfigured: 'This build has no analytics relay configured. Nothing is sent.',
+    pending: 'Deletion is pending. Boite retries in the background. PostHog removes events asynchronously after accepting the request.',
+    export: 'Export analytics data', retry: 'Retry deletion',
+  },
   speech: {
     heading: 'Voice', description: 'Dictate into any conversation. Review the text before sending.',
     start: 'Dictate', stop: 'Finish dictation', listening: 'Listening', opening: 'Waiting for microphone', transcribing: 'Transcribing',

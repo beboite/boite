@@ -4,6 +4,7 @@
   import ShellSettings from './ShellSettings.svelte';
   import PhoneSettings from './PhoneSettings.svelte';
   import ModelDefaultsSettings from './ModelDefaultsSettings.svelte';
+  import TelemetrySettings from './TelemetrySettings.svelte';
   import { confirm } from '../lib/confirm.svelte';
   import { ago, time } from '../lib/format';
   import { qrSvg } from '../lib/qr';
@@ -80,6 +81,7 @@
 
   <PhoneSettings {store} />
   <ModelDefaultsSettings {store} />
+  <TelemetrySettings {store} />
 
   <section class="card" id="settings-projects">
     <h2>{strings.settings.projects}</h2>
