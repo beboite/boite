@@ -17,7 +17,7 @@
 
 <div class="trace">
   {#if capability}
-    <details class="capability" data-testid="trace-note">
+    <details class="disclosure capability" data-testid="trace-note">
       <summary>{capability.mode === 'events' ? strings.trace.exact : strings.trace.limited}</summary>
       <p>{capability.os} / {capability.mode}: {capability.note}</p>
     </details>
@@ -59,9 +59,8 @@
 
 <style>
   .trace { padding: 8px 12px 16px; }
-  .capability { color: var(--color-muted-foreground); font-size: var(--text-xs); margin-bottom: 12px; }
-  .capability summary { cursor: pointer; padding: 4px 0; }
-  .capability p { margin-top: 6px; font-size: var(--text-sm); }
+  .capability { margin-bottom: 12px; }
+  .capability p { margin-top: 6px; padding-left: 20px; color: var(--color-muted-foreground); font-size: var(--text-sm); }
   .process { border-bottom: 1px solid var(--color-border); }
   .process > summary { list-style: none; cursor: pointer; padding: 12px 0; }
   .process > summary::-webkit-details-marker { display: none; }

@@ -753,7 +753,6 @@ export const strings = {
     projects: 'Projects',
     projectsHint: 'Right-click a project in the sidebar to remove it from Boite.',
     projectsDevice: 'Folders are added and removed from the app the core runs in.',
-    appearance: 'Appearance',
     theme: 'Theme',
     accent: 'Accent colour',
     accentHint: 'Reasoning, buttons, links and focus indicators',
@@ -764,7 +763,6 @@ export const strings = {
     themeLight: 'Light',
     themeGrain: 'Grain',
     experiments: {
-      heading: 'Experiments',
       intro: 'These are unfinished. They may change shape or leave in a later build.'
     },
     material: 'Window material',

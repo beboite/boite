@@ -28,7 +28,8 @@
   function back() { phone = false; store.showSettings('general'); }
 </script>
 
-<div class="mobile-settings" data-testid="settings">
+<!-- `settings` gives the detail pages the same grammar as the desktop ones. -->
+<div class="mobile-settings settings" data-testid="settings">
   {#if page === 'home'}
     <div class="home" data-testid="mobile-settings-home">
       <h1>{strings.settings.heading}</h1>
@@ -98,19 +99,22 @@
   h2 { font-size: var(--text-sm); font-weight: 500; color: var(--color-muted-foreground); margin: 0 0 8px; }
   p { font-size: var(--text-sm); color: var(--color-muted-foreground); line-height: 1.5; margin: 8px 0 12px; }
   .rows { border: 1px solid var(--color-border); border-radius: var(--radius-lg); overflow: hidden; background: var(--color-surface); }
-  .row { display: flex; width: 100%; height: auto; min-height: 72px; gap: 12px; padding: 16px; text-align: left; border-radius: 0; white-space: normal; }
+  /* A ghost button is muted; a row title reads like any other settings label. */
+  .row { display: flex; width: 100%; height: auto; min-height: 72px; gap: 12px; padding: 16px; text-align: left; border-radius: 0; white-space: normal; color: var(--color-foreground); }
   .row + .row { border-top: 1px solid var(--color-border); }
   .row span { flex: 1; min-width: 0; }
-  .row :global(svg) { flex: none; }
+  .row :global(svg) { flex: none; color: var(--color-muted-foreground); }
+  h2 + p { margin-top: 0; }
   strong { display: block; font-size: var(--text-base); font-weight: 500; }
   small { display: block; margin-top: 4px; font-size: var(--text-sm); color: var(--color-muted-foreground); line-height: 1.45; }
   header { flex: none; display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-bottom: 1px solid var(--color-border); }
   header .icon { width: 44px; min-height: 44px; }
   header h1 { font-size: var(--text-md); }
   .phone-page { padding: 16px; }
-  .scope { overflow-wrap: anywhere; }
+  .scope { overflow-wrap: anywhere; margin-top: 0; }
   .phone-page :global(.card) { padding: 18px; }
   .detail :global(.page), .detail :global(.machines-page) { padding: 16px; }
+  /* The bar above already names the page, so its own title steps aside. */
   .detail :global(.page > header), .detail :global(.machines-page > .head h1) { display: none; }
   .detail :global(.switch-row) { flex-wrap: wrap; gap: 12px; }
 </style>

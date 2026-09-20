@@ -232,12 +232,14 @@
 </script>
 
 <div class="page" data-testid="accounts-page">
-  <header class="head">
-    <h1>{strings.providerSettings.heading}</h1>
+  <header>
+    <div>
+      <h1>{strings.providerSettings.heading}</h1>
+      <p>{strings.providerSettings.intro}</p>
+    </div>
   </header>
-  <p class="intro lead">{strings.providerSettings.intro}</p>
 
-  <div class="card list">
+  <div class="card flush list">
     {#each store.providers as provider (provider.id)}
       {@const step = stepOf(provider)}
       {@const install = store.installOf(provider.id)}
@@ -434,11 +436,8 @@
 </div>
 
 <style>
-  .head { max-width: 720px; margin-bottom: 4px; }
-  .lead { max-width: 720px; margin-bottom: 16px; color: var(--color-muted-foreground); font-size: var(--text-sm); }
 
   /* One card, one row per provider: the page reads top to bottom as a checklist. */
-  .page .list { padding: 0; overflow: hidden; }
   .provider { padding: 12px 16px; display: grid; gap: 10px; }
   .provider + .provider { border-top: 1px solid var(--color-border); }
 

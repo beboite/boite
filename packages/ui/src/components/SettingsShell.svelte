@@ -1,7 +1,7 @@
 <script lang="ts">
   import { MediaQuery } from 'svelte/reactivity';
   import MobileSettings from './MobileSettings.svelte';
-  import { Activity, ChevronRight, ShieldCheck, ArrowLeft, Coins, FlaskConical, Gauge, Keyboard, Palette, Puzzle, Settings2, Users, Mic } from '@lucide/svelte';
+  import { ArrowLeft, ChevronRight, Coins, FlaskConical, Gauge, Keyboard, Mic, Monitor, Palette, Puzzle, Settings2, ShieldCheck, Users } from '@lucide/svelte';
   import KeyboardPage from './KeyboardPage.svelte';
   import LimitsPage from './LimitsPage.svelte';
   import PluginsPage from './PluginsPage.svelte';
@@ -27,7 +27,7 @@
   const all: { id: SettingsTab; label: string; icon: typeof Settings2 }[] = [
     { id: 'general', label: strings.settings.tabs.general, icon: Settings2 },
     { id: 'voice', label: strings.speech.heading, icon: Mic },
-    { id: 'machines', label: strings.machines.heading, icon: Activity },
+    { id: 'machines', label: strings.machines.heading, icon: Monitor },
     { id: 'appearance', label: strings.settings.tabs.appearance, icon: Palette },
     { id: 'keyboard', label: strings.settings.tabs.keyboard, icon: Keyboard },
     { id: 'accounts', label: strings.settings.tabs.accounts, icon: Users },

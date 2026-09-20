@@ -26,7 +26,10 @@ afterEach(() => {
   openUrl.mockClear();
 });
 
-async function waitFor(check: () => boolean, attempts = 400): Promise<void> {
+// The first settings mount waits on the dynamic import of the whole settings
+// subtree: on a CI worker that one wait already took 1.2 s, against a budget of
+// 400 ticks. Poll long enough that a slow machine is not a failure.
+async function waitFor(check: () => boolean, attempts = 2000): Promise<void> {
   for (let attempt = 0; attempt < attempts; attempt++) {
     if (check()) return;
     await new Promise((resolve) => setTimeout(resolve, 2));

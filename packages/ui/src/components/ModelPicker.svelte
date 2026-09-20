@@ -690,7 +690,7 @@
   .rail {
     flex-direction: row;
     flex-wrap: nowrap;
-    padding-right: 40px;
+    padding-right: calc(var(--control-lg) + 10px);
     justify-content: flex-start;
     align-items: center;
     gap: 4px;
@@ -704,8 +704,8 @@
     align-items: center;
     justify-content: center;
     flex: none;
-    width: 36px;
-    height: 36px;
+    width: var(--control-lg);
+    height: var(--control-lg);
     padding: 0;
     border: none;
     border-radius: var(--radius-md);
@@ -734,8 +734,12 @@
   }
 
   .models > * { flex-shrink: 0; }
-  .refresh { position: absolute; top: 8px; right: 8px; z-index: 3; display: grid; place-items: center; width: 28px; height: 28px; border: none; border-radius: var(--radius-sm); background: var(--color-surface-2); color: var(--color-muted-foreground); }
-  .refresh:hover:not(:disabled) { background: var(--color-surface-3); color: var(--color-foreground); }
+  /* A tile like the logos beside it, in the rail's own grid cell so it stays on
+     their line in the popover and in the phone sheet, on the rail's ground so the
+     logos scroll under it unseen. */
+  .rail { grid-area: 1 / 1; }
+  .refresh { grid-area: 1 / 1; align-self: center; justify-self: end; margin-right: 6px; position: relative; z-index: 3; display: grid; place-items: center; width: var(--control-lg); height: var(--control-lg); padding: 0; border: none; border-radius: var(--radius-md); background: var(--color-surface); color: var(--color-muted-foreground); }
+  .refresh:hover:not(:disabled) { background: linear-gradient(var(--color-hover) 0 0), var(--color-surface); color: var(--color-foreground); }
   .head {
     display: flex;
     align-items: center;
@@ -950,10 +954,18 @@
       flex-direction: row;
       flex-wrap: nowrap;
       overflow-x: auto;
-      padding-right: 40px;
+      padding-right: calc(var(--touch-target) + 10px);
       justify-content: flex-start;
       border-right: none;
       border-bottom: 1px solid var(--color-border);
+    }
+
+    /* The rail is the finger's first stop on a phone, so its tiles and the
+       refresh button take a full touch target like every other control. */
+    .tile,
+    .refresh {
+      width: var(--touch-target);
+      height: var(--touch-target);
     }
   }
 </style>

@@ -38,11 +38,12 @@
 </section>
 
 <style>
-  .card { display: flex; flex-direction: column; gap: 12px; padding: 18px; border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-surface); box-shadow: var(--shadow-e1); }
-  h2 { margin: 0; font-size: var(--text-base); font-weight: 600; }
-  .hint { margin: 0; color: var(--color-muted-foreground); font-size: var(--text-sm); }
-  .default-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: var(--row); flex-wrap: wrap; }
-  .provider { font-size: var(--text-base); }
+  /* Rows like the switch rows of the other cards: a rule between them, the
+     provider on the left, its model and effort on the right. */
+  .default-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: var(--row); padding: 10px 0; flex-wrap: wrap; }
+  .default-row + .default-row { border-top: 1px solid var(--color-border); }
+  .default-row:last-child { padding-bottom: 0; }
+  .provider { font-size: var(--text-base); font-weight: 500; }
   .controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
   .pending-effort { color: var(--color-muted-foreground); font-size: var(--text-sm); text-transform: capitalize; padding: 2px 8px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); }
 </style>
