@@ -66,6 +66,39 @@ test('provider actions report RPC failures through their owning store', async ()
   } finally { store.detach(); client.close(); }
 });
 
+test('a refusal reaches the surface without its JSON-RPC code', async () => {
+  const { store, client } = await ready();
+  const refusal = new RpcFailure({ code: RpcErrorCode.Refused, message: 'This account is no longer available.' });
+  vi.spyOn(client, 'call').mockRejectedValue(refusal);
+  try {
+    expect(await store.installProvider('claude')).toBe(false);
+    // The code said nothing to the person reading the toast, and it used to
+    // ride along as `(-32011)` on every refusal.
+    expect(store.error).toBe('This account is no longer available.');
+  } finally { store.detach(); client.close(); }
+});
+
+test('one failed boot call leaves every other slice loaded', async () => {
+  const client = new FakeClient({ delayMs: 0 });
+  const store = new Store();
+  const real = client.call.bind(client);
+  vi.spyOn(client, 'call').mockImplementation(((method: string, params: unknown) => {
+    if (method === 'providers.list') {
+      return Promise.reject(new RpcFailure({ code: RpcErrorCode.Internal, message: 'providers are unreadable' }));
+    }
+    return real(method as never, params as never);
+  }) as typeof client.call);
+  store.attach(client);
+  try {
+    await store.connect();
+    // `Promise.all` used to jump to the catch here, leaving threads, projects
+    // and settings on their pre-reconnect values under a loaded-looking app.
+    expect(store.threads.length).toBeGreaterThan(0);
+    expect(store.projects.length).toBeGreaterThan(0);
+    expect(store.error).toBe('providers are unreadable');
+  } finally { store.detach(); client.close(); }
+});
+
 test.each(['same', 'selection', 'kind'])('a lost start response reuses its request id only for identical content and selection: %s', async (change) => {
   const { store, client } = await ready();
   const original = client.call.bind(client);
