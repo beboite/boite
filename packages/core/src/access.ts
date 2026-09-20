@@ -27,6 +27,9 @@ import type { Connection } from './router.ts';
  * process of its own or changes what the core trusts.
  */
 export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>([
+  // Coordination is visible with the conversation; only the owner enables it.
+  'collaboration.get',
+  'collaboration.directory',
   // Dictation uses the owner's configured engine. Devices cannot change paths or credentials.
   'speech.status',
   'speech.transcribe',
@@ -92,6 +95,9 @@ export function isDeviceMethod(method: RpcMethodName): boolean {
  * thread whose token it carries.
  */
 export const AGENT_METHODS: ReadonlyMap<RpcMethodName, string> = new Map<RpcMethodName, string>([
+  ['collaboration.get', 'its own coordination inbox and remaining budget, never other conversations'],
+  ['collaboration.directory', 'opted-in contacts in this project and explicitly trusted machines'],
+  ['collaboration.send', 'authenticated delivery as this thread to a separately authorized recipient'],
   ['agent.where', 'the thread, its project, its working directory and its branch: what the CLI prints first'],
   ['panel.open', 'showing the user a file, a diff or a page instead of pasting it into the transcript'],
   ['threads.tasks.set', 'the plan the tasks surface draws, from an agent whose protocol carries no todo tool'],

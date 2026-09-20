@@ -13,7 +13,7 @@ import type {
   Usage,
 } from '@boite/contracts';
 
-export const SCHEMA_VERSION = 11;
+export const SCHEMA_VERSION = 12;
 const DELTA_WINDOW_MS = 16;
 
 /** What `listMessagePage` hands back: the page itself and the cursor for what is behind it. */
@@ -349,6 +349,18 @@ function migrate(db: Database): void {
   if (version < 11) {
     db.exec('CREATE TABLE turn_requests (thread_id TEXT NOT NULL, request_id TEXT NOT NULL, fingerprint TEXT NOT NULL, turn_id TEXT NOT NULL REFERENCES turns(id) ON DELETE CASCADE, PRIMARY KEY(thread_id, request_id))');
     version = 11;
+  }
+  if (version < 12) {
+    db.exec(`CREATE TABLE coordination_letters (
+      id TEXT NOT NULL, thread_id TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
+      direction TEXT NOT NULL, status TEXT NOT NULL, created_at INTEGER NOT NULL,
+      request_id TEXT, fingerprint TEXT, data TEXT NOT NULL,
+      PRIMARY KEY(id, direction), UNIQUE(thread_id, request_id)
+    );
+    CREATE INDEX coordination_thread ON coordination_letters(thread_id, created_at);
+    CREATE TABLE coordination_wakes (thread_id TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE, at INTEGER NOT NULL);
+    CREATE INDEX coordination_wake_thread ON coordination_wakes(thread_id, at);`);
+    version = 12;
   }
   db.exec(`PRAGMA user_version = ${version}`);
 }

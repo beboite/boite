@@ -47,6 +47,9 @@ boite open trace|tasks|changes|files [dir]
 boite status                     git status: branch, upstream, one row per change
 boite task list|add <text>|start <id>|done <id>|remove <id>|clear
 boite todo list|add <text>|claim <id>
+boite agents list|inbox
+boite agents send <core-id>/<thread-id> <text>
+boite agents reply <message-id> <text>
 boite help
 ```
 
@@ -66,6 +69,10 @@ in the Tasks surface.
 
 Exit codes: 0, 1 on a refusal or a failure (`error: ...` on stderr), 2 on a
 usage error (the usage text on stderr).
+
+[Agent coordination](coordination.md) must be enabled by the owner before an
+agent can send messages. The directory includes only authorized contacts.
+Replies preserve their message reference and authenticated sender identity.
 
 ## Where the command lives
 

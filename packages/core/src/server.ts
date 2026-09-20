@@ -258,6 +258,7 @@ export function startServer(options: ServerOptions): RunningServer {
   const connections = new Set<ServerConnection>();
   const helloTimers = new Map<ServerConnection, ReturnType<typeof setTimeout>>();
   const frames = new Set<Promise<void>>();
+  const peerRequests = new Set<Promise<Response>>();
   let stopping = false;
 
   const server = Bun.serve<SocketData>({
@@ -268,6 +269,13 @@ export function startServer(options: ServerOptions): RunningServer {
     fetch(request, self) {
       if (stopping) return new Response('core stopping', { status: 503 });
       const url = new URL(request.url);
+
+      if (url.pathname === '/agent-messages') {
+        const response = core.coordination.http(request);
+        peerRequests.add(response);
+        void response.finally(() => peerRequests.delete(response)).catch(() => undefined);
+        return response;
+      }
 
       if (url.pathname === '/health') {
         return Response.json({ ok: true, version: core.version, pid: process.pid });
@@ -354,6 +362,8 @@ export function startServer(options: ServerOptions): RunningServer {
     const threadId = eventThreadId(payload);
     for (const connection of connections) {
       if (!connection.authenticated) continue;
+      if (name === 'collaboration.changed' && connection.identity.principal === 'agent' && connection.identity.threadId !== threadId) continue;
+      if (name === 'collaboration.changed' && !connection.subscriptions.has(threadId ?? '')) continue;
       if (scoped && (threadId === null || !connection.subscriptions.has(threadId))) continue;
       if (name === 'todos.updated' && !mayReadTodos(core, connection, (payload as RpcEvents['todos.updated']).projectId)) continue;
       connection.sendEvent(name, payload);
@@ -374,7 +384,7 @@ export function startServer(options: ServerOptions): RunningServer {
       // Bun 1.3.11 never resolves server.stop() once a socket has been upgraded,
       // so the listener is closed without waiting on that promise.
       void server.stop(true);
-      await Promise.allSettled([...frames]);
+      await Promise.allSettled([...frames, ...peerRequests]);
     },
   };
 }

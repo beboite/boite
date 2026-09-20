@@ -77,6 +77,10 @@ export const strings = {
     timeout: 'Machine did not answer within 12 seconds. Check its address and browser origins, then reconnect.',
     browserOrigins: 'Allowed browser origins',
     browserOriginsHint: 'For a browser or phone viewing several machines, add the origin that serves Boite on each remote machine. One exact http(s) origin per line. Desktop connections need no extra origin.',
+    agentLinks: 'Agent links', agentLinksHint: 'Let agents on two connected owner machines find each other. Each core exchanges its public signing key and address. No owner token or private key is shared.',
+    agentLinksRefresh: 'Refresh agent links', linkAgents: 'Link agents', linkedAgents: 'Linked agent cores', availableAgentLinks: 'Available connections',
+    noAgentLinks: 'No other connected owner machine is available.', unlinkAgent: 'Revoke on this machine',
+    reciprocalLink: 'Mutual trust', oneSidedLink: 'Trusted on this machine only', publicIdentityHint: 'Set the public HTTPS address of each core in General settings before linking different PCs. Both cores must reach each other. Loopback HTTP works only on the same PC.',
   },
   app: {
     name: 'Boite',
@@ -408,6 +412,27 @@ export const strings = {
     copy: 'Copy',
     copied: 'Copied',
     error: 'Error'
+  },
+
+  coordination: {
+    options: 'Resources and permissions',
+    heading: 'Agent coordination', off: 'Off', brief: 'Brief', team: 'Team',
+    summaryOff: 'Other agents cannot contact this thread.', summaryBrief: 'Short handoffs with up to 6 sends and 2 wake turns each hour.',
+    summaryTeam: 'Team coordination with up to 40 sends and 12 wake turns each hour.',
+    ownerOnly: 'Only the owner can change coordination. This device can inspect the directory and exchanges.',
+    resources: 'Resources and responsibilities', resourcesPlaceholder: 'What this agent owns, can answer, or should avoid',
+    remote: 'Across projects and machines', remoteHint: 'Share this thread\'s title and declared resources with opted-in agents in other projects and trusted machines. Both threads must enable this.',
+    pause: 'Pause coordination', resume: 'Resume coordination', paused: 'Paused',
+    sends: '{used} of {limit} sends this hour', wakes: '{used} of {limit} wake turns this hour', receives: 'Recipients accept up to {limit} letters each hour.',
+    directory: 'Authorized contacts', refresh: 'Refresh', directoryEmpty: 'No opted-in thread in this project is available.', unavailable: 'Unavailable contacts',
+    exchanges: 'Agent exchanges', noExchanges: 'No agent exchange yet.', details: 'Show exchange',
+    from: 'From {title} on {machine}', to: 'To {title}', reply: 'Reply to {id}',
+    noReceipt: 'Delivered means submitted to the recipient agent. Agent protocols provide no read receipt.',
+    warning: 'Coordination warning',
+    status: {
+      queued: 'Queued in the outbox', received: 'Received by the recipient core', delivered: 'Submitted to the recipient agent',
+      uncertain: 'Submission outcome uncertain. Boite will not replay it.', expired: 'Expired', rejected: 'Rejected'
+    }
   },
 
   composer: {

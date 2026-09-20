@@ -11,6 +11,20 @@ import type { TestCore } from './harness.ts';
 /** The fake Codex app-server: a real ndjson JSON-RPC process over stdio, run by bun. */
 const FAKE_SERVER = fileURLToPath(new URL('./fixtures/codex-server.ts', import.meta.url));
 
+test('coordination steers the current Codex turn without creating a user turn', async () => {
+  const client = await startCore();
+  const threadId = await codexThread(client);
+  await client.call('turns.start', { threadId, prompt: '[slow] Deploy' });
+  await waitFor(() => fakeLog().includes('waiting for interrupt'));
+  await waitFor(() => harness!.core.journal.listMessages(threadId).some(m => m.role === 'assistant'));
+  expect(await harness!.core.threads.steer(threadId, 'Boite agent coordination. Wait for the VM.')).toBe(true);
+  expect(fakeLog()).toContain('turn/steer codex-fake-turn-1 Boite agent coordination');
+  expect(harness!.core.journal.listTurns(threadId)).toHaveLength(1);
+  expect(harness!.core.journal.listMessages(threadId).filter(m => m.role === 'user')).toHaveLength(1);
+  expect(harness!.core.journal.listMessages(threadId).some(m => m.role === 'system')).toBe(true);
+  await client.call('turns.stop', { threadId });
+});
+
 let harness: TestCore | null = null;
 let logFile = '';
 

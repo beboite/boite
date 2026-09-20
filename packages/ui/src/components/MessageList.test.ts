@@ -87,6 +87,20 @@ const store = {
   loadOlder: async () => 0
 } as unknown as Store;
 
+test('system coordination messages show their display text outside the user bubble', () => {
+  stubLayout(200);
+  const messages: Message[] = [{
+    id: 'm-system', threadId: 't-short', turnId: 'turn-system', role: 'system', state: 'complete', createdAt: 1,
+    parts: [{ type: 'text', text: 'Boite agent coordination. Internal delivery envelope', displayText: 'Agent coordination' }]
+  }];
+  running = mount(MessageList, { target: document.body, props: { store, threadId: 't-short', messages } });
+  flushSync();
+  expect(document.querySelector('[data-testid="message-system"]')?.textContent).toBe('System');
+  expect(document.querySelector('[data-testid="message"]')?.textContent).toContain('Agent coordination');
+  expect(document.querySelector('[data-testid="message"]')?.textContent).not.toContain('Internal delivery envelope');
+  expect(document.querySelector('.bubble')).toBeNull();
+});
+
 /** A store whose thread still has older messages behind the window. */
 function pagedStore(overrides: Partial<Record<string, unknown>> = {}): {
   store: Store;

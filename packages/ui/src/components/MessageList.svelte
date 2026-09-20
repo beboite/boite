@@ -585,6 +585,9 @@
                 {execution.model && isNamedModel(model ?? { id: execution.model, name: execution.model }) ? model?.name ?? execution.model : store.providerOf(execution.providerId)?.name}
               </div>
             {/if}
+            {#if message.role === 'system'}
+              <div class="system-attribution" data-testid="message-system">{strings.chat.system}</div>
+            {/if}
             {@const caretAt = message.state === 'streaming' ? lastTextIndex(message) : -1}
             {@const thought = thoughts.get(message.turnId)}
             {#if thought?.host === message.id}<ThinkingPart text={thought.text} live={thought.live} />{/if}
@@ -593,8 +596,9 @@
                 {#if part.type !== 'thinking'}
                 <div class="part" data-kind={part.type}>
                   {#if part.type === 'text'}
-                    {#if visibleAnswer(part.text).length > 0 || index === caretAt}
-                      <Prose text={visibleAnswer(part.text)} live={index === caretAt} />
+                    {@const shownText = message.role === 'system' ? promptText(part) : visibleAnswer(part.text)}
+                    {#if shownText.length > 0 || index === caretAt}
+                      <Prose text={shownText} live={index === caretAt} />
                     {/if}
 
                   {:else if part.type === 'tool'}
@@ -670,6 +674,7 @@
 <style>
   /* On the same 4 px rest as the parts it names. */
   .model-attribution { color: var(--color-muted-foreground); font-size: var(--text-xs); margin-bottom: 4px; padding-left: 4px; }
+  .system-attribution { width: fit-content; margin-bottom: 6px; padding: 2px 7px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); color: var(--color-muted-foreground); background: var(--color-surface-2); font-size: var(--text-xs); font-weight: 600; }
   .receipts { display: flex; gap: 1px; margin: 4px 2px 0; color: var(--color-muted-foreground); }
   .receipts span { display: flex; opacity: .45; }
   .receipts .received { color: var(--color-accent); opacity: 1; }

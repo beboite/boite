@@ -14,9 +14,11 @@ import { registerTraceMethods } from './trace.ts';
 import { registerUsageMethods } from './usage.ts';
 import { registerPushMethods } from './push.ts';
 import { registerSpeechMethods } from './speech.ts';
+import { registerCoordination } from './coordination.ts';
 
 /** Adding a module is one file plus one line here. `hello` is the server's own. */
 export function registerModules(core: Core): void {
+  registerCoordination(core);
   registerSpeechMethods(core);
   registerPushMethods(core);
   core.router.register('threads.activity.set', (params) => core.activity.set(params));
