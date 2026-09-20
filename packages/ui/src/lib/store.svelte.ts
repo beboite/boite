@@ -183,6 +183,17 @@ function sameProcess(a: ProcessRecord, b: ProcessRecord): boolean {
 const LIVE: ThreadStatusRank = { waiting: 0, running: 1, queued: 2, error: 3, idle: 4 };
 type ThreadStatusRank = Record<ThreadSummary['status'], number>;
 
+/**
+ * The message a held thread asks `threads.get` to start from: the oldest one of
+ * a turn this client has not seen finish, since its parts may still have moved,
+ * or the last one when every turn it knows is over. Null when nothing is held.
+ */
+export function resumeAnchor(thread: Pick<Thread, 'messages' | 'turns'>): MessageId | null {
+  const finished = new Set(thread.turns.filter((turn) => turn.finishedAt !== null).map((turn) => turn.id));
+  const open = thread.messages.find((message) => message.state === 'streaming' || !finished.has(message.turnId));
+  return (open ?? thread.messages[thread.messages.length - 1])?.id ?? null;
+}
+
 export class Store {
   readonly readingPositions = new Map<string, { top: number; pinned: boolean; heights: Map<string, number>; anchor?: { id: string; offset: number } }>();
   #readingThreads = new Map<string, Thread>();
@@ -342,6 +353,9 @@ export class Store {
   #openGeneration = 0;
   /** What that newest run is opening, so an older one knows what to give back. */
   #openTarget: ThreadId | null = null;
+  /** The thread `trace` belongs to, and whether the trace surface is on screen to read it. */
+  #tracedThreadId: ThreadId | null = null;
+  traceWatched = false;
   /** The load in flight, so the two callers of `reload()` share one. */
   #reloading: Promise<void> | null = null;
   #loginRevision = 0;
@@ -1161,6 +1175,8 @@ export class Store {
       this.settings = settings;
       this.keybindings = keybindings;
       this.scheduler = scheduler;
+      // What `bench/startup.ts` reads: the first moment the app holds its data.
+      if (typeof performance !== 'undefined' && performance.getEntriesByName('boite:ready').length === 0) performance.mark('boite:ready');
       const open = this.openThread;
       if (open && this.visible) await this.open(open.id, false);
     } catch (error) {
@@ -1331,6 +1347,7 @@ export class Store {
     this.openThread = null;
     this.draftChoice = null;
     this.trace = [];
+    this.#tracedThreadId = null;
     this.#keepRequestsOf(null);
     this.draft = { projectId: target, worktree: false };
     this.#rememberProject(target);
@@ -1374,7 +1391,22 @@ export class Store {
     const newest = (): boolean => this.#openGeneration === generation;
     try {
       const previous = this.#subscribedThreadId;
-      await client.call('threads.subscribe', { threadId });
+      // Everything this open needs leaves in one burst, in the order the core
+      // must run it: on a 150 ms link, five calls awaited one after the other
+      // were three quarters of a second before the last card was right, and the
+      // messages waited behind a subscribe and an unsubscribe they do not need.
+      const subscribed = client.call('threads.subscribe', { threadId });
+      // A thread already in hand, open or among the recent ones, asks only for
+      // what it cannot vouch for: a reconnect on a long conversation used to
+      // download its last 120 messages again for the two that were new.
+      const held = this.openThread?.id === threadId ? this.openThread : this.#readingThreads.get(threadId);
+      const after = held ? resumeAnchor(held) : null;
+      const fetched = client.call('threads.get', after === null ? { threadId } : { threadId, after });
+      const permissionsAsked = client.call('permissions.list', { threadId });
+      const questionsAsked = client.call('questions.list', { threadId });
+      // A run that a newer click overtakes returns early and never awaits these.
+      for (const asked of [fetched, permissionsAsked, questionsAsked]) asked.catch(() => undefined);
+      await subscribed;
       if (!newest()) {
         // A newer click took over while this one was in flight. Its own thread
         // is the one the socket keeps, so this subscription goes back.
@@ -1384,15 +1416,24 @@ export class Store {
         return;
       }
       this.#subscribedThreadId = threadId;
-      if (previous && previous !== threadId) {
-        await client.call('threads.unsubscribe', { threadId: previous });
-      }
-      const thread = await client.call('threads.get', { threadId });
+      // A thread already left that the core will not let go of costs a few
+      // events, not the open of this one.
+      const unsubscribed: Promise<unknown> = previous && previous !== threadId
+        ? client.call('threads.unsubscribe', { threadId: previous }).catch(() => undefined)
+        : Promise.resolve();
+      const thread = await fetched;
       if (!newest()) return;
       this.rememberReadingThread();
       const cached = this.#readingThreads.get(threadId);
       const freshIds = new Set(thread.messages.map(m => m.id));
-      if (cached && cached.messages.some(m => freshIds.has(m.id))) {
+      if (thread.messagesFrom !== undefined && held) {
+        const from = held.messages.findIndex((m) => m.id === thread.messagesFrom);
+        thread.messages = [...held.messages.slice(0, from === -1 ? held.messages.length : from).filter((m) => !freshIds.has(m.id)), ...thread.messages];
+        const freshTurns = new Set(thread.turns.map((turn) => turn.id));
+        thread.turns = [...held.turns.filter((turn) => !freshTurns.has(turn.id)), ...thread.turns];
+        thread.messagesBefore = held.messagesBefore;
+        delete thread.messagesFrom;
+      } else if (cached && cached.messages.some(m => freshIds.has(m.id))) {
         const merged = new Map(cached.messages.map(m => [m.id, m]));
         for (const message of thread.messages) merged.set(message.id, message);
         thread.messages = [...merged.values()].sort((a, b) => a.createdAt - b.createdAt);
@@ -1412,15 +1453,18 @@ export class Store {
         this.sidebarOpen = false;
         this.#rememberProject(thread.projectId);
       }
-      // The trace is the owner's: a device has no button for it, and asking
-      // would refuse the rest of this open with it.
-      const trace = this.owner ? await client.call('trace.get', { threadId }) : [];
-      if (!newest()) return;
-      this.trace = trace;
+      // The trace is read by its surface alone, so it is fetched only while
+      // that surface is on screen, and never in the way of the messages.
+      // A new thread empties it and the surface's own effect reads the new
+      // one; the same thread again is a reconnect, which that effect never sees.
+      if (this.#tracedThreadId !== threadId) this.trace = [];
+      else if (this.traceWatched) void this.refreshTrace();
+      this.#tracedThreadId = threadId;
       // The thread may already be waiting on a request this page never saw,
       // and may have had one settled where this client could not hear it.
-      const permissions = await client.call('permissions.list', { threadId });
-      const questions = await client.call('questions.list', { threadId });
+      const permissions = await permissionsAsked;
+      const questions = await questionsAsked;
+      await unsubscribed;
       if (!newest()) return;
       this.#mergePermissions(permissions, threadId);
       this.#mergeQuestions(questions, threadId);

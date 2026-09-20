@@ -80,6 +80,8 @@ failing checks; report any blocker that needs the user's decision.
 - [Phone](docs/phone.md) and [server](docs/server.md): pairing and deployment.
 - [Machines](docs/machines.md): connections, browser origins and thread views.
 - [Trace](docs/trace.md): process events, resource caps and Windows guards.
+- [Performance](docs/performance.md): what a remote client is sent, startup
+  order and the benches behind every number.
 - [Panel](docs/panel.md) and [CLI](docs/cli.md): the surfaces beside the chat
   and the `boite` command an agent uses to reach them.
 - [Releasing](docs/releasing.md): build artifacts, channels and installers.

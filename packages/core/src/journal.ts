@@ -847,6 +847,15 @@ export class Journal {
     };
   }
 
+  /** That message and what was written after it, oldest first, or null when that is more than `limit`. */
+  listMessagesFrom(threadId: string, fromRowid: number, limit: number): Message[] | null {
+    this.flushDeltas();
+    const rows = this.db
+      .query('SELECT * FROM messages WHERE thread_id = ? AND rowid >= ? ORDER BY rowid ASC LIMIT ?')
+      .all(threadId, fromRowid, limit + 1) as MessageRow[];
+    return rows.length > limit ? null : rows.map(toMessage);
+  }
+
   setMessagePart(messageId: string, partIndex: number, part: MessagePart): void {
     const message = this.getMessage(messageId);
     if (message === null) return;

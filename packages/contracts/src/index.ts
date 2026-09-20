@@ -690,6 +690,12 @@ export interface ActivityIteration {
 
 export interface Thread extends ThreadSummary {
   activity?: ThreadActivity;
+  /**
+   * Set when `threads.get` answered an `after`: `messages` starts at this
+   * message, `turns` are theirs, and `messagesBefore` says nothing. The caller
+   * keeps every message it held before this one.
+   */
+  messagesFrom?: MessageId;
   /** The last `MESSAGE_PAGE` messages of the thread, oldest first. Older ones come from `messages.list`. */
   messages: Message[];
   /**
@@ -1441,7 +1447,15 @@ export interface RpcMethods {
    * The thread with its last `MESSAGE_PAGE` messages and the cursor for what is
    * behind them. Opening a thousand-message thread costs one page, not the lot.
    */
-  'threads.get': { params: { threadId: ThreadId }; result: Thread };
+  /**
+   * `after` is for a client that already holds the thread, a reconnect or a
+   * reopen: the answer then carries that message and the ones written after it
+   * rather than the whole page, and says so in `messagesFrom`. The client names
+   * the first message it cannot vouch for, the oldest one of a turn it has not
+   * seen finish, or its last one. An `after` the thread does not hold, or one
+   * with more than a page behind it, is answered with the full page.
+   */
+  'threads.get': { params: { threadId: ThreadId; after?: MessageId }; result: Thread };
   /**
    * One page of older messages, oldest first inside the page: what was written
    * before `before`, at most `limit` (`MESSAGE_PAGE` by default, `MESSAGE_PAGE_MAX`

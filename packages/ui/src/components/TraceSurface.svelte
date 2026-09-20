@@ -15,6 +15,12 @@
     const id = store.openThread?.id;
     if (id) void store.refreshTrace();
   });
+
+  // `Store.open` no longer reads a trace nobody is looking at; this says somebody is.
+  $effect(() => {
+    store.traceWatched = true;
+    return () => { store.traceWatched = false; };
+  });
 </script>
 
 <div class="trace-surface" data-testid="trace-panel">
