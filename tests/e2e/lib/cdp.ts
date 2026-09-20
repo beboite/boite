@@ -8,18 +8,22 @@ const CONNECT_TIMEOUT_MS = 30_000;
 const CALL_TIMEOUT_MS = 20_000;
 const POLL_MS = 100;
 
-/** Candidates in order; `BOITE_E2E_BROWSER` overrides all of them. */
+/**
+ * Candidates in order; `BOITE_E2E_BROWSER` overrides all of them. Helium comes
+ * last: on a fresh profile it reloads the open tab a few seconds after launch,
+ * with no script or devtools call behind it, and the page boots a second time.
+ */
 function browserCandidates(): string[] {
   const local = process.env.LOCALAPPDATA ?? '';
   const programs = process.env.ProgramFiles ?? '';
   const programsX86 = process.env['ProgramFiles(x86)'] ?? '';
   if (process.platform === 'win32') {
     return [
-      join(local, 'imput', 'Helium', 'Application', 'chrome.exe'),
       join(local, 'Google', 'Chrome', 'Application', 'chrome.exe'),
       join(programs, 'Google', 'Chrome', 'Application', 'chrome.exe'),
       join(programsX86, 'Google', 'Chrome', 'Application', 'chrome.exe'),
       join(programsX86, 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+      join(local, 'imput', 'Helium', 'Application', 'chrome.exe'),
     ].filter((path) => path.length > 0);
   }
   return ['/usr/bin/google-chrome', '/usr/bin/chromium', '/usr/bin/chromium-browser'];

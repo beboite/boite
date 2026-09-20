@@ -26,7 +26,7 @@ beforeAll(async () => {
   const port = await freePort();
   server = await createServer({ root: join(import.meta.dir, '../../packages/ui'), server: { host: '127.0.0.1', port, strictPort: true }, clearScreen: false });
   await server.listen();
-  page = await BrowserPage.launch({ url: `http://127.0.0.1:${port}/?fake=1` });
+  page = await BrowserPage.launch({ url: `http://127.0.0.1:${port}/?fake=1&open=recent` });
   await page.waitFor(`document.querySelector('${id('new-thread')}')`);
   await size(false);
 }, 30_000);

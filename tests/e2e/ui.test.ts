@@ -654,6 +654,11 @@ test(
       // fired before this document existed, so the card can only come from
       // `permissions.list`.
       await page.navigate(pairingUrlOf(core));
+      // The app opens on a draft; the waiting thread is one click away in the sidebar.
+      await page.waitFor(`Array.from(document.querySelectorAll('${testid('thread-row')}')).some((row) => row.textContent.includes('reloaded permission'))`, 30_000);
+      await page.evaluate<null>(
+        `(() => { Array.from(document.querySelectorAll('${testid('thread-row')}')).find((row) => row.textContent.includes('reloaded permission')).click(); return null; })()`,
+      );
       await page.waitFor(`${textOf('thread-title')} === 'reloaded permission'`, 30_000);
       await page.waitFor(`document.querySelector('${testid('permission-card')}')`, 30_000);
       await page.waitFor(`document.querySelector('${testid('permission-input')}')`, 30_000);

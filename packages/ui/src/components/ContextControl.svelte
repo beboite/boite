@@ -16,7 +16,7 @@
   const context = $derived(thread?.context ?? null);
   const percent = $derived(context ? contextPercent(context) : null);
   const protocol = $derived(thread ? store.providerOf(thread.providerId)?.protocol : null);
-  const supported = $derived(protocol !== 'acp' || thread?.commands?.some(command => command.name === 'compact'));
+  const supported = $derived(protocol !== 'agy' && (protocol !== 'acp' || thread?.commands?.some(command => command.name === 'compact')));
   const reason = $derived(submitting || store.busy ? strings.composer.compactBusy : !thread?.sessionId
     ? strings.composer.compactNoSession : !supported ? strings.composer.compactUnavailable : null);
   const exact = (n: number) => n.toLocaleString();

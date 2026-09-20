@@ -45,7 +45,7 @@ OpenCode's descriptor, with the `linux` and `macos` profiles left out:
   shipped one. `schemaVersion` is `1` and is checked. `name` and `shortName` are
   what the picker and the chips show.
 - `protocol` picks the driver: `claude-sdk`, `acp`, `codex-appserver`, `muse`,
-  `pi`, or `echo`. OpenCode uses `acp`. A protocol with no driver behind it has nothing to run,
+  `pi`, `agy` or `echo`. OpenCode uses `acp`. A protocol with no driver behind it has nothing to run,
   so it is the one field that cannot be invented.
 - `roots` lists every directory the engine may read or write for this provider. A
   path outside them is refused, and a `..` segment is refused at load.
@@ -100,12 +100,22 @@ session protocol either.
 
 - `detect` is `{ command }` or `{ file }`. A provider whose detect does not
   resolve reports unavailable rather than failing at spawn.
-- `executable` is an ordered candidate list: `kind: "file"` is an exact path,
-  `kind: "path"` a name looked up on PATH, first hit wins.
-- `launch.args` put the agent into the mode Boite speaks to, and they let a
-  descriptor name a script rather than a program: npm installs several of these
-  agents as a shim Bun cannot spawn, so the profile runs `node` with the
-  package's own `dist/cli.js` as the first argument.
+- `executable` is an ordered candidate list, first hit wins. `kind: "file"` is
+  an exact path and `kind: "path"` a name looked up on PATH. `kind: "npm"` names
+  a globally installed package, `@scope/name#bin`, for the agents npm installs
+  as a `.cmd` shim Bun cannot spawn. The core looks for the package under the
+  npm prefix (`npm_config_prefix`, `%APPDATA%/npm`, the directory of `npm`,
+  `node` or the bin on PATH), pnpm's and Bun's global directories and the usual
+  Unix prefixes. It reads the bin script from the package's own `package.json`
+  and runs it with the Node installed beside that prefix, else Node on PATH,
+  else Bun. The script goes first on the command line, before `launch.args`, and
+  the summary shows the script as the executable. Only the `pi` and `acp`
+  protocols take an `npm` candidate: the SDK and app-server drivers spawn the
+  program with no leading argument.
+- `launch.args` put the agent into the mode Boite speaks to. The `agy` driver
+  adds its print-mode flags itself, because the same binary also answers
+  `agy models` for the probe, so the Antigravity CLI declares none; anything a
+  descriptor puts there goes first on both command lines.
 - `isolation` is the environment that makes one account blind to the others, with
   `{isolationDir}` substituted per account at spawn ([accounts.md](accounts.md)).
 - `close.processes` names what the core closes when an account is removed, and is
@@ -126,8 +136,9 @@ descriptor folder, so a shipped login command can name a script beside it.
 at spawn, in the `isolation` map and in a login command's `env`.
 
 There is no token for the thread's model, effort or permission mode: a descriptor
-declares one launch line and the driver is what changes it. Grok is the only one
-that needs that today, and only for the permission mode: the `grok` quirk splices
+declares one launch line and the driver is what changes it. The `agy` driver
+builds the whole print-mode line itself (below). Grok needs it for the permission
+mode alone: the `grok` quirk splices
 `--permission-mode <mode>` before the `agent` subcommand, or `--always-approve`
 after it, on the way to the spawn. A probe has no thread, so it launches the
 declared line as it is.
@@ -203,17 +214,19 @@ is the deterministic fake the tests and the bench run on, loaded only under
 | Claude | `claude-sdk` | the SDK drives the CLI | `CLAUDE_CONFIG_DIR` | `.credentials.json` | `claude auth login` |
 | OpenCode | `acp` | `opencode acp --port 0` | `XDG_DATA_HOME`, `XDG_CONFIG_HOME` | `opencode/auth.json` | `opencode auth login` |
 | Antigravity | `acp` | `agy_acp_server.exe` from the managed install | `GEMINI_HOME`, every account | `antigravity-acp/acp_token.json` | the protocol's `authenticate` |
+| Antigravity CLI | `agy` | `agy --input-format stream-json --output-format stream-json [--conversation <id>] [--model <id>] [--mode <mode> or --dangerously-skip-permissions] -p=` | nothing, the default account only | none, the token is in the system keyring | none, `agy` signs in in its own terminal |
 | Grok | `acp` | `grok [--permission-mode <mode>] agent [--always-approve] stdio` | `GROK_HOME` | `auth.json` | `grok login --device-auth` |
 | Codex | `codex-appserver` | `codex app-server` | `CODEX_HOME` | `auth.json` | `codex login --device-auth` |
 | Muse Code | `muse` | `muse serve --trust-workspace [mode flags]` | `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME` | `muse/auth.json` | `muse login` |
-| pi | `pi` | `pi --mode rpc` | `PI_CODING_AGENT_DIR` | `auth.json` | none |
+| pi | `pi` | `node <the package's bin> --mode rpc`, or `pi --mode rpc` from PATH off Windows | `PI_CODING_AGENT_DIR` | `auth.json` | none |
 | Echo | `echo` | nothing | nothing | none | a script beside the descriptor |
 
 Claude is the one whose model list is entirely in the descriptor, current and
 legacy, each with its own effort scale; the other six carry `default` alone and
 let the probe fill the rest. On Windows, Codex and pi are both reached around an
 npm shim Bun cannot spawn, one through a vendored executable and the other
-through `node`; Grok is reached through the binary its own installer puts under
+through an `npm` candidate under either package scope pi has shipped from
+(`@earendil-works` and `@mariozechner`); Grok is reached through the binary its own installer puts under
 `{home}/.grok/bin`, with PATH behind it.
 
 Antigravity is the one that only exists as a managed install: its binary is nowhere until
@@ -264,6 +277,50 @@ change drops the process. Nothing ever sends `authenticate` to Grok: an account
 with no `auth.json` is refused before a turn starts, and `authenticate` on an
 empty home opens a browser.
 
+## The Antigravity CLI
+
+Two rows carry Antigravity, and they are two different programs.
+`antigravity` is Google's ACP server, `agy_acp_server.exe`, which Boite
+downloads (468 MB) and runs on accounts of its own, each signed in through
+the protocol. `antigravity-cli` is the `agy` command the user installed and
+signed in to already, found on PATH and then at
+`{home}/AppData/Local/agy/bin/agy.exe` on Windows, and run on that sign-in. The
+first costs a download and a sign-in per account; the second costs nothing
+when `agy` is already there, but it only ever has the one login.
+
+That is because nothing moves agy's login. Its token sits in the system
+keyring and its settings under `~/.gemini/antigravity-cli`, and no variable
+points either elsewhere. So the descriptor declares an empty `isolation` map
+and no `login` block, `auth.kind` is `none`, and `accounts.add` refuses an
+account of its own ([accounts.md](accounts.md)). A signed-out agy is found by
+the probe instead: `agy models` answers "Please sign in", and the probe says to
+run `agy` in a terminal and sign in there.
+
+The `agy` driver (`packages/core/src/drivers/agy.ts`) speaks the CLI's
+headless mode, `--input-format stream-json --output-format stream-json -p=`.
+`-p=` needs its empty value, since a bare `-p` takes the next argument as the
+prompt. Each turn is one line on stdin,
+`{"event":"user","message":{"role":"user","content":"<prompt>"}}`, and stdout
+answers with `init` (the `conversation_id`), one `step_update` per change of a
+step, and `result`. An `agent_response` step streams `text_delta` into one text
+part and carries its usage when it is done; a `tool` step is one tool part,
+running then done or failed, keyed by its `step_index`. A turn's usage is the
+sum of its own steps, thinking counted as output, and the context meter gets
+one reading at the end, the last answer's input, cache and output. The CLI reports
+no window, so the meter shows the tokens alone. A `result` whose status is
+`ERROR` fails the turn with its message.
+
+The conversation id is the thread's session: a later process resumes it with
+`--conversation <id>`. The model, the effort and the permission mode are launch
+flags with no call to change them, so they are part of the session key and a
+change starts a new process on the same conversation. With
+`warmProcessMinutes` above zero the process stays up between turns; otherwise
+stdin closes when the turn ends, the process gets eight seconds to leave, and
+the next one of the thread waits for it. Stop kills the whole tree, since agy
+starts the MCP servers from its own settings as children. `BROWSER` points at
+`{browserNoop}` for every process, so nothing agy does opens a window.
+`/compact` is refused: print mode rejects the CLI's interactive-only commands.
+
 ## The models probe
 
 `providers.probe` spawns one short-lived process under the synthetic thread
@@ -296,6 +353,13 @@ question:
   `reasoning_effort_variants`); a model the catalog does not describe gets
   `low` to `max` with `high` preselected, which is Muse's own default. A host
   that is not signed in lists nothing, and the descriptor's models stand.
+- agy: `agy models`, one `id<TAB>label` line per model. agy lists every
+  reasoning variant as a model of its own, `gemini-3.8-flash-low` beside
+  `gemini-3.8-flash-high`, so two or more variants of one base become one model
+  whose effort scale is those variants, `medium` preselected when it is there.
+  The thread's model and effort then go out as the one id agy knows,
+  `--model gemini-3.8-flash-low`. A variant alone, and an id without a level
+  suffix, stays as listed.
 - pi: `get_state`, `get_available_models` and `get_available_thinking_levels`.
   Each model id carries its provider prefix, because that is what pi's `--model`
   takes and two providers can ship a name. An unauthenticated pi answers with
@@ -344,6 +408,12 @@ Each protocol takes them differently, and the difference is not cosmetic.
   the session. `acceptEdits` adds one rule of the driver's: a file write inside
   the thread's folder that Muse neither marks `protectedWrite` nor escalated
   through its own judge is approved once without a card.
+- agy asks nothing in print mode: whatever its mode does not allow, it denies by
+  itself. So the mode is a launch flag and part of the session key.
+  `acceptEdits` and `plan` become `--mode accept-edits` and `--mode plan`,
+  `bypassPermissions` and `dontAsk` become `--dangerously-skip-permissions`,
+  and `default` sends nothing, which leaves agy's own `toolPermission` setting
+  in charge.
 - pi has no approval call anywhere in its RPC mode, so `capabilities.approvals` is
   false, the thread's permission mode never reaches the agent, and each session
   says so once in the log. A driver that waited for a permission question there

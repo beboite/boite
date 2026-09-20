@@ -98,6 +98,12 @@ export interface TurnContext {
   spawn(cmd: string, args: string[], opts?: SpawnOptions): SpawnedProcess;
   /** Same registry as `spawn`, node streams and node events, environment as given. */
   spawnChild(cmd: string, args: string[], opts?: SpawnOptions): SpawnedChild;
+  /**
+   * Terminates every process this thread launched, grandchildren included,
+   * through the registry that traced them. For a driver whose only stop is the
+   * process itself: the agent's own tools die with it instead of outliving it.
+   */
+  killTree?(): void;
 }
 
 export interface TurnResult {

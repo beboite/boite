@@ -7,28 +7,33 @@
   "roots": ["{home}/.pi", "{isolationDir}"],
   "profiles": {
     "windows": {
-      "detect": { "file": "{appdata}/npm/node_modules/@earendil-works/pi-coding-agent/dist/cli.js" },
-      "executable": [{ "kind": "path", "value": "node" }],
-      "launch": {
-        "args": [
-          "{appdata}/npm/node_modules/@earendil-works/pi-coding-agent/dist/cli.js",
-          "--mode",
-          "rpc"
-        ]
-      },
+      "detect": {},
+      "executable": [
+        { "kind": "npm", "value": "@earendil-works/pi-coding-agent#pi" },
+        { "kind": "npm", "value": "@mariozechner/pi-coding-agent#pi" }
+      ],
+      "launch": { "args": ["--mode", "rpc"] },
       "isolation": { "PI_CODING_AGENT_DIR": "{isolationDir}" },
       "close": { "processes": [] }
     },
     "linux": {
-      "detect": { "command": "pi" },
-      "executable": [{ "kind": "path", "value": "pi" }],
+      "detect": {},
+      "executable": [
+        { "kind": "path", "value": "pi" },
+        { "kind": "npm", "value": "@earendil-works/pi-coding-agent#pi" },
+        { "kind": "npm", "value": "@mariozechner/pi-coding-agent#pi" }
+      ],
       "launch": { "args": ["--mode", "rpc"] },
       "isolation": { "PI_CODING_AGENT_DIR": "{isolationDir}" },
       "close": { "processes": [] }
     },
     "macos": {
-      "detect": { "command": "pi" },
-      "executable": [{ "kind": "path", "value": "pi" }],
+      "detect": {},
+      "executable": [
+        { "kind": "path", "value": "pi" },
+        { "kind": "npm", "value": "@earendil-works/pi-coding-agent#pi" },
+        { "kind": "npm", "value": "@mariozechner/pi-coding-agent#pi" }
+      ],
       "launch": { "args": ["--mode", "rpc"] },
       "isolation": { "PI_CODING_AGENT_DIR": "{isolationDir}" },
       "close": { "processes": [] }

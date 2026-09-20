@@ -29,13 +29,23 @@ export type Timestamp = number;
 // Providers: one JSON descriptor per provider, shipped or user-supplied.
 // ---------------------------------------------------------------------------
 
-export type Protocol = 'claude-sdk' | 'codex-appserver' | 'muse' | 'pi' | 'acp' | 'echo';
+/**
+ * How the core talks to an agent. `agy` is the Antigravity CLI's own print
+ * mode, `agy -p= --input-format stream-json --output-format stream-json`: one
+ * JSON prompt per line on stdin, one JSON event per line on stdout.
+ */
+export type Protocol = 'claude-sdk' | 'codex-appserver' | 'muse' | 'pi' | 'acp' | 'agy' | 'echo';
 
 export type Os = 'windows' | 'linux' | 'macos';
 
 export interface ExecutableCandidate {
-  /** Where to look, in order. The user override always wins over all of these. */
-  kind: 'path' | 'file' | 'registry' | 'acp-registry';
+  /**
+   * Where to look, in order. The user override always wins over all of these.
+   * `npm` names a package (`@scope/name`, `#bin` to pick one of several) that
+   * Boite finds in the global npm, pnpm or Bun install directories and runs as
+   * `node <its bin script>`; only the `pi` and `acp` protocols take one.
+   */
+  kind: 'path' | 'file' | 'npm';
   value: string;
 }
 
@@ -262,14 +272,105 @@ export interface AccountQuota {
   error: string | null;
 }
 
+// ---------------------------------------------------------------------------
+// Plugins: one manifest format, `boite-plugin.json`. The recommended ones ship
+// inside the core; the owner adds others from a git URL. docs/plugins.md.
+// ---------------------------------------------------------------------------
+
+/** The file a plugin repository carries at its root. */
+export const PLUGIN_MANIFEST_FILE = 'boite-plugin.json';
+/** The one manifest schema this core reads. */
+export const PLUGIN_MANIFEST_SCHEMA = 1;
+/** `${process.platform}-${process.arch}` keys an artifact may be published for. */
+export const PLUGIN_PLATFORMS = ['win32-x64', 'win32-arm64', 'darwin-x64', 'darwin-arm64', 'linux-x64', 'linux-arm64'] as const;
+export type PluginPlatform = (typeof PLUGIN_PLATFORMS)[number];
+
+/** One native executable, downloaded over https and checked against its digest. */
+export interface PluginArtifact {
+  url: string;
+  /** Lowercase hex SHA-256 of the file at `url`. */
+  sha256: string;
+}
+
+/** What Boite does with the executable. Account pools are the one feature today. */
+export interface PluginProvides {
+  /** The executable answers the account pool commands for these providers. */
+  accountPools?: { providers: ProviderId[] };
+}
+
+export interface PluginManifest {
+  schema: 1;
+  id: string;
+  name: string;
+  version: string;
+  description: string;
+  /** https page of the project, shown as its source link. */
+  homepage: string;
+  /** The file name Boite writes, `.exe` appended on Windows. */
+  executable: string;
+  artifacts: Partial<Record<PluginPlatform, PluginArtifact>>;
+  provides: PluginProvides;
+}
+
+/** Where a plugin added from a URL came from. */
+export interface PluginSource {
+  /** The repository URL, as the core normalized it. */
+  url: string;
+  /** The branch, tag or commit asked for, `HEAD` when none was. */
+  ref: string;
+  /** The commit the manifest was read at. */
+  commit: string;
+}
+
+/** A manifest the core refused, with the file, the field and what it expected. */
+export interface PluginRejected {
+  file: string;
+  field: string;
+  expected: string;
+  message: string;
+}
+
 export interface PluginState {
   id: string;
   name: string;
+  /** Shipped in the core's recommended list, or added by the owner from a git URL. */
+  origin: 'recommended' | 'url';
+  description: string;
+  homepage: string | null;
+  /** The version on disk, null while nothing is installed. */
   version: string | null;
-  availableVersion: string;
-  status: 'not-installed' | 'installed' | 'installing' | 'error';
+  /** The version an install or an update brings. */
+  availableVersion: string | null;
+  status: 'not-installed' | 'installed' | 'installing' | 'error' | 'rejected';
   progress: number;
   error: string | null;
+  /** Null for a recommended plugin. */
+  source: PluginSource | null;
+  /** What an install downloads on this machine, null when the manifest publishes nothing for it. */
+  artifact: PluginArtifact | null;
+  /** This machine's key, `win32-x64` and so on. */
+  platform: string;
+  /** The command lines Boite runs, `<pool>` and `<email>` standing for the values. */
+  commands: string[];
+  /** The providers whose account pools the plugin serves. */
+  pools: ProviderId[];
+  /** Set exactly when `status` is `rejected`. */
+  rejected: PluginRejected | null;
+}
+
+/** What `plugins.inspect` read, shown to the owner before anything is downloaded. */
+export interface PluginPreview {
+  /** What `plugins.add` takes. Null when the manifest was refused. */
+  previewId: string | null;
+  source: PluginSource;
+  manifest: PluginManifest | null;
+  rejected: PluginRejected | null;
+  artifact: PluginArtifact | null;
+  platform: string;
+  commands: string[];
+  /** The version installed under the same id, which this install replaces. */
+  replaces: string | null;
+  expiresAt: Timestamp;
 }
 
 export interface PluginPool {
@@ -385,6 +486,49 @@ export interface Usage {
   cacheWriteTokens: number;
   /** API-equivalent cost. On a subscription this is not money spent; the UI says so. */
   costUsdEquivalent: number | null;
+}
+
+/**
+ * The finished turns of one provider and model whose `finishedAt` falls in
+ * `[edges[bucket], edges[bucket + 1])` of a `usage.history` call.
+ */
+export interface UsageHistoryRow {
+  bucket: number;
+  providerId: ProviderId;
+  /** Null when the turn ran on the provider's default model. */
+  model: string | null;
+  /** Finished turns, whether or not the agent reported its usage. */
+  turns: number;
+  /** Turns among them that carried a usage report. */
+  reported: number;
+  /** Turns among them that carried an API-equivalent price. */
+  priced: number;
+  /**
+   * Sums over the reported turns. `inputTokens` never includes the cache reads,
+   * whatever the provider counts, so the four token fields add up to the tokens
+   * processed. `costUsdEquivalent` is null when no turn of the row was priced.
+   */
+  usage: Usage;
+}
+
+export interface UsageHistoryThread {
+  threadId: ThreadId;
+  title: string;
+  projectId: ProjectId;
+  providerId: ProviderId;
+  archived: boolean;
+  turns: number;
+  usage: Usage;
+}
+
+export interface UsageHistory {
+  edges: Timestamp[];
+  rows: UsageHistoryRow[];
+  /**
+   * The threads that spent the most over the whole range, by tokens, by cost
+   * and by turns, so a client can rank by any of the three. Unordered.
+   */
+  threads: UsageHistoryThread[];
 }
 
 export type TurnStatus = 'queued' | 'running' | 'done' | 'stopped' | 'error';
@@ -1096,7 +1240,16 @@ export interface RpcMethods {
   'threads.activity.control': { params: { threadId: ThreadId; kind: 'goal' | 'loop'; action: 'pause' | 'resume' | 'remove' | 'complete' }; result: ThreadActivity };
   'quotas.list': { params: { refresh?: boolean }; result: AccountQuota[] };
   'quotas.configure': { params: { accountId: AccountId; enabled: boolean }; result: AccountQuota[] };
+  /** The recommended plugins, then every one installed from a URL, rejected ones included. */
   'plugins.list': { params: Record<string, never>; result: PluginState[] };
+  /**
+   * Fetches the repository at `ref` (default `HEAD`) and reads its manifest.
+   * Downloads no artifact and runs nothing. https URLs only.
+   */
+  'plugins.inspect': { params: { url: string; ref?: string }; result: PluginPreview };
+  /** Installs exactly what a preview showed: that manifest, read at that commit. */
+  'plugins.add': { params: { previewId: string }; result: PluginState };
+  /** Installs a recommended plugin, or reinstalls one already added from a URL. */
   'plugins.install': { params: { id: string }; result: PluginState };
   'plugins.cancel': { params: { id: string }; result: PluginState };
   'plugins.uninstall': { params: { id: string }; result: PluginState };
@@ -1372,11 +1525,25 @@ export interface RpcMethods {
     params: { threadId?: ThreadId };
     result: { byThread: Record<ThreadId, Usage>; total: Usage };
   };
+  /**
+   * Finished turns summed per bucket, provider and model. `edges` are 2 to 367
+   * ascending timestamps chosen by the client, usually its local midnights, so
+   * a day follows the reader's calendar whatever the core's time zone.
+   */
+  'usage.history': { params: { edges: Timestamp[] }; result: UsageHistory };
 
   'settings.get': { params: Record<string, never>; result: Settings };
   'settings.set': { params: Partial<Settings>; result: Settings };
   /** The keybindings file as last read: the path, the entries it names, and what it got wrong. */
   'keybindings.get': { params: Record<string, never>; result: Keybindings };
+  /**
+   * Writes one entry of the keybindings file: a chord, `mod+shift+k` style, or
+   * null to leave the command with no key. The other entries stay as written.
+   * A file that is not JSON is refused rather than overwritten.
+   */
+  'keybindings.set': { params: { command: KeybindingCommand; chord: string | null }; result: Keybindings };
+  /** Takes entries out of the file so they fall back to the default: one command, or every one when omitted. */
+  'keybindings.reset': { params: { command?: KeybindingCommand }; result: Keybindings };
 
   /**
    * The sessions the project's folder has on disk across every account whose
@@ -1407,6 +1574,7 @@ export interface RpcEvents {
   /** The project's whole list, after any change. */
   'todos.updated': { projectId: ProjectId; todos: Todo[] };
   'quotas.updated': AccountQuota[];
+  /** One plugin after any change. A `url` plugin that comes back `not-installed` is gone from the list. */
   'plugins.updated': PluginState;
   /** A project `projects.add` created. A known path returns its project without one. */
   'project.added': Project;
