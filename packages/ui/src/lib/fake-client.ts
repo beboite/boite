@@ -1327,6 +1327,11 @@ export class FakeClient implements ObservableClient {
       }
       case 'providers.probe': {
         const params = rawParams as RpcParams<'providers.probe'>;
+        // The fixture catalogue already carries each model's own scale, so a probe
+        // naming a model answers the same list; only the refusal is mirrored.
+        if (params.model !== undefined && (typeof params.model !== 'string' || params.model.length === 0)) {
+          throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'model must be a non-empty string when given', data: { field: 'model', expected: 'a non-empty string' } });
+        }
         return this.#probe(params.providerId, params.accountId);
       }
       case 'providers.install': {
