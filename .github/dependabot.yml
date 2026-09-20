@@ -7,6 +7,15 @@ updates:
     groups:
       actions:
         patterns: ['*']
+  - package-ecosystem: bun
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      # Majors arrive one pull request each, so a breaking SDK stays isolated.
+      workspace:
+        patterns: ['*']
+        update-types: [minor, patch]
   - package-ecosystem: npm
     directory: /docker/agents
     schedule:
