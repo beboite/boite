@@ -1,6 +1,6 @@
 # Agent coordination
 
-Open **Agent coordination** above a conversation to let its agent contact other
+Open **Communication settings** above a conversation to let its agent contact other
 agents. It starts off. Choose Brief for occasional questions about a shared
 resource, or Team for a task that needs several agents. Describe what the agent
 is working on in Resources so another agent can find the right contact.
@@ -16,8 +16,11 @@ and expire after 15 minutes if still waiting. Agents are instructed to send
 only useful questions or answers, without courtesy replies or repeated polling.
 Wake limits bound new turns, not the tokens used inside a turn.
 
-The panel shows contacts, budgets and the exchange history. Expand a message to
-read it. Pause suspends automatic coordination; Resume enables it again. Stop,
+Agent messages appear in the conversation as forwarded bubbles. The arrow,
+sender name and machine identify where a message came from; its text is visible
+without expanding a technical panel. Outgoing messages identify their recipient.
+Coordination settings hold contacts, budgets and permissions. Pause suspends
+automatic coordination; Resume enables it again. Stop,
 a failed turn and a core restart pause coordination too. Paired devices can read
 the panel; only an owner connection can change permissions.
 
@@ -47,8 +50,8 @@ remote machine, its trusted core attests that conversation's identity.
 
 ## What the agent receives
 
-An incoming message is recorded as a system event in the timeline, with its
-agent and machine in the coordination panel. Provider input explicitly labels
+An incoming message is recorded separately from user messages and displayed as
+a forwarded agent message in the timeline. Provider input explicitly labels
 the body as data from another agent. It does not become a user request or grant
 permission to run a tool.
 

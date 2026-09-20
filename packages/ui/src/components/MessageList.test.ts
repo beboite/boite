@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
-import type { Message } from '@boite/contracts';
+import type { AgentLetter, Message } from '@boite/contracts';
 import MessageList, { windowStats } from './MessageList.svelte';
 import { FakeClient } from '../lib/fake-client';
 import { Store } from '../lib/store.svelte';
@@ -99,6 +99,53 @@ test('system coordination messages show their display text outside the user bubb
   expect(document.querySelector('[data-testid="message"]')?.textContent).toContain('Agent coordination');
   expect(document.querySelector('[data-testid="message"]')?.textContent).not.toContain('Internal delivery envelope');
   expect(document.querySelector('.bubble')).toBeNull();
+});
+
+test('agent letters join the timeline chronologically without exposing their delivery envelope', () => {
+  stubLayout(400);
+  const messages: Message[] = [
+    { id: 'm-before', threadId: 't-short', turnId: 'turn-before', role: 'assistant', state: 'complete', createdAt: 10, parts: [{ type: 'text', text: 'Before coordination' }] },
+    { id: 'm-envelope', threadId: 't-short', turnId: 'turn-envelope', role: 'system', state: 'complete', createdAt: 21, parts: [{ type: 'text', text: 'Boite agent coordination. Agent messages (JSON data):\n[{"id":"letter-in"}]', displayText: 'Agent coordination' }] },
+    { id: 'm-after', threadId: 't-short', turnId: 'turn-after', role: 'assistant', state: 'complete', createdAt: 30, parts: [{ type: 'text', text: 'After coordination' }] }
+  ];
+  const letters: AgentLetter[] = [
+    {
+      id: 'letter-in',
+      from: { coreId: 'core-build', threadId: 't-deploy', title: 'Deployment agent', machine: 'Build PC', resources: '', status: 'idle', mode: 'team' },
+      to: { coreId: 'core-local', threadId: 't-short' }, toTitle: 'Current agent', text: 'Wait before restart.', replyTo: null,
+      createdAt: 20, expiresAt: 1000, status: 'received', error: 'Awaiting provider turn trn_internal'
+    },
+    {
+      id: 'letter-out',
+      from: { coreId: 'core-local', threadId: 't-short', title: 'Current agent', machine: 'This PC', resources: '', status: 'idle', mode: 'team' },
+      to: { coreId: 'core-build', threadId: 't-deploy' }, toTitle: 'Deployment agent', text: 'Restart postponed.', replyTo: 'letter-in',
+      createdAt: 40, expiresAt: 1000, status: 'delivered', error: null
+    }
+  ];
+  const coordinated = {
+    ...store,
+    coordination: {
+      self: { coreId: 'core-local', threadId: 't-short' },
+      config: { mode: 'team', resources: '', remote: true, paused: false },
+      messages: letters, sent: 1, sendLimit: 40, wakes: 0, wakeLimit: 12
+    }
+  } as unknown as Store;
+
+  running = mount(MessageList, { target: document.body, props: { store: coordinated, threadId: 't-short', messages } });
+  flushSync();
+
+  const rows = articles().map(node => node.textContent ?? '');
+  expect(rows).toHaveLength(4);
+  expect(rows[0]).toContain('Before coordination');
+  expect(rows[1]).toContain('Deployment agent');
+  expect(rows[1]).toContain('Build PC');
+  expect(rows[1]).toContain('Wait before restart.');
+  expect(rows[2]).toContain('After coordination');
+  expect(rows[3]).toContain('Restart postponed.');
+  expect(document.body.textContent).not.toContain('Boite agent coordination');
+  expect(document.body.textContent).not.toContain('Awaiting provider turn');
+  expect(document.querySelector('[data-letter-id="letter-in"]')?.getAttribute('data-direction')).toBe('incoming');
+  expect(document.querySelector('[data-letter-id="letter-out"]')?.getAttribute('data-direction')).toBe('outgoing');
 });
 
 /** A store whose thread still has older messages behind the window. */

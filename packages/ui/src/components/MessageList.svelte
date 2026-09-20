@@ -11,7 +11,7 @@
 <script lang="ts">
   import { onDestroy, onMount, tick, untrack } from 'svelte';
   import { ArrowDown, Check, FileText } from '@lucide/svelte';
-  import type { Message } from '@boite/contracts';
+  import type { AgentLetter, Message } from '@boite/contracts';
   import { bytes } from '../lib/format';
   import { decodedBytes } from '../lib/attachments';
   import { strings } from '../lib/strings';
@@ -25,6 +25,7 @@
   import { promptCommand, promptText } from '../lib/message-display';
   import ToolCard from './ToolCard.svelte';
   import MessageOutline from './MessageOutline.svelte';
+  import ForwardedAgentMessage from './ForwardedAgentMessage.svelte';
   import { visibleAnswer } from '../lib/message-display';
   import { isNamedModel } from '../lib/model-order';
 
@@ -33,7 +34,31 @@
     threadId,
     messages
   }: { store: Store; threadId: string; messages: Message[] } = $props();
+  const coordination = $derived(store.coordination?.self.threadId === threadId ? store.coordination : null);
+  const letters = $derived(coordination?.messages ?? []);
+  const letterRows = $derived.by(() => new Map(letters.map(letter => [`coordination:${letter.id}`, letter])));
+  const timeline = $derived.by(() => {
+    if (letters.length === 0) return messages;
+    const ids = new Set(letters.map(letter => letter.id));
+    const visible = messages.filter(message => !coordinationPlaceholder(message, ids));
+    const forwarded = letters.map((letter): Message => ({
+      id: `coordination:${letter.id}`,
+      threadId,
+      turnId: `coordination:${letter.id}`,
+      role: 'system',
+      parts: [],
+      state: 'complete',
+      createdAt: letter.createdAt
+    }));
+    return [...visible, ...forwarded].sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
+  });
+  const timelineOrder = $derived(timeline.map(message => message.id).join('\0'));
   const savedReading = untrack(() => store.readingPositions?.get(threadId));
+
+  function coordinationPlaceholder(message: Message, ids: Set<string>): boolean {
+    if (message.role !== 'system') return false;
+    return message.parts.some(part => part.type === 'text' && part.text.startsWith('Boite agent coordination.') && [...ids].some(id => part.text.includes(`"id":"${id}"`)));
+  }
 
   /** Under this many messages the list renders whole: a window would cost more than it saves. */
   const WINDOW_FROM = 60;
@@ -98,10 +123,10 @@
   function releaseNavigation() { releaseAnchor(); navigationTarget = null; }
   const activePrompt = $derived.by(() => {
     void measured;
-    const total = totals(messages);
-    const at = pinned ? messages.length - 1 : atOrBefore(total, messages.length, scrollTop + 24);
-    for (let index = Math.min(at, messages.length - 1); index >= 0; index--) {
-      if (messages[index]?.role === 'user') return messages[index]!.id;
+    const total = totals(timeline);
+    const at = pinned ? timeline.length - 1 : atOrBefore(total, timeline.length, scrollTop + 24);
+    for (let index = Math.min(at, timeline.length - 1); index >= 0; index--) {
+      if (timeline[index]?.role === 'user') return timeline[index]!.id;
     }
     return null;
   });
@@ -109,12 +134,12 @@
   function jumpToMessage(id: string) {
     releaseAnchor();
     const box = viewport;
-    const index = messages.findIndex(message => message.id === id);
+    const index = timeline.findIndex(message => message.id === id);
     if (!box || index < 0) return;
     navigationTarget = id;
     pinned = false;
     behind = true;
-    box.scrollTop = totals(messages)[index] ?? 0;
+    box.scrollTop = totals(timeline)[index] ?? 0;
     scrollTop = box.scrollTop;
   }
 
@@ -138,7 +163,7 @@
     return () => cancelAnimationFrame(frame);
   });
 
-  const windowed = $derived(messages.length > WINDOW_FROM);
+  const windowed = $derived(timeline.length > WINDOW_FROM);
 
   function slotAt(list: Message[], index: number): number {
     windowStats.slots += 1;
@@ -156,6 +181,8 @@
   /** What `sums` was built on: how many messages there were, and the id at the head. */
   let sumsCount = 0;
   let sumsHead = '';
+  let sumsTail = '';
+  let sumsOrder = '';
   /** The lowest index a measurement invalidated. Repaired from there on the next read. */
   let dirty = 0;
   /** Where each message sits, so a measurement finds its index without scanning. */
@@ -172,6 +199,8 @@
     }
     sumsCount = list.length;
     sumsHead = list[0]?.id ?? '';
+    sumsTail = list.at(-1)?.id ?? '';
+    sumsOrder = timelineOrder;
     dirty = list.length;
   }
 
@@ -183,7 +212,7 @@
    */
   function totals(list: Message[]): number[] {
     const head = list[0]?.id ?? '';
-    if (head !== sumsHead || list.length < sumsCount) {
+    if (head !== sumsHead || list.length < sumsCount || (list.length === sumsCount && timelineOrder !== sumsOrder) || (list.length > sumsCount && list[sumsCount - 1]?.id !== sumsTail)) {
       rebuild(list);
       return sums;
     }
@@ -198,6 +227,8 @@
     }
     for (let i = dirty; i < list.length; i += 1) sums[i + 1] = (sums[i] ?? 0) + slotAt(list, i);
     dirty = list.length;
+    sumsTail = list.at(-1)?.id ?? '';
+    sumsOrder = timelineOrder;
     return sums;
   }
 
@@ -234,7 +265,7 @@
   const view = $derived.by(() => {
     void measured;
     windowStats.recomputes += 1;
-    const list = messages;
+    const list = timeline;
     if (!windowed) {
       return { start: 0, end: list.length, first: 0, above: 0, below: 0 };
     }
@@ -257,13 +288,13 @@
     return { start, end, first, above: total[start] ?? 0, below: whole - (total[end] ?? 0) };
   });
 
-  const rendered = $derived(messages.slice(view.start, view.end));
+  const rendered = $derived(timeline.slice(view.start, view.end));
 
   /** Where a message sits now, off the map the totals keep; a miss falls back to a scan. */
   function indexOf(id: string): number {
     const at = positions.get(id);
-    if (at !== undefined && messages[at]?.id === id) return at;
-    return messages.findIndex((message) => message.id === id);
+    if (at !== undefined && timeline[at]?.id === id) return at;
+    return timeline.findIndex((message) => message.id === id);
   }
 
   /**
@@ -273,7 +304,7 @@
    */
   function onMeasured(entries: ResizeObserverEntry[]): void {
     const box = viewport;
-    const lastId = messages.at(-1)?.id;
+    const lastId = timeline.at(-1)?.id;
     let shift = 0;
     let moved = false;
     for (const entry of entries) {
@@ -317,7 +348,7 @@
     tailTimer = window.setTimeout(() => {
       tailTimer = 0;
       tailAt = performance.now();
-      const last = messages.at(-1);
+      const last = timeline.at(-1);
       tail = last ? (heights.get(last.id) ?? ESTIMATE) : 0;
     }, wait);
   }
@@ -413,6 +444,7 @@
     if (box.scrollTop > LOAD_AT) return;
     if (store.messagesBefore === null || store.loadingOlder) return;
     const topBefore = box.scrollTop;
+    const headBefore = timeline[0]?.id;
     void store.loadOlder().then((added) => {
       if (added === 0) return;
       requestAnimationFrame(() => {
@@ -420,8 +452,9 @@
         // which is a read rather than a measurement of a list that has just
         // been laid out, and it is right whether they landed in the window or
         // in the spacer above it.
-        const total = totals(messages);
-        const grew = total[Math.min(added, messages.length)] ?? 0;
+        const total = totals(timeline);
+        const before = headBefore ? timeline.findIndex(message => message.id === headBefore) : Math.min(added, timeline.length);
+        const grew = total[Math.max(0, before)] ?? 0;
         if (grew <= 0) return;
         box.scrollTop = topBefore + grew;
         scrollTop = box.scrollTop;
@@ -447,7 +480,7 @@
    * this whole effect on every token of every answer.
    */
   $effect(() => {
-    void messages.length;
+    void timeline.length;
     void tail;
     const box = viewport;
     if (!box) return;
@@ -530,14 +563,17 @@
         <div class="spacer" data-testid="timeline-above" style="height: {view.above}px"></div>
       {/if}
       {#each rendered as message (message.id)}
+        {@const letter = letterRows.get(message.id)}
         {@const turn = store.openThread?.turns.find(turn => turn.id === message.turnId)}
         <article
           use:track={message.id}
           class="message {message.role}"
           data-testid="message"
-          data-role={message.role}
+          data-role={letter ? 'agent-letter' : message.role}
         >
-          {#if message.role === 'user'}
+          {#if letter && coordination}
+            <ForwardedAgentMessage {letter} self={coordination.self} />
+          {:else if message.role === 'user'}
             {@const images = imagesOf(message)}
             <div class="bubble">
               {#each message.parts as part, index (index)}

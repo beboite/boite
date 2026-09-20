@@ -416,8 +416,8 @@ export const strings = {
   },
 
   coordination: {
-    options: 'Resources and permissions',
-    heading: 'Agent coordination', off: 'Off', brief: 'Brief', team: 'Team',
+    options: 'Advanced settings',
+    heading: 'Communication settings', off: 'Off', brief: 'Brief', team: 'Team',
     summaryOff: 'Other agents cannot contact this thread.', summaryBrief: 'Short handoffs with up to 6 sends and 2 wake turns each hour.',
     summaryTeam: 'Team coordination with up to 40 sends and 12 wake turns each hour.',
     ownerOnly: 'Only the owner can change coordination. This device can inspect the directory and exchanges.',
@@ -428,11 +428,15 @@ export const strings = {
     directory: 'Authorized contacts', refresh: 'Refresh', directoryEmpty: 'No opted-in thread in this project is available.', unavailable: 'Unavailable contacts',
     exchanges: 'Agent exchanges', noExchanges: 'No agent exchange yet.', details: 'Show exchange',
     from: 'From {title} on {machine}', to: 'To {title}', reply: 'Reply to {id}',
+    forwardedFrom: 'Forwarded from', incoming: 'Incoming', outgoing: 'Outgoing',
     noReceipt: 'Delivered means submitted to the recipient agent. Agent protocols provide no read receipt.',
     warning: 'Coordination warning',
     status: {
       queued: 'Queued in the outbox', received: 'Received by the recipient core', delivered: 'Submitted to the recipient agent',
       uncertain: 'Submission outcome uncertain. Boite will not replay it.', expired: 'Expired', rejected: 'Rejected'
+    },
+    bubbleStatus: {
+      queued: 'Waiting', received: 'Waiting', delivered: 'Sent', uncertain: 'Unconfirmed', expired: 'Expired', rejected: 'Failed'
     }
   },
 

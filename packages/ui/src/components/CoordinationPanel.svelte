@@ -10,7 +10,11 @@
   let view = $derived(store.coordination?.self.threadId === threadId ? store.coordination : null);
   let config = $derived(view?.config ?? fallback);
   let summary = $derived(config.mode === 'brief' ? strings.coordination.summaryBrief : config.mode === 'team' ? strings.coordination.summaryTeam : strings.coordination.summaryOff);
-  onMount(() => { void store.loadCoordination(threadId); });
+  onMount(() => { void store.loadCoordination(threadId, false); });
+
+  function toggleSettings(event: Event): void {
+    if ((event.currentTarget as HTMLDetailsElement).open) void store.loadCoordination(threadId, true);
+  }
 
   function configure(patch: Partial<CoordinationConfig>): void {
     if (!store.owner) return;
@@ -32,7 +36,7 @@
   }
 </script>
 
-<details class="coordination" data-testid="coordination-panel">
+<details class="coordination" data-testid="coordination-panel" ontoggle={toggleSettings}>
   <summary>
     <Network size={14} strokeWidth={1.75} />
     <span>{strings.coordination.heading}</span>
@@ -89,7 +93,6 @@
         />
       </label>
 
-      </details>
       <div class="budget" data-testid="coordination-budget">
         <span>{fill(strings.coordination.sends, { used: String(view?.sent ?? 0), limit: String(view?.sendLimit ?? 0) })}</span>
         <span>{fill(strings.coordination.wakes, { used: String(view?.wakes ?? 0), limit: String(view?.wakeLimit ?? 0) })}</span>
@@ -105,7 +108,7 @@
       <section class="directory" aria-labelledby="coordination-directory">
         <header>
           <h3 id="coordination-directory">{strings.coordination.directory}</h3>
-          <button class="ghost small" data-testid="coordination-refresh" disabled={store.coordinationLoading} onclick={() => void store.loadCoordination(threadId)}>
+           <button class="ghost small" data-testid="coordination-refresh" disabled={store.coordinationLoading} onclick={() => void store.loadCoordination(threadId, true)}>
             <RefreshCw size={13} />{strings.coordination.refresh}
           </button>
         </header>
@@ -125,30 +128,8 @@
           </div>
         {/if}
       </section>
+      </details>
     {/if}
-
-    <section class="exchanges" aria-labelledby="coordination-exchanges">
-      <h3 id="coordination-exchanges">{strings.coordination.exchanges}</h3>
-      {#if (view?.messages.length ?? 0) === 0}
-        <p class="empty">{strings.coordination.noExchanges}</p>
-      {:else}
-        {#each view?.messages ?? [] as letter (letter.id)}
-          <details class="letter" data-testid="coordination-letter">
-            <summary>
-              <span class="letter-who">{fill(strings.coordination.from, { title: letter.from.title, machine: letter.from.machine })}</span>
-              <span class="letter-status" data-status={letter.status}>{strings.coordination.status[letter.status]}</span>
-            </summary>
-            <div class="letter-body">
-              <p class="to">{fill(strings.coordination.to, { title: letter.toTitle })}</p>
-              <p>{letter.text}</p>
-              {#if letter.replyTo}<p class="reply">{fill(strings.coordination.reply, { id: letter.replyTo })}</p>{/if}
-              {#if letter.error}<p class="warning" role="status"><strong>{strings.coordination.warning}</strong> {letter.error}</p>{/if}
-            </div>
-          </details>
-        {/each}
-      {/if}
-      <p class="receipt">{strings.coordination.noReceipt}</p>
-    </section>
 
     {#if store.coordinationError}<p class="error" role="alert">{store.coordinationError}</p>{/if}
   </div>
@@ -161,7 +142,7 @@
   .mode, .paused { padding: 2px 6px; border-radius: var(--radius-sm); background: var(--color-surface-3); color: var(--color-muted-foreground); font-size: var(--text-xs); font-weight: 500; }
   .mode { margin-left: auto; }
   .body { padding: 0 14px 14px; border-top: 1px solid var(--color-border); max-height: min(48dvh, 480px); overflow-y: auto; overscroll-behavior: contain; }
-  .summary, .empty, .receipt, .notice { margin: 10px 0; color: var(--color-muted-foreground); font-size: var(--text-sm); line-height: 1.45; }
+  .summary, .empty, .notice { margin: 10px 0; color: var(--color-muted-foreground); font-size: var(--text-sm); line-height: 1.45; }
   .notice { padding: 8px 10px; border-left: 2px solid var(--color-edge); background: var(--color-surface-2); }
   .modes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; padding: 3px; border-radius: var(--radius-md); background: var(--color-surface-2); }
   .modes button { width: 100%; }
@@ -192,23 +173,12 @@
   .contacts strong, .contacts small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .contacts strong { font-size: var(--text-sm); font-weight: 500; }
   .contacts small, .contact-status { color: var(--color-muted-foreground); font-size: var(--text-xs); }
-  .warnings, .warning { margin-top: 8px; padding: 8px 10px; border-left: 2px solid var(--color-live); background: var(--color-surface-2); font-size: var(--text-sm); }
+  .warnings { margin-top: 8px; padding: 8px 10px; border-left: 2px solid var(--color-live); background: var(--color-surface-2); font-size: var(--text-sm); }
   .warnings p { margin-top: 4px; }
-  .letter { border-top: 1px solid var(--color-border); }
-  .letter:first-of-type { margin-top: 8px; }
-  .letter > summary { min-height: var(--control-lg); display: flex; align-items: center; gap: 12px; cursor: pointer; font-size: var(--text-sm); }
-  .letter-who { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .letter-status { color: var(--color-muted-foreground); font-size: var(--text-xs); text-align: right; }
-  .letter-body { padding: 0 10px 10px; font-size: var(--text-sm); line-height: 1.5; }
-  .letter-body p { margin-top: 6px; white-space: pre-wrap; overflow-wrap: anywhere; }
-  .to, .reply { color: var(--color-muted-foreground); font-size: var(--text-xs); }
-  .receipt { margin-bottom: 0; }
   .error { margin-top: 10px; color: var(--color-danger); font-size: var(--text-sm); }
   @media (max-width: 720px) {
     .coordination { width: calc(100% - 20px); margin-top: 6px; }
     .body { padding: 0 10px 12px; }
-    .letter > summary { align-items: flex-start; flex-direction: column; gap: 2px; padding: 7px 0; }
-    .letter-status { text-align: left; }
   }
   @media (prefers-reduced-motion: reduce) { .remote-row input::after { transition: none; } }
 </style>

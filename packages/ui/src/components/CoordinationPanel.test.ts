@@ -30,6 +30,12 @@ async function show(principal: 'owner' | 'session' = 'owner'): Promise<Store> {
 test('an owner configures a thread and sees the hourly budgets', async () => {
   const active = await show();
   expect(active.coordination?.config.mode).toBe('off');
+  expect(active.coordinationDirectory).toBeNull();
+  const panel = document.querySelector<HTMLDetailsElement>('[data-testid="coordination-panel"]')!;
+  panel.open = true;
+  panel.dispatchEvent(new Event('toggle'));
+  await settle();
+  expect(active.coordinationDirectory).not.toBeNull();
   document.querySelector<HTMLButtonElement>('[data-testid="coordination-mode-brief"]')!.click();
   await settle();
   expect(active.coordination?.config.mode).toBe('brief');
