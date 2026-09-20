@@ -47,6 +47,9 @@
   --color-danger: #f0716f;
   --color-danger-hover: #d36060;
   --color-on-danger: #ffffff;
+  /* The Windows 11 caption close, the same red in both themes: the danger
+     salmon under a white cross read at 2.9:1, this one at 5.7:1. */
+  --color-caption-close: #c42b1c;
   --color-scrim: rgba(6, 6, 8, 0.55);
   --color-on-foreground: #101013;
 
@@ -85,6 +88,8 @@
   --text-lg: 20px;
 
   --titlebar: 44px;
+  /* A caption button, Windows' own width, the bar's full height. */
+  --caption: 46px;
   --sidebar: 280px;
   --panel: 360px;
   --content: 820px;
@@ -329,8 +334,17 @@ button.small {
   font-size: var(--text-sm);
 }
 
+/* `button.small` comes after `button.icon` at the same specificity, so its side
+   padding won here and left a 26 px icon button 8 px for its glyph. */
 button.small.icon {
   width: var(--control-sm);
+  padding: 0;
+}
+
+/* A glyph keeps the size it was drawn at: a flex row too narrow for it
+   overflows rather than shrinking the icon to a speck. */
+button svg {
+  flex-shrink: 0;
 }
 
 input,

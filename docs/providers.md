@@ -44,8 +44,8 @@ OpenCode's descriptor, with the `linux` and `macos` profiles left out:
 - `id` is the key everything refers to, and a user descriptor may not reuse a
   shipped one. `schemaVersion` is `1` and is checked. `name` and `shortName` are
   what the picker and the chips show.
-- `protocol` picks the driver: `claude-sdk`, `acp`, `codex-appserver`, `pi`,
-  `agy` or `echo`. OpenCode uses `acp`. A protocol with no driver behind it has nothing to run,
+- `protocol` picks the driver: `claude-sdk`, `acp`, `codex-appserver`, `muse`,
+  `pi`, `agy` or `echo`. OpenCode uses `acp`. A protocol with no driver behind it has nothing to run,
   so it is the one field that cannot be invented.
 - `roots` lists every directory the engine may read or write for this provider. A
   path outside them is refused, and a `..` segment is refused at load.
@@ -76,7 +76,9 @@ OpenCode's descriptor, with the `linux` and `macos` profiles left out:
   answer says `agentCapabilities.promptCapabilities.image` is true, or the turn
   fails before anything goes out; Codex appends one
   `{ type: 'image', url: 'data:<mimeType>;base64,<data>' }` entry per attachment
-  to `turn/start`'s `input`; pi adds an `images` array of
+  to `turn/start`'s `input`; Muse appends one
+  `{ type: 'image', base64Data, mediaType }` part per attachment to its own
+  `turn/start` `input`; pi adds an `images` array of
   `{ type: 'image', data, mimeType }` entries to the `prompt` command.
 
 A thread's `/commands` come from wherever the protocol says an agent lists its
@@ -91,7 +93,8 @@ the thread's latest `TurnContext` outside the running turn for exactly that
 window, since the update carries no turn of its own to report through. pi asks
 once per process, right after it comes up, with the `get_commands` RPC
 command. Codex has no such listing in the app-server protocol the driver
-speaks, so `codex.ts` reports none.
+speaks, so `codex.ts` reports none, and `muse.ts` reads none from Muse's
+session protocol either.
 
 ## Inside an OS profile
 
@@ -164,6 +167,12 @@ releases; the Codex archive also carries `codex-command-runner.exe` and
 managed copy is the first executable candidate, so an update reaches the agent
 Boite runs even when an npm copy exists. `test/shipped-installs.live.test.ts`,
 opt-in behind `BOITE_E2E_INSTALLS=1`, downloads both and runs `--version`.
+Muse Code ships the same way on Windows x64, as the single binary Meta's own
+installer downloads (`format: "binary"`, pinned with its SHA-256). The official
+installer puts a `muse.cmd` launcher on PATH instead, which Bun cannot spawn, so
+the driver reads `.muse-version` beside it and runs the `muse-bin-<version>.exe`
+it names; a launcher with no such binary beside it is refused with a sentence
+saying to install Muse Code from Providers.
 Grok and pi have no archive Boite can pin, so their row links to the agent's own
 install guide.
 
@@ -208,6 +217,7 @@ is the deterministic fake the tests and the bench run on, loaded only under
 | Antigravity CLI | `agy` | `agy --input-format stream-json --output-format stream-json [--conversation <id>] [--model <id>] [--mode <mode> or --dangerously-skip-permissions] -p=` | nothing, the default account only | none, the token is in the system keyring | none, `agy` signs in in its own terminal |
 | Grok | `acp` | `grok [--permission-mode <mode>] agent [--always-approve] stdio` | `GROK_HOME` | `auth.json` | `grok login --device-auth` |
 | Codex | `codex-appserver` | `codex app-server` | `CODEX_HOME` | `auth.json` | `codex login --device-auth` |
+| Muse Code | `muse` | `muse serve --trust-workspace [mode flags]` | `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME` | `muse/auth.json` | `muse login` |
 | pi | `pi` | `node <the package's bin> --mode rpc`, or `pi --mode rpc` from PATH off Windows | `PI_CODING_AGENT_DIR` | `auth.json` | none |
 | Echo | `echo` | nothing | nothing | none | a script beside the descriptor |
 
@@ -334,6 +344,15 @@ question:
   two models on one account can offer two different scales. `serviceTiers` supplies
   speed choices without adding unlisted tiers. It answers before
   any login, so an unauthenticated account is no reason to skip the probe.
+- Muse: `initialize`, `initialized`, then `model/list`, on a host started with
+  `--no-session-log --disable-write --disable-shell` so a probe can neither write
+  nor leave a session behind. Only models routed to `meta` are kept. `model/list`
+  carries no efforts, so each model's tiers come from the catalog Muse caches
+  under the `museHome` its `initialize` answer names
+  (`model-catalog/*.json`, rows of the same profile with
+  `reasoning_effort_variants`); a model the catalog does not describe gets
+  `low` to `max` with `high` preselected, which is Muse's own default. A host
+  that is not signed in lists nothing, and the descriptor's models stand.
 - agy: `agy models`, one `id<TAB>label` line per model. agy lists every
   reasoning variant as a model of its own, `gemini-3.8-flash-low` beside
   `gemini-3.8-flash-high`, so two or more variants of one base become one model
@@ -378,6 +397,17 @@ Each protocol takes them differently, and the difference is not cosmetic.
   plus read-only, `bypassPermissions` and `dontAsk` never plus danger-full-access.
   No call changes that pair on a live thread, so the mode is part of the session
   key: changing it drops the process and the next turn resumes with the new pair.
+- Muse splits a mode in two. The approval mode goes on the wire, on
+  `session/start` and through `session/setApprovalMode` when the host reports
+  another, so a warm host follows it: `default` and `acceptEdits` are
+  `promptUnmatched`, `plan` is `denyUnmatched`, `bypassPermissions` and `dontAsk`
+  are `allowAll`. The sandbox posture is a host flag, fixed for the process:
+  `plan` adds `--disable-write --disable-shell`, `bypassPermissions` and
+  `dontAsk` add `--disable-sandbox`. Those flags join the session key, so only a
+  change between the three postures drops the process, and the next host resumes
+  the session. `acceptEdits` adds one rule of the driver's: a file write inside
+  the thread's folder that Muse neither marks `protectedWrite` nor escalated
+  through its own judge is approved once without a card.
 - agy asks nothing in print mode: whatever its mode does not allow, it denies by
   itself. So the mode is a launch flag and part of the session key.
   `acceptEdits` and `plan` become `--mode accept-edits` and `--mode plan`,
@@ -392,7 +422,8 @@ Each protocol takes them differently, and the difference is not cosmetic.
 A permission is not the only thing an agent asks. A protocol that carries a
 free-form question maps it to `askQuestion` on the turn context, which draws a
 question card in the timeline and answers the agent with what the user picked;
-Codex's `item/tool/requestUserInput` is the one that does today. A question is
+Codex's `item/tool/requestUserInput` and Muse's `userInput/requested` are the two
+that do today. A question is
 not a permission mode and is never gated by one: an agent whose approvals are
 off can still ask.
 
@@ -403,3 +434,31 @@ on both `thread/start` and `thread/resume`. Codex disables this tool by default;
 listening for `turn/plan/updated` alone does not make it available to the agent.
 The native plan populates the thread's activity tasks. Goal instructions explain
 this mapping so the agent uses its planning tools instead of legacy Boite todos.
+
+### Muse Code
+
+`packages/core/src/drivers/muse.ts` speaks MSP, Muse's session protocol:
+JSON-RPC 2.0 as ndjson over `muse serve`'s stdio, with its own transport rather
+than `@muse-code/sdk`, because the SDK spawns its own child and every agent
+process here goes through `procs.spawnChild`. The driver refuses a host whose
+`initialize` answer names another envelope version than 1.
+
+- Every command carries a client-minted UUIDv7 `commandId`, and a new session's
+  id is minted the same way. A fresh turn's id is the `commandId` of its
+  `turn/start`, so an item that arrives before the answer still finds its turn.
+- An item notification carries the whole item so far. Text already written from
+  `item/delta` is remembered per item and field, and a snapshot only adds what
+  lies past it, so an answer is drawn once whichever way it arrived.
+- Approvals and questions arrive as `approval/requested` and
+  `userInput/requested` notifications and are answered with `approval/decide`
+  and `userInput/answer`. Allow sends the narrowest approving choice the host
+  offers, once before session before persistent; a stop sends `abort`, or the
+  denial when there is none. The server-request forms are declined.
+- A missing login ends the turn with `authRequired`, which the driver turns into
+  a sentence saying to sign the account in from Providers.
+- `threads.compact` sends `session/compact`; a `noop` answer fails the turn
+  with Muse's reason. `session/todoListChanged` fills the thread's tasks, a
+  cancelled item left out, and `session/contextUsage` feeds the context meter.
+- The profile sets `MUSE_NO_AUTO_UPDATE=1`, so the launcher never updates what
+  Boite pinned, and unsets `META_API_KEY`, so a key in the user's environment
+  never replaces the account's login.

@@ -37,6 +37,7 @@
     codex: 'https://developers.openai.com/codex/cli',
     opencode: 'https://opencode.ai/docs/',
     grok: 'https://grok.com/build',
+    muse: 'https://developer.meta.com/ai/products/muse-code/',
     pi: 'https://github.com/earendil-works/pi'
   };
 

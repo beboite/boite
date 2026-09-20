@@ -37,6 +37,7 @@ finite or below zero writes nothing.
 | Claude | `usage` on each `assistant` message of the SDK stream, the last one wins | `modelUsage[<model>].contextWindow` on the result message, the thread's model first, else the one model the turn ran on | the `compact_boundary` system message, with `pre_tokens` and `post_tokens` |
 | echo | 100 plus one token per character of the prompt | 2000 | `[compact]` in the prompt draws one, 1800 to 300 tokens, and lowers the reading to 300 |
 | Codex | `tokenUsage.last.totalTokens` in `thread/tokenUsage/updated` | `tokenUsage.modelContextWindow` when reported | completed `contextCompaction` items |
+| Muse Code | `usedTokens` in `session/contextUsage` | `windowTokens` when reported | completed `compaction` items, with `tokensBefore` and `tokensAfter` |
 | Antigravity CLI | the last `agent_response` step's `usage` in the turn, input plus cache reads plus output, once at the end | not reported | none, compaction is refused |
 | OpenCode, Antigravity, Grok, pi | none yet | | pi's manual compaction response |
 

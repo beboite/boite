@@ -1519,7 +1519,7 @@ export class Store {
     const models = this.modelsOf(choice.providerId, choice.accountId);
     if ((!models.some((model) => model.id === choice.model) ||
       (provider.protocol === 'claude-sdk' && !this.probedModels[probeKey(provider.id, choice.accountId)])) &&
-      ['claude-sdk', 'acp', 'codex-appserver', 'pi', 'agy'].includes(provider.protocol)) {
+      ['claude-sdk', 'acp', 'codex-appserver', 'muse', 'pi', 'agy'].includes(provider.protocol)) {
       const client = this.#client;
       if (!client) return null;
       try {

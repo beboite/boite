@@ -1,14 +1,27 @@
 # CI and publication
 
-The required check is `CI required`. Configure branch protection to require that
-single job. It fails when an applicable check fails or is cancelled, including
+The `main protect` ruleset refuses direct pushes, force pushes and deletion of
+`main`. Changes land through a squash-merged pull request once the required
+checks `CI required` and `PR title` pass. No approval is required; CODEOWNERS
+only requests reviews. Repository admins can bypass the rules when merging a
+pull request, never on a direct push.
+
+`CI required` fails when an applicable check fails or is cancelled, including
 when a dependency never starts. Documentation-only changes still produce it.
+
+`PR title` runs `scripts/ci/pr-title.ts` on every title edit. The squash commit
+takes the title, so it must read `type(scope): summary` with a type among `feat`,
+`fix`, `perf`, `refactor`, `docs`, `test`, `ci`, `build`, `chore` and `revert`.
+The squash commit message body is left empty.
+
+The `release tags` ruleset keeps `v*` tags from being moved or deleted. Creating
+one stays open, which the nightly reservation and a manual release rely on.
 
 ## Checks
 
 | Change | Checks |
 | --- | --- |
-| Markdown docs, license, issue templates, topics | Local documentation links and CI decision tests |
+| Markdown docs, license, security policy, code of conduct, issue and pull request templates, CODEOWNERS, labeler rules, topics | Local documentation links and CI decision tests |
 | Shell files or end-to-end tests | Windows shell tests, installer build and full end-to-end suite; Linux/macOS shell builds and Rust tests |
 | Dockerfile, .dockerignore, docker/ | Docker smoke tests on native x64 and ARM64 |
 | UI files | Type checks, UI tests, desktop checks and Docker smoke tests |
@@ -108,6 +121,24 @@ artifacts are excluded. Installing the GitHub App on this repository is a
 separate prerequisite. CodeRabbit controls free-plan eligibility and review
 limits; repository configuration does not override them.
 
+## Security and labels
+
+CodeQL's default setup analyses GitHub Actions, JavaScript/TypeScript and Rust on
+pushes and pull requests. Secret scanning with push protection, Dependabot alerts
+and Dependabot security updates are on. Vulnerability reports go through private
+vulnerability reporting, as [SECURITY.md](../SECURITY.md) describes. Actions
+must be pinned to a full commit SHA; the repository setting refuses a tag.
+
+Dependabot updates the Bun workspace, the agent CLIs in `docker/agents`, the
+shell's Cargo dependencies, the Docker base image and the workflow actions
+weekly. Workspace minor and patch updates share one pull request; each major
+update gets its own.
+
+The `labeler` workflow labels pull requests by path with `core`, `ui`, `shell`,
+`server`, `ci` and `documentation`, following `.github/labeler.yml`. It runs on
+`pull_request_target` without checking out the pull request, so a fork gets
+labels without its code running with write access.
+
 ## Releases and server images
 
 A `v<version>` tag must match all package manifests, Cargo and the Tauri config.
@@ -140,6 +171,9 @@ workflows.
 Release notes come from Git commits, including commits without a pull request.
 Each subject links to its commit, and a comparison link opens the complete diff.
 Merge commits are excluded because the commits they merge are already listed.
+Subjects starting with `feat`, `fix` and `perf` get their own sections; every
+other subject goes under "Other changes". A list with no typed subject has no
+headings.
 
 For a stable release, the range starts at the previous published stable release
 reachable from that commit. A prerelease may start at a previous prerelease.

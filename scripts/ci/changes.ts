@@ -6,8 +6,9 @@ export function affectedChecks(files: string[]) {
   const checks = { core: false, web: false, desktop: false, server: false };
   for (const file of files) {
     if (
-      /^(docs\/.*\.md|README\.md|AGENTS\.md|CONTRIBUTING\.md|LICENSE)$/.test(file) ||
-      /^\.github\/(ISSUE_TEMPLATE\/|pull_request_template\.md$|topics\.json$)/.test(file) || file === '.coderabbit.yaml'
+      /^(docs\/.*\.md|README\.md|AGENTS\.md|CONTRIBUTING\.md|SECURITY\.md|CODE_OF_CONDUCT\.md|LICENSE)$/.test(file) ||
+      /^\.github\/(ISSUE_TEMPLATE\/|pull_request_template\.md$|topics\.json$|CODEOWNERS$|labeler\.yml$)/.test(file) ||
+      file === '.coderabbit.yaml'
     ) continue;
     if (/^(apps\/shell\/|tests\/e2e\/)/.test(file)) {
       checks.desktop = true;

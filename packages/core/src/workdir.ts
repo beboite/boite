@@ -12,7 +12,7 @@
 import { existsSync, lstatSync, realpathSync, statSync } from 'node:fs';
 import type { Stats } from 'node:fs';
 import { readdir, readFile, stat, writeFile } from 'node:fs/promises';
-import { isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { FILES_LIST_MAX, FILE_MAX_BYTES, FILE_ROUTE, FILE_TICKET_TTL_MS } from '@boite/contracts';
 import type { FileContent, FileEntry, ThreadId, Timestamp } from '@boite/contracts';
 import type { Core } from './core.ts';
@@ -91,6 +91,37 @@ export function existingInside(
   if (expect === 'file' && !stats.isFile()) throw refused(`${what} is not a file: ${path}`, { what, path });
   if (expect === 'dir' && !stats.isDirectory()) throw refused(`${what} is not a directory: ${path}`, { what, path });
   return { ...found, stats };
+}
+
+/**
+ * Whether a write to `path` would land inside the working directory once every
+ * link on the way is followed. A file that does not exist yet is judged by its
+ * nearest existing parent, which is where the write would create it; a link to
+ * nothing, or a path that cannot be read, is judged outside.
+ */
+export function writeLandsInside(cwd: string, path: string): boolean {
+  const root = resolve(cwd);
+  const absolute = isAbsolute(path) ? resolve(path) : resolve(root, path);
+  if (!contains(root, absolute)) return false;
+  const missing: string[] = [];
+  let probe = absolute;
+  for (;;) {
+    try {
+      return contains(realOf(root), join(realpathSync(probe), ...missing));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return false;
+      try {
+        lstatSync(probe);
+        return false;
+      } catch {
+        // Not there at all: its parent decides.
+      }
+      const parent = dirname(probe);
+      if (parent === probe) return false;
+      missing.unshift(basename(probe));
+      probe = parent;
+    }
+  }
 }
 
 function byName(a: { name: string }, b: { name: string }): number {

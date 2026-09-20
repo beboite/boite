@@ -272,7 +272,7 @@ test('the picker rails the providers as logos and gives the shown one its accoun
   await waitFor(() => document.querySelector('[data-testid=composer-picker-menu]') !== null);
   // One tile per provider, in the core's order, the one whose files are still to
   // download included: it is picked like any other and its column says why.
-  expect(tiles()).toEqual(['favorites', 'claude', 'echo', 'opencode', 'antigravity', 'codex', 'pi', 'grok']);
+  expect(tiles()).toEqual(['favorites', 'claude', 'echo', 'opencode', 'antigravity', 'codex', 'pi', 'grok', 'muse']);
   // Claude is the shown one and has two logins, so they sit beside its name.
   expect(seats()).toEqual(['claude::a-claude-main', 'claude::a-claude-side']);
   expect(shownModels()).toEqual(['claude-fable-5-1', 'claude-opus-5', 'claude-sonnet-5']);
