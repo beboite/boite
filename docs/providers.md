@@ -26,6 +26,7 @@ OpenCode's descriptor, with the `linux` and `macos` profiles left out:
     "windows": {
       "detect": {},
       "executable": [
+        { "kind": "file", "value": "{agentsDir}/opencode.exe" },
         { "kind": "file", "value": "{appdata}/npm/node_modules/opencode-ai/bin/opencode.exe" },
         { "kind": "path", "value": "opencode" }
       ],
@@ -205,7 +206,7 @@ is held, and one is held for every process a thread, probe or login launched.
 
 ## What ships
 
-Eight descriptors ship, and only the first seven are ever visible to a user: `echo`
+Nine descriptors ship, and only the first eight are ever visible to a user: `echo`
 is the deterministic fake the tests and the bench run on, loaded only under
 `BOITE_ECHO=1`.
 
@@ -222,7 +223,7 @@ is the deterministic fake the tests and the bench run on, loaded only under
 | Echo | `echo` | nothing | nothing | none | a script beside the descriptor |
 
 Claude is the one whose model list is entirely in the descriptor, current and
-legacy, each with its own effort scale; the other six carry `default` alone and
+legacy, each with its own effort scale; the other seven carry `default` alone and
 let the probe fill the rest. On Windows, Codex and pi are both reached around an
 npm shim Bun cannot spawn, one through a vendored executable and the other
 through an `npm` candidate under either package scope pi has shipped from
@@ -373,7 +374,7 @@ account, and reaches every client as `providers.probed`. Two callers at once sha
 one process. `refresh: true` bypasses a completed cache entry, sharing any probe
 already in flight. The UI keeps a persistent display cache and reads asynchronously.
 A probe that finds no executable, whose agent dies or that runs past
-twenty seconds throws with the reason and caches nothing. `threads.create` and
+twenty seconds, thirty for pi, throws with the reason and caches nothing. `threads.create` and
 `threads.update` accept what the last probe listed on top of the descriptor's; a
 model nobody probed is refused, saying to open the picker.
 

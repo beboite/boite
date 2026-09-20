@@ -183,6 +183,16 @@ export class Core {
     this.bus.emit('core.log', { level, message, at: Date.now() });
   }
 
+  /**
+   * Shutdown, first half. The scheduler stops what runs and waits for it while
+   * the sockets are still open and the bus still has its listeners, so a turn
+   * that ends during shutdown still reaches the clients watching it. Closing
+   * the server first emitted `turn.finished` to nobody.
+   */
+  async drain(): Promise<void> {
+    await this.scheduler.drain();
+  }
+
   async close(): Promise<void> {
     await this.speech.close();
     await this.push.close();

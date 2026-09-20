@@ -31,8 +31,9 @@ does not add system toasts or hard-exit process ownership on Linux or macOS.
 would produce a process nothing here can see.
 
 On Windows the first spawn of a thread creates that thread's Job Object, nested
-inside a global job named `boite-agents`. Both carry `KILL_ON_JOB_CLOSE` and
-neither carries `BREAKAWAY_OK`, so nothing a thread starts can leave the job, and
+inside a global job. Both are created unnamed, so neither can be looked up from
+another process. Both carry `KILL_ON_JOB_CLOSE` and neither carries
+`BREAKAWAY_OK`, so nothing a thread starts can leave the job, and
 a core that dies takes every agent process with it. The child is assigned right
 after spawn, and `windowsHide: true` is set on every one of them.
 

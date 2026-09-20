@@ -64,6 +64,26 @@ describe('scheduler', () => {
     expect(harness.core.threads.get(queued).turns[0]?.status).toBe('stopped');
   });
 
+  test('drain gives up on a turn that ignores its stop instead of hanging shutdown', async () => {
+    const client = await harness.connect();
+    const [running = ''] = await threeThreads(client);
+    await client.call('turns.start', { threadId: running, prompt: '[sleep:60000]' });
+    await waitFor(() => harness.core.scheduler.state().running.length === 1);
+    // A driver that never answers its stop. The wait used to have no deadline,
+    // so one of these held the whole shutdown open for ever.
+    const stopRunning = harness.core.threads.stopRunning.bind(harness.core.threads);
+    harness.core.threads.stopRunning = () => true;
+    try {
+      const started = Date.now();
+      await harness.core.scheduler.drain(150);
+      expect(Date.now() - started).toBeLessThan(5_000);
+    } finally {
+      harness.core.threads.stopRunning = stopRunning;
+    }
+    // Still running: the deadline gave up waiting on it, it did not kill it.
+    expect(harness.core.scheduler.state().running.length).toBe(1);
+  });
+
   test('concurrency caps require positive integers', () => {
     for (const key of ['maxConcurrentTurns', 'perAccountConcurrency'] as const) {
       for (const value of [0, 0.5, 1.5]) {

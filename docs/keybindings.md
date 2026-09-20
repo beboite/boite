@@ -17,11 +17,12 @@ row saves on the key press. Escape alone cancels, as does leaving the window.
 A chord with no modifier is refused on the row. A chord another command
 already has asks first, and "Move it here" takes it from that command. The row's
 reset button returns one command to its default and its clear button leaves it
-with no key; Reset all empties the file.
+with no key; Reset all removes every known entry.
 
 Every change goes through the core: `keybindings.set` writes one entry and
-`keybindings.reset` removes one entry, or all of them, which deletes the file.
-Other entries stay as written, unknown ones included, so the page and a text
+`keybindings.reset` removes one entry, or every known one. The file is deleted
+only when nothing is left in it, so a file holding an unknown key survives a
+Reset all. Other entries stay as written, unknown ones included, so the page and a text
 editor edit the same file. The core writes a temporary file and renames it
 over, reads it back at once, and announces the table like any other change. A
 file that is not JSON is refused rather than overwritten, with its path, and
@@ -42,8 +43,8 @@ or to `null` to take a key away:
 ```
 
 Save it and the change is live. There is no restart, no reload, no button:
-the core watches the directory and reads the file again about a hundred
-milliseconds after the last write, then announces the whole table. An editor
+the core watches the directory and reads the file again 120 milliseconds after
+the last write, then announces the whole table. An editor
 that saves by writing a temporary file and renaming it is read the same way.
 
 ## The chords
