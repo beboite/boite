@@ -3147,7 +3147,9 @@ export class FakeClient implements ObservableClient {
   #addPlugin(previewId: string): PluginState {
     const preview = this.#pluginPreviews.get(previewId);
     const manifest = preview?.manifest;
-    if (preview === undefined || manifest == null) {
+    // A preview is read once and only within its ten minutes, as the core's is.
+    if (preview !== undefined && preview.expiresAt <= this.#now()) this.#pluginPreviews.delete(previewId);
+    if (preview === undefined || manifest == null || preview.expiresAt <= this.#now()) {
       throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'plugin preview is unknown or expired; inspect the URL again' });
     }
     this.#pluginPreviews.delete(previewId);
