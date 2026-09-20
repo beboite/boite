@@ -13,7 +13,7 @@
   },
   "dependencies": {
     "@boite/contracts": "workspace:*",
-    "@lucide/svelte": "1.42.0",
+    "@lucide/svelte": "1.47.0",
     "@tauri-apps/api": "2.11.1",
     "@tauri-apps/plugin-dialog": "2.7.3",
     "@tauri-apps/plugin-opener": "2.5.5",
@@ -28,7 +28,7 @@
     "svelte": "5.57.0",
     "svelte-check": "^4.7.6",
     "typescript": "^6.0.3",
-    "vite": "8.2.2",
-    "vitest": "^5.0.0"
+    "vite": "8.3.0",
+    "vitest": "^5.0.1"
   }
 }
