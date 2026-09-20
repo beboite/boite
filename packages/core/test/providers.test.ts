@@ -84,7 +84,7 @@ describe('providers', () => {
     const { loaded, rejected } = await client.call('providers.list', {});
     expect(rejected).toEqual([]);
     const ids = loaded.map((provider) => provider.id).sort();
-    expect(ids).toEqual(['antigravity', 'claude', 'codex', 'echo', 'grok', 'opencode', 'pi']);
+    expect(ids).toEqual(['antigravity', 'claude', 'codex', 'echo', 'grok', 'muse', 'opencode', 'pi']);
 
     const echo = loaded.find((provider) => provider.id === 'echo');
     expect(echo?.source).toBe('shipped');
@@ -270,6 +270,40 @@ describe('providers', () => {
       return;
     }
     expect(codex.executable?.toLowerCase()).toEndWith('codex.exe');
+  });
+
+  test('the shipped muse descriptor loads and is launched as a session host', async () => {
+    const client = await harness.connect();
+    const { loaded, rejected } = await client.call('providers.list', {});
+    expect(rejected).toEqual([]);
+
+    const muse = loaded.find((provider) => provider.id === 'muse');
+    expect(muse?.source).toBe('shipped');
+    expect(muse?.protocol).toBe('muse');
+    expect(muse?.name).toBe('Muse Code');
+    expect(muse?.models).toEqual([{ id: 'default', name: 'Muse default', default: true }]);
+    expect(muse?.capabilities.planMode).toBe(true);
+
+    const descriptor = harness.core.providers.require('muse');
+    // The three XDG homes are Muse's whole state, its login under `muse/`.
+    expect(descriptor.auth).toEqual({ kind: 'oauth-cli', session: ['muse/auth.json'] });
+    expect(descriptor.login?.command).toEqual(['muse', 'login']);
+    const profile = descriptor.profiles[currentOs()];
+    expect(profile?.launch?.args).toEqual(['serve', '--trust-workspace']);
+    expect(Object.keys(profile?.isolation ?? {})).toEqual(['XDG_CONFIG_HOME', 'XDG_DATA_HOME', 'XDG_STATE_HOME']);
+    // Boite pins the version it installs, and an API key never overrides the account.
+    expect(profile?.env).toEqual({ MUSE_NO_AUTO_UPDATE: '1' });
+    expect(profile?.unsetEnv).toEqual(['META_API_KEY']);
+
+    if (process.platform !== 'win32') return;
+    expect(profile?.install?.url).toContain('muse-x86-windows.exe');
+    expect(profile?.install?.sha256).toHaveLength(64);
+    expect(profile?.install?.files.map((file) => file.path)).toEqual(['muse.exe']);
+    // Boite's own download first, then the official installer's launcher, which
+    // the driver swaps for the versioned binary beside it.
+    expect(profile?.executable[1]?.value.toLowerCase().replaceAll('\\', '/')).toEndWith(
+      '/appdata/local/programs/muse/muse.cmd',
+    );
   });
 
   test('the shipped pi descriptor loads and is launched as node with the cli entry in rpc mode', async () => {

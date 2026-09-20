@@ -29,7 +29,7 @@ export type Timestamp = number;
 // Providers: one JSON descriptor per provider, shipped or user-supplied.
 // ---------------------------------------------------------------------------
 
-export type Protocol = 'claude-sdk' | 'codex-appserver' | 'pi' | 'acp' | 'echo';
+export type Protocol = 'claude-sdk' | 'codex-appserver' | 'muse' | 'pi' | 'acp' | 'echo';
 
 export type Os = 'windows' | 'linux' | 'macos';
 
