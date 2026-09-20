@@ -3,7 +3,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { AgentAddress, AgentContact, AgentLetter, CoordinationConfig, CoordinationPeer, CoordinationView, RpcParams } from '@boite/contracts';
 import type { Core } from './core.ts';
-import { invalidParams, messageOf, refused } from './errors.ts';
+import { invalidParams, messageOf, refused, RpcFailure } from './errors.ts';
 
 const HOUR = 3_600_000;
 const MAX_BODY = 262_144;
@@ -444,7 +444,7 @@ export class Coordination {
     if (!verify(null, Buffer.from(raw), peer.publicKey, Buffer.from(response.headers.get('x-boite-signature') ?? '', 'base64'))) throw new Error('invalid peer response signature');
     const reply = JSON.parse(raw) as { nonce: string; result?: unknown; error?: string };
     if (reply.nonce !== nonce) throw new Error('peer response nonce mismatch');
-    if (reply.error) throw new PeerRefusal(reply.error);
+    if (reply.error && response.status === 400) throw new PeerRefusal(reply.error);
     if (!response.ok) throw new Error('peer request failed');
     return reply.result;
   }
@@ -471,6 +471,7 @@ export class Coordination {
     } catch { return new Response('invalid signed message', { status: 403 }); }
     let result: unknown;
     let error: string | undefined;
+    let status = 200;
     try {
       // A revoke while the body streamed wins before any data is read or changed.
       if (!this.peers().some(p => p.coreId === peer.coreId)) throw refused('peer permission revoked');
@@ -482,10 +483,13 @@ export class Coordination {
         if (!letter || letter.from.coreId !== peer.coreId || letter.from.threadId !== payload.fromThreadId) throw refused('unknown receipt');
         result = letter;
       } else throw invalidParams('operation: expected directory, deliver or receipt');
-    } catch (reason) { error = messageOf(reason); }
+    } catch (reason) {
+      status = reason instanceof RpcFailure ? 400 : 500;
+      error = reason instanceof RpcFailure ? reason.message : 'Machine could not process the request';
+    }
     const raw = JSON.stringify({ nonce: envelope.nonce, result, error });
     this.identityKey();
-    return new Response(raw, { status: error ? 400 : 200, headers: { 'content-type': 'application/json', 'cache-control': 'no-store', 'x-boite-signature': sign(null, Buffer.from(raw), this.key!).toString('base64') } });
+    return new Response(raw, { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store', 'x-boite-signature': sign(null, Buffer.from(raw), this.key!).toString('base64') } });
   }
   beginClose(): void { this.closed = true; clearInterval(this.timer); }
   async close(): Promise<void> { this.beginClose(); await Promise.allSettled([...this.pending]); }

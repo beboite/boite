@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from 'bun:test';
+import { afterEach, expect, spyOn, test } from 'bun:test';
 import { mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { sign } from 'node:crypto';
@@ -130,6 +130,26 @@ test('two real cores exchange signed directory, message, reply and receipt witho
   two.h.core.coordination.untrust(cardA.coreId);
   expect((await one.h.core.coordination.directory(one.a)).unavailable).toEqual([cardB.name]);
 }, 25000);
+
+test('signed peer errors expose validation messages but hide unexpected implementation details', async () => {
+  const one = await setup(); const two = await setup();
+  const cardA = one.h.core.coordination.identity(), cardB = two.h.core.coordination.identity();
+  two.h.core.coordination.trust(cardA);
+  const request = async (operation: string) => {
+    const body = JSON.stringify({ from: cardA.coreId, to: cardB.coreId, at: Date.now(), nonce: crypto.randomUUID(), operation, payload: {} });
+    const signature = sign(null, Buffer.from(body), readFileSync(join(one.h.dataDir, 'coordination-key.pem'))).toString('base64');
+    return fetch(`${two.h.url}/agent-messages`, { method: 'POST', body, headers: { 'x-boite-peer': cardA.coreId, 'x-boite-signature': signature } });
+  };
+  const invalid = await request('invalid');
+  expect(invalid.status).toBe(400);
+  expect(await invalid.json()).toMatchObject({ error: 'operation: expected directory, deliver or receipt' });
+  const failure = spyOn(two.h.core.journal, 'listThreads').mockImplementation(() => { throw new Error('database failure at /private/workspace/journal.sqlite'); });
+  try {
+    const response = await request('directory');
+    expect(response.status).toBe(500);
+    expect(await response.json()).toMatchObject({ error: 'Machine could not process the request' });
+  } finally { failure.mockRestore(); }
+});
 
 test('federation rejects forged signatures, replay, sender substitution, cleartext remote URLs and device configuration', async () => {
   const one = await setup(); const two = await setup();
