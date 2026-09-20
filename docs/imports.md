@@ -22,7 +22,7 @@ with a line on the log. The listing parses the first prompt and the title
 records only, so a folder of long sessions answers in well under a second.
 
 Only Claude Code keeps transcripts Boite reads today. OpenCode, Codex, pi,
-Antigravity and Grok have their own stores; none is read yet.
+Antigravity, Grok and Muse Code have their own stores; none is read yet.
 
 ## What is imported
 

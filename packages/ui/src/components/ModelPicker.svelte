@@ -54,7 +54,7 @@
     favoritePending = true;
     try {
       const protocol = store.providerOf(entry.providerId)?.protocol;
-      if (protocol === 'claude-sdk' || protocol === 'acp' || protocol === 'codex-appserver' || protocol === 'pi') await store.probeModels(entry.providerId, entry.accountId);
+      if (protocol === 'claude-sdk' || protocol === 'acp' || protocol === 'codex-appserver' || protocol === 'muse' || protocol === 'pi') await store.probeModels(entry.providerId, entry.accountId);
       if (!store.modelsOf(entry.providerId, entry.accountId).some((m) => m.id === entry.model.id)) { store.error = strings.composer.favoriteUnavailable; return; }
       onpick({ providerId: entry.providerId, accountId: entry.accountId, model: entry.model.id });
       popover.hide();
@@ -112,10 +112,25 @@
   // Nothing is asked of a provider whose executable is not on the machine.
   $effect(() => {
     if (!popover.open || favoritesOpen || !shown || needsInstall) return;
-    if (shown.protocol !== 'claude-sdk' && shown.protocol !== 'acp' && shown.protocol !== 'codex-appserver' && shown.protocol !== 'pi') return;
+    if (shown.protocol !== 'claude-sdk' && shown.protocol !== 'acp' && shown.protocol !== 'codex-appserver' && shown.protocol !== 'muse' && shown.protocol !== 'pi') return;
     const accountId = shownAccountId;
     if (accountId === null) return;
     void store.probeModels(shown.id, accountId);
+  });
+
+  // On a phone the rail scrolls, and the refresh button covers its right end:
+  // the shown tile is brought clear of both whenever it changes.
+  $effect(() => {
+    const current = favoritesOpen ? 'favorites' : shown?.id;
+    if (!popover.shown || !menu || !current) return;
+    const rail = menu.querySelector<HTMLElement>('.rail');
+    const tile = rail?.querySelector<HTMLElement>(`[data-provider="${current}"]`);
+    if (!rail || !tile) return;
+    const railBox = rail.getBoundingClientRect();
+    const tileBox = tile.getBoundingClientRect();
+    const visibleRight = railBox.right - (parseFloat(getComputedStyle(rail).paddingRight) || 0);
+    if (tileBox.right > visibleRight) rail.scrollLeft += tileBox.right - visibleRight;
+    else if (tileBox.left < railBox.left) rail.scrollLeft -= railBox.left - tileBox.left;
   });
 
   // The effort has a chip of its own in the composer, so this one names the
