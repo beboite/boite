@@ -58,7 +58,7 @@ interface Target {
 }
 
 async function npmLatest(name: string): Promise<string> {
-  const response = await fetch(`https://registry.npmjs.org/${name.replace('/', '%2F')}/latest`, {
+  const response = await fetch(`https://registry.npmjs.org/${name.replaceAll('/', '%2F')}/latest`, {
     signal: AbortSignal.timeout(VERSION_TIMEOUT_MS),
     headers: { accept: 'application/json' },
   });

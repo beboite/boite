@@ -90,19 +90,33 @@ export function registerProbeMethods(core: Core): void {
     accountRevisions.set(accountId, accountRevision(accountId) + 1);
   };
   const pending = new Map<string, Promise<RpcResult<'providers.probe'>>>();
+  /** The last probe of each provider and account, settled or not: the next one waits for it. */
+  const lanes = new Map<string, Promise<void>>();
   core.router.register('providers.probe', (params) => {
     if (params.model !== undefined && (typeof params.model !== 'string' || params.model.length === 0)) {
-      throw invalidParams('model must be a non-empty string when given');
+      throw invalidParams('model must be a non-empty string when given', { field: 'model', expected: 'a non-empty string' });
     }
     const key = JSON.stringify([params.providerId, params.accountId, params.model ?? null]);
     const existing = pending.get(key);
     if (existing) return existing;
-    if (params.refresh) forgetProbes({ providerId: params.providerId, accountId: params.accountId });
-    const startedAtRevision = revision;
-    const startedAtAccount = accountRevision(params.accountId);
-    const isCurrent = () => revision === startedAtRevision && accountRevision(params.accountId) === startedAtAccount;
-    const request = probeProvider(core, params.providerId, params.accountId, isCurrent, params.model).finally(() => pending.delete(key));
+    // One probe at a time per account: they share a synthetic thread, so the
+    // `killTree` that ends one would take a second one's process with it, and a
+    // refresh would drop the cache entry the other is still filling.
+    const lane = JSON.stringify([params.providerId, params.accountId]);
+    const before = lanes.get(lane) ?? Promise.resolve();
+    const request = before.then(() => {
+      if (params.refresh) forgetProbes({ providerId: params.providerId, accountId: params.accountId });
+      const startedAtRevision = revision;
+      const startedAtAccount = accountRevision(params.accountId);
+      const isCurrent = () => revision === startedAtRevision && accountRevision(params.accountId) === startedAtAccount;
+      return probeProvider(core, params.providerId, params.accountId, isCurrent, params.model);
+    }).finally(() => pending.delete(key));
     pending.set(key, request);
+    const settled = request.then(() => undefined, () => undefined);
+    lanes.set(lane, settled);
+    void settled.then(() => {
+      if (lanes.get(lane) === settled) lanes.delete(lane);
+    });
     return request;
   });
 

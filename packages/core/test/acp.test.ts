@@ -626,6 +626,19 @@ describe('acp driver', () => {
     expect(toolOutputText({ other: 1 })).toContain('"other"');
   });
 
+  test('two probes of one account asked together both answer, one after the other', async () => {
+    const client = await startCore();
+    const { accountId } = await acpAccount(client);
+
+    // The picker's probe and a model's effort probe leave the UI in the same tick.
+    const [plain, named] = await Promise.all([
+      client.call('providers.probe', { providerId: 'acp-fake', accountId, refresh: true }),
+      client.call('providers.probe', { providerId: 'acp-fake', accountId, model: 'fake-smart', refresh: true }),
+    ]);
+    expect(plain.models.map((model) => model.id)).toContain('fake-smart');
+    expect(named.models.find((model) => model.id === 'fake-smart')?.effort?.default).toBe('high');
+  });
+
   test('a probe naming a model reads the scale the agent gives that model', async () => {
     const client = await startCore();
     const { accountId, projectId } = await acpAccount(client);
