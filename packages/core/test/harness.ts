@@ -50,6 +50,9 @@ export async function startTestCore(options: TestCoreOptions = {}): Promise<Test
   });
 
   const clients: CoreClient[] = [];
+  // A test that shuts the core down itself still has `afterEach` calling this,
+  // and closing a journal or a bus twice is not the thing under test.
+  let stopped = false;
   return {
     core,
     server,
@@ -62,6 +65,8 @@ export async function startTestCore(options: TestCoreOptions = {}): Promise<Test
       return client;
     },
     async stop(): Promise<void> {
+      if (stopped) return;
+      stopped = true;
       for (const client of clients) client.close();
       await server.stop();
       await core.close();

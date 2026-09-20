@@ -84,6 +84,21 @@ describe('scheduler', () => {
     expect(harness.core.scheduler.state().running.length).toBe(1);
   });
 
+  test('a shutdown waits once for a turn that ignores its stop, not once per phase', async () => {
+    const client = await harness.connect();
+    const [running = ''] = await threeThreads(client);
+    await client.call('turns.start', { threadId: running, prompt: '[sleep:60000]' });
+    await waitFor(() => harness.core.scheduler.state().running.length === 1);
+    harness.core.threads.stopRunning = () => true;
+    await harness.core.drain(150);
+    // `close()` drains again, for a turn that ended while the sockets were
+    // closing. Spending the whole budget a second time is what used to run the
+    // shutdown past its own ten seconds and skip every step after the drain.
+    const started = Date.now();
+    await harness.stop();
+    expect(Date.now() - started).toBeLessThan(2_000);
+  });
+
   test('concurrency caps require positive integers', () => {
     for (const key of ['maxConcurrentTurns', 'perAccountConcurrency'] as const) {
       for (const value of [0, 0.5, 1.5]) {

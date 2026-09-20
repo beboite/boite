@@ -356,8 +356,8 @@ export class Store {
   /** The thread `trace` belongs to, and whether the trace surface is on screen to read it. */
   #tracedThreadId: ThreadId | null = null;
   traceWatched = false;
-  /** The load in flight, so the two callers of `reload()` share one. */
-  #reloading: Promise<void> | null = null;
+  /** The load in flight and the client it speaks to, so the two callers of `reload()` share one. */
+  #reloading: { client: Client; promise: Promise<void> } | null = null;
   #loginRevision = 0;
   #loginChanges = new Map<string, number>();
 
@@ -1135,10 +1135,18 @@ export class Store {
    * again. It joins the load already in flight instead.
    */
   reload(): Promise<void> {
-    this.#reloading ??= this.#load().finally(() => {
-      this.#reloading = null;
+    const client = this.#client;
+    if (!client) return this.#load();
+    // The load in flight belongs to the client that started it. A machine
+    // switched under a slow boot used to hand the new client that same
+    // promise, whose result `#load()` then discards for being the old one's,
+    // so the new machine's store stayed empty until something asked again.
+    if (this.#reloading?.client === client) return this.#reloading.promise;
+    const promise = this.#load().finally(() => {
+      if (this.#reloading?.promise === promise) this.#reloading = null;
     });
-    return this.#reloading;
+    this.#reloading = { client, promise };
+    return promise;
   }
 
   async #load(): Promise<void> {
@@ -1662,7 +1670,7 @@ export class Store {
     if (prompt.trim().length === 0 && attachments.length === 0) return false;
     try {
       // Reconnect snapshots must land before a new stream starts mutating the thread.
-      await this.#reloading;
+      await this.#reloading?.promise;
       if (this.#client !== client || this.connection !== 'ready') return false;
       const activity = activityCommand(prompt);
       if (activity) {

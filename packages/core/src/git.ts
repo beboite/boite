@@ -11,8 +11,8 @@
  * thread started in a subdirectory of its project.
  */
 
-import { statSync } from 'node:fs';
-import { open, readFile } from 'node:fs/promises';
+import { open } from 'node:fs/promises';
+import type { FileHandle } from 'node:fs/promises';
 import { DIFF_MAX_BYTES } from '@boite/contracts';
 import type { GitChange, GitChangeStatus, GitDiff, GitStatus, RpcParams, ThreadId } from '@boite/contracts';
 import type { Core } from './core.ts';
@@ -219,37 +219,42 @@ export async function gitDiff(core: Core, params: RpcParams<'git.diff'>): Promis
   // for a file git has nothing to say about.
   const atRef = change?.oldPath ?? change?.path ?? `./${found.relative}`;
   // `git show` buffers the whole blob before anything is cut, so the size is
-  // asked for first and an absurd one is never loaded at all.
-  const sized = await git(core, threadId, cwd, ['cat-file', '-s', `${ref}:${atRef}`]);
-  const blobBytes = sized.code === 0 ? Number(sized.stdout.trim()) : null;
+  // asked for first and an absurd one is never loaded at all. The name is
+  // resolved to the blob's own id before either call: a branch that moves
+  // between them would otherwise size one object and read another.
+  const resolved = await git(core, threadId, cwd, ['rev-parse', '--verify', '--quiet', `${ref}:${atRef}`]);
+  const blob = resolved.code === 0 ? resolved.stdout.trim() : '';
+  const sized = blob.length > 0 ? await git(core, threadId, cwd, ['cat-file', '-s', blob]) : null;
+  const blobBytes = sized !== null && sized.code === 0 ? Number(sized.stdout.trim()) : null;
   const refSideTooBig = blobBytes !== null && Number.isFinite(blobBytes) && blobBytes > SIDE_CEILING_BYTES;
-  const shown = refSideTooBig ? null : await gitBytes(core, threadId, cwd, ['show', `${ref}:${atRef}`]);
+  const shown =
+    blob.length === 0 || refSideTooBig ? null : await gitBytes(core, threadId, cwd, ['cat-file', 'blob', blob]);
   const old = shown !== null && shown.code === 0 ? shown.data : null;
 
   let current: Uint8Array | null = null;
   let newSideTooBig = false;
+  // Size before read, on the handle rather than the path. A multi-gigabyte
+  // working-tree file used to be loaded whole and only cut to DIFF_MAX_BYTES
+  // afterwards, so one `git.diff` on a big log could take the core down; and a
+  // path replaced between a `stat` and a `readFile` would have escaped the
+  // ceiling the stat approved. Only what the diff can show is read, from the
+  // one file the size was taken from.
+  let handle: FileHandle | null = null;
   try {
-    // Stat before read. A multi-gigabyte working-tree file used to be loaded
-    // whole and only cut to DIFF_MAX_BYTES afterwards, so one `git.diff` on a
-    // big log could take the core down. Only what the diff can show is read.
-    const size = statSync(found.absolute).size;
+    handle = await open(found.absolute, 'r');
+    const size = (await handle.stat()).size;
     if (size > SIDE_CEILING_BYTES) {
       newSideTooBig = true;
-    } else if (size > DIFF_MAX_BYTES) {
-      const handle = await open(found.absolute, 'r');
-      try {
-        // One byte past the limit, so `cut` still reports the side as truncated.
-        const buffer = new Uint8Array(DIFF_MAX_BYTES + 1);
-        const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
-        current = buffer.subarray(0, bytesRead);
-      } finally {
-        await handle.close();
-      }
     } else {
-      current = await readFile(found.absolute);
+      // One byte past the limit, so `cut` still reports the side as truncated.
+      const buffer = new Uint8Array(Math.min(size, DIFF_MAX_BYTES) + 1);
+      const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+      current = buffer.subarray(0, bytesRead);
     }
   } catch {
     current = null;
+  } finally {
+    await handle?.close();
   }
   if (refSideTooBig || newSideTooBig) {
     throw refused(

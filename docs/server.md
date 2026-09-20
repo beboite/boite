@@ -179,7 +179,8 @@ RestartSec=5
 WantedBy=default.target
 ```
 
-The data directory is `~/.local/share/boite2`, or whatever `--data-dir` or
+The data directory is `~/.local/share/boite2` on the stable channel and
+`~/.local/share/boite2-dev` on the dev one, or whatever `--data-dir` or
 `BOITE_DATA_DIR` names: the journal, the accounts, `core.json` with the core
 token (mode 600) and `core.lock`. `$XDG_DATA_HOME` is not read.
 

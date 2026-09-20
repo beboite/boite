@@ -29,6 +29,27 @@ test('dropped folders use the local core when a remote machine is selected', asy
   }
 });
 
+test('a machine switched under a slow boot loads the new one instead of joining the old load', async () => {
+  const slow = new FakeClient({ delayMs: 20 });
+  const fresh = new FakeClient({ delayMs: 0 });
+  const store = new Store();
+  store.attach(slow);
+  await store.connect();
+  try {
+    const first = store.reload();
+    store.attach(fresh);
+    const asked = vi.spyOn(fresh, 'call');
+    // The load in flight belongs to the machine that started it, and its
+    // results are dropped on landing. Handing the same promise to the new
+    // machine meant the new machine was never asked for anything at all.
+    await Promise.all([store.connect(), first]);
+    expect(asked.mock.calls.map(([method]) => method)).toContain('projects.list');
+    expect(store.error).toBe(null);
+  } finally {
+    store.detach(); slow.close(); fresh.close();
+  }
+});
+
 async function ready(): Promise<{ store: Store; client: FakeClient }> {
   const client = new FakeClient({ delayMs: 0 });
   const store = new Store();
