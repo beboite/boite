@@ -10,17 +10,21 @@
 
   let quotas = $state<AccountQuota[] | null>(null);
   let loading = $state(false);
+  /** Only the newest read writes, so the first one never lands over a refresh asked meanwhile. */
+  let latest = 0;
 
   async function read(refresh: boolean) {
     const client = store.client;
     if (!client || !store.owner) return;
+    const request = ++latest;
     loading = true;
     try {
-      quotas = await client.call('quotas.list', { refresh });
+      const rows = await client.call('quotas.list', { refresh });
+      if (request === latest) quotas = rows;
     } catch {
-      quotas ??= [];
+      if (request === latest) quotas ??= [];
     } finally {
-      loading = false;
+      if (request === latest) loading = false;
     }
   }
 
