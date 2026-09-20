@@ -22,7 +22,7 @@
   import Prose from './Prose.svelte';
   import ThinkingPart from './ThinkingPart.svelte';
   import TurnSummary from './TurnSummary.svelte';
-  import { promptText } from '../lib/message-display';
+  import { promptCommand, promptText } from '../lib/message-display';
   import ToolCard from './ToolCard.svelte';
   import MessageOutline from './MessageOutline.svelte';
   import { visibleAnswer } from '../lib/message-display';
@@ -543,7 +543,7 @@
               {#each message.parts as part, index (index)}
                 {#if part.type === 'text'}
                   {@const prompt = promptText(part)}
-                  {@const command = /^\/(goal|loop)(?=\s|$)/.exec(prompt)?.[0]}
+                  {@const command = promptCommand(prompt)}
                   <p class="user-text" data-testid="text-part">{#if command}<span class="command">{command}</span>{prompt.slice(command.length)}{:else}{prompt}{/if}</p>
                 {:else if part.type === 'file'}
                   <a class="file-attachment" data-testid="file-part" href="data:application/octet-stream;base64,{part.data}" download={part.name ?? strings.composer.attachAlt}>
@@ -668,7 +668,8 @@
 </div>
 
 <style>
-  .model-attribution { color: var(--color-muted-foreground); font-size: var(--text-xs); margin-bottom: 4px; }
+  /* On the same 4 px rest as the parts it names. */
+  .model-attribution { color: var(--color-muted-foreground); font-size: var(--text-xs); margin-bottom: 4px; padding-left: 4px; }
   .receipts { display: flex; gap: 1px; margin: 4px 2px 0; color: var(--color-muted-foreground); }
   .receipts span { display: flex; opacity: .45; }
   .receipts .received { color: var(--color-accent); opacity: 1; }

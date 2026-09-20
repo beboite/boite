@@ -112,9 +112,11 @@
     <span class="channel" title={strings.app.channelDevTitle} data-testid="titlebar-channel">{strings.app.channelDev}</span>
   {/if}
   {#if inShell}
-  <div class="controls">
+  <!-- Windows' caption buttons: 46 px wide, the bar's full height, no gap and
+       flush with the edge, so a throw into the top right corner lands on Close. -->
+  <div class="controls" data-testid="titlebar-controls">
     <button type="button" class="ctl" aria-label={strings.titlebar.minimize} title={strings.titlebar.minimize} onclick={() => void minimize()}>
-      <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M1 6.5h10" /></svg>
+      <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M0 5.5h10" /></svg>
     </button>
     <button
       type="button"
@@ -126,13 +128,13 @@
       onclick={() => void maximize()}
     >
       {#if maximized}
-        <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M3.5 2.5v-1h7v7h-1" /><rect x="1.5" y="3.5" width="7" height="7" /></svg>
+        <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M2.5 2.5v-2h7v7h-2" /><rect x="0.5" y="2.5" width="7" height="7" /></svg>
       {:else}
-        <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><rect x="1.5" y="1.5" width="9" height="9" /></svg>
+        <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><rect x="0.5" y="0.5" width="9" height="9" /></svg>
       {/if}
     </button>
-    <button type="button" class="ctl close" aria-label={strings.titlebar.close} title={strings.titlebar.close} onclick={() => void close()}>
-      <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="m1.5 1.5 9 9m0-9-9 9" /></svg>
+    <button type="button" class="ctl close" aria-label={strings.titlebar.close} title={strings.titlebar.close} data-testid="titlebar-close" onclick={() => void close()}>
+      <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="m0.5 0.5 9 9m0-9-9 9" /></svg>
     </button>
   </div>
   {/if}
@@ -153,14 +155,20 @@
     cursor: default;
   }
 
+  /* In the shell the caption buttons end the bar at its edge. */
+  .titlebar.browser { padding-right: 8px; }
   .sidebar-toggle { flex: none; }
   @media (max-width: 720px) {
     .titlebar.browser { background: var(--color-background); padding: 0 16px; }
     .browser .sidebar-toggle { display: none; }
   }
   .name { flex: 1; min-width: 0; font-size: var(--text-sm); color: var(--color-muted-foreground); }
-  .titlebar { padding-right: 8px; }
-  .controls { flex: none; margin-left: 4px; }
+  /* Alone in the bar, the label starts where the toggle's icon would: 16 px in. */
+  .name:first-child { padding-left: 8px; }
+  /* The phone bar already pads 16 px. */
+  @media (max-width: 720px) {
+    .titlebar.browser .name:first-child { padding-left: 0; }
+  }
 
   .channel {
     font-size: var(--text-xs);
@@ -174,21 +182,19 @@
 
   .controls {
     display: flex;
-    justify-content: flex-end;
-    align-items: center;
-    gap: 4px;
-    padding-right: 6px;
-    height: 100%;
+    flex: none;
+    align-self: stretch;
+    margin-left: 4px;
   }
 
   .ctl {
-    width: 34px;
+    width: var(--caption);
+    height: 100%;
     padding: 0;
     display: grid;
     place-items: center;
-    height: 26px;
     border: none;
-    border-radius: var(--radius-sm);
+    border-radius: 0;
     background: transparent;
     color: var(--color-muted-foreground);
   }
@@ -197,7 +203,7 @@
 
   .ctl:hover:not(:disabled),
   .ctl:focus-visible {
-    background: var(--color-surface-3);
+    background: var(--color-hover);
     color: var(--color-foreground);
     outline: none;
   }
@@ -206,16 +212,16 @@
      than moving, because the frame itself never moves. */
   .ctl:active:not(:disabled) {
     transform: none;
-    background: color-mix(in srgb, var(--color-surface-3) 82%, var(--color-foreground));
+    background: var(--color-active);
   }
 
   .ctl.close:hover:not(:disabled),
   .ctl.close:focus-visible {
-    background: var(--color-danger);
+    background: var(--color-caption-close);
     color: var(--color-on-danger);
   }
 
   .ctl.close:active:not(:disabled) {
-    background: var(--color-danger-hover);
+    background: color-mix(in srgb, var(--color-caption-close) 85%, var(--color-foreground));
   }
 </style>

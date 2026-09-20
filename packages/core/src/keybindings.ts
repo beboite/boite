@@ -8,12 +8,13 @@
  * are the UI's, so the file only carries what differs.
  */
 
-import { existsSync, readFileSync, watch } from 'node:fs';
+import { existsSync, readFileSync, renameSync, rmSync, watch, writeFileSync } from 'node:fs';
 import type { FSWatcher } from 'node:fs';
 import { join } from 'node:path';
 import { KEYBINDING_COMMANDS, parseChord } from '@boite/contracts';
 import type { Keybindings, KeybindingCommand } from '@boite/contracts';
 import type { Core } from './core.ts';
+import { invalidParams, refused } from './errors.ts';
 
 export const KEYBINDINGS_FILE = 'keybindings.json';
 /** An editor writes a file in more than one event; the read waits for the burst to end. */
@@ -79,6 +80,64 @@ export class KeybindingStore {
     return structuredClone(this.current);
   }
 
+  /**
+   * One entry written into the file, the others kept as the user wrote them,
+   * unknown ones included: the settings page edits the same file a text editor
+   * does. A chord is checked before anything is written.
+   */
+  set(command: KeybindingCommand, chord: string | null): Keybindings {
+    if (!KNOWN.has(command)) throw invalidParams(`command: "${command}" is not a command Boite has`);
+    if (chord !== null) {
+      if (typeof chord !== 'string') throw invalidParams('chord: expected a chord string like mod+shift+k, or null');
+      const parsed = parseChord(chord);
+      if (!parsed.ok) throw invalidParams(`chord: ${parsed.reason}`);
+    }
+    const entries = this.entries();
+    entries[command] = chord === null ? null : chord.trim().toLowerCase();
+    return this.write(entries);
+  }
+
+  /** Entries out of the file: one command, or all of them, which removes the file. */
+  reset(command?: KeybindingCommand): Keybindings {
+    if (command !== undefined && !KNOWN.has(command)) throw invalidParams(`command: "${command}" is not a command Boite has`);
+    const entries = this.entries();
+    if (command === undefined) for (const id of KEYBINDING_COMMANDS) delete entries[id];
+    else delete entries[command];
+    return this.write(entries);
+  }
+
+  /** The file as an object, or a refusal: a file Boite cannot read is the user's to fix, never to overwrite. */
+  private entries(): Record<string, unknown> {
+    if (!existsSync(this.path)) return {};
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(readFileSync(this.path, 'utf8'));
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      throw refused(`${KEYBINDINGS_FILE}: not valid JSON (${detail}); fix it by hand at ${this.path} before changing a key here`);
+    }
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+      throw refused(`${KEYBINDINGS_FILE}: expected an object of command ids to chords at ${this.path}; fix it by hand before changing a key here`);
+    }
+    return parsed as Record<string, unknown>;
+  }
+
+  /** Written beside and renamed over, so the watcher and an open editor never see half a file. */
+  private write(entries: Record<string, unknown>): Keybindings {
+    if (Object.keys(entries).length === 0) rmSync(this.path, { force: true });
+    else {
+      const temp = `${this.path}.${process.pid}.tmp`;
+      writeFileSync(temp, `${JSON.stringify(entries, null, 2)}
+`, 'utf8');
+      renameSync(temp, this.path);
+    }
+    // Read back now rather than on the watch, so the answer already holds the change.
+    if (this.settle !== null) clearTimeout(this.settle);
+    this.settle = null;
+    this.reload();
+    return this.get();
+  }
+
   close(): void {
     if (this.settle !== null) clearTimeout(this.settle);
     this.settle = null;
@@ -141,4 +200,6 @@ export class KeybindingStore {
 
 export function registerKeybindingMethods(core: Core): void {
   core.router.register('keybindings.get', () => core.keybindings.get());
+  core.router.register('keybindings.set', ({ command, chord }) => core.keybindings.set(command, chord));
+  core.router.register('keybindings.reset', ({ command }) => core.keybindings.reset(command));
 }

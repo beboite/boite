@@ -10,7 +10,7 @@ beforeAll(async () => {
   const port = await freePort();
   const vite = await createServer({root:join(import.meta.dir,'../../packages/ui'),server:{host:'127.0.0.1',port,strictPort:true}});
   server = vite; await vite.listen();
-  page = await BrowserPage.launch({url:`http://127.0.0.1:${port}/?fake=1`,windowSize:{width:1300,height:850}});
+  page = await BrowserPage.launch({url:`http://127.0.0.1:${port}/?fake=1&open=recent`,windowSize:{width:1300,height:850}});
   await page.waitFor(`document.querySelector('[data-thread-id]')`);
 }, 90000);
 afterAll(async () => { await page?.close(); await server?.close(); });

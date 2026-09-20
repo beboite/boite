@@ -17,14 +17,12 @@
 </script>
 
 <section class="card" data-testid="shell-settings">
-  <label>
-    <span>{strings.settings.closeToTray}<small>{strings.settings.closeToTrayHint}</small></span>
+  <label class="switch-row">
+    <span class="text">{strings.settings.closeToTray}<span class="hint">{strings.settings.closeToTrayHint}</span></span>
     <input type="checkbox" role="switch" data-testid="close-to-tray" checked={enabled} disabled={!ready} onchange={(event) => void update(event.currentTarget.checked)} />
   </label>
   {#if error}<p role="alert">{error}</p>{/if}
 </section>
 <style>
-  label { display: flex; align-items: center; gap: 20px; justify-content: space-between; }
-  small { display: block; color: var(--color-muted-foreground); font-size: var(--text-sm); margin-top: 4px; }
-  p { color: var(--color-danger); }
+  p { margin-top: 12px; color: var(--color-danger); }
 </style>

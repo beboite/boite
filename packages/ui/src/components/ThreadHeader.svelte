@@ -107,7 +107,7 @@
       {/if}
       {#if thread?.branch}
         <span class="chip path branch mono" title="{strings.thread.branchHint}: {thread.cwd}" data-testid="thread-branch">
-          <GitBranch size={12} strokeWidth={1.75} />
+          <GitBranch size={13} strokeWidth={1.75} />
           {thread.branch}
         </span>
       {/if}
@@ -175,10 +175,6 @@
     overflow: hidden;
     text-overflow: ellipsis;
     font-size: var(--text-sm);
-  }
-
-  .branch {
-    color: var(--color-foreground);
   }
 
   .trace {

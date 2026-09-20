@@ -27,13 +27,30 @@ function escapeMarkdown(text: string): string {
   return text.replace(/[\\`*_[\]<>]/g, '\\$&');
 }
 
+// Subjects follow the pull request title check (scripts/ci/pr-title.ts). Older
+// or direct commits without a known type land under "Other changes".
+const SECTIONS = [['feat', 'Features'], ['fix', 'Fixes'], ['perf', 'Performance']] as const;
+
+function commitType(subject: string): string | undefined {
+  return /^(\w+)(?:\([^)]*\))?!?: /.exec(subject)?.[1];
+}
+
 export function releaseNotes(
   commits: Commit[], repository: string, tag: string, previous?: string, announcement = '',
 ): string {
   const url = `https://github.com/${repository}`;
-  const changes = commits.map(({ sha, subject }) =>
+  const list = (group: Commit[]) => group.map(({ sha, subject }) =>
     `- ${escapeMarkdown(subject)} ([${sha.slice(0, 7)}](${url}/commit/${sha}))`,
   ).join('\n');
+  const known = new Set<string>(SECTIONS.map(([type]) => type));
+  const groups = [
+    ...SECTIONS.map(([type, title]) => [title, commits.filter((commit) => commitType(commit.subject) === type)] as const),
+    ['Other changes', commits.filter((commit) => !known.has(commitType(commit.subject) ?? ''))] as const,
+  ].filter(([, group]) => group.length > 0);
+  // A list with nothing to tell apart needs no heading.
+  const changes = groups.length === 1 && groups[0]![0] === 'Other changes'
+    ? list(groups[0]![1])
+    : groups.map(([title, group]) => `### ${title}\n\n${list(group)}`).join('\n\n');
   const compare = previous
     ? `[Full diff](${url}/compare/${encodeURIComponent(previous)}...${encodeURIComponent(tag)})`
     : '';

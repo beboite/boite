@@ -37,7 +37,7 @@ import type {
 import pkg from '../../package.json';
 import { messageOf, unavailable } from '../errors.ts';
 import type { SpawnedChild, SpawnOptions } from '../procs.ts';
-import { agentEnv, profileFor, resolveExecutable } from '../providers/loader.ts';
+import { agentEnv, launchPrefix, profileFor, resolveExecutable } from '../providers/loader.ts';
 import { normalizeAntigravityTool, isAntigravityQuestion } from './antigravity.ts';
 import { grokEffortOf, grokLaunchArgs, grokReasoningEffortOf } from './grok.ts';
 import { imageDocument } from './documents.ts';
@@ -83,7 +83,7 @@ function isGrok(provider: ProviderDescriptor): boolean {
  */
 function launchArgs(profile: OsProfile | undefined, provider: ProviderDescriptor, mode: PermissionMode): string[] {
   const declared = profile?.launch?.args ?? [];
-  return isGrok(provider) ? grokLaunchArgs(declared, mode) : [...declared];
+  return [...launchPrefix(profile), ...(isGrok(provider) ? grokLaunchArgs(declared, mode) : declared)];
 }
 
 /** One `ContentBlock::Image` per attachment, `mimeType` and `data` as ACP names them. */
@@ -1244,7 +1244,7 @@ async function readModels(ctx: ProbeContext, deps: AcpDeps, noteOptions: (option
   let lastStderr = '';
   // No thread here, so no permission mode either: the probe launches the line
   // the descriptor declares and reads the agent on its own defaults.
-  const child = ctx.spawnChild(executable, profile?.launch?.args ?? [], {
+  const child = ctx.spawnChild(executable, [...launchPrefix(profile), ...(profile?.launch?.args ?? [])], {
     cwd: ctx.cwd,
     env: agentEnv(ctx.provider, ctx.accountEnv),
   });

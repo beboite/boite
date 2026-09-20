@@ -27,7 +27,7 @@ function reset() {
   store.composerStates = {};
 }
 test('the existing thread picker switches providers and back without losing the conversation or draft', async () => {
-  history.replaceState(null, '', '/?fake=1');
+  history.replaceState(null, '', '/?fake=1&open=recent');
   reset();
   app = mount(App, { target: document.body });
   await waitFor(() => store.booted && store.openThread !== null);

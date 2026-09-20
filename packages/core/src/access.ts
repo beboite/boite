@@ -71,6 +71,9 @@ export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>
   // Read-only screens.
   'scheduler.get',
   'usage.get',
+  // Sums of the same finished turns per day, provider and model. The thread
+  // titles it names are the ones `threads.list` already shows the device.
+  'usage.history',
   'settings.get',
   'keybindings.get',
 ]);

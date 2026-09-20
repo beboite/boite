@@ -16,7 +16,7 @@
   const context = $derived(thread?.context ?? null);
   const percent = $derived(context ? contextPercent(context) : null);
   const protocol = $derived(thread ? store.providerOf(thread.providerId)?.protocol : null);
-  const supported = $derived(protocol !== 'acp' || thread?.commands?.some(command => command.name === 'compact'));
+  const supported = $derived(protocol !== 'agy' && (protocol !== 'acp' || thread?.commands?.some(command => command.name === 'compact')));
   const reason = $derived(submitting || store.busy ? strings.composer.compactBusy : !thread?.sessionId
     ? strings.composer.compactNoSession : !supported ? strings.composer.compactUnavailable : null);
   const exact = (n: number) => n.toLocaleString();
@@ -52,7 +52,7 @@
     <div class="popup" style:left={`${left}px`} style:top={`${top}px`} class:closing={popup.closing} role="dialog" aria-label={strings.thread.contextDetails} tabindex="-1" data-testid="context-popup" use:popup.attach onanimationend={popup.end}>
       <div class="heading"><span>{strings.thread.contextDetails}</span>{#if percent !== null}<span class="mono">{percent}%</span>{/if}</div>
       {#if context}
-        <p class="total mono">{exact(context.tokens)}{#if context.window !== null} / {exact(context.window)}{/if}</p>
+        <p class="total mono">{exact(context.tokens)}{#if context.window !== null}{' / '}{exact(context.window)}{/if}</p>
         <div class="bar" aria-hidden="true">
           {#each segments as segment (segment.kind)}<span class={segment.kind} style:width={`${Math.min(100, segment.count / Math.max(1, context.window ?? context.tokens) * 100)}%`}></span>{/each}
         </div>

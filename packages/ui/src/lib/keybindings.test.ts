@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'vitest';
-import { chordLabel, commandForKey, isMac, matchesChord, resolveBindings } from './keybindings';
+import { KEYBINDING_COMMANDS, parseChord } from '@boite/contracts';
+import { COMMAND_GROUPS, chordFromEvent, chordLabel, chordParts, commandForKey, isMac, matchesChord, resolveBindings } from './keybindings';
 
 function key(init: KeyboardEventInit): KeyboardEvent {
   return new KeyboardEvent('keydown', init);
@@ -60,5 +61,38 @@ describe('the keyboard table', () => {
     expect(isMac('MacIntel')).toBe(true);
     expect(isMac('Win32')).toBe(false);
     expect(isMac('Linux x86_64')).toBe(false);
+  });
+});
+
+describe('recording a chord on the Keyboard page', () => {
+  test('a keydown spells the words of the file, the platform modifier becoming mod', () => {
+    expect(chordFromEvent(key({ key: 'K', ctrlKey: true, shiftKey: true }), false)).toBe('mod+shift+k');
+    expect(chordFromEvent(key({ key: 'k', metaKey: true }), true)).toBe('mod+k');
+    expect(chordFromEvent(key({ key: 'k', ctrlKey: true }), true)).toBe('ctrl+k');
+    expect(chordFromEvent(key({ key: 'ArrowUp', altKey: true }), false)).toBe('alt+up');
+    expect(chordFromEvent(key({ key: ' ', ctrlKey: true }), false)).toBe('mod+space');
+    expect(chordFromEvent(key({ key: '+', ctrlKey: true }), false)).toBe('mod+plus');
+    expect(chordFromEvent(key({ key: 'F5' }), false)).toBe('f5');
+    // Only modifiers held: the recording waits for the key.
+    expect(chordFromEvent(key({ key: 'Control', ctrlKey: true }), false)).toBeNull();
+    expect(chordFromEvent(key({ key: 'Shift', shiftKey: true }), false)).toBeNull();
+  });
+
+  test('what it records reads back as the same chord, and a bare letter is refused', () => {
+    for (const event of [key({ key: 'K', ctrlKey: true, shiftKey: true }), key({ key: 'ArrowLeft', ctrlKey: true, altKey: true }), key({ key: ',', ctrlKey: true })]) {
+      const text = chordFromEvent(event, false)!;
+      const parsed = parseChord(text);
+      expect(parsed.ok).toBe(true);
+      if (parsed.ok) expect(matchesChord(event, parsed.chord, false)).toBe(true);
+    }
+    expect(parseChord(chordFromEvent(key({ key: 'b' }), false)!).ok).toBe(false);
+  });
+
+  test('the page draws one cap per key, and every command sits in exactly one section', () => {
+    expect(chordParts(resolveBindings({}).tasks.chord!, false)).toEqual(['Ctrl', 'Shift', 'K']);
+    expect(chordParts(resolveBindings({}).tasks.chord!, true)).toEqual(['Shift', 'Cmd', 'K']);
+    const listed = COMMAND_GROUPS.flatMap((group) => group.commands);
+    expect([...listed].sort()).toEqual([...KEYBINDING_COMMANDS].sort());
+    expect(new Set(listed).size).toBe(listed.length);
   });
 });

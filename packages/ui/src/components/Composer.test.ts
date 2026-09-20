@@ -57,7 +57,7 @@ async function type(text: string): Promise<void> {
 }
 
 async function mountOnFake(): Promise<void> {
-  window.history.replaceState(null, '', '/?fake=1');
+  window.history.replaceState(null, '', '/?fake=1&open=recent');
   const target = document.createElement('div');
   document.body.appendChild(target);
   // The store is a singleton: the previous test's thread and its draft would

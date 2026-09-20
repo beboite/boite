@@ -160,7 +160,7 @@
 </div>
 
 <style>
-  .separator { height: 1px; background: var(--color-border); margin: 5px 4px; }
+  .separator { height: 1px; background: var(--color-border); margin: 4px 6px; }
   .label { display: flex; align-items: center; gap: 6px; }
   .item.hide-mark.active { background: var(--color-active); }
   .status-dot { display: inline-block; width: 6px; height: 6px; flex: none; border-radius: 50%; margin-right: 8px; vertical-align: middle; background: var(--color-live); }
@@ -258,13 +258,16 @@
     transform-origin: top right;
   }
 
+  /* A one-line item is as tall as a context menu row; a hint below grows it. */
   .item {
     display: flex;
     flex-direction: column;
     align-items: flex-start;
+    justify-content: center;
     gap: 0;
     height: auto;
-    padding: 5px 8px;
+    min-height: var(--control);
+    padding: 4px 8px;
     border: none;
     border-radius: var(--radius-sm);
     background: transparent;
