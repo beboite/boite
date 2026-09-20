@@ -1,10 +1,11 @@
 # Usage
 
 Settings > Usage shows what the agents spent through Boite: tokens, the API
-equivalent cost and turns, per day, provider, model and thread, with the
-subscription limits each provider last reported. Everything on the page comes
-from turns the core already recorded in its journal. Boite never estimates a
-token count or prices a turn itself.
+equivalent cost and turns, per day, provider, model and thread. Settings >
+Limits is its own tab beside it, holding the subscription windows each provider
+last reported. Everything on the usage page comes from turns the core already
+recorded in its journal. Boite never estimates a token count or prices a turn
+itself.
 
 ## The page
 
@@ -21,9 +22,14 @@ token count or prices a turn itself.
   doubles as the chart's table view.
 - Top threads are the ten threads that spent the most by the chosen measure.
   A thread still in the sidebar opens on click; an archived one is marked.
-- Limits are the windows from `quotas.list`, the same source as the tray popup.
-  An account whose provider reports no limit, or whose monitoring is off, is
+## The limits tab
+
+- The windows come from `quotas.list`, the same source as the tray popup, and
+  an account whose provider reports no limit, or whose monitoring is off, is
   named once under "Not monitored".
+- The tab reads the quotas itself and follows `quotas.updated`, so opening it
+  costs one call and no history. Its own refresh button asks the providers
+  again.
 
 Provider colours come from `--series-1` to `--series-8` in `app.css`, with a
 light and a dark set. The order is fixed (Claude, Codex, OpenCode, Grok,
@@ -85,8 +91,8 @@ A phone may call `usage.history`: it returns sums over the same finished turns
 a device can already open, and the thread titles it names are the ones
 `threads.list` shows it. The reason sits beside the entry in
 `packages/core/src/access.ts`. `quotas.list` stays owner-only, so on a device
-the Limits card says the limits are read on the computer that runs Boite. On a
-phone the page is under Settings > Machines > Usage.
+the Limits tab says the limits are read on the computer that runs Boite. On a
+phone both pages are under Settings > Machines, as Usage and Limits.
 
 ## The fake client
 
@@ -106,5 +112,5 @@ added on top, and the uninstalled mode (`?fake=1&uninstalled=1`) starts empty.
   order, the summaries and the fake ledger.
 - `tests/e2e/usage.test.ts`: the page at 1280x800 and 390x844 in both themes,
   the tooltip staying inside the chart, keyboard reading, the three ranges, the
-  phone entry and the device's Limits note. Captures land in
-  `tests/e2e/.artifacts/usage-*.png`.
+  phone entry, the limits tab on both widths and the device's Limits note.
+  Captures land in `tests/e2e/.artifacts/usage-*.png` and `limits-*.png`.

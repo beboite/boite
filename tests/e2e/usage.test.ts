@@ -37,6 +37,15 @@ async function openUsage() {
   await page.waitFor(`document.querySelector('[data-testid=usage-chart] svg path')`);
 }
 
+async function openLimits() {
+  // Settings may already be open from the previous test, and its entry then lives in the nav.
+  if (await page.evaluate<boolean>(`!document.querySelector('[data-testid=settings-tab-limits]')`)) {
+    await page.click('[data-testid=nav-settings]');
+  }
+  await page.click('[data-testid=settings-tab-limits]');
+  await page.waitFor(`document.querySelector('[data-testid=limits-page]')`);
+}
+
 beforeAll(async () => {
   const port = await freePort();
   server = await createServer({ root: join(import.meta.dir, '../../packages/ui'), server: { host: '127.0.0.1', port, strictPort: true }, clearScreen: false });
@@ -48,9 +57,8 @@ beforeAll(async () => {
 }, 60_000);
 afterAll(async () => { await page?.close(); await server?.close(); }, 15_000);
 
-test('the desktop page charts each day by provider, reads a column on hover and keys, and lists models, threads and limits', async () => {
+test('the desktop page charts each day by provider, reads a column on hover and keys, and lists models and threads', async () => {
   await openUsage();
-  await page.waitFor(`document.querySelectorAll('[data-testid=usage-limit-account]').length >= 3`);
   expect(await attribute('[data-testid=usage-chart]', 'aria-valuemax')).toBe('29');
   expect(await count('[data-testid=usage-providers] li')).toBe(6);
   expect(await page.evaluate(`[...document.querySelectorAll('[data-testid=usage-providers] li')].map(li => li.dataset.provider)`)).toEqual(['claude', 'codex', 'opencode', 'grok', 'antigravity', 'pi']);
@@ -138,13 +146,34 @@ test('the phone page fits 390 px and is reachable from the phone settings list',
   await page.waitFor(`document.querySelector('[data-testid=mobile-settings-home]')`);
 }, 60_000);
 
+test('the limits tab is its own page, one card per provider, no scrolling through the history', async () => {
+  await viewport(1280, 800);
+  await openLimits();
+  await page.waitFor(`document.querySelectorAll('[data-testid=usage-limit-account]').length >= 3`);
+  // The limits answer the first screen: nothing of the history is loaded beside them.
+  expect(await count('[data-testid=usage-chart]')).toBe(0);
+  expect(await page.evaluate(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true);
+  await capture('limits-desktop-dark.png');
+  await scheme('light');
+  await capture('limits-desktop-light.png');
+  await scheme('dark');
+
+  await viewport(390, 844, true);
+  await page.waitFor(`document.querySelector('[data-testid=mobile-settings-detail] [data-testid=limits-page]')`);
+  expect(await page.evaluate(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true);
+  await capture('limits-phone-dark.png');
+  await page.click('[data-testid=mobile-settings-back]');
+  await page.waitFor(`document.querySelector('[data-testid=mobile-settings-home]')`);
+  await viewport(1280, 800);
+  expect(page.errors()).toEqual([]);
+}, 60_000);
+
 test('a paired device reads the history and is told where the limits are', async () => {
   await viewport(1280, 800);
   await page.navigate(`${origin}/?fake=1&principal=session`);
-  await openUsage();
+  await openLimits();
   await page.waitFor(`document.querySelector('[data-testid=usage-limits-owner]')`);
   expect(await count('[data-testid=usage-limit-account]')).toBe(0);
-  await page.evaluate(`document.getElementById('settings-usage-limits').scrollIntoView({ block: 'end' })`);
   await capture('usage-device.png');
   expect(page.errors()).toEqual([]);
 }, 60_000);

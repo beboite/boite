@@ -1,7 +1,7 @@
 <script lang="ts">
   import { untrack } from 'svelte';
   import { RefreshCw } from '@lucide/svelte';
-  import type { AccountQuota, UsageHistory } from '@boite/contracts';
+  import type { UsageHistory } from '@boite/contracts';
   import type { Store } from '../lib/store.svelte';
   import { fill, strings } from '../lib/strings';
   import {
@@ -21,7 +21,6 @@
   } from '../lib/usage';
   import ProviderLogo from './ProviderLogo.svelte';
   import UsageChart from './UsageChart.svelte';
-  import UsageLimits from './UsageLimits.svelte';
 
   let { store }: { store: Store } = $props();
 
@@ -31,7 +30,6 @@
   let history = $state<UsageHistory | null>(null);
   let loading = $state(false);
   let failure = $state<string | null>(null);
-  let quotas = $state<AccountQuota[] | null>(null);
   /** Only the newest request writes, so a slow 90-day answer never lands over a 7-day one. */
   let latest = 0;
 
@@ -52,16 +50,6 @@
     }
   }
 
-  async function readQuotas(refresh: boolean) {
-    const client = store.client;
-    if (!client || !store.owner) return;
-    try {
-      quotas = await client.call('quotas.list', { refresh });
-    } catch {
-      quotas ??= [];
-    }
-  }
-
   $effect(() => {
     const days = range;
     if (!store.client) return;
@@ -77,14 +65,11 @@
       clearTimeout(timer);
       timer = setTimeout(() => void load(range), 1500);
     });
-    const offQuotas = store.owner ? client.on('quotas.updated', (rows) => { quotas = rows; }) : undefined;
-    if (store.owner) untrack(() => void readQuotas(false));
-    return () => { clearTimeout(timer); offTurns(); offQuotas?.(); };
+    return () => { clearTimeout(timer); offTurns(); };
   });
 
   function refresh() {
     void load(range);
-    void readQuotas(true);
   }
 
   let view = $derived(history === null ? null : summarize(history, metric));
@@ -279,18 +264,6 @@
         </section>
       {/if}
     {/if}
-
-    <section class="card" id="settings-usage-limits">
-      <h2>{strings.usage.limits}</h2>
-      {#if !store.owner}
-        <p class="muted" data-testid="usage-limits-owner">{strings.usage.limitsOwner}</p>
-      {:else if quotas === null}
-        <p class="muted">{strings.quotas.loading}</p>
-      {:else}
-        <p class="aside intro">{strings.usage.limitsIntro}</p>
-        <UsageLimits rows={quotas} />
-      {/if}
-    </section>
   </div>
 </div>
 
@@ -329,7 +302,6 @@
   .hero strong { font-size: calc(var(--text-lg) * 1.6); line-height: 1.1; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
   .hero small, .aside, .muted { color: var(--color-muted-foreground); font-size: var(--text-sm); }
   .aside { margin: 10px 0 0; line-height: 1.5; }
-  .aside.intro { margin: -4px 0 12px; }
 
   .providers { display: grid; gap: 8px; margin: 16px 0 0; padding: 14px 0 0; list-style: none; border-top: 1px solid var(--color-border); }
   .providers li { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto 44px minmax(60px, 160px); align-items: center; gap: 10px; font-size: var(--text-sm); }

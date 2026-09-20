@@ -1,8 +1,9 @@
 <script lang="ts">
   import { MediaQuery } from 'svelte/reactivity';
   import MobileSettings from './MobileSettings.svelte';
-  import { Activity, ChevronRight, ShieldCheck, ArrowLeft, Coins, FlaskConical, Keyboard, Palette, Puzzle, Settings2, Users, Mic } from '@lucide/svelte';
+  import { Activity, ChevronRight, ShieldCheck, ArrowLeft, Coins, FlaskConical, Gauge, Keyboard, Palette, Puzzle, Settings2, Users, Mic } from '@lucide/svelte';
   import KeyboardPage from './KeyboardPage.svelte';
+  import LimitsPage from './LimitsPage.svelte';
   import PluginsPage from './PluginsPage.svelte';
   import { strings } from '../lib/strings';
   import { COMMAND_GROUPS } from '../lib/keybindings';
@@ -32,6 +33,7 @@
     { id: 'accounts', label: strings.settings.tabs.accounts, icon: Users },
     { id: 'plugins', label: strings.settings.tabs.plugins, icon: Puzzle },
     { id: 'usage', label: strings.settings.tabs.usage, icon: Coins },
+    { id: 'limits', label: strings.usage.limits, icon: Gauge },
     { id: 'resources', label: strings.settings.tabs.resources, icon: ShieldCheck },
     { id: 'experiments', label: strings.settings.tabs.experiments, icon: FlaskConical }
   ];
@@ -47,8 +49,7 @@
     usage: [
       { id: 'usage-overview', label: strings.usage.overview },
       { id: 'usage-breakdown', label: strings.usage.breakdown },
-      { id: 'usage-threads', label: strings.usage.threads },
-      { id: 'usage-limits', label: strings.usage.limits }
+      { id: 'usage-threads', label: strings.usage.threads }
     ],
     general: [
       { id: 'phone', label: strings.phone.heading },
@@ -145,6 +146,8 @@
         <AccountsPage {store} />
       {:else if tab === 'usage'}
         <UsagePage {store} />
+      {:else if tab === 'limits'}
+        <LimitsPage {store} />
       {:else if tab === 'plugins'}
         <PluginsPage {store} />
       {:else if tab === 'experiments'}
