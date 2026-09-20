@@ -26,8 +26,11 @@ export function outlineWave(centers: number[], at: number, reach: number): numbe
 export function outlineEntries(count: number, active: number): OutlineEntry[] {
   if (count <= 13) return Array.from({ length: count }, (_, start) => ({ start, end: start }));
   const center = Math.max(0, Math.min(count - 1, active < 0 ? count - 1 : active));
-  const first = Math.max(1, Math.min(count - 8, center - 3));
-  const last = Math.min(count - 2, first + 6);
+  // Eleven slots wherever the window sits: moving it never moves the entry a pointer is aiming at.
+  let first = center - 3;
+  let last = first + 6;
+  if (first <= 1) { first = 1; last = 8; }
+  else if (last >= count - 2) { last = count - 2; first = count - 9; }
   const entries: OutlineEntry[] = [{ start: 0, end: 0 }];
   if (first > 1) entries.push({ start: 1, end: first - 1 });
   for (let index = first; index <= last; index++) entries.push({ start: index, end: index });

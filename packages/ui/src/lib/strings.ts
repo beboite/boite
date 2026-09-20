@@ -389,6 +389,9 @@ export const strings = {
     outline: 'Messages in this conversation',
     messageGroup: 'Browse {count} messages',
     earlierMessages: 'Load earlier messages',
+    /** The rail's own chevrons: they move its window over the conversation without moving the timeline. */
+    outlineEarlier: 'Show earlier messages in the rail',
+    outlineLater: 'Show later messages in the rail',
     goToMessage: 'Go to message {number}: {text}',
     copy: 'Copy',
     copied: 'Copied',

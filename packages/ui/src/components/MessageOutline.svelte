@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { ChevronUp } from '@lucide/svelte';
+  import { ChevronDown, ChevronUp } from '@lucide/svelte';
   import type { Message } from '@boite/contracts';
   import { fill, strings } from '../lib/strings';
   import { messagePreview, promptCommand } from '../lib/message-display';
@@ -12,7 +12,20 @@
     hasOlder: boolean; loading: boolean; loadOlder: () => void;
   } = $props();
   const prompts = $derived(messages.filter(message => message.role === 'user'));
-  const entries = $derived(outlineEntries(prompts.length, prompts.findIndex(message => message.id === active)));
+  const activeIndex = $derived(prompts.findIndex(message => message.id === active));
+  /** How many entries a chevron moves the rail's window by, and how often it repeats under the pointer. */
+  const PAGE = 7;
+  const REPEAT = 420;
+  /** The prompt the window is centred on while a chevron moves it; null follows the active prompt. */
+  let pan = $state<number | null>(null);
+  const focus = $derived(pan === null ? activeIndex : Math.min(pan, prompts.length - 1));
+  const entries = $derived(outlineEntries(prompts.length, focus));
+  /** A group at either end of the rail is what the chevron there has to open: entries it hides. */
+  const canEarlier = $derived((entries[1]?.end ?? 0) > (entries[1]?.start ?? 0));
+  const canLater = $derived(entries.length > 2 && entries.at(-2)!.end > entries.at(-2)!.start);
+  // Both chevrons stay in place once the rail groups anything: a rail that changes height under the
+  // pointer moves everything else with it, and the one the pointer holds would slide out from under it.
+  const paged = $derived(canEarlier || canLater);
   const disclosure = new Closing();
   let group = $state<OutlineEntry | null>(null);
   let groupPosition = $state({ top: 0, left: 0 });
@@ -55,6 +68,9 @@
   /** The prompt whose preview is open. */
   let shown = $state<string | null>(null);
   let pointing = false;
+  let repeat: ReturnType<typeof setInterval> | null = null;
+  /** True while a page plays, which is when the track must not answer the pointer. */
+  let sliding = $state(false);
   const offsets = $derived(unfold ? outlineUnfold(entries.length, frame.pitch, OPEN, unfold.at, unfold.room) : entries.map(() => 0));
   const centers = $derived(offsets.map((offset, slot) => (slot + 0.5) * frame.pitch + offset));
   const weights = $derived(wave === null ? centers.map(() => 0) : outlineWave(centers, wave, OPEN * 1.4));
@@ -90,8 +106,41 @@
     if (!unfold) open((_, top) => event.clientY - top);
     wave = event.clientY - frame.top;
   }
+  /**
+   * Moves the window `step` entries over the conversation. The timeline does not follow: the rail is
+   * a map of what was sent, and a chevron pans that map. False once that end is already shown.
+   */
+  function pageBy(step: number): boolean {
+    if (!(step < 0 ? canEarlier : canLater)) return false;
+    const from = focus < 0 ? prompts.length - 1 : focus;
+    const next = Math.max(0, Math.min(prompts.length - 1, from + step));
+    if (next === from) return false;
+    pan = next;
+    // A page swaps the entries rather than moving them, so the move itself is played on the track. The
+    // sliding track is taken out of hit testing: a bar passing under the pointer would steal the chevron
+    // it is holding, and the chevron would take it back on the next frame, paging the rail at 60 Hz.
+    const move = Number.parseFloat(track ? getComputedStyle(track).getPropertyValue('--dur-3') : '') || 220;
+    const slide = track?.animate?.([{ translate: `0 ${step < 0 ? -10 : 10}px`, opacity: 0.35 }, { translate: '0 0', opacity: 1 }],
+      { duration: move, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' });
+    if (slide) { sliding = true; void slide.finished.then(() => { sliding = false; }).catch(() => { sliding = false; }); }
+    return true;
+  }
+  /** A chevron pages as soon as the pointer reaches it, then keeps paging while it stays there. */
+  function hold(step: number) {
+    stop();
+    shown = null;
+    if (!pageBy(step)) return;
+    repeat = setInterval(() => { if (!pageBy(step)) stop(); }, REPEAT);
+  }
+  function stop() {
+    if (repeat !== null) { clearInterval(repeat); repeat = null; }
+  }
+  // The repeat is a timer, not a subscription: it dies with the component.
+  $effect(() => stop);
   function release() {
     pointing = false;
+    stop();
+    pan = null;
     unfold = null;
     wave = null;
     shown = null;
@@ -117,10 +166,14 @@
 
 {#if prompts.length > 1 || hasOlder}
   <nav class="outline" class:open={unfold !== null} bind:this={rail} aria-label={strings.chat.outline} data-testid="message-outline" data-message-count={prompts.length} onscroll={() => shown = null} onpointermove={point} onpointerleave={release}>
-    {#if hasOlder}
-      <button class="earlier" style:--offset={`${unfold ? (centers[0] ?? 0) - OPEN / 2 : 0}px`} disabled={loading} onclick={loadOlder} {onkeydown} aria-label={strings.chat.earlierMessages} title={strings.chat.earlierMessages} data-testid="outline-earlier"><ChevronUp size={14} /></button>
+    {#if paged || hasOlder}
+      {@const label = hasOlder ? strings.chat.earlierMessages : strings.chat.outlineEarlier}
+      <button class="step" style:--offset={`${unfold ? (centers[0] ?? 0) - OPEN / 2 : 0}px`} disabled={loading || !(hasOlder || canEarlier)} {onkeydown}
+        onpointerenter={() => hold(-PAGE)} onpointerleave={stop}
+        onclick={() => { stop(); if (hasOlder) { pan = null; loadOlder(); } else pageBy(-PAGE); }}
+        aria-label={label} title={label} data-testid="outline-earlier"><ChevronUp size={14} /></button>
     {/if}
-    <div class="track" bind:this={track}>
+    <div class="track" class:sliding bind:this={track}>
       {#each entries as entry, slot (`${entry.start}:${entry.end}`)}
         {@const index = entry.start}
         {@const message = prompts[index]!}
@@ -141,6 +194,11 @@
         {/if}
       {/each}
     </div>
+    {#if paged || hasOlder}
+      <button class="step" style:--offset={`${unfold ? (centers.at(-1) ?? 0) + OPEN / 2 - entries.length * frame.pitch : 0}px`} disabled={!canLater} {onkeydown}
+        onpointerenter={() => hold(PAGE)} onpointerleave={stop} onclick={() => { stop(); pageBy(PAGE); }}
+        aria-label={strings.chat.outlineLater} title={strings.chat.outlineLater} data-testid="outline-later"><ChevronDown size={14} /></button>
+    {/if}
   </nav>
   {#if disclosure.shown && group}
     <div class="group-menu" class:closing={disclosure.closing} bind:this={groupMenu} use:disclosure.attach onanimationend={disclosure.end} role="dialog" aria-label={strings.chat.outline} tabindex="-1" onkeydown={groupKeys} style:top={`${groupPosition.top}px`} style:left={`${groupPosition.left}px`} data-testid="outline-group-menu">
@@ -163,10 +221,12 @@
   .outline { position: absolute; z-index: 5; left: 4px; top: 50%; transform: translateY(-50%); width: 28px; padding: 4px 0; }
   button { display: flex; align-items: center; width: 28px; padding: 0; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--color-muted-foreground); }
   button:active { transform: none; }
-  button.earlier, .track button { translate: 0 var(--offset, 0px); transition: translate var(--dur-3) var(--ease-out-quint), color var(--dur-2), background var(--dur-2); }
-  .earlier { justify-content: center; height: 20px; min-height: 20px; }
-  .earlier:hover:not(:disabled), .earlier:focus-visible { background: var(--color-hover); color: var(--color-foreground); }
+  button.step, .track button { translate: 0 var(--offset, 0px); transition: translate var(--dur-3) var(--ease-out-quint), color var(--dur-2), background var(--dur-2); }
+  /* The chevrons ride the edges of the open rail, each covering the gap its end would leave. */
+  .step { justify-content: center; height: 20px; min-height: 20px; }
+  .step:hover:not(:disabled), .step:focus-visible { background: var(--color-hover); color: var(--color-foreground); }
   .track { --pitch: 6px; }
+  .track.sliding { pointer-events: none; }
   .track button { position: relative; justify-content: flex-start; height: var(--pitch); min-height: var(--pitch); padding-left: 6px; }
   /* The hit area is the slot the open rail gives the entry. It eases on the same curve as the bar, so the slots
      tile the rail at every frame: no gap between two bars, and no overlap that would hand a click to a neighbour. */

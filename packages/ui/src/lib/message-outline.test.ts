@@ -25,8 +25,18 @@ test('the wave peaks under the pointer and fades with distance', () => {
 test('long outlines stay bounded and keep every prompt reachable exactly once', () => {
   for (const count of [0, 1, 8, 13, 14, 200, 1000]) for (const active of [-1, 0, 6, 80, count - 1]) {
     const entries = outlineEntries(count, active);
-    expect(entries.length).toBeLessThanOrEqual(13);
+    expect(entries.length).toBe(count > 13 ? 11 : count);
     expect(entries.flatMap(entry => Array.from({length:entry.end-entry.start+1},(_,i)=>entry.start+i))).toEqual(Array.from({length:count},(_,i)=>i));
     if (active >= 0 && active < count) expect(entries).toContainEqual({start:active,end:active});
   }
+});
+
+test('moving the window walks the conversation without changing the rail', () => {
+  const firstShown = (center: number) => outlineEntries(200, center).find(entry => entry.end === entry.start && entry.start > 0)!.start;
+  for (let center = 0; center < 200; center++) {
+    expect(outlineEntries(200, center).length).toBe(11);
+    if (center > 0) expect(firstShown(center)).toBeGreaterThanOrEqual(firstShown(center - 1));
+  }
+  expect(firstShown(0)).toBe(1);
+  expect(firstShown(199)).toBe(191);
 });
