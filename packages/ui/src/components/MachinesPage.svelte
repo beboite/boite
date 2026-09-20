@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Plus, ArrowUpRight } from '@lucide/svelte';
+  import { Plus, ArrowUpRight, RefreshCw, Unplug, X } from '@lucide/svelte';
   import { workspace, machineIcons } from '../lib/workspace.svelte';
   import { store as primary } from '../lib/store.svelte';
   import { strings } from '../lib/strings';
@@ -11,9 +11,26 @@
     token = $state('');
   let busy = $state(false);
   let origins = $state('');
+  /** The add form stays folded behind its button, unless there is nothing else to show. */
+  let adding = $state(false);
+  let open = $derived(adding || workspace.machines.length === 0);
+  /** The one card whose icon choices are unfolded. */
+  let customizing = $state<string | null>(null);
+  let linkInput = $state<HTMLInputElement | null>(null);
   $effect(() => {
     origins = (workspace.active.settings?.browserOrigins ?? []).join('\n');
   });
+  function startAdding() {
+    adding = true;
+    requestAnimationFrame(() => linkInput?.focus());
+  }
+  function stopAdding() {
+    adding = false;
+    link = '';
+    token = '';
+    url = '';
+    label = '';
+  }
   async function add(manual = false) {
     if (busy) return;
     busy = true;
@@ -21,12 +38,7 @@
       const ok = manual
         ? await workspace.add({ url: url.trim(), token }, label)
         : await workspace.pair(link.trim(), label);
-      if (ok) {
-        link = '';
-        token = '';
-        url = '';
-        label = '';
-      }
+      if (ok) stopAdding();
     } finally {
       busy = false;
     }
@@ -34,99 +46,115 @@
 </script>
 
 <div class="machines-page" data-testid="machines-page">
-  <h1>{strings.machines.heading}</h1>
-  <p class="intro">{strings.machines.intro}</p>
+  <header class="head">
+    <div>
+      <h1>{strings.machines.heading}</h1>
+      <p class="intro">{strings.machines.intro}</p>
+    </div>
+    {#if !open}
+      <button class="primary add-open" data-testid="machine-add-open" onclick={startAdding}><Plus size={15} />{strings.machines.add}</button>
+    {/if}
+  </header>
+
+  <div class="reveal" class:open inert={!open}>
+    <div>
+      <section class="card add" data-testid="machine-add-card" aria-label={strings.machines.add}>
+        <div class="add-head">
+          <h2>{strings.machines.add}</h2>
+          {#if workspace.machines.length > 0}
+            <button class="ghost icon-only" data-testid="machine-add-close" aria-label={strings.common.cancel} title={strings.common.cancel} onclick={stopAdding}><X size={15} /></button>
+          {/if}
+        </div>
+        <p class="hint">{strings.machines.addHint}</p>
+        <form
+          onsubmit={(e) => {
+            e.preventDefault();
+            void add();
+          }}
+        >
+          <label>{strings.machines.link}<input
+              bind:this={linkInput}
+              bind:value={link}
+              data-testid="machine-link"
+              type="password"
+              autocomplete="off"
+              spellcheck="false"
+            /></label>
+          <label>{strings.machines.labelOptional}<input bind:value={label} data-testid="machine-name" autocomplete="off" placeholder={strings.machines.labelPlaceholder} /></label>
+          <button type="submit" class="primary" data-testid="machine-add" disabled={busy || !link.trim()}
+            ><Plus size={14} />{busy ? strings.machines.adding : strings.machines.connect}</button
+          >
+        </form>
+        <details>
+          <summary>{strings.machines.manual}</summary>
+          <form
+            onsubmit={(e) => {
+              e.preventDefault();
+              void add(true);
+            }}
+          >
+            <label>{strings.settings.coreUrl}<input bind:value={url} data-testid="machine-url" autocomplete="off" spellcheck="false" /></label>
+            <label>{strings.settings.token}<input bind:value={token} data-testid="machine-token" type="password" autocomplete="off" /></label>
+            <button class="primary" disabled={busy || !url.trim() || !token}
+              >{busy ? strings.machines.adding : strings.machines.connect}</button
+            >
+          </form>
+        </details>
+        {#if workspace.error}<p class="error" role="alert">{workspace.error}</p>{/if}
+      </section>
+    </div>
+  </div>
+
   <div class="machines">
     {#each workspace.machines as machine (machine.id)}
       <section class="card machine-card" data-testid="machine-card" data-machine-id={machine.id}>
-        <span class="logo"><MachineIcon icon={machine.icon} os={machine.store.core?.os} size={22} /></span>
-        <div class="identity">
-          <input class="machine-name" data-testid="machine-rename" aria-label={strings.machines.label} value={machine.label} maxlength="80" onchange={(event) => { workspace.customize(machine.id, event.currentTarget.value, machine.icon); event.currentTarget.value = machine.label; }} />
-          {#if !mobile}<div class="icon-choices" role="group" aria-label={strings.machines.icon}>
-            {#each machineIcons as icon (icon)}
-              <button class="ghost icon" class:chosen={machine.icon === icon} data-testid="machine-icon-{icon}" aria-label={strings.machines.icons[icon]} title={strings.machines.icons[icon]} aria-pressed={machine.icon === icon} onclick={() => workspace.customize(machine.id, machine.label, icon)}><MachineIcon {icon} size={17} /></button>
-            {/each}
-          </div>{/if}
-          <span class="address">{machine.store.localCore ? strings.machines.local : machine.id}</span>
-          <span class="status" class:ready={machine.store.connection === 'ready'}
-            >{strings.connection[machine.store.connection]}</span
-          >
-          {#if machine.store.error}<p class="error">{machine.store.error}</p>{/if}
+        <div class="main">
+          <button
+            class="ghost logo"
+            data-testid="machine-customize"
+            aria-label={strings.machines.icon}
+            title={strings.machines.icon}
+            aria-expanded={customizing === machine.id}
+            onclick={() => (customizing = customizing === machine.id ? null : machine.id)}
+          ><MachineIcon icon={machine.icon} os={machine.store.core?.os} size={20} /></button>
+          <div class="identity">
+            <input class="machine-name" data-testid="machine-rename" aria-label={strings.machines.label} value={machine.label} maxlength="80" onchange={(event) => { workspace.customize(machine.id, event.currentTarget.value, machine.icon); event.currentTarget.value = machine.label; }} />
+            <span class="meta">
+              <span class="dot" class:ready={machine.store.connection === 'ready'} aria-hidden="true"></span>
+              <span class="status" class:ready={machine.store.connection === 'ready'}>{strings.connection[machine.store.connection]}</span>
+              <span class="address">{machine.store.localCore ? strings.machines.local : machine.id}</span>
+            </span>
+          </div>
+          <div class="actions">
+            {#if machine.store.connection === 'closed'}
+              <button class="ghost icon-only" aria-label={strings.common.refresh} title={strings.common.refresh} onclick={() => void machine.store.connect()}><RefreshCw size={15} /></button>
+            {/if}
+            {#if machine.store !== primary}
+              <button class="ghost icon-only" data-testid="machine-remove" aria-label={strings.machines.remove} title={strings.machines.remove} onclick={() => void workspace.remove(machine.id)}><Unplug size={15} /></button>
+            {/if}
+            <button class="ghost small" data-testid="machine-open" onclick={() => void workspace.select(machine.store)}
+              >{strings.machines.open}<ArrowUpRight size={13} /></button
+            >
+          </div>
         </div>
-        <div class="actions">
-          <button class="ghost small" data-testid="machine-open" onclick={() => void workspace.select(machine.store)}
-            >{strings.machines.open}<ArrowUpRight size={13} /></button
-          >
-          {#if machine.store.connection === 'closed'}<button
-              class="ghost small"
-              onclick={() => void machine.store.connect()}>{strings.common.refresh}</button
-            >{/if}
-          {#if machine.store !== primary}<button
-              class="ghost small"
-              data-testid="machine-remove"
-              onclick={() => void workspace.remove(machine.id)}>{strings.machines.remove}</button
-            >{/if}
+        <div class="reveal" class:open={customizing === machine.id} inert={customizing !== machine.id}>
+          <div>
+            <div class="icon-choices" role="group" aria-label={strings.machines.icon}>
+              {#each machineIcons as icon (icon)}
+                <button class="ghost icon" class:chosen={machine.icon === icon} data-testid="machine-icon-{icon}" aria-label={strings.machines.icons[icon]} title={strings.machines.icons[icon]} aria-pressed={machine.icon === icon} onclick={() => workspace.customize(machine.id, machine.label, icon)}><MachineIcon {icon} size={17} /></button>
+              {/each}
+            </div>
+          </div>
         </div>
+        {#if machine.store.error}<p class="error">{machine.store.error}</p>{/if}
       </section>
     {/each}
   </div>
-  <section class="card add">
-    <h2>{strings.machines.add}</h2>
-    <form
-      onsubmit={(e) => {
-        e.preventDefault();
-        void add();
-      }}
-    >
-      <label>{strings.machines.label}<input bind:value={label} data-testid="machine-name" autocomplete="off" /></label>
-      <label
-        >{strings.machines.link}<input
-          bind:value={link}
-          data-testid="machine-link"
-          type="password"
-          autocomplete="off"
-          spellcheck="false"
-        /></label
-      >
-      <button type="submit" class="primary" data-testid="machine-add" disabled={busy || !link.trim()}
-        ><Plus size={14} />{busy ? strings.machines.adding : strings.machines.add}</button
-      >
-    </form>
-    <details>
-      <summary>{strings.machines.manual}</summary>
-      <form
-        onsubmit={(e) => {
-          e.preventDefault();
-          void add(true);
-        }}
-      >
-        <label
-          >{strings.settings.coreUrl}<input
-            bind:value={url}
-            data-testid="machine-url"
-            autocomplete="off"
-            spellcheck="false"
-          /></label
-        >
-        <label
-          >{strings.settings.token}<input
-            bind:value={token}
-            data-testid="machine-token"
-            type="password"
-            autocomplete="off"
-          /></label
-        >
-        <button class="primary" disabled={busy || !url.trim() || !token}
-          >{busy ? strings.machines.adding : strings.machines.add}</button
-        >
-      </form>
-    </details>
-    {#if workspace.error}<p class="error" role="alert">{workspace.error}</p>{/if}
-  </section>
+
   {#if workspace.active.owner && !mobile}
-    <section class="card add origins">
-      <h2>{strings.machines.browserOrigins}</h2>
-      <p class="intro">{strings.machines.browserOriginsHint}</p>
+    <details class="card origins">
+      <summary>{strings.machines.browserOrigins}</summary>
+      <p class="hint">{strings.machines.browserOriginsHint}</p>
       <textarea bind:value={origins} aria-label={strings.machines.browserOrigins} rows="3"></textarea>
       <button
         onclick={() =>
@@ -137,95 +165,205 @@
               .filter(Boolean)
           })}>{strings.settings.save}</button
       >
-    </section>
+    </details>
   {/if}
 </div>
 
 <style>
-  .machine-name { width: 100%; font-weight: 600; }
-  .icon-choices { display: flex; flex-wrap: wrap; gap: 4px; margin: 8px 0; }
-  .icon-choices .chosen { color: var(--color-foreground); background: var(--color-surface-3); box-shadow: inset 0 0 0 1px var(--color-border); }
   .machines-page {
     max-width: 820px;
     padding: 28px;
     margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
   }
   h1 {
     font-size: var(--text-lg);
-    margin: 0 0 10px;
+    margin: 0 0 8px;
   }
   h2 {
     font-size: var(--text-base);
-    margin: 0 0 6px;
+    margin: 0;
   }
-  .intro {
+  .intro,
+  .hint {
     color: var(--color-muted-foreground);
-    line-height: 1.6;
-    margin-bottom: 24px;
-  }
-  .machines {
-    display: grid;
-    gap: 10px;
-    margin-bottom: 24px;
-  }
-  .machine-card {
-    display: flex;
-    align-items: flex-start;
-    gap: 14px;
-    padding: 18px;
-  }
-  .logo {
-    display: grid;
-    place-items: center;
-    width: 42px;
-    height: 42px;
-    border-radius: var(--radius-md);
-    background: var(--color-surface-3);
-    color: var(--color-muted-foreground);
-    flex: none;
-  }
-  .identity {
-    flex: 1;
-    min-width: 0;
-  }
-  .address {
-    display: block;
-    color: var(--color-subtle);
     font-size: var(--text-sm);
-    overflow-wrap: anywhere;
+    line-height: 1.6;
   }
-  .status {
-    display: block;
-    margin-top: 7px;
-    font-size: var(--text-xs);
-    color: var(--color-live);
+  .add-open {
+    flex: none;
+    margin-top: 2px;
   }
-  .status.ready {
-    color: var(--color-success);
+
+  /* Folds on its row height, so a close animates as much as an open. */
+  .reveal {
+    display: grid;
+    grid-template-rows: 0fr;
+    opacity: 0;
+    transition: grid-template-rows var(--dur-3) var(--ease-out-quint), opacity var(--dur-2);
   }
-  .actions {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-end;
-    gap: 4px;
+  .reveal.open {
+    grid-template-rows: 1fr;
+    opacity: 1;
   }
+  .reveal > div {
+    overflow: hidden;
+    min-height: 0;
+  }
+
   .add {
     padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .add-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
   }
   form {
     display: flex;
     flex-direction: column;
     gap: 12px;
     align-items: flex-start;
-    margin-top: 16px;
+    margin-top: 6px;
   }
+
+  .machines {
+    display: grid;
+    gap: 8px;
+  }
+  .machine-card {
+    display: flex;
+    flex-direction: column;
+    padding: 12px 14px;
+  }
+  .main {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .logo {
+    display: grid;
+    place-items: center;
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    border-radius: var(--radius-md);
+    background: var(--color-surface-3);
+    color: var(--color-muted-foreground);
+    flex: none;
+  }
+  .logo:hover,
+  .logo[aria-expanded='true'] {
+    color: var(--color-foreground);
+    box-shadow: inset 0 0 0 1px var(--color-edge);
+  }
+  .identity {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  /* A name that reads as a title until it is clicked. */
+  .machine-name {
+    width: 100%;
+    height: var(--control-sm);
+    padding: 0 6px;
+    margin-left: -6px;
+    font-weight: 600;
+    background: transparent;
+    border-color: transparent;
+  }
+  .machine-name:hover {
+    border-color: var(--color-border);
+  }
+  .machine-name:focus {
+    background: var(--color-surface-2);
+  }
+  .meta {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    font-size: var(--text-xs);
+    color: var(--color-subtle);
+  }
+  .dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--color-live);
+    flex: none;
+  }
+  .dot.ready {
+    background: var(--color-success);
+  }
+  .status {
+    color: var(--color-live);
+    flex: none;
+  }
+  .status.ready {
+    color: var(--color-success);
+  }
+  .address {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .address::before {
+    content: '·';
+    margin-right: 6px;
+  }
+  .actions {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    flex: none;
+  }
+  .icon-only {
+    width: var(--control);
+    padding: 0;
+    color: var(--color-muted-foreground);
+  }
+  .icon-choices {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    padding: 10px 0 2px 52px;
+  }
+  .icon-choices .chosen {
+    color: var(--color-foreground);
+    background: var(--color-surface-3);
+    box-shadow: inset 0 0 0 1px var(--color-border);
+  }
+
   .origins {
-    margin-top: 20px;
+    padding: 14px 20px;
+  }
+  .origins summary {
+    cursor: pointer;
+    font-size: var(--text-sm);
+    color: var(--color-muted-foreground);
+  }
+  .origins[open] summary {
+    margin-bottom: 10px;
+    color: var(--color-foreground);
   }
   textarea {
     display: block;
     width: 100%;
-    margin-bottom: 12px;
+    margin: 12px 0;
   }
   label {
     display: flex;
@@ -238,8 +376,8 @@
   input {
     width: 100%;
   }
-  details {
-    margin-top: 20px;
+  details:not(.origins) {
+    margin-top: 8px;
     color: var(--color-muted-foreground);
     font-size: var(--text-sm);
   }
@@ -248,18 +386,40 @@
   }
   .error {
     color: var(--color-danger);
+    font-size: var(--text-sm);
     overflow-wrap: anywhere;
+    margin-top: 8px;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .reveal {
+      transition: none;
+    }
   }
   @media (max-width: 720px) {
     .machines-page {
       padding: 16px;
     }
-    .machine-card {
+    .head {
+      flex-direction: column;
+      align-items: stretch;
+      gap: 12px;
+    }
+    .add-open {
+      width: 100%;
+      min-height: var(--touch-target);
+    }
+    .main {
       flex-wrap: wrap;
     }
+    .identity {
+      flex-basis: calc(100% - 52px);
+    }
     .actions {
-      flex-direction: row;
       width: 100%;
+      justify-content: flex-end;
+    }
+    .icon-choices {
+      padding-left: 0;
     }
   }
 </style>

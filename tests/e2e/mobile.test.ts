@@ -15,7 +15,7 @@ beforeAll(async () => {
   const port = await freePort();
   server = await createServer({ root: join(import.meta.dir, '../../packages/ui'), server: { host: '127.0.0.1', port, strictPort: true }, clearScreen: false });
   await server.listen();
-  page = await BrowserPage.launch({ url: `http://127.0.0.1:${port}/?fake=1&machines=1` });
+  page = await BrowserPage.launch({ url: `http://127.0.0.1:${port}/?fake=1&open=recent&machines=1` });
   await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
   await page.waitFor(`document.querySelector('[data-testid=mobile-tabs]')`);
 }, 30_000);
@@ -34,7 +34,7 @@ test('phone settings separate device preferences from remote administration, inc
   await page.evaluate('history.back()');
   await page.waitFor(`document.querySelector('[data-testid=mobile-settings-home]')`);
   await page.click('[data-testid=settings-tab-machines]');
-  await page.waitFor(`document.querySelector('[data-testid=machine-link]')`);
+  await page.waitFor(`document.querySelector('[data-testid=machine-add-open]')`);
   expect(await page.evaluate(`document.querySelector('.origins') === null`)).toBe(true);
   await capture('phone-settings-machines.png');
   await page.click('[data-testid=mobile-settings-back]');
@@ -112,7 +112,7 @@ test('model sheets stay on screen and browser Back closes the sheet without losi
 
 test('returning to a long conversation preserves the reading position', async () => {
   const origin = await page.evaluate<string>('location.origin');
-  await page.navigate(`${origin}/?fake=1&long=1`);
+  await page.navigate(`${origin}/?fake=1&open=recent&long=1`);
   await page.waitFor(`document.querySelector('[data-testid=thread-title]')?.textContent.includes('Four hundred')`);
   await page.evaluate(`(() => { const t=document.querySelector('[data-testid=timeline]'); t.scrollTop = t.scrollHeight - t.clientHeight - 1200; t.dispatchEvent(new Event('scroll')); })()`);
   await capture('mobile-long-reading.png');

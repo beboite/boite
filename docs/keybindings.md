@@ -6,7 +6,26 @@ core's data directory, which only says what differs. The core reads the file
 at start and again the moment it changes, hands the result to every client
 through `keybindings.get` and `keybindings.updated`, and the UI applies it
 everywhere at once: the key handler, the palette hints, the tooltips, and the
-Keyboard page in Settings, which lists the whole table and where the file is.
+Keyboard page in Settings, which lists the whole table by group and changes it.
+
+## From Settings
+
+The Keyboard page groups the commands (General, Side panel, Thread and
+composer, Theme) under a search field that matches a label, an id or a chord.
+Clicking a chord starts recording: hold the modifiers, press the key, and the
+row saves on the key press. Escape alone cancels, as does leaving the window.
+A chord with no modifier is refused on the row. A chord another command
+already has asks first, and "Move it here" takes it from that command. The row's
+reset button returns one command to its default and its clear button leaves it
+with no key; Reset all empties the file.
+
+Every change goes through the core: `keybindings.set` writes one entry and
+`keybindings.reset` removes one entry, or all of them, which deletes the file.
+Other entries stay as written, unknown ones included, so the page and a text
+editor edit the same file. The core writes a temporary file and renames it
+over, reads it back at once, and announces the table like any other change. A
+file that is not JSON is refused rather than overwritten, with its path, and
+the page shows that message on the row.
 
 ## The file
 

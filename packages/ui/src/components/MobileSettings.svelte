@@ -1,21 +1,24 @@
 <script lang="ts">
-  import { ArrowLeft, Bell, ChevronRight, Monitor, Palette, Mic } from '@lucide/svelte';
+  import { ArrowLeft, Bell, ChevronRight, Coins, Gauge, Monitor, Palette, Mic } from '@lucide/svelte';
   import type { Store } from '../lib/store.svelte';
   import { workspace } from '../lib/workspace.svelte';
   import { strings } from '../lib/strings';
   import { mobileOverlay } from '../lib/mobile-history';
   import AppearancePage from './AppearancePage.svelte';
+  import LimitsPage from './LimitsPage.svelte';
   import MachinesPage from './MachinesPage.svelte';
   import PhoneSettings from './PhoneSettings.svelte';
+  import UsagePage from './UsagePage.svelte';
   import VoiceSettings from './VoiceSettings.svelte';
 
   let { store }: { store: Store } = $props();
   let phone = $state(false);
-  let page = $derived(store.settingsTab === 'appearance' || store.settingsTab === 'machines' || store.settingsTab === 'voice'
+  let page = $derived(store.settingsTab === 'appearance' || store.settingsTab === 'machines' || store.settingsTab === 'voice' || store.settingsTab === 'usage' || store.settingsTab === 'limits'
     ? store.settingsTab : phone ? 'phone' : 'home');
   let machine = $derived(workspace.machines.find(machine => machine.store === store));
   let title = $derived(page === 'phone' ? strings.mobile.settingsPhone
-    : page === 'voice' ? strings.speech.heading : page === 'appearance' ? strings.settings.tabs.appearance : strings.machines.heading);
+    : page === 'voice' ? strings.speech.heading : page === 'appearance' ? strings.settings.tabs.appearance
+    : page === 'usage' ? strings.usage.heading : page === 'limits' ? strings.usage.limits : strings.machines.heading);
   let detail = $derived(page !== 'home');
   $effect(() => { if (detail) return mobileOverlay(back); });
 
@@ -50,6 +53,12 @@
           <button class="ghost row" data-testid="settings-tab-voice" onclick={() => store.showSettings('voice')}>
             <Mic size={20} /><span><strong>{strings.speech.heading}</strong><small>{strings.speech.phoneHint}</small></span><ChevronRight size={18} />
           </button>
+          <button class="ghost row" data-testid="settings-tab-usage" onclick={() => store.showSettings('usage')}>
+            <Coins size={20} /><span><strong>{strings.usage.heading}</strong><small>{strings.usage.phoneHint}</small></span><ChevronRight size={18} />
+          </button>
+          <button class="ghost row" data-testid="settings-tab-limits" onclick={() => store.showSettings('limits')}>
+            <Gauge size={20} /><span><strong>{strings.usage.limits}</strong><small>{strings.usage.limitsIntro}</small></span><ChevronRight size={18} />
+          </button>
         </div>
         <p>{strings.mobile.settingsRemoteHint}</p>
       </section>
@@ -69,6 +78,10 @@
         <VoiceSettings {store} readOnly />
       {:else if page === 'appearance'}
         <AppearancePage />
+      {:else if page === 'usage'}
+        <UsagePage {store} />
+      {:else if page === 'limits'}
+        <LimitsPage {store} />
       {:else}
         <MachinesPage mobile />
       {/if}
@@ -98,6 +111,6 @@
   .scope { overflow-wrap: anywhere; }
   .phone-page :global(.card) { padding: 18px; }
   .detail :global(.page), .detail :global(.machines-page) { padding: 16px; }
-  .detail :global(.page > header), .detail :global(.machines-page > h1) { display: none; }
+  .detail :global(.page > header), .detail :global(.machines-page > .head h1) { display: none; }
   .detail :global(.switch-row) { flex-wrap: wrap; gap: 12px; }
 </style>

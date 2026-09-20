@@ -24,10 +24,18 @@ environment variables, with `{isolationDir}` substituted at spawn:
   one variable is enough and the session file is `auth.json` under it.
 - Claude moves with `CLAUDE_CONFIG_DIR`, and files `.credentials.json`.
 - Grok moves with `GROK_HOME`, and files `auth.json`.
+- Muse Code moves with the three XDG homes, `XDG_CONFIG_HOME`, `XDG_DATA_HOME`
+  and `XDG_STATE_HOME`, and files its login at `muse/auth.json` under the config
+  one, which is `~/.config/muse/auth.json` for the default account.
 - Antigravity moves with `GEMINI_HOME`, files `antigravity-acp/acp_token.json`
   under it, and has no default account at all: its descriptor says
   `isolation.alwaysIsolated`, so `accounts.add` gives every account a directory
   of its own whatever the request asked for.
+- The Antigravity CLI moves with nothing. `agy` keeps its token in the system
+  keyring and its settings under `~/.gemini/antigravity-cli`, and no variable
+  points either elsewhere, so its descriptor declares an empty map and only the
+  default account exists. Its `auth.kind` is `none`: there is no session file to
+  read, and a signed-out agy shows up in the model probe instead.
 
 The same environment goes to every process of that account: a turn, a probe, a
 login. That is why the map lives on the OS profile rather than in a driver, and
@@ -119,6 +127,10 @@ goes to the page and never to a window over the user's work.
   configuration directory the user is logged into. The refusal says so.
 - The login command is empty, or its executable does not resolve. Refused at the
   spawn, naming what was tried.
+- An account of its own, for a provider whose profile has no isolation variable
+  and no login block. Such an account would run on the user's own login anyway,
+  so `accounts.add` refuses it, names the profile's `isolation` field and says to
+  use the default account. The Antigravity CLI is the shipped example.
 
 Every one of those is a loud refusal carrying the reason, never a silent
 no-operation. The Accounts page shows the reason in its error banner.
@@ -179,5 +191,5 @@ minutes. A failed refresh preserves the last reading and marks it stale. An
 unknown percentage is unavailable, not zero. Other providers report that quotas
 are unsupported rather than inventing a balance.
 
-The optional [kebacc-switcher plugin](plugins.md) manages external CLI account pools.
+[Plugins](plugins.md) such as the recommended kebacc-switcher manage external CLI account pools.
 There is no automatic rotation or relay.

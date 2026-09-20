@@ -23,7 +23,7 @@ is replaced once by the agent's, right after the first finished turn.
 - `threads.update` with a `title` saves it with `titleSource: 'user'`. The
   agent's answer never touches it again, unless the user asks.
 
-Drivers without a `title` hook (Codex, OpenCode, Antigravity, Grok, pi today)
+Drivers without a `title` hook (Codex, Muse Code, OpenCode, Antigravity, the Antigravity CLI, Grok, pi today)
 keep the prompt's title, so their threads read as they always did.
 
 ## Asking again

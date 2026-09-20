@@ -98,8 +98,9 @@ function menuValues(): (string | null)[] {
   );
 }
 
+/** Lands on the most recent thread, what most of these tests are about; `open=` in `search` overrides it. */
 async function mountOnFake(search = '/?fake=1'): Promise<void> {
-  window.history.replaceState(null, '', search);
+  window.history.replaceState(null, '', search.includes('open=') ? search : `${search}&open=recent`);
   const target = document.createElement('div');
   document.body.appendChild(target);
   // The store is a singleton and keeps the previous test's open thread, so
@@ -107,10 +108,11 @@ async function mountOnFake(search = '/?fake=1'): Promise<void> {
   store.booted = false;
   store.openThread = null;
   store.draft = null;
+  store.page = 'chat';
   store.composerStates = {};
   store.projectPickerOpen = false;
   running = mount(App, { target });
-  await waitFor(() => store.booted && store.openThread !== null);
+  await waitFor(() => store.booted && (store.openThread !== null || store.draft !== null));
 }
 
 test('the app mounts against the fake core, lists the seeded threads and opens the latest', async () => {
@@ -126,6 +128,29 @@ test('the app mounts against the fake core, lists the seeded threads and opens t
   expect(document.querySelectorAll('[data-testid=thread-row]').length).toBe(4);
   // The most recent thread opens on its own; nothing to click first.
   expect(store.openThread?.id).toBe('t-descriptors');
+});
+
+test('the app opens on a new thread in the project last worked in', async () => {
+  await mountOnFake('/?fake=1&open=landing');
+  await waitFor(() => store.draft !== null);
+  expect(store.openThread).toBeNull();
+  // Nothing remembered on this device yet: the project of the most recent thread.
+  expect(store.draft?.projectId).toBe('p-notes');
+  expect(document.querySelector('[data-testid=composer-input]')).not.toBeNull();
+
+  store.startDraft('p-boite');
+  unmount(running!, { outro: false });
+  running = null;
+  await mountOnFake('/?fake=1&open=landing');
+  await waitFor(() => store.draft !== null);
+  expect(store.draft?.projectId).toBe('p-boite');
+
+  // Settings opened before the core answered is not taken back by the landing.
+  store.draft = null;
+  store.showSettings();
+  await store.openLanding();
+  expect(store.draft).toBeNull();
+  expect(store.page).toBe('settings');
 });
 
 test('New thread opens a draft and the first send creates the thread titled from the prompt', async () => {
@@ -247,7 +272,7 @@ test('the picker rails the providers as logos and gives the shown one its accoun
   await waitFor(() => document.querySelector('[data-testid=composer-picker-menu]') !== null);
   // One tile per provider, in the core's order, the one whose files are still to
   // download included: it is picked like any other and its column says why.
-  expect(tiles()).toEqual(['favorites', 'claude', 'echo', 'opencode', 'antigravity', 'codex', 'pi', 'grok']);
+  expect(tiles()).toEqual(['favorites', 'claude', 'echo', 'opencode', 'antigravity', 'codex', 'pi', 'grok', 'muse']);
   // Claude is the shown one and has two logins, so they sit beside its name.
   expect(seats()).toEqual(['claude::a-claude-main', 'claude::a-claude-side']);
   expect(shownModels()).toEqual(['claude-fable-5-1', 'claude-opus-5', 'claude-sonnet-5']);
@@ -515,7 +540,7 @@ test('the keybindings file moves a chord, takes one away, and the Keyboard page 
   const keyOf = (id: string) =>
     query(`[data-testid=keybinding-row][data-command=${id}] [data-testid=keybinding-key]`).textContent?.trim();
   expect(keyOf('theme-light')).toBe('Ctrl+Shift+L');
-  expect(keyOf('panel')).toBe('none');
+  expect(keyOf('panel')).toBe('Not set');
   expect(keyOf('new-thread')).toBe('Ctrl+N');
   expect(query('[data-testid=keybinding-row][data-command=theme-light]').classList.contains('custom')).toBe(true);
   expect(query('[data-testid=keybinding-row][data-command=new-thread]').classList.contains('custom')).toBe(false);
@@ -524,6 +549,52 @@ test('the keybindings file moves a chord, takes one away, and the Keyboard page 
 
   query<HTMLButtonElement>('[data-testid=settings-back]').click();
   await waitFor(() => document.querySelector('[data-testid=settings]') === null);
+});
+
+test('a shortcut is recorded from the keys pressed, a taken one asks first, and reset puts the defaults back', async () => {
+  await mountOnFake();
+  store.showSettings('keyboard');
+  await waitFor(() => document.querySelector('[data-testid=keyboard-page]') !== null);
+  const row = (id: string) => `[data-testid=keybinding-row][data-command=${id}]`;
+  const keyOf = (id: string) => query(`${row(id)} [data-testid=keybinding-key]`).textContent?.replace(/\s+/g, '');
+  const press = (init: KeyboardEventInit) =>
+    window.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init }));
+
+  query<HTMLButtonElement>(`${row('pin')} [data-testid=keybinding-edit]`).click();
+  await waitFor(() => document.querySelector(`${row('pin')} [data-testid=keybinding-capture]`) !== null);
+  // Modifiers alone wait; a bare letter is typing and is refused on the row.
+  press({ key: 'Control', ctrlKey: true });
+  await waitFor(() => document.querySelector(`${row('pin')} [data-testid=keybinding-capture]`)?.textContent?.includes('Ctrl') === true);
+  press({ key: 'p' });
+  await waitFor(() => document.querySelector(`${row('pin')} [role=alert]`) !== null);
+  press({ key: 'p', ctrlKey: true, altKey: true });
+  await waitFor(() => store.bindings.pin.text === 'mod+alt+p');
+  await waitFor(() => keyOf('pin') === 'Ctrl+Alt+P');
+  expect(query(row('pin')).classList.contains('custom')).toBe(true);
+  // The recorded chord ran nothing on its way in.
+  expect(store.page).toBe('settings');
+
+  query<HTMLButtonElement>(`${row('pin')} [data-testid=keybinding-edit]`).click();
+  await waitFor(() => document.querySelector(`${row('pin')} [data-testid=keybinding-capture]`) !== null);
+  press({ key: 'k', ctrlKey: true });
+  await waitFor(() => document.querySelector(`${row('pin')} [data-testid=keybinding-conflict]`) !== null);
+  expect(store.bindings.palette.text).toBe('mod+k');
+  query<HTMLButtonElement>('[data-testid=keybinding-replace]').click();
+  await waitFor(() => store.bindings.pin.text === 'mod+k' && store.bindings.palette.text === null);
+
+  query<HTMLButtonElement>(`${row('pin')} [data-testid=keybinding-reset]`).click();
+  await waitFor(() => store.bindings.pin.text === null && !store.bindings.pin.custom);
+  query<HTMLButtonElement>('[data-testid=keybindings-reset-all]').click();
+  await waitFor(() => store.bindings.palette.text === 'mod+k' && store.bindings['theme-light'].text === null);
+  expect(document.querySelector('[data-testid=keybindings-reset-all]')).toBeNull();
+
+  // Moving to the filter ends the recording, so its keys type instead of binding.
+  query<HTMLButtonElement>(`${row('pin')} [data-testid=keybinding-edit]`).click();
+  await waitFor(() => document.querySelector(`${row('pin')} [data-testid=keybinding-capture]`) !== null);
+  query('[data-testid=keybindings-filter]').dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
+  await waitFor(() => document.querySelector(`${row('pin')} [data-testid=keybinding-capture]`) === null);
+  expect(press({ key: 'p', ctrlKey: true, altKey: true })).toBe(true);
+  expect(store.bindings.pin.text).toBe(null);
 });
 
 test('removing a project asks first, and Cancel keeps it', async () => {

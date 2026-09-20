@@ -22,11 +22,14 @@ import type {
 import type { Core } from '../core.ts';
 import { agentsDirPath, appDataPath, browserNoopPath, currentOs, homePath } from '../paths.ts';
 import { InstallManager } from './install.ts';
+import { isNpmSpec, resolveNpm } from './npm.ts';
 import { notFound, refused } from '../errors.ts';
 import antigravityShipped from './shipped/antigravity.json';
+import antigravityCliShipped from './shipped/antigravity-cli.json';
 import claudeShipped from './shipped/claude.json';
 import codexShipped from './shipped/codex.json';
 import grokShipped from './shipped/grok.json';
+import museShipped from './shipped/muse.json';
 import opencodeShipped from './shipped/opencode.json';
 import piShipped from './shipped/pi.json';
 import echoShipped from './shipped/echo.json';
@@ -51,18 +54,20 @@ const SHIPPED_DIR = join(import.meta.dir, 'shipped');
 
 const SHIPPED_SOURCES: { file: string; raw: unknown; when?: () => boolean }[] = [
   { file: 'shipped/antigravity.json', raw: antigravityShipped },
+  { file: 'shipped/antigravity-cli.json', raw: antigravityCliShipped },
   { file: 'shipped/claude.json', raw: claudeShipped },
   { file: 'shipped/codex.json', raw: codexShipped },
   { file: 'shipped/grok.json', raw: grokShipped },
+  { file: 'shipped/muse.json', raw: museShipped },
   { file: 'shipped/opencode.json', raw: opencodeShipped },
   { file: 'shipped/pi.json', raw: piShipped },
   { file: 'shipped/echo.json', raw: echoShipped, when: echoEnabled },
 ];
 
-const PROTOCOLS: readonly Protocol[] = ['claude-sdk', 'codex-appserver', 'pi', 'acp', 'echo'];
+const PROTOCOLS: readonly Protocol[] = ['claude-sdk', 'codex-appserver', 'muse', 'pi', 'acp', 'agy', 'echo'];
 const OS_KEYS: readonly Os[] = ['windows', 'linux', 'macos'];
 const AUTH_KINDS: readonly ProviderAuth['kind'][] = ['oauth-cli', 'api-key', 'none'];
-const CANDIDATE_KINDS: readonly ExecutableCandidate['kind'][] = ['path', 'file'];
+const CANDIDATE_KINDS: readonly ExecutableCandidate['kind'][] = ['path', 'file', 'npm'];
 const QUIRKS: readonly ProviderQuirk[] = ['antigravity', 'grok'];
 const CAPABILITY_KEYS: readonly (keyof ProviderCapabilities)[] = [
   'approvals',
@@ -173,7 +178,11 @@ function checkCandidate(value: unknown, file: string, field: string): Executable
   if (!CANDIDATE_KINDS.includes(kind as ExecutableCandidate['kind'])) {
     reject(file, `${field}.kind`, `one of: ${CANDIDATE_KINDS.join(', ')}`, `unknown candidate kind ${kind}`);
   }
-  return { kind: kind as ExecutableCandidate['kind'], value: asString(obj['value'], file, `${field}.value`) };
+  const candidateValue = asString(obj['value'], file, `${field}.value`);
+  if (kind === 'npm' && !isNpmSpec(candidateValue)) {
+    reject(file, `${field}.value`, 'an npm package name, @scope/name, with an optional #bin', `${candidateValue} is not an npm package name`);
+  }
+  return { kind: kind as ExecutableCandidate['kind'], value: candidateValue };
 }
 
 function checkStringMap(value: unknown, file: string, field: string): Record<string, string> {
@@ -514,9 +523,8 @@ function expandDescriptor(descriptor: ProviderDescriptor, dataDir: string): Prov
         kind: candidate.kind,
         value: candidate.kind === 'file' ? normalize(expand(candidate.value)) : expand(candidate.value),
       })),
-      // A CLI that npm installs as a `.cmd` shim is launched as `node <its js>`,
-      // so a launch argument names a path like an executable candidate does and
-      // takes the same tokens.
+      // A launch argument can name a path like an executable candidate does,
+      // so it takes the same tokens.
       ...(profile.launch === undefined ? {} : { launch: { args: (profile.launch.args ?? []).map(expand) } }),
       // The fixed environment names the harness beside the executable and the
       // browser launcher under the data directory, so it takes the same tokens.
@@ -588,6 +596,15 @@ export function validateDescriptor(
   for (const os of OS_KEYS) {
     if (profilesRaw[os] === undefined) continue;
     profiles[os] = checkProfile(profilesRaw[os], file, `profiles.${os}`);
+    // Only these drivers launch the program with the descriptor's arguments after
+    // it, which is what `node <script>` needs; the SDK and app-server drivers do not.
+    if (protocol !== 'pi' && protocol !== 'acp') {
+      profiles[os]!.executable.forEach((candidate, index) => {
+        if (candidate.kind === 'npm') {
+          reject(file, `profiles.${os}.executable[${index}].kind`, 'path or file for this protocol', `an npm candidate needs the pi or acp protocol, not ${protocol}`);
+        }
+      });
+    }
   }
   if (Object.keys(profiles).length === 0) {
     reject(file, 'profiles', 'at least one of: windows, linux, macos', 'profiles must describe at least one OS');
@@ -614,17 +631,40 @@ export function validateDescriptor(
   );
 }
 
-/** The same lookup `ProviderSummary.executable` reports, for a driver that needs the path. */
-export function resolveExecutable(profile: OsProfile): string | null {
+/**
+ * What a profile launches: the program, the arguments that belong to it before
+ * the descriptor's own (the bin script, for an `npm` candidate), and the path a
+ * person recognises as the agent, which for a script is the script, not Node.
+ */
+export interface ResolvedCommand {
+  executable: string;
+  prefix: string[];
+  shown: string;
+}
+
+export function resolveCommand(profile: OsProfile): ResolvedCommand | null {
   for (const candidate of profile.executable) {
     if (candidate.kind === 'path') {
       const found = Bun.which(candidate.value);
-      if (found !== null) return found;
+      if (found !== null) return { executable: found, prefix: [], shown: found };
     } else if (candidate.kind === 'file') {
-      if (existsSync(candidate.value)) return candidate.value;
+      if (existsSync(candidate.value)) return { executable: candidate.value, prefix: [], shown: candidate.value };
+    } else if (candidate.kind === 'npm') {
+      const found = resolveNpm(candidate.value);
+      if (found !== null) return { executable: found.executable, prefix: [found.script], shown: found.script };
     }
   }
   return null;
+}
+
+/** The program to spawn, for a driver that needs the path. Its arguments start with `launchPrefix`. */
+export function resolveExecutable(profile: OsProfile): string | null {
+  return resolveCommand(profile)?.executable ?? null;
+}
+
+/** The descriptor's launch arguments behind whatever the resolved program needs first. */
+export function launchPrefix(profile: OsProfile | undefined): string[] {
+  return profile === undefined ? [] : (resolveCommand(profile)?.prefix ?? []);
 }
 
 function detectResolves(profile: OsProfile, agentsDir: string, dataDir: string): boolean {
@@ -647,7 +687,7 @@ export function profileFor(descriptor: ProviderDescriptor, os: Os = currentOs())
  */
 export function summarize(entry: LoadedProvider, installs: InstallManager, dataDir: string): ProviderSummary {
   const profile = profileFor(entry.descriptor);
-  const executable = profile === undefined ? null : resolveExecutable(profile);
+  const executable = profile === undefined ? null : (resolveCommand(profile)?.shown ?? null);
   const available =
     profile !== undefined &&
     detectResolves(profile, installs.currentDir(entry.descriptor.id), dataDir) &&

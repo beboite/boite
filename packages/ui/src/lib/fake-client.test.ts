@@ -153,24 +153,30 @@ test.each([
   client.close();
 });
 
-test('fake probes expose distinct OpenCode, Codex, pi, Grok and Antigravity catalogs', async () => {
+test('fake probes expose distinct OpenCode, Codex, pi, Grok, Muse and Antigravity catalogs', async () => {
   vi.useFakeTimers();
   const client = new FakeClient({ delayMs: 0 });
   await client.connect();
   await client.call('providers.install', { providerId: 'antigravity' });
   await vi.runAllTimersAsync();
   const catalogs = new Map<string, string[]>();
-  for (const providerId of ['opencode', 'codex', 'pi', 'grok', 'antigravity']) {
+  for (const providerId of ['opencode', 'codex', 'pi', 'grok', 'muse', 'antigravity']) {
     const pending = client.call('providers.probe', { providerId, accountId: `a-${providerId}` });
     const [result] = await Promise.all([pending, vi.runAllTimersAsync()]);
     catalogs.set(providerId, result.models.map((model) => model.id));
+    if (providerId === 'muse') {
+      // Like the real probe, each Muse model carries its own effort scale.
+      const demo = result.models.find((model) => model.id === 'muse-demo');
+      expect(demo?.effort?.levels.map((level) => level.id)).toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
+      expect(demo?.effort?.default).toBe('high');
+    }
   }
   expect(catalogs.get('opencode')).toContain('anthropic/claude-sonnet-5');
-  for (const providerId of ['codex', 'pi', 'grok', 'antigravity']) {
+  for (const providerId of ['codex', 'pi', 'grok', 'muse', 'antigravity']) {
     expect(catalogs.get(providerId)).toContain(`${providerId}-demo`);
     expect(catalogs.get(providerId)).not.toContain('anthropic/claude-sonnet-5');
   }
-  expect(new Set([...catalogs.values()].map((models) => JSON.stringify(models))).size).toBe(5);
+  expect(new Set([...catalogs.values()].map((models) => JSON.stringify(models))).size).toBe(6);
   client.close();
 });
 

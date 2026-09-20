@@ -15,7 +15,7 @@ test("settings reveal sections and protection switches persist across navigation
   });
   await server.listen();
   const page = await BrowserPage.launch({
-    url: `http://127.0.0.1:${port}/?fake=1`,
+    url: `http://127.0.0.1:${port}/?fake=1&open=recent`,
     windowSize: { width: 1440, height: 1000 },
   });
   async function settled() {

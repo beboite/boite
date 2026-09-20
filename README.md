@@ -13,7 +13,7 @@
 </p>
 
 boite is an open-source desktop app and self-hosted server for AI agents.
-Run Claude Code, Codex, OpenCode, Antigravity, Grok and pi in one chat interface,
+Run Claude Code, Codex, Muse Code, OpenCode, Antigravity, Grok and pi in one chat interface,
 using their own protocols and your existing accounts.
 
 Keep a conversation per task. Switch models or accounts inside it, give it a

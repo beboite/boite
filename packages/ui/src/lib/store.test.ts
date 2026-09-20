@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, test, vi } from 'vitest';
-import type { ThreadStatus } from '@boite/contracts';
+import { RpcErrorCode, type ThreadStatus } from '@boite/contracts';
+import { RpcFailure } from './client';
 import { FakeClient } from './fake-client';
 import { setNotificationSender, type Toast } from './notify';
 import { resumeAnchor, Store } from './store.svelte';
@@ -325,6 +326,25 @@ describe('Store', () => {
     expect(calls).toHaveBeenCalledTimes(1);
     await store.probeModels('opencode', 'a-opencode', true);
     expect(calls).toHaveBeenCalledTimes(2);
+  });
+
+  test('a probe the core refused because the account changed meanwhile is no error, and runs again', async () => {
+    const { store, client } = await ready();
+    const original = client.call.bind(client);
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const calls = vi.spyOn(client, 'call').mockImplementation(async (method, params) => {
+      if (method !== 'providers.probe') return original(method, params);
+      await gate;
+      throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'the provider or account changed during discovery; refresh models' });
+    });
+    const request = store.probeModels('opencode', 'a-opencode');
+    await original('accounts.check', { accountId: 'a-opencode' });
+    release(); await request;
+    expect(store.error).toBeNull();
+    calls.mockRestore();
+    await store.probeModels('opencode', 'a-opencode');
+    expect(Object.keys(store.probedModels)).toEqual(['opencode::a-opencode']);
   });
 
   test('a probe elsewhere fills the models of that instance, the descriptor until then', async () => {

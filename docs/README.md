@@ -5,6 +5,7 @@
 - [Accounts](accounts.md): agent logins and isolated accounts.
 - [Model switching](model-switching.md): changing models and providers in one conversation.
 - [Context](context.md): context usage and compaction.
+- [Usage](usage.md): tokens, API cost and limits per day, provider and model.
 - [Keyboard shortcuts](keybindings.md): defaults and customization.
 - [The right panel](panel.md): browser, changes, files, tasks and trace beside the chat.
 - [The `boite` CLI](cli.md): what an agent runs to reach its thread and its panel.
@@ -13,7 +14,7 @@
 - [Phone access](phone.md): pairing, permissions and offline behavior.
 - [Voice dictation](voice.md): local Whisper, API transcription and microphone access.
 - [Headless server](server.md): Docker, persistent storage and remote access.
-- [Plugins](plugins.md): managed plugins and their settings.
+- [Plugins](plugins.md): recommended plugins, adding one from a git URL, and writing your own.
 
 ## Building and contributing
 

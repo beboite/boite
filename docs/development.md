@@ -76,6 +76,11 @@ in-memory fake.
   UI tests run on and the fastest way to look at a screen.
 - `?fake=1&long=1` adds a four-hundred-message thread, which is what the
   windowed message list is looked at on.
+- The app opens on a new thread's draft in the last used project, as if New
+  thread had been pressed: the project last opened or drafted in on that
+  device (kept per core in `localStorage`), else the project of the most recent
+  thread, else the first one. `?fake=1&open=recent` opens the most recent
+  thread instead, which is the page most captures and e2e tests look at.
 - `?grant=<grant>` is a pairing link: the page exchanges it once for a session
   key of its own and stores that. `?token=<token>` opens the page on a token
   one already holds, and `?core=<url>` points it somewhere else. All three are
@@ -281,7 +286,9 @@ visual: a diff, a passing test and a green build all say nothing about what a
 screen looks like.
 
 `BOITE_E2E_BROWSER` overrides the browser lookup when the candidates in that file
-find nothing.
+find nothing. Helium is the last of them: on a fresh profile it reloads the tab
+a few seconds after launch, so a test that acts in that window sees the page
+boot twice, and its dictation tests fail.
 
 ## The opt-in live tests
 
@@ -296,6 +303,7 @@ each one is skipped unless its variable is set. Run them from
 | `BOITE_E2E_GROK=1` | `test/grok.live.test.ts` | an ACP turn on a named Grok model and effort, then a resume on a new process. It only ever uses the default account, which reads `~/.grok`: a Grok started on an empty `GROK_HOME` opens a browser |
 | `BOITE_E2E_CODEX=1` | `test/codex.live.test.ts` | a Codex app-server turn and its resume |
 | `BOITE_E2E_PI=1` | `test/pi.live.test.ts` | a pi turn and its resume |
+| `BOITE_E2E_AGY=1` | `test/agy.live.test.ts` | `agy models` folded into models with effort levels, then one cold turn on `gemini-3.8-flash` at `low` with a one-word prompt, on the default account. agy must be installed and signed in |
 | `BOITE_E2E_KEBACC_INSTALL=1` | `test/plugins.install.live.test.ts` | pinned native plugin download, version check and uninstall in a temporary directory; no login |
 | `BOITE_E2E_ANTIGRAVITY_INSTALL=1` | `test/antigravity.install.live.test.ts` | the managed install for real: 468 MB from Google, the sha256 and every file size checked, `initialize` answered. No sign-in |
 | `BOITE_E2E_ANTIGRAVITY=1` | `test/antigravity.live.test.ts` | the whole Google sign-in, in your browser, then one turn. Only a person runs this one |

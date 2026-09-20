@@ -47,8 +47,27 @@
   --color-danger: #f0716f;
   --color-danger-hover: #d36060;
   --color-on-danger: #ffffff;
+  /* The Windows 11 caption close, the same red in both themes: the danger
+     salmon under a white cross read at 2.9:1, this one at 5.7:1. */
+  --color-caption-close: #c42b1c;
   --color-scrim: rgba(6, 6, 8, 0.55);
   --color-on-foreground: #101013;
+
+  /*
+   * Chart series, one hue per provider in a fixed order: Claude, Codex,
+   * OpenCode, Grok, Antigravity, pi, then two spare slots for any other
+   * provider. Each theme's set was checked for colour-blind separation and
+   * contrast against its own card surface. Text never wears these.
+   */
+  --series-1: #d95926;
+  --series-2: #3987e5;
+  --series-3: #199e70;
+  --series-4: #9085e9;
+  --series-5: #c98500;
+  --series-6: #d55181;
+  --series-7: #008300;
+  --series-8: #e66767;
+  --series-other: var(--color-subtle);
 
   --radius-sm: 6px;
   --radius-md: 8px;
@@ -69,6 +88,8 @@
   --text-lg: 20px;
 
   --titlebar: 44px;
+  /* A caption button, Windows' own width, the bar's full height. */
+  --caption: 46px;
   --sidebar: 280px;
   --panel: 360px;
   --content: 820px;
@@ -113,6 +134,14 @@
   --color-on-danger: #ffffff;
   --color-scrim: rgba(20, 20, 24, 0.35);
   --color-on-foreground: #fafafb;
+  --series-1: #eb6834;
+  --series-2: #2a78d6;
+  --series-3: #18a070;
+  --series-4: #4a3aa7;
+  --series-5: #bf8200;
+  --series-6: #e26092;
+  --series-7: #008300;
+  --series-8: #e34948;
   --shadow-e1: 0 1px 2px rgb(0 0 0 / 0.08), inset 0 1px 0 rgb(255 255 255 / 0.6);
   --shadow-e2: 0 8px 24px rgb(0 0 0 / 0.12), 0 0 0 1px rgb(0 0 0 / 0.06);
   --shadow-e3: 0 20px 60px rgb(0 0 0 / 0.18), 0 0 0 1px rgb(0 0 0 / 0.08);
@@ -305,8 +334,17 @@ button.small {
   font-size: var(--text-sm);
 }
 
+/* `button.small` comes after `button.icon` at the same specificity, so its side
+   padding won here and left a 26 px icon button 8 px for its glyph. */
 button.small.icon {
   width: var(--control-sm);
+  padding: 0;
+}
+
+/* A glyph keeps the size it was drawn at: a flex row too narrow for it
+   overflows rather than shrinking the icon to a speck. */
+button svg {
+  flex-shrink: 0;
 }
 
 input,

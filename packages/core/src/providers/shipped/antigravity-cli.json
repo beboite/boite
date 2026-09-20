@@ -1,0 +1,44 @@
+{
+  "id": "antigravity-cli",
+  "schemaVersion": 1,
+  "name": "Antigravity CLI",
+  "shortName": "agy",
+  "protocol": "agy",
+  "roots": ["{home}/.gemini/antigravity-cli"],
+  "profiles": {
+    "windows": {
+      "detect": {},
+      "executable": [
+        { "kind": "path", "value": "agy" },
+        { "kind": "file", "value": "{home}/AppData/Local/agy/bin/agy.exe" }
+      ],
+      "isolation": {},
+      "env": { "BROWSER": "{browserNoop}", "NO_COLOR": "1" },
+      "close": { "processes": [] }
+    },
+    "linux": {
+      "detect": {},
+      "executable": [{ "kind": "path", "value": "agy" }],
+      "isolation": {},
+      "env": { "BROWSER": "{browserNoop}", "NO_COLOR": "1" },
+      "close": { "processes": [] }
+    },
+    "macos": {
+      "detect": {},
+      "executable": [{ "kind": "path", "value": "agy" }],
+      "isolation": {},
+      "env": { "BROWSER": "{browserNoop}", "NO_COLOR": "1" },
+      "close": { "processes": [] }
+    }
+  },
+  "auth": { "kind": "none" },
+  "models": [{ "id": "default", "name": "Antigravity CLI default", "default": true }],
+  "capabilities": {
+    "approvals": false,
+    "hooks": false,
+    "checkpoint": false,
+    "images": false,
+    "planMode": true,
+    "resume": true
+  }
+}
