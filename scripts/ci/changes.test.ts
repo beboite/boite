@@ -18,6 +18,7 @@ test('shared inputs and unknown files fail open to every check', () => {
 
 test('docs-only changes keep the cheap check path', () => {
   expect(needsCodeChecks(['README.md', 'docs/server.md', 'LICENSE'])).toBe(false);
+  expect(needsCodeChecks(['SECURITY.md', 'CODE_OF_CONDUCT.md', '.github/CODEOWNERS', '.github/labeler.yml'])).toBe(false);
 });
 
 test('workflow lint follows workflows, local actions and their decision scripts', () => {

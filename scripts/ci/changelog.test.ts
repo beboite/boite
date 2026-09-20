@@ -36,6 +36,26 @@ test('direct commits and an optional announcement appear without manual notes', 
   expect(notes).toContain('/compare/v1.0.0...v1.1.0');
 });
 
+test('typed subjects are grouped, untyped ones fall under other changes', () => {
+  const notes = releaseNotes([
+    { sha: 'a'.repeat(40), subject: 'fix(ui): normalize spacing' },
+    { sha: 'b'.repeat(40), subject: 'feat: add dictation' },
+    { sha: 'c'.repeat(40), subject: 'Point the cargo note at the docs' },
+    { sha: 'd'.repeat(40), subject: 'chore(deps): bump node' },
+    { sha: 'e'.repeat(40), subject: 'feat(core)!: drop schema 8' },
+  ], 'example/boite', 'v1.1.0');
+  const features = notes.indexOf('### Features');
+  const fixes = notes.indexOf('### Fixes');
+  const other = notes.indexOf('### Other changes');
+  expect(features).toBeGreaterThanOrEqual(0);
+  expect(fixes).toBeGreaterThan(features);
+  expect(other).toBeGreaterThan(fixes);
+  expect(notes).not.toContain('### Performance');
+  expect(notes.slice(features, fixes)).toContain('drop schema 8');
+  expect(notes.slice(other)).toContain('bump node');
+  expect(notes.slice(other)).toContain('Point the cargo note');
+});
+
 test('the first release has no invented previous version', () => {
   expect(previousRelease([], 'v1.0.0', () => true)).toBeUndefined();
   expect(releaseNotes([{ sha: 'a'.repeat(40), subject: 'Initial implementation' }], 'example/boite', 'v1.0.0')).not.toContain('/compare/');

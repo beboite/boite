@@ -1,5 +1,7 @@
 name: Bug report
 description: Report a reproducible problem in boite.
+type: Bug
+labels: [bug]
 body:
   - type: textarea
     id: problem
@@ -11,8 +13,37 @@ body:
   - type: input
     id: version
     attributes:
-      label: Version and platform
-      placeholder: Version or commit, OS, desktop or browser
+      label: Version
+      placeholder: 2.0.0-beta.1, a nightly tag or a commit
+    validations:
+      required: true
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Where does it happen?
+      multiple: true
+      options:
+        - Desktop app on Windows
+        - Desktop app on Linux
+        - Desktop app on macOS
+        - Phone
+        - Browser connected to a core
+        - Server (Docker image or Linux binary)
+    validations:
+      required: true
+  - type: dropdown
+    id: agent
+    attributes:
+      label: Agent
+      multiple: true
+      options:
+        - Not specific to an agent
+        - Claude Code
+        - Codex
+        - OpenCode
+        - Antigravity
+        - Grok
+        - pi
     validations:
       required: true
   - type: textarea
@@ -20,3 +51,10 @@ body:
     attributes:
       label: Logs or screenshots
       description: Remove tokens, pairing links, private paths and conversation content.
+  - type: checkboxes
+    id: search
+    attributes:
+      label: Existing issues
+      options:
+        - label: I searched the open and closed issues for this problem.
+          required: true

@@ -1,0 +1,18 @@
+core:
+  - changed-files:
+      - any-glob-to-any-file: ['packages/core/**', 'packages/contracts/**']
+ui:
+  - changed-files:
+      - any-glob-to-any-file: 'packages/ui/**'
+shell:
+  - changed-files:
+      - any-glob-to-any-file: 'apps/shell/**'
+server:
+  - changed-files:
+      - any-glob-to-any-file: ['Dockerfile', '.dockerignore', 'compose.yaml', 'docker/**']
+ci:
+  - changed-files:
+      - any-glob-to-any-file: ['.github/**', 'scripts/ci/**']
+documentation:
+  - changed-files:
+      - any-glob-to-any-file: ['docs/**', '*.md']
