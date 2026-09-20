@@ -12,6 +12,14 @@ and include the commands you ran. UI changes need desktop and phone captures.
 Do not include credentials, pairing links, personal paths or provider transcripts
 in reports or fixtures.
 
+Every change reaches `main` through a pull request. Its title becomes the squash
+commit and the release notes line, so it reads `type(scope): summary`, for
+example `fix(ui): keep the composer above the keyboard`. The accepted types are
+listed in [ci.md](docs/ci.md).
+
+Report vulnerabilities privately as [SECURITY.md](SECURITY.md) describes, never
+in a public issue. Participation follows the [code of conduct](CODE_OF_CONDUCT.md).
+
 Before submitting:
 
 ```sh
