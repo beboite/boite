@@ -954,10 +954,18 @@
       flex-direction: row;
       flex-wrap: nowrap;
       overflow-x: auto;
-      padding-right: calc(var(--control-lg) + 10px);
+      padding-right: calc(var(--touch-target) + 10px);
       justify-content: flex-start;
       border-right: none;
       border-bottom: 1px solid var(--color-border);
+    }
+
+    /* The rail is the finger's first stop on a phone, so its tiles and the
+       refresh button take a full touch target like every other control. */
+    .tile,
+    .refresh {
+      width: var(--touch-target);
+      height: var(--touch-target);
     }
   }
 </style>
