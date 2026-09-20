@@ -65,8 +65,9 @@ With the host stopped, keep a copy of the damaged file. Check its read permissio
 and JSON syntax first. Restore a valid backup only if it retains every pending
 deletion ID and the current installation ID. Do not delete the file or clear
 these fields to bypass the error. If repairing individual fields, preserve valid
-UUIDs in `forget` and `installId`; ask the project maintainer for help if their
-values cannot be recovered. Never publish the consent file in an issue.
+UUIDs in `anonymousId`, `forget` and `installId`; ask the project maintainer for
+help if their values cannot be recovered. Replacing `anonymousId` starts a new
+anonymous-mode installation count. Never publish the consent file in an issue.
 
 Once the file loads, turning enhanced analytics off moves its installation ID
 into the deletion queue. Use "Retry deletion" in settings and wait for the
