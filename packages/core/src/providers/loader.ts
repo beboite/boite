@@ -12,6 +12,7 @@ import type {
   ProviderDescriptor,
   ProviderId,
   ProviderInstall,
+  ProviderSelfUpdate,
   ProviderIsolation,
   ProviderLogin,
   ProviderQuirk,
@@ -247,9 +248,34 @@ function checkInstall(value: unknown, file: string, field: string): ProviderInst
     ...(format === 'zip' || format === 'binary' ? { format } : {}) };
 }
 
+function checkUpdate(value: unknown, file: string, field: string): ProviderSelfUpdate {
+  const obj = asObject(value, file, field);
+  checkKeys(obj, ['versionArgs', 'latestNpm', 'latestArgs', 'args'], file, field);
+  const strings = (key: string): string[] =>
+    asArray(obj[key], file, `${field}.${key}`).map((entry, index) => asString(entry, file, `${field}.${key}[${index}]`));
+  const update: ProviderSelfUpdate = { args: strings('args') };
+  if (update.args.length === 0) {
+    reject(file, `${field}.args`, "the updater's arguments, such as [\"update\"]", `${field}.args must name at least one argument`);
+  }
+  if (obj['versionArgs'] !== undefined) update.versionArgs = strings('versionArgs');
+  if (obj['latestArgs'] !== undefined) update.latestArgs = strings('latestArgs');
+  if (obj['latestNpm'] !== undefined) {
+    const name = asString(obj['latestNpm'], file, `${field}.latestNpm`);
+    // The name goes in a registry URL, so it is a package name and nothing else.
+    if (!/^(@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/.test(name)) {
+      reject(file, `${field}.latestNpm`, 'an npm package name, such as @scope/name', `${name} is not an npm package name`);
+    }
+    update.latestNpm = name;
+  }
+  if (update.latestNpm !== undefined && update.latestArgs !== undefined) {
+    reject(file, field, 'latestNpm or latestArgs, not both', `${field} names two sources for the newest version`);
+  }
+  return update;
+}
+
 function checkProfile(value: unknown, file: string, field: string): OsProfile {
   const obj = asObject(value, file, field);
-  checkKeys(obj, ['detect', 'executable', 'launch', 'install', 'isolation', 'env', 'unsetEnv', 'close'], file, field);
+  checkKeys(obj, ['detect', 'executable', 'launch', 'install', 'update', 'isolation', 'env', 'unsetEnv', 'close'], file, field);
 
   const detectRaw = asObject(obj['detect'] ?? {}, file, `${field}.detect`);
   checkKeys(detectRaw, ['command', 'file'], file, `${field}.detect`);
@@ -294,6 +320,7 @@ function checkProfile(value: unknown, file: string, field: string): OsProfile {
   }
 
   if (obj['install'] !== undefined) profile.install = checkInstall(obj['install'], file, `${field}.install`);
+  if (obj['update'] !== undefined) profile.update = checkUpdate(obj['update'], file, `${field}.update`);
 
   return profile;
 }

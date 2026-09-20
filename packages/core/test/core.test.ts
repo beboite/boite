@@ -76,6 +76,7 @@ describe('settings', () => {
       threadMemoryCapMb: 0,
       focusGuard: true,
       muteAgents: true,
+      autoUpdateHarnesses: false,
     });
 
     const next = await client.call('settings.set', { maxConcurrentTurns: 3 });

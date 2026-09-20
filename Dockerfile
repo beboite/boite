@@ -32,12 +32,14 @@ COPY --from=build /app/packages/core/dist /app/packages/core/dist
 COPY --from=build /app/packages/ui/dist /app/packages/ui/dist
 COPY packages/core/src/providers/shipped/echo-login.ts /app/packages/core/dist/shipped/echo-login.ts
 COPY docker/boite-server /usr/local/bin/boite-server
+COPY docker/boite /opt/boite-cli/boite
 COPY docker/healthcheck.ts /app/healthcheck.ts
 COPY LICENSE /app/LICENSE
-RUN chmod +x /usr/local/bin/boite-server
+RUN chmod +x /usr/local/bin/boite-server /opt/boite-cli/boite
 ENV NODE_ENV=production \
     BOITE_CHANNEL=${BOITE_CHANNEL} \
     BOITE_DATA_DIR=/data \
+    BOITE_CLI_DIR=/opt/boite-cli \
     HOME=/home/node \
     PATH=/opt/agents/node_modules/.bin:/home/node/.local/bin:/usr/local/bin:/usr/bin:/bin
 LABEL org.opencontainers.image.title="boite-server" \

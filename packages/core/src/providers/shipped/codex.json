@@ -8,6 +8,7 @@
   "profiles": {
     "windows": {
       "detect": {},
+      "update": { "args": ["update"], "latestNpm": "@openai/codex" },
       "executable": [
         { "kind": "file", "value": "{agentsDir}/codex-x86_64-pc-windows-msvc.exe" },
         {
@@ -38,6 +39,7 @@
     },
     "linux": {
       "detect": {},
+      "update": { "args": ["update"], "latestNpm": "@openai/codex" },
       "executable": [{ "kind": "path", "value": "codex" }],
       "launch": { "args": ["app-server"] },
       "isolation": { "CODEX_HOME": "{isolationDir}" },
@@ -45,6 +47,7 @@
     },
     "macos": {
       "detect": {},
+      "update": { "args": ["update"], "latestNpm": "@openai/codex" },
       "executable": [{ "kind": "path", "value": "codex" }],
       "launch": { "args": ["app-server"] },
       "isolation": { "CODEX_HOME": "{isolationDir}" },

@@ -8,6 +8,7 @@
   "profiles": {
     "windows": {
       "detect": {},
+      "update": { "args": ["update"], "latestNpm": "@anthropic-ai/claude-code" },
       "executable": [
         { "kind": "file", "value": "{agentsDir}/claude.exe" },
         { "kind": "file", "value": "{home}/.local/bin/claude.exe" },
@@ -26,12 +27,14 @@
     },
     "linux": {
       "detect": {},
+      "update": { "args": ["update"], "latestNpm": "@anthropic-ai/claude-code" },
       "executable": [{ "kind": "path", "value": "claude" }],
       "isolation": { "CLAUDE_CONFIG_DIR": "{isolationDir}" },
       "close": { "processes": ["claude"] }
     },
     "macos": {
       "detect": {},
+      "update": { "args": ["update"], "latestNpm": "@anthropic-ai/claude-code" },
       "executable": [{ "kind": "path", "value": "claude" }],
       "isolation": { "CLAUDE_CONFIG_DIR": "{isolationDir}" },
       "close": { "processes": ["claude"] }

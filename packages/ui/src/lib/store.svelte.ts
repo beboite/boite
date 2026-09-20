@@ -27,6 +27,7 @@ import type {
   Project,
   ProjectId,
   ProviderId,
+  HarnessUpdate,
   ProviderInstallState,
   ProviderRejected,
   ProviderSummary,
@@ -292,6 +293,8 @@ export class Store {
    * only state a summary cannot carry between two `providers.list` calls.
    */
   installStates = $state<Record<ProviderId, ProviderInstallState>>({});
+  /** Where each agent of this machine stands against its newest release, the core's own reading. */
+  harnessUpdates = $state<HarnessUpdate[]>([]);
   /**
    * What an agent answered `providers.probe` with, keyed `providerId::accountId`.
    * An ACP agent owns its model list; the descriptor only carries `default`.
@@ -836,6 +839,9 @@ export class Store {
     on('providers.installProgress', ({ providerId, ...state }) => {
       this.installStates = { ...this.installStates, [providerId]: state as ProviderInstallState };
     });
+    on('providers.updatesChanged', (updates) => {
+      this.harnessUpdates = updates;
+    });
     on('providers.updated', ({ loaded, rejected }) => {
       this.providers = loaded;
       this.rejectedProviders = rejected;
@@ -1210,6 +1216,7 @@ export class Store {
       this.scheduler = scheduler;
       // What `bench/startup.ts` reads: the first moment the app holds its data.
       if (typeof performance !== 'undefined' && performance.getEntriesByName('boite:ready').length === 0) performance.mark('boite:ready');
+      void this.loadHarnessUpdates();
       const open = this.openThread;
       if (open && this.visible) await this.open(open.id, false);
     } catch (error) {
@@ -2241,6 +2248,51 @@ export class Store {
       this.#fail(error);
       return false;
     }
+  }
+
+  /**
+   * The list is the core's and arrives again as `providers.updatesChanged`.
+   * A core from before updates answers MethodNotFound: that machine simply
+   * offers none, which is not an error worth a toast.
+   */
+  async loadHarnessUpdates(refresh = false): Promise<void> {
+    const client = this.#client;
+    if (!client || !this.owner) return;
+    try {
+      const updates = await client.call('providers.updates', refresh ? { refresh: true } : {});
+      if (client === this.#client) this.harnessUpdates = updates;
+    } catch (error) {
+      if (error instanceof RpcFailure && error.code === RpcErrorCode.MethodNotFound) return;
+      if (refresh) this.#fail(error);
+      else console.warn('reading the agent updates failed', error);
+    }
+  }
+
+  async updateHarness(providerId: ProviderId): Promise<void> {
+    const client = this.#client;
+    if (!client) return;
+    try {
+      const update = await client.call('providers.update', { providerId });
+      this.#putHarnessUpdate(update);
+    } catch (error) {
+      this.#fail(error);
+    }
+  }
+
+  async skipHarnessUpdate(providerId: ProviderId, version: string | null): Promise<void> {
+    const client = this.#client;
+    if (!client) return;
+    try {
+      this.#putHarnessUpdate(await client.call('providers.updateSkip', { providerId, version }));
+    } catch (error) {
+      this.#fail(error);
+    }
+  }
+
+  #putHarnessUpdate(update: HarnessUpdate): void {
+    this.harnessUpdates = this.harnessUpdates.some((entry) => entry.providerId === update.providerId)
+      ? this.harnessUpdates.map((entry) => (entry.providerId === update.providerId ? update : entry))
+      : [...this.harnessUpdates, update];
   }
 
   /** Start the download. The rest arrives as `providers.installProgress`. */

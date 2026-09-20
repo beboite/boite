@@ -85,6 +85,44 @@ export type ProviderInstallState =
   | { state: 'installed'; version: string; installedAt: Timestamp; available: string }
   | { state: 'failed'; version: string; message: string };
 
+/**
+ * How an agent the user installed by their own means brings itself up to date.
+ * Boite never downloads that agent: it asks the program its version, reads the
+ * newest one where the agent publishes it, and runs the agent's own updater.
+ */
+export interface ProviderSelfUpdate {
+  /** Arguments that print the installed version. The first `x.y.z` in the output is read. Default `--version`. */
+  versionArgs?: string[];
+  /** The npm package whose `latest` tag names the newest release. */
+  latestNpm?: string;
+  /** Arguments that print a JSON object carrying `latestVersion`, for an agent that checks by itself. */
+  latestArgs?: string[];
+  /** Arguments of the agent's own updater. */
+  args: string[];
+}
+
+/**
+ * Where one agent stands against its newest release on this core's machine.
+ * `managed` is a release Boite downloaded, updated through the install block
+ * a Boite release pins. `self` is the user's own install, updated by the
+ * agent's updater. `pending` is what a client shows: a newer version exists,
+ * the user has not skipped it, and nothing is running.
+ */
+export interface HarnessUpdate {
+  providerId: ProviderId;
+  name: string;
+  route: 'managed' | 'self';
+  current: string | null;
+  latest: string | null;
+  pending: boolean;
+  /** The version the user chose not to hear about again. A newer one asks again. */
+  skipped: string | null;
+  state: 'idle' | 'checking' | 'updating' | 'failed';
+  /** Why the last check or update failed, null otherwise. */
+  message: string | null;
+  checkedAt: Timestamp | null;
+}
+
 export interface OsProfile {
   /** The provider is offered only when one of these resolves. */
   detect: { command?: string; file?: string };
@@ -92,6 +130,8 @@ export interface OsProfile {
   launch?: { args?: string[] };
   /** A release the core downloads on request. Absent when the agent ships another way. */
   install?: ProviderInstall;
+  /** How the user's own install updates itself. Absent when the agent has no updater Boite can run. */
+  update?: ProviderSelfUpdate;
   /**
    * Environment that makes one account blind to the others. Values may use
    * `{isolationDir}`, replaced by the account's own directory.
@@ -841,6 +881,12 @@ export interface Settings {
    * process exits. Windows only, ignored elsewhere.
    */
   muteAgents: boolean;
+  /**
+   * The core updates its agents by itself: checked a minute after start and
+   * every six hours, each one updated once no turn of its provider is in
+   * flight. It needs no client connected, which is how a server stays current.
+   */
+  autoUpdateHarnesses: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -1395,6 +1441,21 @@ export interface RpcMethods {
   };
   /** Delete what a managed install put on disk. Refused while a process of that provider is alive. */
   'providers.uninstall': { params: { providerId: ProviderId }; result: ProviderInstallState };
+  /**
+   * Where every available agent stands against its newest release, on the
+   * machine this core runs on. `refresh` asks the agents and the registries
+   * again; without it the last reading answers, and the first call reads.
+   */
+  'providers.updates': { params: { refresh?: boolean }; result: HarnessUpdate[] };
+  /**
+   * Bring one agent to its newest release. Refused while a turn of that
+   * provider is queued, running or waiting, and when nothing newer is known.
+   * The warm processes of the provider are released first, since a running
+   * program cannot be replaced. Progress arrives as `providers.updatesChanged`.
+   */
+  'providers.update': { params: { providerId: ProviderId }; result: HarnessUpdate };
+  /** Stop offering this version. A later one is offered again. `version: null` forgets the skip. */
+  'providers.updateSkip': { params: { providerId: ProviderId; version: string | null }; result: HarnessUpdate };
   /** Validate a user descriptor and show what it would do. Writes nothing. */
   'providers.dryRun': {
     params: { file: string };
@@ -1665,6 +1726,8 @@ export interface RpcEvents {
    * once the files land or are removed, so every client re-lists.
    */
   'providers.installProgress': ProviderInstallState & { providerId: ProviderId };
+  /** The whole list, each time a check, an update or a skip changed one entry. */
+  'providers.updatesChanged': HarnessUpdate[];
   /** Every `providers.probe` that completed, so a second client sees the same models. */
   'providers.probed': {
     providerId: ProviderId;

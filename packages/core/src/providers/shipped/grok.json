@@ -8,6 +8,7 @@
   "profiles": {
     "windows": {
       "detect": {},
+      "update": { "args": ["update"], "latestArgs": ["update", "--check", "--json"] },
       "executable": [
         { "kind": "file", "value": "{home}/.grok/bin/grok.exe" },
         { "kind": "path", "value": "grok" }
@@ -32,6 +33,7 @@
     },
     "linux": {
       "detect": {},
+      "update": { "args": ["update"], "latestArgs": ["update", "--check", "--json"] },
       "executable": [
         { "kind": "file", "value": "{home}/.grok/bin/grok" },
         { "kind": "path", "value": "grok" }
@@ -56,6 +58,7 @@
     },
     "macos": {
       "detect": {},
+      "update": { "args": ["update"], "latestArgs": ["update", "--check", "--json"] },
       "executable": [
         { "kind": "file", "value": "{home}/.grok/bin/grok" },
         { "kind": "path", "value": "grok" }

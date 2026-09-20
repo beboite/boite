@@ -122,6 +122,9 @@ session protocol either.
   empty for an agent running under `node`: the process in the job is `node`, not
   the agent. `install` is the optional managed release, below.
 
+An `update` block says how the user's own install updates itself; see
+[agent updates](agent-updates.md).
+
 ## The tokens
 
 Four expand when the descriptor loads, in `roots`, in every executable candidate,
@@ -338,7 +341,11 @@ question:
   Otherwise the `configOptions` whose category is `model` and `thought_level` are
   read. That effort scale describes only the current model, so Boite does not
   copy it to other models. An agent that sends neither leaves the descriptor's
-  models standing.
+  models standing. OpenCode names a model's `thought_level` only once a session
+  is on that model: `providers.probe` takes an optional `model`, selects it with
+  `session/set_config_option` in a fresh probe process and reads the scale the
+  answer carries. One read per model is cached with the list, the composer asks
+  for the model it lands on, and a failed read keeps the list already cached.
 - Codex: `initialize`, the `initialized` notification, then `model/list` until no
   cursor comes back. Each model carries its own efforts and its own default, so
   two models on one account can offer two different scales. `serviceTiers` supplies
@@ -376,6 +383,11 @@ A probe that finds no executable, whose agent dies or that runs past
 twenty seconds throws with the reason and caches nothing. `threads.create` and
 `threads.update` accept what the last probe listed on top of the descriptor's; a
 model nobody probed is refused, saying to open the picker.
+
+A probed scale lives in memory. After a core restart a thread may carry an
+effort whose scale is not read yet: `turns.start` lets it through, because it
+was checked when it was chosen, and refuses only an effort missing from a scale
+that is known.
 
 ## Permission modes
 

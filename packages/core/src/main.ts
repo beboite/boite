@@ -262,6 +262,10 @@ export function main(argv: string[]): void {
   const settings = core.settings.get();
   const host = resolveHost(flags, settings);
   const server = startServer({ core, host, port: flags.port });
+  core.updates.start();
+  if (core.cliDir === null) {
+    console.warn('the boite CLI shim is not beside the core: agents started here cannot run `boite`. Copy `boite` next to the executable, or name its directory in BOITE_CLI_DIR');
+  }
   if (!flags.hostExplicit) {
     core.log('info', `listening on ${host} because listenOnLan is ${settings.listenOnLan ? 'on' : 'off'}`);
   }

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import NotificationCard from './components/NotificationCard.svelte';
+  import HarnessUpdateNotices from './components/HarnessUpdateNotices.svelte';
   import ChatView from './components/ChatView.svelte';
 
   import ConfirmDialog from './components/ConfirmDialog.svelte';
@@ -431,6 +432,8 @@
       <span class="bar" class:filling={quitHint.open}></span>
     </div>
   {/if}
+
+  <HarnessUpdateNotices />
 
   {#if toast.shown}
     <div

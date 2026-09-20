@@ -37,6 +37,7 @@ import {
   type QuestionRequest,
   type ProcessRecord,
   type Project,
+  type HarnessUpdate,
   type ProviderInstallState,
   type ProviderSummary,
   type RpcEventName,
@@ -878,6 +879,12 @@ const PROBE_PROVIDERS: Pick<ProviderSummary, 'id' | 'name' | 'protocol' | 'login
  * The whole core in memory, contract-accurate: what `vite dev` uses behind
  * `?fake=1` and what every test runs against.
  */
+function quietUpdates(): boolean {
+  if (typeof location === 'undefined') return false;
+  const query = new URLSearchParams(location.search);
+  return query.get('fake') === '1' && query.get('updates') !== '1';
+}
+
 export class FakeClient implements ObservableClient {
   #state: ClientState = 'idle';
   #handlers = new Map<string, Set<(payload: unknown) => void>>();
@@ -965,7 +972,8 @@ export class FakeClient implements ObservableClient {
       agentCpuCapPercent: 75,
       threadMemoryCapMb: 0,
       focusGuard: true,
-      muteAgents: true
+      muteAgents: true,
+      autoUpdateHarnesses: false
     };
     this.#core = {
       version: '2.0.0-beta.1',
@@ -1332,6 +1340,20 @@ export class FakeClient implements ObservableClient {
       case 'providers.uninstall': {
         const params = rawParams as RpcParams<'providers.uninstall'>;
         return this.#uninstall(params.providerId);
+      }
+      case 'providers.updates':
+        return structuredClone(this.#harnessUpdates);
+      case 'providers.update': {
+        const params = rawParams as RpcParams<'providers.update'>;
+        return this.#updateHarness(params.providerId);
+      }
+      case 'providers.updateSkip': {
+        const params = rawParams as RpcParams<'providers.updateSkip'>;
+        const update = this.#harnessUpdate(params.providerId);
+        update.skipped = params.version;
+        update.pending = update.latest !== update.current && update.skipped !== update.latest;
+        this.#emit('providers.updatesChanged', structuredClone(this.#harnessUpdates));
+        return structuredClone(update);
       }
       case 'providers.dryRun': {
         const params = rawParams as RpcParams<'providers.dryRun'>;
@@ -3013,6 +3035,45 @@ export class FakeClient implements ObservableClient {
     const probedAt = this.#now();
     this.#emit('providers.probed', { providerId, accountId, models: structuredClone(models), probedAt });
     return { models, probedAt };
+  }
+
+  // -------------------------------------------------------------------------
+  // Agent updates
+  // -------------------------------------------------------------------------
+
+  /**
+   * Two agents behind their newest release, one by each route, so the notices
+   * have a subject. The fake page shows them on `?updates=1` only: a card
+   * pinned to a corner would sit in every other capture.
+   */
+  #harnessUpdates: HarnessUpdate[] = ([
+    { providerId: 'claude', name: 'Claude Code', route: 'self', current: '2.1.267', latest: '2.1.278', pending: true, skipped: null, state: 'idle', message: null, checkedAt: Date.now() },
+    { providerId: 'codex', name: 'Codex', route: 'managed', current: '0.154.0', latest: '0.155.1', pending: true, skipped: null, state: 'idle', message: null, checkedAt: Date.now() },
+    { providerId: 'opencode', name: 'OpenCode', route: 'self', current: '1.18.31', latest: '1.18.31', pending: false, skipped: null, state: 'idle', message: null, checkedAt: Date.now() }
+  ] satisfies HarnessUpdate[]).map((update) => (quietUpdates() ? { ...update, current: update.latest, pending: false } : update));
+
+  #harnessUpdate(providerId: string): HarnessUpdate {
+    const update = this.#harnessUpdates.find((entry) => entry.providerId === providerId);
+    if (!update) throw new RpcFailure({ code: RpcErrorCode.Refused, message: `${providerId} has no update Boite can run on this machine` });
+    return update;
+  }
+
+  #updateHarness(providerId: string): RpcResult<'providers.update'> {
+    const update = this.#harnessUpdate(providerId);
+    if (update.state === 'updating') throw new RpcFailure({ code: RpcErrorCode.Refused, message: `${update.name} is already updating` });
+    if (update.current === update.latest) {
+      throw new RpcFailure({ code: RpcErrorCode.Refused, message: `${update.name} is already on its newest known version` });
+    }
+    update.state = 'updating';
+    update.pending = false;
+    this.#emit('providers.updatesChanged', structuredClone(this.#harnessUpdates));
+    setTimeout(() => {
+      update.state = 'idle';
+      update.current = update.latest;
+      update.checkedAt = Date.now();
+      this.#emit('providers.updatesChanged', structuredClone(this.#harnessUpdates));
+    }, 1200);
+    return structuredClone(update);
   }
 
   // -------------------------------------------------------------------------

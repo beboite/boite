@@ -8,6 +8,7 @@
   "profiles": {
     "windows": {
       "detect": {},
+      "update": { "args": ["update", "self"], "latestNpm": "@earendil-works/pi-coding-agent" },
       "executable": [
         { "kind": "npm", "value": "@earendil-works/pi-coding-agent#pi" },
         { "kind": "npm", "value": "@mariozechner/pi-coding-agent#pi" }
@@ -18,6 +19,7 @@
     },
     "linux": {
       "detect": {},
+      "update": { "args": ["update", "self"], "latestNpm": "@earendil-works/pi-coding-agent" },
       "executable": [
         { "kind": "path", "value": "pi" },
         { "kind": "npm", "value": "@earendil-works/pi-coding-agent#pi" },
@@ -29,6 +31,7 @@
     },
     "macos": {
       "detect": {},
+      "update": { "args": ["update", "self"], "latestNpm": "@earendil-works/pi-coding-agent" },
       "executable": [
         { "kind": "path", "value": "pi" },
         { "kind": "npm", "value": "@earendil-works/pi-coding-agent#pi" },
