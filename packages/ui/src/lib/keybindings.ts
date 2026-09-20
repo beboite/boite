@@ -96,13 +96,57 @@ const KEY_LABELS: Record<string, string> = {
   arrowright: 'Right'
 };
 
-/** `Ctrl+Shift+K`, or `Cmd+Shift+K` on a Mac: what a tooltip and a palette row show. */
-export function chordLabel(chord: Chord, mac: boolean = isMac()): string {
+/** `['Ctrl', 'Shift', 'K']`: one entry per key cap, what the Keyboard page draws. */
+export function chordParts(chord: Chord, mac: boolean = isMac()): string[] {
   const parts: string[] = [];
   if (chord.ctrl || (chord.mod && !mac)) parts.push('Ctrl');
   if (chord.alt) parts.push(mac ? 'Option' : 'Alt');
   if (chord.shift) parts.push('Shift');
   if (chord.meta || (chord.mod && mac)) parts.push(mac ? 'Cmd' : 'Win');
-  parts.push(KEY_LABELS[chord.key] ?? (chord.key.length === 1 ? chord.key.toUpperCase() : chord.key.toUpperCase()));
+  parts.push(KEY_LABELS[chord.key] ?? chord.key.toUpperCase());
+  return parts;
+}
+
+/** `Ctrl+Shift+K`, or `Cmd+Shift+K` on a Mac: what a tooltip and a palette row show. */
+export function chordLabel(chord: Chord, mac: boolean = isMac()): string {
+  return chordParts(chord, mac).join('+');
+}
+
+/** The file's name for a key `KeyboardEvent.key` reports, where the two differ. */
+const FILE_KEYS: Record<string, string> = {
+  ' ': 'space',
+  '+': 'plus',
+  arrowup: 'up',
+  arrowdown: 'down',
+  arrowleft: 'left',
+  arrowright: 'right'
+};
+
+const MODIFIER_KEYS = new Set(['control', 'shift', 'alt', 'meta', 'os', 'altgraph', 'capslock', 'numlock', 'fn']);
+
+/**
+ * The chord a keydown spells, in the file's words (`mod+shift+k`), or null
+ * while only modifiers are held or the key has no name. The platform's own
+ * modifier becomes `mod`, so a chord set on Windows means Cmd on a Mac.
+ * Whether it is a legal chord is `parseChord`'s call, not this one's.
+ */
+export function chordFromEvent(event: KeyboardEvent, mac: boolean = isMac()): string | null {
+  const key = event.key.toLowerCase();
+  if (MODIFIER_KEYS.has(key) || key === 'dead' || key === 'unidentified' || key === 'process' || key === '') return null;
+  const parts: string[] = [];
+  if (mac ? event.metaKey : event.ctrlKey) parts.push('mod');
+  if (mac && event.ctrlKey) parts.push('ctrl');
+  if (event.altKey) parts.push('alt');
+  if (event.shiftKey) parts.push('shift');
+  if (!mac && event.metaKey) parts.push('meta');
+  parts.push(FILE_KEYS[key] ?? key);
   return parts.join('+');
 }
+
+/** The Keyboard page's sections. Every command sits in exactly one; a test holds that. */
+export const COMMAND_GROUPS: { id: 'general' | 'surfaces' | 'thread' | 'theme'; commands: KeybindingCommand[] }[] = [
+  { id: 'general', commands: ['new-thread', 'palette', 'sidebar', 'panel', 'settings', 'providers', 'appearance', 'add-project', 'pair', 'import-session'] },
+  { id: 'surfaces', commands: ['browser', 'changes', 'files', 'tasks', 'trace', 'close-surface'] },
+  { id: 'thread', commands: ['send-and-draft', 'stash', 'pin', 'rename', 'retitle', 'archive'] },
+  { id: 'theme', commands: ['theme-dark', 'theme-light', 'theme-system'] }
+];

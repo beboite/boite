@@ -110,7 +110,11 @@ the sandbox when the thread opens and has no call that changes them later.
 `muse` has its own peer too, for Muse Code's session protocol: the approval
 mode is a call on the running host and the sandbox is a host flag, so only the
 flags are in the session key. `pi` takes its session on the command line rather
-than through a call, so the driver mints the id itself. `echo` streams the prompt back, can call a fake tool, ask a
+than through a call, so the driver mints the id itself. `agy` runs the installed
+Antigravity CLI in its stream-json print mode, one JSON line per prompt and per
+event, with no SDK or protocol library behind it; the model, the effort and the
+permission mode are launch flags, and a later process resumes the conversation
+with `--conversation`. `echo` streams the prompt back, can call a fake tool, ask a
 permission and spawn a child on request, and never touches the network.
 
 ## Descriptors, tokens, managed installs
@@ -140,7 +144,7 @@ line by line with the first link it prints carried separately.
 
 ## The probe, because an agent owns its models
 
-A descriptor's model list is a starting point. A Claude, ACP, Codex or pi agent owns the
+A descriptor's model list is a starting point. A Claude, ACP, Codex, pi or agy agent owns the
 real one, so `providers.probe` spawns one short-lived process under the synthetic
 thread `probe:<providerId>:<accountId>`, asks the protocol's own models call,
 kills the child on every path, and caches the answer per provider and account
@@ -150,7 +154,9 @@ keeps a persistent display cache while it reads models asynchronously. `threads.
 a model nobody probed is refused, saying to open the picker. Two callers at once
 share one process, and `providers.probed` lets a second client see the same
 answer. A probe that finds no executable, whose agent dies, or that passes twenty
-seconds throws with the reason and caches nothing.
+seconds throws with the reason and caches nothing. One whose own account changed
+or whose descriptors were reloaded while it ran is refused as stale; another
+account changing does not touch it, and the UI asks again without a toast.
 
 ## The UI streams, and stops streaming
 

@@ -1,15 +1,16 @@
 <script lang="ts">
   import type { AccountQuota } from '@boite/contracts';
   import { strings } from '../lib/strings';
-  let { rows, compact = false }: { rows: AccountQuota[]; compact?: boolean } = $props();
+  /** `bare` drops the card and the provider header, for a list that already sits under its account. */
+  let { rows, compact = false, bare = false }: { rows: AccountQuota[]; compact?: boolean; bare?: boolean } = $props();
   const date = (at: number) => new Date(at).toLocaleString(undefined, { weekday: 'short', hour: '2-digit', minute: '2-digit' });
 </script>
 
-<div class="quota-list" class:compact data-testid="quota-list">
+<div class="quota-list" class:compact class:bare data-testid="quota-list">
   {#if rows.length === 0}<p class="muted">{strings.quotas.empty}</p>{/if}
   {#each rows as row (row.accountId)}
     <article class="quota" data-testid="quota-account" data-account-id={row.accountId}>
-      <header><strong>{row.providerName}</strong><span>{row.label}</span></header>
+      {#if !bare}<header><strong>{row.providerName}</strong><span>{row.label}</span></header>{/if}
       {#if row.status === 'unsupported'}<p class="muted">{strings.quotas.unsupported}</p>
       {:else if row.status === 'disabled'}<p class="muted">{strings.quotas.disabled}</p>
       {:else}
@@ -47,4 +48,5 @@
   p { margin: 0; }
   .error { color: var(--color-danger); font-size: var(--text-sm); }
   .compact .quota { padding: 12px; }
+  .bare .quota { padding: 0; background: none; border: 0; border-radius: 0; }
 </style>

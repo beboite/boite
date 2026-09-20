@@ -23,11 +23,27 @@ the draft's worktree switch. While recording, Cancel and Finish replace Send;
 the transcript stays above these controls. Back or Escape closes the options
 panel without losing the draft.
 
-## Choose an engine
+## Set it up
 
-Open Settings, Voice on the machine hosting the conversation. Its owner chooses
-the engine and credentials. Paired phones dictate through that same core,
-but cannot change its configuration, install executables or read local paths.
+Open Settings, Voice on the machine hosting the conversation. The card at the
+top says whether dictation works now and, when it does not, offers the one
+action that fixes it: Set up dictation downloads the local engine, Try again
+restarts a failed download, Save to repair rewrites an unreadable
+`speech.json`. With no configuration the engine is Local, so on Windows x64 a
+single click is the whole setup. The microphone beside Send links to this page
+when the engine is not ready.
+
+The engine, the API provider, the fallback and the language apply as soon as
+they change. API keys and local paths have their own Save button, so a
+half-typed key is never sent. A machine whose core predates dictation answers
+`speech.status` with MethodNotFound; the page and the microphone then name that
+machine and ask to update Boite there, instead of showing the RPC error.
+
+Its owner chooses the engine and credentials. Paired phones dictate through
+that same core, but cannot change its configuration, install executables or
+read local paths.
+
+## Engines
 
 - Local runs whisper.cpp on the core's machine, with no cloud fallback. Windows
   x64 downloads the pinned CPU runtime and multilingual Whisper Small Q5_1
@@ -43,17 +59,17 @@ but cannot change its configuration, install executables or read local paths.
   Calls have a 60-second provider deadline.
 
 An empty language selects automatic detection. A two-letter code such as `fr`
-or `en` requests that language. Save applies configuration to this core. Changing
-it invalidates recordings started under the previous configuration, so a local
-recording cannot silently become a cloud request.
+or `en` requests that language. Every change is written to this core at once.
+Changing it invalidates recordings started under the previous configuration, so
+a local recording cannot silently become a cloud request.
 
 Keys live in `<dataDir>/speech.json`, outside the journal, with restrictive file
 creation permissions. Configuration reads never return key values. An empty
-key field preserves the saved key; Remove key deletes it on Save. Cloud mode
+key field preserves the saved key; Remove key deletes it on Save keys. Cloud mode
 sends audio to the provider, whose own retention policy applies.
 An invalid `speech.json` disables dictation and reports its error in Voice
-settings without preventing core startup. Saving a valid configuration repairs
-it; the invalid file is left untouched until then.
+settings without preventing core startup. Save to repair writes the choices
+shown; the invalid file is left untouched until then.
 
 ## Microphone and HTTPS
 

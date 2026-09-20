@@ -1,0 +1,40 @@
+[
+  {
+    "schema": 1,
+    "id": "kebacc-switcher",
+    "name": "kebacc-switcher",
+    "version": "2.0.1",
+    "description": "Save and switch Claude, Codex and Antigravity CLI logins, with quota readings for each saved account.",
+    "homepage": "https://github.com/kebab1337420/kebacc-switch",
+    "executable": "kebacc",
+    "artifacts": {
+      "win32-x64": {
+        "url": "https://github.com/kebab1337420/kebacc-switch/releases/download/kebacc-v2.0.1/kebacc-x86_64-pc-windows-msvc.exe",
+        "sha256": "9edc5c3af1db76e97a9c07e2fd1c3399ad8c9db22e0ad2684a1b885e33acc538"
+      },
+      "win32-arm64": {
+        "url": "https://github.com/kebab1337420/kebacc-switch/releases/download/kebacc-v2.0.1/kebacc-aarch64-pc-windows-msvc.exe",
+        "sha256": "ed5a23820361e47d88540b5cf30bf6c90ee0739c23fba937463d2f5716986f6e"
+      },
+      "darwin-x64": {
+        "url": "https://github.com/kebab1337420/kebacc-switch/releases/download/kebacc-v2.0.1/kebacc-x86_64-apple-darwin",
+        "sha256": "7d1f32dfb73b094a6b9c8111fbab2b0d2b743dc224f6c5bd8e551d2acaf35c36"
+      },
+      "darwin-arm64": {
+        "url": "https://github.com/kebab1337420/kebacc-switch/releases/download/kebacc-v2.0.1/kebacc-aarch64-apple-darwin",
+        "sha256": "85951d81d5db5e676b5950ece8a818673eecb5d1f46ff980236c9e40c3cf8ef6"
+      },
+      "linux-x64": {
+        "url": "https://github.com/kebab1337420/kebacc-switch/releases/download/kebacc-v2.0.1/kebacc-x86_64-unknown-linux-gnu",
+        "sha256": "b683ac5b491bc45e94cb1392e9a1743e8ac9e244d71ed7c024809ac4ddb82500"
+      },
+      "linux-arm64": {
+        "url": "https://github.com/kebab1337420/kebacc-switch/releases/download/kebacc-v2.0.1/kebacc-aarch64-unknown-linux-gnu",
+        "sha256": "258dd96565bad8c4194b1fdaf182d784d8a617cef0a397c1210a9a4cb9e2df17"
+      }
+    },
+    "provides": {
+      "accountPools": { "providers": ["claude", "codex", "antigravity"] }
+    }
+  }
+]

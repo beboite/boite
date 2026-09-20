@@ -10,6 +10,15 @@ vi.stubGlobal('ResizeObserver', class {
   disconnect() {}
 });
 
+// jsdom has no Web Animations either, so a Svelte transition ends at once here.
+if (typeof Element.prototype.animate !== 'function') {
+  Element.prototype.animate = function animate() {
+    const animation = { currentTime: 0, playState: 'finished', onfinish: null as (() => void) | null, cancel() {}, finish() {} };
+    queueMicrotask(() => animation.onfinish?.());
+    return animation as unknown as Animation;
+  };
+}
+
 vi.stubGlobal('matchMedia', (media: string) => ({
   media,
   matches: false,

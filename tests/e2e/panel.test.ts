@@ -29,7 +29,7 @@ beforeAll(async () => {
   const port = await freePort();
   server = await createServer({ root: join(import.meta.dir, '../../packages/ui'), server: { host: '127.0.0.1', port, strictPort: true }, clearScreen: false });
   await server.listen();
-  page = await BrowserPage.launch({ url: `http://127.0.0.1:${port}/?fake=1&long=1`, windowSize: { width: 1310, height: 820 } });
+  page = await BrowserPage.launch({ url: `http://127.0.0.1:${port}/?fake=1&open=recent&long=1`, windowSize: { width: 1310, height: 820 } });
   await page.waitFor(`document.querySelector('${id('timeline')}')`);
   await onStore(`await store.open('t-trace');`);
   await page.waitFor(`document.querySelector('${id('panel-toggle')}')`);

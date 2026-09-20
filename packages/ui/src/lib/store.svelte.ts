@@ -39,8 +39,7 @@ import type {
   ThreadId,
   ThreadResources,
   ThreadSummary,
-  Todo,
-  Usage
+  Todo
 } from '@boite/contracts';
 import {
   RpcFailure,
@@ -80,7 +79,7 @@ import { DEFAULT_MODEL_NAMES, INITIAL_MODEL_DEFAULTS, readModelDefaults, writeMo
 import { FAVORITES_KEY, isNamedModel, readFavorites, type FavoriteModel } from './model-order';
 
 export type Page = 'chat' | 'settings';
-export type SettingsTab = 'voice' | 'general' | 'machines' | 'appearance' | 'keyboard' | 'accounts' | 'plugins' | 'usage' | 'resources' | 'experiments';
+export type SettingsTab = 'voice' | 'general' | 'machines' | 'appearance' | 'keyboard' | 'accounts' | 'plugins' | 'usage' | 'limits' | 'resources' | 'experiments';
 
 /** A login process the core runs for one account, as `account.login` reports it. */
 export interface LoginState {
@@ -90,11 +89,6 @@ export interface LoginState {
   /** The first https link it printed, once there is one. */
   url: string | null;
   exitCode: number | null;
-}
-
-export interface UsageReport {
-  byThread: Record<ThreadId, Usage>;
-  total: Usage;
 }
 
 /** A thread that exists only in the UI until its first message is sent. */
@@ -323,7 +317,6 @@ export class Store {
   /** Every command with its chord: the defaults, the file's entries over them. */
   bindings = $derived(resolveBindings(this.keybindings?.bindings ?? {}));
   resources = $state<ThreadResources[]>([]);
-  usage = $state<UsageReport | null>(null);
   trace = $state<ProcessRecord[]>([]);
   /**
    * The todo cards of each project, keyed by project id: the list is the
@@ -472,7 +465,13 @@ export class Store {
         if (client !== this.#client || epoch !== this.#probeEpoch) return;
         this.probedModels = { ...this.probedModels, [key]: models };
         this.#saveModels();
-      } catch (error) { if (client === this.#client) this.#fail(error); }
+      } catch (error) {
+        if (client !== this.#client) return;
+        // The account or the descriptors changed while the agent answered: the
+        // core refused a stale list, and the next look asks again.
+        if (epoch !== this.#probeEpoch) this.#probeAttempts.delete(key);
+        else this.#fail(error);
+      }
       finally {
         if (this.#probeRequests.get(key) === request) {
           this.#probeRequests.delete(key);
@@ -682,7 +681,6 @@ export class Store {
     on('turn.started', (turn) => this.#upsertTurn(turn.threadId, turn));
     on('turn.finished', (turn) => {
       this.#upsertTurn(turn.threadId, turn);
-      void this.refreshUsage();
       // A stop is the user's own doing: nothing to tell them.
       if (turn.status === 'done') this.#notify('done', turn.threadId, null);
       else if (turn.status === 'error') this.#notify('error', turn.threadId, turn.error);
@@ -887,8 +885,13 @@ export class Store {
         this.machineId = endpoint.url;
         this.#attachEndpoint(endpoint);
       }
+      const opens = this.#openGeneration;
       await this.connect();
-      await this.openWhereLeft();
+      // `&open=recent` lands on the most recent thread instead of a draft, the
+      // page most captures are about. Fake core only, like `&long=1`.
+      if (import.meta.env.DEV && params.get('fake') === '1' && params.get('open') === 'recent') await this.openWhereLeft();
+      // A thread clicked while the lists arrived is still opening: it wins.
+      else if (this.#openGeneration === opens) await this.openLanding();
       // `&panel=<kind>` opens that surface on the thread the page lands on, so
       // a capture of it needs no clicks. Fake core only, like `&long=1`.
       if (import.meta.env.DEV && params.get('fake') === '1') this.#openQueryPanel(params.get('panel'));
@@ -963,6 +966,31 @@ export class Store {
     this.#attachEndpoint(endpoint);
     await this.connect();
     await this.openWhereLeft();
+  }
+
+  /** Per core, so two machines each land on their own project. */
+  #lastProjectKey(): string { return 'boite.lastProject.v1:' + JSON.stringify([this.endpointUrl, this.core?.dataDir]); }
+  #rememberProject(projectId: ProjectId): void {
+    try { localStorage.setItem(this.#lastProjectKey(), projectId); } catch { /* storage unavailable: the recent thread decides */ }
+  }
+
+  /** The project last opened or drafted in on this device, else the one of the most recent thread, else the first. */
+  lastProject(): ProjectId | null {
+    let stored: string | null = null;
+    try { stored = localStorage.getItem(this.#lastProjectKey()); } catch { /* storage unavailable */ }
+    const known = this.projects.find((p) => p.id === stored);
+    if (known) return known.id;
+    const recent = this.threads.filter((t) => !t.archived).sort((a, b) => b.updatedAt - a.updatedAt)[0];
+    return recent?.projectId ?? this.projects[0]?.id ?? null;
+  }
+
+  /** Where the app opens: a new thread's draft in the last used project, as if New thread had been pressed. */
+  async openLanding(): Promise<void> {
+    if (!this.visible) return;
+    // Settings opened while the core was still answering stays open.
+    if (this.openThread || this.draft || this.page !== 'chat') return;
+    const project = this.lastProject();
+    if (project) this.startDraft(project);
   }
 
   /** The most recent thread, a draft in the first project, or nothing on a first run. */
@@ -1160,6 +1188,36 @@ export class Store {
     return chord === null ? null : chordLabel(chord);
   }
 
+  /**
+   * A chord for one command, null for none, or `default` to take the command
+   * out of the file. The refusal comes back for the row that asked, not as
+   * the app's error.
+   */
+  async setKeybinding(id: KeybindingCommand, chord: string | null | 'default'): Promise<string | null> {
+    const client = this.#client;
+    if (!client) return strings.connection.unavailable;
+    try {
+      this.keybindings = chord === 'default'
+        ? await client.call('keybindings.reset', { command: id })
+        : await client.call('keybindings.set', { command: id, chord });
+      return null;
+    } catch (error) {
+      return error instanceof Error ? error.message : String(error);
+    }
+  }
+
+  /** Every command back on its default. */
+  async resetKeybindings(): Promise<string | null> {
+    const client = this.#client;
+    if (!client) return strings.connection.unavailable;
+    try {
+      this.keybindings = await client.call('keybindings.reset', {});
+      return null;
+    } catch (error) {
+      return error instanceof Error ? error.message : String(error);
+    }
+  }
+
   /** ` (Ctrl+N)` for a tooltip, or nothing while the command has no key. */
   keyHint(id: KeybindingCommand): string {
     const label = this.keyLabel(id);
@@ -1173,7 +1231,6 @@ export class Store {
   showSettings(tab: SettingsTab = 'general'): void {
     this.settingsTab = tab;
     this.page = 'settings';
-    if (tab === 'usage') void this.refreshUsage();
     if (tab === 'resources') void this.refreshResources();
   }
 
@@ -1276,6 +1333,7 @@ export class Store {
     this.trace = [];
     this.#keepRequestsOf(null);
     this.draft = { projectId: target, worktree: false };
+    this.#rememberProject(target);
     this.page = 'chat';
     this.sidebarOpen = false;
   }
@@ -1290,6 +1348,7 @@ export class Store {
     if (!draft || draft.projectId === projectId) return;
     if (!this.projects.some((p) => p.id === projectId)) return;
     this.draft = { projectId, worktree: draft.worktree };
+    this.#rememberProject(projectId);
     this.collapsedProjects = this.collapsedProjects.filter((id) => id !== projectId);
   }
 
@@ -1351,6 +1410,7 @@ export class Store {
       if (navigate) {
         this.page = 'chat';
         this.sidebarOpen = false;
+        this.#rememberProject(thread.projectId);
       }
       // The trace is the owner's: a device has no button for it, and asking
       // would refuse the rest of this open with it.
@@ -1459,7 +1519,7 @@ export class Store {
     const models = this.modelsOf(choice.providerId, choice.accountId);
     if ((!models.some((model) => model.id === choice.model) ||
       (provider.protocol === 'claude-sdk' && !this.probedModels[probeKey(provider.id, choice.accountId)])) &&
-      ['claude-sdk', 'acp', 'codex-appserver', 'muse', 'pi'].includes(provider.protocol)) {
+      ['claude-sdk', 'acp', 'codex-appserver', 'muse', 'pi', 'agy'].includes(provider.protocol)) {
       const client = this.#client;
       if (!client) return null;
       try {
@@ -1973,16 +2033,6 @@ export class Store {
     if (!client) return;
     try {
       this.resources = await client.call('resources.list', {});
-    } catch (error) {
-      this.#fail(error);
-    }
-  }
-
-  async refreshUsage(): Promise<void> {
-    const client = this.#client;
-    if (!client) return;
-    try {
-      this.usage = await client.call('usage.get', {});
     } catch (error) {
       this.#fail(error);
     }

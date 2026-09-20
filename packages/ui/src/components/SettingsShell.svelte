@@ -1,10 +1,12 @@
 <script lang="ts">
   import { MediaQuery } from 'svelte/reactivity';
   import MobileSettings from './MobileSettings.svelte';
-  import { Activity, ChevronRight, ShieldCheck, ArrowLeft, Coins, FlaskConical, Keyboard, Palette, Puzzle, Settings2, Users, Mic } from '@lucide/svelte';
+  import { Activity, ChevronRight, ShieldCheck, ArrowLeft, Coins, FlaskConical, Gauge, Keyboard, Palette, Puzzle, Settings2, Users, Mic } from '@lucide/svelte';
   import KeyboardPage from './KeyboardPage.svelte';
+  import LimitsPage from './LimitsPage.svelte';
   import PluginsPage from './PluginsPage.svelte';
   import { strings } from '../lib/strings';
+  import { COMMAND_GROUPS } from '../lib/keybindings';
   import type { SettingsTab, Store } from '../lib/store.svelte';
   import AccountsPage from './AccountsPage.svelte';
   import AppearancePage from './AppearancePage.svelte';
@@ -31,6 +33,7 @@
     { id: 'accounts', label: strings.settings.tabs.accounts, icon: Users },
     { id: 'plugins', label: strings.settings.tabs.plugins, icon: Puzzle },
     { id: 'usage', label: strings.settings.tabs.usage, icon: Coins },
+    { id: 'limits', label: strings.usage.limits, icon: Gauge },
     { id: 'resources', label: strings.settings.tabs.resources, icon: ShieldCheck },
     { id: 'experiments', label: strings.settings.tabs.experiments, icon: FlaskConical }
   ];
@@ -38,8 +41,16 @@
   let children: Partial<Record<SettingsTab, { id: string; label: string }[]>> = $derived({
     accounts: store.providers.map(provider => ({id: `provider-${provider.id}`, label: provider.name})),
     appearance: [{id: 'theme', label: strings.settings.theme}],
-    keyboard: [{id: 'shortcuts', label: strings.keyboard.heading}, {id: 'keybinding-file', label: strings.keyboard.file}],
+    keyboard: [
+      ...COMMAND_GROUPS.map(group => ({id: `keys-${group.id}`, label: strings.keyboard.groups[group.id]})),
+      {id: 'keybinding-file', label: strings.keyboard.file}
+    ],
     experiments: [{id: 'theme-grain', label: strings.experiments.themeGrain.title}, {id: 'session-import', label: strings.experiments.sessionImport.title}],
+    usage: [
+      { id: 'usage-overview', label: strings.usage.overview },
+      { id: 'usage-breakdown', label: strings.usage.breakdown },
+      { id: 'usage-threads', label: strings.usage.threads }
+    ],
     general: [
       { id: 'phone', label: strings.phone.heading },
       { id: 'projects', label: strings.settings.projects },
@@ -135,6 +146,8 @@
         <AccountsPage {store} />
       {:else if tab === 'usage'}
         <UsagePage {store} />
+      {:else if tab === 'limits'}
+        <LimitsPage {store} />
       {:else if tab === 'plugins'}
         <PluginsPage {store} />
       {:else if tab === 'experiments'}
