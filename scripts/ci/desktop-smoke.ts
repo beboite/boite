@@ -18,7 +18,8 @@ let corePid: number | undefined;
 const child = Bun.spawn([executable], {
   cwd: directory,
   env: { ...process.env, PATH: process.platform === 'win32' ? process.env.SystemRoot + '\\System32' : '/usr/bin:/bin',
-    BOITE_CORE_COMMAND: undefined, BOITE_UI_DIR: undefined, HOME: home,
+    BOITE_CORE_COMMAND: undefined, BOITE_UI_DIR: undefined, BOITE_CLI_DIR: undefined,
+    BOITE_CORE_EXECUTABLE: undefined, HOME: home,
     BOITE_DATA_DIR: data, BOITE_SHELL_HIDDEN: '1', BOITE_ECHO: '1' },
   stdout: 'pipe', stderr: 'pipe', windowsHide: true,
   detached: process.platform !== 'win32',
@@ -53,10 +54,14 @@ try {
   const thread = await client.call('threads.create', { projectId: project.id, providerId: 'echo', accountId: account.id, title: 'Installed smoke' });
   await client.call('threads.subscribe', { threadId: thread.id });
   const finished = client.next('turn.finished', turn => turn.threadId === thread.id, 15_000);
-  await client.call('turns.start', { threadId: thread.id, prompt: 'installed desktop smoke' });
+  await client.call('turns.start', { threadId: thread.id, prompt: '[spawn:boite where]' });
   const turn = await finished;
   if (turn.status !== 'done') throw new Error(`Installed echo turn ended with ${turn.status}`);
-  console.log('Installed desktop: core startup, bundled UI, authenticated RPC and echo turn passed');
+  const conversation = await client.call('threads.get', { threadId: thread.id });
+  const output = conversation.messages.filter(message => message.role === 'assistant').flatMap(message => message.parts)
+    .filter(part => part.type === 'text').map(part => part.text).join('\n');
+  if (!output.includes(`thread: ${thread.id}`)) throw new Error(`The installed boite CLI did not reach its thread: ${output}`);
+  console.log('Installed desktop: core startup, bundled UI, authenticated RPC and boite CLI passed');
 } catch (error) {
   failures.push(error);
 } finally {

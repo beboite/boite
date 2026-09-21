@@ -52,7 +52,8 @@ export interface CoreOptions {
 /**
  * Where the `boite` shim a thread's processes find on their PATH lives.
  * `BOITE_CLI_DIR` decides when it is set. An installed core is the compiled
- * `boite-core`, and the shim is staged beside it. From the sources, it is
+ * `boite-core`, and the shim is staged beside it. Desktop packages whose
+ * resources live elsewhere set BOITE_CLI_DIR from the shell. From the sources, it is
  * `packages/core/bin`, which is one directory up from here whether this runs
  * from `src` or from `dist`. Anything else has no CLI to offer and says so
  * with null rather than putting a directory that holds nothing on PATH. A

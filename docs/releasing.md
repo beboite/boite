@@ -77,6 +77,12 @@ guards are not implemented on Linux or macOS.
 On a normal quit, the POSIX shell gives the core three seconds to handle
 `SIGTERM`, stop its direct children and close the journal before forcing exit.
 
+The installed smoke test runs with a temporary home, outside the checkout and
+without Bun on PATH. Its echo turn executes `boite where` and checks the returned
+thread ID, covering the agent's PATH, executable permissions and the CLI's
+connection to the core. See [platform readiness](portability.md) for remaining
+Linux and macOS gaps.
+
 macOS requires 13.0 or newer. The bundle includes the JIT entitlements required
 by the [compiled Bun runtime](https://bun.sh/docs/bundler/executables).
 CI signs locally with an ad-hoc identity and starts that signed bundle. A public
