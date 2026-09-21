@@ -1,5 +1,5 @@
 import { afterEach, expect, test, vi } from 'vitest';
-import { mount, unmount } from 'svelte';
+import { flushSync, mount, unmount } from 'svelte';
 import type { RpcMethodName } from '@boite/contracts';
 import App from './App.svelte';
 import { confirm } from './lib/confirm.svelte';
@@ -954,6 +954,38 @@ test('an unsaved edit survives a tab switch, and closing its tab asks before it 
   await waitFor(() => document.querySelector<HTMLTextAreaElement>('[data-testid=file-text]')?.value.includes('# boite') === true);
   expect(query<HTMLTextAreaElement>('[data-testid=file-text]').value).not.toContain('An edit nobody saved.');
   expect(document.querySelector('[data-testid=file-dirty]')).toBeNull();
+  store.panel.closeAll();
+});
+
+test('a key typed while a save is out stays unsaved and survives a tab switch', async () => {
+  await openWorkbench();
+  const file = store.panel.openFile('docs/guide/tree.md');
+  await waitFor(() => document.querySelector<HTMLTextAreaElement>('[data-testid=file-text]')?.value.includes('# The tree') === true);
+  const area = query<HTMLTextAreaElement>('[data-testid=file-text]');
+  const sent = `${area.value}Saved.\n`;
+  area.value = sent;
+  area.dispatchEvent(new Event('input', { bubbles: true }));
+  await waitFor(() => document.querySelector<HTMLButtonElement>('[data-testid=file-save]')?.disabled === false);
+
+  // The click sends the text; the next key lands before the write answers.
+  query<HTMLButtonElement>('[data-testid=file-save]').click();
+  flushSync();
+  expect(query('[data-testid=file-save]').textContent).toContain('Saving');
+  const newer = `${sent}Typed during the save.\n`;
+  area.value = newer;
+  area.dispatchEvent(new Event('input', { bubbles: true }));
+  await waitFor(() => query('[data-testid=file-save]').textContent?.includes('Saving') === false);
+
+  // The disk has what was sent, and the newer key is still a draft with its dot.
+  const disk = await store.client!.call('files.read', { threadId: 't-trace', path: 'docs/guide/tree.md' });
+  expect(disk.kind === 'text' ? disk.text : '').toBe(sent);
+  expect(document.querySelector('[data-testid=file-dirty]')).not.toBeNull();
+  expect(store.panel.draft(file.id)).toBe(newer);
+  store.panel.openTasks();
+  await waitFor(() => document.querySelector('[data-testid=file-text]') === null);
+  store.panel.activate(file.id);
+  await waitFor(() => document.querySelector<HTMLTextAreaElement>('[data-testid=file-text]')?.value === newer);
+  store.panel.keepDraft(file.id, null);
   store.panel.closeAll();
 });
 

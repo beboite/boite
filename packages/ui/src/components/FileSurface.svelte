@@ -88,17 +88,22 @@
     const wanted = path;
     const file = content;
     if (id === null || wanted === null || file?.kind !== 'text' || readOnly || !dirty || saving) return;
+    // What was sent, and where: a key typed while the write is out is newer
+    // than the disk, and marking it saved let a tab switch drop it.
+    const text = draft;
+    const owner = panel;
+    const surfaceId = surface.id;
     saving = true;
-    const answer = await store.writeFile(id, wanted, draft);
+    const answer = await store.writeFile(id, wanted, text);
     saving = false;
     if (!answer.ok) {
       problem = fill(strings.files.writeFailed, { reason: answer.error });
       return;
     }
     problem = null;
-    stored = draft;
-    keep();
-    content = { ...file, text: draft, bytes: answer.value.bytes, modifiedAt: answer.value.modifiedAt };
+    stored = text;
+    keep(owner, surfaceId);
+    content = { ...file, text, bytes: answer.value.bytes, modifiedAt: answer.value.modifiedAt };
   }
 
   /**
@@ -106,8 +111,8 @@
    * hidden panel or another thread unmounts the editor, and the text typed
    * since the last save used to go with it.
    */
-  function keep(): void {
-    panel.keepDraft(surface.id, draft === stored ? null : draft);
+  function keep(owner: BoundPanel = panel, surfaceId: string = surface.id): void {
+    owner.keepDraft(surfaceId, draft === stored ? null : draft);
   }
 
   function edit(text: string): void {
