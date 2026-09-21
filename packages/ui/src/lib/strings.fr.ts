@@ -1065,19 +1065,16 @@ export const fr: Messages = {
     progress: "Aller à l'étape {index} : {title}",
     replay: 'Revoir la présentation',
     replayHint: "Les mêmes écrans qu'au premier lancement. Rien de ce que vous avez réglé n'est défait.",
-    changeLater: 'Tout ça se retrouve ensuite dans les réglages.',
+    changeLater: 'Tout ça se retrouve dans les réglages.',
 
     welcome: {
       title: 'Boite fait tourner vos agents',
-      body: "Une conversation par tâche, chacune dans un dossier de projet, toutes côte à côte. Les agents tournent sur la machine qui héberge ce cœur, pas dans cette fenêtre : un tour continue pendant que vous faites autre chose.",
-      pick: 'Deux choses valent le coup tout de suite.'
+      body: 'Une conversation par tâche. Les agents continuent pendant que vous faites autre chose.'
     },
 
     agents: {
-      title: "Changer d'agent au milieu d'une conversation",
-      body: "La pastille en bas à gauche de la zone de saisie contient tous les fournisseurs que vous avez connectés, leurs comptes et leurs modèles. Changez de modèle en pleine conversation et rien n'est perdu : l'historique reste, et le processus déjà lancé est prévenu au lieu d'être jeté.",
-      effort: "La pastille juste à côté règle l'effort de raisonnement, sur l'échelle propre au modèle.",
-      locked: 'Une conversation garde le fournisseur et le compte sur lesquels elle a commencé. Le modèle et le raisonnement, eux, changent quand vous voulez.',
+      title: "Changer d'agent en pleine conversation",
+      body: "Changez de modèle, ou même de fournisseur, quand vous voulez. L'historique suit.",
       demoModel: 'Claude Sonnet 5',
       demoEffort: 'Élevé',
       demoMode: 'Demander'
@@ -1085,27 +1082,23 @@ export const fr: Messages = {
 
     voice: {
       title: 'Parler au lieu de taper',
-      body: "Appuyez sur le micro dans la zone de saisie et parlez. L'enregistrement est transcrit sur la machine qui héberge ce cœur et arrive dans le champ sous forme de texte, que vous relisez avant que quoi que ce soit parte.",
-      hint: 'Choisissez un moteur une fois et la dictée marche dans toutes les conversations, sur le téléphone aussi.',
+      body: "Appuyez sur le micro et parlez. Vous relisez le texte avant qu'il parte.",
       open: 'Réglages de la voix',
       reading: 'Lecture du moteur vocal'
     },
 
     panel: {
-      title: "L'établi à côté de la conversation",
-      body: "Chaque conversation porte un panneau sur sa droite. Il montre ce que l'agent a modifié, les fichiers dans lesquels il travaille, sa liste de tâches et les processus qu'il a lancés, sans quitter la conversation pour aller voir.",
-      agent: "L'agent y ouvre des choses lui-même : il lance la commande `boite` pour vous montrer un fichier, un diff ou une page plutôt que de les coller dans la conversation.",
-      keys: 'Les touches qui les ouvrent, modifiables dans Réglages, Raccourcis.',
+      title: 'Le panneau à côté de la conversation',
+      body: 'Modifications, fichiers, tâches et navigateur, à une touche.',
       open: 'Raccourcis clavier',
       noKey: 'aucune touche'
     },
 
     usage: {
-      title: 'Voir ce que vous dépensez',
-      body: "Vos fournisseurs indiquent ce qu'il reste de votre abonnement. Boite en dessine une barre par fenêtre, avec l'heure de réinitialisation, dans la zone de notification, sur la page Fournisseurs et dans Réglages, Limites.",
-      tokens: "Ce que les agents dépensent dans Boite est compté à part, dans Réglages, Consommation : une barre par jour et par fournisseur, le détail par modèle, et ce que les mêmes tours auraient coûté sur l'API.",
+      title: "Voir ce qu'il vous reste",
+      body: "Une barre par abonnement, avec l'heure de réinitialisation.",
       monitor: 'Lire les limites de {account}',
-      noAccounts: "Aucun compte de fournisseur pour le moment. Connectez-en un et ses limites apparaîtront ici toutes seules.",
+      noAccounts: 'Aucun fournisseur connecté pour le moment.',
       connect: 'Connecter un fournisseur',
       deviceHint: 'Les limites sont lues sur la machine qui héberge le cœur.'
     },
@@ -1113,27 +1106,25 @@ export const fr: Messages = {
     reach: {
       title: 'Votre téléphone, et vos autres machines',
       phone: 'Sur votre téléphone',
-      phoneBody: "Un lien à usage unique, ou le QR code à côté, ouvre Boite sur votre téléphone avec une clé à lui. Les mêmes conversations, et une notification quand un tour se termine ou vous demande quelque chose.",
+      phoneBody: 'Scannez un QR code et votre téléphone retrouve les mêmes conversations, avec les notifications.',
       pair: 'Appairer un téléphone',
       machines: 'Un autre Boite',
-      machinesBody: "Cette application pilote aussi un Boite qui tourne ailleurs, sur un serveur ou un second ordinateur. Connectez-le une fois et ses projets et ses conversations se rangent à côté de ceux d'ici, chaque machine continuant d'exécuter ses propres agents sur ses propres fichiers.",
+      machinesBody: 'Pilotez depuis cette application un Boite qui tourne sur un serveur ou un autre ordinateur.',
       connect: 'Connecter une machine',
       deviceHint: "L'appairage et les machines se gèrent depuis l'application où tourne le cœur."
     },
 
     quiet: {
       title: 'Des agents qui ne vous coupent pas',
-      body: "Boite est fait pour tourner pendant que vous travaillez sur autre chose. Voici les interrupteurs qui valent le coup d'être décidés maintenant.",
-      windows: 'Les deux derniers ne valent que sur un hôte Windows et sont ignorés ailleurs.',
       deviceHint: 'Le focus et le son sont des réglages de la machine qui héberge le cœur.'
     },
 
     project: {
       title: 'Ouvrir votre premier projet',
-      body: "Un projet, c'est le dossier dans lequel un agent travaille. Les conversations vivent dedans, et un agent ne voit rien en dehors tant que vous ne l'y envoyez pas.",
-      opened: '{count} projet ouvert. Vous pouvez en ajouter depuis la barre latérale.',
-      openedMany: '{count} projets ouverts. Vous pouvez en ajouter depuis la barre latérale.',
-      deviceBody: "Les projets s'ouvrent depuis l'application où tourne le cœur. Ceux qu'il détient apparaissent ici tout seuls."
+      body: 'Le dossier dans lequel un agent travaille.',
+      opened: '{count} projet ouvert.',
+      openedMany: '{count} projets ouverts.',
+      deviceBody: "Les projets s'ouvrent depuis l'application où tourne le cœur."
     }
   }
 };

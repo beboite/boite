@@ -14,15 +14,22 @@ tour set.
 
 | Screen | What it says | What it carries |
 |---|---|---|
-| Welcome | What Boite is, and that agents run on the machine hosting the core | Language and theme |
+| Welcome | One conversation per task, and agents keep working meanwhile | Language and theme |
 | Privacy | Basic counters start enabled on new hosts; enhanced usage requires consent | The same telemetry controls as Settings, owner only |
-| Agents | The model changes in the middle of a thread, and the history stays | A still of the composer's chip row |
-| Voice | Dictation goes through the machine hosting the core, and you read it before sending | `speech.status`, then Voice settings when it is not set up |
-| Panel | The workbench beside the thread, and the `boite` command the agent opens it with | The four surfaces with their live chords, and Keyboard settings |
-| Usage | Providers report what is left of a subscription, drawn as bars | One switch per account, `quotas.configure` |
-| Reach | A phone pairs with a key of its own, and another Boite connects beside this one | The LAN switch, and the two settings pages |
-| Quiet | Boite is built to run while you work on something else | Notifications, close to tray, focus guard, mute |
-| Project | A project is the folder an agent works in | The folder picker, or the count already open |
+| Agents | The model or the provider changes mid-thread, the history follows | A still of the composer's chip row |
+| Voice | Press the microphone, read the text before it is sent | `speech.status`, then Voice settings when it is not set up |
+| Panel | Changes, files, tasks and a browser, one key away | The four surfaces with their live chords, and Keyboard settings |
+| Usage | One bar per subscription, with the hour it resets | One switch per account, `quotas.configure` |
+| Reach | A phone pairs with a QR code, another Boite connects from this app | The LAN switch, and the two settings pages |
+| Quiet | Its title only | Notifications, close to tray, focus guard, mute |
+| Project | The folder an agent works in | The folder picker, or the count already open |
+
+One sentence per screen, and a row is its label alone: the hint under a
+switch stays on the Settings page it writes to. A reader keeps one idea per
+screen and skims the rest, so the tour says what the feature is and where it
+lives, never how it works.
+Privacy keeps the consent details beside its switches so the owner can read
+what each mode collects before opting in.
 
 Escape leaves, the cross leaves, Tab stays inside. The dots at the bottom walk
 the screens and read as steps to a screen reader. Leaving at the first screen
@@ -78,8 +85,8 @@ chord each surface has today, read from `store.keyLabel`, so a chord moved in
 ## Adding a screen
 
 1. A key in `ORDER` and in `OnboardingStep`, in `lib/onboarding.ts`.
-2. A block under `onboarding` in `lib/strings.en.ts`, with a `title`, then the
-   same block in `lib/strings.fr.ts`.
+2. A block under `onboarding` in `lib/strings.en.ts`, with a `title` and at
+   most one sentence, then the same block in `lib/strings.fr.ts`.
 3. A branch in `Onboarding.svelte`, between the two it sits between.
 4. `ONBOARDING_VERSION` up, since the tour changed shape.
 
