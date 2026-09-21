@@ -9,7 +9,11 @@ async function fixture(h: TestCore) {
   const client = await h.connect();
   const path = join(h.dataDir, 'project'); mkdirSync(path);
   for (const args of [['init', '-q'], ['commit', '--allow-empty', '-qm', 'Initial fixture']]) {
-    const spawned = h.core.procs.spawn('fixture', 'git', args, { cwd: path });
+    const spawned = h.core.procs.spawn('fixture', 'git', args, { cwd: path, env: {
+      ...process.env,
+      GIT_AUTHOR_NAME: 'boite test', GIT_AUTHOR_EMAIL: 'test@boite.invalid',
+      GIT_COMMITTER_NAME: 'boite test', GIT_COMMITTER_EMAIL: 'test@boite.invalid',
+    } });
     const [code, error] = await Promise.all([spawned.exited, new Response(spawned.proc.stderr).text(), new Response(spawned.proc.stdout).text()]);
     if (code !== 0) throw new Error(error);
   }
