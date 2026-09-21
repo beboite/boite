@@ -168,3 +168,18 @@ test('model and token details require opt-in at both the host and relay', async 
   await f.telemetry.configure('basic');
   expect(f.telemetry.state().pendingDeletion).toBe(true);
 });
+
+test('enhanced turn metrics use the frozen execution and keep missing usage absent', async () => {
+  const f = fixture();
+  await f.telemetry.configure('enhanced'); await f.telemetry.flush();
+  f.bus.emit('turn.finished', {
+    id: 'private', threadId: 'private', status: 'done', queuedAt: 100, startedAt: 250, finishedAt: 1250,
+    usage: { inputTokens: 1234, outputTokens: 456, cacheReadTokens: 2789 },
+    execution: { providerId: 'claude', model: 'claude-sonnet-4-5', effort: 'high', speed: 'fast', permissionMode: 'plan', operation: 'compact' },
+  } as any);
+  await f.telemetry.flush();
+  const event = f.requests.at(-1)!.body.events[0];
+  expect(event).toMatchObject({ model: 'claude-sonnet-4-5', effort: 'high', speed: 'fast', permission_mode: 'plan', operation: 'compact', queue_ms: 150, duration_ms: 1000, input_tokens: 1200, output_tokens: 500, cache_read_tokens: 2800 });
+  expect(event.cache_write_tokens).toBeUndefined();
+  expect(JSON.stringify(event)).not.toContain('private');
+});
