@@ -9,6 +9,10 @@ import { buildBatch } from '../../../telemetry/src/index.ts';
 import { enhancedDetails, publicModel } from '../../contracts/src/telemetry.ts';
 
 const cleanups: (() => Promise<void>)[] = [];
+test('the core test runner disables the production relay', () => {
+  expect(process.env.BOITE_TELEMETRY_URL).toBe('');
+});
+
 test('enhanced normalization preserves canonical defaults across host and relay', () => {
   const event = enhancedDetails({});
   expect(event).toMatchObject({ effort: 'default', speed: 'default' });
