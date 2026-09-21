@@ -879,6 +879,7 @@ const PROBE_PROVIDERS: Pick<ProviderSummary, 'id' | 'name' | 'protocol' | 'login
  * `?fake=1` and what every test runs against.
  */
 export class FakeClient implements ObservableClient {
+  #telemetry: import('@boite/contracts').TelemetryState = { mode: 'basic', configured: true, pendingDeletion: false };
   #state: ClientState = 'idle';
   #handlers = new Map<string, Set<(payload: unknown) => void>>();
   #stateHandlers = new Set<(state: ClientState) => void>();
@@ -1788,6 +1789,21 @@ export class FakeClient implements ObservableClient {
         return fakeUsageHistory(edges, { seeded: this.#usageSeeded, finished: this.#finished });
       }
 
+      case 'telemetry.state': return { ...this.#telemetry };
+      case 'telemetry.configure': {
+        const { mode } = rawParams as RpcParams<'telemetry.configure'>;
+        if (!['off', 'basic', 'enhanced'].includes(mode)) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'mode: expected off, basic or enhanced' });
+        if (mode === 'enhanced' && this.#telemetry.pendingDeletion) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'telemetry: retry pending deletion before enabling enhanced mode' });
+        if (this.#telemetry.mode === 'enhanced' && mode !== 'enhanced') this.#telemetry.pendingDeletion = true;
+        this.#telemetry.mode = mode;
+        return { ...this.#telemetry };
+      }
+      case 'telemetry.retryForget':
+        this.#telemetry.pendingDeletion = false;
+        return { ...this.#telemetry };
+      case 'telemetry.export':
+        if (this.#telemetry.mode !== 'enhanced') throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'telemetry export: expected enhanced mode' });
+        return { events: [], truncated: false };
       case 'settings.get':
         return { ...this.#settings };
       case 'speech.config': return { ...this.#speech };

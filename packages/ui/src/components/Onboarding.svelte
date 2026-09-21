@@ -1,6 +1,6 @@
 <script lang="ts">
   /*
-   * The tour, once per device. Eight screens, each one carrying the switch or
+   * The tour, once per device. Nine owner screens, each one carrying the switch or
    * the button for what it explains, so reading it and setting it up are the
    * same pass: the language and the theme, the agent picker, dictation, the
    * panel and its keys, the usage bars, the phone and the other machines, the
@@ -16,6 +16,7 @@
   import { onMount, tick, untrack } from 'svelte';
   import { AppWindow, Bell, Brain, Coins, FolderOpen, GitCompare, Keyboard, Languages, ListTodo, Mic, Minimize2, Palette, Server, ShieldCheck, Smartphone, Files as FilesIcon, VolumeX, X } from '@lucide/svelte';
   import type { AccountQuota, KeybindingCommand, SpeechStatus } from '@boite/contracts';
+  import TelemetrySettings from './TelemetrySettings.svelte';
   import BoiteMark from './BoiteMark.svelte';
   import ProviderLogo from './ProviderLogo.svelte';
   import { Closing } from '../lib/closing.svelte';
@@ -30,8 +31,11 @@
   const inShell = window.__TAURI_INTERNALS__ !== undefined;
   const FOCUSABLE = 'button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])';
 
-  const screens = steps();
+  const screens = $derived(steps(store.owner));
   let index = $state(0);
+  $effect(() => {
+    if (index >= screens.length) index = Math.max(0, screens.length - 1);
+  });
   let step = $derived<OnboardingStep>(screens[index] ?? 'welcome');
   let last = $derived(index === screens.length - 1);
   let panel = $state<HTMLDivElement | undefined>(undefined);
@@ -279,6 +283,10 @@
                 </div>
               </div>
             </div>
+          {:else if step === 'privacy'}
+            <h1 id="onboarding-title">{strings.onboarding.privacy.title}</h1>
+            <p class="lead">{strings.onboarding.privacy.body}</p>
+            <TelemetrySettings {store} embedded />
           {:else if step === 'agents'}
             <h1 id="onboarding-title">{strings.onboarding.agents.title}</h1>
             <p class="lead">{strings.onboarding.agents.body}</p>
@@ -791,6 +799,8 @@
     .row { flex-wrap: wrap; }
     .segmented { width: 100%; justify-content: stretch; }
     .segmented button { flex: 1; }
+    footer { flex-wrap: wrap; justify-content: flex-end; }
+    .dots { flex-basis: 100%; justify-content: center; margin-right: 0; }
   }
 
   @media (prefers-reduced-motion: reduce) {

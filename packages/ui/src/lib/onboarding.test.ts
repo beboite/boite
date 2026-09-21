@@ -51,7 +51,8 @@ test('the screens come in order, from the welcome to the first project', () => {
 
   expect(shown[0]).toBe('welcome');
   expect(shown.at(-1)).toBe('project');
-  expect(shown).toEqual(['welcome', 'agents', 'voice', 'panel', 'usage', 'reach', 'quiet', 'project']);
+  expect(shown).toEqual(['welcome', 'privacy', 'agents', 'voice', 'panel', 'usage', 'reach', 'quiet', 'project']);
   // A fresh array every call: the caller keeps its own and may not change ours.
   expect(steps()).not.toBe(shown);
+  expect(steps(false)).not.toContain('privacy');
 });

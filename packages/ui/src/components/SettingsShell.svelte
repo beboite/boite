@@ -5,8 +5,8 @@
   import KeyboardPage from './KeyboardPage.svelte';
   import LimitsPage from './LimitsPage.svelte';
   import PluginsPage from './PluginsPage.svelte';
-  import { strings } from '../lib/strings';
   import { COMMAND_GROUPS } from '../lib/keybindings';
+  import { strings } from '../lib/strings';
   import type { SettingsTab, Store } from '../lib/store.svelte';
   import AccountsPage from './AccountsPage.svelte';
   import AppearancePage from './AppearancePage.svelte';

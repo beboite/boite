@@ -1,6 +1,6 @@
 # The tour
 
-Boite opens a tour the first time it runs on a device: eight screens, each one
+Boite opens a tour the first time it runs on a device: nine owner screens, each one
 carrying the switch or the button for what it explains, so reading it and
 setting it up are the same pass. It waits for a core to be connected, because half its controls
 would be dead against a connection that is not there.
@@ -15,6 +15,7 @@ tour set.
 | Screen | What it says | What it carries |
 |---|---|---|
 | Welcome | One conversation per task, and agents keep working meanwhile | Language and theme |
+| Privacy | Basic counters start enabled on new hosts; enhanced usage requires consent | The same telemetry controls as Settings, owner only |
 | Agents | The model or the provider changes mid-thread, the history follows | A still of the composer's chip row |
 | Voice | Press the microphone, read the text before it is sent | `speech.status`, then Voice settings when it is not set up |
 | Panel | Changes, files, tasks and a browser, one key away | The four surfaces with their live chords, and Keyboard settings |
@@ -27,6 +28,8 @@ One sentence per screen, and a row is its label alone: the hint under a
 switch stays on the Settings page it writes to. A reader keeps one idea per
 screen and skims the rest, so the tour says what the feature is and where it
 lives, never how it works.
+Privacy keeps the consent details beside its switches so the owner can read
+what each mode collects before opting in.
 
 Escape leaves, the cross leaves, Tab stays inside. The dots at the bottom walk
 the screens and read as steps to a screen reader. Leaving at the first screen
@@ -37,7 +40,7 @@ counts as much as finishing the last one: the tour is not asked twice.
 Closing it writes `boite.onboarding` in `localStorage`:
 
 ```json
-{ "version": 2, "at": 1789660000000 }
+{ "version": 3, "at": 1789660000000 }
 ```
 
 The device that stores nothing, a browser refusing storage, sees the tour every

@@ -160,6 +160,10 @@ export class BrowserPage {
       await page.send('Page.enable', {});
       await page.send('Runtime.enable', {});
       if (options.showTour !== true) await page.send('Page.addScriptToEvaluateOnNewDocument', { source: SEEN_TOUR });
+      // Windows may clamp the headless window. Pin the CSS viewport before startup.
+      await page.send('Emulation.setDeviceMetricsOverride', {
+        width: size.width, height: size.height, deviceScaleFactor: 1, mobile: false,
+      });
       await page.navigate(options.url);
       return page;
     } catch (error) {

@@ -10,6 +10,18 @@
 import type { Messages } from './i18n.svelte';
 
 export const fr: Messages = {
+  "telemetry": {
+    "heading": "Confidentialité et statistiques",
+    "description": "Les compteurs de base sont activés par défaut. Les statistiques améliorées restent facultatives. Aucun message, nom de projet, chemin, compte ou enregistrement n'est collecté.",
+    "basic": "Compteurs anonymes",
+    "basicHint": "Compter les installations actives, lancements, conversations et résultats des tours. Les identifiants d'usage changent chaque jour ; un identifiant distinct compte uniquement les installations.",
+    "enhanced": "Statistiques améliorées",
+    "enhancedHint": "Partager les modèles publics choisis, le niveau de raisonnement, les modes de vitesse et de permission, les durées et les volumes de jetons avec un identifiant aléatoire stable. Les modèles privés sont regroupés sous « autre ». Désactiver demande la suppression du profil et de ses événements.",
+    "unconfigured": "Cette version n'a pas de relais statistique configuré. Rien n'est envoyé.",
+    "pending": "Suppression en attente. Boite réessaie en arrière-plan. PostHog supprime les événements après acceptation de la demande.",
+    "export": "Exporter mes statistiques",
+    "retry": "Réessayer la suppression"
+  },
   speech: {
     heading: 'Voix', description: 'Dictez dans n\'importe quelle conversation. Relisez le texte avant de l\'envoyer.',
     start: 'Dicter', stop: 'Terminer la dictée', listening: 'Écoute', opening: 'Attente du micro', transcribing: 'Transcription',
@@ -1043,6 +1055,7 @@ export const fr: Messages = {
   },
 
   onboarding: {
+    "privacy": { "title": "Aider à améliorer Boite", "body": "Les compteurs de base sont activés par défaut sur une nouvelle installation. Les détails d'usage améliorés restent facultatifs. Ces deux choix restent modifiables dans les réglages." },
     label: 'Prise en main',
     skip: 'Passer',
     back: 'Retour',

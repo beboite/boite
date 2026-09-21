@@ -8,6 +8,7 @@
 - [Model switching](model-switching.md): changing models and providers in one conversation.
 - [Context](context.md): context usage and compaction.
 - [Usage](usage.md): tokens, API cost and limits per day, provider and model.
+- [Analytics](analytics.md): optional telemetry, consent, collected fields and data controls.
 - [Keyboard shortcuts](keybindings.md): defaults and customization.
 - [The right panel](panel.md): browser, changes, files, tasks and trace beside the chat.
 - [The `boite` CLI](cli.md): what an agent runs to reach its thread and its panel.
