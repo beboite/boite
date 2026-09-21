@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, tick, untrack } from 'svelte';
-  import { AppWindow, Bell, Languages, Minimize2, Palette, VolumeX, X } from '@lucide/svelte';
+  import { AppWindow, ArrowLeftRight, Bell, Check, FileDiff, Languages, Mic, Minimize2, Palette, VolumeX, X } from '@lucide/svelte';
   import type { SpeechStatus } from '@boite/contracts';
   import TelemetrySettings from './TelemetrySettings.svelte';
   import OnboardingScene from './OnboardingScene.svelte';
@@ -118,10 +118,15 @@
           {:else if step === 'agents'}
             <p class="lead">{strings.onboarding.demo.workspaceBody}</p>
             <div class="examples" role="group" aria-label={strings.onboarding.agents.title}>
-              {#each examples as item (item.id)}<button class:on={example === item.id} aria-pressed={example === item.id} data-testid="onboarding-example-{item.id}" onclick={() => { example = item.id; }}>{item.label}</button>{/each}
+              {#each examples as item (item.id)}
+                <button class:on={example === item.id} aria-pressed={example === item.id} data-testid="onboarding-example-{item.id}" onclick={() => { example = item.id; }}>
+                  {#if item.id === 'agents'}<ArrowLeftRight size={20} />{:else if item.id === 'voice'}<Mic size={20} />{:else}<FileDiff size={20} />{/if}
+                  <span>{item.label}</span>
+                  {#if example === item.id}<Check size={13} class="selected-mark" />{/if}
+                </button>
+              {/each}
             </div>
             <OnboardingScene scene={example} />
-            <p class="caption">{example === 'voice' ? strings.onboarding.demo.voiceHint : example === 'panel' ? strings.onboarding.demo.reviewed : strings.onboarding.demo.continued}</p>
             {#if example === 'voice' && store.owner}
               <div class="voice-setup">
                 {#if speech?.ready}<p data-testid="onboarding-voice-ready">{strings.onboarding.demo.readyVoice}</p>
@@ -190,14 +195,18 @@
   .preferences { display: grid; gap: 12px; }
   .preference { display: flex; align-items: center; gap: 10px; }
   .preference > span { margin-right: auto; }
-  .segmented, .examples { display: flex; gap: 4px; }
+  .segmented { display: flex; gap: 4px; }
   .segmented { padding: 3px; border: 1px solid var(--color-border); border-radius: var(--radius-md); }
-  .segmented button, .examples button { border: 0; background: transparent; color: var(--color-muted-foreground); font-size: var(--text-sm); }
-  .segmented button.on, .examples button.on { background: var(--color-accent-soft); color: var(--color-foreground); }
-  .examples { margin-top: 16px; flex-wrap: wrap; }
+  .segmented button { border: 0; background: transparent; color: var(--color-muted-foreground); font-size: var(--text-sm); }
+  .segmented button.on { background: var(--color-accent-soft); color: var(--color-foreground); }
+  .examples { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 16px; }
+  .examples button { position: relative; display: flex; flex-direction: column; justify-content: center; gap: 8px; height: auto; min-height: 76px; padding: 12px 8px; white-space: normal; line-height: 1.3; border: 1px solid var(--color-edge); border-radius: var(--radius-lg); background: var(--color-surface-2); color: var(--color-muted-foreground); font-size: var(--text-sm); cursor: pointer; }
+  .examples button:hover { color: var(--color-foreground); background: var(--color-hover); border-color: var(--color-accent); }
+  .examples button.on { border-color: var(--color-accent); background: var(--color-accent-soft); color: var(--color-foreground); box-shadow: inset 0 -2px var(--color-accent); }
+  .examples :global(.selected-mark) { position: absolute; top: 7px; right: 7px; color: var(--color-accent); }
   .voice-setup { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 12px; font-size: var(--text-sm); color: var(--color-muted-foreground); }
   .voice-setup progress { display: block; width: 100%; margin-top: 6px; accent-color: var(--color-accent); }
-  .quiet-scene, .privacy-scene { max-width: 340px; margin: auto; }
+  .quiet-scene, .privacy-scene { margin: auto; }
   .rows { display: grid; gap: 4px; }
   .row { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--color-border); }
   .row > span { flex: 1; font-size: var(--text-base); }
@@ -215,7 +224,6 @@
   @media (max-width: 480px) {
     .screen { padding: 8px 18px 18px; } .preference { flex-wrap: wrap; } .segmented { flex-basis: 100%; } .segmented button { flex: 1; }
     footer { padding: 12px; gap: 4px; } .dot { width: 20px; } .dot::after { left: 7px; } .dot.on::after { left: 3px; }
-    .quiet-scene, .privacy-scene { max-width: 260px; }
   }
   @media (prefers-reduced-motion: reduce) {
     .scrim, .panel { animation: none; }

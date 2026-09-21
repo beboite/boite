@@ -1,7 +1,7 @@
 # The tour
 
 Boite opens a six-screen tour on a new owner device, five on a paired guest.
-It waits for a connected core. SVG illustrations explain the features without
+It waits for a connected core. Animated miniatures with SVG controls explain the features without
 calling live providers, reading quotas or navigating away from the tour.
 
 Nothing in it is a setting of its own. Every control writes through the same
@@ -20,8 +20,10 @@ tour set.
 | Quiet | Agents work without taking over the screen or speakers | Notifications, close to tray, focus guard, mute |
 | Privacy | Messages and files stay out of analytics | Two concise consent switches and the final welcome, owner only |
 
-Illustrations have their own phone layout, use theme tokens and carry an example
-label. Animations stop after their demonstration, can be paused and replayed,
+The miniatures use responsive text, the real provider marks and theme tokens.
+Three bordered icon buttons select the conversation demonstrations. Dictation
+shows microphone activation, speech, then a draft to review; agent switching
+shows the picker, a follow-up and the next agent's answer. Animations stop after their demonstration, can be paused and replayed,
 and show the completed state under reduced motion. The dots are the only progress
 indicator. Export and deletion management remain in Settings. Pending deletion
 does not prevent a fresh opt-in or leaving the consent screen.

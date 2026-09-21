@@ -185,6 +185,18 @@ test('the panel example shows changes beside chat instead of a keybinding list',
   expect(readOnboarding()).toBeNull();
 });
 
+test('demo choices are labelled buttons and dictation keeps word spacing', async () => {
+  await open();
+  await click('onboarding-dot-agents');
+  for (const demo of ['agents', 'voice', 'panel']) {
+    expect(query(`[data-testid=onboarding-example-${demo}]`).tagName).toBe('BUTTON');
+  }
+  await click('onboarding-example-voice');
+  expect(query('[data-testid=onboarding-scene]').textContent).toContain('Make the buttons easier to read');
+  expect(query('[data-testid=onboarding-scene]').textContent).not.toContain('Illustration');
+  expect(query('[data-testid=onboarding-animation-replay]').textContent).toContain('Replay');
+});
+
 test('skipping at the first screen counts as seen, the same as finishing it', async () => {
   await open();
   expect(step()).toBe('welcome');
