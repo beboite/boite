@@ -574,6 +574,9 @@ export class ThreadStore {
       throw refused('this thread already has an in-flight turn', { threadId });
     }
     const provider = this.core.providers.require(thread.providerId);
+    if (this.core.updates.updating(thread.providerId)) {
+      throw refused(`${provider.name} is updating; send this again once it is done`, { threadId, providerId: thread.providerId });
+    }
     assertDriverRunnable(
       provider.protocol,
       this.core.providers.summary(thread.providerId),

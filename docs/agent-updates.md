@@ -65,6 +65,8 @@ process. A version read has 20 seconds, an update 15 minutes.
 
 - An update is refused while a turn of that provider is queued, running or
   waiting. The automatic update waits and looks again ten minutes later.
+- A turn is refused while its provider is updating, and an update asked for
+  during a version check starts once that check has landed.
 - Versions compare by their numbers; a pre-release is older than its release.
   The self route offers only a newer version. The managed route offers whatever
   the descriptor pins, since a Boite release may pin an older, working one.

@@ -159,6 +159,11 @@ export class HarnessUpdates {
     return this.describe(providerId)!;
   }
 
+  /** True while this provider's program is being replaced: a turn started now would run on half of it. */
+  updating(providerId: ProviderId): boolean {
+    return this.entries.get(providerId)?.state === 'updating';
+  }
+
   skip(providerId: ProviderId, version: string | null): HarnessUpdate {
     const current = this.describe(providerId);
     if (current === null) throw notFound('provider update', providerId);

@@ -164,6 +164,10 @@ describe('harness updates', () => {
     const { client } = await start('npm');
     await client.call('providers.updates', {});
 
+    const project = await client.call('projects.add', { path: harness!.dataDir, name: 'updates' });
+    const account = await client.call('accounts.add', { providerId: 'update-fake', label: 'Fake', useDefaultLocation: true });
+    const thread = await client.call('threads.create', { projectId: project.id, providerId: 'update-fake', accountId: account.id, title: 'gate' });
+
     let release = (): void => {};
     const gate = new Promise<void>((done) => (release = done));
     harness!.core.updates.npmLatest = async () => {
@@ -177,6 +181,9 @@ describe('harness updates', () => {
     release();
 
     expect((await started).state).toBe('updating');
+    // A turn started now would run on a program half replaced.
+    expect(harness!.core.updates.updating('update-fake')).toBe(true);
+    await expect(client.call('turns.start', { threadId: thread.id, prompt: 'hello' })).rejects.toThrow(/is updating/);
     await checked;
     await expect(client.call('providers.update', { providerId: 'update-fake' })).rejects.toThrow(/already updating/);
     await client.next('providers.updatesChanged', (list) => list[0]?.state === 'idle' && list[0]?.current === '1.2.0', 20000);
