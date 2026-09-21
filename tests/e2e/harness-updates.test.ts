@@ -62,10 +62,13 @@ test('an agent update is a pinned notice with Update and Skip, on a desktop and 
 
 test('Settings, Providers lists every agent, offers a skipped version again and carries the automatic switch', async () => {
   await page.click(id('nav-settings')); await page.click(id('settings-tab-accounts'));
-  await page.waitFor(`document.querySelectorAll('${id('harness-update-row')}').length === 3`);
+  await page.waitFor(`document.querySelectorAll('${id('harness-update-row')}').length === 4`);
   const text = await page.evaluate(`document.querySelector('${id('harness-updates-card')}').textContent`) as string;
   expect(text).toContain('2.1.278 skipped');
   expect(text).toContain('Up to date');
+  // An agent that cannot name its newest release offers its updater instead of a version.
+  expect(text).toContain('Checks by itself');
+  expect(await page.evaluate(`document.querySelector('[data-update-provider="antigravity"] ${id('harness-update-row-blind')}') !== null`)).toBe(true);
 
   await page.click(id('setting-auto-update-harnesses'));
   await page.waitFor(`document.querySelector('${id('setting-auto-update-harnesses')}').checked`);

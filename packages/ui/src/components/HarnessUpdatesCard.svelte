@@ -74,6 +74,8 @@
                 <button type="button" class="primary small" data-testid="harness-update-row-run" onclick={() => void store.updateHarness(update.providerId)}>
                   {update.state === 'failed' ? strings.harnessUpdates.retry : strings.harnessUpdates.update}
                 </button>
+              {:else if update.route === 'self' && update.latest === null && update.current !== null && update.state !== 'updating'}
+                <button type="button" class="quiet small" data-testid="harness-update-row-blind" onclick={() => void store.updateHarness(update.providerId)}>{strings.harnessUpdates.runUpdater}</button>
               {/if}
             </span>
           </li>

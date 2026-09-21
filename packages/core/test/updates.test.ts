@@ -18,7 +18,7 @@ afterEach(async () => {
 });
 
 /** A user descriptor whose updater is the fixture, reading its newest version the way `source` says. */
-function writeDescriptor(dataDir: string, source: 'command' | 'npm', updater: string): string {
+function writeDescriptor(dataDir: string, source: 'command' | 'npm' | 'none', updater: string): string {
   const dir = join(dataDir, 'providers');
   mkdirSync(dir, { recursive: true });
   const state = join(dataDir, 'fake-version.txt');
@@ -28,7 +28,7 @@ function writeDescriptor(dataDir: string, source: 'command' | 'npm', updater: st
     executable: [{ kind: 'path', value: 'bun' }],
     update: {
       versionArgs: [FAKE, state, '--version'],
-      ...(source === 'command' ? { latestArgs: [FAKE, state, 'check'] } : { latestNpm: '@boite-test/fake-agent' }),
+      ...(source === 'command' ? { latestArgs: [FAKE, state, 'check'] } : source === 'npm' ? { latestNpm: '@boite-test/fake-agent' } : {}),
       args: [FAKE, state, updater],
     },
     isolation: {},
@@ -52,7 +52,7 @@ function writeDescriptor(dataDir: string, source: 'command' | 'npm', updater: st
   return state;
 }
 
-async function start(source: 'command' | 'npm', updater = 'update'): Promise<{ client: CoreClient; state: string }> {
+async function start(source: 'command' | 'npm' | 'none', updater = 'update'): Promise<{ client: CoreClient; state: string }> {
   harness = await startTestCore();
   // Only the fixture: a check must never run the agents of the machine the tests run on.
   harness.core.updates.only = new Set(['update-fake']);
@@ -101,6 +101,19 @@ describe('harness updates', () => {
     // Every run of the agent went through the process registry.
     const trace = await client.call('trace.get', { threadId: 'update:update-fake' });
     expect(trace.length).toBeGreaterThanOrEqual(4);
+    await waitFor(() => harness?.core.procs.liveCount('update:update-fake') === 0);
+  });
+
+  test('an agent that cannot name its newest version announces nothing and still runs its updater when asked', async () => {
+    const { client, state } = await start('none');
+
+    const before = only(await client.call('providers.updates', {}));
+    expect(before).toMatchObject({ route: 'self', current: '1.0.0', latest: null, pending: false, state: 'idle' });
+
+    const changed = client.next('providers.updatesChanged', (list) => list[0]?.state === 'idle' && list[0]?.current === '1.2.0', 20000);
+    expect((await client.call('providers.update', { providerId: 'update-fake' })).state).toBe('updating');
+    expect(only(await changed)).toMatchObject({ current: '1.2.0', latest: null, pending: false, message: null });
+    expect(readFileSync(state, 'utf8')).toBe('1.2.0');
     await waitFor(() => harness?.core.procs.liveCount('update:update-fake') === 0);
   });
 

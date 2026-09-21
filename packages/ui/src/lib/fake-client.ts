@@ -3054,8 +3054,10 @@ export class FakeClient implements ObservableClient {
   #harnessUpdates: HarnessUpdate[] = ([
     { providerId: 'claude', name: 'Claude Code', route: 'self', current: '2.1.267', latest: '2.1.278', pending: true, skipped: null, state: 'idle', message: null, checkedAt: Date.now() },
     { providerId: 'codex', name: 'Codex', route: 'managed', current: '0.154.0', latest: '0.155.1', pending: true, skipped: null, state: 'idle', message: null, checkedAt: Date.now() },
-    { providerId: 'opencode', name: 'OpenCode', route: 'self', current: '1.18.31', latest: '1.18.31', pending: false, skipped: null, state: 'idle', message: null, checkedAt: Date.now() }
-  ] satisfies HarnessUpdate[]).map((update) => (quietUpdates() ? { ...update, current: update.latest, pending: false } : update));
+    { providerId: 'opencode', name: 'OpenCode', route: 'self', current: '1.18.31', latest: '1.18.31', pending: false, skipped: null, state: 'idle', message: null, checkedAt: Date.now() },
+    // No way to name its newest release: the row that offers the updater itself.
+    { providerId: 'antigravity', name: 'Antigravity', route: 'self', current: '1.2.7', latest: null, pending: false, skipped: null, state: 'idle', message: null, checkedAt: Date.now() }
+  ] satisfies HarnessUpdate[]).map((update) => (quietUpdates() ? { ...update, current: update.latest ?? update.current, pending: false } : update));
 
   #harnessUpdate(providerId: string): HarnessUpdate {
     const update = this.#harnessUpdates.find((entry) => entry.providerId === providerId);
@@ -3066,7 +3068,7 @@ export class FakeClient implements ObservableClient {
   #updateHarness(providerId: string): RpcResult<'providers.update'> {
     const update = this.#harnessUpdate(providerId);
     if (update.state === 'updating') throw new RpcFailure({ code: RpcErrorCode.Refused, message: `${update.name} is already updating` });
-    if (update.current === update.latest) {
+    if (update.latest !== null && update.current === update.latest) {
       throw new RpcFailure({ code: RpcErrorCode.Refused, message: `${update.name} is already on its newest known version` });
     }
     update.state = 'updating';
@@ -3074,7 +3076,7 @@ export class FakeClient implements ObservableClient {
     this.#emit('providers.updatesChanged', structuredClone(this.#harnessUpdates));
     setTimeout(() => {
       update.state = 'idle';
-      update.current = update.latest;
+      update.current = update.latest ?? update.current;
       update.checkedAt = Date.now();
       this.#emit('providers.updatesChanged', structuredClone(this.#harnessUpdates));
     }, 1200);

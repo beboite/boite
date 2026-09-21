@@ -4,6 +4,11 @@ Boite keeps the agents of a machine current. The core of that machine does the
 work: it reads each agent's version, reads the newest one, and runs the update.
 A client only shows what the core found and sends Update or Skip back.
 
+An agent with an updater and no way to name its newest release, the Antigravity
+CLI being one, announces nothing: its row reads `Checks by itself` and carries
+`Run its updater`, which runs the updater on request and reads the version again.
+The automatic switch leaves it alone, such an agent updates itself.
+
 ## What the user sees
 
 A newer version is a notice pinned under the title bar, top right. It carries

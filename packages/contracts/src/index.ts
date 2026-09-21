@@ -97,7 +97,11 @@ export interface ProviderSelfUpdate {
   latestNpm?: string;
   /** Arguments that print a JSON object carrying `latestVersion`, for an agent that checks by itself. */
   latestArgs?: string[];
-  /** Arguments of the agent's own updater. */
+  /**
+   * Arguments of the agent's own updater. With neither `latestNpm` nor
+   * `latestArgs` the newest version is unknown: nothing is announced, and the
+   * updater still runs when the user asks for it.
+   */
   args: string[];
 }
 

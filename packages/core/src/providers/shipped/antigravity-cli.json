@@ -12,6 +12,7 @@
         { "kind": "path", "value": "agy" },
         { "kind": "file", "value": "{home}/AppData/Local/agy/bin/agy.exe" }
       ],
+      "update": { "args": ["update"] },
       "isolation": {},
       "env": { "BROWSER": "{browserNoop}", "NO_COLOR": "1" },
       "close": { "processes": [] }
@@ -19,6 +20,7 @@
     "linux": {
       "detect": {},
       "executable": [{ "kind": "path", "value": "agy" }],
+      "update": { "args": ["update"] },
       "isolation": {},
       "env": { "BROWSER": "{browserNoop}", "NO_COLOR": "1" },
       "close": { "processes": [] }
@@ -26,6 +28,7 @@
     "macos": {
       "detect": {},
       "executable": [{ "kind": "path", "value": "agy" }],
+      "update": { "args": ["update"] },
       "isolation": {},
       "env": { "BROWSER": "{browserNoop}", "NO_COLOR": "1" },
       "close": { "processes": [] }

@@ -88,7 +88,7 @@ test('the settings card carries the automatic switch, the versions and a way bac
   await settle();
 
   const rows = [...document.querySelectorAll<HTMLElement>('[data-testid="harness-update-row"]')];
-  expect(rows.map((row) => row.dataset['updateProvider'])).toEqual(['claude', 'codex', 'opencode']);
+  expect(rows.map((row) => row.dataset['updateProvider'])).toEqual(['claude', 'codex', 'opencode', 'antigravity']);
   expect(rows[0]!.textContent).toContain('2.1.267 → 2.1.278');
   expect(rows[2]!.textContent).toContain('Up to date');
 

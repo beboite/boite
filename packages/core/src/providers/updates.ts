@@ -121,7 +121,10 @@ export class HarnessUpdates {
     }
     if (entry === undefined) throw notFound('provider update', providerId);
     if (entry.state === 'updating') throw refused(`${target.descriptor.name} is already updating`, { providerId });
-    if (!this.newer(entry)) {
+    // An agent with no way to name its newest release is still updated on request:
+    // its updater checks by itself, and what it installed is read afterwards.
+    const blind = target.route === 'self' && entry.latest === null && entry.current !== null;
+    if (!blind && !this.newer(entry)) {
       throw refused(`${target.descriptor.name} is already on its newest known version`, {
         providerId,
         current: entry.current,
