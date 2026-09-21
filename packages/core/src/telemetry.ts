@@ -126,6 +126,8 @@ export class Telemetry {
       await this.inFlight;
       const old = this.consent;
       this.consent = { ...old, mode, forget: [...old.forget] };
+      // Events accepted while the aborted upload settled belong to the old consent.
+      this.queue = [];
       if (old.mode === 'enhanced' && old.installId) {
         this.consent.forget.push(old.installId);
         this.consent.installId = null;
@@ -196,6 +198,10 @@ export class Telemetry {
     this.inFlight = (async () => {
       try {
         await this.forgetPending();
+        if (this.consent.mode === 'off' || revision !== this.revision) {
+          this.queue = [];
+          return;
+        }
         this.ping();
         const events = this.queue.splice(0);
         if (events.length) {

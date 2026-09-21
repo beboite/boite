@@ -114,6 +114,36 @@ test('enhanced withdrawal persists deletion, retries after restart, and uses a n
   } finally { await restarted.close(); }
 });
 
+test('consent changes discard events arriving while an aborted upload settles', async () => {
+  for (const mode of ['off', 'basic', 'enhanced'] as const) {
+    let release!: () => void;
+    let started!: () => void;
+    const waiting = new Promise<void>(resolve => { started = resolve; });
+    const settled = new Promise<void>(resolve => { release = resolve; });
+    let block = true;
+    const f = fixture(async path => {
+      if (path === '/track' && block) { started(); await settled; }
+      return Response.json({ ok: true });
+    });
+    if (mode !== 'enhanced') await f.telemetry.configure('enhanced');
+    const upload = f.telemetry.flush();
+    await waiting;
+    const changed = f.telemetry.configure(mode);
+    await Promise.resolve();
+    f.telemetry.track('turn_finished', { model: 'gpt-6-astra' });
+    block = false;
+    release();
+    await upload;
+    await changed;
+    f.requests.length = 0;
+    await f.telemetry.flush();
+    const uploads = f.requests.filter(request => request.path === '/track');
+    expect(uploads.flatMap(request => request.body.events).some(event => event.name === 'turn_finished')).toBe(false);
+    if (mode === 'off') expect(uploads).toEqual([]);
+    if (mode !== 'enhanced') expect(f.requests.some(request => request.path === '/forget')).toBe(true);
+  }
+});
+
 test('export needs enhanced mode and an inert build never contacts a relay', async () => {
   const f = fixture();
   await f.telemetry.configure('off');
