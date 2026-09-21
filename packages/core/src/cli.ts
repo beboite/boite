@@ -17,6 +17,7 @@ import { connect } from './client.ts';
 import type { CoreClient } from './client.ts';
 import { CORE_VERSION } from './core.ts';
 import { resolveDataDir } from './paths.ts';
+import { agentCommand } from './agents/cli.ts';
 
 export interface CliIo {
   out(text: string): void;
@@ -44,6 +45,16 @@ export const USAGE = `usage: boite <command> [args] [--json]
   agents inbox                   agent messages, provenance and delivery state
   agents send <core>/<thread> <text>
   agents reply <message-id> <text>
+  agent context|inbox|missions   this persistent agent's authorized context
+  agent send <ids|-> <text>      post to its group or direct conversation
+  agent reply <message-id> <text>
+  agent acquire <task-id>        acquire a mission task atomically
+  agent submit <task-id> <generation> <result>
+  agent artifact <json>          title, summary, missionId, taskId, paths, commit, verification
+  agent decide <json>            prompt and options; yield until the user answers
+  agent memory [query]           search memory in this context
+  agent remember <json>          title and text, optional id and expectedRevision
+  --request-id <id>              reuse for a retried collaboration command
 
   --thread <id> --data-dir <dir> --channel <stable|dev>
                                  drive a thread from outside it, as the owner`;
@@ -72,6 +83,7 @@ interface Parsed {
   thread: string | undefined;
   dataDir: string | undefined;
   channel: Channel;
+  requestId?: string;
 }
 
 function parse(argv: string[]): Parsed {
@@ -85,6 +97,7 @@ function parse(argv: string[]): Parsed {
       return value;
     };
     if (arg === '--json') parsed.json = true;
+    else if (arg === '--request-id') parsed.requestId = next();
     else if (arg === '--thread') parsed.thread = next();
     else if (arg === '--data-dir') parsed.dataDir = next();
     else if (arg === '--channel') {
@@ -192,6 +205,11 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
   };
 
   switch (command) {
+    case 'agent': {
+      const result = await agentCommand(client, threadId, rest, parsed.requestId ?? crypto.randomUUID());
+      print([JSON.stringify(result)], result);
+      return;
+    }
     case 'agents': {
       const action = want(0, 'list, inbox, send or reply');
       if (action === 'list') {

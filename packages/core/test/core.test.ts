@@ -23,7 +23,7 @@ describe('projects', () => {
   test('removing a project drains turns and deletes its projection rows', async () => {
     const client = await harness.connect();
     const { threadId } = await echoThread(harness, client);
-    const projectId = harness.core.threads.require(threadId).projectId;
+    const projectId = harness.core.projects.require(harness.core.threads.require(threadId).projectId).id;
     await client.call('turns.start', { threadId, prompt: '[sleep:60000]', clientRequestId: 'remove-request' });
     expect(harness.core.journal.turnRequest(threadId, 'remove-request')).not.toBeNull();
     await client.call('projects.remove', { projectId });
@@ -36,7 +36,7 @@ describe('projects', () => {
   test('removing a project stops remaining processes before deleting their rows', async () => {
     const client = await harness.connect();
     const { threadId } = await echoThread(harness, client);
-    const projectId = harness.core.threads.require(threadId).projectId;
+    const projectId = harness.core.projects.require(harness.core.threads.require(threadId).projectId).id;
     harness.core.procs.spawnChild(threadId, process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { cwd: harness.dataDir });
     await client.call('projects.remove', { projectId });
     expect(harness.core.procs.liveCount(threadId)).toBe(0);

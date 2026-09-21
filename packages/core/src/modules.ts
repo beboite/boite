@@ -1,4 +1,5 @@
 import type { Core } from './core.ts';
+import { registerPersistentAgents } from './agents/store.ts';
 import { registerAccountMethods } from './accounts.ts';
 import { registerAgentMethods } from './agent.ts';
 import { registerImportMethods } from './imports.ts';
@@ -19,6 +20,7 @@ import { registerCoordination } from './coordination.ts';
 
 /** Adding a module is one file plus one line here. `hello` is the server's own. */
 export function registerModules(core: Core): void {
+  registerPersistentAgents(core);
   registerCoordination(core);
   registerSpeechMethods(core);
   registerPushMethods(core);

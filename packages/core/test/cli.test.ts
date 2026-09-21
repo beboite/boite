@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { AGENT_ENV } from '@boite/contracts';
 import { runCli, splitLine } from '../src/cli.ts';
 import type { CliIo } from '../src/cli.ts';
-import { echoThread, startTestCore } from './harness.ts';
+import { echoThread, startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
 
 let harness: TestCore;
@@ -77,6 +77,29 @@ test('agents commands discover, send and reply using the calling thread identity
   expect(reply.code).toBe(0);
   expect(JSON.parse(reply.out).replyTo).toBe(incoming.id);
   expect((await boite(['agents', 'inbox'])).out).toContain('from=');
+});
+
+test('persistent agent CLI uses its own context, durable memory and idempotent decision requests', async () => {
+  const client = await harness.connect();
+  const account = harness.core.accounts.list().find(a => a.providerId === 'echo')!;
+  const agent = await client.call('agents.profile.save', { value: { name: 'CLI worker', domain: '', instructions: '', avatar: '', status: 'active', tools: ['memory', 'decisions', 'messages'], accountIntegration: 'provider', selection: { providerId: 'echo', accountId: account.id, model: null, effort: null, permissionMode: 'default' } } });
+  await client.call('agents.message.send', { scope: { kind: 'agent', id: agent.id }, text: '[sleep:60000]', recipientIds: [], requestId: 'cli_agent_start_001' });
+  await waitFor(() => harness.core.workforce.records.list('run').some(r => r.status === 'running'));
+  threadId = harness.core.workforce.records.list('run')[0]!.threadId;
+  cwd = harness.core.threads.require(threadId).cwd;
+  const context = await boite(['agent', 'context', '--json']);
+  expect(context.code).toBe(0);
+  expect(JSON.parse(context.out).sessions[0].threadId).toBe(threadId);
+  const remembered = await boite(['agent', 'remember', JSON.stringify({ title: 'A finding', text: 'Keep prototypes small.' }), '--json']);
+  expect(remembered.code).toBe(0);
+  const found = await boite(['agent', 'memory', 'prototypes', '--json']);
+  expect(JSON.parse(found.out)).toHaveLength(1);
+  const args = ['agent', 'decide', JSON.stringify({ prompt: 'Which prototype?', options: ['Puzzle', 'Simulation'] }), '--request-id', 'cli_agent_decision_001', '--json'];
+  const first = await boite(args);
+  expect(first.code).toBe(0);
+  await waitFor(() => harness.core.scheduler.state().running.length === 0);
+  expect(await boite(args)).toEqual(first);
+  expect(harness.core.workforce.records.list('decision')).toHaveLength(1);
 });
 
 describe('usage', () => {

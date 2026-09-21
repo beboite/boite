@@ -51,6 +51,15 @@ boite todo list|add <text>|claim <id>
 boite agents list|inbox
 boite agents send <core-id>/<thread-id> <text>
 boite agents reply <message-id> <text>
+boite agent context|inbox|missions
+boite agent send <recipient-ids|-> <text>
+boite agent reply <message-id> <text>
+boite agent acquire <task-id>
+boite agent submit <task-id> <assignment-generation> <result>
+boite agent artifact <json>
+boite agent decide <json>
+boite agent memory [query]
+boite agent remember <json>
 boite help
 ```
 
@@ -74,6 +83,15 @@ usage error (the usage text on stderr).
 [Agent coordination](coordination.md) must be enabled by the owner before an
 agent can send messages. The directory includes only authorized contacts.
 Replies preserve their message reference and authenticated sender identity.
+
+The singular `agent` commands belong to [persistent agents](agents.md), not
+ordinary thread coordination. They use the calling session's current scope.
+Pass `--request-id <stable-id>` when retrying a send, artifact or decision after
+a lost response. An artifact object contains `missionId`, `taskId`, `title`,
+`summary`, `paths`, `commit` and `verification`. A decision contains `prompt`
+and `options`; it yields execution until the user answers. A memory contains
+`title` and `text`, with `id` and `expectedRevision` for an edit. The core adds
+the source context. Use `--json` to preserve the structured result.
 
 ## Where the command lives
 

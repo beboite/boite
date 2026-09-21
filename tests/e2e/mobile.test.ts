@@ -39,7 +39,7 @@ afterAll(async () => { await page?.close(); await server?.close(); }, 15_000);
 
 test('phone settings separate device preferences from remote administration, including owner sessions', async () => {
   await page.send('Emulation.setDeviceMetricsOverride', { width: 360, height: 800, deviceScaleFactor: 1, mobile: true });
-  await page.click('[data-testid=mobile-tabs] button:nth-child(3)');
+  await page.click('[data-testid=mobile-settings]');
   await page.waitFor(`document.querySelector('[data-testid=mobile-settings-home]')`);
   expect(await page.evaluate(`document.querySelector('[data-testid=settings-tab-resources]') === null && document.querySelector('[data-testid=settings-tab-keyboard]') === null`)).toBe(true);
   await capture('phone-settings-home-dark.png');
@@ -68,7 +68,7 @@ test('phone settings separate device preferences from remote administration, inc
 }, 30_000);
 
 test('phone navigates conversations, activity and settings without a sidebar', async () => {
-  await page.click('[data-testid=mobile-tabs] button:nth-child(1)');
+  await page.click('[data-testid=mobile-conversations]');
   await page.waitFor(`document.querySelector('[data-testid=mobile-list] .thread')`);
   const tabs = await page.evaluate<{ bottom: number; height: number }>(`(() => { const r = document.querySelector('[data-testid=mobile-tabs]').getBoundingClientRect(); return {bottom:r.bottom,height:r.height}; })()`);
   expect(tabs.bottom).toBeLessThanOrEqual(844);
@@ -79,12 +79,12 @@ test('phone navigates conversations, activity and settings without a sidebar', a
   await page.waitFor(`!document.querySelector('[data-testid=mobile-list]') && document.querySelector('[data-testid=chat]')`);
   await capture('mobile-chat.png');
   expect(await page.evaluate(`document.querySelector('[data-testid=titlebar]').getBoundingClientRect().bottom <= document.querySelector('[data-testid=timeline]').getBoundingClientRect().top`)).toBe(true);
-  await page.click('[data-testid=mobile-tabs] button:nth-child(2)');
+  await page.click('[data-testid=mobile-activity]');
   await page.waitFor(`document.querySelector('[data-testid=mobile-list] h1')?.textContent === 'Activity'`);
   await capture('mobile-activity.png');
-  await page.click('[data-testid=mobile-tabs] button:nth-child(3)');
+  await page.click('[data-testid=mobile-settings]');
   await page.waitFor(`document.querySelector('[data-testid=settings]')`);
-  await page.click('[data-testid=mobile-tabs] button:nth-child(1)');
+  await page.click('[data-testid=mobile-conversations]');
   await page.click('[data-testid=mobile-new]');
   await page.waitFor(`document.querySelector('[data-testid=composer]') && !document.querySelector('[data-testid=settings]')`);
   expect(page.errors()).toEqual([]);
@@ -92,7 +92,7 @@ test('phone navigates conversations, activity and settings without a sidebar', a
 
 test('draft survives navigation and the light phone layout fits landscape', async () => {
   await page.evaluate(`(() => { const t = document.querySelector('[data-testid=composer-input]'); t.value = 'Keep this draft'; t.dispatchEvent(new Event('input', {bubbles:true})); })()`);
-  await page.click('[data-testid=mobile-tabs] button:nth-child(1)');
+  await page.click('[data-testid=mobile-conversations]');
   await page.click('[data-testid=mobile-header] [data-testid=mobile-new]');
   expect(await page.evaluate(`document.querySelector('[data-testid=composer-input]').value`)).toBe('Keep this draft');
   await page.evaluate(`document.documentElement.dataset.theme = 'light'`);
@@ -120,7 +120,7 @@ test('model sheets stay on screen and browser Back closes the sheet without losi
   await page.evaluate('history.back()');
   await page.waitFor(`!document.querySelector('[data-testid=composer-picker-menu]')`);
   expect(await page.evaluate(`document.querySelector('[data-testid=composer-input]').value`)).toBe('Keep this draft');
-  await page.click('[data-testid=mobile-tabs] button:nth-child(3)');
+  await page.click('[data-testid=mobile-settings]');
   await page.click('[data-testid=mobile-settings-phone]');
   await page.waitFor(`document.querySelector('[data-testid=phone-settings]')`);
   await capture('mobile-installation.png');
@@ -134,10 +134,10 @@ test('returning to a long conversation preserves the reading position', async ()
   await capture('mobile-long-reading.png');
   const visibleAnchor = `(() => { const t=document.querySelector('[data-testid=timeline]'); const top=t.getBoundingClientRect().top; const m=[...t.querySelectorAll('[data-mid]')].find(m=>m.getBoundingClientRect().bottom>top); return {id:m.dataset.mid,offset:m.getBoundingClientRect().top-top}; })()`;
   const anchor = await page.evaluate<{ id: string; offset: number }>(visibleAnchor);
-  await page.click('[data-testid=mobile-tabs] button:nth-child(1)');
+  await page.click('[data-testid=mobile-conversations]');
   await page.click('[data-testid=mobile-list] .thread:not([data-testid=mobile-thread-t-long])');
   await page.waitFor(`!document.querySelector('[data-testid=mobile-list]')`);
-  await page.click('[data-testid=mobile-tabs] button:nth-child(1)');
+  await page.click('[data-testid=mobile-conversations]');
   await page.click('[data-testid=mobile-thread-t-long]');
   await page.waitFor(`!document.querySelector('[data-testid=mobile-list]')`);
   await capture('mobile-long-restored.png');

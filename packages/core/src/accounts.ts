@@ -147,6 +147,12 @@ export class AccountStore {
 
   async remove(accountId: AccountId): Promise<void> {
     const account = this.require(accountId);
+    const checkAgentReferences = () => {
+      if (this.core.workforce.records.list('profile').some(agent => agent.selection.accountId === accountId)) {
+        throw refused('this account is used by a persistent agent; choose another account on its profile first', { accountId });
+      }
+    };
+    checkAgentReferences();
     if (this.core.scheduler.activeAccountIds().includes(accountId) || this.core.journal.listThreads().some((thread) => thread.accountId === accountId)) {
       throw refused('this account is used by a thread; remove its project before removing the account', { accountId });
     }
@@ -156,6 +162,7 @@ export class AccountStore {
       throw refused('the account isolationDir must be its own directory under accounts', { accountId, field: 'isolationDir' });
     }
     await this.loginCancel(accountId);
+    checkAgentReferences();
     // Cancelling yields to RPC work; a new thread may have claimed this account.
     if (this.core.scheduler.activeAccountIds().includes(accountId) || this.core.journal.listThreads().some((thread) => thread.accountId === accountId)) {
       throw refused('this account is used by a thread; remove its project before removing the account', { accountId });

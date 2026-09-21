@@ -12,6 +12,8 @@ import {
   type Account,
   type AccountQuota,
   type AgentCommand,
+  type AgentProfile,
+  type AgentWork,
   type AgentTask,
   type AgentWhere,
   type AgentLetter,
@@ -69,6 +71,7 @@ import {
 import { decodedBytes } from './attachments';
 import { RpcFailure, type ClientState, type EventHandler, type ObservableClient } from './client';
 import { fakeUsageHistory, type FakeFinishedTurn } from './fake-usage';
+import { FakeAgents } from './fake-agents';
 
 export interface FakeClientOptions {
   /** Milliseconds between two streamed chunks. Tests pass 0. */
@@ -93,6 +96,7 @@ export interface FakeClientOptions {
  * `hello` is not in it because the core answers it before the router's gate.
  */
 const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>([
+  'agents.snapshot', 'agents.message.send', 'agents.decision.answer', 'agents.work.control',
   'sessions.list',
   'push.status', 'push.subscribe', 'push.unsubscribe', 'push.test',
   'projects.list',
@@ -913,6 +917,24 @@ function quietUpdates(): boolean {
 }
 
 export class FakeClient implements ObservableClient {
+  #agents = new FakeAgents(revision => this.#emit('agents.changed', { revision }), {
+    create: (agent, sessionId, work) => this.#createAgentSession(agent, sessionId, work),
+    start: (threadId, prompt, agent) => { Object.assign(this.#thread(threadId), agent.selection); return this.#startTurn(threadId, prompt); },
+    stop: threadId => { void this.#stopTurn(threadId); },
+  });
+  #createAgentSession(agent: AgentProfile, sessionId: string, work: AgentWork): string {
+    const mission = work.scope.kind === 'mission' ? this.#agents.snapshot().missions.find(m => m.id === work.scope.id) : null;
+    const project = this.#projects.find(p => p.id === mission?.projectId);
+    const placed = project ? fakeWorktree(project.path, `${agent.name} ${mission?.title ?? ''}`) : null;
+    const now = Date.now();
+    const thread: Thread = { id: `t-${++this.#seq}`, projectId: project?.id ?? null, agentSessionId: sessionId, ...agent.selection,
+      title: agent.name, titleSource: 'user', speed: null, cwd: placed?.path ?? `${DATA_DIR}/agent-workspaces/${agent.id}/${work.scope.id}`, branch: placed?.branch ?? null,
+      status: 'idle', unread: false, archived: false, pinned: false, sessionId: null, sessionGeneration: 0, selectionVersion: 0, load: null, context: null,
+      createdAt: now, updatedAt: now, messages: [], messagesBefore: null, turns: [], commands: [] };
+    this.#threads.set(thread.id, thread);
+    this.#emit('thread.created', structuredClone(toSummary(thread)));
+    return thread.id;
+  }
   static #cores = new Map<string, FakeClient>();
   #state: ClientState = 'idle';
   #handlers = new Map<string, Set<(payload: unknown) => void>>();
@@ -1105,6 +1127,7 @@ export class FakeClient implements ObservableClient {
   }
 
   async connect(): Promise<CoreInfo> {
+    this.#agents.open();
     this.#setState('connecting');
     await this.#tick();
     this.#setState('ready');
@@ -1112,6 +1135,7 @@ export class FakeClient implements ObservableClient {
   }
 
   close(): void {
+    this.#agents.close();
     if (FakeClient.#cores.get(this.#identity.coreId) === this) FakeClient.#cores.delete(this.#identity.coreId);
     for (const thread of this.#threads.values()) this.#pauseActivity(thread);
     for (const [id, run] of this.#pluginRuns) this.#pluginRuns.set(id, run + 1);
@@ -1216,6 +1240,29 @@ export class FakeClient implements ObservableClient {
 
   async #dispatch(method: RpcMethodName, rawParams: unknown): Promise<unknown> {
     switch (method) {
+      case 'core.shutdown': {
+        this.#agents.close();
+        await Promise.all([...this.#threads.keys()].map(id => this.#stopTurn(id)));
+        setTimeout(() => this.close(), 25);
+        return { ok: true };
+      }
+      case 'agents.snapshot':
+      case 'agents.profile.save':
+      case 'agents.group.save':
+      case 'agents.team.save':
+      case 'agents.mission.save':
+      case 'agents.task.save':
+      case 'agents.resource.save':
+      case 'agents.memory.save':
+      case 'agents.message.send':
+      case 'agents.task.acquire':
+      case 'agents.task.submit':
+      case 'agents.artifact.add':
+      case 'agents.decision.request':
+      case 'agents.decision.answer':
+      case 'agents.work.control':
+      case 'agents.limits.set':
+        return this.#agents.call(method, rawParams);
       case 'quotas.configure': {
         const params = rawParams as RpcParams<'quotas.configure'>;
         this.#quotaEnabled[params.accountId] = params.enabled;
@@ -1694,6 +1741,7 @@ export class FakeClient implements ObservableClient {
 
       case 'turns.start': {
         const params = rawParams as RpcParams<'turns.start'>;
+        if (this.#thread(params.threadId).agentSessionId) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'persistent agent sessions accept work through Agents, not turns.start' });
         if (params.attachments !== undefined && (!Array.isArray(params.attachments) || params.attachments.some(a => !a || typeof a !== 'object'))) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'attachments must be an array of attachment objects' });
         const key = params.clientRequestId ? `${params.threadId}:${params.clientRequestId}` : null;
         const content = JSON.stringify([params.prompt, (params.attachments ?? []).map(a => [a.kind, a.mimeType, a.data, a.name])]);
@@ -1718,6 +1766,7 @@ export class FakeClient implements ObservableClient {
       case 'threads.activity.set': {
         const params = rawParams as RpcParams<'threads.activity.set'>;
         const thread = this.#thread(params.threadId);
+        if (thread.agentSessionId) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'persistent agent sessions use missions instead of conversation loops' });
         if (thread.archived) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'activity requires an unarchived thread' });
         const activity = structuredClone(thread.activity ?? { goal: null, loop: null, tasks: [] });
         if (params.goal !== undefined) {
@@ -2140,16 +2189,16 @@ export class FakeClient implements ObservableClient {
         const params = rawParams as RpcParams<'agent.where'>;
         const thread = this.#thread(params.threadId);
         const project = this.#projects.find((one) => one.id === thread.projectId);
-        if (!project) throw this.#notFound('project', thread.projectId);
+        if (!project && thread.projectId !== null) throw this.#notFound('project', thread.projectId);
         const where: AgentWhere = {
           threadId: thread.id,
           title: thread.title,
-          projectId: project.id,
-          projectPath: project.path,
+          projectId: project?.id ?? null,
+          projectPath: project?.path ?? null,
           cwd: thread.cwd,
           branch: thread.branch,
           // A thread of its own worktree does not sit in the project directory.
-          worktree: thread.cwd !== project.path,
+          worktree: thread.branch !== null,
           providerId: thread.providerId,
           // A thread on no model of its own runs the provider's default.
           model: thread.model ?? 'default'
@@ -2193,6 +2242,7 @@ export class FakeClient implements ObservableClient {
       case 'todos.add': {
         const params = rawParams as RpcParams<'todos.add'>;
         const thread = this.#thread(params.threadId);
+        if (thread.projectId === null) throw refusal('this agent session has no project');
         const at = this.#now();
         const todo: Todo = {
           id: `todo-${++this.#seq}`,
@@ -2210,6 +2260,7 @@ export class FakeClient implements ObservableClient {
       case 'todos.update': {
         const params = rawParams as RpcParams<'todos.update'>;
         const thread = this.#thread(params.threadId);
+        if (thread.projectId === null) throw refusal('this agent session has no project');
         const todo = this.#todos.find((one) => one.id === params.todoId && one.projectId === thread.projectId);
         if (!todo) throw this.#notFound('todo', params.todoId);
         // The status is checked before the text moves, as the core's `updateTodo`
@@ -2227,6 +2278,7 @@ export class FakeClient implements ObservableClient {
       case 'todos.remove': {
         const params = rawParams as RpcParams<'todos.remove'>;
         const thread = this.#thread(params.threadId);
+        if (thread.projectId === null) throw refusal('this agent session has no project');
         const index = this.#todos.findIndex((one) => one.id === params.todoId && one.projectId === thread.projectId);
         if (index < 0) throw this.#notFound('todo', params.todoId);
         this.#todos.splice(index, 1);
@@ -3054,6 +3106,8 @@ const ready = true;
   #emit<E extends RpcEventName>(event: E, payload: RpcEvents[E]): void {
     if (event === 'turn.finished') {
       const turn = payload as Turn;
+      const agentThread = this.#threads.get(turn.threadId);
+      if (agentThread?.agentSessionId) this.#agents.finished(turn, agentThread.messages.filter(m => m.turnId === turn.id && m.role === 'assistant').flatMap(m => m.parts.flatMap(p => p.type === 'text' ? [p.text] : [])).join('\n'));
       const owned = this.#activityTurns.get(turn.id);
       this.#activityTurns.delete(turn.id);
       const thread = this.#threads.get(turn.threadId);
@@ -3114,7 +3168,8 @@ const ready = true;
   }
 
   /** The project's cards, the ones already done last, the core's order. */
-  #projectTodos(projectId: string): Todo[] {
+  #projectTodos(projectId: string | null): Todo[] {
+    if (projectId === null) throw refusal('this agent session has no project');
     const rank = (todo: Todo): number => (todo.status === 'done' ? 1 : 0);
     return structuredClone(
       this.#todos

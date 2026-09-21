@@ -106,7 +106,7 @@
   {#if store.page === 'chat' && (store.openThread || store.draft)}
     {#key store}<ThreadHeader {store} />{/key}
   {:else}
-    <span class="name">{store.page === 'settings' ? strings.settings.heading : title}</span>
+    <span class="name">{store.page === 'settings' ? strings.settings.heading : store.page === 'agents' ? strings.agents.heading : title}</span>
   {/if}
   {#if dev}
     <span class="channel" title={strings.app.channelDevTitle} data-testid="titlebar-channel">{strings.app.channelDev}</span>

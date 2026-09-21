@@ -1,4 +1,5 @@
 import { statSync } from 'node:fs';
+import type { AgentProfile } from '@boite/contracts';
 import { createHash } from 'node:crypto';
 import { activityPrompt } from './activity-prompt.ts';
 import { relative, resolve } from 'node:path';
@@ -113,6 +114,20 @@ interface PendingQuestion {
 }
 
 export class ThreadStore {
+  /** Internal-only entry: callers supply an already authorized workspace, never a fabricated project. */
+  createAgentSession(agent: AgentProfile, sessionId: string, cwd: string, projectId: string | null = null, branch: string | null = null): ThreadSummary {
+    const provider = this.core.providers.require(agent.selection.providerId);
+    const account = this.core.accounts.require(agent.selection.accountId);
+    if (account.providerId !== provider.id) throw refused('agent account belongs to another provider');
+    const now = Date.now();
+    const thread: ThreadSummary = {
+      id: newId('thr_'), projectId, agentSessionId: sessionId, title: agent.name, titleSource: 'user',
+      ...agent.selection, speed: null, cwd, branch, status: 'idle', unread: false, archived: false, pinned: false,
+      sessionId: null, sessionGeneration: 0, selectionVersion: 0, load: null, context: null, createdAt: now, updatedAt: now,
+    };
+    this.core.journal.append({ type: 'thread.created', threadId: thread.id, version: 1, payload: thread }, () => this.core.journal.putThread(thread));
+    return thread;
+  }
   private readonly handles = new Map<ThreadId, TurnHandle>();
   private readonly permissions = new Map<RequestId, PendingPermission>();
   private readonly questions = new Map<RequestId, PendingQuestion>();
@@ -554,8 +569,12 @@ export class ThreadStore {
     return this.startTurn(threadId, protocol === 'echo' ? '[compact]' : '/compact', [], expectedSelectionVersion, 'compact');
   }
 
-  startTurn(threadId: ThreadId, prompt: string, attachments: Attachment[] = [], expectedSelectionVersion?: number, operation?: 'compact' | 'coordination', activity?: { kind: 'goal' | 'loop'; iteration: number }, clientRequestId?: string): Turn {
+  startTurn(threadId: ThreadId, prompt: string, attachments: Attachment[] = [], expectedSelectionVersion?: number, operation?: 'compact' | 'coordination', activity?: { kind: 'goal' | 'loop'; iteration: number }, clientRequestId?: string, agentRunId?: string): Turn {
     const thread = this.require(threadId);
+    if (thread.agentSessionId && operation !== 'compact') {
+      const run = agentRunId ? this.core.workforce.records.get('run', agentRunId) : null;
+      if (!run || run.threadId !== threadId || run.status !== 'accepted' || run.id !== clientRequestId) throw refused('persistent agent sessions accept work through Agents, not turns.start');
+    }
     checkAttachmentArray(attachments);
     let fingerprint = '';
     if (clientRequestId !== undefined) {
@@ -1277,7 +1296,7 @@ function modelsFor(provider: ProviderDescriptor, accountId: AccountId): ModelInf
  * Null is always allowed and means the provider's own default. Anything else
  * must be a model the descriptor lists or one the last probe read.
  */
-function checkModel(provider: ProviderDescriptor, accountId: AccountId, model: string | null): string | null {
+export function checkModel(provider: ProviderDescriptor, accountId: AccountId, model: string | null): string | null {
   if (model === null) return null;
   const models = modelsFor(provider, accountId);
   if (models.some((entry) => entry.id === model)) return model;
@@ -1294,7 +1313,7 @@ function checkModel(provider: ProviderDescriptor, accountId: AccountId, model: s
  * be one of the levels that model lists, from the descriptor or from the probe,
  * or the call is refused.
  */
-function checkEffort(
+export function checkEffort(
   provider: ProviderDescriptor,
   accountId: AccountId,
   model: string | null,

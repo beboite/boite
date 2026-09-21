@@ -5,6 +5,8 @@ import { PROTOCOL_VERSION } from '@boite/contracts';
 import type { Channel, CoreInfo, ThreadId } from '@boite/contracts';
 import pkg from '../package.json';
 import { AccountStore } from './accounts.ts';
+import { AgentStore } from './agents/store.ts';
+import { AgentRuntime } from './agents/runtime.ts';
 import { AgentTokens } from './agent.ts';
 import { FileTickets } from './workdir.ts';
 import { Bus } from './bus.ts';
@@ -47,6 +49,8 @@ export interface CoreOptions {
   token: string;
   /** Which install this core belongs to. Absent means the stable one. */
   channel?: Channel;
+  /** The executable owns process exit; embedded cores may omit it. */
+  onShutdown?: () => void;
 }
 
 /**
@@ -93,6 +97,8 @@ export class Core {
   readonly settings: SettingsStore;
   readonly providers: ProviderRegistry;
   readonly accounts: AccountStore;
+  readonly workforce: AgentStore;
+  readonly agentRuntime: AgentRuntime;
   readonly projects: ProjectStore;
   readonly procs: ProcRegistry;
   readonly scheduler: Scheduler;
@@ -156,12 +162,24 @@ export class Core {
     this.updates = new HarnessUpdates(this);
     this.coordination = new Coordination(this);
 
+    this.workforce = new AgentStore(this);
     registerModules(this);
+    let shutdownRequested = false;
+    this.router.register('core.shutdown', () => {
+      if (!options.onShutdown) throw new Error('This embedded core does not support process shutdown.');
+      if (!shutdownRequested) {
+        shutdownRequested = true;
+        // Leave time for the RPC acknowledgement before the socket is closed.
+        setTimeout(options.onShutdown, 25).unref();
+      }
+      return { ok: true as const };
+    });
     this.procs.applySettings(this.settings.get());
     this.accounts.ensureDefaults();
     // The journal is open and no socket is accepted yet: whatever a dead core
     // left running or queued is closed here, or nothing ever would.
     this.threads.recoverStuckTurns();
+    this.agentRuntime = new AgentRuntime(this);
   }
 
   setEndpoint(host: string, port: number): void {
@@ -202,6 +220,7 @@ export class Core {
    * the server first emitted `turn.finished` to nobody.
    */
   async drain(timeoutMs?: number): Promise<void> {
+    await this.agentRuntime.close();
     this.coordination.beginClose();
     this.#drained = true;
     await this.scheduler.drain(timeoutMs);
@@ -211,6 +230,7 @@ export class Core {
   #drained = false;
 
   async close(): Promise<void> {
+    await this.agentRuntime.close();
     this.updates.close();
     this.coordination.beginClose();
     // Reuse the shutdown wait already spent by drain(), while stopping late arrivals.

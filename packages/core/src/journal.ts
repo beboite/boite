@@ -13,7 +13,7 @@ import type {
   Usage,
 } from '@boite/contracts';
 
-export const SCHEMA_VERSION = 12;
+export const SCHEMA_VERSION = 14;
 const DELTA_WINDOW_MS = 16;
 
 /** What `listMessagePage` hands back: the page itself and the cursor for what is behind it. */
@@ -47,7 +47,8 @@ interface ProjectRow {
 interface ThreadRow {
   last_user_message_at?: number | null;
   id: string;
-  project_id: string;
+  project_id: string | null;
+  agent_session_id?: string | null;
   title: string;
   title_source: string;
   provider_id: string;
@@ -362,6 +363,39 @@ function migrate(db: Database): void {
     CREATE INDEX coordination_wake_thread ON coordination_wakes(thread_id, at);`);
     version = 12;
   }
+  if (version < 13) {
+    db.exec(`CREATE TABLE agent_entities (
+      kind TEXT NOT NULL, id TEXT NOT NULL, revision INTEGER NOT NULL,
+      created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+      data TEXT NOT NULL CHECK(json_valid(data)), PRIMARY KEY(kind, id)
+    );
+    CREATE UNIQUE INDEX agent_session_context ON agent_entities (
+      json_extract(data, '$.agentId'), json_extract(data, '$.scope.kind'), json_extract(data, '$.scope.id')
+    ) WHERE kind = 'session';
+    CREATE UNIQUE INDEX agent_delivery_recipient ON agent_entities (
+      json_extract(data, '$.messageId'), json_extract(data, '$.agentId')
+    ) WHERE kind = 'delivery';
+    CREATE INDEX agent_work_status ON agent_entities (json_extract(data, '$.status'), created_at) WHERE kind = 'work';
+    CREATE INDEX agent_run_status ON agent_entities (json_extract(data, '$.status'), created_at) WHERE kind = 'run';
+    CREATE TABLE agent_requests (
+      actor TEXT NOT NULL, request_id TEXT NOT NULL, fingerprint TEXT NOT NULL,
+      result TEXT NOT NULL CHECK(json_valid(result)), PRIMARY KEY(actor, request_id)
+    );`);
+    version = 13;
+  }
+  if (version < 14) {
+    // Rebuild only this table to remove NOT NULL; preserve every existing column and row.
+    const definition = db.query("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'threads'").get() as { sql: string };
+    const indexes = db.query("SELECT sql FROM sqlite_master WHERE type = 'index' AND tbl_name = 'threads' AND sql IS NOT NULL").all() as { sql: string }[];
+    const replacement = definition.sql.replace(/CREATE TABLE (?:IF NOT EXISTS )?["`\[]?threads["`\]]?/i, 'CREATE TABLE threads_next').replace(/project_id TEXT NOT NULL/i, 'project_id TEXT');
+    db.exec(replacement);
+    db.exec('INSERT INTO threads_next SELECT * FROM threads');
+    db.exec('DROP TABLE threads');
+    db.exec('ALTER TABLE threads_next RENAME TO threads');
+    db.exec('ALTER TABLE threads ADD COLUMN agent_session_id TEXT');
+    for (const index of indexes) db.exec(index.sql);
+    version = 14;
+  }
   db.exec(`PRAGMA user_version = ${version}`);
 }
 
@@ -382,6 +416,7 @@ function toThread(row: ThreadRow): ThreadSummary {
     lastUserMessageAt: row.last_user_message_at ?? null,
     id: row.id,
     projectId: row.project_id,
+    ...(row.agent_session_id ? { agentSessionId: row.agent_session_id } : {}),
     title: row.title,
     titleSource: row.title_source as ThreadSummary['titleSource'],
     providerId: row.provider_id,
@@ -573,8 +608,8 @@ export class Journal {
     this.db
       .query(
         `INSERT OR REPLACE INTO threads
-         (id, project_id, title, title_source, provider_id, account_id, model, effort, cwd, branch, permission_mode, status, unread, archived, pinned, session_id, context, created_at, updated_at, session_generation, selection_version, speed)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (id, project_id, title, title_source, provider_id, account_id, model, effort, cwd, branch, permission_mode, status, unread, archived, pinned, session_id, context, created_at, updated_at, session_generation, selection_version, speed, agent_session_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         thread.id,
@@ -599,6 +634,7 @@ export class Journal {
         thread.sessionGeneration ?? 0,
         thread.selectionVersion ?? 0,
         thread.speed ?? null,
+        thread.agentSessionId ?? null,
       );
   }
 

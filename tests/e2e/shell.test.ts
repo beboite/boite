@@ -232,13 +232,14 @@ function parentOf(pid: number): number | null {
  * browser process with the installed app the user may have open. A debugging
  * port is only passed when the test drives the page.
  */
-function spawnHiddenShell(ownDataDir: string, debugPort?: number): number {
+function spawnHiddenShell(ownDataDir: string, debugPort?: number, resident = false): number {
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(process.env)) {
     if (value !== undefined) env[key] = value;
   }
   delete env.BOITE_CORE_COMMAND;
   env.BOITE_SHELL_HIDDEN = '1';
+  env.BOITE_CORE_RESIDENT = resident ? '1' : '0';
   env.BOITE_DATA_DIR = ownDataDir;
   env.BOITE_ECHO = '1';
   delete env.BOITE_SHELL_DEBUG_PORT;
@@ -264,6 +265,41 @@ async function waitForHealthyCore(ownDataDir: string): Promise<CoreFile> {
 
 /** The webview exposes its page target before the IPC bridge is injected. */
 const TAURI_READY = "typeof window.__TAURI_INTERNALS__?.invoke === 'function'";
+
+shellTest('a resident core finishes agent work after shell exit, is adopted, and stops explicitly', async () => {
+  const ownDataDir = freshDataDir();
+  let shellPid = 0; let found: CoreFile | undefined; let ownPage: BrowserPage | undefined;
+  let client: Awaited<ReturnType<typeof connect>> | undefined;
+  try {
+    const port = await freePort(); shellPid = spawnHiddenShell(ownDataDir, port, true);
+    found = await waitForHealthyCore(ownDataDir);
+    client = await connect(`http://127.0.0.1:${found.port}`, found.token);
+    const account = (await client.call('accounts.list', {})).find(a => a.providerId === 'echo')!;
+    const agent = await client.call('agents.profile.save', { value: { name: 'Background worker', domain: '', instructions: '', avatar: '', status: 'active', tools: ['messages'], accountIntegration: 'provider', selection: { providerId: 'echo', accountId: account.id, model: null, effort: null, permissionMode: 'default' } } });
+    ownPage = await BrowserPage.attach(port); await ownPage.waitFor(TAURI_READY);
+    const started = client.next('turn.started', () => true, 10000);
+    const finished = client.next('turn.finished', () => true, 15000);
+    await client.call('agents.message.send', { scope: { kind: 'agent', id: agent.id }, text: '[sleep:1500] finish after closing the window', recipientIds: [agent.id], requestId: 'resident_message_001' });
+    await started;
+    await ownPage.evaluate(`window.__TAURI_INTERNALS__.invoke('quit_shell')`).catch(() => undefined);
+    await waitUntil(() => !pidAlive(shellPid), CORE_GONE_TIMEOUT_MS);
+    expect(await healthy(found.port)).toBe(true);
+    expect((await finished).status).toBe('done');
+    expect((await client.call('agents.snapshot', {})).work[0]?.status).toBe('done');
+    await ownPage.close(); ownPage = undefined;
+    const secondPort = await freePort(); shellPid = spawnHiddenShell(ownDataDir, secondPort, true);
+    ownPage = await BrowserPage.attach(secondPort); await ownPage.waitFor(TAURI_READY);
+    await ownPage.evaluate(`window.__TAURI_INTERNALS__.invoke('core_endpoint')`);
+    expect((await waitForHealthyCore(ownDataDir)).pid).toBe(found.pid);
+    expect(await client.call('core.shutdown', {})).toEqual({ ok: true });
+    await waitUntil(() => !pidAlive(found!.pid), CORE_GONE_TIMEOUT_MS);
+  } finally {
+    client?.close(); await ownPage?.close();
+    if (shellPid) killProcessTree(shellPid);
+    if (found && pidAlive(found.pid)) killProcessTree(found.pid);
+    await removeDirectory(ownDataDir);
+  }
+}, 60000);
 
 shellTest('close exits by default; the persisted setting hides instead; the native quota page connects', async () => {
   const ownDataDir = freshDataDir();

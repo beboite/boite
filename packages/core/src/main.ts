@@ -260,7 +260,7 @@ export function main(argv: string[]): void {
   const unlock = lockDataDir(dataDir);
   const coreFile = join(dataDir, 'core.json');
   const token = readToken(coreFile) ?? newToken();
-  const core = new Core({ dataDir, token, channel: flags.channel });
+  const core = new Core({ dataDir, token, channel: flags.channel, onShutdown: () => shutdown() });
   const publicUrl = flags.publicUrl ?? process.env.BOITE_PUBLIC_URL;
   if (publicUrl !== undefined) core.settings.set({ publicUrl });
   const settings = core.settings.get();

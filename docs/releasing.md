@@ -74,8 +74,11 @@ Debian package, extracted AppImage and macOS application bundle. Signing, notari
 on older operating systems remain release prerequisites; a local unsigned
 bundle is not a notarized download. Native notifications and Windows process
 guards are not implemented on Linux or macOS.
-On a normal quit, the POSIX shell gives the core three seconds to handle
-`SIGTERM`, stop its direct children and close the journal before forcing exit.
+Normal shell quit leaves the resident core running. With `BOITE_CORE_RESIDENT=0`,
+the POSIX shell gives its owned core three seconds to handle `SIGTERM`, stop
+its direct children and close the journal before forcing exit. Resident cores
+append output to `core-output.log` in the data directory instead of a pipe
+owned by the shell; startup truncates that file once it exceeds 8 MiB.
 
 macOS requires 13.0 or newer. The bundle includes the JIT entitlements required
 by the [compiled Bun runtime](https://bun.sh/docs/bundler/executables).

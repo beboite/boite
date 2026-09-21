@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Activity, ArrowLeft, ChevronDown, MessageSquare, Plus, Settings } from '@lucide/svelte';
+  import { Activity, ArrowLeft, Bot, ChevronDown, MessageSquare, Plus, Settings } from '@lucide/svelte';
   import type { Store } from '../lib/store.svelte';
   import { workspace } from '../lib/workspace.svelte';
   import { strings } from '../lib/strings';
@@ -40,7 +40,7 @@
   }
 </script>
 
-<header class="mobile-header" class:settings={store.page === 'settings'} data-testid="mobile-header">
+<header class="mobile-header" class:settings={store.page !== 'chat'} data-testid="mobile-header">
   {#if screen === 'chat' && store.page === 'chat'}
     <button class="ghost icon" aria-label={strings.mobile.threads} onclick={() => show('threads')}><ArrowLeft size={20} /></button>
   {/if}
@@ -73,9 +73,10 @@
 {/if}
 
 <nav class="mobile-tabs" aria-label={strings.mobile.navigation} data-testid="mobile-tabs">
-  <button class="ghost" class:active={store.page === 'chat' && screen !== 'activity'} aria-current={store.page === 'chat' && screen !== 'activity' ? 'page' : undefined} onclick={() => show('threads')}><MessageSquare size={20} /><span>{strings.mobile.threads}</span></button>
-  <button class="ghost" class:active={store.page === 'chat' && screen === 'activity'} aria-current={store.page === 'chat' && screen === 'activity' ? 'page' : undefined} onclick={() => show('activity')}><span class="activity-icon"><Activity size={20} />{#if waiting.length}<span class="badge">{waiting.length}</span>{/if}</span><span>{strings.mobile.activity}</span></button>
-  <button class="ghost" class:active={store.page === 'settings'} aria-current={store.page === 'settings' ? 'page' : undefined} onclick={() => store.showSettings()}><Settings size={20} /><span>{strings.settings.heading}</span></button>
+  <button class="ghost" class:active={store.page === 'agents'} aria-current={store.page === 'agents' ? 'page' : undefined} data-testid="mobile-agents" onclick={() => store.showAgents()}><Bot size={20} /><span>{strings.agents.heading}</span></button>
+  <button class="ghost" class:active={store.page === 'chat' && screen !== 'activity'} aria-current={store.page === 'chat' && screen !== 'activity' ? 'page' : undefined} data-testid="mobile-conversations" onclick={() => show('threads')}><MessageSquare size={20} /><span>{strings.mobile.threads}</span></button>
+  <button class="ghost" class:active={store.page === 'chat' && screen === 'activity'} aria-current={store.page === 'chat' && screen === 'activity' ? 'page' : undefined} data-testid="mobile-activity" onclick={() => show('activity')}><span class="activity-icon"><Activity size={20} />{#if waiting.length}<span class="badge">{waiting.length}</span>{/if}</span><span>{strings.mobile.activity}</span></button>
+  <button class="ghost" class:active={store.page === 'settings'} aria-current={store.page === 'settings' ? 'page' : undefined} data-testid="mobile-settings" onclick={() => store.showSettings()}><Settings size={20} /><span>{strings.settings.heading}</span></button>
 </nav>
 
 <style>

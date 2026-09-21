@@ -113,7 +113,7 @@ describe('the access gate', () => {
     const owner = await harness.connect();
     const { threadId } = await echoThread(harness, owner);
     const other = await harness.core.threads.create({
-      projectId: harness.core.threads.require(threadId).projectId,
+      projectId: harness.core.projects.require(harness.core.threads.require(threadId).projectId).id,
       providerId: 'echo',
       accountId: harness.core.threads.require(threadId).accountId,
       title: 'another thread',

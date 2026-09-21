@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { basename, dirname, join } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import type { Project, ThreadId } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { messageOf, refused } from './errors.ts';
@@ -44,6 +44,20 @@ export interface PlacedWorktree {
  */
 export class Worktrees {
   constructor(private readonly core: Core) {}
+
+  /** Adopt only the exact branch/path recorded before preparation, or create it once. */
+  async ensure(threadId: ThreadId, project: Project, branch: string): Promise<PlacedWorktree> {
+    const path = join(worktreeRoot(project.path), slugOf(branch.slice(BRANCH_PREFIX.length)));
+    const listed = await this.git(threadId, project.path, ['worktree', 'list', '--porcelain', '-z']);
+    if (listed.code !== 0) throw refused(`cannot inspect worktrees in ${project.path}: ${listed.stderr.trim()}`);
+    for (const entry of listed.stdout.split('\0\0')) {
+      const fields = entry.split('\0');
+      const location = fields.find(field => field.startsWith('worktree '))?.slice(9);
+      const name = fields.find(field => field.startsWith('branch '))?.slice(7);
+      if (location && resolve(location) === resolve(path) && name === `refs/heads/${branch}` && existsSync(join(path, '.git'))) return { path, branch };
+    }
+    return this.add(threadId, project, branch, branch);
+  }
 
   async add(threadId: ThreadId, project: Project, title: string, wanted?: string): Promise<PlacedWorktree> {
     if (!existsSync(join(project.path, '.git'))) {
@@ -107,16 +121,14 @@ export class Worktrees {
     return result.code === 0;
   }
 
-  private async git(threadId: ThreadId, cwd: string, args: string[]): Promise<{ code: number; stderr: string }> {
+  private async git(threadId: ThreadId, cwd: string, args: string[]): Promise<{ code: number; stderr: string; stdout: string }> {
     let spawned;
     try {
       spawned = this.core.procs.spawn(threadId, 'git', args, { cwd });
     } catch (error) {
       throw refused(`git did not start (${messageOf(error)}): a worktree needs git on PATH`, { cwd, args });
     }
-    const [stderr, code] = await Promise.all([new Response(spawned.proc.stderr).text(), spawned.exited]);
-    // stdout is piped by the registry; drained so a chatty git never blocks on it.
-    await new Response(spawned.proc.stdout).text();
-    return { code, stderr };
+    const [stderr, stdout, code] = await Promise.all([new Response(spawned.proc.stderr).text(), new Response(spawned.proc.stdout).text(), spawned.exited]);
+    return { code, stderr, stdout };
   }
 }

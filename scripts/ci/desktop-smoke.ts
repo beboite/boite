@@ -19,7 +19,7 @@ const child = Bun.spawn([executable], {
   cwd: directory,
   env: { ...process.env, PATH: process.platform === 'win32' ? process.env.SystemRoot + '\\System32' : '/usr/bin:/bin',
     BOITE_CORE_COMMAND: undefined, BOITE_UI_DIR: undefined, HOME: home,
-    BOITE_DATA_DIR: data, BOITE_SHELL_HIDDEN: '1', BOITE_ECHO: '1' },
+    BOITE_DATA_DIR: data, BOITE_SHELL_HIDDEN: '1', BOITE_CORE_RESIDENT: '0', BOITE_ECHO: '1' },
   stdout: 'pipe', stderr: 'pipe', windowsHide: true,
   detached: process.platform !== 'win32',
 });

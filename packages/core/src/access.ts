@@ -27,6 +27,8 @@ import type { Connection } from './router.ts';
  * process of its own or changes what the core trusts.
  */
 export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>([
+  // A paired phone follows persistent work, talks to agents and answers its owner's decisions.
+  'agents.snapshot', 'agents.message.send', 'agents.decision.answer', 'agents.work.control',
   // Coordination is visible with the conversation; only the owner enables it.
   'collaboration.get',
   'collaboration.directory',
@@ -95,6 +97,13 @@ export function isDeviceMethod(method: RpcMethodName): boolean {
  * thread whose token it carries.
  */
 export const AGENT_METHODS: ReadonlyMap<RpcMethodName, string> = new Map<RpcMethodName, string>([
+  ['agents.snapshot', 'only the persistent identity, context and resources of this execution'],
+  ['agents.message.send', 'a bounded message as this agent to recipients in its current conversation'],
+  ['agents.memory.save', 'scoped memory with mandatory provenance, no widening of access'],
+  ['agents.task.acquire', 'atomic self-assignment inside the current authorized mission'],
+  ['agents.task.submit', 'submission by the current assignment generation, never final approval'],
+  ['agents.artifact.add', 'versioned results from the current mission and working directory'],
+  ['agents.decision.request', 'durable requests for a human decision without an idle provider process'],
   ['collaboration.get', 'its own coordination inbox and remaining budget, never other conversations'],
   ['collaboration.directory', 'opted-in contacts in this project and explicitly trusted machines'],
   ['collaboration.send', 'authenticated delivery as this thread to a separately authorized recipient'],

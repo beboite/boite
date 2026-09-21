@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { ChevronRight, Ellipsis, Folder, List, Plus, Search, Settings } from '@lucide/svelte';
+  import { Bot, ChevronRight, Ellipsis, Folder, List, Plus, Search, Settings } from '@lucide/svelte';
   import type { Project } from '@boite/contracts';
   import type { Store } from '../lib/store.svelte';
   import { workspace, type Machine } from '../lib/workspace.svelte';
@@ -226,6 +226,7 @@
   {/if}
   <div class="foot">
     <MachineStatus {store} {filter} onfilter={id => (filter = id)} />
+    <button class="ghost icon" aria-label={strings.agents.heading} title={strings.agents.heading} data-testid="nav-agents" onclick={() => store.showAgents()}><Bot size={16} /></button>
     <button
       class="ghost icon"
       title={`${strings.sidebar.settings}${store.keyHint('settings')}`}
