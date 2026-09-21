@@ -18,7 +18,9 @@ Wake limits bound new turns, not the tokens used inside a turn.
 
 Agent messages appear in the conversation as forwarded bubbles. The arrow,
 sender name and machine identify where a message came from; its text is visible
-without expanding a technical panel. Outgoing messages identify their recipient.
+without expanding a technical panel. Incoming messages sit on the left with
+"Received from"; outgoing messages sit on the right in the accent color with
+"Your agent sent to" and the recipient's name.
 Coordination settings hold contacts, budgets and permissions. Pause suspends
 automatic coordination; Resume enables it again. Stop,
 a failed turn and a core restart pause coordination too. Paired devices can read

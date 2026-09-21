@@ -428,7 +428,8 @@ export const strings = {
     directory: 'Authorized contacts', refresh: 'Refresh', directoryEmpty: 'No opted-in thread in this project is available.', unavailable: 'Unavailable contacts',
     exchanges: 'Agent exchanges', noExchanges: 'No agent exchange yet.', details: 'Show exchange',
     from: 'From {title} on {machine}', to: 'To {title}', reply: 'Reply to {id}',
-    forwardedFrom: 'Forwarded from', incoming: 'Incoming', outgoing: 'Outgoing',
+    receivedFrom: 'Received from', sentTo: 'Your agent sent to', incoming: 'Incoming', outgoing: 'Outgoing',
+    receivedStatus: 'Received',
     noReceipt: 'Delivered means submitted to the recipient agent. Agent protocols provide no read receipt.',
     warning: 'Coordination warning',
     status: {

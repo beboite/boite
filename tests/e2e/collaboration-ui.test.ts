@@ -54,6 +54,23 @@ test('forwarded agent messages sit in the conversation at desktop and phone widt
   expect(await page.evaluate(`document.querySelector('[data-letter-id="incoming-deployment"]')?.textContent ?? ''`)).toContain('Build PC');
   expect(await page.evaluate(`document.querySelector('[data-letter-id="incoming-deployment"]')?.textContent ?? ''`)).toContain('Wait before restart');
   expect(await page.evaluate(`document.querySelector('[data-letter-id="outgoing-reply"]')?.dataset.direction`)).toBe('outgoing');
+  const checkDirection = async () => {
+    const bubbles = await page.evaluate<any>(`(() => {
+      const incoming = document.querySelector('[data-letter-id="incoming-deployment"]');
+      const outgoing = document.querySelector('[data-letter-id="outgoing-reply"]');
+      return { incoming: incoming.textContent, outgoing: outgoing.textContent,
+        incomingLeft: incoming.getBoundingClientRect().left, outgoingLeft: outgoing.getBoundingClientRect().left,
+        incomingRight: incoming.getBoundingClientRect().right, outgoingRight: outgoing.getBoundingClientRect().right,
+        incomingColor: getComputedStyle(incoming).backgroundColor, outgoingColor: getComputedStyle(outgoing).backgroundColor };
+    })()`);
+    expect(bubbles.incoming).toContain('Received from');
+    expect(bubbles.outgoing).toContain('Your agent sent to');
+    expect(bubbles.outgoing).toContain('Deployment agent');
+    expect(bubbles.outgoingLeft).toBeGreaterThan(bubbles.incomingLeft);
+    expect(bubbles.outgoingRight).toBeGreaterThan(bubbles.incomingRight);
+    expect(bubbles.outgoingColor).not.toBe(bubbles.incomingColor);
+  };
+  await checkDirection();
   expect(await page.evaluate(`document.querySelector('[data-testid="timeline"]')?.textContent ?? ''`)).not.toContain('Boite agent coordination');
   expect(await page.evaluate(`document.querySelector('[data-testid="coordination-panel"]')?.hasAttribute('open')`)).toBe(false);
   await page.evaluate(`document.querySelector('[data-letter-id="incoming-deployment"]').scrollIntoView({ block: 'center' })`);
@@ -64,6 +81,7 @@ test('forwarded agent messages sit in the conversation at desktop and phone widt
   await page.evaluate(`document.querySelector('[data-letter-id="incoming-deployment"]').scrollIntoView({ block: 'center' })`);
   await settled();
   expect(await page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')).toBe(true);
+  await checkDirection();
   await page.screenshot(join(import.meta.dir, '.artifacts', 'coordination-phone.png'));
 
   await page.click('[data-testid="coordination-panel"] > summary');
