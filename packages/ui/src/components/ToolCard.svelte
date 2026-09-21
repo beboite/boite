@@ -2,7 +2,7 @@
   import { Check, ChevronRight, CircleSlash, Wrench, X } from '@lucide/svelte';
   import type { ToolDocument, ToolStatus } from '@boite/contracts';
   import { json } from '../lib/format';
-  import { fill, strings } from '../lib/i18n.svelte';
+  import { fill, strings } from '../lib/strings';
   import DocumentView from './DocumentView.svelte';
 
   let {

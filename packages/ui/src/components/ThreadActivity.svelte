@@ -1,7 +1,7 @@
 <script lang="ts">
   import { Check, ChevronDown, Circle, CircleCheck, CircleDot, ListTodo, Pause, Play, Repeat, Target, X } from '@lucide/svelte';
   import type { Store } from '../lib/store.svelte';
-  import { fill, strings } from '../lib/i18n.svelte';
+  import { fill, strings } from '../lib/strings';
 
   let { store }: { store: Store } = $props();
   let activity = $derived(store.openThread?.activity);

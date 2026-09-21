@@ -2,7 +2,7 @@
   import { Check, LoaderCircle, Square, CircleAlert } from '@lucide/svelte';
   import type { Turn } from '@boite/contracts';
   import { millis } from '../lib/format';
-  import { strings } from '../lib/i18n.svelte';
+  import { strings } from '../lib/strings';
   let { turn, waiting = false }: { turn: Turn; waiting?: boolean } = $props();
   let hidden = $state(document.hidden);
   const label = $derived(turn.status === 'done' ? strings.notify.done : turn.status === 'error' ? strings.notify.failed : turn.status === 'stopped' ? strings.chat.stopped : waiting ? strings.notify.needsYou : strings.chat.working);

@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { Project } from '@boite/contracts';
   import { focusOnMount } from '../lib/actions';
-  import { strings } from '../lib/i18n.svelte';
+  import { strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
 
   let {

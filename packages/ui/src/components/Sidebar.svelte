@@ -8,7 +8,7 @@
   import { experimentOn } from '../lib/experiments.svelte';
   import { separator } from '../lib/menu';
   import { clampSidebar, SIDEBAR_DEFAULT } from '../lib/prefs';
-  import { fill, strings } from '../lib/i18n.svelte';
+  import { fill, strings } from '../lib/strings';
   import MachineStatus from './MachineStatus.svelte';
   import ThreadCard from './ThreadCard.svelte';
   import MachineIcon from './MachineIcon.svelte';

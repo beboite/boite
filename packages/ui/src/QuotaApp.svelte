@@ -5,7 +5,7 @@
   import { WsClient, type Client } from './lib/client';
   import { resolveEndpoint } from './lib/endpoint';
   import { startTheme } from './lib/theme';
-  import { strings } from './lib/i18n.svelte';
+  import { strings } from './lib/strings';
   import QuotaOverview from './components/QuotaOverview.svelte';
   let rows = $state<AccountQuota[]>([]);
   let busy = $state(false);

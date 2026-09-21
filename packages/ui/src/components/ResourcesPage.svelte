@@ -2,7 +2,7 @@
   import { untrack } from 'svelte';
   import type { ThreadId } from '@boite/contracts';
   import { bytes, duration, millis, time } from '../lib/format';
-  import { strings } from '../lib/i18n.svelte';
+  import { strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
   import StatusMark from './StatusMark.svelte';
 

@@ -2,7 +2,7 @@
   import { onDestroy } from 'svelte';
   import { Minimize2 } from '@lucide/svelte';
   import type { Store } from '../lib/store.svelte';
-  import { strings } from '../lib/i18n.svelte';
+  import { strings } from '../lib/strings';
   import { contextPercent, contextLevel, formatTokens } from '../lib/tokens';
   import { count, time } from '../lib/format';
   import { Closing } from '../lib/closing.svelte';

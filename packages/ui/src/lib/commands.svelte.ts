@@ -9,7 +9,7 @@ import type { KeybindingCommand } from '@boite/contracts';
 import { experimentOn } from './experiments.svelte';
 import { openTour } from './onboarding.svelte';
 import type { PaletteItem } from './palette';
-import { strings } from './i18n.svelte';
+import { strings } from './strings';
 import type { Store } from './store.svelte';
 import { setTheme } from './theme';
 

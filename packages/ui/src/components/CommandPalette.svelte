@@ -5,7 +5,7 @@
   import { Closing } from '../lib/closing.svelte';
   import { appCommands, runCommand } from '../lib/commands.svelte';
   import { PALETTE_LIMIT, RECENT_THREADS, rankItems, type PaletteItem } from '../lib/palette';
-  import { strings } from '../lib/i18n.svelte';
+  import { strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
   import { workspace } from '../lib/workspace.svelte';
   import StatusMark from './StatusMark.svelte';

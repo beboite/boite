@@ -2,7 +2,7 @@
   import { tick } from 'svelte';
   import { renderMarkdown } from '../lib/markdown';
   import { paragraphBlocks, answerText } from '../lib/message-display';
-  import { strings } from '../lib/i18n.svelte';
+  import { strings } from '../lib/strings';
 
   let { text, live = false }: { text: string; live?: boolean } = $props();
   let blocks = $derived(paragraphBlocks(answerText(text, live), live));

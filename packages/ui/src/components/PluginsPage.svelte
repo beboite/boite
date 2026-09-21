@@ -3,7 +3,7 @@
   import { Download, Puzzle, RefreshCw, ShieldAlert, TriangleAlert } from '@lucide/svelte';
   import type { PluginPool, PluginPreview, PluginRejected, PluginState, RpcParams } from '@boite/contracts';
   import type { Store } from '../lib/store.svelte';
-  import { fill, strings } from '../lib/i18n.svelte';
+  import { fill, strings } from '../lib/strings';
   import { confirm } from '../lib/confirm.svelte';
   import QuotaList from './QuotaList.svelte';
 

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { RefreshCw } from '@lucide/svelte';
   import { bytes, percent } from '../lib/format';
-  import { strings } from '../lib/i18n.svelte';
+  import { strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
   import TraceTable from './TraceTable.svelte';
 

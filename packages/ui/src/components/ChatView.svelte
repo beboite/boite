@@ -2,7 +2,7 @@
   import { ChevronDown } from '@lucide/svelte';
   import type { ProjectId } from '@boite/contracts';
   import { type MenuItem } from '../lib/menu';
-  import { fill, strings } from '../lib/i18n.svelte';
+  import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
   import { workspace } from '../lib/workspace.svelte';
   import Composer from './Composer.svelte';

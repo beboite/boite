@@ -3,7 +3,7 @@
   import { ArrowLeft, Bell, ChevronRight, Coins, Compass, Gauge, Monitor, Palette, Mic } from '@lucide/svelte';
   import type { Store } from '../lib/store.svelte';
   import { workspace } from '../lib/workspace.svelte';
-  import { strings } from '../lib/i18n.svelte';
+  import { strings } from '../lib/strings';
   import { mobileOverlay } from '../lib/mobile-history';
   import { openTour } from '../lib/onboarding.svelte';
   import AppearancePage from './AppearancePage.svelte';

@@ -10,7 +10,7 @@ import {
   type Endpoint,
   type StoredEnvironment
 } from './endpoint';
-import { strings } from './i18n.svelte';
+import { strings } from './strings';
 
 export interface Machine {
   id: string;

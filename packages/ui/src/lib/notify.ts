@@ -13,7 +13,7 @@
  * of it.
  */
 
-import { strings } from './i18n.svelte';
+import { strings } from './strings';
 
 export const NOTIFICATIONS_STORAGE_KEY = 'boite.notifications';
 

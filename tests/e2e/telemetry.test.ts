@@ -30,6 +30,7 @@ test('owner controls consent on desktop and phone; captures both layouts', async
   await page.waitFor(`document.querySelector('${card} input')`);
   await page.evaluate(`Promise.all([document.fonts.ready, ...document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {}))])`);
   expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
+  expect(await page.evaluate(`(() => { const panel = document.querySelector('[data-testid="onboarding"] .panel').getBoundingClientRect(); const next = document.querySelector('[data-testid="onboarding-next"]').getBoundingClientRect(); return next.right <= panel.right - 8; })()`)).toBe(true);
   await page.screenshot(join(import.meta.dir, '.artifacts/onboarding-telemetry-phone-fr.png'));
   await page.click('[data-testid="onboarding-skip"]');
   await page.waitFor(`!document.querySelector('[data-testid="onboarding"]')`);

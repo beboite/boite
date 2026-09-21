@@ -1,5 +1,5 @@
 import { mobileOverlay } from './mobile-history';
-import { strings } from './i18n.svelte';
+import { strings } from './strings';
 /** Position desktop popovers at their anchor and phone menus above the keyboard. */
 export function floating(node: HTMLElement, options: { anchor: () => HTMLElement | null; side?: 'right'; mobileOnly?: boolean; dismiss?: () => void }) {
   const mobile = window.matchMedia('(max-width: 720px)').matches;

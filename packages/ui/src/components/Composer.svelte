@@ -9,7 +9,7 @@
   import { rankItems, type PaletteItem } from '../lib/palette';
   import { clearStash, DRAFT_STASH_KEY, readStash, writeStash } from '../lib/prefs';
   import { promptText } from '../lib/message-display';
-  import { fill, strings } from '../lib/i18n.svelte';
+  import { fill, strings } from '../lib/strings';
   import type { Choice, PickPatch, Store } from '../lib/store.svelte';
   import EffortSlider from './EffortSlider.svelte';
   import Menu from './Menu.svelte';

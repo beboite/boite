@@ -7,7 +7,7 @@
   import { contextMenu } from '../lib/context-menu.svelte';
   import { separator } from '../lib/menu';
   import { focusOnMount } from '../lib/actions';
-  import { strings } from '../lib/i18n.svelte';
+  import { strings } from '../lib/strings';
   import { lookupPullRequest } from '../lib/pull-request';
   import { ago } from '../lib/format';
   import MachineIcon from './MachineIcon.svelte';

@@ -1,7 +1,7 @@
 <script lang="ts">
   import ModelPicker from './ModelPicker.svelte';
   import EffortSlider from './EffortSlider.svelte';
-  import { strings } from '../lib/i18n.svelte';
+  import { strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
 
   let { store }: { store: Store } = $props();

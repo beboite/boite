@@ -1,7 +1,7 @@
 <script lang="ts">
   import { MessageCircleQuestionMark } from '@lucide/svelte';
   import type { QuestionAnswer, QuestionOption } from '@boite/contracts';
-  import { strings } from '../lib/i18n.svelte';
+  import { strings } from '../lib/strings';
 
   let {
     text,

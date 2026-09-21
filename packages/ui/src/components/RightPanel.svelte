@@ -18,7 +18,7 @@
   import { separator } from '../lib/menu';
   import { PANEL_DEFAULT, baseName, clampPanel, rightPanel } from '../lib/right-panel.svelte';
   import type { BoundPanel, Surface, SurfaceKind } from '../lib/right-panel.svelte';
-  import { fill, strings } from '../lib/i18n.svelte';
+  import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
   import BrowserSurface from './BrowserSurface.svelte';
   import ChangesSurface from './ChangesSurface.svelte';

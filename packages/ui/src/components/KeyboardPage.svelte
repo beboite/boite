@@ -3,7 +3,7 @@
   import { RotateCcw, Search, X } from '@lucide/svelte';
   import { commandLabel } from '../lib/commands.svelte';
   import { COMMAND_GROUPS, chordFromEvent, chordParts, isMac } from '../lib/keybindings';
-  import { strings } from '../lib/i18n.svelte';
+  import { strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
 
   let { store }: { store: Store } = $props();

@@ -793,6 +793,8 @@
     .row { flex-wrap: wrap; }
     .segmented { width: 100%; justify-content: stretch; }
     .segmented button { flex: 1; }
+    footer { flex-wrap: wrap; justify-content: flex-end; }
+    .dots { flex-basis: 100%; justify-content: center; margin-right: 0; }
   }
 
   @media (prefers-reduced-motion: reduce) {

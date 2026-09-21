@@ -74,7 +74,7 @@ import {
   type ComposerPrefs
 } from './prefs';
 import { rightPanel, type BoundPanel } from './right-panel.svelte';
-import { strings } from './i18n.svelte';
+import { strings } from './strings';
 import { DEFAULT_MODEL_NAMES, INITIAL_MODEL_DEFAULTS, readModelDefaults, writeModelDefaults, resolveModelDefault, type ModelDefaults } from './model-defaults';
 import { FAVORITES_KEY, isNamedModel, readFavorites, type FavoriteModel } from './model-order';
 

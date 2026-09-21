@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { ThreadStatus } from '@boite/contracts';
-  import { strings } from '../lib/i18n.svelte';
+  import { strings } from '../lib/strings';
 
   let {
     status,

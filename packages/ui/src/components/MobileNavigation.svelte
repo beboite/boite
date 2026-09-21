@@ -2,7 +2,7 @@
   import { Activity, ArrowLeft, ChevronDown, MessageSquare, Plus, Settings } from '@lucide/svelte';
   import type { Store } from '../lib/store.svelte';
   import { workspace } from '../lib/workspace.svelte';
-  import { strings } from '../lib/i18n.svelte';
+  import { strings } from '../lib/strings';
   import Menu from './Menu.svelte';
   import StatusMark from './StatusMark.svelte';
 

@@ -3,7 +3,7 @@
   import type { ImportableSession } from '@boite/contracts';
   import { Closing } from '../lib/closing.svelte';
   import { ago } from '../lib/format';
-  import { fill, strings } from '../lib/i18n.svelte';
+  import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
 
   let { store }: { store: Store } = $props();

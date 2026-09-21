@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { ToolDocument } from '@boite/contracts';
-  import { strings } from '../lib/i18n.svelte';
+  import { strings } from '../lib/strings';
   import DiffView from './DiffView.svelte';
   import Prose from './Prose.svelte';
 

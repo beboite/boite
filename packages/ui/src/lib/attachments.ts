@@ -12,7 +12,7 @@ import {
   type ImageMimeType
 } from '@boite/contracts';
 import { bytes } from './format';
-import { fill, strings } from './i18n.svelte';
+import { fill, strings } from './strings';
 
 /** The formats named in a refusal, the contract's own list and nothing else. */
 const FORMATS = IMAGE_MIME_TYPES.join(', ');

@@ -6,7 +6,7 @@
   import LimitsPage from './LimitsPage.svelte';
   import PluginsPage from './PluginsPage.svelte';
   import { COMMAND_GROUPS } from '../lib/keybindings';
-  import { strings } from '../lib/i18n.svelte';
+  import { strings } from '../lib/strings';
   import type { SettingsTab, Store } from '../lib/store.svelte';
   import AccountsPage from './AccountsPage.svelte';
   import AppearancePage from './AppearancePage.svelte';
