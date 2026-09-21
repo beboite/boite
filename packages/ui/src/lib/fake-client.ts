@@ -7,6 +7,8 @@ import {
   PANEL_SURFACE_KINDS,
   PROTOCOL_VERSION,
   RpcErrorCode,
+  TODO_STATUSES,
+  TODO_TEXT_MAX,
   type Account,
   type AccountQuota,
   type AgentCommand,
@@ -582,6 +584,21 @@ function fakeBytes(path: string, text: string | undefined): number {
   const media = FAKE_MEDIA[path];
   if (media) return dataUrlBytes(media.url());
   return text?.length ?? 0;
+}
+
+/** A refusal worded like the core's, so a screen tested here shows what the real one would. */
+function refusal(message: string): RpcFailure {
+  return new RpcFailure({ code: RpcErrorCode.Refused, message });
+}
+
+/** The core's `checkText` in `todos.ts`: a card needs text, and a line of it. */
+function todoText(text: unknown): string {
+  if (typeof text !== 'string' || text.trim().length === 0) throw refusal('a todo needs text');
+  const trimmed = text.trim();
+  if (trimmed.length > TODO_TEXT_MAX) {
+    throw refusal(`a todo is at most ${TODO_TEXT_MAX} characters, this one is ${trimmed.length}`);
+  }
+  return trimmed;
 }
 
 /** What the editor colours a file with, by the only thing the core has: the extension. */
@@ -2138,22 +2155,13 @@ export class FakeClient implements ObservableClient {
       case 'panel.open': {
         const params = rawParams as RpcParams<'panel.open'>;
         const thread = this.#thread(params.threadId);
-        const surface: PanelSurface = params.surface;
-        if (!PANEL_SURFACE_KINDS.includes(surface.kind)) {
-          throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: `unknown panel surface ${String(surface.kind)}` });
-        }
-        if (surface.kind === 'browser' && !/^https?:\/\//i.test(surface.url)) {
-          throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'a browser surface needs an http or https url' });
-        }
-        if (surface.kind === 'file' && surface.path.trim().length === 0) {
-          throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'a file surface needs a path' });
-        }
+        const surface = this.#checkSurface(thread.cwd, params.surface);
         // The core sends this to every client subscribed to the thread, and
         // `shown` says whether there was one to receive it.
         const shown = this.#subscribed.has(thread.id);
         this.#emitToThread(thread.id, 'panel.requested', {
           threadId: thread.id,
-          surface: structuredClone(surface),
+          surface,
           at: this.#now()
         });
         return { shown };
@@ -2181,13 +2189,11 @@ export class FakeClient implements ObservableClient {
       case 'todos.add': {
         const params = rawParams as RpcParams<'todos.add'>;
         const thread = this.#thread(params.threadId);
-        const text = params.text.trim();
-        if (text.length === 0) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'a todo needs text' });
         const at = this.#now();
         const todo: Todo = {
           id: `todo-${++this.#seq}`,
           projectId: thread.projectId,
-          text,
+          text: todoText(params.text),
           status: 'open',
           threadId: thread.id,
           createdAt: at,
@@ -2202,11 +2208,12 @@ export class FakeClient implements ObservableClient {
         const thread = this.#thread(params.threadId);
         const todo = this.#todos.find((one) => one.id === params.todoId && one.projectId === thread.projectId);
         if (!todo) throw this.#notFound('todo', params.todoId);
-        if (params.text !== undefined) {
-          const text = params.text.trim();
-          if (text.length === 0) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'a todo needs text' });
-          todo.text = text;
+        // The status is checked before the text moves, as the core's `updateTodo`
+        // builds the whole card before it saves anything.
+        if (params.status !== undefined && !TODO_STATUSES.includes(params.status)) {
+          throw refusal(`a todo is ${TODO_STATUSES.join(', ')}, not ${String(params.status)}`);
         }
+        if (params.text !== undefined) todo.text = todoText(params.text);
         if (params.status !== undefined) todo.status = params.status;
         todo.threadId = thread.id;
         todo.updatedAt = this.#now();
@@ -2238,13 +2245,17 @@ export class FakeClient implements ObservableClient {
       }
       case 'git.diff': {
         const params = rawParams as RpcParams<'git.diff'>;
-        this.#thread(params.threadId);
-        const change = FAKE_CHANGES.find((one) => one.path === params.path);
-        if (!change) throw this.#notFound('change', params.path);
-        const sides = FAKE_DIFFS[params.path] ?? {
+        const path = this.#inside(this.#thread(params.threadId).cwd, params.path, 'git.diff path');
+        const change = FAKE_CHANGES.find((one) => one.path === path);
+        if (!change) throw this.#notFound('change', path);
+        const sides = FAKE_DIFFS[path] ?? {
           // A row with no fixture of its own still opens on two readable sides.
-          oldText: `// ${params.path}\nconst ready = false;\n`,
-          newText: `// ${params.path}\nconst ready = true;\n`,
+          oldText: `// ${path}
+const ready = false;
+`,
+          newText: `// ${path}
+const ready = true;
+`,
           binary: false,
           truncated: false
         };
@@ -2254,47 +2265,50 @@ export class FakeClient implements ObservableClient {
 
       case 'files.list': {
         const params = rawParams as RpcParams<'files.list'>;
-        this.#thread(params.threadId);
-        return this.#listDir(params.path ?? '');
+        const cwd = this.#thread(params.threadId).cwd;
+        return this.#listDir(this.#inside(cwd, params.path ?? '', 'files.list path', 'dir'));
       }
       case 'files.read': {
         const params = rawParams as RpcParams<'files.read'>;
-        this.#thread(params.threadId);
+        const path = this.#inside(this.#thread(params.threadId).cwd, params.path, 'files.read path', 'file');
         // A picture, a sound and anything else binary answer as a url, the way
         // the core hands out a ticket, except that these carry their own bytes.
-        const media = FAKE_MEDIA[params.path];
+        const media = FAKE_MEDIA[path];
         if (media) {
           const url = media.url();
           const blob: FileContent = {
             kind: media.kind,
-            path: params.path,
-            bytes: fakeBytes(params.path, undefined),
-            modifiedAt: this.#fileTime(params.path),
+            path,
+            bytes: fakeBytes(path, undefined),
+            modifiedAt: this.#fileTime(path),
             mime: media.mime,
             url
           };
           return blob;
         }
-        const text = this.#files.get(params.path);
-        if (text === undefined) throw this.#notFound('file', params.path);
+        const text = this.#files.get(path) ?? '';
         const content: FileContent = {
           kind: 'text',
-          path: params.path,
+          path,
           bytes: text.length,
-          modifiedAt: this.#fileTime(params.path),
+          modifiedAt: this.#fileTime(path),
           text,
           truncated: false,
-          language: fakeLanguage(params.path)
+          language: fakeLanguage(path)
         };
         return content;
       }
       case 'files.write': {
         const params = rawParams as RpcParams<'files.write'>;
-        this.#thread(params.threadId);
-        if (FAKE_MEDIA[params.path]) {
+        const cwd = this.#thread(params.threadId).cwd;
+        const path = this.#inside(cwd, params.path, 'files.write path');
+        // The file may be new, its directory may not, and what is there already has to be a file.
+        this.#inside(cwd, path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '', 'files.write path directory', 'dir');
+        if (this.#isDir(path)) throw refusal(`files.write path is not a file: ${params.path}`);
+        if (FAKE_MEDIA[path]) {
           throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'this file is not text' });
         }
-        this.#files.set(params.path, params.text);
+        this.#files.set(path, params.text);
         return { bytes: params.text.length, modifiedAt: this.#now() };
       }
 
@@ -3144,6 +3158,90 @@ export class FakeClient implements ObservableClient {
         .sort(byName),
       ...files.sort(byName)
     ];
+  }
+
+  #isDir(path: string): boolean {
+    if (path === '') return true;
+    const prefix = `${path}/`;
+    return [...this.#files.keys(), ...FAKE_MEDIA_PATHS].some((full) => full.startsWith(prefix));
+  }
+
+  /**
+   * The core's `resolveInside`, and `existingInside` when `expect` is given,
+   * over the fake tree: a path relative to the thread's directory or absolute
+   * inside it, never out of it, answered in the relative form with forward
+   * slashes the core answers with.
+   */
+  #inside(cwd: string, path: unknown, what: string, expect?: 'file' | 'dir'): string {
+    if (typeof path !== 'string') throw refusal(`${what} must be a path, got ${typeof path}`);
+    const root = cwd.replace(/[\\/]+$/, '').replace(/\\/g, '/');
+    let rest = path.replace(/\\/g, '/');
+    if (/^([a-z]:)?\//i.test(rest)) {
+      if (rest.toLowerCase() !== root.toLowerCase() && !rest.toLowerCase().startsWith(`${root.toLowerCase()}/`)) {
+        throw refusal(`${what} leaves the thread's working directory: ${path}`);
+      }
+      rest = rest.slice(root.length);
+    }
+    const parts: string[] = [];
+    for (const part of rest.split('/')) {
+      if (part === '' || part === '.') continue;
+      if (part !== '..') parts.push(part);
+      else if (parts.pop() === undefined) throw refusal(`${what} leaves the thread's working directory: ${path}`);
+    }
+    const relative = parts.join('/');
+    if (expect === undefined) return relative;
+    const isFile = this.#files.has(relative) || FAKE_MEDIA[relative] !== undefined;
+    const isDir = this.#isDir(relative);
+    if (!isFile && !isDir) throw refusal(`${what} does not exist: ${path}`);
+    if (expect === 'file' && !isFile) throw refusal(`${what} is not a file: ${path}`);
+    if (expect === 'dir' && !isDir) throw refusal(`${what} is not a directory: ${path}`);
+    return relative;
+  }
+
+  /**
+   * The core's `checkSurface` in `agent.ts`: a file that is there, a directory
+   * that is, a diff path inside the directory, an http or https url, and the
+   * relative path every client compares tabs by.
+   */
+  #checkSurface(cwd: string, surface: PanelSurface): PanelSurface {
+    const kind = (surface as { kind?: unknown } | null | undefined)?.kind;
+    if (typeof kind !== 'string' || !(PANEL_SURFACE_KINDS as readonly string[]).includes(kind)) {
+      throw refusal(`panel.open does not know the surface ${String(kind)}`);
+    }
+    const path = (surface as { path?: unknown }).path;
+    if (kind === 'file') {
+      if (typeof path !== 'string' || path.length === 0) throw refusal('panel.open file needs a path');
+      const found = this.#inside(cwd, path, 'panel.open file path', 'file');
+      const line = (surface as { line?: unknown }).line;
+      if (line === undefined || line === null) return { kind, path: found };
+      if (typeof line !== 'number' || !Number.isInteger(line) || line < 1) {
+        throw refusal(`panel.open line must be a line number, got ${String(line)}`);
+      }
+      return { kind, path: found, line };
+    }
+    if (kind === 'files') {
+      if (path === undefined || path === null) return { kind };
+      return { kind, path: this.#inside(cwd, path, 'panel.open files path', 'dir') };
+    }
+    if (kind === 'diff') {
+      // A diff names a file that may be gone from the working tree.
+      if (path === undefined || path === null) return { kind };
+      return { kind, path: this.#inside(cwd, path, 'panel.open diff path') };
+    }
+    if (kind === 'browser') {
+      const url = (surface as { url?: unknown }).url;
+      let parsed: URL;
+      try {
+        parsed = new URL(String(url));
+      } catch {
+        throw refusal(`panel.open browser needs a url, got ${String(url)}`);
+      }
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+        throw refusal(`panel.open browser takes http or https, not ${parsed.protocol.replace(':', '')}`);
+      }
+      return { kind, url: parsed.href };
+    }
+    return { kind: kind as 'trace' | 'tasks' };
   }
 
   #notFound(what: string, id: string): RpcFailure {

@@ -449,6 +449,14 @@ export function startServer(options: ServerOptions): RunningServer {
         if (connection.identity.sessionId === sessionId) connection.close(RpcCloseCode.Unauthorized, 'session revoked');
       }
     },
+    closeAgents(threadId: ThreadId): void {
+      for (const connection of connections) {
+        const identity = connection.identity;
+        if (identity.principal === 'agent' && identity.threadId === threadId) {
+          connection.close(RpcCloseCode.Unauthorized, 'thread archived or removed');
+        }
+      }
+    },
   };
 
   const off = core.bus.onAny((name, payload) => {

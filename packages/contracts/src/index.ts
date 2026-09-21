@@ -1159,6 +1159,9 @@ export interface Todo {
 
 export const TODO_STATUSES: readonly Todo['status'][] = ['open', 'claimed', 'done'];
 
+/** A card is a line, not a document: the whole list travels on every change. */
+export const TODO_TEXT_MAX = 2000;
+
 export type GitChangeStatus = 'added' | 'modified' | 'deleted' | 'renamed' | 'copied' | 'untracked' | 'conflict';
 
 /** One path `git status` reports, staged or not, with the numbers `git diff --numstat` gives it. */

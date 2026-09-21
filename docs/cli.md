@@ -28,7 +28,8 @@ one thread. An agent reaches the methods listed in `AGENT_METHODS`
 (`packages/core/src/access.ts`) on its own thread and nothing else: a call that
 names another thread, or an owner-only method such as `files.write` or
 `trace.get`, is refused by name. The token is forgotten when the thread is
-removed and never written to disk.
+archived or removed, a socket an agent already opened with it is closed at the
+same moment, and the token is never written to disk.
 
 Outside a thread, `boite --thread <id>` reads the owner token out of
 `core.json` like `boite-core pair` does (`--data-dir`, `--channel dev`) and

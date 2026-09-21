@@ -9,14 +9,11 @@
  * `claimed` and the card waits there until a person confirms it.
  */
 
-import { TODO_STATUSES } from '@boite/contracts';
+import { TODO_STATUSES, TODO_TEXT_MAX } from '@boite/contracts';
 import type { Principal, ProjectId, RpcParams, ThreadId, Todo } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { refused } from './errors.ts';
 import { newId } from './ids.ts';
-
-/** A card is a line, not a document: the whole list travels on every change. */
-export const TODO_TEXT_MAX = 2000;
 
 const ORDER: Record<Todo['status'], number> = { open: 0, claimed: 1, done: 2 };
 

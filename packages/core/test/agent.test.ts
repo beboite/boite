@@ -71,6 +71,28 @@ describe('the per-thread token', () => {
     }
     expect(refusal).toBe('the token is wrong');
   });
+
+  test('an agent already connected is put out when its thread is archived', async () => {
+    const agent = await agentClient();
+    try {
+      expect(await agent.call('todos.list', { threadId })).toEqual([]);
+      harness.core.threads.archive(threadId, true);
+      // Forgetting the token only stops the next hello. The socket this agent
+      // already held used to go on claiming cards on the archived thread.
+      let refusal = 'none';
+      for (let attempt = 0; attempt < 50 && refusal === 'none'; attempt++) {
+        try {
+          await agent.call('todos.list', { threadId });
+          await Bun.sleep(20);
+        } catch (error) {
+          refusal = (error as Error).message;
+        }
+      }
+      expect(refusal).toContain('closed');
+    } finally {
+      agent.close();
+    }
+  });
 });
 
 describe('the environment a thread launches with', () => {
