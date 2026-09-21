@@ -35,7 +35,8 @@ export function compareVersions(a: string, b: string): number {
   if (left.tag === right.tag) return 0;
   if (left.tag === '') return 1;
   if (right.tag === '') return -1;
-  return left.tag < right.tag ? -1 : 1;
+  // beta.10 is after beta.2: a numeric part compares as a number.
+  return left.tag.localeCompare(right.tag, 'en', { numeric: true }) < 0 ? -1 : 1;
 }
 
 export function readVersion(output: string): string | null {
@@ -114,6 +115,9 @@ export class HarnessUpdates {
   async update(providerId: ProviderId): Promise<HarnessUpdate> {
     const target = this.targetOf(providerId);
     if (target === null) throw refused(`${providerId} has no update Boite can run on this machine`, { providerId });
+    // A check in flight writes its reading when it lands: an update started under it
+    // would be written over as idle, and a second updater could then start.
+    if (this.checking !== null) await this.checking.catch(() => {});
     let entry = this.entries.get(providerId);
     if (entry === undefined) {
       await this.check();
@@ -240,9 +244,11 @@ export class HarnessUpdates {
         if (this.entries.get(id)?.state === 'updating') return;
         try {
           const read = await this.read(target);
+          if (this.entries.get(id)?.state === 'updating') return;
           this.entries.set(id, { route: target.route, ...read, state: 'idle', message: null, checkedAt: Date.now() });
         } catch (error) {
           const previous = this.entries.get(id);
+          if (previous?.state === 'updating') return;
           this.entries.set(id, {
             route: target.route,
             current: previous?.current ?? null,

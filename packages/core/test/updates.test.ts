@@ -78,6 +78,7 @@ describe('harness updates', () => {
     expect(compareVersions('2.1.278', '2.1.278')).toBe(0);
     expect(compareVersions('1.0.0-beta.1', '1.0.0')).toBe(-1);
     expect(compareVersions('0.85.1', '0.86.1')).toBe(-1);
+    expect(compareVersions('1.0.0-beta.10', '1.0.0-beta.2')).toBe(1);
     expect(readVersion('codex-cli 0.155.1')).toBe('0.155.1');
     expect(readVersion('grok 1.0.34 (3736acbc8658) [stable]')).toBe('1.0.34');
     expect(readVersion('nothing here')).toBeNull();
@@ -155,6 +156,29 @@ describe('harness updates', () => {
     harness!.core.journal.putThread({ ...harness!.core.journal.getThread(thread.id)!, status: 'running' });
 
     await expect(client.call('providers.update', { providerId: 'update-fake' })).rejects.toThrow(/1 turn in flight/);
+  });
+
+  test('an update asked for during a check waits for it, and a second one is refused while the first runs', async () => {
+    const { client } = await start('npm');
+    await client.call('providers.updates', {});
+
+    let release = (): void => {};
+    const gate = new Promise<void>((done) => (release = done));
+    harness!.core.updates.npmLatest = async () => {
+      await gate;
+      return '1.1.0';
+    };
+    const checked = client.call('providers.updates', { refresh: true });
+    await client.next('providers.updatesChanged', (list) => list[0]?.state === 'checking', 20000);
+    const started = client.call('providers.update', { providerId: 'update-fake' });
+    await new Promise((done) => setTimeout(done, 50));
+    release();
+
+    expect((await started).state).toBe('updating');
+    await checked;
+    await expect(client.call('providers.update', { providerId: 'update-fake' })).rejects.toThrow(/already updating/);
+    await client.next('providers.updatesChanged', (list) => list[0]?.state === 'idle' && list[0]?.current === '1.2.0', 20000);
+    await waitFor(() => harness?.core.procs.liveCount('update:update-fake') === 0);
   });
 
   test('a descriptor whose update block is wrong is refused by field', async () => {
