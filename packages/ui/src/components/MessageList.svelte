@@ -14,7 +14,7 @@
   import type { Message } from '@boite/contracts';
   import { bytes } from '../lib/format';
   import { decodedBytes } from '../lib/attachments';
-  import { strings } from '../lib/strings';
+  import { strings } from '../lib/i18n.svelte';
   import type { Store } from '../lib/store.svelte';
   import { formatTokens } from '../lib/tokens';
   import PermissionCard from './PermissionCard.svelte';

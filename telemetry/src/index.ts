@@ -53,7 +53,9 @@ export interface Env {
 }
 
 // ─── Payload types ───────────────────────────────────────────────
-export interface TelemetryEvent {
+import { enhancedDetails, type EnhancedDetails } from './details';
+
+export interface TelemetryEvent extends EnhancedDetails {
   name: string;
   app_version: string;
   os?: string;
@@ -418,6 +420,7 @@ export function buildBatch(
     }
     if (ev.name === "turn_finished") {
       properties.outcome = ["done", "error", "stopped"].includes(ev.outcome ?? "") ? ev.outcome : "other";
+      if (isModeB) Object.assign(properties, enhancedDetails(ev as unknown as Record<string, unknown>));
     }
     if (["app_launched", "session_ended", "turn_finished"].includes(ev.name)) {
       const duration = count(ev.duration_ms);

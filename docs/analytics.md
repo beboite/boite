@@ -1,7 +1,10 @@
 # Analytics
 
 Boite can report usage counts through a Cloudflare Worker to PostHog EU.
-Collection starts off. Settings > General > Privacy and analytics has two
+Basic counters start on for new hosts. Enhanced analytics start off and are
+offered explicitly in the onboarding tour. Skipping the tour does not enable
+enhanced mode. An existing saved choice, including Off, is never overwritten.
+Settings > General > Privacy and analytics has two
 switches. On a phone connected as the owner, they are under App & notifications.
 Paired guest devices and agents cannot read or change these settings.
 
@@ -43,8 +46,23 @@ The relay adds country and collection mode. Providers and outcomes come from
 closed lists; unknown values become `other`. Both the host and relay construct
 new payloads from approved fields.
 
+Enhanced `turn_finished` events also carry the selected public `model`, `effort`,
+`speed`, `permission_mode`, `operation`, scheduler `queue_ms`, and reported
+`input_tokens`, `output_tokens`, `cache_read_tokens`, `cache_write_tokens` rounded
+to 100 tokens and capped at ten million. Missing usage stays absent.
+The frozen execution snapshot supplies these values, not a later model choice.
+`default` means the provider chose its model; it does not claim a resolved model.
+`telemetry/src/details.ts` lists public models explicitly. Unknown models, custom
+aliases, paths and fine-tuned IDs become `other` on both the host and relay.
+Basic mode strips every enhanced field even from modified clients.
+
+These fields support model adoption, retention among consenting installations,
+turn success/stop rates, queue delay, duration and token-volume comparisons.
+They do not measure answer quality, subscriber spending or all users: enhanced
+data comes only from installations whose owners opted in.
+
 No prompt, response, reasoning, tool argument, file content, project name, path,
-account identifier, model name, error message, screenshot or recording is sent.
+account identifier, private model name, error message, screenshot or recording is sent.
 The relay overwrites the IP field and disables GeoIP enrichment. The PostHog
 project also discards IP data. Cloudflare processes the source IP in transit for
 country lookup, daily hashing and rate limits; it is not forwarded to PostHog.

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { FolderPlus } from '@lucide/svelte';
-  import { strings } from '../lib/strings';
+  import { strings } from '../lib/i18n.svelte';
 </script>
 
 <div class="drop" data-testid="drop-overlay">

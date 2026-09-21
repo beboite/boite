@@ -38,6 +38,7 @@ async function once(): Promise<Run> {
   delete env.BOITE_CORE_COMMAND;
   env.BOITE_SHELL_HIDDEN = '1';
   env.BOITE_DATA_DIR = dataDir;
+  env.BOITE_TELEMETRY_URL = '';
   env.BOITE_ECHO = '1';
   env.BOITE_SHELL_DEBUG_PORT = String(port);
   env.WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = `--remote-debugging-port=${port} --remote-allow-origins=* --mute-audio --use-angle=d3d11`;

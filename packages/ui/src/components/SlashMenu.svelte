@@ -1,7 +1,7 @@
 <script lang="ts">
   import { AGENT_PREFIX, isAgentCommand, slashName } from '../lib/commands.svelte';
   import type { PaletteItem } from '../lib/palette';
-  import { strings } from '../lib/strings';
+  import { strings } from '../lib/i18n.svelte';
   import ComposerMenu from './ComposerMenu.svelte';
 
   /**

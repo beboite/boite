@@ -2,7 +2,7 @@
   import { ChevronRight } from '@lucide/svelte';
   import type { ProcessRecord, TraceCapability } from '@boite/contracts';
   import { bytes, millis } from '../lib/format';
-  import { strings } from '../lib/strings';
+  import { strings } from '../lib/i18n.svelte';
   let { records, capability }: { records: ProcessRecord[]; capability: TraceCapability | null } = $props();
   let now = $state(Date.now());
   let live = $derived(records.some(record => record.exitedAt === null));

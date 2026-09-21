@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import type { TelemetryState, Turn } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { invalidParams as invalid } from './errors.ts';
+import { enhancedDetails, type EnhancedDetails } from '../../../telemetry/src/details.ts';
 
 const EVENTS = ['ping', 'first_run', 'app_launched', 'session_ended', 'project_added', 'thread_spawned', 'turn_finished'] as const;
 type EventName = typeof EVENTS[number];
@@ -18,7 +19,7 @@ interface Consent {
   firstRun: boolean;
   pingDay: string;
 }
-export interface TelemetryEvent {
+export interface TelemetryEvent extends EnhancedDetails {
   name: EventName;
   uuid: string;
   app_version: string;
@@ -75,7 +76,7 @@ export class Telemetry {
       this.endpoint = endpoint.replace(/\/$/, '');
     }
     this.file = join(core.dataDir, 'telemetry.json');
-    this.consent = { mode: 'off', anonymousId: crypto.randomUUID(), installId: null, forget: [], firstRun: false, pingDay: '' };
+    this.consent = { mode: 'basic', anonymousId: crypto.randomUUID(), installId: null, forget: [], firstRun: false, pingDay: '' };
     if (existsSync(this.file)) {
       try {
         const saved = JSON.parse(readFileSync(this.file, 'utf8')) as Consent;
@@ -95,7 +96,15 @@ export class Telemetry {
       if (name === 'thread.created') this.track('thread_spawned', { provider: (payload as { providerId: string }).providerId });
       if (name === 'turn.finished') {
         const turn = payload as Turn;
-        this.track('turn_finished', { provider: turn.execution?.providerId, outcome: turn.status, duration_ms: (turn.finishedAt ?? Date.now()) - (turn.startedAt ?? turn.queuedAt) });
+        this.track('turn_finished', {
+          provider: turn.execution?.providerId, outcome: turn.status,
+          duration_ms: (turn.finishedAt ?? Date.now()) - (turn.startedAt ?? turn.queuedAt),
+          model: turn.execution?.model, effort: turn.execution?.effort, speed: turn.execution?.speed,
+          permission_mode: turn.execution?.permissionMode, operation: turn.execution?.operation ?? 'prompt',
+          queue_ms: turn.startedAt === null ? undefined : turn.startedAt - turn.queuedAt,
+          input_tokens: turn.usage?.inputTokens, output_tokens: turn.usage?.outputTokens,
+          cache_read_tokens: turn.usage?.cacheReadTokens, cache_write_tokens: turn.usage?.cacheWriteTokens,
+        });
       }
     });
     this.launch();
@@ -155,7 +164,9 @@ export class Telemetry {
 
   track(name: EventName, fields: Record<string, unknown> = {}): void {
     if (this.closed || !this.endpoint || this.consent.mode === 'off' || !EVENTS.includes(name)) return;
-    this.queue.push(telemetryEvent(name, this.core.version, fields));
+    const event = telemetryEvent(name, this.core.version, fields);
+    if (this.consent.mode === 'enhanced' && name === 'turn_finished') Object.assign(event, enhancedDetails(fields));
+    this.queue.push(event);
     if (this.queue.length > 200) this.queue.shift();
   }
 

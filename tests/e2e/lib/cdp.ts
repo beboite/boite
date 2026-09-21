@@ -70,6 +70,8 @@ interface Pending {
 }
 
 export interface BrowserOptions {
+  /** Only tour tests start with onboarding unseen. Other scenarios test the app behind it. */
+  onboarding?: boolean;
   url: string;
   executable?: string;
   userDataDir?: string;
@@ -144,6 +146,12 @@ export class BrowserPage {
       const page = new BrowserPage(socket, proc.pid, ownsUserDataDir ? userDataDir : null);
       await page.send('Page.enable', {});
       await page.send('Runtime.enable', {});
+      await page.send('Page.addScriptToEvaluateOnNewDocument', { source: `
+        try {
+          if (!localStorage.getItem('boite.locale')) localStorage.setItem('boite.locale', 'en');
+          ${options.onboarding ? '' : "if (!localStorage.getItem('boite.onboarding')) localStorage.setItem('boite.onboarding', JSON.stringify({ version: 2, at: Date.now() }));"}
+        } catch {}
+      ` });
       // Headless window sizing can be clamped by the Windows display. Pin the
       // CSS viewport before app startup so responsive layouts stay deterministic.
       await page.send('Emulation.setDeviceMetricsOverride', {

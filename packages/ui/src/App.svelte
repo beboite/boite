@@ -7,7 +7,7 @@
   import ContextMenu from './components/ContextMenu.svelte';
   import DropOverlay from './components/DropOverlay.svelte';
   import FirstRun from './components/FirstRun.svelte';
-
+  import Onboarding from './components/Onboarding.svelte';
   import Sidebar from './components/Sidebar.svelte';
   import TitleBar from './components/TitleBar.svelte';
   import { Closing } from './lib/closing.svelte';
@@ -17,9 +17,10 @@
   import { installExternalLinks } from './lib/links';
   import { isQuitChord, QUIT_HOLD_MS, QuitHold } from './lib/quit-hold';
   import { onNotificationOpen } from './lib/notify';
-  import { strings } from './lib/strings';
+  import { strings } from './lib/i18n.svelte';
   import { rightPanel } from './lib/right-panel.svelte';
   import { workspace } from './lib/workspace.svelte';
+  import { tourRequested, tourSeen } from './lib/onboarding.svelte';
   import { startTheme } from './lib/theme';
   import MobileNavigation from './components/MobileNavigation.svelte';
   import { startViewport } from './lib/viewport';
@@ -254,8 +255,15 @@
     quitHold?.release();
   }
 
-  /** Whether one of the two modal dialogs is up, waiting on the user. */
-  let modal = $derived(confirm.current !== null || store.imports !== null || store.projectPickerOpen);
+  /*
+   * The tour opens by itself the first time Boite runs on this device, and on
+   * request afterwards. It waits for a core: its screens carry real switches,
+   * and half of them would be dead against a connection that is not there.
+   */
+  let tour = $derived(store.booted && store.connection !== 'closed' && (tourRequested() || !tourSeen()));
+
+  /** Whether something modal is up, waiting on the user: no app chord fires under it. */
+  let modal = $derived(tour || confirm.current !== null || store.imports !== null || store.projectPickerOpen);
 
   /** A key that belongs to whatever the user is typing in, not to the app. */
   function typing(event: KeyboardEvent): boolean {
@@ -447,6 +455,7 @@
 </div>
 
 <ContextMenu />
+{#if tour}<Onboarding {store} />{/if}
 {#if deferred.ProjectPicker}{@const ProjectPicker = deferred.ProjectPicker}<ProjectPicker {store} />{/if}
 <ConfirmDialog />
 {#if deferred.ImportDialog}{@const ImportDialog = deferred.ImportDialog}<ImportDialog {store} />{/if}

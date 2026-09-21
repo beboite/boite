@@ -2,7 +2,7 @@
   import { ShieldQuestion } from '@lucide/svelte';
   import type { PermissionRequest } from '@boite/contracts';
   import { json } from '../lib/format';
-  import { strings } from '../lib/strings';
+  import { strings } from '../lib/i18n.svelte';
 
   let {
     toolName,

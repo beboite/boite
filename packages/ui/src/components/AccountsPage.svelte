@@ -8,7 +8,7 @@
   import { confirm } from '../lib/confirm.svelte';
   import { bytes, percent } from '../lib/format';
   import { nextAccountLabel, setupStep, signInTarget, type SetupStep } from '../lib/provider-setup';
-  import { strings } from '../lib/strings';
+  import { strings } from '../lib/i18n.svelte';
   import type { Store } from '../lib/store.svelte';
 
   /**

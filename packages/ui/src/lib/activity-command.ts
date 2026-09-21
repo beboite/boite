@@ -1,4 +1,4 @@
-import { strings } from './strings';
+import { strings } from './i18n.svelte';
 
 export type ActivityCommand = { goal: { objective: string } } | { loop: { prompt: string; intervalMs: number; maxIterations?: number } };
 

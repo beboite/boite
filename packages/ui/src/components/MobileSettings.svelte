@@ -1,10 +1,11 @@
 <script lang="ts">
   import TelemetrySettings from './TelemetrySettings.svelte';
-  import { ArrowLeft, Bell, ChevronRight, Coins, Gauge, Monitor, Palette, Mic } from '@lucide/svelte';
+  import { ArrowLeft, Bell, ChevronRight, Coins, Compass, Gauge, Monitor, Palette, Mic } from '@lucide/svelte';
   import type { Store } from '../lib/store.svelte';
   import { workspace } from '../lib/workspace.svelte';
-  import { strings } from '../lib/strings';
+  import { strings } from '../lib/i18n.svelte';
   import { mobileOverlay } from '../lib/mobile-history';
+  import { openTour } from '../lib/onboarding.svelte';
   import AppearancePage from './AppearancePage.svelte';
   import LimitsPage from './LimitsPage.svelte';
   import MachinesPage from './MachinesPage.svelte';
@@ -43,6 +44,9 @@
           </button>
           <button class="ghost row" data-testid="settings-tab-appearance" onclick={() => store.showSettings('appearance')}>
             <Palette size={20} /><span><strong>{strings.settings.tabs.appearance}</strong><small>{strings.mobile.settingsAppearanceHint}</small></span><ChevronRight size={18} />
+          </button>
+          <button class="ghost row" data-testid="settings-tour" onclick={() => { store.showChat(); openTour(); }}>
+            <Compass size={20} /><span><strong>{strings.onboarding.replay}</strong><small>{strings.onboarding.replayHint}</small></span><ChevronRight size={18} />
           </button>
         </div>
       </section>

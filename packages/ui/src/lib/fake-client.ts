@@ -879,7 +879,7 @@ const PROBE_PROVIDERS: Pick<ProviderSummary, 'id' | 'name' | 'protocol' | 'login
  * `?fake=1` and what every test runs against.
  */
 export class FakeClient implements ObservableClient {
-  #telemetry: import('@boite/contracts').TelemetryState = { mode: 'off', configured: true, pendingDeletion: false };
+  #telemetry: import('@boite/contracts').TelemetryState = { mode: 'basic', configured: true, pendingDeletion: false };
   #state: ClientState = 'idle';
   #handlers = new Map<string, Set<(payload: unknown) => void>>();
   #stateHandlers = new Set<(state: ClientState) => void>();

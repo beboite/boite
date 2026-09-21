@@ -3,7 +3,7 @@
   import { focusOnMount } from '../lib/actions';
   import { contextMenu } from '../lib/context-menu.svelte';
   import { separator } from '../lib/menu';
-  import { strings } from '../lib/strings';
+  import { strings } from '../lib/i18n.svelte';
   import type { Store } from '../lib/store.svelte';
   import ContextControl from './ContextControl.svelte';
   import StatusMark from './StatusMark.svelte';

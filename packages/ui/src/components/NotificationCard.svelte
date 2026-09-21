@@ -1,6 +1,6 @@
 <script lang="ts">
   import { X } from '@lucide/svelte';
-  import { strings } from '../lib/strings';
+  import { strings } from '../lib/i18n.svelte';
 
   let { title, message, dismiss }: { title: string; message: string; dismiss: () => void } = $props();
 </script>

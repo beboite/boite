@@ -25,18 +25,28 @@ function fixture(respond: (path: string, body: any) => Promise<Response> = async
   return { telemetry, requests, dataDir, bus, host, send };
 }
 
-test('fresh hosts send nothing, including before consent and on shutdown', async () => {
-  const { telemetry, requests } = fixture();
+test('fresh hosts use basic counters and an explicit opt-out persists across restarts', async () => {
+  const { telemetry, requests, host, send } = fixture();
+  expect(telemetry.state().mode).toBe('basic');
+  await telemetry.flush();
+  expect(requests[0]!.body.mode).toBe('A');
+  await telemetry.configure('off');
+  requests.length = 0;
   telemetry.track('project_added');
   await telemetry.flush();
   await telemetry.close();
   expect(requests).toEqual([]);
   expect(telemetry.state().mode).toBe('off');
+  const restarted = new Telemetry(host, 'https://relay.example', send);
+  await restarted.close();
+  expect(restarted.state().mode).toBe('off');
+  expect(requests).toEqual([]);
 });
 
 test('invalid consent fails closed with repair guidance and preserves the deletion ledger', async () => {
   const f = fixture();
   await f.telemetry.close();
+  f.requests.length = 0;
   const file = join(f.dataDir, 'telemetry.json');
   for (const text of ['{"forget":[', JSON.stringify({ mode: 'invalid', forget: [crypto.randomUUID()] }), 'null']) {
     writeFileSync(file, text);
@@ -94,6 +104,7 @@ test('enhanced withdrawal persists deletion, retries after restart, and uses a n
 
 test('export needs enhanced mode and an inert build never contacts a relay', async () => {
   const f = fixture();
+  await f.telemetry.configure('off');
   await expect(f.telemetry.export()).rejects.toThrow('enhanced');
   const inert = new Telemetry(f.host, '', f.send);
   await inert.configure('enhanced');
@@ -130,4 +141,30 @@ test('one host bus emits one count, never the prompt or error from a turn', asyn
   expect(events[0].duration_ms).toBe(10);
   expect(JSON.stringify(events)).not.toContain('SECRET');
   expect(JSON.stringify(events)).not.toContain('private');
+});
+
+test('model and token details require opt-in at both the host and relay', async () => {
+  const f = fixture();
+  const fields = { provider: 'codex', model: 'openai/gpt-6-astra', effort: 'high', permission_mode: 'plan', operation: 'prompt', input_tokens: 1234, output_tokens: 567, queue_ms: 150 };
+  await f.telemetry.flush();
+  f.telemetry.track('turn_finished', fields); await f.telemetry.flush();
+  expect(f.requests.at(-1)!.body.events[0].model).toBeUndefined();
+  expect(f.requests.at(-1)!.body.events[0].input_tokens).toBeUndefined();
+  await f.telemetry.configure('enhanced'); await f.telemetry.flush();
+  f.telemetry.track('turn_finished', fields); await f.telemetry.flush();
+  const event = f.requests.at(-1)!.body.events[0];
+  expect(event.model).toBe('gpt-6-astra'); expect(event.input_tokens).toBe(1200);
+  const ids = { eventIdentifier: 'daily', pingIdentifier: 'stable' };
+  const basic = buildBatch('A', [event], ids, 'FR', new Date().toISOString())[0]!.properties;
+  expect(basic.model).toBeUndefined(); expect(basic.input_tokens).toBeUndefined();
+  const enhanced = buildBatch('B', [event], ids, 'FR', new Date().toISOString())[0]!.properties;
+  expect(enhanced.model).toBe('gpt-6-astra'); expect(enhanced.effort).toBe('high');
+  f.telemetry.track('turn_finished', { ...fields, model: 'private-client/model-secret', effort: 'SECRET', prompt: 'SECRET' });
+  await f.telemetry.flush();
+  expect(f.requests.at(-1)!.body.events[0].model).toBe('other');
+  expect(JSON.stringify(f.requests.at(-1))).not.toContain('SECRET');
+  const hostile = buildBatch('B', [{ ...event, model: '/private/path', effort: 'SECRET', input_tokens: Infinity }], ids, 'FR', new Date().toISOString())[0]!.properties;
+  expect(hostile.model).toBe('other'); expect(hostile.effort).toBe('other'); expect(hostile.input_tokens).toBeUndefined();
+  await f.telemetry.configure('basic');
+  expect(f.telemetry.state().pendingDeletion).toBe(true);
 });

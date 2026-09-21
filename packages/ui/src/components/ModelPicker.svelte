@@ -5,7 +5,7 @@
   import ProviderLogo from './ProviderLogo.svelte';
   import { floating } from '../lib/floating';
   import { Closing } from '../lib/closing.svelte';
-  import { strings } from '../lib/strings';
+  import { strings } from '../lib/i18n.svelte';
   import type { Choice, PickPatch, Store } from '../lib/store.svelte';
 
   /**

@@ -3,7 +3,7 @@
   import type { EffortLevel } from '@boite/contracts';
   import { Closing } from '../lib/closing.svelte';
   import { floating } from '../lib/floating';
-  import { strings } from '../lib/strings';
+  import { strings } from '../lib/i18n.svelte';
 
   /**
    * The reasoning chip and its popover: one dot per level of the model's scale,

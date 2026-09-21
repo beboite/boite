@@ -3,7 +3,7 @@
   import type { Store } from '../lib/store.svelte';
   import { strings } from '../lib/strings';
 
-  let { store }: { store: Store } = $props();
+  let { store, embedded = false }: { store: Store; embedded?: boolean } = $props();
   let consent = $state<TelemetryState | null>(null);
   let error = $state('');
   let busy = $state(false);
@@ -45,8 +45,8 @@
 </script>
 
 {#if store.owner}
-  <section class="card" data-testid="telemetry-settings">
-    <h2>{strings.telemetry.heading}</h2>
+  <section class:card={!embedded} data-testid="telemetry-settings">
+    {#if !embedded}<h2>{strings.telemetry.heading}</h2>{/if}
     <p class="hint">{strings.telemetry.description}</p>
     {#if consent}
       {#if !consent.configured}<p class="hint">{strings.telemetry.unconfigured}</p>{/if}

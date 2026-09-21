@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { strings } from '../lib/strings';
+  import { strings } from '../lib/i18n.svelte';
   let enabled = $state(false);
   let ready = $state(false);
   let error = $state('');
