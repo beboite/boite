@@ -55,6 +55,8 @@ import type {
 const CLIENT_NAME = 'boite';
 const MINUTE_MS = 60_000;
 const STDERR_MAX = 400;
+/** A glog line at info severity: `I0921 09:51:32.917720 10292 main.py:80] ...`. */
+const GLOG_INFO = /^I\d{4} \d{2}:\d{2}:\d{2}\.\d+\s/;
 /** How long a failed prompt waits for the child's exit before blaming the error itself. */
 const EXIT_GRACE_MS = 500;
 /**
@@ -878,6 +880,9 @@ class AcpSession {
         const text = line.trim();
         if (text.length === 0) continue;
         this.lastStderr = text.slice(0, STDERR_MAX);
+        // Antigravity writes every protocol frame to stderr as a glog info line,
+        // three hundred a turn: only what the agent itself calls a warning is one.
+        if (GLOG_INFO.test(text)) continue;
         ctx.log('warn', `acp agent: ${this.lastStderr}`);
       }
     });

@@ -79,6 +79,7 @@ const mode = flag('--mode') || 'default';
 const skip = args.includes('--dangerously-skip-permissions');
 const stream = flag('--input-format') === 'stream-json' && flag('--output-format') === 'stream-json';
 log(`argv conversation=${flag('--conversation') || 'new'} model=${model} mode=${mode} skip=${skip} stream=${stream}`);
+log(`workspace ${flag('--add-dir')}`);
 log(`env BROWSER=${process.env['BROWSER'] ?? ''}`);
 
 let stepIndex = 0;
@@ -123,7 +124,7 @@ function tool(fails: boolean): void {
       tool_info: { ...info, error: { type: 'PERMISSION_DENIED', message: 'the command was denied' } },
     });
   } else {
-    step({ step_index: index, state: 'DONE', step_type: 'tool', tool_name: 'run_command', tool_info: info });
+    step({ step_index: index, state: 'DONE', step_type: 'tool', tool_name: 'run_command', tool_info: { ...info, output: 'hi\n' } });
   }
 }
 

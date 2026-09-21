@@ -15,6 +15,8 @@ export function loginThreadId(accountId: AccountId): string {
 }
 
 const URL_IN_OUTPUT = /https:\/\/\S+/;
+/** What a sign-in link carries and a terms or privacy page does not. */
+const SIGN_IN_LINK = /oauth|authorize|redirect_uri|client_id|user_code|\/device|\/login|\/auth/i;
 
 /** How long the one GET on a pasted redirect URL waits before it is called failed. */
 const CALLBACK_TIMEOUT_MS = 10_000;
@@ -460,7 +462,10 @@ export class AccountStore {
     const run = this.logins.get(accountId);
     if (run === undefined || line.length === 0) return;
     run.lastLine = line;
-    if (run.url === null) run.url = URL_IN_OUTPUT.exec(line)?.[0] ?? null;
+    const link = URL_IN_OUTPUT.exec(line)?.[0] ?? null;
+    // An agent may print its terms or privacy page before the sign-in link: the
+    // first link stands only until one that looks like a sign-in shows up.
+    if (link !== null && (run.url === null || (!SIGN_IN_LINK.test(run.url) && SIGN_IN_LINK.test(link)))) run.url = link;
     this.emitLogin(accountId, 'running', line, run);
   }
 

@@ -179,7 +179,10 @@ describe('agy driver', () => {
     const tools = parts.filter((part) => part.type === 'tool');
     expect(tools).toHaveLength(2);
     expect(tools[0]).toMatchObject({ name: 'run_command', status: 'running', output: null, input: { CommandLine: 'echo hi' } });
-    expect(tools[1]).toMatchObject({ name: 'run_command', status: 'done' });
+    // The finished step carries what the command printed.
+    expect(tools[1]).toMatchObject({ name: 'run_command', status: 'done', output: 'hi\n' });
+    // agy's print mode works in its own scratch directory unless the thread's is named.
+    expect(fakeLog()).toContain(`workspace ${(await client.call('threads.get', { threadId })).cwd}`);
     expect(tools[0]?.type === 'tool' && tools[1]?.type === 'tool' && tools[0].toolId === tools[1].toolId).toBe(true);
 
     const thread = await client.call('threads.get', { threadId });
