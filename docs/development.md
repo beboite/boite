@@ -202,6 +202,13 @@ bun run e2e      # tests/e2e
 Run all three once on a clean tree before writing anything. A failure you did not
 cause reads exactly like one you did, and that has cost time here before.
 
+jsdom is held at 30.0.1, exactly, and Dependabot is told to leave it there.
+Since 30.1.0, removing the focused element makes the next `focus()` fire a
+blur aimed at the window ([jsdom#4347](https://github.com/jsdom/jsdom/issues/4347)).
+Every menu here closes on a window blur, so a menu that opens right after
+another one closed shuts itself in the same tick: two tests in
+`packages/ui/src/app.test.ts` fail on it. Lift the pin once that issue is fixed.
+
 `bun run e2e` builds the UI before loading any test. Tests earlier than
 `ui.test.ts` also serve that build, so building only inside the UI suite leaves
 them without a page in a fresh worktree.
