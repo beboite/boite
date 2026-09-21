@@ -10,6 +10,7 @@ import {
   TODO_STATUSES,
   TODO_TEXT_MAX,
   type Account,
+  type BrainStatus,
   type AccountQuota,
   type AgentCommand,
   type AgentTask,
@@ -913,6 +914,7 @@ function quietUpdates(): boolean {
 }
 
 export class FakeClient implements ObservableClient {
+  #brain: BrainStatus = { config: { path: null, enabled: false }, entries: [], problems: [], git: null, lastSync: null };
   static #cores = new Map<string, FakeClient>();
   #state: ClientState = 'idle';
   #handlers = new Map<string, Set<(payload: unknown) => void>>();
@@ -1216,6 +1218,25 @@ export class FakeClient implements ObservableClient {
 
   async #dispatch(method: RpcMethodName, rawParams: unknown): Promise<unknown> {
     switch (method) {
+      case 'brain.status': return structuredClone(this.#brain);
+      case 'brain.configure': {
+        const config = rawParams as RpcParams<'brain.configure'>;
+        if (typeof config.enabled !== 'boolean' || (config.enabled && !config.path) || (config.path !== null && (typeof config.path !== 'string' || !/^(?:[A-Za-z]:[\\/]|\/)/.test(config.path)))) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'brain.path must be an absolute folder path or null; enabled must be a boolean' });
+        if (this.#brain.config.path !== config.path) this.#brain.lastSync = null;
+        this.#brain.config = { ...config };
+        this.#brain.entries = config.path ? [
+          { kind: 'instructions', name: 'AGENTS.md', path: 'AGENTS.md', description: '', error: null },
+          { kind: 'skill', name: 'code-review', path: 'skills/code-review/SKILL.md', description: 'Review changes and check the affected behavior.', error: null },
+          { kind: 'plugin', name: 'team-tools', path: 'plugins/team-tools/.claude-plugin/plugin.json', description: 'Shared tools for the team.', error: null },
+        ] : [];
+        this.#brain.git = config.path ? { branch: 'main', upstream: 'origin/main', ahead: 0, behind: 0, dirty: false } : null;
+        return structuredClone(this.#brain);
+      }
+      case 'brain.sync': {
+        if (!this.#brain.git) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'brain.path must point to the root of a Git checkout to synchronize' });
+        this.#brain.lastSync = Date.now();
+        return structuredClone(this.#brain);
+      }
       case 'quotas.configure': {
         const params = rawParams as RpcParams<'quotas.configure'>;
         this.#quotaEnabled[params.accountId] = params.enabled;

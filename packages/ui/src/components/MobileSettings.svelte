@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { ArrowLeft, Bell, ChevronRight, Coins, Gauge, Monitor, Palette, Mic } from '@lucide/svelte';
+  import { ArrowLeft, Bell, Brain, ChevronRight, Coins, Gauge, Monitor, Palette, Mic } from '@lucide/svelte';
   import type { Store } from '../lib/store.svelte';
   import { workspace } from '../lib/workspace.svelte';
   import { strings } from '../lib/strings';
@@ -10,13 +10,14 @@
   import PhoneSettings from './PhoneSettings.svelte';
   import UsagePage from './UsagePage.svelte';
   import VoiceSettings from './VoiceSettings.svelte';
+  import BrainPage from './BrainPage.svelte';
 
   let { store }: { store: Store } = $props();
   let phone = $state(false);
-  let page = $derived(store.settingsTab === 'appearance' || store.settingsTab === 'machines' || store.settingsTab === 'voice' || store.settingsTab === 'usage' || store.settingsTab === 'limits'
+  let page = $derived((store.owner && store.settingsTab === 'brain') || store.settingsTab === 'appearance' || store.settingsTab === 'machines' || store.settingsTab === 'voice' || store.settingsTab === 'usage' || store.settingsTab === 'limits'
     ? store.settingsTab : phone ? 'phone' : 'home');
   let machine = $derived(workspace.machines.find(machine => machine.store === store));
-  let title = $derived(page === 'phone' ? strings.mobile.settingsPhone
+  let title = $derived(page === 'brain' ? strings.brain.heading : page === 'phone' ? strings.mobile.settingsPhone
     : page === 'voice' ? strings.speech.heading : page === 'appearance' ? strings.settings.tabs.appearance
     : page === 'usage' ? strings.usage.heading : page === 'limits' ? strings.usage.limits : strings.machines.heading);
   let detail = $derived(page !== 'home');
@@ -51,6 +52,7 @@
           <button class="ghost row" data-testid="settings-tab-machines" onclick={() => store.showSettings('machines')}>
             <Monitor size={20} /><span><strong>{strings.connection.manage}</strong><small>{strings.mobile.settingsMachinesHint}</small></span><ChevronRight size={18} />
           </button>
+          {#if store.owner}<button class="ghost row" data-testid="settings-tab-brain" onclick={() => store.showSettings('brain')}><Brain size={20} /><span><strong>{strings.brain.heading}</strong><small>{strings.brain.description}</small></span><ChevronRight size={18} /></button>{/if}
           <button class="ghost row" data-testid="settings-tab-voice" onclick={() => store.showSettings('voice')}>
             <Mic size={20} /><span><strong>{strings.speech.heading}</strong><small>{strings.speech.phoneHint}</small></span><ChevronRight size={18} />
           </button>
@@ -70,7 +72,9 @@
       <h1>{title}</h1>
     </header>
     <div class="detail" data-testid="mobile-settings-detail">
-      {#if page === 'phone'}
+      {#if page === 'brain' && store.owner}
+        <BrainPage {store} />
+      {:else if page === 'phone'}
         <div class="page phone-page">
           <p class="scope" data-testid="mobile-settings-scope">{machine?.label ?? store.endpointUrl ?? strings.connection.current} · {strings.connection[store.connection]}</p>
           <PhoneSettings {store} showServerSettings={false} />

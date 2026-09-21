@@ -1016,7 +1016,7 @@ export class ThreadStore {
       account,
       provider,
       turn,
-      prompt: prepared.prompt + (turn.execution?.operation === 'compact' ? '' : this.core.coordination.instructions(threadId)),
+      prompt: (turn.execution?.operation || prepared.prompt.trimStart().startsWith('/') ? '' : this.core.brain.instructions(provider.id)) + prepared.prompt + (turn.execution?.operation === 'compact' ? '' : this.core.coordination.instructions(threadId)),
       coordination: () => this.core.coordination.take(threadId, turn.id),
       attachments: prepared.attachments,
       sessionId: thread.sessionId,

@@ -1,5 +1,21 @@
 /** Every user-facing string of the UI. No literal UI text lives anywhere else. */
 export const strings = {
+  brain: {
+    heading: 'Agent brain',
+    description: 'One folder for shared instructions, skills and agent plugins. Configure its local path on each machine.',
+    folder: 'Brain folder', pathHint: 'Absolute path on this machine', save: 'Use this folder', browse: 'Browse folders', useFolder: 'Choose this folder',
+    enabled: 'Share with agents', enabledHint: 'Include instructions and the skill catalog in normal turns. Changes apply on the next turn.',
+    disconnect: 'Disconnect folder', refresh: 'Refresh', sync: 'Synchronize', working: 'Working',
+    empty: 'Choose an existing brain folder to see what Boite detects.',
+    detected: 'Detected in this folder', instructions: 'Instructions', skill: 'Skills', plugin: 'Agent plugins',
+    pluginHint: 'Plugin manifests are detected only. Install and enable plugins with their agent. Boite extensions stay in Plugins.',
+    syncHint: 'Uses this checkout\'s Git upstream to fetch, fast-forward and push existing commits. Commit local edits first. Conflicts stay untouched.',
+    noGit: 'Local folder. Use a Git checkout with an upstream to synchronize between computers.',
+    noUpstream: 'Set a Git upstream branch before synchronizing.', dirty: 'Local edits need a commit before synchronizing.',
+    counts: '{ahead} commits to send, {behind} to receive', lastSync: 'Last synchronized', never: 'Not synchronized yet',
+    noEntries: 'No instruction entrypoints, skills or plugin manifests detected.',
+    missing: 'This machine needs a newer Boite to configure an agent brain.',
+  },
   speech: {
     heading: 'Voice', description: 'Dictate into any conversation. Review the text before sending.',
     start: 'Dictate', stop: 'Finish dictation', listening: 'Listening', opening: 'Waiting for microphone', transcribing: 'Transcribing',

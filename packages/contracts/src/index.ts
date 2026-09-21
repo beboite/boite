@@ -1324,7 +1324,33 @@ export interface CoordinationView {
   wakeLimit: number;
 }
 
+/** A brain lives on the core's machine. Detected plugins are not installed by Boite. */
+export interface BrainConfig {
+  path: string | null;
+  enabled: boolean;
+}
+
+export interface BrainEntry {
+  kind: 'instructions' | 'skill' | 'plugin';
+  path: string;
+  name: string;
+  description: string;
+  error: string | null;
+}
+
+export interface BrainStatus {
+  config: BrainConfig;
+  entries: BrainEntry[];
+  problems: string[];
+  git: { branch: string | null; upstream: string | null; ahead: number; behind: number; dirty: boolean } | null;
+  lastSync: number | null;
+}
+
 export interface RpcMethods {
+  'brain.status': { params: Record<string, never>; result: BrainStatus };
+  'brain.configure': { params: BrainConfig; result: BrainStatus };
+  /** Fetch, fast-forward and push existing commits. Never stage, stash, reset or force. */
+  'brain.sync': { params: Record<string, never>; result: BrainStatus };
   'collaboration.get': { params: { threadId: ThreadId }; result: CoordinationView };
   'collaboration.configure': { params: { threadId: ThreadId; config: CoordinationConfig }; result: CoordinationView };
   'collaboration.directory': { params: { threadId: ThreadId }; result: { agents: AgentContact[]; unavailable: string[] } };

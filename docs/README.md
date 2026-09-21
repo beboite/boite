@@ -4,6 +4,7 @@
 
 - [Accounts](accounts.md): agent logins and isolated accounts.
 - [Agent updates](agent-updates.md): update notices, the automatic update and remote machines.
+- [Agent brain](brain.md): shared instructions, skill discovery and Git synchronization.
 - [Model switching](model-switching.md): changing models and providers in one conversation.
 - [Context](context.md): context usage and compaction.
 - [Agent coordination](coordination.md): messages between agents, machine links and limits.

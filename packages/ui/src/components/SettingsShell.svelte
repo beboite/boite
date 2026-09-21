@@ -1,6 +1,7 @@
 <script lang="ts">
   import { MediaQuery } from 'svelte/reactivity';
   import MobileSettings from './MobileSettings.svelte';
+  import BrainPage from './BrainPage.svelte';
   import { ArrowLeft, ChevronRight, Coins, FlaskConical, Gauge, Keyboard, Mic, Monitor, Palette, Puzzle, Settings2, ShieldCheck, Users } from '@lucide/svelte';
   import KeyboardPage from './KeyboardPage.svelte';
   import LimitsPage from './LimitsPage.svelte';
@@ -22,7 +23,7 @@
   const inShell = window.__TAURI_INTERNALS__ !== undefined;
 
   /** Providers, Plugins and Resources call nothing a paired device may call. */
-  const OWNER_TABS: SettingsTab[] = ['accounts', 'plugins', 'resources'];
+  const OWNER_TABS: SettingsTab[] = ['accounts', 'plugins', 'resources', 'brain'];
 
   const all: { id: SettingsTab; label: string; icon: typeof Settings2 }[] = [
     { id: 'general', label: strings.settings.tabs.general, icon: Settings2 },
@@ -32,6 +33,7 @@
     { id: 'keyboard', label: strings.settings.tabs.keyboard, icon: Keyboard },
     { id: 'accounts', label: strings.settings.tabs.accounts, icon: Users },
     { id: 'plugins', label: strings.settings.tabs.plugins, icon: Puzzle },
+    { id: 'brain', label: strings.brain.heading, icon: Puzzle },
     { id: 'usage', label: strings.settings.tabs.usage, icon: Coins },
     { id: 'limits', label: strings.usage.limits, icon: Gauge },
     { id: 'resources', label: strings.settings.tabs.resources, icon: ShieldCheck },
@@ -132,7 +134,9 @@
        rather than swapping it in one frame. -->
   {#key tab}
     <section>
-      {#if tab === 'voice'}
+      {#if tab === 'brain'}
+        <BrainPage {store} />
+      {:else if tab === 'voice'}
         <VoiceSettings {store} />
       {:else if tab === 'general'}
         <GeneralSettings {store} />
