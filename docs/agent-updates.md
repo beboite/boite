@@ -51,10 +51,11 @@ A profile opts in with an `update` block:
 - `latestArgs`: arguments that print JSON carrying `latestVersion`, for an
   agent that checks by itself. Grok uses `update --check --json`.
 
-`latestNpm` and `latestArgs` exclude each other. With neither, the version is
-listed and no update is ever offered. Claude, Codex, OpenCode, Grok and pi ship
-with a block. Antigravity CLI and Muse Code publish no version Boite can read,
-so they are not listed.
+`latestNpm` and `latestArgs` exclude each other. With neither, the installed
+version is listed, no update is announced and `Run its updater` stays on the
+row. Claude, Codex, OpenCode, Grok and pi ship with a block that names its
+newest release. The Antigravity CLI ships with its updater alone, having no
+newest release Boite can read. Muse Code has no updater, so it is not listed.
 
 Every run of an agent goes through the process registry under the synthetic
 thread `update:<provider id>`, so it is traced and capped like any other agent
@@ -81,7 +82,8 @@ notice names the machine when more than one is connected.
 
 A server with no window needs no client at all: with
 `autoUpdateHarnesses` on, its core checks a minute after start and every six
-hours, and updates each agent once none of its turns is in flight. Turn it on
+hours, and updates each agent whose newest release it can read once none of
+its turns is in flight. Turn it on
 from Settings, Providers while that machine is the selected one. On Linux and
 macOS the shipped agents have no managed release, so they update through the
 self route, as the user the core runs as: an agent installed system-wide by
