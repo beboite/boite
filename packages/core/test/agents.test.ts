@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { realpathSync } from 'node:fs';
 import type { AgentProfile, AgentSave, AgentMissionTask } from '@boite/contracts';
 import { startTestCore, type TestCore } from './harness.ts';
 import type { CoreClient } from '../src/client.ts';
@@ -100,6 +101,6 @@ describe('persistent agents over RPC', () => {
     const value = { scope: { kind: 'agent' as const, id: agent.id }, name: 'Files', kind: 'directory' as const, value: 'missing-relative-directory', access: 'write' as const };
     await expect(client.call('agents.resource.save', { value })).rejects.toThrow('absolute');
     const resource = await client.call('agents.resource.save', { value: { ...value, value: h.dataDir } });
-    expect(resource.value).toBe(h.dataDir);
+    expect(resource.value).toBe(realpathSync(h.dataDir));
   });
 });

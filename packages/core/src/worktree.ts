@@ -1,5 +1,5 @@
-import { existsSync } from 'node:fs';
-import { basename, dirname, join, resolve } from 'node:path';
+import { existsSync, realpathSync } from 'node:fs';
+import { basename, dirname, join } from 'node:path';
 import type { Project, ThreadId } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { messageOf, refused } from './errors.ts';
@@ -54,7 +54,7 @@ export class Worktrees {
       const fields = entry.split('\0');
       const location = fields.find(field => field.startsWith('worktree '))?.slice(9);
       const name = fields.find(field => field.startsWith('branch '))?.slice(7);
-      if (location && resolve(location) === resolve(path) && name === `refs/heads/${branch}` && existsSync(join(path, '.git'))) return { path, branch };
+      if (location && name === `refs/heads/${branch}` && existsSync(location) && existsSync(join(path, '.git')) && realpathSync(location) === realpathSync(path)) return { path, branch };
     }
     return this.add(threadId, project, branch, branch);
   }

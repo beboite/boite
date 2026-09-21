@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, realpathSync, rmSync, symlinkSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { slugOf, worktreeRoot } from '../src/worktree.ts';
@@ -57,6 +57,23 @@ async function echoAccount(): Promise<string> {
 }
 
 describe('a thread in its own worktree', () => {
+  test('workspace recovery adopts the registered directory through a parent alias', async () => {
+    const root = join(harness.dataDir, 'real');
+    mkdirSync(root);
+    const project = await repoProject(join('real', 'repo'));
+    const row = harness.core.projects.require(project.id);
+    const branch = 'boite/recovered-agent';
+    const original = await harness.core.worktrees.ensure('thr_recover', row, branch);
+    const alias = join(harness.dataDir, 'alias');
+    symlinkSync(root, alias, process.platform === 'win32' ? 'junction' : 'dir');
+    try {
+      const adopted = await harness.core.worktrees.ensure('thr_recover', { ...row, path: join(alias, 'repo') }, branch);
+      expect(realpathSync(adopted.path)).toBe(realpathSync(original.path));
+      expect(adopted.branch).toBe(branch);
+      expect(git(project.path, 'worktree', 'list', '--porcelain').split(`branch refs/heads/${branch}`)).toHaveLength(2);
+    } finally { unlinkSync(alias); }
+  });
+
   test('the slug and the root are what name the branch and its directory', () => {
     expect(slugOf('Fix the login: retry on 401!')).toBe('fix-the-login-retry-on-401');
     expect(slugOf('   ')).toBe('thread');
