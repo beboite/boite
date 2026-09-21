@@ -13,11 +13,15 @@ import type { Channel, PairingGrant, PairingRole, Settings } from '@boite/contra
 import { processIo, runCli } from './cli.ts';
 import { connect } from './client.ts';
 import { CORE_VERSION, Core } from './core.ts';
+import { messageOf } from './errors.ts';
 import { newToken } from './ids.ts';
 import { resolveDataDir } from './paths.ts';
 import { startServer } from './server.ts';
 
 const CHANNELS: readonly Channel[] = ['stable', 'dev'];
+
+/** How long a graceful shutdown may take before the process leaves anyway. */
+const SHUTDOWN_TIMEOUT_MS = 10_000;
 
 interface CoreFile {
   port: number;
@@ -289,12 +293,31 @@ export function main(argv: string[]): void {
 
   let stopping = false;
   const shutdown = (): void => {
-    if (stopping) return;
+    // A second signal is the operator saying the graceful path is taking too
+    // long. Honour it rather than ignoring it, which used to leave no way out
+    // short of killing the process.
+    if (stopping) {
+      core.log('warn', 'second shutdown signal, exiting now');
+      process.exit(1);
+    }
     stopping = true;
-    void server
-      .stop()
+    // A driver that never answers its stop must not hold the process open, and
+    // a rejection anywhere in the chain must not skip unlock() and the exit.
+    const deadline = setTimeout(() => {
+      core.log('error', `shutdown did not finish in ${SHUTDOWN_TIMEOUT_MS} ms, exiting`);
+      unlock();
+      process.exit(1);
+    }, SHUTDOWN_TIMEOUT_MS);
+    deadline.unref();
+    void core
+      .drain()
+      .then(() => server.stop())
       .then(() => core.close())
-      .then(() => {
+      .catch((error: unknown) => {
+        core.log('error', `shutdown failed: ${messageOf(error)}`);
+      })
+      .finally(() => {
+        clearTimeout(deadline);
         unlock();
         process.exit(0);
       });

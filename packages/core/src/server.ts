@@ -100,7 +100,7 @@ export class ServerConnection implements Connection {
    * A remote client gets its text every `REMOTE_DELTA_WINDOW_MS` rather than
    * every 16 ms. Each frame costs its envelope, its ids and the headers under
    * it whatever text it carries, so five deltas in one frame are a fifth of
-   * the bytes, and the UI redraws a streaming part every 48 ms anyway. Any
+   * the bytes, and the UI only re-renders a paragraph once it closes. Any
    * other frame on this socket, an event or a response, sends what is held
    * first: a client never sees a card, or a snapshot, before the text that
    * came before it.
@@ -614,10 +614,14 @@ async function handleFrame(core: Core, connection: ServerConnection, raw: string
       connection.sendResponse({ jsonrpc: '2.0', id, error: error.toError() });
       return;
     }
+    // An unexpected throw is a bug here, not something the user can act on.
+    // SQLite sentences, absolute paths and stack fragments used to reach the
+    // screen verbatim. The cause stays in the log, the client gets a sentence.
+    core.log('error', `${method} failed: ${messageOf(error)}`);
     connection.sendResponse({
       jsonrpc: '2.0',
       id,
-      error: { code: RpcErrorCode.Internal, message: messageOf(error) },
+      error: { code: RpcErrorCode.Internal, message: 'Something went wrong. Try again.' },
     });
   }
 }

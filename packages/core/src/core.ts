@@ -186,9 +186,25 @@ export class Core {
     this.bus.emit('core.log', { level, message, at: Date.now() });
   }
 
+  /**
+   * Shutdown, first half. The scheduler stops what runs and waits for it while
+   * the sockets are still open and the bus still has its listeners, so a turn
+   * that ends during shutdown still reaches the clients watching it. Closing
+   * the server first emitted `turn.finished` to nobody.
+   */
+  async drain(timeoutMs?: number): Promise<void> {
+    this.coordination.beginClose();
+    this.#drained = true;
+    await this.scheduler.drain(timeoutMs);
+  }
+
+  /** Whether the wait above has already been spent, so `close()` does not spend a second one. */
+  #drained = false;
+
   async close(): Promise<void> {
     this.coordination.beginClose();
-    await this.scheduler.drain();
+    // Reuse the shutdown wait already spent by drain(), while stopping late arrivals.
+    await this.scheduler.drain(this.#drained ? 0 : undefined);
     await this.coordination.close();
     await this.speech.close();
     await this.push.close();
