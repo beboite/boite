@@ -32,6 +32,7 @@ function read(root: string, path: string): string {
 
 /** Only instruction entrypoints and catalog folders are inspected. Never execute a brain script. */
 export function scanBrain(root: string): { entries: BrainEntry[]; problems: string[] } {
+  root = realpathSync(root);
   if (!statSync(root).isDirectory()) throw refused(`${root}: expected an existing brain folder`);
   const entries: BrainEntry[] = [], problems: string[] = [];
   const visited = new Set<string>();

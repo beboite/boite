@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
-import { mkdirSync, readFileSync, renameSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, realpathSync, renameSync, symlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { scanBrain } from '../src/brain.ts';
 import { BrainStore } from '../src/brain.ts';
@@ -8,11 +8,19 @@ import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts'
 
 let h: TestCore;
 let root: string;
-beforeEach(async () => { h = await startTestCore(); root = join(h.dataDir, 'brain'); mkdirSync(root); });
+beforeEach(async () => { h = await startTestCore(); root = join(h.dataDir, 'brain'); mkdirSync(root); root = realpathSync(root); });
 afterEach(async () => { await h.stop(); });
 function file(path: string, text: string) { mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, text); }
 async function git(cwd: string, args: string[]) {
-  const p = h.core.procs.spawn('brain-test', 'git', args, { cwd });
+  // Fixture commits must not depend on a developer's identity or signing config.
+  const env = {
+    ...process.env,
+    GIT_CONFIG_GLOBAL: process.platform === 'win32' ? 'NUL' : '/dev/null',
+    GIT_CONFIG_NOSYSTEM: '1',
+    GIT_AUTHOR_NAME: 'boite test', GIT_AUTHOR_EMAIL: 'test@boite.invalid',
+    GIT_COMMITTER_NAME: 'boite test', GIT_COMMITTER_EMAIL: 'test@boite.invalid',
+  };
+  const p = h.core.procs.spawn('brain-test', 'git', args, { cwd, env });
   const [stdout, stderr, exit] = await Promise.all([new Response(p.proc.stdout).text(), new Response(p.proc.stderr).text(), p.exited]);
   if (exit) throw new Error(`git ${args[0]}: ${stderr}`);
   return stdout.trim();
@@ -47,6 +55,14 @@ test('junction cycles are bounded and outside catalog links are refused without 
   const result = scanBrain(root);
   expect(result.entries).toEqual([]);
   expect(result.problems.join()).toContain('outside the brain');
+});
+
+test('a brain reached through a directory alias has the same catalog', () => {
+  file(join(root, 'AGENTS.md'), 'Shared conventions');
+  file(join(root, 'skills/review/SKILL.md'), '---\nname: review\ndescription: Review changes.\n---\n');
+  const alias = join(h.dataDir, 'brain-alias');
+  symlinkSync(root, alias, process.platform === 'win32' ? 'junction' : 'dir');
+  expect(scanBrain(alias)).toEqual(scanBrain(root));
 });
 
 test('owner configures, disables and disconnects the brain; invalid paths preserve the previous config', async () => {
