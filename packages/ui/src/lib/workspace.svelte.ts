@@ -76,7 +76,7 @@ export class Workspace {
     const remote = new Store();
     remote.machineId = 'http://builder.test';
     remote.visible = false;
-    remote.attach(new FakeClient());
+    remote.attach(new FakeClient({ coreId: 'fake-builder', coreName: 'Builder', publicUrl: 'https://builder.test' }));
     await remote.connect();
     if (!this.#current(lifecycle)) {
       remote.client?.close();

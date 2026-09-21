@@ -569,6 +569,12 @@ class CodexSession {
     void rpc.request('turn/interrupt', { threadId, turnId: turn.turnId }).catch(() => undefined);
   }
 
+  async steer(turn: CodexTurn, text: string): Promise<boolean> {
+    if (this.current !== turn || turn.settled || turn.isStopped || !this.rpc || !this.threadId || !turn.turnId) return false;
+    await this.rpc.request('turn/steer', { threadId: this.threadId, expectedTurnId: turn.turnId, input: [{ type: 'text', text, text_elements: [] }] });
+    return true;
+  }
+
   /** Archive, shutdown, an idle window, a changed setup: the process goes. */
   close(reason: string | null, ctx?: TurnContext): void {
     if (this.ended) return;
@@ -1424,6 +1430,7 @@ export function createCodexDriver(): Driver {
       running.attach(turn, warmMs);
       return {
         done: turn.done,
+        steer: (text) => running.steer(turn, text),
         stop: (): void => {
           running.stopTurn(turn);
         },

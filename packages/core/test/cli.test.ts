@@ -59,6 +59,26 @@ test('splits a trailing line off a path and leaves a drive letter alone', () => 
   expect(splitLine('C:\\x\\a.ts:3')).toEqual({ path: 'C:\\x\\a.ts', line: 3 });
 });
 
+test('agents commands discover, send and reply using the calling thread identity', async () => {
+  const client = await harness.connect();
+  const other = (await echoThread(harness, client, 'VM worker')).threadId;
+  const config = { mode: 'brief' as const, resources: 'VM', remote: false, paused: false };
+  harness.core.coordination.configure(threadId, config);
+  harness.core.coordination.configure(other, config);
+  const listed = await boite(['agents', 'list', '--json']);
+  expect(listed.code).toBe(0);
+  const contact = JSON.parse(listed.out).agents[0];
+  const sent = await boite(['agents', 'send', `${contact.coreId}/${other}`, 'Can I restart?', '--json']);
+  expect(sent.code).toBe(0);
+  const letter = JSON.parse(sent.out);
+  expect(letter.from.threadId).toBe(threadId);
+  const incoming = await harness.core.coordination.send({ threadId: other, to: harness.core.coordination.get(threadId).self, text: 'Wait', replyTo: letter.id, requestId: 'reply' });
+  const reply = await boite(['agents', 'reply', incoming.id, 'Understood', '--json']);
+  expect(reply.code).toBe(0);
+  expect(JSON.parse(reply.out).replyTo).toBe(incoming.id);
+  expect((await boite(['agents', 'inbox'])).out).toContain('from=');
+});
+
 describe('usage', () => {
   test('a bare call and a bad flag exit 2, help exits 0', async () => {
     const bare = await boite([]);

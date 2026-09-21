@@ -29,6 +29,7 @@ import { ActivityStore } from './activity.ts';
 import { PushStore } from './push.ts';
 import { SpeechStore } from './speech.ts';
 import { HarnessUpdates } from './providers/updates.ts';
+import { Coordination } from './coordination.ts';
 
 export const CORE_VERSION: string = pkg.version;
 
@@ -110,6 +111,7 @@ export class Core {
   readonly cliDir: string | null = resolveCliDir();
   readonly speech: SpeechStore;
   readonly updates: HarnessUpdates;
+  readonly coordination: Coordination;
 
   /**
    * The server tells the core what it alone can know. The default answers no
@@ -146,6 +148,7 @@ export class Core {
     this.push = new PushStore(this);
     this.speech = new SpeechStore(this);
     this.updates = new HarnessUpdates(this);
+    this.coordination = new Coordination(this);
 
     registerModules(this);
     this.procs.applySettings(this.settings.get());
@@ -193,6 +196,7 @@ export class Core {
    * the server first emitted `turn.finished` to nobody.
    */
   async drain(timeoutMs?: number): Promise<void> {
+    this.coordination.beginClose();
     this.#drained = true;
     await this.scheduler.drain(timeoutMs);
   }
@@ -202,15 +206,14 @@ export class Core {
 
   async close(): Promise<void> {
     this.updates.close();
+    this.coordination.beginClose();
+    // Reuse the shutdown wait already spent by drain(), while stopping late arrivals.
+    await this.scheduler.drain(this.#drained ? 0 : undefined);
+    await this.coordination.close();
     await this.speech.close();
     await this.push.close();
     this.activity.close();
     await this.plugins.close();
-    // A turn that ignores its stop is waited for once, not twice: `main()`
-    // drains before the server closes, and spending that budget again here ran
-    // the shutdown past its own deadline, which exited before anything below
-    // this line. The second pass still stops what arrived in between.
-    await this.scheduler.drain(this.#drained ? 0 : undefined);
     this.providers.installs.stop();
     shutdownDrivers();
     await this.accounts.closeLogins();

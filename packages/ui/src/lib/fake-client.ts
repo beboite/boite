@@ -12,6 +12,10 @@ import {
   type AgentCommand,
   type AgentTask,
   type AgentWhere,
+  type AgentLetter,
+  type CoordinationConfig,
+  type CoordinationPeer,
+  type CoordinationView,
   type PluginManifest,
   type PluginPreview,
   type PluginState,
@@ -73,6 +77,10 @@ export interface FakeClientOptions {
   uninstalled?: boolean;
   /** Who this client is. `'session'` makes it a paired phone, refused like one. */
   principal?: Principal;
+  /** Stable public identity for multi-machine coordination tests. */
+  coreId?: string;
+  coreName?: string;
+  publicUrl?: string;
 }
 
 /*
@@ -114,6 +122,8 @@ const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>([
   'usage.get',
   'usage.history',
   'settings.get',
+  'collaboration.get',
+  'collaboration.directory',
   'speech.status', 'speech.transcribe', 'speech.cancel',
   'keybindings.get'
 ]);
@@ -886,6 +896,7 @@ function quietUpdates(): boolean {
 }
 
 export class FakeClient implements ObservableClient {
+  static #cores = new Map<string, FakeClient>();
   #state: ClientState = 'idle';
   #handlers = new Map<string, Set<(payload: unknown) => void>>();
   #stateHandlers = new Set<(state: ClientState) => void>();
@@ -905,6 +916,10 @@ export class FakeClient implements ObservableClient {
   #installBefore = new Map<string, ProviderInstallState>();
   #accounts: Account[] = [];
   #threads = new Map<ThreadId, Thread>();
+  #coordination = new Map<ThreadId, CoordinationConfig>();
+  #letters = new Map<ThreadId, AgentLetter[]>();
+  #peers = new Map<string, CoordinationPeer>();
+  #identity: CoordinationPeer;
   #activityTimers = new Map<string, ReturnType<typeof setTimeout>>();
   #activityTurns = new Map<string, { kind: 'goal' | 'loop'; generation: number }>();
   #activityGenerations = new Map<string, number>();
@@ -964,6 +979,14 @@ export class FakeClient implements ObservableClient {
     this.#delayMs = options.delayMs ?? 18;
     this.#long = options.long ?? false;
     this.#principal = options.principal ?? 'owner';
+    const coreId = options.coreId ?? `fake-core-${crypto.randomUUID()}`;
+    this.#identity = {
+      coreId,
+      name: options.coreName ?? 'This PC',
+      url: options.publicUrl ?? 'http://127.0.0.1:8777',
+      publicKey: `fake-public-key-${coreId}`
+    };
+    FakeClient.#cores.set(coreId, this);
     this.#settings = {
       maxConcurrentTurns: 6,
       perAccountConcurrency: 2,
@@ -1072,6 +1095,7 @@ export class FakeClient implements ObservableClient {
   }
 
   close(): void {
+    if (FakeClient.#cores.get(this.#identity.coreId) === this) FakeClient.#cores.delete(this.#identity.coreId);
     for (const thread of this.#threads.values()) this.#pauseActivity(thread);
     for (const [id, run] of this.#pluginRuns) this.#pluginRuns.set(id, run + 1);
     this.#setState('closed');
@@ -1817,6 +1841,131 @@ export class FakeClient implements ObservableClient {
 
       case 'settings.get':
         return { ...this.#settings };
+      case 'collaboration.get': {
+        const { threadId } = rawParams as RpcParams<'collaboration.get'>;
+        this.#thread(threadId);
+        return this.#coordinationView(threadId);
+      }
+      case 'collaboration.configure': {
+        const { threadId, config } = rawParams as RpcParams<'collaboration.configure'>;
+        this.#thread(threadId);
+        if (!['off', 'brief', 'team'].includes(config.mode) || typeof config.resources !== 'string' || config.resources.length > 500 || typeof config.remote !== 'boolean' || typeof config.paused !== 'boolean') {
+          throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'config: expected mode, resources, remote and paused' });
+        }
+        this.#coordination.set(threadId, { ...config, resources: config.resources.trim() });
+        this.#emit('collaboration.changed', { threadId });
+        return this.#coordinationView(threadId);
+      }
+      case 'collaboration.directory': {
+        const { threadId } = rawParams as RpcParams<'collaboration.directory'>;
+        const source = this.#thread(threadId);
+        const sourceConfig = this.#coordinationConfig(threadId);
+        if (sourceConfig.mode === 'off') return { agents: [], unavailable: [] };
+        const agents = [...this.#threads.values()]
+          .filter(thread => thread.id !== threadId && !thread.archived && (thread.projectId === source.projectId || sourceConfig.remote && this.#coordinationConfig(thread.id).remote))
+          .map(thread => {
+            const config = this.#coordinationConfig(thread.id);
+            return {
+              coreId: this.#identity.coreId,
+              threadId: thread.id,
+              title: thread.title,
+              machine: this.#identity.name,
+              resources: config.resources,
+              status: thread.status,
+              mode: config.mode
+            };
+          })
+          .filter(agent => agent.mode !== 'off');
+        const unavailable: string[] = [];
+        if (sourceConfig.remote) for (const peer of this.#peers.values()) {
+          const target = FakeClient.#cores.get(peer.coreId);
+          if (!target || !target.#peers.has(this.#identity.coreId)) { unavailable.push(peer.name); continue; }
+          for (const thread of target.#threads.values()) {
+            const config = target.#coordinationConfig(thread.id);
+            if (thread.archived || config.mode === 'off' || !config.remote) continue;
+            agents.push({ coreId: peer.coreId, threadId: thread.id, title: thread.title, machine: peer.name, resources: config.resources, status: thread.status, mode: config.mode });
+          }
+        }
+        return { agents, unavailable };
+      }
+      case 'collaboration.send': {
+        const params = rawParams as RpcParams<'collaboration.send'>;
+        const source = this.#thread(params.threadId);
+        const config = this.#coordinationConfig(source.id);
+        if (config.mode === 'off' || config.paused) {
+          throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'coordination is off or paused for this thread' });
+        }
+        const existing = this.#letters.get(source.id)?.find(letter => letter.id === params.requestId);
+        if (existing) {
+          if (existing.text !== params.text.trim() || existing.to.coreId !== params.to.coreId || existing.to.threadId !== params.to.threadId || existing.replyTo !== (params.replyTo ?? null)) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'requestId already used for different content' });
+          return structuredClone(existing);
+        }
+        if (!params.text.trim() || params.text.length > 4000 || this.#coordinationView(source.id).sent >= (config.mode === 'brief' ? 6 : 40)) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'message size or hourly budget exceeded' });
+        const destination = params.to.coreId === this.#identity.coreId ? this : FakeClient.#cores.get(params.to.coreId);
+        const target = destination ? destination.#threads.get(params.to.threadId) : undefined;
+        if (!target || target.archived || destination!.#coordinationConfig(target.id).mode === 'off') {
+          throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'recipient is unavailable for coordination' });
+        }
+        if (destination === this && target.projectId !== source.projectId && !(config.remote && this.#coordinationConfig(target.id).remote)) {
+          throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'both threads must allow coordination across projects' });
+        }
+        if (destination !== this && (!config.remote || !this.#peers.has(params.to.coreId) || !destination || !destination.#peers.has(this.#identity.coreId) || !destination.#coordinationConfig(target.id).remote)) {
+          throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'remote core is not trusted' });
+        }
+        const letter: AgentLetter = {
+          id: params.requestId,
+          from: {
+            coreId: this.#identity.coreId,
+            threadId: source.id,
+            title: source.title,
+            machine: this.#identity.name,
+            resources: config.resources,
+            status: source.status,
+            mode: config.mode
+          },
+          to: params.to,
+          toTitle: target?.title ?? this.#peers.get(params.to.coreId)?.name ?? params.to.threadId,
+          text: params.text.trim(),
+          replyTo: params.replyTo ?? null,
+          createdAt: this.#now(),
+          expiresAt: this.#now() + 15 * 60_000,
+          status: 'delivered',
+          error: null
+        };
+        this.#letters.set(source.id, [...(this.#letters.get(source.id) ?? []), letter]);
+        this.#emit('collaboration.changed', { threadId: source.id });
+        destination!.#letters.set(target.id, [...(destination!.#letters.get(target.id) ?? []), letter]);
+        destination!.#emit('collaboration.changed', { threadId: target.id });
+        return structuredClone(letter);
+      }
+      case 'collaboration.identity':
+        return structuredClone(this.#identity);
+      case 'collaboration.peers':
+        return structuredClone([...this.#peers.values()]);
+      case 'collaboration.check': {
+        const { coreId } = rawParams as RpcParams<'collaboration.check'>;
+        const peer = this.#peers.get(coreId);
+        const target = FakeClient.#cores.get(coreId);
+        if (!peer || !target || !target.#peers.has(this.#identity.coreId) || target.#identity.url !== peer.url) {
+          throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'machine is unreachable or mutual trust is missing' });
+        }
+        return { ok: true };
+      }
+      case 'collaboration.trust': {
+        const { peer } = rawParams as RpcParams<'collaboration.trust'>;
+        let url: URL;
+        try { url = new URL(peer.url); } catch { throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'peer.url: expected an HTTPS or loopback URL' }); }
+        const loopback = url.protocol === 'http:' && ['127.0.0.1', '[::1]'].includes(url.hostname);
+        if (url.username || url.password || url.search || url.hash || url.pathname !== '/' || (url.protocol !== 'https:' && !loopback)) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'peer.url: expected HTTPS origin, or numeric loopback HTTP' });
+        if (!peer.coreId || !peer.publicKey || peer.coreId === this.#identity.coreId) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'peer: expected another core public identity' });
+        this.#peers.set(peer.coreId, structuredClone(peer));
+        return structuredClone(peer);
+      }
+      case 'collaboration.untrust': {
+        const { coreId } = rawParams as RpcParams<'collaboration.untrust'>;
+        this.#peers.delete(coreId);
+        return { ok: true };
+      }
       case 'speech.config': return { ...this.#speech };
       case 'speech.status': return { ...this.#speechStatus };
       case 'speech.configure': {
@@ -2157,6 +2306,26 @@ export class FakeClient implements ObservableClient {
         });
       }
     }
+  }
+
+  #coordinationConfig(threadId: ThreadId): CoordinationConfig {
+    return this.#coordination.get(threadId) ?? { mode: 'off', resources: '', remote: false, paused: false };
+  }
+
+  #coordinationView(threadId: ThreadId): CoordinationView {
+    const config = this.#coordinationConfig(threadId);
+    const letters = this.#letters.get(threadId) ?? [];
+    const sendLimit = config.mode === 'brief' ? 6 : config.mode === 'team' ? 40 : 0;
+    const wakeLimit = config.mode === 'brief' ? 2 : config.mode === 'team' ? 12 : 0;
+    return {
+      self: { coreId: this.#identity.coreId, threadId },
+      config: structuredClone(config),
+      messages: structuredClone(letters),
+      sent: letters.filter(letter => letter.from.coreId === this.#identity.coreId && letter.from.threadId === threadId && letter.createdAt > this.#now() - 3_600_000).length,
+      sendLimit,
+      wakes: 0,
+      wakeLimit
+    };
   }
 
   #quotas(): AccountQuota[] {

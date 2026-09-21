@@ -4,6 +4,7 @@
   import { store as primary } from '../lib/store.svelte';
   import { strings } from '../lib/strings';
   import MachineIcon from './MachineIcon.svelte';
+  import RemoteCoordination from './RemoteCoordination.svelte';
   let { mobile = false }: { mobile?: boolean } = $props();
   let label = $state(''),
     link = $state(''),
@@ -150,6 +151,10 @@
       </section>
     {/each}
   </div>
+
+  {#if !mobile && workspace.machines.some(machine => machine.store.owner)}
+    <RemoteCoordination />
+  {/if}
 
   {#if workspace.active.owner && !mobile}
     <details class="card origins">

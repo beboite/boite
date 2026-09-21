@@ -40,6 +40,10 @@ export const USAGE = `usage: boite <command> [args] [--json]
   todo list                      the project's todo list
   todo add <text>                add a card for the user
   todo claim <id>                mark a card finished, awaiting the user
+  agents list                    authorized agents and shared resources
+  agents inbox                   agent messages, provenance and delivery state
+  agents send <core>/<thread> <text>
+  agents reply <message-id> <text>
 
   --thread <id> --data-dir <dir> --channel <stable|dev>
                                  drive a thread from outside it, as the owner`;
@@ -188,6 +192,34 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
   };
 
   switch (command) {
+    case 'agents': {
+      const action = want(0, 'list, inbox, send or reply');
+      if (action === 'list') {
+        const result = await client.call('collaboration.directory', { threadId });
+        print([...result.agents.map(a => `${a.coreId}/${a.threadId} ${JSON.stringify(a.title)} machine=${JSON.stringify(a.machine)} ${a.status} resources=${JSON.stringify(a.resources)}`), ...result.unavailable.map(name => `unavailable: ${JSON.stringify(name)}`)], result);
+      } else if (action === 'inbox') {
+        const result = await client.call('collaboration.get', { threadId });
+        print([`mode: ${result.config.mode}${result.config.paused ? ' (paused)' : ''}`, `budget: ${result.sent}/${result.sendLimit} sent this hour`, ...result.messages.map(m => `${m.id} ${m.status} from=${JSON.stringify(m.from)} to=${JSON.stringify(m.to)} text=${JSON.stringify(m.text)}${m.error ? ` error=${JSON.stringify(m.error)}` : ''}`)], result);
+      } else if (action === 'send' || action === 'reply') {
+        const target = want(1, 'a recipient or incoming message id');
+        const body = rest.slice(2).join(' ');
+        if (!body) throw new Usage('agents send/reply needs message text');
+        let to: { coreId: string; threadId: string };
+        if (action === 'reply') {
+          const view = await client.call('collaboration.get', { threadId });
+          const letter = view.messages.find(m => m.id === target && m.to.coreId === view.self.coreId && m.to.threadId === threadId);
+          if (!letter) throw new Usage('reply needs an incoming message id from agents inbox');
+          to = { coreId: letter.from.coreId, threadId: letter.from.threadId };
+        } else {
+          const [coreId, targetThreadId, extra] = target.split('/');
+          if (!coreId || !targetThreadId || extra) throw new Usage('recipient must be <core-id>/<thread-id> from agents list');
+          to = { coreId, threadId: targetThreadId };
+        }
+        const letter = await client.call('collaboration.send', { threadId, to, text: body, requestId: crypto.randomUUID(), ...(action === 'reply' ? { replyTo: target } : {}) });
+        print([`id: ${letter.id}`, `status: ${letter.status}`, 'Delivery is not consent. Wait for an explicit reply before a disruptive action.', ...(letter.error ? [`error: ${letter.error}`] : [])], letter);
+      } else throw new Usage('agents expects list, inbox, send or reply');
+      return;
+    }
     case 'where': {
       const where = await client.call('agent.where', { threadId });
       print(

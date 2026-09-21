@@ -52,7 +52,7 @@ test('queued prompts keep their thread, and browser project and account actions 
     await page.waitFor('document.querySelector("[data-testid=draft-row]")');
     expect((await client.call('projects.list', {})).some((entry) => entry.path === directory)).toBe(true);
 
-    await page.send('Emulation.clearDeviceMetricsOverride', {});
+    await page.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
     const isolated = await client.call('accounts.add', { providerId: 'echo', label: 'Temporary account' });
     await page.click(selector('nav-settings'));
     await page.click(selector('settings-tab-accounts'));

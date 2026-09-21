@@ -88,7 +88,7 @@ test('favorites survive reload, reasoning has discrete stops, and the context ri
   await page.click('[data-testid=composer-picker]');
   await page.waitFor(`document.querySelector('[data-testid=favorite-model]')`);
   await capture('favorites-phone.png');
-  await page.send('Emulation.clearDeviceMetricsOverride', {});
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
   await page.navigate(url);
   await page.waitFor(`document.querySelector('[data-testid=context-trigger]')`);
   await page.click('[data-testid=context-trigger]');
@@ -106,7 +106,7 @@ test('favorites survive reload, reasoning has discrete stops, and the context ri
 }, 30_000);
 
 test('legacy models open beside the picker and preserve the page position', async () => {
-  await page.send('Emulation.clearDeviceMetricsOverride', {});
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
   await page.navigate(url);
   await page.waitFor(`document.querySelector('[data-testid=composer-picker]')`);
   const before = await page.evaluate<number>(`document.querySelector('[data-testid=composer]').getBoundingClientRect().top`);
@@ -162,12 +162,12 @@ test('the accent persists and colours the effort track continuously to the thumb
   await page.click('[data-testid=settings-tab-appearance]');
   await capture('appearance-accent-phone.png');
   await page.click('[data-testid=accent-260]');
-  await page.send('Emulation.clearDeviceMetricsOverride', {});
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
 }, 30_000);
 
 
 test('model picker flips upward without moving the composer and scrolls long lists', async () => {
-  await page.send('Emulation.clearDeviceMetricsOverride', {});
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
   await page.navigate(url);
   await page.waitFor(`document.querySelector('[data-testid=composer-picker]')`);
   await page.click('[data-testid=composer-picker]');
@@ -195,7 +195,7 @@ test('model picker flips upward without moving the composer and scrolls long lis
 
 
 test('speed controls follow the selected model and Codex never offers Ultrathink', async () => {
-  await page.send('Emulation.clearDeviceMetricsOverride', {});
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
   await page.navigate(url);
   await page.waitFor(`document.querySelector('[data-testid=composer-picker]')`);
   await page.click('[data-testid=composer-picker]');
@@ -233,7 +233,7 @@ test('speed controls follow the selected model and Codex never offers Ultrathink
 }, 30_000);
 
 test('the draft keeps a compact composer above a detached favorites menu', async () => {
-  await page.send('Emulation.clearDeviceMetricsOverride', {});
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
   await page.navigate(url);
   await page.waitFor(`document.querySelector('[data-testid=new-thread]')`);
   await page.click('[data-testid=new-thread]');

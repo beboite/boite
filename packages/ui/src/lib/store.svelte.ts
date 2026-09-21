@@ -4,6 +4,10 @@ import { activityCommand } from './activity-command';
 import type {
   Account,
   AgentTask,
+  AgentContact,
+  CoordinationConfig,
+  CoordinationPeer,
+  CoordinationView,
   CoreInfo,
   FileContent,
   FileEntry,
@@ -347,6 +351,13 @@ export class Store {
    */
   permissionRequests = $state<Record<RequestId, PermissionRequest>>({});
   pendingQuestions = $state<QuestionRequest[]>([]);
+  /** Native agent-to-agent traffic for the open thread. It is separate from chat messages. */
+  coordination = $state<CoordinationView | null>(null);
+  coordinationDirectory = $state<{ agents: AgentContact[]; unavailable: string[] } | null>(null);
+  coordinationLoading = $state(false);
+  coordinationSaving = $state(false);
+  #coordinationEpoch = 0;
+  coordinationError = $state<string | null>(null);
   /** Kept after the answer so a folded card still shows what was asked. Same bound. */
   questionRequests = $state<Record<RequestId, QuestionRequest>>({});
   collapsedProjects = $state<string[]>([]);
@@ -701,6 +712,9 @@ export class Store {
     on('thread.activity', ({ threadId, activity }) => {
       if (this.openThread?.id === threadId) this.openThread.activity = activity;
     });
+    on('collaboration.changed', ({ threadId }) => {
+      if (this.openThread?.id === threadId) void this.loadCoordination(threadId, false);
+    });
     // The agent of a thread asked its panel for something. The layout is per
     // thread, so it is written on that thread's panel even while another one is
     // on screen: opening the thread later shows what was asked for.
@@ -873,6 +887,12 @@ export class Store {
   }
 
   detach(): void {
+    this.#coordinationEpoch++;
+    this.coordination = null;
+    this.coordinationDirectory = null;
+    this.coordinationLoading = false;
+    this.coordinationSaving = false;
+    this.coordinationError = null;
     for (const off of this.#off) off();
     this.#off = [];
     this.#client = null;
@@ -1108,6 +1128,70 @@ export class Store {
     } catch (error) {
       this.#fail(error);
     }
+  }
+
+  async loadCoordination(threadId = this.openThread?.id, withDirectory = true): Promise<void> {
+    const client = this.#client;
+    if (!client || !threadId) return;
+    const epoch = ++this.#coordinationEpoch;
+    const current = () => this.#client === client && this.openThread?.id === threadId && this.#coordinationEpoch === epoch;
+    if (this.coordination?.self.threadId !== threadId) { this.coordination = null; this.coordinationDirectory = null; }
+    this.coordinationLoading = true;
+    this.coordinationError = null;
+    try {
+      const view = await client.call('collaboration.get', { threadId });
+      if (!current()) return;
+      this.coordination = view;
+      if (withDirectory) {
+        const directory = await client.call('collaboration.directory', { threadId });
+        if (current()) this.coordinationDirectory = directory;
+      }
+    } catch (error) {
+      if (current()) this.coordinationError = error instanceof Error ? error.message : String(error);
+    } finally {
+      if (current()) this.coordinationLoading = false;
+    }
+  }
+
+  async configureCoordination(config: CoordinationConfig): Promise<void> {
+    const client = this.#client;
+    const threadId = this.openThread?.id;
+    if (!client || !threadId || !this.owner || this.coordinationSaving) return;
+    this.coordinationSaving = true;
+    this.coordinationError = null;
+    try {
+      await client.call('collaboration.configure', { threadId, config });
+      if (this.#client === client && this.openThread?.id === threadId) await this.loadCoordination(threadId);
+    } catch (error) {
+      if (this.#client === client && this.openThread?.id === threadId) this.coordinationError = error instanceof Error ? error.message : String(error);
+    } finally {
+      if (this.#client === client) this.coordinationSaving = false;
+    }
+  }
+
+  async coordinationIdentity(): Promise<CoordinationPeer> {
+    if (!this.#client) throw new Error(strings.connection.unavailable);
+    return this.#client.call('collaboration.identity', {});
+  }
+
+  async coordinationPeers(): Promise<CoordinationPeer[]> {
+    if (!this.#client) throw new Error(strings.connection.unavailable);
+    return this.#client.call('collaboration.peers', {});
+  }
+
+  async checkCoordinationPeer(coreId: string): Promise<void> {
+    if (!this.#client) throw new Error(strings.connection.unavailable);
+    await this.#client.call('collaboration.check', { coreId });
+  }
+
+  async trustCoordinationPeer(peer: CoordinationPeer): Promise<CoordinationPeer> {
+    if (!this.#client) throw new Error(strings.connection.unavailable);
+    return this.#client.call('collaboration.trust', { peer });
+  }
+
+  async untrustCoordinationPeer(coreId: string): Promise<void> {
+    if (!this.#client) throw new Error(strings.connection.unavailable);
+    await this.#client.call('collaboration.untrust', { coreId });
   }
 
   /** Point the UI at another core, from the Settings page. It stays remembered. */

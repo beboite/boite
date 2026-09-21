@@ -1,8 +1,30 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { echoThread, startTestCore, type TestCore } from './harness.ts';
+import { setDriver } from '../src/drivers/index.ts';
+import { echoDriver } from '../src/drivers/echo.ts';
 let h: TestCore;
 beforeEach(async () => { h = await startTestCore(); });
 afterEach(async () => { await h.stop(); });
+test('coordination instructions never become native compaction arguments', async () => {
+  const prompts: string[] = [];
+  const restore = setDriver('echo', { ...echoDriver, startTurn(ctx) {
+    prompts.push(ctx.prompt);
+    return echoDriver.startTurn(ctx);
+  } });
+  const client = await h.connect();
+  try {
+    const { threadId } = await echoThread(h, client);
+    h.core.coordination.configure(threadId, { mode: 'brief', resources: '', remote: false, paused: false });
+    let done = client.next('turn.finished', t => t.threadId === threadId);
+    await client.call('turns.start', { threadId, prompt: 'remember this' });
+    await done;
+    expect(prompts[0]).toContain('boite agents');
+    done = client.next('turn.finished', t => t.threadId === threadId);
+    await client.call('threads.compact', { threadId });
+    await done;
+    expect(prompts[1]).toBe('[compact]');
+  } finally { restore(); client.close(); }
+});
 test('compaction rejects missing sessions and stale selections, and preserves history on success', async () => {
   const client = await h.connect();
   const { threadId } = await echoThread(h, client);

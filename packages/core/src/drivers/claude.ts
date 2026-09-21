@@ -947,6 +947,8 @@ class ClaudeSession {
   private readonly postToolUse = async (input: HookInput): Promise<HookJSONOutput> => {
     if (input.hook_event_name === 'PostToolUse') {
       this.head()?.finishTool(input.tool_use_id, stringify(input.tool_response), 'done');
+      const additionalContext = this.head()?.ctx.coordination?.();
+      if (additionalContext) return { hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext } };
     }
     return {};
   };

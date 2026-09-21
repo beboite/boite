@@ -259,6 +259,7 @@ async function runPrompt(text: string): Promise<void> {
         usage = usageBlock();
         break;
       case 'slow':
+        log('waiting for abort');
         await awaitAbort();
         waitingAbort = null;
         stopReason = 'aborted';
@@ -301,6 +302,16 @@ function handle(message: Record<string, unknown>): void {
   switch (type) {
     case 'compact': {
       send({ id, type: 'response', command: 'compact', success: true, data: { tokensBefore: 150000, summary: 'remember this', firstKeptEntryId: 'm-1' } });
+      return;
+    }
+    case 'clear_queue': {
+      send({ id, type: 'response', command: 'clear_queue', success: true, data: { steering: [], followUp: [] } });
+      return;
+    }
+    case 'steer': {
+      if (!waitingAbort) { send({ id, type: 'response', command: 'steer', success: false, error: 'no active turn' }); return; }
+      log(`steering ${textOf(message['message'])}`);
+      send({ id, type: 'response', command: 'steer', success: true });
       return;
     }
     case 'prompt': {

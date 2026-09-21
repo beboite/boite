@@ -144,6 +144,9 @@ export class BrowserPage {
       const page = new BrowserPage(socket, proc.pid, ownsUserDataDir ? userDataDir : null);
       await page.send('Page.enable', {});
       await page.send('Runtime.enable', {});
+      // A headless window can report a transient small viewport on Windows.
+      // Apply the requested CSS dimensions before the app selects its layout.
+      await page.send('Emulation.setDeviceMetricsOverride', { ...size, deviceScaleFactor: 1, mobile: false });
       await page.navigate(options.url);
       return page;
     } catch (error) {

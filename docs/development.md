@@ -292,6 +292,13 @@ through ANGLE, muted, in a throwaway profile, and drives it over CDP.
 visual: a diff, a passing test and a green build all say nothing about what a
 screen looks like.
 
+The plugin-page fixture uses `tests/e2e/lib/ui.ts`. With
+`BOITE_E2E_PREBUILT_UI=1`, it builds a separate fake-client UI under
+`.artifacts/fake-ui` before browser interactions, so loading Settings does not
+wait for cold development transforms. The installer still uses the production
+build, which does not enable the fake client. Without the flag, the fixture uses Vite's
+development server.
+
 `BOITE_E2E_BROWSER` overrides the browser lookup when the candidates in that file
 find nothing. Helium is the last of them: on a fresh profile it reloads the tab
 a few seconds after launch, so a test that acts in that window sees the page
