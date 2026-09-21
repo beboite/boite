@@ -1073,20 +1073,17 @@ export const strings = {
     progress: 'Go to step {index}: {title}',
     replay: 'Show the tour again',
     replayHint: 'The same screens as the first launch. Nothing you have set is undone.',
-    changeLater: 'All of this is in Settings afterwards.',
+    changeLater: 'All of this is in Settings.',
 
     welcome: {
       title: 'Boite runs your agents',
-      body: 'One conversation per task, each one in a project folder, all of them side by side. The agents run on the machine hosting this core, not in this window, so a turn keeps going while you do something else.',
-      pick: 'Two things worth picking now.'
+      body: 'One conversation per task. The agents keep working while you do something else.'
     },
 
     /** Switching model inside a live conversation, the composer's picker. */
     agents: {
-      title: 'Change the agent inside a conversation',
-      body: 'The chip at the bottom left of the composer holds every provider you connected, its accounts and its models. Change the model in the middle of a thread and nothing is lost: the history stays, and the process already running is told rather than dropped.',
-      effort: 'The chip beside it sets how hard the model thinks, on that model\'s own scale.',
-      locked: 'A thread keeps the provider and the account it started on. The model and the reasoning effort change whenever you want.',
+      title: 'Switch agent mid-conversation',
+      body: 'Change the model, or even the provider, whenever you want. The history follows.',
       demoModel: 'Claude Sonnet 5',
       demoEffort: 'High',
       demoMode: 'Ask'
@@ -1095,29 +1092,25 @@ export const strings = {
     /** Dictation: what it does, and where this core stands on setting it up. */
     voice: {
       title: 'Talk instead of typing',
-      body: 'Press the microphone in the composer and speak. The recording is transcribed on the machine hosting this core and lands in the box as text, which you read before anything is sent.',
-      hint: 'Pick an engine once and dictation works in every conversation, on the phone as well.',
+      body: 'Press the microphone and speak. You read the text before it is sent.',
       open: 'Voice settings',
       reading: 'Reading the voice engine'
     },
 
-    /** The panel on the right: the surfaces, and the agent pushing things into it. */
+    /** The panel on the right, each surface with its key. */
     panel: {
-      title: 'The workbench beside the conversation',
-      body: 'Every thread carries a panel on its right. It shows what the agent changed, the files it works in, its task list and the processes it started, without leaving the conversation to go and look.',
-      agent: 'The agent opens things there itself: it runs the `boite` command to show you a file, a diff or a page rather than pasting it into the transcript.',
-      keys: 'The keys that open them, changed in Settings, Keyboard.',
+      title: 'The panel beside the conversation',
+      body: 'Changes, files, tasks and a browser, one key away.',
       open: 'Keyboard shortcuts',
       noKey: 'no key'
     },
 
-    /** The quota bars and the token count, and the switch that fills them. */
+    /** The quota bars, and the switch that fills them. */
     usage: {
-      title: 'See what you are spending',
-      body: 'Your providers report how much of your subscription is left. Boite draws one bar per window with the hour it resets, in the tray, on the Providers page and under Settings, Limits.',
-      tokens: 'What the agents spend inside Boite is counted apart, in Settings, Usage: a bar per day and provider, the breakdown per model, and what the same turns would have cost on the API.',
+      title: 'See what you have left',
+      body: 'One bar per subscription, with the hour it resets.',
       monitor: 'Read subscription limits for {account}',
-      noAccounts: 'No provider account yet. Connect one and its limits appear here on their own.',
+      noAccounts: 'No provider connected yet.',
       connect: 'Connect a provider',
       deviceHint: 'Limits are read on the machine hosting the core.'
     },
@@ -1126,10 +1119,10 @@ export const strings = {
     reach: {
       title: 'Your phone, and your other machines',
       phone: 'On your phone',
-      phoneBody: 'A one-time link, or the QR code beside it, opens Boite on your phone with a key of its own. Same conversations, and a notification when a turn finishes or asks you something.',
+      phoneBody: 'Scan a QR code and your phone gets the same conversations, with notifications.',
       pair: 'Pair a phone',
       machines: 'Another Boite',
-      machinesBody: 'This app also drives a Boite running somewhere else, a server or a second computer. Connect it once and its projects and threads sit beside the local ones, each machine still running its own agents on its own files.',
+      machinesBody: 'Drive a Boite running on a server or another computer from this app.',
       connect: 'Connect a machine',
       deviceHint: 'Pairing and machines are managed from the app the core runs in.'
     },
@@ -1137,18 +1130,16 @@ export const strings = {
     /** The switches everyone ends up looking for on the first evening. */
     quiet: {
       title: 'Agents that do not interrupt you',
-      body: 'Boite is built to run while you work on something else. These are the switches worth deciding now.',
-      windows: 'The last two apply on a Windows host and are ignored elsewhere.',
       deviceHint: 'Focus and audio are settings of the machine hosting the core.'
     },
 
     /** The last screen, and the only one that does something irreversible: it opens a folder. */
     project: {
       title: 'Open your first project',
-      body: 'A project is the folder an agent works in. Threads live inside it, and an agent sees nothing outside it unless you point it there.',
-      opened: '{count} project open. You can add more from the sidebar.',
-      openedMany: '{count} projects open. You can add more from the sidebar.',
-      deviceBody: 'Projects are opened from the app the core runs in. The ones it holds show up here on their own.'
+      body: 'The folder an agent works in.',
+      opened: '{count} project open.',
+      openedMany: '{count} projects open.',
+      deviceBody: 'Projects are opened from the app the core runs in.'
     }
   }
 } as const;

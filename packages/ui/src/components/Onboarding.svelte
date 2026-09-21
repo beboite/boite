@@ -6,6 +6,9 @@
    * panel and its keys, the usage bars, the phone and the other machines, the
    * four quiet switches, and the first project.
    *
+   * One sentence per screen, and a row is its label alone. The detail a
+   * reader would not remember lives on the Settings page the row writes to.
+   *
    * Nothing here invents a setting. Every control writes through the same
    * function the Settings page writes through, so a choice made in the tour
    * and one made afterwards are the same choice.
@@ -159,6 +162,14 @@
 
   let monitored = $derived(quotas.filter((row) => row.status !== 'unsupported'));
 
+  /** Providers with more than one account here: only their rows name the account. */
+  let shared = $derived.by(() => {
+    const seen = new Set<string>();
+    const twice = new Set<string>();
+    for (const row of monitored) (seen.has(row.providerId) ? twice : seen).add(row.providerId);
+    return twice;
+  });
+
   // The voice screen says where this core stands rather than describing a
   // feature that may need a 200 MB download first. A core from before dictation
   // has no such method, which reads the same as not set up.
@@ -178,11 +189,11 @@
   }
 
   /** The panel's four surfaces, each with the key that opens it today. */
-  const SURFACES: { id: KeybindingCommand; icon: typeof Coins; label: () => string; hint: () => string }[] = [
-    { id: 'changes', icon: GitCompare, label: () => strings.rightPanel.changes, hint: () => strings.rightPanel.changesHint },
-    { id: 'files', icon: FilesIcon, label: () => strings.rightPanel.files, hint: () => strings.rightPanel.filesHint },
-    { id: 'tasks', icon: ListTodo, label: () => strings.rightPanel.tasks, hint: () => strings.rightPanel.tasksHint },
-    { id: 'browser', icon: AppWindow, label: () => strings.rightPanel.browser, hint: () => strings.rightPanel.browserHint }
+  const SURFACES: { id: KeybindingCommand; icon: typeof Coins; label: () => string }[] = [
+    { id: 'changes', icon: GitCompare, label: () => strings.rightPanel.changes },
+    { id: 'files', icon: FilesIcon, label: () => strings.rightPanel.files },
+    { id: 'tasks', icon: ListTodo, label: () => strings.rightPanel.tasks },
+    { id: 'browser', icon: AppWindow, label: () => strings.rightPanel.browser }
   ];
 
   // The screen is the only thing this watches. Every reader writes the state
@@ -241,11 +252,10 @@
             <div class="hero"><BoiteMark size={30} /></div>
             <h1 id="onboarding-title">{strings.onboarding.welcome.title}</h1>
             <p class="lead">{strings.onboarding.welcome.body}</p>
-            <p class="muted small">{strings.onboarding.welcome.pick}</p>
             <div class="rows">
               <div class="row">
                 <Languages size={18} strokeWidth={1.5} />
-                <span class="text">{strings.settings.language}<span class="hint">{strings.settings.languageHint}</span></span>
+                <span class="text">{strings.settings.language}</span>
                 <div class="segmented" role="group" aria-label={strings.settings.language}>
                   <button type="button" data-step-start class:on={locale === 'system'} aria-pressed={locale === 'system'} data-testid="onboarding-locale-system" onclick={() => pickLocale('system')}>
                     {strings.settings.languageSystem}
@@ -279,15 +289,12 @@
               <span class="chip"><Brain size={13} strokeWidth={1.75} />{strings.onboarding.agents.demoEffort}</span>
               <span class="chip"><ShieldCheck size={13} strokeWidth={1.75} />{strings.onboarding.agents.demoMode}</span>
             </div>
-            <p>{strings.onboarding.agents.effort}</p>
-            <p class="note">{strings.onboarding.agents.locked}</p>
           {:else if step === 'voice'}
             <h1 id="onboarding-title">{strings.onboarding.voice.title}</h1>
             <p class="lead">{strings.onboarding.voice.body}</p>
             <div class="demo" aria-hidden="true">
               <span class="chip"><Mic size={13} strokeWidth={1.75} />{strings.speech.start}</span>
             </div>
-            <p class="note">{strings.onboarding.voice.hint}</p>
             {#if !store.owner}
               <p class="note">{strings.speech.ownerSetup}</p>
             {:else if speech === null && speechBusy}
@@ -306,13 +313,11 @@
                 {@const Icon = surface.icon}
                 <div class="row">
                   <Icon size={18} strokeWidth={1.5} />
-                  <span class="text">{surface.label()}<span class="hint">{surface.hint()}</span></span>
+                  <span class="text">{surface.label()}</span>
                   <kbd class:none={store.keyLabel(surface.id) === null}>{store.keyLabel(surface.id) ?? strings.onboarding.panel.noKey}</kbd>
                 </div>
               {/each}
             </div>
-            <p class="note">{strings.onboarding.panel.agent}</p>
-            <p class="note">{strings.onboarding.panel.keys}</p>
             <button type="button" data-step-start data-testid="onboarding-keyboard" onclick={() => leaveFor('keyboard')}>
               <Keyboard size={15} strokeWidth={1.75} />
               {strings.onboarding.panel.open}
@@ -326,18 +331,18 @@
               <Coins size={16} strokeWidth={1.5} />
               <span class="meters"><progress max="100" value="72"></progress><progress max="100" value="94"></progress><progress class="low" max="100" value="12"></progress></span>
             </div>
-            <p>{strings.onboarding.usage.tokens}</p>
             {#if !store.owner}
               <p class="note">{strings.onboarding.usage.deviceHint}</p>
             {:else if monitored.length > 0}
               <div class="rows">
                 {#each monitored as row (row.accountId)}
-                  <!-- The provider first, the account under it: several
-                       providers ship an account called "Default", and the row
-                       has to say which one the switch reads. -->
+                  <!-- The provider, and the account only when that provider has
+                       two here: a column of "Default" under every name tells
+                       the reader nothing. -->
+                  {@const account = shared.has(row.providerId) ? row.label : ''}
                   <label class="row">
                     <ProviderLogo providerId={row.providerId} size={18} />
-                    <span class="text">{row.providerName}{#if row.label}<span class="hint">{row.label}</span>{/if}</span>
+                    <span class="text">{row.providerName}{#if account}<span class="inline">{account}</span>{/if}</span>
                     <input type="checkbox" role="switch" aria-label={fill(strings.onboarding.usage.monitor, { account: row.label ? `${row.providerName}, ${row.label}` : row.providerName })} data-testid="onboarding-quota-{row.accountId}" checked={row.enabled} disabled={quotaBusy} onchange={(event) => void monitor(row.accountId, event.currentTarget.checked)} />
                   </label>
                 {/each}
@@ -353,7 +358,7 @@
               <p>{strings.onboarding.reach.phoneBody}</p>
               {#if store.owner}
                 <label class="row">
-                  <span class="text">{strings.settings.listenOnLan}<span class="hint">{strings.settings.listenOnLanHint}</span></span>
+                  <span class="text">{strings.settings.listenOnLan}</span>
                   <input
                     type="checkbox"
                     role="switch"
@@ -373,34 +378,33 @@
             {#if !store.owner}<p class="note">{strings.onboarding.reach.deviceHint}</p>{/if}
           {:else if step === 'quiet'}
             <h1 id="onboarding-title">{strings.onboarding.quiet.title}</h1>
-            <p class="lead">{strings.onboarding.quiet.body}</p>
             <div class="rows">
               <label class="row">
                 <Bell size={18} strokeWidth={1.5} />
-                <span class="text">{strings.settings.notifications}<span class="hint">{strings.settings.notificationsHint}</span></span>
+                <span class="text">{strings.settings.notifications}</span>
                 <input type="checkbox" role="switch" data-testid="onboarding-notifications" checked={store.notifications} onchange={(event) => void store.setNotifications(event.currentTarget.checked)} />
               </label>
               {#if inShell}
                 <label class="row">
                   <Minimize2 size={18} strokeWidth={1.5} />
-                  <span class="text">{strings.settings.closeToTray}<span class="hint">{strings.settings.closeToTrayHint}</span></span>
+                  <span class="text">{strings.settings.closeToTray}</span>
                   <input type="checkbox" role="switch" data-testid="onboarding-tray" checked={tray} disabled={!trayReady} onchange={(event) => void setTray(event.currentTarget.checked)} />
                 </label>
               {/if}
               {#if store.owner}
                 <label class="row">
                   <AppWindow size={18} strokeWidth={1.5} />
-                  <span class="text">{strings.settings.focusGuard}<span class="hint">{strings.settings.focusGuardHint}</span></span>
+                  <span class="text">{strings.settings.focusGuard}</span>
                   <input type="checkbox" role="switch" data-testid="onboarding-focus-guard" checked={store.settings?.focusGuard ?? true} onchange={(event) => void store.saveSettings({ focusGuard: event.currentTarget.checked })} />
                 </label>
                 <label class="row">
                   <VolumeX size={18} strokeWidth={1.5} />
-                  <span class="text">{strings.settings.muteAgents}<span class="hint">{strings.settings.muteAgentsHint}</span></span>
+                  <span class="text">{strings.settings.muteAgents}</span>
                   <input type="checkbox" role="switch" data-testid="onboarding-mute" checked={store.settings?.muteAgents ?? true} onchange={(event) => void store.saveSettings({ muteAgents: event.currentTarget.checked })} />
                 </label>
               {/if}
             </div>
-            <p class="note">{store.owner ? strings.onboarding.quiet.windows : strings.onboarding.quiet.deviceHint}</p>
+            {#if !store.owner}<p class="note">{strings.onboarding.quiet.deviceHint}</p>{/if}
           {:else}
             <h1 id="onboarding-title">{strings.onboarding.project.title}</h1>
             <p class="lead">{store.owner ? strings.onboarding.project.body : strings.onboarding.project.deviceBody}</p>
@@ -648,11 +652,10 @@
     font-size: var(--text-base);
   }
 
-  .row .hint {
-    display: block;
+  .row .inline {
+    margin-left: 8px;
     color: var(--color-muted-foreground);
     font-size: var(--text-sm);
-    margin-top: 2px;
   }
 
   /* The key as the Keyboard page prints it, so the row reads as the shortcut
