@@ -53,13 +53,13 @@ async function missionJourney() {
   await page.waitFor(`document.querySelector('.agents-content [data-status="done"]')`);
 
   await page.evaluate(`(async () => {
-    const { workspace } = await import('/src/lib/workspace.svelte.ts');
+    const { workspace } = window.__boiteTest;
     const c = workspace.active.client, agent = window.__agentsFixture.first;
     await c.call('agents.message.send', { scope: { kind: 'agent', id: agent.id }, text: 'Consider a new prototype and ask for a direction.', recipientIds: [], requestId: 'e2e_decision_start' });
   })()`);
-  await page.waitFor(`(async () => { const { workspace } = await import('/src/lib/workspace.svelte.ts'); return (await workspace.active.client.call('agents.snapshot', {})).runs.some(r => r.status === 'running'); })()`);
+  await page.waitFor(`(async () => { const { workspace } = window.__boiteTest; return (await workspace.active.client.call('agents.snapshot', {})).runs.some(r => r.status === 'running'); })()`);
   await page.evaluate(`(async () => {
-    const { workspace } = await import('/src/lib/workspace.svelte.ts'); const c = workspace.active.client;
+    const { workspace } = window.__boiteTest; const c = workspace.active.client;
     const run = (await c.call('agents.snapshot', {})).runs.find(r => r.status === 'running');
     await c.call('agents.decision.request', { threadId: run.threadId, prompt: 'Which prototype should I explore?', options: ['Puzzle', 'Simulation'], requestId: 'e2e_decision_request' });
   })()`);
@@ -68,7 +68,7 @@ async function missionJourney() {
   await capture('agents-attention-phone.png');
   await page.evaluate(`Array.from(document.querySelectorAll('[data-testid="agent-decision"] button')).find(b => b.textContent === 'Puzzle').click()`);
   await page.waitFor(`!document.querySelector('[data-testid="agent-decision"]')`);
-  expect(await page.evaluate(`(async () => { const { workspace } = await import('/src/lib/workspace.svelte.ts'); return (await workspace.active.client.call('agents.snapshot', {})).decisions.at(-1).answer; })()`)).toBe('Puzzle');
+  expect(await page.evaluate(`(async () => { const { workspace } = window.__boiteTest; return (await workspace.active.client.call('agents.snapshot', {})).decisions.at(-1).answer; })()`)).toBe('Puzzle');
 }
 afterAll(async () => { await page?.close(); await server?.close(); }, 15000);
 
@@ -94,7 +94,7 @@ test('create, converse, leave background work and inspect the studio on desktop 
   await capture('agents-conversation-desktop.png');
 
   await page.evaluate(`(async () => {
-    const { workspace } = await import('/src/lib/workspace.svelte.ts');
+    const { workspace } = window.__boiteTest;
     const c = workspace.active.client;
     const first = (await c.call('agents.snapshot', {})).profiles[0];
     const second = await c.call('agents.profile.save', { value: { ...first, name: 'Atlas', domain: 'Implementation' } });
@@ -106,16 +106,16 @@ test('create, converse, leave background work and inspect the studio on desktop 
     workspace.active.showChat();
   })()`);
   await page.waitFor(`!document.querySelector('[data-testid="agents-page"]')`);
-  await page.waitFor(`(async () => { const { workspace } = await import('/src/lib/workspace.svelte.ts'); return (await workspace.active.client.call('agents.snapshot', {})).work.every(w => w.status === 'done'); })()`);
+  await page.waitFor(`(async () => { const { workspace } = window.__boiteTest; return (await workspace.active.client.call('agents.snapshot', {})).work.every(w => w.status === 'done'); })()`);
   await page.click('[data-testid="nav-agents"]');
   await page.waitFor(`document.querySelector('[data-testid="agents-scene-toggle"]')`);
   await page.click('[data-testid="agents-scene-toggle"]');
   await page.waitFor(`document.querySelectorAll('.agent-scene-hit').length === 5 && document.querySelector('canvas')?.width > 100`);
   await capture('agents-studio-desktop.png');
-  await page.evaluate(`import('/src/lib/theme.ts').then(m => m.setTheme('light'))`);
+  await page.evaluate(`window.__boiteTest.setTheme('light')`);
   await page.waitFor(`document.documentElement.dataset.theme === 'light'`);
   await capture('agents-studio-light.png');
-  await page.evaluate(`import('/src/lib/theme.ts').then(m => m.setTheme('dark'))`);
+  await page.evaluate(`window.__boiteTest.setTheme('dark')`);
   expect(await page.evaluate(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true);
   await page.evaluate(`Array.from(document.querySelectorAll('.agent-scene-hit')).find(b => b.textContent.includes('Ideas table')).click()`);
   await page.waitFor(`document.querySelectorAll('.agent-message').length === 4`);
