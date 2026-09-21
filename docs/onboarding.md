@@ -45,6 +45,23 @@ and a version it does not know still counts as seen.
 Settings, General, Getting started brings it back, and so does "Replay the
 tour" in the command palette. Neither forgets anything that was set.
 
+`App.svelte` loads the component the first time the tour is due, the way it
+loads the palette and the dialogs, so a device that has seen it never downloads
+it again. Until it has loaded the tour holds no key: offline with a cold cache
+the app stays usable and asks again on the next launch.
+
+## In the end-to-end suite
+
+Every browser profile the suite drives is new, so the tour would open over the
+page each test clicks through. `tests/e2e/lib/cdp.ts` writes the record before
+the page's first script runs, and reloads a WebView2 page it attaches to once
+for the same reason. `BrowserPage.launch({ showTour: true })` leaves a profile
+unseen; `tests/e2e/onboarding.test.ts` is the one test that asks for it.
+
+The same file launches the browser with `--lang=en-US`, and the shell test
+passes it to WebView2: the language setting defaults to `system`, and the
+assertions are written in English whatever the machine speaks.
+
 ## The screens that read the core
 
 Voice asks `speech.status` and Usage asks `quotas.list`, each one when its
