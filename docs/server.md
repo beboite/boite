@@ -184,8 +184,10 @@ RestartSec=5
 WantedBy=default.target
 ```
 
-The data directory is `~/.local/share/boite2`, or `$XDG_DATA_HOME/boite2`: the
-journal, the accounts, `core.json` with the core token (mode 600) and `core.lock`.
+The data directory is `~/.local/share/boite2` on the stable channel and
+`~/.local/share/boite2-dev` on the dev one, or whatever `--data-dir` or
+`BOITE_DATA_DIR` names: the journal, the accounts, `core.json` with the core
+token (mode 600) and `core.lock`. `$XDG_DATA_HOME` is not read.
 
 ## Pairing the desktop app with it
 
