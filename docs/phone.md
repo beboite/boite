@@ -177,7 +177,7 @@ core behind it; both are skipped. A registration that fails is one
 
 ## What is cached, and what never is
 
-One cache, `boite-ui-v2`. Activation deletes older `boite-ui-` caches and leaves
+One cache, `boite-ui-v3`. Activation deletes older `boite-ui-` caches and leaves
 other applications' caches alone before the worker claims its clients.
 
 | Request | Rule |
@@ -186,7 +186,7 @@ other applications' caches alone before the worker claims its clients.
 | `/assets/` | cache first, stored on its first whole 200 |
 | `/fonts/`, `/icons/` | cache first |
 | `/rpc` | never cached |
-| anything carrying an `upgrade` header | never cached |
+| anything carrying an `upgrade: websocket` header | never cached |
 | `/sw.js` | never cached |
 | `/manifest.webmanifest` | never cached |
 

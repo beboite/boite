@@ -356,8 +356,8 @@ export class Store {
   /** The thread `trace` belongs to, and whether the trace surface is on screen to read it. */
   #tracedThreadId: ThreadId | null = null;
   traceWatched = false;
-  /** The load in flight, so the two callers of `reload()` share one. */
-  #reloading: Promise<void> | null = null;
+  /** The load in flight and the client it speaks to, so the two callers of `reload()` share one. */
+  #reloading: { client: Client; promise: Promise<void> } | null = null;
   #loginRevision = 0;
   #loginChanges = new Map<string, number>();
 
@@ -1135,52 +1135,74 @@ export class Store {
    * again. It joins the load already in flight instead.
    */
   reload(): Promise<void> {
-    this.#reloading ??= this.#load().finally(() => {
-      this.#reloading = null;
+    const client = this.#client;
+    if (!client) return this.#load();
+    // The load in flight belongs to the client that started it. A machine
+    // switched under a slow boot used to hand the new client that same
+    // promise, whose result `#load()` then discards for being the old one's,
+    // so the new machine's store stayed empty until something asked again.
+    if (this.#reloading?.client === client) return this.#reloading.promise;
+    const promise = this.#load().finally(() => {
+      if (this.#reloading?.promise === promise) this.#reloading = null;
     });
-    return this.#reloading;
+    this.#reloading = { client, promise };
+    return promise;
   }
 
   async #load(): Promise<void> {
     const client = this.#client;
     if (!client) return;
     const loginRevision = this.#loginRevision;
-    try {
-      const [projects, threads, providers, accounts, settings, scheduler, permissions, questions, logins, keybindings] =
-        await Promise.all([
-          client.call('projects.list', {}),
-          client.call('threads.list', {}),
-          client.call('providers.list', {}),
-          client.call('accounts.list', {}),
-          client.call('settings.get', {}),
-          client.call('scheduler.get', {}),
-          client.call('permissions.list', {}),
-          client.call('questions.list', {}),
-          // The one owner-only call of the boot. A device asking for it is
-          // refused, and `Promise.all` would take the whole load down with it,
-          // so the phone would come up on an empty app and a red toast.
-          this.owner ? client.call('accounts.logins', {}) : Promise.resolve([]),
-          client.call('keybindings.get', {})
-        ]);
-      this.#mergePermissions(permissions, 'all');
-      this.#mergeQuestions(questions, 'all');
-      this.projects = projects;
-      this.threads = threads;
-      this.providers = providers.loaded;
-      this.rejectedProviders = providers.rejected;
-      this.installStates = installStatesOf(providers.loaded);
-      this.accounts = accounts;
+    // One rejected call used to take the whole boot down: `Promise.all` jumped
+    // to the catch, which only toasted, and projects, threads, providers and
+    // accounts silently kept their pre-reconnect values under an app that
+    // looked loaded. Each slice lands on its own now, and only what failed is
+    // reported.
+    const results = await Promise.allSettled([
+      client.call('projects.list', {}),
+      client.call('threads.list', {}),
+      client.call('providers.list', {}),
+      client.call('accounts.list', {}),
+      client.call('settings.get', {}),
+      client.call('scheduler.get', {}),
+      client.call('permissions.list', {}),
+      client.call('questions.list', {}),
+      // The one owner-only call of the boot. A device asking for it is refused.
+      this.owner ? client.call('accounts.logins', {}) : Promise.resolve([]),
+      client.call('keybindings.get', {})
+    ]);
+    // A machine switched under a slow boot must not have this one's data
+    // written into it: the store may already be serving another client.
+    if (client !== this.#client) return;
+    const [projects, threads, providers, accounts, settings, scheduler, permissions, questions, logins, keybindings] = results;
+    if (permissions.status === 'fulfilled') this.#mergePermissions(permissions.value, 'all');
+    if (questions.status === 'fulfilled') this.#mergeQuestions(questions.value, 'all');
+    if (projects.status === 'fulfilled') this.projects = projects.value;
+    if (threads.status === 'fulfilled') this.threads = threads.value;
+    if (providers.status === 'fulfilled') {
+      this.providers = providers.value.loaded;
+      this.rejectedProviders = providers.value.rejected;
+      this.installStates = installStatesOf(providers.value.loaded);
+    }
+    if (accounts.status === 'fulfilled') {
+      this.accounts = accounts.value;
       this.#restoreModels();
-      this.#restoreLogins(logins, loginRevision);
-      this.settings = settings;
-      this.keybindings = keybindings;
-      this.scheduler = scheduler;
-      // What `bench/startup.ts` reads: the first moment the app holds its data.
-      if (typeof performance !== 'undefined' && performance.getEntriesByName('boite:ready').length === 0) performance.mark('boite:ready');
-      const open = this.openThread;
-      if (open && this.visible) await this.open(open.id, false);
-    } catch (error) {
-      this.#fail(error);
+    }
+    if (logins.status === 'fulfilled') this.#restoreLogins(logins.value, loginRevision);
+    if (settings.status === 'fulfilled') this.settings = settings.value;
+    if (keybindings.status === 'fulfilled') this.keybindings = keybindings.value;
+    if (scheduler.status === 'fulfilled') this.scheduler = scheduler.value;
+    const failed = results.find((result) => result.status === 'rejected');
+    if (failed !== undefined && failed.status === 'rejected') this.#fail(failed.reason);
+    // What `bench/startup.ts` reads: the first moment the app holds its data.
+    if (typeof performance !== 'undefined' && performance.getEntriesByName('boite:ready').length === 0) performance.mark('boite:ready');
+    const open = this.openThread;
+    if (open && this.visible) {
+      try {
+        await this.open(open.id, false);
+      } catch (error) {
+        this.#fail(error);
+      }
     }
   }
 
@@ -1648,7 +1670,7 @@ export class Store {
     if (prompt.trim().length === 0 && attachments.length === 0) return false;
     try {
       // Reconnect snapshots must land before a new stream starts mutating the thread.
-      await this.#reloading;
+      await this.#reloading?.promise;
       if (this.#client !== client || this.connection !== 'ready') return false;
       const activity = activityCommand(prompt);
       if (activity) {
@@ -2332,14 +2354,21 @@ export class Store {
     }
   }
 
-  /** The sentence one failure reads as, whether it lands in a surface or the toast. */
+  /**
+   * The sentence one failure reads as, whether it lands in a surface or the
+   * toast. The JSON-RPC code used to ride along as `(-32011)`: it says nothing
+   * to the person reading the toast, and every refusal already names what to
+   * do. It belongs in the console, which `#fail` writes it to.
+   */
   #reason(error: unknown): string {
-    if (error instanceof RpcFailure) return `${error.message} (${error.code})`;
+    if (error instanceof RpcFailure) return error.message;
     if (error instanceof Error) return error.message;
     return String(error);
   }
 
   #fail(error: unknown): void {
+    if (error instanceof RpcFailure) console.error(`rpc ${error.code}: ${error.message}`, error);
+    else console.error(error);
     this.error = this.#reason(error);
   }
 }

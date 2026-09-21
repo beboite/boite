@@ -60,7 +60,7 @@ Put `boite-plugin.json` at the root of the repository:
 | `homepage` | An https URL with a host and no user or password, at most 2048 characters. The page links to it as the source code. |
 | `executable` | The file name Boite saves the download as: a letter or digit, then letters, digits, `_` and `-`, 64 characters at most, no extension. Boite adds `.exe` on Windows. |
 | `artifacts` | An object keyed by platform, at least one of `win32-x64`, `win32-arm64`, `darwin-x64`, `darwin-arm64`, `linux-x64`, `linux-arm64`. Each value is `{ "url", "sha256" }`: an https URL as for `homepage`, and the file's SHA-256 as 64 lowercase hexadecimal characters. |
-| `provides` | An object naming at least one feature. The only feature is `accountPools`, `{ "providers": [...] }`: a non-empty list of distinct provider ids among `antigravity`, `antigravity-cli`, `claude`, `codex`, `grok`, `opencode` and `pi`. |
+| `provides` | An object naming at least one feature. The only feature is `accountPools`, `{ "providers": [...] }`: a non-empty list of distinct provider ids among `antigravity`, `antigravity-cli`, `claude`, `codex`, `grok`, `muse`, `opencode` and `pi`. |
 
 The platform key is `process.platform` and `process.arch` of the machine that
 runs the core, joined by a hyphen. A core on a Linux server downloads the

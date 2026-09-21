@@ -104,6 +104,25 @@ export function updateTodo(core: Core, params: RpcParams<'todos.update'>, princi
   if (params.status !== undefined && !TODO_STATUSES.includes(params.status)) {
     throw refused(`a todo is ${TODO_STATUSES.join(', ')}, not ${String(params.status)}`, { status: params.status });
   }
+  // A card the user confirmed is the user's. An agent used to be able to move
+  // it back to open and rewrite its text, undoing the confirmation in silence.
+  if (principal !== 'owner' && current.status === 'done') {
+    throw refused(`todo ${params.todoId} is done: only the user reopens a card they confirmed`, {
+      todoId: params.todoId,
+      status: current.status,
+      principal,
+    });
+  }
+  // Two agents used to be able to claim the same card: both calls succeeded and
+  // the second silently took the attribution. Claiming is a transition out of
+  // open, so it only holds while the card is still open.
+  if (principal !== 'owner' && params.status === 'claimed' && current.status !== 'open') {
+    throw refused(`todo ${params.todoId} is already ${current.status}`, {
+      todoId: params.todoId,
+      status: current.status,
+      principal,
+    });
+  }
   const updated: Todo = {
     ...current,
     ...(params.status === undefined ? {} : { status: params.status }),

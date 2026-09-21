@@ -147,6 +147,60 @@ describe('the todo list of a project', () => {
     }
   });
 
+  test('a second agent is refused a card the first already claimed', async () => {
+    const todo = await client.call('todos.add', { threadId, text: 'one card, two agents' });
+    const first = await agentClient();
+    const second = await agentClient();
+    try {
+      const claimed = await first.call('todos.update', { threadId, todoId: todo.id, status: 'claimed' });
+      expect(claimed.status).toBe('claimed');
+      let message = 'none';
+      try {
+        await second.call('todos.update', { threadId, todoId: todo.id, status: 'claimed' });
+      } catch (error) {
+        message = (error as Error).message;
+      }
+      expect(message).toBe(`todo ${todo.id} is already claimed`);
+      // The first claim still owns the card: the second took nothing.
+      expect((await client.call('todos.list', { threadId }))[0]?.updatedAt).toBe(claimed.updatedAt);
+    } finally {
+      first.close();
+      second.close();
+    }
+  });
+
+  test('an agent cannot reopen or rewrite a card the user confirmed', async () => {
+    const todo = await client.call('todos.add', { threadId, text: 'confirmed by the user' });
+    await client.call('todos.update', { threadId, todoId: todo.id, status: 'done' });
+    const agent = await agentClient();
+    try {
+      for (const params of [{ status: 'open' } as const, { text: 'rewritten' } as const]) {
+        let message = 'none';
+        try {
+          await agent.call('todos.update', { threadId, todoId: todo.id, ...params });
+        } catch (error) {
+          message = (error as Error).message;
+        }
+        expect(message).toBe(`todo ${todo.id} is done: only the user reopens a card they confirmed`);
+      }
+      const after = (await client.call('todos.list', { threadId }))[0];
+      expect(after?.status).toBe('done');
+      expect(after?.text).toBe('confirmed by the user');
+    } finally {
+      agent.close();
+    }
+  });
+
+  test('the owner reopens and rewrites a confirmed card, and reclaims a claimed one', async () => {
+    const todo = await client.call('todos.add', { threadId, text: 'the user decides' });
+    await client.call('todos.update', { threadId, todoId: todo.id, status: 'done' });
+    const reopened = await client.call('todos.update', { threadId, todoId: todo.id, status: 'open', text: 'reworded' });
+    expect(reopened.status).toBe('open');
+    expect(reopened.text).toBe('reworded');
+    await client.call('todos.update', { threadId, todoId: todo.id, status: 'claimed' });
+    expect((await client.call('todos.update', { threadId, todoId: todo.id, status: 'claimed' })).status).toBe('claimed');
+  });
+
   test('the cards of a project reach its own agents and no agent of another project', async () => {
     const path = join(harness.dataDir, 'second-project');
     mkdirSync(path, { recursive: true });
