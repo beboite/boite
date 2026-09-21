@@ -53,8 +53,8 @@ test('a new device gets the tour on its own, holds the app keys under it, and ne
   await page.evaluate(`(document.activeElement ?? document.body).dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))`);
   await page.waitFor(`!document.querySelector('[data-testid=palette]')`);
 
-  await page.evaluate('location.reload()');
-  await page.waitFor(`document.readyState === 'complete' && document.querySelector('[data-testid=composer-picker]')`);
+  await page.reload();
+  await page.waitFor(`document.querySelector('[data-testid=composer-picker]')`);
   await Bun.sleep(500);
   expect(await page.evaluate<boolean>(`!!document.querySelector('[data-testid=onboarding]')`)).toBe(false);
 }, 45_000);
@@ -95,6 +95,21 @@ test('light theme and a short phone viewport keep consent and navigation reachab
   expect(await page.evaluate(`document.documentElement.dataset.theme`)).toBe('light');
   expect(await page.evaluate(`document.querySelector('[data-testid=onboarding-next]').getBoundingClientRect().bottom <= innerHeight`)).toBe(true);
   expect(await page.evaluate(`document.querySelector('[data-testid=telemetry-settings] input').getBoundingClientRect().top >= 0`)).toBe(true);
+  const exits = await page.evaluate<Array<{ name: string; duration: number }>>(`(() => {
+    return [...document.querySelectorAll('[data-testid=onboarding], [data-testid=onboarding] [role=dialog]')].map(element => {
+      element.classList.add('closing');
+      const style = getComputedStyle(element);
+      const exit = { name: style.animationName, duration: parseFloat(style.animationDuration) };
+      element.classList.remove('closing');
+      return exit;
+    });
+  })()`);
+  expect(exits).toHaveLength(2);
+  for (const exit of exits) {
+    expect(exit.name).not.toBe('none');
+    expect(exit.duration).toBeGreaterThan(0);
+    expect(exit.duration).toBeLessThanOrEqual(0.001);
+  }
   await page.click('[data-testid=onboarding-next]');
   await page.waitFor(`!document.querySelector('[data-testid=onboarding]')`);
 }, 15_000);

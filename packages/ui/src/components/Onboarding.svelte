@@ -217,5 +217,9 @@
     footer { padding: 12px; gap: 4px; } .dot { width: 20px; } .dot::after { left: 7px; } .dot.on::after { left: 3px; }
     .quiet-scene, .privacy-scene { max-width: 260px; }
   }
-  @media (prefers-reduced-motion: reduce) { .scrim, .panel { animation: none; } }
+  @media (prefers-reduced-motion: reduce) {
+    .scrim, .panel { animation: none; }
+    /* Keep animationend so closing also persists the completed tour. */
+    .scrim.closing, .panel.closing { animation-duration: 1ms; }
+  }
 </style>
