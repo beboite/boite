@@ -2,7 +2,9 @@
   import { ArrowUp, FileText, GitBranch, Paperclip, ShieldCheck, Square, X } from '@lucide/svelte';
   import { tick, untrack } from 'svelte';
   import type { Attachment, PermissionMode } from '@boite/contracts';
-  import { bytes } from '../lib/format';
+  import { bytes, tokens as formatTokens } from '../lib/format';
+  import { confirm } from '../lib/confirm.svelte';
+  import { switchDropsHistory } from '../lib/switch-warning';
   import { ATTACHMENT_MAX_BYTES, ATTACHMENTS_PER_TURN } from '@boite/contracts';
   import { acceptAttachments, decodedBytes, readAttachmentFile } from '../lib/attachments';
   import { AGENT_PREFIX, appCommands, isAgentCommand, runCommand } from '../lib/commands.svelte';
@@ -335,6 +337,17 @@
       const target = { ...choice, ...patch, effort: patch.effort !== undefined ? patch.effort : changedModel ? null : choice.effort, speed: patch.speed !== undefined ? patch.speed : changedModel ? null : choice.speed ?? null };
       picking = true;
       try {
+        if (switchDropsHistory(thread, target.accountId)) {
+          const from = store.providers.find((entry) => entry.id === thread.providerId)?.name ?? thread.providerId;
+          const to = store.providers.find((entry) => entry.id === target.providerId)?.name ?? target.providerId;
+          const go = await confirm.ask({
+            title: fill(strings.composer.switchTitle, { tokens: formatTokens(thread.context?.tokens ?? 0), provider: to }),
+            body: fill(strings.composer.switchBody, { provider: to }),
+            confirmLabel: strings.composer.switchConfirm,
+            cancelLabel: fill(strings.composer.switchCancel, { provider: from }),
+          });
+          if (!go) return;
+        }
         const accepted = await store.update(thread.id, {
           accountId: target.accountId, model: target.model, effort: target.effort, speed: target.speed,
           expectedSelectionVersion: thread.selectionVersion ?? 0,

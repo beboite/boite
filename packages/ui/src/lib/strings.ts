@@ -413,6 +413,10 @@ export const strings = {
 
   composer: {
     options: 'Message options',
+    switchTitle: 'Switch a {tokens} token thread to {provider}?',
+    switchBody: '{provider} starts a new session and receives excerpts of the opening and of the most recent exchanges, about 20k tokens. The rest is lost to it. Compacting first changes nothing.',
+    switchConfirm: 'Switch',
+    switchCancel: 'Stay on {provider}',
     placeholder: 'Message {provider} in {project}',
     placeholderNoProject: 'Message the agent',
     send: 'Send',

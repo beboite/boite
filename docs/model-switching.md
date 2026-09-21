@@ -77,6 +77,11 @@ and end preserved. Gaps are identified to the receiving agent. These are
 transport bounds, not token estimates. Some old details may be absent; the
 journal remains unchanged.
 
+A thread whose last context reading is over 200,000 tokens asks before it moves
+to another account: the receiving agent gets these excerpts, not what the old
+session held, and a compaction summary is not part of them. A model change
+inside one account keeps its session and asks nothing.
+
 Historical images use remaining slots within the eight-image turn limit. The
 current prompt's attachments take priority, then the most recent historical
 images. Delivery is chronological. The receiving agent is told which older
