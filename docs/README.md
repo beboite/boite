@@ -2,6 +2,8 @@
 
 ## Using boite
 
+- [The tour](onboarding.md): the first launch, and what it sets up.
+- [Language](language.md): English and French, and where the sentences live.
 - [Accounts](accounts.md): agent logins and isolated accounts.
 - [Model switching](model-switching.md): changing models and providers in one conversation.
 - [Context](context.md): context usage and compaction.
