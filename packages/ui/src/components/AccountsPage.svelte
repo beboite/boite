@@ -5,6 +5,7 @@
   import type { Account, AccountQuota, ProviderSummary } from '@boite/contracts';
   import QuotaList from './QuotaList.svelte';
   import ProviderIcon from './ProviderLogo.svelte';
+  import HarnessUpdatesCard from './HarnessUpdatesCard.svelte';
   import { confirm } from '../lib/confirm.svelte';
   import { bytes, percent } from '../lib/format';
   import { nextAccountLabel, setupStep, signInTarget, type SetupStep } from '../lib/provider-setup';
@@ -238,6 +239,8 @@
       <p>{strings.providerSettings.intro}</p>
     </div>
   </header>
+
+  <HarnessUpdatesCard {store} />
 
   <div class="card flush list">
     {#each store.providers as provider (provider.id)}

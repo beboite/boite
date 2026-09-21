@@ -28,6 +28,7 @@ import { Worktrees } from './worktree.ts';
 import { ActivityStore } from './activity.ts';
 import { PushStore } from './push.ts';
 import { SpeechStore } from './speech.ts';
+import { HarnessUpdates } from './providers/updates.ts';
 import { Coordination } from './coordination.ts';
 
 export const CORE_VERSION: string = pkg.version;
@@ -109,6 +110,7 @@ export class Core {
   /** Where the `boite` shim is, prepended to the PATH of every process a thread launches. */
   readonly cliDir: string | null = resolveCliDir();
   readonly speech: SpeechStore;
+  readonly updates: HarnessUpdates;
   readonly coordination: Coordination;
 
   /**
@@ -145,6 +147,7 @@ export class Core {
     this.activity = new ActivityStore(this);
     this.push = new PushStore(this);
     this.speech = new SpeechStore(this);
+    this.updates = new HarnessUpdates(this);
     this.coordination = new Coordination(this);
 
     registerModules(this);
@@ -202,6 +205,7 @@ export class Core {
   #drained = false;
 
   async close(): Promise<void> {
+    this.updates.close();
     this.coordination.beginClose();
     // Reuse the shutdown wait already spent by drain(), while stopping late arrivals.
     await this.scheduler.drain(this.#drained ? 0 : undefined);

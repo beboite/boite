@@ -6,6 +6,7 @@ import { registerKeybindingMethods } from './keybindings.ts';
 import { registerProjectMethods } from './projects.ts';
 import { registerProviderMethods } from './providers/loader.ts';
 import { registerProbeMethods } from './providers/probe.ts';
+import { registerUpdateMethods } from './providers/updates.ts';
 import { registerSchedulerMethods } from './scheduler.ts';
 import { registerSessionMethods } from './sessions.ts';
 import { registerSettingsMethods } from './settings.ts';
@@ -36,6 +37,7 @@ export function registerModules(core: Core): void {
   registerProjectMethods(core);
   registerProviderMethods(core);
   registerProbeMethods(core);
+  registerUpdateMethods(core);
   registerAccountMethods(core);
   registerThreadMethods(core);
   registerSchedulerMethods(core);

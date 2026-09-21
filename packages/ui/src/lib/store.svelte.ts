@@ -31,6 +31,7 @@ import type {
   Project,
   ProjectId,
   ProviderId,
+  HarnessUpdate,
   ProviderInstallState,
   ProviderRejected,
   ProviderSummary,
@@ -296,6 +297,8 @@ export class Store {
    * only state a summary cannot carry between two `providers.list` calls.
    */
   installStates = $state<Record<ProviderId, ProviderInstallState>>({});
+  /** Where each agent of this machine stands against its newest release, the core's own reading. */
+  harnessUpdates = $state<HarnessUpdate[]>([]);
   /**
    * What an agent answered `providers.probe` with, keyed `providerId::accountId`.
    * An ACP agent owns its model list; the descriptor only carries `default`.
@@ -305,6 +308,8 @@ export class Store {
    */
   probedModels = $state<Record<string, ModelInfo[]>>({});
   #probeAttempts = new Set<string>();
+  /** One per-model effort read per provider, account and model, see `probeModelEffort`. */
+  #effortAttempts = new Set<string>();
   #probeRequests = new Map<string, Promise<void>>();
   #probeEpoch = 0;
   #modelCacheKey(): string { return 'boite.models.v1:' + JSON.stringify([this.endpointUrl, this.core?.dataDir]); }
@@ -466,6 +471,34 @@ export class Store {
       ? { id: choice.model, name: DEFAULT_MODEL_NAMES[choice.model] ?? choice.model } : null;
   }
 
+  /**
+   * OpenCode names a model's reasoning efforts only once a session is on that
+   * model, so the list a probe reads carries none. The composer asks for the
+   * model it landed on, once per model, and the effort chip fills in.
+   */
+  async probeModelEffort(providerId: ProviderId, accountId: string, model: string): Promise<void> {
+    const client = this.#client;
+    if (!client || !this.owner) return;
+    const key = `${probeKey(providerId, accountId)}::${model}`;
+    if (this.#effortAttempts.has(key)) return;
+    await this.probeModels(providerId, accountId);
+    const listed = this.modelsOf(providerId, accountId).find(entry => entry.id === model);
+    if (!listed || listed.effort !== undefined || this.#effortAttempts.has(key)) return;
+    this.#effortAttempts.add(key);
+    const epoch = this.#probeEpoch;
+    try {
+      const { models } = await client.call('providers.probe', { providerId, accountId, model });
+      if (client !== this.#client || epoch !== this.#probeEpoch) return;
+      this.probedModels = { ...this.probedModels, [probeKey(providerId, accountId)]: models };
+      this.#saveModels();
+    } catch (error) {
+      // An older core refuses nothing here, it just answers the plain list; a
+      // real failure is the agent's, and the chip simply stays absent.
+      if (client === this.#client) this.#effortAttempts.delete(key);
+      console.warn('reading the model efforts failed', error);
+    }
+  }
+
   isProbing(providerId: ProviderId, accountId: string | null): boolean {
     return accountId !== null && this.probingModels.includes(probeKey(providerId, accountId));
   }
@@ -625,6 +658,7 @@ export class Store {
     this.probedModels = {};
     this.#probeEpoch++;
     this.#probeAttempts.clear();
+    this.#effortAttempts.clear();
     this.#probeRequests.clear();
     this.probingModels = [];
     this.connection = client.state;
@@ -647,6 +681,7 @@ export class Store {
             resetPullRequestSupport(client);
             this.#probeEpoch++;
             this.#probeAttempts.clear();
+    this.#effortAttempts.clear();
             this.error = null;
             this.core = client.core;
             // `WsClient` writes its principal from the hello answer before it
@@ -818,6 +853,9 @@ export class Store {
     on('providers.installProgress', ({ providerId, ...state }) => {
       this.installStates = { ...this.installStates, [providerId]: state as ProviderInstallState };
     });
+    on('providers.updatesChanged', (updates) => {
+      this.harnessUpdates = updates;
+    });
     on('providers.updated', ({ loaded, rejected }) => {
       this.providers = loaded;
       this.rejectedProviders = rejected;
@@ -828,6 +866,7 @@ export class Store {
       this.probedModels = {};
       this.#probeEpoch++;
       this.#probeAttempts.clear();
+    this.#effortAttempts.clear();
       this.#saveModels();
     });
     on('providers.probed', ({ providerId, accountId, models }) => {
@@ -1280,6 +1319,7 @@ export class Store {
     if (failed !== undefined && failed.status === 'rejected') this.#fail(failed.reason);
     // What `bench/startup.ts` reads: the first moment the app holds its data.
     if (typeof performance !== 'undefined' && performance.getEntriesByName('boite:ready').length === 0) performance.mark('boite:ready');
+    void this.loadHarnessUpdates();
     const open = this.openThread;
     if (open && this.visible) {
       try {
@@ -2314,6 +2354,51 @@ export class Store {
       this.#fail(error);
       return false;
     }
+  }
+
+  /**
+   * The list is the core's and arrives again as `providers.updatesChanged`.
+   * A core from before updates answers MethodNotFound: that machine simply
+   * offers none, which is not an error worth a toast.
+   */
+  async loadHarnessUpdates(refresh = false): Promise<void> {
+    const client = this.#client;
+    if (!client || !this.owner) return;
+    try {
+      const updates = await client.call('providers.updates', refresh ? { refresh: true } : {});
+      if (client === this.#client) this.harnessUpdates = updates;
+    } catch (error) {
+      if (error instanceof RpcFailure && error.code === RpcErrorCode.MethodNotFound) return;
+      if (refresh) this.#fail(error);
+      else console.warn('reading the agent updates failed', error);
+    }
+  }
+
+  async updateHarness(providerId: ProviderId): Promise<void> {
+    const client = this.#client;
+    if (!client) return;
+    try {
+      const update = await client.call('providers.update', { providerId });
+      this.#putHarnessUpdate(update);
+    } catch (error) {
+      this.#fail(error);
+    }
+  }
+
+  async skipHarnessUpdate(providerId: ProviderId, version: string | null): Promise<void> {
+    const client = this.#client;
+    if (!client) return;
+    try {
+      this.#putHarnessUpdate(await client.call('providers.updateSkip', { providerId, version }));
+    } catch (error) {
+      this.#fail(error);
+    }
+  }
+
+  #putHarnessUpdate(update: HarnessUpdate): void {
+    this.harnessUpdates = this.harnessUpdates.some((entry) => entry.providerId === update.providerId)
+      ? this.harnessUpdates.map((entry) => (entry.providerId === update.providerId ? update : entry))
+      : [...this.harnessUpdates, update];
   }
 
   /** Start the download. The rest arrives as `providers.installProgress`. */

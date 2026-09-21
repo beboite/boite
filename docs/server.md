@@ -137,11 +137,16 @@ That is `build:core` followed by `bun build --compile --target=bun-linux-x64`,
 which writes `packages/core/dist/boite-core-linux-x64`: one executable for x64
 glibc Linux that carries its own Bun. Cross-compiling works from Windows. Copy it
 to the server with `packages/ui/dist` beside it, renamed `ui`, since a compiled
-core looks for the UI next to its own executable:
+core looks for the UI next to its own executable. The build also writes
+`packages/core/dist/boite`, the shim behind the `boite` command an agent runs
+([CLI](cli.md)). Copy it beside the executable too: the core puts that directory
+on the PATH of every agent it starts, and warns at start when the shim is
+missing, since no agent can then reach the panel or the task list.
 
 ```
 ~/.local/lib/boite/
   boite-core      (the executable, mode 755)
+  boite           (the CLI shim, mode 755)
   ui/             (packages/ui/dist)
 ```
 

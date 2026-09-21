@@ -71,6 +71,11 @@ export interface TurnContext {
    */
   attachments: ImageAttachment[];
   sessionId: string | null;
+  /**
+   * What the finished turns of this agent session already used, for an agent
+   * whose running totals survive a resume. Absent or zero on a fresh session.
+   */
+  sessionBefore?: { costUsd: number; tokens: number };
   /** The isolation environment of this account, empty for the provider's own login. */
   accountEnv: Record<string, string>;
   /**
@@ -133,6 +138,8 @@ export interface ProbeContext {
   accountEnv: Record<string, string>;
   /** The core's data directory: the probe session belongs to no project. */
   cwd: string;
+  /** Also read this model's own effort scale, for an agent that names it per model. */
+  model?: string;
   /** The registry that traces the probe process, under the thread `probe:<providerId>:<accountId>`. */
   spawnChild(cmd: string, args: string[], opts?: SpawnOptions): SpawnedChild;
   /** Terminates whatever that synthetic thread launched. Called on every path. */

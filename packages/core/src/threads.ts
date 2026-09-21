@@ -574,12 +574,15 @@ export class ThreadStore {
       throw refused('this thread already has an in-flight turn', { threadId });
     }
     const provider = this.core.providers.require(thread.providerId);
+    if (this.core.updates.updating(thread.providerId)) {
+      throw refused(`${provider.name} is updating; send this again once it is done`, { threadId, providerId: thread.providerId });
+    }
     assertDriverRunnable(
       provider.protocol,
       this.core.providers.summary(thread.providerId),
       this.core.accounts.require(thread.accountId),
     );
-    checkEffort(provider, thread.accountId, thread.model, thread.effort);
+    checkStoredEffort(provider, thread.accountId, thread.model, thread.effort);
     checkSpeed(provider, thread.accountId, thread.model, thread.speed ?? null);
     checkAttachments(attachments, provider);
 
@@ -1017,6 +1020,7 @@ export class ThreadStore {
       coordination: () => this.core.coordination.take(threadId, turn.id),
       attachments: prepared.attachments,
       sessionId: thread.sessionId,
+      sessionBefore: this.sessionBefore(thread, turn.id),
       accountEnv: env,
       warmProcessMinutes: this.core.settings.get().warmProcessMinutes,
       emit,
@@ -1162,6 +1166,19 @@ export class ThreadStore {
   }
 
   /** The user message of the turn, read back from the journal: the text and the images it carried. */
+  /** What the agent session this turn resumes already used, summed over its recorded turns. */
+  private sessionBefore(thread: ThreadSummary, turnId: TurnId): { costUsd: number; tokens: number } {
+    const before = { costUsd: 0, tokens: 0 };
+    if (thread.sessionId === null) return before;
+    for (const earlier of this.core.journal.listTurns(thread.id)) {
+      if (earlier.id === turnId || earlier.usage === null) continue;
+      if (earlier.execution?.sessionGeneration !== (thread.sessionGeneration ?? 0)) continue;
+      before.costUsd += earlier.usage.costUsdEquivalent ?? 0;
+      before.tokens += earlier.usage.inputTokens + earlier.usage.outputTokens + earlier.usage.cacheReadTokens + earlier.usage.cacheWriteTokens;
+    }
+    return before;
+  }
+
   private lastUserInput(threadId: ThreadId, turnId: TurnId): { prompt: string; attachments: Attachment[] } {
     const operation = this.core.journal.getTurn(turnId)?.execution?.operation;
     const message = operation === 'coordination'
@@ -1292,6 +1309,23 @@ function checkEffort(
     effort,
     expected: levels.length === 0 ? 'null: this model has no effort levels' : levels.map((level) => level.id),
   });
+}
+
+/**
+ * The effort a thread already carries was checked when it was chosen. A probed
+ * scale lives in memory, so after a core restart it may not be read yet: only a
+ * scale that is known and lacks the level refuses the turn.
+ */
+function checkStoredEffort(
+  provider: ProviderDescriptor,
+  accountId: AccountId,
+  model: string | null,
+  effort: string | null,
+): void {
+  if (effort === null) return;
+  const known = modelsFor(provider, accountId).find((entry) => entry.id === model)?.effort;
+  if (known === undefined) return;
+  checkEffort(provider, accountId, model, effort);
 }
 
 function defaultModel(provider: ProviderDescriptor): string | null {

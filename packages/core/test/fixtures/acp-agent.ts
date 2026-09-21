@@ -192,6 +192,24 @@ const app = agent({ name: 'acp-fake' })
   })
   .onRequest('session/set_config_option', ({ params }) => {
     log(`set_config_option ${params.configId} ${String(params.value)}`);
+    // Like OpenCode, the smart model names its own scale once a session is on it.
+    if (params.configId === 'model' && params.value === 'fake-smart') {
+      return {
+        configOptions: configOptions.map((option) =>
+          option.id === 'model'
+            ? { ...option, currentValue: 'fake-smart' }
+            : {
+                ...option,
+                currentValue: 'high',
+                options: [
+                  { value: 'low', name: 'Low' },
+                  { value: 'high', name: 'High' },
+                  { value: 'max', name: 'Max' },
+                ],
+              },
+        ) as SessionConfigOption[],
+      };
+    }
     return { configOptions };
   })
   .onRequest('session/set_mode', ({ params }) => {

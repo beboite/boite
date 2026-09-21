@@ -213,10 +213,16 @@ describe('accounts', () => {
       'account.login',
       (event) => event.accountId === account.id && event.url !== null,
     );
+    const withSignIn = client.next(
+      'account.login',
+      (event) => event.accountId === account.id && event.url !== null && event.url.includes('/login'),
+    );
 
     expect(await client.call('accounts.login', { accountId: account.id })).toEqual({ ok: true });
     expect((await started).state).toBe('running');
-    const link = await withUrl;
+    // The terms page is printed first and gives way to the link that signs in.
+    expect((await withUrl).url).toBe('https://example.invalid/terms');
+    const link = await withSignIn;
     expect(link.url).toBe('https://example.invalid/login?code=echo');
     expect(link.output).toContain('https://example.invalid/login?code=echo');
 

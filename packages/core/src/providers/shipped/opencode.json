@@ -8,6 +8,7 @@
   "profiles": {
     "windows": {
       "detect": {},
+      "update": { "args": ["upgrade"], "latestNpm": "opencode-ai" },
       "executable": [
         { "kind": "file", "value": "{agentsDir}/opencode.exe" },
         { "kind": "file", "value": "{appdata}/npm/node_modules/opencode-ai/bin/opencode.exe" },
@@ -27,6 +28,7 @@
     },
     "linux": {
       "detect": {},
+      "update": { "args": ["upgrade"], "latestNpm": "opencode-ai" },
       "executable": [{ "kind": "path", "value": "opencode" }],
       "launch": { "args": ["acp", "--port", "0"] },
       "isolation": { "XDG_DATA_HOME": "{isolationDir}", "XDG_CONFIG_HOME": "{isolationDir}" },
@@ -34,6 +36,7 @@
     },
     "macos": {
       "detect": {},
+      "update": { "args": ["upgrade"], "latestNpm": "opencode-ai" },
       "executable": [{ "kind": "path", "value": "opencode" }],
       "launch": { "args": ["acp", "--port", "0"] },
       "isolation": { "XDG_DATA_HOME": "{isolationDir}", "XDG_CONFIG_HOME": "{isolationDir}" },

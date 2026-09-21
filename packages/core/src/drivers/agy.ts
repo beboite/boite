@@ -15,7 +15,8 @@
  *   `DONE`, `ERROR`) and `step_type`. An `agent_response` step streams
  *   `text_delta` chunks and carries its `usage` when it is done; a `tool` step
  *   carries `tool_name` and `tool_info { name, parameters, error? }`, `ACTIVE`
- *   then `DONE` or `ERROR` on the same index. Tool output is never streamed.
+ *   then `DONE` or `ERROR` on the same index. `tool_info.output` arrives whole
+ *   with the last update of most tools and never streams.
  * - `result`, at the end of every turn: `status` `SUCCESS` or `ERROR`, the
  *   `response`, the `error`. Its `usage` counts the whole process, so a turn's
  *   usage is the sum of its own `agent_response` steps instead.
@@ -65,6 +66,8 @@ const KILL_WAIT_MS = 2_000;
 const PROBE_TIMEOUT_MS = 20_000;
 /** What a probe keeps of the listing, far above any real one. */
 const PROBE_OUTPUT_MAX = 1024 * 1024;
+/** What one tool part keeps of its output in the journal. */
+const TOOL_OUTPUT_MAX = 64 * 1024;
 /** The model id that means "agy keeps the one it is configured with". */
 const AGENT_OWN_MODEL = 'default';
 /**
@@ -339,10 +342,11 @@ function drawStep(turn: AgyTurn, step: Row): void {
   const info = rowOf(step['tool_info']);
   const failure = rowOf(info['error']);
   const status: ToolStatus = state === 'ERROR' ? 'error' : state === 'DONE' ? 'done' : 'running';
-  let output: string | null = null;
+  // A finished step carries what the tool printed, whole: nothing streams before it.
+  let output: string | null = toolOutput(info['output']);
   if (status === 'error') {
     const reason = textOf(failure['message']) || textOf(failure['type']);
-    output = reason.length > 0 ? reason : 'the tool failed';
+    output = reason.length > 0 ? reason : (output ?? 'the tool failed');
   }
   turn.upsertTool(stepIndex, {
     name: textOf(info['name']) || textOf(step['tool_name']),
@@ -350,6 +354,18 @@ function drawStep(turn: AgyTurn, step: Row): void {
     output,
     status,
   });
+}
+
+/** `tool_info.output` is text on every tool seen so far; anything else is kept as JSON rather than dropped. */
+function toolOutput(value: unknown): string | null {
+  if (value === undefined || value === null) return null;
+  if (typeof value === 'string') return value.length > TOOL_OUTPUT_MAX ? `${value.slice(0, TOOL_OUTPUT_MAX)}
+[cut at ${TOOL_OUTPUT_MAX} characters]` : value;
+  try {
+    return toolOutput(JSON.stringify(value));
+  } catch {
+    return null;
+  }
 }
 
 /** Wherever the event carries it: `init`, a step or a `result`. */
@@ -549,6 +565,9 @@ class AgySession {
       ...STREAM_ARGS,
       ...(this.sessionId === null ? [] : ['--conversation', this.sessionId]),
       ...(model === null ? [] : ['--model', model]),
+      // Print mode's workspace is agy's own scratch directory unless one is
+      // named: without this its shell and its file tools never see the project.
+      '--add-dir', ctx.thread.cwd,
       ...modeArgs(ctx.thread.permissionMode),
       PRINT_FLAG,
     ];
