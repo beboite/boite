@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { join, resolve, sep } from 'node:path';
 import type { HarnessUpdate, OsProfile, ProviderDescriptor, ProviderId, ProviderSelfUpdate } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { forgetProbes, releaseThread } from '../drivers/index.ts';
@@ -37,6 +37,12 @@ export function compareVersions(a: string, b: string): number {
   if (right.tag === '') return -1;
   // beta.10 is after beta.2: a numeric part compares as a number.
   return left.tag.localeCompare(right.tag, 'en', { numeric: true }) < 0 ? -1 : 1;
+}
+
+/** True when the path sits under that directory, a sibling sharing its first letters left out. */
+export function inside(dir: string, path: string): boolean {
+  const fold = (value: string): string => (process.platform === 'linux' ? value : value.toLowerCase());
+  return fold(path).startsWith(fold(dir.endsWith(sep) ? dir : dir + sep));
 }
 
 export function readVersion(output: string): string | null {
@@ -210,7 +216,7 @@ export class HarnessUpdates {
     const runsManaged =
       summary.install?.state === 'installed' &&
       command !== null &&
-      resolve(command.executable).toLowerCase().startsWith(managedDir.toLowerCase());
+      inside(managedDir, resolve(command.executable));
     if (runsManaged && profile.install !== undefined) return { descriptor, profile, route: 'managed' };
     // A download in flight belongs to the install card, not to this list.
     if (profile.update !== undefined && command !== null) return { descriptor, profile, route: 'self' };

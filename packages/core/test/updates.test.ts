@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, test } from 'bun:test';
 import type { HarnessUpdate } from '@boite/contracts';
 import type { CoreClient } from '../src/client.ts';
-import { compareVersions, readVersion } from '../src/providers/updates.ts';
+import { compareVersions, inside, readVersion } from '../src/providers/updates.ts';
 import { startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
 
@@ -82,6 +82,8 @@ describe('harness updates', () => {
     expect(readVersion('codex-cli 0.155.1')).toBe('0.155.1');
     expect(readVersion('grok 1.0.34 (3736acbc8658) [stable]')).toBe('1.0.34');
     expect(readVersion('nothing here')).toBeNull();
+    expect(inside(join('a', 'codex'), join('a', 'codex', 'bin', 'agent'))).toBe(true);
+    expect(inside(join('a', 'codex'), join('a', 'codex-other', 'agent'))).toBe(false);
   });
 
   test('an agent that checks by itself is read, updated by its own updater, and traced', async () => {
