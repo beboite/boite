@@ -53,7 +53,7 @@ export interface Env {
 }
 
 // ─── Payload types ───────────────────────────────────────────────
-import { enhancedDetails, type EnhancedDetails } from './details';
+import { enhancedDetails, type EnhancedDetails } from '../../packages/contracts/src/telemetry.ts';
 
 export interface TelemetryEvent extends EnhancedDetails {
   name: string;

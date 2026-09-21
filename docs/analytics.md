@@ -52,7 +52,7 @@ Enhanced `turn_finished` events also carry the selected public `model`, `effort`
 to 100 tokens and capped at ten million. Missing usage stays absent.
 The frozen execution snapshot supplies these values, not a later model choice.
 `default` means the provider chose its model; it does not claim a resolved model.
-`telemetry/src/details.ts` lists public models explicitly. Unknown models, custom
+`packages/contracts/src/telemetry.ts` lists public models explicitly. Unknown models, custom
 aliases, paths and fine-tuned IDs become `other` on both the host and relay.
 Basic mode strips every enhanced field even from modified clients.
 

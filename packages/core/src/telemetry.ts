@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import type { TelemetryState, Turn } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { invalidParams as invalid } from './errors.ts';
-import { enhancedDetails, type EnhancedDetails } from '../../../telemetry/src/details.ts';
+import { enhancedDetails, type EnhancedDetails } from '../../contracts/src/telemetry.ts';
 
 const EVENTS = ['ping', 'first_run', 'app_launched', 'session_ended', 'project_added', 'thread_spawned', 'turn_finished'] as const;
 type EventName = typeof EVENTS[number];
