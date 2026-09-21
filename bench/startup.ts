@@ -28,7 +28,7 @@ const ROOT = join(import.meta.dir, '..');
 const EXE = flag('exe', process.env.BOITE_E2E_SHELL_EXE ?? join(ROOT, 'apps', 'shell', 'src-tauri', 'target', 'release', 'boite-shell.exe'));
 const RUNS = Number(flag('runs', '7'));
 const CORE_COMMAND = flag('core-command', '');
-if (process.argv.at(-1) === '--core-command') throw new Error('--core-command needs a value: the command that starts the core');
+if (process.argv.at(-1) === '--core-command' || CORE_COMMAND.startsWith('--')) throw new Error('--core-command needs a value: the command that starts the core');
 
 interface Run {
   coreMs: number;
