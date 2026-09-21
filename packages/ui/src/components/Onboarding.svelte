@@ -33,6 +33,9 @@
 
   const screens = $derived(steps(store.owner));
   let index = $state(0);
+  $effect(() => {
+    if (index >= screens.length) index = Math.max(0, screens.length - 1);
+  });
   let step = $derived<OnboardingStep>(screens[index] ?? 'welcome');
   let last = $derived(index === screens.length - 1);
   let panel = $state<HTMLDivElement | undefined>(undefined);

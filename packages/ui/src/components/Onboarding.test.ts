@@ -206,6 +206,16 @@ test('skipping at the first screen counts as seen, the same as finishing it', as
   expect(tourSeen()).toBe(true);
 });
 
+test('losing owner access on the last screen keeps the step and count valid', async () => {
+  await open();
+  await click('onboarding-dot-project');
+  store.principal = 'session';
+  flushSync();
+  await tick();
+  expect(step()).toBe('project');
+  expect(query('header .count').textContent?.trim()).toBe('Step 8 of 8');
+});
+
 test('continuing the privacy step keeps basic counters without opting into details', async () => {
   await open();
   await click('onboarding-next');
