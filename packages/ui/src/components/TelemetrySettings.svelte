@@ -12,7 +12,7 @@
     if (!client || !store.owner || store.connection !== 'ready') return;
     let active = true;
     consent = null;
-    void client.call('telemetry.state', {}).then(value => { if (active) consent = value; })
+    void store.telemetryState().then(value => { if (active) consent = value; })
       .catch(reason => { if (active) error = String(reason); });
     return () => { active = false; };
   });
@@ -21,7 +21,7 @@
     const client = store.client;
     if (!client) return;
     busy = true; error = '';
-    try { const value = await client.call('telemetry.configure', { mode }); if (store.client === client) consent = value; }
+    try { const value = await store.configureTelemetry(mode); if (store.client === client) consent = value; }
     catch (reason) { if (store.client === client) error = String(reason); }
     finally { busy = false; }
   }
@@ -31,9 +31,9 @@
     if (!client) return;
     busy = true; error = '';
     try {
-      if (action === 'retryForget') { const value = await client.call('telemetry.retryForget', {}); if (store.client === client) consent = value; }
+      if (action === 'retryForget') { const value = await store.retryTelemetryDeletion(); if (store.client === client) consent = value; }
       else {
-        const result = await client.call('telemetry.export', {});
+        const result = await store.exportTelemetry();
         if (store.client !== client) return;
         const url = URL.createObjectURL(new Blob([JSON.stringify(result, null, 2)], { type: 'application/json' }));
         const link = document.createElement('a'); link.href = url; link.download = 'boite-telemetry.json'; link.click();

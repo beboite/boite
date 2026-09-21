@@ -36,7 +36,7 @@ export function enhancedDetails(fields: Record<string, unknown>): EnhancedDetail
     model: publicModel(fields.model),
     effort: fields.effort == null ? 'default' : choice(fields.effort, ['default', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra', 'ultrathink']),
     speed: fields.speed == null ? 'default' : choice(fields.speed, ['default', 'standard', 'fast']),
-    permission_mode: choice(fields.permission_mode, ['default', 'acceptEdits', 'plan', 'bypassPermissions', 'dontAsk']),
+    permission_mode: choice(fields.permission_mode ?? 'default', ['default', 'acceptEdits', 'plan', 'bypassPermissions', 'dontAsk']),
     operation: choice(fields.operation, ['prompt', 'compact']),
   };
   if (typeof fields.queue_ms === 'number' && Number.isFinite(fields.queue_ms) && fields.queue_ms >= 0) result.queue_ms = Math.min(604800000, Math.round(fields.queue_ms));

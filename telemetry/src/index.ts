@@ -808,6 +808,7 @@ async function notifyRateLimit(env: Env, endpoint: string, ip: string): Promise<
   try {
     const res = await fetch("https://api.resend.com/emails", {
       method: "POST",
+      signal: AbortSignal.timeout(POSTHOG_TIMEOUT_MS),
       headers: {
         Authorization: `Bearer ${env.RESEND_API_KEY}`,
         "Content-Type": "application/json",

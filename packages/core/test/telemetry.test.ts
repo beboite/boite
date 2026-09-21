@@ -1,11 +1,11 @@
-import { afterEach, expect, test } from 'bun:test';
+import { afterEach, expect, spyOn, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { Bus } from '../src/bus.ts';
 import type { Core } from '../src/core.ts';
 import { Telemetry, telemetryEvent } from '../src/telemetry.ts';
-import { buildBatch } from '../../../telemetry/src/index.ts';
+import relay, { buildBatch, type Env } from '../../../telemetry/src/index.ts';
 import { enhancedDetails, publicModel } from '../../contracts/src/telemetry.ts';
 
 const cleanups: (() => Promise<void>)[] = [];
@@ -15,7 +15,8 @@ test('the core test runner disables the production relay', () => {
 
 test('enhanced normalization preserves canonical defaults across host and relay', () => {
   const event = enhancedDetails({});
-  expect(event).toMatchObject({ effort: 'default', speed: 'default' });
+  expect(event).toMatchObject({ effort: 'default', speed: 'default', permission_mode: 'default' });
+  expect(enhancedDetails({ permission_mode: 'private' }).permission_mode).toBe('other');
   expect(enhancedDetails(event as Record<string, unknown>)).toEqual(event);
   expect(publicModel('anthropic/claude-sonnet-4-5-20250929[1m]')).toBe('claude-sonnet-4-5');
 });
@@ -53,6 +54,11 @@ test('fresh hosts use basic counters and an explicit opt-out persists across res
   await restarted.close();
   expect(restarted.state().mode).toBe('off');
   expect(requests).toEqual([]);
+});
+
+test('invalid relay URLs name the configuration field without echoing its value', () => {
+  const f = fixture();
+  expect(() => new Telemetry(f.host, 'INVALID PRIVATE URL', f.send)).toThrow('BOITE_TELEMETRY_URL: expected a valid URL');
 });
 
 test('invalid consent fails closed with repair guidance and preserves the deletion ledger', async () => {
@@ -171,6 +177,34 @@ test('relay rebuilds a closed payload and separates basic ping identifiers', () 
   expect(JSON.stringify(batch)).not.toContain('SECRET');
   expect(JSON.stringify(batch)).not.toContain('/private/path');
   expect((batch[0] as any).uuid).toBe(event.uuid);
+});
+
+test('rate-limit alerts carry a bounded abort signal', async () => {
+  const background: Promise<unknown>[] = [];
+  const deadline = spyOn(AbortSignal, 'timeout');
+  const request = spyOn(globalThis, 'fetch').mockImplementation((async (_url, init) => {
+    expect(init?.signal).toBeInstanceOf(AbortSignal);
+    return Response.json({ ok: true });
+  }) as typeof fetch);
+  try {
+    const env: Env = {
+      RL_TRACK: { limit: async () => ({ success: false }) },
+      RL_NOTIFY: { limit: async () => ({ success: true }) },
+      RL_RGPD: { limit: async () => ({ success: true }) },
+      RL_GLOBAL: { limit: async () => ({ success: true }) },
+      HASH_SECRET: 'test-only', POSTHOG_PROJECT_API_KEY: '', POSTHOG_PERSONAL_API_KEY: '',
+      POSTHOG_PROJECT_ID: '', POSTHOG_INGEST_HOST: '', POSTHOG_API_HOST: '', ENVIRONMENT: 'test', BATCH_MAX_EVENTS: '200',
+      RESEND_API_KEY: 'test-only', ALERT_EMAIL: 'test@example.invalid', ALERT_FROM: 'test@example.invalid',
+      UA_PREFIX: 'Boite/', ALLOWED_ORIGINS: '',
+    };
+    const response = await relay.fetch(new Request('https://relay.example/track', {
+      method: 'POST', headers: { 'User-Agent': 'Boite/test', 'CF-Connecting-IP': '192.0.2.1' },
+    }), env, { waitUntil: promise => { background.push(promise); } });
+    expect(response.status).toBe(429);
+    await Promise.all(background);
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(deadline).toHaveBeenCalledWith(10000);
+  } finally { request.mockRestore(); deadline.mockRestore(); }
 });
 
 test('one host bus emits one count, never the prompt or error from a turn', async () => {

@@ -68,7 +68,9 @@ export class Telemetry {
 
   constructor(private core: Core, private endpoint = process.env.BOITE_TELEMETRY_URL ?? 'https://boite-v2-telemetry.nefreex.workers.dev', private send: typeof fetch = fetch) {
     if (endpoint) {
-      const url = new URL(endpoint);
+      let url: URL;
+      try { url = new URL(endpoint); }
+      catch { throw invalid('BOITE_TELEMETRY_URL: expected a valid URL'); }
       if (url.protocol !== 'https:' && !(url.protocol === 'http:' && ['127.0.0.1', 'localhost'].includes(url.hostname))) {
         throw invalid('BOITE_TELEMETRY_URL: expected HTTPS or loopback HTTP');
       }
