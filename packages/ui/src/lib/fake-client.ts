@@ -1571,7 +1571,11 @@ export class FakeClient implements ObservableClient {
         // the tail is longer than a page, and then the whole page as before.
         const from = params.after === undefined ? -1 : thread.messages.findIndex((message) => message.id === params.after);
         if (from !== -1 && thread.messages.length - from <= MESSAGE_PAGE) {
-          return structuredClone({ ...thread, messages: thread.messages.slice(from), messagesBefore: null, messagesFrom: params.after });
+          const messages = thread.messages.slice(from);
+          // As the core's `listTurnsFor`: the turns of the messages sent, and whatever is still queued or running.
+          const sent = new Set(messages.map((message) => message.turnId));
+          const turns = thread.turns.filter((turn) => turn.status === 'queued' || turn.status === 'running' || sent.has(turn.id));
+          return structuredClone({ ...thread, messages, turns, messagesBefore: null, messagesFrom: params.after });
         }
         const page = this.#page(thread.messages, thread.messages.length, MESSAGE_PAGE);
         return structuredClone({ ...thread, messages: page.messages, messagesBefore: page.before });

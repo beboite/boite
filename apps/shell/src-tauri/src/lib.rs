@@ -491,7 +491,11 @@ fn repo_root() -> Option<PathBuf> {
     None
 }
 
-fn sidecar() -> Result<Option<PathBuf>, String> {
+/// The sidecar beside this executable and the arguments that make it the core.
+/// A `core/main.js` beside it means the sidecar is the Bun runtime under the
+/// core's name (the Windows installer, see `stage-sidecar.ts`) and the bundle is
+/// its script; without one the sidecar is the compiled core and takes nothing.
+fn sidecar() -> Result<Option<(PathBuf, Vec<String>)>, String> {
     let exe = std::env::current_exe().map_err(|error| error.to_string())?;
     let name = if cfg!(windows) {
         "boite-core.exe"
@@ -503,7 +507,16 @@ fn sidecar() -> Result<Option<PathBuf>, String> {
     if !path.exists() { return Ok(None); }
     #[cfg(windows)]
     check_workers(directory)?;
-    Ok(Some(path))
+    Ok(Some((path, bundle_args(directory))))
+}
+
+fn bundle_args(directory: &Path) -> Vec<String> {
+    let bundle = directory.join("core").join("main.js");
+    if bundle.is_file() {
+        vec![bundle.display().to_string()]
+    } else {
+        Vec::new()
+    }
 }
 
 #[cfg(any(windows, test))]
@@ -537,8 +550,8 @@ fn core_program() -> Result<(String, Vec<String>, Option<PathBuf>), String> {
         return Ok((program, parts.collect(), None));
     }
 
-    if let Some(path) = sidecar()? {
-        return Ok((path.display().to_string(), Vec::new(), None));
+    if let Some((path, args)) = sidecar()? {
+        return Ok((path.display().to_string(), args, None));
     }
 
     let repo = repo_root().ok_or_else(|| {
@@ -889,6 +902,16 @@ mod tests {
         assert!(super::check_workers(&directory).unwrap_err().contains("guard-worker.js"));
         std::fs::write(directory.join("guard-worker.js"), "").unwrap();
         assert!(super::check_workers(&directory).is_ok());
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn a_bundle_beside_the_sidecar_becomes_its_script() {
+        let directory = std::env::temp_dir().join(format!("boite-bundle-{}", std::process::id()));
+        std::fs::create_dir_all(directory.join("core")).unwrap();
+        assert!(super::bundle_args(&directory).is_empty());
+        std::fs::write(directory.join("core").join("main.js"), "").unwrap();
+        assert_eq!(super::bundle_args(&directory), vec![directory.join("core").join("main.js").display().to_string()]);
         std::fs::remove_dir_all(directory).unwrap();
     }
 
