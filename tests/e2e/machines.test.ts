@@ -77,7 +77,7 @@ test('project and recent cards show both hosts, PRs and user-message ordering on
   expect(await page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')).toBe(true);
   await page.evaluate(`document.documentElement.dataset.theme = 'light'`);
   await capture('recent-machines-phone-light.png');
-  await page.send('Emulation.clearDeviceMetricsOverride');
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
   await page.click(id('nav-settings'));
   await page.click(id('settings-tab-machines'));
   await page.evaluate(`(() => { const input = document.querySelectorAll('[data-testid="machine-rename"]')[1]; input.value = 'Build server'; input.dispatchEvent(new Event('change', {bubbles: true})); })()`);

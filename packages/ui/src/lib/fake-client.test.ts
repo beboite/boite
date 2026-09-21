@@ -4,6 +4,37 @@ import { RpcErrorCode } from '@boite/contracts';
 
 afterEach(() => vi.useRealTimers());
 
+test('coordination stays scoped to its core and paired devices can only inspect it', async () => {
+  const first = new FakeClient({ delayMs: 0, coreId: 'core-first', coreName: 'First', publicUrl: 'https://first.test' });
+  const second = new FakeClient({ delayMs: 0, coreId: 'core-second', coreName: 'Second', publicUrl: 'https://second.test' });
+  const phone = new FakeClient({ delayMs: 0, principal: 'session', coreId: 'core-phone' });
+  await Promise.all([first.connect(), second.connect(), phone.connect()]);
+
+  expect((await first.call('collaboration.get', { threadId: 't-trace' })).config.mode).toBe('off');
+  await first.call('collaboration.configure', { threadId: 't-trace', config: { mode: 'team', resources: 'UI', remote: true, paused: false } });
+  expect((await first.call('collaboration.get', { threadId: 't-trace' })).config.resources).toBe('UI');
+  await first.call('collaboration.configure', { threadId: 't-descriptors', config: { mode: 'brief', resources: 'Descriptors', remote: false, paused: false } });
+  expect((await first.call('collaboration.directory', { threadId: 't-trace' })).agents.map(agent => agent.threadId)).not.toContain('t-descriptors');
+  await first.call('collaboration.configure', { threadId: 't-descriptors', config: { mode: 'brief', resources: 'Descriptors', remote: true, paused: false } });
+  expect((await first.call('collaboration.directory', { threadId: 't-trace' })).agents.map(agent => agent.threadId)).toContain('t-descriptors');
+  expect((await second.call('collaboration.get', { threadId: 't-trace' })).config.mode).toBe('off');
+  expect((await phone.call('collaboration.get', { threadId: 't-trace' })).config.mode).toBe('off');
+  await expect(phone.call('collaboration.configure', { threadId: 't-trace', config: { mode: 'brief', resources: '', remote: false, paused: false } })).rejects.toMatchObject({ code: RpcErrorCode.Refused });
+
+  const [a, b] = await Promise.all([first.call('collaboration.identity', {}), second.call('collaboration.identity', {})]);
+  await Promise.all([first.call('collaboration.trust', { peer: b }), second.call('collaboration.trust', { peer: a })]);
+  expect(await first.call('collaboration.peers', {})).toEqual([b]);
+  await second.call('collaboration.configure', { threadId: 't-trace', config: { mode: 'brief', resources: 'Build VM', remote: true, paused: false } });
+  await expect(first.call('collaboration.check', { coreId: b.coreId })).resolves.toEqual({ ok: true });
+  expect((await first.call('collaboration.directory', { threadId: 't-trace' })).agents).toContainEqual(expect.objectContaining({ coreId: b.coreId, threadId: 't-trace' }));
+  const letter = await first.call('collaboration.send', { threadId: 't-trace', to: { coreId: b.coreId, threadId: 't-trace' }, text: 'Wait for the build', requestId: 'remote' });
+  expect((await second.call('collaboration.get', { threadId: 't-trace' })).messages).toEqual([letter]);
+  expect((await second.call('collaboration.get', { threadId: 't-trace' })).sent).toBe(0);
+  await first.call('collaboration.untrust', { coreId: b.coreId });
+  expect(await first.call('collaboration.peers', {})).toEqual([]);
+  first.close(); second.close(); phone.close();
+});
+
 test('fake threads reject unknown providers even when speed is omitted', async () => {
   const client = new FakeClient({ delayMs: 0 });
   await client.connect();

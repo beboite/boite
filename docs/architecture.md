@@ -176,6 +176,15 @@ measures it, and a height measured above the reading point put back into
 The transport sits behind one `Client` interface, so the same UI runs on the real
 core, on a WebSocket to a remote core, and on an in-memory fake.
 
+## Agent coordination
+
+The core owns opt-in permissions, discovery, durable inboxes and message budgets.
+Agent RPC credentials bind the sender to one thread. Cross-machine messaging uses
+a separate signed HTTPS endpoint with pinned Ed25519 public keys, not owner RPC
+credentials. UI stores remain machine-scoped. Provider adapters deliver attributed
+agent input at supported boundaries; the scheduler handles idle wake turns.
+[Agent coordination](coordination.md) describes delivery states and the trust boundary.
+
 ## The phone keeps the app
 
 `packages/ui/public/sw.js` is plain JavaScript that Vite copies untouched, one
@@ -187,4 +196,3 @@ serves the shell, the worker and the manifest as `no-cache` and the hashed
 assets as immutable for a year. What a phone gets with the core asleep is the
 shell painting from disk and "Connecting" in the footer until the socket comes
 back. [docs/phone.md](phone.md).
-

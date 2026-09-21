@@ -337,6 +337,7 @@ async function runTurn(turnId: string, text: string): Promise<void> {
         });
         break;
       case 'slow':
+        log('waiting for interrupt');
         await awaitInterrupt(turnId);
         waiting.delete(turnId);
         interrupted.delete(turnId);
@@ -414,6 +415,12 @@ function handle(method: string, raw: unknown): unknown {
         void runTurn(turnId, promptOf(params));
       }, 0);
       return { turn: turnRecord(turnId, 'inProgress') };
+    }
+    case 'turn/steer': {
+      const active = textOf(params['expectedTurnId']);
+      if (!waiting.has(active) || params['threadId'] !== threadId) throw new Error('no matching active turn');
+      log(`turn/steer ${active} ${promptOf(params)}`);
+      return { turnId: active };
     }
     case 'turn/interrupt': {
       const turnId = textOf(params['turnId']);

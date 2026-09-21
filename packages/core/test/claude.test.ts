@@ -140,6 +140,30 @@ class FakeQuery {
   }
 }
 
+test('coordination arrives once through Claude PostToolUse with agent provenance', async () => {
+  scripted(fake => fake.emit(init('coordination-session')));
+  const client = await harness.connect();
+  const threadId = await claudeThread(client);
+  const projectId = harness.core.threads.require(threadId).projectId;
+  const account = (await client.call('accounts.list', {})).find(a => a.providerId === 'echo')!;
+  const source = await client.call('threads.create', { projectId, providerId: 'echo', accountId: account.id, title: 'Maintenance' });
+  const config = { mode: 'brief' as const, resources: 'shared VM', remote: false, paused: false };
+  for (const id of [source.id, threadId]) harness.core.coordination.configure(id, config);
+  await client.call('turns.start', { threadId, prompt: 'Deploy the service' });
+  await waitFor(() => !!calls[0]?.prompts.length);
+  await harness.core.coordination.send({ threadId: source.id, to: harness.core.coordination.get(threadId).self, text: 'May I reboot?', requestId: 'claude-hook' });
+  const hook = calls[0]!.options.hooks!.PostToolUse![0]!.hooks[0]!;
+  const input = { hook_event_name: 'PostToolUse' as const, session_id: 'coordination-session', transcript_path: '', cwd: harness.dataDir, tool_use_id: 'read-1', tool_name: 'Read', tool_input: {}, tool_response: 'file content' };
+  const result = await hook(input, 'read-1', { signal: new AbortController().signal });
+  expect(JSON.stringify(result)).toContain('OTHER AGENTS, NOT the user');
+  expect(JSON.stringify(result)).toContain('May I reboot?');
+  expect(JSON.stringify(result)).not.toContain('classifierContext');
+  const again = await hook(input, 'read-2', { signal: new AbortController().signal });
+  expect(JSON.stringify(again)).not.toContain('May I reboot?');
+  expect(harness.core.coordination.get(threadId).messages[0]?.status).toBe('delivered');
+  await client.call('turns.stop', { threadId });
+});
+
 const queries: FakeQuery[] = [];
 /** What the driver handed the SDK, query by query: the options and every prompt it pushed. */
 const calls: { options: Options; prompts: string[] }[] = [];

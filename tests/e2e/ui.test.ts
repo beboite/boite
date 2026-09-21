@@ -796,7 +796,7 @@ test('inline code stays literal at desktop and phone widths', async () => {
       await page.screenshot(join(import.meta.dir, '.artifacts', `markdown-${name}.png`));
     }
   } finally {
-    await page.send('Emulation.clearDeviceMetricsOverride');
+    await page.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
   }
 }, TIMEOUT);
 

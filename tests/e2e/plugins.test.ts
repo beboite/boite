@@ -1,14 +1,11 @@
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { createRequire } from 'node:module';
 import { BrowserPage, freePort } from './lib/cdp.ts';
+import { startUi } from './lib/ui.ts';
 
-// Vite belongs to the UI workspace, not the repository root.
-const uiRequire = createRequire(join(import.meta.dir, '../../packages/ui/package.json'));
-const { createServer } = await import(uiRequire.resolve('vite'));
 const artifacts = join(import.meta.dir, '.artifacts', 'plugins');
-let server: { listen(): Promise<unknown>; close(): Promise<void> };
+let server: { close(): Promise<void> };
 let page: BrowserPage;
 const id = (name: string) => `[data-testid="${name}"]`;
 const row = (plugin: string) => `${id('plugin-row')}[data-plugin="${plugin}"]`;
@@ -36,8 +33,7 @@ async function inspect(url: string) {
 
 beforeAll(async () => {
   const port = await freePort();
-  server = await createServer({ root: join(import.meta.dir, '../../packages/ui'), server: { host: '127.0.0.1', port, strictPort: true }, clearScreen: false });
-  await server.listen();
+  server = await startUi(port);
   page = await BrowserPage.launch({ url: `http://127.0.0.1:${port}/?fake=1`, windowSize: { width: 1280, height: 800 } });
   await page.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
   await page.waitFor(`document.querySelector('${id('nav-settings')}')`);

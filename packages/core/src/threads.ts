@@ -554,7 +554,7 @@ export class ThreadStore {
     return this.startTurn(threadId, protocol === 'echo' ? '[compact]' : '/compact', [], expectedSelectionVersion, 'compact');
   }
 
-  startTurn(threadId: ThreadId, prompt: string, attachments: Attachment[] = [], expectedSelectionVersion?: number, operation?: 'compact', activity?: { kind: 'goal' | 'loop'; iteration: number }, clientRequestId?: string): Turn {
+  startTurn(threadId: ThreadId, prompt: string, attachments: Attachment[] = [], expectedSelectionVersion?: number, operation?: 'compact' | 'coordination', activity?: { kind: 'goal' | 'loop'; iteration: number }, clientRequestId?: string): Turn {
     const thread = this.require(threadId);
     checkAttachmentArray(attachments);
     let fingerprint = '';
@@ -604,9 +604,9 @@ export class ThreadStore {
       id: newId('msg_'),
       threadId,
       turnId: turn.id,
-      role: 'user',
+      role: operation === 'coordination' ? 'system' : 'user',
       parts: [
-        { type: 'text', text: prompt, ...(activity ? { activity } : {}) },
+        { type: 'text', text: prompt, ...(operation === 'coordination' ? { displayText: 'Agent coordination' } : {}), ...(activity ? { activity } : {}) },
         ...attachments.map((attachment): MessagePart => attachment.kind === 'file' ? { type: 'file', mimeType: attachment.mimeType, data: attachment.data, name: attachment.name } : ({
           type: 'image',
           mimeType: attachment.mimeType,
@@ -633,7 +633,32 @@ export class ThreadStore {
 
   stopTurn(threadId: ThreadId): boolean {
     this.require(threadId);
+    this.core.coordination.pause(threadId);
     return this.core.scheduler.stop(threadId);
+  }
+
+  stopQueuedCoordination(threadId: ThreadId): boolean {
+    const queued = this.core.journal.listTurns(threadId).find(turn => turn.status === 'queued' && turn.execution?.operation === 'coordination');
+    return queued === undefined ? false : this.core.scheduler.stop(threadId);
+  }
+
+  canSteer(threadId: string): boolean { return typeof this.handles.get(threadId)?.steer === 'function'; }
+
+  async steer(threadId: string, text: string): Promise<boolean> {
+    const handle = this.handles.get(threadId);
+    if (!handle?.steer) return false;
+    const turn = this.core.journal.listTurns(threadId).find(t => t.status === 'running');
+    if (!turn) return false;
+    const submitted = await handle.steer(text);
+    if (submitted) this.noteCoordination(threadId, turn.id, text);
+    return submitted;
+  }
+
+  noteCoordination(threadId: string, turnId: string, text: string): void {
+    const message: Message = { id: newId('msg_'), threadId, turnId, role: 'system', parts: [{ type: 'text', text, displayText: 'Agent coordination' }], state: 'complete', createdAt: Date.now() };
+    this.core.journal.append({ type: 'coordination.context', threadId, version: 1, payload: message }, () => this.core.journal.putMessage(message));
+    this.core.bus.emit('message.started', message);
+    this.core.bus.emit('message.completed', { threadId, messageId: message.id, state: 'complete' });
   }
 
   stopRunning(threadId: ThreadId): boolean {
@@ -657,6 +682,7 @@ export class ThreadStore {
     });
     this.core.bus.emit('turn.finished', next);
     this.setStatus(turn.threadId, 'idle');
+    if (turn.execution?.operation === 'coordination') this.core.coordination.queuedCancelled(turn.threadId);
   }
 
   // -- crash recovery -------------------------------------------------------
@@ -675,6 +701,7 @@ export class ThreadStore {
       const previous = turn.status;
       this.core.journal.db.transaction(() => {
         this.failStuckTurn(turn, previous === 'running' ? CRASH_WHILE_RUNNING : CRASH_WHILE_QUEUED);
+        if (previous === 'queued' && turn.execution?.operation === 'coordination') this.core.coordination.queuedCancelled(turn.threadId);
       })();
       this.core.log(
         'warn',
@@ -760,6 +787,10 @@ export class ThreadStore {
     const queued = this.core.journal.getTurn(turnId);
     const selected = this.core.journal.getThread(threadId);
     if (queued === null || selected === null) return;
+    if (queued.execution?.operation === 'coordination' && !this.core.coordination.prepareWake(threadId, turnId)) {
+      this.markQueuedStopped(turnId);
+      return;
+    }
     const thread = { ...selected, ...queued.execution };
 
     const running: Turn = { ...queued, status: 'running', startedAt: Date.now() };
@@ -777,6 +808,7 @@ export class ThreadStore {
       const handle = driver.startTurn(this.makeContext(thread, provider, account, running));
       this.handles.set(threadId, handle);
       result = await handle.done;
+      if (running.execution?.operation === 'coordination' && result.status === 'done') this.core.coordination.submitted(threadId, turnId);
     } catch (error) {
       result = { status: 'error', sessionId: thread.sessionId, usage: null, error: messageOf(error) };
     } finally {
@@ -816,7 +848,8 @@ export class ThreadStore {
       unread: current.unread || !this.core.subscribers.hasSubscribers(threadId),
     };
     this.save(next, 'thread.finished');
-    if (result.status === 'done' && sameSession && queued.execution?.operation !== 'compact') this.autoTitle(threadId, turnId);
+    if (result.status !== 'done') this.core.coordination.pause(threadId);
+    if (result.status === 'done' && sameSession && !queued.execution?.operation) this.autoTitle(threadId, turnId);
   }
 
   /**
@@ -980,7 +1013,8 @@ export class ThreadStore {
       account,
       provider,
       turn,
-      prompt: prepared.prompt,
+      prompt: prepared.prompt + (turn.execution?.operation === 'compact' ? '' : this.core.coordination.instructions(threadId)),
+      coordination: () => this.core.coordination.take(threadId, turn.id),
       attachments: prepared.attachments,
       sessionId: thread.sessionId,
       accountEnv: env,
@@ -1129,7 +1163,10 @@ export class ThreadStore {
 
   /** The user message of the turn, read back from the journal: the text and the images it carried. */
   private lastUserInput(threadId: ThreadId, turnId: TurnId): { prompt: string; attachments: Attachment[] } {
-    const message = this.core.journal.lastUserMessage(threadId, turnId);
+    const operation = this.core.journal.getTurn(turnId)?.execution?.operation;
+    const message = operation === 'coordination'
+      ? Array.from(this.core.journal.walkTurnMessages(threadId, turnId)).find(m => m.role === 'system') ?? null
+      : this.core.journal.lastUserMessage(threadId, turnId);
     if (message !== null) {
       const attachments: Attachment[] = [];
       for (const part of message.parts) {

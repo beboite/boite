@@ -536,7 +536,7 @@ export type TurnStatus = 'queued' | 'running' | 'done' | 'stopped' | 'error';
 /** Frozen when a prompt is accepted, including while it waits in the scheduler. */
 export type TurnExecution = Pick<ThreadSummary,
   'providerId' | 'accountId' | 'model' | 'effort' | 'speed' | 'permissionMode' | 'sessionId'
-> & { sessionGeneration: number; selectionVersion: number; operation?: 'compact' };
+> & { sessionGeneration: number; selectionVersion: number; operation?: 'compact' | 'coordination' };
 
 export interface Turn {
   id: TurnId;
@@ -1232,7 +1232,55 @@ export interface SpeechStatus {
 export const SPEECH_MAX_SECONDS = 120;
 export const SPEECH_MAX_BYTES = 44 + 16000 * 2 * SPEECH_MAX_SECONDS;
 
+export type CoordinationMode = 'off' | 'brief' | 'team';
+export interface CoordinationConfig {
+  mode: CoordinationMode;
+  resources: string;
+  remote: boolean;
+  paused: boolean;
+}
+export interface AgentAddress { coreId: string; threadId: ThreadId }
+export interface AgentContact extends AgentAddress {
+  title: string;
+  machine: string;
+  resources: string;
+  status: ThreadStatus;
+  mode: CoordinationMode;
+}
+export interface AgentLetter {
+  id: string;
+  from: AgentContact;
+  to: AgentAddress;
+  toTitle: string;
+  text: string;
+  replyTo: string | null;
+  createdAt: Timestamp;
+  expiresAt: Timestamp;
+  status: 'queued' | 'received' | 'delivered' | 'uncertain' | 'expired' | 'rejected';
+  error: string | null;
+}
+/** Public contact card. No owner token or private signing key crosses a core. */
+export interface CoordinationPeer { coreId: string; name: string; url: string; publicKey: string }
+export interface CoordinationView {
+  self: AgentAddress;
+  config: CoordinationConfig;
+  messages: AgentLetter[];
+  sent: number;
+  sendLimit: number;
+  wakes: number;
+  wakeLimit: number;
+}
+
 export interface RpcMethods {
+  'collaboration.get': { params: { threadId: ThreadId }; result: CoordinationView };
+  'collaboration.configure': { params: { threadId: ThreadId; config: CoordinationConfig }; result: CoordinationView };
+  'collaboration.directory': { params: { threadId: ThreadId }; result: { agents: AgentContact[]; unavailable: string[] } };
+  'collaboration.send': { params: { threadId: ThreadId; to: AgentAddress; text: string; replyTo?: string; requestId: string }; result: AgentLetter };
+  'collaboration.identity': { params: Record<string, never>; result: CoordinationPeer };
+  'collaboration.peers': { params: Record<string, never>; result: CoordinationPeer[] };
+  'collaboration.check': { params: { coreId: string }; result: { ok: true } };
+  'collaboration.trust': { params: { peer: CoordinationPeer }; result: CoordinationPeer };
+  'collaboration.untrust': { params: { coreId: string }; result: { ok: true } };
   'speech.status': { params: Record<string, never>; result: SpeechStatus };
   'speech.configure': { params: SpeechConfig & { groqKey?: string; openrouterKey?: string }; result: SpeechStatus };
   'speech.config': { params: Record<string, never>; result: SpeechConfig };
@@ -1582,6 +1630,7 @@ export type RpcParams<M extends RpcMethodName> = RpcMethods[M]['params'];
 export type RpcResult<M extends RpcMethodName> = RpcMethods[M]['result'];
 
 export interface RpcEvents {
+  'collaboration.changed': { threadId: ThreadId };
   'thread.activity': { threadId: ThreadId; activity: ThreadActivity };
   /** Subscribed threads only: the agent asked for something in the panel. */
   'panel.requested': { threadId: ThreadId; surface: PanelSurface; at: Timestamp };

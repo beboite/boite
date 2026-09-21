@@ -62,6 +62,8 @@ export interface TurnContext {
   provider: ProviderDescriptor;
   turn: Turn;
   prompt: string;
+  /** An authenticated agent message at a safe tool boundary, never a user instruction. */
+  coordination?(): string | null;
   /**
    * The images sent with the prompt, already checked by the core (format,
    * size, count, and the provider's `capabilities.images`). Empty for most
@@ -116,6 +118,8 @@ export interface TurnResult {
 export interface TurnHandle {
   done: Promise<TurnResult>;
   stop(): void;
+  /** False means not ready, rejection means uncertain dispatch and must not be replayed. */
+  steer?(message: string): Promise<boolean>;
 }
 
 /**
