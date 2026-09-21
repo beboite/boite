@@ -61,6 +61,8 @@ stashes, resets, force-pushes or resolves conflicts. Local file changes,
 diverging histories, detached HEAD and a missing upstream stop the operation.
 Commit changes with Git before synchronizing. A second click cannot run a
 concurrent synchronization, and the folder cannot change during one.
+If the branch, upstream or HEAD changes during fetch, synchronization stops.
+Outgoing pushes name the checked commit rather than a mutable HEAD.
 
 Boite records the last successful synchronization for this folder. The commit
 counts use local Git knowledge, refreshed by Synchronize. Authentication is

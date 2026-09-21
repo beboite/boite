@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, test } from 'bun:test';
+import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
 import { mkdirSync, readFileSync, realpathSync, renameSync, symlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { scanBrain } from '../src/brain.ts';
@@ -169,4 +169,36 @@ test('two checkouts exchange existing commits; dirty and diverged histories rema
   await expect(h.core.brain.sync()).rejects.toThrow('diverging');
   expect(await git(root, ['rev-parse', 'HEAD'])).toBe(before);
   expect((await h.core.brain.status()).git).toMatchObject({ ahead: 1, behind: 1, dirty: false });
+}, 30_000);
+
+test.each(['fetch', 'push'] as const)('switching branches during %s cannot publish the newly selected branch', async phase => {
+  const remote = join(h.dataDir, 'remote.git');
+  await git(h.dataDir, ['init', '--bare', '--initial-branch=main', remote]);
+  await git(root, ['init', '--initial-branch=main']);
+  await commit(root, 'Shared base');
+  const base = await git(root, ['rev-parse', 'HEAD']);
+  await git(root, ['remote', 'add', 'origin', remote]);
+  await git(root, ['push', '-u', 'origin', 'main']);
+  await git(root, ['switch', '-c', 'other']);
+  await commit(root, 'Other branch only');
+  await git(root, ['branch', '--set-upstream-to=origin/main']);
+  await git(root, ['switch', 'main']);
+  await commit(root, 'Main branch only');
+  const mainHead = await git(root, ['rev-parse', 'HEAD']);
+  await h.core.brain.configure({ path: root, enabled: true });
+  // Use real repositories while placing an external checkout at the fetch boundary.
+  const runner = h.core.brain as unknown as { git(path: string, args: string[]): Promise<string> };
+  const original = runner.git.bind(runner);
+  const intercepted = spyOn(runner, 'git').mockImplementation(async (path, args) => {
+    if (phase === 'push' && args[0] === 'push') await git(root, ['switch', 'other']);
+    const result = await original(path, args);
+    if (phase === 'fetch' && args[0] === 'fetch') await git(root, ['switch', 'other']);
+    return result;
+  });
+  try {
+    if (phase === 'fetch') await expect(h.core.brain.sync()).rejects.toThrow('changed during synchronization');
+    else await h.core.brain.sync();
+    expect(await git(remote, ['rev-parse', 'main'])).toBe(phase === 'fetch' ? base : mainHead);
+    expect(await git(root, ['branch', '--show-current'])).toBe('other');
+  } finally { intercepted.mockRestore(); }
 }, 30_000);

@@ -11,6 +11,7 @@ const INSTRUCTIONS_LIMIT = 128 * 1024;
 const INSTRUCTION_FILES = ['AGENTS.md', '.agents/AGENTS.md', 'CLAUDE.md', 'GEMINI.md'];
 const CATALOG_DIRS = ['skills', '.agents/skills', '.claude/skills', '.codex/skills', 'plugins', '.claude/plugins', '.codex/plugins'];
 const PLUGIN_FILES = ['.claude-plugin/plugin.json', '.codex-plugin/plugin.json'];
+type GitSnapshot = NonNullable<BrainStatus['git']> & { head: string | null };
 
 function inside(root: string, path: string): boolean {
   const rel = relative(root, path);
@@ -119,7 +120,10 @@ export class BrainStore {
     try {
       Object.assign(status, scanBrain(config.path));
       // A folder within another repository is not itself a synchronizable brain.
-      if (exists(join(config.path, '.git'))) status.git = await this.gitStatus(config.path);
+      if (exists(join(config.path, '.git'))) {
+        const { head: _head, ...git } = await this.gitStatus(config.path);
+        status.git = git;
+      }
     } catch (cause) { status.problems.push(messageOf(cause)); }
     return status;
   }
@@ -148,26 +152,32 @@ export class BrainStore {
       const path = this.config().path;
       if (!path || !exists(join(path, '.git'))) throw refused('brain.path must point to the root of a Git checkout to synchronize');
       let state = await this.gitStatus(path);
+      const started = state;
       if (state.dirty) throw refused('Brain has local file changes. Commit or resolve them before synchronizing; Boite leaves them untouched.');
-      if (!state.branch || !state.upstream) throw refused('Brain needs a local branch with a configured Git upstream');
+      if (!state.branch || !state.upstream || !state.head) throw refused('Brain needs a local branch with a commit and a configured Git upstream');
       const remote = (await this.git(path, ['config', '--get', `branch.${state.branch}.remote`])).trim();
       const merge = (await this.git(path, ['config', '--get', `branch.${state.branch}.merge`])).trim();
       if (!remote || remote.startsWith('-') || !merge.startsWith('refs/heads/')) throw refused('Brain upstream must name a remote branch');
       await this.git(path, ['fetch', '--no-tags', '--', remote]);
       state = await this.gitStatus(path);
+      if (state.branch !== started.branch || state.upstream !== started.upstream || state.head !== started.head) {
+        throw refused('Brain branch, upstream or HEAD changed during synchronization. Retry from the intended branch.');
+      }
       if (state.dirty || (state.ahead > 0 && state.behind > 0)) throw refused('Brain has local changes or diverging commits. Resolve them before synchronizing; Boite does not merge conflicts.');
       if (state.behind > 0) await this.git(path, ['merge', '--ff-only', '@{upstream}']);
-      if (state.ahead > 0) await this.git(path, ['push', '--', remote, `HEAD:${merge}`]);
+      // An external checkout after the check must never change what gets published.
+      if (state.ahead > 0) await this.git(path, ['push', '--', remote, `${state.head}:${merge}`]);
       this.core.journal.setSetting('brain.lastSync', Date.now());
       return await this.status();
     } finally { this.busy = false; }
   }
 
-  private async gitStatus(path: string): Promise<NonNullable<BrainStatus['git']>> {
+  private async gitStatus(path: string): Promise<GitSnapshot> {
     const lines = (await this.git(path, ['status', '--porcelain=v2', '--branch', '--untracked-files=normal'])).split('\n');
     const value = (key: string) => lines.find(line => line.startsWith(`# branch.${key} `))?.slice(key.length + 10).trim() ?? null;
     const head = value('head'), upstream = value('upstream'), counts = value('ab')?.match(/^\+(\d+) -(\d+)$/);
-    return { branch: head === '(detached)' ? null : head, upstream, ahead: Number(counts?.[1] ?? 0), behind: Number(counts?.[2] ?? 0), dirty: lines.some(line => line.length > 0 && !line.startsWith('#')) };
+    const oid = value('oid');
+    return { head: oid === '(initial)' ? null : oid, branch: head === '(detached)' ? null : head, upstream, ahead: Number(counts?.[1] ?? 0), behind: Number(counts?.[2] ?? 0), dirty: lines.some(line => line.length > 0 && !line.startsWith('#')) };
   }
 
   private async git(path: string, args: string[]): Promise<string> {
