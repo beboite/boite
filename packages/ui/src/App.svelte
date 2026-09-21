@@ -17,6 +17,7 @@
   import { installExternalLinks } from './lib/links';
   import { isQuitChord, QUIT_HOLD_MS, QuitHold } from './lib/quit-hold';
   import { onNotificationOpen } from './lib/notify';
+  import { closeTabs } from './lib/panel-close';
   import { strings } from './lib/strings';
   import { rightPanel } from './lib/right-panel.svelte';
   import { workspace } from './lib/workspace.svelte';
@@ -332,7 +333,7 @@
         const active = store.panel.activeSurfaceId;
         if (!store.panelOpen || !active || typing(event)) return;
         event.preventDefault();
-        store.panel.close(active);
+        void closeTabs(store.panel, 'close', active);
         break;
       }
       case 'stash':

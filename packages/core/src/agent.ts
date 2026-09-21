@@ -205,11 +205,18 @@ export function registerAgentMethods(core: Core): void {
 
   // A thread that is gone or archived keeps no door open: its processes are
   // stopped with it, and a token nobody can use is a token nobody can steal.
+  // Forgetting the token only stops the next hello, so a socket an agent
+  // already opened goes too: it used to keep claiming cards and opening
+  // panels on a thread the user had put away.
+  const shut = (threadId: ThreadId): void => {
+    core.agents.forget(threadId);
+    core.subscribers.closeAgents(threadId);
+  };
   core.bus.onAny((name, payload) => {
-    if (name === 'thread.removed') core.agents.forget((payload as { threadId: ThreadId }).threadId);
+    if (name === 'thread.removed') shut((payload as { threadId: ThreadId }).threadId);
     if (name === 'thread.updated') {
       const thread = payload as ThreadSummary;
-      if (thread.archived) core.agents.forget(thread.id);
+      if (thread.archived) shut(thread.id);
     }
   });
 }

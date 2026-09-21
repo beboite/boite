@@ -341,4 +341,32 @@ describe('the right panel', () => {
     expect(destroy.mock.calls.map(([id]) => id)).toEqual([first.id, second.id]);
     destroy.mockRestore();
   });
+
+  test('a file tab keeps its unsaved text until it is closed, and each close names what it takes', () => {
+    const { root, bound } = panel();
+    const readme = bound.openFile('README.md');
+    const main = bound.openFile('src/main.ts');
+    const tasks = bound.openTasks();
+    bound.keepDraft(readme.id, 'edited readme');
+    bound.keepDraft(main.id, 'edited main');
+
+    expect(bound.draft(readme.id)).toBe('edited readme');
+    expect(bound.closing('close', readme.id)).toEqual([readme.id]);
+    expect(bound.closing('others', main.id)).toEqual([readme.id, tasks.id]);
+    expect(bound.closing('right', readme.id)).toEqual([main.id, tasks.id]);
+    expect(bound.closing('all', null)).toEqual([readme.id, main.id, tasks.id]);
+    expect(bound.unsaved(bound.closing('right', readme.id)).map((surface) => surface.id)).toEqual([main.id]);
+    // Another thread's panel holds its own drafts.
+    expect(root.for('t-2').draft(readme.id)).toBeUndefined();
+
+    bound.closeToRight(readme.id);
+    expect(bound.draft(main.id)).toBeUndefined();
+    expect(bound.draft(readme.id)).toBe('edited readme');
+    bound.keepDraft(readme.id, null);
+    expect(bound.unsaved([readme.id])).toEqual([]);
+
+    bound.keepDraft(readme.id, 'again');
+    root.forget('t-1');
+    expect(root.for('t-1').draft(readme.id)).toBeUndefined();
+  });
 });

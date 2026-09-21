@@ -36,6 +36,8 @@ export interface SubscriptionSink {
   hasSubscribers(threadId: ThreadId): boolean;
   /** Every socket a revoked session holds goes, with the close code the client reads as "pair again". */
   closeSession(sessionId: string): void;
+  /** Every socket an agent of this thread holds goes: the thread was archived or removed under it. */
+  closeAgents(threadId: ThreadId): void;
 }
 
 export interface CoreOptions {
@@ -114,7 +116,11 @@ export class Core {
    * to everything, which is what a core with no socket open should say:
    * `panel.open` then reports that nobody saw the request.
    */
-  subscribers: SubscriptionSink = { hasSubscribers: () => false, closeSession: () => undefined };
+  subscribers: SubscriptionSink = {
+    hasSubscribers: () => false,
+    closeSession: () => undefined,
+    closeAgents: () => undefined,
+  };
 
   private endpoint = { host: '127.0.0.1', port: 0 };
 

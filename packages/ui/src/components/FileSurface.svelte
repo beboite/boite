@@ -8,11 +8,11 @@
   import type { FileContent } from '@boite/contracts';
   import { bytes } from '../lib/format';
   import { baseName } from '../lib/right-panel.svelte';
-  import type { Surface } from '../lib/right-panel.svelte';
+  import type { BoundPanel, Surface } from '../lib/right-panel.svelte';
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
 
-  let { store, surface }: { store: Store; surface: Surface } = $props();
+  let { store, surface, panel }: { store: Store; surface: Surface; panel: BoundPanel } = $props();
 
   /** The editor's own line box, in pixels: the gutter and the highlight do this maths. */
   const LINE = 20;
@@ -73,7 +73,9 @@
     content = answer.value;
     if (answer.value.kind === 'text') {
       stored = answer.value.text;
-      draft = answer.value.text;
+      // An edit made before this tab was last unmounted comes back over the
+      // disk's text, and the dirty dot with it.
+      draft = panel.draft(surface.id) ?? answer.value.text;
       offset = 0;
     } else {
       natural = null;
@@ -95,7 +97,22 @@
     }
     problem = null;
     stored = draft;
+    keep();
     content = { ...file, text: draft, bytes: answer.value.bytes, modifiedAt: answer.value.modifiedAt };
+  }
+
+  /**
+   * The edit, held by the panel rather than by this component: a tab switch, a
+   * hidden panel or another thread unmounts the editor, and the text typed
+   * since the last save used to go with it.
+   */
+  function keep(): void {
+    panel.keepDraft(surface.id, draft === stored ? null : draft);
+  }
+
+  function edit(text: string): void {
+    draft = text;
+    keep();
   }
 
   /** Tab writes two spaces rather than leaving the editor for the next control. */
@@ -106,7 +123,7 @@
     event.preventDefault();
     const start = node.selectionStart;
     const end = node.selectionEnd;
-    draft = `${draft.slice(0, start)}  ${draft.slice(end)}`;
+    edit(`${draft.slice(0, start)}  ${draft.slice(end)}`);
     void tick().then(() => node.setSelectionRange(start + 2, start + 2));
   }
 
@@ -342,7 +359,7 @@
         data-testid="file-text"
         readonly={readOnly}
         bind:this={area}
-        bind:value={draft}
+        bind:value={() => draft, edit}
         onkeydown={onEditorKey}
         onscroll={() => (offset = area?.scrollTop ?? 0)}
       ></textarea>

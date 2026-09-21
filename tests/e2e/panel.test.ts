@@ -189,3 +189,32 @@ test('the tree opens on a directory, the editor lands on a line, and a picture z
   await phone(false);
   await onStore(`store.panel.closeAll();`);
 }, 60_000);
+
+test('an unsaved edit survives a tab switch and its tab asks before closing, at both widths', async () => {
+  await onStore(`store.panel.closeAll(); store.panel.openFile('README.md');`);
+  await page.waitFor(`document.querySelector('${id('file-text')}')?.value.includes('# boite')`);
+  await page.evaluate(`(() => { const area = document.querySelector('${id('file-text')}'); area.value += 'An edit nobody saved.\\n'; area.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  await page.waitFor(`document.querySelector('${id('file-dirty')}')`);
+  await onStore(`store.panel.openTasks();`);
+  await page.waitFor(`document.querySelector('${id('tasks-panel')}')`);
+  await page.click(`${id('panel-tab')}[data-surface-id="file:README.md"]`);
+  await page.waitFor(`document.querySelector('${id('file-text')}')?.value.includes('An edit nobody saved.')`);
+
+  const closer = `${id('panel-tab')}[data-surface-id="file:README.md"] ${id('panel-tab-close')}`;
+  for (const width of ['desktop', 'phone'] as const) {
+    await phone(width === 'phone');
+    await page.click(closer);
+    await page.waitFor(`document.querySelector('${id('confirm-dialog')}')`);
+    await capture(`file-discard-${width}.png`);
+    expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
+    await page.click(id('confirm-cancel'));
+    await page.waitFor(`!document.querySelector('${id('confirm-dialog')}')`);
+  }
+  expect(await page.evaluate(`document.querySelector('${id('file-text')}').value.includes('An edit nobody saved.')`)).toBe(true);
+  await page.click(closer);
+  await page.waitFor(`document.querySelector('${id('confirm-dialog')}')`);
+  await page.click(id('confirm-ok'));
+  await page.waitFor(`!document.querySelector('${id('panel-tab')}[data-surface-id="file:README.md"]')`);
+  await phone(false);
+  await onStore(`store.panel.closeAll();`);
+}, 60_000);

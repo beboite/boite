@@ -916,6 +916,47 @@ test('the editor shows the file, writes two spaces for a tab and saves what was 
   expect(answer.kind === 'text' ? answer.text : '').toBe(edited);
 });
 
+test('an unsaved edit survives a tab switch, and closing its tab asks before it is lost', async () => {
+  await openWorkbench();
+  const file = store.panel.openFile('README.md');
+  await waitFor(() => document.querySelector<HTMLTextAreaElement>('[data-testid=file-text]')?.value.includes('# boite') === true);
+  const area = query<HTMLTextAreaElement>('[data-testid=file-text]');
+  const edited = `${area.value}An edit nobody saved.
+`;
+  area.value = edited;
+  area.dispatchEvent(new Event('input', { bubbles: true }));
+  await waitFor(() => document.querySelector('[data-testid=file-dirty]') !== null);
+
+  // Another tab unmounts the editor, and coming back used to read the disk again.
+  store.panel.openTasks();
+  await waitFor(() => document.querySelector('[data-testid=file-text]') === null);
+  store.panel.activate(file.id);
+  await waitFor(() => document.querySelector<HTMLTextAreaElement>('[data-testid=file-text]')?.value === edited);
+  expect(document.querySelector('[data-testid=file-dirty]')).not.toBeNull();
+
+  // Closing the tab asks first, and Cancel keeps the tab and the edit.
+  const closer = `[data-testid=panel-tab][data-surface-id="${file.id}"] [data-testid=panel-tab-close]`;
+  query<HTMLButtonElement>(closer).click();
+  await waitFor(() => document.querySelector('[data-testid=confirm-dialog]') !== null);
+  expect(query('#confirm-title').textContent).toBe('Close README.md without saving?');
+  query<HTMLButtonElement>('[data-testid=confirm-cancel]').click();
+  await waitFor(() => document.querySelector('[data-testid=confirm-dialog]') === null);
+  expect(store.panel.surfaces.some((surface) => surface.id === file.id)).toBe(true);
+  expect(store.panel.draft(file.id)).toBe(edited);
+
+  // Confirming closes it and drops the edit, so the file reopens on the disk's text.
+  query<HTMLButtonElement>(closer).click();
+  await waitFor(() => document.querySelector('[data-testid=confirm-dialog]') !== null);
+  query<HTMLButtonElement>('[data-testid=confirm-ok]').click();
+  await waitFor(() => !store.panel.surfaces.some((surface) => surface.id === file.id));
+  expect(store.panel.draft(file.id)).toBeUndefined();
+  store.panel.openFile('README.md');
+  await waitFor(() => document.querySelector<HTMLTextAreaElement>('[data-testid=file-text]')?.value.includes('# boite') === true);
+  expect(query<HTMLTextAreaElement>('[data-testid=file-text]').value).not.toContain('An edit nobody saved.');
+  expect(document.querySelector('[data-testid=file-dirty]')).toBeNull();
+  store.panel.closeAll();
+});
+
 test('the image viewer measures the picture and the zoom buttons move the percentage', async () => {
   await openWorkbench();
   store.panel.openFile('assets/preview.png');

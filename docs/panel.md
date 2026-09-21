@@ -23,7 +23,9 @@ iframe with the sites that allow it. [machines.md](machines.md) has the origins
 and the bridge.
 
 A text file is edited in place and saved with the Save button or the platform's
-save chord through `files.write`. An image opens fitted to the panel; the wheel zooms
+save chord through `files.write`. An edit not saved yet stays with its tab
+while another tab, another thread or a hidden panel unmounts the editor, in
+memory only, and closing that tab asks first. An image opens fitted to the panel; the wheel zooms
 around the pointer, a drag pans, the bar has fit, 100% and the zoom steps, and
 the checkerboard behind it tells transparency from white. A video or a sound
 uses the native player over the ticketed file route below. Anything else is a

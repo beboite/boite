@@ -45,6 +45,9 @@ export interface Surface {
   line?: number;
 }
 
+/** What the tab menu, the close button and the close key ask for. */
+export type CloseAction = 'close' | 'others' | 'right' | 'all';
+
 /** What one thread remembers about its panel. */
 export interface PanelState {
   isOpen: boolean;
@@ -165,6 +168,13 @@ export class RightPanelStore {
   /** The chat column at zero width. Deliberately not persisted, like T3's. */
   maximized = $state(false);
 
+  /**
+   * The unsaved text of each file tab, per thread. Switching tabs, hiding the
+   * panel or opening another thread unmounts the editor, and the edit used to
+   * go with it. Held in memory only: the layout is stored, a draft is not.
+   */
+  readonly drafts = new Map<string, Map<string, string>>();
+
   #bound = new Map<string, BoundPanel>();
 
   constructor() {
@@ -229,6 +239,7 @@ export class RightPanelStore {
     const { [threadId]: _gone, ...kept } = this.threads;
     this.threads = kept;
     this.#bound.delete(threadId);
+    this.drafts.delete(threadId);
     this.save();
   }
 }
@@ -345,11 +356,52 @@ export class BoundPanel {
     else this.open('trace');
   }
 
+  /** The unsaved text of a file tab, when it has any. */
+  draft(id: string): string | undefined {
+    return this.#root.drafts.get(this.#key)?.get(id);
+  }
+
+  /** Held while it differs from the disk; null forgets it, after a save or a discard. */
+  keepDraft(id: string, text: string | null): void {
+    const held = this.#root.drafts.get(this.#key);
+    if (text === null) {
+      held?.delete(id);
+      return;
+    }
+    if (held) held.set(id, text);
+    else this.#root.drafts.set(this.#key, new Map([[id, text]]));
+  }
+
+  /** The ids a close action takes away, so the question asked and the tabs closed agree. */
+  closing(action: CloseAction, id: string | null): string[] {
+    const ids = this.state.surfaces.map((surface) => surface.id);
+    if (action === 'all') return ids;
+    const index = id === null ? -1 : ids.indexOf(id);
+    if (index < 0) return [];
+    if (action === 'close') return [ids[index] as string];
+    if (action === 'others') return ids.filter((one) => one !== id);
+    return ids.slice(index + 1);
+  }
+
+  /** The tabs among these holding an edit that was never saved. */
+  unsaved(ids: readonly string[]): Surface[] {
+    const held = this.#root.drafts.get(this.#key);
+    if (!held) return [];
+    return this.state.surfaces.filter((surface) => ids.includes(surface.id) && held.has(surface.id));
+  }
+
+  /** A closed tab's draft goes with it: reopening the file reads the disk again. */
+  #drop(ids: readonly string[]): void {
+    const held = this.#root.drafts.get(this.#key);
+    for (const id of ids) held?.delete(id);
+  }
+
   /** Closing the active surface hands the panel to the one on its left. */
   close(id: string): void {
     const current = this.state;
     const index = current.surfaces.findIndex((surface) => surface.id === id);
     if (index < 0) return;
+    this.#drop([id]);
     const surfaces = current.surfaces.filter((surface) => surface.id !== id);
     if (surfaces.length === 0) {
       this.#write({ isOpen: false, activeSurfaceId: null, surfaces });
@@ -366,6 +418,7 @@ export class BoundPanel {
     const current = this.state;
     const kept = current.surfaces.find((surface) => surface.id === id);
     if (!kept) return;
+    this.#drop(this.closing('others', id));
     this.#write({ isOpen: current.isOpen, activeSurfaceId: kept.id, surfaces: [kept] });
   }
 
@@ -375,6 +428,7 @@ export class BoundPanel {
     if (index < 0) return;
     const surfaces = current.surfaces.slice(0, index + 1);
     if (surfaces.length === current.surfaces.length) return;
+    this.#drop(this.closing('right', id));
     const active = surfaces.some((surface) => surface.id === current.activeSurfaceId)
       ? current.activeSurfaceId
       : id;
@@ -382,6 +436,7 @@ export class BoundPanel {
   }
 
   closeAll(): void {
+    this.#drop(this.closing('all', null));
     this.#write(emptyState());
   }
 
