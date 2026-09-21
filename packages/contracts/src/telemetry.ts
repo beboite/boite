@@ -16,7 +16,7 @@ const MODELS = new Set([
 export function publicModel(value: unknown): string {
   if (value === null || value === undefined || value === '' || value === 'default') return 'default';
   if (typeof value !== 'string') return 'other';
-  const name = value.toLowerCase().replace(/^(openai|anthropic|google|x-ai|deepseek)\//, '').replace(/-\d{8}$/, '').replace(/\[1m\]$/, '');
+  const name = value.toLowerCase().replace(/^(openai|anthropic|google|x-ai|deepseek)\//, '').replace(/\[1m\]$/, '').replace(/-\d{8}$/, '');
   return MODELS.has(name) ? name : 'other';
 }
 
@@ -34,8 +34,8 @@ export interface EnhancedDetails {
 export function enhancedDetails(fields: Record<string, unknown>): EnhancedDetails {
   const result: EnhancedDetails = {
     model: publicModel(fields.model),
-    effort: fields.effort == null ? 'default' : choice(fields.effort, ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra', 'ultrathink']),
-    speed: fields.speed == null ? 'default' : choice(fields.speed, ['standard', 'fast']),
+    effort: fields.effort == null ? 'default' : choice(fields.effort, ['default', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra', 'ultrathink']),
+    speed: fields.speed == null ? 'default' : choice(fields.speed, ['default', 'standard', 'fast']),
     permission_mode: choice(fields.permission_mode, ['default', 'acceptEdits', 'plan', 'bypassPermissions', 'dontAsk']),
     operation: choice(fields.operation, ['prompt', 'compact']),
   };

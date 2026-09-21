@@ -6,8 +6,16 @@ import { Bus } from '../src/bus.ts';
 import type { Core } from '../src/core.ts';
 import { Telemetry, telemetryEvent } from '../src/telemetry.ts';
 import { buildBatch } from '../../../telemetry/src/index.ts';
+import { enhancedDetails, publicModel } from '../../contracts/src/telemetry.ts';
 
 const cleanups: (() => Promise<void>)[] = [];
+test('enhanced normalization preserves canonical defaults across host and relay', () => {
+  const event = enhancedDetails({});
+  expect(event).toMatchObject({ effort: 'default', speed: 'default' });
+  expect(enhancedDetails(event as Record<string, unknown>)).toEqual(event);
+  expect(publicModel('anthropic/claude-sonnet-4-5-20250929[1m]')).toBe('claude-sonnet-4-5');
+});
+
 afterEach(async () => { for (const cleanup of cleanups.splice(0)) await cleanup(); });
 function fixture(respond: (path: string, body: any) => Promise<Response> = async () => Response.json({ ok: true })) {
   const dataDir = mkdtempSync(join(tmpdir(), 'boite-telemetry-'));
