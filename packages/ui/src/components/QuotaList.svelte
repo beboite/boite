@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { AccountQuota } from '@boite/contracts';
-  import { strings } from '../lib/i18n.svelte';
+  import { strings } from '../lib/strings';
   import { weekdayTime } from '../lib/format';
   /** `bare` drops the card and the provider header, for a list that already sits under its account. */
   let { rows, compact = false, bare = false }: { rows: AccountQuota[]; compact?: boolean; bare?: boolean } = $props();

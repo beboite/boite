@@ -99,35 +99,6 @@ test('a dot jumps to its screen and Back walks the way it came', async () => {
   expect(step()).toBe('usage');
 });
 
-test('continuing the privacy step keeps basic counters without opting into details', async () => {
-  await open();
-  await click('onboarding-next');
-  await new Promise(resolve => setTimeout(resolve, 0));
-  flushSync();
-  const inputs = [...document.querySelectorAll<HTMLInputElement>('[data-testid=telemetry-settings] input')];
-  expect(inputs.map(input => input.checked)).toEqual([true, false]);
-  await click('onboarding-next');
-  expect(await store.client!.call('telemetry.state', {})).toMatchObject({ mode: 'basic' });
-});
-
-test('the privacy switch opts in explicitly and replay preserves a saved opt-out', async () => {
-  await open();
-  await click('onboarding-dot-privacy');
-  await new Promise(resolve => setTimeout(resolve, 0));
-  flushSync();
-  const inputs = document.querySelectorAll<HTMLInputElement>('[data-testid=telemetry-settings] input');
-  inputs[1]!.click();
-  await new Promise(resolve => setTimeout(resolve, 0));
-  flushSync();
-  expect(await store.client!.call('telemetry.state', {})).toMatchObject({ mode: 'enhanced' });
-  await store.client!.call('telemetry.configure', { mode: 'off' });
-  await click('onboarding-dot-welcome');
-  await click('onboarding-dot-privacy');
-  await new Promise(resolve => setTimeout(resolve, 0));
-  flushSync();
-  expect([...document.querySelectorAll<HTMLInputElement>('[data-testid=telemetry-settings] input')].map(input => input.checked)).toEqual([false, false]);
-});
-
 test('the language switch changes the tour it is on, and the choice is the settings one', async () => {
   await open();
 
@@ -191,6 +162,33 @@ test('the usage screen offers the accounts it can read, and the reach screen the
   expect(tourSeen()).toBe(true);
 });
 
+test('the voice screen says where the core stands instead of describing dictation in the air', async () => {
+  await open();
+  await click('onboarding-dot-voice');
+
+  // The fake core answers `speech.status` with an engine already installed.
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  flushSync();
+  await tick();
+
+  expect(query('[data-testid=onboarding-voice-ready]').textContent).toContain('Ready to dictate');
+  expect(document.querySelector('[data-testid=onboarding-voice]')).toBeNull();
+});
+
+test('the panel screen prints the keys that open each surface, not the defaults', async () => {
+  await open();
+  await click('onboarding-dot-panel');
+
+  const keys = [...document.querySelectorAll('[data-testid=onboarding-step] kbd')].map((node) => node.textContent?.trim());
+  expect(keys).toEqual(['Ctrl+Shift+C', 'Ctrl+Shift+F', 'Ctrl+Shift+K', 'Ctrl+Shift+J']);
+
+  await click('onboarding-keyboard');
+  await settle();
+
+  expect(store.page).toBe('settings');
+  expect(store.settingsTab).toBe('keyboard');
+});
+
 test('skipping at the first screen counts as seen, the same as finishing it', async () => {
   await open();
   expect(step()).toBe('welcome');
@@ -206,4 +204,33 @@ test('skipping at the first screen counts as seen, the same as finishing it', as
   expect(tourRequested()).toBe(true);
   closeTour();
   expect(tourSeen()).toBe(true);
+});
+
+test('continuing the privacy step keeps basic counters without opting into details', async () => {
+  await open();
+  await click('onboarding-next');
+  await new Promise(resolve => setTimeout(resolve, 0));
+  flushSync();
+  const inputs = [...document.querySelectorAll<HTMLInputElement>('[data-testid=telemetry-settings] input')];
+  expect(inputs.map(input => input.checked)).toEqual([true, false]);
+  await click('onboarding-next');
+  expect(await store.client!.call('telemetry.state', {})).toMatchObject({ mode: 'basic' });
+});
+
+test('the privacy switch opts in explicitly and replay preserves a saved opt-out', async () => {
+  await open();
+  await click('onboarding-dot-privacy');
+  await new Promise(resolve => setTimeout(resolve, 0));
+  flushSync();
+  const inputs = document.querySelectorAll<HTMLInputElement>('[data-testid=telemetry-settings] input');
+  inputs[1]!.click();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  flushSync();
+  expect(await store.client!.call('telemetry.state', {})).toMatchObject({ mode: 'enhanced' });
+  await store.client!.call('telemetry.configure', { mode: 'off' });
+  await click('onboarding-dot-welcome');
+  await click('onboarding-dot-privacy');
+  await new Promise(resolve => setTimeout(resolve, 0));
+  flushSync();
+  expect([...document.querySelectorAll<HTMLInputElement>('[data-testid=telemetry-settings] input')].map(input => input.checked)).toEqual([false, false]);
 });

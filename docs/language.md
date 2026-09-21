@@ -30,18 +30,20 @@ on a French machine reads as English, not as a French machine writing English.
 
 | File | What it holds |
 |---|---|
-| `packages/ui/src/lib/strings.en.ts` | English sentences and the shape every translation mirrors. |
-| `packages/ui/src/lib/strings.ts` | Re-exports the active catalogue proxy and `fill` for components. |
+| `packages/ui/src/lib/strings.ts` | What every component imports: `strings` in the language of the moment, and `fill`. |
+| `packages/ui/src/lib/strings.en.ts` | English. Every user-facing sentence of the UI, and the shape every translation mirrors. |
 | `packages/ui/src/lib/strings.fr.ts` | French, typed `Messages`, which is the English catalogue with its literals widened. |
-| `packages/ui/src/lib/i18n.svelte.ts` | The choice, the detection, and the `strings` every component imports. |
+| `packages/ui/src/lib/i18n.svelte.ts` | The choice, the detection, and the proxy `strings.ts` re-exports. |
 
 `strings` is a proxy over the catalogue of the moment, not one of the two
 objects. A component writing `{strings.settings.theme}` in its markup is
 subscribed to the language by the read itself, so the sentence swaps when the
 language does, with no prop, no context and no store. Writing to it throws.
 
-Components import `lib/strings`. The locale controls also import the setter
-from `lib/i18n.svelte`. Both export `fill` for the `{name}` slots of a sentence.
+A component imports from `lib/strings` and nothing else, the way it did before
+there were two languages. Only `i18n.svelte.ts` reads the catalogues, and only
+a screen that changes the language itself, the Appearance page and the tour,
+imports `lib/i18n.svelte` for `setLocaleSetting` and the list of locales.
 
 ## Adding a sentence
 

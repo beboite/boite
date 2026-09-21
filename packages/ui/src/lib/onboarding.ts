@@ -16,7 +16,7 @@
 export const ONBOARDING_STORAGE_KEY = 'boite.onboarding';
 
 /** Bumped when the tour changes shape, not when a sentence in it is reworded. */
-export const ONBOARDING_VERSION = 2;
+export const ONBOARDING_VERSION = 3;
 
 export interface OnboardingRecord {
   version: number;
@@ -24,20 +24,18 @@ export interface OnboardingRecord {
   at: number;
 }
 
-export type OnboardingStep = 'welcome' | 'privacy' | 'agents' | 'voice' | 'usage' | 'reach' | 'quiet' | 'project';
+export type OnboardingStep = 'welcome' | 'privacy' | 'agents' | 'voice' | 'panel' | 'usage' | 'reach' | 'quiet' | 'project';
 
 /**
- * Dictation is being built on its own branch. Its screen and both translations
- * are written; this is the one line that puts it in the tour, together with
- * pointing its button at the Voice settings tab that branch adds.
+ * The order they come in: what you talk to, then how you talk to it, then what
+ * sits beside the conversation, what it costs, how far it reaches, how it
+ * behaves while you work, and finally the folder it all happens in.
  */
-export const VOICE_STEP: boolean = false;
+const ORDER: readonly OnboardingStep[] = ['welcome', 'privacy', 'agents', 'voice', 'panel', 'usage', 'reach', 'quiet', 'project'];
 
-const ORDER: readonly OnboardingStep[] = ['welcome', 'privacy', 'agents', 'voice', 'usage', 'reach', 'quiet', 'project'];
-
-/** The screens this build shows, in order. */
+/** The screens this build shows, in order. A fresh array: the caller owns it. */
 export function steps(owner = true): OnboardingStep[] {
-  return ORDER.filter((step) => (step !== 'voice' || VOICE_STEP) && (step !== 'privacy' || owner));
+  return ORDER.filter(step => step !== 'privacy' || owner);
 }
 
 /** What the device remembers, or null when the tour has never been closed here. */

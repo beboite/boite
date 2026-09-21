@@ -1,8 +1,8 @@
 /*
  * The language the UI speaks.
  *
- * `lib/strings.en.ts` is English: the catalogue every other language mirrors, the
- * default, and the fallback for a key a translation has not got yet.
+ * `lib/strings.en.ts` is English: the catalogue every other language mirrors,
+ * the default, and the fallback for a key a translation has not got yet.
  * `lib/strings.fr.ts` is French, typed against that catalogue, so a key added
  * on one side fails `svelte-check` until the other side has it.
  *
@@ -14,7 +14,8 @@
  * `strings` here is a proxy over the active catalogue rather than one of the
  * two objects: a component reading `strings.settings.theme` in its markup
  * re-renders the moment the language changes, with no reload, no prop and no
- * import of its own. `lib/strings.ts` re-exports this proxy for components.
+ * import of its own. Components read it through `./strings`, which re-exports
+ * it; the catalogues are imported by this file and by nobody else.
  */
 
 import { strings as en, fill, type Strings } from './strings.en';

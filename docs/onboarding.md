@@ -1,8 +1,8 @@
 # The tour
 
-Boite opens a tour the first time it runs on a device: seven owner screens, each one
-carrying the switch for what it explains, so reading it and setting it up are
-the same pass. It waits for a core to be connected, because half its controls
+Boite opens a tour the first time it runs on a device: nine owner screens, each one
+carrying the switch or the button for what it explains, so reading it and
+setting it up are the same pass. It waits for a core to be connected, because half its controls
 would be dead against a connection that is not there.
 
 Nothing in it is a setting of its own. Every control writes through the same
@@ -17,6 +17,8 @@ tour set.
 | Welcome | What Boite is, and that agents run on the machine hosting the core | Language and theme |
 | Privacy | Basic counters start enabled on new hosts; enhanced usage requires consent | The same telemetry controls as Settings, owner only |
 | Agents | The model changes in the middle of a thread, and the history stays | A still of the composer's chip row |
+| Voice | Dictation goes through the machine hosting the core, and you read it before sending | `speech.status`, then Voice settings when it is not set up |
+| Panel | The workbench beside the thread, and the `boite` command the agent opens it with | The four surfaces with their live chords, and Keyboard settings |
 | Usage | Providers report what is left of a subscription, drawn as bars | One switch per account, `quotas.configure` |
 | Reach | A phone pairs with a key of its own, and another Boite connects beside this one | The LAN switch, and the two settings pages |
 | Quiet | Boite is built to run while you work on something else | Notifications, close to tray, focus guard, mute |
@@ -31,7 +33,7 @@ counts as much as finishing the last one: the tour is not asked twice.
 Closing it writes `boite.onboarding` in `localStorage`:
 
 ```json
-{ "version": 2, "at": 1789660000000 }
+{ "version": 3, "at": 1789660000000 }
 ```
 
 The device that stores nothing, a browser refusing storage, sees the tour every
@@ -44,13 +46,34 @@ and a version it does not know still counts as seen.
 Settings, General, Getting started brings it back, and so does "Replay the
 tour" in the command palette. Neither forgets anything that was set.
 
-## The voice screen
+`App.svelte` loads the component the first time the tour is due, the way it
+loads the palette and the dialogs, so a device that has seen it never downloads
+it again. Until it has loaded the tour holds no key: offline with a cold cache
+the app stays usable and asks again on the next launch.
 
-An eighth screen, dictation, is written and translated and does not show:
-`VOICE_STEP` in `packages/ui/src/lib/onboarding.ts` is `false` while that
-feature is built on its own branch. Turning it to `true` puts the screen in the
-order, in both languages, and the only other thing it needs is its button
-pointing at the Voice settings tab that branch adds.
+## In the end-to-end suite
+
+Every browser profile the suite drives is new, so the tour would open over the
+page each test clicks through. `tests/e2e/lib/cdp.ts` writes the record before
+the page's first script runs, and reloads a WebView2 page it attaches to once
+for the same reason. `BrowserPage.launch({ showTour: true })` leaves a profile
+unseen; `tests/e2e/onboarding.test.ts` is the one test that asks for it.
+
+The same file launches the browser with `--lang=en-US`, and the shell test
+passes it to WebView2: the language setting defaults to `system`, and the
+assertions are written in English whatever the machine speaks.
+
+## The screens that read the core
+
+Voice asks `speech.status` and Usage asks `quotas.list`, each one when its
+screen opens and never again, which is what the `untrack` around those readers
+is for: both write the state they guard on, so a tracked read would have the
+effect answer itself for ever.
+
+Voice says "ready to dictate" or offers the Voice settings tab, rather than
+describing a feature that may want a 200 MB download first. Panel prints the
+chord each surface has today, read from `store.keyLabel`, so a chord moved in
+`keybindings.json` shows moved here too.
 
 ## Adding a screen
 
@@ -58,6 +81,7 @@ pointing at the Voice settings tab that branch adds.
 2. A block under `onboarding` in `lib/strings.en.ts`, with a `title`, then the
    same block in `lib/strings.fr.ts`.
 3. A branch in `Onboarding.svelte`, between the two it sits between.
+4. `ONBOARDING_VERSION` up, since the tour changed shape.
 
 The header count, the dots, the Back and Next buttons and the keyboard follow
 from `steps()`. A screen that reads the core guards on `store.owner`: a paired

@@ -1104,23 +1104,30 @@ export const strings = {
       demoMode: 'Ask'
     },
 
-    /**
-     * Dictation. The screen is written and translated; `VOICE_STEP` in
-     * `lib/onboarding.ts` is what puts it in the tour, once the feature it
-     * describes has landed.
-     */
+    /** Dictation: what it does, and where this core stands on setting it up. */
     voice: {
       title: 'Talk instead of typing',
-      body: 'Hold the microphone in the composer and speak. The recording is transcribed on the machine hosting this core and lands in the box as text, which you read before anything is sent.',
+      body: 'Press the microphone in the composer and speak. The recording is transcribed on the machine hosting this core and lands in the box as text, which you read before anything is sent.',
       hint: 'Pick an engine once and dictation works in every conversation, on the phone as well.',
-      open: 'Voice settings'
+      open: 'Voice settings',
+      reading: 'Reading the voice engine'
+    },
+
+    /** The panel on the right: the surfaces, and the agent pushing things into it. */
+    panel: {
+      title: 'The workbench beside the conversation',
+      body: 'Every thread carries a panel on its right. It shows what the agent changed, the files it works in, its task list and the processes it started, without leaving the conversation to go and look.',
+      agent: 'The agent opens things there itself: it runs the `boite` command to show you a file, a diff or a page rather than pasting it into the transcript.',
+      keys: 'The keys that open them, changed in Settings, Keyboard.',
+      open: 'Keyboard shortcuts',
+      noKey: 'no key'
     },
 
     /** The quota bars and the token count, and the switch that fills them. */
     usage: {
       title: 'See what you are spending',
-      body: 'Your providers report how much of your subscription is left. Boite draws one bar per window with the hour it resets, in the tray and on the Providers page.',
-      tokens: 'Tokens spent inside Boite are counted apart, in Settings, Usage, with what the same turns would have cost on the API.',
+      body: 'Your providers report how much of your subscription is left. Boite draws one bar per window with the hour it resets, in the tray, on the Providers page and under Settings, Limits.',
+      tokens: 'What the agents spend inside Boite is counted apart, in Settings, Usage: a bar per day and provider, the breakdown per model, and what the same turns would have cost on the API.',
       monitor: 'Read subscription limits for {account}',
       noAccounts: 'No provider account yet. Connect one and its limits appear here on their own.',
       connect: 'Connect a provider',

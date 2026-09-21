@@ -8,7 +8,7 @@
   import { confirm } from '../lib/confirm.svelte';
   import { ago, time } from '../lib/format';
   import { qrSvg } from '../lib/qr';
-  import { fill, strings } from '../lib/i18n.svelte';
+  import { fill, strings } from '../lib/strings';
   import { openTour } from '../lib/onboarding.svelte';
   import type { Store } from '../lib/store.svelte';
 

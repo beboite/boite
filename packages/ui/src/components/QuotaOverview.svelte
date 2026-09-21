@@ -3,7 +3,7 @@
   import type { AccountQuota } from '@boite/contracts';
   import ProviderLogo from './ProviderLogo.svelte';
   import QuotaList from './QuotaList.svelte';
-  import { strings } from '../lib/i18n.svelte';
+  import { strings } from '../lib/strings';
   import { weekdayTime } from '../lib/format';
   let { rows, busy = false, configure, connect }: { rows: AccountQuota[]; busy?: boolean; configure: (id: string, enabled: boolean) => void; connect: () => void } = $props();
   const providers = ['claude', 'codex', 'antigravity', 'grok', 'opencode'] as const;

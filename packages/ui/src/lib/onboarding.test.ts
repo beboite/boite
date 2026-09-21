@@ -5,7 +5,6 @@ import {
   onboardingSeen,
   readOnboarding,
   steps,
-  VOICE_STEP,
   writeOnboarding
 } from './onboarding';
 
@@ -47,17 +46,12 @@ test('a record that is not one reads as never seen', () => {
   expect(onboardingSeen()).toBe(true);
 });
 
-test('the screens come in order, and the voice one only once its branch lands', () => {
+test('the screens come in order, from the welcome to the first project', () => {
   const shown = steps();
 
   expect(shown[0]).toBe('welcome');
   expect(shown.at(-1)).toBe('project');
-  expect(shown.includes('voice')).toBe(VOICE_STEP);
-  expect(shown).toEqual(
-    VOICE_STEP
-      ? ['welcome', 'privacy', 'agents', 'voice', 'usage', 'reach', 'quiet', 'project']
-      : ['welcome', 'privacy', 'agents', 'usage', 'reach', 'quiet', 'project']
-  );
+  expect(shown).toEqual(['welcome', 'privacy', 'agents', 'voice', 'panel', 'usage', 'reach', 'quiet', 'project']);
   // A fresh array every call: the caller keeps its own and may not change ours.
   expect(steps()).not.toBe(shown);
   expect(steps(false)).not.toContain('privacy');

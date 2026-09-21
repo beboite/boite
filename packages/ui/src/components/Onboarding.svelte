@@ -1,20 +1,21 @@
 <script lang="ts">
   /*
-   * The tour, once per device. Six screens, each one carrying the switch for
-   * what it explains, so reading it and setting it up are the same pass: the
-   * language and the theme, the agent picker, the usage bars, the phone and
-   * the other machines, the four quiet switches, and the first project.
+   * The tour, once per device. Nine owner screens, each one carrying the switch or
+   * the button for what it explains, so reading it and setting it up are the
+   * same pass: the language and the theme, the agent picker, dictation, the
+   * panel and its keys, the usage bars, the phone and the other machines, the
+   * four quiet switches, and the first project.
    *
    * Nothing here invents a setting. Every control writes through the same
    * function the Settings page writes through, so a choice made in the tour
    * and one made afterwards are the same choice.
    */
   import { onMount, tick, untrack } from 'svelte';
-  import { AppWindow, Bell, Brain, Coins, FolderOpen, Languages, Mic, Minimize2, Palette, Server, ShieldCheck, Smartphone, VolumeX, X } from '@lucide/svelte';
-  import type { AccountQuota } from '@boite/contracts';
+  import { AppWindow, Bell, Brain, Coins, FolderOpen, GitCompare, Keyboard, Languages, ListTodo, Mic, Minimize2, Palette, Server, ShieldCheck, Smartphone, Files as FilesIcon, VolumeX, X } from '@lucide/svelte';
+  import type { AccountQuota, KeybindingCommand, SpeechStatus } from '@boite/contracts';
+  import TelemetrySettings from './TelemetrySettings.svelte';
   import BoiteMark from './BoiteMark.svelte';
   import ProviderLogo from './ProviderLogo.svelte';
-  import TelemetrySettings from './TelemetrySettings.svelte';
   import { Closing } from '../lib/closing.svelte';
   import { fill, LOCALES, localeSetting, setLocaleSetting, strings, type LocaleSetting } from '../lib/i18n.svelte';
   import { steps, type OnboardingStep } from '../lib/onboarding';
@@ -27,7 +28,7 @@
   const inShell = window.__TAURI_INTERNALS__ !== undefined;
   const FOCUSABLE = 'button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])';
 
-  let screens = $derived(steps(store.owner));
+  const screens = $derived(steps(store.owner));
   let index = $state(0);
   let step = $derived<OnboardingStep>(screens[index] ?? 'welcome');
   let last = $derived(index === screens.length - 1);
@@ -159,14 +160,41 @@
 
   let monitored = $derived(quotas.filter((row) => row.status !== 'unsupported'));
 
-  // The screen is the only thing this watches. Both readers write the state
-  // they guard themselves on, so tracking their reads would have the effect
-  // fire on its own answer and ask the core again, for ever.
+  // The voice screen says where this core stands rather than describing a
+  // feature that may need a 200 MB download first. A core from before dictation
+  // has no such method, which reads the same as not set up.
+  let speech = $state<SpeechStatus | null>(null);
+  let speechBusy = $state(false);
+  async function readSpeech(): Promise<void> {
+    const client = store.client;
+    if (!client || speechBusy) return;
+    speechBusy = true;
+    try {
+      speech = await client.call('speech.status', {});
+    } catch {
+      speech = null;
+    } finally {
+      speechBusy = false;
+    }
+  }
+
+  /** The panel's four surfaces, each with the key that opens it today. */
+  const SURFACES: { id: KeybindingCommand; icon: typeof Coins; label: () => string; hint: () => string }[] = [
+    { id: 'changes', icon: GitCompare, label: () => strings.rightPanel.changes, hint: () => strings.rightPanel.changesHint },
+    { id: 'files', icon: FilesIcon, label: () => strings.rightPanel.files, hint: () => strings.rightPanel.filesHint },
+    { id: 'tasks', icon: ListTodo, label: () => strings.rightPanel.tasks, hint: () => strings.rightPanel.tasksHint },
+    { id: 'browser', icon: AppWindow, label: () => strings.rightPanel.browser, hint: () => strings.rightPanel.browserHint }
+  ];
+
+  // The screen is the only thing this watches. Every reader writes the state
+  // it guards itself on, so tracking their reads would have the effect fire on
+  // its own answer and ask the core again, for ever.
   $effect(() => {
     const at = step;
     untrack(() => {
       if (at === 'quiet') void readTray();
       if (at === 'usage') void readQuotas();
+      if (at === 'voice') void readSpeech();
     });
   });
 
@@ -262,9 +290,38 @@
             <h1 id="onboarding-title">{strings.onboarding.voice.title}</h1>
             <p class="lead">{strings.onboarding.voice.body}</p>
             <div class="demo" aria-hidden="true">
-              <span class="chip"><Mic size={13} strokeWidth={1.75} />{strings.onboarding.voice.title}</span>
+              <span class="chip"><Mic size={13} strokeWidth={1.75} />{strings.speech.start}</span>
             </div>
             <p class="note">{strings.onboarding.voice.hint}</p>
+            {#if !store.owner}
+              <p class="note">{strings.speech.ownerSetup}</p>
+            {:else if speech === null && speechBusy}
+              <p class="note">{strings.onboarding.voice.reading}</p>
+            {:else if speech?.ready}
+              <p class="note" data-testid="onboarding-voice-ready">{strings.speech.statusReady}</p>
+            {:else}
+              <p class="note">{strings.speech.statusSetup}</p>
+              <button type="button" data-step-start data-testid="onboarding-voice" onclick={() => leaveFor('voice')}>{strings.onboarding.voice.open}</button>
+            {/if}
+          {:else if step === 'panel'}
+            <h1 id="onboarding-title">{strings.onboarding.panel.title}</h1>
+            <p class="lead">{strings.onboarding.panel.body}</p>
+            <div class="rows">
+              {#each SURFACES as surface (surface.id)}
+                {@const Icon = surface.icon}
+                <div class="row">
+                  <Icon size={18} strokeWidth={1.5} />
+                  <span class="text">{surface.label()}<span class="hint">{surface.hint()}</span></span>
+                  <kbd class:none={store.keyLabel(surface.id) === null}>{store.keyLabel(surface.id) ?? strings.onboarding.panel.noKey}</kbd>
+                </div>
+              {/each}
+            </div>
+            <p class="note">{strings.onboarding.panel.agent}</p>
+            <p class="note">{strings.onboarding.panel.keys}</p>
+            <button type="button" data-step-start data-testid="onboarding-keyboard" onclick={() => leaveFor('keyboard')}>
+              <Keyboard size={15} strokeWidth={1.75} />
+              {strings.onboarding.panel.open}
+            </button>
           {:else if step === 'usage'}
             <h1 id="onboarding-title">{strings.onboarding.usage.title}</h1>
             <p class="lead">{strings.onboarding.usage.body}</p>
@@ -280,10 +337,13 @@
             {:else if monitored.length > 0}
               <div class="rows">
                 {#each monitored as row (row.accountId)}
+                  <!-- The provider first, the account under it: several
+                       providers ship an account called "Default", and the row
+                       has to say which one the switch reads. -->
                   <label class="row">
                     <ProviderLogo providerId={row.providerId} size={18} />
-                    <span class="text">{fill(strings.onboarding.usage.monitor, { account: row.label || row.providerName })}</span>
-                    <input type="checkbox" role="switch" data-testid="onboarding-quota-{row.accountId}" checked={row.enabled} disabled={quotaBusy} onchange={(event) => void monitor(row.accountId, event.currentTarget.checked)} />
+                    <span class="text">{row.providerName}{#if row.label}<span class="hint">{row.label}</span>{/if}</span>
+                    <input type="checkbox" role="switch" aria-label={fill(strings.onboarding.usage.monitor, { account: row.label ? `${row.providerName}, ${row.label}` : row.providerName })} data-testid="onboarding-quota-{row.accountId}" checked={row.enabled} disabled={quotaBusy} onchange={(event) => void monitor(row.accountId, event.currentTarget.checked)} />
                   </label>
                 {/each}
               </div>
@@ -598,6 +658,25 @@
     color: var(--color-muted-foreground);
     font-size: var(--text-sm);
     margin-top: 2px;
+  }
+
+  /* The key as the Keyboard page prints it, so the row reads as the shortcut
+     it really has rather than the one the default table would give. */
+  kbd {
+    flex: none;
+    padding: 2px 7px;
+    border: 1px solid var(--color-edge);
+    border-radius: var(--radius-sm);
+    background: var(--color-surface-2);
+    color: var(--color-foreground);
+    font-family: inherit;
+    font-size: var(--text-xs);
+    white-space: nowrap;
+  }
+
+  kbd.none {
+    color: var(--color-subtle);
+    background: transparent;
   }
 
   .segmented {

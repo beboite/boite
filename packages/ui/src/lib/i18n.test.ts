@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test } from 'vitest';
-import { strings as en } from './strings.en';
+import { strings as en } from './strings';
 import { fr } from './strings.fr';
 import {
   activeLocale,

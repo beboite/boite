@@ -10,7 +10,7 @@ beforeAll(async () => {
   const port = await freePort();
   server = await createServer({ root: join(import.meta.dir, '../../packages/ui'), server: { host: '127.0.0.1', port, strictPort: true }, clearScreen: false });
   await server.listen();
-  page = await BrowserPage.launch({ url: `http://127.0.0.1:${port}/?fake=1&open=recent`, onboarding: true });
+  page = await BrowserPage.launch({ url: `http://127.0.0.1:${port}/?fake=1&open=recent`, showTour: true });
   await page.send('Emulation.setDeviceMetricsOverride', { width: 1400, height: 1000, deviceScaleFactor: 1, mobile: false });
   await page.waitFor(`document.querySelector('[data-testid="nav-settings"]')`);
 }, 30_000);
