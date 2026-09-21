@@ -1055,12 +1055,24 @@ export const fr: Messages = {
   },
 
   onboarding: {
-    "privacy": { "title": "Aider à améliorer Boite", "body": "Les compteurs de base sont activés par défaut sur une nouvelle installation. Les détails d'usage améliorés restent facultatifs. Ces deux choix restent modifiables dans les réglages." },
+    privacy: { title: 'Vous êtes chez vous', body: "Un dernier choix. Vos messages, fichiers et comptes restent hors des statistiques.", basic: 'Compter les lancements et les tâches terminées. Activé par défaut.', enhanced: 'Partager les modèles publics, la vitesse et les volumes de jetons. Facultatif, désactivé par défaut.' },
+    demo: {
+      example: 'Illustration, pas votre activité', pause: "Mettre l'animation en pause", play: "Rejouer l'animation",
+      conversation: "Changer d'agent", voice: 'Dicter', panel: 'Voir les modifications',
+      task: 'Créer mon portfolio', secondTask: 'Réparer la connexion', thirdTask: 'Écrire les tests', working: 'En cours', complete: 'Terminé', request: 'Ajoute un formulaire de contact', answer: 'Le formulaire est prêt.', followup: "Vérifie maintenant l'accessibilité", continued: 'Même conversation. Même historique.',
+      voiceWords: 'Rends les boutons plus lisibles', voiceHint: 'Parlez, relisez le brouillon, puis envoyez.',
+      changes: 'Modifications', file: 'Formulaire de contact', reviewed: 'Relisez les changements à côté du chat.',
+      usageLabel: 'Claude', window: 'Limite sur 5 h', used: '24 % utilisés', reset: 'Réinitialisation dans 2 h 10', tray: "Dans la barre des tâches, près de l'horloge", trayHint: "Survolez l'icône Boite pour voir vos limites sans ouvrir l'application.",
+      desktop: 'Votre ordinateur', phone: 'Votre téléphone', synced: 'La même conversation', reachHint: "Après un appairage par QR code, suivez vos agents sur votre téléphone. Votre ordinateur continue de les faire tourner.",
+      notification: 'Formulaire de contact terminé', quietBody: "Vos agents travaillent sans prendre votre écran ni vos haut-parleurs.",
+      installVoice: 'Installer la dictée locale', downloadVoice: 'Environ 200 Mo. Le son reste sur cet ordinateur.', installingVoice: 'Téléchargement du moteur vocal', cancelVoice: 'Annuler le téléchargement', readyVoice: 'La dictée est prête. Utilisez le micro du champ de message.', retryVoice: 'Réessayer la configuration vocale',
+      workspaceBody: 'Une conversation pour toute la tâche. Essayez les exemples ci-dessous.', finish: 'Bon boitage !', finishBody: 'Vos agents vous attendent. Ouvrez un dossier et confiez-leur une tâche.',
+    },
     label: 'Prise en main',
     skip: 'Passer',
     back: 'Retour',
     next: 'Suivant',
-    done: 'Ouvrir Boite',
+    done: 'À moi de boiter',
     step: 'Étape {index} sur {total}',
     progress: "Aller à l'étape {index} : {title}",
     replay: 'Revoir la présentation',
@@ -1073,8 +1085,8 @@ export const fr: Messages = {
     },
 
     agents: {
-      title: "Changer d'agent en pleine conversation",
-      body: "Changez de modèle, ou même de fournisseur, quand vous voulez. L'historique suit.",
+      title: 'Une conversation qui suit votre travail',
+      body: "Changez d'agent, dictez un message, relisez le résultat. Sans changer de conversation.",
       demoModel: 'Claude Sonnet 5',
       demoEffort: 'Élevé',
       demoMode: 'Demander'
@@ -1096,7 +1108,7 @@ export const fr: Messages = {
 
     usage: {
       title: "Voir ce qu'il vous reste",
-      body: "Une barre par abonnement, avec l'heure de réinitialisation.",
+      body: "Voyez quel abonnement se remplit et quand il se réinitialise, même avec Boite en arrière-plan.",
       monitor: 'Lire les limites de {account}',
       noAccounts: 'Aucun fournisseur connecté pour le moment.',
       connect: 'Connecter un fournisseur',
@@ -1104,7 +1116,7 @@ export const fr: Messages = {
     },
 
     reach: {
-      title: 'Votre téléphone, et vos autres machines',
+      title: 'Éloignez-vous. Gardez le fil.',
       phone: 'Sur votre téléphone',
       phoneBody: 'Scannez un QR code et votre téléphone retrouve les mêmes conversations, avec les notifications.',
       pair: 'Appairer un téléphone',

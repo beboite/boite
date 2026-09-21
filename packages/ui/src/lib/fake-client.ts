@@ -1793,7 +1793,6 @@ export class FakeClient implements ObservableClient {
       case 'telemetry.configure': {
         const { mode } = rawParams as RpcParams<'telemetry.configure'>;
         if (!['off', 'basic', 'enhanced'].includes(mode)) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'mode: expected off, basic or enhanced' });
-        if (mode === 'enhanced' && this.#telemetry.pendingDeletion) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'telemetry: retry pending deletion before enabling enhanced mode' });
         if (this.#telemetry.mode === 'enhanced' && mode !== 'enhanced') this.#telemetry.pendingDeletion = true;
         this.#telemetry.mode = mode;
         return { ...this.#telemetry };

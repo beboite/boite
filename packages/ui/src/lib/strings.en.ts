@@ -1075,12 +1075,24 @@ export const strings = {
    * it up are the same pass.
    */
   onboarding: {
-    privacy: { title: 'Help improve Boite', body: 'Basic counters start on for new installations. Enhanced usage details are optional. You can change either choice in Settings.' },
+    privacy: { title: 'Make yourself at home', body: 'One last choice. Your messages, files and account details stay out of analytics.', basic: 'Count launches and completed tasks. On by default.', enhanced: 'Share public model names, speed and token counts. Your choice, off by default.' },
+    demo: {
+      example: 'Illustration, not your activity', pause: 'Pause animation', play: 'Replay animation',
+      conversation: 'Change agent', voice: 'Dictate', panel: 'Inspect changes',
+      task: 'Build my portfolio', secondTask: 'Fix the login', thirdTask: 'Write the tests', working: 'Working', complete: 'Done', request: 'Add a contact form', answer: 'The form is ready.', followup: 'Now check the accessibility', continued: 'Same thread. Same history.',
+      voiceWords: 'Make the buttons easier to read', voiceHint: 'Speak, review the draft, then send.',
+      changes: 'Changes', file: 'Contact form', reviewed: 'Review the changes beside the chat.',
+      usageLabel: 'Claude', window: '5-hour limit', used: '24% used', reset: 'Resets in 2 h 10 min', tray: 'In your taskbar, beside the clock', trayHint: 'Hover the Boite icon to see your limits without opening the app.',
+      desktop: 'Your computer', phone: 'Your phone', synced: 'The same conversation', reachHint: 'After pairing by QR code, follow your agents from your phone. Your computer keeps running them.',
+      notification: 'Contact form finished', quietBody: 'Let your agents work without taking over your screen or your speakers.',
+      installVoice: 'Install local dictation', downloadVoice: 'About 200 MB. Audio stays on this computer.', installingVoice: 'Downloading voice engine', cancelVoice: 'Cancel download', readyVoice: 'Dictation is ready. Use the microphone in the composer.', retryVoice: 'Retry voice setup',
+      workspaceBody: 'One thread for the whole task. Try the examples below.', finish: 'Happy Boiting!', finishBody: 'Your agents are ready when you are. Open a folder and give them a task.',
+    },
     label: 'Getting started',
     skip: 'Skip',
     back: 'Back',
     next: 'Next',
-    done: 'Open Boite',
+    done: "Let's Boite",
     step: 'Step {index} of {total}',
     progress: 'Go to step {index}: {title}',
     replay: 'Show the tour again',
@@ -1094,8 +1106,8 @@ export const strings = {
 
     /** Switching model inside a live conversation, the composer's picker. */
     agents: {
-      title: 'Switch agent mid-conversation',
-      body: 'Change the model, or even the provider, whenever you want. The history follows.',
+      title: 'A conversation that follows your work',
+      body: 'Switch agents, dictate a message, inspect the result. Stay in the same thread.',
       demoModel: 'Claude Sonnet 5',
       demoEffort: 'High',
       demoMode: 'Ask'
@@ -1120,7 +1132,7 @@ export const strings = {
     /** The quota bars, and the switch that fills them. */
     usage: {
       title: 'See what you have left',
-      body: 'One bar per subscription, with the hour it resets.',
+      body: 'See which subscription is filling up and when it resets, even with Boite in the background.',
       monitor: 'Read subscription limits for {account}',
       noAccounts: 'No provider connected yet.',
       connect: 'Connect a provider',
@@ -1129,7 +1141,7 @@ export const strings = {
 
     /** The two ways this core reaches further: a phone, and another core. */
     reach: {
-      title: 'Your phone, and your other machines',
+      title: 'Step away. Keep the conversation.',
       phone: 'On your phone',
       phoneBody: 'Scan a QR code and your phone gets the same conversations, with notifications.',
       pair: 'Pair a phone',

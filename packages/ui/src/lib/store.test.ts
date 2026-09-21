@@ -45,8 +45,7 @@ test('telemetry actions route through the owning client and retain deletion stat
     await store.configureTelemetry('enhanced');
     expect(await store.exportTelemetry()).toEqual({ events: [], truncated: false });
     expect(await store.configureTelemetry('off')).toMatchObject({ mode: 'off', pendingDeletion: true });
-    await expect(store.configureTelemetry('enhanced')).rejects.toThrow('pending deletion');
-    expect(store.error).toContain('pending deletion');
+    expect(await store.configureTelemetry('enhanced')).toMatchObject({ mode: 'enhanced', pendingDeletion: true });
     expect(await store.retryTelemetryDeletion()).toMatchObject({ pendingDeletion: false });
     await store.configureTelemetry('enhanced');
     store.attach(other);

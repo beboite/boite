@@ -29,9 +29,10 @@ test('a new device gets the tour on its own, holds the app keys under it, and ne
   await Bun.sleep(200);
   expect(await page.evaluate<boolean>(`!!document.querySelector('[data-testid=palette]')`)).toBe(false);
 
-  await page.click('[data-testid=onboarding-dot-panel]');
-  await page.waitFor(`document.querySelector('[data-testid=onboarding-step]')?.dataset.step === 'panel'`);
-  expect(await page.evaluate<string[]>(`[...document.querySelectorAll('[data-testid=onboarding-step] kbd')].map((node) => node.textContent.trim())`)).toEqual(['Ctrl+Shift+C', 'Ctrl+Shift+F', 'Ctrl+Shift+K', 'Ctrl+Shift+J']);
+  await page.click('[data-testid=onboarding-dot-agents]');
+  await page.click('[data-testid=onboarding-example-panel]');
+  await page.waitFor(`document.querySelector('[data-testid=onboarding-scene]')?.dataset.scene === 'panel'`);
+  expect(await page.evaluate(`document.querySelectorAll('[data-testid=onboarding-step] kbd').length`)).toBe(0);
   await capture('onboarding-panel.png');
 
   await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
@@ -57,3 +58,43 @@ test('a new device gets the tour on its own, holds the app keys under it, and ne
   await Bun.sleep(500);
   expect(await page.evaluate<boolean>(`!!document.querySelector('[data-testid=onboarding]')`)).toBe(false);
 }, 45_000);
+
+test('six illustrated screens fit both languages and widths, without leaving the tour', async () => {
+  await page.evaluate(`localStorage.removeItem('boite.onboarding')`);
+  await page.reload();
+  await page.waitFor(`document.querySelector('[data-testid=onboarding]')`);
+  for (const locale of ['en', 'fr']) {
+    await page.click('[data-testid=onboarding-dot-welcome]');
+    await page.click(`[data-testid=onboarding-locale-${locale}]`);
+    for (const width of [1100, 390]) {
+      await page.send('Emulation.setDeviceMetricsOverride', { width, height: 900, deviceScaleFactor: 1, mobile: width === 390 });
+      for (const step of ['welcome', 'agents', 'usage', 'reach', 'quiet', 'privacy']) {
+        await page.click(`[data-testid=onboarding-dot-${step}]`);
+        await page.waitFor(`document.querySelector('[data-testid=onboarding-step]')?.dataset.step === '${step}'`);
+        await capture(`tour-${locale}-${width}-${step}.png`);
+        expect(await page.evaluate(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true);
+        expect(await page.evaluate(`document.querySelector('[data-testid=onboarding-next]').getBoundingClientRect().bottom <= innerHeight`)).toBe(true);
+        expect(await page.evaluate(`document.querySelector('[data-testid=onboarding] header .count') === null`)).toBe(true);
+      }
+    }
+  }
+  await page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
+  await page.click('[data-testid=onboarding-dot-agents]');
+  expect(await page.evaluate(`document.querySelector('[data-testid=onboarding-scene] svg').getAnimations({subtree:true}).length`)).toBe(0);
+  await capture('tour-reduced-motion.png');
+}, 120_000);
+
+test('light theme and a short phone viewport keep consent and navigation reachable', async () => {
+  await page.click('[data-testid=onboarding-dot-welcome]');
+  await page.click('[data-testid=onboarding-theme-light]');
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 640, deviceScaleFactor: 1, mobile: true });
+  await page.click('[data-testid=onboarding-dot-privacy]');
+  await page.waitFor(`document.querySelectorAll('[data-testid=telemetry-settings] input').length === 2`);
+  await page.evaluate(`document.querySelector('[data-testid=telemetry-settings]').scrollIntoView({block:'center'})`);
+  await capture('tour-light-short-phone.png');
+  expect(await page.evaluate(`document.documentElement.dataset.theme`)).toBe('light');
+  expect(await page.evaluate(`document.querySelector('[data-testid=onboarding-next]').getBoundingClientRect().bottom <= innerHeight`)).toBe(true);
+  expect(await page.evaluate(`document.querySelector('[data-testid=telemetry-settings] input').getBoundingClientRect().top >= 0`)).toBe(true);
+  await page.click('[data-testid=onboarding-next]');
+  await page.waitFor(`!document.querySelector('[data-testid=onboarding]')`);
+}, 15_000);

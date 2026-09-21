@@ -1,9 +1,8 @@
 # The tour
 
-Boite opens a tour the first time it runs on a device: nine owner screens, each one
-carrying the switch or the button for what it explains, so reading it and
-setting it up are the same pass. It waits for a core to be connected, because half its controls
-would be dead against a connection that is not there.
+Boite opens a six-screen tour on a new owner device, five on a paired guest.
+It waits for a connected core. SVG illustrations explain the features without
+calling live providers, reading quotas or navigating away from the tour.
 
 Nothing in it is a setting of its own. Every control writes through the same
 function the Settings page writes through, so a choice made in the tour and one
@@ -15,21 +14,17 @@ tour set.
 | Screen | What it says | What it carries |
 |---|---|---|
 | Welcome | One conversation per task, and agents keep working meanwhile | Language and theme |
-| Privacy | Basic counters start enabled on new hosts; enhanced usage requires consent | The same telemetry controls as Settings, owner only |
-| Agents | The model or the provider changes mid-thread, the history follows | A still of the composer's chip row |
-| Voice | Press the microphone, read the text before it is sent | `speech.status`, then Voice settings when it is not set up |
-| Panel | Changes, files, tasks and a browser, one key away | The four surfaces with their live chords, and Keyboard settings |
-| Usage | One bar per subscription, with the hour it resets | One switch per account, `quotas.configure` |
-| Reach | A phone pairs with a QR code, another Boite connects from this app | The LAN switch, and the two settings pages |
-| Quiet | Its title only | Notifications, close to tray, focus guard, mute |
-| Project | The folder an agent works in | The folder picker, or the count already open |
+| Conversation | The same history follows a change of agent | Selectable agent, dictation and diff demonstrations; inline local voice installation |
+| Usage | A named provider, a five-hour limit, used percentage and reset time | An illustrated taskbar hover, no live account list |
+| Reach | The host keeps working while the phone shows the same conversation | An animated desktop-to-phone illustration |
+| Quiet | Agents work without taking over the screen or speakers | Notifications, close to tray, focus guard, mute |
+| Privacy | Messages and files stay out of analytics | Two concise consent switches and the final welcome, owner only |
 
-One sentence per screen, and a row is its label alone: the hint under a
-switch stays on the Settings page it writes to. A reader keeps one idea per
-screen and skims the rest, so the tour says what the feature is and where it
-lives, never how it works.
-Privacy keeps the consent details beside its switches so the owner can read
-what each mode collects before opting in.
+Illustrations have their own phone layout, use theme tokens and carry an example
+label. Animations stop after their demonstration, can be paused and replayed,
+and show the completed state under reduced motion. The dots are the only progress
+indicator. Export and deletion management remain in Settings. Pending deletion
+does not prevent a fresh opt-in or leaving the consent screen.
 
 Escape leaves, the cross leaves, Tab stays inside. The dots at the bottom walk
 the screens and read as steps to a screen reader. Leaving at the first screen
@@ -40,7 +35,7 @@ counts as much as finishing the last one: the tour is not asked twice.
 Closing it writes `boite.onboarding` in `localStorage`:
 
 ```json
-{ "version": 3, "at": 1789660000000 }
+{ "version": 4, "at": 1789660000000 }
 ```
 
 The device that stores nothing, a browser refusing storage, sees the tour every
@@ -72,15 +67,12 @@ assertions are written in English whatever the machine speaks.
 
 ## The screens that read the core
 
-Voice asks `speech.status` and Usage asks `quotas.list`, each one when its
-screen opens and never again, which is what the `untrack` around those readers
-is for: both write the state they guard on, so a tracked read would have the
-effect answer itself for ever.
-
-Voice says "ready to dictate" or offers the Voice settings tab, rather than
-describing a feature that may want a 200 MB download first. Panel prints the
-chord each surface has today, read from `store.keyLabel`, so a chord moved in
-`keybindings.json` shows moved here too.
+Voice polls `speech.status` only while its example is selected. The owner can
+start or cancel the local engine download there; no download starts without a
+click. Selecting another example, leaving the step or closing the tour stops
+polling, but a requested download continues in the core. The tour never requests
+microphone access or sends a prompt. Privacy and the quiet switches use the
+same host settings and shell command as Settings.
 
 ## Adding a screen
 
@@ -90,7 +82,7 @@ chord each surface has today, read from `store.keyLabel`, so a chord moved in
 3. A branch in `Onboarding.svelte`, between the two it sits between.
 4. `ONBOARDING_VERSION` up, since the tour changed shape.
 
-The header count, the dots, the Back and Next buttons and the keyboard follow
+The dots, the Back and Next buttons and the keyboard follow
 from `steps()`. A screen that reads the core guards on `store.owner`: a paired
 phone is refused those calls ([phone.md](phone.md)), and a screen offering a
 button that answers nothing teaches the wrong thing.

@@ -121,7 +121,6 @@ export class Telemetry {
     if (!MODES.includes(mode)) return Promise.reject(invalid('mode: expected off, basic or enhanced'));
     const next = this.mutation.then(async () => {
       if (mode === this.consent.mode) return this.state();
-      if (mode === 'enhanced' && this.consent.forget.length) throw invalid('telemetry: retry pending deletion before enabling enhanced mode');
       this.revision++;
       this.queue = [];
       this.controller?.abort();
@@ -134,6 +133,8 @@ export class Telemetry {
         this.consent.forget.push(old.installId);
         this.consent.installId = null;
       }
+      // A fresh opt-in never revives an identity queued for deletion. Uploads
+      // still wait for forgetPending; the user's choice does not have to.
       if (mode === 'enhanced') this.consent.installId = crypto.randomUUID();
       try { this.save(); } catch (error) { this.consent = old; throw error; }
       this.failures = 0;

@@ -106,7 +106,13 @@ test('enhanced withdrawal persists deletion, retries after restart, and uses a n
   const oldId = f.requests[0]!.body.install_id;
   await f.telemetry.configure('off'); await f.telemetry.flush();
   expect(f.telemetry.state().pendingDeletion).toBe(true);
-  await expect(f.telemetry.configure('enhanced')).rejects.toThrow('pending deletion');
+  await f.telemetry.configure('enhanced');
+  const saved = JSON.parse(readFileSync(join(f.dataDir, 'telemetry.json'), 'utf8'));
+  expect(saved.installId).not.toBe(oldId);
+  expect(saved.forget).toContain(oldId);
+  const uploads = f.requests.filter(r => r.path === '/track').length;
+  await f.telemetry.flush();
+  expect(f.requests.filter(r => r.path === '/track')).toHaveLength(uploads);
   await f.telemetry.close();
   fail = false;
   const restarted = new Telemetry(f.host, 'https://relay.example', f.send);

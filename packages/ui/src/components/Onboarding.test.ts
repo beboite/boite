@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, test } from 'vitest';
+import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { flushSync, mount, tick, unmount } from 'svelte';
 import Onboarding from './Onboarding.svelte';
 import { FakeClient } from '../lib/fake-client';
@@ -31,6 +31,8 @@ afterEach(() => {
   window.localStorage.clear();
   setLocaleSetting('system');
   delete document.documentElement.dataset.theme;
+  vi.restoreAllMocks();
+  store.detach();
 });
 
 function query<T extends Element>(selector: string): T {
@@ -67,7 +69,7 @@ test('the tour walks its screens, the dots follow, and the last one closes it', 
   await open();
 
   expect(step()).toBe('welcome');
-  expect(query('header .count').textContent?.trim()).toBe(`Step 1 of ${screens.length}`);
+  expect(document.querySelector('header .count')).toBeNull();
   expect(query<HTMLButtonElement>('[data-testid=onboarding-back]').disabled).toBe(true);
   expect(document.querySelectorAll('.dots .dot').length).toBe(screens.length);
 
@@ -78,8 +80,8 @@ test('the tour walks its screens, the dots follow, and the last one closes it', 
   }
 
   // The last screen sends the user into the app rather than to another one.
-  expect(query('[data-testid=onboarding-next]').textContent?.trim()).toBe('Open Boite');
-  expect(tourSeen()).toBe(false);
+  expect(query('[data-testid=onboarding-next]').textContent?.trim()).toBe("Let's Boite");
+  expect(readOnboarding()).toBeNull();
 
   await click('onboarding-next');
   await settle();
@@ -139,54 +141,48 @@ test('Escape leaves the tour, and the device remembers it either way', async () 
   expect(window.localStorage.getItem(ONBOARDING_STORAGE_KEY)).not.toBeNull();
 });
 
-test('the usage screen offers the accounts it can read, and the reach screen the two ways out', async () => {
+test('usage and reach explain themselves without delayed account lists or exits', async () => {
   await open();
   await click('onboarding-dot-usage');
 
-  // The fake core answers `quotas.list`, so the switches are the real rows.
   await new Promise((resolve) => setTimeout(resolve, 0));
   flushSync();
   await tick();
   const switches = document.querySelectorAll('[data-testid^=onboarding-quota-]');
-  expect(switches.length > 0 || document.querySelector('[data-testid=onboarding-providers]') !== null).toBe(true);
+  expect(switches.length).toBe(0);
+  expect(document.body.textContent).toContain('24% used');
+  expect(document.body.textContent).toContain('5-hour limit');
+  expect(document.body.textContent).toContain('beside the clock');
 
   await click('onboarding-dot-reach');
-  expect(document.querySelector('[data-testid=onboarding-pair]')).not.toBeNull();
-  expect(document.querySelector('[data-testid=onboarding-machines]')).not.toBeNull();
-
-  // Either button hands over to a settings tab and ends the tour there.
-  await click('onboarding-machines');
-  await settle();
-  expect(store.page).toBe('settings');
-  expect(store.settingsTab).toBe('machines');
-  expect(tourSeen()).toBe(true);
+  expect(document.querySelector('[data-testid=onboarding-pair]')).toBeNull();
+  expect(document.querySelector('[data-testid=onboarding-machines]')).toBeNull();
+  expect(readOnboarding()).toBeNull();
 });
 
 test('the voice screen says where the core stands instead of describing dictation in the air', async () => {
   await open();
-  await click('onboarding-dot-voice');
+  await click('onboarding-dot-agents');
+  await click('onboarding-example-voice');
 
   // The fake core answers `speech.status` with an engine already installed.
   await new Promise((resolve) => setTimeout(resolve, 0));
   flushSync();
   await tick();
 
-  expect(query('[data-testid=onboarding-voice-ready]').textContent).toContain('Ready to dictate');
+  expect(query('[data-testid=onboarding-voice-ready]').textContent).toContain('Dictation is ready');
   expect(document.querySelector('[data-testid=onboarding-voice]')).toBeNull();
 });
 
-test('the panel screen prints the keys that open each surface, not the defaults', async () => {
+test('the panel example shows changes beside chat instead of a keybinding list', async () => {
   await open();
-  await click('onboarding-dot-panel');
+  await click('onboarding-dot-agents');
+  await click('onboarding-example-panel');
 
   const keys = [...document.querySelectorAll('[data-testid=onboarding-step] kbd')].map((node) => node.textContent?.trim());
-  expect(keys).toEqual(['Ctrl+Shift+C', 'Ctrl+Shift+F', 'Ctrl+Shift+K', 'Ctrl+Shift+J']);
-
-  await click('onboarding-keyboard');
-  await settle();
-
-  expect(store.page).toBe('settings');
-  expect(store.settingsTab).toBe('keyboard');
+  expect(keys).toEqual([]);
+  expect(query('[data-testid=onboarding-scene]').getAttribute('data-scene')).toBe('panel');
+  expect(readOnboarding()).toBeNull();
 });
 
 test('skipping at the first screen counts as seen, the same as finishing it', async () => {
@@ -208,17 +204,17 @@ test('skipping at the first screen counts as seen, the same as finishing it', as
 
 test('losing owner access on the last screen keeps the step and count valid', async () => {
   await open();
-  await click('onboarding-dot-project');
+  await click('onboarding-dot-privacy');
   store.principal = 'session';
   flushSync();
   await tick();
-  expect(step()).toBe('project');
-  expect(query('header .count').textContent?.trim()).toBe('Step 8 of 8');
+  expect(step()).toBe('quiet');
+  expect(document.querySelectorAll('.dots .dot')).toHaveLength(5);
 });
 
 test('continuing the privacy step keeps basic counters without opting into details', async () => {
   await open();
-  await click('onboarding-next');
+  await click('onboarding-dot-privacy');
   await new Promise(resolve => setTimeout(resolve, 0));
   flushSync();
   const inputs = [...document.querySelectorAll<HTMLInputElement>('[data-testid=telemetry-settings] input')];
@@ -243,4 +239,57 @@ test('the privacy switch opts in explicitly and replay preserves a saved opt-out
   await new Promise(resolve => setTimeout(resolve, 0));
   flushSync();
   expect([...document.querySelectorAll<HTMLInputElement>('[data-testid=telemetry-settings] input')].map(input => input.checked)).toEqual([false, false]);
+});
+
+test('an accidental opt-out can be reversed while deletion is pending, without data-management buttons', async () => {
+  await store.client!.call('telemetry.configure', { mode: 'enhanced' });
+  await open();
+  await click('onboarding-dot-privacy');
+  await new Promise(resolve => setTimeout(resolve, 0)); flushSync();
+  query<HTMLInputElement>('[data-testid=telemetry-settings] input').click();
+  await new Promise(resolve => setTimeout(resolve, 0)); flushSync();
+  expect(await store.client!.call('telemetry.state', {})).toMatchObject({ mode: 'off', pendingDeletion: true });
+  const enhanced = document.querySelectorAll<HTMLInputElement>('[data-testid=telemetry-settings] input')[1]!;
+  expect(enhanced.disabled).toBe(false);
+  enhanced.click();
+  await new Promise(resolve => setTimeout(resolve, 0)); flushSync();
+  expect(await store.client!.call('telemetry.state', {})).toMatchObject({ mode: 'enhanced', pendingDeletion: true });
+  expect(document.querySelector('[data-testid=telemetry-settings] button')).toBeNull();
+  expect(document.querySelector('[data-testid=onboarding]')).not.toBeNull();
+});
+
+test('voice setup failures stay in the tour and preserve their message across status reads', async () => {
+  const client = store.client!;
+  const call = client.call.bind(client);
+  const calls: string[] = [];
+  vi.spyOn(client, 'call').mockImplementation((async (method: string, params: never) => {
+    calls.push(method);
+    if (method === 'speech.status') return { ready: false, localReady: false, installing: false, canInstallRuntime: true, engine: 'local' };
+    if (method === 'speech.install') throw new Error('download unavailable');
+    return call(method as never, params);
+  }) as typeof client.call);
+  await open();
+  await click('onboarding-dot-agents');
+  await click('onboarding-example-voice');
+  await new Promise(resolve => setTimeout(resolve, 0)); flushSync();
+  expect(calls).not.toContain('speech.install');
+  await click('onboarding-voice-install');
+  await new Promise(resolve => setTimeout(resolve, 0)); flushSync();
+  expect(query('[role=alert]').textContent).toContain('download unavailable');
+  expect(document.querySelector('[data-testid=onboarding]')).not.toBeNull();
+  expect(store.page).not.toBe('settings');
+  await click('onboarding-next');
+  expect(step()).toBe('usage');
+});
+
+test('focus stays in the dialog and navigation focuses its new heading', async () => {
+  await open();
+  await click('onboarding-next');
+  await settle();
+  expect(document.activeElement).toBe(query('h1'));
+  query<HTMLButtonElement>('[data-testid=onboarding-next]').focus();
+  document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }));
+  expect(document.activeElement).toBe(query('[data-testid=onboarding-skip]'));
+  document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true, cancelable: true }));
+  expect(document.activeElement).toBe(query('[data-testid=onboarding-next]'));
 });

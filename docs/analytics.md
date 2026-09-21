@@ -23,7 +23,10 @@ create another installation or duplicate a conversation event.
   retention analysis. Enabling it also enables counters. Disabling it discards
   queued events and requests deletion of the corresponding profile and events.
   Failed deletion remains on disk and retries after restart. Re-enabling enhanced
-  mode requires pending deletion to finish and creates a new identifier.
+  mode immediately creates a new identifier without cancelling earlier deletion.
+  Uploads wait for the pending deletions to be accepted; the consent switches and
+  onboarding navigation do not. Export and deletion status live in Settings,
+  not in the onboarding tour.
 
 Export downloads up to 10,000 enhanced events as JSON. PostHog processes event
 deletion asynchronously after accepting the request. A batch already received
