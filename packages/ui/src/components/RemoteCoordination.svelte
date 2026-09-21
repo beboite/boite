@@ -1,6 +1,6 @@
 <script lang="ts">
   import { Link2, RefreshCw, Unlink } from '@lucide/svelte';
-  import { onMount } from 'svelte';
+  import { untrack } from 'svelte';
   import type { CoordinationPeer } from '@boite/contracts';
   import { strings } from '../lib/strings';
   import { workspace, type Machine } from '../lib/workspace.svelte';
@@ -9,6 +9,7 @@
   let peers = $state<Record<string, CoordinationPeer[]>>({});
   let error = $state<string | null>(null);
   let busy = $state('');
+  let refreshVersion = 0;
   let machines = $derived(workspace.machines.filter(machine => machine.store.owner && machine.store.connection === 'ready'));
   let machineKey = $derived(machines.map(machine => machine.id).join('\0'));
   let pairs = $derived.by(() => {
@@ -28,19 +29,34 @@
     return result;
   });
 
-  onMount(() => { if (machineKey) void refresh(); });
+  $effect(() => {
+    const key = machineKey;
+    untrack(() => {
+      if (key) void refresh();
+      else {
+        refreshVersion += 1;
+        identities = {};
+        peers = {};
+        error = null;
+      }
+    });
+  });
 
   async function refresh(): Promise<void> {
+    const version = ++refreshVersion;
+    const current = machines;
     error = null;
     try {
-      const rows = await Promise.all(machines.map(async machine => ({
+      const rows = await Promise.all(current.map(async machine => ({
         id: machine.id,
         identity: await machine.store.coordinationIdentity(),
         peers: await machine.store.coordinationPeers()
       })));
+      if (version !== refreshVersion) return;
       identities = Object.fromEntries(rows.map(row => [row.id, row.identity]));
       peers = Object.fromEntries(rows.map(row => [row.id, row.peers]));
     } catch (cause) {
+      if (version !== refreshVersion) return;
       error = cause instanceof Error ? cause.message : String(cause);
     }
   }

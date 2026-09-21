@@ -49,3 +49,31 @@ test('linking two connected machines establishes reciprocal public trust', async
   expect(await first.coordinationPeers()).toEqual([]);
   expect((await second.coordinationPeers()).map(peer => peer.coreId)).toEqual(['core-first']);
 });
+
+test('a machine that becomes ready after mount refreshes its existing links', async () => {
+  const first = await machine('first', 'First');
+  const second = await machine('second', 'Second');
+  const [firstIdentity, secondIdentity] = await Promise.all([
+    first.coordinationIdentity(),
+    second.coordinationIdentity(),
+  ]);
+  await Promise.all([
+    first.trustCoordinationPeer(secondIdentity),
+    second.trustCoordinationPeer(firstIdentity),
+  ]);
+  second.connection = 'connecting';
+  workspace.machines = [{ id: 'first', label: 'First', store: first }, { id: 'second', label: 'Second', store: second }];
+  workspace.active = first;
+  component = mount(RemoteCoordination, { target: document.body });
+  await settle();
+  expect(document.querySelector('[data-testid="agent-link-pair"]')).toBeNull();
+
+  second.connection = 'ready';
+  await vi.waitFor(() => {
+    flushSync();
+    const link = document.querySelector<HTMLButtonElement>('[data-testid="agent-link"]');
+    expect(link, document.body.textContent ?? '').not.toBeNull();
+    expect(link?.disabled, document.body.textContent ?? '').toBe(true);
+    expect(document.querySelectorAll('[data-testid="agent-peer"]')).toHaveLength(2);
+  });
+});
