@@ -579,6 +579,23 @@ fn core_program() -> Result<(String, Vec<String>, Option<PathBuf>), String> {
     ))
 }
 
+/// Tauri keeps resources separate from executables on Linux and macOS.
+fn configure_core_resources(command: &mut Command, resources: &Path) {
+    let ui = resources.join("ui");
+    if ui.join("index.html").is_file() { command.env("BOITE_UI_DIR", ui); }
+    #[cfg(not(windows))]
+    if resources.join("boite").is_file()
+        && Path::new(command.get_program()).is_absolute()
+        && Path::new(command.get_program()).file_name().is_some_and(|name| name == "boite-core")
+    {
+        let executable = command.get_program().to_os_string();
+        command.env("BOITE_CORE_EXECUTABLE", executable);
+        if std::env::var_os("BOITE_CLI_DIR").filter(|value| !value.is_empty()).is_none() {
+            command.env("BOITE_CLI_DIR", resources);
+        }
+    }
+}
+
 fn spawn_core(channel: Channel, resources: Option<&Path>) -> Result<(Child, Arc<AtomicBool>, CoreJob), String> {
     let (program, args, working_directory) = core_command(channel)?;
     let job = job::create_core_job()?;
@@ -592,9 +609,7 @@ fn spawn_core(channel: Channel, resources: Option<&Path>) -> Result<(Child, Arc<
     if let Some(directory) = working_directory {
         command.current_dir(directory);
     }
-    if let Some(ui) = resources.map(|path| path.join("ui")).filter(|path| path.join("index.html").is_file()) {
-        command.env("BOITE_UI_DIR", ui);
-    }
+    if let Some(resources) = resources { configure_core_resources(&mut command, resources); }
     platform::prepare_command(&mut command);
 
     let mut child = command

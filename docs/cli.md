@@ -90,7 +90,12 @@ shims pass `core/main.js` before the subcommand. Two shims put it on the PATH,
 `packages/core/shims/boite` for a POSIX shell (Git Bash included) and
 `packages/core/shims/boite.cmd` for cmd and PowerShell; `stage-sidecar.ts`
 copies both beside `boite-core.exe` and the bundle overlay lists them as
-resources. From the sources, `packages/core/bin/boite` and `boite.cmd` run the
+resources. Linux and macOS packages keep those resources apart from executables.
+The shell sets `BOITE_CLI_DIR` to the resource directory unless explicitly
+overridden, and `BOITE_CORE_EXECUTABLE` to the installed core's absolute path.
+The POSIX shim quotes that path, including spaces in a macOS application name.
+Standalone core installs still find the executable beside the shim.
+From the sources, `packages/core/bin/boite` and `boite.cmd` run the
 same subcommand through `bun`, and the core puts that directory on the PATH
 when it runs from the sources. `BOITE_CLI_DIR` overrides the directory in both
 cases, and a core refuses to start on one that holds no shim.
