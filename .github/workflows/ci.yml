@@ -53,6 +53,8 @@ jobs:
         run: bun scripts/ci/changes.ts
       - run: bun scripts/check-docs.ts
       - run: bun test scripts/ci
+      - run: bun run check:architecture
+      - run: bun test scripts/architecture
       - name: Validate workflows
         if: steps.filter.outputs.workflows == 'true'
         run: |

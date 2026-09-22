@@ -1,8 +1,16 @@
 import { afterEach, expect, test, vi } from 'vitest';
 import { FakeClient } from './fake-client';
-import { RpcErrorCode, TODO_TEXT_MAX } from '@boite/contracts';
+import { RpcErrorCode, TODO_TEXT_MAX, type RpcMethodName } from '@boite/contracts';
 
 afterEach(() => vi.useRealTimers());
+
+test.each(['toString', 'constructor', '__proto__', 'missing.method'])('unknown RPC method %s is refused', async method => {
+  const client = new FakeClient({ delayMs: 0 });
+  await client.connect();
+  try {
+    await expect(client.call(method as RpcMethodName, {})).rejects.toMatchObject({ code: RpcErrorCode.MethodNotFound });
+  } finally { client.close(); }
+});
 
 test('coordination stays scoped to its core and paired devices can only inspect it', async () => {
   const first = new FakeClient({ delayMs: 0, coreId: 'core-first', coreName: 'First', publicUrl: 'https://first.test' });

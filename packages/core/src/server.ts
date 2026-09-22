@@ -1,19 +1,19 @@
+import type { RpcEvents, ThreadId } from '@boite/contracts';
+import { FILE_ROUTE, RPC_PATH, RpcCloseCode } from '@boite/contracts';
 import { existsSync } from 'node:fs';
 import { hostname, networkInterfaces } from 'node:os';
 import { basename, dirname, join, normalize, resolve, sep } from 'node:path';
-import type { ServerWebSocket } from 'bun';
-import { FILE_ROUTE, PROTOCOL_VERSION, RPC_PATH, RpcCloseCode, RpcErrorCode } from '@boite/contracts';
-import type { RpcError, RpcEventName, RpcEvents, ThreadId } from '@boite/contracts';
 import { eventThreadId } from './bus.ts';
 import type { Core } from './core.ts';
-import { RpcFailure, messageOf } from './errors.ts';
-import { newId } from './ids.ts';
+import { messageOf } from './errors.ts';
 import type { Connection } from './router.ts';
-import { principalOf } from './sessions.ts';
-import type { Identity } from './sessions.ts';
+import type { SocketData } from './server/connection.ts';
+import { ServerConnection } from './server/connection.ts';
+import { handleFrame } from './server/frame.ts';
+export { ServerConnection } from './server/connection.ts';
 
 const DEFAULT_HELLO_TIMEOUT_MS = 5000;
-const REMOTE_DELTA_WINDOW_MS = 80;
+
 /**
  * The UI build. `packages/core/src` and `packages/core/dist` are the same depth,
  * so `../../ui/dist` is `packages/ui/dist` from either; a compiled core has no
@@ -32,21 +32,11 @@ function resolveUiDist(): string {
 }
 
 export const UI_DIST = resolveUiDist();
+
 export const PLACEHOLDER_HTML =
   '<!doctype html><meta charset="utf-8"><title>Boite core</title><p>Boite core is running; the UI is not built</p>';
 
 const SHELL_ORIGINS = ['tauri://localhost', 'http://tauri.localhost', 'https://tauri.localhost'];
-
-interface SocketData {
-  connection: ServerConnection;
-}
-
-interface OutgoingResponse {
-  jsonrpc: '2.0';
-  id: number | string;
-  result?: unknown;
-  error?: RpcError;
-}
 
 export interface ServerOptions {
   core: Core;
@@ -60,136 +50,6 @@ export interface RunningServer {
   port: number;
   url: string;
   stop(): Promise<void>;
-}
-
-export class ServerConnection implements Connection {
-  readonly id = newId('con_');
-  readonly subscriptions = new Set<ThreadId>();
-  authenticated = false;
-  /** Owner until hello says otherwise; nothing reads it before `authenticated` is true. */
-  identity: Identity = { principal: 'owner', sessionId: null, threadId: null };
-
-  private socket: ServerWebSocket<SocketData> | null = null;
-  private congested = false;
-  private readonly catchUp = new Set<string>();
-  private readonly paced = new Map<string, RpcEvents['message.delta']>();
-  private paceTimer: ReturnType<typeof setTimeout> | null = null;
-
-  /**
-   * `remote` is a client that reached the core by a name other than this
-   * machine's loopback: a phone, a laptop, a tunnel. Its frames are deflated
-   * and its deltas paced; the shell on 127.0.0.1 gets neither, because there
-   * the bytes are free and the CPU is not.
-   */
-  constructor(private readonly core: Core, readonly remote = false) {}
-
-  attach(socket: ServerWebSocket<SocketData>): void {
-    this.socket = socket;
-  }
-
-  sendEvent<E extends RpcEventName>(name: E, payload: RpcEvents[E]): void {
-    if (name === 'message.delta' && this.remote && !this.congested) {
-      this.pace(payload as RpcEvents['message.delta']);
-      return;
-    }
-    this.flushPaced();
-    this.sendNow(name, payload);
-  }
-
-  /**
-   * A remote client gets its text every `REMOTE_DELTA_WINDOW_MS` rather than
-   * every 16 ms. Each frame costs its envelope, its ids and the headers under
-   * it whatever text it carries, so five deltas in one frame are a fifth of
-   * the bytes, and the UI only re-renders a paragraph once it closes. Any
-   * other frame on this socket, an event or a response, sends what is held
-   * first: a client never sees a card, or a snapshot, before the text that
-   * came before it.
-   */
-  private pace(delta: RpcEvents['message.delta']): void {
-    const key = `${delta.messageId}|${delta.partIndex}`;
-    const held = this.paced.get(key);
-    if (held) held.text += delta.text;
-    else this.paced.set(key, { ...delta });
-    this.paceTimer ??= setTimeout(() => this.flushPaced(), REMOTE_DELTA_WINDOW_MS);
-  }
-
-  private flushPaced(): void {
-    if (this.paceTimer !== null) {
-      clearTimeout(this.paceTimer);
-      this.paceTimer = null;
-    }
-    if (this.paced.size === 0) return;
-    const held = [...this.paced.values()];
-    this.paced.clear();
-    for (const delta of held) this.sendNow('message.delta', delta);
-  }
-
-  private sendNow<E extends RpcEventName>(name: E, payload: RpcEvents[E]): void {
-    if (name === 'message.delta' && this.congested) {
-      this.queueCatchUp(payload);
-      return;
-    }
-    const sent = this.write({ jsonrpc: '2.0', method: name, params: payload });
-    if (sent > 0) return;
-    if (sent === 0) {
-      this.close(1013, 'connection dropped a frame; reconnect');
-      return;
-    }
-    this.congested = true;
-    if (name === 'message.delta') this.queueCatchUp(payload);
-  }
-
-  sendResponse(response: OutgoingResponse): void {
-    this.flushPaced();
-    if (this.write(response) === 0) this.close(1013, 'connection dropped a response; reconnect');
-  }
-
-  close(code: number, reason?: string): void {
-    this.core.speech.cancel(this.id);
-    if (this.paceTimer !== null) clearTimeout(this.paceTimer);
-    this.paceTimer = null;
-    this.paced.clear();
-    this.catchUp.clear();
-    this.socket?.close(code, reason);
-  }
-
-  bufferedAmount(): number {
-    return this.socket?.getBufferedAmount() ?? 0;
-  }
-
-  private write(frame: unknown): number {
-    if (this.socket === null) return 0;
-    return this.socket.send(JSON.stringify(frame), this.remote);
-  }
-
-  /** Backpressure: deltas are dropped, then the whole part is resent once the socket drains. */
-  private queueCatchUp(payload: unknown): void {
-    if (typeof payload !== 'object' || payload === null) return;
-    const messageId = (payload as { messageId?: unknown }).messageId;
-    if (typeof messageId !== 'string') return;
-    this.catchUp.add(messageId);
-  }
-
-  drain(): void {
-    if (this.core.journal.isClosed()) return;
-    this.core.journal.flushDeltas();
-    this.congested = false;
-    const ids = [...this.catchUp];
-    for (const messageId of ids) {
-      const message = this.core.journal.getMessage(messageId);
-      if (message === null) { this.catchUp.delete(messageId); continue; }
-      for (const [partIndex, part] of message.parts.entries()) {
-        const sent = this.write({
-          jsonrpc: '2.0',
-          method: 'message.part',
-          params: { threadId: message.threadId, messageId, partIndex, part },
-        });
-        if (sent === 0) { this.close(1013, 'catch-up dropped; reconnect'); return; }
-        if (sent < 0) { this.congested = true; return; }
-      }
-      this.catchUp.delete(messageId);
-    }
-  }
 }
 
 function envTimeout(): number | null {
@@ -495,141 +355,4 @@ export function startServer(options: ServerOptions): RunningServer {
       await Promise.allSettled([...frames, ...peerRequests]);
     },
   };
-}
-
-async function handleFrame(core: Core, connection: ServerConnection, raw: string): Promise<void> {
-  let frame: { id?: unknown; method?: unknown; params?: unknown };
-  try {
-    frame = JSON.parse(raw) as { id?: unknown; method?: unknown; params?: unknown };
-    if (frame === null || typeof frame !== 'object' || Array.isArray(frame)) throw new Error('expected an RPC object');
-  } catch {
-    connection.sendResponse({
-      jsonrpc: '2.0',
-      id: 0,
-      error: { code: RpcErrorCode.ParseError, message: 'the frame is not JSON' },
-    });
-    return;
-  }
-
-  const id = typeof frame.id === 'number' || typeof frame.id === 'string' ? frame.id : 0;
-  const method = typeof frame.method === 'string' ? frame.method : '';
-
-  if (!connection.authenticated) {
-    if (method !== 'hello') {
-      connection.sendResponse({
-        jsonrpc: '2.0',
-        id,
-        error: { code: RpcErrorCode.Unauthorized, message: 'the first frame must be hello' },
-      });
-      connection.close(RpcCloseCode.Unauthorized, 'hello expected');
-      return;
-    }
-    const params = frame.params as
-      | { token?: unknown; grant?: unknown; protocolVersion?: unknown; client?: { name?: unknown; version?: unknown } }
-      | undefined;
-    const refuse = (message: string, reason: string): void => {
-      connection.sendResponse({ jsonrpc: '2.0', id, error: { code: RpcErrorCode.Unauthorized, message } });
-      connection.close(RpcCloseCode.Unauthorized, reason);
-    };
-    const token = typeof params?.token === 'string' ? params.token : null;
-    const grant = typeof params?.grant === 'string' ? params.grant : null;
-    const client = {
-      name: typeof params?.client?.name === 'string' ? params.client.name : 'unknown',
-      version: typeof params?.client?.version === 'string' ? params.client.version : '',
-    };
-
-    let session: ReturnType<typeof core.sessions.exchange> | undefined;
-    let identity: Identity;
-    if (grant !== null && token === null) {
-      // The exchange happens before the protocol check on purpose: a grant is
-      // one-shot, and a client that trips the version check keeps its link.
-      if (params?.protocolVersion !== PROTOCOL_VERSION) {
-        connection.sendResponse({ jsonrpc: '2.0', id, error: {
-          code: RpcErrorCode.InvalidParams, message: `protocolVersion must be ${PROTOCOL_VERSION}`,
-        } });
-        connection.close(RpcCloseCode.ProtocolMismatch, 'protocol version mismatch');
-        return;
-      }
-      try {
-        session = core.sessions.exchange(grant, client);
-      } catch (error) {
-        refuse(messageOf(error), 'bad grant');
-        return;
-      }
-      identity = { principal: principalOf(session.role), sessionId: session.id, threadId: null };
-    } else if (token !== null && grant === null) {
-      if (token === core.token) {
-        identity = { principal: 'owner', sessionId: null, threadId: null };
-      } else {
-        const found = token.length > 0 ? core.sessions.authenticate(token) : null;
-        // A token that is neither the core's nor a pairing's may still be the
-        // one a thread put in the environment of a process it launched.
-        const threadId = found === null && token.length > 0 ? core.agents.authenticate(token) : null;
-        if (found === null && threadId === null) {
-          refuse('the token is wrong', 'bad token');
-          return;
-        }
-        identity = found === null
-          ? { principal: 'agent', sessionId: null, threadId }
-          : { principal: principalOf(found.role), sessionId: found.id, threadId: null };
-      }
-    } else {
-      refuse('hello takes a token or a grant, one of the two', 'bad hello');
-      return;
-    }
-    if (params?.protocolVersion !== PROTOCOL_VERSION) {
-      connection.sendResponse({ jsonrpc: '2.0', id, error: {
-        code: RpcErrorCode.InvalidParams, message: `protocolVersion must be ${PROTOCOL_VERSION}`,
-      } });
-      connection.close(RpcCloseCode.ProtocolMismatch, 'protocol version mismatch');
-      return;
-    }
-    connection.identity = identity;
-    connection.authenticated = true;
-    connection.sendResponse({
-      jsonrpc: '2.0',
-      id,
-      result: {
-        core: core.info(),
-        principal: identity.principal,
-        ...(session === undefined ? {} : { session: { id: session.id, token: session.token } }),
-        // The agent learns which thread it is in from its own hello, so the CLI
-        // needs nothing but the token to name it.
-        ...(identity.threadId === null ? {} : { threadId: identity.threadId }),
-      },
-    });
-    return;
-  }
-
-  if (method === 'hello') {
-    connection.sendResponse({
-      jsonrpc: '2.0',
-      id,
-      result: {
-        core: core.info(),
-        principal: connection.identity.principal,
-        ...(connection.identity.threadId === null ? {} : { threadId: connection.identity.threadId }),
-      },
-    });
-    return;
-  }
-
-  try {
-    const result = await core.router.dispatch(method, frame.params, { connection });
-    connection.sendResponse({ jsonrpc: '2.0', id, result });
-  } catch (error) {
-    if (error instanceof RpcFailure) {
-      connection.sendResponse({ jsonrpc: '2.0', id, error: error.toError() });
-      return;
-    }
-    // An unexpected throw is a bug here, not something the user can act on.
-    // SQLite sentences, absolute paths and stack fragments used to reach the
-    // screen verbatim. The cause stays in the log, the client gets a sentence.
-    core.log('error', `${method} failed: ${messageOf(error)}`);
-    connection.sendResponse({
-      jsonrpc: '2.0',
-      id,
-      error: { code: RpcErrorCode.Internal, message: 'Something went wrong. Try again.' },
-    });
-  }
 }
