@@ -154,8 +154,9 @@ must be pinned to a full commit SHA; the repository setting refuses a tag.
 
 Dependabot updates the Bun workspace, the agent CLIs in `docker/agents`, the
 shell's Cargo dependencies, the Docker base image and the workflow actions
-weekly. Minor and patch updates of all five share one pull request, the
-`weekly` multi-ecosystem group; each major update gets its own.
+weekly. The actions, the agent CLIs and the Cargo dependencies share one pull
+request, the `weekly` multi-ecosystem group. Workspace minor and patch updates
+share another; each workspace major update gets its own.
 
 The `labeler` workflow labels pull requests by path with `core`, `ui`, `shell`,
 `server`, `ci` and `documentation`, following `.github/labeler.yml`. It runs on

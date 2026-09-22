@@ -1,12 +1,11 @@
 version: 2
-# Minor and patch updates of every ecosystem share one weekly pull request, so
-# a week of updates costs one CI run instead of one per ecosystem. Majors
-# arrive one pull request each, so a breaking SDK stays isolated.
+# The workflow actions, the agent CLIs and the shell's Cargo dependencies share
+# one weekly pull request, majors included as before, so a week of their updates
+# costs one CI run instead of three.
 multi-ecosystem-groups:
   weekly:
     schedule:
       interval: weekly
-    update-types: [minor, patch]
     commit-message:
       prefix: chore
       include: scope
@@ -15,16 +14,6 @@ updates:
     directory: /
     multi-ecosystem-group: weekly
     patterns: ['*']
-  - package-ecosystem: bun
-    directory: /
-    multi-ecosystem-group: weekly
-    patterns: ['*']
-    ignore:
-      # 30.1.0 fires a window-targeted blur after the focused element leaves the
-      # DOM, which closes the context menu on its way back up:
-      # https://github.com/jsdom/jsdom/issues/4347
-      - dependency-name: jsdom
-        versions: ['>=30.1.0']
   - package-ecosystem: npm
     directory: /docker/agents
     multi-ecosystem-group: weekly
@@ -33,7 +22,22 @@ updates:
     directory: /apps/shell/src-tauri
     multi-ecosystem-group: weekly
     patterns: ['*']
+  - package-ecosystem: bun
+    directory: /
+    schedule:
+      interval: weekly
+    ignore:
+      # 30.1.0 fires a window-targeted blur after the focused element leaves the
+      # DOM, which closes the context menu on its way back up:
+      # https://github.com/jsdom/jsdom/issues/4347
+      - dependency-name: jsdom
+        versions: ['>=30.1.0']
+    groups:
+      # Majors arrive one pull request each, so a breaking SDK stays isolated.
+      workspace:
+        patterns: ['*']
+        update-types: [minor, patch]
   - package-ecosystem: docker
     directory: /
-    multi-ecosystem-group: weekly
-    patterns: ['*']
+    schedule:
+      interval: weekly
