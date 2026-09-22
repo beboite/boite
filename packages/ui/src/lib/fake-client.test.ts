@@ -1,6 +1,6 @@
 import { afterEach, expect, test, vi } from 'vitest';
 import { FakeClient } from './fake-client';
-import { DEFAULT_DELEGATION_CONFIG, RpcErrorCode, TODO_TEXT_MAX } from '@boite/contracts';
+import { DEFAULT_DELEGATION_CONFIG, RpcErrorCode, TODO_TEXT_MAX, type RpcMethodName } from '@boite/contracts';
 
 afterEach(() => vi.useRealTimers());
 
@@ -155,6 +155,27 @@ test('regular Stop cancels queued children separately and pauses the team when s
     expect(view.config.paused).toBe(true);
     expect(view.agents.find(agent => agent.thread.id === first.thread.id)?.lastTurn?.status).toBe('stopped');
     expect(view.agents.find(agent => agent.thread.id === queued.thread.id)?.lastTurn?.status).toBe('stopped');
+  } finally { client.close(); }
+});
+
+test('telemetry handlers retain export and deletion state through the typed dispatcher', async () => {
+  const client = new FakeClient({ delayMs: 0 });
+  await client.connect();
+  try {
+    expect(await client.call('telemetry.state', {})).toEqual({ mode: 'basic', configured: true, pendingDeletion: false });
+    await expect(client.call('telemetry.export', {})).rejects.toMatchObject({ code: RpcErrorCode.InvalidParams });
+    await client.call('telemetry.configure', { mode: 'enhanced' });
+    expect(await client.call('telemetry.export', {})).toEqual({ events: [], truncated: false });
+    expect(await client.call('telemetry.configure', { mode: 'off' })).toMatchObject({ mode: 'off', pendingDeletion: true });
+    expect(await client.call('telemetry.retryForget', {})).toMatchObject({ mode: 'off', pendingDeletion: false });
+  } finally { client.close(); }
+});
+
+test.each(['toString', 'constructor', '__proto__', 'missing.method'])('unknown RPC method %s is refused', async method => {
+  const client = new FakeClient({ delayMs: 0 });
+  await client.connect();
+  try {
+    await expect(client.call(method as RpcMethodName, {})).rejects.toMatchObject({ code: RpcErrorCode.MethodNotFound });
   } finally { client.close(); }
 });
 

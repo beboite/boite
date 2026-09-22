@@ -175,7 +175,7 @@ const app = agent({ name: 'acp-fake' })
     };
   })
   .onRequest('session/new', async ({ client }) => {
-    const sessionId = `acp-fake-${Math.random().toString(16).slice(2, 10)}`;
+    const sessionId = `acp-fake-${crypto.randomUUID().slice(0, 8)}`;
     known.add(sessionId);
     // Before any prompt: the between-turns path a driver must not drop.
     await client.notify('session/update', {

@@ -194,6 +194,45 @@ measures it, and a height measured above the reading point put back into
 The transport sits behind one `Client` interface, so the same UI runs on the real
 core, on a WebSocket to a remote core, and on an in-memory fake.
 
+## Module boundaries and complexity
+
+The Codex and Muse entry files compose their drivers. Each has a directory with
+`rpc.ts` for framing and requests, `session.ts` for the warm process lifecycle,
+`turn.ts` for message parts, `models.ts` for discovery, `mapping.ts` for protocol
+conversion, and `protocol.ts` for wire types and constants. Internal modules do
+not import their entry file. Public imports remain unchanged.
+
+Both drivers use `drivers/model-probes.ts` to coalesce concurrent model reads.
+Completion checks entry identity, so an invalidated probe cannot overwrite or
+remove its replacement's cached result. Session ownership,
+permissions and shutdown remain specific to each driver.
+
+The server separates connection buffering, frame dispatch and the initial
+authentication handshake under `server/`. The Git reader separates porcelain
+parsing, bounded file reads and diff assembly under `git/`. A ref resolves to an
+object ID before its size and content are read; a working-tree file is sized and
+read through the same handle.
+
+The in-memory client checks each RPC handler's input and result against the
+shared contract. Its plugin domain owns installation state and cancellation;
+file, conversation and provider fixtures live under `lib/fake-client/`.
+
+`bun run check:architecture` checks runtime imports in production TypeScript
+and JavaScript, including literal dynamic imports. It rejects cycles, core/UI
+cross-imports, contracts importing either runtime, direct native-backend imports
+outside the platform directory, and internal modules importing their entry file.
+Type-only imports, Svelte component scripts and Rust dependencies are outside
+this check. Type checks, UI tests and shell checks still cover those sources.
+New workspace package exports need a source mapping in the check's alias table;
+unmapped workspace imports fail instead of disappearing from the graph.
+
+`bun run audit:complexity` prints an advisory ranking from pinned oxlint 1.82.0.
+It measures TypeScript, JavaScript and Svelte scripts, not Rust, and accepts
+`--json` for comparison. The first run downloads the tool through Bun's cache.
+Complexity is not a CI threshold: a method router and a short validation guard
+can legitimately have many branches. Review state ownership and repeated logic
+before splitting a high-scoring function.
+
 ## Agent coordination
 
 The core owns opt-in permissions, discovery, durable inboxes and message budgets.
