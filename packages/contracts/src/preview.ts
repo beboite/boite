@@ -1,4 +1,6 @@
-import { PREVIEW_REFERENCES_PER_TURN, type PreviewReference } from './index';
+import type { PreviewReference } from './index';
+
+export const PREVIEW_REFERENCES_PER_TURN = 8;
 // Both supported hosts expose URL; contracts otherwise need no DOM or Node types.
 declare const URL: new (value: string) => { protocol: string };
 
