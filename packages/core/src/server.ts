@@ -100,7 +100,7 @@ export class ServerConnection implements Connection {
    * A remote client gets its text every `REMOTE_DELTA_WINDOW_MS` rather than
    * every 16 ms. Each frame costs its envelope, its ids and the headers under
    * it whatever text it carries, so five deltas in one frame are a fifth of
-   * the bytes, and the UI redraws a streaming part every 48 ms anyway. Any
+   * the bytes, and the UI only re-renders a paragraph once it closes. Any
    * other frame on this socket, an event or a response, sends what is held
    * first: a client never sees a card, or a snapshot, before the text that
    * came before it.
@@ -349,6 +349,7 @@ export function startServer(options: ServerOptions): RunningServer {
   const connections = new Set<ServerConnection>();
   const helloTimers = new Map<ServerConnection, ReturnType<typeof setTimeout>>();
   const frames = new Set<Promise<void>>();
+  const peerRequests = new Set<Promise<Response>>();
   let stopping = false;
 
   const server = Bun.serve<SocketData>({
@@ -359,6 +360,13 @@ export function startServer(options: ServerOptions): RunningServer {
     fetch(request, self) {
       if (stopping) return new Response('core stopping', { status: 503 });
       const url = new URL(request.url);
+
+      if (url.pathname === '/agent-messages') {
+        const response = core.coordination.http(request);
+        peerRequests.add(response);
+        void response.finally(() => peerRequests.delete(response)).catch(() => undefined);
+        return response;
+      }
 
       if (url.pathname === '/health') {
         return Response.json({ ok: true, version: core.version, pid: process.pid });
@@ -441,6 +449,14 @@ export function startServer(options: ServerOptions): RunningServer {
         if (connection.identity.sessionId === sessionId) connection.close(RpcCloseCode.Unauthorized, 'session revoked');
       }
     },
+    closeAgents(threadId: ThreadId): void {
+      for (const connection of connections) {
+        const identity = connection.identity;
+        if (identity.principal === 'agent' && identity.threadId === threadId) {
+          connection.close(RpcCloseCode.Unauthorized, 'thread archived or removed');
+        }
+      }
+    },
   };
 
   const off = core.bus.onAny((name, payload) => {
@@ -454,6 +470,8 @@ export function startServer(options: ServerOptions): RunningServer {
     const threadId = eventThreadId(payload);
     for (const connection of connections) {
       if (!connection.authenticated) continue;
+      if (name === 'collaboration.changed' && connection.identity.principal === 'agent' && connection.identity.threadId !== threadId) continue;
+      if (name === 'collaboration.changed' && !connection.subscriptions.has(threadId ?? '')) continue;
       if (scoped && (threadId === null || !connection.subscriptions.has(threadId))) continue;
       if (name === 'todos.updated' && !mayReadTodos(core, connection, (payload as RpcEvents['todos.updated']).projectId)) continue;
       connection.sendEvent(name, payload);
@@ -474,7 +492,7 @@ export function startServer(options: ServerOptions): RunningServer {
       // Bun 1.3.11 never resolves server.stop() once a socket has been upgraded,
       // so the listener is closed without waiting on that promise.
       void server.stop(true);
-      await Promise.allSettled([...frames]);
+      await Promise.allSettled([...frames, ...peerRequests]);
     },
   };
 }
@@ -604,10 +622,14 @@ async function handleFrame(core: Core, connection: ServerConnection, raw: string
       connection.sendResponse({ jsonrpc: '2.0', id, error: error.toError() });
       return;
     }
+    // An unexpected throw is a bug here, not something the user can act on.
+    // SQLite sentences, absolute paths and stack fragments used to reach the
+    // screen verbatim. The cause stays in the log, the client gets a sentence.
+    core.log('error', `${method} failed: ${messageOf(error)}`);
     connection.sendResponse({
       jsonrpc: '2.0',
       id,
-      error: { code: RpcErrorCode.Internal, message: messageOf(error) },
+      error: { code: RpcErrorCode.Internal, message: 'Something went wrong. Try again.' },
     });
   }
 }

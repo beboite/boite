@@ -29,6 +29,27 @@ test('dropped folders use the local core when a remote machine is selected', asy
   }
 });
 
+test('a machine switched under a slow boot loads the new one instead of joining the old load', async () => {
+  const slow = new FakeClient({ delayMs: 20 });
+  const fresh = new FakeClient({ delayMs: 0 });
+  const store = new Store();
+  store.attach(slow);
+  await store.connect();
+  try {
+    const first = store.reload();
+    store.attach(fresh);
+    const asked = vi.spyOn(fresh, 'call');
+    // The load in flight belongs to the machine that started it, and its
+    // results are dropped on landing. Handing the same promise to the new
+    // machine meant the new machine was never asked for anything at all.
+    await Promise.all([store.connect(), first]);
+    expect(asked.mock.calls.map(([method]) => method)).toContain('projects.list');
+    expect(store.error).toBe(null);
+  } finally {
+    store.detach(); slow.close(); fresh.close();
+  }
+});
+
 async function ready(): Promise<{ store: Store; client: FakeClient }> {
   const client = new FakeClient({ delayMs: 0 });
   const store = new Store();
@@ -81,6 +102,39 @@ test('provider actions report RPC failures through their owning store', async ()
     store.error = null;
     expect(await store.reloadProviders()).toBe(false);
     expect(store.error).toContain('provider unavailable');
+  } finally { store.detach(); client.close(); }
+});
+
+test('a refusal reaches the surface without its JSON-RPC code', async () => {
+  const { store, client } = await ready();
+  const refusal = new RpcFailure({ code: RpcErrorCode.Refused, message: 'This account is no longer available.' });
+  vi.spyOn(client, 'call').mockRejectedValue(refusal);
+  try {
+    expect(await store.installProvider('claude')).toBe(false);
+    // The code said nothing to the person reading the toast, and it used to
+    // ride along as `(-32011)` on every refusal.
+    expect(store.error).toBe('This account is no longer available.');
+  } finally { store.detach(); client.close(); }
+});
+
+test('one failed boot call leaves every other slice loaded', async () => {
+  const client = new FakeClient({ delayMs: 0 });
+  const store = new Store();
+  const real = client.call.bind(client);
+  vi.spyOn(client, 'call').mockImplementation(((method: string, params: unknown) => {
+    if (method === 'providers.list') {
+      return Promise.reject(new RpcFailure({ code: RpcErrorCode.Internal, message: 'providers are unreadable' }));
+    }
+    return real(method as never, params as never);
+  }) as typeof client.call);
+  store.attach(client);
+  try {
+    await store.connect();
+    // `Promise.all` used to jump to the catch here, leaving threads, projects
+    // and settings on their pre-reconnect values under a loaded-looking app.
+    expect(store.threads.length).toBeGreaterThan(0);
+    expect(store.projects.length).toBeGreaterThan(0);
+    expect(store.error).toBe('providers are unreadable');
   } finally { store.detach(); client.close(); }
 });
 

@@ -6,6 +6,7 @@ import { registerKeybindingMethods } from './keybindings.ts';
 import { registerProjectMethods } from './projects.ts';
 import { registerProviderMethods } from './providers/loader.ts';
 import { registerProbeMethods } from './providers/probe.ts';
+import { registerUpdateMethods } from './providers/updates.ts';
 import { registerSchedulerMethods } from './scheduler.ts';
 import { registerSessionMethods } from './sessions.ts';
 import { registerSettingsMethods } from './settings.ts';
@@ -15,10 +16,12 @@ import { registerUsageMethods } from './usage.ts';
 import { registerPushMethods } from './push.ts';
 import { registerSpeechMethods } from './speech.ts';
 import { registerTelemetry } from './telemetry.ts';
+import { registerCoordination } from './coordination.ts';
 
 /** Adding a module is one file plus one line here. `hello` is the server's own. */
 export function registerModules(core: Core): void {
   registerTelemetry(core);
+  registerCoordination(core);
   registerSpeechMethods(core);
   registerPushMethods(core);
   core.router.register('threads.activity.set', (params) => core.activity.set(params));
@@ -36,6 +39,7 @@ export function registerModules(core: Core): void {
   registerProjectMethods(core);
   registerProviderMethods(core);
   registerProbeMethods(core);
+  registerUpdateMethods(core);
   registerAccountMethods(core);
   registerThreadMethods(core);
   registerSchedulerMethods(core);

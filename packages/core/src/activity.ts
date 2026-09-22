@@ -78,6 +78,8 @@ export class ActivityStore {
     if (!item) throw refused(`this thread has no ${params.kind}`);
     if (params.action === 'resume' && params.kind === 'loop' && state.loop?.maxIterations && state.loop.iterations >= state.loop.maxIterations) throw refused('this loop has finished all its iterations; start a new loop');
     if (params.action === 'complete' && params.kind !== 'goal') throw invalidParams('only a goal can be completed');
+    // A finished loop cannot resume, so pausing it would leave it stuck on `paused`.
+    if (params.action === 'pause' && item.status === 'complete') throw refused(`this ${params.kind} is complete; there is nothing to pause`);
     if (params.action === 'remove') state[params.kind] = null;
     else if (params.action === 'complete' && state.goal) state.goal.status = 'complete';
     else { item.status = params.action === 'resume' ? 'active' : 'paused'; item.error = null; if (params.kind === 'goal' && state.goal) state.goal.dismissed = false; }

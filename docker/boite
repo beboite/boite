@@ -1,0 +1,3 @@
+#!/bin/sh
+# The `boite` CLI inside the server image: the bundled core answers it.
+exec bun /app/packages/core/dist/main.js cli "$@"

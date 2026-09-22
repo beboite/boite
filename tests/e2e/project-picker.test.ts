@@ -35,7 +35,7 @@ test('project picker browses folders, opens a draft, and fits a phone', async ()
   const bounds = await page.evaluate<{left:number;right:number}>(`(() => { const r = document.querySelector('[data-testid=project-picker]').getBoundingClientRect(); return {left:r.left,right:r.right}; })()`);
   expect(bounds.left).toBeGreaterThanOrEqual(0); expect(bounds.right).toBeLessThanOrEqual(390);
   await page.click('[data-testid=project-cancel]');
-  await page.send('Emulation.clearDeviceMetricsOverride', {});
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
 }, 30_000);
 test('an unreachable remembered machine appears as a problem without counting as connected', async () => {
   const port = await freePort();

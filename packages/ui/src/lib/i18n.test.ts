@@ -103,6 +103,14 @@ test('the stored choice comes back on boot, and system follows the machine', () 
   expect(document.documentElement.lang).toBe('en');
 });
 
+test('formatted update messages use the current language and preserve arguments', () => {
+  setLocaleSetting('en');
+  expect(strings.harnessUpdates.available('Claude', '1.2')).toBe('Claude 1.2 is available');
+  setLocaleSetting('fr');
+  expect(strings.harnessUpdates.available('Claude', '1.2')).toBe('Claude 1.2 est disponible');
+  expect(strings.harnessUpdates.on('Desktop')).toBe('Sur Desktop');
+});
+
 test('dates and numbers keep the machine region when it speaks the same language', () => {
   speaks('fr-CA', 'en-US');
   setLocaleSetting('fr');

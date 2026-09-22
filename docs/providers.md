@@ -26,6 +26,7 @@ OpenCode's descriptor, with the `linux` and `macos` profiles left out:
     "windows": {
       "detect": {},
       "executable": [
+        { "kind": "file", "value": "{agentsDir}/opencode.exe" },
         { "kind": "file", "value": "{appdata}/npm/node_modules/opencode-ai/bin/opencode.exe" },
         { "kind": "path", "value": "opencode" }
       ],
@@ -122,6 +123,9 @@ session protocol either.
   empty for an agent running under `node`: the process in the job is `node`, not
   the agent. `install` is the optional managed release, below.
 
+An `update` block says how the user's own install updates itself; see
+[agent updates](agent-updates.md).
+
 ## The tokens
 
 Four expand when the descriptor loads, in `roots`, in every executable candidate,
@@ -205,7 +209,7 @@ is held, and one is held for every process a thread, probe or login launched.
 
 ## What ships
 
-Eight descriptors ship, and only the first seven are ever visible to a user: `echo`
+Nine descriptors ship, and only the first eight are ever visible to a user: `echo`
 is the deterministic fake the tests and the bench run on, loaded only under
 `BOITE_ECHO=1`.
 
@@ -222,7 +226,7 @@ is the deterministic fake the tests and the bench run on, loaded only under
 | Echo | `echo` | nothing | nothing | none | a script beside the descriptor |
 
 Claude is the one whose model list is entirely in the descriptor, current and
-legacy, each with its own effort scale; the other six carry `default` alone and
+legacy, each with its own effort scale; the other seven carry `default` alone and
 let the probe fill the rest. On Windows, Codex and pi are both reached around an
 npm shim Bun cannot spawn, one through a vendored executable and the other
 through an `npm` candidate under either package scope pi has shipped from
@@ -338,7 +342,11 @@ question:
   Otherwise the `configOptions` whose category is `model` and `thought_level` are
   read. That effort scale describes only the current model, so Boite does not
   copy it to other models. An agent that sends neither leaves the descriptor's
-  models standing.
+  models standing. OpenCode names a model's `thought_level` only once a session
+  is on that model: `providers.probe` takes an optional `model`, selects it with
+  `session/set_config_option` in a fresh probe process and reads the scale the
+  answer carries. One read per model is cached with the list, the composer asks
+  for the model it lands on, and a failed read keeps the list already cached.
 - Codex: `initialize`, the `initialized` notification, then `model/list` until no
   cursor comes back. Each model carries its own efforts and its own default, so
   two models on one account can offer two different scales. `serviceTiers` supplies
@@ -373,9 +381,14 @@ account, and reaches every client as `providers.probed`. Two callers at once sha
 one process. `refresh: true` bypasses a completed cache entry, sharing any probe
 already in flight. The UI keeps a persistent display cache and reads asynchronously.
 A probe that finds no executable, whose agent dies or that runs past
-twenty seconds throws with the reason and caches nothing. `threads.create` and
+twenty seconds, thirty for pi, throws with the reason and caches nothing. `threads.create` and
 `threads.update` accept what the last probe listed on top of the descriptor's; a
 model nobody probed is refused, saying to open the picker.
+
+A probed scale lives in memory. After a core restart a thread may carry an
+effort whose scale is not read yet: `turns.start` lets it through, because it
+was checked when it was chosen, and refuses only an effort missing from a scale
+that is known.
 
 ## Permission modes
 

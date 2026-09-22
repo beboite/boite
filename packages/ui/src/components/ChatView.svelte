@@ -6,6 +6,7 @@
   import type { Store } from '../lib/store.svelte';
   import { workspace } from '../lib/workspace.svelte';
   import Composer from './Composer.svelte';
+  import CoordinationPanel from './CoordinationPanel.svelte';
   import Menu from './Menu.svelte';
   import MessageList from './MessageList.svelte';
 
@@ -48,6 +49,7 @@
 
 
     {#if thread}
+      {#key thread.id}<CoordinationPanel {store} threadId={thread.id} />{/key}
       <!-- One timeline per thread: the heights it measured and the ids that
            already played the rise belong to that thread alone, and kept across
            a switch they grew for every message the page had ever shown. -->

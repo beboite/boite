@@ -475,6 +475,7 @@ class PiSession {
   private idle: Timer | null = null;
   /** The turn whose `prompt` is in flight; events outside one are dropped. */
   private current: PiTurn | null = null;
+  private steered = false;
   private queue: Promise<void> = Promise.resolve();
   private running = 0;
   private closing = false;
@@ -521,7 +522,17 @@ class PiSession {
     }
     const peer = this.peer;
     if (peer === null) return;
-    void peer.command('abort').catch(() => undefined);
+    // pi may continue queued steering after abort. Clear it before cancelling.
+    if (this.steered) void peer.command('clear_queue').then(() => peer.command('abort')).catch(() => this.drop());
+    else void peer.command('abort').catch(() => undefined);
+  }
+
+  /** Submit attributed coordination at pi's next tool boundary. */
+  async steer(turn: PiTurn, message: string): Promise<boolean> {
+    if (this.current !== turn || turn.settled || turn.isStopped || !this.peer) return false;
+    this.steered = true;
+    await this.peer.command('steer', { message });
+    return true;
   }
 
   /** Archive, shutdown, an idle window, a changed setup: the process goes. */
@@ -553,6 +564,7 @@ class PiSession {
 
     turn.noteSession(sessionId);
     this.current = turn;
+    this.steered = false;
     try {
       if (turn.ctx.turn.execution?.operation === 'compact') {
         const result = dataOf(await peer.command('compact')) as { tokensBefore?: number };
@@ -1261,6 +1273,7 @@ export function createPiDriver(): Driver {
       running.attach(turn, warmMs);
       return {
         done: turn.done,
+        steer: (message) => running.steer(turn, message),
         stop: (): void => {
           running.stopTurn(turn);
         },

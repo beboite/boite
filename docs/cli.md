@@ -28,7 +28,8 @@ one thread. An agent reaches the methods listed in `AGENT_METHODS`
 (`packages/core/src/access.ts`) on its own thread and nothing else: a call that
 names another thread, or an owner-only method such as `files.write` or
 `trace.get`, is refused by name. The token is forgotten when the thread is
-removed and never written to disk.
+archived or removed, a socket an agent already opened with it is closed at the
+same moment, and the token is never written to disk.
 
 Outside a thread, `boite --thread <id>` reads the owner token out of
 `core.json` like `boite-core pair` does (`--data-dir`, `--channel dev`) and
@@ -47,6 +48,9 @@ boite open trace|tasks|changes|files [dir]
 boite status                     git status: branch, upstream, one row per change
 boite task list|add <text>|start <id>|done <id>|remove <id>|clear
 boite todo list|add <text>|claim <id>
+boite agents list|inbox
+boite agents send <core-id>/<thread-id> <text>
+boite agents reply <message-id> <text>
 boite help
 ```
 
@@ -67,10 +71,16 @@ in the Tasks surface.
 Exit codes: 0, 1 on a refusal or a failure (`error: ...` on stderr), 2 on a
 usage error (the usage text on stderr).
 
+[Agent coordination](coordination.md) must be enabled by the owner before an
+agent can send messages. The directory includes only authorized contacts.
+Replies preserve their message reference and authenticated sender identity.
+
 ## Where the command lives
 
 `boite` is `boite-core cli`: the same executable, one more subcommand, so the
-installer carries no second Bun binary. Two shims put it on the PATH,
+installer carries no second Bun binary. On Windows, where the sidecar is the
+runtime and the core a bundle beside it ([releasing.md](releasing.md)), both
+shims pass `core/main.js` before the subcommand. Two shims put it on the PATH,
 `packages/core/shims/boite` for a POSIX shell (Git Bash included) and
 `packages/core/shims/boite.cmd` for cmd and PowerShell; `stage-sidecar.ts`
 copies both beside `boite-core.exe` and the bundle overlay lists them as

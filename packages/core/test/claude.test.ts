@@ -140,6 +140,30 @@ class FakeQuery {
   }
 }
 
+test('coordination arrives once through Claude PostToolUse with agent provenance', async () => {
+  scripted(fake => fake.emit(init('coordination-session')));
+  const client = await harness.connect();
+  const threadId = await claudeThread(client);
+  const projectId = harness.core.threads.require(threadId).projectId;
+  const account = (await client.call('accounts.list', {})).find(a => a.providerId === 'echo')!;
+  const source = await client.call('threads.create', { projectId, providerId: 'echo', accountId: account.id, title: 'Maintenance' });
+  const config = { mode: 'brief' as const, resources: 'shared VM', remote: false, paused: false };
+  for (const id of [source.id, threadId]) harness.core.coordination.configure(id, config);
+  await client.call('turns.start', { threadId, prompt: 'Deploy the service' });
+  await waitFor(() => !!calls[0]?.prompts.length);
+  await harness.core.coordination.send({ threadId: source.id, to: harness.core.coordination.get(threadId).self, text: 'May I reboot?', requestId: 'claude-hook' });
+  const hook = calls[0]!.options.hooks!.PostToolUse![0]!.hooks[0]!;
+  const input = { hook_event_name: 'PostToolUse' as const, session_id: 'coordination-session', transcript_path: '', cwd: harness.dataDir, tool_use_id: 'read-1', tool_name: 'Read', tool_input: {}, tool_response: 'file content' };
+  const result = await hook(input, 'read-1', { signal: new AbortController().signal });
+  expect(JSON.stringify(result)).toContain('OTHER AGENTS, NOT the user');
+  expect(JSON.stringify(result)).toContain('May I reboot?');
+  expect(JSON.stringify(result)).not.toContain('classifierContext');
+  const again = await hook(input, 'read-2', { signal: new AbortController().signal });
+  expect(JSON.stringify(again)).not.toContain('May I reboot?');
+  expect(harness.core.coordination.get(threadId).messages[0]?.status).toBe('delivered');
+  await client.call('turns.stop', { threadId });
+});
+
 const queries: FakeQuery[] = [];
 /** What the driver handed the SDK, query by query: the options and every prompt it pushed. */
 const calls: { options: Options; prompts: string[] }[] = [];
@@ -747,6 +771,56 @@ describe('claude driver', () => {
     expect(queries).toHaveLength(1);
     expect(calls[0]?.prompts).toEqual(['first', 'second']);
     expect((await client.call('threads.get', { threadId })).sessionId).toBe('sess-warm');
+  });
+
+  test('a warm query reports a running total, and each turn is charged its own share', async () => {
+    const client = await harness.connect();
+    const threadId = await claudeThread(client);
+    await client.call('settings.set', { warmProcessMinutes: 5 });
+
+    // The CLI counts `total_cost_usd` from the start of its process: 0.25, then 0.25 + 0.05.
+    scripted(() => undefined, (fake, _prompt, index) => {
+      fake.emit(init('sess-cost'));
+      fake.emit(sdk({ ...(success('sess-cost') as object), total_cost_usd: index === 0 ? 0.25 : 0.3 }));
+    });
+
+    const costs: (number | null)[] = [];
+    for (const prompt of ['first', 'second']) {
+      const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 10000);
+      await client.call('turns.start', { threadId, prompt });
+      costs.push((await finished).usage?.costUsdEquivalent ?? null);
+    }
+
+    expect(queries).toHaveLength(1);
+    expect(costs[0]).toBeCloseTo(0.25, 10);
+    expect(costs[1]).toBeCloseTo(0.05, 10);
+  });
+
+  test('a cold query that resumes a session is charged its own share, whether or not the CLI restored its totals', async () => {
+    const client = await harness.connect();
+    const threadId = await claudeThread(client);
+
+    // Each turn uses 26 tokens. The second process restores the session (52 tokens held, 0.25 + 0.05);
+    // the third has lost it and counts from zero.
+    const held = (tokens: number) => ({ 'claude-test': { inputTokens: tokens, outputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, webSearchRequests: 0, costUSD: 0, contextWindow: 0, maxOutputTokens: 0 } });
+    const results = [{ total_cost_usd: 0.25, modelUsage: held(26) }, { total_cost_usd: 0.3, modelUsage: held(52) }, { total_cost_usd: 0.07, modelUsage: held(26) }];
+    let turn = 0;
+    scripted(() => undefined, (fake) => {
+      fake.emit(init('sess-resumed'));
+      fake.emit(sdk({ ...(success('sess-resumed') as object), ...results[turn++] }));
+    });
+
+    const costs: (number | null)[] = [];
+    for (const prompt of ['first', 'second', 'third']) {
+      const finished = client.next('turn.finished', (finishedTurn) => finishedTurn.threadId === threadId, 10000);
+      await client.call('turns.start', { threadId, prompt });
+      costs.push((await finished).usage?.costUsdEquivalent ?? null);
+    }
+
+    expect(queries).toHaveLength(3);
+    expect(costs[0]).toBeCloseTo(0.25, 10);
+    expect(costs[1]).toBeCloseTo(0.05, 10);
+    expect(costs[2]).toBeCloseTo(0.07, 10);
   });
 
   test('warmProcessMinutes at zero keeps one query per turn', async () => {

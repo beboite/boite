@@ -29,6 +29,8 @@ async function readLine(): Promise<string | null> {
   return tail.length > 0 ? tail : null;
 }
 
+// A real CLI prints its terms before the link that signs in: the core must not take the first for the second.
+await say('By continuing you accept https://example.invalid/terms');
 await say('Open https://example.invalid/login?code=echo to continue');
 await say('Paste the code the page shows.');
 

@@ -4,6 +4,10 @@ import { activityCommand } from './activity-command';
 import type {
   Account,
   AgentTask,
+  AgentContact,
+  CoordinationConfig,
+  CoordinationPeer,
+  CoordinationView,
   CoreInfo,
   FileContent,
   FileEntry,
@@ -27,6 +31,7 @@ import type {
   Project,
   ProjectId,
   ProviderId,
+  HarnessUpdate,
   ProviderInstallState,
   ProviderRejected,
   ProviderSummary,
@@ -295,6 +300,8 @@ export class Store {
    * only state a summary cannot carry between two `providers.list` calls.
    */
   installStates = $state<Record<ProviderId, ProviderInstallState>>({});
+  /** Where each agent of this machine stands against its newest release, the core's own reading. */
+  harnessUpdates = $state<HarnessUpdate[]>([]);
   /**
    * What an agent answered `providers.probe` with, keyed `providerId::accountId`.
    * An ACP agent owns its model list; the descriptor only carries `default`.
@@ -304,6 +311,8 @@ export class Store {
    */
   probedModels = $state<Record<string, ModelInfo[]>>({});
   #probeAttempts = new Set<string>();
+  /** One per-model effort read per provider, account and model, see `probeModelEffort`. */
+  #effortAttempts = new Set<string>();
   #probeRequests = new Map<string, Promise<void>>();
   #probeEpoch = 0;
   #modelCacheKey(): string { return 'boite.models.v1:' + JSON.stringify([this.endpointUrl, this.core?.dataDir]); }
@@ -345,6 +354,13 @@ export class Store {
    */
   permissionRequests = $state<Record<RequestId, PermissionRequest>>({});
   pendingQuestions = $state<QuestionRequest[]>([]);
+  /** Native agent-to-agent traffic for the open thread. It is separate from chat messages. */
+  coordination = $state<CoordinationView | null>(null);
+  coordinationDirectory = $state<{ agents: AgentContact[]; unavailable: string[] } | null>(null);
+  coordinationLoading = $state(false);
+  coordinationSaving = $state(false);
+  #coordinationEpoch = 0;
+  coordinationError = $state<string | null>(null);
   /** Kept after the answer so a folded card still shows what was asked. Same bound. */
   questionRequests = $state<Record<RequestId, QuestionRequest>>({});
   collapsedProjects = $state<string[]>([]);
@@ -359,8 +375,8 @@ export class Store {
   /** The thread `trace` belongs to, and whether the trace surface is on screen to read it. */
   #tracedThreadId: ThreadId | null = null;
   traceWatched = false;
-  /** The load in flight, so the two callers of `reload()` share one. */
-  #reloading: Promise<void> | null = null;
+  /** The load in flight and the client it speaks to, so the two callers of `reload()` share one. */
+  #reloading: { client: Client; promise: Promise<void> } | null = null;
   #loginRevision = 0;
   #loginChanges = new Map<string, number>();
 
@@ -456,6 +472,34 @@ export class Store {
     // Display the configured target before probing. It never joins modelsOf's selectable list.
     return choice.model && choice.model === preferred?.model
       ? { id: choice.model, name: DEFAULT_MODEL_NAMES[choice.model] ?? choice.model } : null;
+  }
+
+  /**
+   * OpenCode names a model's reasoning efforts only once a session is on that
+   * model, so the list a probe reads carries none. The composer asks for the
+   * model it landed on, once per model, and the effort chip fills in.
+   */
+  async probeModelEffort(providerId: ProviderId, accountId: string, model: string): Promise<void> {
+    const client = this.#client;
+    if (!client || !this.owner) return;
+    const key = `${probeKey(providerId, accountId)}::${model}`;
+    if (this.#effortAttempts.has(key)) return;
+    await this.probeModels(providerId, accountId);
+    const listed = this.modelsOf(providerId, accountId).find(entry => entry.id === model);
+    if (!listed || listed.effort !== undefined || this.#effortAttempts.has(key)) return;
+    this.#effortAttempts.add(key);
+    const epoch = this.#probeEpoch;
+    try {
+      const { models } = await client.call('providers.probe', { providerId, accountId, model });
+      if (client !== this.#client || epoch !== this.#probeEpoch) return;
+      this.probedModels = { ...this.probedModels, [probeKey(providerId, accountId)]: models };
+      this.#saveModels();
+    } catch (error) {
+      // An older core refuses nothing here, it just answers the plain list; a
+      // real failure is the agent's, and the chip simply stays absent.
+      if (client === this.#client) this.#effortAttempts.delete(key);
+      console.warn('reading the model efforts failed', error);
+    }
   }
 
   isProbing(providerId: ProviderId, accountId: string | null): boolean {
@@ -617,6 +661,7 @@ export class Store {
     this.probedModels = {};
     this.#probeEpoch++;
     this.#probeAttempts.clear();
+    this.#effortAttempts.clear();
     this.#probeRequests.clear();
     this.probingModels = [];
     this.connection = client.state;
@@ -639,6 +684,7 @@ export class Store {
             resetPullRequestSupport(client);
             this.#probeEpoch++;
             this.#probeAttempts.clear();
+    this.#effortAttempts.clear();
             this.error = null;
             this.core = client.core;
             // `WsClient` writes its principal from the hello answer before it
@@ -668,6 +714,9 @@ export class Store {
     });
     on('thread.activity', ({ threadId, activity }) => {
       if (this.openThread?.id === threadId) this.openThread.activity = activity;
+    });
+    on('collaboration.changed', ({ threadId }) => {
+      if (this.openThread?.id === threadId) void this.loadCoordination(threadId, false);
     });
     // The agent of a thread asked its panel for something. The layout is per
     // thread, so it is written on that thread's panel even while another one is
@@ -807,6 +856,9 @@ export class Store {
     on('providers.installProgress', ({ providerId, ...state }) => {
       this.installStates = { ...this.installStates, [providerId]: state as ProviderInstallState };
     });
+    on('providers.updatesChanged', (updates) => {
+      this.harnessUpdates = updates;
+    });
     on('providers.updated', ({ loaded, rejected }) => {
       this.providers = loaded;
       this.rejectedProviders = rejected;
@@ -817,6 +869,7 @@ export class Store {
       this.probedModels = {};
       this.#probeEpoch++;
       this.#probeAttempts.clear();
+    this.#effortAttempts.clear();
       this.#saveModels();
     });
     on('providers.probed', ({ providerId, accountId, models }) => {
@@ -837,6 +890,12 @@ export class Store {
   }
 
   detach(): void {
+    this.#coordinationEpoch++;
+    this.coordination = null;
+    this.coordinationDirectory = null;
+    this.coordinationLoading = false;
+    this.coordinationSaving = false;
+    this.coordinationError = null;
     for (const off of this.#off) off();
     this.#off = [];
     this.#client = null;
@@ -1074,6 +1133,70 @@ export class Store {
     }
   }
 
+  async loadCoordination(threadId = this.openThread?.id, withDirectory = true): Promise<void> {
+    const client = this.#client;
+    if (!client || !threadId) return;
+    const epoch = ++this.#coordinationEpoch;
+    const current = () => this.#client === client && this.openThread?.id === threadId && this.#coordinationEpoch === epoch;
+    if (this.coordination?.self.threadId !== threadId) { this.coordination = null; this.coordinationDirectory = null; }
+    this.coordinationLoading = true;
+    this.coordinationError = null;
+    try {
+      const view = await client.call('collaboration.get', { threadId });
+      if (!current()) return;
+      this.coordination = view;
+      if (withDirectory) {
+        const directory = await client.call('collaboration.directory', { threadId });
+        if (current()) this.coordinationDirectory = directory;
+      }
+    } catch (error) {
+      if (current()) this.coordinationError = error instanceof Error ? error.message : String(error);
+    } finally {
+      if (current()) this.coordinationLoading = false;
+    }
+  }
+
+  async configureCoordination(config: CoordinationConfig): Promise<void> {
+    const client = this.#client;
+    const threadId = this.openThread?.id;
+    if (!client || !threadId || !this.owner || this.coordinationSaving) return;
+    this.coordinationSaving = true;
+    this.coordinationError = null;
+    try {
+      await client.call('collaboration.configure', { threadId, config });
+      if (this.#client === client && this.openThread?.id === threadId) await this.loadCoordination(threadId);
+    } catch (error) {
+      if (this.#client === client && this.openThread?.id === threadId) this.coordinationError = error instanceof Error ? error.message : String(error);
+    } finally {
+      if (this.#client === client) this.coordinationSaving = false;
+    }
+  }
+
+  async coordinationIdentity(): Promise<CoordinationPeer> {
+    if (!this.#client) throw new Error(strings.connection.unavailable);
+    return this.#client.call('collaboration.identity', {});
+  }
+
+  async coordinationPeers(): Promise<CoordinationPeer[]> {
+    if (!this.#client) throw new Error(strings.connection.unavailable);
+    return this.#client.call('collaboration.peers', {});
+  }
+
+  async checkCoordinationPeer(coreId: string): Promise<void> {
+    if (!this.#client) throw new Error(strings.connection.unavailable);
+    await this.#client.call('collaboration.check', { coreId });
+  }
+
+  async trustCoordinationPeer(peer: CoordinationPeer): Promise<CoordinationPeer> {
+    if (!this.#client) throw new Error(strings.connection.unavailable);
+    return this.#client.call('collaboration.trust', { peer });
+  }
+
+  async untrustCoordinationPeer(coreId: string): Promise<void> {
+    if (!this.#client) throw new Error(strings.connection.unavailable);
+    await this.#client.call('collaboration.untrust', { coreId });
+  }
+
   /** Point the UI at another core, from the Settings page. It stays remembered. */
   async connectTo(url: string, token: string): Promise<void> {
     storeEndpoint({ url, token });
@@ -1138,52 +1261,75 @@ export class Store {
    * again. It joins the load already in flight instead.
    */
   reload(): Promise<void> {
-    this.#reloading ??= this.#load().finally(() => {
-      this.#reloading = null;
+    const client = this.#client;
+    if (!client) return this.#load();
+    // The load in flight belongs to the client that started it. A machine
+    // switched under a slow boot used to hand the new client that same
+    // promise, whose result `#load()` then discards for being the old one's,
+    // so the new machine's store stayed empty until something asked again.
+    if (this.#reloading?.client === client) return this.#reloading.promise;
+    const promise = this.#load().finally(() => {
+      if (this.#reloading?.promise === promise) this.#reloading = null;
     });
-    return this.#reloading;
+    this.#reloading = { client, promise };
+    return promise;
   }
 
   async #load(): Promise<void> {
     const client = this.#client;
     if (!client) return;
     const loginRevision = this.#loginRevision;
-    try {
-      const [projects, threads, providers, accounts, settings, scheduler, permissions, questions, logins, keybindings] =
-        await Promise.all([
-          client.call('projects.list', {}),
-          client.call('threads.list', {}),
-          client.call('providers.list', {}),
-          client.call('accounts.list', {}),
-          client.call('settings.get', {}),
-          client.call('scheduler.get', {}),
-          client.call('permissions.list', {}),
-          client.call('questions.list', {}),
-          // The one owner-only call of the boot. A device asking for it is
-          // refused, and `Promise.all` would take the whole load down with it,
-          // so the phone would come up on an empty app and a red toast.
-          this.owner ? client.call('accounts.logins', {}) : Promise.resolve([]),
-          client.call('keybindings.get', {})
-        ]);
-      this.#mergePermissions(permissions, 'all');
-      this.#mergeQuestions(questions, 'all');
-      this.projects = projects;
-      this.threads = threads;
-      this.providers = providers.loaded;
-      this.rejectedProviders = providers.rejected;
-      this.installStates = installStatesOf(providers.loaded);
-      this.accounts = accounts;
+    // One rejected call used to take the whole boot down: `Promise.all` jumped
+    // to the catch, which only toasted, and projects, threads, providers and
+    // accounts silently kept their pre-reconnect values under an app that
+    // looked loaded. Each slice lands on its own now, and only what failed is
+    // reported.
+    const results = await Promise.allSettled([
+      client.call('projects.list', {}),
+      client.call('threads.list', {}),
+      client.call('providers.list', {}),
+      client.call('accounts.list', {}),
+      client.call('settings.get', {}),
+      client.call('scheduler.get', {}),
+      client.call('permissions.list', {}),
+      client.call('questions.list', {}),
+      // The one owner-only call of the boot. A device asking for it is refused.
+      this.owner ? client.call('accounts.logins', {}) : Promise.resolve([]),
+      client.call('keybindings.get', {})
+    ]);
+    // A machine switched under a slow boot must not have this one's data
+    // written into it: the store may already be serving another client.
+    if (client !== this.#client) return;
+    const [projects, threads, providers, accounts, settings, scheduler, permissions, questions, logins, keybindings] = results;
+    if (permissions.status === 'fulfilled') this.#mergePermissions(permissions.value, 'all');
+    if (questions.status === 'fulfilled') this.#mergeQuestions(questions.value, 'all');
+    if (projects.status === 'fulfilled') this.projects = projects.value;
+    if (threads.status === 'fulfilled') this.threads = threads.value;
+    if (providers.status === 'fulfilled') {
+      this.providers = providers.value.loaded;
+      this.rejectedProviders = providers.value.rejected;
+      this.installStates = installStatesOf(providers.value.loaded);
+    }
+    if (accounts.status === 'fulfilled') {
+      this.accounts = accounts.value;
       this.#restoreModels();
-      this.#restoreLogins(logins, loginRevision);
-      this.settings = settings;
-      this.keybindings = keybindings;
-      this.scheduler = scheduler;
-      // What `bench/startup.ts` reads: the first moment the app holds its data.
-      if (typeof performance !== 'undefined' && performance.getEntriesByName('boite:ready').length === 0) performance.mark('boite:ready');
-      const open = this.openThread;
-      if (open && this.visible) await this.open(open.id, false);
-    } catch (error) {
-      this.#fail(error);
+    }
+    if (logins.status === 'fulfilled') this.#restoreLogins(logins.value, loginRevision);
+    if (settings.status === 'fulfilled') this.settings = settings.value;
+    if (keybindings.status === 'fulfilled') this.keybindings = keybindings.value;
+    if (scheduler.status === 'fulfilled') this.scheduler = scheduler.value;
+    const failed = results.find((result) => result.status === 'rejected');
+    if (failed !== undefined && failed.status === 'rejected') this.#fail(failed.reason);
+    // What `bench/startup.ts` reads: the first moment the app holds its data.
+    if (typeof performance !== 'undefined' && performance.getEntriesByName('boite:ready').length === 0) performance.mark('boite:ready');
+    void this.loadHarnessUpdates();
+    const open = this.openThread;
+    if (open && this.visible) {
+      try {
+        await this.open(open.id, false);
+      } catch (error) {
+        this.#fail(error);
+      }
     }
   }
 
@@ -1651,7 +1797,7 @@ export class Store {
     if (prompt.trim().length === 0 && attachments.length === 0) return false;
     try {
       // Reconnect snapshots must land before a new stream starts mutating the thread.
-      await this.#reloading;
+      await this.#reloading?.promise;
       if (this.#client !== client || this.connection !== 'ready') return false;
       const activity = activityCommand(prompt);
       if (activity) {
@@ -2240,6 +2386,51 @@ export class Store {
     }
   }
 
+  /**
+   * The list is the core's and arrives again as `providers.updatesChanged`.
+   * A core from before updates answers MethodNotFound: that machine simply
+   * offers none, which is not an error worth a toast.
+   */
+  async loadHarnessUpdates(refresh = false): Promise<void> {
+    const client = this.#client;
+    if (!client || !this.owner) return;
+    try {
+      const updates = await client.call('providers.updates', refresh ? { refresh: true } : {});
+      if (client === this.#client) this.harnessUpdates = updates;
+    } catch (error) {
+      if (error instanceof RpcFailure && error.code === RpcErrorCode.MethodNotFound) return;
+      if (refresh) this.#fail(error);
+      else console.warn('reading the agent updates failed', error);
+    }
+  }
+
+  async updateHarness(providerId: ProviderId): Promise<void> {
+    const client = this.#client;
+    if (!client) return;
+    try {
+      const update = await client.call('providers.update', { providerId });
+      this.#putHarnessUpdate(update);
+    } catch (error) {
+      this.#fail(error);
+    }
+  }
+
+  async skipHarnessUpdate(providerId: ProviderId, version: string | null): Promise<void> {
+    const client = this.#client;
+    if (!client) return;
+    try {
+      this.#putHarnessUpdate(await client.call('providers.updateSkip', { providerId, version }));
+    } catch (error) {
+      this.#fail(error);
+    }
+  }
+
+  #putHarnessUpdate(update: HarnessUpdate): void {
+    this.harnessUpdates = this.harnessUpdates.some((entry) => entry.providerId === update.providerId)
+      ? this.harnessUpdates.map((entry) => (entry.providerId === update.providerId ? update : entry))
+      : [...this.harnessUpdates, update];
+  }
+
   /** Start the download. The rest arrives as `providers.installProgress`. */
   async installProvider(providerId: ProviderId): Promise<boolean> {
     const client = this.#client;
@@ -2362,14 +2553,21 @@ export class Store {
     }
   }
 
-  /** The sentence one failure reads as, whether it lands in a surface or the toast. */
+  /**
+   * The sentence one failure reads as, whether it lands in a surface or the
+   * toast. The JSON-RPC code used to ride along as `(-32011)`: it says nothing
+   * to the person reading the toast, and every refusal already names what to
+   * do. It belongs in the console, which `#fail` writes it to.
+   */
   #reason(error: unknown): string {
-    if (error instanceof RpcFailure) return `${error.message} (${error.code})`;
+    if (error instanceof RpcFailure) return error.message;
     if (error instanceof Error) return error.message;
     return String(error);
   }
 
   #fail(error: unknown): void {
+    if (error instanceof RpcFailure) console.error(`rpc ${error.code}: ${error.message}`, error);
+    else console.error(error);
     this.error = this.#reason(error);
   }
 }

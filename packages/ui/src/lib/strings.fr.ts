@@ -100,6 +100,10 @@ export const fr: Messages = {
     timeout: "La machine n'a pas répondu en 12 secondes. Vérifiez son adresse et ses origines navigateur, puis reconnectez-la.",
     browserOrigins: 'Origines navigateur autorisées',
     browserOriginsHint: "Pour un navigateur ou un téléphone qui regarde plusieurs machines, ajoutez sur chaque machine distante l'origine qui sert Boite. Une origine http(s) exacte par ligne. Les connexions de bureau n'ont besoin d'aucune origine en plus.",
+    agentLinks: 'Liens entre agents', agentLinksHint: 'Permettre aux agents de deux machines connectées en propriétaire de se trouver. Chaque cœur échange son adresse et sa clé publique de signature. Aucun jeton propriétaire ni clé privée ne sont partagés.',
+    agentLinksRefresh: 'Actualiser les liens', linkAgents: 'Relier les agents', linkedAgents: "Cœurs d'agents reliés", availableAgentLinks: 'Connexions disponibles',
+    noAgentLinks: "Aucune autre machine connectée en propriétaire n'est disponible.", unlinkAgent: 'Révoquer sur cette machine',
+    reciprocalLink: 'Confiance mutuelle', oneSidedLink: 'Confiance sur cette machine seulement', publicIdentityHint: "Définissez l'adresse HTTPS publique de chaque cœur dans les réglages généraux avant de relier des PC distincts. Les deux cœurs doivent pouvoir se joindre. Le HTTP local ne fonctionne que sur le même PC.",
   },
   app: {
     name: 'Boite',
@@ -419,7 +423,36 @@ export const fr: Messages = {
     error: 'Erreur'
   },
 
+  coordination: {
+    options: 'Réglages avancés',
+    heading: 'Réglages de communication', off: 'Désactivée', brief: 'Courte', team: 'Équipe',
+    summaryOff: 'Les autres agents ne peuvent pas contacter cette conversation.', summaryBrief: 'Passages de relais courts, jusqu’à 6 envois et 2 réveils par heure.',
+    summaryTeam: "Coordination d'équipe, jusqu'à 40 envois et 12 réveils par heure.",
+    ownerOnly: 'Seul le propriétaire peut modifier la coordination. Cet appareil peut consulter les contacts et les échanges.',
+    resources: 'Ressources et responsabilités', resourcesPlaceholder: "Ce que cet agent gère, peut expliquer ou doit éviter",
+    remote: 'Entre projets et machines', remoteHint: 'Partager le titre de cette conversation et ses ressources déclarées avec les agents volontaires des autres projets et machines de confiance. Les deux conversations doivent activer ce choix.',
+    pause: 'Suspendre la coordination', resume: 'Reprendre la coordination', paused: 'Suspendue',
+    sends: '{used} envois sur {limit} cette heure', wakes: '{used} réveils sur {limit} cette heure', receives: "Les destinataires acceptent jusqu'à {limit} messages par heure.",
+    directory: 'Contacts autorisés', refresh: 'Actualiser', directoryEmpty: "Aucune conversation volontaire n'est disponible dans ce projet.", unavailable: 'Contacts indisponibles',
+    exchanges: 'Échanges entre agents', noExchanges: "Aucun échange entre agents pour le moment.", details: "Afficher l'échange",
+    from: 'De {title} sur {machine}', to: 'À {title}', reply: 'Réponse à {id}',
+    receivedFrom: 'Reçu de', sentTo: 'Votre agent a envoyé à', incoming: 'Entrant', outgoing: 'Sortant',
+    receivedStatus: 'Reçu',
+    noReceipt: "Remis signifie transmis à l'agent destinataire. Les protocoles des agents ne fournissent aucun accusé de lecture.",
+    warning: 'Avertissement de coordination',
+    status: {
+      queued: "En attente d'envoi", received: 'Reçu par le cœur destinataire', delivered: "Transmis à l'agent destinataire",
+      uncertain: 'Transmission incertaine. Boite ne la réessaiera pas.', expired: 'Expiré', rejected: 'Refusé'
+    },
+    bubbleStatus: {
+      queued: 'En attente', received: 'En attente', delivered: 'Envoyé', uncertain: 'Non confirmé', expired: 'Expiré', rejected: 'Échec'
+    }
+  },
   composer: {
+    switchTitle: 'Passer une conversation de {tokens} jetons à {provider} ?',
+    switchBody: "{provider} démarre une nouvelle session et reçoit des extraits du début et des échanges les plus récents, environ 20 000 jetons. Le reste lui est inaccessible. Compacter avant ne change rien.",
+    switchConfirm: "Changer d'agent",
+    switchCancel: 'Rester avec {provider}',
     options: 'Options du message',
     placeholder: 'Message à {provider} dans {project}',
     placeholderNoProject: "Message à l'agent",
@@ -572,6 +605,10 @@ export const fr: Messages = {
     save: 'Enregistrer',
     saving: 'Enregistrement',
     unsaved: 'Modifications non enregistrées',
+    discardOne: 'Fermer {name} sans enregistrer ?',
+    discardMany: 'Fermer {count} fichiers sans enregistrer ?',
+    discardBody: 'Le texte saisi depuis le dernier enregistrement sera perdu.',
+    discardConfirm: 'Fermer sans enregistrer',
     editorLabel: 'Contenu du fichier',
     lineOf: 'Ligne {line}',
     zoomIn: 'Agrandir',
@@ -922,6 +959,25 @@ export const fr: Messages = {
     unavailable: 'Aucune lecture de quota disponible.',
     refresh: 'Actualiser les quotas',
     quit: 'Quitter Boite',
+  },
+  harnessUpdates: {
+    heading: 'Mises à jour des agents',
+    intro: 'Chaque machine vérifie ses agents toutes les six heures et les met à jour là où ils tournent.',
+    auto: 'Mettre les agents à jour automatiquement',
+    autoHint: "Cette machine met un agent à jour lorsqu'aucune de ses conversations ne tourne et que personne n'est connecté",
+    check: 'Vérifier maintenant', checking: 'Vérification',
+    available: (name: string, version: string) => `${name} ${version} est disponible`,
+    availableShort: 'Mise à jour disponible',
+    installed: (version: string) => `Version installée : ${version}`,
+    on: (machine: string) => `Sur ${machine}`,
+    update: 'Mettre à jour', skip: 'Ignorer', retry: 'Réessayer',
+    updating: (name: string) => `Mise à jour de ${name}`,
+    updatingHint: 'Ses conversations restent en place. Le prochain tour utilisera la nouvelle version.',
+    failed: (name: string) => `La mise à jour de ${name} a échoué`,
+    upToDate: 'À jour', unknown: 'Vérifie lui-même', runUpdater: 'Lancer sa mise à jour',
+    skipped: (version: string) => `${version} ignorée`,
+    unskip: 'Proposer à nouveau', none: "Aucun agent sur cette machine ne possède de programme de mise à jour que Boite peut lancer.",
+    route: { managed: 'Installé par Boite', self: 'Votre installation' }
   },
   providerSettings: {
     heading: 'Fournisseurs',

@@ -7,11 +7,17 @@ import {
   PANEL_SURFACE_KINDS,
   PROTOCOL_VERSION,
   RpcErrorCode,
+  TODO_STATUSES,
+  TODO_TEXT_MAX,
   type Account,
   type AccountQuota,
   type AgentCommand,
   type AgentTask,
   type AgentWhere,
+  type AgentLetter,
+  type CoordinationConfig,
+  type CoordinationPeer,
+  type CoordinationView,
   type PluginManifest,
   type PluginPreview,
   type PluginState,
@@ -37,6 +43,7 @@ import {
   type QuestionRequest,
   type ProcessRecord,
   type Project,
+  type HarnessUpdate,
   type ProviderInstallState,
   type ProviderSummary,
   type RpcEventName,
@@ -72,6 +79,10 @@ export interface FakeClientOptions {
   uninstalled?: boolean;
   /** Who this client is. `'session'` makes it a paired phone, refused like one. */
   principal?: Principal;
+  /** Stable public identity for multi-machine coordination tests. */
+  coreId?: string;
+  coreName?: string;
+  publicUrl?: string;
 }
 
 /*
@@ -113,6 +124,8 @@ const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>([
   'usage.get',
   'usage.history',
   'settings.get',
+  'collaboration.get',
+  'collaboration.directory',
   'speech.status', 'speech.transcribe', 'speech.cancel',
   'keybindings.get'
 ]);
@@ -573,6 +586,21 @@ function fakeBytes(path: string, text: string | undefined): number {
   return text?.length ?? 0;
 }
 
+/** A refusal worded like the core's, so a screen tested here shows what the real one would. */
+function refusal(message: string): RpcFailure {
+  return new RpcFailure({ code: RpcErrorCode.Refused, message });
+}
+
+/** The core's `checkText` in `todos.ts`: a card needs text, and a line of it. */
+function todoText(text: unknown): string {
+  if (typeof text !== 'string' || text.trim().length === 0) throw refusal('a todo needs text');
+  const trimmed = text.trim();
+  if (trimmed.length > TODO_TEXT_MAX) {
+    throw refusal(`a todo is at most ${TODO_TEXT_MAX} characters, this one is ${trimmed.length}`);
+  }
+  return trimmed;
+}
+
 /** What the editor colours a file with, by the only thing the core has: the extension. */
 function fakeLanguage(path: string): string | null {
   const dot = path.lastIndexOf('.');
@@ -878,8 +906,15 @@ const PROBE_PROVIDERS: Pick<ProviderSummary, 'id' | 'name' | 'protocol' | 'login
  * The whole core in memory, contract-accurate: what `vite dev` uses behind
  * `?fake=1` and what every test runs against.
  */
+function quietUpdates(): boolean {
+  if (typeof location === 'undefined') return false;
+  const query = new URLSearchParams(location.search);
+  return query.get('fake') === '1' && query.get('updates') !== '1';
+}
+
 export class FakeClient implements ObservableClient {
   #telemetry: import('@boite/contracts').TelemetryState = { mode: 'basic', configured: true, pendingDeletion: false };
+  static #cores = new Map<string, FakeClient>();
   #state: ClientState = 'idle';
   #handlers = new Map<string, Set<(payload: unknown) => void>>();
   #stateHandlers = new Set<(state: ClientState) => void>();
@@ -899,6 +934,10 @@ export class FakeClient implements ObservableClient {
   #installBefore = new Map<string, ProviderInstallState>();
   #accounts: Account[] = [];
   #threads = new Map<ThreadId, Thread>();
+  #coordination = new Map<ThreadId, CoordinationConfig>();
+  #letters = new Map<ThreadId, AgentLetter[]>();
+  #peers = new Map<string, CoordinationPeer>();
+  #identity: CoordinationPeer;
   #activityTimers = new Map<string, ReturnType<typeof setTimeout>>();
   #activityTurns = new Map<string, { kind: 'goal' | 'loop'; generation: number }>();
   #activityGenerations = new Map<string, number>();
@@ -958,6 +997,14 @@ export class FakeClient implements ObservableClient {
     this.#delayMs = options.delayMs ?? 18;
     this.#long = options.long ?? false;
     this.#principal = options.principal ?? 'owner';
+    const coreId = options.coreId ?? `fake-core-${crypto.randomUUID()}`;
+    this.#identity = {
+      coreId,
+      name: options.coreName ?? 'This PC',
+      url: options.publicUrl ?? 'http://127.0.0.1:8777',
+      publicKey: `fake-public-key-${coreId}`
+    };
+    FakeClient.#cores.set(coreId, this);
     this.#settings = {
       maxConcurrentTurns: 6,
       perAccountConcurrency: 2,
@@ -966,7 +1013,8 @@ export class FakeClient implements ObservableClient {
       agentCpuCapPercent: 75,
       threadMemoryCapMb: 0,
       focusGuard: true,
-      muteAgents: true
+      muteAgents: true,
+      autoUpdateHarnesses: false
     };
     this.#core = {
       version: '2.0.0-beta.1',
@@ -1065,6 +1113,7 @@ export class FakeClient implements ObservableClient {
   }
 
   close(): void {
+    if (FakeClient.#cores.get(this.#identity.coreId) === this) FakeClient.#cores.delete(this.#identity.coreId);
     for (const thread of this.#threads.values()) this.#pauseActivity(thread);
     for (const [id, run] of this.#pluginRuns) this.#pluginRuns.set(id, run + 1);
     this.#setState('closed');
@@ -1320,6 +1369,11 @@ export class FakeClient implements ObservableClient {
       }
       case 'providers.probe': {
         const params = rawParams as RpcParams<'providers.probe'>;
+        // The fixture catalogue already carries each model's own scale, so a probe
+        // naming a model answers the same list; only the refusal is mirrored.
+        if (params.model !== undefined && (typeof params.model !== 'string' || params.model.length === 0)) {
+          throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'model must be a non-empty string when given', data: { field: 'model', expected: 'a non-empty string' } });
+        }
         return this.#probe(params.providerId, params.accountId);
       }
       case 'providers.install': {
@@ -1333,6 +1387,20 @@ export class FakeClient implements ObservableClient {
       case 'providers.uninstall': {
         const params = rawParams as RpcParams<'providers.uninstall'>;
         return this.#uninstall(params.providerId);
+      }
+      case 'providers.updates':
+        return structuredClone(this.#harnessUpdates);
+      case 'providers.update': {
+        const params = rawParams as RpcParams<'providers.update'>;
+        return this.#updateHarness(params.providerId);
+      }
+      case 'providers.updateSkip': {
+        const params = rawParams as RpcParams<'providers.updateSkip'>;
+        const update = this.#harnessUpdate(params.providerId);
+        update.skipped = params.version;
+        update.pending = update.latest !== update.current && update.skipped !== update.latest;
+        this.#emit('providers.updatesChanged', structuredClone(this.#harnessUpdates));
+        return structuredClone(update);
       }
       case 'providers.dryRun': {
         const params = rawParams as RpcParams<'providers.dryRun'>;
@@ -1504,7 +1572,11 @@ export class FakeClient implements ObservableClient {
         // the tail is longer than a page, and then the whole page as before.
         const from = params.after === undefined ? -1 : thread.messages.findIndex((message) => message.id === params.after);
         if (from !== -1 && thread.messages.length - from <= MESSAGE_PAGE) {
-          return structuredClone({ ...thread, messages: thread.messages.slice(from), messagesBefore: null, messagesFrom: params.after });
+          const messages = thread.messages.slice(from);
+          // As the core's `listTurnsFor`: the turns of the messages sent, and whatever is still queued or running.
+          const sent = new Set(messages.map((message) => message.turnId));
+          const turns = thread.turns.filter((turn) => turn.status === 'queued' || turn.status === 'running' || sent.has(turn.id));
+          return structuredClone({ ...thread, messages, turns, messagesBefore: null, messagesFrom: params.after });
         }
         const page = this.#page(thread.messages, thread.messages.length, MESSAGE_PAGE);
         return structuredClone({ ...thread, messages: page.messages, messagesBefore: page.before });
@@ -1805,6 +1877,131 @@ export class FakeClient implements ObservableClient {
         return { events: [], truncated: false };
       case 'settings.get':
         return { ...this.#settings };
+      case 'collaboration.get': {
+        const { threadId } = rawParams as RpcParams<'collaboration.get'>;
+        this.#thread(threadId);
+        return this.#coordinationView(threadId);
+      }
+      case 'collaboration.configure': {
+        const { threadId, config } = rawParams as RpcParams<'collaboration.configure'>;
+        this.#thread(threadId);
+        if (!['off', 'brief', 'team'].includes(config.mode) || typeof config.resources !== 'string' || config.resources.length > 500 || typeof config.remote !== 'boolean' || typeof config.paused !== 'boolean') {
+          throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'config: expected mode, resources, remote and paused' });
+        }
+        this.#coordination.set(threadId, { ...config, resources: config.resources.trim() });
+        this.#emit('collaboration.changed', { threadId });
+        return this.#coordinationView(threadId);
+      }
+      case 'collaboration.directory': {
+        const { threadId } = rawParams as RpcParams<'collaboration.directory'>;
+        const source = this.#thread(threadId);
+        const sourceConfig = this.#coordinationConfig(threadId);
+        if (sourceConfig.mode === 'off') return { agents: [], unavailable: [] };
+        const agents = [...this.#threads.values()]
+          .filter(thread => thread.id !== threadId && !thread.archived && (thread.projectId === source.projectId || sourceConfig.remote && this.#coordinationConfig(thread.id).remote))
+          .map(thread => {
+            const config = this.#coordinationConfig(thread.id);
+            return {
+              coreId: this.#identity.coreId,
+              threadId: thread.id,
+              title: thread.title,
+              machine: this.#identity.name,
+              resources: config.resources,
+              status: thread.status,
+              mode: config.mode
+            };
+          })
+          .filter(agent => agent.mode !== 'off');
+        const unavailable: string[] = [];
+        if (sourceConfig.remote) for (const peer of this.#peers.values()) {
+          const target = FakeClient.#cores.get(peer.coreId);
+          if (!target || !target.#peers.has(this.#identity.coreId)) { unavailable.push(peer.name); continue; }
+          for (const thread of target.#threads.values()) {
+            const config = target.#coordinationConfig(thread.id);
+            if (thread.archived || config.mode === 'off' || !config.remote) continue;
+            agents.push({ coreId: peer.coreId, threadId: thread.id, title: thread.title, machine: peer.name, resources: config.resources, status: thread.status, mode: config.mode });
+          }
+        }
+        return { agents, unavailable };
+      }
+      case 'collaboration.send': {
+        const params = rawParams as RpcParams<'collaboration.send'>;
+        const source = this.#thread(params.threadId);
+        const config = this.#coordinationConfig(source.id);
+        if (config.mode === 'off' || config.paused) {
+          throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'coordination is off or paused for this thread' });
+        }
+        const existing = this.#letters.get(source.id)?.find(letter => letter.id === params.requestId);
+        if (existing) {
+          if (existing.text !== params.text.trim() || existing.to.coreId !== params.to.coreId || existing.to.threadId !== params.to.threadId || existing.replyTo !== (params.replyTo ?? null)) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'requestId already used for different content' });
+          return structuredClone(existing);
+        }
+        if (!params.text.trim() || params.text.length > 4000 || this.#coordinationView(source.id).sent >= (config.mode === 'brief' ? 6 : 40)) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'message size or hourly budget exceeded' });
+        const destination = params.to.coreId === this.#identity.coreId ? this : FakeClient.#cores.get(params.to.coreId);
+        const target = destination ? destination.#threads.get(params.to.threadId) : undefined;
+        if (!target || target.archived || destination!.#coordinationConfig(target.id).mode === 'off') {
+          throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'recipient is unavailable for coordination' });
+        }
+        if (destination === this && target.projectId !== source.projectId && !(config.remote && this.#coordinationConfig(target.id).remote)) {
+          throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'both threads must allow coordination across projects' });
+        }
+        if (destination !== this && (!config.remote || !this.#peers.has(params.to.coreId) || !destination || !destination.#peers.has(this.#identity.coreId) || !destination.#coordinationConfig(target.id).remote)) {
+          throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'remote core is not trusted' });
+        }
+        const letter: AgentLetter = {
+          id: params.requestId,
+          from: {
+            coreId: this.#identity.coreId,
+            threadId: source.id,
+            title: source.title,
+            machine: this.#identity.name,
+            resources: config.resources,
+            status: source.status,
+            mode: config.mode
+          },
+          to: params.to,
+          toTitle: target?.title ?? this.#peers.get(params.to.coreId)?.name ?? params.to.threadId,
+          text: params.text.trim(),
+          replyTo: params.replyTo ?? null,
+          createdAt: this.#now(),
+          expiresAt: this.#now() + 15 * 60_000,
+          status: 'delivered',
+          error: null
+        };
+        this.#letters.set(source.id, [...(this.#letters.get(source.id) ?? []), letter]);
+        this.#emit('collaboration.changed', { threadId: source.id });
+        destination!.#letters.set(target.id, [...(destination!.#letters.get(target.id) ?? []), letter]);
+        destination!.#emit('collaboration.changed', { threadId: target.id });
+        return structuredClone(letter);
+      }
+      case 'collaboration.identity':
+        return structuredClone(this.#identity);
+      case 'collaboration.peers':
+        return structuredClone([...this.#peers.values()]);
+      case 'collaboration.check': {
+        const { coreId } = rawParams as RpcParams<'collaboration.check'>;
+        const peer = this.#peers.get(coreId);
+        const target = FakeClient.#cores.get(coreId);
+        if (!peer || !target || !target.#peers.has(this.#identity.coreId) || target.#identity.url !== peer.url) {
+          throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'machine is unreachable or mutual trust is missing' });
+        }
+        return { ok: true };
+      }
+      case 'collaboration.trust': {
+        const { peer } = rawParams as RpcParams<'collaboration.trust'>;
+        let url: URL;
+        try { url = new URL(peer.url); } catch { throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'peer.url: expected an HTTPS or loopback URL' }); }
+        const loopback = url.protocol === 'http:' && ['127.0.0.1', '[::1]'].includes(url.hostname);
+        if (url.username || url.password || url.search || url.hash || url.pathname !== '/' || (url.protocol !== 'https:' && !loopback)) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'peer.url: expected HTTPS origin, or numeric loopback HTTP' });
+        if (!peer.coreId || !peer.publicKey || peer.coreId === this.#identity.coreId) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'peer: expected another core public identity' });
+        this.#peers.set(peer.coreId, structuredClone(peer));
+        return structuredClone(peer);
+      }
+      case 'collaboration.untrust': {
+        const { coreId } = rawParams as RpcParams<'collaboration.untrust'>;
+        this.#peers.delete(coreId);
+        return { ok: true };
+      }
       case 'speech.config': return { ...this.#speech };
       case 'speech.status': return { ...this.#speechStatus };
       case 'speech.configure': {
@@ -1977,22 +2174,13 @@ export class FakeClient implements ObservableClient {
       case 'panel.open': {
         const params = rawParams as RpcParams<'panel.open'>;
         const thread = this.#thread(params.threadId);
-        const surface: PanelSurface = params.surface;
-        if (!PANEL_SURFACE_KINDS.includes(surface.kind)) {
-          throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: `unknown panel surface ${String(surface.kind)}` });
-        }
-        if (surface.kind === 'browser' && !/^https?:\/\//i.test(surface.url)) {
-          throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'a browser surface needs an http or https url' });
-        }
-        if (surface.kind === 'file' && surface.path.trim().length === 0) {
-          throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'a file surface needs a path' });
-        }
+        const surface = this.#checkSurface(thread.cwd, params.surface);
         // The core sends this to every client subscribed to the thread, and
         // `shown` says whether there was one to receive it.
         const shown = this.#subscribed.has(thread.id);
         this.#emitToThread(thread.id, 'panel.requested', {
           threadId: thread.id,
-          surface: structuredClone(surface),
+          surface,
           at: this.#now()
         });
         return { shown };
@@ -2020,13 +2208,11 @@ export class FakeClient implements ObservableClient {
       case 'todos.add': {
         const params = rawParams as RpcParams<'todos.add'>;
         const thread = this.#thread(params.threadId);
-        const text = params.text.trim();
-        if (text.length === 0) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'a todo needs text' });
         const at = this.#now();
         const todo: Todo = {
           id: `todo-${++this.#seq}`,
           projectId: thread.projectId,
-          text,
+          text: todoText(params.text),
           status: 'open',
           threadId: thread.id,
           createdAt: at,
@@ -2041,11 +2227,12 @@ export class FakeClient implements ObservableClient {
         const thread = this.#thread(params.threadId);
         const todo = this.#todos.find((one) => one.id === params.todoId && one.projectId === thread.projectId);
         if (!todo) throw this.#notFound('todo', params.todoId);
-        if (params.text !== undefined) {
-          const text = params.text.trim();
-          if (text.length === 0) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'a todo needs text' });
-          todo.text = text;
+        // The status is checked before the text moves, as the core's `updateTodo`
+        // builds the whole card before it saves anything.
+        if (params.status !== undefined && !TODO_STATUSES.includes(params.status)) {
+          throw refusal(`a todo is ${TODO_STATUSES.join(', ')}, not ${String(params.status)}`);
         }
+        if (params.text !== undefined) todo.text = todoText(params.text);
         if (params.status !== undefined) todo.status = params.status;
         todo.threadId = thread.id;
         todo.updatedAt = this.#now();
@@ -2077,13 +2264,17 @@ export class FakeClient implements ObservableClient {
       }
       case 'git.diff': {
         const params = rawParams as RpcParams<'git.diff'>;
-        this.#thread(params.threadId);
-        const change = FAKE_CHANGES.find((one) => one.path === params.path);
-        if (!change) throw this.#notFound('change', params.path);
-        const sides = FAKE_DIFFS[params.path] ?? {
+        const path = this.#inside(this.#thread(params.threadId).cwd, params.path, 'git.diff path');
+        const change = FAKE_CHANGES.find((one) => one.path === path);
+        if (!change) throw this.#notFound('change', path);
+        const sides = FAKE_DIFFS[path] ?? {
           // A row with no fixture of its own still opens on two readable sides.
-          oldText: `// ${params.path}\nconst ready = false;\n`,
-          newText: `// ${params.path}\nconst ready = true;\n`,
+          oldText: `// ${path}
+const ready = false;
+`,
+          newText: `// ${path}
+const ready = true;
+`,
           binary: false,
           truncated: false
         };
@@ -2093,47 +2284,50 @@ export class FakeClient implements ObservableClient {
 
       case 'files.list': {
         const params = rawParams as RpcParams<'files.list'>;
-        this.#thread(params.threadId);
-        return this.#listDir(params.path ?? '');
+        const cwd = this.#thread(params.threadId).cwd;
+        return this.#listDir(this.#inside(cwd, params.path ?? '', 'files.list path', 'dir'));
       }
       case 'files.read': {
         const params = rawParams as RpcParams<'files.read'>;
-        this.#thread(params.threadId);
+        const path = this.#inside(this.#thread(params.threadId).cwd, params.path, 'files.read path', 'file');
         // A picture, a sound and anything else binary answer as a url, the way
         // the core hands out a ticket, except that these carry their own bytes.
-        const media = FAKE_MEDIA[params.path];
+        const media = FAKE_MEDIA[path];
         if (media) {
           const url = media.url();
           const blob: FileContent = {
             kind: media.kind,
-            path: params.path,
-            bytes: fakeBytes(params.path, undefined),
-            modifiedAt: this.#fileTime(params.path),
+            path,
+            bytes: fakeBytes(path, undefined),
+            modifiedAt: this.#fileTime(path),
             mime: media.mime,
             url
           };
           return blob;
         }
-        const text = this.#files.get(params.path);
-        if (text === undefined) throw this.#notFound('file', params.path);
+        const text = this.#files.get(path) ?? '';
         const content: FileContent = {
           kind: 'text',
-          path: params.path,
+          path,
           bytes: text.length,
-          modifiedAt: this.#fileTime(params.path),
+          modifiedAt: this.#fileTime(path),
           text,
           truncated: false,
-          language: fakeLanguage(params.path)
+          language: fakeLanguage(path)
         };
         return content;
       }
       case 'files.write': {
         const params = rawParams as RpcParams<'files.write'>;
-        this.#thread(params.threadId);
-        if (FAKE_MEDIA[params.path]) {
+        const cwd = this.#thread(params.threadId).cwd;
+        const path = this.#inside(cwd, params.path, 'files.write path');
+        // The file may be new, its directory may not, and what is there already has to be a file.
+        this.#inside(cwd, path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '', 'files.write path directory', 'dir');
+        if (this.#isDir(path)) throw refusal(`files.write path is not a file: ${params.path}`);
+        if (FAKE_MEDIA[path]) {
           throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'this file is not text' });
         }
-        this.#files.set(params.path, params.text);
+        this.#files.set(path, params.text);
         return { bytes: params.text.length, modifiedAt: this.#now() };
       }
 
@@ -2145,6 +2339,26 @@ export class FakeClient implements ObservableClient {
         });
       }
     }
+  }
+
+  #coordinationConfig(threadId: ThreadId): CoordinationConfig {
+    return this.#coordination.get(threadId) ?? { mode: 'off', resources: '', remote: false, paused: false };
+  }
+
+  #coordinationView(threadId: ThreadId): CoordinationView {
+    const config = this.#coordinationConfig(threadId);
+    const letters = this.#letters.get(threadId) ?? [];
+    const sendLimit = config.mode === 'brief' ? 6 : config.mode === 'team' ? 40 : 0;
+    const wakeLimit = config.mode === 'brief' ? 2 : config.mode === 'team' ? 12 : 0;
+    return {
+      self: { coreId: this.#identity.coreId, threadId },
+      config: structuredClone(config),
+      messages: structuredClone(letters),
+      sent: letters.filter(letter => letter.from.coreId === this.#identity.coreId && letter.from.threadId === threadId && letter.createdAt > this.#now() - 3_600_000).length,
+      sendLimit,
+      wakes: 0,
+      wakeLimit
+    };
   }
 
   #quotas(): AccountQuota[] {
@@ -2965,6 +3179,90 @@ export class FakeClient implements ObservableClient {
     ];
   }
 
+  #isDir(path: string): boolean {
+    if (path === '') return true;
+    const prefix = `${path}/`;
+    return [...this.#files.keys(), ...FAKE_MEDIA_PATHS].some((full) => full.startsWith(prefix));
+  }
+
+  /**
+   * The core's `resolveInside`, and `existingInside` when `expect` is given,
+   * over the fake tree: a path relative to the thread's directory or absolute
+   * inside it, never out of it, answered in the relative form with forward
+   * slashes the core answers with.
+   */
+  #inside(cwd: string, path: unknown, what: string, expect?: 'file' | 'dir'): string {
+    if (typeof path !== 'string') throw refusal(`${what} must be a path, got ${typeof path}`);
+    const root = cwd.replace(/[\\/]+$/, '').replace(/\\/g, '/');
+    let rest = path.replace(/\\/g, '/');
+    if (/^([a-z]:)?\//i.test(rest)) {
+      if (rest.toLowerCase() !== root.toLowerCase() && !rest.toLowerCase().startsWith(`${root.toLowerCase()}/`)) {
+        throw refusal(`${what} leaves the thread's working directory: ${path}`);
+      }
+      rest = rest.slice(root.length);
+    }
+    const parts: string[] = [];
+    for (const part of rest.split('/')) {
+      if (part === '' || part === '.') continue;
+      if (part !== '..') parts.push(part);
+      else if (parts.pop() === undefined) throw refusal(`${what} leaves the thread's working directory: ${path}`);
+    }
+    const relative = parts.join('/');
+    if (expect === undefined) return relative;
+    const isFile = this.#files.has(relative) || FAKE_MEDIA[relative] !== undefined;
+    const isDir = this.#isDir(relative);
+    if (!isFile && !isDir) throw refusal(`${what} does not exist: ${path}`);
+    if (expect === 'file' && !isFile) throw refusal(`${what} is not a file: ${path}`);
+    if (expect === 'dir' && !isDir) throw refusal(`${what} is not a directory: ${path}`);
+    return relative;
+  }
+
+  /**
+   * The core's `checkSurface` in `agent.ts`: a file that is there, a directory
+   * that is, a diff path inside the directory, an http or https url, and the
+   * relative path every client compares tabs by.
+   */
+  #checkSurface(cwd: string, surface: PanelSurface): PanelSurface {
+    const kind = (surface as { kind?: unknown } | null | undefined)?.kind;
+    if (typeof kind !== 'string' || !(PANEL_SURFACE_KINDS as readonly string[]).includes(kind)) {
+      throw refusal(`panel.open does not know the surface ${String(kind)}`);
+    }
+    const path = (surface as { path?: unknown }).path;
+    if (kind === 'file') {
+      if (typeof path !== 'string' || path.length === 0) throw refusal('panel.open file needs a path');
+      const found = this.#inside(cwd, path, 'panel.open file path', 'file');
+      const line = (surface as { line?: unknown }).line;
+      if (line === undefined || line === null) return { kind, path: found };
+      if (typeof line !== 'number' || !Number.isInteger(line) || line < 1) {
+        throw refusal(`panel.open line must be a line number, got ${String(line)}`);
+      }
+      return { kind, path: found, line };
+    }
+    if (kind === 'files') {
+      if (path === undefined || path === null) return { kind };
+      return { kind, path: this.#inside(cwd, path, 'panel.open files path', 'dir') };
+    }
+    if (kind === 'diff') {
+      // A diff names a file that may be gone from the working tree.
+      if (path === undefined || path === null) return { kind };
+      return { kind, path: this.#inside(cwd, path, 'panel.open diff path') };
+    }
+    if (kind === 'browser') {
+      const url = (surface as { url?: unknown }).url;
+      let parsed: URL;
+      try {
+        parsed = new URL(String(url));
+      } catch {
+        throw refusal(`panel.open browser needs a url, got ${String(url)}`);
+      }
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+        throw refusal(`panel.open browser takes http or https, not ${parsed.protocol.replace(':', '')}`);
+      }
+      return { kind, url: parsed.href };
+    }
+    return { kind: kind as 'trace' | 'tasks' };
+  }
+
   #notFound(what: string, id: string): RpcFailure {
     return new RpcFailure({
       code: RpcErrorCode.NotFound,
@@ -3028,6 +3326,47 @@ export class FakeClient implements ObservableClient {
     const probedAt = this.#now();
     this.#emit('providers.probed', { providerId, accountId, models: structuredClone(models), probedAt });
     return { models, probedAt };
+  }
+
+  // -------------------------------------------------------------------------
+  // Agent updates
+  // -------------------------------------------------------------------------
+
+  /**
+   * Two agents behind their newest release, one by each route, so the notices
+   * have a subject. The fake page shows them on `?updates=1` only: a card
+   * pinned to a corner would sit in every other capture.
+   */
+  #harnessUpdates: HarnessUpdate[] = ([
+    { providerId: 'claude', name: 'Claude Code', route: 'self', current: '2.1.267', latest: '2.1.278', pending: true, skipped: null, state: 'idle', message: null, checkedAt: Date.now() },
+    { providerId: 'codex', name: 'Codex', route: 'managed', current: '0.154.0', latest: '0.155.1', pending: true, skipped: null, state: 'idle', message: null, checkedAt: Date.now() },
+    { providerId: 'opencode', name: 'OpenCode', route: 'self', current: '1.18.31', latest: '1.18.31', pending: false, skipped: null, state: 'idle', message: null, checkedAt: Date.now() },
+    // No way to name its newest release: the row that offers the updater itself.
+    { providerId: 'antigravity', name: 'Antigravity', route: 'self', current: '1.2.7', latest: null, pending: false, skipped: null, state: 'idle', message: null, checkedAt: Date.now() }
+  ] satisfies HarnessUpdate[]).map((update) => (quietUpdates() ? { ...update, current: update.latest ?? update.current, pending: false } : update));
+
+  #harnessUpdate(providerId: string): HarnessUpdate {
+    const update = this.#harnessUpdates.find((entry) => entry.providerId === providerId);
+    if (!update) throw new RpcFailure({ code: RpcErrorCode.Refused, message: `${providerId} has no update Boite can run on this machine` });
+    return update;
+  }
+
+  #updateHarness(providerId: string): RpcResult<'providers.update'> {
+    const update = this.#harnessUpdate(providerId);
+    if (update.state === 'updating') throw new RpcFailure({ code: RpcErrorCode.Refused, message: `${update.name} is already updating` });
+    if (update.latest !== null && update.current === update.latest) {
+      throw new RpcFailure({ code: RpcErrorCode.Refused, message: `${update.name} is already on its newest known version` });
+    }
+    update.state = 'updating';
+    update.pending = false;
+    this.#emit('providers.updatesChanged', structuredClone(this.#harnessUpdates));
+    setTimeout(() => {
+      update.state = 'idle';
+      update.current = update.latest ?? update.current;
+      update.checkedAt = Date.now();
+      this.#emit('providers.updatesChanged', structuredClone(this.#harnessUpdates));
+    }, 1200);
+    return structuredClone(update);
   }
 
   // -------------------------------------------------------------------------

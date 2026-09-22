@@ -1,8 +1,39 @@
 import { afterEach, expect, test, vi } from 'vitest';
 import { FakeClient } from './fake-client';
-import { RpcErrorCode } from '@boite/contracts';
+import { RpcErrorCode, TODO_TEXT_MAX } from '@boite/contracts';
 
 afterEach(() => vi.useRealTimers());
+
+test('coordination stays scoped to its core and paired devices can only inspect it', async () => {
+  const first = new FakeClient({ delayMs: 0, coreId: 'core-first', coreName: 'First', publicUrl: 'https://first.test' });
+  const second = new FakeClient({ delayMs: 0, coreId: 'core-second', coreName: 'Second', publicUrl: 'https://second.test' });
+  const phone = new FakeClient({ delayMs: 0, principal: 'session', coreId: 'core-phone' });
+  await Promise.all([first.connect(), second.connect(), phone.connect()]);
+
+  expect((await first.call('collaboration.get', { threadId: 't-trace' })).config.mode).toBe('off');
+  await first.call('collaboration.configure', { threadId: 't-trace', config: { mode: 'team', resources: 'UI', remote: true, paused: false } });
+  expect((await first.call('collaboration.get', { threadId: 't-trace' })).config.resources).toBe('UI');
+  await first.call('collaboration.configure', { threadId: 't-descriptors', config: { mode: 'brief', resources: 'Descriptors', remote: false, paused: false } });
+  expect((await first.call('collaboration.directory', { threadId: 't-trace' })).agents.map(agent => agent.threadId)).not.toContain('t-descriptors');
+  await first.call('collaboration.configure', { threadId: 't-descriptors', config: { mode: 'brief', resources: 'Descriptors', remote: true, paused: false } });
+  expect((await first.call('collaboration.directory', { threadId: 't-trace' })).agents.map(agent => agent.threadId)).toContain('t-descriptors');
+  expect((await second.call('collaboration.get', { threadId: 't-trace' })).config.mode).toBe('off');
+  expect((await phone.call('collaboration.get', { threadId: 't-trace' })).config.mode).toBe('off');
+  await expect(phone.call('collaboration.configure', { threadId: 't-trace', config: { mode: 'brief', resources: '', remote: false, paused: false } })).rejects.toMatchObject({ code: RpcErrorCode.Refused });
+
+  const [a, b] = await Promise.all([first.call('collaboration.identity', {}), second.call('collaboration.identity', {})]);
+  await Promise.all([first.call('collaboration.trust', { peer: b }), second.call('collaboration.trust', { peer: a })]);
+  expect(await first.call('collaboration.peers', {})).toEqual([b]);
+  await second.call('collaboration.configure', { threadId: 't-trace', config: { mode: 'brief', resources: 'Build VM', remote: true, paused: false } });
+  await expect(first.call('collaboration.check', { coreId: b.coreId })).resolves.toEqual({ ok: true });
+  expect((await first.call('collaboration.directory', { threadId: 't-trace' })).agents).toContainEqual(expect.objectContaining({ coreId: b.coreId, threadId: 't-trace' }));
+  const letter = await first.call('collaboration.send', { threadId: 't-trace', to: { coreId: b.coreId, threadId: 't-trace' }, text: 'Wait for the build', requestId: 'remote' });
+  expect((await second.call('collaboration.get', { threadId: 't-trace' })).messages).toEqual([letter]);
+  expect((await second.call('collaboration.get', { threadId: 't-trace' })).sent).toBe(0);
+  await first.call('collaboration.untrust', { coreId: b.coreId });
+  expect(await first.call('collaboration.peers', {})).toEqual([]);
+  first.close(); second.close(); phone.close();
+});
 
 test('fake threads reject unknown providers even when speed is omitted', async () => {
   const client = new FakeClient({ delayMs: 0 });
@@ -222,5 +253,60 @@ test.each(['drop', 'close'] as const)('fake speech releases abandoned requests o
   await client.restore();
   try {
     expect((await client.call('speech.transcribe', { requestId: 'same', revision, audio: '' })).text).toBeTruthy();
+  } finally { client.close(); }
+});
+
+test('fake panel.open refuses what the core refuses and names the file by its relative path', async () => {
+  const client = new FakeClient({ delayMs: 0 });
+  await client.connect();
+  try {
+    await client.call('threads.subscribe', { threadId: 't-trace' });
+    const heard: unknown[] = [];
+    client.on('panel.requested', (event) => heard.push(event.surface));
+    const refusals = [
+      { kind: 'file', path: 'src/missing.ts' },
+      { kind: 'file', path: '../outside.ts' },
+      { kind: 'file', path: 'docs' },
+      { kind: 'file', path: 'README.md', line: 0 },
+      { kind: 'files', path: 'README.md' },
+      { kind: 'diff', path: '../../etc/passwd' },
+      { kind: 'browser', url: 'file:///C:/secret.txt' },
+      { kind: 'nope' }
+    ];
+    for (const surface of refusals) {
+      await expect(client.call('panel.open', { threadId: 't-trace', surface: surface as never })).rejects.toMatchObject({ code: RpcErrorCode.Refused });
+    }
+    expect(heard).toEqual([]);
+    await client.call('panel.open', { threadId: 't-trace', surface: { kind: 'file', path: 'C:\\src\\boite\\docs\\.\\panel.md', line: 3 } });
+    expect(heard).toEqual([{ kind: 'file', path: 'docs/panel.md', line: 3 }]);
+  } finally { client.close(); }
+});
+
+test('fake todos hold the core limits: a known status and at most TODO_TEXT_MAX characters', async () => {
+  const client = new FakeClient({ delayMs: 0 });
+  await client.connect();
+  try {
+    await expect(client.call('todos.add', { threadId: 't-trace', text: 'x'.repeat(TODO_TEXT_MAX + 1) })).rejects.toMatchObject({ code: RpcErrorCode.Refused });
+    const card = await client.call('todos.add', { threadId: 't-trace', text: 'Write the fake guards' });
+    await expect(client.call('todos.update', { threadId: 't-trace', todoId: card.id, status: 'finished' as never, text: 'moved anyway' })).rejects.toMatchObject({ code: RpcErrorCode.Refused });
+    await expect(client.call('todos.update', { threadId: 't-trace', todoId: card.id, text: 'x'.repeat(TODO_TEXT_MAX + 1) })).rejects.toMatchObject({ code: RpcErrorCode.Refused });
+    const list = await client.call('todos.list', { threadId: 't-trace' });
+    expect(list.find((todo) => todo.id === card.id)).toMatchObject({ text: 'Write the fake guards', status: 'open' });
+  } finally { client.close(); }
+});
+
+test('fake files and diffs stay inside the thread directory like the core', async () => {
+  const client = new FakeClient({ delayMs: 0 });
+  await client.connect();
+  try {
+    await expect(client.call('files.read', { threadId: 't-trace', path: '../boite-legacy/README.md' })).rejects.toMatchObject({ code: RpcErrorCode.Refused });
+    await expect(client.call('files.read', { threadId: 't-trace', path: 'src/missing.ts' })).rejects.toMatchObject({ code: RpcErrorCode.Refused });
+    await expect(client.call('files.list', { threadId: 't-trace', path: '..' })).rejects.toMatchObject({ code: RpcErrorCode.Refused });
+    await expect(client.call('files.list', { threadId: 't-trace', path: 'nowhere' })).rejects.toMatchObject({ code: RpcErrorCode.Refused });
+    await expect(client.call('files.write', { threadId: 't-trace', path: '../escape.txt', text: 'x' })).rejects.toMatchObject({ code: RpcErrorCode.Refused });
+    await expect(client.call('files.write', { threadId: 't-trace', path: 'nowhere/new.txt', text: 'x' })).rejects.toMatchObject({ code: RpcErrorCode.Refused });
+    await expect(client.call('git.diff', { threadId: 't-trace', path: '../outside.ts' })).rejects.toMatchObject({ code: RpcErrorCode.Refused });
+    expect((await client.call('files.read', { threadId: 't-trace', path: './docs//guide/editor.md' })).path).toBe('docs/guide/editor.md');
+    expect((await client.call('files.list', { threadId: 't-trace', path: 'docs/' })).map((entry) => entry.path)).toContain('docs/guide');
   } finally { client.close(); }
 });

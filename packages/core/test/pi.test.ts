@@ -11,6 +11,20 @@ import type { TestCore } from './harness.ts';
 /** The fake pi in RPC mode: a real JSON-lines process over stdio, run by bun. */
 const FAKE_AGENT = fileURLToPath(new URL('./fixtures/pi-agent.ts', import.meta.url));
 
+test('coordination steers a running pi turn over its RPC connection', async () => {
+  const client = await startCore();
+  const threadId = await piThread(client);
+  await client.call('turns.start', { threadId, prompt: '[slow] Deploy' });
+  await waitFor(() => fakeLog().includes('waiting for abort'));
+  await waitFor(() => harness!.core.journal.listMessages(threadId).some(m => m.role === 'assistant'));
+  expect(await harness!.core.threads.steer(threadId, 'Boite agent coordination. Wait for the VM.')).toBe(true);
+  expect(fakeLog()).toContain('steering Boite agent coordination');
+  expect(harness!.core.journal.listTurns(threadId)).toHaveLength(1);
+  await client.call('turns.stop', { threadId });
+  await waitFor(() => fakeLog().includes('clear_queue\nabort'));
+  expect(fakeLog()).toContain('clear_queue\nabort');
+});
+
 let harness: TestCore | null = null;
 let logFile = '';
 

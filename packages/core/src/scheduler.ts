@@ -13,6 +13,9 @@ interface RunningEntry extends Entry {
   done: Promise<void>;
 }
 
+/** How long `drain()` waits for running turns before shutdown moves on. */
+const DRAIN_TIMEOUT_MS = 5_000;
+
 /**
  * A thread is not a process: this counts turns. A turn past `maxConcurrentTurns`
  * or past `perAccountConcurrency` waits in order and is visible as `queued`.
@@ -107,14 +110,24 @@ export class Scheduler {
   }
 
   /** Shutdown: drop the queue, stop what runs, and wait for it before the journal closes. */
-  async drain(): Promise<void> {
+  async drain(timeoutMs: number = DRAIN_TIMEOUT_MS): Promise<void> {
     if (!this.core.journal.isClosed()) {
       for (const entry of this.queue) this.core.threads.markQueuedStopped(entry.turnId);
     }
     this.queue.length = 0;
     const entries = [...this.running.values()];
     for (const entry of entries) this.core.threads.stopRunning(entry.threadId);
-    await Promise.allSettled(entries.map((entry) => entry.done));
+    if (entries.length === 0) return;
+    // A driver that never answers its stop used to hang this wait for ever,
+    // and with it the whole shutdown. What is still running past the deadline
+    // is left to the process kill that follows.
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const deadline = new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, timeoutMs);
+      timer.unref();
+    });
+    await Promise.race([Promise.allSettled(entries.map((entry) => entry.done)), deadline]);
+    if (timer !== undefined) clearTimeout(timer);
   }
 
   private runningForAccount(accountId: AccountId): number {

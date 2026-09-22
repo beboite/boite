@@ -16,6 +16,7 @@
   import { browserBridge } from '../lib/browser-bridge';
   import { contextMenu } from '../lib/context-menu.svelte';
   import { separator } from '../lib/menu';
+  import { closeTabs } from '../lib/panel-close';
   import { PANEL_DEFAULT, baseName, clampPanel, rightPanel } from '../lib/right-panel.svelte';
   import type { BoundPanel, Surface, SurfaceKind } from '../lib/right-panel.svelte';
   import { fill, strings } from '../lib/strings';
@@ -203,10 +204,9 @@
         { id: 'all', label: strings.rightPanel.closeAll }
       ],
       (action) => {
-        if (action === 'close') panel.close(surface.id);
-        else if (action === 'others') panel.closeOthers(surface.id);
-        else if (action === 'right') panel.closeToRight(surface.id);
-        else if (action === 'all') panel.closeAll();
+        if (action === 'close' || action === 'others' || action === 'right' || action === 'all') {
+          void closeTabs(panel, action, surface.id);
+        }
       }
     );
   }
@@ -215,7 +215,7 @@
     if (event.button !== 1) return;
     // The middle button scrolls by default; the tab closes instead.
     event.preventDefault();
-    panel.close(surface.id);
+    void closeTabs(panel, 'close', surface.id);
   }
 
   function onTabKey(event: KeyboardEvent, surface: Surface): void {
@@ -397,7 +397,7 @@
             data-testid="panel-tab-close"
             onclick={(event) => {
               event.stopPropagation();
-              panel.close(surface.id);
+              void closeTabs(panel, 'close', surface.id);
             }}
           >
             <span class="glyph">
@@ -489,7 +489,7 @@
       <FilesSurface {store} surface={active} {panel} />
     {:else if active?.kind === 'file'}
       {#key active.id}
-        <FileSurface {store} surface={active} />
+        <FileSurface {store} surface={active} {panel} />
       {/key}
     {:else if active?.kind === 'tasks'}
       <TasksSurface {store} />

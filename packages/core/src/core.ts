@@ -29,6 +29,8 @@ import { ActivityStore } from './activity.ts';
 import { PushStore } from './push.ts';
 import { SpeechStore } from './speech.ts';
 import { Telemetry } from './telemetry.ts';
+import { HarnessUpdates } from './providers/updates.ts';
+import { Coordination } from './coordination.ts';
 
 export const CORE_VERSION: string = pkg.version;
 
@@ -37,6 +39,8 @@ export interface SubscriptionSink {
   hasSubscribers(threadId: ThreadId): boolean;
   /** Every socket a revoked session holds goes, with the close code the client reads as "pair again". */
   closeSession(sessionId: string): void;
+  /** Every socket an agent of this thread holds goes: the thread was archived or removed under it. */
+  closeAgents(threadId: ThreadId): void;
 }
 
 export interface CoreOptions {
@@ -110,13 +114,19 @@ export class Core {
   readonly cliDir: string | null = resolveCliDir();
   readonly speech: SpeechStore;
   readonly telemetry: Telemetry;
+  readonly updates: HarnessUpdates;
+  readonly coordination: Coordination;
 
   /**
    * The server tells the core what it alone can know. The default answers no
    * to everything, which is what a core with no socket open should say:
    * `panel.open` then reports that nobody saw the request.
    */
-  subscribers: SubscriptionSink = { hasSubscribers: () => false, closeSession: () => undefined };
+  subscribers: SubscriptionSink = {
+    hasSubscribers: () => false,
+    closeSession: () => undefined,
+    closeAgents: () => undefined,
+  };
 
   private endpoint = { host: '127.0.0.1', port: 0 };
 
@@ -146,6 +156,8 @@ export class Core {
     this.push = new PushStore(this);
     this.speech = new SpeechStore(this);
     this.telemetry = new Telemetry(this);
+    this.updates = new HarnessUpdates(this);
+    this.coordination = new Coordination(this);
 
     registerModules(this);
     this.procs.applySettings(this.settings.get());
@@ -186,12 +198,31 @@ export class Core {
     this.bus.emit('core.log', { level, message, at: Date.now() });
   }
 
+  /**
+   * Shutdown, first half. The scheduler stops what runs and waits for it while
+   * the sockets are still open and the bus still has its listeners, so a turn
+   * that ends during shutdown still reaches the clients watching it. Closing
+   * the server first emitted `turn.finished` to nobody.
+   */
+  async drain(timeoutMs?: number): Promise<void> {
+    this.coordination.beginClose();
+    this.#drained = true;
+    await this.scheduler.drain(timeoutMs);
+  }
+
+  /** Whether the wait above has already been spent, so `close()` does not spend a second one. */
+  #drained = false;
+
   async close(): Promise<void> {
+    this.updates.close();
+    this.coordination.beginClose();
+    // Reuse the shutdown wait already spent by drain(), while stopping late arrivals.
+    await this.scheduler.drain(this.#drained ? 0 : undefined);
+    await this.coordination.close();
     await this.speech.close();
     await this.push.close();
     this.activity.close();
     await this.plugins.close();
-    await this.scheduler.drain();
     this.providers.installs.stop();
     shutdownDrivers();
     await this.accounts.closeLogins();

@@ -69,7 +69,7 @@ The Windows backend and the shared Linux/macOS fallback live under
 [Trace](trace.md#platform-boundary) describes that boundary and its limits.
 
 On Windows `procs` creates the thread's job on first use, nested in a global
-`boite-agents` job, `KILL_ON_JOB_CLOSE` on both and never `BREAKAWAY_OK`, and
+unnamed job, `KILL_ON_JOB_CLOSE` on both and never `BREAKAWAY_OK`, and
 assigns the child right after spawn. A completion port drained in a Worker
 reports every process that enters or leaves, grandchildren included, as
 `process.started` and `process.exited` with pid, executable, command line, CPU
@@ -154,7 +154,7 @@ keeps a persistent display cache while it reads models asynchronously. `threads.
 a model nobody probed is refused, saying to open the picker. Two callers at once
 share one process, and `providers.probed` lets a second client see the same
 answer. A probe that finds no executable, whose agent dies, or that passes twenty
-seconds throws with the reason and caches nothing. One whose own account changed
+seconds, thirty for pi, throws with the reason and caches nothing. One whose own account changed
 or whose descriptors were reloaded while it ran is refused as stale; another
 account changing does not touch it, and the UI asks again without a toast.
 
@@ -163,8 +163,10 @@ account changing does not touch it, and the UI asks again without a toast.
 Each machine owns its client and Store. Route actions through the owning Store;
 project and thread IDs can collide across machines. Only the open thread on the
 visible machine streams. The rest of the list lives on `thread.updated`
-summaries. Inside a message, the markdown of a streaming part is rebuilt at most
-every 48 ms rather than on every token, and a tool card opens on its own while
+summaries. Inside a message, the markdown of a streaming part is rebuilt only
+for the paragraphs that have closed: the block still being typed is left out
+until a blank line ends it, so a token never re-renders the text before it, and
+a tool card opens on its own while
 the model is still typing its input, then folds back once the parsed input lands.
 Past sixty messages the timeline renders a window: the slice that meets the
 viewport plus eight messages of overscan each way, two spacers carrying the
@@ -173,6 +175,15 @@ measures it, and a height measured above the reading point put back into
 `scrollTop` so the viewport never jumps. Under sixty, the list renders whole.
 The transport sits behind one `Client` interface, so the same UI runs on the real
 core, on a WebSocket to a remote core, and on an in-memory fake.
+
+## Agent coordination
+
+The core owns opt-in permissions, discovery, durable inboxes and message budgets.
+Agent RPC credentials bind the sender to one thread. Cross-machine messaging uses
+a separate signed HTTPS endpoint with pinned Ed25519 public keys, not owner RPC
+credentials. UI stores remain machine-scoped. Provider adapters deliver attributed
+agent input at supported boundaries; the scheduler handles idle wake turns.
+[Agent coordination](coordination.md) describes delivery states and the trust boundary.
 
 ## The phone keeps the app
 
@@ -185,4 +196,3 @@ serves the shell, the worker and the manifest as `no-cache` and the hashed
 assets as immutable for a year. What a phone gets with the core asleep is the
 shell painting from disk and "Connecting" in the footer until the socket comes
 back. [docs/phone.md](phone.md).
-

@@ -85,6 +85,48 @@ export type ProviderInstallState =
   | { state: 'installed'; version: string; installedAt: Timestamp; available: string }
   | { state: 'failed'; version: string; message: string };
 
+/**
+ * How an agent the user installed by their own means brings itself up to date.
+ * Boite never downloads that agent: it asks the program its version, reads the
+ * newest one where the agent publishes it, and runs the agent's own updater.
+ */
+export interface ProviderSelfUpdate {
+  /** Arguments that print the installed version. The first `x.y.z` in the output is read. Default `--version`. */
+  versionArgs?: string[];
+  /** The npm package whose `latest` tag names the newest release. */
+  latestNpm?: string;
+  /** Arguments that print a JSON object carrying `latestVersion`, for an agent that checks by itself. */
+  latestArgs?: string[];
+  /**
+   * Arguments of the agent's own updater. With neither `latestNpm` nor
+   * `latestArgs` the newest version is unknown: nothing is announced, and the
+   * updater still runs when the user asks for it.
+   */
+  args: string[];
+}
+
+/**
+ * Where one agent stands against its newest release on this core's machine.
+ * `managed` is a release Boite downloaded, updated through the install block
+ * a Boite release pins. `self` is the user's own install, updated by the
+ * agent's updater. `pending` is what a client shows: a newer version exists,
+ * the user has not skipped it, and nothing is running.
+ */
+export interface HarnessUpdate {
+  providerId: ProviderId;
+  name: string;
+  route: 'managed' | 'self';
+  current: string | null;
+  latest: string | null;
+  pending: boolean;
+  /** The version the user chose not to hear about again. A newer one asks again. */
+  skipped: string | null;
+  state: 'idle' | 'checking' | 'updating' | 'failed';
+  /** Why the last check or update failed, null otherwise. */
+  message: string | null;
+  checkedAt: Timestamp | null;
+}
+
 export interface OsProfile {
   /** The provider is offered only when one of these resolves. */
   detect: { command?: string; file?: string };
@@ -92,6 +134,8 @@ export interface OsProfile {
   launch?: { args?: string[] };
   /** A release the core downloads on request. Absent when the agent ships another way. */
   install?: ProviderInstall;
+  /** How the user's own install updates itself. Absent when the agent has no updater Boite can run. */
+  update?: ProviderSelfUpdate;
   /**
    * Environment that makes one account blind to the others. Values may use
    * `{isolationDir}`, replaced by the account's own directory.
@@ -536,7 +580,7 @@ export type TurnStatus = 'queued' | 'running' | 'done' | 'stopped' | 'error';
 /** Frozen when a prompt is accepted, including while it waits in the scheduler. */
 export type TurnExecution = Pick<ThreadSummary,
   'providerId' | 'accountId' | 'model' | 'effort' | 'speed' | 'permissionMode' | 'sessionId'
-> & { sessionGeneration: number; selectionVersion: number; operation?: 'compact' };
+> & { sessionGeneration: number; selectionVersion: number; operation?: 'compact' | 'coordination' };
 
 export interface Turn {
   id: TurnId;
@@ -848,6 +892,12 @@ export interface Settings {
    * process exits. Windows only, ignored elsewhere.
    */
   muteAgents: boolean;
+  /**
+   * The core updates its agents by itself: checked a minute after start and
+   * every six hours, each one updated once no turn of its provider is in
+   * flight. It needs no client connected, which is how a server stays current.
+   */
+  autoUpdateHarnesses: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -1116,6 +1166,9 @@ export interface Todo {
 
 export const TODO_STATUSES: readonly Todo['status'][] = ['open', 'claimed', 'done'];
 
+/** A card is a line, not a document: the whole list travels on every change. */
+export const TODO_TEXT_MAX = 2000;
+
 export type GitChangeStatus = 'added' | 'modified' | 'deleted' | 'renamed' | 'copied' | 'untracked' | 'conflict';
 
 /** One path `git status` reports, staged or not, with the numbers `git diff --numstat` gives it. */
@@ -1239,7 +1292,55 @@ export interface SpeechStatus {
 export const SPEECH_MAX_SECONDS = 120;
 export const SPEECH_MAX_BYTES = 44 + 16000 * 2 * SPEECH_MAX_SECONDS;
 
+export type CoordinationMode = 'off' | 'brief' | 'team';
+export interface CoordinationConfig {
+  mode: CoordinationMode;
+  resources: string;
+  remote: boolean;
+  paused: boolean;
+}
+export interface AgentAddress { coreId: string; threadId: ThreadId }
+export interface AgentContact extends AgentAddress {
+  title: string;
+  machine: string;
+  resources: string;
+  status: ThreadStatus;
+  mode: CoordinationMode;
+}
+export interface AgentLetter {
+  id: string;
+  from: AgentContact;
+  to: AgentAddress;
+  toTitle: string;
+  text: string;
+  replyTo: string | null;
+  createdAt: Timestamp;
+  expiresAt: Timestamp;
+  status: 'queued' | 'received' | 'delivered' | 'uncertain' | 'expired' | 'rejected';
+  error: string | null;
+}
+/** Public contact card. No owner token or private signing key crosses a core. */
+export interface CoordinationPeer { coreId: string; name: string; url: string; publicKey: string }
+export interface CoordinationView {
+  self: AgentAddress;
+  config: CoordinationConfig;
+  messages: AgentLetter[];
+  sent: number;
+  sendLimit: number;
+  wakes: number;
+  wakeLimit: number;
+}
+
 export interface RpcMethods {
+  'collaboration.get': { params: { threadId: ThreadId }; result: CoordinationView };
+  'collaboration.configure': { params: { threadId: ThreadId; config: CoordinationConfig }; result: CoordinationView };
+  'collaboration.directory': { params: { threadId: ThreadId }; result: { agents: AgentContact[]; unavailable: string[] } };
+  'collaboration.send': { params: { threadId: ThreadId; to: AgentAddress; text: string; replyTo?: string; requestId: string }; result: AgentLetter };
+  'collaboration.identity': { params: Record<string, never>; result: CoordinationPeer };
+  'collaboration.peers': { params: Record<string, never>; result: CoordinationPeer[] };
+  'collaboration.check': { params: { coreId: string }; result: { ok: true } };
+  'collaboration.trust': { params: { peer: CoordinationPeer }; result: CoordinationPeer };
+  'collaboration.untrust': { params: { coreId: string }; result: { ok: true } };
   'speech.status': { params: Record<string, never>; result: SpeechStatus };
   'speech.configure': { params: SpeechConfig & { groqKey?: string; openrouterKey?: string }; result: SpeechStatus };
   'speech.config': { params: Record<string, never>; result: SpeechConfig };
@@ -1374,7 +1475,13 @@ export interface RpcMethods {
    * the moment of the call.
    */
   'providers.probe': {
-    params: { providerId: ProviderId; accountId: AccountId; refresh?: boolean };
+    /**
+     * `model` also asks for that model's own reasoning efforts. OpenCode names an
+     * effort scale per model and only once the session is on it, so the list a
+     * plain probe reads carries none; the picker names the model it landed on
+     * and the answer comes back with that model's `effort` filled in.
+     */
+    params: { providerId: ProviderId; accountId: AccountId; refresh?: boolean; model?: string };
     result: { models: ModelInfo[]; probedAt: Timestamp };
   };
   /**
@@ -1396,6 +1503,21 @@ export interface RpcMethods {
   };
   /** Delete what a managed install put on disk. Refused while a process of that provider is alive. */
   'providers.uninstall': { params: { providerId: ProviderId }; result: ProviderInstallState };
+  /**
+   * Where every available agent stands against its newest release, on the
+   * machine this core runs on. `refresh` asks the agents and the registries
+   * again; without it the last reading answers, and the first call reads.
+   */
+  'providers.updates': { params: { refresh?: boolean }; result: HarnessUpdate[] };
+  /**
+   * Bring one agent to its newest release. Refused while a turn of that
+   * provider is queued, running or waiting, and when nothing newer is known.
+   * The warm processes of the provider are released first, since a running
+   * program cannot be replaced. Progress arrives as `providers.updatesChanged`.
+   */
+  'providers.update': { params: { providerId: ProviderId }; result: HarnessUpdate };
+  /** Stop offering this version. A later one is offered again. `version: null` forgets the skip. */
+  'providers.updateSkip': { params: { providerId: ProviderId; version: string | null }; result: HarnessUpdate };
   /** Validate a user descriptor and show what it would do. Writes nothing. */
   'providers.dryRun': {
     params: { file: string };
@@ -1593,6 +1715,7 @@ export type RpcParams<M extends RpcMethodName> = RpcMethods[M]['params'];
 export type RpcResult<M extends RpcMethodName> = RpcMethods[M]['result'];
 
 export interface RpcEvents {
+  'collaboration.changed': { threadId: ThreadId };
   'thread.activity': { threadId: ThreadId; activity: ThreadActivity };
   /** Subscribed threads only: the agent asked for something in the panel. */
   'panel.requested': { threadId: ThreadId; surface: PanelSurface; at: Timestamp };
@@ -1670,6 +1793,8 @@ export interface RpcEvents {
    * once the files land or are removed, so every client re-lists.
    */
   'providers.installProgress': ProviderInstallState & { providerId: ProviderId };
+  /** The whole list, each time a check, an update or a skip changed one entry. */
+  'providers.updatesChanged': HarnessUpdate[];
   /** Every `providers.probe` that completed, so a second client sees the same models. */
   'providers.probed': {
     providerId: ProviderId;

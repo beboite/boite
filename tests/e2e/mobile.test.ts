@@ -8,7 +8,23 @@ const { createServer } = await import(uiRequire.resolve('vite'));
 let server: { listen(): Promise<unknown>; close(): Promise<void> };
 let page: BrowserPage;
 async function capture(name: string) {
-  await page.evaluate(`Promise.all([document.fonts.ready, ...document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {}))])`);
+  const settled = await page.evaluate<{ timedOut: boolean; fonts: FontFaceSetLoadStatus; animations: Array<{ playState: AnimationPlayState; currentTime: number | null; endTime: number }> }>(`(async () => {
+    const animations = document.getAnimations().filter(animation => animation.effect?.getTiming().iterations !== Infinity);
+    const ready = Promise.all([document.fonts.ready, ...animations.map(animation => animation.finished.catch(() => {}))]);
+    return Promise.race([
+      ready.then(() => ({ timedOut: false, fonts: document.fonts.status, animations: [] })),
+      new Promise(resolve => setTimeout(() => resolve({
+        timedOut: true,
+        fonts: document.fonts.status,
+        animations: animations.filter(animation => animation.playState !== 'finished').map(animation => ({
+          playState: animation.playState,
+          currentTime: animation.currentTime,
+          endTime: animation.effect?.getComputedTiming().endTime ?? 0
+        }))
+      }), 2_000))
+    ]);
+  })()`);
+  if (settled.timedOut) console.warn(`[capture] ${name} settle timed out: ${JSON.stringify(settled)}`);
   await page.screenshot(join(import.meta.dir, '.artifacts', name));
 }
 beforeAll(async () => {

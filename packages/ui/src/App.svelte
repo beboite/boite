@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import NotificationCard from './components/NotificationCard.svelte';
+  import HarnessUpdateNotices from './components/HarnessUpdateNotices.svelte';
   import ChatView from './components/ChatView.svelte';
 
   import ConfirmDialog from './components/ConfirmDialog.svelte';
@@ -17,6 +18,7 @@
   import { installExternalLinks } from './lib/links';
   import { isQuitChord, QUIT_HOLD_MS, QuitHold } from './lib/quit-hold';
   import { onNotificationOpen } from './lib/notify';
+  import { closeTabs } from './lib/panel-close';
   import { strings } from './lib/strings';
   import { rightPanel } from './lib/right-panel.svelte';
   import { workspace } from './lib/workspace.svelte';
@@ -347,7 +349,7 @@
         const active = store.panel.activeSurfaceId;
         if (!store.panelOpen || !active || typing(event)) return;
         event.preventDefault();
-        store.panel.close(active);
+        void closeTabs(store.panel, 'close', active);
         break;
       }
       case 'stash':
@@ -446,6 +448,8 @@
       <span class="bar" class:filling={quitHint.open}></span>
     </div>
   {/if}
+
+  <HarnessUpdateNotices />
 
   {#if toast.shown}
     <div
