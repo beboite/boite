@@ -35,7 +35,7 @@ export function switchDropsHistory(thread: Pick<ThreadSummary, 'accountId' | 'co
  */
 export function switchResetsCache(thread: Pick<ThreadSummary, 'context'>, from: CacheKey, to: CacheKey, now = Date.now()): boolean {
   const context = thread.context;
-  if (!context || context.tokens <= CACHE_WARNING_TOKENS || now - context.at > CACHE_LIFETIME_MS) return false;
+  if (!context || context.tokens <= CACHE_WARNING_TOKENS || now - context.at >= CACHE_LIFETIME_MS) return false;
   if (from.accountId !== to.accountId) return false;
   return from.model !== to.model || from.effort !== to.effort || from.speed !== to.speed;
 }

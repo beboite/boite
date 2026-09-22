@@ -37,10 +37,11 @@ describe('switchResetsCache', () => {
     expect(switchResetsCache(warm(900_000), key, { ...key, accountId: 'b', effort: 'low' }, now)).toBe(false);
   });
 
-  it('stays quiet at or under the threshold, with no reading, or once the cache has expired', () => {
+  it('stays quiet at or under the threshold, with no reading, and from the hour the cache expires', () => {
     expect(switchResetsCache(warm(100_000), key, { ...key, effort: 'low' }, now)).toBe(false);
     expect(switchResetsCache({ context: null }, key, { ...key, effort: 'low' }, now)).toBe(false);
-    const cold = { context: { tokens: 900_000, window: 1_000_000, at: now - CACHE_LIFETIME_MS - 1 } };
-    expect(switchResetsCache(cold, key, { ...key, effort: 'low' }, now)).toBe(false);
+    const at = (age: number) => ({ context: { tokens: 900_000, window: 1_000_000, at: now - age } });
+    expect(switchResetsCache(at(CACHE_LIFETIME_MS - 1), key, { ...key, effort: 'low' }, now)).toBe(true);
+    expect(switchResetsCache(at(CACHE_LIFETIME_MS), key, { ...key, effort: 'low' }, now)).toBe(false);
   });
 });

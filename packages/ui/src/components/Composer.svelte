@@ -327,12 +327,12 @@
   let speeds = $derived(store.modelOf(choice)?.speeds ?? []);
   let activeEffort = $derived(choice?.effort ?? store.modelOf(choice)?.effort?.default ?? null);
 
-  /** A null effort is the model's default, which is what the agent actually runs. */
+  /** A null effort runs at the model's own default, not at a preset the client configured. */
   function cacheKey(selection: Choice): CacheKey {
     return {
       accountId: selection.accountId,
       model: selection.model ?? null,
-      effort: selection.effort ?? store.defaultEffortOf(selection.providerId, selection.accountId, selection.model ?? null),
+      effort: selection.effort ?? store.modelOf(selection)?.effort?.default ?? null,
       speed: selection.speed ?? null,
     };
   }
