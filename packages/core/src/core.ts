@@ -28,6 +28,7 @@ import { Worktrees } from './worktree.ts';
 import { ActivityStore } from './activity.ts';
 import { PushStore } from './push.ts';
 import { SpeechStore } from './speech.ts';
+import { Telemetry } from './telemetry.ts';
 import { HarnessUpdates } from './providers/updates.ts';
 import { Coordination } from './coordination.ts';
 
@@ -113,6 +114,7 @@ export class Core {
   /** Where the `boite` shim is, prepended to the PATH of every process a thread launches. */
   readonly cliDir: string | null = resolveCliDir();
   readonly speech: SpeechStore;
+  readonly telemetry: Telemetry;
   readonly updates: HarnessUpdates;
   readonly coordination: Coordination;
 
@@ -154,6 +156,7 @@ export class Core {
     this.activity = new ActivityStore(this);
     this.push = new PushStore(this);
     this.speech = new SpeechStore(this);
+    this.telemetry = new Telemetry(this);
     this.updates = new HarnessUpdates(this);
     this.coordination = new Coordination(this);
 
@@ -227,6 +230,7 @@ export class Core {
     this.procs.killAll();
     this.procs.close();
     this.keybindings.close();
+    await this.telemetry.close();
     this.bus.dispose();
     this.journal.close();
   }

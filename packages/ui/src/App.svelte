@@ -22,7 +22,9 @@
   import { strings } from './lib/strings';
   import { rightPanel } from './lib/right-panel.svelte';
   import { workspace } from './lib/workspace.svelte';
+  import { tourRequested, tourSeen } from './lib/onboarding.svelte';
   import { startTheme } from './lib/theme';
+  import { appUpdater } from './lib/app-update.svelte';
   import MobileNavigation from './components/MobileNavigation.svelte';
   import { startViewport } from './lib/viewport';
   import { WsClient } from './lib/client';
@@ -37,12 +39,14 @@
   // panel and its six surfaces, the palette and the two dialogs were a third of
   // it. Each loads the moment it is asked for, and all of them once the app is
   // idle, so a key pressed a second after boot finds them and the service
-  // worker has them for a phone that loses its link.
+  // worker has them for a phone that loses its link. The tour is the same case
+  // taken further: a device draws it once, then only when asked.
   const deferredLoaders = {
     RightPanel: () => import('./components/RightPanel.svelte'),
     CommandPalette: () => import('./components/CommandPalette.svelte'),
     ProjectPicker: () => import('./components/ProjectPicker.svelte'),
-    ImportDialog: () => import('./components/ImportDialog.svelte')
+    ImportDialog: () => import('./components/ImportDialog.svelte'),
+    Onboarding: () => import('./components/Onboarding.svelte')
   };
   type Deferred = { [K in keyof typeof deferredLoaders]?: Awaited<ReturnType<(typeof deferredLoaders)[K]>>['default'] };
   let deferred = $state.raw<Deferred>({});
@@ -85,11 +89,18 @@
     if (store.paletteOpen) need('CommandPalette');
     if (store.projectPickerOpen) need('ProjectPicker');
     if (store.imports) need('ImportDialog');
+    if (tour) need('Onboarding');
   });
 
   onMount(() => {
     const stopViewport = startViewport();
     const stopInstall = listenForInstall();
+    let stopAppUpdater: () => void = () => undefined;
+    let updateDelay: number | undefined;
+    const updateFrame = typeof requestAnimationFrame === 'function'
+      ? requestAnimationFrame(() => { updateDelay = window.setTimeout(() => { stopAppUpdater = appUpdater.start(); }, 0); })
+      : undefined;
+    if (updateFrame === undefined) updateDelay = window.setTimeout(() => { stopAppUpdater = appUpdater.start(); }, 0);
     // After the first paint, not in its way. Safari has no requestIdleCallback.
     const idle = typeof requestIdleCallback === 'function'
       ? requestIdleCallback(needAll, { timeout: 1500 })
@@ -122,6 +133,9 @@
       else clearTimeout(idle);
       stopViewport();
       stopInstall();
+      if (updateFrame !== undefined) cancelAnimationFrame(updateFrame);
+      if (updateDelay !== undefined) clearTimeout(updateDelay);
+      stopAppUpdater();
       document.removeEventListener('visibilitychange', visibility);
       window.removeEventListener('online', resume);
       window.removeEventListener('pageshow', pageshow);
@@ -256,8 +270,19 @@
     quitHold?.release();
   }
 
-  /** Whether one of the two modal dialogs is up, waiting on the user. */
-  let modal = $derived(confirm.current !== null || store.imports !== null || store.projectPickerOpen);
+  /*
+   * The tour opens by itself the first time Boite runs on this device, and on
+   * request afterwards. It waits for a core: its screens carry real switches,
+   * and half of them would be dead against a connection that is not there.
+   */
+  let tour = $derived(store.booted && store.connection !== 'closed' && (tourRequested() || !tourSeen()));
+
+  /**
+   * Whether something modal is up, waiting on the user: no app chord fires under
+   * it. The tour counts once it is drawn: offline with a cold cache it never is,
+   * and the keyboard must not stay held for it.
+   */
+  let modal = $derived((tour && deferred.Onboarding !== undefined) || confirm.current !== null || store.imports !== null || store.projectPickerOpen);
 
   /** A key that belongs to whatever the user is typing in, not to the app. */
   function typing(event: KeyboardEvent): boolean {
@@ -434,7 +459,7 @@
     </div>
   {/if}
 
-  <HarnessUpdateNotices />
+  {#if !(tour && deferred.Onboarding)}<HarnessUpdateNotices />{/if}
 
   {#if toast.shown}
     <div
@@ -451,6 +476,7 @@
 </div>
 
 <ContextMenu />
+{#if tour && deferred.Onboarding}{@const Onboarding = deferred.Onboarding}<Onboarding {store} />{/if}
 {#if deferred.ProjectPicker}{@const ProjectPicker = deferred.ProjectPicker}<ProjectPicker {store} />{/if}
 <ConfirmDialog />
 {#if deferred.ImportDialog}{@const ImportDialog = deferred.ImportDialog}<ImportDialog {store} />{/if}

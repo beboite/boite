@@ -81,7 +81,7 @@
 </script>
 
 <div class="changes-surface" data-testid="changes-panel">
-  <div class="bar">
+  <div class="panel-toolbar">
     <span class="branch" title={status?.upstream ?? strings.changes.noBranch}>
       <GitBranch size={13} strokeWidth={1.75} />
       {status?.branch ?? strings.changes.noBranch}
@@ -184,17 +184,6 @@
     container-type: inline-size;
   }
 
-  .bar {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    height: var(--row);
-    padding: 0 6px 0 12px;
-    flex: none;
-    font-size: var(--text-xs);
-    color: var(--color-muted-foreground);
-  }
-
   .branch,
   .track {
     display: inline-flex;
@@ -206,6 +195,7 @@
   }
 
   .branch {
+    flex: 0 1 auto;
     color: var(--color-foreground);
     overflow: hidden;
     text-overflow: ellipsis;
@@ -240,7 +230,8 @@
     flex: 1;
     min-height: 0;
     overflow: auto;
-    padding: 0 10px 10px;
+    padding: 12px;
+    border-top: 1px solid var(--color-border);
   }
 
   /* Wide enough for two columns: the diff sits beside the list instead of under it. */
@@ -266,18 +257,19 @@
     align-items: center;
     gap: 6px;
     width: 100%;
-    height: var(--control-sm);
+    height: var(--row);
     padding: 0 6px;
     border: none;
     border-radius: var(--radius-sm);
     background: transparent;
     color: var(--color-muted-foreground);
-    font-size: var(--text-xs);
+    font-size: var(--text-sm);
     font-weight: 400;
     text-align: left;
   }
 
-  .row:hover:not(:disabled) {
+  .row:hover:not(:disabled),
+  .row:focus-visible {
     background: var(--color-hover);
   }
 
@@ -303,7 +295,7 @@
     background: color-mix(in srgb, var(--mark) 18%, transparent);
     color: var(--mark);
     font-family: var(--font-mono);
-    font-size: var(--text-xs);
+    font-size: var(--text-sm);
     font-weight: 600;
   }
 
@@ -365,7 +357,7 @@
     border-radius: var(--radius-sm);
     background: var(--color-surface-3);
     color: var(--color-muted-foreground);
-    font-size: var(--text-xs);
+    font-size: var(--text-sm);
     line-height: 18px;
     font-weight: 600;
   }
@@ -385,13 +377,13 @@
 
   .empty {
     padding: 10px 6px;
-    font-size: var(--text-xs);
+    font-size: var(--text-sm);
     color: var(--color-muted-foreground);
   }
 
   .notice {
     margin: 6px 0;
-    font-size: var(--text-xs);
+    font-size: var(--text-sm);
     color: var(--color-muted-foreground);
   }
 </style>

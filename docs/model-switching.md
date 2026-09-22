@@ -32,11 +32,14 @@ when its SDK reports adaptive thinking.
 Model catalogs persist in client storage, scoped to the core endpoint and data
 directory and checked against the current provider/account records. Opening an
 agent shows the cached list immediately while discovery runs in the background.
-The top-right refresh button forces a new probe; concurrent requests share one
+The refresh button forces a new probe; concurrent requests share one
 operation. A failed refresh keeps the visible list and waits for a manual retry.
 The menu floats without changing the page layout. It prefers the space below the
-composer and flips above when needed. Provider tabs sit above the models; the
-menu fits its content up to a scrollable height limit. Legacy models open in a
+composer and flips above when needed. On desktop, provider logos sit in a
+narrow left column, with names in tooltips. On phones, they form a horizontal
+strip above them. The frame keeps the same size when switching providers or
+favorites, limited by the available viewport space. Models scroll independently
+below the provider name and account chips. Legacy models open in a
 side submenu, with a left-side or in-viewport fallback on narrow screens.
 Both menus use the browser's top layer so the composer's glass or Grain blur
 cannot offset or clip them. Pointer-click checks cover both materials.

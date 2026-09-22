@@ -1,9 +1,11 @@
 <script lang="ts">
-  import { ArrowLeft, Bell, ChevronRight, Coins, Gauge, Monitor, Palette, Mic } from '@lucide/svelte';
+  import TelemetrySettings from './TelemetrySettings.svelte';
+  import { ArrowLeft, Bell, ChevronRight, Coins, Compass, Gauge, Monitor, Palette, Mic } from '@lucide/svelte';
   import type { Store } from '../lib/store.svelte';
   import { workspace } from '../lib/workspace.svelte';
   import { strings } from '../lib/strings';
   import { mobileOverlay } from '../lib/mobile-history';
+  import { openTour } from '../lib/onboarding.svelte';
   import AppearancePage from './AppearancePage.svelte';
   import LimitsPage from './LimitsPage.svelte';
   import MachinesPage from './MachinesPage.svelte';
@@ -30,6 +32,7 @@
 
 <!-- `settings` gives the detail pages the same grammar as the desktop ones. -->
 <div class="mobile-settings settings" data-testid="settings">
+  {#key page}
   {#if page === 'home'}
     <div class="home" data-testid="mobile-settings-home">
       <h1>{strings.settings.heading}</h1>
@@ -42,6 +45,9 @@
           </button>
           <button class="ghost row" data-testid="settings-tab-appearance" onclick={() => store.showSettings('appearance')}>
             <Palette size={20} /><span><strong>{strings.settings.tabs.appearance}</strong><small>{strings.mobile.settingsAppearanceHint}</small></span><ChevronRight size={18} />
+          </button>
+          <button class="ghost row" data-testid="settings-tour" onclick={() => { store.showChat(); openTour(); }}>
+            <Compass size={20} /><span><strong>{strings.onboarding.replay}</strong><small>{strings.onboarding.replayHint}</small></span><ChevronRight size={18} />
           </button>
         </div>
       </section>
@@ -74,6 +80,7 @@
         <div class="page phone-page">
           <p class="scope" data-testid="mobile-settings-scope">{machine?.label ?? store.endpointUrl ?? strings.connection.current} · {strings.connection[store.connection]}</p>
           <PhoneSettings {store} showServerSettings={false} />
+          <TelemetrySettings {store} />
         </div>
       {:else if page === 'voice'}
         <VoiceSettings {store} readOnly />
@@ -88,11 +95,12 @@
       {/if}
     </div>
   {/if}
+  {/key}
 </div>
 
 <style>
   .mobile-settings { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
-  .home, .detail { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+  .home, .detail { animation: fade var(--dur-2) var(--ease-out-quint); min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
   .home { padding: 20px 16px; }
   h1 { font-size: var(--text-lg); margin: 0; }
   section { margin-top: 28px; }
@@ -115,6 +123,8 @@
   .phone-page :global(.card) { padding: 18px; }
   .detail :global(.page), .detail :global(.machines-page) { padding: 16px; }
   /* The bar above already names the page, so its own title steps aside. */
-  .detail :global(.page > header), .detail :global(.machines-page > .head h1) { display: none; }
+  .detail :global(.page:not(.machines-page):not(.usage) > header),
+  .detail :global(.machines-page > .head h1),
+  .detail :global(.usage > header h1) { display: none; }
   .detail :global(.switch-row) { flex-wrap: wrap; gap: 12px; }
 </style>

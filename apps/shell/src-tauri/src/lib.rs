@@ -13,6 +13,13 @@ mod platform;
 use platform::{job, default_data_dir};
 use platform::job::CoreJob;
 mod quota_window;
+mod updater;
+
+// Tauri links its manifest into binaries, but not the library test executable.
+// Native updater tests import TaskDialogIndirect, which needs Common Controls v6.
+#[cfg(all(test, target_os = "windows"))]
+#[link(name = "resource", kind = "static", modifiers = "-bundle")]
+unsafe extern "C" {}
 
 use serde::{Deserialize, Serialize};
 use tauri::{
@@ -714,6 +721,12 @@ fn start_core<R: Runtime>(app: &AppHandle<R>, state: &CoreState) {
 // Window and tray.
 // ---------------------------------------------------------------------------
 
+fn product_label<R: Runtime>(app: &AppHandle<R>, channel: Channel) -> &'static str {
+    if channel == Channel::Stable && app.package_info().version.pre.as_str().starts_with("nightly.") {
+        "boite de nuit"
+    } else { channel.product_name() }
+}
+
 /// The main window, built here rather than in `tauri.conf.json` so a run on its
 /// own data directory (a test, a bench) keeps its WebView2 profile there too.
 /// WebView2 runs one browser process per profile: on the default profile the
@@ -725,7 +738,7 @@ fn build_main_window<R: Runtime>(
 ) -> tauri::Result<tauri::WebviewWindow<R>> {
     let mut builder =
         tauri::WebviewWindowBuilder::new(app, MAIN_LABEL, tauri::WebviewUrl::default())
-            .title(channel.product_name())
+            .title(product_label(app, channel))
             .inner_size(1280.0, 800.0)
             .min_inner_size(880.0, 560.0)
             .resizable(true)
@@ -800,7 +813,7 @@ fn build_tray<R: Runtime>(app: &AppHandle<R>, channel: Channel) -> tauri::Result
     let menu = Menu::with_items(app, &[&show, &leave])?;
 
     let mut builder = TrayIconBuilder::with_id("boite")
-        .tooltip(channel.product_name())
+        .tooltip(product_label(app, channel))
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_tray_icon_event(|tray, event| {
@@ -847,10 +860,15 @@ pub fn run() {
     };
     let preferences_path = directory.join("shell-settings.json");
     let close_to_tray = close_to_tray_or_default(&preferences_path);
+    let app_updater = updater::AppUpdater::new(context.package_info().version.to_string(), directory.clone(),
+        cfg!(all(windows, target_arch = "x86_64")) && !cfg!(debug_assertions)
+            && channel == Channel::Stable && !hidden());
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .manage(app_updater)
         .manage(CoreState::new(channel))
         .manage(quota_window::HoverState::default())
         .manage(CloseBehavior { enabled: AtomicBool::new(close_to_tray), path: preferences_path })
@@ -859,6 +877,10 @@ pub fn run() {
             quit_shell,
             notify,
             close_behavior,
+            updater::app_update_status,
+            updater::app_update_check,
+            updater::app_update_download,
+            updater::app_update_install,
             quota_window::quota_window,
             window_material,
             window_material_supported,
