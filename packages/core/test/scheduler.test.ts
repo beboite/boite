@@ -33,6 +33,24 @@ afterEach(async () => {
 });
 
 describe('scheduler', () => {
+  test('shutdown refuses new turns before they reach the journal', async () => {
+    const client = await harness.connect();
+    const [threadId = ''] = await threeThreads(client);
+    await harness.core.drain();
+    await expect(client.call('turns.start', { threadId, prompt: 'late prompt' })).rejects.toThrow('stopping');
+    expect(harness.core.journal.listTurns(threadId)).toEqual([]);
+    expect(harness.core.journal.listMessages(threadId)).toEqual([]);
+  });
+
+  test('shutdown pauses delayed activity before waiting for running turns', async () => {
+    const client = await harness.connect();
+    const [threadId = ''] = await threeThreads(client);
+    harness.core.activity.set({ threadId, goal: { objective: 'must not start during shutdown' } });
+    await harness.core.drain();
+    expect(harness.core.activity.get(threadId).goal?.status).toBe('paused');
+    expect(harness.core.journal.listTurns(threadId)).toEqual([]);
+  });
+
   test('refuses a second in-flight turn without journaling its prompt', async () => {
     const client = await harness.connect();
     const [threadId = ''] = await threeThreads(client);
@@ -91,12 +109,26 @@ describe('scheduler', () => {
     await waitFor(() => harness.core.scheduler.state().running.length === 1);
     harness.core.threads.stopRunning = () => true;
     await harness.core.drain(150);
-    // `close()` drains again, for a turn that ended while the sockets were
-    // closing. Spending the whole budget a second time is what used to run the
-    // shutdown past its own ten seconds and skip every step after the drain.
+    // Spending the budget again in close() used to run shutdown past its own
+    // ten seconds and skip every step after the drain.
     const started = Date.now();
     await harness.stop();
     expect(Date.now() - started).toBeLessThan(2_000);
+  });
+
+  test('close keeps the journal open until an overlapping drain finishes', async () => {
+    const client = await harness.connect();
+    const [running = ''] = await threeThreads(client);
+    await client.call('turns.start', { threadId: running, prompt: '[sleep:60000]' });
+    await waitFor(() => harness.core.scheduler.state().running.length === 1);
+    harness.core.threads.stopRunning = () => true;
+    let journalOpenAfterDrain = false;
+    const draining = harness.core.drain(1_000).then(() => {
+      journalOpenAfterDrain = !harness.core.journal.isClosed();
+    });
+    await Promise.all([draining, harness.stop()]);
+    expect(journalOpenAfterDrain).toBe(true);
+    expect(harness.core.journal.isClosed()).toBe(true);
   });
 
   test('concurrency caps require positive integers', () => {

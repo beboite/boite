@@ -68,6 +68,9 @@ process. A version read has 20 seconds, an update 15 minutes.
 
 - An update is refused while a turn of that provider is queued, running or
   waiting. The automatic update waits and looks again ten minutes later.
+  The accepted turn's provider still counts after the picker selects another
+  account. Closing the core cancels update processes and prevents an updater
+  waiting on a version check from starting later.
 - A turn is refused while its provider is updating, and an update asked for
   during a version check starts once that check has landed.
 - Versions compare by their numbers; a pre-release is older than its release.

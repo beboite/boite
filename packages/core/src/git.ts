@@ -17,7 +17,7 @@ import { DIFF_MAX_BYTES } from '@boite/contracts';
 import type { GitChange, GitChangeStatus, GitDiff, GitStatus, RpcParams, ThreadId } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { messageOf, refused } from './errors.ts';
-import { hasNul, resolveInside, threadCwd } from './workdir.ts';
+import { hasNul, resolveInside, threadCwd, writeLandsInside } from './workdir.ts';
 
 /** git answers 128 on anything it will not do here, a directory outside a repository first of all. */
 const OUTSIDE_A_REPOSITORY = 128;
@@ -233,6 +233,11 @@ export async function gitDiff(core: Core, params: RpcParams<'git.diff'>): Promis
 
   let current: Uint8Array | null = null;
   let newSideTooBig = false;
+  // Missing files are valid diff inputs, but existing ancestors and links must
+  // still resolve inside the same directory that files.read permits.
+  if (!writeLandsInside(cwd, found.absolute)) {
+    throw refused(`git.diff path leaves the thread's working directory: ${params.path}`, { path: params.path });
+  }
   // Size before read, on the handle rather than the path. A multi-gigabyte
   // working-tree file used to be loaded whole and only cut to DIFF_MAX_BYTES
   // afterwards, so one `git.diff` on a big log could take the core down; and a

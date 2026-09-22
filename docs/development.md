@@ -208,7 +208,7 @@ BOITE_ECHO=1 bun run dev:core
 ## Checks and tests
 
 ```bash
-bun run check    # tsc on contracts and core, svelte-check --tsgo on the UI
+bun run check    # contracts, core, UI and end-to-end test types
 bun run test     # bun test in packages/core, vitest in packages/ui
 bun run build:ui # required by the core-backed browser tests on a fresh checkout
 bun run e2e      # tests/e2e

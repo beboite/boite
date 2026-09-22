@@ -5,6 +5,7 @@ import type { ServerWebSocket } from 'bun';
 import { FILE_ROUTE, PROTOCOL_VERSION, RPC_PATH, RpcCloseCode, RpcErrorCode } from '@boite/contracts';
 import type { RpcError, RpcEventName, RpcEvents, ThreadId } from '@boite/contracts';
 import { eventThreadId } from './bus.ts';
+import { mayReceiveEvent } from './access.ts';
 import type { Core } from './core.ts';
 import { RpcFailure, messageOf } from './errors.ts';
 import { newId } from './ids.ts';
@@ -470,7 +471,8 @@ export function startServer(options: ServerOptions): RunningServer {
     const threadId = eventThreadId(payload);
     for (const connection of connections) {
       if (!connection.authenticated) continue;
-      if (name === 'collaboration.changed' && connection.identity.principal === 'agent' && connection.identity.threadId !== threadId) continue;
+      if (!mayReceiveEvent(name, connection)) continue;
+      if (connection.identity.principal === 'agent' && name !== 'todos.updated' && connection.identity.threadId !== threadId) continue;
       if (name === 'collaboration.changed' && !connection.subscriptions.has(threadId ?? '')) continue;
       if (scoped && (threadId === null || !connection.subscriptions.has(threadId))) continue;
       if (name === 'todos.updated' && !mayReadTodos(core, connection, (payload as RpcEvents['todos.updated']).projectId)) continue;
