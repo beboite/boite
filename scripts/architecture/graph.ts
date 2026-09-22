@@ -2,7 +2,7 @@ import { posix } from 'node:path';
 
 export type Sources = Map<string, string>;
 export type Graph = Map<string, string[]>;
-const scanner = new Bun.Transpiler({ loader: 'tsx' });
+const scanner = new Bun.Transpiler({ loader: 'ts' });
 const aliases = new Map([
   ['@boite/contracts', 'packages/contracts/src/index.ts'],
   ['@boite/core', 'packages/core/src/index.ts'],

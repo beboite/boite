@@ -204,24 +204,28 @@ export class Core {
    * that ends during shutdown still reaches the clients watching it. Closing
    * the server first emitted `turn.finished` to nobody.
    */
-  async drain(timeoutMs?: number): Promise<void> {
+  drain(timeoutMs?: number): Promise<void> {
+    if (this.#drainPromise !== null) return this.#drainPromise;
+    this.#stopping = true;
     this.coordination.beginClose();
-    this.#drained = true;
-    await this.scheduler.drain(timeoutMs);
+    this.activity.close();
+    this.#drainPromise = this.scheduler.drain(timeoutMs);
+    return this.#drainPromise;
   }
 
-  /** Whether the wait above has already been spent, so `close()` does not spend a second one. */
-  #drained = false;
+  /** Share both an active wait and its completion across shutdown phases. */
+  #drainPromise: Promise<void> | null = null;
+  #stopping = false;
+
+  get stopping(): boolean { return this.#stopping; }
 
   async close(): Promise<void> {
+    this.#stopping = true;
     this.updates.close();
-    this.coordination.beginClose();
-    // Reuse the shutdown wait already spent by drain(), while stopping late arrivals.
-    await this.scheduler.drain(this.#drained ? 0 : undefined);
+    await this.drain();
     await this.coordination.close();
     await this.speech.close();
     await this.push.close();
-    this.activity.close();
     await this.plugins.close();
     this.providers.installs.stop();
     shutdownDrivers();

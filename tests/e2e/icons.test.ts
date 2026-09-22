@@ -1,11 +1,8 @@
 import { afterAll, beforeAll, expect, test } from 'bun:test';
-import { join } from 'node:path';
-import { createRequire } from 'node:module';
 import { BrowserPage, freePort } from './lib/cdp';
+import { startUi } from './lib/ui.ts';
 
-const uiRequire = createRequire(join(import.meta.dir, '../../packages/ui/package.json'));
-const { createServer } = await import(uiRequire.resolve('vite'));
-let server: Awaited<ReturnType<typeof createServer>>;
+let server: { close(): Promise<void> };
 let page: BrowserPage;
 const id = (name: string) => `[data-testid="${name}"]`;
 
@@ -36,8 +33,7 @@ async function squeezed(where: string): Promise<string[]> {
 
 beforeAll(async () => {
   const port = await freePort();
-  server = await createServer({ root: join(import.meta.dir, '../../packages/ui'), server: { host: '127.0.0.1', port, strictPort: true }, clearScreen: false });
-  await server.listen();
+  server = await startUi(port);
   page = await BrowserPage.launch({ url: `http://127.0.0.1:${port}/?fake=1`, windowSize: { width: 1310, height: 820 } });
   // The app opens on a draft, so a thread is opened here for the icons a timeline draws.
   await page.click(id('thread-row'));

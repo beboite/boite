@@ -21,6 +21,11 @@ Provider accounts, keyboard shortcuts, plugins, resource limits, pairing
 administration and server configuration stay in desktop settings. This smaller
 phone menu also applies to owner sessions; it does not change RPC permissions.
 
+Device sessions receive only events corresponding to the state they may read.
+Account login output, process traces, plugin state, quotas and core diagnostics
+remain owner-only. Event permissions are deny-by-default in `access.ts`, just
+like RPC permissions.
+
 [Phone settings](images/phone-settings.png) · [Desktop settings](images/phone-settings-desktop.png)
 
 ## Listening on the LAN

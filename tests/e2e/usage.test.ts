@@ -63,6 +63,16 @@ test('the desktop page charts each day by provider, reads a column on hover and 
   expect(await count('[data-testid=usage-providers] li')).toBe(6);
   expect(await page.evaluate(`[...document.querySelectorAll('[data-testid=usage-providers] li')].map(li => li.dataset.provider)`)).toEqual(['claude', 'codex', 'opencode', 'grok', 'antigravity', 'pi']);
   expect(await count('[data-testid=usage-threads] li')).toBe(10);
+  const cards = await page.evaluate<{ inset: number; gap: number; width: number }>(`(() => {
+    const overview = document.querySelector('[data-testid=usage-overview]');
+    const next = overview.nextElementSibling;
+    const box = overview.getBoundingClientRect();
+    return { inset: overview.firstElementChild.getBoundingClientRect().left - box.left,
+      gap: next.getBoundingClientRect().top - box.bottom, width: box.width };
+  })()`);
+  expect(cards.inset).toBeGreaterThanOrEqual(18);
+  expect(cards.gap).toBeGreaterThanOrEqual(16);
+  expect(cards.width).toBeLessThanOrEqual(880);
   await capture('usage-desktop-dark.png');
 
   const chart = await box('[data-testid=usage-chart]');
@@ -115,6 +125,7 @@ test('the phone page fits 390 px and is reachable from the phone settings list',
   await viewport(390, 844, true);
   await page.waitFor(`document.querySelector('[data-testid=mobile-settings-detail] [data-testid=usage-chart] svg path')`);
   expect(await fits()).toBe(true);
+  expect(await page.evaluate(`document.querySelector('[data-testid=usage-page] > header p').getBoundingClientRect().height > 0`)).toBe(true);
   await capture('usage-phone-dark.png');
 
   await page.evaluate(`document.querySelector('[data-testid=usage-chart]').scrollIntoView({ block: 'center' })`);

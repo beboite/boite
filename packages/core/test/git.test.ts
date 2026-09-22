@@ -5,7 +5,7 @@
  * output git produces for a rename and a binary file.
  */
 
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { DIFF_MAX_BYTES, RpcErrorCode } from '@boite/contracts';
@@ -193,6 +193,16 @@ describe('git.diff', () => {
       'git.diff has no file to read at never-existed.txt, in the working tree or at HEAD',
     ]);
   });
+});
+
+test('git.diff refuses a junction leading outside the working directory', async () => {
+  const cwd = await fixture();
+  const threadId = await threadIn(cwd, 'junction boundary');
+  const outside = join(harness.dataDir, 'outside-diff');
+  mkdirSync(outside);
+  writeFileSync(join(outside, 'private.txt'), 'outside data');
+  symlinkSync(outside, join(cwd, 'linked'), 'junction');
+  await expect(client.call('git.diff', { threadId, path: 'linked/private.txt' })).rejects.toThrow("leaves the thread's working directory");
 });
 
 describe('the porcelain formats', () => {

@@ -31,6 +31,12 @@ names another thread, or an owner-only method such as `files.write` or
 archived or removed, a socket an agent already opened with it is closed at the
 same moment, and the token is never written to disk.
 
+Events follow the same access boundary as calls. An agent can receive its own
+thread's activity and its project's task cards. Account login output, process
+traces, diagnostics and other conversations' updates are owner-only for an
+agent connection. New event types are denied until explicitly allowed in
+`access.ts`.
+
 Outside a thread, `boite --thread <id>` reads the owner token out of
 `core.json` like `boite-core pair` does (`--data-dir`, `--channel dev`) and
 drives that thread as the owner. That is for a person at a terminal, not for an

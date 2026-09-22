@@ -1,6 +1,14 @@
 import { expect, test } from 'bun:test';
 import { boundaryViolations, cycles, dependencyGraph } from './graph.ts';
 
+test('generic TypeScript arrow functions are not parsed as JSX', () => {
+  const graph = dependencyGraph(new Map([
+    ['a.ts', "import { value } from './b'; export const invoke = async <T>(command: string): Promise<T> => value as T;"],
+    ['b.ts', 'export const value = 1;'],
+  ]));
+  expect(graph.get('a.ts')).toEqual(['b.ts']);
+});
+
 test('resolves aliases, barrel exports and lazy imports, but ignores type-only edges', () => {
   const graph = dependencyGraph(new Map([
     ['packages/core/src/a.ts', "import type { B } from './b.ts'; export { C } from './c'; const lazy = () => import('./b.ts');"],

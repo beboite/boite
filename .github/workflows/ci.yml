@@ -6,6 +6,10 @@ on:
   pull_request:
   workflow_dispatch:
   workflow_call:
+    secrets:
+      TAURI_SIGNING_PRIVATE_KEY:
+        description: Required only when sign-updates is enabled.
+        required: false
     inputs:
       force:
         type: boolean
@@ -19,6 +23,9 @@ on:
       version:
         type: string
         default: ''
+      sign-updates:
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -122,6 +129,8 @@ jobs:
       - name: Build installer once
         env:
           BUILD_CHANNEL: ${{ inputs.channel || 'stable' }}
+          BOITE_SIGN_UPDATES: ${{ inputs.sign-updates && '1' || '0' }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ inputs.sign-updates && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
         run: |
           if ($env:BUILD_CHANNEL -eq 'nightly') {
             bun run build:shell:nightly
@@ -139,7 +148,9 @@ jobs:
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: windows-installer
-          path: apps/shell/src-tauri/target/release/bundle/nsis/*.exe
+          path: |
+            apps/shell/src-tauri/target/release/bundle/nsis/*.exe
+            apps/shell/src-tauri/target/release/bundle/nsis/*.sig
           if-no-files-found: error
           compression-level: 0
           retention-days: 7

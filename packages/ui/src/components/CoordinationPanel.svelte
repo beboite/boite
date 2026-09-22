@@ -36,7 +36,7 @@
   }
 </script>
 
-<details class="coordination" data-testid="coordination-panel" ontoggle={toggleSettings}>
+<details class="coordination disclosure" data-testid="coordination-panel" ontoggle={toggleSettings}>
   <summary>
     <Network size={14} strokeWidth={1.75} />
     <span>{strings.coordination.heading}</span>
@@ -66,7 +66,7 @@
     </div>
 
     {#if config.mode !== 'off'}
-      <details class="options">
+      <details class="options disclosure">
         <summary>{strings.coordination.options}</summary>
       <label class="resources">
         <span>{strings.coordination.resources}</span>
@@ -137,8 +137,8 @@
 
 <style>
   .coordination { flex: none; margin: 8px auto 0; width: min(calc(100% - 40px), var(--content)); border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-surface); }
-  .coordination > summary { min-height: var(--control-lg); padding: 0 12px; display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: var(--text-sm); font-weight: 600; }
-  .coordination > summary::marker { color: var(--color-muted-foreground); }
+  .coordination > summary { min-height: var(--control-lg); width: 100%; padding: 0 12px; display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: var(--text-sm); font-weight: 600; color: var(--color-foreground); border-radius: var(--radius-lg); }
+  .coordination > summary:hover { background: var(--color-hover); }
   .mode, .paused { padding: 2px 6px; border-radius: var(--radius-sm); background: var(--color-surface-3); color: var(--color-muted-foreground); font-size: var(--text-xs); font-weight: 500; }
   .mode { margin-left: auto; }
   .body { padding: 0 14px 14px; border-top: 1px solid var(--color-border); max-height: min(48dvh, 480px); overflow-y: auto; overscroll-behavior: contain; }
@@ -156,11 +156,6 @@
   .remote-row strong, .remote-row small { display: block; }
   .remote-row strong { font-size: var(--text-sm); font-weight: 500; }
   .remote-row small { margin-top: 2px; color: var(--color-muted-foreground); line-height: 1.4; }
-  .remote-row input { appearance: none; position: relative; flex: 0 0 40px; width: 40px; height: 24px; min-height: 24px; padding: 0; border: 1px solid var(--color-edge); border-radius: 999px; background: var(--color-surface-3); cursor: pointer; }
-  .remote-row input::after { content: ''; position: absolute; width: 16px; height: 16px; top: 3px; left: 3px; border-radius: 50%; background: var(--color-muted-foreground); transition: transform var(--dur-2) var(--ease-out-quint); }
-  .remote-row input:checked { background: var(--color-foreground); border-color: var(--color-foreground); }
-  .remote-row input:checked::after { transform: translateX(16px); background: var(--color-background); }
-  .remote-row input:focus-visible { outline: 2px solid var(--color-foreground); outline-offset: 3px; }
   .budget { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 12px; color: var(--color-muted-foreground); font-size: var(--text-xs); font-variant-numeric: tabular-nums; }
   .pause { margin-top: 8px; padding-left: 0; }
   section { margin-top: 16px; }
@@ -180,5 +175,4 @@
     .coordination { width: calc(100% - 20px); margin-top: 6px; }
     .body { padding: 0 10px 12px; }
   }
-  @media (prefers-reduced-motion: reduce) { .remote-row input::after { transition: none; } }
 </style>

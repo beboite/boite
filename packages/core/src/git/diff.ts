@@ -2,7 +2,7 @@ import type { GitChange, GitDiff, RpcParams } from '@boite/contracts';
 import { DIFF_MAX_BYTES } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { refused } from '../errors.ts';
-import { hasNul, resolveInside, threadCwd } from '../workdir.ts';
+import { hasNul, resolveInside, threadCwd, writeLandsInside } from '../workdir.ts';
 import { notARepository, OUTSIDE_A_REPOSITORY } from './errors.ts';
 import { parseStatus } from './porcelain.ts';
 import { git, readRefSide, readTreeSide, SIDE_CEILING_BYTES } from './read.ts';
@@ -30,6 +30,10 @@ export async function gitDiff(core: Core, params: RpcParams<'git.diff'>): Promis
   // Status paths are root-relative; an unchanged path is relative to cwd.
   const atRef = change?.oldPath ?? change?.path ?? `./${found.relative}`;
   const oldSide = await readRefSide(core, threadId, cwd, ref, atRef);
+  // Missing files remain valid inputs, but links and ancestors must stay inside cwd.
+  if (!writeLandsInside(cwd, found.absolute)) {
+    throw refused(`git.diff path leaves the thread's working directory: ${params.path}`, { path: params.path });
+  }
   const newSide = await readTreeSide(found.absolute);
   if (oldSide.tooBig || newSide.tooBig) {
     throw refused(

@@ -51,6 +51,10 @@ lets a video seek, and is never cached. It answers `nosniff` and
 instead of rendering. The answer carries the path only, and the UI resolves it
 against the origin it reached the core by.
 
+A ticket also records the file's real path, identity, size and modification
+times. Replacing or modifying the file invalidates it, including replacing an
+ancestor with a junction. An expired or invalidated ticket returns the same 404.
+
 The shell's content security policy lets pictures and media load from
 `http://127.0.0.1:*` and nothing wider. A shell driving a core on another
 machine therefore reads and edits text there, and shows no picture or video
