@@ -22,7 +22,7 @@ export async function gitDiff(core: Core, params: RpcParams<'git.diff'>): Promis
   const threadId = params.threadId;
   const cwd = threadCwd(core, threadId);
   const found = resolveInside(cwd, params.path, 'git.diff path');
-  const ref = checkRef(params.ref === undefined || params.ref.length === 0 ? 'HEAD' : params.ref);
+  const ref = checkRef(params.ref === undefined || params.ref === '' ? 'HEAD' : params.ref);
   // Read the whole status so a rename retains its origin.
   const status = await git(core, threadId, cwd, ['status', '--porcelain=v1', '-z']);
   if (status.code === OUTSIDE_A_REPOSITORY) notARepository(threadId, status.stderr);
