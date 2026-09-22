@@ -576,7 +576,8 @@ describe('muse wire helpers', () => {
     const dir = mkdtempSync(join(tmpdir(), 'muse-install-'));
     try {
       const shim = join(dir, 'muse.cmd');
-      writeFileSync(shim, '@echo off\r\n', 'utf8');
+      // This Windows-layout fixture also runs through the POSIX executable resolver.
+      writeFileSync(shim, '@echo off\r\n', { encoding: 'utf8', mode: 0o755 });
       const descriptor = (path: string): ProviderDescriptor => {
         const profile = { detect: {}, executable: [{ kind: 'file', value: path }], isolation: {} };
         return {
@@ -590,7 +591,7 @@ describe('muse wire helpers', () => {
 
       writeFileSync(join(dir, '.muse-version'), '1.3.0-R3401.1\n', 'utf8');
       const binary = join(dir, 'muse-bin-1.3.0-R3401.1.exe');
-      writeFileSync(binary, '', 'utf8');
+      writeFileSync(binary, '', { encoding: 'utf8', mode: 0o755 });
       expect(museExecutable(descriptor(shim))).toBe(binary);
       // Anything but a `.cmd` is spawned as it is.
       expect(museExecutable(descriptor(binary))).toBe(binary);
