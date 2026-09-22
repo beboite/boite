@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, expect, test } from 'bun:test';
+import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from 'bun:test';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { BrowserPage, freePort } from './lib/cdp';
@@ -37,10 +37,14 @@ beforeAll(async () => {
   base = `http://127.0.0.1:${port}`;
   server = await createServer({ root: join(import.meta.dir, '../../packages/ui'), server: { host: '127.0.0.1', port, strictPort: true }, clearScreen: false });
   await server.listen();
+}, 30_000);
+
+beforeEach(async () => {
   page = await BrowserPage.launch({ url: `${base}/?fake=1` });
   await width(1400);
 }, 30_000);
-afterAll(async () => { await page?.close(); await server?.close(); }, 15_000);
+afterEach(async () => { await page?.close(); }, 15_000);
+afterAll(async () => { await server?.close(); }, 15_000);
 
 test('titlebar details open and scroll to the card on the first and later clicks', async () => {
   await page.navigate(`${base}/?fake=1&appUpdate=ready&appUpdateChannel=nightly`);
