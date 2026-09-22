@@ -70,6 +70,9 @@ type Segment =
 
 /** What the fake's context meter says: a fixed window, and a token per character of the prompt on top of a floor. */
 const CONTEXT_WINDOW = 2_000;
+
+/** A fixed prompt cache lifetime, so the timer and its journal column have something to carry in tests. */
+const PROMPT_CACHE = { ttlSeconds: 300, source: 'documented' } as const;
 const CONTEXT_FLOOR = 100;
 /** What `[compact]` claims it held before compacting and keeps after. */
 const COMPACT_PRE_TOKENS = 1_800;
@@ -471,5 +474,5 @@ async function run(ctx: TurnContext, state: RunState): Promise<TurnResult> {
 
   ctx.emit.complete(messageId, 'complete');
   ctx.context({ tokens: contextTokens, window: CONTEXT_WINDOW });
-  return { status: state.stopped ? 'stopped' : 'done', sessionId, usage: usage() };
+  return { status: state.stopped ? 'stopped' : 'done', sessionId, usage: usage(), promptCache: PROMPT_CACHE };
 }

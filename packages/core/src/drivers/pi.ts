@@ -43,7 +43,35 @@ import type {
   TurnContext,
   TurnHandle,
   TurnResult,
+  PromptCacheLife,
 } from './types.ts';
+import { ANTHROPIC_DEFAULT, openAiCacheLife } from '../prompt-cache.ts';
+
+/** The OpenAI Responses shapes pi sends to OpenAI's own endpoint, with an API key or a ChatGPT login. */
+const PI_OPENAI_APIS = new Set(['openai-responses', 'openai-codex-responses']);
+
+/**
+ * The prompt cache lifetime one pi request left. On Anthropic pi passes the
+ * API's own split through as `cacheWrite1h`, so the lifetime is reported; a
+ * pi too old to carry the field gets Anthropic's default. On OpenAI's own
+ * endpoint the model's published default applies, whatever `PI_CACHE_RETENTION`
+ * asks for: on a pre-5.6 model its `long` is the 24 hour retention an
+ * organization already defaults to, and from 5.6 on it is the 30 minutes that
+ * are the default anyway. Anything else has no published lifetime. A request
+ * that wrote nothing on Anthropic names nothing, like the Claude driver.
+ */
+export function piCacheLife(message: PiAssistantMessage): PromptCacheLife | null {
+  const usage = message.usage;
+  if (message.api === 'anthropic-messages' && message.provider === 'anthropic') {
+    if (usage === undefined || (usage.cacheWrite ?? 0) <= 0) return null;
+    if (usage.cacheWrite1h === undefined) return ANTHROPIC_DEFAULT;
+    return usage.cacheWrite1h > 0 ? { ttlSeconds: 3600, source: 'reported' } : { ttlSeconds: 300, source: 'reported' };
+  }
+  if (message.api !== undefined && PI_OPENAI_APIS.has(message.api) && (message.provider === 'openai' || message.provider === 'openai-codex')) {
+    return openAiCacheLife(message.model ?? null);
+  }
+  return null;
+}
 
 const MINUTE_MS = 60_000;
 const STDERR_MAX = 400;
@@ -100,12 +128,18 @@ interface PiUsage {
   output?: number;
   cacheRead?: number;
   cacheWrite?: number;
+  /** The part of `cacheWrite` written with the one-hour lifetime. Only Anthropic reports the split. */
+  cacheWrite1h?: number;
   cost?: { total?: number };
 }
 
 /** pi's `AssistantMessage`, the fields a `message_end` is read for. */
 interface PiAssistantMessage {
   role?: string;
+  /** The wire protocol the request went out on, `anthropic-messages` or `openai-responses` for instance. */
+  api?: string;
+  provider?: string;
+  model?: string;
   usage?: PiUsage;
   stopReason?: string;
   errorMessage?: string;
@@ -288,6 +322,8 @@ class PiTurn {
   /** The pi session id the process was launched with, kept as the thread's. */
   sessionId: string | null;
   usage: Usage | null = null;
+  /** The prompt cache lifetime of the last request that named one. */
+  cacheLife: PromptCacheLife | null = null;
   decided = false;
   isStopped = false;
   settled = false;
@@ -359,6 +395,7 @@ class PiTurn {
       sessionId: this.sessionId,
       usage: this.usage,
       error: this.error ?? undefined,
+      promptCache: this.cacheLife,
     });
   }
 
@@ -812,6 +849,7 @@ class PiSession {
         const assistant = message['message'] as PiAssistantMessage | undefined;
         if (assistant === undefined || assistant.role !== 'assistant') break;
         if (assistant.usage !== undefined) turn.addUsage(assistant.usage);
+        turn.cacheLife = piCacheLife(assistant) ?? turn.cacheLife;
         if (assistant.stopReason === 'error') {
           turn.noteError(assistant.errorMessage ?? 'the pi agent failed the turn');
         }

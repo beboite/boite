@@ -41,6 +41,9 @@ export function seedThreads() {
     sessionId: 'sess-trace',
     load: null,
     context: null,
+    // Measured from the page's own clock, so the timer behind the
+    // `prompt-cache` experiment reads warm with about half an hour left.
+    promptCache: { at: Date.now() - 29 * 60_000, ttlSeconds: 3600, source: 'reported', readTokens: 12_400, model: 'echo-1', accountId: 'a-echo' },
     createdAt: T0,
     updatedAt: T0 + 60_000,
     turns: [

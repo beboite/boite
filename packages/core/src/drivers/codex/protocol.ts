@@ -143,6 +143,13 @@ export const MODE_POLICY: Record<PermissionMode, { approvalPolicy: AskForApprova
   dontAsk: { approvalPolicy: 'never', sandbox: 'danger-full-access' },
 };
 
+/** What `thread/start` and `thread/resume` answer beside the thread. */
+export interface CodexThreadOpened {
+  thread: { id: string };
+  model?: unknown;
+  modelProvider?: unknown;
+}
+
 export type Timer = ReturnType<typeof setTimeout>;
 
 /** What one Codex `ThreadItem` is drawn as, or null when the contract has no part for it. */

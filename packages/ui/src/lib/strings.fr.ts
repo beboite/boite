@@ -365,6 +365,20 @@ export const fr: Messages = {
     contextNoBreakdown: 'Cet agent ne détaille pas sa consommation.',
     contextNoReading: "Aucune mesure reçue de cet agent pour l'instant.",
     contextMeasured: 'Dernière mesure',
+    cacheTitle: 'Cache de prompt',
+    cacheChipWarm: (left: string) => `Cache de prompt chaud, encore environ ${left}`,
+    cacheChipCold: 'Cache de prompt froid',
+    cacheCold: 'froid',
+    cacheWarm: (left: string) => `Chaud, encore environ ${left}.`,
+    cacheMaybe: (left: string) => `Peut-être encore chaud, ${left} au plus.`,
+    cacheExpired: 'Froid : le prochain tour renvoie tout le contexte.',
+    cacheSwitched: 'Froid : la conversation a changé de modèle ou de compte depuis.',
+    cacheReported: (lifetime: string) => `Durée de vie de ${lifetime}, rapportée par l'agent.`,
+    cacheDocumented: (lifetime: string) => `Durée de vie de ${lifetime}, selon la documentation du provider.`,
+    cacheBestEffort: (lifetime: string, most: string) => `Durée de vie de ${lifetime}, jusqu'à ${most} quand le provider a de la place.`,
+    cacheRead: (tokens: string) => `Le dernier tour y a lu ${tokens} tokens.`,
+    minutes: (n: number) => `${n} min`,
+    hours: (n: number) => `${n} h`,
     none: 'Aucune conversation ouverte',
     noneBody: 'Choisissez-en une à gauche, ou lancez-en une nouvelle.',
     trace: 'Trace',
@@ -966,6 +980,10 @@ export const fr: Messages = {
     sessionImport: {
       title: 'Import de session Claude Code',
       hint: 'Transformer une session lancée dans le terminal en conversation, depuis le menu du projet et la palette'
+    },
+    promptCache: {
+      title: 'Minuteur du cache de prompt',
+      hint: 'Une horloge à côté de la jauge de contexte, qui décompte le temps pendant lequel le provider garde la conversation en cache'
     }
   },
 

@@ -48,7 +48,7 @@
       ...COMMAND_GROUPS.map(group => ({id: `keys-${group.id}`, label: strings.keyboard.groups[group.id]})),
       {id: 'keybinding-file', label: strings.keyboard.file}
     ],
-    experiments: [{id: 'theme-grain', label: strings.experiments.themeGrain.title}, {id: 'session-import', label: strings.experiments.sessionImport.title}],
+    experiments: [{id: 'theme-grain', label: strings.experiments.themeGrain.title}, {id: 'session-import', label: strings.experiments.sessionImport.title}, {id: 'prompt-cache', label: strings.experiments.promptCache.title}],
     usage: [
       { id: 'usage-overview', label: strings.usage.overview },
       { id: 'usage-breakdown', label: strings.usage.breakdown },
