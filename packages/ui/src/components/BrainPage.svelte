@@ -1,6 +1,6 @@
 <script lang="ts">
   import { ArrowUp, Brain, Check, ChevronRight, FileText, Folder, GitBranch, Puzzle, RefreshCw, Sparkles } from '@lucide/svelte';
-  import { RpcErrorCode, type BrainStatus, type RpcResult } from '@boite/contracts';
+  import { RpcErrorCode, type BrainConfig, type BrainStatus, type RpcResult } from '@boite/contracts';
   import { RpcFailure } from '../lib/client';
   import type { Store } from '../lib/store.svelte';
   import { strings } from '../lib/strings';
@@ -20,6 +20,7 @@
   const icons = { instructions: FileText, skill: Sparkles, plugin: Puzzle };
   let entries = $derived(status?.entries.filter(entry => entry.kind === selected) ?? []);
   let folderName = $derived(status?.config.path?.replace(/[\\/]+$/, '').split(/[\\/]/).pop() ?? '');
+  let autoPull = $derived(status?.config.autoPull ?? { onStartup: false, intervalMinutes: 0 });
   const failure = (cause: unknown) => cause instanceof RpcFailure && cause.code === RpcErrorCode.MethodNotFound ? t.missing : cause instanceof Error ? cause.message : String(cause);
 
   $effect(() => {
@@ -35,16 +36,18 @@
     return () => { ++revision; };
   });
 
-  async function run(action: 'save' | 'refresh' | 'sync' | 'disconnect' | 'toggle') {
+  async function run(action: 'save' | 'refresh' | 'sync' | 'disconnect' | 'toggle' | 'auto', policy?: BrainConfig['autoPull']) {
     const client = store.client;
     if (!client || busy) return;
     const current = revision;
     busy = true; error = '';
     try {
-      const next = action === 'save' || action === 'disconnect' || action === 'toggle'
+      const next = action === 'save' || action === 'disconnect' || action === 'toggle' || action === 'auto'
         ? await client.call('brain.configure', {
-          path: action === 'disconnect' ? null : action === 'toggle' ? status!.config.path : path.trim(),
+          ...status?.config,
+          path: action === 'disconnect' ? null : action === 'toggle' || action === 'auto' ? status!.config.path : path.trim(),
           enabled: action === 'disconnect' ? false : action === 'toggle' ? !status!.config.enabled : enabled,
+          ...(policy ? { autoPull: policy } : {}),
         })
         : action === 'sync' ? await client.call('brain.sync', {}) : await client.call('brain.status', {});
       if (current !== revision) return;
@@ -90,6 +93,18 @@
         <label class="sharing"><input type="checkbox" role="switch" checked={status.config.enabled} onchange={event => { event.currentTarget.checked = status!.config.enabled; void run('toggle'); }} disabled={busy} data-testid="brain-enabled" /><span>{t.enabled}</span></label>
         <button class="ghost small" disabled={busy} onclick={() => { editing = !editing; path = status!.config.path!; folders = null; }} data-testid="brain-change">{editing ? t.cancel : t.change}</button>
       </div>
+      {#if status.git?.upstream || status.config.autoPull}
+        <div class="automation">
+          <h3>{t.autoPull}</h3>
+          <label class="sharing"><input type="checkbox" role="switch" checked={autoPull.onStartup} disabled={busy} data-testid="brain-startup" onchange={event => { event.currentTarget.checked = autoPull.onStartup; void run('auto', { ...autoPull, onStartup: !autoPull.onStartup }); }} /><span>{t.onStartup}</span></label>
+          <div class="interval-row">
+            <label class="sharing"><input type="checkbox" role="switch" checked={autoPull.intervalMinutes > 0} disabled={busy} data-testid="brain-periodic" onchange={event => { event.currentTarget.checked = autoPull.intervalMinutes > 0; void run('auto', { ...autoPull, intervalMinutes: autoPull.intervalMinutes ? 0 : 15 }); }} /><span>{t.periodic}</span></label>
+            {#if autoPull.intervalMinutes > 0}
+              <label class="interval-value"><input type="number" min="1" max="1440" step="1" value={autoPull.intervalMinutes} aria-label={t.interval} disabled={busy} data-testid="brain-interval" onchange={event => { const input = event.currentTarget; const minutes = input.valueAsNumber; input.value = String(autoPull.intervalMinutes); if (!Number.isInteger(minutes) || minutes < 1 || minutes > 1440) { error = t.intervalHint; return; } void run('auto', { ...autoPull, intervalMinutes: minutes }); }} /><span>{t.minutes}</span></label>
+            {/if}
+          </div>
+        </div>
+      {/if}
     </section>
   {/if}
   {#if status && (!status.config.path || editing)}
@@ -152,6 +167,11 @@
   .sync-state :global(svg) { flex: none; }
   .connection-bottom { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 20px 12px 24px; border-top: 1px solid var(--color-border); }
   .sharing { display: flex; align-items: center; gap: 10px; font-size: var(--text-sm); }
+  .automation { display: grid; gap: 14px; padding: 20px 24px; border-top: 1px solid var(--color-border); }
+  .automation h3 { margin: 0; font-size: var(--text-sm); font-weight: 500; color: var(--color-muted-foreground); }
+  .interval-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: var(--control); }
+  .interval-value { display: flex; align-items: center; gap: 8px; font-size: var(--text-sm); color: var(--color-muted-foreground); }
+  .interval-value input { width: 78px; }
   .folder-form { padding: 24px; margin-top: 16px; background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-lg); }
   .folder-form h2 { margin-top: 16px; }
   .folder-form p { margin: 6px 0 24px; }
@@ -190,6 +210,7 @@
     .sync-button { width: 100%; }
     .sync-state { padding: 12px 16px 20px; }
     .connection-bottom { padding: 12px 16px; flex-wrap: wrap; gap: 8px; }
+    .automation { padding: 16px; }
     .folder-form { padding: 20px 16px; }
     .path-row { flex-wrap: wrap; }
     .path-row input { flex-basis: 100%; }

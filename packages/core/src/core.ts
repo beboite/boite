@@ -169,6 +169,7 @@ export class Core {
     // The journal is open and no socket is accepted yet: whatever a dead core
     // left running or queued is closed here, or nothing ever would.
     this.threads.recoverStuckTurns();
+    this.brain.start();
   }
 
   setEndpoint(host: string, port: number): void {

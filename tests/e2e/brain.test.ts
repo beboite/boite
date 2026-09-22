@@ -29,6 +29,12 @@ test('configure, inspect, synchronize and disconnect a brain at desktop and phon
   await page.click(id('brain-save'));
   await page.waitFor(`document.querySelectorAll('${id('brain-entry')}').length === 1`);
   expect(await page.evaluate(`document.querySelector('${id('brain-path')}')`)).toBeNull();
+  await page.click(id('brain-startup'));
+  await page.waitFor(`document.querySelector('${id('brain-startup')}')?.checked === true && !document.querySelector('${id('brain-startup')}').disabled`);
+  await page.click(id('brain-periodic'));
+  await page.waitFor(`document.querySelector('${id('brain-interval')}')?.value === '15' && !document.querySelector('${id('brain-interval')}').disabled`);
+  await page.evaluate(`const field = document.querySelector('${id('brain-interval')}'); field.value = '30'; field.dispatchEvent(new Event('change', { bubbles: true }))`);
+  await page.waitFor(`document.querySelector('${id('brain-interval')}')?.value === '30' && !document.querySelector('${id('brain-interval')}').disabled`);
   await page.click(id('brain-category-skill'));
   expect(await page.evaluate(`document.querySelector('${id('brain-inventory')}').textContent`)).toContain('code-review');
   await page.click(`${id('brain-entry')} summary`);
@@ -44,6 +50,8 @@ test('configure, inspect, synchronize and disconnect a brain at desktop and phon
   await page.click(id('brain-refresh'));
   await page.waitFor(`document.querySelector('${id('brain-page')}')?.getAttribute('aria-busy') === 'false'`);
   expect(await page.evaluate(`document.querySelector('${id('brain-enabled')}').checked`)).toBe(false);
+  expect(await page.evaluate(`document.querySelector('${id('brain-startup')}').checked`)).toBe(true);
+  expect(await page.evaluate(`document.querySelector('${id('brain-interval')}').value`)).toBe('30');
   await page.click(id('brain-enabled'));
   await page.waitFor(`document.querySelector('${id('brain-enabled')}')?.checked === true && document.querySelector('${id('brain-page')}')?.getAttribute('aria-busy') === 'false'`);
   await page.evaluate(`localStorage.setItem('boite.locale', 'fr'); location.reload()`);
@@ -55,6 +63,10 @@ test('configure, inspect, synchronize and disconnect a brain at desktop and phon
   await page.click(id('brain-save'));
   await page.waitFor(`document.querySelector('${id('brain-sync')}')`);
   expect(await page.evaluate(`document.querySelector('${id('brain-sync')}').textContent`)).toContain('Synchroniser');
+  await page.click(id('brain-startup'));
+  await page.waitFor(`document.querySelector('${id('brain-startup')}')?.checked === true && !document.querySelector('${id('brain-startup')}').disabled`);
+  await page.click(id('brain-periodic'));
+  await page.waitFor(`document.querySelector('${id('brain-interval')}')?.value === '15' && !document.querySelector('${id('brain-interval')}').disabled`);
   await capture('brain-desktop-fr.png');
   await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
   await page.waitFor(`document.querySelector('${id('brain-inventory')}')`);

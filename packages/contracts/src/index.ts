@@ -1335,6 +1335,8 @@ export interface CoordinationView {
 export interface BrainConfig {
   path: string | null;
   enabled: boolean;
+  /** Pull only. An interval of 0 disables periodic pulls. Defaults to off. */
+  autoPull?: { onStartup: boolean; intervalMinutes: number };
 }
 
 export interface BrainEntry {

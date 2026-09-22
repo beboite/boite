@@ -6,6 +6,8 @@ export const strings = {
     enabled: 'Use with agents', disconnect: 'Disconnect', refresh: 'Refresh', sync: 'Synchronize', working: 'Working',
     empty: 'Connect your brain', emptyHint: 'Choose the folder with your instructions and skills.',
     change: 'Change folder', cancel: 'Cancel', saveChanges: 'Save',
+    autoPull: 'Pull automatically', onStartup: 'At startup', periodic: 'Periodically', minutes: 'min',
+    interval: 'Pull interval in minutes', intervalHint: 'Choose a whole number from 1 to 1440 minutes.',
     detected: 'Contents', instructions: 'Instructions', skill: 'Skills', plugin: 'Plugins',
     pluginHint: 'Detected here. Install plugins through their agent.',
     details: 'Sync details', noGit: 'Local folder. Connect a Git repository to sync between computers.',

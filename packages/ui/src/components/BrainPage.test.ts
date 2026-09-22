@@ -30,3 +30,24 @@ test('a refused sharing change keeps the saved switch state and shows the error'
   expect(control.checked).toBe(true);
   expect(call).toHaveBeenCalledWith('brain.configure', { path: '/work/brain', enabled: false });
 });
+
+test('automatic pull controls save their policy and preserve it when sharing changes', async () => {
+  let config = { path: '/work/brain', enabled: true, autoPull: { onStartup: false, intervalMinutes: 0 } };
+  const call = vi.fn(async (method: string, params?: typeof config) => {
+    if (method === 'brain.configure') config = params!;
+    return { config, entries: [], problems: [], git: { upstream: 'origin/main' }, lastSync: null };
+  });
+  mounted = mount(BrainPage, { target: document.body, props: { store: { client: { call }, owner: true, connection: 'ready' } as unknown as Store } });
+  const control = (name: string) => document.querySelector<HTMLInputElement>(`[data-testid="brain-${name}"]`)!;
+  await vi.waitFor(() => { flushSync(); expect(control('startup')).not.toBeNull(); });
+  control('startup').click();
+  await vi.waitFor(() => { flushSync(); expect(config.autoPull.onStartup).toBe(true); expect(control('startup').disabled).toBe(false); });
+  control('periodic').click();
+  await vi.waitFor(() => { flushSync(); expect(config.autoPull.intervalMinutes).toBe(15); expect(control('periodic').disabled).toBe(false); });
+  control('interval').value = '30';
+  control('interval').dispatchEvent(new Event('change', { bubbles: true }));
+  await vi.waitFor(() => { flushSync(); expect(config.autoPull.intervalMinutes).toBe(30); expect(control('enabled').disabled).toBe(false); });
+  control('enabled').click();
+  await vi.waitFor(() => { flushSync(); expect(config.enabled).toBe(false); });
+  expect(config.autoPull).toEqual({ onStartup: true, intervalMinutes: 30 });
+});

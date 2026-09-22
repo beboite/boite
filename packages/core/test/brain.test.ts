@@ -31,6 +31,92 @@ async function commit(cwd: string, text: string, name = 'AGENTS.md') {
   await git(cwd, ['commit', '-m', 'Update shared instructions']);
 }
 
+test('automatic pull settings persist and reject invalid intervals', async () => {
+  const autoPull = { onStartup: true, intervalMinutes: 15 };
+  const owner = await h.connect();
+  await owner.call('brain.configure', { path: root, enabled: true, autoPull });
+  expect(new BrainStore(h.core).config().autoPull).toEqual(autoPull);
+  for (const intervalMinutes of [-1, 0.5, 1441, NaN]) {
+    await expect(h.core.brain.configure({ path: root, enabled: true, autoPull: { onStartup: true, intervalMinutes } })).rejects.toThrow('intervalMinutes');
+  }
+  await h.core.brain.configure({ path: root, enabled: false });
+  expect(h.core.brain.config().autoPull).toEqual(autoPull);
+});
+
+test('startup and periodic pulls fetch without publishing and stop when disabled or closed', async () => {
+  const remote = join(h.dataDir, 'automatic.git'), second = join(h.dataDir, 'second');
+  await git(h.dataDir, ['init', '--bare', '--initial-branch=main', remote]);
+  await git(root, ['init', '--initial-branch=main']);
+  await commit(root, 'Base');
+  await git(root, ['remote', 'add', 'origin', remote]);
+  await git(root, ['push', '-u', 'origin', 'main']);
+  await git(h.dataDir, ['clone', remote, second]);
+  await commit(second, 'Remote update');
+  await git(second, ['push']);
+  await h.core.brain.configure({ path: root, enabled: true, autoPull: { onStartup: true, intervalMinutes: 15 } });
+  let pending: { run: () => Promise<void>; ms: number } | null = null;
+  const brain = new BrainStore(h.core, (run, ms) => { pending = { run, ms }; return () => { pending = null; }; });
+  const tick = async () => { const task = pending!; pending = null; await task.run(); };
+  try {
+    brain.start();
+    expect(pending!.ms).toBe(0);
+    await tick();
+    expect(readFileSync(join(root, 'AGENTS.md'), 'utf8')).toBe('Remote update');
+    expect(pending!.ms).toBe(15 * 60_000);
+    const remoteHead = await git(remote, ['rev-parse', 'main']);
+    await commit(root, 'Local commit');
+    await tick();
+    expect(await git(remote, ['rev-parse', 'main'])).toBe(remoteHead);
+    expect((await brain.status()).git?.ahead).toBe(1);
+    file(join(root, 'notes.txt'), 'Keep local work');
+    await tick();
+    expect((await brain.status()).problems.join(' ')).toContain('local file changes');
+    expect(readFileSync(join(root, 'notes.txt'), 'utf8')).toBe('Keep local work');
+    expect(pending!.ms).toBe(15 * 60_000);
+    await git(root, ['add', 'notes.txt']);
+    await git(root, ['commit', '-m', 'Keep notes']);
+    await commit(second, 'Another remote update');
+    await git(second, ['push']);
+    const localHead = await git(root, ['rev-parse', 'HEAD']);
+    await tick();
+    expect((await brain.status()).problems.join(' ')).toContain('diverging');
+    expect(await git(root, ['rev-parse', 'HEAD'])).toBe(localHead);
+    await git(root, ['merge', '-s', 'ours', 'origin/main', '-m', 'Resolve fixture divergence']);
+    await tick();
+    expect((await brain.status()).problems).toEqual([]);
+    await brain.configure({ path: root, enabled: true, autoPull: { onStartup: true, intervalMinutes: 0 } });
+    expect(pending).toBeNull();
+    await brain.configure({ path: root, enabled: true, autoPull: { onStartup: false, intervalMinutes: 5 } });
+    expect(pending!.ms).toBe(5 * 60_000);
+  } finally { await brain.close(); }
+  expect(pending).toBeNull();
+}, 30_000);
+
+test('automatic pulls wait for completion and shutdown drains the active attempt', async () => {
+  await h.core.brain.configure({ path: root, enabled: true, autoPull: { onStartup: true, intervalMinutes: 1 } });
+  const queued: (() => Promise<void>)[] = [];
+  const brain = new BrainStore(h.core, run => { queued.push(run); return () => {}; });
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const internals = brain as unknown as { synchronize(push: boolean): Promise<unknown> };
+  const sync = spyOn(internals, 'synchronize').mockImplementation(async () => { await gate; return {}; });
+  try {
+    brain.start(); brain.start();
+    expect(queued).toHaveLength(1);
+    const running = queued.shift()!();
+    expect(queued).toHaveLength(0);
+    expect(sync).toHaveBeenCalledWith(false);
+    let closed = false;
+    const closing = brain.close().then(() => { closed = true; });
+    await Promise.resolve();
+    expect(closed).toBe(false);
+    release();
+    await Promise.all([running, closing]);
+    expect(closed).toBe(true);
+    expect(queued).toHaveLength(0);
+  } finally { release(); sync.mockRestore(); await brain.close(); }
+});
+
 test('detects instructions, YAML skills and both plugin manifests; reports malformed entries', () => {
   file(join(root, 'AGENTS.md'), 'Follow project conventions.');
   file(join(root, '.agents/skills/review/SKILL.md'), '---\nname: review\ndescription: >-\n  Review changes\n  before release.\n---\nBody');

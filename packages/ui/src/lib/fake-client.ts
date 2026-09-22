@@ -1223,8 +1223,10 @@ export class FakeClient implements ObservableClient {
       case 'brain.configure': {
         const config = rawParams as RpcParams<'brain.configure'>;
         if (typeof config.enabled !== 'boolean' || (config.enabled && !config.path) || (config.path !== null && (typeof config.path !== 'string' || !/^(?:[A-Za-z]:[\\/]|\/)/.test(config.path)))) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'brain.path must be an absolute folder path or null; enabled must be a boolean' });
+        const autoPull = config.autoPull === undefined ? this.#brain.config.autoPull : config.autoPull;
+        if (autoPull !== undefined && (!autoPull || typeof autoPull.onStartup !== 'boolean' || !Number.isInteger(autoPull.intervalMinutes) || autoPull.intervalMinutes < 0 || autoPull.intervalMinutes > 1440)) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'brain.autoPull.onStartup must be a boolean; intervalMinutes must be an integer from 0 to 1440' });
         if (this.#brain.config.path !== config.path) this.#brain.lastSync = null;
-        this.#brain.config = { ...config };
+        this.#brain.config = { ...config, ...(autoPull ? { autoPull: { ...autoPull } } : {}) };
         this.#brain.entries = config.path ? [
           { kind: 'instructions', name: 'AGENTS.md', path: 'AGENTS.md', description: '', error: null },
           { kind: 'skill', name: 'code-review', path: 'skills/code-review/SKILL.md', description: 'Review changes and check the affected behavior.', error: null },

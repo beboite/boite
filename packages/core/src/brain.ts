@@ -12,6 +12,12 @@ const INSTRUCTION_FILES = ['AGENTS.md', '.agents/AGENTS.md', 'CLAUDE.md', 'GEMIN
 const CATALOG_DIRS = ['skills', '.agents/skills', '.claude/skills', '.codex/skills', 'plugins', '.claude/plugins', '.codex/plugins'];
 const PLUGIN_FILES = ['.claude-plugin/plugin.json', '.codex-plugin/plugin.json'];
 type GitSnapshot = NonNullable<BrainStatus['git']> & { head: string | null };
+type Schedule = (run: () => Promise<void>, ms: number) => () => void;
+const defaultSchedule: Schedule = (run, ms) => {
+  const timer = setTimeout(() => { void run(); }, ms);
+  timer.unref();
+  return () => clearTimeout(timer);
+};
 
 function inside(root: string, path: string): boolean {
   const rel = relative(root, path);
@@ -89,18 +95,58 @@ export function scanBrain(root: string): { entries: BrainEntry[]; problems: stri
 export class BrainStore {
   private busy = false;
   private closed = false;
+  private started = false;
+  private cancelTimer?: () => void;
+  private automatic?: Promise<void>;
   private readonly processes = new Map<string, Promise<void>>();
-  constructor(private readonly core: Core) {}
+  constructor(private readonly core: Core, private readonly schedule: Schedule = defaultSchedule) {}
+
+  start(): void {
+    if (this.started || this.closed) return;
+    this.started = true;
+    this.schedulePull(true);
+  }
+
+  private schedulePull(startup = false): void {
+    this.cancelTimer?.();
+    this.cancelTimer = undefined;
+    if (!this.started || this.closed) return;
+    const { path, autoPull } = this.config();
+    if (!path || !autoPull) return;
+    const immediate = startup && autoPull.onStartup;
+    if (!immediate && !autoPull.intervalMinutes) return;
+    this.cancelTimer = this.schedule(() => {
+      this.cancelTimer = undefined;
+      if (this.closed) return Promise.resolve();
+      this.automatic = this.pullAutomatically();
+      return this.automatic;
+    }, immediate ? 0 : autoPull.intervalMinutes * 60_000);
+  }
+
+  private async pullAutomatically(): Promise<void> {
+    try {
+      if (!this.busy) await this.synchronize(false);
+    } catch (cause) {
+      if (!this.closed) this.core.journal.setSetting('brain.pullError', messageOf(cause));
+    } finally {
+      this.schedulePull();
+    }
+  }
 
   config(): BrainConfig {
     return (this.core.journal.getSetting('brain') as BrainConfig | undefined) ?? { path: null, enabled: false };
   }
 
   async configure(config: BrainConfig): Promise<BrainStatus> {
+    if (this.closed) throw refused('Brain is shutting down');
     if (this.busy) throw refused('Brain synchronization is running; wait before changing its folder');
     if (typeof config.enabled !== 'boolean') throw invalidParams('brain.enabled must be a boolean');
     if (config.path !== null && (typeof config.path !== 'string' || !isAbsolute(config.path))) throw invalidParams('brain.path must be an absolute folder path or null');
     if (config.enabled && config.path === null) throw invalidParams('brain.path is required when enabled');
+    const autoPull = config.autoPull === undefined ? this.config().autoPull : config.autoPull;
+    if (autoPull !== undefined && (!autoPull || typeof autoPull.onStartup !== 'boolean' || !Number.isInteger(autoPull.intervalMinutes) || autoPull.intervalMinutes < 0 || autoPull.intervalMinutes > 1440)) {
+      throw invalidParams('brain.autoPull.onStartup must be a boolean; intervalMinutes must be an integer from 0 to 1440 (0 disables periodic pulls)');
+    }
     let path: string | null = null;
     if (config.path !== null) {
       try {
@@ -108,8 +154,12 @@ export class BrainStore {
         if (!statSync(path).isDirectory()) throw new Error('not a folder');
       } catch { throw invalidParams(`brain.path ${config.path}: expected an existing, readable folder`); }
     }
-    if (path !== this.config().path) this.core.journal.setSetting('brain.lastSync', null);
-    this.core.journal.setSetting('brain', { path, enabled: config.enabled });
+    if (path !== this.config().path) {
+      this.core.journal.setSetting('brain.lastSync', null);
+      this.core.journal.setSetting('brain.pullError', null);
+    }
+    this.core.journal.setSetting('brain', { path, enabled: config.enabled, ...(autoPull ? { autoPull } : {}) });
+    this.schedulePull();
     return this.status();
   }
 
@@ -125,6 +175,8 @@ export class BrainStore {
         status.git = git;
       }
     } catch (cause) { status.problems.push(messageOf(cause)); }
+    const pullError = this.core.journal.getSetting('brain.pullError');
+    if (typeof pullError === 'string') status.problems.push(pullError);
     return status;
   }
 
@@ -146,6 +198,11 @@ export class BrainStore {
   }
 
   async sync(): Promise<BrainStatus> {
+    return this.synchronize(true);
+  }
+
+  private async synchronize(push: boolean): Promise<BrainStatus> {
+    if (this.closed) throw refused('Brain is shutting down');
     if (this.busy) throw refused('Brain synchronization is already running');
     this.busy = true;
     try {
@@ -166,8 +223,9 @@ export class BrainStore {
       if (state.dirty || (state.ahead > 0 && state.behind > 0)) throw refused('Brain has local changes or diverging commits. Resolve them before synchronizing; Boite does not merge conflicts.');
       if (state.behind > 0) await this.git(path, ['merge', '--ff-only', '@{upstream}']);
       // An external checkout after the check must never change what gets published.
-      if (state.ahead > 0) await this.git(path, ['push', '--', remote, `${state.head}:${merge}`]);
+      if (push && state.ahead > 0) await this.git(path, ['push', '--', remote, `${state.head}:${merge}`]);
       this.core.journal.setSetting('brain.lastSync', Date.now());
+      this.core.journal.setSetting('brain.pullError', null);
       return await this.status();
     } finally { this.busy = false; }
   }
@@ -207,7 +265,10 @@ export class BrainStore {
 
   async close(): Promise<void> {
     this.closed = true;
+    this.cancelTimer?.();
+    this.cancelTimer = undefined;
     for (const id of this.processes.keys()) this.core.procs.killTree(id);
     await Promise.all(this.processes.values());
+    await this.automatic;
   }
 }

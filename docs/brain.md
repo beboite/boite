@@ -74,8 +74,18 @@ noninteractive, repository hooks are disabled for these operations, and each
 Git command has a 30-second deadline. Git runs through the process registry
 and is stopped when the core closes.
 
-This version does not clone repositories, commit edits, schedule background
-synchronization or copy files directly between machines.
+Pull automatically has two independent options, both off by default: At startup
+and Periodically. The interval accepts 1 to 1440 minutes. Startup means starting
+the core hosting this folder, not opening a client connected to that core.
+Automatic pulls fetch and fast-forward only; they never push local commits.
+They use the same dirty-folder and divergence checks as Synchronize. A failure
+appears in the inventory and the next interval retries. The interval starts after
+the previous attempt finishes, and a manual synchronization takes priority.
+These settings apply even when Use with agents is off. Disconnect stops pulls;
+closing the core cancels the timer and drains its Git processes.
+
+This version does not clone repositories, commit edits, create symlinks in
+agent profiles or copy files directly between machines.
 
 ## Verification
 

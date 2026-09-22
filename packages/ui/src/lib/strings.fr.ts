@@ -16,6 +16,8 @@ export const fr: Messages = {
     enabled: 'Utiliser avec les agents', disconnect: 'Déconnecter', refresh: 'Actualiser', sync: 'Synchroniser', working: 'En cours',
     empty: 'Connecte ton brain', emptyHint: 'Choisis le dossier de tes instructions et skills.',
     change: 'Changer de dossier', cancel: 'Annuler', saveChanges: 'Enregistrer',
+    autoPull: 'Pull automatique', onStartup: 'Au démarrage', periodic: 'À intervalle régulier', minutes: 'min',
+    interval: 'Intervalle du pull en minutes', intervalHint: 'Choisis un nombre entier entre 1 et 1440 minutes.',
     detected: 'Contenu', instructions: 'Instructions', skill: 'Skills', plugin: 'Plugins',
     pluginHint: 'Détectés ici. Installe les plugins depuis leur agent.',
     details: 'Détails de la synchro', noGit: 'Dossier local. Connecte un dépôt Git pour synchroniser entre PC.',
