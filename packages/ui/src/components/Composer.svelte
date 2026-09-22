@@ -313,6 +313,11 @@
   // Older modes keep their execution policy until the user makes a choice.
   let displayedMode = $derived<PermissionMode>(choice?.permissionMode ?? 'default');
   let modes = $derived(modesFor(provider));
+  /** The chosen account answered that it is signed out: the next send would fail on it. */
+  let signedOut = $derived.by(() => {
+    const account = choice ? store.accountOf(choice.accountId) : null;
+    return account?.status === 'unauthenticated' ? account : null;
+  });
   let modeItems = $derived(
     modes.map((mode) => ({
       id: mode,
@@ -885,6 +890,9 @@
       {/key}
       <div class="chips">
         <ModelPicker {store} {choice} disabled={picking} onpick={pick} />
+        {#if signedOut && store.owner}
+          <button type="button" class="chip signed-out" data-testid="composer-reconnect" title={fill(strings.connect.signedOut, { provider: provider?.name ?? '' })} onclick={() => store.openConnect(signedOut.providerId, signedOut.id)}>{strings.connect.reconnect}</button>
+        {/if}
 
         <div class="desktop-options">
         {#if effortLevels.length > 0 || speeds.length > 0}
@@ -1082,6 +1090,7 @@
 
   /* Off it reads like the other chips; on it takes the active fill, the same as a pressed tab. */
   .open-mode { display: inline-flex; color: var(--color-live); }
+  .chip.signed-out { color: var(--color-live); }
 
   .worktree.on {
     background: var(--color-active);
@@ -1159,6 +1168,13 @@
     color: var(--color-foreground);
   }
 
+  /* Nothing to pick yet: the one chip that gets somewhere wears the accent. */
+  .chips :global(.trigger.connect) {
+    border-color: transparent;
+    background: var(--color-accent-soft);
+    color: var(--color-accent);
+  }
+
   .chips :global(.trigger:hover) {
     background: var(--color-surface-3);
   }
@@ -1184,6 +1200,7 @@
     .chips :global(.picker) { min-width: 0; max-width: 100%; }
     .chips :global(.picker > .trigger) { max-width: 100%; height: var(--touch-target); padding: 0 6px; border: none; background: transparent; font-weight: 500; color: var(--color-muted-foreground); }
     .chips :global(.picker > .trigger > .label) { min-width: 0; max-width: none; }
+    .chips :global(.picker > .trigger.connect) { padding: 0 12px; border-radius: var(--radius-md); background: var(--color-accent-soft); color: var(--color-accent); }
     .composer { box-shadow: none; border-radius: var(--radius-xl); }
     .composer:focus-within { box-shadow: none; border-color: var(--color-edge); }
     .send, .stop { border-radius: 50%; margin-left: 2px; }

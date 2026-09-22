@@ -222,6 +222,33 @@ export const fr: Messages = {
     add: 'Ouvrir'
   },
 
+  connect: {
+    button: 'Connecter une IA',
+    title: 'Connecter une IA',
+    intro: "Boite fonctionne avec un abonnement IA que vous avez déjà. Choisissez-le, Boite installe ce qu'il faut et ouvre sa page de connexion.",
+    more: 'Autres agents',
+    plan: {
+      claude: 'Avec un forfait Claude Pro ou Max',
+      codex: 'Avec un forfait ChatGPT'
+    },
+    otherPlan: 'Avec votre compte {provider}',
+    install: 'Installer {provider}',
+    installNote: "Télécharge {size}. Rien d'autre ne change sur cet ordinateur.",
+    signIn: 'Se connecter à {provider}',
+    signInNote: 'Votre navigateur ouvre la page de connexion. Revenez ici une fois connecté.',
+    manual: "{provider} s'installe avec son propre installateur. Lancez-le, puis vérifiez à nouveau ici.",
+    manualOpen: "Ouvrir la page d'installation",
+    external: '{provider} se connecte depuis sa propre fenêtre. Connectez-vous là-bas, puis vérifiez à nouveau.',
+    checkAgain: 'Vérifier à nouveau',
+    ready: '{provider} est connecté.',
+    use: 'Utiliser {provider}',
+    back: 'Retour',
+    close: 'Fermer',
+    device: "Aucune IA n'est encore connectée sur l'ordinateur qui fait tourner Boite. Connectez-en une depuis cet ordinateur.",
+    reconnect: 'Se reconnecter',
+    signedOut: "{provider} n'est plus connecté"
+  },
+
   drop: {
     title: 'Déposez pour ajouter un projet',
     body: 'Chaque dossier devient un projet. Les fichiers sont refusés.'
@@ -570,7 +597,7 @@ export const fr: Messages = {
     model: 'Modèle',
     unavailable: 'pas installé',
     noAccount: 'aucun compte',
-    noProvider: 'Aucun fournisseur',
+    noProvider: 'Aucune IA connectée',
     hint: 'Entrée pour envoyer, Maj+Entrée pour une nouvelle ligne',
     worktree: 'Worktree',
     worktreeOff: 'Démarrer dans un worktree git sur sa propre branche',

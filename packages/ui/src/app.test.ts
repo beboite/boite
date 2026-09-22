@@ -225,6 +225,39 @@ test('a draft on a folder that is not a repository offers no worktree switch', a
   await waitFor(() => document.querySelector('[data-testid=composer-worktree]') !== null);
 });
 
+test('a machine with no AI offers to connect one, and the composer keeps its text and lands on it', async () => {
+  await mountOnFake('/?fake=1&uninstalled=1');
+  if (!store.draft) query<HTMLButtonElement>('[data-testid=new-thread]').click();
+  await waitFor(() => document.querySelector('[data-testid=composer-connect]') !== null);
+  const input = query<HTMLTextAreaElement>('[data-testid=composer-input]');
+  input.value = 'Sort my holiday photos';
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+
+  query<HTMLButtonElement>('[data-testid=composer-connect]').click();
+  await waitFor(() => document.querySelector('[data-testid=connect-dialog]') !== null);
+  // The two services most people already pay for come first, each saying which plan it uses.
+  const services = Array.from(document.querySelectorAll('[data-testid=connect-service]')).map((row) => row.getAttribute('data-provider'));
+  expect(services.slice(0, 2)).toEqual(['claude', 'codex']);
+  expect(query('[data-testid=connect-dialog]').textContent).toContain('Uses a Claude Pro or Max plan');
+
+  query<HTMLButtonElement>('[data-testid=connect-service][data-provider=claude]').click();
+  await waitFor(() => document.querySelector('[data-testid=connect-install]') !== null);
+  query<HTMLButtonElement>('[data-testid=connect-install]').click();
+  // The download chains into the sign-in, which hands over a page to open and a field for its code.
+  await waitFor(() => document.querySelector('[data-testid=connect-login-url]') !== null, 20_000);
+  const code = query<HTMLInputElement>('[data-testid=connect-login-input]');
+  code.value = 'fake-code';
+  code.dispatchEvent(new Event('input', { bubbles: true }));
+  code.closest('form')!.requestSubmit();
+  await waitFor(() => document.querySelector('[data-testid=connect-use]') !== null, 20_000);
+  query<HTMLButtonElement>('[data-testid=connect-use]').click();
+
+  await waitFor(() => document.querySelector('[data-testid=connect-dialog]') === null);
+  await waitFor(() => document.querySelector('[data-testid=composer-connect]') === null);
+  expect(query('[data-testid=composer-picker]').textContent).not.toContain('No AI connected');
+  expect(query<HTMLTextAreaElement>('[data-testid=composer-input]').value).toBe('Sort my holiday photos');
+});
+
 test('the sidebar draft row hands the keyboard back to the composer', async () => {
   await mountOnFake();
 

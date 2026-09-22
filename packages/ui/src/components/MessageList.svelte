@@ -36,6 +36,13 @@
   }: { store: Store; threadId: string; messages: Message[] } = $props();
   const coordination = $derived(store.coordination?.self.threadId === threadId ? store.coordination : null);
   const letters = $derived(coordination?.messages ?? []);
+  /** The thread's account is signed out: an error then carries the way back in. */
+  const signedOut = $derived.by(() => {
+    const thread = store.openThread;
+    if (!thread || thread.id !== threadId) return null;
+    const account = store.accountOf(thread.accountId);
+    return account?.status === 'unauthenticated' ? account : null;
+  });
   const letterRows = $derived.by(() => new Map(letters.map(letter => [`coordination:${letter.id}`, letter])));
   const timeline = $derived.by(() => {
     if (letters.length === 0) return messages;
@@ -681,6 +688,9 @@
                     <div class="error" data-testid="error-part">
                       <span class="section-label">{strings.chat.error}</span>
                       <p>{part.message}</p>
+                      {#if signedOut && store.owner}
+                        <button type="button" class="quiet small reconnect" data-testid="error-reconnect" onclick={() => store.openConnect(signedOut.providerId, signedOut.id)}>{strings.connect.reconnect}</button>
+                      {/if}
                     </div>
                   {/if}
                 </div>
@@ -866,6 +876,8 @@
     border-radius: var(--radius-md);
     background: var(--color-surface);
   }
+
+  .error .reconnect { margin-top: 8px; }
 
   .error p {
     margin-top: 4px;

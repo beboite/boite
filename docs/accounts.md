@@ -115,6 +115,27 @@ A login that insists on opening a browser window of its own is one Boite points 
 a launcher that does nothing, through the profile's `BROWSER` variable, so the link
 goes to the page and never to a window over the user's work.
 
+## The guided connection
+
+Nobody should meet "no provider" as a dead end. When the composer has nothing
+to pick, its model chip becomes `Connect an AI` and opens `ConnectFlow.svelte`:
+Claude and Codex first, each naming the plan it uses, the other agents below.
+Choosing one walks the same steps as its row on the Providers page
+(`lib/provider-setup.ts`), one at a time: the download when Boite can fetch the
+agent, its own installer page otherwise, then the sign-in with the page to open
+and the field for a code. A download asked for here goes on to the sign-in by
+itself. Once the account answers, `Use <provider>` moves the composer to it
+through `store.useProvider`, the same remembered choice a pick in the model
+picker writes, and the text being typed stays where it was.
+
+An account that answered `unauthenticated` gets a `Sign in again` chip beside
+the model chip, and an error in its thread carries the same button. Both open
+the dialog on that account, so the login lands on it instead of creating a
+second one; a default-location account, which Boite never logs in, is told to
+sign in from the agent's own window and check again. A paired phone gets
+neither button and reads `No AI connected` on the chip: `accounts.*` and
+`providers.install` are the owner's.
+
 ## What the core refuses, and why
 
 - The provider has no `login` block. Nothing to run, so the answer is a refusal

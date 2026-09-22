@@ -240,6 +240,12 @@ export class Store {
   /** The cores this device remembers: pairing or connecting adds one, forgetting removes one. */
   environments = $state<StoredEnvironment[]>([]);
   projectPickerOpen = $state(false);
+  /**
+   * The guided connection dialog: open on a provider's steps, or on the list
+   * when `providerId` is null. `accountId` names the account a "sign in again"
+   * is for, so the login lands on it rather than on a new one.
+   */
+  connectDialog = $state<{ providerId: ProviderId | null; accountId: string | null } | null>(null);
   machineStates = $state<Record<string, { state: ClientState; error?: string }>>({});
   /** Toasts for threads the user is not looking at, per machine. */
   notifications = $state(readNotifications());
@@ -618,6 +624,34 @@ export class Store {
       effort,
       speed: this.modelsOf(provider.id, account.id).find(m => m.id === model)?.speeds?.some(option => option.id === this.prefs.speed) ? this.prefs.speed : null
     };
+  }
+
+  openConnect(providerId: ProviderId | null = null, accountId: string | null = null): void {
+    this.connectDialog = { providerId, accountId };
+  }
+
+  closeConnect(): void {
+    this.connectDialog = null;
+  }
+
+  /**
+   * The composer moves to this provider's signed-in account, the way a pick in
+   * the model picker would. False when it has none yet.
+   */
+  useProvider(providerId: ProviderId): boolean {
+    const provider = this.providerOf(providerId);
+    const account = this.accountsOf(providerId).find((a) => a.status === 'ok');
+    if (!provider || !provider.available || !account) return false;
+    const model = this.defaultModelOf(provider, account.id);
+    this.remember({
+      providerId,
+      accountId: account.id,
+      permissionMode: this.prefs.permissionMode,
+      model,
+      effort: this.defaultEffortOf(providerId, account.id, model),
+      speed: null
+    });
+    return true;
   }
 
   remember(choice: Choice): void {

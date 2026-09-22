@@ -46,6 +46,7 @@
     CommandPalette: () => import('./components/CommandPalette.svelte'),
     ProjectPicker: () => import('./components/ProjectPicker.svelte'),
     ImportDialog: () => import('./components/ImportDialog.svelte'),
+    ConnectFlow: () => import('./components/ConnectFlow.svelte'),
     Onboarding: () => import('./components/Onboarding.svelte')
   };
   type Deferred = { [K in keyof typeof deferredLoaders]?: Awaited<ReturnType<(typeof deferredLoaders)[K]>>['default'] };
@@ -63,6 +64,7 @@
         requested.delete(name);
         if (name === 'ProjectPicker' && store.projectPickerOpen) store.projectPickerOpen = false;
         else if (name === 'ImportDialog' && store.imports) store.closeImports();
+        else if (name === 'ConnectFlow' && store.connectDialog) store.closeConnect();
         else if (name === 'CommandPalette' && store.paletteOpen) store.paletteOpen = false;
         else return;
         store.error = strings.phone.dialogOffline;
@@ -89,6 +91,7 @@
     if (store.paletteOpen) need('CommandPalette');
     if (store.projectPickerOpen) need('ProjectPicker');
     if (store.imports) need('ImportDialog');
+    if (store.connectDialog) need('ConnectFlow');
     if (tour) need('Onboarding');
   });
 
@@ -480,6 +483,7 @@
 {#if deferred.ProjectPicker}{@const ProjectPicker = deferred.ProjectPicker}<ProjectPicker {store} />{/if}
 <ConfirmDialog />
 {#if deferred.ImportDialog}{@const ImportDialog = deferred.ImportDialog}<ImportDialog {store} />{/if}
+{#if deferred.ConnectFlow}{@const ConnectFlow = deferred.ConnectFlow}<ConnectFlow {store} />{/if}
 {#if deferred.CommandPalette}{@const CommandPalette = deferred.CommandPalette}<CommandPalette {store} />{/if}
 
 <style>
