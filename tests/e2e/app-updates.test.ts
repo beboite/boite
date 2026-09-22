@@ -32,7 +32,7 @@ beforeAll(async () => {
 }, 30_000);
 afterAll(async () => { await page?.close(); await server?.close(); }, 15_000);
 
-test('the titlebar update action opens and scrolls to the card on its first click', async () => {
+test('titlebar details open and scroll to the card on the first and later clicks', async () => {
   await page.navigate(`${base}/?fake=1&appUpdate=ready&appUpdateChannel=nightly`);
   await page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
   await page.waitFor(`document.querySelector('${id('titlebar-update-ready')}')`);
@@ -44,7 +44,7 @@ test('the titlebar update action opens and scrolls to the card on its first clic
       return original.call(this, options);
     };
   })()`);
-  await page.click(id('titlebar-update-ready'));
+  await page.click(id('titlebar-update-details'));
   await page.waitFor(`document.querySelector('${id('app-update-card')}')`);
   expect(await page.evaluate('window.__appUpdateScrollTarget')).toBe('settings-app-update');
   await capture('titlebar-first-click');
@@ -53,9 +53,34 @@ test('the titlebar update action opens and scrolls to the card on its first clic
   expect(await page.evaluate('window.__appUpdateScrollTarget')).toBe('settings-phone');
   expect(await page.evaluate(`document.querySelector('[data-settings-section="app-update"]').classList.contains('chosen')`)).toBe(false);
   await page.evaluate('window.__appUpdateScrollTarget = null');
-  await page.click(id('titlebar-update-ready'));
+  await page.click(id('titlebar-update-details'));
   await page.waitFor(`document.querySelector('[data-settings-section="app-update"]').classList.contains('chosen')`);
   expect(await page.evaluate('window.__appUpdateScrollTarget')).toBe('settings-app-update');
+}, 30_000);
+
+test('the titlebar installs with confirmation without leaving chat', async () => {
+  await page.navigate(`${base}/?fake=1&appUpdate=ready&appUpdateChannel=nightly`);
+  await width(880);
+  await page.waitFor(`document.querySelector('${id('titlebar-update-ready')}')`);
+  await page.waitFor(`document.querySelector('${id('titlebar-update-details')}')`);
+  expect(await page.evaluate(`document.querySelector('${id('app-update-card')}') === null`)).toBe(true);
+  expect(await page.evaluate('document.documentElement.scrollWidth <= 880')).toBe(true);
+  await capture('main-ready');
+
+  await page.click(id('titlebar-update-ready'));
+  await page.waitFor(`document.querySelector('${id('confirm-cancel')}')`);
+  expect(await page.evaluate(`document.querySelector('${id('app-update-card')}') === null`)).toBe(true);
+  expect(await page.evaluate(`document.querySelector('${id('nav-settings')}') !== null`)).toBe(true);
+  await capture('main-confirmation');
+  await page.click(id('confirm-cancel'));
+  await page.waitFor(`document.querySelector('${id('confirm-cancel')}') === null`);
+  expect(await page.evaluate(`document.querySelector('${id('titlebar-update-ready')}') !== null`)).toBe(true);
+
+  await page.click(id('titlebar-update-ready'));
+  await page.waitFor(`document.querySelector('${id('confirm-ok')}')`);
+  await page.click(id('confirm-ok'));
+  await page.waitFor(`document.querySelector('${id('titlebar-update-ready')}') === null`);
+  expect(await page.evaluate(`document.querySelector('${id('app-update-card')}') === null`)).toBe(true);
 }, 30_000);
 
 test('ready desktop updates show versions, notes and a restart confirmation', async () => {
@@ -66,6 +91,7 @@ test('ready desktop updates show versions, notes and a restart confirmation', as
   await capture('ready-desktop');
   await page.click(id('app-update-install'));
   await page.waitFor(`document.querySelector('[role="alertdialog"], [role="dialog"]')`);
+  expect(await page.evaluate(`document.querySelector('${id('titlebar-update-ready')}').disabled`)).toBe(true);
   expect(await page.evaluate(`document.querySelector('[role="alertdialog"], [role="dialog"]').textContent`)).toContain('Interrupted turns do not restart automatically');
   await capture('restart-confirmation');
   await page.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
@@ -97,6 +123,8 @@ test('phone and ordinary browser settings never offer native app installation', 
   await page.click(id('nav-settings'));
   await page.waitFor(`document.querySelector('${id('mobile-settings-home')}')`);
   expect(await page.evaluate(`document.querySelector('${id('app-update-card')}') === null`)).toBe(true);
+  expect(await page.evaluate(`document.querySelector('${id('titlebar-update-ready')}') === null`)).toBe(true);
+  expect(await page.evaluate(`document.querySelector('${id('titlebar-update-details')}') === null`)).toBe(true);
   expect(await page.evaluate('document.documentElement.scrollWidth <= 390')).toBe(true);
   await capture('phone');
 }, 30_000);

@@ -134,10 +134,12 @@ export const strings = {
     retry: 'Try again',
     download: 'Download',
     install: 'Install and restart',
-    readyAction: 'Update ready',
+    readyAction: 'Install update',
+    detailsAction: 'Details',
     installTitle: 'Install the Boite update?',
     installBody: 'Boite will close and stop agent turns running on this computer. Interrupted turns do not restart automatically.',
-    readyTitlebar: 'An app update is ready to install'
+    readyTitlebar: 'Install the ready app update',
+    detailsTitlebar: 'Open app update details'
   },
 
   connection: {

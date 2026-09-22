@@ -1,36 +1,17 @@
 <script lang="ts">
   import Prose from './Prose.svelte';
   import { appUpdater, type AppUpdater, type UpdateChannel } from '../lib/app-update.svelte';
-  import { confirm } from '../lib/confirm.svelte';
+  import { appUpdateInstall } from '../lib/app-update-install.svelte';
   import { bytes, time } from '../lib/format';
   import { fill, strings } from '../lib/strings';
 
   let { updater = appUpdater }: { updater?: AppUpdater } = $props();
   let update = $derived(updater.snapshot);
   let progress = $derived(update.total && update.total > 0 ? Math.min(100, (update.received / update.total) * 100) : null);
-  let preparing = $state(false);
 
   function choose(channel: UpdateChannel): void {
     if (channel === update.channel && update.phase !== 'error' && update.phase !== 'idle' && update.phase !== 'current') return;
     updater.check(channel);
-  }
-
-  async function install(): Promise<void> {
-    if (preparing || !updater.ready) return;
-    const version = update.version;
-    const channel = update.channel;
-    preparing = true;
-    try {
-      const ok = await confirm.ask({
-        title: strings.appUpdate.installTitle,
-        body: strings.appUpdate.installBody,
-        confirmLabel: strings.appUpdate.install,
-        cancelLabel: strings.common.cancel
-      });
-      if (ok && updater.ready && updater.snapshot.version === version && updater.snapshot.channel === channel) updater.install();
-    } finally {
-      preparing = false;
-    }
   }
 
   function phaseText(): string {
@@ -130,7 +111,7 @@
 
     <div class="actions">
       {#if update.phase === 'ready'}
-        <button type="button" class="primary" disabled={preparing} onclick={() => void install()} data-testid="app-update-install">
+        <button type="button" class="primary" disabled={appUpdateInstall.preparing} onclick={() => void appUpdateInstall.request(updater)} data-testid="app-update-install">
           {strings.appUpdate.install}
         </button>
       {:else if update.phase === 'available'}

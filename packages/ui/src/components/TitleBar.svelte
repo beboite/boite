@@ -7,6 +7,7 @@
   import { strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
   import { appUpdater, showAppUpdateUi } from '../lib/app-update.svelte';
+  import { appUpdateInstall } from '../lib/app-update-install.svelte';
 
   let { store }: { store: Store } = $props();
 
@@ -122,15 +123,24 @@
   {#if showAppUpdateUi() && appUpdater.ready}
     <button
       type="button"
-      class="ghost small update-ready"
+      class="small update-ready"
       title={strings.appUpdate.readyTitlebar}
       aria-label={strings.appUpdate.readyTitlebar}
-      onclick={openUpdate}
+      disabled={appUpdateInstall.preparing}
+      onclick={() => void appUpdateInstall.request()}
       data-testid="titlebar-update-ready"
     >
       <CircleArrowDown size={14} strokeWidth={1.75} />
       <span>{strings.appUpdate.readyAction}</span>
     </button>
+    <button
+      type="button"
+      class="ghost small update-details"
+      title={strings.appUpdate.detailsTitlebar}
+      aria-label={strings.appUpdate.detailsTitlebar}
+      onclick={openUpdate}
+      data-testid="titlebar-update-details"
+    >{strings.appUpdate.detailsAction}</button>
   {/if}
   {#if inShell}
   <!-- Windows' caption buttons: 46 px wide, the bar's full height, no gap and
@@ -204,8 +214,9 @@
   .update-ready {
     flex: none;
     gap: 5px;
-    color: var(--color-foreground);
   }
+
+  .update-details { flex: none; }
 
   .controls {
     display: flex;

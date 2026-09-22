@@ -107,7 +107,9 @@ function testBackend(fixture: AppUpdateTestFixture): AppUpdateBackend {
       received: current.total ?? current.received,
       error: null
     }),
-    install: async () => undefined,
+    install: async () => {
+      publish({ ...current, phase: 'installing', error: null });
+    },
     listen: async (handler) => {
       handlers.add(handler);
       return () => handlers.delete(handler);

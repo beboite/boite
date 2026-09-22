@@ -2,7 +2,9 @@
 
 General settings contains the desktop update card. It names the installed
 version and channel, the available version, its publication date and release
-notes. A notice in the title bar opens these details when an update is ready.
+notes. When an update is ready, the title bar offers installation directly
+from the conversation, with a confirmation before restarting. A separate
+details action opens the update card.
 
 ## Boite and boite de nuit
 
