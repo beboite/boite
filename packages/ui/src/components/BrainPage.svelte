@@ -8,7 +8,6 @@
   let { store }: { store: Store } = $props();
   let status = $state.raw<BrainStatus | null>(null);
   let path = $state('');
-  let enabled = $state(true);
   let busy = $state(false);
   let error = $state('');
   let folders = $state.raw<RpcResult<'projects.browse'> | null>(null);
@@ -30,7 +29,7 @@
     status = null; error = ''; folders = null; editing = false; busy = true;
     void client.call('brain.status', {}).then(next => {
       if (current !== revision) return;
-      status = next; path = next.config.path ?? ''; enabled = next.config.path ? next.config.enabled : true;
+      status = next; path = next.config.path ?? '';
     }).catch(cause => { if (current === revision) error = failure(cause); })
       .finally(() => { if (current === revision) busy = false; });
     return () => { ++revision; };
@@ -46,14 +45,14 @@
         ? await client.call('brain.configure', {
           ...status?.config,
           path: action === 'disconnect' ? null : action === 'toggle' || action === 'auto' ? status!.config.path : path.trim(),
-          enabled: action === 'disconnect' ? false : action === 'toggle' ? !status!.config.enabled : enabled,
+          enabled: action === 'disconnect' ? false : action === 'toggle' ? !status!.config.enabled : status?.config.path ? status.config.enabled : true,
           ...(policy ? { autoPull: policy } : {}),
         })
         : action === 'sync' ? await client.call('brain.sync', {}) : await client.call('brain.status', {});
       if (current !== revision) return;
       status = next;
       if (action === 'save' || action === 'disconnect' || action === 'toggle') {
-        path = next.config.path ?? ''; enabled = next.config.path ? next.config.enabled : true; folders = null; editing = false;
+        path = next.config.path ?? ''; folders = null; editing = false;
       }
     } catch (cause) { if (current === revision) error = failure(cause); }
     finally { if (current === revision) busy = false; }
