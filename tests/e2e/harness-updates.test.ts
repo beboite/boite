@@ -83,4 +83,5 @@ test('Settings, Providers lists every agent, offers a skipped version again and 
   expect(await page.evaluate(`document.documentElement.scrollWidth <= 390`)).toBe(true);
   await capture('harness-updates-settings-phone.png');
   await desktop();
-});
+// Includes the first lazy Settings import and captures at both viewport sizes.
+}, 20_000);
