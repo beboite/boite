@@ -100,6 +100,31 @@ test('recent-thread recovery does not open delegated children', async () => {
   } finally { store.detach(); client.close(); }
 });
 
+test('launching from a child refreshes its team and returns the sibling without another spawn', async () => {
+  const client = new FakeClient({ delayMs: 0, delegationDemo: true });
+  const store = new Store();
+  store.attach(client);
+  try {
+    await store.connect();
+    await store.open('t-team-done');
+    await store.loadDelegation();
+    const profile = store.delegation!.config.profiles[0]!;
+    const agent = await store.spawnDelegatedAgent(profile.id, 'Review the error path');
+    expect(agent).not.toBeNull();
+    expect(agent?.thread.parentThreadId).toBe('t-trace');
+    expect(store.openThread?.id).toBe('t-team-done');
+    expect(store.delegation?.agents).toHaveLength(3);
+    expect(store.delegation?.agents.some(entry => entry.thread.id === agent?.thread.id)).toBe(true);
+    const call = client.call.bind(client);
+    vi.spyOn(client, 'call').mockImplementation((async (method, params) => {
+      if (method === 'delegation.configure') throw new Error('Configuration refused');
+      return call(method, params);
+    }) as typeof client.call);
+    await store.configureDelegation(store.delegation!.config);
+    expect(store.delegationError).toBe('Configuration refused');
+  } finally { store.detach(); client.close(); }
+});
+
 test('uninstalled setup starts without account-dependent demo state', async () => {
   const client = new FakeClient({ delayMs: 0, uninstalled: true });
   const store = new Store();

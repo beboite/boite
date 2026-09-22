@@ -1237,6 +1237,7 @@ export class Store {
 
   async configureDelegation(config: DelegationConfig): Promise<void> {
     const client = this.#client;
+    const openThreadId = this.openThread?.id;
     const threadId = this.delegation?.rootThreadId ?? this.openThread?.id;
     if (!client || !threadId || !this.owner || this.delegationSaving) return;
     const epoch = ++this.#delegationConfigureEpoch;
@@ -1244,9 +1245,12 @@ export class Store {
     this.delegationError = null;
     try {
       const view = await client.call('delegation.configure', { threadId, config });
-      if (client === this.#client && this.openThread?.id === threadId && epoch === this.#delegationConfigureEpoch) this.delegation = view;
+      if (client === this.#client && this.openThread?.id === openThreadId && epoch === this.#delegationConfigureEpoch) {
+        if (openThreadId === threadId) this.delegation = view;
+        else await this.loadDelegation(openThreadId);
+      }
     } catch (error) {
-      if (client === this.#client && this.openThread?.id === threadId && epoch === this.#delegationConfigureEpoch) this.delegationError = this.#reason(error);
+      if (client === this.#client && this.openThread?.id === openThreadId && epoch === this.#delegationConfigureEpoch) this.delegationError = this.#reason(error);
     } finally {
       if (client === this.#client && epoch === this.#delegationConfigureEpoch) this.delegationSaving = false;
     }
@@ -1287,6 +1291,7 @@ export class Store {
 
   async spawnDelegatedAgent(profileId: string, task: string, title?: string): Promise<DelegatedAgent | null> {
     const client = this.#client;
+    const openThreadId = this.openThread?.id;
     const threadId = this.delegation?.rootThreadId ?? this.openThread?.id;
     if (!client || !threadId || !this.owner || !task.trim()) return null;
     this.delegationError = null;
@@ -1298,11 +1303,11 @@ export class Store {
         ...(title?.trim() ? { title: title.trim() } : {}),
         requestId: crypto.randomUUID()
       });
-      if (client !== this.#client || this.openThread?.id !== threadId) return null;
-      await this.loadDelegation(threadId);
+      if (client !== this.#client || this.openThread?.id !== openThreadId) return null;
+      await this.loadDelegation(openThreadId);
       return agent;
     } catch (error) {
-      if (client === this.#client && this.openThread?.id === threadId) this.delegationError = this.#reason(error);
+      if (client === this.#client && this.openThread?.id === openThreadId) this.delegationError = this.#reason(error);
       return null;
     }
   }
