@@ -1,8 +1,9 @@
 /** Run the installed layout, from outside the checkout, without Bun on PATH. */
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { connect, type CoreClient } from '../../packages/core/src/client.ts';
+import { waitForCoreEndpoint } from './desktop-smoke-endpoint.ts';
 
 const executable = resolve(process.argv[2] ?? '');
 if (!process.argv[2] || !existsSync(executable)) throw new Error('Expected an installed shell executable');
@@ -29,12 +30,7 @@ const failures: unknown[] = [];
 try {
   const file = join(data, 'core.json');
   const deadline = Date.now() + 30_000;
-  while (!existsSync(file)) {
-    if (child.exitCode !== null) throw new Error(`Shell exited with ${child.exitCode}`);
-    if (Date.now() > deadline) throw new Error('Installed shell did not start its core within 30 seconds');
-    await Bun.sleep(100);
-  }
-  const endpoint = JSON.parse(readFileSync(file, 'utf8'));
+  const endpoint = await waitForCoreEndpoint(file, { deadline, exitCode: () => child.exitCode });
   corePid = endpoint.pid;
   const origin = `http://127.0.0.1:${endpoint.port}`;
   const health = await (await fetch(`${origin}/health`, { signal: AbortSignal.timeout(5000) })).json() as { ok: boolean; pid: number };
