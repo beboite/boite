@@ -296,6 +296,15 @@ export interface FileTicketTarget {
   mime: string;
 }
 
+function fileIdentity(path: string): string | null {
+  try {
+    const real = realpathSync(path);
+    const stats = statSync(real, { bigint: true });
+    if (!stats.isFile()) return null;
+    return `${real}|${stats.dev}|${stats.ino}|${stats.size}|${stats.mtimeNs}|${stats.ctimeNs}`;
+  } catch { return null; }
+}
+
 /**
  * The tickets the file route answers. Random, held in memory, bound to one
  * absolute path and good for `FILE_TICKET_TTL_MS`: a url that ends up in a
@@ -303,12 +312,12 @@ export interface FileTicketTarget {
  * names a path to the HTTP server.
  */
 export class FileTickets {
-  private readonly held = new Map<string, { path: string; mime: string; expiresAt: number }>();
+  private readonly held = new Map<string, { path: string; mime: string; expiresAt: number; identity: string | null }>();
 
   mint(path: string, mime: string, now = Date.now()): string {
     this.sweep(now);
     const ticket = newToken();
-    this.held.set(ticket, { path, mime, expiresAt: now + FILE_TICKET_TTL_MS });
+    this.held.set(ticket, { path, mime, expiresAt: now + FILE_TICKET_TTL_MS, identity: fileIdentity(path) });
     return ticket;
   }
 
@@ -316,6 +325,10 @@ export class FileTickets {
     this.sweep(now);
     const entry = this.held.get(ticket);
     if (entry === undefined) return null;
+    if (entry.identity === null || fileIdentity(entry.path) !== entry.identity) {
+      this.held.delete(ticket);
+      return null;
+    }
     return { path: entry.path, mime: entry.mime };
   }
 

@@ -254,6 +254,8 @@ export class Store {
   error = $state<string | null>(null);
   page = $state<Page>('chat');
   settingsTab = $state<SettingsTab>('general');
+  /** A settings card requested before its lazy page exists, with a fresh key for repeated asks. */
+  settingsSection = $state<{ id: string; request: number } | null>(null);
   /** The phone drawer. */
   sidebarOpen = $state(false);
   /** The desktop sidebar, folded with Ctrl+B. */
@@ -1394,8 +1396,11 @@ export class Store {
   // Navigation
   // -------------------------------------------------------------------------
 
-  showSettings(tab: SettingsTab = 'general'): void {
+  showSettings(tab: SettingsTab = 'general', section: string | null = null): void {
     this.settingsTab = tab;
+    this.settingsSection = section === null
+      ? null
+      : { id: section, request: (this.settingsSection?.request ?? 0) + 1 };
     this.page = 'settings';
     if (tab === 'resources') void this.refreshResources();
   }

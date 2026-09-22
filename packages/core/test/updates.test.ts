@@ -5,7 +5,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import type { HarnessUpdate } from '@boite/contracts';
 import type { CoreClient } from '../src/client.ts';
 import { compareVersions, inside, readVersion } from '../src/providers/updates.ts';
-import { startTestCore, waitFor } from './harness.ts';
+import { echoThread, startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
 
 const FAKE = fileURLToPath(new URL('./fixtures/update-agent.ts', import.meta.url));
@@ -160,6 +160,24 @@ describe('harness updates', () => {
     await expect(client.call('providers.update', { providerId: 'update-fake' })).rejects.toThrow(/1 turn in flight/);
   });
 
+  test('an accepted turn still protects its provider after the picker changes', async () => {
+    const { client, state } = await start('command');
+    const core = harness!.core;
+    await client.call('providers.updates', {});
+    await client.call('settings.set', { maxConcurrentTurns: 1 });
+    const blocker = await echoThread(harness!, client);
+    await client.call('turns.start', { threadId: blocker.threadId, prompt: '[sleep:60000]' });
+    const account = await client.call('accounts.add', { providerId: 'update-fake', label: 'Fake', useDefaultLocation: true });
+    const thread = await client.call('threads.create', { projectId: core.threads.require(blocker.threadId).projectId, providerId: 'update-fake', accountId: account.id });
+    await client.call('turns.start', { threadId: thread.id, prompt: 'queued on the old provider' });
+    await client.call('threads.update', { threadId: thread.id, accountId: blocker.accountId });
+    expect(core.threads.require(thread.id).providerId).toBe('echo');
+    try {
+      await expect(client.call('providers.update', { providerId: 'update-fake' })).rejects.toThrow(/1 turn in flight/);
+      expect(readFileSync(state, 'utf8')).toBe('1.0.0');
+    } finally { await client.call('turns.stop', { threadId: thread.id }); }
+  });
+
   test('an update asked for during a check waits for it, and a second one is refused while the first runs', async () => {
     const { client } = await start('npm');
     await client.call('providers.updates', {});
@@ -204,5 +222,24 @@ describe('harness updates', () => {
     const loaded = await client.call('providers.reload', {});
     expect(loaded.rejected).toHaveLength(1);
     expect(loaded.rejected[0]?.field).toContain('update.latestNpm');
+  });
+
+  test('an updater waiting on a check cannot start after the store closes', async () => {
+    const { state } = await start('npm');
+    const updates = harness!.core.updates;
+    await updates.check();
+    let release!: () => void;
+    let entered!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const checking = new Promise<void>(resolve => { entered = resolve; });
+    updates.npmLatest = async () => { entered(); await gate; return '1.1.0'; };
+    const checked = updates.check();
+    await checking;
+    const update = updates.update('update-fake');
+    updates.close();
+    release();
+    await checked;
+    await expect(update).rejects.toThrow('stopping');
+    expect(readFileSync(state, 'utf8')).toBe('1.0.0');
   });
 });

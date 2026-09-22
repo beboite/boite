@@ -4,6 +4,15 @@ What boite does to stay cheap on a slow link and quick to start, how each part
 is measured, and the numbers of the last run. A claim about speed or size needs
 a fresh run of the bench that covers it, with the command and the date.
 
+## Naming a long conversation
+
+`bun run bench/retitle.ts` creates 5,000 messages containing about 40 MB of text
+on a temporary core and regenerates the title with the offline echo driver.
+It warms up once, then reports six samples. On 2026-09-22, the median fell from
+103.08 ms to 0.26 ms after replacing a full history load with a journal iterator
+that stops after the first user message and nonempty assistant answer.
+This measures local history lookup and title persistence, not provider latency.
+
 ## A remote client and a local one are not served alike
 
 The core decides per connection. A WebSocket whose `Host` header is

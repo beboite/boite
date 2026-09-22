@@ -186,7 +186,7 @@
         {#if status.localReady && !status.installing}
           <div class="actions"><button type="button" class="quiet small" data-testid="voice-uninstall" disabled={busy} onclick={() => void manage('speech.uninstall')}><Trash2 size={14} />{strings.speech.remove}</button></div>
         {/if}
-        <details>
+        <details class="disclosure">
           <summary>{strings.speech.advanced}</summary>
           <p>{strings.speech.pathHint}</p>
           {#if !status.canInstallRuntime}<p>{strings.speech.runtimeHint}</p>{/if}

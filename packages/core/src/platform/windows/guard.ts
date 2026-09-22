@@ -95,7 +95,7 @@ function ensureWorker(): void {
     created.postMessage(start);
     // The core exits on its own terms; a pump that is still waiting must never
     // be what keeps the process alive.
-    if (typeof created.unref === 'function') created.unref();
+    if ('unref' in created && typeof created.unref === 'function') created.unref();
     worker = created;
   } catch (error) {
     fail(error instanceof Error ? error.message : String(error));

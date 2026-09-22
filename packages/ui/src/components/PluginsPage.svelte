@@ -261,8 +261,7 @@
 {/snippet}
 
 <div class="page" data-testid="plugins-page">
-  <header><h1>{t.heading}</h1></header>
-  <p class="lead">{t.intro}</p>
+  <header><div><h1>{t.heading}</h1><p>{t.intro}</p></div></header>
   {#if error}<p class="bad" role="alert">{error}</p>{/if}
 
   <section aria-labelledby="plugins-installed" data-testid="plugins-installed">
@@ -348,8 +347,7 @@
 
 <style>
   .page { container-type: inline-size; }
-  .lead { max-width: 720px; margin-bottom: 20px; color: var(--color-muted-foreground); font-size: var(--text-sm); line-height: 1.5; }
-  section { max-width: 720px; margin-bottom: 24px; }
+  section { max-width: var(--settings-width); margin-bottom: 24px; }
   section > h2 { margin: 0 0 8px; }
   .hint { margin: 0; font-size: var(--text-sm); color: var(--color-muted-foreground); line-height: 1.5; }
   .empty-note { min-height: 1.5em; }

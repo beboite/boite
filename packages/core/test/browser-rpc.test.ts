@@ -31,6 +31,12 @@ test('browser capability is explicit and rejects unknown protocol versions', () 
   expect(() => parseManifest({ ...manifest, provides: { browser: { protocol: 'anything' } } }, 'fixture')).toThrow('provides.browser.protocol');
 });
 
+test('shutdown refuses a new browser task before checking plugin configuration', async () => {
+  harness = await startTestCore();
+  await harness.core.drain();
+  expect(() => harness!.core.browser.start({ threadId: 't1', pluginId: 'jev-browser', url: 'https://example.org', goal: 'Open page', completion: { text: 'Example' } })).toThrow('shutting down');
+});
+
 test('agents cannot enable automation, inspect credentials, or read another thread', async () => {
   harness = await startTestCore(); const owner = await harness.connect();
   const { threadId } = await echoThread(harness, owner);

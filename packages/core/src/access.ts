@@ -16,7 +16,7 @@
  * refused to both until someone decides otherwise, on purpose.
  */
 
-import type { RpcMethodName } from '@boite/contracts';
+import type { RpcEventName, RpcMethodName } from '@boite/contracts';
 import { refused } from './errors.ts';
 import type { Connection } from './router.ts';
 
@@ -83,6 +83,30 @@ export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>
 
 export function isDeviceMethod(method: RpcMethodName): boolean {
   return DEVICE_METHODS.has(method);
+}
+
+/** Push events must not bypass the read permissions enforced on RPC calls. */
+export const DEVICE_EVENTS: ReadonlySet<RpcEventName> = new Set<RpcEventName>([
+  'collaboration.changed', 'thread.activity',
+  'project.added', 'project.removed',
+  'thread.created', 'thread.updated', 'thread.removed', 'thread.commands',
+  'turn.started', 'turn.finished',
+  'message.started', 'message.delta', 'message.part', 'message.completed',
+  'permission.requested', 'permission.resolved', 'question.asked', 'question.answered',
+  'scheduler.updated', 'accounts.updated', 'accounts.removed',
+  'settings.updated', 'keybindings.updated', 'sessions.updated',
+  'providers.updated', 'providers.installProgress', 'providers.probed',
+]);
+
+/** The server also checks the thread or project scope of these agent events. */
+export const AGENT_EVENTS: ReadonlySet<RpcEventName> = new Set<RpcEventName>([
+  'browser.updated', // Progress for the agent's own owner-enabled browser tasks.
+  'thread.activity', 'todos.updated', 'collaboration.changed',
+]);
+
+export function mayReceiveEvent(name: RpcEventName, connection: Connection): boolean {
+  if (connection.identity.principal === 'owner') return true;
+  return (connection.identity.principal === 'agent' ? AGENT_EVENTS : DEVICE_EVENTS).has(name);
 }
 
 /**

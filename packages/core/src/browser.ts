@@ -42,7 +42,7 @@ export class BrowserStore {
 
   start(raw: BrowserRequest): BrowserTask {
     const request = validateBrowserRequest(raw);
-    if (this.closing) throw refused('Boite is shutting down.');
+    if (this.closing || this.core.stopping) throw refused('Boite is shutting down.');
     if (!this.config.enabled) throw refused('Enable browser automation in Plugins first.');
     const key = process.env.TYPESAFE_API_KEY;
     if (!key) throw refused('Set TYPESAFE_API_KEY in the core environment before starting a browser task.');

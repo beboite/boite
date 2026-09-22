@@ -264,11 +264,20 @@ export class WsClient implements ObservableClient {
   ): Promise<RpcResult<M>> {
     const id = this.#nextId++;
     return new Promise<RpcResult<M>>((resolve, reject) => {
-      this.#pending.set(id, {
-        resolve: (value) => resolve(value as RpcResult<M>),
-        reject
-      });
-      socket.send(JSON.stringify({ jsonrpc: '2.0', id, method, params }));
+      const timer = setTimeout(() => {
+        this.#pending.delete(id);
+        reject(transportFailure(`${method} timed out; check the conversation before retrying`));
+      }, 120_000);
+      const pending: Pending = {
+        resolve: (value) => { clearTimeout(timer); resolve(value as RpcResult<M>); },
+        reject: (error) => { clearTimeout(timer); reject(error); }
+      };
+      this.#pending.set(id, pending);
+      try { socket.send(JSON.stringify({ jsonrpc: '2.0', id, method, params })); }
+      catch (error) {
+        this.#pending.delete(id);
+        pending.reject(error instanceof Error ? error : transportFailure(String(error)));
+      }
     });
   }
 

@@ -1,11 +1,13 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { PanelLeftClose, PanelLeftOpen } from '@lucide/svelte';
+  import { CircleArrowDown, PanelLeftClose, PanelLeftOpen } from '@lucide/svelte';
   import { MediaQuery } from 'svelte/reactivity';
   import ThreadHeader from './ThreadHeader.svelte';
   import type { Window as TauriWindow } from '@tauri-apps/api/window';
   import { strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
+  import { appUpdater, showAppUpdateUi } from '../lib/app-update.svelte';
+  import { appUpdateInstall } from '../lib/app-update-install.svelte';
 
   let { store }: { store: Store } = $props();
 
@@ -91,6 +93,10 @@
   let title = $derived(store.openProject?.name ?? strings.app.name);
   /** The dev install runs beside the stable one, so the bar has to say which is open. */
   let dev = $derived(store.core?.channel === 'dev');
+
+  function openUpdate(): void {
+    store.showSettings('general', 'app-update');
+  }
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -110,6 +116,31 @@
   {/if}
   {#if dev}
     <span class="channel" title={strings.app.channelDevTitle} data-testid="titlebar-channel">{strings.app.channelDev}</span>
+  {/if}
+  {#if showAppUpdateUi() && appUpdater.snapshot.supported && appUpdater.snapshot.currentChannel === 'nightly'}
+    <span class="channel" title={strings.appUpdate.nightlyTitle} data-testid="titlebar-update-channel">{strings.appUpdate.nightly}</span>
+  {/if}
+  {#if showAppUpdateUi() && appUpdater.ready}
+    <button
+      type="button"
+      class="small update-ready"
+      title={strings.appUpdate.readyTitlebar}
+      aria-label={strings.appUpdate.readyTitlebar}
+      disabled={appUpdateInstall.preparing}
+      onclick={() => void appUpdateInstall.request()}
+      data-testid="titlebar-update-ready"
+    >
+      <CircleArrowDown size={14} strokeWidth={1.75} />
+      <span>{strings.appUpdate.readyAction}</span>
+    </button>
+    <button
+      type="button"
+      class="ghost small update-details"
+      title={strings.appUpdate.detailsTitlebar}
+      aria-label={strings.appUpdate.detailsTitlebar}
+      onclick={openUpdate}
+      data-testid="titlebar-update-details"
+    >{strings.appUpdate.detailsAction}</button>
   {/if}
   {#if inShell}
   <!-- Windows' caption buttons: 46 px wide, the bar's full height, no gap and
@@ -179,6 +210,13 @@
     background: var(--color-surface-3);
     color: var(--color-muted-foreground);
   }
+
+  .update-ready {
+    flex: none;
+    gap: 5px;
+  }
+
+  .update-details { flex: none; }
 
   .controls {
     display: flex;

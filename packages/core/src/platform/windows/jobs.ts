@@ -451,7 +451,7 @@ function ensureWorker(port: number): void {
     };
     const start: JobsWorkerStart = { port, stop: shared, waitMs: 250 };
     created.postMessage(start);
-    if (typeof created.unref === 'function') created.unref();
+    if ('unref' in created && typeof created.unref === 'function') created.unref();
     worker = created;
   } catch (error) {
     failWorker(error instanceof Error ? error.message : String(error));
