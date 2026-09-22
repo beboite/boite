@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { accessSync, constants, existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, normalize, relative, resolve } from 'node:path';
 import type {
   EffortLevel,
@@ -675,7 +675,11 @@ export function resolveCommand(profile: OsProfile): ResolvedCommand | null {
       const found = Bun.which(candidate.value);
       if (found !== null) return { executable: found, prefix: [], shown: found };
     } else if (candidate.kind === 'file') {
-      if (existsSync(candidate.value)) return { executable: candidate.value, prefix: [], shown: candidate.value };
+      try {
+        if (!statSync(candidate.value).isFile()) continue;
+        accessSync(candidate.value, constants.X_OK);
+        return { executable: candidate.value, prefix: [], shown: candidate.value };
+      } catch { /* Missing or non-executable candidates leave the next one available. */ }
     } else if (candidate.kind === 'npm') {
       const found = resolveNpm(candidate.value);
       if (found !== null) return { executable: found.executable, prefix: [found.script], shown: found.script };
