@@ -31,6 +31,15 @@ test('browser capability is explicit and rejects unknown protocol versions', () 
   expect(() => parseManifest({ ...manifest, provides: { browser: { protocol: 'anything' } } }, 'fixture')).toThrow('provides.browser.protocol');
 });
 
+test('browser configuration accepts automatic discovery or an existing file and rejects a missing executable', async () => {
+  harness = await startTestCore(); const owner = await harness.connect();
+  const executablePath = join(harness.dataDir, 'browser-fixture');
+  await expect(owner.call('browser.configure', { enabled: false, executablePath })).rejects.toThrow('existing browser executable');
+  writeFileSync(executablePath, 'fixture, never executed');
+  expect((await owner.call('browser.configure', { enabled: false, executablePath })).config.executablePath).toBe(executablePath);
+  expect((await owner.call('browser.configure', { enabled: false, executablePath: null })).config.executablePath).toBeNull();
+});
+
 test('shutdown refuses a new browser task before checking plugin configuration', async () => {
   harness = await startTestCore();
   await harness.core.drain();

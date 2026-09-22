@@ -36,9 +36,9 @@ test('browser plugin saves host settings and cancels a visible task', async () =
   await client!.call('plugins.install', { id: 'jev-browser' });
   await vi.waitFor(() => expect(q('[data-testid="browser-enabled"]')).not.toBeNull(), { timeout: 3000 });
   (q('[data-testid="browser-enabled"]') as HTMLInputElement).click();
-  type('[data-testid="browser-executable"]', '/browser/chromium');
+  type('[data-testid="browser-executable"]', '  ');
   q('[data-testid="browser-save"]')!.click();
-  await vi.waitFor(async () => expect((await client!.call('browser.status', {})).config).toEqual({ enabled: true, executablePath: '/browser/chromium' }));
+  await vi.waitFor(async () => expect((await client!.call('browser.status', {})).config).toEqual({ enabled: true, executablePath: null }));
   const task = await client!.call('browser.start', { threadId: 't1', pluginId: 'jev-browser', url: 'https://example.org', goal: 'Save weekly notifications', completion: { text: 'Saved' } });
   await vi.waitFor(() => expect(q('[data-testid="browser-task"]')?.textContent).toContain(task.goal));
   q('[data-testid="browser-cancel"]')!.click();
