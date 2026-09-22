@@ -84,6 +84,11 @@ export class TauriBridge implements BrowserBridge {
     this.#run(id, 'browser_set_zoom', { factor });
   }
 
+  annotate(id: string, requestId: string | null): void {
+    if (!this.#live.has(id)) return;
+    this.#run(id, 'browser_annotate', { requestId });
+  }
+
   destroy(id: string): void {
     if (!this.#live.has(id)) return;
     this.#run(id, 'browser_destroy', {});
@@ -124,7 +129,9 @@ export class TauriBridge implements BrowserBridge {
         await invoke<null>(command, { id, ...args });
       })
       .catch((error: unknown) => {
-        this.#emit({ type: 'failed', id, reason: reasonOf(error) });
+        if (command === 'browser_annotate' && typeof args.requestId === 'string') {
+          this.#emit({ type: 'selection-failed', id, requestId: args.requestId, reason: reasonOf(error) });
+        } else this.#emit({ type: 'failed', id, reason: reasonOf(error) });
       });
     this.#queues.set(id, next);
     void next.then(() => {

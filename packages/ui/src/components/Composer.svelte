@@ -393,6 +393,16 @@
     syncInput();
   }
 
+  // Context inserted from a preview changes the shared draft without an input
+  // event. Measure after Svelte has written that text into the textarea.
+  $effect(() => {
+    void text;
+    if (!box) return;
+    let current = true;
+    void tick().then(() => { if (current) grow(); });
+    return () => { current = false; };
+  });
+
   /** Typing is the user's own, so it takes the composer out of recall. */
   function oninput() {
     recall = null;

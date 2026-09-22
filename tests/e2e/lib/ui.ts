@@ -8,9 +8,9 @@ const fixtureDir = join(import.meta.dir, '../.artifacts/fake-ui');
 let fixtureBuild: Promise<unknown> | undefined;
 
 /** Build fake-client fixtures once in CI, keeping cold transforms outside browser interaction deadlines. */
-export async function startUi(port: number): Promise<{ close(): Promise<void> }> {
+export async function startUi(port: number, options: { development?: boolean } = {}): Promise<{ close(): Promise<void> }> {
   const address = { host: '127.0.0.1', port, strictPort: true };
-  if (process.env.BOITE_E2E_PREBUILT_UI === '1') {
+  if (process.env.BOITE_E2E_PREBUILT_UI === '1' && !options.development) {
     // Production intentionally excludes ?fake=1. This separate test bundle
     // enables it without changing the UI staged in the installer.
     fixtureBuild ??= build({ root, define: { 'import.meta.env.DEV': 'true' }, build: { outDir: fixtureDir, emptyOutDir: true }, logLevel: 'warn' });

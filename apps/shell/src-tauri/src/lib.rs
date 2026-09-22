@@ -854,6 +854,7 @@ pub fn run() {
             browser::browser_reload,
             browser::browser_set_bounds,
             browser::browser_set_zoom,
+            browser::browser_annotate,
             browser::browser_destroy,
         ])
         .setup(move |app| {

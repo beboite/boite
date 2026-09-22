@@ -14,12 +14,12 @@
  * `session-import` is on before showing or running the import.
  */
 
-export type ExperimentId = 'theme-grain' | 'session-import';
+export type ExperimentId = 'theme-grain' | 'session-import' | 'chat-artifacts' | 'proposal-comparison' | 'preview-comments';
 
 export const EXPERIMENTS_STORAGE_KEY = 'boite.experiments';
 
 /** Every experiment this build ships, in the order the page lists them. */
-export const EXPERIMENT_IDS: ExperimentId[] = ['theme-grain', 'session-import'];
+export const EXPERIMENT_IDS: ExperimentId[] = ['theme-grain', 'session-import', 'chat-artifacts', 'proposal-comparison', 'preview-comments'];
 
 type Listener = (enabled: ExperimentId[]) => void;
 

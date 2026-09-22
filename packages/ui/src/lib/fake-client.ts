@@ -2156,6 +2156,24 @@ export class FakeClient implements ObservableClient {
         };
         return where;
       }
+      case 'artifacts.publish': {
+        const params = rawParams as RpcParams<'artifacts.publish'>;
+        const thread = this.#thread(params.threadId);
+        if (thread.archived) throw refusal('artifacts.publish needs an active thread');
+        const turn = thread.turns.at(-1);
+        if (!turn) throw refusal('artifacts.publish needs a thread with a turn');
+        const path = this.#inside(thread.cwd, params.path, 'artifacts.publish path', 'file');
+        const media = FAKE_MEDIA[path];
+        const body = media ? new Uint8Array(await (await fetch(media.url())).arrayBuffer()) : new TextEncoder().encode(this.#files.get(path) ?? '');
+        if (body.length > 5 * 1024 * 1024) throw refusal('artifacts.publish file must be at most 5 MB');
+        let binary = '';
+        for (const byte of body) binary += String.fromCharCode(byte);
+        const message: Message = { id: `m-${++this.#seq}`, threadId: thread.id, turnId: turn.id, role: 'assistant', state: 'complete', createdAt: this.#now(), parts: [{ type: 'file', name: path.split('/').at(-1) ?? path, mimeType: media?.mime ?? 'application/octet-stream', data: btoa(binary) }] };
+        thread.messages.push(message);
+        this.#emitToThread(thread.id, 'message.started', structuredClone(message));
+        this.#emitToThread(thread.id, 'message.completed', { threadId: thread.id, messageId: message.id, state: 'complete' });
+        return structuredClone(message);
+      }
       case 'panel.open': {
         const params = rawParams as RpcParams<'panel.open'>;
         const thread = this.#thread(params.threadId);

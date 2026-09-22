@@ -1698,6 +1698,16 @@ export class Store {
     paused: boolean;
   }>>({});
 
+  /** Add reviewed context to this machine's unsent draft without queuing a turn. */
+  appendComposerText(threadId: string, text: string): void {
+    if (!text.trim()) return;
+    this.composerStates[threadId] ??= {
+      text: '', attachments: [], queued: [], sending: false, paused: false
+    };
+    const draft = this.composerStates[threadId]!;
+    draft.text = draft.text ? `${draft.text}\n\n${text}` : text;
+  }
+
   /**
    * The composer's one action. On a draft it creates the thread first, titled
    * from the prompt; on an open thread it starts a turn. An image alone is a

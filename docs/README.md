@@ -10,6 +10,7 @@
 - [Usage](usage.md): tokens, API cost and limits per day, provider and model.
 - [Keyboard shortcuts](keybindings.md): defaults and customization.
 - [The right panel](panel.md): browser, changes, files, tasks and trace beside the chat.
+- [Chat and preview experiments](experiments.md): file delivery, proposal comparison and browser comments.
 - [The `boite` CLI](cli.md): what an agent runs to reach its thread and its panel.
 - [Titles](titles.md): automatic and manual conversation titles.
 - [Session import](imports.md): bringing in a Claude Code conversation.

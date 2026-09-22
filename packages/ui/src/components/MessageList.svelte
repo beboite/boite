@@ -20,6 +20,7 @@
   import PermissionCard from './PermissionCard.svelte';
   import QuestionCard from './QuestionCard.svelte';
   import Prose from './Prose.svelte';
+  import ChatFile from './ChatFile.svelte';
   import ThinkingPart from './ThinkingPart.svelte';
   import TurnSummary from './TurnSummary.svelte';
   import { promptCommand, promptText } from '../lib/message-display';
@@ -634,9 +635,11 @@
                   {#if part.type === 'text'}
                     {@const shownText = message.role === 'system' ? promptText(part) : visibleAnswer(part.text)}
                     {#if shownText.length > 0 || index === caretAt}
-                      <Prose text={shownText} live={index === caretAt} />
+                      <Prose text={shownText} live={index === caretAt} {store} {threadId} />
                     {/if}
 
+                  {:else if part.type === 'file'}
+                    <ChatFile file={part} />
                   {:else if part.type === 'tool'}
                     <ToolCard
                       name={part.name}

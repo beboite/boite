@@ -481,7 +481,7 @@
       <TraceSurface {store} />
     {:else if active?.kind === 'browser'}
       {#key active.id}
-        <BrowserSurface surface={active} {panel} />
+        <BrowserSurface surface={active} {panel} {store} />
       {/key}
     {:else if active?.kind === 'changes'}
       <ChangesSurface {store} surface={active} {panel} />

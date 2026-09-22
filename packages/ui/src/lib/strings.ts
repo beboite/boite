@@ -1,5 +1,41 @@
 /** Every user-facing string of the UI. No literal UI text lives anywhere else. */
 export const strings = {
+  previewComments: {
+  annotate: 'Comment on an element',
+  picking: 'Select an element in the page. Escape cancels.',
+  comment: 'What should change?',
+  add: 'Add to message',
+  cancel: 'Cancel',
+  added: 'Added to your message. Review it before sending.',
+  unavailable: 'Element selection is unavailable on this page. Use the desktop app for cross-origin pages.',
+  failed: 'Element selection failed. Reload the page and try again.'
+},
+  proposalComparison: {
+  title: 'Compare proposals',
+  intro: 'Send one prompt to two agents in separate Git worktrees. Each uses Ask permission mode.',
+  prompt: 'Shared prompt',
+  placeholder: 'Describe the change you want both agents to propose.',
+  first: 'Proposal A',
+  second: 'Proposal B',
+  launch: 'Run both proposals',
+  launching: 'Starting proposals',
+  close: 'Close',
+  continue: 'Continue in this thread',
+  empty: 'The response will appear here.',
+  waiting: 'Open the thread to answer its permission request or question.',
+  independent: 'Closing this view does not stop a running thread. Continue in either thread to review its changes.',
+  created: 'Thread created, but its start was not confirmed. Open the thread to check before sending again.',
+  unavailable: 'Comparison needs an owner connection to this machine.',
+  noTarget: 'Choose an available provider and account for both proposals.',
+  changed: 'The machine connection changed. Open any created thread on its original machine.',
+  newComparison: 'New comparison',
+  refresh: 'Refresh',
+  starting: 'Starting',
+  failed: 'Could not start',
+  ready: 'Ready',
+  noText: 'No text response yet. Open the thread to review tools and other output.'
+},
+  artifacts: { preview: 'Preview', download: 'Download', close: 'Close preview', loading: 'Loading file', unavailable: 'No inline preview for this file. Download it to open it.', failed: 'Could not open this file', ownerOnly: 'Local file links need an owner connection. Ask the agent to attach the file to share it with this device.' },
   speech: {
     heading: 'Voice', description: 'Dictate into any conversation. Review the text before sending.',
     start: 'Dictate', stop: 'Finish dictation', listening: 'Listening', opening: 'Waiting for microphone', transcribing: 'Transcribing',
@@ -921,6 +957,9 @@ export const strings = {
   },
 
   experiments: {
+    chatArtifacts: { title: 'Chat files and previews', hint: 'Open file links and preview files returned by an agent in the conversation' },
+    proposalComparison: { title: 'Compare proposals', hint: 'Send one prompt to two agents in separate worktrees and compare their answers' },
+    previewComments: { title: 'Preview comments', hint: 'Select an element in the integrated browser and add feedback to the conversation draft' },
     themeGrain: {
       title: 'Grain theme',
       hint: 'A grainy ground fading from light grey at the top left to black at the bottom right'

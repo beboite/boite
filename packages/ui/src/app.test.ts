@@ -1184,20 +1184,21 @@ test('outside the shell the same link goes through window.open', async () => {
   }
 });
 
-test('a ctrl-click on an external link is left alone', async () => {
+test.each([false, true])('a ctrl-click uses the opener only in the shell: %s', async (shell) => {
   const opened = vi.fn(() => null);
   const original = window.open;
   window.open = opened as unknown as typeof window.open;
   try {
     const link = await loginLink();
-    window.__TAURI_INTERNALS__ = {};
+    if (shell) window.__TAURI_INTERNALS__ = {};
     const click = new MouseEvent('click', { bubbles: true, cancelable: true, ctrlKey: true });
     link.dispatchEvent(click);
 
     await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(openUrl).not.toHaveBeenCalled();
+    if (shell) expect(openUrl).toHaveBeenCalledWith(LOGIN_URL);
+    else expect(openUrl).not.toHaveBeenCalled();
     expect(opened).not.toHaveBeenCalled();
-    expect(click.defaultPrevented).toBe(false);
+    expect(click.defaultPrevented).toBe(shell);
 
     await backToChat();
   } finally {

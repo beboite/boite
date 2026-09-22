@@ -1398,6 +1398,8 @@ export interface RpcMethods {
    * and refuses by name otherwise.
    */
   'panel.open': { params: { threadId: ThreadId; surface: PanelSurface }; result: { shown: boolean } };
+  /** Explicitly publish a bounded file snapshot from this thread's working directory. */
+  'artifacts.publish': { params: { threadId: ThreadId; path: string }; result: Message };
   /** The agent's task list, whole, as the tasks surface shows it. */
   'threads.tasks.set': { params: { threadId: ThreadId; tasks: AgentTask[] }; result: ThreadActivity };
   'threads.tasks.get': { params: { threadId: ThreadId }; result: AgentTask[] };
