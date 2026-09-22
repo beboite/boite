@@ -290,8 +290,8 @@ test('a profile switches harness/account/model without copying the parent transc
   scriptedClaude(h);
   const provider = h.core.providers.require('claude');
   const model = provider.models[0]!.id;
-  const account = h.core.accounts.list().find(a => a.providerId === 'claude')!;
-  h.core.journal.putAccount({ ...account, status: 'ok' });
+  const account = { id: 'delegation-claude', providerId: 'claude', label: 'Scripted Claude', isolationDir: h.dataDir, status: 'ok' as const, identity: null, createdAt: Date.now() };
+  h.core.journal.putAccount(account);
   let seen: TurnContext | undefined;
   restores.push(setDriver('claude-sdk', { protocol: 'claude-sdk', startTurn(ctx) {
     seen = ctx;
