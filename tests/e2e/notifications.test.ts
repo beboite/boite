@@ -13,7 +13,7 @@ beforeAll(async () => {
   page = await BrowserPage.launch({url:`http://127.0.0.1:${port}/?fake=1&open=recent`,windowSize:{width:1300,height:850}});
   await page.waitFor(`document.querySelector('[data-thread-id]')`);
 }, 90000);
-afterAll(async () => { await page?.close(); await server?.close(); });
+afterAll(async () => { await page?.close(); await server?.close(); }, 15_000);
 test('notification stays readable and can be dismissed', async () => {
   await page.evaluate(`(async () => { const {workspace} = await import('/src/lib/workspace.svelte.ts'); workspace.active.error = 'Could not connect to the build machine. Check the connection in Settings and try again. The current conversation is saved.'; })()`);
   await page.waitFor(`document.querySelector('[data-testid="error-toast"]')`);

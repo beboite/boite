@@ -150,10 +150,15 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           bun run apps/shell/scripts/stage-sidecar.ts
       - run: bun run test:shell --release
-      - run: bun test tests/e2e --parallel=3
+      - name: End-to-end tests
         if: needs.changes.outputs.e2e == 'true'
         env:
           BOITE_E2E_PREBUILT_UI: '1'
+          BOITE_E2E_FAKE_UI: tests/e2e/.artifacts/fake-ui
+        run: |
+          bun tests/e2e/lib/warm.ts $env:BOITE_E2E_FAKE_UI
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          bun test tests/e2e --parallel=3
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: windows-installer

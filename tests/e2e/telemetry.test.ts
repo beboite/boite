@@ -14,7 +14,7 @@ beforeAll(async () => {
   await page.send('Emulation.setDeviceMetricsOverride', { width: 1400, height: 1000, deviceScaleFactor: 1, mobile: false });
   await page.waitFor(`document.querySelector('[data-testid="nav-settings"]')`);
 }, 30_000);
-afterAll(async () => { await page?.close(); await server?.close(); });
+afterAll(async () => { await page?.close(); await server?.close(); }, 15_000);
 const card = '[data-testid="telemetry-settings"]';
 test('owner controls consent on desktop and phone; captures both layouts', async () => {
   await page.waitFor(`document.querySelector('[data-testid="onboarding-next"]')`);

@@ -79,8 +79,13 @@ The tested installer becomes the release artifact, with no second release build.
 CI sets `BOITE_E2E_PREBUILT_UI=1` to test the UI already built for that installer.
 The test refuses a missing UI build. Local end-to-end runs rebuild it by default.
 The suite runs on three `bun test --parallel` workers: every file takes its own
-ports, data directory and browser profile, and the fake-client bundle is built
-once per worker process.
+ports, data directory and browser profile. `tests/e2e/lib/warm.ts` runs first.
+It optimizes Vite's dependencies once, since on a fresh checkout each dev
+server would otherwise empty `packages/ui/node_modules/.vite` under the
+servers of the other workers. It also builds the fake-client bundle that
+`BOITE_E2E_FAKE_UI` hands to every worker. Warming under a `NODE_ENV` other
+than `test`, the one `bun test` sets, changes Vite's config hash and brings the
+race back.
 
 When Cargo uses a shared target directory, staging snapshots its shell into the
 checkout before the tests. Another checkout's later build cannot replace it.

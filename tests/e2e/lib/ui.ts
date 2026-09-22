@@ -1,5 +1,6 @@
 import { createRequire } from 'node:module';
-import { join } from 'node:path';
+import { existsSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 
 const root = join(import.meta.dir, '../../../packages/ui');
 const requireUi = createRequire(join(root, 'package.json'));
@@ -12,6 +13,12 @@ let fixtureBuild: Promise<unknown> | undefined;
 /** Build fake-client fixtures once in CI, keeping cold transforms outside browser interaction deadlines. */
 export async function startUi(port: number): Promise<{ close(): Promise<void> }> {
   const address = { host: '127.0.0.1', port, strictPort: true };
+  const shared = process.env.BOITE_E2E_FAKE_UI;
+  if (shared) {
+    // Built once by `lib/warm.ts` before a parallel run.
+    if (!existsSync(join(shared, 'index.html'))) throw new Error(`BOITE_E2E_FAKE_UI=${shared} holds no index.html; build it with bun tests/e2e/lib/warm.ts ${shared}`);
+    return preview({ root, build: { outDir: resolve(shared) }, preview: address, clearScreen: false });
+  }
   if (process.env.BOITE_E2E_PREBUILT_UI === '1') {
     // Production intentionally excludes ?fake=1. This separate test bundle
     // enables it without changing the UI staged in the installer.
