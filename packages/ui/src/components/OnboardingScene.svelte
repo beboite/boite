@@ -3,12 +3,15 @@
   import ProviderLogo from './ProviderLogo.svelte';
   import BoiteMark from './BoiteMark.svelte';
   import { strings } from '../lib/strings';
+  import { strings as english } from '../lib/strings.en';
 
   let { scene }: { scene: 'welcome' | 'agents' | 'voice' | 'panel' | 'usage' | 'reach' | 'quiet' | 'privacy' } = $props();
   let paused = $state(false);
   let replay = $state(0);
-  const t = $derived(strings.onboarding.demo);
-  const description = $derived(scene === 'voice' ? t.voiceHint : scene === 'agents' ? t.continued : scene === 'panel' ? t.reviewed : scene === 'usage' ? t.trayHint : scene === 'reach' ? t.reachHint : scene === 'quiet' ? t.quietBody : scene === 'privacy' ? strings.onboarding.privacy.body : strings.onboarding.welcome.body);
+  // Keep artwork copy short and stable across locales; controls remain translated.
+  const t = english.onboarding.demo;
+  const controls = $derived(strings.onboarding.demo);
+  const description = $derived(scene === 'voice' ? controls.voiceHint : scene === 'agents' ? controls.continued : scene === 'panel' ? controls.reviewed : scene === 'usage' ? controls.trayHint : scene === 'reach' ? controls.reachHint : scene === 'quiet' ? controls.quietBody : scene === 'privacy' ? strings.onboarding.privacy.body : strings.onboarding.welcome.body);
 </script>
 
 {#snippet pointer(extra: string)}
@@ -107,8 +110,8 @@
     </div>
   {/key}
   <figcaption>
-    <button class="ghost small" aria-pressed={paused} data-testid="onboarding-animation-pause" onclick={() => paused = !paused}>{#if paused}<Play size={13} />{t.resume}{:else}<Pause size={13} />{t.pause}{/if}</button>
-    <button class="ghost small" data-testid="onboarding-animation-replay" onclick={() => { paused = false; replay++; }}><RotateCcw size={13} />{t.play}</button>
+    <button class="ghost small" aria-pressed={paused} data-testid="onboarding-animation-pause" onclick={() => paused = !paused}>{#if paused}<Play size={13} />{controls.resume}{:else}<Pause size={13} />{controls.pause}{/if}</button>
+    <button class="ghost small" data-testid="onboarding-animation-replay" onclick={() => { paused = false; replay++; }}><RotateCcw size={13} />{controls.play}</button>
   </figcaption>
 </figure>
 

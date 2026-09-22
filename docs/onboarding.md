@@ -20,7 +20,8 @@ tour set.
 | Quiet | Agents work without taking over the screen or speakers | Notifications, close to tray, focus guard, mute |
 | Privacy | Messages and files stay out of analytics | Two concise consent switches and the final welcome, owner only |
 
-The miniatures use responsive text, the real provider marks and theme tokens.
+The miniatures use responsive English text, the real provider marks and theme tokens.
+Tour instructions, animation controls and accessible descriptions stay localized.
 Three bordered icon buttons select the conversation demonstrations. Dictation
 shows microphone activation, speech, then a draft to review; agent switching
 shows the picker, a follow-up and the next agent's answer. Animations stop after their demonstration, can be paused and replayed,

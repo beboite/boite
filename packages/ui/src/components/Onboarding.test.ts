@@ -64,6 +64,18 @@ async function settle(): Promise<void> {
   await tick();
 }
 
+test('demo artwork stays English while the surrounding tour stays French', async () => {
+  setLocaleSetting('fr');
+  await open();
+  await click('onboarding-dot-agents');
+  await click('onboarding-example-voice');
+  expect(query('[data-testid=onboarding-animation]').textContent).toContain('Build my portfolio');
+  await click('onboarding-animation-pause');
+  expect(query('[data-testid=onboarding-animation-pause]').textContent).toContain('Reprendre');
+  expect(query('[data-testid=onboarding-animation-replay]').textContent).toContain('Rejouer');
+  expect(query('[data-testid=onboarding-next]').textContent).toContain('Suivant');
+});
+
 test('the tour walks its screens, the dots follow, and the last one closes it', async () => {
   const screens = steps();
   await open();
