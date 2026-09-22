@@ -40,9 +40,9 @@ turn whose driver names a lifetime, and keeps it in the journal
 
 | Agent | Lifetime | Source |
 |---|---|---|
-| Claude | 5 minutes or 1 hour, per request | `reported`: `usage.cache_creation.ephemeral_5m_input_tokens` and `ephemeral_1h_input_tokens` on each main-loop assistant message |
+| Claude | what the API says it applied: 1 hour on a subscription within plan usage, 5 minutes on an API key, a cloud provider or usage credits | `reported`: `usage.cache_creation.ephemeral_5m_input_tokens` and `ephemeral_1h_input_tokens` on each main-loop assistant message |
 | Codex on OpenAI | 30 minutes; up to 24 hours before GPT-5.6 | `documented`, from the model `thread/start` answers |
-| pi on Anthropic | 5 minutes or 1 hour, per request | `reported`: pi's `usage.cacheWrite1h` |
+| pi on Anthropic | what the API says it applied: 5 minutes by default, 1 hour with `PI_CACHE_RETENTION=long` | `reported`: pi's `usage.cacheWrite1h` |
 | pi on OpenAI | as Codex | `documented` |
 | OpenCode on `anthropic/` models | 5 minutes | `documented` |
 | OpenCode on `openai/` models | as Codex | `documented` |
