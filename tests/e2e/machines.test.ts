@@ -1,13 +1,11 @@
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { join } from 'node:path';
-import { createRequire } from 'node:module';
 import { BrowserPage, freePort } from './lib/cdp.ts';
+import { startUi } from './lib/ui.ts';
 import { startCore, type RunningCore } from './lib/core.ts';
 import { connect } from '../../packages/core/src/client.ts';
 
-const requireUi = createRequire(join(import.meta.dir, '../../packages/ui/package.json'));
-const { createServer } = await import(requireUi.resolve('vite'));
-let server: { listen(): Promise<unknown>; close(): Promise<void> };
+let server: { close(): Promise<void> };
 let page: BrowserPage;
 let url: string;
 const cores: RunningCore[] = [];
@@ -20,12 +18,7 @@ async function capture(name: string) {
 }
 beforeAll(async () => {
   const port = await freePort();
-  server = await createServer({
-    root: join(import.meta.dir, '../../packages/ui'),
-    server: { host: '127.0.0.1', port, strictPort: true },
-    clearScreen: false
-  });
-  await server.listen();
+  server = await startUi(port);
   url = `http://127.0.0.1:${port}`;
   page = await BrowserPage.launch({ url: `${url}/?fake=1&open=recent&machines=1` });
 }, 30_000);
@@ -55,9 +48,11 @@ test('project and recent cards show both hosts, PRs and user-message ordering on
     `Array.from(document.querySelectorAll('${id('thread-row')}')).map(e => e.dataset.threadId)`
   );
   expect(rows.length).toBe(8);
-  await page.evaluate(
-    `(async () => { const { workspace } = await import('/src/lib/workspace.svelte.ts'); const remote = workspace.machines[1].store; await remote.rename('t-trace', 'Changed title, same user message'); })()`
-  );
+  const remoteThread = '[data-testid="thread-row"][data-thread-id="t-trace"][data-machine-id="http://builder.test"]';
+  await page.evaluate(`document.querySelector(${JSON.stringify(remoteThread)}).dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))`);
+  await page.type(id('thread-rename'), 'Changed title, same user message');
+  await page.evaluate(`document.querySelector('${id('thread-rename')}').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))`);
+  await page.waitFor(`document.querySelector(${JSON.stringify(remoteThread)})?.title === 'Changed title, same user message'`);
   expect(
     await page.evaluate<string[]>(
       `Array.from(document.querySelectorAll('${id('thread-row')}')).map(e => e.dataset.threadId)`
@@ -70,9 +65,8 @@ test('project and recent cards show both hosts, PRs and user-message ordering on
     deviceScaleFactor: 1,
     mobile: true
   });
-  await page.evaluate(
-    `(async () => { const { workspace } = await import('/src/lib/workspace.svelte.ts'); workspace.active.sidebarOpen = true; })()`
-  );
+  await page.click('[data-testid="mobile-tabs"] button:first-child');
+  await page.waitFor(`document.querySelectorAll('[data-testid="mobile-list"] [data-testid^="mobile-thread-"]').length === 8`);
   await capture('recent-machines-phone.png');
   expect(await page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')).toBe(true);
   await page.evaluate(`document.documentElement.dataset.theme = 'light'`);
