@@ -25,7 +25,11 @@ test.skipIf(!shell).each(['separate resources', 'adjacent core', 'runtime bundle
     }
     const result = Bun.spawnSync([shell!, shim, 'panel', 'a file.txt'], {
       cwd: directory,
-      env: { ...process.env, BOITE_CORE_EXECUTABLE: layout === 'separate resources' ? core.replaceAll('\\', '/') : undefined },
+      env: {
+        ...process.env,
+        BOITE_DATA_DIR: join(directory, 'data'),
+        BOITE_CORE_EXECUTABLE: layout === 'separate resources' ? core.replaceAll('\\', '/') : undefined,
+      },
       stdout: 'pipe', stderr: 'pipe', windowsHide: true,
     });
     expect(result.stderr.toString()).toBe('');
