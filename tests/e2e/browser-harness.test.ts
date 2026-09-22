@@ -14,11 +14,13 @@ test('browser waits for asynchronous conditions and the requested navigation', a
   });
   let page: BrowserPage | undefined;
   try {
-    page = await BrowserPage.launch({ url: `${server.url}first` });
+    page = await BrowserPage.launch({ url: `${server.url}first`, windowSize: { width: 1310, height: 820 } });
+    expect(await page.evaluate('[innerWidth, innerHeight]')).toEqual([1310, 820]);
     await expect(page.waitFor('Promise.resolve(false)', 100)).rejects.toThrow('waitFor timed out');
     await page.waitFor('Promise.resolve(true)', 100);
     await page.navigate(`${server.url}next`);
     expect(await page.evaluate('document.title')).toBe('/next');
+    expect(await page.evaluate('[innerWidth, innerHeight]')).toEqual([1310, 820]);
   } finally {
     await page?.close();
     server.stop(true);

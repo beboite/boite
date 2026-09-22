@@ -79,7 +79,7 @@ async function oneRun(live: Subject[]): Promise<Map<string, number>> {
     if (isCore) dataDirs.push(dataDir);
     const proc = Bun.spawn({
       cmd: isCore ? [...subject.cmd, '--port', '0'] : subject.cmd,
-      env: isCore ? { ...process.env, BOITE_DATA_DIR: dataDir } : { ...process.env },
+      env: isCore ? { ...process.env, BOITE_DATA_DIR: dataDir, BOITE_TELEMETRY_URL: '' } : { ...process.env },
       stdin: 'ignore',
       stdout: 'ignore',
       stderr: 'ignore',

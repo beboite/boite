@@ -17,3 +17,5 @@ bench/results/*.json
 tests/e2e/.artifacts/
 apps/shell/src-tauri/binaries/
 .bun-cache/
+telemetry/.wrangler/
+telemetry/.dev.vars*

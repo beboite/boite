@@ -71,7 +71,7 @@ export async function startCore(options: StartCoreOptions = {}): Promise<Running
       String(port),
       ...(options.args ?? []),
     ],
-    env: { ...process.env, BOITE_DATA_DIR: dataDir, BOITE_ECHO: '1', ...(options.env ?? {}) },
+    env: { ...process.env, BOITE_DATA_DIR: dataDir, BOITE_ECHO: '1', BOITE_TELEMETRY_URL: '', ...(options.env ?? {}) },
     stdout: 'pipe',
     stderr: 'pipe',
   });

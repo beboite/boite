@@ -4,11 +4,12 @@
   import ProviderLogo from './ProviderLogo.svelte';
   import QuotaList from './QuotaList.svelte';
   import { strings } from '../lib/strings';
+  import { weekdayTime } from '../lib/format';
   let { rows, busy = false, configure, connect }: { rows: AccountQuota[]; busy?: boolean; configure: (id: string, enabled: boolean) => void; connect: () => void } = $props();
   const providers = ['claude', 'codex', 'antigravity', 'grok', 'opencode'] as const;
   let expanded = $state<string | null>(null);
   const remaining = (used: number) => strings.quotas.remaining.replace('{percent}', String(Math.round(100 - used)));
-  const reset = (at: number) => strings.quotas.resets.replace('{time}', new Date(at).toLocaleString(undefined, { weekday: 'short', hour: '2-digit', minute: '2-digit' }));
+  const reset = (at: number) => strings.quotas.resets.replace('{time}', weekdayTime(at));
   const name = (provider: typeof providers[number]) => strings.quotas.names[provider];
 </script>
 
