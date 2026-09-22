@@ -1714,7 +1714,7 @@ export class Store {
     const generation = ++this.#openGeneration;
     this.#openTarget = threadId;
     const newest = (): boolean => this.#openGeneration === generation;
-    if (this.delegationSelectedAgentId && this.delegationSelectedAgentId !== threadId) {
+    if (this.openThread?.id !== threadId && this.delegationSelectedAgentId && this.delegationSelectedAgentId !== threadId) {
       await this.selectDelegatedAgent(null);
       if (!newest()) return;
     }

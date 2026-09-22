@@ -125,6 +125,23 @@ test('a later navigation wins while the previous agent subscription is being rel
   } finally { store.detach(); client.close(); }
 });
 
+test('reloading the current conversation keeps the selected agent transcript subscribed', async () => {
+  const client = new FakeClient({ delayMs: 0, delegationDemo: true });
+  const store = new Store();
+  store.attach(client);
+  try {
+    await store.connect();
+    await store.open('t-trace');
+    await store.selectDelegatedAgent('t-team-running');
+    const called = vi.spyOn(client, 'call');
+    await store.reload();
+    expect(store.openThread?.id).toBe('t-trace');
+    expect(store.delegationSelectedAgentId).toBe('t-team-running');
+    expect(store.delegationThread?.id).toBe('t-team-running');
+    expect(called).not.toHaveBeenCalledWith('threads.unsubscribe', { threadId: 't-team-running' });
+  } finally { store.detach(); client.close(); }
+});
+
 test('starting a draft cancels a pending child subscription even without an open subscription', async () => {
   const client = new FakeClient({ delayMs: 0, delegationDemo: true });
   const store = new Store();
