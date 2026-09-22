@@ -587,6 +587,9 @@ export const fr: Messages = {
     options: 'Options du message',
     placeholder: 'Message à {provider} dans {project}',
     placeholderNoProject: "Message à l'agent",
+    placeholderNew: 'Que voulez-vous faire ?',
+    moreOptions: 'Options',
+    pin: 'Garder {option} dans la barre',
     send: 'Envoyer',
     stop: 'Arrêter',
     queued: 'Envoyé à la fin du tour en cours',
@@ -938,6 +941,16 @@ export const fr: Messages = {
     },
     material: 'Matériau de la fenêtre',
     materialHint: 'Ce que Windows dessine derrière la fenêtre',
+    workspace: 'Espace de travail',
+    startIn: 'Les nouvelles conversations commencent dans',
+    startInHint: "Là où va Nouvelle conversation quand aucun projet n'est choisi. Celle lancée depuis un projet commence toujours dans ce projet.",
+    startDrafts: 'Brouillons',
+    startProject: 'Le projet en cours',
+    panelStart: "Le panneau latéral s'ouvre sur",
+    panelStartHint: "Ce que le panneau montre quand il s'ouvre sans rien dedans.",
+    panelLauncher: 'Son menu',
+    panelFiles: 'Fichiers',
+    panelChanges: 'Modifications',
     materialAcrylic: 'Acrylique',
     materialMica: 'Mica',
     materialSolid: 'Opaque',
@@ -1277,6 +1290,15 @@ export const fr: Messages = {
     replay: 'Revoir la présentation',
     replayHint: "Les mêmes écrans qu'au premier lancement. Rien de ce que vous avez réglé n'est défait.",
     changeLater: 'Tout ça se retrouve dans les réglages.',
+
+    profile: {
+      title: "D'abord, lequel êtes-vous ?",
+      everyday: "Je ne suis pas dev ! Ne m'embrouillez pas avec du code et des commandes !",
+      everydayHint: "Les conversations commencent dans Documents/Boite, la barre reste simple et l'agent demande avant d'agir.",
+      developer: 'Je suis dev, mettez-moi la totale.',
+      developerHint: "Les conversations commencent dans votre projet, l'effort et le worktree restent dans la barre, le panneau s'ouvre sur les modifications.",
+      later: "Rien n'est retiré, dans un cas comme dans l'autre. Le menu Options du champ de message et les réglages changent tout ça."
+    },
 
     welcome: {
       title: 'Boite fait tourner vos agents',

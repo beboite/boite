@@ -61,7 +61,7 @@ test('a new device gets the tour on its own, holds the app keys under it, and ne
   expect(await page.evaluate<boolean>(`!!document.querySelector('[data-testid=onboarding]')`)).toBe(false);
 }, 45_000);
 
-test('six illustrated screens fit both languages and widths, without leaving the tour', async () => {
+test('seven screens fit both languages and widths, without leaving the tour', async () => {
   await page.evaluate(`localStorage.removeItem('boite.onboarding')`);
   await page.reload();
   await page.waitFor(`document.querySelector('[data-testid=onboarding]')`);
@@ -70,14 +70,15 @@ test('six illustrated screens fit both languages and widths, without leaving the
     await page.click(`[data-testid=onboarding-locale-${locale}]`);
     for (const width of [1100, 390]) {
       await page.send('Emulation.setDeviceMetricsOverride', { width, height: 900, deviceScaleFactor: 1, mobile: width === 390 });
-      for (const step of ['welcome', 'agents', 'usage', 'reach', 'quiet', 'privacy']) {
+      for (const step of ['welcome', 'profile', 'agents', 'usage', 'reach', 'quiet', 'privacy']) {
         await page.click(`[data-testid=onboarding-dot-${step}]`);
         await page.waitFor(`document.querySelector('[data-testid=onboarding-step]')?.dataset.step === '${step}'`);
         await capture(`tour-${locale}-${width}-${step}.png`);
         expect(await page.evaluate(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true);
         expect(await page.evaluate(`document.querySelector('[data-testid=onboarding-next]').getBoundingClientRect().bottom <= innerHeight`)).toBe(true);
         expect(await page.evaluate(`document.querySelector('[data-testid=onboarding] header .count') === null`)).toBe(true);
-        expect(await page.evaluate(`document.querySelector('[data-testid=onboarding-scene]').textContent.includes('Illustration')`)).toBe(false);
+        // The question is its own picture: two answers, no scene.
+        if (step !== 'profile') expect(await page.evaluate(`document.querySelector('[data-testid=onboarding-scene]').textContent.includes('Illustration')`)).toBe(false);
         if (step === 'agents') {
           for (const demo of ['voice', 'panel', 'agents']) {
             await page.click(`[data-testid=onboarding-example-${demo}]`);

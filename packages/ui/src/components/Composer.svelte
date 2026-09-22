@@ -22,6 +22,7 @@
   import ThreadActivity from './ThreadActivity.svelte';
   import Dictation from './Dictation.svelte';
   import ComposerOptions from './ComposerOptions.svelte';
+  import { work } from '../lib/work-prefs.svelte';
 
   /**
    * `centered` is the draft's placement: the parent stacks the composer under
@@ -161,10 +162,13 @@
       !composer?.sending
   );
 
+  // A new conversation asks what the user wants done; one under way names who reads the message.
   let placeholder = $derived(
-    store.openProject && provider
-      ? fill(strings.composer.placeholder, { provider: provider.name, project: store.openProject.name })
-      : strings.composer.placeholderNoProject
+    !store.openThread && store.draft
+      ? strings.composer.placeholderNew
+      : store.openProject && provider
+        ? fill(strings.composer.placeholder, { provider: provider.name, project: store.openProject.name })
+        : strings.composer.placeholderNoProject
   );
 
   // -- the slash menu -----------------------------------------------------------
@@ -336,6 +340,13 @@
   let effortLevels = $derived((store.modelOf(choice)?.effort?.levels ?? []).filter(level => provider?.protocol === 'claude-sdk' || level.id !== 'ultrathink'));
   let speeds = $derived(store.modelOf(choice)?.speeds ?? []);
   let activeEffort = $derived(choice?.effort ?? store.modelOf(choice)?.effort?.default ?? null);
+  // A chip stays in the bar when this device pinned it, or when it holds
+  // something other than the default: a choice nobody can see is a trap.
+  let effortChip = $derived(
+    (effortLevels.length > 0 || speeds.length > 0) &&
+      (work.current.pins.effort || activeEffort !== (store.modelOf(choice)?.effort?.default ?? null) || Boolean(choice?.speed))
+  );
+  let worktreeChip = $derived(Boolean(store.draft && draftRepository && (work.current.pins.worktree || store.draft.worktree)));
 
   /** A null effort runs at the model's own default, not at a preset the client configured. */
   function cacheKey(selection: Choice): CacheKey {
@@ -696,6 +707,8 @@
     await tick();
     const bar = box?.closest('[data-testid="composer"]');
     if (window.matchMedia('(max-width: 720px)').matches && testid !== 'composer-picker') testid = 'composer-options';
+    // An unpinned effort lives in the Options menu.
+    else if (testid === 'composer-effort' && !effortChip) testid = 'composer-more';
     bar?.querySelector<HTMLElement>(`[data-testid="${testid}"]`)?.click();
   }
 
@@ -897,7 +910,7 @@
         {/if}
 
         <div class="desktop-options">
-        {#if effortLevels.length > 0 || speeds.length > 0}
+        {#if effortChip}
           <EffortSlider levels={effortLevels} active={activeEffort} onpick={pickEffort} {speeds} speed={choice?.speed ?? null} onspeed={(speed) => void pick({ speed })} />
         {/if}
 
@@ -909,7 +922,7 @@
         {/if}
 
         <!-- A thread keeps its directory, so the switch exists on a draft alone. -->
-        {#if store.draft && draftRepository}
+        {#if store.draft && worktreeChip}
           <button
             type="button"
             class="chip worktree"
@@ -924,6 +937,10 @@
             {strings.composer.worktree}
           </button>
         {/if}
+
+        {#key `${key}:${store.draft?.projectId ?? ''}`}
+          <ComposerOptions variant="desktop" busy={picking} levels={effortLevels} effort={activeEffort} {speeds} speed={choice?.speed ?? null} {modes} modeLabel={(mode) => modeLabel(mode, provider)} modeHint={(mode) => modeHint(mode, provider)} mode={displayedMode} worktree={store.draft && draftRepository ? store.draft.worktree : null} {canAttach} pins={work.current.pins} onattach={() => picker?.click()} oneffort={pickEffort} onspeed={(speed) => void pick({ speed })} onmode={pickMode} onworktree={() => store.setDraftWorktree(!store.draft?.worktree)} onpin={(id, on) => work.pin(id, on)} />
+        {/key}
         </div>
       </div>
 

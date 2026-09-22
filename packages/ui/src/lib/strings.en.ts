@@ -593,6 +593,12 @@ export const strings = {
     options: 'Message options',
     placeholder: 'Message {provider} in {project}',
     placeholderNoProject: 'Message the agent',
+    /** A new conversation, before anything is sent. */
+    placeholderNew: 'What do you want to do?',
+    /** The desktop button holding the options the bar does not show. */
+    moreOptions: 'Options',
+    /** A pin in that menu: pressed, the option has its own chip in the bar. */
+    pin: 'Keep {option} in the bar',
     send: 'Send',
     stop: 'Stop',
     queued: 'Sent when the current turn ends',
@@ -955,6 +961,16 @@ export const strings = {
     },
     material: 'Window material',
     materialHint: 'What Windows draws behind the window',
+    workspace: 'Workspace',
+    startIn: 'New conversations start in',
+    startInHint: "Where New thread goes when no project is picked. A project's own new thread always starts in that project.",
+    startDrafts: 'Drafts',
+    startProject: 'The current project',
+    panelStart: 'The side panel opens on',
+    panelStartHint: 'What the panel shows when it opens with nothing in it yet.',
+    panelLauncher: 'Its menu',
+    panelFiles: 'Files',
+    panelChanges: 'Changes',
     materialAcrylic: 'Acrylic',
     materialMica: 'Mica',
     materialSolid: 'Solid',
@@ -1300,6 +1316,16 @@ export const strings = {
     replay: 'Show the tour again',
     replayHint: 'The same screens as the first launch. Nothing you have set is undone.',
     changeLater: 'All of this is in Settings.',
+
+    /** The question the preset hangs on: said plainly, with a smile, so nobody is unsure which one they are. */
+    profile: {
+      title: 'First, which one are you?',
+      everyday: "I'm not a developer! Don't confuse me with code and commands!",
+      everydayHint: 'Conversations start in Documents/Boite, the bar stays simple, and the agent asks before it acts.',
+      developer: "I'm a developer, give me the works.",
+      developerHint: 'Conversations start in your project, effort and worktree stay in the bar, and the panel opens on the changes.',
+      later: "Nothing is taken away either way. The composer's Options menu and Settings change any of it."
+    },
 
     welcome: {
       title: 'Boite runs your agents',

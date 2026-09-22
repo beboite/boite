@@ -1,6 +1,6 @@
 # The tour
 
-Boite opens a six-screen tour on a new owner device, five on a paired guest.
+Boite opens a seven-screen tour on a new owner device, six on a paired guest.
 It waits for a connected core. Animated miniatures with SVG controls explain the features without
 calling live providers, reading quotas or navigating away from the tour.
 
@@ -14,6 +14,7 @@ tour set.
 | Screen | What it says | What it carries |
 |---|---|---|
 | Welcome | One conversation per task, and agents keep working meanwhile | Language and theme |
+| Profile | Developer or not, asked plainly | Two answers, each writing a preset of existing settings |
 | Conversation | The same history follows a change of agent | Selectable agent, dictation and diff demonstrations; inline local voice installation |
 | Usage | A named provider, a five-hour limit, used percentage and reset time | An illustrated taskbar hover, no live account list |
 | Reach | The host keeps working while the phone shows the same conversation | An animated desktop-to-phone illustration |
@@ -33,12 +34,47 @@ Escape leaves, the cross leaves, Tab stays inside. The dots at the bottom walk
 the screens and read as steps to a screen reader. Leaving at the first screen
 counts as much as finishing the last one: the tour is not asked twice.
 
+## The question
+
+The second screen asks who is at the keyboard, in the user's words rather than
+a feature list: "I'm not a developer! Don't confuse me with code and
+commands!" or "I'm a developer, give me the works." The answer is a preset,
+not a mode. It writes settings that already exist, and no component reads the
+answer itself:
+
+| | Not a developer | Developer |
+|---|---|---|
+| Composer chips pinned in the bar | none | effort and worktree |
+| New thread with no project picked | the drafts, `Documents/Boite` | the project in use |
+| An empty side panel opens on | Files | Changes |
+| Permission mode | Ask, set once | left as it is |
+
+`lib/work-prefs.svelte.ts` holds these per device, in `boite.work`. Picking an
+answer writes it at once, so skipping the rest of the tour keeps it, and picking
+the other one rewrites the whole preset. A draft still empty on screen moves
+to where the answer starts.
+
+Each piece changes on its own afterwards. On a computer the composer's Options
+menu lists effort, speed and worktree with a pin beside each; a pinned option
+gets its chip back in the bar. The permission mode never leaves the bar. An
+option set away from its default (a worktree turned on, a non-default effort
+or a speed) keeps its chip while it is set, pinned or not: a choice nobody can
+see is a trap. Settings, Appearance, Workspace holds the starting point and
+the panel's first surface.
+
+A device with no record gets one the first time a core answers. A core that
+already holds conversations, or a device that has already seen the tour, is an
+install from before the question: everything stays pinned, New thread stays in
+the project, and the panel keeps its launcher. Anything else starts with the
+calm bar and the drafts, the not-a-developer preset without its permission
+change.
+
 ## Once per device
 
 Closing it writes `boite.onboarding` in `localStorage`:
 
 ```json
-{ "version": 4, "at": 1789660000000 }
+{ "version": 5, "at": 1789660000000 }
 ```
 
 The device that stores nothing, a browser refusing storage, sees the tour every

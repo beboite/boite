@@ -7,6 +7,8 @@ import { ONBOARDING_STORAGE_KEY, ONBOARDING_VERSION, readOnboarding, steps } fro
 import { closeTour, openTour, tourRequested, tourSeen } from '../lib/onboarding.svelte';
 import { Store } from '../lib/store.svelte';
 import { THEME_STORAGE_KEY } from '../lib/theme';
+import { PREFS_STORAGE_KEY } from '../lib/prefs';
+import { work, WORK_STORAGE_KEY } from '../lib/work-prefs.svelte';
 
 /**
  * The tour: the screens it walks, the switches it carries, and the record it
@@ -19,6 +21,7 @@ let store: Store;
 
 beforeEach(async () => {
   window.localStorage.clear();
+  work.load();
   store = new Store();
   store.attach(new FakeClient({ delayMs: 0 }));
   await store.connect();
@@ -233,7 +236,7 @@ test('losing owner access on the last screen keeps the step and count valid', as
   flushSync();
   await tick();
   expect(step()).toBe('quiet');
-  expect(document.querySelectorAll('.dots .dot')).toHaveLength(5);
+  expect(document.querySelectorAll('.dots .dot')).toHaveLength(6);
 });
 
 test('continuing the privacy step keeps basic counters without opting into details', async () => {
@@ -316,4 +319,26 @@ test('focus stays in the dialog and navigation focuses its new heading', async (
   expect(document.activeElement).toBe(query('[data-testid=onboarding-skip]'));
   document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true, cancelable: true }));
   expect(document.activeElement).toBe(query('[data-testid=onboarding-next]'));
+});
+
+test('the second screen asks who is using Boite and writes the preset at once', async () => {
+  await open();
+  await click('onboarding-next');
+  expect(step()).toBe('profile');
+  expect(query('[data-testid=onboarding-profile-everyday]').textContent).toContain("I'm not a developer! Don't confuse me with code and commands!");
+  expect(query('[data-testid=onboarding-profile-developer]').textContent).toContain("I'm a developer, give me the works.");
+
+  store.prefs = { ...store.prefs, permissionMode: 'bypassPermissions' };
+  await click('onboarding-profile-everyday');
+  expect(query('[data-testid=onboarding-profile-everyday]').getAttribute('aria-pressed')).toBe('true');
+  expect(JSON.parse(window.localStorage.getItem(WORK_STORAGE_KEY) ?? 'null')).toEqual({ profile: 'everyday', pins: { effort: false, worktree: false }, startIn: 'drafts', panel: 'files' });
+  // The everyday answer asks before each action.
+  expect(JSON.parse(window.localStorage.getItem(PREFS_STORAGE_KEY) ?? 'null')).toMatchObject({ permissionMode: 'default' });
+
+  // Changing the answer rewrites the whole preset, and skipping keeps it.
+  await click('onboarding-profile-developer');
+  expect(query('[data-testid=onboarding-profile-everyday]').getAttribute('aria-pressed')).toBe('false');
+  await click('onboarding-skip');
+  await settle();
+  expect(JSON.parse(window.localStorage.getItem(WORK_STORAGE_KEY) ?? 'null')).toEqual({ profile: 'developer', pins: { effort: true, worktree: true }, startIn: 'project', panel: 'changes' });
 });

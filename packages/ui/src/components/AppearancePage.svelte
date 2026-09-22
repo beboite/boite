@@ -5,6 +5,7 @@
   import { glassSupported, readGlass, setGlass, type Glass } from '../lib/glass';
   import { LOCALES, localeSetting, setLocaleSetting, strings, type LocaleSetting } from '../lib/i18n.svelte';
   import { readTheme, setTheme, type Theme } from '../lib/theme';
+  import { work, type PanelStart, type StartIn } from '../lib/work-prefs.svelte';
   import { ACCENT_PRESETS, readAccent, setAccent } from '../lib/accent';
 
   let accent = $state(untrack(() => readAccent()));
@@ -23,6 +24,15 @@
 
   // `readTheme` answers `system` for a grain that lost its experiment, which is
   // the fallback the segmented control has to show.
+  let starts = $derived<{ id: StartIn; label: string }[]>([
+    { id: 'drafts', label: strings.settings.startDrafts },
+    { id: 'project', label: strings.settings.startProject }
+  ]);
+  let panels = $derived<{ id: PanelStart; label: string }[]>([
+    { id: 'launcher', label: strings.settings.panelLauncher },
+    { id: 'files', label: strings.settings.panelFiles },
+    { id: 'changes', label: strings.settings.panelChanges }
+  ]);
   let theme = $state<Theme>(untrack(() => readTheme()));
 
   function pickTheme(next: Theme) {
@@ -128,6 +138,27 @@
         </div>
       </div>
     {/if}
+  </section>
+
+  <!-- What the tour's question set, each piece on its own. -->
+  <section class="card" id="settings-workspace">
+    <h2>{strings.settings.workspace}</h2>
+    <div class="switch-row">
+      <span class="text">{strings.settings.startIn}<InfoTip topic={strings.settings.startIn} text={strings.settings.startInHint} /></span>
+      <div class="segmented" role="group" aria-label={strings.settings.startIn}>
+        {#each starts as option (option.id)}
+          <button type="button" class:on={work.current.startIn === option.id} aria-pressed={work.current.startIn === option.id} data-testid="start-in-{option.id}" onclick={() => work.setStartIn(option.id)}>{option.label}</button>
+        {/each}
+      </div>
+    </div>
+    <div class="switch-row">
+      <span class="text">{strings.settings.panelStart}<InfoTip topic={strings.settings.panelStart} text={strings.settings.panelStartHint} /></span>
+      <div class="segmented" role="group" aria-label={strings.settings.panelStart}>
+        {#each panels as option (option.id)}
+          <button type="button" class:on={work.current.panel === option.id} aria-pressed={work.current.panel === option.id} data-testid="panel-start-{option.id}" onclick={() => work.setPanel(option.id)}>{option.label}</button>
+        {/each}
+      </div>
+    </div>
   </section>
 </div>
 

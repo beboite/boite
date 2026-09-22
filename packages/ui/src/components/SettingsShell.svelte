@@ -45,7 +45,7 @@
 
   let children: Partial<Record<SettingsTab, { id: string; label: string }[]>> = $derived({
     accounts: store.providers.map(provider => ({id: `provider-${provider.id}`, label: provider.name})),
-    appearance: [{id: 'theme', label: strings.settings.theme}],
+    appearance: [{id: 'theme', label: strings.settings.theme}, {id: 'workspace', label: strings.settings.workspace}],
     keyboard: [
       ...COMMAND_GROUPS.map(group => ({id: `keys-${group.id}`, label: strings.keyboard.groups[group.id]})),
       {id: 'keybinding-file', label: strings.keyboard.file}

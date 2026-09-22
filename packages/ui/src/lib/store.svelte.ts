@@ -81,6 +81,8 @@ import {
   writePrefs,
   type ComposerPrefs
 } from './prefs';
+import { work, type Profile } from './work-prefs.svelte';
+import { onboardingSeen } from './onboarding';
 import { rightPanel, type BoundPanel } from './right-panel.svelte';
 import { strings } from './strings';
 import { DEFAULT_MODEL_NAMES, INITIAL_MODEL_DEFAULTS, readModelDefaults, writeModelDefaults, resolveModelDefault, type ModelDefaults } from './model-defaults';
@@ -670,6 +672,21 @@ export class Store {
     return true;
   }
 
+  /**
+   * The tour's question: the preset lands in the device's settings, the
+   * everyday answer asks before each action, and a draft still empty on
+   * screen moves to where this answer starts.
+   */
+  applyProfile(profile: Profile): void {
+    work.choose(profile);
+    if (profile === 'everyday' && this.prefs.permissionMode !== 'default') {
+      this.prefs = { ...this.prefs, permissionMode: 'default' };
+      writePrefs(this.prefs);
+      if (this.draftChoice) this.draftChoice = { ...this.draftChoice, permissionMode: 'default' };
+    }
+    if (this.draft && !this.openThread) this.setDraftProject(profile === 'everyday' ? null : this.lastProject());
+  }
+
   remember(choice: Choice): void {
     if (this.draft) this.draftChoice = { ...choice };
     this.prefs = { ...choice };
@@ -1118,7 +1135,7 @@ export class Store {
     // Settings opened while the core was still answering stays open.
     if (this.openThread || this.draft || this.page !== 'chat') return;
     // No project yet: the drafts, so the first screen is a composer, not a folder picker.
-    this.startDraft(this.lastProject());
+    this.startDraft(work.current.startIn === 'drafts' ? null : this.lastProject());
   }
 
   /** The most recent thread, a draft in the first project, or nothing on a first run. */
@@ -1355,7 +1372,12 @@ export class Store {
     if (permissions.status === 'fulfilled') this.#mergePermissions(permissions.value, 'all');
     if (questions.status === 'fulfilled') this.#mergeQuestions(questions.value, 'all');
     if (projects.status === 'fulfilled') this.projects = projects.value;
-    if (threads.status === 'fulfilled') this.threads = threads.value;
+    if (threads.status === 'fulfilled') {
+      this.threads = threads.value;
+      // A device with no record of how it works: conversations already here, or
+      // a tour already seen, mean an install from before the question.
+      work.settle(threads.value.length > 0 || onboardingSeen());
+    }
     if (providers.status === 'fulfilled') {
       this.providers = providers.value.loaded;
       this.rejectedProviders = providers.value.rejected;
@@ -1469,7 +1491,7 @@ export class Store {
 
   /**
    * The header's Panel button: the panel itself, open or shut. An empty panel
-   * opens on its launcher rather than forcing one surface on the user.
+   * opens on the surface this device starts with, else on its launcher.
    */
   togglePanel(): void {
     this.panel.toggle();
@@ -1580,9 +1602,9 @@ export class Store {
 
   /** An empty chat in a project, composer focused. Nothing reaches the core until the first send. */
   startDraft(projectId?: ProjectId | null): void {
-    // Named, a project; null, the drafts; unnamed, where the user is, else
-    // the first project, else the drafts.
-    const target = projectId === null
+    // Named, a project; null, the drafts; unnamed, where this device starts
+    // (the drafts, or where the user is, else the first project, else the drafts).
+    const target = projectId === null || (projectId === undefined && work.current.startIn === 'drafts')
       ? (this.draftsProject?.id ?? null)
       : (projectId ?? this.openProject?.id ?? this.projects[0]?.id ?? null);
     this.rememberReadingThread();
