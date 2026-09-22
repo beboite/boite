@@ -67,7 +67,7 @@ export class BrainLinks {
 
   status(root: string | null): BrainLink[] {
     const owned = this.storage.get();
-    if (!root) return owned.map(link => ({ name: 'Global instructions', path: link.path, state: 'blocked', error: `Restore pending at ${link.path}; the replacement was preserved${link.backup ? `, with the original at ${link.backup}` : ''}` }));
+    if (!root) return owned.map(link => ({ name: 'Global instructions', path: link.path, state: 'blocked', error: this.errors.get(link.path) ?? `Restore pending at ${link.path}${link.backup ? `; original backup at ${link.backup}` : ''}` }));
     const source = join(root, 'AGENTS.md'), sourceError = this.sourceError(root);
     const targets = this.targets();
     const result: BrainLink[] = targets.map(target => {
@@ -114,26 +114,29 @@ export class BrainLinks {
         const info = stat(target.path);
         const managed = owned.find(link => link.path === target.path);
         if (managed) {
-          if (info || managed.source !== source) throw new Error(`${target.path}: changed outside Boite; preserved with its backup`);
+          if (info || managed.source !== source) throw new Error(`${target.path}: changed outside Boite; original backup kept at ${managed.backup ?? 'none'}`);
           mkdirSync(dirname(target.path), { recursive: true });
           symlinkSync(source, target.path, 'file');
           continue;
         }
         if (info && !info.isFile() && !info.isSymbolicLink()) throw new Error(`${target.path}: expected a file or symlink; directory preserved`);
         mkdirSync(dirname(target.path), { recursive: true });
-        if (info) {
-          backup = `${target.path}.boite-backup-${crypto.randomUUID()}`;
-          renameSync(target.path, backup);
+        backup = info ? `${target.path}.boite-backup-${crypto.randomUUID()}` : null;
+        // Persist ownership before moving anything, including incomplete installations.
+        owned.push({ path: target.path, source, backup }); save();
+        try {
+          if (backup) renameSync(target.path, backup);
+          symlinkSync(source, target.path, 'file');
         }
-        try { symlinkSync(source, target.path, 'file'); }
         catch (cause) {
-          if (backup && !stat(target.path)) { restoreBackup(backup, target.path); backup = null; }
+          if (backup && stat(backup) && !stat(target.path)) restoreBackup(backup, target.path);
+          if (!backup || !stat(backup)) { owned = owned.filter(link => link.path !== target.path); save(); }
           throw cause;
         }
-        owned.push({ path: target.path, source, backup }); save();
       } catch (cause) {
         const hint = process.platform === 'win32' && (cause as NodeJS.ErrnoException).code === 'EPERM' ? ' Enable Windows Developer Mode to allow file symlinks.' : '';
-        errors.set(target.path, `${messageOf(cause)}${hint}`);
+        const pending = owned.find(link => link.path === target.path)?.backup;
+        errors.set(target.path, `${messageOf(cause)}${hint}${pending ? ` Original backup: ${pending}` : ''}`);
       }
     }
     return this.status(root).map(link => errors.has(link.path) ? { ...link, state: 'blocked', error: errors.get(link.path)! } : link);

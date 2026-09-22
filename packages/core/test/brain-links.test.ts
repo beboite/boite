@@ -114,3 +114,21 @@ test('a refused symlink restores the original file and reports the failure', () 
     expect(owned.some(link => link.path === path)).toBe(false);
   } finally { mock.mockRestore(); }
 });
+
+test('a failed install keeps its backup tracked when another writer occupies the destination', () => {
+  const path = join(home, '.codex', 'AGENTS.md'); mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, 'Original');
+  const create = fs.symlinkSync;
+  const mock = spyOn(fs, 'symlinkSync').mockImplementation((source, destination, type) => {
+    if (destination === path) { writeFileSync(path, 'Concurrent edit'); throw Object.assign(new Error('Destination exists'), { code: 'EEXIST' }); }
+    return create(source, destination, type);
+  });
+  try {
+    links.apply(brain);
+    const backup = owned.find(link => link.path === path)?.backup;
+    expect(backup).toBeDefined();
+    expect(readFileSync(backup!, 'utf8')).toBe('Original');
+    expect(links.apply(null).find(link => link.path === path)?.error).toContain(backup!);
+    expect(readFileSync(path, 'utf8')).toBe('Concurrent edit');
+  } finally { mock.mockRestore(); }
+});
