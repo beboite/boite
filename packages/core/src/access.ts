@@ -27,6 +27,8 @@ import type { Connection } from './router.ts';
  * process of its own or changes what the core trusts.
  */
 export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>([
+  // Follow and steer an owner-enabled team from the phone, without changing routes or limits.
+  'delegation.get', 'delegation.send', 'delegation.stop',
   // Coordination is visible with the conversation; only the owner enables it.
   'collaboration.get',
   'collaboration.directory',
@@ -90,11 +92,16 @@ export function isDeviceMethod(method: RpcMethodName): boolean {
  * token that sits in the environment of a process the user did not write. Read
  * this as the CLI's manual: the agent says where it is, shows the user
  * something, keeps its task list and the project's cards, reads the changes and
- * the files around it. Nothing here writes a file, starts a process, reads
- * another thread or changes what the core trusts, and every call is held to the
- * thread whose token it carries.
+ * the files around it. Delegation can start a child only on owner-approved
+ * routes within that thread's team budget. Every call is held to the token's
+ * thread; team methods check the relationship before reaching a child. None
+ * of these methods changes the owner's trust, routes or permissions.
  */
 export const AGENT_METHODS: ReadonlyMap<RpcMethodName, string> = new Map<RpcMethodName, string>([
+  ['delegation.get', 'its own team summaries, approved profiles and remaining budget'],
+  ['delegation.spawn', 'one direct child on an owner-approved route, within durable team limits'],
+  ['delegation.send', 'messages only between this parent and its direct children'],
+  ['delegation.stop', 'stop its own children or itself, never unrelated work'],
   ['collaboration.get', 'its own coordination inbox and remaining budget, never other conversations'],
   ['collaboration.directory', 'opted-in contacts in this project and explicitly trusted machines'],
   ['collaboration.send', 'authenticated delivery as this thread to a separately authorized recipient'],

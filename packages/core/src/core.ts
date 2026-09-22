@@ -30,6 +30,7 @@ import { PushStore } from './push.ts';
 import { SpeechStore } from './speech.ts';
 import { HarnessUpdates } from './providers/updates.ts';
 import { Coordination } from './coordination.ts';
+import { Delegation } from './delegation.ts';
 
 export const CORE_VERSION: string = pkg.version;
 
@@ -114,6 +115,7 @@ export class Core {
   readonly speech: SpeechStore;
   readonly updates: HarnessUpdates;
   readonly coordination: Coordination;
+  readonly delegation: Delegation;
 
   /**
    * The server tells the core what it alone can know. The default answers no
@@ -155,6 +157,7 @@ export class Core {
     this.speech = new SpeechStore(this);
     this.updates = new HarnessUpdates(this);
     this.coordination = new Coordination(this);
+    this.delegation = new Delegation(this);
 
     registerModules(this);
     this.procs.applySettings(this.settings.get());
@@ -202,6 +205,7 @@ export class Core {
    * the server first emitted `turn.finished` to nobody.
    */
   async drain(timeoutMs?: number): Promise<void> {
+    this.delegation.beginClose();
     this.coordination.beginClose();
     this.#drained = true;
     await this.scheduler.drain(timeoutMs);
@@ -211,6 +215,7 @@ export class Core {
   #drained = false;
 
   async close(): Promise<void> {
+    await this.delegation.close();
     this.updates.close();
     this.coordination.beginClose();
     // Reuse the shutdown wait already spent by drain(), while stopping late arrivals.

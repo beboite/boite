@@ -52,7 +52,7 @@ test('no button shows its icon smaller than it was drawn', async () => {
   // Every surface of the right panel, one at a time, back to the launcher in between.
   await page.click(id('panel-toggle'));
   await page.waitFor(`document.querySelector('${id('panel-launcher')}')`);
-  for (const kind of ['trace', 'changes', 'files', 'tasks']) {
+  for (const kind of ['agents', 'trace', 'changes', 'files', 'tasks']) {
     if (await page.evaluate<boolean>(`document.querySelector('${id(`launch-${kind}`)}').disabled`)) continue;
     await page.click(id(`launch-${kind}`));
     await page.waitFor(`document.querySelector('${id('panel-tab')}[data-kind="${kind}"]')`);

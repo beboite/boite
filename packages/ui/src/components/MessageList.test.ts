@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
-import type { AgentLetter, Message } from '@boite/contracts';
+import { DEFAULT_DELEGATION_CONFIG, type AgentLetter, type Message } from '@boite/contracts';
 import MessageList, { windowStats } from './MessageList.svelte';
 import { FakeClient } from '../lib/fake-client';
 import { Store } from '../lib/store.svelte';
@@ -146,6 +146,33 @@ test('agent letters join the timeline chronologically without exposing their del
   expect(document.body.textContent).not.toContain('Awaiting provider turn');
   expect(document.querySelector('[data-letter-id="letter-in"]')?.getAttribute('data-direction')).toBe('incoming');
   expect(document.querySelector('[data-letter-id="letter-out"]')?.getAttribute('data-direction')).toBe('outgoing');
+});
+
+test('delegation letters use local family identity when coordination has another core identity', () => {
+  stubLayout(200);
+  const letter: AgentLetter = {
+    id: 'delegation-user', origin: 'user',
+    from: { coreId: 'local', threadId: 't-short', title: 'Parent', machine: 'Boite', resources: '', status: 'idle', mode: 'team' },
+    to: { coreId: 'local', threadId: 't-child' }, toTitle: 'Reviewer', text: 'Check the parser.', replyTo: null,
+    createdAt: 20, expiresAt: 1000, status: 'received', error: null
+  };
+  const coordinated = {
+    ...store,
+    coordination: {
+      self: { coreId: 'real-core-id', threadId: 't-short' },
+      config: { mode: 'off', resources: '', remote: false, paused: false }, messages: [], sent: 0, sendLimit: 0, wakes: 0, wakeLimit: 0
+    },
+    delegation: {
+      rootThreadId: 't-short', config: DEFAULT_DELEGATION_CONFIG, agents: [], messages: [letter], turnsUsed: 0,
+      usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, costUsdEquivalent: 0 }
+    }
+  } as unknown as Store;
+
+  running = mount(MessageList, { target: document.body, props: { store: coordinated, threadId: 't-short', messages: [] } });
+  flushSync();
+  const row = document.querySelector('[data-letter-id="delegation-user"]');
+  expect(row?.getAttribute('data-direction')).toBe('outgoing');
+  expect(row?.textContent).toContain('You sent to');
 });
 
 /** A store whose thread still has older messages behind the window. */

@@ -35,7 +35,12 @@
     messages
   }: { store: Store; threadId: string; messages: Message[] } = $props();
   const coordination = $derived(store.coordination?.self.threadId === threadId ? store.coordination : null);
-  const letters = $derived(coordination?.messages ?? []);
+  const delegation = $derived(store.delegation && (store.delegation.rootThreadId === threadId || store.delegation.agents.some(agent => agent.thread.id === threadId)) ? store.delegation : null);
+  const letters = $derived([
+    ...(coordination?.messages ?? []),
+    ...(delegation?.messages.filter(letter => letter.from.threadId === threadId || letter.to.threadId === threadId) ?? [])
+  ]);
+  const delegationLetterIds = $derived(new Set(delegation?.messages.map(letter => letter.id) ?? []));
   const letterRows = $derived.by(() => new Map(letters.map(letter => [`coordination:${letter.id}`, letter])));
   const timeline = $derived.by(() => {
     if (letters.length === 0) return messages;
@@ -57,7 +62,14 @@
 
   function coordinationPlaceholder(message: Message, ids: Set<string>): boolean {
     if (message.role !== 'system') return false;
-    return message.parts.some(part => part.type === 'text' && part.text.startsWith('Boite agent coordination.') && [...ids].some(id => part.text.includes(`"id":"${id}"`)));
+    return message.parts.some(part => part.type === 'text' &&
+      (part.text.startsWith('Boite agent coordination.') || part.text.startsWith('Boite delegation messages.')) &&
+      [...ids].some(id => part.text.includes(`"id":"${id}"`)));
+  }
+
+  function letterSelf(letter: AgentLetter): { coreId: string; threadId: string } | null {
+    if (delegationLetterIds.has(letter.id)) return { coreId: 'local', threadId };
+    return coordination?.self ?? null;
   }
 
   /** Under this many messages the list renders whole: a window would cost more than it saves. */
@@ -571,8 +583,8 @@
           data-testid="message"
           data-role={letter ? 'agent-letter' : message.role}
         >
-          {#if letter && coordination}
-            <ForwardedAgentMessage {letter} self={coordination.self} />
+          {#if letter && letterSelf(letter)}
+            <ForwardedAgentMessage {letter} self={letterSelf(letter)!} />
           {:else if message.role === 'user'}
             {@const images = imagesOf(message)}
             <div class="bubble">

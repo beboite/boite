@@ -58,6 +58,48 @@ async function ready(): Promise<{ store: Store; client: FakeClient }> {
   return { store, client };
 }
 
+test('delegation selection keeps one child subscription and ignores an overtaken A-B-A response', async () => {
+  const client = new FakeClient({ delayMs: 0, delegationDemo: true });
+  const store = new Store();
+  const real = client.call.bind(client);
+  let releaseFirstA: (() => void) | null = null;
+  let heldFirstA = true;
+  const asked = vi.spyOn(client, 'call').mockImplementation(((method: string, params: { threadId?: string }) => {
+    if (method === 'threads.subscribe' && params.threadId === 't-team-running' && heldFirstA) {
+      heldFirstA = false;
+      return new Promise(resolve => { releaseFirstA = () => { void real(method as never, params as never).then(resolve); }; });
+    }
+    return real(method as never, params as never);
+  }) as typeof client.call);
+  store.attach(client);
+  try {
+    await store.connect();
+    await store.open('t-trace');
+    await store.loadDelegation('t-trace');
+    const first = store.selectDelegatedAgent('t-team-running');
+    await vi.waitFor(() => expect(releaseFirstA).not.toBeNull());
+    await store.selectDelegatedAgent('t-team-done');
+    await store.selectDelegatedAgent('t-team-running');
+    releaseFirstA!();
+    await first;
+    expect(store.delegationSelectedAgentId).toBe('t-team-running');
+    expect(store.delegationThread?.id).toBe('t-team-running');
+    const unsubscribed = asked.mock.calls.filter(([method, params]) => method === 'threads.unsubscribe' && (params as { threadId?: string }).threadId === 't-team-running');
+    expect(unsubscribed).toHaveLength(0);
+  } finally { store.detach(); client.close(); }
+});
+
+test('recent-thread recovery does not open delegated children', async () => {
+  const client = new FakeClient({ delayMs: 0, delegationDemo: true });
+  const store = new Store();
+  store.attach(client);
+  try {
+    await store.connect();
+    await store.openWhereLeft();
+    expect(store.openThread?.parentThreadId).toBeFalsy();
+  } finally { store.detach(); client.close(); }
+});
+
 test('uninstalled setup starts without account-dependent demo state', async () => {
   const client = new FakeClient({ delayMs: 0, uninstalled: true });
   const store = new Store();

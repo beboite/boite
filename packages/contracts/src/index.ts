@@ -484,6 +484,8 @@ export interface ContextUse {
 }
 
 export interface ThreadSummary {
+  /** Core-owned delegation relationship. Absent on ordinary conversations. */
+  parentThreadId?: ThreadId | null;
   /** Last accepted user message, independent of assistant activity and renames. */
   lastUserMessageAt?: Timestamp | null;
   pullRequest?: { number: number; url: string; state: 'OPEN' | 'CLOSED' | 'MERGED' } | null;
@@ -580,7 +582,7 @@ export type TurnStatus = 'queued' | 'running' | 'done' | 'stopped' | 'error';
 /** Frozen when a prompt is accepted, including while it waits in the scheduler. */
 export type TurnExecution = Pick<ThreadSummary,
   'providerId' | 'accountId' | 'model' | 'effort' | 'speed' | 'permissionMode' | 'sessionId'
-> & { sessionGeneration: number; selectionVersion: number; operation?: 'compact' | 'coordination' };
+> & { sessionGeneration: number; selectionVersion: number; operation?: 'compact' | 'coordination' | 'delegation' };
 
 export interface Turn {
   id: TurnId;
@@ -1301,6 +1303,8 @@ export interface AgentContact extends AgentAddress {
   mode: CoordinationMode;
 }
 export interface AgentLetter {
+  /** Authenticated source of delegation mail. Older coordination mail is agent-authored. */
+  origin?: 'user' | 'agent' | 'result';
   id: string;
   from: AgentContact;
   to: AgentAddress;
@@ -1324,7 +1328,53 @@ export interface CoordinationView {
   wakeLimit: number;
 }
 
+/** Owner-selected routes. Agents name a profile, never arbitrary credentials or permissions. */
+export interface DelegationProfile {
+  id: string;
+  name: string;
+  providerId: ProviderId;
+  accountId: AccountId;
+  model: string;
+  effort: string | null;
+}
+export interface DelegationConfig {
+  enabled: boolean;
+  paused: boolean;
+  maxAgents: number;
+  maxConcurrent: number;
+  /** Total child turns and automatic parent wake turns across this team's lifetime. */
+  maxTurns: number;
+  /** Deadline for child turns and automatic parent wakes, including time awaiting an answer. */
+  maxMinutes: number;
+  profiles: DelegationProfile[];
+}
+export const DEFAULT_DELEGATION_CONFIG: DelegationConfig = {
+  enabled: false, paused: false, maxAgents: 4, maxConcurrent: 2,
+  maxTurns: 12, maxMinutes: 30, profiles: [],
+};
+export interface DelegatedAgent {
+  thread: ThreadSummary;
+  profileId: string;
+  task: string;
+  lastTurn: Turn | null;
+  /** Bounded final answer, without tool payloads or a summarization model call. */
+  result: string | null;
+}
+export interface DelegationView {
+  rootThreadId: ThreadId;
+  config: DelegationConfig;
+  agents: DelegatedAgent[];
+  messages: AgentLetter[];
+  turnsUsed: number;
+  usage: Usage;
+}
+
 export interface RpcMethods {
+  'delegation.get': { params: { threadId: ThreadId }; result: DelegationView };
+  'delegation.configure': { params: { threadId: ThreadId; config: DelegationConfig }; result: DelegationView };
+  'delegation.spawn': { params: { threadId: ThreadId; profileId: string; task: string; title?: string; requestId: string }; result: DelegatedAgent };
+  'delegation.send': { params: { threadId: ThreadId; toThreadId: ThreadId; text: string; requestId: string }; result: AgentLetter };
+  'delegation.stop': { params: { threadId: ThreadId; agentId?: ThreadId }; result: { stopped: number } };
   'collaboration.get': { params: { threadId: ThreadId }; result: CoordinationView };
   'collaboration.configure': { params: { threadId: ThreadId; config: CoordinationConfig }; result: CoordinationView };
   'collaboration.directory': { params: { threadId: ThreadId }; result: { agents: AgentContact[]; unavailable: string[] } };
@@ -1704,6 +1754,7 @@ export type RpcParams<M extends RpcMethodName> = RpcMethods[M]['params'];
 export type RpcResult<M extends RpcMethodName> = RpcMethods[M]['result'];
 
 export interface RpcEvents {
+  'delegation.changed': { threadId: ThreadId };
   'collaboration.changed': { threadId: ThreadId };
   'thread.activity': { threadId: ThreadId; activity: ThreadActivity };
   /** Subscribed threads only: the agent asked for something in the panel. */

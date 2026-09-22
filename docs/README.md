@@ -7,6 +7,7 @@
 - [Model switching](model-switching.md): changing models and providers in one conversation.
 - [Context](context.md): context usage and compaction.
 - [Agent coordination](coordination.md): messages between agents, machine links and limits.
+- [Agent delegation](delegation.md): model profiles, child conversations, live steering and team budgets.
 - [Usage](usage.md): tokens, API cost and limits per day, provider and model.
 - [Keyboard shortcuts](keybindings.md): defaults and customization.
 - [The right panel](panel.md): browser, changes, files, tasks and trace beside the chat.

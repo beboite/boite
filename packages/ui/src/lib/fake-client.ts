@@ -1,4 +1,5 @@
 import {
+  DEFAULT_DELEGATION_CONFIG,
   KEYBINDING_COMMANDS,
   parseChord,
   type Keybindings,
@@ -18,6 +19,10 @@ import {
   type CoordinationConfig,
   type CoordinationPeer,
   type CoordinationView,
+  type DelegatedAgent,
+  type DelegationConfig,
+  type DelegationProfile,
+  type DelegationView,
   type PluginManifest,
   type PluginPreview,
   type PluginState,
@@ -77,6 +82,8 @@ export interface FakeClientOptions {
   long?: boolean;
   /** A fresh machine with no agents or accounts, for the setup flow. */
   uninstalled?: boolean;
+  /** Adds a deterministic active team for visual checks on `?fake=1&team=1`. */
+  delegationDemo?: boolean;
   /** Who this client is. `'session'` makes it a paired phone, refused like one. */
   principal?: Principal;
   /** Stable public identity for multi-machine coordination tests. */
@@ -93,6 +100,7 @@ export interface FakeClientOptions {
  * `hello` is not in it because the core answers it before the router's gate.
  */
 const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>([
+  'delegation.get', 'delegation.send', 'delegation.stop',
   'sessions.list',
   'push.status', 'push.subscribe', 'push.unsubscribe', 'push.test',
   'projects.list',
@@ -934,6 +942,12 @@ export class FakeClient implements ObservableClient {
   #accounts: Account[] = [];
   #threads = new Map<ThreadId, Thread>();
   #coordination = new Map<ThreadId, CoordinationConfig>();
+  #delegationConfigs = new Map<ThreadId, DelegationConfig>();
+  #delegationAgents = new Map<ThreadId, { threadId: ThreadId; profileId: string; task: string }[]>();
+  #delegationLetters = new Map<ThreadId, AgentLetter[]>();
+  #delegationTurns = new Map<ThreadId, number>();
+  #delegationRequests = new Map<string, { fingerprint: string; threadId: ThreadId }>();
+  #delegationSendRequests = new Map<string, { fingerprint: string; letter: AgentLetter }>();
   #letters = new Map<ThreadId, AgentLetter[]>();
   #peers = new Map<string, CoordinationPeer>();
   #identity: CoordinationPeer;
@@ -1037,6 +1051,7 @@ export class FakeClient implements ObservableClient {
       queued: []
     };
     this.#seed();
+    if (options.delegationDemo) this.#seedDelegationDemo();
     if (options.uninstalled) {
       this.#providers = this.#providers.filter(provider => provider.id !== 'echo').map(provider => ({
         ...provider, available: false, executable: null,
@@ -1706,12 +1721,20 @@ export class FakeClient implements ObservableClient {
         if (params.expectedSelectionVersion !== undefined && params.expectedSelectionVersion !== (this.#thread(params.threadId).selectionVersion ?? 0)) {
           throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'the model selection changed; review the selected model and send again' });
         }
-        const providerId = this.#thread(params.threadId).providerId;
+        const thread = this.#thread(params.threadId);
+        const providerId = thread.providerId;
         const provider = this.#providers.find(p => p.id === providerId);
         if (!provider) throw this.#notFound('provider', providerId);
         const error = attachmentError(params.attachments ?? [], provider);
         if (error) throw new RpcFailure({ code: RpcErrorCode.Refused, ...error });
-        const turn = this.#startTurn(params.threadId, params.prompt, params.attachments ?? []);
+        const rootId = thread.parentThreadId;
+        if (rootId) {
+          const config = this.#delegationConfig(rootId);
+          if (!config.enabled || config.paused) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'delegation is disabled or paused' });
+          if ((this.#delegationTurns.get(rootId) ?? 0) >= config.maxTurns) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'delegation turn budget reached' });
+        }
+        const turn = this.#startTurn(params.threadId, params.prompt, params.attachments ?? [], rootId ? 'delegation' : undefined);
+        if (rootId) this.#delegationTurns.set(rootId, (this.#delegationTurns.get(rootId) ?? 0) + 1);
         if (key) this.#turnRequests.set(key, { content, turn });
         return turn;
       }
@@ -1862,6 +1885,151 @@ export class FakeClient implements ObservableClient {
 
       case 'settings.get':
         return { ...this.#settings };
+      case 'delegation.get': {
+        const { threadId } = rawParams as RpcParams<'delegation.get'>;
+        return this.#delegationView(this.#delegationRoot(threadId), threadId);
+      }
+      case 'delegation.configure': {
+        const { threadId, config: value } = rawParams as RpcParams<'delegation.configure'>;
+        const root = this.#delegationRoot(threadId);
+        if (root !== threadId || !value || typeof value.enabled !== 'boolean' || typeof value.paused !== 'boolean' || !Array.isArray(value.profiles) || value.profiles.length > 16) {
+          throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'delegation.configure requires a parent thread and a valid config' });
+        }
+        const integer = (field: keyof Pick<DelegationConfig, 'maxAgents' | 'maxConcurrent' | 'maxTurns' | 'maxMinutes'>, max: number): number => {
+          const number = value[field];
+          if (!Number.isSafeInteger(number) || number < 1 || number > max) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: `${field} must be an integer from 1 to ${max}` });
+          return number;
+        };
+        const profiles = value.profiles.map(profile => {
+          const provider = this.#providers.find(entry => entry.id === profile.providerId);
+          const account = this.#accounts.find(entry => entry.id === profile.accountId);
+          if (!profile.id || !profile.name.trim() || !provider || !account || account.providerId !== provider.id || !profile.model) {
+            throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'each profile needs a unique id, name, provider, account and model' });
+          }
+          return { ...profile, name: profile.name.trim() };
+        });
+        if (new Set(profiles.map(profile => profile.id)).size !== profiles.length) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'profile ids must be unique' });
+        if (value.enabled && profiles.length === 0) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'choose at least one profile before enabling delegation' });
+        const config: DelegationConfig = {
+          enabled: value.enabled,
+          paused: value.paused,
+          maxAgents: integer('maxAgents', 8),
+          maxConcurrent: integer('maxConcurrent', 8),
+          maxTurns: integer('maxTurns', 100),
+          maxMinutes: integer('maxMinutes', 120),
+          profiles
+        };
+        if (config.maxConcurrent > config.maxAgents) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'maxConcurrent must not exceed maxAgents' });
+        this.#delegationConfigs.set(root, structuredClone(config));
+        if (!config.enabled || config.paused) await this.#stopDelegation(root);
+        this.#emit('delegation.changed', { threadId: root });
+        return this.#delegationView(root);
+      }
+      case 'delegation.spawn': {
+        const params = rawParams as RpcParams<'delegation.spawn'>;
+        const parent = this.#thread(params.threadId);
+        if (parent.parentThreadId) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'delegation supports one level' });
+        const task = params.task.trim();
+        if (!task || task.length > 12000) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'task must contain 1 to 12000 characters' });
+        const fingerprint = JSON.stringify([params.profileId, task, params.title ?? null]);
+        const requestKey = `${parent.id}:${params.requestId}`;
+        const prior = this.#delegationRequests.get(requestKey);
+        if (prior) {
+          if (prior.fingerprint !== fingerprint) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'requestId already used for different content' });
+          const row = (this.#delegationAgents.get(parent.id) ?? []).find(entry => entry.threadId === prior.threadId);
+          if (!row) throw this.#notFound('delegated agent', prior.threadId);
+          return this.#delegatedAgent(row);
+        }
+        const config = this.#delegationConfig(parent.id);
+        if (!config.enabled || config.paused) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'delegation is disabled or paused' });
+        const rows = this.#delegationAgents.get(parent.id) ?? [];
+        if (rows.length >= config.maxAgents) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'delegation agent limit reached' });
+        if ((this.#delegationTurns.get(parent.id) ?? 0) >= config.maxTurns) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'delegation turn budget reached' });
+        const running = rows.filter(row => ['queued', 'running', 'waiting'].includes(this.#thread(row.threadId).status)).length;
+        const profile = config.profiles.find(entry => entry.id === params.profileId);
+        if (!profile) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'unknown delegation profile' });
+        const id = `t-${++this.#seq}`;
+        const at = this.#now();
+        const child: Thread = {
+          ...parent,
+          id,
+          parentThreadId: parent.id,
+          title: params.title?.trim() || task.split('\n')[0]!.slice(0, 80),
+          titleSource: 'user',
+          providerId: profile.providerId,
+          accountId: profile.accountId,
+          model: profile.model,
+          effort: profile.effort,
+          status: 'idle', unread: false, archived: false, pinned: false,
+          sessionId: null, sessionGeneration: 0, selectionVersion: 0, load: null, context: null,
+          createdAt: at, updatedAt: at, messagesBefore: null, messages: [], turns: [], commands: []
+        };
+        delete child.pullRequest;
+        delete child.lastUserMessageAt;
+        this.#threads.set(id, child);
+        const row = { threadId: id, profileId: profile.id, task };
+        this.#delegationAgents.set(parent.id, [...rows, row]);
+        this.#delegationTurns.set(parent.id, (this.#delegationTurns.get(parent.id) ?? 0) + 1);
+        this.#emit('thread.created', structuredClone(toSummary(child)));
+        const turn = running >= config.maxConcurrent
+          ? { id: `turn-${++this.#seq}`, threadId: id, status: 'queued' as const, queuedAt: at, startedAt: null, finishedAt: null, usage: null, error: null }
+          : this.#startTurn(id, task, [], 'delegation');
+        if (turn.status === 'queued') {
+          child.turns.push(turn);
+          child.status = 'queued';
+          this.#scheduler.queued = [...this.#scheduler.queued, { turnId: turn.id, threadId: id, position: this.#scheduler.queued.length + 1, queuedAt: turn.queuedAt }];
+          this.#emit('scheduler.updated', structuredClone(this.#scheduler));
+        }
+        const agent = this.#delegatedAgent(row);
+        this.#delegationRequests.set(requestKey, { fingerprint, threadId: id });
+        this.#emit('delegation.changed', { threadId: parent.id });
+        void turn;
+        return structuredClone(agent);
+      }
+      case 'delegation.send': {
+        const params = rawParams as RpcParams<'delegation.send'>;
+        if (params.requestId.startsWith('result:')) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'requestId prefix result: is reserved' });
+        const sender = this.#thread(params.threadId);
+        const recipient = this.#thread(params.toThreadId);
+        const root = this.#delegationRoot(sender.id);
+        const direct = sender.parentThreadId ? recipient.id === sender.parentThreadId : recipient.parentThreadId === sender.id;
+        if (!direct) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'toThreadId must be the parent or a direct child' });
+        const body = params.text.trim();
+        if (!body || body.length > 4000) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'text must contain 1 to 4000 characters' });
+        const key = `${sender.id}:${params.requestId}`;
+        const fingerprint = JSON.stringify([recipient.id, body]);
+        const prior = this.#delegationSendRequests.get(key);
+        if (prior) {
+          if (prior.fingerprint !== fingerprint) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'requestId already used for different content' });
+          return structuredClone(prior.letter);
+        }
+        const config = this.#delegationConfig(root);
+        if (!config.enabled || config.paused) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'delegation is disabled or paused' });
+        const letter: AgentLetter = {
+          id: `letter-${++this.#seq}`,
+          origin: 'user',
+          from: { coreId: 'local', threadId: sender.id, title: sender.title, machine: 'Boite', resources: '', status: sender.status, mode: 'team' },
+          to: { coreId: 'local', threadId: recipient.id }, toTitle: recipient.title,
+          text: body, replyTo: null, createdAt: this.#now(), expiresAt: this.#now() + 15 * 60_000,
+          status: 'received', error: null
+        };
+        this.#delegationLetters.set(root, [...(this.#delegationLetters.get(root) ?? []), letter]);
+        this.#delegationSendRequests.set(key, { fingerprint, letter });
+        this.#emit('delegation.changed', { threadId: root });
+        return structuredClone(letter);
+      }
+      case 'delegation.stop': {
+        const params = rawParams as RpcParams<'delegation.stop'>;
+        const caller = this.#thread(params.threadId);
+        const root = caller.parentThreadId ?? caller.id;
+        if (caller.parentThreadId && params.agentId && params.agentId !== caller.id) {
+          throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'a delegated child can only stop itself' });
+        }
+        const target = params.agentId ?? (caller.parentThreadId ? caller.id : undefined);
+        const stopped = await this.#stopDelegation(root, target);
+        this.#emit('delegation.changed', { threadId: root });
+        return { stopped };
+      }
       case 'collaboration.get': {
         const { threadId } = rawParams as RpcParams<'collaboration.get'>;
         this.#thread(threadId);
@@ -2330,6 +2498,91 @@ const ready = true;
     return this.#coordination.get(threadId) ?? { mode: 'off', resources: '', remote: false, paused: false };
   }
 
+  #delegationRoot(threadId: ThreadId): ThreadId {
+    const thread = this.#thread(threadId);
+    return thread.parentThreadId ?? thread.id;
+  }
+
+  #delegationConfig(rootId: ThreadId): DelegationConfig {
+    return structuredClone(this.#delegationConfigs.get(rootId) ?? DEFAULT_DELEGATION_CONFIG);
+  }
+
+  #delegatedAgent(row: { threadId: ThreadId; profileId: string; task: string }): DelegatedAgent {
+    const thread = this.#thread(row.threadId);
+    const lastTurn = thread.turns.at(-1) ?? null;
+    const result = lastTurn && !['queued', 'running'].includes(lastTurn.status)
+      ? thread.messages.filter(message => message.turnId === lastTurn.id && message.role === 'assistant').at(-1)?.parts
+          .filter(part => part.type === 'text').map(part => part.text).join('\n').trim().slice(0, 4000) || lastTurn.error
+      : null;
+    return { thread: structuredClone(toSummary(thread)), profileId: row.profileId, task: row.task, lastTurn: structuredClone(lastTurn), result: result || null };
+  }
+
+  #delegationView(rootId: ThreadId, callerId = rootId): DelegationView {
+    this.#thread(rootId);
+    const rows = this.#delegationAgents.get(rootId) ?? [];
+    let usage = emptyUsage();
+    for (const row of rows) for (const turn of this.#thread(row.threadId).turns) if (turn.usage) usage = addUsage(usage, turn.usage);
+    return {
+      rootThreadId: rootId,
+      config: this.#delegationConfig(rootId),
+      agents: rows.map(row => this.#delegatedAgent(row)),
+      messages: structuredClone((this.#delegationLetters.get(rootId) ?? []).filter(letter => callerId === rootId || letter.from.threadId === callerId || letter.to.threadId === callerId)),
+      turnsUsed: this.#delegationTurns.get(rootId) ?? 0,
+      usage
+    };
+  }
+
+  async #stopDelegation(rootId: ThreadId, agentId?: ThreadId): Promise<number> {
+    const rows = this.#delegationAgents.get(rootId) ?? [];
+    const selected = agentId ? rows.filter(row => row.threadId === agentId) : rows;
+    if (agentId && selected.length === 0) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'agentId must name a direct child' });
+    if (!agentId) this.#delegationConfigs.set(rootId, { ...this.#delegationConfig(rootId), paused: true });
+    let stopped = 0;
+    for (const row of selected) {
+      const thread = this.#thread(row.threadId);
+      if (['queued', 'running', 'waiting'].includes(thread.status)) stopped += 1;
+      const queued = thread.turns.at(-1);
+      if (queued?.status === 'queued') {
+        queued.status = 'stopped';
+        queued.finishedAt = this.#now();
+        this.#scheduler.queued = this.#scheduler.queued.filter(entry => entry.turnId !== queued.id);
+      }
+      await this.#stopTurn(thread.id);
+      thread.status = 'idle';
+      this.#touch(thread);
+    }
+    return stopped;
+  }
+
+  #seedDelegationDemo(): void {
+    const root = this.#thread('t-trace');
+    const reviewer: DelegationProfile = { id: 'reviewer', name: 'Reviewer', providerId: 'claude', accountId: 'a-claude-main', model: 'claude-sonnet-5', effort: 'high' };
+    const implementer: DelegationProfile = { id: 'implementer', name: 'Implementer', providerId: 'codex', accountId: 'a-codex', model: 'gpt-5.6-sol', effort: 'medium' };
+    this.#delegationConfigs.set(root.id, { enabled: true, paused: false, maxAgents: 4, maxConcurrent: 2, maxTurns: 12, maxMinutes: 30, profiles: [reviewer, implementer] });
+    const make = (id: string, title: string, task: string, status: Thread['status'], answer: string, profile: DelegationProfile): Thread => {
+      const turn: Turn = { id: `turn-${id}`, threadId: id, status: status === 'running' ? 'running' : 'done', queuedAt: T0 + 400_000, startedAt: T0 + 401_000, finishedAt: status === 'running' ? null : T0 + 430_000, usage: status === 'running' ? null : { inputTokens: 820, outputTokens: 260, cacheReadTokens: 1200, cacheWriteTokens: 0, costUsdEquivalent: 0.012 }, error: null };
+      return {
+        ...root, id, parentThreadId: root.id, title, titleSource: 'user', status, unread: false, archived: false, pinned: false,
+        providerId: profile.providerId, accountId: profile.accountId, model: profile.model, effort: profile.effort,
+        sessionId: `session-${id}`, sessionGeneration: 0, selectionVersion: 0, load: status === 'running' ? { processes: 1, cpuPercent: 8, memoryBytes: 64 * 1024 * 1024 } : null,
+        createdAt: T0 + 400_000, updatedAt: T0 + 430_000, messagesBefore: null, commands: [], turns: [turn],
+        messages: [
+          { id: `m-${id}-1`, threadId: id, turnId: turn.id, role: 'user', parts: [{ type: 'text', text: task }], state: 'complete', createdAt: T0 + 400_000 },
+          { id: `m-${id}-2`, threadId: id, turnId: turn.id, role: 'assistant', parts: [{ type: 'text', text: answer }], state: status === 'running' ? 'streaming' : 'complete', createdAt: T0 + 410_000 }
+        ]
+      };
+    };
+    const running = make('t-team-running', 'Audit subscription flow', 'Check selection races and own the store tests.', 'running', 'I found the subscription boundary and am checking stale responses.', reviewer);
+    const done = make('t-team-done', 'Review panel copy', 'Review the panel wording and report confusing states.', 'idle', 'The queued delivery label now matches the core state.', implementer);
+    this.#threads.set(running.id, running);
+    this.#threads.set(done.id, done);
+    this.#delegationAgents.set(root.id, [
+      { threadId: running.id, profileId: reviewer.id, task: 'Check selection races and own the store tests.' },
+      { threadId: done.id, profileId: implementer.id, task: 'Review the panel wording and report confusing states.' }
+    ]);
+    this.#delegationTurns.set(root.id, 2);
+  }
+
   #coordinationView(threadId: ThreadId): CoordinationView {
     const config = this.#coordinationConfig(threadId);
     const letters = this.#letters.get(threadId) ?? [];
@@ -2385,12 +2638,12 @@ const ready = true;
     return stopped;
   }
 
-  #startTurn(threadId: ThreadId, prompt: string, attachments: Attachment[] = [], operation?: 'compact', activityKind?: 'goal' | 'loop'): Turn {
+  #startTurn(threadId: ThreadId, prompt: string, attachments: Attachment[] = [], operation?: 'compact' | 'delegation', activityKind?: 'goal' | 'loop', queuedTurn?: Turn): Turn {
     const thread = this.#thread(threadId);
     if (thread.archived) {
       throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'cannot start a turn on an archived thread', data: { threadId } });
     }
-    if (['queued', 'running', 'waiting'].includes(thread.status) || this.#inFlight.has(threadId)) {
+    if ((!queuedTurn && ['queued', 'running', 'waiting'].includes(thread.status)) || (queuedTurn && (thread.status !== 'queued' || queuedTurn.status !== 'queued')) || this.#inFlight.has(threadId)) {
       throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'this thread already has an in-flight turn', data: { threadId } });
     }
     // The agent names what it takes on its first turn, the way the echo driver
@@ -2404,23 +2657,18 @@ const ready = true;
     }
 
     const at = this.#now();
-    const turn: Turn = {
-      id: `turn-${++this.#seq}`,
-      threadId,
-      status: 'running',
-      queuedAt: at,
-      startedAt: at,
-      finishedAt: null,
-      usage: null,
-      error: null,
-      execution: {
+    const execution: NonNullable<Turn['execution']> = {
         providerId: thread.providerId, accountId: thread.accountId, model: thread.model,
         effort: thread.effort, speed: thread.speed ?? null, permissionMode: thread.permissionMode, sessionId: thread.sessionId,
         sessionGeneration: thread.sessionGeneration ?? 0, selectionVersion: thread.selectionVersion ?? 0,
         ...(operation ? { operation } : {}),
-      }
     };
-    thread.turns.push(turn);
+    const turn: Turn = queuedTurn ?? {
+      id: `turn-${++this.#seq}`, threadId, status: 'running', queuedAt: at,
+      startedAt: at, finishedAt: null, usage: null, error: null, execution
+    };
+    if (queuedTurn) Object.assign(turn, { status: 'running', startedAt: at, execution });
+    else thread.turns.push(turn);
 
     const user: Message = {
       id: `m-${++this.#seq}`,
@@ -2611,6 +2859,46 @@ const ready = true;
     this.#touch(thread);
     this.#emit('turn.finished', structuredClone(turn));
     this.#pushScheduler(turn, 'finished');
+    if (turn.execution?.operation === 'delegation' && thread.parentThreadId) {
+      const root = thread.parentThreadId;
+      const text = message.parts.filter(part => part.type === 'text').map(part => part.text).join('\n').trim().slice(0, 4000);
+      const config = this.#delegationConfig(root);
+      if (!record.cancelled && config.enabled && !config.paused) {
+        const letter: AgentLetter = {
+          id: `letter-${++this.#seq}`,
+          origin: 'result',
+          from: { coreId: 'local', threadId: thread.id, title: thread.title, machine: 'Boite', resources: '', status: thread.status, mode: 'team' },
+          to: { coreId: 'local', threadId: root },
+          toTitle: this.#thread(root).title,
+          text,
+          replyTo: null,
+          createdAt: this.#now(),
+          expiresAt: Number.MAX_SAFE_INTEGER,
+          status: 'received',
+          error: null
+        };
+        this.#delegationLetters.set(root, [...(this.#delegationLetters.get(root) ?? []), letter]);
+      }
+      this.#pumpDelegation(root);
+      this.#emit('delegation.changed', { threadId: root });
+    }
+  }
+
+  #pumpDelegation(rootId: ThreadId): void {
+    const config = this.#delegationConfig(rootId);
+    if (!config.enabled || config.paused) return;
+    const rows = this.#delegationAgents.get(rootId) ?? [];
+    let running = rows.filter(row => ['running', 'waiting'].includes(this.#thread(row.threadId).status)).length;
+    for (const row of rows) {
+      if (running >= config.maxConcurrent) break;
+      const thread = this.#thread(row.threadId);
+      const turn = thread.turns.at(-1);
+      if (thread.status !== 'queued' || turn?.status !== 'queued') continue;
+      this.#scheduler.queued = this.#scheduler.queued.filter(entry => entry.turnId !== turn.id);
+      this.#scheduler.queued.forEach((entry, index) => { entry.position = index + 1; });
+      this.#startTurn(thread.id, row.task, [], 'delegation', undefined, turn);
+      running += 1;
+    }
   }
 
   async #askPermission(thread: Thread, turn: Turn, message: Message): Promise<void> {

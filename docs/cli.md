@@ -51,6 +51,10 @@ boite todo list|add <text>|claim <id>
 boite agents list|inbox
 boite agents send <core-id>/<thread-id> <text>
 boite agents reply <message-id> <text>
+boite delegate profiles|list
+boite delegate spawn <profile-id> <brief>
+boite delegate send <thread-id> <text>
+boite delegate stop [thread-id]
 boite help
 ```
 
@@ -74,6 +78,11 @@ usage error (the usage text on stderr).
 [Agent coordination](coordination.md) must be enabled by the owner before an
 agent can send messages. The directory includes only authorized contacts.
 Replies preserve their message reference and authenticated sender identity.
+
+[Delegation](delegation.md) uses owner-approved model profiles and a separate
+team budget. Children share the parent's checkout, retain their own sessions,
+and return bounded results automatically. `delegate stop` pauses the whole team;
+only the owner can change profiles or resume a paused team.
 
 ## Where the command lives
 
