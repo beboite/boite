@@ -1,4 +1,4 @@
-import { statSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
 import { readdir } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
@@ -22,14 +22,14 @@ export class ProjectStore {
   }
 
   list(): Project[] {
-    return this.core.journal.listProjects();
+    return this.core.journal.listProjects().map(described);
   }
 
   require(projectId: ProjectId): Project {
     if (this.removing.has(projectId)) throw refused('this project is being removed', { projectId });
     const project = this.core.journal.getProject(projectId);
     if (project === null) throw notFound(`unknown project ${projectId}`, { projectId });
-    return project;
+    return described(project);
   }
 
   add(path: string, name?: string): Project {
@@ -54,8 +54,9 @@ export class ProjectStore {
     this.core.journal.append({ type: 'project.added', threadId: null, version: 1, payload: project }, () => {
       this.core.journal.putProject(project);
     });
-    this.core.bus.emit('project.added', project);
-    return project;
+    const answered = described(project);
+    this.core.bus.emit('project.added', answered);
+    return answered;
   }
 
   async remove(projectId: ProjectId): Promise<void> {
@@ -81,6 +82,15 @@ export class ProjectStore {
       this.removing.delete(projectId);
     }
   }
+}
+
+/**
+ * What a client is told beyond the stored row: whether the folder is a git
+ * repository, by the same test `Worktrees.add` refuses on. Read on each
+ * answer, since a folder can gain or lose its `.git` between two.
+ */
+function described(project: Project): Project {
+  return { ...project, repository: existsSync(join(project.path, '.git')) };
 }
 
 export function registerProjectMethods(core: Core): void {

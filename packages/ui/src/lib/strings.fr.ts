@@ -360,18 +360,23 @@ export const fr: Messages = {
 
   permissionMode: {
     default: 'Demander',
-    acceptEdits: 'Décider seul',
-    bypassPermissions: 'Yolo',
+    acceptEdits: 'Modifier librement',
+    bypassPermissions: 'Sans confirmation',
     plan: 'Plan',
     dontAsk: 'Tout refuser'
   },
 
   permissionModeLong: {
-    default: "Demander avant chaque appel d'outil",
-    acceptEdits: 'Accepter les modifications, demander pour le reste',
-    bypassPermissions: 'Tout exécuter sans demander',
+    default: 'Lit librement, demande avant de modifier un fichier ou de lancer une commande',
+    acceptEdits: 'Modifie les fichiers sans demander, demande avant de lancer une commande',
+    bypassPermissions: 'Exécute tout sans demander, partout sur cet ordinateur',
     plan: 'Plan seulement, aucune modification',
     dontAsk: 'Refuser tout ce qui demanderait une autorisation'
+  },
+
+  permissionModeCodex: {
+    default: 'Ce dossier',
+    defaultLong: 'Modifie et lance des commandes dans ce dossier sans demander, demande pour aller au-delà'
   },
 
   thread: {
@@ -792,13 +797,13 @@ export const fr: Messages = {
 
   usage: {
     heading: 'Consommation',
-    note: "Sur un abonnement, ce coût est un équivalent API, pas de l'argent dépensé.",
+    note: "Les coûts sont estimés au tarif API. Sur un abonnement, ce n'est pas une facture.",
     thread: 'Conversation',
     input: 'Entrée',
     output: 'Sortie',
     cacheRead: 'Cache lu',
     cacheWrite: 'Cache écrit',
-    cost: 'Équivalent API',
+    cost: 'Estimation au tarif API',
     total: 'Total',
     empty: 'Aucun jeton dépensé pour le moment.',
     today: "aujourd'hui",
@@ -806,13 +811,13 @@ export const fr: Messages = {
     range: 'Période',
     days: '{days} jours',
     metric: 'Mesure',
-    metrics: { tokens: 'Jetons', cost: 'Coût API', turns: 'Tours' },
+    metrics: { tokens: 'Jetons', cost: 'Estimation API', turns: 'Tours' },
     totalOf: {
       tokens: 'Jetons, {days} derniers jours',
-      cost: 'Équivalent API, {days} derniers jours',
+      cost: 'Estimation au tarif API, {days} derniers jours',
       turns: 'Tours, {days} derniers jours'
     },
-    summary: '{turns} tours · {tokens} jetons · {cost} en équivalent API',
+    summary: '{turns} tours · {tokens} jetons · {cost} au tarif API',
     overview: "Vue d'ensemble",
     chart: 'Par jour',
     chartLabel: '{metric} par jour et par fournisseur. Utilisez les flèches pour lire chaque jour.',

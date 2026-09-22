@@ -212,6 +212,19 @@ test('the draft worktree chip puts the first send on its own branch, and the hea
   expect(document.querySelector('[data-testid=composer-worktree]')).toBeNull();
 });
 
+test('a draft on a folder that is not a repository offers no worktree switch', async () => {
+  await mountOnFake();
+  query<HTMLButtonElement>('[data-testid=new-thread]').click();
+  await waitFor(() => document.querySelector('[data-testid=composer-worktree]') !== null);
+  const project = store.projects.find((one) => one.id === store.draft?.projectId);
+  if (!project) throw new Error('the draft has no project');
+  project.repository = false;
+  await waitFor(() => document.querySelector('[data-testid=composer-worktree]') === null);
+  // A core older than the field says nothing, and the switch stays.
+  delete project.repository;
+  await waitFor(() => document.querySelector('[data-testid=composer-worktree]') !== null);
+});
+
 test('the sidebar draft row hands the keyboard back to the composer', async () => {
   await mountOnFake();
 

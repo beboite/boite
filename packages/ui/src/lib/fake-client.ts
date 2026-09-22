@@ -545,7 +545,9 @@ export class FakeClient implements ObservableClient {
         id: `p-${++this.#seq}`,
         name: params.name ?? params.path.split(/[\\/]/).filter(Boolean).pop() ?? params.path,
         path: params.path,
-        createdAt: this.#now()
+        createdAt: this.#now(),
+        // No disk here: a folder the fake is handed counts as a repository.
+        repository: true
       };
       this.#projects.push(project);
       this.#emit('project.added', structuredClone(project));
@@ -2716,8 +2718,8 @@ const ready = true;
 
   #seed(): void {
     this.#projects = [
-      { id: 'p-boite', name: 'boite', path: 'C:\\src\\boite', createdAt: T0 },
-      { id: 'p-notes', name: 'notes', path: 'C:\\src\\notes', createdAt: T0 }
+      { id: 'p-boite', name: 'boite', path: 'C:\\src\\boite', createdAt: T0, repository: true },
+      { id: 'p-notes', name: 'notes', path: 'C:\\src\\notes', createdAt: T0, repository: true }
     ];
 
     // What Claude Code left under its projects folder for boite: one session

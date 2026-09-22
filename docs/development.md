@@ -127,7 +127,10 @@ names the root `.gitignore` lists outright, and stops at twenty thousand files,
 saying so in `capped`. A glob or a negation in `.gitignore` is not read, so a
 tree ignored through one still shows up in the menu.
 
-A draft has one more chip, `Worktree`. On, the first send passes
+A draft on a git repository has one more chip, `Worktree`. `Project.repository`
+says whether the folder holds a `.git`, read by the core on every answer with
+the test the worktree refuses on; a core that does not send the field keeps the
+chip. On, the first send passes
 `worktree: {}` to `threads.create` and the core runs `git worktree add -b`
 before writing the thread: the branch is `boite/<slug of the title>` (`-2`,
 `-3` when the name is taken, or the `branch` the call names), the directory

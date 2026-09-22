@@ -442,6 +442,12 @@ export interface Project {
   name: string;
   path: string;
   createdAt: Timestamp;
+  /**
+   * The folder holds a `.git`, read on every answer rather than stored: the
+   * test `threads.create.worktree` applies. Absent from a core older than this
+   * field, which a client reads as unknown and keeps the worktree switch for.
+   */
+  repository?: boolean;
 }
 
 export type PermissionMode = 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan' | 'dontAsk';

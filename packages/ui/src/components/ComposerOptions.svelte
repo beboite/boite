@@ -7,9 +7,11 @@
   import { floating } from '../lib/floating';
   import { strings } from '../lib/strings';
 
-  let { levels, effort, speeds, speed, mode, worktree, canAttach, busy, onattach, oneffort, onspeed, onmode, onworktree } : {
+  let { levels, effort, speeds, speed, modes, modeLabel, modeHint, mode, worktree, canAttach, busy, onattach, oneffort, onspeed, onmode, onworktree } : {
     levels: EffortLevel[]; effort: string | null;
     speeds: { id: string; label: string }[]; speed: string | null;
+    /** The composer's list, the most open first; the panel reads it the other way. */
+    modes: PermissionMode[]; modeLabel: (mode: PermissionMode) => string; modeHint: (mode: PermissionMode) => string;
     mode: PermissionMode; worktree: boolean | null; canAttach: boolean; busy: boolean;
     onattach: () => void; oneffort: (id: string) => void;
     onspeed: (id: string | null) => void; onmode: (id: PermissionMode) => void;
@@ -20,7 +22,7 @@
   $effect(() => { if (!mobile.current) panel.hide(); });
   let trigger = $state<HTMLButtonElement>();
   let content = $state<HTMLDivElement>();
-  const modes: PermissionMode[] = ['default', 'acceptEdits', 'bypassPermissions'];
+  let ordered = $derived([...modes].reverse());
   function close() { panel.hide(); trigger?.focus({ preventScroll: true }); }
   async function open() {
     panel.show(); await tick();
@@ -56,9 +58,9 @@
           {#each [{ id: null, label: strings.composer.standardSpeed }, ...speeds] as entry (entry.id)}<label class:selected={speed === entry.id}><input type="radio" name="mobile-speed" checked={speed === entry.id} onchange={() => onspeed(entry.id)} />{entry.label}</label>{/each}
         </div></fieldset>
       {/if}
-      <fieldset disabled={busy}><legend>{strings.composer.mode}</legend><div class="choices permissions">
-        {#each modes as item (item)}<label class:selected={mode === item} title={strings.permissionModeLong[item]}><input type="radio" name="mobile-mode" value={item} checked={mode === item} onchange={() => onmode(item)} />{strings.permissionMode[item]}</label>{/each}
-      </div><p class="hint">{strings.permissionModeLong[mode]}</p></fieldset>
+      {#if ordered.length > 0}<fieldset disabled={busy}><legend>{strings.composer.mode}</legend><div class="choices permissions">
+        {#each ordered as item (item)}<label class:selected={mode === item} title={modeHint(item)}><input type="radio" name="mobile-mode" value={item} checked={mode === item} onchange={() => onmode(item)} />{modeLabel(item)}</label>{/each}
+      </div><p class="hint">{modeHint(mode)}</p></fieldset>{/if}
       {#if worktree !== null}<button class="worktree" aria-pressed={worktree} data-testid="composer-options-worktree" onclick={onworktree}><GitBranch size={19} /><span>{strings.composer.worktree}</span><span class="switch" class:on={worktree}></span></button>{/if}
     </div>
   {/if}

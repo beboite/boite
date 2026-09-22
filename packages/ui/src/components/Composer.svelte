@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { ArrowUp, FileText, GitBranch, Paperclip, ShieldCheck, Square, X } from '@lucide/svelte';
+  import { ArrowUp, FileText, GitBranch, Paperclip, ShieldAlert, ShieldCheck, Square, X } from '@lucide/svelte';
   import { tick, untrack } from 'svelte';
   import type { Attachment, PermissionMode } from '@boite/contracts';
   import { bytes, tokens as formatTokens } from '../lib/format';
@@ -11,6 +11,7 @@
   import { rankItems, type PaletteItem } from '../lib/palette';
   import { clearStash, DRAFT_STASH_KEY, readStash, writeStash } from '../lib/prefs';
   import { promptText } from '../lib/message-display';
+  import { modeHint, modeLabel, modesFor } from '../lib/permission-modes';
   import { fill, strings } from '../lib/strings';
   import type { Choice, PickPatch, Store } from '../lib/store.svelte';
   import EffortSlider from './EffortSlider.svelte';
@@ -29,7 +30,6 @@
    */
   let { store, centered = false }: { store: Store; centered?: boolean } = $props();
 
-  const MODES: PermissionMode[] = ['bypassPermissions', 'acceptEdits', 'default'];
   const MAX_LINES = 8;
 
   let key = $derived(store.openThread?.id ?? DRAFT_STASH_KEY);
@@ -312,14 +312,17 @@
 
   // Older modes keep their execution policy until the user makes a choice.
   let displayedMode = $derived<PermissionMode>(choice?.permissionMode ?? 'default');
+  let modes = $derived(modesFor(provider));
   let modeItems = $derived(
-    MODES.map((mode) => ({
+    modes.map((mode) => ({
       id: mode,
-      label: strings.permissionMode[mode],
-      hint: strings.permissionModeLong[mode],
+      label: modeLabel(mode, provider),
+      hint: modeHint(mode, provider),
       active: displayedMode === mode
     }))
   );
+  // The worktree switch exists where the core can honour it: a draft on a git repository.
+  let draftRepository = $derived(store.draft ? store.projects.find((project) => project.id === store.draft?.projectId)?.repository !== false : false);
 
   // The reasoning chip belongs to the model the choice is on, and a model that
   // offers no scale (an agent that keeps its own) gets no chip at all.
@@ -878,7 +881,7 @@
 
     <div class="bar">
       {#key `${key}:${store.draft?.projectId ?? ''}`}
-      <ComposerOptions busy={picking} levels={effortLevels} effort={activeEffort} {speeds} speed={choice?.speed ?? null} mode={displayedMode} worktree={store.draft ? store.draft.worktree : null} {canAttach} onattach={() => picker?.click()} oneffort={pickEffort} onspeed={(speed) => void pick({ speed })} onmode={pickMode} onworktree={() => store.setDraftWorktree(!store.draft?.worktree)} />
+      <ComposerOptions busy={picking} levels={effortLevels} effort={activeEffort} {speeds} speed={choice?.speed ?? null} {modes} modeLabel={(mode) => modeLabel(mode, provider)} modeHint={(mode) => modeHint(mode, provider)} mode={displayedMode} worktree={store.draft && draftRepository ? store.draft.worktree : null} {canAttach} onattach={() => picker?.click()} oneffort={pickEffort} onspeed={(speed) => void pick({ speed })} onmode={pickMode} onworktree={() => store.setDraftWorktree(!store.draft?.worktree)} />
       {/key}
       <div class="chips">
         <ModelPicker {store} {choice} disabled={picking} onpick={pick} />
@@ -888,13 +891,15 @@
           <EffortSlider levels={effortLevels} active={activeEffort} onpick={pickEffort} {speeds} speed={choice?.speed ?? null} onspeed={(speed) => void pick({ speed })} />
         {/if}
 
-        <Menu items={modeItems} onpick={pickMode} label={strings.composer.mode} testid="composer-mode" align="end">
-          <ShieldCheck size={14} strokeWidth={1.75} />
-          {strings.permissionMode[displayedMode]}
-        </Menu>
+        {#if modes.length > 0}
+          <Menu items={modeItems} onpick={pickMode} label={strings.composer.mode} testid="composer-mode" align="end">
+            {#if displayedMode === 'bypassPermissions'}<span class="open-mode"><ShieldAlert size={14} strokeWidth={1.75} /></span>{:else}<ShieldCheck size={14} strokeWidth={1.75} />{/if}
+            {modeLabel(displayedMode, provider)}
+          </Menu>
+        {/if}
 
         <!-- A thread keeps its directory, so the switch exists on a draft alone. -->
-        {#if store.draft}
+        {#if store.draft && draftRepository}
           <button
             type="button"
             class="chip worktree"
@@ -1076,6 +1081,8 @@
   }
 
   /* Off it reads like the other chips; on it takes the active fill, the same as a pressed tab. */
+  .open-mode { display: inline-flex; color: var(--color-live); }
+
   .worktree.on {
     background: var(--color-active);
     border-color: var(--color-active);

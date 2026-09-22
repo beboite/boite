@@ -44,7 +44,7 @@ test('commands are colored with aligned wrapping and three permission choices', 
     await page.type(id('composer-input'), '/goal Verify the composer');
     await page.click(id('composer-mode'));
     await page.waitFor(`document.querySelector('${id('composer-mode-menu')}')`);
-    expect(await page.evaluate(`Array.from(document.querySelectorAll('${id('composer-mode-menu')} .label')).map(el => el.textContent.trim())`)).toEqual(['Yolo', 'Auto decide', 'Ask']);
+    expect(await page.evaluate(`Array.from(document.querySelectorAll('${id('composer-mode-menu')} .label')).map(el => el.textContent.trim())`)).toEqual(['No confirmation', 'Edit freely', 'Ask']);
     expect(await page.evaluate(`(() => { const r=document.querySelector('${id('composer-mode-menu')}').getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth; })()`)).toBe(true);
     await capture(phone ? 'commands-permissions-phone' : 'commands-permissions-desktop');
     await page.evaluate(`document.querySelector('${id('composer-mode-menu')}').dispatchEvent(new KeyboardEvent('keydown', {key:'Escape', bubbles:true}))`);

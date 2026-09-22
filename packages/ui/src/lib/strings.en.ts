@@ -353,18 +353,24 @@ export const strings = {
 
   permissionMode: {
     default: 'Ask',
-    acceptEdits: 'Auto decide',
-    bypassPermissions: 'Yolo',
+    acceptEdits: 'Edit freely',
+    bypassPermissions: 'No confirmation',
     plan: 'Plan',
     dontAsk: 'Auto-deny'
   },
 
   permissionModeLong: {
-    default: 'Ask before every tool call',
-    acceptEdits: 'Accept edits, ask for the rest',
-    bypassPermissions: 'Run everything without asking',
+    default: 'Reads freely, asks before editing a file or running a command',
+    acceptEdits: 'Edits files without asking, asks before running a command',
+    bypassPermissions: 'Runs everything without asking, anywhere on this computer',
     plan: 'Plan only, no changes',
     dontAsk: 'Deny anything that would need asking'
+  },
+
+  /** Codex writes inside the folder on its default mode: the chip says so instead of "Ask". */
+  permissionModeCodex: {
+    default: 'This folder',
+    defaultLong: 'Edits and runs commands in this folder without asking, asks to go beyond it'
   },
 
   thread: {
@@ -805,13 +811,13 @@ export const strings = {
 
   usage: {
     heading: 'Usage',
-    note: 'On a subscription this cost is an API equivalent, not money spent.',
+    note: 'Costs are estimated at API rates. On a subscription this is not an invoice.',
     thread: 'Thread',
     input: 'Input',
     output: 'Output',
     cacheRead: 'Cache read',
     cacheWrite: 'Cache write',
-    cost: 'API equivalent',
+    cost: 'API-rate estimate',
     total: 'Total',
     empty: 'No token spent yet.',
     today: 'today',
@@ -819,13 +825,13 @@ export const strings = {
     range: 'Range',
     days: '{days} days',
     metric: 'Measure',
-    metrics: { tokens: 'Tokens', cost: 'API cost', turns: 'Turns' },
+    metrics: { tokens: 'Tokens', cost: 'API estimate', turns: 'Turns' },
     totalOf: {
       tokens: 'Tokens, last {days} days',
-      cost: 'API equivalent, last {days} days',
+      cost: 'API-rate estimate, last {days} days',
       turns: 'Turns, last {days} days'
     },
-    summary: '{turns} turns · {tokens} tokens · {cost} API equivalent',
+    summary: '{turns} turns · {tokens} tokens · {cost} at API rates',
     overview: 'Overview',
     chart: 'Per day',
     chartLabel: '{metric} per day and provider. Use the arrow keys to read each day.',
