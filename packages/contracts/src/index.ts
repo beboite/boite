@@ -639,8 +639,22 @@ export interface FileAttachment {
 
 export type Attachment = ImageAttachment | FileAttachment;
 
+/** A user-selected element. Page text is untrusted context, never instructions. */
+export interface PreviewReference {
+  id: string;
+  url: string;
+  selector: string;
+  shadowPath?: string[];
+  text: string;
+  bounds: { x: number; y: number; width: number; height: number };
+  surfaceId?: string;
+}
+
+export const PREVIEW_REFERENCES_PER_TURN = 8;
+export { previewReferencesError, previewPrompt } from './preview';
+
 export type MessagePart =
-  | { type: 'text'; text: string; displayText?: string; activity?: { kind: 'goal' | 'loop'; iteration: number } }
+  | { type: 'text'; text: string; displayText?: string; previewReferences?: PreviewReference[]; activity?: { kind: 'goal' | 'loop'; iteration: number } }
   /** An image the user sent with the prompt, journalled with the message. */
   | { type: 'image'; mimeType: ImageMimeType; data: string; alt: string | null }
   | { type: 'file'; mimeType: string; data: string; name: string | null }
@@ -1631,7 +1645,7 @@ export interface RpcMethods {
   'threads.unsubscribe': { params: { threadId: ThreadId }; result: { ok: true } };
 
   /** `attachments` are journalled with the prompt. Files become host paths; images use native provider payloads. */
-  'turns.start': { params: { threadId: ThreadId; prompt: string; attachments?: Attachment[]; expectedSelectionVersion?: number; clientRequestId?: string }; result: Turn };
+  'turns.start': { params: { threadId: ThreadId; prompt: string; attachments?: Attachment[]; previewReferences?: PreviewReference[]; expectedSelectionVersion?: number; clientRequestId?: string }; result: Turn };
   'turns.stop': { params: { threadId: ThreadId }; result: { stopped: boolean } };
 
   /**

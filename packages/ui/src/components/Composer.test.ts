@@ -14,6 +14,53 @@ import { closeTour } from '../lib/onboarding.svelte';
 
 let running: Record<string, unknown> | null = null;
 
+const previewReference = { id: 'composer-element', url: 'https://example.test', selector: '#save', text: 'Save', bounds: { x: 0, y: 0, width: 80, height: 30 } };
+
+test('preview references survive queuing and a failed drain, and stashing refuses without changing the draft', async () => {
+  await mountOnFake();
+  await store.open('t-trace');
+  await waitFor(() => !store.busy);
+  store.addPreviewReference('t-trace', previewReference);
+  await type('Change the selected control');
+  input().focus();
+  press('s', { ctrlKey: true });
+  expect(store.error).toContain('cannot be stashed');
+  expect(input().value).toBe('Change the selected control');
+  expect(store.composerStates['t-trace']?.previewReferences).toEqual([previewReference]);
+  const send = vi.spyOn(store, 'send').mockResolvedValue(false);
+  store.openThread!.status = 'running';
+  await new Promise(resolve => setTimeout(resolve, 0));
+  press('Enter');
+  await waitFor(() => store.composerStates['t-trace']?.queued.length === 1);
+  expect(store.composerStates['t-trace']!.queued[0]!.previewReferences).toEqual([previewReference]);
+  expect(store.composerStates['t-trace']!.previewReferences).toEqual([]);
+  store.openThread!.status = 'idle';
+  await waitFor(() => store.composerStates['t-trace']?.paused === true);
+  expect(send).toHaveBeenCalledWith('Change the selected control', 't-trace', [], [previewReference]);
+  expect(store.composerStates['t-trace']!.text).toBe('Change the selected control');
+  expect(store.composerStates['t-trace']!.previewReferences).toEqual([previewReference]);
+});
+
+test('preview references remain after refused activity commands and return with recalled sent prompts', async () => {
+  await mountOnFake();
+  await store.open('t-trace');
+  await waitFor(() => !store.busy);
+  store.addPreviewReference('t-trace', previewReference);
+  await type('/goal Change the control');
+  input().focus(); press('Enter');
+  await waitFor(() => !!store.error?.includes('references cannot be used'));
+  expect(store.composerStates['t-trace']!.previewReferences).toEqual([previewReference]);
+  await send('Change the selected control');
+  expect(store.composerStates['t-trace']!.previewReferences).toEqual([]);
+  expect(query('[data-role="user"] [data-testid="preview-reference"]').textContent).toBe('@Save');
+  input().focus(); press('ArrowUp');
+  await waitFor(() => input().value === 'Change the selected control');
+  expect(store.composerStates['t-trace']!.previewReferences).toEqual([previewReference]);
+  query('[data-testid="composer"] [data-testid="preview-reference-remove"]').click();
+  await waitFor(() => !document.querySelector('[data-testid="composer"] [data-testid="preview-reference"]'));
+  expect(input().value).toBe('Change the selected control');
+});
+
 afterEach(() => {
   if (running) unmount(running, { outro: false });
   running = null;

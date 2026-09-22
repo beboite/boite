@@ -21,6 +21,7 @@
   import ThreadActivity from './ThreadActivity.svelte';
   import Dictation from './Dictation.svelte';
   import ComposerOptions from './ComposerOptions.svelte';
+  import PreviewReferences from './PreviewReferences.svelte';
 
   /**
    * `centered` is the draft's placement: the parent stacks the composer under
@@ -37,6 +38,7 @@
   let text = $derived(composer?.text ?? '');
   /** The attachments this prompt carries, the same array the strip above the box draws. */
   let attachments = $derived<Attachment[]>(composer?.attachments ?? []);
+  let previewReferences = $derived(composer?.previewReferences ?? []);
   let choice = $state<Choice | null>(null);
   let picking = $state(false);
   let readingFiles = $state(0);
@@ -123,14 +125,13 @@
   let sent = $derived(
     (store.openThread?.messages ?? [])
       .filter((message) => message.role === 'user')
-      .map((message) =>
-        message.parts
+      .map((message) => ({ text: message.parts
           .filter((part) => part.type === 'text')
           .map((part) => (part.type === 'text' ? promptText(part) : ''))
           .join('\n')
-          .trim()
-      )
-      .filter((prompt) => prompt.length > 0)
+          .trim(), previewReferences: message.parts.flatMap(part => part.type === 'text' ? part.previewReferences ?? [] : [])
+      }))
+      .filter((prompt) => prompt.text.length > 0 || prompt.previewReferences.length > 0)
       .reverse()
   );
 
@@ -152,7 +153,7 @@
   /** Every agent can read uploaded files through its local tools. */
   let canAttach = $derived(provider !== null && provider !== undefined);
   let canSend = $derived(
-    (text.trim().length > 0 || attachments.length > 0) &&
+    (text.trim().length > 0 || attachments.length > 0 || previewReferences.length > 0) &&
       readingFiles === 0 &&
       choice !== null &&
       store.connection === 'ready' &&
@@ -454,17 +455,18 @@
     const entry = state.queued[0];
     if (entry === undefined) return;
     state.sending = true;
-    const accepted = await store.send(entry.text, threadId, entry.attachments);
+    const accepted = await store.send(entry.text, threadId, entry.attachments, entry.previewReferences ?? []);
     if (accepted) state.queued.shift();
     else {
       // Pause after a refusal. The prompt goes back in the box for an explicit
       // retry only when it is the whole queue: taking it out from under the
       // ones behind it would send them in the order they were not typed in.
       state.paused = true;
-      if (state.queued.length === 1 && state.text.length === 0 && state.attachments.length === 0) {
+      if (state.queued.length === 1 && state.text.length === 0 && state.attachments.length === 0 && !state.previewReferences?.length) {
         const back = state.queued.shift()!;
         state.text = back.text;
         state.attachments = back.attachments;
+        state.previewReferences = back.previewReferences ?? [];
       }
     }
     state.sending = false;
@@ -473,15 +475,17 @@
   async function submit(nextDraft = false) {
     const prompt = text;
     const images = attachments;
+    const references = previewReferences;
     if (!canSend || !choice) return;
     const state = stateForInput();
     // A queue that still holds something takes this prompt too, whatever the
     // thread's status: sending it on its own would put it ahead of prompts the
     // user typed first. Sending is also how he resumes a queue a refusal paused.
     if (store.busy || state.queued.length > 0) {
-      state.queued.push({ text: prompt, attachments: images });
+      state.queued.push({ text: prompt, attachments: images, ...(references.length ? { previewReferences: references } : {}) });
       state.text = '';
       state.attachments = [];
+      state.previewReferences = [];
       state.paused = false;
       recall = null;
       requestAnimationFrame(grow);
@@ -489,13 +493,14 @@
     }
     state.sending = true;
     const accepted = await (nextDraft
-      ? store.submitAndDraft(prompt, choice, images)
-      : store.submit(prompt, choice, images));
+      ? store.submitAndDraft(prompt, choice, images, references)
+      : store.submit(prompt, choice, images, references));
     if (accepted) {
       // Text typed and images attached while the RPC was pending belong to the
       // next prompt: only what went out is cleared.
       if (state.text === prompt) state.text = '';
       if (state.attachments === images) state.attachments = [];
+      if (state.previewReferences === references) state.previewReferences = [];
       state.paused = false;
       recall = null;
       requestAnimationFrame(grow);
@@ -592,7 +597,7 @@
 
   /** ArrowUp: one prompt older, or nothing when the user typed the text themselves. */
   function older(): boolean {
-    if (recall === null && text.length > 0) return false;
+    if (recall === null && (text.length > 0 || previewReferences.length > 0)) return false;
     if (recall === null && composer?.queued.length && !composer.sending && attachments.length === 0) {
       restoreQueued(composer.queued.length - 1);
       return true;
@@ -601,16 +606,18 @@
     const prompt = sent[next];
     if (prompt === undefined) return recall !== null;
     recall = next;
-    put(prompt);
+    put(prompt.text);
+    stateForInput().previewReferences = [...prompt.previewReferences];
     return true;
   }
 
   function restoreQueued(at: number) {
     const state = composer;
-    if (!state || state.sending || text.length > 0 || attachments.length > 0) return;
+    if (!state || state.sending || text.length > 0 || attachments.length > 0 || previewReferences.length > 0) return;
     const entry = state.queued.splice(at, 1)[0];
     if (!entry) return;
     state.attachments = entry.attachments;
+    state.previewReferences = entry.previewReferences ?? [];
     recall = null;
     put(entry.text);
     box?.focus();
@@ -622,18 +629,21 @@
     const next = recall - 1;
     if (next < 0) {
       recall = null;
+      stateForInput().previewReferences = [];
       put('');
       return true;
     }
     const prompt = sent[next];
     if (prompt === undefined) return true;
     recall = next;
-    put(prompt);
+    put(prompt.text);
+    stateForInput().previewReferences = [...prompt.previewReferences];
     return true;
   }
 
   /** Ctrl+S: text goes aside for this thread, an empty composer takes it back. */
   function stash() {
+    if (previewReferences.length) { store.error = strings.previewComments.stashUnsupported; return; }
     const key = store.threadKey(store.openThread?.id ?? DRAFT_STASH_KEY);
     if (text.trim().length > 0) {
       writeStash(key, text);
@@ -779,10 +789,11 @@
         {#each composer.queued as entry, at (entry)}
           <button type="button" class="ghost queued-entry"
             title={strings.composer.editQueued}
-            disabled={composer.sending || text.length > 0 || attachments.length > 0}
+            disabled={composer.sending || text.length > 0 || attachments.length > 0 || previewReferences.length > 0}
             onclick={() => restoreQueued(at)}>
             <span>{entry.text || strings.composer.attachAlt}</span>
             {#if entry.attachments.length}<span class="subtle">{entry.attachments.length} <Paperclip size={12} /></span>{/if}
+            {#if entry.previewReferences?.length}<span class="subtle">@{entry.previewReferences.length}</span>{/if}
             <ArrowUp size={12} />
           </button>
         {/each}
@@ -815,6 +826,10 @@
       </div>
     {/if}
 
+    {#if previewReferences.length && store.openThread}
+      <PreviewReferences references={previewReferences} {store} threadId={store.openThread.id}
+        onremove={(id) => { stateForInput().previewReferences = previewReferences.filter(reference => reference.id !== id); }} />
+    {/if}
     <div class="input-wrap">
     {#if commandToken}
       <div class="input-highlight" aria-hidden="true" data-testid="composer-highlight" style:width={`${inputWidth}px`}>

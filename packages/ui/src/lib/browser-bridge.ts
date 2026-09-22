@@ -11,6 +11,8 @@
  */
 import { TauriBridge } from './browser-bridge-tauri';
 import { installPreviewPicker, validPreviewSelection, type PreviewSelection } from './preview-comments';
+import highlightPreviewElement from './preview-highlight.js';
+import { previewReferencesError, type PreviewReference } from '@boite/contracts';
 
 /** A slot's place on the screen, in CSS pixels, the way `getBoundingClientRect` gives it. */
 export interface SurfaceRect {
@@ -21,6 +23,7 @@ export interface SurfaceRect {
 }
 
 export type BrowserEvent =
+  | { type: 'highlight-result'; id: string; requestId: string; error: string | null }
   | { type: 'selection'; id: string; requestId: string; selection: PreviewSelection | null }
   | { type: 'selection-failed'; id: string; requestId: string; reason: string }
   | { type: 'url'; id: string; url: string }
@@ -33,6 +36,7 @@ export type BrowserEvent =
 export interface BrowserBridge {
   /** Whether this bridge paints anything at all. False keeps the slot's muted line. */
   readonly paints: boolean;
+  isReady(id: string): boolean;
   create(id: string, url: string): void;
   navigate(id: string, url: string): void;
   back(id: string): void;
@@ -44,6 +48,7 @@ export interface BrowserBridge {
   setZoom(id: string, factor: number): void;
   /** One explicit pick. A null request cancels it. */
   annotate(id: string, requestId: string | null): void;
+  highlight(id: string, requestId: string, reference: PreviewReference): void;
   destroy(id: string): void;
   on(handler: (event: BrowserEvent) => void): () => void;
 }
@@ -72,6 +77,8 @@ export class FakeBridge implements BrowserBridge {
   #views = new Map<string, HTMLIFrameElement>();
   #handlers = new Set<(event: BrowserEvent) => void>();
   #pickers = new Map<string, () => void>();
+  #loaded = new Set<string>();
+  isReady(id: string): boolean { return this.#loaded.has(id); }
 
   create(id: string, url: string): void {
     if (this.#views.has(id)) return;
@@ -85,12 +92,14 @@ export class FakeBridge implements BrowserBridge {
     document.body.append(frame);
     this.#views.set(id, frame);
     frame.addEventListener('load', () => {
+      this.#loaded.add(id);
       this.annotate(id, null);
       this.#emit({ type: 'loading', id, loading: false });
     });
   }
 
   navigate(id: string, url: string): void {
+    this.#loaded.delete(id);
     this.annotate(id, null);
     const frame = this.#views.get(id);
     if (!frame) return;
@@ -140,6 +149,7 @@ export class FakeBridge implements BrowserBridge {
   }
 
   destroy(id: string): void {
+    this.#loaded.delete(id);
     this.annotate(id, null);
     this.#views.get(id)?.remove();
     this.#views.delete(id);
@@ -172,6 +182,16 @@ export class FakeBridge implements BrowserBridge {
     }
   }
 
+  highlight(id: string, requestId: string, reference: PreviewReference): void {
+    const done = (error: string | null) => this.#emit({ type: 'highlight-result', id, requestId, error });
+    if (previewReferencesError([reference])) { done('unavailable'); return; }
+    try {
+      const doc = this.#views.get(id)?.contentDocument;
+      if (!doc) { done('unavailable'); return; }
+      highlightPreviewElement(doc, reference, done);
+    } catch { done('unavailable'); }
+  }
+
   #history(id: string, delta: number): void {
     try {
       this.#views.get(id)?.contentWindow?.history.go(delta);
@@ -188,6 +208,7 @@ export class FakeBridge implements BrowserBridge {
 /** Nothing to park a page over yet: the slot says so in one line. */
 class NoBridge implements BrowserBridge {
   readonly paints = false;
+  isReady(): boolean { return false; }
   create(): void {}
   navigate(): void {}
   back(): void {}
@@ -197,6 +218,9 @@ class NoBridge implements BrowserBridge {
   setZoom(): void {}
   annotate(id: string, requestId: string | null): void {
     if (requestId) for (const handler of this.#handlers) handler({ type: 'selection-failed', id, requestId, reason: 'unavailable' });
+  }
+  highlight(id: string, requestId: string): void {
+    for (const handler of this.#handlers) handler({ type: 'highlight-result', id, requestId, error: 'unavailable' });
   }
   destroy(): void {}
   #handlers = new Set<(event: BrowserEvent) => void>();

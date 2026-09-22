@@ -24,6 +24,7 @@
   import ThinkingPart from './ThinkingPart.svelte';
   import TurnSummary from './TurnSummary.svelte';
   import { promptCommand, promptText } from '../lib/message-display';
+  import PreviewReferences from './PreviewReferences.svelte';
   import ToolCard from './ToolCard.svelte';
   import MessageOutline from './MessageOutline.svelte';
   import ForwardedAgentMessage from './ForwardedAgentMessage.svelte';
@@ -582,6 +583,7 @@
                   {@const prompt = promptText(part)}
                   {@const command = promptCommand(prompt)}
                   <p class="user-text" data-testid="text-part">{#if command}<span class="command">{command}</span>{prompt.slice(command.length)}{:else}{prompt}{/if}</p>
+                  {#if part.previewReferences?.length}<PreviewReferences references={part.previewReferences} {store} threadId={message.threadId} />{/if}
                 {:else if part.type === 'file'}
                   <a class="file-attachment" data-testid="file-part" href="data:application/octet-stream;base64,{part.data}" download={part.name ?? strings.composer.attachAlt}>
                     <FileText size={20} strokeWidth={1.5} />

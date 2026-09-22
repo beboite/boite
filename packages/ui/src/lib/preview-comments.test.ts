@@ -1,7 +1,9 @@
 import { afterEach, expect, test, vi } from 'vitest';
 import { FakeBridge, type BrowserEvent } from './browser-bridge';
-import { installPreviewPicker, previewCommentText, validPreviewSelection } from './preview-comments';
+import { installPreviewPicker, previewReferenceLabel, validPreviewSelection } from './preview-comments';
+import highlightPreviewElement from './preview-highlight.js';
 import { Store } from './store.svelte';
+import { FakeClient } from './fake-client';
 
 afterEach(() => { document.body.innerHTML = ''; });
 
@@ -45,6 +47,40 @@ test('open shadow roots report the clicked control rather than the retargeted ho
   }));
 });
 
+test('the second sibling in an open shadow root can be highlighted again and follows scrolling', () => {
+  vi.useFakeTimers();
+  try {
+    const host = document.createElement('section');
+    host.id = 'checkout';
+    document.body.append(host);
+    const shadow = host.attachShadow({ mode: 'open' });
+    shadow.innerHTML = '<button>First</button><button>Second</button>';
+    const target = shadow.querySelectorAll('button')[1]!;
+    let left = 35;
+    vi.spyOn(target, 'getBoundingClientRect').mockImplementation(() => ({ x: left, y: 20, width: 60, height: 25 }) as DOMRect);
+    const selected = vi.fn();
+    installPreviewPicker(document, selected);
+    target.dispatchEvent(new MouseEvent('click', { composed: true, bubbles: true, cancelable: true }));
+    const reference = { ...selected.mock.calls[0]![0], id: 'second' };
+    expect(reference.selector).toBe('button:nth-of-type(2)');
+    expect(reference.shadowPath).toEqual(['#checkout']);
+    const done = vi.fn();
+    highlightPreviewElement(document, reference, done);
+    expect(done).toHaveBeenCalledExactlyOnceWith(null);
+    expect(document.querySelector<HTMLElement>('[data-boite-preview-highlight]')!.style.left).toBe('35px');
+    left = 80;
+    document.dispatchEvent(new Event('scroll'));
+    expect(document.querySelector<HTMLElement>('[data-boite-preview-highlight]')!.style.left).toBe('80px');
+    vi.advanceTimersByTime(3100);
+    expect(document.querySelector('[data-boite-preview-highlight]')).toBeNull();
+    highlightPreviewElement(document, { ...reference, url: 'https://other.test' }, done);
+    expect(done).toHaveBeenLastCalledWith('stale');
+    target.remove();
+    highlightPreviewElement(document, reference, done);
+    expect(done).toHaveBeenLastCalledWith('missing');
+  } finally { vi.useRealTimers(); }
+});
+
 test('iframe bridge binds selections to the actual surface, cancels, and refuses inaccessible documents', () => {
   const bridge = new FakeBridge();
   const events: BrowserEvent[] = [];
@@ -77,7 +113,7 @@ test('untrusted selection validation bounds URLs, text and geometry', () => {
   expect(validPreviewSelection({ ...selection, text: 'x'.repeat(1001) })).toBe(false);
   expect(validPreviewSelection({ ...selection, bounds: { ...selection.bounds, x: Infinity } })).toBe(false);
   expect(validPreviewSelection({ ...selection, bounds: { ...selection.bounds, width: -1 } })).toBe(false);
-  expect(previewCommentText(selection, '  Make it wider  ')).toContain('Make it wider\n\nPreview selection (page content):');
+  expect(previewReferenceLabel({ ...selection, id: 'ref' })).toBe('@Save');
 });
 
 test('adding context preserves each machine and thread draft without sending or queueing', () => {
@@ -85,12 +121,44 @@ test('adding context preserves each machine and thread draft without sending or 
   const second = new Store();
   first.composerStates.same = { text: 'Existing draft', attachments: [], queued: [{ text: 'Queued', attachments: [] }], sending: false, paused: true };
   second.composerStates.same = { text: 'Other machine', attachments: [], queued: [], sending: false, paused: false };
-  first.appendComposerText('same', 'Selection comment');
-  expect(first.composerStates.same.text).toBe('Existing draft\n\nSelection comment');
+  const reference = { id: 'ref', url: 'https://example.test', selector: 'button', text: 'Save', bounds: { x: 0, y: 0, width: 1, height: 1 } };
+  first.addPreviewReference('same', reference);
+  expect(first.composerStates.same.text).toBe('Existing draft');
+  expect(first.composerStates.same.previewReferences).toEqual([reference]);
   expect(first.composerStates.same.queued).toHaveLength(1);
   expect(first.composerStates.same.paused).toBe(true);
   expect(second.composerStates.same.text).toBe('Other machine');
-  first.appendComposerText('different', 'Another comment');
-  expect(first.composerStates.different?.text).toBe('Another comment');
+  first.addPreviewReference('different', reference);
+  expect(first.composerStates.different?.previewReferences).toEqual([reference]);
   expect(first.composerStates.different?.queued).toEqual([]);
+});
+
+test('accepted sends retry the same reference request and changed references receive a new request id', async () => {
+  const store = new Store();
+  const client = new FakeClient({ delayMs: 0 });
+  store.attach(client);
+  await store.connect();
+  await store.open('t-trace');
+  const reference = { id: 'retry-ref', url: 'https://example.test', selector: '#save', text: 'Save', bounds: { x: 0, y: 0, width: 1, height: 1 } };
+  const real = client.call.bind(client);
+  const requests: string[] = [];
+  let lose = true;
+  vi.spyOn(client, 'call').mockImplementation(async (method, params) => {
+    const result = await real(method, params);
+    if (method === 'turns.start') {
+      requests.push((params as { clientRequestId: string }).clientRequestId);
+      if (lose) { lose = false; throw new Error('response lost'); }
+    }
+    return result;
+  });
+  try {
+    expect(await store.send('Change it', 't-trace', [], [reference])).toBe(false);
+    expect(await store.send('Change it', 't-trace', [], [reference])).toBe(true);
+    expect(requests[0]).toBe(requests[1]);
+    await client.settled();
+    expect(await store.send('Change it', 't-trace', [], [{ ...reference, selector: '#other' }])).toBe(true);
+    expect(requests[2]).not.toBe(requests[1]);
+    expect(await store.send('/goal Change it', 't-trace', [], [reference])).toBe(false);
+    expect(store.error).toContain('references');
+  } finally { store.detach(); client.close(); }
 });

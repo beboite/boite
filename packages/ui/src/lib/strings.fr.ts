@@ -11,14 +11,21 @@ import type { Messages } from './i18n.svelte';
 
 export const fr: Messages = {
   previewComments: {
-  annotate: 'Comment on an element',
-  picking: 'Select an element in the page. Escape cancels.',
-  comment: 'What should change?',
-  add: 'Add to message',
-  cancel: 'Cancel',
-  added: 'Added to your message. Review it before sending.',
-  unavailable: 'Element selection is unavailable on this page. Use the desktop app for cross-origin pages.',
-  failed: 'Element selection failed. Reload the page and try again.'
+  annotate: 'Référencer un élément',
+  picking: 'Sélectionnez un élément dans la page. Échap annule.',
+  comment: 'Que faut-il changer ?',
+  add: 'Ajouter au message',
+  cancel: 'Annuler',
+  added: 'Élément ajouté à votre message.',
+  unavailable: 'Cet élément est inaccessible. Utilisez l’application de bureau pour les pages d’une autre origine.',
+  failed: 'La sélection a échoué. Rechargez la page et réessayez.',
+  reveal: 'Montrer cet élément dans l’aperçu',
+  remove: 'Retirer la référence à cet élément',
+  stale: 'Cet aperçu a changé de page. Rouvrez la page d’origine ou sélectionnez à nouveau l’élément.',
+  missing: 'Cet élément n’existe plus dans la page. Sélectionnez-le à nouveau.',
+  tooMany: 'Un message peut référencer au maximum 8 éléments de page.',
+  activityUnsupported: 'Les références ne sont pas disponibles avec /goal ou /loop. Envoyez un message ordinaire ou retirez les références.',
+  stashUnsupported: 'Ce brouillon contient des références et ne peut pas être mis de côté. Envoyez-le ou retirez les références.'
 },
   proposalComparison: {
   title: 'Comparer les propositions',

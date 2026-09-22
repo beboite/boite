@@ -794,7 +794,7 @@ shellTest(
   TIMEOUT,
 );
 
-shellTest('native preview selection crosses the child webview boundary and stays in an unsent draft', async () => {
+shellTest('native preview references attach to the composer and highlight from sent history', async () => {
   if (!page) throw new Error('shell is not ready');
   const fixture = Bun.serve({
     hostname: '127.0.0.1', port: 0,
@@ -826,24 +826,39 @@ shellTest('native preview selection crosses the child webview boundary and stays
     })()`);
     expect(refused).not.toBe('allowed');
     await child.click('#native-preview-target');
-    await page.waitFor(`document.querySelector('${testid('preview-comment-form')}')`);
-    expect(await page.text(`${testid('preview-comment-form')} code`)).toBe('#native-preview-target');
+    await page.waitFor(`document.querySelector('${testid('composer')} ${testid('preview-reference')}')`);
+    expect(await page.text(`${testid('composer')} ${testid('preview-reference')}`)).toBe('@Save changes');
     expect(await child.evaluate('location.href')).toBe(url);
-    await page.type(testid('preview-comment'), 'Make the save action clearer.');
-    await page.screenshot(join(import.meta.dir, '.artifacts', 'preview-native-comment.png'));
-    const messagesBefore = await page.evaluate(`document.querySelectorAll('[data-testid=message]').length`);
-    await page.click(testid('preview-add'));
     const draft = await page.evaluate<string>(`document.querySelector('${testid('composer-input')}').value`);
-    expect(draft).toStartWith('Existing native draft.\n\nMake the save action clearer.');
-    expect(draft).toContain(`"url": "${url}"`);
-    expect(draft).toContain('"selector": "#native-preview-target"');
-    expect(draft).toContain('"text": "Save changes"');
-    expect(await page.evaluate(`document.querySelectorAll('[data-testid=message]').length`)).toBe(messagesBefore);
+    expect(draft).toBe('Existing native draft.');
+    expect(await page.evaluate(`!!document.querySelector('${testid('preview-comment-form')}')`)).toBe(false);
+    await page.click(`${testid('composer')} ${testid('preview-reference')}`);
+    await child.waitFor(`document.querySelector('[data-boite-preview-highlight]')`);
+    await page.screenshot(join(import.meta.dir, '.artifacts', 'preview-native-reference.png'));
+    await page.type(testid('composer-input'), 'Make the save action clearer.');
+    await clickWhenEnabled(testid('composer-send'));
+    await page.waitFor(`document.querySelector('[data-role="user"] ${testid('preview-reference')}')`);
+    await page.waitFor(`!document.querySelector('${testid('composer')} ${testid('preview-reference')}')`);
+    expect(await page.evaluate(`Array.from(document.querySelectorAll('[data-role="user"] ${testid('text-part')}')).at(-1).textContent`)).toBe('Make the save action clearer.');
+    await child.close();
+    child = undefined;
+    await page.click(testid('panel-tab-close'));
+    await waitForTargets(url, 0, 20_000);
+    // Closing the last tab already closes the panel. Its exit animation keeps
+    // the close button mounted briefly; clicking it would toggle the panel open.
+    await page.waitFor(`!document.querySelector('${testid('right-panel')}')`);
+    // A reference from history restores a closed tab, waits for the real page,
+    // then highlights its element in the newly created child webview.
+    await page.click(`[data-role="user"] ${testid('preview-reference')}`);
+    await waitForTargets(url, 1, 20_000);
+    child = await BrowserPage.attach(debugPort, url);
+    await child.waitFor(`document.querySelector('[data-boite-preview-highlight]')`);
+    expect(await child.evaluate('location.href')).toBe(url);
+    await page.screenshot(join(import.meta.dir, '.artifacts', 'preview-native-sent.png'));
   } finally {
     await child?.close();
-    // Closing the last tab destroys the child view and returns the launcher.
+    // Closing the last tab destroys the child view and closes the panel.
     if (await page.evaluate(`!!document.querySelector('${testid('panel-tab-close')}')`)) await page.click(testid('panel-tab-close'));
-    if (await page.evaluate(`!!document.querySelector('${testid('panel-close')}')`)) await page.click(testid('panel-close'));
     await page.type(testid('composer-input'), '');
     fixture.stop(true);
   }

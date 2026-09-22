@@ -45,9 +45,11 @@ const BLANK: &str = "about:blank";
 static PICKS: LazyLock<Mutex<HashMap<String, String>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 const PICKER: &str = include_str!("../../../../packages/ui/src/lib/preview-picker.js");
+const HIGHLIGHTER: &str = include_str!("../../../../packages/ui/src/lib/preview-highlight.js");
+static HIGHLIGHTS: LazyLock<Mutex<HashMap<String, (String, String)>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 // Even if every allowed payload byte needs JSON escaping and percent encoding,
-// the 24,384 field bytes plus the fixed envelope fit this transport budget.
-const MAX_SELECTION_CALLBACK_BYTES: usize = 512 * 1024;
+// the 56,384 field bytes plus the fixed envelope fit this transport budget.
+const MAX_SELECTION_CALLBACK_BYTES: usize = 1024 * 1024;
 
 #[derive(Clone, Deserialize, Serialize)]
 struct SelectionBounds {
@@ -61,8 +63,17 @@ struct SelectionBounds {
 struct PreviewSelection {
     url: String,
     selector: String,
+    #[serde(default, rename = "shadowPath")]
+    shadow_path: Vec<String>,
     text: String,
     bounds: SelectionBounds,
+}
+
+#[derive(Deserialize, Serialize)]
+pub struct PreviewHighlight {
+    id: String,
+    #[serde(flatten)]
+    selection: PreviewSelection,
 }
 
 fn valid_selection(selection: &PreviewSelection) -> bool {
@@ -70,6 +81,8 @@ fn valid_selection(selection: &PreviewSelection) -> bool {
         && selection.selector.len() <= 4000
         && !selection.selector.is_empty()
         && selection.text.len() <= 4000
+        && selection.shadow_path.len() <= 8
+        && selection.shadow_path.iter().all(|part| !part.trim().is_empty() && part.len() <= 4000)
         && checked_url("selection", &selection.url).is_ok()
         && [
             selection.bounds.x,
@@ -117,6 +130,12 @@ fn read_selection(id: &str, url: &Url) -> Option<(String, Option<PreviewSelectio
 #[derive(Clone, Serialize)]
 #[serde(tag = "type", rename_all = "kebab-case")]
 enum Event {
+    HighlightResult {
+        id: String,
+        #[serde(rename = "requestId")]
+        request_id: String,
+        error: Option<String>,
+    },
     Selection {
         id: String,
         #[serde(rename = "requestId")]
@@ -192,6 +211,7 @@ pub fn only_main(webview: &Webview) -> Result<(), String> {
 /// them. Called on every load of the main webview, the first one included,
 /// where there is nothing to close.
 pub fn close_all<R: Runtime>(app: &AppHandle<R>) {
+    if let Ok(mut highlights) = HIGHLIGHTS.lock() { highlights.clear(); }
     if let Ok(mut picks) = PICKS.lock() {
         picks.clear();
     }
@@ -304,6 +324,24 @@ pub async fn browser_create(
     let surface = id.clone();
     builder = builder.on_navigation(move |url| {
         if url.scheme() == "boite-preview" {
+            if url.host_str() == Some("highlight") && url.as_str().len() < 1024 {
+                let fields: HashMap<_, _> = url.query_pairs().into_owned().collect();
+                let result = HIGHLIGHTS.lock().ok().and_then(|mut highlights| {
+                    let (request, _) = highlights.get(&surface)?;
+                    if fields.get("request")? != request { return None; }
+                    highlights.remove(&surface)
+                });
+                if let Some((request_id, expected_url)) = result {
+                    let actual = view_of(&handle, &surface).and_then(|view| view.url().map_err(|error| error.to_string()));
+                    let status = fields.get("status").map(String::as_str).unwrap_or("unavailable");
+                    let error = if actual.ok().as_ref().map(Url::as_str) != Some(expected_url.as_str()) { Some("stale".into()) }
+                        else if status == "ok" { None }
+                        else if ["stale", "missing", "unavailable"].contains(&status) { Some(status.into()) }
+                        else { Some("unavailable".into()) };
+                    announce(&handle, Event::HighlightResult { id: surface.clone(), request_id, error });
+                }
+                return false;
+            }
             if let Some((request_id, mut selection)) = read_selection(&surface, url) {
                 // The page supplies text and coordinates; the host supplies its
                 // actual URL, so it cannot impersonate a different origin.
@@ -328,6 +366,11 @@ pub async fn browser_create(
             return false;
         }
         cancel_pick(&surface);
+        if let Ok(mut highlights) = HIGHLIGHTS.lock() {
+            if let Some((request_id, _)) = highlights.remove(&surface) {
+                announce(&handle, Event::HighlightResult { id: surface.clone(), request_id, error: Some("stale".into()) });
+            }
+        }
         if !SCHEMES.contains(&url.scheme()) {
             fail(
                 &handle,
@@ -546,9 +589,32 @@ pub async fn browser_annotate(
 }
 
 #[tauri::command]
+pub async fn browser_highlight(app: AppHandle, webview: Webview, id: String, request_id: String, reference: PreviewHighlight) -> Result<(), String> {
+    only_main(&webview)?;
+    if request_id.is_empty() || request_id.len() > 80 || !request_id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') ||
+        reference.id.is_empty() || reference.id.len() > 80 || !valid_selection(&reference.selection) {
+        return Err("unavailable".into());
+    }
+    let view = view_of(&app, &id)?;
+    if view.url().map_err(|error| error.to_string())?.as_str() != reference.selection.url { return Err("stale".into()); }
+    let replaced = HIGHLIGHTS.lock().map_err(|_| "unavailable")?.insert(id.clone(), (request_id.clone(), reference.selection.url.clone()));
+    if let Some((previous, _)) = replaced {
+        announce(&app, Event::HighlightResult { id: id.clone(), request_id: previous, error: Some("superseded".into()) });
+    }
+    let request = serde_json::to_string(&request_id).map_err(|error| error.to_string())?;
+    let data = serde_json::to_string(&reference).map_err(|error| error.to_string())?;
+    let highlighter = HIGHLIGHTER.replacen("export default ", "", 1);
+    view.eval(format!("({highlighter})(document, {data}, error => {{ location.href = 'boite-preview://highlight/?request=' + encodeURIComponent({request}) + '&status=' + encodeURIComponent(error || 'ok'); }});")).map_err(|error| {
+        if let Ok(mut highlights) = HIGHLIGHTS.lock() { highlights.remove(&id); }
+        format!("browser {id:?} could not highlight selection: {error}")
+    })
+}
+
+#[tauri::command]
 pub async fn browser_destroy(app: AppHandle, webview: Webview, id: String) -> Result<(), String> {
     only_main(&webview)?;
     cancel_pick(&id);
+    if let Ok(mut highlights) = HIGHLIGHTS.lock() { highlights.remove(&id); }
     view_of(&app, &id)?
         .close()
         .map_err(|error| format!("the browser surface {id:?} could not be closed: {error}"))
@@ -594,6 +660,7 @@ mod tests {
         let payload = serde_json::json!({
             "url": format!("https://example.test/{}", "é".repeat(8000)),
             "selector": format!("#{}", "é".repeat(1999)),
+            "shadowPath": vec!["\u{0001}".repeat(4000); 8],
             "text": "é".repeat(2000),
             "bounds": { "x": 0, "y": 0, "width": 10, "height": 10 }
         });

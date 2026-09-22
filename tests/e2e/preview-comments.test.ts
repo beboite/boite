@@ -23,7 +23,7 @@ async function capture(name: string) {
   await page.screenshot(join(import.meta.dir, '.artifacts', name));
 }
 
-test('preview comments select a real iframe element and add context to the owning unsent draft at both widths', async () => {
+test('preview references attach to the existing composer and remain clickable after sending at both widths', async () => {
   await page.type(id('composer-input'), 'Keep this existing draft.');
   await onStore(`store.panel.open('browser');`);
   await page.waitFor(`document.querySelector('iframe[data-browser-id]')?.contentDocument?.body`);
@@ -49,28 +49,40 @@ test('preview comments select a real iframe element and add context to the ownin
   await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...point });
   await page.send('Input.dispatchMouseEvent', { type: 'mousePressed', ...point, button: 'left', buttons: 1, clickCount: 1 });
   await page.send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...point, button: 'left', buttons: 0, clickCount: 1 });
-  await page.waitFor(`document.querySelector('${id('preview-comment-form')}')`);
-  expect(await page.text(`${id('preview-comment-form')} code`)).toBe('#preview-buy');
-  await page.type(id('preview-comment'), 'Make this button easier to find.');
-  await capture('preview-comment-desktop.png');
-  await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
-  await capture('preview-comment-phone.png');
-  expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
-  // Native child views and the iframe both sit below the form, never over its actions.
-  expect(await page.evaluate(`document.querySelector('iframe[data-browser-id]').getBoundingClientRect().top >= document.querySelector('${id('preview-comment-form')}').getBoundingClientRect().bottom - 1`)).toBe(true);
-  expect(await page.evaluate(`(() => { const frame = document.querySelector('iframe[data-browser-id]'); const rect = frame.getBoundingClientRect(); return document.elementFromPoint(rect.left + rect.width / 2, rect.top + 30) === frame; })()`)).toBe(true);
-  const turnsBefore = await onStore(`return store.openThread.messages.length;`);
-  await page.click(id('preview-add'));
+  await page.waitFor(`document.querySelector('${id('composer')} ${id('preview-reference')}')`);
+  expect(await page.evaluate(`!!document.querySelector('${id('preview-comment-form')}')`)).toBe(false);
+  expect(await page.evaluate(`document.querySelector('${id('composer-input')}').value`)).toBe('Keep this existing draft.');
+  expect(await page.text(`${id('composer')} ${id('preview-reference')}`)).toBe('@Buy now');
+  expect(await page.evaluate(`getComputedStyle(document.querySelector('${id('composer')} ${id('preview-reference')}')).fontWeight`)).toBe('700');
+  await capture('preview-reference-desktop.png');
+  await page.click(`${id('composer')} ${id('preview-reference')}`);
+  await page.waitFor(`document.querySelector('iframe[data-browser-id]').contentDocument.querySelector('[data-boite-preview-highlight]')`);
+  await page.type(id('composer-input'), 'Make this button easier to find.');
+  const turnsBefore = await onStore(`return store.openThread.turns.length;`);
+  await page.click(id('composer-send'));
+  await page.waitFor(`document.querySelector('[data-role="user"] ${id('preview-reference')}')`);
+  await page.waitFor(`!document.querySelector('${id('composer')} ${id('preview-reference')}')`);
+  expect(await onStore(`return store.openThread.turns.length;`)).toBe(Number(turnsBefore) + 1);
+  expect(await page.evaluate(`Array.from(document.querySelectorAll('[data-role="user"] ${id('text-part')}')).at(-1).textContent`)).toBe('Make this button easier to find.');
+  // Disabling new selections keeps the references already in history usable.
+  await page.evaluate(`import('/src/lib/experiments.ts').then(({ setExperiment }) => setExperiment('preview-comments', false))`);
   await page.click(id('panel-close'));
   await page.waitFor(`!document.querySelector('${id('right-panel')}')`);
-  const draft = await page.evaluate<string>(`document.querySelector('${id('composer-input')}').value`);
-  expect(await page.evaluate(`document.querySelector('${id('composer-input')}').getBoundingClientRect().height > 100`)).toBe(true);
-  expect(draft).toStartWith('Keep this existing draft.\n\nMake this button easier to find.');
-  expect(draft).toContain('"selector": "#preview-buy"');
-  expect(draft).toContain('"text": "Buy now"');
-  expect(draft).toContain('"bounds"');
-  expect(await onStore(`return store.openThread.messages.length;`)).toBe(turnsBefore);
-  await capture('preview-draft-phone.png');
+  await page.click(`[data-role="user"] ${id('preview-reference')}`);
+  await page.waitFor(`document.querySelector('iframe[data-browser-id]')?.contentDocument.querySelector('[data-boite-preview-highlight]')`);
+  await capture('preview-reference-sent-desktop.png');
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+  await capture('preview-reference-highlight-phone.png');
+  expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
+  await page.evaluate(`import('/src/lib/experiments.ts').then(({ setExperiment }) => setExperiment('preview-comments', true))`);
+  await page.click(id('preview-annotate'));
+  await page.evaluate(`document.querySelector('iframe[data-browser-id]').contentDocument.querySelector('#preview-buy').click()`);
+  await page.waitFor(`!document.querySelector('${id('right-panel')}')`);
+  await page.waitFor(`document.querySelector('${id('composer')} ${id('preview-reference')}')`);
+  await page.type(id('composer-input'), 'Keep the label short.');
+  await capture('preview-reference-phone.png');
+  expect(await page.evaluate(`document.querySelector('${id('composer-input')}').value`)).toBe('Keep the label short.');
+  await page.click(`${id('composer')} ${id('preview-reference-remove')}`);
+  await page.waitFor(`!document.querySelector('${id('composer')} ${id('preview-reference')}')`);
   await page.send('Emulation.setDeviceMetricsOverride', { width: 1310, height: 820, deviceScaleFactor: 1, mobile: false });
-  await capture('preview-draft-desktop.png');
 }, 60_000);

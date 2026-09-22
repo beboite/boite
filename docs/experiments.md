@@ -46,17 +46,33 @@ the underlying threads and worktrees persist independently.
 
 ## Preview comments
 
-Open a Browser tab in the integrated panel and choose Comment on an element.
-Click an element, write feedback and choose Add to message. The owning thread's
-draft receives the comment plus the page URL, selector, text and viewport bounds.
-Existing draft text and attachments stay intact. Nothing is sent until Send.
+Open a Browser tab in the integrated panel and choose Reference an element.
+Clicking an element adds a compact, removable `@element` reference to the
+existing composer. Write the request there and send it normally. Draft text,
+attachments and queued messages stay intact. On a phone-sized window, selection
+returns to the composer. There is no separate comment form.
+
+References appear in the accent color in the composer and sent messages. Click
+one to reopen its thread's browser and highlight the element. A closed tab is
+reopened at the captured URL; a surviving tab that changed pages is refused.
+Missing elements and inaccessible pages report errors. Open shadow roots are
+supported, including sibling elements within them. The highlight follows scroll
+and resize for three seconds. Existing references remain clickable with the
+experiment switched off.
+
+Each message carries up to eight typed references. The core validates the URL,
+selector, shadow-root path, selected text and viewport bounds, then supplies
+them as labeled untrusted context to every agent. The visible message keeps
+only the user's prose and reference chips. References survive queued sends,
+failed sends, idempotent retries and prompt recall. Stashing a referenced draft
+or sending it with `/goal` or `/loop` is refused explicitly, preserving the draft.
 
 Escape cancels selection. Switching off the experiment or leaving the surface
 cancels the picker. Desktop child webviews support selection across origins.
 The iframe test bridge only inspects accessible same-origin documents and
 reports inaccessible pages explicitly. Selected page content is untrusted data;
-it never grants the page access to host commands. This version does not capture
-a screenshot with the comment.
+it never grants the page access to host commands. This version does not attach
+a screenshot to the reference.
 
 ## Verification
 

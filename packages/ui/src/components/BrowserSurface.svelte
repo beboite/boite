@@ -8,41 +8,29 @@
   import type { BoundPanel, Surface } from '../lib/right-panel.svelte';
   import type { Store } from '../lib/store.svelte';
   import { experimentOn } from '../lib/experiments.svelte';
-  import { previewCommentText, validPreviewSelection, type PreviewSelection } from '../lib/preview-comments';
-  const previewStrings = strings.previewComments;
+  import { validPreviewSelection } from '../lib/preview-comments';
+  const previewStrings = $derived(strings.previewComments);
 
   let { surface, panel, store }: { surface: Surface; panel: BoundPanel; store: Store } = $props();
 
   let request = $state<string | null>(null);
-  let selection = $state<PreviewSelection | null>(null);
-  let comment = $state('');
   let notice = $state('');
-  let selectionOwner: { store: Store; threadId: string } | null = null;
+  let selectionOwner: { store: Store; threadId: string; client: Store['client']; machineId: string } | null = null;
   const enabled = $derived(experimentOn('preview-comments'));
 
   function cancelSelection(): void {
     request = null;
-    selection = null;
-    comment = '';
     browserBridge.annotate(id, null);
   }
 
   function beginSelection(): void {
-    if (request || selection) { cancelSelection(); return; }
+    if (request) { cancelSelection(); return; }
     const threadId = store.openThread?.id;
     if (!enabled || !threadId) return;
-    selectionOwner = { store, threadId };
+    selectionOwner = { store, threadId, client: store.client, machineId: store.machineId };
     notice = '';
     request = crypto.randomUUID();
     browserBridge.annotate(id, request);
-  }
-
-  function addComment(event: SubmitEvent): void {
-    event.preventDefault();
-    if (!enabled || !selection || !selectionOwner || !comment.trim()) return;
-    selectionOwner.store.appendComposerText(selectionOwner.threadId, previewCommentText(selection, comment));
-    cancelSelection();
-    notice = previewStrings.added;
   }
 
   $effect(() => {
@@ -54,14 +42,20 @@
       if (event.type === 'selection' && event.requestId === request) {
         if (event.selection !== null && !validPreviewSelection(event.selection)) return;
         request = null;
-        selection = event.selection;
+        if (event.selection && selectionOwner && selectionOwner.store.client === selectionOwner.client && selectionOwner.store.machineId === selectionOwner.machineId) {
+          const added = selectionOwner.store.addPreviewReference(selectionOwner.threadId, {
+            ...event.selection, id: crypto.randomUUID(), surfaceId
+          });
+          notice = added ? previewStrings.added : '';
+          if (added && window.innerWidth <= 980) panel.toggle();
+        }
       } else if (event.type === 'selection-failed' && event.requestId === request) {
         request = null;
         notice = event.reason === 'inaccessible' || event.reason === 'unavailable' ? previewStrings.unavailable : previewStrings.failed;
       // WebView2 finishes the refused picker callback navigation by reporting
       // the unchanged page URL and loading=false. Keep its returned selection.
       } else if ((event.type === 'loading' && event.loading) ||
-        (event.type === 'url' && event.url !== (selection?.url ?? surface.url))) {
+        (event.type === 'url' && event.url !== surface.url)) {
         cancelSelection();
         notice = '';
       }
@@ -149,7 +143,7 @@
 
   /** `Ctrl+=`, `Ctrl+-` and `Ctrl+0` while this surface is the one showing. */
   function onZoomKey(event: KeyboardEvent): void {
-    if (event.key === 'Escape' && (request || selection)) {
+    if (event.key === 'Escape' && request) {
       event.preventDefault();
       cancelSelection();
       return;
@@ -236,25 +230,14 @@
     </form>
     {#if enabled}
       <button type="button" class="ghost small icon" title={previewStrings.annotate}
-        aria-label={previewStrings.annotate} aria-pressed={!!request || !!selection}
+        aria-label={previewStrings.annotate} aria-pressed={!!request}
         disabled={!store.openThread} data-testid="preview-annotate" onclick={beginSelection}>
         <MousePointer2 size={14} strokeWidth={1.75} />
       </button>
     {/if}
   </div>
 
-  {#if enabled && selection}
-    <form class="annotation" onsubmit={addComment} data-testid="preview-comment-form">
-      <code title={selection.selector}>{selection.selector}</code>
-      {#if selection.text}<p class="excerpt">{selection.text}</p>{/if}
-      <textarea aria-label={previewStrings.comment} placeholder={previewStrings.comment}
-        bind:value={comment} maxlength={8000} rows="3" data-testid="preview-comment"></textarea>
-      <div class="annotation-actions">
-        <button type="button" class="ghost small" onclick={cancelSelection}>{previewStrings.cancel}</button>
-        <button type="submit" class="small" disabled={!comment.trim()} data-testid="preview-add">{previewStrings.add}</button>
-      </div>
-    </form>
-  {:else if enabled && (request || notice)}
+  {#if enabled && (request || notice)}
     <p class="annotation-notice" role="status">{request ? previewStrings.picking : notice}</p>
   {/if}
 
@@ -266,12 +249,8 @@
 </div>
 
 <style>
-  .annotation { display: flex; flex-direction: column; gap: 8px; padding: 12px; border-bottom: 1px solid var(--color-border); background: var(--color-surface-2); max-height: 50%; overflow-y: auto; }
-  .annotation code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-sm); }
-  .annotation textarea { width: 100%; min-height: 70px; resize: vertical; font-size: var(--text-sm); }
-  .excerpt { margin: 0; font-size: var(--text-sm); color: var(--color-muted-foreground); display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-  .annotation-actions { display: flex; justify-content: flex-end; gap: 8px; }
   .annotation-notice { margin: 0; padding: 8px 12px; font-size: var(--text-sm); color: var(--color-muted-foreground); border-bottom: 1px solid var(--color-border); }
+  .chrome button[aria-pressed="true"] { color: var(--color-accent); background: var(--color-accent-soft); }
   .browser-surface {
     display: flex;
     flex-direction: column;

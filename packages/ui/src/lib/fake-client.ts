@@ -30,6 +30,9 @@ import {
   type GitStatus,
   type Attachment,
   attachmentError,
+  previewReferencesError,
+  previewPrompt,
+  type PreviewReference,
   type ImportableSession,
   type Message,
   type MessageId,
@@ -1695,9 +1698,11 @@ export class FakeClient implements ObservableClient {
 
       case 'turns.start': {
         const params = rawParams as RpcParams<'turns.start'>;
+        const referenceError = previewReferencesError(params.previewReferences ?? []);
+        if (referenceError) throw new RpcFailure({ code: RpcErrorCode.Refused, message: referenceError });
         if (params.attachments !== undefined && (!Array.isArray(params.attachments) || params.attachments.some(a => !a || typeof a !== 'object'))) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'attachments must be an array of attachment objects' });
         const key = params.clientRequestId ? `${params.threadId}:${params.clientRequestId}` : null;
-        const content = JSON.stringify([params.prompt, (params.attachments ?? []).map(a => [a.kind, a.mimeType, a.data, a.name])]);
+        const content = JSON.stringify([params.prompt, (params.attachments ?? []).map(a => [a.kind, a.mimeType, a.data, a.name]), ...(params.previewReferences?.length ? [params.previewReferences] : [])]);
         if (params.clientRequestId !== undefined && !/^[A-Za-z0-9_-]{8,128}$/.test(params.clientRequestId)) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'clientRequestId must contain 8 to 128 URL-safe characters' });
         const previous = key ? this.#turnRequests.get(key) : undefined;
         if (previous) {
@@ -1712,7 +1717,7 @@ export class FakeClient implements ObservableClient {
         if (!provider) throw this.#notFound('provider', providerId);
         const error = attachmentError(params.attachments ?? [], provider);
         if (error) throw new RpcFailure({ code: RpcErrorCode.Refused, ...error });
-        const turn = this.#startTurn(params.threadId, params.prompt, params.attachments ?? []);
+        const turn = this.#startTurn(params.threadId, params.prompt, params.attachments ?? [], undefined, undefined, params.previewReferences ?? []);
         if (key) this.#turnRequests.set(key, { content, turn });
         return turn;
       }
@@ -2418,7 +2423,9 @@ const ready = true;
     return stopped;
   }
 
-  #startTurn(threadId: ThreadId, prompt: string, attachments: Attachment[] = [], operation?: 'compact', activityKind?: 'goal' | 'loop'): Turn {
+  #startTurn(threadId: ThreadId, prompt: string, attachments: Attachment[] = [], operation?: 'compact', activityKind?: 'goal' | 'loop', previewReferences: PreviewReference[] = []): Turn {
+    // The real transport serializes Svelte proxies before they reach the core.
+    previewReferences = JSON.parse(JSON.stringify(previewReferences)) as PreviewReference[];
     const thread = this.#thread(threadId);
     if (thread.archived) {
       throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'cannot start a turn on an archived thread', data: { threadId } });
@@ -2462,7 +2469,7 @@ const ready = true;
       role: 'user',
       // The images ride after the text, the order the core journals them in.
       parts: [
-        { type: 'text', text: activityKind ? `/${activityKind} ${prompt}` : prompt, ...(activityKind ? { activity: { kind: activityKind, iteration: (thread.activity?.[activityKind]?.iterations ?? 0) + 1 } } : {}) },
+        { type: 'text', text: activityKind ? `/${activityKind} ${prompt}` : previewPrompt(prompt, previewReferences), ...(previewReferences.length ? { displayText: prompt, previewReferences: structuredClone(previewReferences) } : {}), ...(activityKind ? { activity: { kind: activityKind, iteration: (thread.activity?.[activityKind]?.iterations ?? 0) + 1 } } : {}) },
         ...attachments.map((attachment): MessagePart => attachment.kind === 'file' ? { type: 'file', mimeType: attachment.mimeType, data: attachment.data, name: attachment.name } : ({
           type: 'image',
           mimeType: attachment.mimeType,

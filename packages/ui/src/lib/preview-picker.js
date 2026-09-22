@@ -11,15 +11,24 @@ export default function installPreviewPicker(doc, emit) {
     let current = element;
     while (current && parts.length < 8) {
       const tag = current.localName;
-      if (current.id && win.CSS && win.CSS.escape) {
+      if (current.id && win.CSS && win.CSS.escape && current.getRootNode().querySelectorAll('#' + win.CSS.escape(current.id)).length === 1) {
         parts.unshift('#' + win.CSS.escape(current.id));
         break;
       }
-      const peers = current.parentElement ? Array.from(current.parentElement.children).filter(child => child.localName === tag) : [];
+      const peers = current.parentNode?.children ? Array.from(current.parentNode.children).filter(child => child.localName === tag) : [];
       parts.unshift(tag + (peers.length > 1 ? ':nth-of-type(' + (peers.indexOf(current) + 1) + ')' : ''));
       current = current.parentElement;
     }
     return parts.join(' > ').slice(0, 1000);
+  }
+  function shadowPath(element) {
+    const hosts = [];
+    let root = element.getRootNode();
+    while (root.host && hosts.length < 8) {
+      hosts.unshift(selector(root.host));
+      root = root.host.getRootNode();
+    }
+    return hosts;
   }
   function move(event) {
     const target = event.composedPath()[0];
@@ -42,6 +51,7 @@ export default function installPreviewPicker(doc, emit) {
     const selection = {
       url: doc.URL.slice(0, 4096),
       selector: selector(target),
+      shadowPath: shadowPath(target),
       text: (target.innerText || target.textContent || '').trim().slice(0, 1000),
       bounds: { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
     };
