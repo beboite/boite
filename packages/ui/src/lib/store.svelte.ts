@@ -778,13 +778,7 @@ export class Store {
     });
 
     on('message.started', (message) => {
-      const targets = [this.openThread, this.delegationThread].filter(
-        (thread): thread is Thread => thread?.id === message.threadId
-      );
-      const seen = new Set<string>();
-      for (const target of targets) {
-        if (seen.has(target.id)) continue;
-        seen.add(target.id);
+      for (const target of this.#threadSnapshots(message.threadId)) {
         const index = target.messages.findIndex((m) => m.id === message.id);
         if (index >= 0) target.messages[index] = message;
         else target.messages.push(message);
@@ -792,25 +786,22 @@ export class Store {
     });
 
     on('message.delta', ({ threadId, messageId, partIndex, text }) => {
-      const message = this.#message(threadId, messageId);
-      if (!message) return;
-      const part = message.parts[partIndex];
-      // A delta appends to whatever kind of text part sits there: text or thinking.
-      if (part && (part.type === 'text' || part.type === 'thinking')) part.text += text;
-      // On a tool part it is the input's JSON, still being typed by the model.
-      else if (part && part.type === 'tool') part.inputText = (part.inputText ?? '') + text;
-      else if (!part) message.parts[partIndex] = { type: 'text', text };
+      for (const message of this.#messages(threadId, messageId)) {
+        const part = message.parts[partIndex];
+        // A delta appends to whatever kind of text part sits there: text or thinking.
+        if (part && (part.type === 'text' || part.type === 'thinking')) part.text += text;
+        // On a tool part it is the input's JSON, still being typed by the model.
+        else if (part && part.type === 'tool') part.inputText = (part.inputText ?? '') + text;
+        else if (!part) message.parts[partIndex] = { type: 'text', text };
+      }
     });
 
     on('message.part', ({ threadId, messageId, partIndex, part }) => {
-      const message = this.#message(threadId, messageId);
-      if (!message) return;
-      message.parts[partIndex] = part;
+      for (const message of this.#messages(threadId, messageId)) message.parts[partIndex] = part;
     });
 
     on('message.completed', ({ threadId, messageId, state }) => {
-      const message = this.#message(threadId, messageId);
-      if (message) message.state = state;
+      for (const message of this.#messages(threadId, messageId)) message.state = state;
     });
 
     on('permission.requested', (request) => {
@@ -1720,12 +1711,13 @@ export class Store {
   async open(threadId: ThreadId, navigate = true): Promise<void> {
     const client = this.#client;
     if (!client) return;
-    if (this.delegationSelectedAgentId && this.delegationSelectedAgentId !== threadId) {
-      await this.selectDelegatedAgent(null);
-    }
     const generation = ++this.#openGeneration;
     this.#openTarget = threadId;
     const newest = (): boolean => this.#openGeneration === generation;
+    if (this.delegationSelectedAgentId && this.delegationSelectedAgentId !== threadId) {
+      await this.selectDelegatedAgent(null);
+      if (!newest()) return;
+    }
     try {
       const previous = this.#subscribedThreadId;
       // Everything this open needs leaves in one burst, in the order the core
@@ -2682,11 +2674,12 @@ export class Store {
     const client = this.#client;
     const previous = this.#subscribedThreadId;
     const delegated = this.#delegationSubscribedThreadId;
-    if (!client || (!previous && !delegated)) return;
+    this.#delegationSelectionEpoch++;
     this.#subscribedThreadId = null;
     this.#delegationSubscribedThreadId = null;
     this.delegationSelectedAgentId = null;
     this.delegationThread = null;
+    if (!client || (!previous && !delegated)) return;
     const ids = [...new Set([previous, delegated].filter((id): id is string => id !== null))];
     await Promise.all(ids.map(threadId => client.call('threads.unsubscribe', { threadId }).catch(() => undefined)));
   }
@@ -2724,21 +2717,21 @@ export class Store {
     else this.threads.push(summary);
   }
 
-  #message(threadId: ThreadId, messageId: string): Message | null {
-    const thread = this.openThread?.id === threadId
-      ? this.openThread
-      : this.delegationThread?.id === threadId
-        ? this.delegationThread
-        : null;
-    return thread?.messages.find((m) => m.id === messageId) ?? null;
+  #threadSnapshots(threadId: ThreadId): Set<Thread> {
+    return new Set([this.openThread, this.delegationThread].filter((thread): thread is Thread => thread?.id === threadId));
+  }
+
+  #messages(threadId: ThreadId, messageId: string): Set<Message> {
+    const messages = new Set<Message>();
+    for (const thread of this.#threadSnapshots(threadId)) {
+      const message = thread.messages.find((m) => m.id === messageId);
+      if (message) messages.add(message);
+    }
+    return messages;
   }
 
   #upsertTurn(threadId: ThreadId, turn: Thread['turns'][number]): void {
-    const targets = [this.openThread, this.delegationThread].filter((thread): thread is Thread => thread?.id === threadId);
-    const seen = new Set<string>();
-    for (const thread of targets) {
-      if (seen.has(thread.id)) continue;
-      seen.add(thread.id);
+    for (const thread of this.#threadSnapshots(threadId)) {
       const index = thread.turns.findIndex((t) => t.id === turn.id);
       if (index >= 0) thread.turns[index] = turn;
       else thread.turns.push(turn);
