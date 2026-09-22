@@ -167,3 +167,20 @@ test('agent update notices wait until the tour closes without dismissing pending
   await page.waitFor(`document.querySelectorAll('[data-testid=harness-update-notice]').length === 2`);
   expect(await page.evaluate(`document.querySelectorAll('[data-testid=harness-update-run]').length`)).toBe(2);
 }, 20_000);
+
+test('an unavailable onboarding chunk does not hide agent update notices or block the app', async () => {
+  const offline = await BrowserPage.launch({ url: 'about:blank', showTour: true });
+  try {
+    await offline.send('Network.enable', {});
+    await offline.send('Network.setBlockedURLs', { urls: ['*Onboarding.svelte*'] });
+    const origin = await page.evaluate<string>('location.origin');
+    await offline.navigate(`${origin}/?fake=1&updates=1`);
+    await offline.waitFor(`document.querySelector('[data-testid=nav-settings]')`);
+    await offline.waitFor(`document.querySelectorAll('[data-testid=harness-update-notice]').length === 2`);
+    expect(await offline.evaluate(`document.querySelector('[data-testid=onboarding]') === null`)).toBe(true);
+    await offline.click('[data-testid=nav-settings]');
+    await offline.waitFor(`document.querySelector('[data-testid=settings]')`);
+  } finally {
+    await offline.close();
+  }
+}, 30_000);

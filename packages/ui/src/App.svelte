@@ -449,7 +449,7 @@
     </div>
   {/if}
 
-  {#if !tour}<HarnessUpdateNotices />{/if}
+  {#if !(tour && deferred.Onboarding)}<HarnessUpdateNotices />{/if}
 
   {#if toast.shown}
     <div
