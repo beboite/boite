@@ -339,7 +339,7 @@ export class Delegation {
     }
     if (!thread.parentThreadId && !agentId) {
       const turn = this.lastTurn(root.id);
-      if (turn?.execution?.operation === 'delegation' && ['queued', 'running'].includes(turn.status)) this.core.scheduler.stop(root.id);
+      if (turn?.execution?.operation === 'delegation' && ['queued', 'running'].includes(turn.status) && this.core.scheduler.stop(root.id)) stopped++;
     }
     this.changed(root.id);
     return stopped;

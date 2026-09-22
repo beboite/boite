@@ -220,6 +220,20 @@ test('one scheduler slot permits nonblocking spawn and a completion wake after t
   expect(runs.get(threadId)!.ctx.prompt).toContain('Result ready');
 });
 
+test('the regular Stop command reports cancellation of a queued parent wake', async () => {
+  const runs = scripted(); const { h, owner, threadId, spawn } = await setup();
+  h.core.settings.set({ maxConcurrentTurns: 1, perAccountConcurrency: 1 });
+  const child = await spawn();
+  const blocker = (await echoThread(h, owner, 'Other work')).threadId;
+  h.core.threads.startTurn(blocker, 'Keep the scheduler occupied');
+  runs.get(child.thread.id)!.finish('Result ready');
+  await waitFor(() => h.core.threads.require(threadId).status === 'queued', 5000);
+  expect(await owner.call('turns.stop', { threadId })).toEqual({ stopped: true });
+  expect(h.core.journal.listTurns(threadId)[0]?.status).toBe('stopped');
+  expect(h.core.delegation.get(threadId).config.paused).toBe(true);
+  expect(h.core.threads.require(blocker).status).toBe('running');
+});
+
 test('child inbox hides parent messages to siblings', async () => {
   scripted(); const { h, owner, threadId, spawn } = await setup();
   const one = await spawn('one'), two = await spawn('two');
