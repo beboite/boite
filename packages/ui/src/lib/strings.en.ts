@@ -505,7 +505,21 @@ export const strings = {
     compactionNoPost: 'Context compacted from {pre} tokens',
     compactionUnknown: 'Context compacted',
     compactionManual: 'by hand',
-    permissionHeading: 'Wants to use',
+    /** What the agent asks to do, one sentence per kind of tool (`lib/tool-summary.ts`). */
+    permissionAsk: {
+      command: 'Run a command',
+      edit: 'Change {file}',
+      editFiles: 'Change files',
+      editFolder: 'Write files in {folder} from now on',
+      write: 'Create or replace {file}',
+      read: 'Read {file}',
+      search: 'Search the files for {subject}',
+      fetch: 'Open {subject}',
+      web: 'Search the web for {subject}',
+      agent: 'Start a helper agent',
+      other: 'Use its {tool} tool'
+    },
+    permissionTechnical: 'Technical details',
     allow: 'Allow',
     deny: 'Deny',
     allowed: 'Allowed',

@@ -3,6 +3,7 @@
   import type { ToolDocument, ToolStatus } from '@boite/contracts';
   import { json } from '../lib/format';
   import { fill, strings } from '../lib/strings';
+  import { partialSummaryOf, summaryOf } from '../lib/tool-summary';
   import DocumentView from './DocumentView.svelte';
 
   let {
@@ -22,31 +23,6 @@
   } = $props();
 
   let open = $state(false);
-
-  const SUMMARY_KEYS = ['file_path', 'path', 'command', 'pattern', 'query', 'url', 'notebook_path', 'prompt', 'description'];
-
-  /** The first `"key": "value` of a half-typed JSON object, so the line reads before it closes. */
-  const PARTIAL_VALUE = /"[^"]*"\s*:\s*"((?:[^"\\]|\\.)*)/;
-
-  /** The one value a reader wants on the closed line: the path, the command, the pattern. */
-  function summary(value: unknown): string {
-    if (typeof value === 'string') return value;
-    if (typeof value !== 'object' || value === null) return '';
-    const record = value as Record<string, unknown>;
-    for (const key of SUMMARY_KEYS) {
-      const found = record[key];
-      if (typeof found === 'string' && found.length > 0) return found.split('\n')[0] ?? '';
-    }
-    const first = Object.values(record).find((entry) => typeof entry === 'string');
-    return typeof first === 'string' ? (first.split('\n')[0] ?? '') : '';
-  }
-
-  /** While the JSON is still arriving the summary comes from it, else the tool name. */
-  function partialSummary(text: string): string {
-    const found = PARTIAL_VALUE.exec(text);
-    const value = found?.[1] ?? '';
-    return value.length > 0 ? (value.split('\\n')[0] ?? '') : '';
-  }
 
   /** `2 diffs` when every document is one, `2 docs` when they are mixed. */
   function chipFor(list: ToolDocument[]): string {
@@ -72,7 +48,7 @@
   // The body opens itself while the input is being typed: that is the whole point
   // of the stream. It folds back to the one line once the parsed input lands.
   let shown = $derived(open || streaming);
-  let line = $derived(streaming ? partialSummary(inputText ?? '') : summary(input));
+  let line = $derived(streaming ? partialSummaryOf(inputText ?? '') : summaryOf(input));
   let chip = $derived(documents.length > 0 && !shown ? chipFor(documents) : '');
 
   let inputJson = $derived(streaming ? '' : json(input));

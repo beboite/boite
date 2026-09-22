@@ -10,7 +10,7 @@
 
 <script lang="ts">
   import { onDestroy, onMount, tick, untrack } from 'svelte';
-  import { ArrowDown, Check, FileText } from '@lucide/svelte';
+  import { ArrowDown, Check, CircleAlert, FileText } from '@lucide/svelte';
   import type { AgentLetter, Message } from '@boite/contracts';
   import { bytes } from '../lib/format';
   import { decodedBytes } from '../lib/attachments';
@@ -686,7 +686,7 @@
                     </div>
                   {:else if part.type === 'error'}
                     <div class="error" data-testid="error-part">
-                      <span class="section-label">{strings.chat.error}</span>
+                      <span class="section-label error-head"><CircleAlert size={13} strokeWidth={2} />{strings.chat.error}</span>
                       <p>{part.message}</p>
                       {#if signedOut && store.owner}
                         <button type="button" class="quiet small reconnect" data-testid="error-reconnect" onclick={() => store.openConnect(signedOut.providerId, signedOut.id)}>{strings.connect.reconnect}</button>
@@ -872,10 +872,17 @@
   .error {
     padding: 8px 12px;
     border: 1px solid var(--color-border);
-    border-left: 3px solid var(--color-danger);
     border-radius: var(--radius-md);
     background: var(--color-surface);
   }
+
+  .error-head {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .error-head :global(svg) { color: var(--color-danger); }
 
   .error .reconnect { margin-top: 8px; }
 
