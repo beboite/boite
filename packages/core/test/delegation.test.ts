@@ -205,6 +205,21 @@ test('the regular Stop command reports a stopped child and preserves sibling wor
   expect(h.core.threads.require(two.thread.id).status).toBe('running');
 });
 
+test('ordinary threads leave delegation unset on stop/archive; stopping an enabled parent pauses its team', async () => {
+  scripted(); const { h, owner, threadId, spawn } = await setup();
+  const ordinary = (await echoThread(h, owner, 'No team')).threadId;
+  h.core.threads.startTurn(ordinary, 'Work alone');
+  expect(await owner.call('turns.stop', { threadId: ordinary })).toEqual({ stopped: true });
+  expect(h.core.journal.getSetting(`delegation:${ordinary}`)).toBeUndefined();
+  h.core.threads.archive(ordinary, true);
+  expect(h.core.journal.getSetting(`delegation:${ordinary}`)).toBeUndefined();
+  h.core.threads.startTurn(threadId, 'Coordinate');
+  const child = await spawn();
+  expect(await owner.call('turns.stop', { threadId })).toEqual({ stopped: true });
+  await waitFor(() => h.core.threads.require(child.thread.id).status === 'idle');
+  expect(h.core.delegation.get(threadId).config.paused).toBe(true);
+});
+
 test('one scheduler slot permits nonblocking spawn and a completion wake after the parent yields', async () => {
   const runs = scripted(); const { h, threadId, spawn } = await setup();
   h.core.settings.set({ maxConcurrentTurns: 1, perAccountConcurrency: 1 });

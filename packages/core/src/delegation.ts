@@ -322,7 +322,9 @@ export class Delegation {
     const thread = this.core.threads.require(threadId);
     if (thread.parentThreadId && agentId && agentId !== threadId) throw refused('an agent may stop only itself or its direct children');
     const root = this.root(threadId);
-    const ids = thread.parentThreadId ? [threadId] : agentId ? [agentId] : this.rows(root.id).map(row => row.thread_id);
+    const children = this.rows(root.id);
+    if (!thread.parentThreadId && !agentId && !this.config(root.id).enabled && children.length === 0) return 0;
+    const ids = thread.parentThreadId ? [threadId] : agentId ? [agentId] : children.map(row => row.thread_id);
     for (const id of ids) if (this.core.threads.require(id).parentThreadId !== root.id) throw refused('agentId must name a direct child');
     if (!thread.parentThreadId && !agentId) this.saveConfig(root.id, { ...this.config(root.id), paused: true });
     let stopped = 0;
