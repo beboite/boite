@@ -211,13 +211,16 @@ export const fr: Messages = {
     error: 'erreur'
   },
 
+  drafts: {
+    name: 'Brouillons',
+    hint: 'Un dossier par conversation, dans Documents/Boite',
+    openFolder: 'Travailler dans un de mes dossiers',
+    pickFolder: 'Ouvrir un dossier'
+  },
   firstRun: {
     heading: 'Ouvrir un projet',
-    body: "Choisissez le dossier dans lequel un agent travaillera. Les conversations vivent dedans.",
     deviceBody: "Les projets s'ouvrent depuis l'application où tourne le cœur. Ceux qu'il détient apparaissent ici.",
     pick: 'Choisir un dossier',
-    dropHint: "ou déposez un dossier n'importe où dans cette fenêtre",
-    typePath: 'Ou saisir le chemin',
     pathPlaceholder: 'Chemin absolu du dossier',
     add: 'Ouvrir'
   },

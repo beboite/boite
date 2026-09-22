@@ -448,6 +448,13 @@ export interface Project {
    * field, which a client reads as unknown and keeps the worktree switch for.
    */
   repository?: boolean;
+  /**
+   * `drafts` on the one project `projects.drafts` made in the machine's
+   * Documents folder, read from the path on every answer like `repository`.
+   * A thread started there without a `cwd` gets a folder of its own inside it.
+   * Absent on every other project and from a core older than this field.
+   */
+  kind?: 'drafts';
 }
 
 export type PermissionMode = 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan' | 'dontAsk';
@@ -1524,6 +1531,13 @@ export interface RpcMethods {
   };
   'projects.remove': { params: { projectId: ProjectId }; result: { ok: true } };
   /**
+   * The drafts project: `Boite` in the Documents folder of the machine running
+   * this core, or `BOITE_DRAFTS_DIR` when set. The folder and the project are
+   * made on the first call and returned as they are on every later one, so a
+   * client can ask for it right before its first send.
+   */
+  'projects.drafts': { params: Record<string, never>; result: Project };
+  /**
    * The files of a project a mention can name, ranked on the query: relative
    * paths with `/` separators, `.git`, `node_modules` and what the root
    * `.gitignore` names by plain name left out. `total` is the number of
@@ -1642,7 +1656,7 @@ export interface RpcMethods {
        * own: `boite/<slug of the title>` unless `branch` names one. The core
        * runs `git worktree add` and refuses by name when the project is not a
        * git repository, git is missing, or the named branch already exists.
-       * Excludes `cwd`.
+       * Excludes `cwd`. Refused on the drafts project, which is not a repository.
        */
       worktree?: { branch?: string };
     };

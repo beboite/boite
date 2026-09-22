@@ -201,13 +201,16 @@ export const strings = {
     error: 'error'
   },
 
+  drafts: {
+    name: 'Drafts',
+    hint: 'A folder of its own for each conversation, in Documents/Boite',
+    openFolder: 'Work in a folder of mine',
+    pickFolder: 'Open a folder'
+  },
   firstRun: {
     heading: 'Open a project',
-    body: 'Pick the folder an agent will work in. Threads live inside it.',
     deviceBody: 'Projects are opened from the app the core runs in. The ones it holds show up here.',
     pick: 'Choose a folder',
-    dropHint: 'or drop a folder anywhere in this window',
-    typePath: 'Or type the path',
     pathPlaceholder: 'Absolute path of the folder',
     add: 'Open'
   },

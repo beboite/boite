@@ -86,9 +86,10 @@ test('uninstalled setup starts without account-dependent demo state', async () =
     expect(store.accounts).toEqual([]);
     expect(store.threads).toEqual([]);
     expect(store.openThread).toBeNull();
-    expect(await client.call('imports.list', { projectId: 'p-boite' })).toEqual([]);
     expect(await client.call('scheduler.get', {})).toMatchObject({ running: [], queued: [] });
-    expect(store.projects.length).toBeGreaterThan(0);
+    // No folder yet: the app lands on a draft in the drafts, which nothing has made.
+    expect(store.projects).toEqual([]);
+    expect(store.draft).toEqual({ projectId: null, worktree: false });
     expect((await client.call('sessions.list', {})).length).toBeGreaterThan(0);
   } finally { store.detach(); client.close(); }
 });

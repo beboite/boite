@@ -104,8 +104,8 @@ in-memory fake.
 The service worker never registers under `?fake=1`, so a rebuild is always what
 a reload shows.
 
-Opening a project uses one dialog from the sidebar, first-run card, settings
-and command palette. Choose a machine, then type an absolute path or browse
+Opening a project uses one dialog from the sidebar, the drafts' project menu
+and `Work in a folder of mine`, settings and the command palette. Choose a machine, then type an absolute path or browse
 its directories through the owner-only `projects.browse` method. The native
 folder button is available only for the shell's local core. A folder dropped
 from the desktop switches to that local core before opening the path.

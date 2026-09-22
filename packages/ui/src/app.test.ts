@@ -301,9 +301,12 @@ test('a draft names its project in the heading and the dropdown moves it to anot
   const rows = Array.from(
     document.querySelectorAll<HTMLButtonElement>('[data-testid=draft-project-menu] [data-row]')
   );
-  expect(rows.map((row) => JSON.parse(row.dataset['value']!)[1])).toEqual(['p-boite', 'p-notes']);
+  // The drafts lead, made or not, and opening a folder closes the list.
+  const places = rows.filter((row) => row.dataset['value']!.startsWith('['));
+  expect(places.map((row) => JSON.parse(row.dataset['value']!)[1])).toEqual([null, 'p-boite', 'p-notes']);
+  expect(rows.at(-1)?.dataset['value']).toBe('open-folder');
 
-  rows[0]?.click();
+  places[1]?.click();
   await waitFor(() => store.draft?.projectId === 'p-boite');
   await waitFor(() => (query('[data-testid=draft-empty]').textContent ?? '').includes('boite'));
   // The draft row moved with it, and the composer took the keyboard back.
@@ -1652,19 +1655,48 @@ test('browser Add project keeps refused paths and Escape returns to its button',
   }
 });
 
-test('first run uses the same path form to open its first project', async () => {
-  await mountOnFake();
+/** The app as a first launch sees it: no project, no thread, nothing open. */
+async function emptyCore(): Promise<void> {
   store.projects = [];
+  store.threads = [];
   store.openThread = null;
   store.draft = null;
-  await waitFor(() => document.querySelector('[data-testid=first-run]') !== null);
-  query<HTMLButtonElement>('[data-testid=add-project]').click();
+  await store.openWhereLeft();
+}
+
+test('first run opens a draft in the drafts, and the first send makes them', async () => {
+  await mountOnFake();
+  await emptyCore();
+  await waitFor(() => store.draft !== null);
+  expect(store.draft?.projectId).toBeNull();
+  expect(query('[data-testid=draft-project]').textContent).toContain('Drafts');
+  // A draft in the drafts has no repository to branch.
+  expect(document.querySelector('[data-testid=composer-worktree]')).toBeNull();
+
+  const input = query<HTMLTextAreaElement>('[data-testid=composer-input]');
+  input.value = 'Write a letter to the bank';
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  await waitFor(() => !query<HTMLButtonElement>('[data-testid=composer-send]').disabled);
+  query<HTMLButtonElement>('[data-testid=composer-send]').click();
+
+  await waitFor(() => store.openThread !== null && store.draft === null);
+  const drafts = store.draftsProject;
+  expect(drafts?.kind).toBe('drafts');
+  expect(store.openThread?.projectId).toBe(drafts?.id);
+  expect(store.openThread?.cwd).toMatch(/Documents\\Boite\\\d{4}-\d{2}-\d{2} Write a letter to the bank$/);
+});
+
+test('first run keeps opening a folder one click away', async () => {
+  await mountOnFake();
+  await emptyCore();
+  await waitFor(() => document.querySelector('[data-testid=draft-open-folder]') !== null);
+  query<HTMLButtonElement>('[data-testid=draft-open-folder]').click();
   await waitFor(() => document.querySelector('[data-testid=project-path]') !== null);
   await type(query<HTMLInputElement>('[data-testid=project-path]'), 'D:\\work\\first-project');
   query<HTMLButtonElement>('[data-testid=project-add]').click();
-  await waitFor(() => store.draft !== null);
-  expect(store.openProject?.path).toBe('D:\\work\\first-project');
-  expect(document.querySelector('[data-testid=first-run]')).toBeNull();
+  await waitFor(() => store.openProject?.path === 'D:\\work\\first-project');
+  expect(store.draftInDrafts).toBe(false);
+  expect(document.querySelector('[data-testid=draft-open-folder]')).toBeNull();
 });
 
 test('an ACP login accepts the phone redirect URL through the login input', async () => {

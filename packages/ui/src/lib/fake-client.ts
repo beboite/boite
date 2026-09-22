@@ -112,6 +112,8 @@ import {
   ECHO_COMMANDS,
   emptyUsage,
   fakeWorktree,
+  fakeDraftFolder,
+  FAKE_DRAFTS_PATH,
   refusal,
   SHOUT,
   T0,
@@ -128,7 +130,7 @@ export interface FakeClientOptions {
   delayMs?: number;
   /** Seeds one thread of 400 messages, what `?fake=1&long=1` opens the list on. */
   long?: boolean;
-  /** A fresh machine with no agents or accounts, for the setup flow. */
+  /** A fresh machine with no agents, accounts or projects, for the setup flow. */
   uninstalled?: boolean;
   /** Who this client is. `'session'` makes it a paired phone, refused like one. */
   principal?: Principal;
@@ -279,6 +281,8 @@ export class FakeClient implements ObservableClient {
         install: RELEASES[provider.id] ? { state: 'absent', ...RELEASES[provider.id]! } : null,
       }));
       this.#accounts = [];
+      // A first launch: no folder opened yet, so the app lands in the drafts.
+      this.#projects = [];
       this.#threads.clear();
       this.#importable = [];
       this.#pendingPermissions.clear();
@@ -553,6 +557,21 @@ export class FakeClient implements ObservableClient {
       this.#emit('project.added', structuredClone(project));
       return structuredClone(project);
     },
+    'projects.drafts': async () => {
+      const existing = this.#projects.find((p) => p.kind === 'drafts');
+      if (existing) return structuredClone(existing);
+      const project: Project = {
+        id: `p-${++this.#seq}`,
+        name: 'Drafts',
+        path: FAKE_DRAFTS_PATH,
+        createdAt: this.#now(),
+        repository: false,
+        kind: 'drafts'
+      };
+      this.#projects.push(project);
+      this.#emit('project.added', structuredClone(project));
+      return structuredClone(project);
+    },
     'threads.pullRequest': async (params) => {
       const thread = this.#threads.get(params.threadId);
       return thread?.pullRequest ?? null;
@@ -750,7 +769,12 @@ export class FakeClient implements ObservableClient {
       const title = params.title ?? 'Untitled thread';
       // The core's own placement: a branch named after the title, the
       // worktree beside the repository. No git here, only the two strings.
+      if (params.worktree !== undefined && project.kind === 'drafts') throw new Error('a draft has no worktree: the drafts folder is not a git repository');
       const placed = params.worktree === undefined ? null : fakeWorktree(project.path, title, params.worktree.branch);
+      // The core makes a dated folder per draft; the fake only names it.
+      const draftFolder = project.kind === 'drafts' && !params.cwd
+        ? fakeDraftFolder(project.path, title, new Date(at), new Set([...this.#threads.values()].map((thread) => thread.cwd)))
+        : null;
       const thread: Thread = {
         id: `t-${++this.#seq}`,
         projectId: params.projectId,
@@ -761,7 +785,7 @@ export class FakeClient implements ObservableClient {
         model: params.model ?? null,
         effort: params.effort ?? null,
         speed: params.speed ?? null,
-        cwd: placed?.path ?? params.cwd ?? project.path,
+        cwd: placed?.path ?? draftFolder ?? params.cwd ?? project.path,
         branch: placed?.branch ?? null,
         permissionMode: params.permissionMode ?? 'default',
         status: 'idle',

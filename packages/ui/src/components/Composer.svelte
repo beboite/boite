@@ -327,7 +327,9 @@
     }))
   );
   // The worktree switch exists where the core can honour it: a draft on a git repository.
-  let draftRepository = $derived(store.draft ? store.projects.find((project) => project.id === store.draft?.projectId)?.repository !== false : false);
+  let draftRepository = $derived(
+    store.draft && !store.draftInDrafts ? store.projects.find((project) => project.id === store.draft?.projectId)?.repository !== false : false
+  );
 
   // The reasoning chip belongs to the model the choice is on, and a model that
   // offers no scale (an agent that keeps its own) gets no chip at all.

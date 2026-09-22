@@ -3,6 +3,7 @@
   import type { Store } from '../lib/store.svelte';
   import { workspace } from '../lib/workspace.svelte';
   import { strings } from '../lib/strings';
+  import { projectName } from '../lib/format';
   import Menu from './Menu.svelte';
   import StatusMark from './StatusMark.svelte';
 
@@ -17,10 +18,10 @@
   let waiting = $derived(entries.filter(e => e.thread.status === 'waiting'));
   let active = $derived(entries.filter(e => ['waiting', 'running', 'queued'].includes(e.thread.status)));
   let rows = $derived((screen === 'activity' ? active : entries)
-    .filter(e => `${e.thread.title} ${e.project?.name} ${e.machine.label}`.toLowerCase().includes(search.toLowerCase()))
+    .filter(e => `${e.thread.title} ${projectName(e.project)} ${e.machine.label}`.toLowerCase().includes(search.toLowerCase()))
     .toSorted((a, b) => (Number(b.thread.status === 'waiting') - Number(a.thread.status === 'waiting')) || b.thread.updatedAt - a.thread.updatedAt));
   let projects = $derived([...machines.flatMap(m => m.store.projects.map(p => ({
-    id: JSON.stringify([m.id, p.id]), label: p.name, hint: m.label,
+    id: JSON.stringify([m.id, p.id]), label: projectName(p), hint: m.label,
     active: m.store === store && p.id === project?.id
   }))), ...(store.owner ? [{ id: 'add-project', label: strings.sidebar.addProject, hint: '', active: false }] : [])]);
 
@@ -47,7 +48,7 @@
   <div class="identity">
     <span class="machine">{machine?.label} · {strings.connection[store.connection]}</span>
     <Menu items={projects} onpick={pickProject} label={strings.mobile.project} placement="bottom" variant="text" testid="mobile-project">
-      {project?.name ?? strings.mobile.project}<ChevronDown size={14} />
+      {store.draftInDrafts && !store.openThread ? strings.drafts.name : project ? projectName(project) : strings.mobile.project}<ChevronDown size={14} />
     </Menu>
   </div>
   <button class="ghost icon" data-testid="mobile-new" aria-label={strings.sidebar.newThread} disabled={!project || store.connection !== 'ready'} onclick={() => { store.startDraft(project?.id); show('chat'); }}><Plus size={21} /></button>
@@ -63,7 +64,7 @@
     {#each rows as row (`${row.machine.id}:${row.thread.id}`)}
       <button class="ghost thread" data-testid="mobile-thread-{row.thread.id}" onclick={async () => { await workspace.select(row.machine.store, row.thread.id); show('chat'); }}>
         <StatusMark status={row.thread.status} />
-        <span class="summary"><span class="title">{row.thread.title}</span><span class="detail">{row.project?.name} · {row.machine.label}</span></span>
+        <span class="summary"><span class="title">{row.thread.title}</span><span class="detail">{projectName(row.project)} · {row.machine.label}</span></span>
         {#if row.thread.unread}<span class="unread" role="img" aria-label={strings.mobile.unread}></span>{/if}
       </button>
     {:else}

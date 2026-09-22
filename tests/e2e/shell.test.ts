@@ -240,6 +240,7 @@ function spawnHiddenShell(ownDataDir: string, debugPort?: number): number {
   delete env.BOITE_CORE_COMMAND;
   env.BOITE_SHELL_HIDDEN = '1';
   env.BOITE_DATA_DIR = ownDataDir;
+  env.BOITE_DRAFTS_DIR = join(ownDataDir, 'Documents', 'Boite');
   env.BOITE_ECHO = '1';
   delete env.BOITE_SHELL_DEBUG_PORT;
   if (debugPort !== undefined) {
@@ -492,7 +493,7 @@ shellTest(
   'a project, an echo thread and a turn go through the shell',
   async () => {
     // The dialog IPC is answered here so this test never puts a native window on screen.
-    await page?.waitFor(`document.querySelector('${testid('first-run')}')`);
+    await page?.waitFor(`document.querySelector('${testid('draft-open-folder')}')`);
     await page?.click(testid('add-project'));
     await page?.waitFor(`document.querySelector('[data-testid=pick-project]') && !document.querySelector('[data-testid=pick-project]').disabled`);
     await page?.evaluate(`document.fonts.ready`);

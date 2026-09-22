@@ -9,7 +9,7 @@
   import { focusOnMount } from '../lib/actions';
   import { strings } from '../lib/strings';
   import { lookupPullRequest } from '../lib/pull-request';
-  import { ago } from '../lib/format';
+  import { ago, projectName } from '../lib/format';
   import MachineIcon from './MachineIcon.svelte';
   import StatusMark from './StatusMark.svelte';
   import LoadGauge from './LoadGauge.svelte';
@@ -111,7 +111,7 @@
       </span>
     </button>
     <div class="metadata">
-      <span class="project-name" title={project.path}><Folder size={12} /><span>{project.name}</span></span>
+      <span class="project-name" title={project.path}><Folder size={12} /><span>{projectName(project)}</span></span>
       {#if pullRequest}
         <a class="pr-link" data-testid="thread-pr" href={pullRequest.url} target="_blank" rel="noopener noreferrer"
           title={pullRequest.url} aria-label={`#${pullRequest.number}`}><GitPullRequest size={12} />#{pullRequest.number}</a>

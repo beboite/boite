@@ -1,7 +1,7 @@
-import { statSync } from 'node:fs';
+import { mkdirSync, statSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { activityPrompt } from './activity-prompt.ts';
-import { relative, resolve } from 'node:path';
+import { join, relative, resolve } from 'node:path';
 import { attachmentError, MESSAGE_PAGE, MESSAGE_PAGE_MAX } from '@boite/contracts';
 import type {
   Account,
@@ -54,6 +54,41 @@ type CreateParams = RpcParams<'threads.create'>;
 
 function titleOf(title: string | undefined): string {
   return title !== undefined && title.length > 0 ? title : 'New thread';
+}
+
+/** What a folder name cannot hold on Windows, the strictest of the three. */
+const UNSAFE_NAME = /[<>:"/\\|?*\u0000-\u001f]/g;
+
+/**
+ * A draft's folder name: the local date, then the first words of its title,
+ * `2026-09-23 Plan the trip to Lisbon`. The date comes first so the folder
+ * sorts by day and a title can never make a reserved name like `CON`.
+ */
+export function draftFolderName(title: string, at: Date): string {
+  const day = `${at.getFullYear()}-${String(at.getMonth() + 1).padStart(2, '0')}-${String(at.getDate()).padStart(2, '0')}`;
+  const words = title.replace(UNSAFE_NAME, ' ').split(/\s+/).filter(Boolean).slice(0, 6).join(' ');
+  const cut = words.slice(0, 60).replace(/[. ]+$/, '');
+  return cut.length > 0 ? `${day} ${cut}` : day;
+}
+
+/**
+ * A new folder for a draft in the drafts directory, never an existing one:
+ * two drafts with the same title on the same day get `name 2`, `name 3`.
+ */
+function makeDraftFolder(root: string, name: string): string {
+  mkdirSync(root, { recursive: true });
+  for (let index = 1; index < 1000; index += 1) {
+    const path = join(root, index === 1 ? name : `${name} ${index}`);
+    try {
+      mkdirSync(path);
+      return path;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') {
+        throw refused(`the draft's folder cannot be made: ${messageOf(error)}`, { path });
+      }
+    }
+  }
+  throw refused('every folder name for this draft is taken', { root, name });
 }
 
 /**
@@ -244,6 +279,9 @@ export class ThreadStore {
       throw refused('cwd and worktree exclude each other: a worktree is the working directory', { cwd: params.cwd });
     }
     const { project, provider, account } = this.check(params);
+    if (project.kind === 'drafts') {
+      throw refused('a draft has no worktree: the drafts folder is not a git repository', { projectId: project.id });
+    }
     const model = checkModel(provider, account.id, params.model ?? defaultModel(provider));
     checkEffort(provider, account.id, model, params.effort ?? null);
     checkSpeed(provider, account.id, model, params.speed ?? null);
@@ -262,6 +300,19 @@ export class ThreadStore {
 
     const now = Date.now();
     const model = checkModel(provider, account.id, params.model ?? defaultModel(provider));
+    const effort = checkEffort(provider, account.id, model, params.effort ?? null);
+    const speed = checkSpeed(provider, account.id, model, params.speed ?? null);
+    // A worktree's directory is the core's own and sits beside the project;
+    // anything a client names has to be inside it. A draft with no directory
+    // named gets a new folder of its own, made once everything else passed.
+    const cwd =
+      params.cwd !== undefined && params.cwd.length > 0
+        ? placed !== undefined
+          ? params.cwd
+          : checkCwd(project, params.cwd)
+        : project.kind === 'drafts'
+          ? makeDraftFolder(project.path, draftFolderName(titleOf(params.title), new Date(now)))
+          : project.path;
     const thread: ThreadSummary = {
       id: placed?.id ?? newId('thr_'),
       projectId: project.id,
@@ -270,16 +321,9 @@ export class ThreadStore {
       providerId: provider.id,
       accountId: account.id,
       model,
-      effort: checkEffort(provider, account.id, model, params.effort ?? null),
-      speed: checkSpeed(provider, account.id, model, params.speed ?? null),
-      // A worktree's directory is the core's own and sits beside the project;
-      // anything a client names has to be inside it.
-      cwd:
-        params.cwd !== undefined && params.cwd.length > 0
-          ? placed !== undefined
-            ? params.cwd
-            : checkCwd(project, params.cwd)
-          : project.path,
+      effort,
+      speed,
+      cwd,
       branch: placed?.branch ?? null,
       permissionMode: params.permissionMode ?? 'default',
       status: 'idle',

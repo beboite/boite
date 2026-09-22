@@ -7,7 +7,6 @@
   import ConfirmDialog from './components/ConfirmDialog.svelte';
   import ContextMenu from './components/ContextMenu.svelte';
   import DropOverlay from './components/DropOverlay.svelte';
-  import FirstRun from './components/FirstRun.svelte';
 
   import Sidebar from './components/Sidebar.svelte';
   import TitleBar from './components/TitleBar.svelte';
@@ -379,7 +378,6 @@
     }
   }
 
-  let firstRun = $derived(store.booted && store.connection !== 'closed' && store.projects.length === 0);
 </script>
 
 <svelte:window {onkeydown} {onkeyup} {onblur} />
@@ -419,13 +417,9 @@
         ></button>
       {/if}
       <main>
-        {#if firstRun}
-          <FirstRun {store} />
-        {:else}
-          {#key store}
-            <ChatView {store} />
-          {/key}
-        {/if}
+        {#key store}
+          <ChatView {store} />
+        {/key}
       </main>
       {#if panelSlot.shown && store.openThread && deferred.RightPanel}
         {@const RightPanel = deferred.RightPanel}

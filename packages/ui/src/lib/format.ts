@@ -115,3 +115,9 @@ export function titleFrom(prompt: string, max = 60): string {
   if (line.length <= max) return line;
   return line.slice(0, max).trimEnd();
 }
+
+/** A project's name as the user reads it: the drafts in the app's own language, any other as the core named it. */
+export function projectName(project: { name: string; kind?: 'drafts' } | null | undefined): string {
+  if (!project) return '';
+  return project.kind === 'drafts' ? strings.drafts.name : project.name;
+}

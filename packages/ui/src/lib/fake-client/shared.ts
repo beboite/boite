@@ -21,6 +21,7 @@ export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>
   'push.status', 'push.subscribe', 'push.unsubscribe', 'push.test',
   'projects.list',
   'projects.files',
+  'projects.drafts',
   'providers.list',
   'accounts.list',
   'threads.list',
@@ -80,6 +81,19 @@ export function todoText(text: unknown): string {
     throw refusal(`a todo is at most ${TODO_TEXT_MAX} characters, this one is ${trimmed.length}`);
   }
   return trimmed;
+}
+
+/** The drafts folder the fake's core would find in Documents. */
+export const FAKE_DRAFTS_PATH = 'C:\\Users\\you\\Documents\\Boite';
+
+/** The core's `2026-09-23 First words` folder, `name 2` when a thread already holds it. */
+export function fakeDraftFolder(root: string, title: string, at: Date, taken: ReadonlySet<string>): string {
+  const day = `${at.getFullYear()}-${String(at.getMonth() + 1).padStart(2, '0')}-${String(at.getDate()).padStart(2, '0')}`;
+  const words = title.replace(/[<>:"/\\|?*]/g, ' ').split(/\s+/).filter(Boolean).slice(0, 6).join(' ').slice(0, 60).replace(/[. ]+$/, '');
+  const name = words ? `${day} ${words}` : day;
+  let path = `${root}\\${name}`;
+  for (let index = 2; taken.has(path); index += 1) path = `${root}\\${name} ${index}`;
+  return path;
 }
 
 /** Where the core would put a worktree: `<parent>/.boite-worktrees/<repo>/<slug>` on `boite/<slug>`. */

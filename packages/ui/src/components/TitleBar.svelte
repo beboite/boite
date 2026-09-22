@@ -5,6 +5,7 @@
   import ThreadHeader from './ThreadHeader.svelte';
   import type { Window as TauriWindow } from '@tauri-apps/api/window';
   import { strings } from '../lib/strings';
+  import { projectName } from '../lib/format';
   import type { Store } from '../lib/store.svelte';
   import { appUpdater, showAppUpdateUi } from '../lib/app-update.svelte';
   import { appUpdateInstall } from '../lib/app-update-install.svelte';
@@ -90,7 +91,7 @@
     await (await windowOf()).close();
   }
 
-  let title = $derived(store.openProject?.name ?? strings.app.name);
+  let title = $derived((store.openProject ? projectName(store.openProject) : null) ?? strings.app.name);
   /** The dev install runs beside the stable one, so the bar has to say which is open. */
   let dev = $derived(store.core?.channel === 'dev');
 

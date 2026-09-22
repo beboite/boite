@@ -8,7 +8,7 @@
   import { showAppUpdateUi } from '../lib/app-update.svelte';
   import TelemetrySettings from './TelemetrySettings.svelte';
   import { confirm } from '../lib/confirm.svelte';
-  import { ago, time } from '../lib/format';
+  import { ago, projectName, time } from '../lib/format';
   import { qrSvg } from '../lib/qr';
   import { fill, strings } from '../lib/strings';
   import { openTour } from '../lib/onboarding.svelte';
@@ -93,7 +93,7 @@
       <ul class="projects">
         {#each store.projects as project (project.id)}
           <li>
-            <span class="name">{project.name}</span>
+            <span class="name">{projectName(project)}</span>
             <span class="mono subtle path" title={project.path}>{project.path}</span>
           </li>
         {/each}

@@ -245,8 +245,8 @@ and write a generic diagnostic without the provider's credential-bearing body.
 
 ## The limits
 
-- What a phone gets with the core asleep is the app shell painting from disk, its
-  first-run card, and "Connecting" in the sidebar footer until the socket comes
+- What a phone gets with the core asleep is the app shell painting from disk, an
+  empty chat, and "Connecting" in the sidebar footer until the socket comes
   back on its own. No queued messages, no offline history: the journal is on the
   core.
 - Pairing is a link somebody carries over, by hand or by the QR code beside it,
