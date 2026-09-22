@@ -145,6 +145,7 @@ function quietUpdates(): boolean {
 }
 
 export class FakeClient implements ObservableClient {
+  #telemetry: import('@boite/contracts').TelemetryState = { mode: 'basic', configured: true, pendingDeletion: false };
   #plugins = new FakePlugins({
     emit: (event, payload) => this.#emit(event, payload),
     now: () => this.#now(),
@@ -1019,6 +1020,21 @@ export class FakeClient implements ObservableClient {
         edges.every((edge, index) => typeof edge === 'number' && Number.isFinite(edge) && (index === 0 || edge > edges[index - 1]!));
       if (!valid) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'edges: expected 2 to 367 strictly ascending timestamps in milliseconds' });
       return fakeUsageHistory(edges, { seeded: this.#usageSeeded, finished: this.#finished });
+    },
+    'telemetry.state': async () => ({ ...this.#telemetry }),
+    'telemetry.configure': async ({ mode }) => {
+      if (!['off', 'basic', 'enhanced'].includes(mode)) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'mode: expected off, basic or enhanced' });
+      if (this.#telemetry.mode === 'enhanced' && mode !== 'enhanced') this.#telemetry.pendingDeletion = true;
+      this.#telemetry.mode = mode;
+      return { ...this.#telemetry };
+    },
+    'telemetry.retryForget': async () => {
+      this.#telemetry.pendingDeletion = false;
+      return { ...this.#telemetry };
+    },
+    'telemetry.export': async () => {
+      if (this.#telemetry.mode !== 'enhanced') throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'telemetry export: expected enhanced mode' });
+      return { events: [], truncated: false };
     },
     'settings.get': async (params) => {
       return { ...this.#settings };

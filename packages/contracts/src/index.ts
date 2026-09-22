@@ -846,6 +846,13 @@ export interface SchedulerState {
   queued: { turnId: TurnId; threadId: ThreadId; position: number; queuedAt: Timestamp }[];
 }
 
+/** Per-core consent. Installation identifiers never cross RPC. */
+export interface TelemetryState {
+  mode: 'off' | 'basic' | 'enhanced';
+  configured: boolean;
+  pendingDeletion: boolean;
+}
+
 export interface Settings {
   /** Exact browser origins allowed to connect alongside the shell and this core's own origin. */
   browserOrigins?: string[];
@@ -1664,6 +1671,10 @@ export interface RpcMethods {
    */
   'usage.history': { params: { edges: Timestamp[] }; result: UsageHistory };
 
+  'telemetry.state': { params: Record<string, never>; result: TelemetryState };
+  'telemetry.configure': { params: { mode: TelemetryState['mode'] }; result: TelemetryState };
+  'telemetry.export': { params: Record<string, never>; result: Record<string, unknown> };
+  'telemetry.retryForget': { params: Record<string, never>; result: TelemetryState };
   'settings.get': { params: Record<string, never>; result: Settings };
   'settings.set': { params: Partial<Settings>; result: Settings };
   /** The keybindings file as last read: the path, the entries it names, and what it got wrong. */

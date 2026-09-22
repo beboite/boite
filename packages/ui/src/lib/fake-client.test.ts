@@ -4,6 +4,19 @@ import { RpcErrorCode, TODO_TEXT_MAX, type RpcMethodName } from '@boite/contract
 
 afterEach(() => vi.useRealTimers());
 
+test('telemetry handlers retain export and deletion state through the typed dispatcher', async () => {
+  const client = new FakeClient({ delayMs: 0 });
+  await client.connect();
+  try {
+    expect(await client.call('telemetry.state', {})).toEqual({ mode: 'basic', configured: true, pendingDeletion: false });
+    await expect(client.call('telemetry.export', {})).rejects.toMatchObject({ code: RpcErrorCode.InvalidParams });
+    await client.call('telemetry.configure', { mode: 'enhanced' });
+    expect(await client.call('telemetry.export', {})).toEqual({ events: [], truncated: false });
+    expect(await client.call('telemetry.configure', { mode: 'off' })).toMatchObject({ mode: 'off', pendingDeletion: true });
+    expect(await client.call('telemetry.retryForget', {})).toMatchObject({ mode: 'off', pendingDeletion: false });
+  } finally { client.close(); }
+});
+
 test.each(['toString', 'constructor', '__proto__', 'missing.method'])('unknown RPC method %s is refused', async method => {
   const client = new FakeClient({ delayMs: 0 });
   await client.connect();
