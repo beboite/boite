@@ -139,6 +139,7 @@
 
   function onkeydown(event: KeyboardEvent): void {
     if (event.key !== 'Escape') return;
+    if (request) cancelSelection();
     event.stopPropagation();
     draft = null;
     field?.blur();

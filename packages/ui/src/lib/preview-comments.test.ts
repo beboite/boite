@@ -185,6 +185,44 @@ test('an invalid native selection settles the picker, reports failure and permit
   }
 });
 
+test('Escape in the address field cancels active picking and restores the current URL', async () => {
+  const store = new Store();
+  const client = new FakeClient({ delayMs: 0 });
+  store.attach(client);
+  await store.connect();
+  await store.open('t-trace');
+  const panel = new RightPanelStore().for('t-trace');
+  const surface = panel.open('browser', 'https://example.test');
+  const annotate = vi.spyOn(browserBridge, 'annotate').mockImplementation(() => {});
+  setExperiment('preview-comments', true);
+  const component = mount(BrowserSurface, { target: document.body, props: { store, panel, surface } });
+  try {
+    flushSync();
+    const button = document.querySelector<HTMLButtonElement>('[data-testid="preview-annotate"]')!;
+    const address = document.querySelector<HTMLInputElement>('[data-testid="browser-url"]')!;
+    button.click();
+    flushSync();
+    expect(button.getAttribute('aria-pressed')).toBe('true');
+    address.focus();
+    address.value = 'https://unsaved.test';
+    address.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    address.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    flushSync();
+    expect(button.getAttribute('aria-pressed')).toBe('false');
+    expect(annotate).toHaveBeenLastCalledWith(surface.id, null);
+    expect(address.value).toBe(surface.url);
+    expect(document.activeElement).not.toBe(address);
+    expect(store.composerStates['t-trace']?.previewReferences ?? []).toEqual([]);
+  } finally {
+    await unmount(component);
+    setExperiment('preview-comments', false);
+    annotate.mockRestore();
+    store.detach();
+    client.close();
+  }
+});
+
 test('adding context preserves each machine and thread draft without sending or queueing', () => {
   const first = new Store();
   const second = new Store();
