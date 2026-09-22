@@ -40,8 +40,11 @@
     const off = browserBridge.on(event => {
       if (!on || event.id !== surfaceId) return;
       if (event.type === 'selection' && event.requestId === request) {
-        if (event.selection !== null && !validPreviewSelection(event.selection)) return;
         request = null;
+        if (event.selection !== null && !validPreviewSelection(event.selection)) {
+          notice = previewStrings.failed;
+          return;
+        }
         if (event.selection && selectionOwner && selectionOwner.store.client === selectionOwner.client && selectionOwner.store.machineId === selectionOwner.machineId) {
           const added = selectionOwner.store.addPreviewReference(selectionOwner.threadId, {
             ...event.selection, id: crypto.randomUUID(), surfaceId

@@ -1,5 +1,10 @@
 import { afterEach, expect, test, vi } from 'vitest';
-import { FakeBridge, type BrowserEvent } from './browser-bridge';
+import { flushSync, mount, unmount } from 'svelte';
+import BrowserSurface from '../components/BrowserSurface.svelte';
+import { browserBridge, FakeBridge, type BrowserEvent } from './browser-bridge';
+import { RightPanelStore } from './right-panel.svelte';
+import { setExperiment } from './experiments';
+import { strings } from './strings';
 import { installPreviewPicker, previewReferenceLabel, validPreviewSelection } from './preview-comments';
 import highlightPreviewElement from './preview-highlight.js';
 import { Store } from './store.svelte';
@@ -114,6 +119,70 @@ test('untrusted selection validation bounds URLs, text and geometry', () => {
   expect(validPreviewSelection({ ...selection, bounds: { ...selection.bounds, x: Infinity } })).toBe(false);
   expect(validPreviewSelection({ ...selection, bounds: { ...selection.bounds, width: -1 } })).toBe(false);
   expect(previewReferenceLabel({ ...selection, id: 'ref' })).toBe('@Save');
+});
+
+test('iframe picking reports invalid geometry and can pick again after failure', () => {
+  const bridge = new FakeBridge();
+  const events: BrowserEvent[] = [];
+  bridge.on(event => events.push(event));
+  bridge.create('invalid', '');
+  try {
+    const frame = document.querySelector<HTMLIFrameElement>('[data-browser-id="invalid"]')!;
+    frame.contentDocument!.body.innerHTML = '<button>Target</button>';
+    const target = frame.contentDocument!.querySelector('button')!;
+    const rect = vi.spyOn(target, 'getBoundingClientRect').mockReturnValue({ x: Infinity, y: 0, width: 80, height: 30 } as DOMRect);
+    bridge.annotate('invalid', 'bad');
+    target.click();
+    expect(events.at(-1)).toEqual({ type: 'selection-failed', id: 'invalid', requestId: 'bad', reason: 'invalid' });
+    rect.mockRestore();
+    bridge.annotate('invalid', 'retry');
+    target.click();
+    expect(events.at(-1)).toMatchObject({ type: 'selection', id: 'invalid', requestId: 'retry', selection: { text: 'Target' } });
+  } finally { bridge.destroy('invalid'); }
+});
+
+test('an invalid native selection settles the picker, reports failure and permits an immediate retry', async () => {
+  const store = new Store();
+  const client = new FakeClient({ delayMs: 0 });
+  store.attach(client);
+  await store.connect();
+  await store.open('t-trace');
+  const panel = new RightPanelStore().for('t-trace');
+  const surface = panel.open('browser', 'https://example.test');
+  let handler: (event: BrowserEvent) => void = () => {};
+  const subscription = vi.spyOn(browserBridge, 'on').mockImplementation(callback => { handler = callback; return () => {}; });
+  const annotate = vi.spyOn(browserBridge, 'annotate').mockImplementation(() => {});
+  setExperiment('preview-comments', true);
+  const component = mount(BrowserSurface, { target: document.body, props: { store, panel, surface } });
+  try {
+    flushSync();
+    const button = document.querySelector<HTMLButtonElement>('[data-testid="preview-annotate"]')!;
+    button.click();
+    flushSync();
+    const requestId = annotate.mock.calls.at(-1)![1]!;
+    expect(button.getAttribute('aria-pressed')).toBe('true');
+    const selection = { url: `https://example.test/${'x'.repeat(4096)}`, selector: 'button', text: 'Target', bounds: { x: 0, y: 0, width: 80, height: 30 } };
+    handler({ type: 'selection', id: surface.id, requestId, selection });
+    flushSync();
+    expect(button.getAttribute('aria-pressed')).toBe('false');
+    expect(document.body.textContent).toContain(strings.previewComments.failed);
+    expect(store.composerStates['t-trace']?.previewReferences ?? []).toEqual([]);
+    button.click();
+    flushSync();
+    const retryId = annotate.mock.calls.at(-1)![1]!;
+    expect(retryId).toBeTruthy();
+    expect(retryId).not.toBe(requestId);
+    handler({ type: 'selection', id: surface.id, requestId: retryId, selection: { ...selection, url: surface.url! } });
+    flushSync();
+    expect(store.composerStates['t-trace']?.previewReferences).toHaveLength(1);
+  } finally {
+    await unmount(component);
+    setExperiment('preview-comments', false);
+    subscription.mockRestore();
+    annotate.mockRestore();
+    store.detach();
+    client.close();
+  }
 });
 
 test('adding context preserves each machine and thread draft without sending or queueing', () => {

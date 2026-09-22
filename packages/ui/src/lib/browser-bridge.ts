@@ -173,7 +173,10 @@ export class FakeBridge implements BrowserBridge {
         this.#pickers.delete(id);
         // The callback closes over the exact iframe document and surface.
         if (this.#views.get(id) !== frame || frame.contentDocument !== doc) return;
-        if (selection !== null && !validPreviewSelection(selection)) return;
+        if (selection !== null && !validPreviewSelection(selection)) {
+          this.#emit({ type: 'selection-failed', id, requestId, reason: 'invalid' });
+          return;
+        }
         this.#emit({ type: 'selection', id, requestId, selection });
       });
       this.#pickers.set(id, cleanup);
