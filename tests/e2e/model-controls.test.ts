@@ -17,7 +17,7 @@ beforeAll(async () => {
   await server.listen(); url = `http://127.0.0.1:${port}/?fake=1&open=recent`;
   page = await BrowserPage.launch({ url });
   await page.waitFor(`document.querySelector('[data-testid=composer-picker]')`);
-}, 30_000);
+}, 60_000);
 afterAll(async () => { await page?.close(); await server?.close(); }, 15_000);
 
 test.each([1440, 390])('provider switching keeps the picker frame still at %ipx', async (width) => {

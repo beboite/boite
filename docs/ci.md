@@ -85,7 +85,9 @@ server would otherwise empty `packages/ui/node_modules/.vite` under the
 servers of the other workers. It also builds the fake-client bundle that
 `BOITE_E2E_FAKE_UI` hands to every worker. Warming under a `NODE_ENV` other
 than `test`, the one `bun test` sets, changes Vite's config hash and brings the
-race back.
+race back. Every dev server still transforms the UI sources itself, so a hook
+that starts one allows 60 s: with three workers busy, `composer-activity` took
+more than 30 s to open its page on 2026-09-22.
 
 When Cargo uses a shared target directory, staging snapshots its shell into the
 checkout before the tests. Another checkout's later build cannot replace it.
