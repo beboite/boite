@@ -182,6 +182,9 @@ export class BrowserPage {
     });
   }
 
+  /** Untyped expressions return a by-value JavaScript result; callers can name a narrower shape. */
+  evaluate(expression: string): Promise<string | number | boolean | object | null | undefined>;
+  evaluate<T>(expression: string): Promise<T>;
   async evaluate<T>(expression: string): Promise<T> {
     const raw = (await this.send('Runtime.evaluate', {
       expression,

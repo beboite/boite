@@ -33,6 +33,24 @@ afterEach(async () => {
 });
 
 describe('scheduler', () => {
+  test('shutdown refuses new turns before they reach the journal', async () => {
+    const client = await harness.connect();
+    const [threadId = ''] = await threeThreads(client);
+    await harness.core.drain();
+    await expect(client.call('turns.start', { threadId, prompt: 'late prompt' })).rejects.toThrow('stopping');
+    expect(harness.core.journal.listTurns(threadId)).toEqual([]);
+    expect(harness.core.journal.listMessages(threadId)).toEqual([]);
+  });
+
+  test('shutdown pauses delayed activity before waiting for running turns', async () => {
+    const client = await harness.connect();
+    const [threadId = ''] = await threeThreads(client);
+    harness.core.activity.set({ threadId, goal: { objective: 'must not start during shutdown' } });
+    await harness.core.drain();
+    expect(harness.core.activity.get(threadId).goal?.status).toBe('paused');
+    expect(harness.core.journal.listTurns(threadId)).toEqual([]);
+  });
+
   test('refuses a second in-flight turn without journaling its prompt', async () => {
     const client = await harness.connect();
     const [threadId = ''] = await threeThreads(client);

@@ -5,7 +5,7 @@
  * temporary directory the harness removes.
  */
 
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
@@ -164,6 +164,33 @@ describe('files.read', () => {
     const unknown = await fetch(`${harness.url}${FILE_ROUTE}/not-a-ticket`);
     expect(unknown.status).toBe(404);
     expect(await unknown.text()).not.toContain(harness.dataDir);
+  });
+
+  test('a ticket stops serving a file after its contents change', async () => {
+    const path = join(harness.dataDir, 'changing.bin');
+    writeFileSync(path, new Uint8Array([0, 1]));
+    const content = await client.call('files.read', { threadId, path: 'changing.bin' });
+    if (content.kind === 'text') throw new Error('expected a file ticket');
+    writeFileSync(path, new Uint8Array([0, 2, 3]));
+    expect((await fetch(`${harness.url}${content.url}`)).status).toBe(404);
+  });
+
+  test('a ticket cannot follow a directory replaced with an outside junction', async () => {
+    const folder = join(harness.dataDir, 'media');
+    const outside = mkdtempSync(join(tmpdir(), 'boite-ticket-outside-'));
+    mkdirSync(folder);
+    writeFileSync(join(folder, 'asset.bin'), new Uint8Array([0, 1]));
+    writeFileSync(join(outside, 'asset.bin'), 'outside data');
+    try {
+      const content = await client.call('files.read', { threadId, path: 'media/asset.bin' });
+      if (content.kind === 'text') throw new Error('expected a file ticket');
+      renameSync(folder, join(harness.dataDir, 'original-media'));
+      symlinkSync(outside, folder, 'junction');
+      expect((await fetch(`${harness.url}${content.url}`)).status).toBe(404);
+    } finally {
+      rmSync(folder, { recursive: true, force: true });
+      rmSync(outside, { recursive: true, force: true });
+    }
   });
 });
 

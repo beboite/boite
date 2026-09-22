@@ -111,7 +111,7 @@ test('the panel opens on its launcher, and the workbench surfaces fit both width
 
 /** The middle of an element, in the page's own pixels, for a real pointer. */
 async function middleOf(selector: string): Promise<{ x: number; y: number }> {
-  return await page.evaluate(`(() => { const box = document.querySelector('${selector}').getBoundingClientRect(); return { x: box.left + box.width / 2, y: box.top + box.height / 2 }; })()`);
+  return await page.evaluate<{ x: number; y: number }>(`(() => { const box = document.querySelector('${selector}').getBoundingClientRect(); return { x: box.left + box.width / 2, y: box.top + box.height / 2 }; })()`);
 }
 
 async function zoomPercent(): Promise<number> {

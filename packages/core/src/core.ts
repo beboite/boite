@@ -204,21 +204,26 @@ export class Core {
   async drain(timeoutMs?: number): Promise<void> {
     this.coordination.beginClose();
     this.#drained = true;
+    this.activity.close();
     await this.scheduler.drain(timeoutMs);
   }
 
   /** Whether the wait above has already been spent, so `close()` does not spend a second one. */
   #drained = false;
 
+  get stopping(): boolean { return this.#drained; }
+
   async close(): Promise<void> {
+    const alreadyDrained = this.#drained;
+    this.#drained = true;
     this.updates.close();
     this.coordination.beginClose();
+    this.activity.close();
     // Reuse the shutdown wait already spent by drain(), while stopping late arrivals.
-    await this.scheduler.drain(this.#drained ? 0 : undefined);
+    await this.scheduler.drain(alreadyDrained ? 0 : undefined);
     await this.coordination.close();
     await this.speech.close();
     await this.push.close();
-    this.activity.close();
     await this.plugins.close();
     this.providers.installs.stop();
     shutdownDrivers();

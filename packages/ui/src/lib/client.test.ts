@@ -84,6 +84,43 @@ describe('rpcUrl', () => {
 });
 
 describe('WsClient', () => {
+  test('a silent RPC expires without resending it or closing a healthy connection', async () => {
+    vi.useFakeTimers();
+    const { client, socket } = connected();
+    try {
+      socket.open();
+      socket.receive({ id: socket.frame(0).id, result: { core: CORE, principal: 'owner' } });
+      await client.connect();
+      let failure: unknown;
+      const pending = client.call('turns.start', { threadId: 'thread', prompt: 'once' }).catch(error => { failure = error; });
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(failure).toBeInstanceOf(RpcFailure);
+      expect((failure as Error).message).toContain('timed out');
+      expect(socket.sent.map(raw => JSON.parse(raw).method)).toEqual(['hello', 'turns.start']);
+      expect(client.state).toBe('ready');
+      await pending;
+      // A late response cannot settle a subsequent request with another id.
+      socket.receive({ id: socket.frame(1).id, result: {} });
+      const next = client.call('projects.list', {});
+      socket.receive({ id: socket.frame(2).id, result: [] });
+      expect(await next).toEqual([]);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally { client.close(); vi.useRealTimers(); }
+  });
+
+  test('a synchronous send failure does not leave a pending request or timer', async () => {
+    vi.useFakeTimers();
+    const { client, socket } = connected();
+    try {
+      socket.open();
+      socket.receive({ id: socket.frame(0).id, result: { core: CORE, principal: 'owner' } });
+      await client.connect();
+      socket.send = () => { throw new Error('socket send failed'); };
+      await expect(client.call('projects.list', {})).rejects.toThrow('socket send failed');
+      expect(vi.getTimerCount()).toBe(0);
+    } finally { client.close(); vi.useRealTimers(); }
+  });
+
   test('resuming replaces a half-open socket without replaying a pending prompt', async () => {
     const sockets: FakeSocket[] = [];
     const client = new WsClient({ url: 'https://core.test', token: 'session', socketFactory: () => {

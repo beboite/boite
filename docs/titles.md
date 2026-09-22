@@ -39,3 +39,8 @@ prompt's title is saved again with `titleSource: 'prompt'`.
 
 The fake client in `?fake=1` answers `threads.retitle` after two hundred
 milliseconds with the echo rule, so the UI can be worked on without a core.
+
+The core streams the journal until it finds the first user message and first
+nonempty assistant answer. It does not decode the remaining history to name
+the conversation. `bun run bench/retitle.ts` measures this path on a temporary
+core with 5,000 messages and the offline echo driver.
