@@ -14,6 +14,11 @@ takes the title, so it must read `type(scope): summary` with a type among `feat`
 `fix`, `perf`, `refactor`, `docs`, `test`, `ci`, `build`, `chore` and `revert`.
 The squash commit message body is left empty.
 
+The changes job also runs `check:architecture` and its regression tests, even
+for documentation-only changes. Runtime dependency cycles and forbidden
+cross-package imports fail before the build matrix starts. The advisory
+complexity report does not impose a numeric merge threshold.
+
 The `release tags` ruleset keeps `v*` tags from being moved or deleted. Creating
 one stays open, which the nightly reservation and a manual release rely on.
 

@@ -111,7 +111,7 @@ const app = agent({ name: 'grok-fake' })
   // No `modes` and no `configOptions`, exactly like the real agent: the models
   // and their effort scales are all it answers with.
   .onRequest('session/new', () => {
-    const sessionId = `grok-fake-${Math.random().toString(16).slice(2, 10)}`;
+    const sessionId = `grok-fake-${crypto.randomUUID().slice(0, 8)}`;
     known.add(sessionId);
     xaiNotification('_x.ai/models/update', { models: MODELS });
     return { sessionId, models: MODELS, _meta: { isGitRepo: false } } as unknown as { sessionId: string };

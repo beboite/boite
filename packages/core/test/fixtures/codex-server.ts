@@ -378,7 +378,7 @@ function handle(method: string, raw: unknown): unknown {
     case 'thread/start': {
       planEnabled = (params['config'] as Record<string, unknown> | undefined)?.['tools.update_plan.enabled'] === true;
       threadCounter += 1;
-      threadId = `codex-fake-${Math.random().toString(16).slice(2, 10)}-${threadCounter}`;
+      threadId = `codex-fake-${crypto.randomUUID().slice(0, 8)}-${threadCounter}`;
       log(
         `thread/start approvalPolicy=${textOf(params['approvalPolicy'])} sandbox=${textOf(params['sandbox'])} model=${textOf(params['model'])}`,
       );
