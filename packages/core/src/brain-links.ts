@@ -9,8 +9,8 @@ interface LinkStorage { get(): OwnedBrainLink[]; set(links: OwnedBrainLink[]): v
 export interface BrainProfiles { home: string; env: Record<string, string | undefined> }
 type Target = { name: string; path: string; override?: string };
 
-function stat(path: string) {
-  try { return lstatSync(path); }
+function stat(path: string, follow = false) {
+  try { return follow ? statSync(path) : lstatSync(path); }
   catch (cause) { if ((cause as NodeJS.ErrnoException).code === 'ENOENT') return null; throw cause; }
 }
 
@@ -119,7 +119,7 @@ export class BrainLinks {
           symlinkSync(source, target.path, 'file');
           continue;
         }
-        if (info && !info.isFile() && !info.isSymbolicLink()) throw new Error(`${target.path}: expected a file or symlink; directory preserved`);
+        if (info && !info.isFile() && (!info.isSymbolicLink() || stat(target.path, true)?.isDirectory())) throw new Error(`${target.path}: expected a file or file symlink; directory preserved`);
         mkdirSync(dirname(target.path), { recursive: true });
         backup = info ? `${target.path}.boite-backup-${crypto.randomUUID()}` : null;
         // Persist ownership before moving anything, including incomplete installations.

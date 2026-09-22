@@ -132,3 +132,13 @@ test('a failed install keeps its backup tracked when another writer occupies the
     expect(readFileSync(path, 'utf8')).toBe('Concurrent edit');
   } finally { mock.mockRestore(); }
 });
+
+test('a directory link at an instruction path is preserved', () => {
+  const path = join(home, '.codex', 'AGENTS.md'), directory = join(root, 'directory');
+  mkdirSync(dirname(path), { recursive: true }); mkdirSync(directory);
+  symlinkSync(directory, path, process.platform === 'win32' ? 'junction' : 'dir');
+  const original = readlinkSync(path);
+  expect(links.apply(brain).find(link => link.path === path)?.state).toBe('blocked');
+  expect(readlinkSync(path)).toBe(original);
+  expect(owned.some(link => link.path === path)).toBe(false);
+});
