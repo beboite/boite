@@ -31,7 +31,7 @@ export function chatLink(raw: string): ChatLink | null {
 }
 
 export function fileLike(text: string): boolean {
-  return /^(?:\.{0,2}[\\/]|[a-z]:[\\/]|file:\/\/)/i.test(text) || /^[\w@.-]+(?:[\\/][^\s]+)+(?::\d+)?$/.test(text) || /^[\w.-]+\.[a-z\d]{1,8}(?::\d+)?$/i.test(text);
+  return /^(?:\.{0,2}[\\/]|[a-z]:[\\/]|file:\/\/)/i.test(text) || /^[\w@.-]+[\\/][^\s]+$/.test(text) || /^[\w.-]+\.[a-z\d]{1,8}(?::\d+)?$/i.test(text);
 }
 
 export function linkHtml(label: string, raw: string): string {

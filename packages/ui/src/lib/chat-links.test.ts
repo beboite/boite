@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { chatLink } from './chat-links';
+import { chatLink, fileLike } from './chat-links';
 import { renderMarkdown } from './markdown';
 
 test('rich markdown supports local paths, spaces, line numbers, file URIs and balanced URL parentheses', () => {
@@ -23,4 +23,9 @@ test('markup, executable schemes and remote file shares cannot turn into active 
   expect(html).not.toContain('href="javascript:'); expect(html).not.toContain('href="data:');
   expect(html).not.toContain('<img'); expect(html).toContain('a&quot;b.pdf');
   expect(renderMarkdown('```\n[local](file.txt)\n```', true)).not.toContain('<a');
+});
+
+test('path detection handles long slash sequences without repeated backtracking', () => {
+  expect(fileLike(`-/${'!/'.repeat(10000)} `)).toBe(false);
+  expect(fileLike('src/nested/file.ts:12')).toBe(true);
 });

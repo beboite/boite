@@ -81,7 +81,8 @@ test('owner compares two isolated proposals with desktop and phone layouts', asy
   expect(await page.evaluate(`window.__proposalCalls.filter(call => call.method === 'turns.start').length`)).toBe(2);
   await page.click(`${id('proposal-column')}[data-proposal=b] .continue`);
   await page.waitFor(`!document.querySelector('${id('proposal-comparison')}')`);
-  await page.waitFor(`import('/src/lib/store.svelte.ts').then(({store}) => store.openThread?.id === ${JSON.stringify(secondId)})`);
+  const deadline = Date.now() + 5000;
+  while (await onStore('return store.openThread?.id') !== secondId && Date.now() < deadline) await Bun.sleep(50);
   expect(await onStore('return store.openThread?.id')).toBe(secondId);
   // A header unmount must preserve the pair for this Store and project.
   await page.evaluate(`import('/src/lib/experiments.ts').then(({setExperiment}) => setExperiment('proposal-comparison', false))`);
