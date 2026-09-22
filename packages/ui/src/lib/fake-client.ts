@@ -153,6 +153,7 @@ export class FakeClient implements ObservableClient {
     now: () => this.#now(),
     nextId: () => ++this.#seq,
     delayMs: () => this.#delayMs,
+    requireThread: id => this.#thread(id),
   });
   static #cores = new Map<string, FakeClient>();
   #state: ClientState = 'idle';

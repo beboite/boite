@@ -1,12 +1,9 @@
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from 'bun:test';
 import { join } from 'node:path';
-import { createRequire } from 'node:module';
 import { BrowserPage, freePort } from './lib/cdp.ts';
+import { startUi } from './lib/ui.ts';
 
-const uiRequire = createRequire(join(import.meta.dir, '../../packages/ui/package.json'));
-const { createServer } = await import(uiRequire.resolve('vite'));
-
-let server: { listen(): Promise<unknown>; close(): Promise<void> };
+let server: { close(): Promise<void> };
 let page: BrowserPage;
 let url: string;
 const id = (name: string) => `[data-testid="${name}"]`;
@@ -19,12 +16,10 @@ const desktop = () => page.send('Emulation.setDeviceMetricsOverride', { width: 1
 const phone = () => page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
 
 beforeAll(async () => {
-  // The fake client is deliberately absent from production bundles.
   const port = await freePort();
   url = `http://127.0.0.1:${port}/?fake=1&updates=1&open=recent`;
-  server = await createServer({ root: join(import.meta.dir, '../../packages/ui'), server: { host: '127.0.0.1', port, strictPort: true }, clearScreen: false });
-  await server.listen();
-}, 30_000);
+  server = await startUi(port);
+}, 120_000);
 beforeEach(async () => {
   page = await BrowserPage.launch({ url });
   await page.waitFor(`document.querySelector('${id('nav-settings')}')`);

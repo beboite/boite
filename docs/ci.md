@@ -65,6 +65,9 @@ for end-to-end testing. It does not recompile the core just to stage it again.
 The tested installer becomes the release artifact, with no second release build.
 CI sets `BOITE_E2E_PREBUILT_UI=1` to test the UI already built for that installer.
 The test refuses a missing UI build. Local end-to-end runs rebuild it by default.
+Fake UI tests share `startUi` and its test bundle. Tests that import source
+modules pass `{ sourceModules: true }`; their dev server warms the entry and
+fake-client import graphs during setup, before the browser navigation deadline.
 
 When Cargo uses a shared target directory, staging snapshots its shell into the
 checkout before the tests. Another checkout's later build cannot replace it.

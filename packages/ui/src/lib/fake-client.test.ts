@@ -66,6 +66,28 @@ test('fake threads reject unknown providers even when speed is omitted', async (
   } finally { client.close(); }
 });
 
+test('fake browser tasks reject missing and archived threads without adding a task', async () => {
+  const client = new FakeClient({ delayMs: 0, browserTask: true });
+  await client.connect();
+  try {
+    const before = (await client.call('browser.status', {})).tasks;
+    const request = { pluginId: 'jev-browser', url: 'https://example.org', goal: 'Save', completion: { text: 'Saved' } };
+    await expect(client.call('browser.start', { ...request, threadId: 'missing-thread' })).rejects.toThrow();
+    await client.call('threads.archive', { threadId: 't-descriptors', archived: true });
+    await expect(client.call('browser.start', { ...request, threadId: 't-descriptors' })).rejects.toThrow();
+    expect((await client.call('browser.status', {})).tasks).toEqual(before);
+  } finally { client.close(); }
+});
+
+test('seeded browser tasks belong to an existing thread', async () => {
+  const client = new FakeClient({ delayMs: 0, browserTask: true });
+  await client.connect();
+  try {
+    const threads = new Set((await client.call('threads.list', {})).map(thread => thread.id));
+    for (const task of (await client.call('browser.status', {})).tasks) expect(threads.has(task.threadId)).toBe(true);
+  } finally { client.close(); }
+});
+
 test.each([{ data: '?' }, { mimeType: '' }, { name: 42 }, { kind: 'unknown' }, { data: 'A'.repeat(7 * 1048576) }])('fake uploads refuse malformed attachment fields before creating a turn: %#', async change => {
   const client = new FakeClient({ delayMs: 0 });
   await client.connect();
