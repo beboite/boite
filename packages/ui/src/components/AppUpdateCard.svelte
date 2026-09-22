@@ -197,7 +197,7 @@
     height: 3px;
     margin-top: 8px;
     overflow: hidden;
-    border-radius: 999px;
+    border-radius: var(--radius-sm);
     background: var(--color-surface-3);
   }
 
