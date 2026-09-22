@@ -4,6 +4,8 @@
   import ShellSettings from './ShellSettings.svelte';
   import PhoneSettings from './PhoneSettings.svelte';
   import ModelDefaultsSettings from './ModelDefaultsSettings.svelte';
+  import AppUpdateCard from './AppUpdateCard.svelte';
+  import { showAppUpdateUi } from '../lib/app-update.svelte';
   import TelemetrySettings from './TelemetrySettings.svelte';
   import { confirm } from '../lib/confirm.svelte';
   import { ago, time } from '../lib/format';
@@ -79,6 +81,7 @@
   </header>
 
   {#if inShell}<ShellSettings />{/if}
+  {#if showAppUpdateUi()}<AppUpdateCard />{/if}
 
   <PhoneSettings {store} />
   <ModelDefaultsSettings {store} />
