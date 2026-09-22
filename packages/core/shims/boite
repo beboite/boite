@@ -1,6 +1,8 @@
 #!/bin/sh
-# The `boite` CLI of an installed Boite: the core beside this file answers it.
+# The shell names the core when its resources live in a separate directory.
+# Standalone installs keep the core beside this file.
 # On Windows that core is the runtime plus the bundle in `core`, elsewhere the compiled core alone.
-here="$(dirname "$0")"
-if [ -f "$here/core/main.js" ]; then exec "$here/boite-core" "$here/core/main.js" cli "$@"; fi
-exec "$here/boite-core" cli "$@"
+core="${BOITE_CORE_EXECUTABLE:-$(dirname "$0")/boite-core}"
+here="$(dirname "$core")"
+if [ -f "$here/core/main.js" ]; then exec "$core" "$here/core/main.js" cli "$@"; fi
+exec "$core" cli "$@"

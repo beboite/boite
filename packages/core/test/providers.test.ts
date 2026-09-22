@@ -1,5 +1,6 @@
 import { currentOs } from '../src/paths.ts';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, writeFileSync } from 'node:fs';
+import { resolveCommand } from '../src/providers/loader.ts';
 import { join, sep } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { startTestCore } from './harness.ts';
@@ -55,6 +56,25 @@ afterEach(async () => {
 });
 
 describe('providers', () => {
+  test('a directory cannot mask a runnable fallback executable', () => {
+    const directory = join(harness.dataDir, 'not-an-executable');
+    mkdirSync(directory);
+    expect(resolveCommand({ detect: {}, executable: [
+      { kind: 'file', value: directory },
+      { kind: 'file', value: process.execPath },
+    ], isolation: {} })?.executable).toBe(process.execPath);
+  });
+
+  test.skipIf(process.platform === 'win32')('a non-executable file cannot mask a runnable fallback on POSIX', () => {
+    const file = join(harness.dataDir, 'not-executable');
+    writeFileSync(file, '#!/bin/sh\nexit 0\n');
+    chmodSync(file, 0o644);
+    expect(resolveCommand({ detect: {}, executable: [
+      { kind: 'file', value: file },
+      { kind: 'file', value: process.execPath },
+    ], isolation: {} })?.executable).toBe(process.execPath);
+  });
+
   test('reload discovers a newly installed provider account once and broadcasts it', async () => {
     const body = validDescriptor();
     body.profiles = Object.fromEntries(['windows', 'linux', 'macos'].map((os) => [os, {
