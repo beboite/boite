@@ -15,6 +15,21 @@ Everything below runs from the repository root, on a `bun install` that has
 already happened. The rules these commands are meant to prove are in
 [../AGENTS.md](../AGENTS.md).
 
+## Desktop updater tests
+
+Desktop updater checks use a local HTTP fixture and a signed inert payload in
+`cargo test --lib`. The fixture never launches an installer. Its Windows test
+executable links the shell's Common Controls v6 manifest too; without that
+resource, loading the native dialog dependency fails before tests start.
+
+`bun test tests/e2e/app-updates.test.ts` checks the update card, channel choice,
+restart confirmation, progress, errors and absence of installer controls on a
+phone. Development-only `?fake=1&appUpdate=ready` and the `downloading` and
+`error` variants support captures without network updates. Set
+`appUpdateChannel=nightly` to preview a nightly target and
+`appUpdateCurrentChannel=nightly` for an installed nightly. These fixtures are
+removed from production builds.
+
 ## The core
 
 ```bash
@@ -193,7 +208,7 @@ BOITE_ECHO=1 bun run dev:core
 ## Checks and tests
 
 ```bash
-bun run check    # tsc on contracts and core, svelte-check --tsgo on the UI
+bun run check    # contracts, core, UI and end-to-end test types
 bun run test     # bun test in packages/core, vitest in packages/ui
 bun run build:ui # required by the core-backed browser tests on a fresh checkout
 bun run e2e      # tests/e2e
@@ -372,6 +387,19 @@ and invisible to the review that follows. The tracked docs, this page included,
 are the ones a worktree can actually change. Check where a file you are about to
 edit really lives before editing it.
 
+
+## UI spacing and motion
+
+Settings pages share their width and card padding through `--settings-width`
+and `--settings-padding` in `app.css`. A page that wraps its cards for a loading
+state uses `settings-stack` on that wrapper. This keeps its cards on the same
+spacing rules as direct children of a settings page.
+
+Native `details.disclosure` sections animate their height in browsers that
+support intrinsic-size transitions, with an immediate fallback elsewhere.
+Task sections use a grid fold and become inert while collapsed. Both read the
+shared motion durations, including the reduced-motion override. The Usage and
+panel end-to-end tests cover card spacing, folded drafts and phone controls.
 
 ## Chat readability
 

@@ -441,6 +441,15 @@ shellTest(
   TIMEOUT,
 );
 
+shellTest('the native updater reports its local version and refuses installation in hidden tests', async () => {
+  await page?.waitFor(TAURI_READY);
+  const status = await page?.evaluate<{ supported: boolean; currentVersion: string }>(`window.__TAURI_INTERNALS__.invoke('app_update_status')`);
+  expect(status?.supported).toBe(false);
+  expect(status?.currentVersion).toMatch(/^\d+\.\d+\.\d+/);
+  const refused = await page?.evaluate<string>(`window.__TAURI_INTERNALS__.invoke('app_update_check', {channel:'stable'}).then(() => 'allowed', error => String(error))`);
+  expect(refused).toContain('installed Windows x64');
+}, TIMEOUT);
+
 shellTest(
   'the shipped webview refuses what the content security policy forbids',
   async () => {

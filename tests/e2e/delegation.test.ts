@@ -65,6 +65,7 @@ test('the phone can open the same team and inspect its retained result', async (
   await page.waitFor('innerHeight === 500');
   expect(await page.evaluate('document.querySelector("[data-testid=delegation-message]").getBoundingClientRect().bottom <= innerHeight')).toBe(true);
   expect(page.errors()).toEqual([]);
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
 }, 15_000);
 
 test('completed counts and frozen duration survive reopening the conversation', async () => {

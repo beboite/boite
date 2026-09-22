@@ -46,6 +46,11 @@
     void store.configureDelegation({ ...config, ...patch });
   }
 
+  function limit(value: number, patch: (value: number) => Partial<DelegationConfig>): void {
+    if (!Number.isSafeInteger(value)) return;
+    save(patch(value));
+  }
+
   function addProfile(): void {
     const choice = store.defaultChoice();
     if (!choice?.model) return;
@@ -157,10 +162,10 @@
           </div>
 
           <div class="limits">
-            <label>{strings.delegation.maxAgents}<input type="number" min="1" max="8" value={config.maxAgents} onchange={(event) => save({ maxAgents: event.currentTarget.valueAsNumber, maxConcurrent: Math.min(config.maxConcurrent, event.currentTarget.valueAsNumber) })} /></label>
-            <label>{strings.delegation.maxConcurrent}<input type="number" min="1" max="8" value={config.maxConcurrent} onchange={(event) => save({ maxConcurrent: event.currentTarget.valueAsNumber })} /></label>
-            <label>{strings.delegation.maxTurns}<input type="number" min="1" max="100" value={config.maxTurns} onchange={(event) => save({ maxTurns: event.currentTarget.valueAsNumber })} /></label>
-            <label>{strings.delegation.maxMinutes}<input type="number" min="1" max="120" value={config.maxMinutes} onchange={(event) => save({ maxMinutes: event.currentTarget.valueAsNumber })} /></label>
+            <label>{strings.delegation.maxAgents}<input type="number" min="1" max="8" value={config.maxAgents} onchange={(event) => limit(event.currentTarget.valueAsNumber, value => ({ maxAgents: value, maxConcurrent: Math.min(config.maxConcurrent, value) }))} /></label>
+            <label>{strings.delegation.maxConcurrent}<input type="number" min="1" max="8" value={config.maxConcurrent} onchange={(event) => limit(event.currentTarget.valueAsNumber, value => ({ maxConcurrent: value }))} /></label>
+            <label>{strings.delegation.maxTurns}<input type="number" min="1" max="100" value={config.maxTurns} onchange={(event) => limit(event.currentTarget.valueAsNumber, value => ({ maxTurns: value }))} /></label>
+            <label>{strings.delegation.maxMinutes}<input type="number" min="1" max="120" value={config.maxMinutes} onchange={(event) => limit(event.currentTarget.valueAsNumber, value => ({ maxMinutes: value }))} /></label>
           </div>
           {#if config.enabled}
             <button type="button" class="quiet pause" onclick={() => save({ paused: !config.paused })}>
