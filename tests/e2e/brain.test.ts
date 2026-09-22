@@ -29,6 +29,9 @@ test('configure, inspect, synchronize and disconnect a brain at desktop and phon
   await page.click(id('brain-save'));
   await page.waitFor(`document.querySelectorAll('${id('brain-entry')}').length === 1`);
   expect(await page.evaluate(`document.querySelector('${id('brain-path')}')`)).toBeNull();
+  await page.click(id('brain-global'));
+  await page.waitFor(`document.querySelector('${id('brain-global')}')?.checked === true && !document.querySelector('${id('brain-global')}').disabled`);
+  expect(await page.evaluate(`document.querySelector('${id('brain-links')}').textContent`)).toContain('7/7');
   await page.click(id('brain-startup'));
   await page.waitFor(`document.querySelector('${id('brain-startup')}')?.checked === true && !document.querySelector('${id('brain-startup')}').disabled`);
   await page.click(id('brain-periodic'));
@@ -50,10 +53,12 @@ test('configure, inspect, synchronize and disconnect a brain at desktop and phon
   await page.click(id('brain-refresh'));
   await page.waitFor(`document.querySelector('${id('brain-page')}')?.getAttribute('aria-busy') === 'false'`);
   expect(await page.evaluate(`document.querySelector('${id('brain-enabled')}').checked`)).toBe(false);
+  expect(await page.evaluate(`document.querySelector('${id('brain-links')}')`)).toBeNull();
   expect(await page.evaluate(`document.querySelector('${id('brain-startup')}').checked`)).toBe(true);
   expect(await page.evaluate(`document.querySelector('${id('brain-interval')}').value`)).toBe('30');
   await page.click(id('brain-enabled'));
   await page.waitFor(`document.querySelector('${id('brain-enabled')}')?.checked === true && document.querySelector('${id('brain-page')}')?.getAttribute('aria-busy') === 'false'`);
+  expect(await page.evaluate(`document.querySelector('${id('brain-links')}').textContent`)).toContain('7/7');
   await page.evaluate(`localStorage.setItem('boite.locale', 'fr'); location.reload()`);
   await page.waitFor(`document.querySelector('${id('nav-settings')}')`);
   await page.click(id('nav-settings'));
@@ -63,6 +68,8 @@ test('configure, inspect, synchronize and disconnect a brain at desktop and phon
   await page.click(id('brain-save'));
   await page.waitFor(`document.querySelector('${id('brain-sync')}')`);
   expect(await page.evaluate(`document.querySelector('${id('brain-sync')}').textContent`)).toContain('Synchroniser');
+  await page.click(id('brain-global'));
+  await page.waitFor(`document.querySelector('${id('brain-global')}')?.checked === true && !document.querySelector('${id('brain-global')}').disabled`);
   await page.click(id('brain-startup'));
   await page.waitFor(`document.querySelector('${id('brain-startup')}')?.checked === true && !document.querySelector('${id('brain-startup')}').disabled`);
   await page.click(id('brain-periodic'));

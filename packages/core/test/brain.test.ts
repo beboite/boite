@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
-import { mkdirSync, readFileSync, realpathSync, renameSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, realpathSync, renameSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { scanBrain } from '../src/brain.ts';
 import { BrainStore } from '../src/brain.ts';
@@ -30,6 +30,32 @@ async function commit(cwd: string, text: string, name = 'AGENTS.md') {
   await git(cwd, ['add', '--', name]);
   await git(cwd, ['commit', '-m', 'Update shared instructions']);
 }
+
+test('global instructions are persisted, repaired at startup and removed when sharing stops', async () => {
+  file(join(root, 'AGENTS.md'), 'Global instructions');
+  const profiles = { home: join(h.dataDir, 'test-home'), env: {} };
+  mkdirSync(profiles.home);
+  const brain = new BrainStore(h.core, undefined, profiles);
+  try {
+    const configured = await brain.configure({ path: root, enabled: true, globalInstructions: true });
+    expect(configured.config.globalInstructions).toBe(true);
+    expect(configured.links?.every(link => link.state === 'linked')).toBe(true);
+    expect(readFileSync(join(profiles.home, '.codex', 'AGENTS.md'), 'utf8')).toBe('Global instructions');
+    await brain.configure({ path: root, enabled: false });
+    expect((await brain.status()).links).toEqual([]);
+    expect(brain.config().globalInstructions).toBe(true);
+    await brain.configure({ path: root, enabled: true });
+    await brain.close();
+    unlinkSync(join(profiles.home, '.codex', 'AGENTS.md'));
+    const restored = new BrainStore(h.core, undefined, profiles);
+    try {
+      restored.start();
+      expect((await restored.status()).links?.every(link => link.state === 'linked')).toBe(true);
+      await restored.configure({ path: null, enabled: false });
+      expect((await restored.status()).links).toEqual([]);
+    } finally { await restored.close(); }
+  } finally { await brain.close(); }
+});
 
 test('automatic pull settings persist and reject invalid intervals', async () => {
   const autoPull = { onStartup: true, intervalMinutes: 15 };

@@ -53,6 +53,51 @@ the prefix. Disconnecting a brain stops future injection but cannot remove
 instructions already present in an agent's conversation history. Start a new
 thread when previous instructions must leave the context.
 
+## Global instructions
+
+Global AGENTS.md links the brain's root `AGENTS.md` into the user profiles on
+the core's machine. The switch is off by default and requires Use with agents.
+These links also apply outside Boite, when the harness loads its global rules.
+
+| Harness | Default destination |
+| --- | --- |
+| Claude Code | `~/.claude/CLAUDE.md` |
+| Codex | `~/.codex/AGENTS.md` |
+| OpenCode | `~/.config/opencode/AGENTS.md` |
+| pi | `~/.pi/agent/AGENTS.md` |
+| Grok | `~/.grok/AGENTS.md` |
+| Gemini / Antigravity | `~/.gemini/GEMINI.md` |
+| Muse | `~/.config/muse/AGENTS.md` |
+
+Profile overrides from the core's environment are honored: `CLAUDE_CONFIG_DIR`,
+`CODEX_HOME`, `XDG_CONFIG_HOME`, `PI_CODING_AGENT_DIR`, `GROK_HOME` and
+`GEMINI_HOME`. Separate account profiles still receive Boite's turn prefix;
+this switch manages the global user profiles listed above.
+
+Existing files move to a unique adjacent backup before linking. Disabling
+global instructions, disabling sharing or disconnecting restores those files.
+Boite leaves matching links created elsewhere alone. If a managed link was
+replaced outside Boite, it preserves the replacement and backup and reports
+the destination under Connected harnesses. Directories and higher-priority
+`AGENTS.override.md` files in Codex or pi profiles are never replaced.
+
+Boite repairs missing managed links at core startup and after synchronization.
+Closing Boite leaves the links working. Git can replace `AGENTS.md` atomically
+without breaking them. Windows requires file-symlink permission, normally
+provided by Developer Mode; a refusal stays visible per harness.
+
+The source must be a readable, nonempty file within the brain, at most 64 KiB.
+Harness-specific size limits and discovery settings still apply. A running
+agent may need a new session to reload global rules. Use absolute paths for
+references that must work from different profile locations.
+
+Native discovery references: [Claude](https://code.claude.com/docs/en/memory),
+[Codex](https://learn.chatgpt.com/docs/agent-configuration/agents-md),
+[OpenCode](https://opencode.ai/docs/rules/),
+[pi](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/src/core/resource-loader.ts),
+[Grok](https://docs.x.ai/build/features/project-rules), and
+[Antigravity](https://antigravity.google/docs/rules-workflows).
+
 ## Synchronization
 
 Use an existing Git checkout with a configured upstream on each computer.
@@ -84,14 +129,18 @@ the previous attempt finishes, and a manual synchronization takes priority.
 These settings apply even when Use with agents is off. Disconnect stops pulls;
 closing the core cancels the timer and drains its Git processes.
 
-This version does not clone repositories, commit edits, create symlinks in
-agent profiles or copy files directly between machines.
+This version does not clone repositories, commit edits or copy files directly
+between machines.
 
 ## Verification
 
 `bun test packages/core/test/brain.test.ts` exercises detection, invalid entries,
 links, owner access, instruction delivery and synchronization between two
 temporary checkouts through a local bare remote. No personal brain is read.
+
+`bun test packages/core/test/brain-links.test.ts` creates physical file symlinks
+in temporary profiles and checks source replacement, backups, restoration,
+profile overrides and preservation of user changes.
 
 `bun test tests/e2e/brain.test.ts` exercises the settings flow, errors and
 disconnect through the in-memory client. Desktop and phone captures go to

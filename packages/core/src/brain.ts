@@ -3,6 +3,7 @@ import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { BrainConfig, BrainEntry, BrainStatus } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { invalidParams, messageOf, refused } from './errors.ts';
+import { BrainLinks, type BrainProfiles, type OwnedBrainLink } from './brain-links.ts';
 
 const FILE_LIMIT = 64 * 1024;
 const ENTRY_LIMIT = 500;
@@ -99,11 +100,23 @@ export class BrainStore {
   private cancelTimer?: () => void;
   private automatic?: Promise<void>;
   private readonly processes = new Map<string, Promise<void>>();
-  constructor(private readonly core: Core, private readonly schedule: Schedule = defaultSchedule) {}
+  private readonly links: BrainLinks;
+  constructor(private readonly core: Core, private readonly schedule: Schedule = defaultSchedule, profiles?: BrainProfiles) {
+    this.links = new BrainLinks({
+      get: () => (core.journal.getSetting('brain.links') as OwnedBrainLink[] | undefined) ?? [],
+      set: links => core.journal.setSetting('brain.links', links),
+    }, profiles);
+  }
+
+  private globalRoot(): string | null {
+    const config = this.config();
+    return config.enabled && config.globalInstructions ? config.path : null;
+  }
 
   start(): void {
     if (this.started || this.closed) return;
     this.started = true;
+    this.links.apply(this.globalRoot());
     this.schedulePull(true);
   }
 
@@ -143,6 +156,8 @@ export class BrainStore {
     if (typeof config.enabled !== 'boolean') throw invalidParams('brain.enabled must be a boolean');
     if (config.path !== null && (typeof config.path !== 'string' || !isAbsolute(config.path))) throw invalidParams('brain.path must be an absolute folder path or null');
     if (config.enabled && config.path === null) throw invalidParams('brain.path is required when enabled');
+    const globalInstructions = config.globalInstructions === undefined ? this.config().globalInstructions : config.globalInstructions;
+    if (globalInstructions !== undefined && typeof globalInstructions !== 'boolean') throw invalidParams('brain.globalInstructions must be a boolean');
     const autoPull = config.autoPull === undefined ? this.config().autoPull : config.autoPull;
     if (autoPull !== undefined && (!autoPull || typeof autoPull.onStartup !== 'boolean' || !Number.isInteger(autoPull.intervalMinutes) || autoPull.intervalMinutes < 0 || autoPull.intervalMinutes > 1440)) {
       throw invalidParams('brain.autoPull.onStartup must be a boolean; intervalMinutes must be an integer from 0 to 1440 (0 disables periodic pulls)');
@@ -158,7 +173,8 @@ export class BrainStore {
       this.core.journal.setSetting('brain.lastSync', null);
       this.core.journal.setSetting('brain.pullError', null);
     }
-    this.core.journal.setSetting('brain', { path, enabled: config.enabled, ...(autoPull ? { autoPull } : {}) });
+    this.core.journal.setSetting('brain', { path, enabled: config.enabled, ...(autoPull ? { autoPull } : {}), ...(globalInstructions !== undefined ? { globalInstructions } : {}) });
+    this.links.apply(this.globalRoot());
     this.schedulePull();
     return this.status();
   }
@@ -166,6 +182,7 @@ export class BrainStore {
   async status(): Promise<BrainStatus> {
     const config = this.config();
     const status: BrainStatus = { config, entries: [], problems: [], git: null, lastSync: (this.core.journal.getSetting('brain.lastSync') as number | null) ?? null };
+    status.links = this.links.status(this.globalRoot());
     if (!config.path) return status;
     try {
       Object.assign(status, scanBrain(config.path));
@@ -226,6 +243,7 @@ export class BrainStore {
       if (push && state.ahead > 0) await this.git(path, ['push', '--', remote, `${state.head}:${merge}`]);
       this.core.journal.setSetting('brain.lastSync', Date.now());
       this.core.journal.setSetting('brain.pullError', null);
+      this.links.apply(this.globalRoot());
       return await this.status();
     } finally { this.busy = false; }
   }

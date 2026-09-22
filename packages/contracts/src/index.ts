@@ -1333,6 +1333,15 @@ export interface BrainConfig {
   enabled: boolean;
   /** Pull only. An interval of 0 disables periodic pulls. Defaults to off. */
   autoPull?: { onStartup: boolean; intervalMinutes: number };
+  /** Link the root AGENTS.md into user-level harness profiles on this machine. */
+  globalInstructions?: boolean;
+}
+
+export interface BrainLink {
+  name: string;
+  path: string;
+  state: 'linked' | 'existing' | 'blocked';
+  error: string | null;
 }
 
 export interface BrainEntry {
@@ -1349,6 +1358,7 @@ export interface BrainStatus {
   problems: string[];
   git: { branch: string | null; upstream: string | null; ahead: number; behind: number; dirty: boolean } | null;
   lastSync: number | null;
+  links?: BrainLink[];
 }
 
 export interface RpcMethods {

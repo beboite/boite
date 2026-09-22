@@ -35,18 +35,19 @@
     return () => { ++revision; };
   });
 
-  async function run(action: 'save' | 'refresh' | 'sync' | 'disconnect' | 'toggle' | 'auto', policy?: BrainConfig['autoPull']) {
+  async function run(action: 'save' | 'refresh' | 'sync' | 'disconnect' | 'toggle' | 'auto' | 'global', policy?: BrainConfig['autoPull']) {
     const client = store.client;
     if (!client || busy) return;
     const current = revision;
     busy = true; error = '';
     try {
-      const next = action === 'save' || action === 'disconnect' || action === 'toggle' || action === 'auto'
+      const next = action === 'save' || action === 'disconnect' || action === 'toggle' || action === 'auto' || action === 'global'
         ? await client.call('brain.configure', {
           ...status?.config,
-          path: action === 'disconnect' ? null : action === 'toggle' || action === 'auto' ? status!.config.path : path.trim(),
+          path: action === 'disconnect' ? null : action === 'save' ? path.trim() : status!.config.path,
           enabled: action === 'disconnect' ? false : action === 'toggle' ? !status!.config.enabled : status?.config.path ? status.config.enabled : true,
           ...(policy ? { autoPull: policy } : {}),
+          ...(action === 'global' ? { globalInstructions: !status!.config.globalInstructions } : {}),
         })
         : action === 'sync' ? await client.call('brain.sync', {}) : await client.call('brain.status', {});
       if (current !== revision) return;
@@ -74,6 +75,11 @@
 <div class="page" data-testid="brain-page" aria-busy={busy}>
   <header><div><h1>{t.heading}</h1><p>{t.description}</p></div></header>
   {#if error}<p class="error" role="alert" data-testid="brain-error">{error}</p>{/if}
+  {#if status && !status.config.path}
+    {#each status.links ?? [] as link (link.path)}
+      {#if link.error}<p class="error" role="alert">{link.error}</p>{/if}
+    {/each}
+  {/if}
   {#if status?.config.path}
     <section class="brain-connection" data-testid="brain-sync-card">
       <div class="connection-top">
@@ -91,6 +97,18 @@
       <div class="connection-bottom">
         <label class="sharing"><input type="checkbox" role="switch" checked={status.config.enabled} onchange={event => { event.currentTarget.checked = status!.config.enabled; void run('toggle'); }} disabled={busy} data-testid="brain-enabled" /><span>{t.enabled}</span></label>
         <button class="ghost small" disabled={busy} onclick={() => { editing = !editing; path = status!.config.path!; folders = null; }} data-testid="brain-change">{editing ? t.cancel : t.change}</button>
+      </div>
+      <div class="global-instructions">
+        <label class="sharing"><input type="checkbox" role="switch" checked={status.config.globalInstructions ?? false} disabled={busy || !status.config.enabled} data-testid="brain-global" onchange={event => { event.currentTarget.checked = status!.config.globalInstructions ?? false; void run('global'); }} /><span>{t.globalInstructions}</span></label>
+        {#if status.links?.length}
+          <details class="global-links" data-testid="brain-links" open={status.links.some(link => link.state === 'blocked')}>
+            <summary>{t.globalDetails}<span>{status.links.filter(link => link.state !== 'blocked').length}/{status.links.length}</span></summary>
+            <p>{t.globalHint}</p>
+            {#each status.links as link (link.path)}
+              <div class="link-row"><span>{link.name}</span><span class:error={link.state === 'blocked'}>{t[link.state]}</span><code>{link.path}</code>{#if link.error}<p class="error">{link.error}</p>{/if}</div>
+            {/each}
+          </details>
+        {/if}
       </div>
       {#if status.git?.upstream || status.config.autoPull}
         <div class="automation">
@@ -166,6 +184,13 @@
   .sync-state :global(svg) { flex: none; }
   .connection-bottom { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 20px 12px 24px; border-top: 1px solid var(--color-border); }
   .sharing { display: flex; align-items: center; gap: 10px; font-size: var(--text-sm); }
+  .global-instructions { padding: 16px 24px; border-top: 1px solid var(--color-border); }
+  .global-links { margin-top: 12px; font-size: var(--text-sm); }
+  .global-links summary { display: flex; gap: 10px; align-items: center; cursor: pointer; color: var(--color-muted-foreground); }
+  .global-links summary span { font-variant-numeric: tabular-nums; }
+  .link-row { display: grid; grid-template-columns: 1fr auto; gap: 6px 12px; padding: 12px 0; border-top: 1px solid var(--color-border); }
+  .link-row code, .link-row p { grid-column: 1 / -1; margin: 0; }
+  .link-row > span:nth-child(2):not(.error) { color: var(--color-muted-foreground); }
   .automation { display: grid; gap: 14px; padding: 20px 24px; border-top: 1px solid var(--color-border); }
   .automation h3 { margin: 0; font-size: var(--text-sm); font-weight: 500; color: var(--color-muted-foreground); }
   .interval-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: var(--control); }
@@ -210,6 +235,7 @@
     .sync-state { padding: 12px 16px 20px; }
     .connection-bottom { padding: 12px 16px; flex-wrap: wrap; gap: 8px; }
     .automation { padding: 16px; }
+    .global-instructions { padding: 16px; }
     .folder-form { padding: 20px 16px; }
     .path-row { flex-wrap: wrap; }
     .path-row input { flex-basis: 100%; }

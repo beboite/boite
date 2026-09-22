@@ -10,7 +10,14 @@ afterEach(() => {
   document.body.innerHTML = '';
 });
 
-test('a refused sharing change keeps the saved switch state and shows the error', async () => {
+test('restoration problems remain visible after disconnecting the folder', async () => {
+  const call = vi.fn(async () => ({ config: { path: null, enabled: false }, entries: [], problems: [], git: null, lastSync: null,
+    links: [{ name: 'Codex', path: '/home/user/.codex/AGENTS.md', state: 'blocked', error: 'Restore pending; original backup preserved' }] }));
+  mounted = mount(BrainPage, { target: document.body, props: { store: { client: { call }, owner: true, connection: 'ready' } as unknown as Store } });
+  await vi.waitFor(() => { flushSync(); expect(document.querySelector('[role="alert"]')?.textContent).toContain('original backup preserved'); });
+});
+
+test.each(['enabled', 'global'])('a refused %s change keeps the saved switch state and shows the error', async name => {
   const call = vi.fn(async (method: string) => {
     if (method === 'brain.configure') throw new Error('Could not save brain settings');
     return { config: { path: '/work/brain', enabled: true }, entries: [], problems: [], git: null, lastSync: null };
@@ -21,14 +28,17 @@ test('a refused sharing change keeps the saved switch state and shows the error'
     flushSync();
     expect(document.querySelector('[data-testid="brain-enabled"]')).not.toBeNull();
   });
-  const control = document.querySelector<HTMLInputElement>('[data-testid="brain-enabled"]')!;
+  const control = document.querySelector<HTMLInputElement>(`[data-testid="brain-${name}"]`)!;
+  expect(control).not.toBeNull();
   control.click();
   await vi.waitFor(() => {
     flushSync();
     expect(document.querySelector('[role="alert"]')?.textContent).toContain('Could not save brain settings');
   });
-  expect(control.checked).toBe(true);
-  expect(call).toHaveBeenCalledWith('brain.configure', { path: '/work/brain', enabled: false });
+  expect(control.checked).toBe(name === 'enabled');
+  expect(call).toHaveBeenCalledWith('brain.configure', name === 'enabled'
+    ? { path: '/work/brain', enabled: false }
+    : { path: '/work/brain', enabled: true, globalInstructions: true });
 });
 
 test('automatic pull controls save their policy and preserve it when sharing changes', async () => {
