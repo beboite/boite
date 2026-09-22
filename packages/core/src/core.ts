@@ -31,6 +31,7 @@ import { SpeechStore } from './speech.ts';
 import { Telemetry } from './telemetry.ts';
 import { HarnessUpdates } from './providers/updates.ts';
 import { Coordination } from './coordination.ts';
+import { BrowserStore } from './browser.ts';
 
 export const CORE_VERSION: string = pkg.version;
 
@@ -116,6 +117,7 @@ export class Core {
   readonly telemetry: Telemetry;
   readonly updates: HarnessUpdates;
   readonly coordination: Coordination;
+  readonly browser: BrowserStore;
 
   /**
    * The server tells the core what it alone can know. The default answers no
@@ -158,6 +160,7 @@ export class Core {
     this.telemetry = new Telemetry(this);
     this.updates = new HarnessUpdates(this);
     this.coordination = new Coordination(this);
+    this.browser = new BrowserStore(this);
 
     registerModules(this);
     this.procs.applySettings(this.settings.get());
@@ -214,6 +217,7 @@ export class Core {
   #drained = false;
 
   async close(): Promise<void> {
+    await this.browser.close();
     this.updates.close();
     this.coordination.beginClose();
     // Reuse the shutdown wait already spent by drain(), while stopping late arrivals.

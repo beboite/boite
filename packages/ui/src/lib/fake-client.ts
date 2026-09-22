@@ -22,6 +22,8 @@ import {
   type PluginPreview,
   type PluginState,
   type PluginPool,
+  type BrowserStatus,
+  type BrowserTask,
   type CoreInfo,
   type FileContent,
   type FileEntry,
@@ -665,6 +667,12 @@ function fakePlugins(): PluginState[] {
   const legacy = `${DATA_DIR}\\plugins\\pool-legacy\\installed.json`;
   return [
     {
+      ...base, id: 'jev-browser', name: 'Jev Browser', origin: 'recommended', version: null, availableVersion: '0.37.1', status: 'not-installed', source: null,
+      description: 'Delegate bounded browser tasks to Jev using the agent-browser native engine.', homepage: 'https://github.com/vercel-labs/agent-browser',
+      artifact: { url: 'https://github.com/vercel-labs/agent-browser/releases/download/v0.37.1/agent-browser-win32-x64.exe', sha256: '29a003139ff4eb96fa4d1ed341830b26eb3e082843bf776b4e88ad3443bb8fde' },
+      commands: ['agent-browser (native daemon, Jev browser tasks)'], pools: [], browser: { protocol: 'agent-browser-0.37' }
+    },
+    {
       ...base, id: 'kebacc-switcher', name: 'kebacc-switcher', origin: 'recommended',
       description: 'Save and switch Claude, Codex and Antigravity CLI logins, with quota readings for each saved account.',
       homepage: 'https://github.com/kebab1337420/kebacc-switch', version: null, availableVersion: '2.0.1', status: 'not-installed', source: null,
@@ -962,6 +970,7 @@ export class FakeClient implements ObservableClient {
   };
   #quotaEnabled: Record<string, boolean> = {};
   #plugins: PluginState[] = fakePlugins();
+  #browser: BrowserStatus = { config: { enabled: false, executablePath: null }, keyAvailable: true, tasks: [] };
   #pluginPools: Record<string, PluginPool[]> = fakePluginPools();
   #pluginPreviews = new Map<string, PluginPreview>();
   /** Bumped by cancel and uninstall, so a fake install in flight stops where it is. */
@@ -1217,6 +1226,29 @@ export class FakeClient implements ObservableClient {
 
   async #dispatch(method: RpcMethodName, rawParams: unknown): Promise<unknown> {
     switch (method) {
+      case 'browser.status': return structuredClone(this.#browser);
+      case 'browser.configure': {
+        this.#browser.config = structuredClone(rawParams as RpcParams<'browser.configure'>);
+        if (!this.#browser.config.enabled) for (const task of this.#browser.tasks) if (task.finishedAt === null) { task.status = 'cancelled'; task.message = 'The task was cancelled.'; task.finishedAt = Date.now(); this.#emit('browser.updated', structuredClone(task)); }
+        return structuredClone(this.#browser);
+      }
+      case 'browser.list': return structuredClone(this.#browser.tasks.filter(task => task.threadId === (rawParams as RpcParams<'browser.list'>).threadId));
+      case 'browser.start': {
+        const request = rawParams as RpcParams<'browser.start'>;
+        const plugin = this.#requirePlugin(request.pluginId);
+        if (!this.#browser.config.enabled || plugin.status !== 'installed' || !plugin.browser) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'Install the browser plugin and enable browser automation first.' });
+        const active = this.#browser.tasks.filter(task => task.finishedAt === null);
+        if (active.length >= 2 || active.some(task => task.threadId === request.threadId)) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'Wait for an active browser task or cancel it first.' });
+        const task: BrowserTask = { id: `browser-${Date.now()}`, threadId: request.threadId, pluginId: request.pluginId, goal: request.goal, url: request.url, status: 'running', step: 0, maxSteps: request.maxSteps ?? 20, startedAt: Date.now(), finishedAt: null, message: 'Starting the browser', inputTokens: 0 };
+        this.#browser.tasks.unshift(task); this.#emit('browser.updated', structuredClone(task)); return structuredClone(task);
+      }
+      case 'browser.cancel': {
+        const params = rawParams as RpcParams<'browser.cancel'>;
+        const task = this.#browser.tasks.find(task => task.id === params.id && task.threadId === params.threadId);
+        if (!task) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'browser task id must belong to the named thread' });
+        Object.assign(task, { status: 'cancelled', message: 'The task was cancelled.', finishedAt: Date.now() });
+        this.#emit('browser.updated', structuredClone(task)); return structuredClone(task);
+      }
       case 'quotas.configure': {
         const params = rawParams as RpcParams<'quotas.configure'>;
         this.#quotaEnabled[params.accountId] = params.enabled;
@@ -1229,6 +1261,7 @@ export class FakeClient implements ObservableClient {
       case 'plugins.add': return this.#addPlugin((rawParams as RpcParams<'plugins.add'>).previewId);
       case 'plugins.install': {
         const plugin = this.#requirePlugin((rawParams as RpcParams<'plugins.install'>).id);
+        if (this.#browser.tasks.some(task => task.pluginId === plugin.id && task.finishedAt === null)) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'Cancel this plugin\'s browser tasks before installing.' });
         if (plugin.status === 'installing') return structuredClone(plugin);
         if (plugin.status === 'rejected' && plugin.origin === 'url') {
           throw new RpcFailure({ code: RpcErrorCode.Refused, message: `${plugin.id} was refused (${plugin.rejected?.message ?? ''}). Remove it, then add it again from its URL.` });
@@ -1249,6 +1282,7 @@ export class FakeClient implements ObservableClient {
       }
       case 'plugins.uninstall': {
         const plugin = this.#requirePlugin((rawParams as RpcParams<'plugins.uninstall'>).id);
+        if (this.#browser.tasks.some(task => task.pluginId === plugin.id && task.finishedAt === null)) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'Cancel this plugin\'s browser tasks before uninstalling.' });
         if (plugin.status === 'installing') throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'Wait for the current plugin operation before uninstalling.' });
         this.#pluginRuns.set(plugin.id, (this.#pluginRuns.get(plugin.id) ?? 0) + 1);
         if (plugin.origin === 'url') return this.#dropPlugin(plugin);

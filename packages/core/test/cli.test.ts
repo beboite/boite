@@ -204,6 +204,14 @@ describe('from inside a turn', () => {
 });
 
 describe('access', () => {
+  test('browser commands preserve thread scope and validate the request through RPC', async () => {
+    expect(await boite(['browser', 'list', '--json'])).toMatchObject({ code: 0, err: '' });
+    const request = join(cwd, 'browser-task.json');
+    writeFileSync(request, JSON.stringify({ pluginId: 'jev-browser', url: 'file:///private', goal: 'Read', completion: { text: 'done' }, threadId: 'different' }));
+    const run = await boite(['browser', 'run', request]);
+    expect(run.code).toBe(1); expect(run.err).toContain('http or https URL');
+    expect((await boite(['browser', 'cancel', 'unknown'])).err).toContain('belong');
+  });
   test('another thread id is refused', async () => {
     // Inside a thread `--thread` is no way out to the owner's token in core.json.
     const run = await boite(['where', '--thread', 'thread_other']);

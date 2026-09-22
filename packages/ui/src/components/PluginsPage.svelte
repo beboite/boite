@@ -6,6 +6,7 @@
   import { fill, strings } from '../lib/strings';
   import { confirm } from '../lib/confirm.svelte';
   import QuotaList from './QuotaList.svelte';
+  import BrowserPlugin from './BrowserPlugin.svelte';
 
   let { store }: { store: Store } = $props();
   const t = strings.plugins;
@@ -224,6 +225,7 @@
     {#if plugin.error}<p class="bad" role="alert">{plugin.error}</p>{/if}
     {#if errors[plugin.id]}<p class="bad" role="alert">{errors[plugin.id]}</p>{/if}
     {#if plugin.rejected}{@render refusal(plugin.rejected)}{/if}
+    {#if plugin.status === 'installed' && plugin.browser}<BrowserPlugin {store} pluginId={plugin.id} />{/if}
     {#if plugin.status === 'installed' && plugin.pools.length > 0}
       <div class="pools">
         <div class="pools-head">

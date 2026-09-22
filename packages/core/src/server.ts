@@ -470,6 +470,7 @@ export function startServer(options: ServerOptions): RunningServer {
     const threadId = eventThreadId(payload);
     for (const connection of connections) {
       if (!connection.authenticated) continue;
+      if (name === 'browser.updated' && (connection.identity.principal === 'session' || connection.identity.principal === 'agent' && connection.identity.threadId !== threadId)) continue;
       if (name === 'collaboration.changed' && connection.identity.principal === 'agent' && connection.identity.threadId !== threadId) continue;
       if (name === 'collaboration.changed' && !connection.subscriptions.has(threadId ?? '')) continue;
       if (scoped && (threadId === null || !connection.subscriptions.has(threadId))) continue;

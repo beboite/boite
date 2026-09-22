@@ -107,8 +107,8 @@ describe('the plugin manifest', () => {
 });
 
 describe('the recommended list', () => {
-  test('kebacc-switcher is its one entry, with the release assets and digests it always had', () => {
-    expect(RECOMMENDED.map((manifest) => manifest.id)).toEqual(['kebacc-switcher']);
+  test('lists the pool and browser plugins with their pinned release assets', () => {
+    expect(RECOMMENDED.map((manifest) => manifest.id)).toEqual(['kebacc-switcher', 'jev-browser']);
     const kebacc = RECOMMENDED[0]!;
     expect(kebacc.version).toBe('2.0.1');
     expect(kebacc.executable).toBe('kebacc');

@@ -29,6 +29,11 @@ export function registerModules(core: Core): void {
   core.router.register('quotas.list', (params) => core.quotas.list(params.refresh));
   core.router.register('quotas.configure', (params) => core.quotas.configure(params.accountId, params.enabled));
   core.router.register('plugins.list', () => core.plugins.list());
+  core.router.register('browser.status', () => core.browser.status());
+  core.router.register('browser.configure', params => core.browser.configure(params));
+  core.router.register('browser.start', params => core.browser.start(params));
+  core.router.register('browser.list', params => core.browser.list(params.threadId));
+  core.router.register('browser.cancel', params => core.browser.cancel(params.threadId, params.id));
   core.router.register('plugins.inspect', (params) => core.plugins.inspect(params));
   core.router.register('plugins.add', (params) => core.plugins.add(params.previewId));
   core.router.register('plugins.install', (params) => core.plugins.install(params.id));

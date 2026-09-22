@@ -445,6 +445,7 @@ export class ThreadStore {
     // An archived thread is not coming back this minute: its warm process goes
     // now, and the commands that process listed go with it.
     if (archived) {
+      void this.core.browser.stopThread(threadId);
       this.core.scheduler.stop(threadId);
       releaseThread(threadId);
       this.commands.delete(threadId);

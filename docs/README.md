@@ -20,6 +20,7 @@
 - [Voice dictation](voice.md): local Whisper, API transcription and microphone access.
 - [Headless server](server.md): Docker, persistent storage and remote access.
 - [Plugins](plugins.md): recommended plugins, adding one from a git URL, and writing your own.
+- [Browser automation](browser-automation.md): Jev tasks, setup, completion checks and cancellation.
 
 ## Building and contributing
 

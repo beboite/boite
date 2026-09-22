@@ -1,0 +1,124 @@
+# Browser automation
+
+Jev Browser delegates a small browser task from a conversation. Boite runs
+the official agent-browser 0.37.1 binary as a persistent native daemon and
+sends its accessibility snapshots to TypeSafe's `jev-1.13.0` model. Jev
+chooses among observed controls; the native driver performs the action.
+The plugin uses no Playwright dependency and requires no upstream fork.
+
+## Setup
+
+1. Set `TYPESAFE_API_KEY` in the environment of the machine's core, then
+   restart the core. The Settings page reports whether the variable exists;
+   it never returns its value.
+2. Open Settings > Plugins and install Jev Browser. The existing plugin
+   installer checks the pinned SHA-256 before saving the native executable.
+3. Set an absolute browser executable path if agent-browser cannot find
+   Chromium on the host. Chrome, Edge and Chromium are supported by the
+   driver. No browser download or interactive login runs automatically.
+4. Enable browser automation and save. Disabling it cancels active tasks.
+
+These are host settings. A remote owner configures the connected machine,
+and paired devices cannot install or configure the plugin. Installing the
+plugin alone does not enable agent access.
+
+Every task owns a hidden, muted browser with a temporary profile. It does
+not attach to the panel WebView or an existing browser pool. Page content
+and supplied form values go to TypeSafe for the task. The browser process
+receives neither the API key nor the conversation's agent token.
+
+## Delegate a task
+
+Write a JSON file in the working directory, for example `browser-task.json`:
+
+```json
+{
+  "pluginId": "jev-browser",
+  "url": "https://example.org/preferences",
+  "goal": "Set Customer name to Ada, choose Weekly, enable Email updates and save once.",
+  "values": { "customer": "Ada", "frequency": "Weekly" },
+  "completion": { "text": "Saved preferences", "url": "https://example.org/preferences" },
+  "maxSteps": 20,
+  "timeoutMs": 120000
+}
+```
+
+```sh
+boite browser run browser-task.json --json
+boite browser list --json
+boite browser cancel <id>
+```
+
+The CLI supplies its thread id. Start returns immediately with a task id.
+Settings > Plugins displays recent tasks, progress, input token counts and
+Cancel. Agents can list and cancel only tasks from their own conversation.
+Archiving a conversation, removing its project or shutting down the core
+also cancels its tasks. Installation, update and uninstall wait until that
+plugin's active tasks have closed.
+
+`completion.text` is required and matched against rendered body text.
+`completion.url`, when present, must match exactly. A model's `done` answer
+cannot turn a missing completion condition into success. Choose a condition
+that proves the requested result: a generic "Saved" message does not prove
+which values were saved. Callers remain responsible for any stronger domain
+check, such as reading the saved record through the application's API.
+
+Results are `succeeded`, `needs-agent`, `error` or `cancelled`. A result needing
+the agent names the reason: step/time limit, missing evidence, page leaving
+the starting origin, or uncertain action delivery. The engine does not
+replay a failed action. A fresh task starts a new browser, so inspect an
+uncertain submission independently before resubmitting it.
+
+## Bounds
+
+The loop supports links, buttons, tabs, menu items, radio buttons, explicit
+checkbox states, text fields and selects. Text and select values must appear
+in `values`; Jev cannot generate them. At most eight named strings and 120
+candidate actions are accepted. Accessibility snapshots are limited to 24,000
+characters, with at most 12,000 characters of rendered page text alongside.
+
+Each decision uses a new snapshot and checks it again before acting. If the
+page changed, no action is sent for that decision. The next iteration reads
+the page again. Jev's choice confidence is not treated as a calibrated
+probability that a browser action is safe or correct.
+
+Defaults are 20 decisions and two minutes, with maxima of 60 decisions and
+five minutes. At most two tasks run on a host and one in a conversation.
+The last 100 task summaries stay in memory until the core restarts. The host
+does not retain the `values` dictionary or snapshots. Browser process groups appear in the trace as
+`browser:<task-id>`.
+
+This version does not automate native desktop applications, reuse login
+profiles, manage uploads/downloads or provide multi-tab workflows. It stops
+after observing navigation outside the starting origin. This is a task
+boundary, not a network filter. Iframes, complex widgets, authentication,
+anti-bot behavior and arbitrary real websites are not covered by the live
+fixture. Linux and macOS use the driver's Unix socket transport, but their
+browser execution and forced cleanup need platform verification. Windows
+owns the headless browser tree through the native driver's job object.
+
+## Protocol and verification
+
+The manifest declares `provides.browser.protocol: "agent-browser-0.37"`.
+The adapter requires a 0.37.x installed binary. It starts that binary through
+Boite's process registry with `AGENT_BROWSER_DAEMON=1`, an isolated socket
+directory and a dedicated session. One newline-delimited JSON connection
+carries the native commands. Heavy transport code loads on the first task.
+The daemon protocol is an upstream internal interface; a version upgrade
+must run the native integration test before changing the pinned manifest.
+
+```sh
+bun test packages/core/test/browser.test.ts packages/core/test/browser-rpc.test.ts
+bun test tests/e2e/plugins.test.ts
+```
+
+The paid test is opt-in. Set `BOITE_E2E_JEV=1`, `TYPESAFE_API_KEY` and
+`BOITE_BROWSER_TEST_BINARY` to the pinned native executable, then run
+`bun test tests/e2e/jev.test.ts`. It creates an isolated core and local form,
+asserts the exact backend record and single submission in English and French,
+follows a delayed control in an open shadow root, and checks normal and
+cancelled process cleanup. It does not use personal profiles or real service accounts.
+
+Upstream references: [agent-browser](https://github.com/vercel-labs/agent-browser),
+[daemon protocol at 0.37.1](https://github.com/vercel-labs/agent-browser/blob/v0.37.1/cli/src/native/daemon.rs),
+[TypeSafe models](https://docs.typesafe.ai/models).

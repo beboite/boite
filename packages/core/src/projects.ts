@@ -65,6 +65,7 @@ export class ProjectStore {
       const threads = this.core.journal.listThreads(projectId);
       for (const thread of threads) this.core.threads.archive(thread.id, true);
       await Promise.all(threads.map((thread) => this.core.scheduler.stopAndWait(thread.id)));
+      await Promise.all(threads.map((thread) => this.core.browser.stopThread(thread.id)));
       await Promise.all(threads.map((thread) => this.core.procs.stopAndWait(thread.id)));
       const threadIds = this.core.journal.append(
         { type: 'project.removed', threadId: null, version: 1, payload: { projectId } },

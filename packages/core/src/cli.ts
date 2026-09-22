@@ -31,6 +31,9 @@ export const USAGE = `usage: boite <command> [args] [--json]
   show <file>[:line]             open a file in the panel, at a line
   diff [file]                    open the changes, or one file's diff
   browse <url>                   open a url in the panel's browser
+  browser run <request.json>     delegate a bounded Jev browser task
+  browser list                  progress and results for this thread
+  browser cancel <id>           stop one browser task
   open trace|tasks|changes|files [dir]
   status                         git status of the working directory
   task list                      the agent's task list
@@ -192,6 +195,25 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
   };
 
   switch (command) {
+    case 'browser': {
+      const action = want(0, 'run, list or cancel');
+      if (action === 'list') {
+        const tasks = await client.call('browser.list', { threadId });
+        print(tasks.map(task => `${task.id} ${task.status} ${task.step}/${task.maxSteps} ${JSON.stringify(task.message)}`), tasks);
+      } else if (action === 'cancel') {
+        const task = await client.call('browser.cancel', { threadId, id: want(1, 'a task id') });
+        print([`id: ${task.id}`, `status: ${task.status}`], task);
+      } else if (action === 'run') {
+        const path = resolve(io.cwd, want(1, 'a JSON request file'));
+        const content = readFileSync(path, 'utf8');
+        if (content.length > 32_000) throw new Usage('browser request file must be at most 32 KB');
+        const request = JSON.parse(content) as Record<string, unknown>;
+        if (!request || typeof request !== 'object' || Array.isArray(request)) throw new Usage('browser request file must contain an object');
+        const task = await client.call('browser.start', { ...request, threadId } as import('@boite/contracts').BrowserRequest);
+        print([`id: ${task.id}`, `status: ${task.status}`, 'Use boite browser list to read progress.'], task);
+      } else throw new Usage(`unknown browser action ${action}`);
+      return;
+    }
     case 'agents': {
       const action = want(0, 'list, inbox, send or reply');
       if (action === 'list') {

@@ -217,7 +217,7 @@ describe('plugins from a git URL', () => {
     const dir = join(harness.dataDir, 'plugins', 'seat-pool');
     const record = JSON.parse(readFileSync(join(dir, 'installed.json'), 'utf8')) as { source: { commit: string } };
     expect(record.source.commit).toBe(repo.commit);
-    expect((await client.call('plugins.list', {})).map((plugin) => plugin.id)).toEqual(['kebacc-switcher', 'seat-pool']);
+    expect((await client.call('plugins.list', {})).map((plugin) => plugin.id)).toEqual(['kebacc-switcher', 'jev-browser', 'seat-pool']);
 
     // A preview is used once.
     await expect(client.call('plugins.add', { previewId: preview.previewId! })).rejects.toThrow('unknown or expired');
@@ -238,7 +238,7 @@ describe('plugins from a git URL', () => {
     const removed = await client.call('plugins.uninstall', { id: 'seat-pool' });
     expect(removed.status).toBe('not-installed');
     expect(existsSync(dir)).toBe(false);
-    expect((await client.call('plugins.list', {})).map((plugin) => plugin.id)).toEqual(['kebacc-switcher']);
+    expect((await client.call('plugins.list', {})).map((plugin) => plugin.id)).toEqual(['kebacc-switcher', 'jev-browser']);
     await expect(client.call('plugins.install', { id: 'seat-pool' })).rejects.toThrow('unknown plugin');
   }, 30_000);
 
@@ -324,7 +324,7 @@ describe('plugins from a git URL', () => {
     await waitFor(() => harness!.core.plugins.state('seat-pool').status !== 'installing');
     expect(harness.core.plugins.state('seat-pool')).toMatchObject({ status: 'installed', source: { commit: repo.commit } });
     await client.call('plugins.uninstall', { id: 'seat-pool' });
-    expect((await client.call('plugins.list', {})).map((plugin) => plugin.id)).toEqual(['kebacc-switcher']);
+    expect((await client.call('plugins.list', {})).map((plugin) => plugin.id)).toEqual(['kebacc-switcher', 'jev-browser']);
   }, 30_000);
 
   test('an installed.json the core no longer accepts is listed as rejected: it can be removed, never run', async () => {

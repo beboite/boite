@@ -31,12 +31,27 @@ function type(selector: string, value: string): void {
   flushSync();
 }
 
+test('browser plugin saves host settings and cancels a visible task', async () => {
+  await open();
+  await client!.call('plugins.install', { id: 'jev-browser' });
+  await vi.waitFor(() => expect(q('[data-testid="browser-enabled"]')).not.toBeNull(), { timeout: 3000 });
+  (q('[data-testid="browser-enabled"]') as HTMLInputElement).click();
+  type('[data-testid="browser-executable"]', '/browser/chromium');
+  q('[data-testid="browser-save"]')!.click();
+  await vi.waitFor(async () => expect((await client!.call('browser.status', {})).config).toEqual({ enabled: true, executablePath: '/browser/chromium' }));
+  const task = await client!.call('browser.start', { threadId: 't1', pluginId: 'jev-browser', url: 'https://example.org', goal: 'Save weekly notifications', completion: { text: 'Saved' } });
+  await vi.waitFor(() => expect(q('[data-testid="browser-task"]')?.textContent).toContain(task.goal));
+  q('[data-testid="browser-cancel"]')!.click();
+  await vi.waitFor(() => expect(q('[data-testid="browser-task"]')?.getAttribute('data-status')).toBe('cancelled'));
+  expect(q('[data-testid="browser-cancel"]')).toBeNull();
+});
+
 test('each section holds its plugins, every state drawn with what the owner can do next', async () => {
   await open();
   const installed = q('[data-testid="plugins-installed"]')!;
   const recommended = q('[data-testid="plugins-recommended"]')!;
   expect([...installed.querySelectorAll('[data-testid="plugin-row"]')].map((el) => el.getAttribute('data-plugin'))).toEqual(['grok-seats', 'pool-legacy', 'seat-pool']);
-  expect([...recommended.querySelectorAll('[data-testid="plugin-row"]')].map((el) => el.getAttribute('data-plugin'))).toEqual(['kebacc-switcher']);
+  expect([...recommended.querySelectorAll('[data-testid="plugin-row"]')].map((el) => el.getAttribute('data-plugin'))).toEqual(['jev-browser', 'kebacc-switcher']);
 
   expect(row('kebacc-switcher')?.querySelector('[data-testid="plugin-install"]')).not.toBeNull();
   expect(row('grok-seats')?.querySelector('[data-testid="plugin-progress"]')?.getAttribute('aria-valuenow')).toBe('45');

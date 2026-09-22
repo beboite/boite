@@ -336,10 +336,51 @@ export interface PluginArtifact {
   sha256: string;
 }
 
-/** What Boite does with the executable. Account pools are the one feature today. */
+/** What Boite does with the executable. */
 export interface PluginProvides {
   /** The executable answers the account pool commands for these providers. */
   accountPools?: { providers: ProviderId[] };
+  /** Versioned native daemon adapter. The host supplies the Jev decision loop. */
+  browser?: { protocol: 'agent-browser-0.37' };
+}
+
+export interface BrowserRequest {
+  threadId: ThreadId;
+  pluginId: string;
+  url: string;
+  goal: string;
+  /** Exact caller-supplied strings, keyed by their purpose. Jev cannot invent text. */
+  values?: Record<string, string>;
+  completion: { text: string; url?: string };
+  maxSteps?: number;
+  timeoutMs?: number;
+}
+
+export interface BrowserTask {
+  id: string;
+  threadId: ThreadId;
+  pluginId: string;
+  goal: string;
+  status: 'running' | 'succeeded' | 'needs-agent' | 'error' | 'cancelled';
+  step: number;
+  maxSteps: number;
+  startedAt: number;
+  finishedAt: number | null;
+  url: string;
+  message: string;
+  inputTokens: number;
+}
+
+export interface BrowserConfig {
+  enabled: boolean;
+  /** null lets agent-browser find its installed Chromium. Never a user profile. */
+  executablePath: string | null;
+}
+
+export interface BrowserStatus {
+  config: BrowserConfig;
+  keyAvailable: boolean;
+  tasks: BrowserTask[];
 }
 
 export interface PluginManifest {
@@ -398,6 +439,7 @@ export interface PluginState {
   commands: string[];
   /** The providers whose account pools the plugin serves. */
   pools: ProviderId[];
+  browser?: PluginProvides['browser'];
   /** Set exactly when `status` is `rejected`. */
   rejected: PluginRejected | null;
 }
@@ -1356,6 +1398,11 @@ export interface RpcMethods {
   'quotas.configure': { params: { accountId: AccountId; enabled: boolean }; result: AccountQuota[] };
   /** The recommended plugins, then every one installed from a URL, rejected ones included. */
   'plugins.list': { params: Record<string, never>; result: PluginState[] };
+  'browser.status': { params: Record<string, never>; result: BrowserStatus };
+  'browser.configure': { params: BrowserConfig; result: BrowserStatus };
+  'browser.start': { params: BrowserRequest; result: BrowserTask };
+  'browser.list': { params: { threadId: ThreadId }; result: BrowserTask[] };
+  'browser.cancel': { params: { threadId: ThreadId; id: string }; result: BrowserTask };
   /**
    * Fetches the repository at `ref` (default `HEAD`) and reads its manifest.
    * Downloads no artifact and runs nothing. https URLs only.
@@ -1724,6 +1771,7 @@ export interface RpcEvents {
   'quotas.updated': AccountQuota[];
   /** One plugin after any change. A `url` plugin that comes back `not-installed` is gone from the list. */
   'plugins.updated': PluginState;
+  'browser.updated': BrowserTask;
   /** A project `projects.add` created. A known path returns its project without one. */
   'project.added': Project;
   /** A project `projects.remove` deleted, after the `thread.removed` of each of its threads. */
