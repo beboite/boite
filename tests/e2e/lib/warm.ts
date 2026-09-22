@@ -15,11 +15,12 @@ process.env.NODE_ENV = 'test';
 const root = join(import.meta.dir, '../../../packages/ui');
 const { build, createServer } = await import(createRequire(join(root, 'package.json')).resolve('vite'));
 
-const port = await freePort();
-const server = await createServer({ root, server: { host: '127.0.0.1', port, strictPort: true }, clearScreen: false });
+// Without strictPort Vite moves to the next port if this one was taken since.
+const server = await createServer({ root, server: { host: '127.0.0.1', port: await freePort() }, clearScreen: false });
 await server.listen();
 try {
-  const base = `http://127.0.0.1:${port}`;
+  const base = server.resolvedUrls?.local[0]?.replace(/\/$/, '');
+  if (!base) throw new Error('the warm-up dev server reported no local URL');
   const entry = await fetch(`${base}/src/main.ts`);
   if (!entry.ok) throw new Error(`the dev server answered ${entry.status} for /src/main.ts`);
   const dep = /["'](\/node_modules\/\.vite\/deps\/[^"'?]+\.js\?v=[^"']+)["']/.exec(await entry.text())?.[1];
