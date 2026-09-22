@@ -178,7 +178,8 @@ function readCoreFile(path: string): CoreFile | undefined {
 async function healthy(port: number): Promise<boolean> {
   try {
     const response = await fetch(`http://127.0.0.1:${port}/health`, {
-      signal: AbortSignal.timeout(1_000),
+      // A freshly started core may still be probing providers on a busy runner.
+      signal: AbortSignal.timeout(5_000),
     });
     return response.ok;
   } catch {
