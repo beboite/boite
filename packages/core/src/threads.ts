@@ -479,11 +479,15 @@ export class ThreadStore {
     if (this.retitling.has(threadId)) {
       throw refused('a title is already being written for this thread', { threadId });
     }
-    const messages = this.core.journal.listMessages(threadId);
-    const first = messages.find((message) => message.role === 'user');
+    let first: Message | undefined;
+    let answer: Message | undefined;
+    for (const message of this.core.journal.walkMessages(threadId)) {
+      if (first === undefined && message.role === 'user') first = message;
+      if (answer === undefined && message.role === 'assistant' && textOf(message).length > 0) answer = message;
+      if (first !== undefined && answer !== undefined) break;
+    }
     if (first === undefined) throw refused('this thread has no prompt to write a title from', { threadId });
     const prompt = textOf(first);
-    const answer = messages.find((message) => message.role === 'assistant' && textOf(message).length > 0);
     const provider = this.core.providers.require(thread.providerId);
     const account = this.core.accounts.require(thread.accountId);
     const driver = getDriver(provider.protocol);
@@ -556,6 +560,7 @@ export class ThreadStore {
   }
 
   startTurn(threadId: ThreadId, prompt: string, attachments: Attachment[] = [], expectedSelectionVersion?: number, operation?: 'compact' | 'coordination', activity?: { kind: 'goal' | 'loop'; iteration: number }, clientRequestId?: string, previewReferences: PreviewReference[] = []): Turn {
+    if (this.core.stopping) throw refused('the core is stopping; reconnect before sending another prompt');
     const thread = this.require(threadId);
     checkAttachmentArray(attachments);
     const referenceError = previewReferencesError(previewReferences);

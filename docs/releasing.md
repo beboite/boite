@@ -4,7 +4,7 @@ From a clean tree to an installer. Every command below exists in the workspace
 `package.json` files and runs from the repository root.
 
 [CI and publication](ci.md) covers automated checks, draft releases, Docker
-images and the disabled nightly schedule.
+images and the daily nightly schedule.
 
 ## The order
 
@@ -77,6 +77,12 @@ guards are not implemented on Linux or macOS.
 On a normal quit, the POSIX shell gives the core three seconds to handle
 `SIGTERM`, stop its direct children and close the journal before forcing exit.
 
+The installed smoke test runs with a temporary home, outside the checkout and
+without Bun on PATH. Its echo turn executes `boite where` and checks the returned
+thread ID, covering the agent's PATH, executable permissions and the CLI's
+connection to the core. See [platform readiness](portability.md) for remaining
+Linux and macOS gaps.
+
 macOS requires 13.0 or newer. The bundle includes the JIT entitlements required
 by the [compiled Bun runtime](https://bun.sh/docs/bundler/executables).
 CI signs locally with an ad-hoc identity and starts that signed bundle. A public
@@ -120,21 +126,21 @@ tree instead.
 
 ## Channels
 
-A channel is one install of Boite. There are two, and they sit side by side on
-the same machine so the user can try a beta without losing the app they work in
-every day.
+Boite and boite de nuit are update tracks of the same installed application.
+They share `com.boite.two`, the Boite installer name and the `boite2` data
+directory. Nightly uses the alternate icon and displays boite de nuit in the
+window title and tray. The in-app channel selector downloads the selected
+track, including an older stable version when leaving nightly.
+[Desktop updates](updates.md) covers restart behavior and data compatibility.
 
-Three things differ, and nothing else:
+Boite Dev remains a separate development install. It uses `com.boite.two.dev`,
+the product name Boite Dev and `boite2-dev`, with no automatic app updates.
 
-- the bundle identifier, `com.boite.two` against `com.boite.two.dev`;
-- the product name, `Boite` against `Boite Dev`, which is the install directory,
-  the window title and the tray tooltip;
-- the data directory, `boite2` against `boite2-dev` under the same OS root.
-
-The two build commands:
+The build commands:
 
 ```bash
 bun run build:shell         # Boite, com.boite.two, boite2
+bun run build:shell:nightly # nightly overlay; CI stamps the nightly version
 bun run build:shell:dev     # Boite Dev, com.boite.two.dev, boite2-dev
 ```
 
@@ -161,7 +167,28 @@ the flag and the directory name.
 
 On Windows the WebView2 profile needs nothing: with no `BOITE_DATA_DIR` set the
 shell leaves it to Tauri, which puts it under `%LOCALAPPDATA%\<identifier>`, so
-the two channels already have one each.
+the regular install and Boite Dev already have one each. Stable and nightly
+share the regular WebView2 profile.
+
+## Signed update artifacts
+
+Release and nightly callers enable `BOITE_SIGN_UPDATES=1` and provide
+`TAURI_SIGNING_PRIVATE_KEY` through the CI secret. The Tauri wrapper adds
+`tauri.updater.conf.json`, which enables `createUpdaterArtifacts`, and refuses
+signing without a key. Normal local builds and PR verification remain unsigned.
+
+The public verification key is in `tauri.conf.json`. Keep the matching private
+key backed up outside the repository: replacing the public key strands clients
+that only trust the old one. No private key belongs in an artifact or Git.
+
+The Windows build uploads the installer and its `.sig`. Publication creates
+`latest.json` with the exact version, publication date, release notes, signature
+and immutable release download URL. Stable releases remain drafts until reviewed;
+nightlies publish automatically. Neither a draft nor an unsigned older release
+is offered by the desktop updater.
+
+These are Tauri updater signatures, not Windows Authenticode signatures. Public
+Linux and macOS update payloads are not published by these workflows yet.
 
 ## What the installer holds
 

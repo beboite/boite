@@ -16,9 +16,9 @@ beforeAll(async () => {
   await vite.listen();
 }, 90_000);
 afterAll(async () => {
-  for (const page of pages) await page.close();
+  await Promise.all(pages.map((page) => page.close()));
   await server?.close();
-});
+}, 15_000);
 
 const STORE = `(await import('/src/lib/workspace.svelte.ts')).workspace.active`;
 

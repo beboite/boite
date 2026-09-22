@@ -104,6 +104,7 @@ export class HarnessUpdates {
     this.closed = true;
     if (this.timer !== null) clearTimeout(this.timer);
     this.timer = null;
+    for (const id of this.entries.keys()) this.core.procs.killTree(updateThreadId(id));
   }
 
   async list(refresh = false): Promise<HarnessUpdate[]> {
@@ -112,6 +113,7 @@ export class HarnessUpdates {
   }
 
   check(): Promise<HarnessUpdate[]> {
+    if (this.closed || this.core.stopping) return Promise.reject(refused('the core is stopping; agent updates are closed'));
     this.checking ??= this.runCheck().finally(() => {
       this.checking = null;
     });
@@ -119,6 +121,7 @@ export class HarnessUpdates {
   }
 
   async update(providerId: ProviderId): Promise<HarnessUpdate> {
+    this.assertOpen();
     const target = this.targetOf(providerId);
     if (target === null) throw refused(`${providerId} has no update Boite can run on this machine`, { providerId });
     // A check in flight writes its reading when it lands: an update started under it
@@ -129,6 +132,7 @@ export class HarnessUpdates {
       await this.check();
       entry = this.entries.get(providerId);
     }
+    this.assertOpen();
     if (entry === undefined) throw notFound('provider update', providerId);
     if (entry.state === 'updating') throw refused(`${target.descriptor.name} is already updating`, { providerId });
     // An agent with no way to name its newest release is still updated on request:
@@ -190,6 +194,7 @@ export class HarnessUpdates {
     let deferred = false;
     try {
       await this.check();
+      if (this.closed || this.core.stopping) return;
       if (this.core.settings.get().autoUpdateHarnesses) {
         for (const update of this.snapshot()) {
           if (!update.pending) continue;
@@ -203,6 +208,7 @@ export class HarnessUpdates {
         }
       }
     } catch (error) {
+      if (this.closed || this.core.stopping) return;
       this.core.log('warn', `checking agent updates: ${error instanceof Error ? error.message : String(error)}`);
     }
     this.schedule(deferred ? BUSY_RETRY_MS : CHECK_EVERY_MS);
@@ -303,6 +309,7 @@ export class HarnessUpdates {
 
   /** One short run of the agent's own program, traced like every process of an agent. */
   private async run(target: Target, args: string[], timeoutMs: number): Promise<string> {
+    this.assertOpen();
     const command = resolveCommand(target.profile);
     if (command === null) throw new Error(`${target.descriptor.name} is not on this machine any more`);
     const spawned = this.core.procs.spawnPiped(updateThreadId(target.descriptor.id), command.executable, [...command.prefix, ...args], {
@@ -337,6 +344,7 @@ export class HarnessUpdates {
       if (target.route === 'managed') await this.runManaged(target);
       else await this.run(target, (target.profile.update as ProviderSelfUpdate).args, UPDATE_TIMEOUT_MS);
       const read = await this.read(target);
+      if (this.closed || this.core.stopping) return;
       const stuck = target.route === 'self' && before.current !== null && read.current === before.current && this.newer({ ...before, ...read });
       this.entries.set(id, {
         route: target.route,
@@ -372,9 +380,15 @@ export class HarnessUpdates {
   }
 
   private busyThreads(providerId: ProviderId): number {
-    return this.core.journal
+    const busy = new Set(this.core.journal
       .listThreads()
-      .filter((thread) => thread.providerId === providerId && ['queued', 'running', 'waiting'].includes(thread.status)).length;
+      .filter((thread) => thread.providerId === providerId && ['queued', 'running', 'waiting'].includes(thread.status))
+      .map(thread => thread.id));
+    // The picker changes the next turn, not the execution target already accepted.
+    for (const turn of this.core.journal.unfinishedTurns()) {
+      if (turn.execution?.providerId === providerId) busy.add(turn.threadId);
+    }
+    return busy.size;
   }
 
   private newer(entry: Pick<Entry, 'route' | 'current' | 'latest'>): boolean {
@@ -415,7 +429,12 @@ export class HarnessUpdates {
   }
 
   private emit(): void {
+    if (this.closed || this.core.stopping) return;
     this.core.bus.emit('providers.updatesChanged', this.snapshot());
+  }
+
+  private assertOpen(): void {
+    if (this.closed || this.core.stopping) throw refused('the core is stopping; agent updates are closed');
   }
 
   private readSkips(): Record<string, string> {

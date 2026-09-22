@@ -27,7 +27,7 @@ one stays open, which the nightly reservation and a manual release rely on.
 | UI files | Type checks, UI tests, desktop checks and Docker smoke tests |
 | Core, contracts, dependencies, shared build files, workflows, unknown paths | All checks, including core tests on Windows, Linux and macOS |
 | Version tag | Complete checks, then a draft Windows release |
-| Enabled nightly with an unpublished commit | Complete checks, development installer, development server image, prerelease |
+| Nightly with an unpublished commit | Complete checks, signed nightly installer, development server image, prerelease |
 
 Pull requests against any branch run CI. A newer commit cancels an older run of
 that same PR. New main commits also cancel superseded ordinary CI runs.
@@ -84,14 +84,10 @@ executable and never need a real CLI or login.
 
 ## boite de nuit
 
-The `boite de nuit` workflow has a daily schedule at 03:23 UTC and a manual
-`workflow_dispatch` entry. Both are gated by the repository variable
-`NIGHTLY_ENABLED`, which must equal `true`. It is disabled by default. No variable
-is created by this repository.
-
-To enable it later, set that variable in Settings, Secrets and variables,
-Actions, Variables. Remove it or set it to `false` to disable both entry points.
-Manual runs must target `main`.
+The `boite de nuit` workflow runs daily at 03:23 UTC and also accepts manual
+`workflow_dispatch` runs on `main`. Both entry points are enabled by default.
+Set the repository variable `NIGHTLY_ENABLED` to `false` to stop both entry
+points. Removing it or setting it to `true` enables them again.
 
 Before building, the workflow compares the selected commit with published
 nightly releases. An unchanged commit skips the expensive jobs. Failed builds
@@ -105,9 +101,10 @@ A failed build reuses that version on retry, even on a later day. A reserved tag
 alone is not a successful release. The installer and core carry the nightly
 version through temporary build inputs; source manifests keep their version.
 
-The desktop uses the development identifier and data directory, shared with
-local Boite Dev builds and separate from stable Boite. The server uses the `dev`
-channel. Use a separate Compose project for nightly volumes. Nightly publication
+The desktop shares Boite's identifier, installation and data directory, allowing
+the in-app update selector to move between stable and nightly. Local Boite Dev
+builds remain isolated. The server uses the `dev` channel; use a separate Compose
+project for nightly volumes. Nightly publication
 never changes the stable Docker `latest` tag or GitHub's latest stable release.
 Nightly verification skips the stable Docker job. Its publication job builds,
 smoke-tests and pushes the development image once per architecture after the
@@ -145,10 +142,21 @@ A `v<version>` tag must match all package manifests, Cargo and the Tauri config.
 Alternatively, manually run `release` on the branch or commit to publish: it
 uses the version already in the manifests and creates its tag after the checks.
 Neither entry point increments the version automatically.
-The release workflow runs the complete CI and attaches the tested installer and
-`SHA256SUMS.txt` to a draft. A maintainer reviews and publishes that draft.
-Installers are currently unsigned; checksums detect corruption, not publisher
-identity. No updater signature is implied by these files.
+The release workflow runs the complete CI and attaches the tested installer,
+its updater `.sig`, `latest.json` and `SHA256SUMS.txt` to a draft. A maintainer
+reviews and publishes that draft. The nightly publishes the same signed update
+artifacts as a prerelease after its checks pass.
+
+Only release callers set the reusable CI's `sign-updates` input and inherit the
+`TAURI_SIGNING_PRIVATE_KEY` secret. Ordinary PR builds require no signing key.
+The build refuses an empty key when signing is requested. The Tauri updater
+overlay generates signatures without recompiling the tested installer in the
+publication job. `scripts/ci/updater-manifest.ts` requires exactly one installer
+and its signature, and binds its URL to the reserved version tag.
+
+Updater signatures authenticate the payload to Boite. They are separate from
+Windows Authenticode signing: the shell installer still has no Authenticode
+publisher certificate. The bundled Bun runtime retains its own signature.
 
 Publishing a release starts `publish server`. It requires a successful release
 workflow on that exact commit before building and testing both architectures.

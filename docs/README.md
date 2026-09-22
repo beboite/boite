@@ -2,6 +2,7 @@
 
 ## Using boite
 
+- [Desktop updates](updates.md): Boite, boite de nuit, downloads and restarting.
 - [The tour](onboarding.md): the first launch, and what it sets up.
 - [Language](language.md): English and French, and where the sentences live.
 - [Accounts](accounts.md): agent logins and isolated accounts.
@@ -29,6 +30,7 @@
 - [Architecture](architecture.md): the core, clients, journal and drivers.
 - [Providers](providers.md): descriptors, protocols and supported capabilities.
 - [Process tracing](trace.md): resource use and platform limits.
+- [Platform readiness](portability.md): Linux and macOS checks and remaining desktop gaps.
 - [Performance](performance.md): what a remote client is sent, startup, and the benches that measure both.
 - [CI](ci.md): checks, caching, nightly builds and image publication.
 - [Releasing](releasing.md): installers, channels and versioning.

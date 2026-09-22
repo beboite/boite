@@ -64,6 +64,7 @@ export class AgentTokens {
 export function agentEnvFor(
   base: Record<string, string | undefined>,
   fields: { threadId: ThreadId; coreUrl: string; token: string; cliDir: string | null },
+  platform: NodeJS.Platform = process.platform,
 ): Record<string, string | undefined> {
   const env: Record<string, string | undefined> = {
     ...base,
@@ -72,7 +73,9 @@ export function agentEnvFor(
     [AGENT_ENV.token]: fields.token,
   };
   if (fields.cliDir === null) return env;
-  const key = Object.keys(env).find((name) => name.toLowerCase() === 'path') ?? 'PATH';
+  const key = platform === 'win32'
+    ? Object.keys(env).find((name) => name.toLowerCase() === 'path') ?? 'PATH'
+    : 'PATH';
   const current = env[key] ?? '';
   if ((current.split(delimiter)[0] ?? '') === fields.cliDir) return env;
   env[key] = current.length === 0 ? fields.cliDir : `${fields.cliDir}${delimiter}${current}`;

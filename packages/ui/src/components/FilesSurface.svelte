@@ -211,7 +211,7 @@
 </script>
 
 <div class="files-surface" data-testid="files-panel" data-path={surface.path ?? ''}>
-  <div class="bar">
+  <div class="panel-toolbar">
     <span class="root" title={store.openThread?.cwd ?? ''} data-testid="files-root">
       <FolderTree size={13} strokeWidth={1.75} />
       {rootName}
@@ -325,23 +325,12 @@
     height: 100%;
   }
 
-  .bar {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    height: var(--row);
-    padding: 0 6px 0 12px;
-    flex: none;
-    font-size: var(--text-xs);
-    color: var(--color-muted-foreground);
-  }
-
   .root {
     display: inline-flex;
     align-items: center;
     gap: 4px;
     min-width: 0;
-    flex: none;
+    flex: 0 1 auto;
     color: var(--color-foreground);
     overflow: hidden;
     text-overflow: ellipsis;
@@ -359,14 +348,14 @@
     flex: 0 1 auto;
     height: var(--control-sm);
     padding: 0 8px;
-    font-size: var(--text-xs);
+    font-size: var(--text-sm);
   }
 
   .tree {
     flex: 1;
     min-height: 0;
     overflow: auto;
-    padding: 2px 6px 8px;
+    padding: 6px;
   }
 
   .row {
@@ -374,19 +363,20 @@
     align-items: center;
     gap: 4px;
     width: 100%;
-    height: var(--control-sm);
+    height: var(--row);
     /* The depth is an indent, not a nested box: every row scrolls as one line. */
     padding: 0 6px 0 calc(6px + var(--depth) * 12px);
     border: none;
     border-radius: var(--radius-sm);
     background: transparent;
     color: var(--color-muted-foreground);
-    font-size: var(--text-xs);
+    font-size: var(--text-sm);
     font-weight: 400;
     text-align: left;
   }
 
-  .row:hover:not(:disabled) {
+  .row:hover:not(:disabled),
+  .row:focus-visible {
     background: var(--color-hover);
   }
 
@@ -451,7 +441,7 @@
   .notice,
   .footer {
     margin: 0;
-    font-size: var(--text-xs);
+    font-size: var(--text-sm);
     color: var(--color-muted-foreground);
   }
 
@@ -468,5 +458,9 @@
     flex: none;
     padding: 6px 12px 8px;
     border-top: 1px solid var(--color-border);
+  }
+
+  @media (max-width: 720px) {
+    .filter { font-size: var(--text-md); }
   }
 </style>
