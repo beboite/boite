@@ -443,7 +443,7 @@
         <button class="refresh" type="button" data-testid="picker-refresh" aria-label={strings.composer.refreshModels} title={strings.composer.refreshModels} disabled={probing || needsInstall} onclick={() => void refreshModels()}><RefreshCw size={14} class={probing ? 'spin' : ''} /></button>
       {/if}
       <div class="column rail">
-        <button type="button" class="tile" class:current={favoritesOpen} role="menuitem" data-row data-provider="favorites" title={strings.composer.favorites} aria-label={strings.composer.favorites} onclick={() => { favoritesOpen = true; modelQuery = ''; }}><Star size={18} /></button>
+        <button type="button" class="tile" class:current={favoritesOpen} role="menuitem" data-row data-provider="favorites" title={strings.composer.favorites} aria-label={strings.composer.favorites} onclick={() => { favoritesOpen = true; modelQuery = ''; }}><Star size={24} /></button>
         {#each tiles as tile (tile.provider.id)}
           <button
             type="button"
@@ -458,7 +458,7 @@
             aria-label={tile.provider.name}
             onclick={() => pickTile(tile)}
           >
-            <ProviderLogo providerId={tile.provider.id} size={18} />
+            <ProviderLogo providerId={tile.provider.id} size={28} />
           </button>
         {/each}
       </div>
@@ -666,7 +666,7 @@
     position: fixed;
     z-index: 40;
     display: grid;
-    grid-template-columns: calc(var(--control-lg) + 28px) minmax(0, 1fr);
+    grid-template-columns: calc(var(--control-lg) + 20px) minmax(0, 1fr);
     width: min(440px, calc(100vw - 32px));
     height: 360px;
     max-height: min(360px, 45dvh);
@@ -698,7 +698,8 @@
 
   .rail {
     align-items: center;
-    gap: 4px;
+    gap: 2px;
+    padding: 4px;
     background: var(--color-surface);
   }
 
@@ -738,7 +739,7 @@
 
   .models > * { flex-shrink: 0; }
   .main-models { grid-area: 1 / 2 / 3 / 3; overflow: hidden; padding: 0; gap: 0; border-left: 1px solid var(--color-border); }
-  .main-models .head { flex-direction: column; align-items: stretch; gap: 6px; height: calc(var(--control-sm) + 56px); padding: 10px 12px; border-bottom: 1px solid var(--color-border); }
+  .main-models .head { flex-direction: column; align-items: stretch; gap: 6px; padding: 10px 12px; border-bottom: 1px solid var(--color-border); }
   .model-list { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; touch-action: pan-y; padding: 6px; }
   .rail { grid-area: 1 / 1; }
   .refresh { grid-area: 2 / 1; align-self: end; justify-self: center; margin: 6px; position: relative; z-index: 3; display: grid; place-items: center; width: var(--control-lg); height: var(--control-lg); padding: 0; border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface); color: var(--color-muted-foreground); }
