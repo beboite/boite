@@ -373,6 +373,19 @@ are the ones a worktree can actually change. Check where a file you are about to
 edit really lives before editing it.
 
 
+## UI spacing and motion
+
+Settings pages share their width and card padding through `--settings-width`
+and `--settings-padding` in `app.css`. A page that wraps its cards for a loading
+state uses `settings-stack` on that wrapper. This keeps its cards on the same
+spacing rules as direct children of a settings page.
+
+Native `details.disclosure` sections animate their height in browsers that
+support intrinsic-size transitions, with an immediate fallback elsewhere.
+Task sections use a grid fold and become inert while collapsed. Both read the
+shared motion durations, including the reduced-motion override. The Usage and
+panel end-to-end tests cover card spacing, folded drafts and phone controls.
+
 ## Chat readability
 
 `bun test tests/e2e/readability.test.ts` checks the sidebar metadata, process

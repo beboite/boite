@@ -122,9 +122,9 @@
 
 <div class="page usage" data-testid="usage-page">
   <header>
-    <h1>{strings.usage.heading}</h1>
+    <div><h1>{strings.usage.heading}</h1>
+      <p>{strings.usage.intro} {strings.usage.note}</p></div>
   </header>
-  <p class="note">{strings.usage.intro} {strings.usage.note}</p>
 
   <div class="filters">
     <div class="segmented" role="group" aria-label={strings.usage.range}>
@@ -150,7 +150,7 @@
     <p class="failure" role="alert">{fill(strings.usage.failed, { error: failure })}</p>
   {/if}
 
-  <div class="body" class:stale={loading && view !== null} aria-busy={loading}>
+  <div class="body settings-stack" class:stale={loading && view !== null} aria-busy={loading}>
     {#if view === null}
       <section class="card"><p class="muted">{strings.usage.loading}</p></section>
     {:else}
@@ -283,13 +283,12 @@
 {/snippet}
 
 <style>
-  .usage .note { max-width: 720px; }
-  .filters { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; max-width: 720px; margin-bottom: 12px; }
+  .filters { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; max-width: var(--settings-width); margin-bottom: 20px; }
   .refresh { margin-left: auto; width: var(--control); height: var(--control); padding: 0; }
   .refresh :global(.spinning) { animation: spin 900ms linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
-  .failure { max-width: 720px; margin: 0 0 12px; color: var(--color-danger); font-size: var(--text-sm); }
-  .body { transition: opacity var(--dur-2) var(--ease-out-quint); }
+  .failure { max-width: var(--settings-width); margin: 0 0 12px; color: var(--color-danger); font-size: var(--text-sm); }
+  .body { max-width: var(--settings-width); transition: opacity var(--dur-2) var(--ease-out-quint); }
   .body.stale { opacity: 0.6; }
 
   /* The options in one track, the chosen one filled like a primary button. */
@@ -310,21 +309,22 @@
   .value { font-variant-numeric: tabular-nums; font-weight: 600; text-align: right; }
   .share { font-variant-numeric: tabular-nums; color: var(--color-muted-foreground); text-align: right; }
   .bar { display: block; height: 4px; border-radius: 2px; background: var(--color-surface-3); overflow: hidden; }
-  .bar span { display: block; height: 100%; border-radius: 2px; }
+  .bar span { transition: width var(--dur-3) var(--ease-out-quint); display: block; height: 100%; border-radius: 2px; }
 
   .legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 10px 0 0; padding: 0; list-style: none; font-size: var(--text-sm); color: var(--color-muted-foreground); }
   .legend li { display: inline-flex; align-items: center; gap: 6px; }
 
-  .card-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+  .card-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 18px; flex-wrap: wrap; }
   .card-head h2 { margin: 0; }
+  .breakdown .card-head h2 { margin-bottom: 0; }
   .breakdown { container-type: inline-size; }
-  .table { overflow-x: auto; margin: 0 -16px -14px; border-radius: 0 0 var(--radius-lg) var(--radius-lg); }
+  .table { overflow-x: auto; margin: 0 calc(-1 * var(--settings-padding)) calc(-1 * var(--settings-padding)); border-radius: 0 0 var(--radius-lg) var(--radius-lg); }
   /* Ninety days is ninety rows: the day view scrolls under its sticky header. */
   .table.scroll { max-height: 420px; overflow-y: auto; }
   table { font-size: var(--text-sm); }
   th { position: sticky; top: 0; z-index: 1; background: var(--color-surface); }
-  th:first-child, td:first-child { padding-left: 16px; }
-  th:last-child, td:last-child { padding-right: 16px; }
+  th:first-child, td:first-child { padding-left: var(--settings-padding); }
+  th:last-child, td:last-child { padding-right: var(--settings-padding); }
   .num { text-align: right; font-variant-numeric: tabular-nums; }
   td.muted { font-size: var(--text-sm); }
   .who { display: flex; align-items: center; gap: 10px; white-space: normal; }

@@ -105,6 +105,8 @@
   --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m9 18 6-6-6-6'/%3E%3C/svg%3E");
   --input: 34px;
   --touch-target: 44px;
+  --settings-width: 880px;
+  --settings-padding: 24px;
 
   --dur-1: 90ms;
   --dur-2: 150ms;
@@ -442,6 +444,49 @@ details.disclosure[open] > summary::before {
   transform: rotate(90deg);
 }
 
+/* Native details retain their keyboard and accessibility behavior. Browsers
+   without intrinsic-size transitions keep the ordinary instant disclosure. */
+@supports (interpolate-size: allow-keywords) {
+  details.disclosure::details-content {
+    interpolate-size: allow-keywords;
+    height: 0;
+    overflow: clip;
+    opacity: 0;
+    transition: height var(--dur-3) var(--ease-out-quint),
+      opacity var(--dur-2) var(--ease-out-quint),
+      content-visibility var(--dur-3) allow-discrete;
+  }
+
+  details.disclosure[open]::details-content {
+    height: auto;
+    opacity: 1;
+  }
+}
+
+.disclosure-fold {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition: grid-template-rows var(--dur-3) var(--ease-out-quint),
+    opacity var(--dur-2) var(--ease-out-quint);
+}
+
+.disclosure-fold.open { grid-template-rows: 1fr; opacity: 1; }
+.disclosure-fold > .disclosure-clip { min-height: 0; overflow: hidden; }
+
+/* File and change panels share a toolbar and readable list density. */
+.panel-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: calc(var(--control-sm) + 16px);
+  padding: 8px 12px;
+  flex: none;
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-muted-foreground);
+  font-size: var(--text-sm);
+}
+
 /* ------------------------------------------------------------------------- */
 /* Text and surfaces                                                          */
 /* ------------------------------------------------------------------------- */
@@ -562,7 +607,7 @@ tr:last-child td {
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
-  max-width: 880px;
+  max-width: var(--settings-width);
   margin-bottom: 28px;
 }
 
@@ -584,9 +629,10 @@ tr:last-child td {
 }
 
 .settings .page > .card,
-.settings .page > form > .card {
-  max-width: 880px;
-  padding: 24px;
+.settings .page > form > .card,
+.settings .page > .settings-stack > .card {
+  max-width: var(--settings-width);
+  padding: var(--settings-padding);
   margin-bottom: 20px;
   box-shadow: none;
   scroll-margin-top: 24px;
@@ -626,7 +672,7 @@ tr:last-child td {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  max-width: 880px;
+  max-width: var(--settings-width);
   margin: 36px 0 14px;
   scroll-margin-top: 24px;
 }
@@ -939,16 +985,16 @@ html[data-glass] .composer {
 }
 
 [data-accent-swatch] { --color-accent: oklch(68% 0.19 var(--accent-hue)); }
-.settings input[type=checkbox][role=switch] { appearance: none; position: relative; flex: 0 0 40px; width: 40px; height: 24px; min-height: 24px; padding: 0; margin: 0; border: 1px solid var(--color-edge); border-radius: 999px; background: var(--color-surface-3); cursor: pointer; transition: background var(--dur-2), border-color var(--dur-2); }
-.settings input[type=checkbox][role=switch]::after { content: ''; position: absolute; width: 16px; height: 16px; top: 3px; left: 3px; border-radius: 50%; background: var(--color-muted-foreground); transition: transform var(--dur-2) var(--ease-out-quint); }
-.settings input[type=checkbox][role=switch]:checked { background: var(--color-foreground); border-color: var(--color-foreground); }
-.settings input[type=checkbox][role=switch]:checked::after { transform: translateX(16px); background: var(--color-background); }
-.settings input[type=checkbox][role=switch]:focus-visible { outline: 2px solid var(--color-foreground); outline-offset: 4px; }
-.settings input[type=checkbox][role=switch]:disabled { opacity: .45; cursor: not-allowed; }
+input[type=checkbox][role=switch] { appearance: none; position: relative; flex: 0 0 40px; width: 40px; height: 24px; min-height: 24px; padding: 0; margin: 0; border: 1px solid var(--color-edge); border-radius: 999px; background: var(--color-surface-3); cursor: pointer; transition: background var(--dur-2), border-color var(--dur-2); }
+input[type=checkbox][role=switch]::after { content: ''; position: absolute; width: 16px; height: 16px; top: 3px; left: 3px; border-radius: 50%; background: var(--color-muted-foreground); transition: transform var(--dur-2) var(--ease-out-quint); }
+input[type=checkbox][role=switch]:checked { background: var(--color-foreground); border-color: var(--color-foreground); }
+input[type=checkbox][role=switch]:checked::after { transform: translateX(16px); background: var(--color-background); }
+input[type=checkbox][role=switch]:focus-visible { outline: 2px solid var(--color-foreground); outline-offset: 4px; }
+input[type=checkbox][role=switch]:disabled { opacity: .45; cursor: not-allowed; }
 @media (max-width: 720px) {
   .mobile-sheet-backdrop { position: fixed; inset: 0; width: 100%; height: 100%; max-width: none; max-height: none; margin: 0; padding: 0; border: 0; border-radius: 0; background: var(--color-scrim); }
   [data-mobile-sheet='true'] { position: fixed !important; box-sizing: border-box; overflow-y: auto; overscroll-behavior: contain; border-radius: var(--radius-xl) !important; padding-bottom: max(12px, env(safe-area-inset-bottom)); }
-  :root { --control: var(--touch-target); --control-sm: var(--touch-target); --input: var(--touch-target); --row: var(--touch-target); }
+  :root { --settings-padding: 18px; --control: var(--touch-target); --control-sm: var(--touch-target); --input: var(--touch-target); --row: var(--touch-target); }
   input, textarea { font-size: var(--text-md); }
   button.icon { min-width: var(--touch-target); min-height: var(--touch-target); }
   .composer-wrap { padding-bottom: max(10px, env(safe-area-inset-bottom)); }
@@ -962,5 +1008,5 @@ html[data-glass] .composer {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .settings input[type=checkbox][role=switch], .settings input[type=checkbox][role=switch]::after { transition: none; }
+  input[type=checkbox][role=switch], input[type=checkbox][role=switch]::after { transition: none; }
 }

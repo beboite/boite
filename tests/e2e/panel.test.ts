@@ -90,12 +90,30 @@ test('the panel opens on its launcher, and the workbench surfaces fit both width
   await page.waitFor(`document.querySelectorAll('${id('todo-row')}').length === 3`);
   await page.waitFor(`document.querySelectorAll('${id('agent-task')}').length === 3`);
   expect(await page.evaluate(`document.querySelectorAll('${id('panel-tab')}').length`)).toBe(2);
+  // Closing preserves the body during its transition and removes its controls
+  // from keyboard navigation immediately; reopening keeps the draft intact.
+  await page.type(id('todo-input'), 'Keep this draft while folded');
+  await page.click(id('tasks-section-todos'));
+  expect(await page.evaluate(`document.querySelector('${id('todo-input')}').closest('[inert]') !== null`)).toBe(true);
+  await page.waitFor(`document.querySelector('${id('todo-input')}').closest('[inert]').getBoundingClientRect().height < 1`);
+  await page.click(id('tasks-section-todos'));
+  await page.waitFor(`!document.querySelector('${id('todo-input')}').closest('[inert]')`);
+  expect(await page.evaluate(`document.querySelector('${id('todo-input')}').value`)).toBe('Keep this draft while folded');
+  await page.type(id('todo-input'), '');
+  await page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
+  await page.click(id('tasks-section-todos'));
+  await page.waitFor(`document.querySelector('${id('todo-input')}').closest('[inert]').getBoundingClientRect().height < 1`);
+  expect(await page.evaluate(`parseFloat(getComputedStyle(document.querySelector('${id('todo-input')}').closest('[inert]')).transitionDuration) < 0.001`)).toBe(true);
+  await page.click(id('tasks-section-todos'));
+  await page.send('Emulation.setEmulatedMedia', { features: [] });
   await capture('tasks-desktop.png');
 
   await phone(true);
   await page.waitFor(`document.querySelector('${id('tasks-panel')}')`);
   await capture('tasks-phone.png');
   expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
+  expect(await page.evaluate(`Array.from(document.querySelectorAll('${id('todo-row')} button')).every(button => getComputedStyle(button).opacity === '1' && button.getBoundingClientRect().height >= 44)`)).toBe(true);
+  expect(await page.evaluate(`Array.from(document.querySelectorAll('${id('todo-row')} .text')).every(text => getComputedStyle(text).whiteSpace !== 'nowrap')`)).toBe(true);
 
   await page.click(`${id('panel-tab')}[data-kind=changes]`);
   await page.waitFor(`document.querySelector('${id('changes-panel')}')`);

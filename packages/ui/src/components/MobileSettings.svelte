@@ -30,6 +30,7 @@
 
 <!-- `settings` gives the detail pages the same grammar as the desktop ones. -->
 <div class="mobile-settings settings" data-testid="settings">
+  {#key page}
   {#if page === 'home'}
     <div class="home" data-testid="mobile-settings-home">
       <h1>{strings.settings.heading}</h1>
@@ -88,11 +89,12 @@
       {/if}
     </div>
   {/if}
+  {/key}
 </div>
 
 <style>
   .mobile-settings { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
-  .home, .detail { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+  .home, .detail { animation: fade var(--dur-2) var(--ease-out-quint); min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
   .home { padding: 20px 16px; }
   h1 { font-size: var(--text-lg); margin: 0; }
   section { margin-top: 28px; }
@@ -115,6 +117,8 @@
   .phone-page :global(.card) { padding: 18px; }
   .detail :global(.page), .detail :global(.machines-page) { padding: 16px; }
   /* The bar above already names the page, so its own title steps aside. */
-  .detail :global(.page > header), .detail :global(.machines-page > .head h1) { display: none; }
+  .detail :global(.page:not(.machines-page):not(.usage) > header),
+  .detail :global(.machines-page > .head h1),
+  .detail :global(.usage > header h1) { display: none; }
   .detail :global(.switch-row) { flex-wrap: wrap; gap: 12px; }
 </style>
