@@ -29,7 +29,22 @@ memory only, and closing that tab asks first. An image opens fitted to the panel
 around the pointer, a drag pans, the bar has fit, 100% and the zoom steps, and
 the checkerboard behind it tells transparency from white. A video or a sound
 uses the native player over the ticketed file route below. Anything else is a
-size and a download link.
+size and a download link. A text file downloads too, as the editor shows it,
+unsaved edits included.
+
+## Files from an answer
+
+A finished turn that wrote files ends with a card listing them: new, changed
+or deleted, read from the diff documents Claude and ACP agents attach, from a
+Codex patch's `changes`, or from a write or edit call's path. A call that
+failed or was denied lists nothing. `lib/turn-files.ts` does the reading.
+
+A row opens its file in a File tab, which is how a phone gets at the file and
+its download. In the shell on its own core, `Show in folder` hands the path to
+the system file manager through the opener plugin's `reveal_item_in_dir`,
+selected and never opened: a program an agent wrote is not run from here. A
+file outside the thread's directory shows without the open action, since
+`files.read` stays inside it.
 
 Captures: [changes](images/panel-changes-desktop.png) · [files](images/panel-files-desktop.png) · [editor](images/panel-file-text-desktop.png) · [picture, zoomed](images/panel-file-image-zoomed.png) · [video](images/panel-cli-video.png) · [tasks](images/panel-tasks-desktop.png) · [changes at phone width](images/panel-changes-phone.png) · [editor at phone width](images/panel-file-text-phone.png)
 

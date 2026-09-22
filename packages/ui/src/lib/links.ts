@@ -23,6 +23,18 @@ export async function openExternal(url: string): Promise<void> {
 }
 
 /**
+ * Shows a file in the system file manager, selected. Only the shell on its own
+ * core can: the path is on this computer, and the opener plugin allows this
+ * one command. Nothing is opened or run, so a file an agent wrote cannot
+ * execute through here.
+ */
+export async function revealFile(path: string): Promise<void> {
+  if (!insideTauri()) throw new Error('showing a file in its folder needs the desktop app');
+  const { revealItemInDir } = await import('@tauri-apps/plugin-opener');
+  await revealItemInDir(path);
+}
+
+/**
  * One capture-phase listener on the app root for every `http(s)` link the UI
  * shows, the markdown answers and the account login link included. A modified
  * click (ctrl, shift, meta or the middle button) is left to the browser, and so

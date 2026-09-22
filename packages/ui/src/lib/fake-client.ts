@@ -1765,6 +1765,8 @@ const ready = true;
       await this.#runTool(thread, message);
     }
     if (!record.cancelled && prompt.includes('[diff]')) {
+      // The edit lands in the working tree, so the file it names opens.
+      this.#files.set(DIFF_PATH, DIFF_NEW);
       await this.#documentTool(thread, message, 'Edit', { file_path: DIFF_PATH }, 'edited 1 file', [
         { kind: 'diff', path: DIFF_PATH, oldText: DIFF_OLD, newText: DIFF_NEW }
       ]);

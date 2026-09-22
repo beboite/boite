@@ -519,6 +519,13 @@ export const fr: Messages = {
       other: 'Utiliser son outil {tool}'
     },
     permissionTechnical: 'Détails techniques',
+    turnFiles: 'Fichiers de cette réponse',
+    fileCreated: 'Nouveau',
+    fileChanged: 'Modifié',
+    fileDeleted: 'Supprimé',
+    openFile: 'Ouvrir {name}',
+    revealFile: 'Afficher dans le dossier',
+    revealFailed: "Le dossier n'a pas pu s'ouvrir : {reason}",
     allow: 'Autoriser',
     deny: 'Refuser',
     allowed: 'Autorisé',

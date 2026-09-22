@@ -22,6 +22,8 @@
   import Prose from './Prose.svelte';
   import ThinkingPart from './ThinkingPart.svelte';
   import TurnSummary from './TurnSummary.svelte';
+  import TurnFiles from './TurnFiles.svelte';
+  import { turnFiles, type TurnFile } from '../lib/turn-files';
   import { promptCommand, promptText } from '../lib/message-display';
   import ToolCard from './ToolCard.svelte';
   import MessageOutline from './MessageOutline.svelte';
@@ -531,6 +533,23 @@
     return result;
   });
   const responded = $derived(new Set(messages.filter(m => m.role === 'assistant' && m.parts.some(p => p.type === 'text' || p.type === 'thinking' ? p.text.length > 0 : true)).map(m => m.turnId)));
+  /** What each finished turn wrote, shown once at its end; a turn still running is left alone. */
+  const filesByTurn = $derived.by(() => {
+    const thread = store.openThread;
+    const result = new Map<string, TurnFile[]>();
+    if (!thread || thread.id !== threadId) return result;
+    const parts = new Map<string, Message['parts']>();
+    for (const message of messages) {
+      if (message.role !== 'assistant') continue;
+      parts.set(message.turnId, [...(parts.get(message.turnId) ?? []), ...message.parts]);
+    }
+    for (const turn of thread.turns) {
+      if (turn.status === 'running' || turn.status === 'queued') continue;
+      const files = turnFiles(parts.get(turn.id) ?? [], thread.cwd);
+      if (files.length > 0) result.set(turn.id, files);
+    }
+    return result;
+  });
   const lastInTurn = $derived.by(() => {
     const result = new Map<string, string>();
     for (const message of messages) result.set(message.turnId, message.id);
@@ -697,6 +716,9 @@
                 {/if}
               {/each}
             </div>
+          {/if}
+          {#if turn && lastInTurn.get(turn.id) === message.id && filesByTurn.has(turn.id)}
+            <TurnFiles {store} files={filesByTurn.get(turn.id)!} />
           {/if}
           {#if turn && lastInTurn.get(turn.id) === message.id}
             <TurnSummary {turn} waiting={store.openThread?.status === 'waiting' && turn.status === 'running'} />

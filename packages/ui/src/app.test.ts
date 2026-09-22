@@ -1311,6 +1311,48 @@ test('a tool card shows the input as the model types it, then switches to the pa
   expect(shown).not.toBe(STREAMED_TOOL_INPUT);
 });
 
+test('a finished answer lists the files it changed, and a row opens one in the panel', async () => {
+  await mountOnFake();
+
+  const input = query<HTMLTextAreaElement>('[data-testid=composer-input]');
+  input.value = 'fix it [diff]';
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  await waitFor(() => !query<HTMLButtonElement>('[data-testid=composer-send]').disabled);
+  query<HTMLButtonElement>('[data-testid=composer-send]').click();
+
+  await waitFor(() => document.querySelector('[data-testid=turn-files]') !== null);
+  const row = query('[data-testid=turn-files] li');
+  expect(row.querySelector('.name')?.textContent).toBe('app.ts');
+  expect(row.querySelector('.folder')?.textContent).toBe('src');
+  expect(row.querySelector('[data-testid=turn-file-change]')?.textContent).toBe('Changed');
+  // A browser has no file manager to hand the path to.
+  expect(row.querySelector('[data-testid=turn-file-reveal]')).toBeNull();
+
+  row.querySelector<HTMLButtonElement>('[data-testid=turn-file]')?.click();
+  await waitFor(() => document.querySelector('[data-testid=file-text]') !== null);
+  expect(query('[data-testid=file-path]').textContent).toContain('src/app.ts');
+
+  // A text file downloads as what the editor shows.
+  const created: Blob[] = [];
+  const createObjectURL = URL.createObjectURL;
+  const revokeObjectURL = URL.revokeObjectURL;
+  URL.createObjectURL = (blob: Blob) => { created.push(blob); return 'blob:turn-file'; };
+  URL.revokeObjectURL = () => {};
+  const click = HTMLAnchorElement.prototype.click;
+  let downloaded = '';
+  HTMLAnchorElement.prototype.click = function (this: HTMLAnchorElement) { downloaded = this.download; };
+  try {
+    query<HTMLButtonElement>('[data-testid=file-download-text]').click();
+  } finally {
+    URL.createObjectURL = createObjectURL;
+    URL.revokeObjectURL = revokeObjectURL;
+    HTMLAnchorElement.prototype.click = click;
+  }
+  expect(downloaded).toBe('app.ts');
+  expect(await created[0]?.text()).toBe(query<HTMLTextAreaElement>('[data-testid=file-text]').value);
+  store.panel.closeAll();
+});
+
 test('a tool card shows the diff, the markdown and the image it produced', async () => {
   await mountOnFake();
 

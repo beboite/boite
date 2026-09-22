@@ -523,6 +523,13 @@ export const strings = {
       other: 'Use its {tool} tool'
     },
     permissionTechnical: 'Technical details',
+    turnFiles: 'Files from this answer',
+    fileCreated: 'New',
+    fileChanged: 'Changed',
+    fileDeleted: 'Deleted',
+    openFile: 'Open {name}',
+    revealFile: 'Show in folder',
+    revealFailed: 'The folder could not be opened: {reason}',
     allow: 'Allow',
     deny: 'Deny',
     allowed: 'Allowed',
