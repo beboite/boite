@@ -35,8 +35,8 @@ agent shows the cached list immediately while discovery runs in the background.
 The refresh button forces a new probe; concurrent requests share one
 operation. A failed refresh keeps the visible list and waits for a manual retry.
 The menu floats without changing the page layout. It prefers the space below the
-composer and flips above when needed. On desktop, named providers sit in a
-left column beside the models. On phones, provider logos form a horizontal
+composer and flips above when needed. On desktop, provider logos sit in a
+narrow left column, with names in tooltips. On phones, they form a horizontal
 strip above them. The frame keeps the same size when switching providers or
 favorites, limited by the available viewport space. Models scroll independently
 below the provider name and account chips. Legacy models open in a

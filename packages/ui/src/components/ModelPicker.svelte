@@ -9,7 +9,7 @@
   import type { Choice, PickPatch, Store } from '../lib/store.svelte';
 
   /**
-   * A fixed frame: named providers beside a scrolling model list on desktop.
+   * A fixed frame: provider logos beside a scrolling model list on desktop.
    * Its name heads the column, its accounts sit
    * below the name as chips when there is more than one, and its models fill
    * the rest. A click on a model closes the picker; nothing else does.
@@ -440,10 +440,10 @@
       {onkeydown}
     >
       {#if store.owner}
-        <button class="refresh" type="button" data-testid="picker-refresh" aria-label={strings.composer.refreshModels} title={strings.composer.refreshModels} disabled={probing || needsInstall} onclick={() => void refreshModels()}><RefreshCw size={14} class={probing ? 'spin' : ''} /><span class="tile-label">{strings.composer.refreshModels}</span></button>
+        <button class="refresh" type="button" data-testid="picker-refresh" aria-label={strings.composer.refreshModels} title={strings.composer.refreshModels} disabled={probing || needsInstall} onclick={() => void refreshModels()}><RefreshCw size={14} class={probing ? 'spin' : ''} /></button>
       {/if}
       <div class="column rail">
-        <button type="button" class="tile" class:current={favoritesOpen} role="menuitem" data-row data-provider="favorites" title={strings.composer.favorites} aria-label={strings.composer.favorites} onclick={() => { favoritesOpen = true; modelQuery = ''; }}><Star size={18} /><span class="tile-label">{strings.composer.favorites}</span></button>
+        <button type="button" class="tile" class:current={favoritesOpen} role="menuitem" data-row data-provider="favorites" title={strings.composer.favorites} aria-label={strings.composer.favorites} onclick={() => { favoritesOpen = true; modelQuery = ''; }}><Star size={18} /></button>
         {#each tiles as tile (tile.provider.id)}
           <button
             type="button"
@@ -459,7 +459,6 @@
             onclick={() => pickTile(tile)}
           >
             <ProviderLogo providerId={tile.provider.id} size={18} />
-            <span class="tile-label">{tile.provider.name}</span>
           </button>
         {/each}
       </div>
@@ -667,8 +666,8 @@
     position: fixed;
     z-index: 40;
     display: grid;
-    grid-template-columns: 160px minmax(0, 1fr);
-    width: min(540px, calc(100vw - 32px));
+    grid-template-columns: calc(var(--control-lg) + 28px) minmax(0, 1fr);
+    width: min(440px, calc(100vw - 32px));
     height: 360px;
     max-height: min(360px, 45dvh);
     grid-template-rows: minmax(0, 1fr) auto;
@@ -698,7 +697,7 @@
   }
 
   .rail {
-    align-items: stretch;
+    align-items: center;
     gap: 4px;
     background: var(--color-surface);
   }
@@ -706,12 +705,11 @@
   .tile {
     display: inline-flex;
     align-items: center;
-    justify-content: flex-start;
-    gap: 10px;
+    justify-content: center;
     flex: none;
-    width: 100%;
+    width: var(--control-lg);
     height: var(--control-lg);
-    padding: 0 8px;
+    padding: 0;
     border: none;
     border-radius: var(--radius-md);
     background: transparent;
@@ -738,13 +736,12 @@
     opacity: 0.45;
   }
 
-  .tile-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-sm); }
   .models > * { flex-shrink: 0; }
   .main-models { grid-area: 1 / 2 / 3 / 3; overflow: hidden; padding: 0; gap: 0; border-left: 1px solid var(--color-border); }
   .main-models .head { flex-direction: column; align-items: stretch; gap: 6px; height: calc(var(--control-sm) + 56px); padding: 10px 12px; border-bottom: 1px solid var(--color-border); }
   .model-list { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; touch-action: pan-y; padding: 6px; }
   .rail { grid-area: 1 / 1; }
-  .refresh { grid-area: 2 / 1; align-self: end; justify-self: stretch; margin: 6px; position: relative; z-index: 3; display: flex; align-items: center; gap: 8px; height: var(--control-lg); padding: 0 8px; border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface); color: var(--color-muted-foreground); }
+  .refresh { grid-area: 2 / 1; align-self: end; justify-self: center; margin: 6px; position: relative; z-index: 3; display: grid; place-items: center; width: var(--control-lg); height: var(--control-lg); padding: 0; border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface); color: var(--color-muted-foreground); }
   .refresh:hover:not(:disabled) { background: linear-gradient(var(--color-hover) 0 0), var(--color-surface); color: var(--color-foreground); }
   .head {
     display: flex;
@@ -977,7 +974,6 @@
 
     /* The rail is the finger's first stop on a phone, so its tiles and the
        refresh button take a full touch target like every other control. */
-    .tile-label { display: none; }
     .main-models { grid-area: 2 / 1 / 3 / 3; border-left: none; }
     .seat { height: var(--touch-target); min-height: var(--touch-target); }
     .refresh { grid-area: 1 / 2; align-self: center; justify-self: end; justify-content: center; width: var(--touch-target); padding: 0; border: none; }
