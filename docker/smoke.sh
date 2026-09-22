@@ -13,7 +13,7 @@ cleanup() {
 trap cleanup EXIT
 docker volume create "$volume" >/dev/null
 docker run -d --name "$name" --cpus=2 --memory=2g \
-  -e BOITE_ECHO=1 -e BOITE_DATA_DIR=/data \
+  -e BOITE_ECHO=1 -e BOITE_DATA_DIR=/data -e BOITE_TELEMETRY_URL= \
   --mount "type=volume,source=$volume,target=/data" "$image" >/dev/null
 ready() {
   for ((attempt=0; attempt<60; attempt++)); do

@@ -67,6 +67,42 @@ function restoreLayout(): void {
 
 let running: Record<string, unknown> | null = null;
 
+test('the parent timeline retains one team row, updates completion counts and opens the whole team', async () => {
+  const client = new FakeClient({ delayMs: 0, delegationDemo: true });
+  const owner = new Store();
+  owner.attach(client);
+  try {
+    await owner.connect();
+    await owner.open('t-trace');
+    await owner.loadDelegation();
+    running = mount(MessageList, { target: document.body, props: { store: owner, threadId: 't-trace', messages: owner.openThread!.messages } });
+    flushSync();
+    const row = document.querySelector<HTMLButtonElement>('[data-testid=delegation-activity]')!;
+    expect(row.textContent).toContain('Started 2 agents');
+    expect(row.textContent).toContain('1/2 completed');
+    await owner.selectDelegatedAgent('t-team-running');
+    row.click();
+    flushSync();
+    expect(owner.panel.isOpen).toBe(true);
+    expect(owner.delegationSelectedAgentId).toBeNull();
+    const agent = owner.delegation!.agents.find(agent => agent.thread.id === 't-team-running')!;
+    agent.thread.status = 'idle';
+    agent.lastTurn!.status = 'done';
+    agent.lastTurn!.finishedAt = agent.thread.createdAt + 60_000;
+    flushSync();
+    expect(document.querySelectorAll('[data-testid=delegation-activity]')).toHaveLength(1);
+    expect(row.textContent).toContain('2/2 completed');
+    expect(row.querySelector('[data-testid=agent-elapsed]')?.textContent).toContain('1');
+    // A child transcript must not claim that it launched its siblings.
+    await unmount(running); running = null;
+    await owner.open('t-team-done');
+    await owner.loadDelegation();
+    running = mount(MessageList, { target: document.body, props: { store: owner, threadId: 't-team-done', messages: owner.openThread!.messages } });
+    flushSync();
+    expect(document.querySelector('[data-testid=delegation-activity]')).toBeNull();
+  } finally { owner.detach(); client.close(); }
+});
+
 afterEach(() => {
   if (running) unmount(running, { outro: false });
   running = null;

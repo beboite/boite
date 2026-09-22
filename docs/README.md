@@ -2,6 +2,8 @@
 
 ## Using boite
 
+- [The tour](onboarding.md): the first launch, and what it sets up.
+- [Language](language.md): English and French, and where the sentences live.
 - [Accounts](accounts.md): agent logins and isolated accounts.
 - [Agent updates](agent-updates.md): update notices, the automatic update and remote machines.
 - [Model switching](model-switching.md): changing models and providers in one conversation.
@@ -9,6 +11,7 @@
 - [Agent coordination](coordination.md): messages between agents, machine links and limits.
 - [Agent delegation](delegation.md): model profiles, child conversations, live steering and team budgets.
 - [Usage](usage.md): tokens, API cost and limits per day, provider and model.
+- [Analytics](analytics.md): optional telemetry, consent, collected fields and data controls.
 - [Keyboard shortcuts](keybindings.md): defaults and customization.
 - [The right panel](panel.md): browser, changes, files, tasks and trace beside the chat.
 - [The `boite` CLI](cli.md): what an agent runs to reach its thread and its panel.

@@ -10,6 +10,8 @@
   import ModelPicker from './ModelPicker.svelte';
   import ProviderLogo from './ProviderLogo.svelte';
   import StatusMark from './StatusMark.svelte';
+  import AgentElapsed from './AgentElapsed.svelte';
+  import { agentProgress } from '../lib/delegation-progress';
 
   let { store }: { store: Store } = $props();
   let task = $state('');
@@ -172,6 +174,8 @@
     {/if}
 
     {#if store.owner && config.enabled && !config.paused && !selected}
+      <details class="launch-section" open={view.agents.length === 0}>
+        <summary>{strings.delegation.launch}</summary>
       <div class="launch" data-testid="delegation-launch">
         <div class="profile-picks" role="radiogroup" aria-label={strings.delegation.profileLabel}>
           {#each config.profiles as profile (profile.id)}
@@ -183,6 +187,7 @@
         <textarea rows="2" maxlength="12000" bind:value={task} placeholder={strings.delegation.taskPlaceholder} data-testid="delegation-task"></textarea>
         <button type="button" class="primary" disabled={!task.trim() || !selectedProfile || launching || view.agents.length >= config.maxAgents} data-testid="delegation-spawn" onclick={() => void launch()}><Plus size={14} />{launching ? strings.delegation.launching : strings.delegation.launch}</button>
       </div>
+      </details>
     {/if}
 
     {#if view.turnsUsed >= config.maxTurns}
@@ -195,11 +200,13 @@
           <p class="empty">{strings.delegation.empty}</p>
         {:else}
           {#each view.agents as agent (agent.thread.id)}
+            {@const progress = agentProgress(agent)}
             <button type="button" class="member" class:selected={selected?.thread.id === agent.thread.id} data-testid="delegation-member" data-agent-id={agent.thread.id} onclick={() => void store.selectDelegatedAgent(agent.thread.id)}>
               <StatusMark status={agent.thread.status} />
               <span class="member-main"><strong>{agent.thread.title}</strong><small>{store.providerOf(agent.thread.providerId)?.name ?? agent.thread.providerId} · {agent.thread.model ?? strings.thread.defaultModel}</small></span>
-              <span class="status">{strings.threadStatus[agent.thread.status]}</span>
+              <span class="status">{progress.status === 'done' ? strings.delegation.doneStatus : progress.status === 'stopped' ? strings.delegation.stoppedStatus : strings.threadStatus[agent.thread.status]}</span>
               <span class="task">{agent.task}</span>
+              <span class="member-usage"><AgentElapsed startedAt={progress.startedAt} finishedAt={progress.finishedAt} active={progress.active} /></span>
               {#if agent.lastTurn?.usage}<span class="member-usage">{formatTokens(agent.lastTurn.usage.inputTokens + agent.lastTurn.usage.outputTokens + agent.lastTurn.usage.cacheReadTokens + agent.lastTurn.usage.cacheWriteTokens)} {strings.units.tokens}</span>{/if}
               {#if agent.result}<span class="result">{agent.result}</span>{/if}
             </button>
@@ -270,6 +277,8 @@
   .limits input { width: 100%; min-width: 0; font-variant-numeric: tabular-nums; }
   .pause { margin-top: 10px; }
   .launch { flex: none; padding: 10px 16px; display: grid; grid-template-columns: 1fr auto; gap: 7px; border-bottom: 1px solid var(--color-border); }
+  .launch-section { flex: none; }
+  .launch-section > summary { padding: 10px 16px; cursor: pointer; color: var(--color-muted-foreground); font-size: var(--text-sm); border-bottom: 1px solid var(--color-border); }
   .profile-picks { grid-column: 1 / -1; display: flex; gap: 5px; overflow-x: auto; }
   .profile-picks .chosen { background: var(--color-active); color: var(--color-foreground); }
   .launch textarea { resize: vertical; min-height: 52px; }

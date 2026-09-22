@@ -26,6 +26,7 @@
   import ToolCard from './ToolCard.svelte';
   import MessageOutline from './MessageOutline.svelte';
   import ForwardedAgentMessage from './ForwardedAgentMessage.svelte';
+  import DelegationActivity from './DelegationActivity.svelte';
   import { visibleAnswer } from '../lib/message-display';
   import { isNamedModel } from '../lib/model-order';
 
@@ -42,8 +43,10 @@
   ]);
   const delegationLetterIds = $derived(new Set(delegation?.messages.map(letter => letter.id) ?? []));
   const letterRows = $derived.by(() => new Map(letters.map(letter => [`coordination:${letter.id}`, letter])));
+  const team = $derived(delegation?.rootThreadId === threadId ? delegation.agents : []);
+  const teamRowId = $derived(`delegation:${threadId}`);
   const timeline = $derived.by(() => {
-    if (letters.length === 0) return messages;
+    if (letters.length === 0 && team.length === 0) return messages;
     const ids = new Set(letters.map(letter => letter.id));
     const visible = messages.filter(message => !coordinationPlaceholder(message, ids));
     const forwarded = letters.map((letter): Message => ({
@@ -55,7 +58,11 @@
       state: 'complete',
       createdAt: letter.createdAt
     }));
-    return [...visible, ...forwarded].sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
+    const activity: Message[] = team.length ? [{
+      id: teamRowId, threadId, turnId: teamRowId, role: 'system', parts: [], state: 'complete',
+      createdAt: Math.min(...team.map(agent => agent.thread.createdAt))
+    }] : [];
+    return [...visible, ...forwarded, ...activity].sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
   });
   const timelineOrder = $derived(timeline.map(message => message.id).join('\0'));
   const savedReading = untrack(() => store.readingPositions?.get(threadId));
@@ -583,7 +590,9 @@
           data-testid="message"
           data-role={letter ? 'agent-letter' : message.role}
         >
-          {#if letter && letterSelf(letter)}
+          {#if message.id === teamRowId}
+            <DelegationActivity {store} agents={team} />
+          {:else if letter && letterSelf(letter)}
             <ForwardedAgentMessage {letter} self={letterSelf(letter)!} />
           {:else if message.role === 'user'}
             {@const images = imagesOf(message)}

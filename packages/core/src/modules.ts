@@ -15,6 +15,7 @@ import { registerTraceMethods } from './trace.ts';
 import { registerUsageMethods } from './usage.ts';
 import { registerPushMethods } from './push.ts';
 import { registerSpeechMethods } from './speech.ts';
+import { registerTelemetry } from './telemetry.ts';
 import { registerCoordination } from './coordination.ts';
 
 /** Adding a module is one file plus one line here. `hello` is the server's own. */
@@ -24,6 +25,7 @@ export function registerModules(core: Core): void {
   core.router.register('delegation.spawn', params => core.delegation.spawn(params));
   core.router.register('delegation.send', (params, ctx) => core.delegation.send(params, ctx.connection.identity.principal === 'agent' ? 'agent' : 'user'));
   core.router.register('delegation.stop', params => ({ stopped: core.delegation.stop(params.threadId, params.agentId) }));
+  registerTelemetry(core);
   registerCoordination(core);
   registerSpeechMethods(core);
   registerPushMethods(core);

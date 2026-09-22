@@ -152,6 +152,24 @@ test('switching conversations clears the old team and refuses missing or mismatc
   } finally { store.detach(); client.close(); }
 });
 
+test('telemetry actions route through the owning client and retain deletion state', async () => {
+  const { store, client } = await ready();
+  const other = new FakeClient({ delayMs: 0 });
+  try {
+    expect(await store.telemetryState()).toMatchObject({ mode: 'basic', pendingDeletion: false });
+    await store.configureTelemetry('enhanced');
+    expect(await store.exportTelemetry()).toEqual({ events: [], truncated: false });
+    expect(await store.configureTelemetry('off')).toMatchObject({ mode: 'off', pendingDeletion: true });
+    expect(await store.configureTelemetry('enhanced')).toMatchObject({ mode: 'enhanced', pendingDeletion: true });
+    expect(await store.retryTelemetryDeletion()).toMatchObject({ pendingDeletion: false });
+    await store.configureTelemetry('enhanced');
+    store.attach(other);
+    await store.connect();
+    expect(await store.telemetryState()).toMatchObject({ mode: 'basic' });
+    expect(await client.call('telemetry.state', {})).toMatchObject({ mode: 'enhanced' });
+  } finally { store.detach(); client.close(); other.close(); }
+});
+
 test('uninstalled setup starts without account-dependent demo state', async () => {
   const client = new FakeClient({ delayMs: 0, uninstalled: true });
   const store = new Store();

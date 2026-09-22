@@ -9,9 +9,9 @@
   import type { Choice, PickPatch, Store } from '../lib/store.svelte';
 
   /**
-   * One popover: a row of provider logos above the selected provider's models.
+   * A fixed frame: provider logos beside a scrolling model list on desktop.
    * Its name heads the column, its accounts sit
-   * beside the name as chips when there is more than one, and its models fill
+   * below the name as chips when there is more than one, and its models fill
    * the rest. A click on a model closes the picker; nothing else does.
    */
   let {
@@ -118,8 +118,7 @@
     void store.probeModels(shown.id, accountId);
   });
 
-  // On a phone the rail scrolls, and the refresh button covers its right end:
-  // the shown tile is brought clear of both whenever it changes.
+  // Keep the shown provider visible in the vertical rail or phone strip.
   $effect(() => {
     const current = favoritesOpen ? 'favorites' : shown?.id;
     if (!popover.shown || !menu || !current) return;
@@ -128,6 +127,11 @@
     if (!rail || !tile) return;
     const railBox = rail.getBoundingClientRect();
     const tileBox = tile.getBoundingClientRect();
+    if (!window.matchMedia('(max-width: 720px)').matches) {
+      if (tileBox.bottom > railBox.bottom) rail.scrollTop += tileBox.bottom - railBox.bottom;
+      else if (tileBox.top < railBox.top) rail.scrollTop -= railBox.top - tileBox.top;
+      return;
+    }
     const visibleRight = railBox.right - (parseFloat(getComputedStyle(rail).paddingRight) || 0);
     if (tileBox.right > visibleRight) rail.scrollLeft += tileBox.right - visibleRight;
     else if (tileBox.left < railBox.left) rail.scrollLeft -= railBox.left - tileBox.left;
@@ -439,7 +443,7 @@
         <button class="refresh" type="button" data-testid="picker-refresh" aria-label={strings.composer.refreshModels} title={strings.composer.refreshModels} disabled={probing || needsInstall} onclick={() => void refreshModels()}><RefreshCw size={14} class={probing ? 'spin' : ''} /></button>
       {/if}
       <div class="column rail">
-        <button type="button" class="tile" class:current={favoritesOpen} role="menuitem" data-row data-provider="favorites" title={strings.composer.favorites} aria-label={strings.composer.favorites} onclick={() => { favoritesOpen = true; modelQuery = ''; }}><Star size={18} /></button>
+        <button type="button" class="tile" class:current={favoritesOpen} role="menuitem" data-row data-provider="favorites" title={strings.composer.favorites} aria-label={strings.composer.favorites} onclick={() => { favoritesOpen = true; modelQuery = ''; }}><Star size={24} /></button>
         {#each tiles as tile (tile.provider.id)}
           <button
             type="button"
@@ -454,12 +458,12 @@
             aria-label={tile.provider.name}
             onclick={() => pickTile(tile)}
           >
-            <ProviderLogo providerId={tile.provider.id} size={18} />
+            <ProviderLogo providerId={tile.provider.id} size={28} />
           </button>
         {/each}
       </div>
 
-      <div class="column models">
+      <div class="column models main-models">
         {#snippet modelRow(model: ModelInfo)}
           <div class="model-entry">
           <button
@@ -483,6 +487,7 @@
 
         {#if favoritesOpen}
           <div class="head"><span class="provider-name">{strings.composer.favorites}</span></div>
+          <div class="model-list">
           {#each favorites as entry (`${entry.providerId}:${entry.accountId}:${entry.model.id}`)}
             <div class="model-entry">
               <button type="button" class="row model favorite-row" role="menuitem" data-row data-testid="favorite-model" disabled={favoritePending || !store.providerOf(entry.providerId)?.available} onclick={() => void pickFavorite(entry)}>
@@ -491,6 +496,7 @@
               <button type="button" class="favorite-button" aria-label={strings.composer.unfavorite} onclick={() => store.toggleFavorite(entry.providerId, entry.accountId, entry.model)}><Star size={14} fill="currentColor" /></button>
             </div>
           {:else}<p class="none subtle" data-testid="favorites-empty">{strings.composer.favoritesEmpty}</p>{/each}
+          </div>
         {:else}
         <div class="head">
           <span class="provider-name">{shown ? shown.name : strings.composer.models}</span>
@@ -513,6 +519,8 @@
             </div>
           {/if}
         </div>
+        {#key `${shown?.id}:${shownAccountId}`}
+        <div class="model-list">
         {#if locked && seats.length > 1}
           <span class="locked-note">{strings.composer.lockedHint}</span>
         {/if}
@@ -586,6 +594,8 @@
             <p class="none subtle probing" data-testid="picker-probing">{strings.composer.probing}</p>
           {/if}
         {/if}
+        </div>
+        {/key}
         {/if}
       </div>
     </div>
@@ -624,7 +634,7 @@
   .favorite-button[aria-pressed='true'] { color: var(--color-foreground); }
   .account-label { margin-left: 8px; font-size: var(--text-xs); color: var(--color-muted-foreground); }
   .row.favorite-row { min-height: 42px; }
-  .legacy-menu { width: min(320px, calc(100vw - 24px)); grid-template-rows: minmax(0, 1fr); z-index: 41; }
+  .popover.legacy-menu { width: min(320px, calc(100vw - 24px)); height: auto; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); z-index: 41; }
   .picker {
     display: inline-flex;
     min-width: 0;
@@ -656,13 +666,14 @@
     position: fixed;
     z-index: 40;
     display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    width: min(400px, calc(100vw - 32px));
+    grid-template-columns: calc(var(--control-lg) + 20px) minmax(0, 1fr);
+    width: min(440px, calc(100vw - 32px));
+    height: 360px;
     max-height: min(360px, 45dvh);
-    grid-template-rows: auto minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) auto;
     background: var(--color-surface-2);
     border: 1px solid var(--color-border);
-    border-radius: var(--radius-md);
+    border-radius: var(--radius-lg);
     box-shadow: var(--shadow-e2);
     animation: pop var(--dur-2) var(--ease-out-quint);
     transform-origin: top left;
@@ -685,17 +696,10 @@
     touch-action: pan-y;
   }
 
-  /* Logos only: the name is the tile's title, and the column beside it names
-     the one that is shown, so nothing is repeated. */
   .rail {
-    flex-direction: row;
-    flex-wrap: nowrap;
-    padding-right: calc(var(--control-lg) + 10px);
-    justify-content: flex-start;
     align-items: center;
-    gap: 4px;
-    overflow-x: auto;
-    border-bottom: 1px solid var(--color-border);
+    gap: 2px;
+    padding: 4px;
     background: var(--color-surface);
   }
 
@@ -734,18 +738,18 @@
   }
 
   .models > * { flex-shrink: 0; }
-  /* A tile like the logos beside it, in the rail's own grid cell so it stays on
-     their line in the popover and in the phone sheet, on the rail's ground so the
-     logos scroll under it unseen. */
+  .main-models { grid-area: 1 / 2 / 3 / 3; overflow: hidden; padding: 0; gap: 0; border-left: 1px solid var(--color-border); }
+  .main-models .head { flex-direction: column; align-items: stretch; gap: 6px; padding: 10px 12px; border-bottom: 1px solid var(--color-border); }
+  .model-list { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; touch-action: pan-y; padding: 6px; }
   .rail { grid-area: 1 / 1; }
-  .refresh { grid-area: 1 / 1; align-self: center; justify-self: end; margin-right: 6px; position: relative; z-index: 3; display: grid; place-items: center; width: var(--control-lg); height: var(--control-lg); padding: 0; border: none; border-radius: var(--radius-md); background: var(--color-surface); color: var(--color-muted-foreground); }
+  .refresh { grid-area: 2 / 1; align-self: end; justify-self: center; margin: 6px; position: relative; z-index: 3; display: grid; place-items: center; width: var(--control-lg); height: var(--control-lg); padding: 0; border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface); color: var(--color-muted-foreground); }
   .refresh:hover:not(:disabled) { background: linear-gradient(var(--color-hover) 0 0), var(--color-surface); color: var(--color-foreground); }
   .head {
     display: flex;
     align-items: center;
     gap: 8px;
     min-height: var(--control-sm);
-    padding: 2px 34px 6px 4px;
+    padding: 2px 4px 6px;
   }
 
   .provider-name {
@@ -759,7 +763,11 @@
   .seats {
     display: flex;
     gap: 2px;
-    margin-left: auto;
+    align-self: flex-start;
+    flex-shrink: 0;
+    max-width: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
     padding: 2px;
     border: 1px solid var(--color-border);
     border-radius: var(--radius-md);
@@ -768,8 +776,10 @@
   }
 
   .seat {
-    height: 20px;
-    max-width: 110px;
+    height: var(--control-sm);
+    min-height: var(--control-sm);
+    flex-shrink: 0;
+    max-width: 150px;
     padding: 0 7px;
     border: none;
     border-radius: var(--radius-sm);
@@ -945,16 +955,19 @@
 
   @media (max-width: 720px) {
     .popover {
-      grid-template-columns: 1fr;
+      grid-template-columns: minmax(0, 1fr) auto;
       grid-template-rows: auto minmax(0, 1fr);
       width: calc(100vw - 24px);
+      height: min(420px, 60dvh);
     }
 
     .rail {
       flex-direction: row;
       flex-wrap: nowrap;
+      padding-bottom: 6px;
+      align-items: center;
+      touch-action: pan-x;
       overflow-x: auto;
-      padding-right: calc(var(--touch-target) + 10px);
       justify-content: flex-start;
       border-right: none;
       border-bottom: 1px solid var(--color-border);
@@ -962,6 +975,10 @@
 
     /* The rail is the finger's first stop on a phone, so its tiles and the
        refresh button take a full touch target like every other control. */
+    .main-models { grid-area: 2 / 1 / 3 / 3; border-left: none; }
+    .seat { height: var(--touch-target); min-height: var(--touch-target); }
+    .refresh { grid-area: 1 / 2; align-self: center; justify-self: end; justify-content: center; width: var(--touch-target); padding: 0; border: none; }
+    .tile { justify-content: center; padding: 0; }
     .tile,
     .refresh {
       width: var(--touch-target);

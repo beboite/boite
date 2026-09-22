@@ -4,6 +4,7 @@
   import type { Store } from '../lib/store.svelte';
   import { strings } from '../lib/strings';
   import { contextPercent, contextLevel, formatTokens } from '../lib/tokens';
+  import { count, time } from '../lib/format';
   import { Closing } from '../lib/closing.svelte';
   let { store }: { store: Store } = $props();
   let submitting = $state(false);
@@ -19,7 +20,7 @@
   const supported = $derived(protocol !== 'agy' && (protocol !== 'acp' || thread?.commands?.some(command => command.name === 'compact')));
   const reason = $derived(submitting || store.busy ? strings.composer.compactBusy : !thread?.sessionId
     ? strings.composer.compactNoSession : !supported ? strings.composer.compactUnavailable : null);
-  const exact = (n: number) => n.toLocaleString();
+  const exact = (n: number) => count(n);
   const segments = $derived(context?.breakdown ? [
     {name: strings.thread.contextInput, count: context.breakdown.input, kind: 'input'},
     {name: strings.thread.contextCache, count: context.breakdown.cache, kind: 'cache'},
@@ -60,7 +61,7 @@
           {#if context.window !== null}<div><dt><i class="free"></i>{strings.thread.contextFree}</dt><dd class="mono">{exact(Math.max(0, context.window - context.tokens))}</dd></div>{/if}
         </dl>
         {#if !context.breakdown}<p class="note">{strings.thread.contextNoBreakdown}</p>{/if}
-        <p class="note">{strings.thread.contextMeasured} · {new Date(context.at).toLocaleTimeString()}</p>
+        <p class="note">{strings.thread.contextMeasured} · {time(context.at)}</p>
       {:else}<p class="note">{strings.thread.contextNoReading}</p>{/if}
       <button type="button" class="compact" data-testid="context-compact" disabled={reason !== null} title={reason ?? strings.composer.compact} onclick={() => void compact()}><Minimize2 size={14} />{strings.composer.compact}</button>
       {#if reason}<p class="note">{reason}</p>{/if}

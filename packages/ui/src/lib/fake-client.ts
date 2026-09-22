@@ -921,6 +921,7 @@ function quietUpdates(): boolean {
 }
 
 export class FakeClient implements ObservableClient {
+  #telemetry: import('@boite/contracts').TelemetryState = { mode: 'basic', configured: true, pendingDeletion: false };
   static #cores = new Map<string, FakeClient>();
   #state: ClientState = 'idle';
   #handlers = new Map<string, Set<(payload: unknown) => void>>();
@@ -1890,6 +1891,20 @@ export class FakeClient implements ObservableClient {
         return fakeUsageHistory(edges, { seeded: this.#usageSeeded, finished: this.#finished });
       }
 
+      case 'telemetry.state': return { ...this.#telemetry };
+      case 'telemetry.configure': {
+        const { mode } = rawParams as RpcParams<'telemetry.configure'>;
+        if (!['off', 'basic', 'enhanced'].includes(mode)) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'mode: expected off, basic or enhanced' });
+        if (this.#telemetry.mode === 'enhanced' && mode !== 'enhanced') this.#telemetry.pendingDeletion = true;
+        this.#telemetry.mode = mode;
+        return { ...this.#telemetry };
+      }
+      case 'telemetry.retryForget':
+        this.#telemetry.pendingDeletion = false;
+        return { ...this.#telemetry };
+      case 'telemetry.export':
+        if (this.#telemetry.mode !== 'enhanced') throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'telemetry export: expected enhanced mode' });
+        return { events: [], truncated: false };
       case 'settings.get':
         return { ...this.#settings };
       case 'delegation.get': {
@@ -2562,20 +2577,21 @@ const ready = true;
   }
 
   #seedDelegationDemo(): void {
+    const demoAt = Date.now() - 85_000;
     const root = this.#thread('t-trace');
     const reviewer: DelegationProfile = { id: 'reviewer', name: 'Reviewer', providerId: 'claude', accountId: 'a-claude-main', model: 'claude-sonnet-5', effort: 'high' };
     const implementer: DelegationProfile = { id: 'implementer', name: 'Implementer', providerId: 'codex', accountId: 'a-codex', model: 'gpt-5.6-sol', effort: 'medium' };
     this.#delegationConfigs.set(root.id, { enabled: true, paused: false, maxAgents: 4, maxConcurrent: 2, maxTurns: 12, maxMinutes: 30, profiles: [reviewer, implementer] });
     const make = (id: string, title: string, task: string, status: Thread['status'], answer: string, profile: DelegationProfile): Thread => {
-      const turn: Turn = { id: `turn-${id}`, threadId: id, status: status === 'running' ? 'running' : 'done', queuedAt: T0 + 400_000, startedAt: T0 + 401_000, finishedAt: status === 'running' ? null : T0 + 430_000, usage: status === 'running' ? null : { inputTokens: 820, outputTokens: 260, cacheReadTokens: 1200, cacheWriteTokens: 0, costUsdEquivalent: 0.012 }, error: null };
+      const turn: Turn = { id: `turn-${id}`, threadId: id, status: status === 'running' ? 'running' : 'done', queuedAt: demoAt, startedAt: demoAt + 1000, finishedAt: status === 'running' ? null : demoAt + 30_000, usage: status === 'running' ? null : { inputTokens: 820, outputTokens: 260, cacheReadTokens: 1200, cacheWriteTokens: 0, costUsdEquivalent: 0.012 }, error: null };
       return {
         ...root, id, parentThreadId: root.id, title, titleSource: 'user', status, unread: false, archived: false, pinned: false,
         providerId: profile.providerId, accountId: profile.accountId, model: profile.model, effort: profile.effort,
         sessionId: `session-${id}`, sessionGeneration: 0, selectionVersion: 0, load: status === 'running' ? { processes: 1, cpuPercent: 8, memoryBytes: 64 * 1024 * 1024 } : null,
-        createdAt: T0 + 400_000, updatedAt: T0 + 430_000, messagesBefore: null, commands: [], turns: [turn],
+        createdAt: demoAt, updatedAt: demoAt + 30_000, messagesBefore: null, commands: [], turns: [turn],
         messages: [
-          { id: `m-${id}-1`, threadId: id, turnId: turn.id, role: 'user', parts: [{ type: 'text', text: task }], state: 'complete', createdAt: T0 + 400_000 },
-          { id: `m-${id}-2`, threadId: id, turnId: turn.id, role: 'assistant', parts: [{ type: 'text', text: answer }], state: status === 'running' ? 'streaming' : 'complete', createdAt: T0 + 410_000 }
+          { id: `m-${id}-1`, threadId: id, turnId: turn.id, role: 'user', parts: [{ type: 'text', text: task }], state: 'complete', createdAt: demoAt },
+          { id: `m-${id}-2`, threadId: id, turnId: turn.id, role: 'assistant', parts: [{ type: 'text', text: answer }], state: status === 'running' ? 'streaming' : 'complete', createdAt: demoAt + 10_000 }
         ]
       };
     };

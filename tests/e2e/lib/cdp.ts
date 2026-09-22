@@ -2,7 +2,15 @@ import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { ONBOARDING_STORAGE_KEY, ONBOARDING_VERSION } from '../../../packages/ui/src/lib/onboarding.ts';
 import { killProcessTree, removeDirectory } from './core.ts';
+
+/**
+ * Marks the tour seen before any script of the page runs, and only where no
+ * record is stored yet, so a test that writes its own keeps it across a reload.
+ * Every profile a test drives is new, and the tour it would open covers the page.
+ */
+const SEEN_TOUR = `try { if (localStorage.getItem(${JSON.stringify(ONBOARDING_STORAGE_KEY)}) === null) localStorage.setItem(${JSON.stringify(ONBOARDING_STORAGE_KEY)}, ${JSON.stringify(JSON.stringify({ version: ONBOARDING_VERSION, at: 0 }))}); } catch {}`;
 
 const CONNECT_TIMEOUT_MS = 30_000;
 const CALL_TIMEOUT_MS = 20_000;
@@ -75,6 +83,8 @@ export interface BrowserOptions {
   userDataDir?: string;
   debugPort?: number;
   windowSize?: { width: number; height: number };
+  /** Leaves the profile as a device that never saw the tour, which opens on boot. */
+  showTour?: boolean;
 }
 
 export class BrowserPage {
@@ -117,6 +127,11 @@ export class BrowserPage {
         '--use-gl=angle',
         '--use-angle=d3d11',
         '--mute-audio',
+        // The suite's assertions are written in English and its numbers read
+        // with the browser's own `toLocaleString`: both follow this, not the
+        // language of the machine the run happens on.
+        '--lang=en-US',
+        '--accept-lang=en-US',
         '--no-first-run',
         '--no-default-browser-check',
         '--disable-background-networking',
@@ -144,9 +159,11 @@ export class BrowserPage {
       const page = new BrowserPage(socket, proc.pid, ownsUserDataDir ? userDataDir : null);
       await page.send('Page.enable', {});
       await page.send('Runtime.enable', {});
-      // A headless window can report a transient small viewport on Windows.
-      // Apply the requested CSS dimensions before the app selects its layout.
-      await page.send('Emulation.setDeviceMetricsOverride', { ...size, deviceScaleFactor: 1, mobile: false });
+      if (options.showTour !== true) await page.send('Page.addScriptToEvaluateOnNewDocument', { source: SEEN_TOUR });
+      // Windows may clamp the headless window. Pin the CSS viewport before startup.
+      await page.send('Emulation.setDeviceMetricsOverride', {
+        width: size.width, height: size.height, deviceScaleFactor: 1, mobile: false,
+      });
       await page.navigate(options.url);
       return page;
     } catch (error) {
@@ -165,6 +182,14 @@ export class BrowserPage {
     const page = new BrowserPage(socket, null, null);
     await page.send('Page.enable', {});
     await page.send('Runtime.enable', {});
+    // The page booted before we got here, on a profile as new as the data
+    // directory it sits in: it read "never seen" already. Record the tour and
+    // boot it again, once, so every later reload finds the record too.
+    await page.send('Page.addScriptToEvaluateOnNewDocument', { source: SEEN_TOUR });
+    const unseen = await page.evaluate<boolean>(
+      `(() => { try { return localStorage.getItem(${JSON.stringify(ONBOARDING_STORAGE_KEY)}) === null; } catch { return false; } })()`,
+    );
+    if (unseen) await page.reload();
     return page;
   }
 
@@ -242,6 +267,20 @@ export class BrowserPage {
       }
     }
     // A cold Vite dependency build on the Windows runner can outlast the normal DOM wait.
+    await this.waitFor("document.readyState === 'complete'", 60_000);
+  }
+
+  /** Boots the same page again and returns once the new document has loaded. */
+  async reload(): Promise<void> {
+    const frame = async (): Promise<string> =>
+      ((await this.send('Page.getFrameTree', {})) as { frameTree: { frame: { loaderId: string } } }).frameTree.frame.loaderId;
+    const before = await frame();
+    await this.send('Page.reload', {});
+    const deadline = Date.now() + CONNECT_TIMEOUT_MS;
+    while ((await frame()) === before) {
+      if (Date.now() > deadline) throw new Error('the reload never committed');
+      await Bun.sleep(POLL_MS);
+    }
     await this.waitFor("document.readyState === 'complete'", 60_000);
   }
 

@@ -14,6 +14,12 @@ these Boite-managed teams.
 
 ## Follow and steer
 
+The parent chat keeps a "Started N agents" row at the first launch. It shows
+successful completions out of the team total, failed or stopped tasks, and
+elapsed time. Click it to open every agent's model, task, status and result in
+the right panel. The timer runs locally while work is active and freezes when
+all agents settle. Sending a follow-up to a child resumes its status and timer.
+
 The bottom strip stays visible while children are running, queued or waiting
 for an answer. Select an agent to inspect it in the right panel, send a message
 or stop it. Open its conversation to answer permission and question cards.

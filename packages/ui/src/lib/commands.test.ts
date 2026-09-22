@@ -42,6 +42,7 @@ test('the list carries every app command, the thread ones only while one is open
     'appearance',
     'providers',
     'pair',
+    'tour',
     'theme-dark',
     'theme-light',
     'theme-system'
@@ -65,6 +66,7 @@ test('the list carries every app command, the thread ones only while one is open
     'appearance',
     'providers',
     'pair',
+    'tour',
     'theme-dark',
     'theme-light',
     'theme-system',
