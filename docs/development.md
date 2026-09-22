@@ -15,6 +15,21 @@ Everything below runs from the repository root, on a `bun install` that has
 already happened. The rules these commands are meant to prove are in
 [../AGENTS.md](../AGENTS.md).
 
+## Desktop updater tests
+
+Desktop updater checks use a local HTTP fixture and a signed inert payload in
+`cargo test --lib`. The fixture never launches an installer. Its Windows test
+executable links the shell's Common Controls v6 manifest too; without that
+resource, loading the native dialog dependency fails before tests start.
+
+`bun test tests/e2e/app-updates.test.ts` checks the update card, channel choice,
+restart confirmation, progress, errors and absence of installer controls on a
+phone. Development-only `?fake=1&appUpdate=ready` and the `downloading` and
+`error` variants support captures without network updates. Set
+`appUpdateChannel=nightly` to preview a nightly target and
+`appUpdateCurrentChannel=nightly` for an installed nightly. These fixtures are
+removed from production builds.
+
 ## The core
 
 ```bash

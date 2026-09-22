@@ -12,7 +12,10 @@ Object, so a hard shell exit also stops that core. Adopted and remote cores are
 not owned by the shell and remain running. The shell also carries a channel, read once from its own
 bundle identifier: `Boite` and `Boite Dev` are two installs on one machine, and
 the channel is what keeps their data directories, and so their cores, apart.
-[docs/releasing.md](releasing.md).
+[docs/releasing.md](releasing.md). Boite and boite de nuit are update tracks
+within the regular install and share its data. The desktop updater belongs to
+the shell, uses main-webview-only IPC and never acts on the selected remote core.
+It verifies signed installers before offering a restart. [Updates](updates.md).
 
 ## One WebSocket, one contract
 
@@ -88,7 +91,7 @@ mute across restarts. Both decisions are pure logic classes tested on a fake of
 the Win32 calls, so no test ever creates a window or plays a sound.
 [docs/trace.md](trace.md) has the caps and the settings.
 
-## Six drivers, one interface
+## Drivers, one interface
 
 `Driver.startTurn(ctx) -> TurnHandle`, and the driver's whole job is mapping one
 protocol onto the contract's parts. What they share: one process and one agent

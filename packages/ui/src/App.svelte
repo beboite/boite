@@ -23,6 +23,7 @@
   import { rightPanel } from './lib/right-panel.svelte';
   import { workspace } from './lib/workspace.svelte';
   import { startTheme } from './lib/theme';
+  import { appUpdater } from './lib/app-update.svelte';
   import MobileNavigation from './components/MobileNavigation.svelte';
   import { startViewport } from './lib/viewport';
   import { WsClient } from './lib/client';
@@ -90,6 +91,12 @@
   onMount(() => {
     const stopViewport = startViewport();
     const stopInstall = listenForInstall();
+    let stopAppUpdater: () => void = () => undefined;
+    let updateDelay: number | undefined;
+    const updateFrame = typeof requestAnimationFrame === 'function'
+      ? requestAnimationFrame(() => { updateDelay = window.setTimeout(() => { stopAppUpdater = appUpdater.start(); }, 0); })
+      : undefined;
+    if (updateFrame === undefined) updateDelay = window.setTimeout(() => { stopAppUpdater = appUpdater.start(); }, 0);
     // After the first paint, not in its way. Safari has no requestIdleCallback.
     const idle = typeof requestIdleCallback === 'function'
       ? requestIdleCallback(needAll, { timeout: 1500 })
@@ -122,6 +129,9 @@
       else clearTimeout(idle);
       stopViewport();
       stopInstall();
+      if (updateFrame !== undefined) cancelAnimationFrame(updateFrame);
+      if (updateDelay !== undefined) clearTimeout(updateDelay);
+      stopAppUpdater();
       document.removeEventListener('visibilitychange', visibility);
       window.removeEventListener('online', resume);
       window.removeEventListener('pageshow', pageshow);

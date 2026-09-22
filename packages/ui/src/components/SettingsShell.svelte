@@ -16,6 +16,7 @@
   import ResourcesPage from './ResourcesPage.svelte';
   import UsagePage from './UsagePage.svelte';
   import VoiceSettings from './VoiceSettings.svelte';
+  import { showAppUpdateUi } from '../lib/app-update.svelte';
 
   let { store }: { store: Store } = $props();
   const narrow = new MediaQuery('(max-width: 720px)');
@@ -52,6 +53,7 @@
       { id: 'usage-threads', label: strings.usage.threads }
     ],
     general: [
+      ...(showAppUpdateUi() ? [{ id: 'app-update', label: strings.appUpdate.heading }] : []),
       { id: 'phone', label: strings.phone.heading },
       { id: 'projects', label: strings.settings.projects },
       { id: 'background', label: strings.settings.background },

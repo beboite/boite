@@ -23,8 +23,8 @@ concurrency:
 
 jobs:
   revision:
-    # Both entry points remain dormant until a maintainer enables the variable.
-    if: vars.NIGHTLY_ENABLED == 'true' && github.ref == 'refs/heads/main'
+    # Enabled by default; false is the emergency stop for both entry points.
+    if: vars.NIGHTLY_ENABLED != 'false' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -57,8 +57,10 @@ jobs:
     needs: revision
     if: needs.revision.outputs.changed == 'true'
     uses: ./.github/workflows/ci.yml
+    secrets: inherit
     with:
       skip-server: true
+      sign-updates: true
       channel: nightly
       version: ${{ needs.revision.outputs.version }}
     permissions:
@@ -106,6 +108,7 @@ jobs:
         run: |
           gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases?per_page=100" > released.json
           bun scripts/ci/changelog.ts released.json artifacts/release-notes.md
+          bun scripts/ci/updater-manifest.ts artifacts
           existing=$(jq --arg tag "$RELEASE_TAG" '[.[][] | select(.tag_name == $tag)] | first // empty' released.json)
           cd artifacts
           sha256sum ./*.exe > SHA256SUMS.txt
@@ -116,8 +119,8 @@ jobs:
             else
               test "$(echo "$existing" | jq -r .target_commitish)" = "$GITHUB_SHA"
             fi
-            gh release upload "$RELEASE_TAG" ./*.exe SHA256SUMS.txt --clobber
+            gh release upload "$RELEASE_TAG" ./*.exe ./*.sig latest.json SHA256SUMS.txt --clobber
             gh release edit "$RELEASE_TAG" --draft=false --prerelease --latest=false
           else
-            gh release create "$RELEASE_TAG" ./*.exe SHA256SUMS.txt --target "$GITHUB_SHA" --title "boite de nuit $RELEASE_TAG" --prerelease --latest=false --notes-file release-notes.md
+            gh release create "$RELEASE_TAG" ./*.exe ./*.sig latest.json SHA256SUMS.txt --target "$GITHUB_SHA" --title "boite de nuit $RELEASE_TAG" --prerelease --latest=false --notes-file release-notes.md
           fi

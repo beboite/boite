@@ -2,6 +2,7 @@
 
 ## Using boite
 
+- [Desktop updates](updates.md): Boite, boite de nuit, downloads and restarting.
 - [Accounts](accounts.md): agent logins and isolated accounts.
 - [Agent updates](agent-updates.md): update notices, the automatic update and remote machines.
 - [Model switching](model-switching.md): changing models and providers in one conversation.
