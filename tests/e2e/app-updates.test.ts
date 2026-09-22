@@ -75,6 +75,7 @@ test('titlebar details open and scroll to the card on the first and later clicks
 test('the titlebar installs with confirmation without leaving chat', async () => {
   await page.navigate(`${base}/?fake=1&appUpdate=ready&appUpdateChannel=nightly`);
   await width(880);
+  await page.waitFor(`document.querySelector('${id('nav-settings')}')`);
   await page.waitFor(`document.querySelector('${id('titlebar-update-ready')}')`);
   await page.waitFor(`document.querySelector('${id('titlebar-update-details')}')`);
   expect(await page.evaluate(`document.querySelector('${id('app-update-card')}') === null`)).toBe(true);

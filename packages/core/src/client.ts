@@ -53,7 +53,9 @@ class RpcCallError extends Error {
 }
 
 function socketUrl(url: string): string {
-  const base = url.replace(/^http/, 'ws').replace(/\/+$/, '');
+  // A loop rather than /\/+$/, which backtracks quadratically on a long run of slashes.
+  let base = url.replace(/^http/, 'ws');
+  while (base.endsWith('/')) base = base.slice(0, -1);
   return base.endsWith(RPC_PATH) ? base : base + RPC_PATH;
 }
 

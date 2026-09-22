@@ -1,4 +1,5 @@
-import { ATTACHMENT_MAX_BYTES, ATTACHMENTS_PER_TURN, IMAGE_MIME_TYPES, type ProviderDescriptor } from './index.ts';
+import { ATTACHMENT_MAX_BYTES, ATTACHMENTS_PER_TURN, IMAGE_MIME_TYPES } from './attachment-limits.ts';
+import type { ProviderDescriptor } from './index.ts';
 
 const BASE64 = /^[A-Za-z0-9+/]+={0,2}$/;
 function refused(message: string, data?: Record<string, unknown>) { return { message, ...(data ? { data } : {}) }; }

@@ -8,7 +8,7 @@
 import { mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { DIFF_MAX_BYTES } from '@boite/contracts';
+import { DIFF_MAX_BYTES, RpcErrorCode } from '@boite/contracts';
 import type { CoreClient } from '../src/client.ts';
 import { parseNumstat, parseStatus } from '../src/git.ts';
 import { startTestCore } from './harness.ts';
@@ -142,6 +142,17 @@ describe('git.diff', () => {
     // A file with a NUL in it has no sides to show, whatever its extension.
     const binary = await client.call('git.diff', { threadId, path: 'pic.png' });
     expect(binary).toMatchObject({ binary: true, oldText: null, newText: null });
+  });
+
+  test('malformed refs are refused while an empty ref defaults to HEAD', async () => {
+    const path = await fixture();
+    const threadId = await threadIn(path, 'repo');
+    for (const ref of [null, false, 0, [], { length: 0 }]) {
+      await expect(client.call('git.diff', { threadId, path: 'a.txt', ref: ref as unknown as string }))
+        .rejects.toMatchObject({ rpc: { code: RpcErrorCode.Refused, message: 'git.diff ref must be a revision' } });
+    }
+    const diff = await client.call('git.diff', { threadId, path: 'a.txt', ref: '' });
+    expect(diff.oldText).toBe('one\ntwo\nthree\n');
   });
 
   test('a working-tree file past the diff limit is cut without being read whole', async () => {
