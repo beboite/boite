@@ -28,6 +28,23 @@ test('Escape cancels selection without collecting page content', () => {
   expect(document.querySelector('[aria-hidden="true"]')).toBeNull();
 });
 
+test('open shadow roots report the clicked control rather than the retargeted host', () => {
+  const host = document.createElement('div');
+  document.body.append(host);
+  const shadow = host.attachShadow({ mode: 'open' });
+  shadow.innerHTML = '<button id="shadow-save">Save inside shadow</button>';
+  const target = shadow.querySelector('button')!;
+  vi.spyOn(target, 'getBoundingClientRect').mockReturnValue({ x: 20, y: 30, width: 80, height: 25 } as DOMRect);
+  const emit = vi.fn();
+  installPreviewPicker(document, emit);
+  target.dispatchEvent(new MouseEvent('pointermove', { bubbles: true, composed: true }));
+  expect(document.querySelector<HTMLElement>('[aria-hidden=true]')?.style.left).toBe('20px');
+  target.dispatchEvent(new MouseEvent('click', { bubbles: true, composed: true, cancelable: true }));
+  expect(emit).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+    selector: '#shadow-save', text: 'Save inside shadow', bounds: { x: 20, y: 30, width: 80, height: 25 }
+  }));
+});
+
 test('iframe bridge binds selections to the actual surface, cancels, and refuses inaccessible documents', () => {
   const bridge = new FakeBridge();
   const events: BrowserEvent[] = [];

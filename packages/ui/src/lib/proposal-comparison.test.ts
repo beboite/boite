@@ -5,10 +5,16 @@ import { Store } from './store.svelte';
 import { ProposalComparison, proposalResponse, savedComparison } from './proposal-comparison.svelte';
 
 const stores: Store[] = [];
-afterEach(() => { for (const store of stores.splice(0)) store.detach(); vi.restoreAllMocks(); });
+const clients: FakeClient[] = [];
+afterEach(() => {
+  for (const store of stores.splice(0)) store.detach();
+  for (const client of clients.splice(0)) client.close();
+  vi.restoreAllMocks();
+});
 
 async function fixture() {
   const client = new FakeClient({ delayMs: 0 });
+  clients.push(client);
   const store = new Store();
   stores.push(store);
   store.attach(client);
@@ -81,6 +87,7 @@ test('changing machines after a create never starts the returned id on either ma
   const { client, store, project, choice, comparison } = await fixture();
   const original = client.call.bind(client);
   const remote = new FakeClient({ delayMs: 0 });
+  clients.push(remote);
   const remoteCall = vi.spyOn(remote, 'call');
   const call = vi.spyOn(client, 'call').mockImplementation((async (method: RpcMethodName, params: RpcParams<RpcMethodName>) => {
     const result = await original(method, params);

@@ -817,10 +817,6 @@ shellTest('native preview selection crosses the child webview boundary and stays
     await child.waitFor(`document.querySelector('#native-preview-target')`);
     await page.click(testid('preview-annotate'));
     await child.waitFor(`typeof window.__boiteStopPreviewPick === 'function'`);
-    await child.click('#native-preview-target');
-    await page.waitFor(`document.querySelector('${testid('preview-comment-form')}')`);
-    expect(await page.text(`${testid('preview-comment-form')} code`)).toBe('#native-preview-target');
-    expect(await child.evaluate('location.href')).toBe(url);
     // Even while the data-only picker is armed, a page gets no host commands.
     const refused = await child.evaluate<string>(`(async () => {
       if (!window.__TAURI_INTERNALS__?.invoke) return 'unavailable';
@@ -828,6 +824,10 @@ shellTest('native preview selection crosses the child webview boundary and stays
       catch { return 'refused'; }
     })()`);
     expect(refused).not.toBe('allowed');
+    await child.click('#native-preview-target');
+    await page.waitFor(`document.querySelector('${testid('preview-comment-form')}')`);
+    expect(await page.text(`${testid('preview-comment-form')} code`)).toBe('#native-preview-target');
+    expect(await child.evaluate('location.href')).toBe(url);
     await page.type(testid('preview-comment'), 'Make the save action clearer.');
     await page.screenshot(join(import.meta.dir, '.artifacts', 'preview-native-comment.png'));
     const messagesBefore = await page.evaluate(`document.querySelectorAll('[data-testid=message]').length`);

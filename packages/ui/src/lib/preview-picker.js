@@ -22,8 +22,9 @@ export default function installPreviewPicker(doc, emit) {
     return parts.join(' > ').slice(0, 1000);
   }
   function move(event) {
-    if (!(event.target instanceof win.Element)) return;
-    const rect = event.target.getBoundingClientRect();
+    const target = event.composedPath()[0];
+    if (!(target instanceof win.Element)) return;
+    const rect = target.getBoundingClientRect();
     Object.assign(marker.style, { display: 'block', left: rect.x + 'px', top: rect.y + 'px', width: rect.width + 'px', height: rect.height + 'px' });
   }
   function cleanup() {
@@ -33,10 +34,10 @@ export default function installPreviewPicker(doc, emit) {
     doc.removeEventListener('keydown', key, true);
   }
   function pick(event) {
-    if (!(event.target instanceof win.Element)) return;
+    const target = event.composedPath()[0];
+    if (!(target instanceof win.Element)) return;
     event.preventDefault();
     event.stopImmediatePropagation();
-    const target = event.target;
     const rect = target.getBoundingClientRect();
     const selection = {
       url: doc.URL.slice(0, 4096),

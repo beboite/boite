@@ -45,6 +45,9 @@ const BLANK: &str = "about:blank";
 static PICKS: LazyLock<Mutex<HashMap<String, String>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 const PICKER: &str = include_str!("../../../../packages/ui/src/lib/preview-picker.js");
+// Even if every allowed payload byte needs JSON escaping and percent encoding,
+// the 24,384 field bytes plus the fixed envelope fit this transport budget.
+const MAX_SELECTION_CALLBACK_BYTES: usize = 512 * 1024;
 
 #[derive(Clone, Deserialize, Serialize)]
 struct SelectionBounds {
@@ -87,24 +90,27 @@ fn cancel_pick(id: &str) {
 }
 
 fn read_selection(id: &str, url: &Url) -> Option<(String, Option<PreviewSelection>)> {
-    if url.as_str().len() > 65536 || url.host_str() != Some("selection") {
+    if url.host_str() != Some("selection") {
         return None;
+    }
+    // Request IDs contain only ASCII alphanumerics and hyphens, so this finds
+    // the matching request without decoding an unbounded data parameter.
+    let request = url.query()?.split('&').find_map(|field| field.strip_prefix("request="))?;
+    let mut picks = PICKS.lock().ok()?;
+    if picks.get(id)?.as_str() != request {
+        return None;
+    }
+    let request = picks.remove(id)?;
+    drop(picks);
+    // A matching malformed callback also settles the UI, like cancellation.
+    if url.as_str().len() > MAX_SELECTION_CALLBACK_BYTES {
+        return Some((request, None));
     }
     let fields: HashMap<_, _> = url.query_pairs().into_owned().collect();
-    let request = fields.get("request")?;
-    let mut picks = PICKS.lock().ok()?;
-    if picks.get(id)? != request {
-        return None;
-    }
-    let selection: Option<PreviewSelection> = serde_json::from_str(fields.get("data")?).ok()?;
-    if selection
-        .as_ref()
-        .is_some_and(|value| !valid_selection(value))
-    {
-        return None;
-    }
-    picks.remove(id);
-    Some((request.clone(), selection))
+    let selection = fields.get("data")
+        .and_then(|data| serde_json::from_str::<Option<PreviewSelection>>(data).ok())
+        .flatten().filter(valid_selection);
+    Some((request, selection))
 }
 
 /// The shape `BrowserEvent` takes in `packages/ui/src/lib/browser-bridge.ts`.
@@ -550,7 +556,7 @@ pub async fn browser_destroy(app: AppHandle, webview: Webview, id: String) -> Re
 
 #[cfg(test)]
 mod tests {
-    use super::{checked_url, label_of, read_selection, LABEL_PREFIX, PICKS};
+    use super::{checked_url, label_of, read_selection, LABEL_PREFIX, MAX_SELECTION_CALLBACK_BYTES, PICKS};
 
     #[test]
     fn preview_selection_is_bound_to_one_surface_and_consumed_once() {
@@ -574,10 +580,34 @@ mod tests {
         assert!(read_selection(id, &wrong).is_none());
         let mut invalid = tauri::Url::parse("boite-preview://selection/").unwrap();
         invalid.query_pairs_mut().append_pair("request", "expected").append_pair("data", r#"{"url":"file:///private","selector":"button","text":"Save","bounds":{"x":1,"y":2,"width":30,"height":40}}"#);
-        assert!(read_selection(id, &invalid).is_none());
+        assert!(read_selection(id, &invalid).unwrap().1.is_none());
+        assert!(!PICKS.lock().unwrap().contains_key(id));
+        PICKS.lock().unwrap().insert(id.into(), "expected".into());
         let cancel =
             tauri::Url::parse("boite-preview://selection/?request=expected&data=null").unwrap();
         assert!(read_selection(id, &cancel).unwrap().1.is_none());
+    }
+
+    #[test]
+    fn percent_encoded_selection_fits_and_oversized_callbacks_settle_once() {
+        let id = "preview-test-encoding";
+        let payload = serde_json::json!({
+            "url": format!("https://example.test/{}", "é".repeat(8000)),
+            "selector": format!("#{}", "é".repeat(1999)),
+            "text": "é".repeat(2000),
+            "bounds": { "x": 0, "y": 0, "width": 10, "height": 10 }
+        });
+        PICKS.lock().unwrap().insert(id.into(), "encoded".into());
+        let mut url = tauri::Url::parse("boite-preview://selection/").unwrap();
+        url.query_pairs_mut().append_pair("request", "encoded").append_pair("data", &payload.to_string());
+        assert!(url.as_str().len() > 65536);
+        assert!(url.as_str().len() < MAX_SELECTION_CALLBACK_BYTES);
+        assert!(read_selection(id, &url).unwrap().1.is_some());
+        PICKS.lock().unwrap().insert(id.into(), "oversized".into());
+        url.set_query(None);
+        url.query_pairs_mut().append_pair("request", "oversized").append_pair("data", &"x".repeat(MAX_SELECTION_CALLBACK_BYTES));
+        assert!(read_selection(id, &url).unwrap().1.is_none());
+        assert!(read_selection(id, &url).is_none());
     }
 
     #[test]
