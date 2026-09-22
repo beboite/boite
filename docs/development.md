@@ -377,6 +377,24 @@ bun run bench/idle-rss.ts   # the core's idle working set against bare bun
 Both set their own fresh data directory. Quote a figure with the date of the run
 it came from, and rerun before quoting an old one.
 
+## Architecture checks
+
+Core tests default to 15 seconds per case because scripted driver tests start
+several traced child processes. Their explicit protocol and shutdown deadlines
+still apply. Override the default with `bun run --cwd packages/core test --timeout 5000`
+when reproducing a timing failure. A slow assertion still fails; this timeout
+does not retry or skip tests.
+
+`bun run check` includes `bun run check:architecture`. The architecture check
+uses Bun's parser and needs no installed workspace dependencies. CI runs it in
+the changes job on every pull request. `bun test scripts/architecture` verifies
+cycle detection, import resolution and the package boundaries.
+
+`bun run audit:complexity` ranks production functions by cyclomatic complexity.
+Use `bun run audit:complexity --json` to save a comparison. It is advisory;
+the [architecture guide](architecture.md#module-boundaries-and-complexity)
+describes its scope and the module boundaries behind the checks.
+
 ## The worktree trap
 
 An agent usually works in a detached git worktree of this repository, and the
