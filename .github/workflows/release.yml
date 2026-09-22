@@ -40,7 +40,8 @@ jobs:
   verify:
     needs: version
     uses: ./.github/workflows/ci.yml
-    secrets: inherit
+    secrets:
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
     with:
       sign-updates: true
     permissions:

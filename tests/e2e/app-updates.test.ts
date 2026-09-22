@@ -32,6 +32,32 @@ beforeAll(async () => {
 }, 30_000);
 afterAll(async () => { await page?.close(); await server?.close(); }, 15_000);
 
+test('the titlebar update action opens and scrolls to the card on its first click', async () => {
+  await page.navigate(`${base}/?fake=1&appUpdate=ready&appUpdateChannel=nightly`);
+  await page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
+  await page.waitFor(`document.querySelector('${id('titlebar-update-ready')}')`);
+  await page.evaluate(`(() => {
+    window.__appUpdateScrollTarget = null;
+    const original = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = function(options) {
+      window.__appUpdateScrollTarget = this.id;
+      return original.call(this, options);
+    };
+  })()`);
+  await page.click(id('titlebar-update-ready'));
+  await page.waitFor(`document.querySelector('${id('app-update-card')}')`);
+  expect(await page.evaluate('window.__appUpdateScrollTarget')).toBe('settings-app-update');
+  await capture('titlebar-first-click');
+  await page.click('[data-settings-section="phone"]');
+  await page.waitFor(`document.querySelector('[data-settings-section="phone"]').classList.contains('chosen')`);
+  expect(await page.evaluate('window.__appUpdateScrollTarget')).toBe('settings-phone');
+  expect(await page.evaluate(`document.querySelector('[data-settings-section="app-update"]').classList.contains('chosen')`)).toBe(false);
+  await page.evaluate('window.__appUpdateScrollTarget = null');
+  await page.click(id('titlebar-update-ready'));
+  await page.waitFor(`document.querySelector('[data-settings-section="app-update"]').classList.contains('chosen')`);
+  expect(await page.evaluate('window.__appUpdateScrollTarget')).toBe('settings-app-update');
+}, 30_000);
+
 test('ready desktop updates show versions, notes and a restart confirmation', async () => {
   await settings('ready', true);
   await page.waitFor(`document.querySelector('${id('app-update-install')}')`);

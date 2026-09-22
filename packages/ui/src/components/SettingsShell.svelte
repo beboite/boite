@@ -69,7 +69,9 @@
     ]
   });
   let selectedSection = $state('');
+  let chosenSection = $derived(store.settingsSection?.id ?? selectedSection);
   function jump(id: string) {
+    store.settingsSection = null;
     selectedSection = id;
     document.getElementById(`settings-${id}`)?.scrollIntoView({behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth', block: 'start'});
   }
@@ -77,6 +79,19 @@
   let tabs = $derived(all.filter((tab) => store.owner || !OWNER_TABS.includes(tab.id)));
   /** A tab this client has no nav entry for lands on General rather than nowhere. */
   let tab = $derived(tabs.some((entry) => entry.id === store.settingsTab) ? store.settingsTab : 'general');
+
+  // A caller can name a card before this lazy settings subtree is mounted.
+  // Effects run after its DOM is present, so the normal navigation path can
+  // perform the first scroll without timing guesses in the caller.
+  $effect(() => {
+    const section = store.settingsSection;
+    if (!section || tab !== store.settingsTab) return;
+    void section.request;
+    document.getElementById(`settings-${section.id}`)?.scrollIntoView({
+      behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth',
+      block: 'start'
+    });
+  });
 </script>
 
 {#if narrow.current && !inShell}
@@ -110,7 +125,7 @@
           <div>
             {#each children[entry.id] ?? [] as child (child.id)}
               {#if store.owner || child.id !== 'scheduler'}
-                <button class="ghost subsection" class:chosen={selectedSection === child.id} onclick={() => jump(child.id)}>{child.label}</button>
+                <button class="ghost subsection" class:chosen={chosenSection === child.id} data-settings-section={child.id} onclick={() => jump(child.id)}>{child.label}</button>
               {/if}
             {/each}
           </div>
@@ -124,7 +139,7 @@
     <div class="mobile-subcategories">
       {#each children[tab] ?? [] as child (child.id)}
         {#if store.owner || child.id !== 'scheduler'}
-          <button class="ghost" class:active={selectedSection === child.id} onclick={() => jump(child.id)}>{child.label}</button>
+          <button class="ghost" class:active={chosenSection === child.id} data-settings-section={child.id} onclick={() => jump(child.id)}>{child.label}</button>
         {/if}
       {/each}
     </div>

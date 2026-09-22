@@ -94,8 +94,7 @@
   let dev = $derived(store.core?.channel === 'dev');
 
   function openUpdate(): void {
-    store.showSettings('general');
-    queueMicrotask(() => document.getElementById('settings-app-update')?.scrollIntoView({ block: 'start' }));
+    store.showSettings('general', 'app-update');
   }
 </script>
 

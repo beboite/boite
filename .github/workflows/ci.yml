@@ -6,6 +6,10 @@ on:
   pull_request:
   workflow_dispatch:
   workflow_call:
+    secrets:
+      TAURI_SIGNING_PRIVATE_KEY:
+        description: Required only when sign-updates is enabled.
+        required: false
     inputs:
       force:
         type: boolean

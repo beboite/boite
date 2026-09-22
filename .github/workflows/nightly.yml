@@ -57,7 +57,8 @@ jobs:
     needs: revision
     if: needs.revision.outputs.changed == 'true'
     uses: ./.github/workflows/ci.yml
-    secrets: inherit
+    secrets:
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
     with:
       skip-server: true
       sign-updates: true

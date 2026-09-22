@@ -27,7 +27,8 @@ reviews:
       instructions: >-
         Check fork pull requests, skipped and cancelled dependencies, least
         privilege, immutable action pins, cache correctness and publication
-        of the exact tested artifacts. Keep nightly publication opt-in.
+        of the exact tested artifacts. Nightly publication is enabled by default
+        on main; preserve NIGHTLY_ENABLED=false as the emergency stop.
     - path: 'packages/core/**'
       instructions: >-
         Check owner versus paired-device authorization and provider-specific
