@@ -45,6 +45,8 @@ jobs:
       web: ${{ steps.filter.outputs.web }}
       desktop: ${{ steps.filter.outputs.desktop }}
       server: ${{ steps.filter.outputs.server == 'true' && !inputs.skip-server }}
+      e2e: ${{ steps.filter.outputs.e2e }}
+      portable: ${{ steps.filter.outputs.portable }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -94,13 +96,20 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+      # Caches are saved on main only: a pull request's copy is visible to that
+      # pull request alone and would evict the ones every pull request restores.
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
         with:
           path: node_modules/.vitest-cache
           key: vitest-${{ runner.os }}-${{ hashFiles('bun.lock', 'packages/ui/vitest.config.ts', 'packages/ui/svelte.config.js') }}-${{ github.sha }}
           restore-keys: vitest-${{ runner.os }}-${{ hashFiles('bun.lock', 'packages/ui/vitest.config.ts', 'packages/ui/svelte.config.js') }}-
       - run: bun run check
       - run: bun run --cwd packages/ui test --maxWorkers=8
+      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        if: github.ref == 'refs/heads/main'
+        with:
+          path: node_modules/.vitest-cache
+          key: vitest-${{ runner.os }}-${{ hashFiles('bun.lock', 'packages/ui/vitest.config.ts', 'packages/ui/svelte.config.js') }}-${{ github.sha }}
 
   desktop:
     needs: changes
@@ -119,6 +128,7 @@ jobs:
         with:
           workspaces: apps/shell/src-tauri -> target
           shared-key: desktop-release-v1
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Set nightly artifact version
         if: inputs.channel == 'nightly' && inputs.version != ''
         env:
@@ -140,7 +150,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           bun run apps/shell/scripts/stage-sidecar.ts
       - run: bun run test:shell --release
-      - run: bun test tests/e2e
+      - run: bun test tests/e2e --parallel=3
+        if: needs.changes.outputs.e2e == 'true'
         env:
           BOITE_E2E_PREBUILT_UI: '1'
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
@@ -166,7 +177,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, ubuntu-24.04-arm, macos-15, macos-15-intel]
+        os: ${{ fromJSON(needs.changes.outputs.portable) }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 35
     steps:
@@ -187,6 +198,7 @@ jobs:
         with:
           workspaces: apps/shell/src-tauri -> target
           shared-key: desktop-portable-v1
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: bun run stage:core
       - run: bun run test:shell --release
       - name: Build and test installed Linux package

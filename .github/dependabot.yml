@@ -1,42 +1,39 @@
 version: 2
+# Minor and patch updates of every ecosystem share one weekly pull request, so
+# a week of updates costs one CI run instead of one per ecosystem. Majors
+# arrive one pull request each, so a breaking SDK stays isolated.
+multi-ecosystem-groups:
+  weekly:
+    schedule:
+      interval: weekly
+    update-types: [minor, patch]
+    commit-message:
+      prefix: chore
+      include: scope
 updates:
   - package-ecosystem: github-actions
     directory: /
-    schedule:
-      interval: weekly
-    groups:
-      actions:
-        patterns: ['*']
+    multi-ecosystem-group: weekly
+    patterns: ['*']
   - package-ecosystem: bun
     directory: /
-    schedule:
-      interval: weekly
+    multi-ecosystem-group: weekly
+    patterns: ['*']
     ignore:
       # 30.1.0 fires a window-targeted blur after the focused element leaves the
       # DOM, which closes the context menu on its way back up:
       # https://github.com/jsdom/jsdom/issues/4347
       - dependency-name: jsdom
         versions: ['>=30.1.0']
-    groups:
-      # Majors arrive one pull request each, so a breaking SDK stays isolated.
-      workspace:
-        patterns: ['*']
-        update-types: [minor, patch]
   - package-ecosystem: npm
     directory: /docker/agents
-    schedule:
-      interval: weekly
-    groups:
-      agent-clis:
-        patterns: ['*']
+    multi-ecosystem-group: weekly
+    patterns: ['*']
   - package-ecosystem: cargo
     directory: /apps/shell/src-tauri
-    schedule:
-      interval: weekly
-    groups:
-      rust:
-        patterns: ['*']
+    multi-ecosystem-group: weekly
+    patterns: ['*']
   - package-ecosystem: docker
     directory: /
-    schedule:
-      interval: weekly
+    multi-ecosystem-group: weekly
+    patterns: ['*']

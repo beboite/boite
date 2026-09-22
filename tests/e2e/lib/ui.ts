@@ -4,7 +4,9 @@ import { join } from 'node:path';
 const root = join(import.meta.dir, '../../../packages/ui');
 const requireUi = createRequire(join(root, 'package.json'));
 const { build, createServer, preview } = await import(requireUi.resolve('vite'));
-const fixtureDir = join(import.meta.dir, '../.artifacts/fake-ui');
+// One directory per process: `bun test --parallel` runs files in several
+// workers, and a shared one would be emptied under another worker's server.
+const fixtureDir = join(import.meta.dir, `../.artifacts/fake-ui-${process.pid}`);
 let fixtureBuild: Promise<unknown> | undefined;
 
 /** Build fake-client fixtures once in CI, keeping cold transforms outside browser interaction deadlines. */

@@ -55,7 +55,8 @@ jobs:
             BOITE_CHANNEL=${{ inputs.channel }}
             BOITE_VERSION=${{ inputs.version }}
           cache-from: type=gha,scope=server-${{ matrix.arch }}
-          cache-to: type=gha,scope=server-${{ matrix.arch }},mode=max
+          # Written on main only, like every other cache: see ci.yml.
+          cache-to: ${{ github.ref == 'refs/heads/main' && format('type=gha,scope=server-{0},mode=max', matrix.arch) || '' }}
       - run: bash docker/smoke.sh boite-server:test "$BUILD_CHANNEL" "$BUILD_VERSION"
         env:
           BUILD_CHANNEL: ${{ inputs.channel }}
