@@ -38,8 +38,11 @@ import type {
   RequestId,
   RpcEventName,
   RpcEvents,
+  RpcParams,
+  RpcResult,
   SchedulerState,
   Settings,
+  TelemetryState,
   Thread,
   ThreadId,
   ThreadResources,
@@ -251,6 +254,8 @@ export class Store {
   error = $state<string | null>(null);
   page = $state<Page>('chat');
   settingsTab = $state<SettingsTab>('general');
+  /** A settings card requested before its lazy page exists, with a fresh key for repeated asks. */
+  settingsSection = $state<{ id: string; request: number } | null>(null);
   /** The phone drawer. */
   sidebarOpen = $state(false);
   /** The desktop sidebar, folded with Ctrl+B. */
@@ -1390,8 +1395,11 @@ export class Store {
   // Navigation
   // -------------------------------------------------------------------------
 
-  showSettings(tab: SettingsTab = 'general'): void {
+  showSettings(tab: SettingsTab = 'general', section: string | null = null): void {
     this.settingsTab = tab;
+    this.settingsSection = section === null
+      ? null
+      : { id: section, request: (this.settingsSection?.request ?? 0) + 1 };
     this.page = 'settings';
     if (tab === 'resources') void this.refreshResources();
   }
@@ -2236,6 +2244,33 @@ export class Store {
       await this.refreshResources();
     } catch (error) {
       this.#fail(error);
+    }
+  }
+
+  telemetryState(): Promise<TelemetryState> {
+    return this.#telemetryCall('telemetry.state', {});
+  }
+
+  configureTelemetry(mode: TelemetryState['mode']): Promise<TelemetryState> {
+    return this.#telemetryCall('telemetry.configure', { mode });
+  }
+
+  retryTelemetryDeletion(): Promise<TelemetryState> {
+    return this.#telemetryCall('telemetry.retryForget', {});
+  }
+
+  exportTelemetry(): Promise<Record<string, unknown>> {
+    return this.#telemetryCall('telemetry.export', {});
+  }
+
+  async #telemetryCall<M extends 'telemetry.state' | 'telemetry.configure' | 'telemetry.retryForget' | 'telemetry.export'>(method: M, params: RpcParams<M>): Promise<RpcResult<M>> {
+    const client = this.#client;
+    try {
+      if (!client || !this.owner) throw new Error(strings.rightPanel.ownerOnly);
+      return await client.call(method, params);
+    } catch (error) {
+      if (this.#client === client) this.#fail(error);
+      throw error;
     }
   }
 

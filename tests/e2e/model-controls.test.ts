@@ -20,6 +20,29 @@ beforeAll(async () => {
 }, 30_000);
 afterAll(async () => { await page?.close(); await server?.close(); }, 15_000);
 
+test.each([1440, 390])('provider switching keeps the picker frame still at %ipx', async (width) => {
+  await page.send('Emulation.setDeviceMetricsOverride', { width, height: 900, deviceScaleFactor: 1, mobile: width < 720 });
+  await page.navigate(url);
+  await page.click('[data-testid=composer-picker]');
+  const frames: { x: number; y: number; width: number; height: number }[] = [];
+  for (const provider of ['claude', 'echo', 'opencode', 'antigravity', 'favorites']) {
+    await page.click(`[data-provider="${provider}"]`);
+    await capture(`picker-stable-${width}-${provider}.png`);
+    frames.push(await page.evaluate<{ x: number; y: number; width: number; height: number }>(`document.querySelector('[data-testid=composer-picker-menu]').getBoundingClientRect().toJSON()`));
+  }
+  const firstFrame = frames[0]!;
+  for (const frame of frames.slice(1)) {
+    expect(frame.x).toBe(firstFrame.x);
+    expect(frame.y).toBe(firstFrame.y);
+    expect(frame.width).toBe(firstFrame.width);
+    expect(frame.height).toBe(firstFrame.height);
+  }
+  expect(frames[0]!.x).toBeGreaterThanOrEqual(0);
+  expect(frames[0]!.x + frames[0]!.width).toBeLessThanOrEqual(width);
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
+  await page.navigate(url);
+}, 30_000);
+
 test.each(['glass', 'grain'])('pointer clicks open and select models with %s', async (material) => {
   await page.navigate(url);
   await page.waitFor(`document.querySelector('[data-testid=composer-picker]')`);
@@ -68,7 +91,6 @@ test('favorites survive reload, reasoning has discrete stops, and the context ri
   await page.waitFor(`document.querySelectorAll('[data-testid=favorite-model]').length === 1`);
   await capture('models-favorites.png');
   expect(await page.evaluate(`document.querySelector('[data-testid=composer]').getBoundingClientRect().height`)).toBeLessThan(140);
-  expect(await page.evaluate(`document.querySelector('[data-testid=composer-picker-menu]').getBoundingClientRect().height`)).toBeLessThan(180);
   await page.navigate(url);
   await page.waitFor(`document.querySelector('[data-testid=composer-picker]')`);
   await page.click('[data-testid=composer-picker]');
@@ -174,19 +196,19 @@ test('model picker flips upward without moving the composer and scrolls long lis
   await page.click('[data-provider=opencode]');
   await page.waitFor(`document.querySelectorAll('[data-model]').length > 12`);
   await capture('picker-scroll-desktop.png');
-  const layout = await page.evaluate<any>(`(() => { const menu=document.querySelector('[data-testid=composer-picker-menu]'); const rows=menu.querySelector('.models'); const trigger=document.querySelector('[data-testid=composer-picker]').getBoundingClientRect(); const rect=menu.getBoundingClientRect(); return {top:rect.top,bottom:rect.bottom,triggerBottom:trigger.bottom,height:innerHeight,scroll:rows.scrollHeight,client:rows.clientHeight,row:rows.querySelector('[data-model]').getBoundingClientRect().height}; })()`);
+  const layout = await page.evaluate<any>(`(() => { const menu=document.querySelector('[data-testid=composer-picker-menu]'); const rows=menu.querySelector('.model-list'); const trigger=document.querySelector('[data-testid=composer-picker]').getBoundingClientRect(); const rect=menu.getBoundingClientRect(); return {top:rect.top,bottom:rect.bottom,triggerBottom:trigger.bottom,height:innerHeight,scroll:rows.scrollHeight,client:rows.clientHeight,row:rows.querySelector('[data-model]').getBoundingClientRect().height}; })()`);
   expect(layout.bottom).toBeLessThan(layout.triggerBottom);
   expect(await page.evaluate(`document.querySelector('[data-testid=composer-picker-menu]').dataset.direction`)).toBe('up');
   expect(layout.bottom).toBeLessThanOrEqual(layout.height);
   expect(layout.scroll).toBeGreaterThan(layout.client);
   expect(layout.row).toBeGreaterThanOrEqual(28);
-  const wheel = await page.evaluate<any>(`(() => { const r=document.querySelector('[data-testid=composer-picker-menu] .models').getBoundingClientRect(); return { x:r.left+r.width/2, y:r.top+r.height/2 }; })()`);
+  const wheel = await page.evaluate<any>(`(() => { const r=document.querySelector('[data-testid=composer-picker-menu] .model-list').getBoundingClientRect(); return { x:r.left+r.width/2, y:r.top+r.height/2 }; })()`);
   await page.send('Input.dispatchMouseEvent', { type:'mouseWheel', ...wheel, deltaX:0, deltaY:180 });
-  await page.waitFor(`document.querySelector('[data-testid=composer-picker-menu] .models').scrollTop > 0`);
+  await page.waitFor(`document.querySelector('[data-testid=composer-picker-menu] .model-list').scrollTop > 0`);
   await page.click('[data-testid=picker-refresh]');
   expect(await page.evaluate(`document.querySelectorAll('[data-model]').length`)).toBeGreaterThan(12);
   await page.waitFor(`!document.querySelector('[data-testid=picker-refresh]').disabled`);
-  expect(await page.evaluate(`document.querySelector('[data-testid=composer-picker-menu] .models').scrollTop`)).toBeGreaterThan(0);
+  expect(await page.evaluate(`document.querySelector('[data-testid=composer-picker-menu] .model-list').scrollTop`)).toBeGreaterThan(0);
   await page.send('Emulation.setDeviceMetricsOverride', { width:390,height:844,deviceScaleFactor:1,mobile:true });
   await capture('picker-scroll-phone.png');
   const phone = await page.evaluate<any>(`(() => { const r=document.querySelector('[data-testid=composer-picker-menu]').getBoundingClientRect();return {left:r.left,right:r.right,bottom:r.bottom}; })()`);
@@ -232,7 +254,7 @@ test('speed controls follow the selected model and Codex never offers Ultrathink
   expect(await page.evaluate(`!!document.querySelector('[data-testid=effort-speed]')`)).toBe(false);
 }, 30_000);
 
-test('the draft keeps a compact composer above a detached favorites menu', async () => {
+test('the draft keeps a compact composer separate from the fixed favorites menu', async () => {
   await page.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
   await page.navigate(url);
   await page.waitFor(`document.querySelector('[data-testid=new-thread]')`);
@@ -249,6 +271,6 @@ test('the draft keeps a compact composer above a detached favorites menu', async
   const layout = await page.evaluate<any>(`(() => { const c=document.querySelector('[data-testid=composer]').getBoundingClientRect(); const m=document.querySelector('[data-testid=composer-picker-menu]').getBoundingClientRect(); return {composerHeight:c.height,composerTop:c.top,composerBottom:c.bottom,menuTop:m.top,menuHeight:m.height}; })()`);
   expect(layout.composerHeight).toBe(before.height);
   expect(layout.composerTop).toBe(before.top);
-  expect(layout.menuTop).toBeGreaterThan(layout.composerBottom);
-  expect(layout.menuHeight).toBeLessThan(260);
+  expect(layout.menuTop + layout.menuHeight).toBeLessThan(layout.composerTop);
+  expect(layout.menuHeight).toBe(360);
 }, 30_000);

@@ -2,12 +2,12 @@
   import { MediaQuery } from 'svelte/reactivity';
   import MobileSettings from './MobileSettings.svelte';
   import BrainPage from './BrainPage.svelte';
-  import { ArrowLeft, ChevronRight, Coins, FlaskConical, Gauge, Keyboard, Mic, Monitor, Palette, Puzzle, Settings2, ShieldCheck, Users } from '@lucide/svelte';
+  import { ArrowLeft, Brain, ChevronRight, Coins, FlaskConical, Gauge, Keyboard, Mic, Monitor, Palette, Puzzle, Settings2, ShieldCheck, Users } from '@lucide/svelte';
   import KeyboardPage from './KeyboardPage.svelte';
   import LimitsPage from './LimitsPage.svelte';
   import PluginsPage from './PluginsPage.svelte';
-  import { strings } from '../lib/strings';
   import { COMMAND_GROUPS } from '../lib/keybindings';
+  import { strings } from '../lib/strings';
   import type { SettingsTab, Store } from '../lib/store.svelte';
   import AccountsPage from './AccountsPage.svelte';
   import AppearancePage from './AppearancePage.svelte';
@@ -17,6 +17,7 @@
   import ResourcesPage from './ResourcesPage.svelte';
   import UsagePage from './UsagePage.svelte';
   import VoiceSettings from './VoiceSettings.svelte';
+  import { showAppUpdateUi } from '../lib/app-update.svelte';
 
   let { store }: { store: Store } = $props();
   const narrow = new MediaQuery('(max-width: 720px)');
@@ -25,7 +26,9 @@
   /** Providers, Plugins and Resources call nothing a paired device may call. */
   const OWNER_TABS: SettingsTab[] = ['accounts', 'plugins', 'resources', 'brain'];
 
-  const all: { id: SettingsTab; label: string; icon: typeof Settings2 }[] = [
+  // Derived, not built once: the nav is written in the language the app is
+  // speaking, and the language changes without a reload.
+  let all = $derived<{ id: SettingsTab; label: string; icon: typeof Settings2 }[]>([
     { id: 'general', label: strings.settings.tabs.general, icon: Settings2 },
     { id: 'voice', label: strings.speech.heading, icon: Mic },
     { id: 'machines', label: strings.machines.heading, icon: Monitor },
@@ -33,12 +36,12 @@
     { id: 'keyboard', label: strings.settings.tabs.keyboard, icon: Keyboard },
     { id: 'accounts', label: strings.settings.tabs.accounts, icon: Users },
     { id: 'plugins', label: strings.settings.tabs.plugins, icon: Puzzle },
-    { id: 'brain', label: strings.brain.heading, icon: Puzzle },
+    { id: 'brain', label: strings.brain.heading, icon: Brain },
     { id: 'usage', label: strings.settings.tabs.usage, icon: Coins },
     { id: 'limits', label: strings.usage.limits, icon: Gauge },
     { id: 'resources', label: strings.settings.tabs.resources, icon: ShieldCheck },
     { id: 'experiments', label: strings.settings.tabs.experiments, icon: FlaskConical }
-  ];
+  ]);
 
   let children: Partial<Record<SettingsTab, { id: string; label: string }[]>> = $derived({
     accounts: store.providers.map(provider => ({id: `provider-${provider.id}`, label: provider.name})),
@@ -54,12 +57,14 @@
       { id: 'usage-threads', label: strings.usage.threads }
     ],
     general: [
+      ...(showAppUpdateUi() ? [{ id: 'app-update', label: strings.appUpdate.heading }] : []),
       { id: 'phone', label: strings.phone.heading },
       { id: 'projects', label: strings.settings.projects },
       { id: 'background', label: strings.settings.background },
       { id: 'machines', label: strings.machines.heading },
       { id: 'devices', label: strings.settings.pairing.heading },
       { id: 'scheduler', label: strings.settings.scheduler },
+      { id: 'tour', label: strings.onboarding.label },
       { id: 'core', label: strings.settings.core }
     ],
     resources: [
@@ -69,7 +74,9 @@
     ]
   });
   let selectedSection = $state('');
+  let chosenSection = $derived(store.settingsSection?.id ?? selectedSection);
   function jump(id: string) {
+    store.settingsSection = null;
     selectedSection = id;
     document.getElementById(`settings-${id}`)?.scrollIntoView({behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth', block: 'start'});
   }
@@ -77,6 +84,19 @@
   let tabs = $derived(all.filter((tab) => store.owner || !OWNER_TABS.includes(tab.id)));
   /** A tab this client has no nav entry for lands on General rather than nowhere. */
   let tab = $derived(tabs.some((entry) => entry.id === store.settingsTab) ? store.settingsTab : 'general');
+
+  // A caller can name a card before this lazy settings subtree is mounted.
+  // Effects run after its DOM is present, so the normal navigation path can
+  // perform the first scroll without timing guesses in the caller.
+  $effect(() => {
+    const section = store.settingsSection;
+    if (!section || tab !== store.settingsTab) return;
+    void section.request;
+    document.getElementById(`settings-${section.id}`)?.scrollIntoView({
+      behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth',
+      block: 'start'
+    });
+  });
 </script>
 
 {#if narrow.current && !inShell}
@@ -110,7 +130,7 @@
           <div>
             {#each children[entry.id] ?? [] as child (child.id)}
               {#if store.owner || child.id !== 'scheduler'}
-                <button class="ghost subsection" class:chosen={selectedSection === child.id} onclick={() => jump(child.id)}>{child.label}</button>
+                <button class="ghost subsection" class:chosen={chosenSection === child.id} data-settings-section={child.id} onclick={() => jump(child.id)}>{child.label}</button>
               {/if}
             {/each}
           </div>
@@ -124,7 +144,7 @@
     <div class="mobile-subcategories">
       {#each children[tab] ?? [] as child (child.id)}
         {#if store.owner || child.id !== 'scheduler'}
-          <button class="ghost" class:active={selectedSection === child.id} onclick={() => jump(child.id)}>{child.label}</button>
+          <button class="ghost" class:active={chosenSection === child.id} data-settings-section={child.id} onclick={() => jump(child.id)}>{child.label}</button>
         {/if}
       {/each}
     </div>
@@ -173,7 +193,9 @@
   .subcategories { display: grid; grid-template-rows: 0fr; opacity: 0; transition: grid-template-rows var(--dur-3) var(--ease-out-quint), opacity var(--dur-2); }
   .subcategories.open { grid-template-rows: 1fr; opacity: 1; }
   .subcategories > div { overflow: hidden; min-height: 0; }
-  .subsection { display: flex; justify-content: flex-start; width: calc(100% - 24px); margin-left: 24px; padding-left: 15px; border-left: 1px solid var(--color-edge); border-radius: 0; color: var(--color-muted-foreground); font-size: var(--text-sm); }
+  /* Block rather than flex, so a label longer than the rail ends in an ellipsis
+     instead of being cut mid-word: French says most of these in more letters. */
+  .subsection { display: block; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; width: calc(100% - 24px); margin-left: 24px; padding-left: 15px; border-left: 1px solid var(--color-edge); border-radius: 0; color: var(--color-muted-foreground); font-size: var(--text-sm); }
   .subsection.chosen { color: var(--color-foreground); border-left-color: var(--color-foreground); background: var(--color-hover); }
   @media (prefers-reduced-motion: reduce) { .subcategories, .tab :global(svg:last-child) { transition: none; } }
 

@@ -28,7 +28,8 @@ beforeAll(async () => {
     }
     return destination.stream;
   }`);
-}, 30_000);
+// This hook builds its own bundle before launching the browser; recording tests keep their own deadlines.
+}, 60_000);
 afterAll(async () => {
   try { await page?.close(); }
   finally { if (server) await new Promise<void>((resolve, reject) => server.httpServer.close((error?: Error) => error ? reject(error) : resolve())); }

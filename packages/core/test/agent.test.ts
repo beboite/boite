@@ -96,12 +96,21 @@ describe('the per-thread token', () => {
 });
 
 describe('the environment a thread launches with', () => {
+  test('POSIX PATH is independent of a differently cased environment variable', () => {
+    const fields = { threadId: 'thr_one', coreUrl: 'http://127.0.0.1:7777', token: 'secret', cliDir: '/opt/boite' };
+    for (const platform of ['linux', 'darwin'] as const) {
+      const env = agentEnvFor({ Path: 'unrelated', PATH: '/usr/bin' }, fields, platform);
+      expect(env.Path).toBe('unrelated');
+      expect(env.PATH).toBe(`/opt/boite${delimiter}/usr/bin`);
+    }
+  });
+
   test('agentEnvFor writes the three variables and puts the CLI first on PATH', () => {
     // No drive letter in these: a colon is the delimiter itself off Windows.
     const cliDir = join('opt', 'boite', 'bin');
     const before = `${join('usr', 'bin')}${delimiter}${join('usr', 'other')}`;
     const fields = { threadId: 'thr_one', coreUrl: 'http://127.0.0.1:7777', token: 'secret', cliDir };
-    const env = agentEnvFor({ Path: before, KEEP: 'kept' }, fields);
+    const env = agentEnvFor({ Path: before, KEEP: 'kept' }, fields, 'win32');
     expect(env[AGENT_ENV.threadId]).toBe('thr_one');
     expect(env[AGENT_ENV.coreUrl]).toBe('http://127.0.0.1:7777');
     expect(env[AGENT_ENV.token]).toBe('secret');
@@ -111,7 +120,7 @@ describe('the environment a thread launches with', () => {
     expect(env['PATH']).toBeUndefined();
 
     // A second turn must not grow PATH by one entry.
-    expect(agentEnvFor(env, fields)['Path']).toBe(`${cliDir}${delimiter}${before}`);
+    expect(agentEnvFor(env, fields, 'win32')['Path']).toBe(`${cliDir}${delimiter}${before}`);
   });
 
   test('the shim directory is the named one, the one beside a compiled core, or the sources', () => {

@@ -1,13 +1,17 @@
 # Agent brain
 
-Settings > Agent brain connects an existing folder on the selected core's
-machine. Browse folders or enter its absolute path, choose whether to share it
-with agents, then select Use this folder. Each core stores its own path, so the
+Settings > Brain connects an existing folder on the selected core's
+machine. Browse folders or enter its absolute path, then select Connect folder.
+Each core stores its own path, so the
 same repository can live at different locations on different computers.
 
 Only owners can inspect or configure a brain and synchronize it. A paired
 device cannot call these methods. An owner using a phone-sized browser has the
-same controls. Disconnect folder removes the setting and leaves the files alone.
+same controls. The connected folder shows Synchronize and a Use with agents
+switch, which saves immediately. Change folder reveals the path editor and
+Disconnect, which removes the setting and leaves the files alone.
+Instructions, Skills and Plugins each have a tab with a count. Select a file
+to expand its description and path; Git details stay under Sync details.
 
 ## Detection
 

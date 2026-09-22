@@ -46,7 +46,7 @@
   }
 </script>
 
-<div class="machines-page" data-testid="machines-page">
+<div class="page machines-page" data-testid="machines-page">
   <header class="head">
     <div>
       <h1>{strings.machines.heading}</h1>
@@ -86,7 +86,7 @@
             ><Plus size={14} />{busy ? strings.machines.adding : strings.machines.connect}</button
           >
         </form>
-        <details>
+        <details class="disclosure">
           <summary>{strings.machines.manual}</summary>
           <form
             onsubmit={(e) => {
@@ -157,7 +157,7 @@
   {/if}
 
   {#if workspace.active.owner && !mobile}
-    <details class="card origins">
+    <details class="card origins disclosure">
       <summary>{strings.machines.browserOrigins}</summary>
       <p class="hint">{strings.machines.browserOriginsHint}</p>
       <textarea bind:value={origins} aria-label={strings.machines.browserOrigins} rows="3"></textarea>
@@ -176,13 +176,12 @@
 
 <style>
   .machines-page {
-    max-width: 820px;
-    padding: 28px;
-    margin: 0 auto;
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
+    padding: 36px clamp(20px, 4vw, 64px);
   }
+  .machines-page > :global(*) { max-width: var(--settings-width); }
+  .machines-page > .reveal { margin-bottom: 20px; }
+  .machines-page > .reveal:not(.open) { margin-bottom: 0; }
+  .machines { margin-bottom: 20px; }
   .head {
     display: flex;
     align-items: flex-start;
