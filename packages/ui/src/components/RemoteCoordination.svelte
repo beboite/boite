@@ -1,4 +1,5 @@
 <script lang="ts">
+  import InfoTip from './InfoTip.svelte';
   import { Link2, RefreshCw, Unlink } from '@lucide/svelte';
   import { untrack } from 'svelte';
   import type { CoordinationPeer } from '@boite/contracts';
@@ -109,11 +110,10 @@
 
 <section class="card remote" data-testid="agent-links">
   <header>
-    <div><h2>{strings.machines.agentLinks}</h2><p class="hint">{strings.machines.agentLinksHint}</p></div>
+    <div><h2>{strings.machines.agentLinks}<InfoTip topic={strings.machines.agentLinks} text={`${strings.machines.agentLinksHint} ${strings.machines.publicIdentityHint}`} /></h2></div>
     <button class="ghost icon-only" aria-label={strings.machines.agentLinksRefresh} title={strings.machines.agentLinksRefresh} disabled={Boolean(busy)} onclick={() => void refresh()}><RefreshCw size={15} /></button>
   </header>
 
-  <p class="secure">{strings.machines.publicIdentityHint}</p>
 
   <h3>{strings.machines.availableAgentLinks}</h3>
   {#if pairs.length === 0}
@@ -151,8 +151,7 @@
   h2, h3 { margin: 0; }
   h2 { font-size: var(--text-base); }
   h3 { margin-top: 4px; color: var(--color-muted-foreground); font-size: var(--text-xs); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
-  .hint, .secure { margin-top: 4px; color: var(--color-muted-foreground); font-size: var(--text-sm); line-height: 1.5; }
-  .secure { padding: 8px 10px; border-left: 2px solid var(--color-edge); background: var(--color-surface-2); }
+  .hint { margin-top: 4px; color: var(--color-muted-foreground); font-size: var(--text-sm); line-height: 1.5; }
   .rows { border: 1px solid var(--color-border); border-radius: var(--radius-md); overflow: hidden; }
   .rows:empty { display: none; }
   .row { min-height: var(--control-lg); display: flex; align-items: center; gap: 12px; padding: 8px 10px; }

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import InfoTip from './InfoTip.svelte';
   import { Plus, ArrowUpRight, RefreshCw, Unplug, X } from '@lucide/svelte';
   import { workspace, machineIcons } from '../lib/workspace.svelte';
   import { store as primary } from '../lib/store.svelte';
@@ -49,8 +50,7 @@
 <div class="page machines-page" data-testid="machines-page">
   <header class="head">
     <div>
-      <h1>{strings.machines.heading}</h1>
-      <p class="intro">{strings.machines.intro}</p>
+      <h1>{strings.machines.heading}<InfoTip topic={strings.machines.heading} text={strings.machines.intro} /></h1>
     </div>
     {#if !open}
       <button class="primary add-open" data-testid="machine-add-open" onclick={startAdding}><Plus size={15} />{strings.machines.add}</button>
@@ -61,12 +61,11 @@
     <div>
       <section class="card add" data-testid="machine-add-card" aria-label={strings.machines.add}>
         <div class="add-head">
-          <h2>{strings.machines.add}</h2>
+          <h2>{strings.machines.add}<InfoTip topic={strings.machines.add} text={strings.machines.addHint} /></h2>
           {#if workspace.machines.length > 0}
             <button class="ghost icon-only" data-testid="machine-add-close" aria-label={strings.common.cancel} title={strings.common.cancel} onclick={stopAdding}><X size={15} /></button>
           {/if}
         </div>
-        <p class="hint">{strings.machines.addHint}</p>
         <form
           onsubmit={(e) => {
             e.preventDefault();
@@ -196,7 +195,6 @@
     font-size: var(--text-base);
     margin: 0;
   }
-  .intro,
   .hint {
     color: var(--color-muted-foreground);
     font-size: var(--text-sm);

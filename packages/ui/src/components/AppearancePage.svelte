@@ -1,4 +1,5 @@
 <script lang="ts">
+  import InfoTip from './InfoTip.svelte';
   import { onMount, untrack } from 'svelte';
   import { isExperimentEnabled, subscribeExperiments } from '../lib/experiments';
   import { glassSupported, readGlass, setGlass, type Glass } from '../lib/glass';
@@ -68,7 +69,7 @@
 
   <section class="card" id="settings-theme">
     <div class="switch-row">
-      <span class="text">{strings.settings.language}<span class="hint">{strings.settings.languageHint}</span></span>
+      <span class="text">{strings.settings.language}<InfoTip topic={strings.settings.language} text={strings.settings.languageHint} /></span>
       <div class="segmented" role="group" aria-label={strings.settings.language}>
         <button type="button" class:on={locale === 'system'} aria-pressed={locale === 'system'} data-testid="locale-system" onclick={() => pickLocale('system')}>
           {strings.settings.languageSystem}
@@ -97,7 +98,7 @@
       </div>
     </div>
     <div class="switch-row accent-row">
-      <span class="text">{strings.settings.accent}<span class="hint">{strings.settings.accentHint}</span></span>
+      <span class="text">{strings.settings.accent}<InfoTip topic={strings.settings.accent} text={strings.settings.accentHint} /></span>
       <div class="accent-controls">
         <div class="swatches" role="group" aria-label={strings.settings.accent}>
           {#each ACCENT_PRESETS as hue, index (hue)}
@@ -110,8 +111,7 @@
     {#if hasMaterial}
       <div class="switch-row">
         <span class="text">
-          {strings.settings.material}
-          <span class="hint">{strings.settings.materialHint}</span>
+          {strings.settings.material}<InfoTip topic={strings.settings.material} text={strings.settings.materialHint} />
         </span>
         <div class="segmented" role="group" aria-label={strings.settings.material}>
           {#each materials as option (option.id)}

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import InfoTip from './InfoTip.svelte';
   import type { TelemetryState } from '@boite/contracts';
   import type { Store } from '../lib/store.svelte';
   import { strings } from '../lib/strings';
@@ -46,17 +47,17 @@
 
 {#if store.owner}
   <section class:card={!embedded} data-testid="telemetry-settings">
-    {#if !embedded}<h2>{strings.telemetry.heading}</h2>{/if}
-    {#if !embedded}<p class="hint">{strings.telemetry.description}</p>{/if}
+    {#if !embedded}<h2>{strings.telemetry.heading}<InfoTip topic={strings.telemetry.heading} text={strings.telemetry.description} /></h2>{/if}
     {#if consent}
       {#if !consent.configured && !embedded}<p class="hint">{strings.telemetry.unconfigured}</p>{/if}
       <label class="switch-row">
-        <span class="text">{strings.telemetry.basic}<span class="hint">{embedded ? strings.onboarding.privacy.basic : strings.telemetry.basicHint}</span></span>
+        <!-- The tour is there to explain, so it keeps the sentence in view. -->
+        <span class="text">{strings.telemetry.basic}{#if embedded}<span class="hint">{strings.onboarding.privacy.basic}</span>{:else}<InfoTip topic={strings.telemetry.basic} text={strings.telemetry.basicHint} />{/if}</span>
         <input type="checkbox" role="switch" checked={consent.mode !== 'off'} disabled={busy}
           onchange={event => void change(event.currentTarget.checked ? 'basic' : 'off')} />
       </label>
       <label class="switch-row">
-        <span class="text">{strings.telemetry.enhanced}<span class="hint">{embedded ? strings.onboarding.privacy.enhanced : strings.telemetry.enhancedHint}</span></span>
+        <span class="text">{strings.telemetry.enhanced}{#if embedded}<span class="hint">{strings.onboarding.privacy.enhanced}</span>{:else}<InfoTip topic={strings.telemetry.enhanced} text={strings.telemetry.enhancedHint} />{/if}</span>
         <input type="checkbox" role="switch" checked={consent.mode === 'enhanced'} disabled={busy}
           onchange={event => void change(event.currentTarget.checked ? 'enhanced' : 'basic')} />
       </label>

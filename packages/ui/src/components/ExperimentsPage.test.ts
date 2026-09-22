@@ -29,7 +29,9 @@ test('the page carries one switch per experiment and a toggle writes the enabled
 
   // The page says these are unfinished before it offers anything.
   expect(query('[data-testid=experiments-page] > header h1').textContent?.trim()).toBe('Experiments');
-  expect(query('[data-testid=experiments-page] > header p').textContent).toContain('unfinished');
+  query<HTMLButtonElement>('[data-testid=experiments-page] > header [data-testid=info-tip]').click();
+  flushSync();
+  expect(query('[data-testid=info-tip-text]').textContent).toContain('unfinished');
 
   const grain = query<HTMLInputElement>('[data-testid=experiment-theme-grain]');
   expect(grain.checked).toBe(false);

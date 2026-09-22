@@ -1,4 +1,5 @@
 <script lang="ts">
+  import InfoTip from './InfoTip.svelte';
   import { onMount } from 'svelte';
   import { Download, Puzzle, RefreshCw, ShieldAlert, TriangleAlert } from '@lucide/svelte';
   import type { PluginPool, PluginPreview, PluginRejected, PluginState, RpcParams } from '@boite/contracts';
@@ -259,7 +260,7 @@
 {/snippet}
 
 <div class="page" data-testid="plugins-page">
-  <header><div><h1>{t.heading}</h1><p>{t.intro}</p></div></header>
+  <header><div><h1>{t.heading}<InfoTip topic={t.heading} text={t.intro} /></h1></div></header>
   {#if error}<p class="bad" role="alert">{error}</p>{/if}
 
   <section aria-labelledby="plugins-installed" data-testid="plugins-installed">

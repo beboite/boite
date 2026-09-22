@@ -1,4 +1,5 @@
 <script lang="ts">
+  import InfoTip from './InfoTip.svelte';
   import type { HarnessUpdate } from '@boite/contracts';
   import { strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
@@ -38,8 +39,7 @@
   <section class="card updates" id="settings-harness-updates" data-testid="harness-updates-card">
     <div class="top">
       <div>
-        <h2>{strings.harnessUpdates.heading}</h2>
-        <p class="hint">{strings.harnessUpdates.intro}</p>
+        <h2>{strings.harnessUpdates.heading}<InfoTip topic={strings.harnessUpdates.heading} text={strings.harnessUpdates.intro} /></h2>
       </div>
       <button type="button" class="quiet small" data-testid="harness-updates-check" disabled={busy} onclick={() => void check()}>
         {busy ? strings.harnessUpdates.checking : strings.harnessUpdates.check}
@@ -47,7 +47,7 @@
     </div>
 
     <label class="switch-row">
-      <span class="text">{strings.harnessUpdates.auto}<span class="hint">{strings.harnessUpdates.autoHint}</span></span>
+      <span class="text">{strings.harnessUpdates.auto}<InfoTip topic={strings.harnessUpdates.auto} text={strings.harnessUpdates.autoHint} /></span>
       <input
         type="checkbox"
         role="switch"
@@ -94,8 +94,6 @@
     justify-content: space-between;
     gap: 12px;
   }
-
-  .top .hint { margin: 2px 0 0; }
 
   ul {
     list-style: none;

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import InfoTip from './InfoTip.svelte';
   import { untrack } from 'svelte';
   import { EXPERIMENT_IDS, readExperiments, setExperiment, type ExperimentId } from '../lib/experiments';
   import { strings } from '../lib/strings';
@@ -21,8 +22,7 @@
 <div class="page" data-testid="experiments-page">
   <header>
     <div>
-      <h1>{strings.settings.tabs.experiments}</h1>
-      <p>{strings.settings.experiments.intro}</p>
+      <h1>{strings.settings.tabs.experiments}<InfoTip topic={strings.settings.tabs.experiments} text={strings.settings.experiments.intro} /></h1>
     </div>
   </header>
 
@@ -30,8 +30,7 @@
     {#each EXPERIMENT_IDS as id (id)}
       <label class="switch-row" id="settings-{id}">
         <span class="text">
-          {copy[id].title}
-          <span class="hint">{copy[id].hint}</span>
+          {copy[id].title}<InfoTip topic={copy[id].title} text={copy[id].hint} />
         </span>
         <input
           type="checkbox"

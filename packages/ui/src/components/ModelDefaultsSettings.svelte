@@ -1,4 +1,5 @@
 <script lang="ts">
+  import InfoTip from './InfoTip.svelte';
   import ModelPicker from './ModelPicker.svelte';
   import EffortSlider from './EffortSlider.svelte';
   import { strings } from '../lib/strings';
@@ -16,8 +17,7 @@
 </script>
 
 <section class="card" data-testid="model-defaults-settings">
-  <h2>{strings.settings.modelDefaults}</h2>
-  <p class="hint">{strings.settings.modelDefaultsHint}</p>
+  <h2>{strings.settings.modelDefaults}<InfoTip topic={strings.settings.modelDefaults} text={strings.settings.modelDefaultsHint} /></h2>
   {#each rows as row (row.provider.id)}
     <div class="default-row" data-default-provider={row.provider.id}>
       <span class="provider">{row.provider.name}</span>

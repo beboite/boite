@@ -1,4 +1,5 @@
 <script lang="ts">
+  import InfoTip from './InfoTip.svelte';
   import { onMount } from 'svelte';
   import { strings } from '../lib/strings';
   let enabled = $state(false);
@@ -18,7 +19,7 @@
 
 <section class="card" data-testid="shell-settings">
   <label class="switch-row">
-    <span class="text">{strings.settings.closeToTray}<span class="hint">{strings.settings.closeToTrayHint}</span></span>
+    <span class="text">{strings.settings.closeToTray}<InfoTip topic={strings.settings.closeToTray} text={strings.settings.closeToTrayHint} /></span>
     <input type="checkbox" role="switch" data-testid="close-to-tray" checked={enabled} disabled={!ready} onchange={(event) => void update(event.currentTarget.checked)} />
   </label>
   {#if error}<p role="alert">{error}</p>{/if}

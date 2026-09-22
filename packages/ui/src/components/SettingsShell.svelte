@@ -58,13 +58,13 @@
     ],
     general: [
       ...(showAppUpdateUi() ? [{ id: 'app-update', label: strings.appUpdate.heading }] : []),
-      { id: 'phone', label: strings.phone.heading },
       { id: 'projects', label: strings.settings.projects },
       { id: 'background', label: strings.settings.background },
       { id: 'machines', label: strings.machines.heading },
       { id: 'devices', label: strings.settings.pairing.heading },
       { id: 'scheduler', label: strings.settings.scheduler },
       { id: 'tour', label: strings.onboarding.label },
+      { id: 'phone', label: strings.phone.heading },
       { id: 'core', label: strings.settings.core }
     ],
     resources: [

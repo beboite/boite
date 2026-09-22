@@ -416,6 +416,13 @@ and `--settings-padding` in `app.css`. A page that wraps its cards for a loading
 state uses `settings-stack` on that wrapper. This keeps its cards on the same
 spacing rules as direct children of a settings page.
 
+A settings page shows titles and controls. The sentence saying what a page, a
+card or a row is for goes in an `InfoTip` beside its title: a small "i" that
+opens on hover with a mouse, on a tap with a finger (a sheet on the phone), and
+closes on Escape or a press elsewhere. A muted `.hint` line stays in view only
+for what is true now: an error, a count, a step that is missing. The tour is
+the exception, since explaining is its job.
+
 Native `details.disclosure` sections animate their height in browsers that
 support intrinsic-size transitions, with an immediate fallback elsewhere.
 Task sections use a grid fold and become inert while collapsed. Both read the
