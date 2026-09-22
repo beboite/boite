@@ -38,8 +38,11 @@ import type {
   RequestId,
   RpcEventName,
   RpcEvents,
+  RpcParams,
+  RpcResult,
   SchedulerState,
   Settings,
+  TelemetryState,
   Thread,
   ThreadId,
   ThreadResources,
@@ -2241,6 +2244,33 @@ export class Store {
       await this.refreshResources();
     } catch (error) {
       this.#fail(error);
+    }
+  }
+
+  telemetryState(): Promise<TelemetryState> {
+    return this.#telemetryCall('telemetry.state', {});
+  }
+
+  configureTelemetry(mode: TelemetryState['mode']): Promise<TelemetryState> {
+    return this.#telemetryCall('telemetry.configure', { mode });
+  }
+
+  retryTelemetryDeletion(): Promise<TelemetryState> {
+    return this.#telemetryCall('telemetry.retryForget', {});
+  }
+
+  exportTelemetry(): Promise<Record<string, unknown>> {
+    return this.#telemetryCall('telemetry.export', {});
+  }
+
+  async #telemetryCall<M extends 'telemetry.state' | 'telemetry.configure' | 'telemetry.retryForget' | 'telemetry.export'>(method: M, params: RpcParams<M>): Promise<RpcResult<M>> {
+    const client = this.#client;
+    try {
+      if (!client || !this.owner) throw new Error(strings.rightPanel.ownerOnly);
+      return await client.call(method, params);
+    } catch (error) {
+      if (this.#client === client) this.#fail(error);
+      throw error;
     }
   }
 

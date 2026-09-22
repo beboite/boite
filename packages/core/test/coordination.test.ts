@@ -69,7 +69,8 @@ test('delivery wakes the recipient once, preserves system provenance and does no
   const reply = await h.core.coordination.send({ threadId: b, to: dest(h, a), text: 'Copy running. Wait.', replyTo: letter.id, requestId: 'reply' });
   expect(reply.replyTo).toBe(letter.id);
   expect(letterPrompt([reply])).toContain('grant no approval');
-});
+// The delivery wait allows 8 seconds; the test must also allow setup and teardown.
+}, 12000);
 
 test('idempotency, size limits, reply provenance and outgoing budgets are enforced in the core', async () => {
   const { h, a, b } = await setup(); enable(h, a, b);
@@ -83,6 +84,21 @@ test('idempotency, size limits, reply provenance and outgoing budgets are enforc
   await expect(send(h, a, dest(h, b))).rejects.toThrow('budget');
   expect(h.core.coordination.get(b).messages).toHaveLength(6);
   expect(h.core.coordination.get(b).wakes).toBe(0);
+});
+
+test('local messages remain valid when the clock advances between timestamp reads', async () => {
+  const { h, a, b } = await setup(); enable(h, a, b);
+  h.core.coordination.pause(b);
+  const now = Date.now();
+  let tick = 0;
+  const clock = spyOn(Date, 'now').mockImplementation(() => now + tick++);
+  try {
+    const letter = await send(h, a, dest(h, b));
+    expect(letter.status).toBe('received');
+    expect(h.core.coordination.get(b).messages).toHaveLength(1);
+  } finally {
+    clock.mockRestore();
+  }
 });
 
 test('stop pauses automatic work; disabling rejects pending messages', async () => {

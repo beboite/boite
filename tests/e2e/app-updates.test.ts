@@ -21,6 +21,16 @@ async function settings(phase: string, nightly = false) {
   await page.click(id('nav-settings'));
   await page.waitFor(`document.querySelector('${id('app-update-card')}')`);
 }
+async function pickDesktopLocale(locale: 'en' | 'fr') {
+  await page.click(id('nav-settings'));
+  await page.waitFor(`document.querySelector('${id('settings-tab-appearance')}')`);
+  await page.click(id('settings-tab-appearance'));
+  await page.waitFor(`document.querySelector('${id(`locale-${locale}`)}')`);
+  await page.click(id(`locale-${locale}`));
+  await page.waitFor(`document.documentElement.lang === '${locale}'`);
+  await page.click(id('settings-back'));
+  await page.waitFor(`document.querySelector('${id('titlebar-update-ready')}')`);
+}
 
 beforeAll(async () => {
   const port = await freePort();
@@ -76,6 +86,16 @@ test('the titlebar installs with confirmation without leaving chat', async () =>
   await page.waitFor(`document.querySelector('${id('confirm-cancel')}') === null`);
   expect(await page.evaluate(`document.querySelector('${id('titlebar-update-ready')}') !== null`)).toBe(true);
 
+  await pickDesktopLocale('fr');
+  expect(await page.evaluate('document.documentElement.scrollWidth <= 880')).toBe(true);
+  await capture('main-ready-fr');
+  await page.click(id('titlebar-update-ready'));
+  await page.waitFor(`document.querySelector('${id('confirm-ok')}')`);
+  await capture('main-confirmation-fr');
+  await page.click(id('confirm-cancel'));
+  await page.waitFor(`document.querySelector('${id('confirm-cancel')}') === null`);
+
+  await pickDesktopLocale('en');
   await page.click(id('titlebar-update-ready'));
   await page.waitFor(`document.querySelector('${id('confirm-ok')}')`);
   await page.click(id('confirm-ok'));
@@ -127,4 +147,15 @@ test('phone and ordinary browser settings never offer native app installation', 
   expect(await page.evaluate(`document.querySelector('${id('titlebar-update-details')}') === null`)).toBe(true);
   expect(await page.evaluate('document.documentElement.scrollWidth <= 390')).toBe(true);
   await capture('phone');
+  await page.click(id('settings-tab-appearance'));
+  await page.waitFor(`document.querySelector('${id('locale-fr')}')`);
+  await page.click(id('locale-fr'));
+  await page.waitFor(`document.documentElement.lang === 'fr'`);
+  await page.reload();
+  await page.waitFor(`document.documentElement.lang === 'fr' && document.querySelector('${id('nav-settings')}')`);
+  await page.click(id('nav-settings'));
+  await page.waitFor(`document.querySelector('${id('mobile-settings-home')}')`);
+  expect(await page.evaluate(`document.querySelector('${id('titlebar-update-ready')}') === null`)).toBe(true);
+  expect(await page.evaluate('document.documentElement.scrollWidth <= 390')).toBe(true);
+  await capture('phone-fr');
 }, 30_000);
