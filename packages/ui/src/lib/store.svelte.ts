@@ -1235,10 +1235,18 @@ export class Store {
     }
   }
 
+  #delegationRootId(): ThreadId | null {
+    const thread = this.openThread;
+    if (!thread) return null;
+    const root = thread.parentThreadId ?? thread.id;
+    if (this.delegation) return this.delegation.rootThreadId === root ? root : null;
+    return thread.parentThreadId ? null : root;
+  }
+
   async configureDelegation(config: DelegationConfig): Promise<void> {
     const client = this.#client;
     const openThreadId = this.openThread?.id;
-    const threadId = this.delegation?.rootThreadId ?? this.openThread?.id;
+    const threadId = this.#delegationRootId();
     if (!client || !threadId || !this.owner || this.delegationSaving) return;
     const epoch = ++this.#delegationConfigureEpoch;
     this.delegationSaving = true;
@@ -1292,7 +1300,7 @@ export class Store {
   async spawnDelegatedAgent(profileId: string, task: string, title?: string): Promise<DelegatedAgent | null> {
     const client = this.#client;
     const openThreadId = this.openThread?.id;
-    const threadId = this.delegation?.rootThreadId ?? this.openThread?.id;
+    const threadId = this.#delegationRootId();
     if (!client || !threadId || !this.owner || !task.trim()) return null;
     this.delegationError = null;
     try {
@@ -1314,7 +1322,7 @@ export class Store {
 
   async messageDelegatedAgent(toThreadId: ThreadId, text: string): Promise<boolean> {
     const client = this.#client;
-    const threadId = this.delegation?.rootThreadId;
+    const threadId = this.#delegationRootId();
     if (!client || !threadId || !text.trim()) return false;
     this.delegationError = null;
     try {
@@ -1330,7 +1338,7 @@ export class Store {
 
   async stopDelegatedAgent(agentId?: ThreadId): Promise<void> {
     const client = this.#client;
-    const threadId = this.delegation?.rootThreadId;
+    const threadId = this.#delegationRootId();
     if (!client || !threadId) return;
     this.delegationError = null;
     try {
@@ -1766,6 +1774,14 @@ export class Store {
       this.draft = null;
       // The last page, pinned to the bottom; what is above it arrives on scroll.
       this.loadingOlder = false;
+      if (this.openThread?.id !== threadId) {
+        this.#delegationEpoch++;
+        this.#delegationConfigureEpoch++;
+        this.delegation = null;
+        this.delegationLoading = false;
+        this.delegationSaving = false;
+        this.delegationError = null;
+      }
       this.openThread = thread;
       // The thread that was open takes its permission and question cards with it.
       this.#keepRequestsOf(threadId);

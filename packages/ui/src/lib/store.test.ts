@@ -125,6 +125,33 @@ test('launching from a child refreshes its team and returns the sibling without 
   } finally { store.detach(); client.close(); }
 });
 
+test('switching conversations clears the old team and refuses missing or mismatched child views', async () => {
+  const client = new FakeClient({ delayMs: 0, delegationDemo: true });
+  const store = new Store();
+  store.attach(client);
+  try {
+    await store.connect();
+    await store.open('t-trace');
+    await store.loadDelegation();
+    const previous = store.delegation!;
+    await store.open('t-bench');
+    expect(store.delegation).toBeNull();
+    const called = vi.spyOn(client, 'call');
+    store.delegation = previous;
+    await store.configureDelegation(previous.config);
+    expect(await store.spawnDelegatedAgent('reviewer', 'Do not launch on the old team')).toBeNull();
+    expect(await store.messageDelegatedAgent('t-team-running', 'Do not steer the old team')).toBe(false);
+    await store.stopDelegatedAgent();
+    expect(called.mock.calls.filter(([method]) => ['delegation.configure', 'delegation.spawn', 'delegation.send', 'delegation.stop'].includes(method))).toEqual([]);
+    await store.open('t-team-done');
+    store.delegation = null;
+    called.mockClear();
+    await store.configureDelegation(previous.config);
+    expect(await store.spawnDelegatedAgent('reviewer', 'Wait for this child team')).toBeNull();
+    expect(called.mock.calls).toEqual([]);
+  } finally { store.detach(); client.close(); }
+});
+
 test('uninstalled setup starts without account-dependent demo state', async () => {
   const client = new FakeClient({ delayMs: 0, uninstalled: true });
   const store = new Store();
