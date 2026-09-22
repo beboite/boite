@@ -28,9 +28,9 @@ test.each([1440, 390])('provider switching keeps the picker frame still at %ipx'
   for (const provider of ['claude', 'echo', 'opencode', 'antigravity', 'favorites']) {
     await page.click(`[data-provider="${provider}"]`);
     await capture(`picker-stable-${width}-${provider}.png`);
-    frames.push(await page.evaluate(`document.querySelector('[data-testid=composer-picker-menu]').getBoundingClientRect().toJSON()`));
+    frames.push(await page.evaluate<(typeof frames)[number]>(`document.querySelector('[data-testid=composer-picker-menu]').getBoundingClientRect().toJSON()`));
   }
-  for (const frame of frames.slice(1)) expect(frame).toEqual(frames[0]);
+  for (const frame of frames.slice(1)) expect(frame).toEqual(frames[0]!);
   expect(frames[0]!.x).toBeGreaterThanOrEqual(0);
   expect(frames[0]!.x + frames[0]!.width).toBeLessThanOrEqual(width);
   await page.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
