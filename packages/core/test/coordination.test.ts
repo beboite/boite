@@ -86,6 +86,21 @@ test('idempotency, size limits, reply provenance and outgoing budgets are enforc
   expect(h.core.coordination.get(b).wakes).toBe(0);
 });
 
+test('local messages remain valid when the clock advances between timestamp reads', async () => {
+  const { h, a, b } = await setup(); enable(h, a, b);
+  h.core.coordination.pause(b);
+  const now = Date.now();
+  let tick = 0;
+  const clock = spyOn(Date, 'now').mockImplementation(() => now + tick++);
+  try {
+    const letter = await send(h, a, dest(h, b));
+    expect(letter.status).toBe('received');
+    expect(h.core.coordination.get(b).messages).toHaveLength(1);
+  } finally {
+    clock.mockRestore();
+  }
+});
+
 test('stop pauses automatic work; disabling rejects pending messages', async () => {
   const { h, a, b } = await setup(); enable(h, a, b);
   h.core.threads.stopTurn(b);

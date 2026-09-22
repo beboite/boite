@@ -246,7 +246,8 @@ export class Coordination {
       if (!same(letter.from, to) || !same(letter.to, from)) throw refused('replyTo must name an incoming message from this recipient');
     }
     // Recheck budgets after all validation, before the synchronous durable write.
-    const letter: AgentLetter = { id: randomUUID(), from, to, toTitle, text: body, replyTo: params.replyTo ?? null, createdAt: Date.now(), expiresAt: Date.now() + 15 * 60_000, status: 'queued', error: null };
+    const createdAt = Date.now();
+    const letter: AgentLetter = { id: randomUUID(), from, to, toTitle, text: body, replyTo: params.replyTo ?? null, createdAt, expiresAt: createdAt + 15 * 60_000, status: 'queued', error: null };
     this.core.journal.append({ type: 'coordination.sent', threadId: from.threadId, version: 1, payload: letter }, () => this.put(letter, 'out', from.threadId, requestId, fingerprint));
     this.changed(from.threadId);
     if (to.coreId === from.coreId) {
