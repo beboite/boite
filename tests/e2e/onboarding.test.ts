@@ -95,6 +95,10 @@ test('six illustrated screens fit both languages and widths, without leaving the
 }, 120_000);
 
 test('light theme and a short phone viewport keep consent and navigation reachable', async () => {
+  await page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
+  await page.evaluate(`localStorage.removeItem('boite.onboarding')`);
+  await page.reload();
+  await page.waitFor(`document.querySelector('[data-testid=onboarding]')`);
   await page.click('[data-testid=onboarding-dot-welcome]');
   await page.click('[data-testid=onboarding-theme-light]');
   await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 640, deviceScaleFactor: 1, mobile: true });
@@ -148,4 +152,18 @@ test('demo selectors look actionable and animations pause, resume and replay', a
   await page.click('[data-testid=onboarding-animation-replay]');
   await page.waitFor(`!document.querySelector('[data-testid=onboarding-animation]').dataset.previous`);
   expect(await page.evaluate(`document.querySelector('[data-testid=onboarding-animation]').getAnimations({subtree:true}).some(a => a.playState === 'running')`)).toBe(true);
+}, 20_000);
+
+test('agent update notices wait until the tour closes without dismissing pending updates', async () => {
+  await page.evaluate(`localStorage.removeItem('boite.onboarding')`);
+  const url = await page.evaluate<string>(`(() => { const url = new URL(location.href); url.searchParams.set('updates', '1'); return url.href; })()`);
+  await page.navigate(url);
+  await page.waitFor(`document.querySelector('[data-testid=onboarding-step]')?.dataset.step === 'welcome'`);
+  expect(await page.evaluate(`document.querySelector('[data-testid=harness-update-notices]') === null`)).toBe(true);
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+  await capture('tour-pending-updates-phone.png');
+  await page.click('[data-testid=onboarding-skip]');
+  await page.waitFor(`!document.querySelector('[data-testid=onboarding]')`);
+  await page.waitFor(`document.querySelectorAll('[data-testid=harness-update-notice]').length === 2`);
+  expect(await page.evaluate(`document.querySelectorAll('[data-testid=harness-update-run]').length`)).toBe(2);
 }, 20_000);
