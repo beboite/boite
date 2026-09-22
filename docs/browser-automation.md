@@ -117,7 +117,21 @@ The paid test is opt-in. Set `BOITE_E2E_JEV=1`, `TYPESAFE_API_KEY` and
 `bun test tests/e2e/jev.test.ts`. It creates an isolated core and local form,
 asserts the exact backend record and single submission in English and French,
 follows a delayed control in an open shadow root, and checks normal and
-cancelled process cleanup. It does not use personal profiles or real service accounts.
+cancelled process cleanup. An invoice workflow also searches among similar
+identifiers, navigates, fills a conditional field, returns from review to
+correct a value, and confirms exactly once. Its assertions check both review
+records and the final server record. No personal profiles or real accounts are used.
+
+Set `BOITE_E2E_JEV_PROFILE=1` for per-request Jev latency and native command
+timings. The measurements include real network calls. Field actions have no
+fixed settling delay; clicks retain a 150 ms rendering allowance. Each next
+decision still re-observes the page and validates its references before acting.
+
+On 2026-09-23, the invoice case passed in 9.94 seconds over 14 decisions on
+Windows, including fresh browser startup and cleanup. Jev requests accounted
+for 5.94 seconds. This is one local synthetic workflow, not a website benchmark;
+API latency varies. Run it with the live variables above and
+`bun test tests/e2e/jev.test.ts --test-name-pattern invoice`.
 
 Upstream references: [agent-browser](https://github.com/vercel-labs/agent-browser),
 [daemon protocol at 0.37.1](https://github.com/vercel-labs/agent-browser/blob/v0.37.1/cli/src/native/daemon.rs),

@@ -127,9 +127,10 @@ export async function runBrowserLoop(request: Request, driver: Driver, decide: D
       return needs('The browser action did not confirm its outcome. It was not retried.');
     }
     history.push(candidate.label);
-    // Navigation may finish before framework rendering. This bounded settle
-    // is followed by a fresh observation, never by reuse of a previous ref.
-    await delay(150, signal);
+    // Clicks can navigate before framework rendering finishes. Field commands
+    // already await their input/change events; observe their result immediately.
+    // Every next decision still gets fresh observations and refs.
+    if (candidate.command.action === 'click') await delay(150, signal);
   }
   return needs('The task reached its step limit.');
 }

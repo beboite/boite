@@ -5,23 +5,46 @@ import { startTestCore, echoThread, waitFor, type TestCore } from '../../package
 import { RECOMMENDED, verifyPluginDownload } from '../../packages/core/src/plugins.ts';
 import { platformKey } from '../../packages/core/src/plugins/manifest.ts';
 import { findBrowser } from './lib/cdp.ts';
+import { invoiceFixture } from './fixtures/jev-invoice.ts';
+import { BrowserDaemon } from '../../packages/core/src/browser/daemon.ts';
 
 // Opt-in: a pinned native binary and paid Jev requests. Fresh core and browser
 // profiles, synthetic local pages, no provider login or personal browser state.
 const live = process.env.BOITE_E2E_JEV === '1' && Boolean(process.env.BOITE_BROWSER_TEST_BINARY);
 let harness: TestCore | undefined;
 let fetchSpy: { mockRestore(): void } | undefined;
-afterEach(async () => { await harness?.stop(); harness = undefined; fetchSpy?.mockRestore(); fetchSpy = undefined; });
+let driverSpy: { mockRestore(): void } | undefined;
+let timings: { jevMs: number[]; commands: { action: string; ms: number }[] } | undefined;
+afterEach(async () => {
+  await harness?.stop(); harness = undefined;
+  fetchSpy?.mockRestore(); fetchSpy = undefined;
+  driverSpy?.mockRestore(); driverSpy = undefined;
+  if (timings) console.log(JSON.stringify({ browserTimings: timings }));
+  timings = undefined;
+});
 
 async function setup() {
-  if (process.env.BOITE_E2E_JEV_TRACE === '1') {
+  if (process.env.BOITE_E2E_JEV_PROFILE === '1') {
+    timings = { jevMs: [], commands: [] };
+    const command = BrowserDaemon.prototype.command;
+    driverSpy = spyOn(BrowserDaemon.prototype, 'command').mockImplementation(async function(this: BrowserDaemon, action, args) {
+      const start = performance.now();
+      try { return await command.call(this, action, args); }
+      finally { timings?.commands.push({ action, ms: Math.round((performance.now() - start) * 10) / 10 }); }
+    });
+  }
+  if (timings || process.env.BOITE_E2E_JEV_TRACE === '1') {
     const realFetch = globalThis.fetch;
     fetchSpy = spyOn(globalThis, 'fetch').mockImplementation((async (input, options) => {
+      const start = performance.now();
       const response = await realFetch(input, options);
       if (String(input).startsWith('https://api.typesafe.ai/')) {
         const result = await response.clone().json() as { answers?: unknown };
-        const request = JSON.parse(String(options?.body)) as { state: unknown };
-        console.log(JSON.stringify({ fixtureDecision: result.answers, fixtureState: request.state }));
+        timings?.jevMs.push(Math.round((performance.now() - start) * 10) / 10);
+        if (process.env.BOITE_E2E_JEV_TRACE === '1') {
+          const request = JSON.parse(String(options?.body)) as { state: unknown };
+          console.log(JSON.stringify({ fixtureDecision: result.answers, fixtureState: request.state }));
+        }
       }
       return response;
     }) as typeof fetch);
@@ -99,3 +122,22 @@ test.skipIf(!live)('cancelling a real native task closes its browser process tre
     expect(harness!.core.procs.liveCount(`browser:${task.id}`)).toBe(0);
   } finally { site.stop(true); }
 }, 45_000);
+
+test.skipIf(!live)('Jev completes invoice search, conditional fields, review and correction before one confirmation', async () => {
+  const { client, threadId } = await setup();
+  const site = invoiceFixture();
+  try {
+    const started = performance.now();
+    const task = await client.call('browser.start', { threadId, pluginId: 'jev-browser', url: site.url, goal: site.goal, values: site.values, completion: { text: JSON.stringify(site.expected) }, maxSteps: 30, timeoutMs: 120_000 });
+    await waitFor(() => harness!.core.browser.list(threadId)[0]?.finishedAt !== null, 135_000);
+    const done = (await client.call('browser.list', { threadId }))[0]!;
+    console.log(JSON.stringify({ browserTask: 'invoice', status: done.status, steps: done.step, inputTokens: done.inputTokens, ms: Math.round(performance.now() - started), message: done.message }));
+    expect(done.status).toBe('succeeded');
+    expect(site.searches).toEqual(['INV-204']);
+    expect(site.opened).toEqual(['INV-204']);
+    expect(site.reviews).toEqual([site.firstReview, site.expected]);
+    expect(site.submissions).toEqual([site.expected]);
+    await waitFor(() => harness!.core.procs.liveCount(`browser:${task.id}`) === 0);
+    expect(harness!.core.procs.liveCount(`browser:${task.id}`)).toBe(0);
+  } finally { site.server.stop(true); }
+}, 150_000);
