@@ -1,0 +1,4 @@
+{
+  "categories": { "correctness": "off" },
+  "rules": { "complexity": ["warn", { "max": 1, "variant": "classic" }] }
+}

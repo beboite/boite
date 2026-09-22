@@ -649,13 +649,9 @@ export type ToolDocument =
   /** `data` is base64 with no `data:` prefix. The core caps it before it is journalled. */
   | { kind: 'image'; mimeType: string; data: string; alt: string | null };
 
-/** The image formats every agent that takes images accepts. */
-export const IMAGE_MIME_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'] as const;
-export type ImageMimeType = (typeof IMAGE_MIME_TYPES)[number];
-/** The maximum decoded bytes per attachment, including non-image files. */
-export const ATTACHMENT_MAX_BYTES = 5 * 1024 * 1024;
-/** The maximum total number of attachments per turn. */
-export const ATTACHMENTS_PER_TURN = 8;
+export { IMAGE_MIME_TYPES, ATTACHMENT_MAX_BYTES, ATTACHMENTS_PER_TURN } from './attachment-limits.ts';
+import type { ImageMimeType } from './attachment-limits.ts';
+export type { ImageMimeType } from './attachment-limits.ts';
 
 /**
  * An image sent with a prompt. `data` is base64 with no `data:` prefix. The
