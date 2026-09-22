@@ -87,7 +87,7 @@
         {:else}<Check size={14} /><span>{status.lastSync ? `${t.lastSync} ${new Date(status.lastSync).toLocaleString()}` : t.never}</span>{/if}
       </div>
       <div class="connection-bottom">
-        <label class="sharing"><input type="checkbox" role="switch" checked={status.config.enabled} onchange={() => void run('toggle')} disabled={busy} data-testid="brain-enabled" /><span>{t.enabled}</span></label>
+        <label class="sharing"><input type="checkbox" role="switch" checked={status.config.enabled} onchange={event => { event.currentTarget.checked = status!.config.enabled; void run('toggle'); }} disabled={busy} data-testid="brain-enabled" /><span>{t.enabled}</span></label>
         <button class="ghost small" disabled={busy} onclick={() => { editing = !editing; path = status!.config.path!; folders = null; }} data-testid="brain-change">{editing ? t.cancel : t.change}</button>
       </div>
     </section>
