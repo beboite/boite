@@ -1793,7 +1793,14 @@ export class FakeClient implements ObservableClient {
       }
       case 'turns.stop': {
         const params = rawParams as RpcParams<'turns.stop'>;
-        return { stopped: await this.#stopTurn(params.threadId) };
+        const thread = this.#thread(params.threadId);
+        const root = thread.parentThreadId ?? thread.id;
+        let childrenStopped = 0;
+        if (thread.parentThreadId || this.#delegationConfig(root).enabled || (this.#delegationAgents.get(root)?.length ?? 0) > 0) {
+          childrenStopped = await this.#stopDelegation(root, thread.parentThreadId ? thread.id : undefined);
+          this.#emit('delegation.changed', { threadId: root });
+        }
+        return { stopped: await this.#stopTurn(params.threadId) || childrenStopped > 0 };
       }
 
       case 'permissions.list': {

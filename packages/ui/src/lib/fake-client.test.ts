@@ -135,6 +135,29 @@ test('fake delegation reserves result request IDs and emits no result when pausi
   } finally { client.close(); }
 });
 
+test('regular Stop cancels queued children separately and pauses the team when stopping its parent', async () => {
+  const client = new FakeClient({ delayMs: 4 });
+  await client.connect();
+  try {
+    await client.call('turns.stop', { threadId: 't-trace' });
+    expect((await client.call('delegation.get', { threadId: 't-trace' })).config.paused).toBe(false);
+    const config = {
+      ...DEFAULT_DELEGATION_CONFIG, enabled: true, maxConcurrent: 1,
+      profiles: [{ id: 'echo', name: 'Echo reviewer', providerId: 'echo', accountId: 'a-echo', model: 'echo-1', effort: null }]
+    };
+    await client.call('delegation.configure', { threadId: 't-trace', config });
+    const first = await client.call('delegation.spawn', { threadId: 't-trace', profileId: 'echo', task: `First ${'a'.repeat(240)}`, requestId: 'regular-first' });
+    const queued = await client.call('delegation.spawn', { threadId: 't-trace', profileId: 'echo', task: 'Queued', requestId: 'regular-queued' });
+    await expect(client.call('turns.stop', { threadId: queued.thread.id })).resolves.toEqual({ stopped: true });
+    expect((await client.call('delegation.get', { threadId: 't-trace' })).config.paused).toBe(false);
+    await expect(client.call('turns.stop', { threadId: 't-trace' })).resolves.toEqual({ stopped: true });
+    const view = await client.call('delegation.get', { threadId: 't-trace' });
+    expect(view.config.paused).toBe(true);
+    expect(view.agents.find(agent => agent.thread.id === first.thread.id)?.lastTurn?.status).toBe('stopped');
+    expect(view.agents.find(agent => agent.thread.id === queued.thread.id)?.lastTurn?.status).toBe('stopped');
+  } finally { client.close(); }
+});
+
 test('coordination stays scoped to its core and paired devices can only inspect it', async () => {
   const first = new FakeClient({ delayMs: 0, coreId: 'core-first', coreName: 'First', publicUrl: 'https://first.test' });
   const second = new FakeClient({ delayMs: 0, coreId: 'core-second', coreName: 'Second', publicUrl: 'https://second.test' });
