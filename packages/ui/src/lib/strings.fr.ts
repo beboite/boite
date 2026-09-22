@@ -1020,7 +1020,7 @@ export const fr: Messages = {
     browserExecutable: 'Exécutable du navigateur',
     browserExecutableHint: 'Chemin absolu facultatif vers Chrome, Edge ou Chromium.',
     browserKeyReady: 'Clé TypeSafe disponible sur cette machine',
-    browserKeyMissing: 'Définis TYPESAFE_API_KEY dans l’environnement du moteur, puis redémarre le moteur.',
+    browserKeyMissing: 'Définissez TYPESAFE_API_KEY dans l’environnement du cœur, puis redémarrez le cœur.',
     browserSave: 'Enregistrer les réglages du navigateur',
     browserSaved: 'Réglages du navigateur enregistrés',
     browserTasks: 'Tâches récentes du navigateur',

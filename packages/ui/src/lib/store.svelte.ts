@@ -941,6 +941,7 @@ export class Store {
           new FakeClient({
             long: params.get('long') === '1',
             uninstalled: params.get('uninstalled') === '1',
+            browserTask: params.get('browser-task') === '1',
             ...(params.get('principal') === 'session' ? { principal: 'session' as const } : {})
           })
         );

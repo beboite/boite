@@ -4,10 +4,26 @@ import { connect } from '../src/client.ts';
 import { BrowserDaemon } from '../src/browser/daemon.ts';
 import { parseManifest } from '../src/plugins/manifest.ts';
 import { RECOMMENDED } from '../src/plugins.ts';
+import { writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { BrowserStore } from '../src/browser.ts';
 
 let harness: TestCore | undefined;
 const cleanups: (() => void)[] = [];
 afterEach(async () => { await harness?.stop(); harness = undefined; for (const cleanup of cleanups.splice(0)) cleanup(); });
+
+test.each(['{', '{"enabled":"yes","executablePath":null}'])('invalid browser settings disable automation and remain repairable: %s', async raw => {
+  harness = await startTestCore();
+  const file = join(harness.dataDir, 'browser.json');
+  writeFileSync(file, raw);
+  const warning = spyOn(harness.core, 'log'); cleanups.push(() => warning.mockRestore());
+  const browser = new BrowserStore(harness.core);
+  await Promise.resolve();
+  expect(browser.status().config).toEqual({ enabled: false, executablePath: null });
+  expect(warning).toHaveBeenCalledWith('warn', expect.stringContaining(file));
+  await browser.configure({ enabled: true, executablePath: null });
+  expect(new BrowserStore(harness.core).status().config.enabled).toBe(true);
+});
 
 test('browser capability is explicit and rejects unknown protocol versions', () => {
   const manifest = RECOMMENDED.find(item => item.id === 'jev-browser')!;

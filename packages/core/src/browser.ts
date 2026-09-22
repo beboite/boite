@@ -15,8 +15,10 @@ export class BrowserStore {
   constructor(private readonly core: Core) {
     this.file = join(core.dataDir, 'browser.json');
     if (existsSync(this.file)) {
-      let raw: unknown; try { raw = JSON.parse(readFileSync(this.file, 'utf8')); } catch { throw new Error(`${this.file}: expected valid JSON`); }
-      this.config = this.readConfig(raw);
+      try { this.config = this.readConfig(JSON.parse(readFileSync(this.file, 'utf8'))); }
+      catch {
+        queueMicrotask(() => core.log('warn', `${this.file}: expected valid JSON with enabled: boolean and executablePath: an absolute path or null. Browser automation is disabled; save its settings to repair the file.`));
+      }
     }
   }
   private readConfig(raw: unknown): BrowserConfig {

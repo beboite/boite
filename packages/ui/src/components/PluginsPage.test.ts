@@ -51,7 +51,7 @@ test('each section holds its plugins, every state drawn with what the owner can 
   const installed = q('[data-testid="plugins-installed"]')!;
   const recommended = q('[data-testid="plugins-recommended"]')!;
   expect([...installed.querySelectorAll('[data-testid="plugin-row"]')].map((el) => el.getAttribute('data-plugin'))).toEqual(['grok-seats', 'pool-legacy', 'seat-pool']);
-  expect([...recommended.querySelectorAll('[data-testid="plugin-row"]')].map((el) => el.getAttribute('data-plugin'))).toEqual(['jev-browser', 'kebacc-switcher']);
+  expect([...recommended.querySelectorAll('[data-testid="plugin-row"]')].map((el) => el.getAttribute('data-plugin'))).toEqual(['kebacc-switcher', 'jev-browser']);
 
   expect(row('kebacc-switcher')?.querySelector('[data-testid="plugin-install"]')).not.toBeNull();
   expect(row('grok-seats')?.querySelector('[data-testid="plugin-progress"]')?.getAttribute('aria-valuenow')).toBe('45');

@@ -79,6 +79,8 @@ export interface FakeClientOptions {
   long?: boolean;
   /** A fresh machine with no agents or accounts, for the setup flow. */
   uninstalled?: boolean;
+  /** An installed browser plugin with a running task, for rendered UI checks. */
+  browserTask?: boolean;
   /** Who this client is. `'session'` makes it a paired phone, refused like one. */
   principal?: Principal;
   /** Stable public identity for multi-machine coordination tests. */
@@ -667,17 +669,17 @@ function fakePlugins(): PluginState[] {
   const legacy = `${DATA_DIR}\\plugins\\pool-legacy\\installed.json`;
   return [
     {
-      ...base, id: 'jev-browser', name: 'Jev Browser', origin: 'recommended', version: null, availableVersion: '0.37.1', status: 'not-installed', source: null,
-      description: 'Delegate bounded browser tasks to Jev using the agent-browser native engine.', homepage: 'https://github.com/vercel-labs/agent-browser',
-      artifact: { url: 'https://github.com/vercel-labs/agent-browser/releases/download/v0.37.1/agent-browser-win32-x64.exe', sha256: '29a003139ff4eb96fa4d1ed341830b26eb3e082843bf776b4e88ad3443bb8fde' },
-      commands: ['agent-browser (native daemon, Jev browser tasks)'], pools: [], browser: { protocol: 'agent-browser-0.37' }
-    },
-    {
       ...base, id: 'kebacc-switcher', name: 'kebacc-switcher', origin: 'recommended',
       description: 'Save and switch Claude, Codex and Antigravity CLI logins, with quota readings for each saved account.',
       homepage: 'https://github.com/kebab1337420/kebacc-switch', version: null, availableVersion: '2.0.1', status: 'not-installed', source: null,
       artifact: { url: `${KEBACC_RELEASE}/kebacc-x86_64-pc-windows-msvc.exe`, sha256: '9edc5c3af1db76e97a9c07e2fd1c3399ad8c9db22e0ad2684a1b885e33acc538' },
       commands: poolCommands('kebacc'), pools: ['claude', 'codex', 'antigravity']
+    },
+    {
+      ...base, id: 'jev-browser', name: 'Jev Browser', origin: 'recommended', version: null, availableVersion: '0.37.1', status: 'not-installed', source: null,
+      description: 'Delegate bounded browser tasks to Jev using the agent-browser native engine.', homepage: 'https://github.com/vercel-labs/agent-browser',
+      artifact: { url: 'https://github.com/vercel-labs/agent-browser/releases/download/v0.37.1/agent-browser-win32-x64.exe', sha256: '29a003139ff4eb96fa4d1ed341830b26eb3e082843bf776b4e88ad3443bb8fde' },
+      commands: ['agent-browser (native daemon, Jev browser tasks)'], pools: [], browser: { protocol: 'agent-browser-0.37' }
     },
     {
       ...base, id: 'seat-pool', name: 'Seat pool', origin: 'url',
@@ -1047,6 +1049,12 @@ export class FakeClient implements ObservableClient {
       queued: []
     };
     this.#seed();
+    if (options.browserTask) {
+      const plugin = this.#plugins.find(row => row.id === 'jev-browser')!;
+      plugin.version = plugin.availableVersion; plugin.status = 'installed';
+      this.#browser.config.enabled = true;
+      this.#browser.tasks = [{ id: 'browser-fixture', threadId: 't1', pluginId: plugin.id, goal: 'Save weekly notifications', url: 'https://example.org', status: 'running', step: 1, maxSteps: 20, startedAt: T0, finishedAt: null, message: 'Checking the page', inputTokens: 120 }];
+    }
     if (options.uninstalled) {
       this.#providers = this.#providers.filter(provider => provider.id !== 'echo').map(provider => ({
         ...provider, available: false, executable: null,

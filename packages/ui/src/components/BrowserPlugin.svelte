@@ -17,12 +17,16 @@
     const client = store.client;
     if (!client) return;
     let disposed = false;
+    const early = new Map<string, BrowserTask>();
+    const merge = (tasks: BrowserTask[], task: BrowserTask) => [task, ...tasks.filter(row => row.id !== task.id)];
     const off = client.on('browser.updated', task => {
-      if (status) status = { ...status, tasks: [task, ...status.tasks.filter(row => row.id !== task.id)] };
+      if (status) status = { ...status, tasks: merge(status.tasks, task) };
+      else early.set(task.id, task);
     });
     void client.call('browser.status', {}).then(value => {
       if (disposed) return;
-      status = value; enabled = value.config.enabled; executable = value.config.executablePath ?? '';
+      status = { ...value, tasks: [...early.values()].reduce(merge, value.tasks) };
+      early.clear(); enabled = value.config.enabled; executable = value.config.executablePath ?? '';
     }).catch(cause => { if (!disposed) error = String(cause.message ?? cause); });
     return () => { disposed = true; off(); };
   });
