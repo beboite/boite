@@ -1188,7 +1188,20 @@ export const strings = {
    * it up are the same pass.
    */
   onboarding: {
-    privacy: { title: 'Make yourself at home', body: 'One last choice. Your messages, files and account details stay out of analytics.', basic: 'Count launches and completed tasks. On by default.', enhanced: 'Share public model names, speed and token counts. Your choice, off by default.' },
+    /** Boite Legacy's trade offer: picking a row is the tour's last click. */
+    privacy: {
+      title: 'SELL YOUR SOUL TO BOITE!',
+      intro: 'Boite counts a few anonymous usage stats so we know what to fix first. Your messages, files and accounts never leave your machine, the app works the same either way, and you can change your mind anytime in Settings.',
+      question: 'Deal?',
+      video: 'Trade offer meme',
+      basic: 'NO! Enough is enough',
+      basicDefault: '(default)',
+      basicHint: 'Anonymous counts of launches and finished tasks, nothing else. No profile, nothing that says who you are.',
+      deal: 'DEAL',
+      dealHint: 'Adds public model names, speed and token counts under a separate random ID kept on your machine. Still no idea who you are, but it helps a lot. Thank you!',
+      optOut: "If you REALLY don't want to help Boite, Settings > General > Privacy and analytics turns everything off. :c",
+      doc: 'What is collected'
+    },
     demo: {
       pause: 'Pause', play: 'Replay', resume: 'Resume',
       record: 'Click the microphone', speak: 'Speak your message', review: 'Review before sending',
@@ -1196,17 +1209,16 @@ export const strings = {
       chooseAgent: 'Choose the next agent', handoff: 'Codex picks up the conversation', checked: 'Labels checked. Contrast improved.', nextMessage: 'Message Codex',
       before: 'Before', after: 'After', buttonBefore: 'Send', buttonAfter: 'Send message', changedFile: 'ContactForm.svelte', changesReady: 'Two lines changed',
       background: 'Working in the background', writing: "Preparing tomorrow's launch", notes: 'Notes', noteOne: 'Review the new contact form', noteTwo: 'Publish the portfolio',
-      privateContent: 'Messages and files', staysHere: 'Stay out of analytics', anonymousCount: 'Tasks completed',
-      taskResult: 'Contact form ready', loginResult: 'Login fixed', testsResult: 'Tests passed', sameResult: 'The form is ready.', hoverTray: 'Hover the Boite icon',
+      taskResult: 'Contact form ready', loginResult: 'Login fixed', testsResult: 'Tests passed', hoverTray: 'Hover the Boite icon',
       conversation: 'Change agent', voice: 'Dictate', panel: 'Inspect changes',
-      task: 'Build my portfolio', secondTask: 'Fix the login', thirdTask: 'Write the tests', working: 'Working', complete: 'Done', request: 'Add a contact form', answer: 'The form is ready.', followup: 'Now check the accessibility', continued: 'Same thread. Same history.',
+      task: 'Build my portfolio', secondTask: 'Fix the login', thirdTask: 'Write the tests', working: 'Working', request: 'Add a contact form', answer: 'The form is ready.', followup: 'Now check the accessibility', continued: 'Same thread. Same history.',
       voiceWords: 'Make the buttons easier to read', voiceHint: 'Speak, review the draft, then send.',
-      changes: 'Changes', file: 'Contact form', reviewed: 'Review the changes beside the chat.',
+      changes: 'Changes', reviewed: 'Review the changes beside the chat.',
       usageLabel: 'Claude', window: '5-hour limit', used: '24% used', reset: 'Resets in 2 h 10 min', tray: 'In your taskbar, beside the clock', trayHint: 'Hover the Boite icon to see your limits without opening the app.',
       desktop: 'Your computer', phone: 'Your phone', synced: 'The same conversation', reachHint: 'After pairing by QR code, follow your agents from your phone. Your computer keeps running them.',
       notification: 'Contact form finished', quietBody: 'Let your agents work without taking over your screen or your speakers.',
       installVoice: 'Install local dictation', downloadVoice: 'About 200 MB. Audio stays on this computer.', installingVoice: 'Downloading voice engine', cancelVoice: 'Cancel download', readyVoice: 'Dictation is ready. Use the microphone in the composer.', retryVoice: 'Retry voice setup',
-      workspaceBody: 'Click a demo to see how it works.', finish: 'Happy Boiting!', finishBody: 'Your agents are ready when you are. Open a folder and give them a task.',
+      workspaceBody: 'Click a demo to see how it works.',
     },
     label: 'Getting started',
     skip: 'Skip',

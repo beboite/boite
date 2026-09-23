@@ -75,9 +75,10 @@ test('six illustrated screens fit both languages and widths, without leaving the
         await page.waitFor(`document.querySelector('[data-testid=onboarding-step]')?.dataset.step === '${step}'`);
         await capture(`tour-${locale}-${width}-${step}.png`);
         expect(await page.evaluate(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true);
-        expect(await page.evaluate(`document.querySelector('[data-testid=onboarding-next]').getBoundingClientRect().bottom <= innerHeight`)).toBe(true);
+        // Privacy ends on its consent rows, every other screen on Next.
+        expect(await page.evaluate(`document.querySelector('[data-testid=onboarding-${step === 'privacy' ? 'back' : 'next'}]').getBoundingClientRect().bottom <= innerHeight`)).toBe(true);
         expect(await page.evaluate(`document.querySelector('[data-testid=onboarding] header .count') === null`)).toBe(true);
-        expect(await page.evaluate(`document.querySelector('[data-testid=onboarding-scene]').textContent.includes('Illustration')`)).toBe(false);
+        expect(await page.evaluate(`!document.querySelector('[data-testid=onboarding-scene]')?.textContent.includes('Illustration')`)).toBe(true);
         if (step === 'agents') {
           for (const demo of ['voice', 'panel', 'agents']) {
             await page.click(`[data-testid=onboarding-example-${demo}]`);
@@ -103,12 +104,12 @@ test('light theme and a short phone viewport keep consent and navigation reachab
   await page.click('[data-testid=onboarding-theme-light]');
   await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 640, deviceScaleFactor: 1, mobile: true });
   await page.click('[data-testid=onboarding-dot-privacy]');
-  await page.waitFor(`document.querySelectorAll('[data-testid=telemetry-settings] input').length === 2`);
-  await page.evaluate(`document.querySelector('[data-testid=telemetry-settings]').scrollIntoView({block:'center'})`);
+  await page.waitFor(`document.querySelector('[data-testid=onboarding-telemetry-enhanced]')`);
+  await page.evaluate(`document.querySelector('[data-testid=onboarding-telemetry-enhanced]').scrollIntoView({block:'center'})`);
   await capture('tour-light-short-phone.png');
   expect(await page.evaluate(`document.documentElement.dataset.theme`)).toBe('light');
-  expect(await page.evaluate(`document.querySelector('[data-testid=onboarding-next]').getBoundingClientRect().bottom <= innerHeight`)).toBe(true);
-  expect(await page.evaluate(`document.querySelector('[data-testid=telemetry-settings] input').getBoundingClientRect().top >= 0`)).toBe(true);
+  expect(await page.evaluate(`document.querySelector('[data-testid=onboarding-back]').getBoundingClientRect().bottom <= innerHeight`)).toBe(true);
+  expect(await page.evaluate(`(() => { const r = document.querySelector('[data-testid=onboarding-telemetry-enhanced]').getBoundingClientRect(); return r.top >= 0 && r.bottom <= innerHeight; })()`)).toBe(true);
   const exits = await page.evaluate<Array<{ name: string; duration: number }>>(`(() => {
     return [...document.querySelectorAll('[data-testid=onboarding], [data-testid=onboarding] [role=dialog]')].map(element => {
       element.classList.add('closing');
@@ -124,7 +125,7 @@ test('light theme and a short phone viewport keep consent and navigation reachab
     expect(exit.duration).toBeGreaterThan(0);
     expect(exit.duration).toBeLessThanOrEqual(0.001);
   }
-  await page.click('[data-testid=onboarding-next]');
+  await page.click('[data-testid=onboarding-telemetry-enhanced]');
   await page.waitFor(`!document.querySelector('[data-testid=onboarding]')`);
 }, 15_000);
 
