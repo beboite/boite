@@ -367,6 +367,7 @@ export const fr: Messages = {
     contextMeasured: 'Dernière mesure',
     cacheTitle: 'Cache de prompt',
     cacheChipWarm: (left: string) => `Cache de prompt chaud, encore environ ${left}`,
+    cacheChipMaybe: (most: string) => `Cache de prompt peut-être encore chaud, ${most} au plus`,
     cacheChipCold: 'Cache de prompt froid',
     cacheCold: 'froid',
     cacheLeft: (left: string) => `encore ${left}`,

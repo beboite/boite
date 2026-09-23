@@ -62,6 +62,7 @@ test('past the OpenAI 30 minutes the cache reads maybe, on a phone and in French
   const page = await open({ width: 390, height: 844 }, { minutesAgo: 40, ttlSeconds: 1800, maxSeconds: 86_400, source: 'documented' }, true, 'fr');
   await page.waitFor(`document.querySelector('${CHIP}')?.dataset.state === 'maybe'`);
   expect(await page.text(CHIP)).toContain('23 h');
+  expect(await page.evaluate<string>(`document.querySelector('[data-testid="context-trigger"]').getAttribute('aria-label')`)).toContain('peut-être encore chaud');
   await capture(page, 'prompt-cache-phone-fr');
   expect(await page.text('[data-testid="prompt-cache-detail"]')).toContain('peut-être · 23 h');
   expect(await page.text('[data-testid="prompt-cache-detail"]')).toContain('30 min à 24 h');

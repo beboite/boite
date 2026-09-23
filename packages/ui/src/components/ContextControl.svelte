@@ -40,6 +40,7 @@
   });
   const remaining = (seconds: number) => { const span = cacheSpan(seconds); return span.unit === 'hours' ? strings.thread.hours(span.n) : strings.thread.minutes(span.n); };
   const cacheLabel = $derived(!cacheNow ? null : cacheNow.kind === 'cold' ? strings.thread.cacheChipCold
+    : cacheNow.kind === 'maybe' ? strings.thread.cacheChipMaybe(remaining(cacheNow.secondsLeft))
     : strings.thread.cacheChipWarm(remaining(cacheNow.secondsLeft)));
   const lifetime = (seconds: number) => seconds % 3600 === 0 ? strings.thread.hours(seconds / 3600) : strings.thread.minutes(Math.round(seconds / 60));
   function place() {

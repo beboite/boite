@@ -360,6 +360,7 @@ export const strings = {
     contextMeasured: 'Last measurement',
     cacheTitle: 'Prompt cache',
     cacheChipWarm: (left: string) => `Prompt cache warm, about ${left} left`,
+    cacheChipMaybe: (most: string) => `Prompt cache maybe still warm, ${most} at most`,
     cacheChipCold: 'Prompt cache cold',
     cacheCold: 'cold',
     cacheLeft: (left: string) => `${left} left`,
