@@ -1025,7 +1025,6 @@ export const strings = {
     on: (machine: string) => `On ${machine}`,
     update: 'Update', skip: 'Skip', retry: 'Try again',
     updating: (name: string) => `Updating ${name}`,
-    updatingHint: 'Its threads stay as they are. The next turn starts the new version.',
     failed: (name: string) => `${name} did not update`,
     upToDate: 'Up to date', unknown: 'Checks by itself', runUpdater: 'Run its updater',
     skipped: (version: string) => `${version} skipped`,

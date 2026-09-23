@@ -47,6 +47,13 @@ export interface ExecutableCandidate {
    */
   kind: 'path' | 'file' | 'npm';
   value: string;
+  /**
+   * Environment the agent's updater gets when it runs from this candidate: what
+   * a launcher Boite skips would have set. Codex's npm package runs its binary
+   * through a Node script that sets `CODEX_MANAGED_BY_NPM`, and `codex update`
+   * without it cannot tell how it was installed.
+   */
+  updateEnv?: Record<string, string>;
 }
 
 /**
