@@ -111,7 +111,7 @@ test('the titlebar installs with confirmation without leaving chat', async () =>
 test('ready desktop updates show versions, notes and a restart confirmation', async () => {
   await settings('ready', true);
   await page.waitFor(`document.querySelector('${id('app-update-install')}')`);
-  expect(await page.evaluate(`document.querySelector('${id('app-update-card')}').textContent`)).toContain('boite de nuit');
+  expect(await page.evaluate(`document.querySelector('${id('app-update-card')}').textContent`)).toContain('boite (de nuit)');
   expect(await page.evaluate(`document.querySelector('${id('app-update-card')}').textContent`)).toContain('Faster startup');
   await capture('ready-desktop');
   await page.click(id('app-update-install'));
@@ -124,8 +124,28 @@ test('ready desktop updates show versions, notes and a restart confirmation', as
   await page.waitFor(`document.querySelector('[role="alertdialog"], [role="dialog"]') === null`);
   await page.click(id('app-update-stable'));
   await page.waitFor(`document.querySelector('${id('app-update-stable')}').getAttribute('aria-pressed') === 'true'`);
-  expect(await page.evaluate(`document.querySelector('${id('app-update-card')}').textContent`)).toContain('boite de nuit');
+  expect(await page.evaluate(`document.querySelector('${id('app-update-card')}').textContent`)).toContain('boite (de nuit)');
   // Selecting a track does not mislabel the version currently running.
+}, 30_000);
+
+test('an installed nightly calls itself boite (de nuit)', async () => {
+  await page.navigate(`${base}/?fake=1&appUpdate=ready&appUpdateChannel=nightly&appUpdateCurrentChannel=nightly`);
+  await page.waitFor(`document.querySelector('${id('titlebar-update-ready')}')`);
+  await page.waitFor(`document.title.endsWith('boite (de nuit)')`);
+  await page.waitFor(`document.querySelector('${id('nav-settings')}')`);
+  // The bar says the name once, whether as its title or as the chip beside a project, thread or settings.
+  const mentions = `document.querySelector('${id('titlebar')}').textContent.split('boite (de nuit)').length - 1`;
+  expect(await page.evaluate(mentions)).toBe(1);
+  await capture('nightly-desktop');
+  await page.click(id('nav-settings'));
+  await page.waitFor(`document.querySelector('${id('app-update-card')}')`);
+  expect(await page.evaluate(mentions)).toBe(1);
+  await capture('nightly-settings');
+  await page.navigate(`${base}/?fake=1&appUpdate=ready&appUpdateChannel=nightly&appUpdateCurrentChannel=nightly`);
+  await width(390);
+  await page.waitFor(`document.title.endsWith('boite (de nuit)')`);
+  expect(await page.evaluate('document.documentElement.scrollWidth <= 390')).toBe(true);
+  await capture('nightly-phone');
 }, 30_000);
 
 test('download progress and retry stay visible without overflowing a narrow desktop', async () => {

@@ -6,9 +6,9 @@ notes. When an update is ready, the title bar offers installation directly
 from the conversation, with a confirmation before restarting. A separate
 details action opens the update card.
 
-## Boite and boite de nuit
+## Boite and boite (de nuit)
 
-Choose Boite for regular releases, including the current beta, or boite de nuit
+Choose Boite for regular releases, including the current beta, or boite (de nuit)
 for the daily build from `main`. A nightly publishes only when that commit has
 not already shipped and its CI checks pass. Nightlies may contain unfinished
 changes.
@@ -17,7 +17,7 @@ Changing the channel immediately checks for its newest signed release and
 downloads it. Returning from nightly to Boite permits a lower version. Both
 channels use the same install location, bundle identifier and `boite2` data
 directory. Projects, accounts and journal files stay in place. The Windows
-installer retains the name Boite; nightly builds use the boite de nuit title,
+installer retains the name Boite; nightly builds use the boite (de nuit) title,
 tray tooltip and the violet and magenta icon.
 
 Keep a backup before trying nightlies: retaining files does not make a future

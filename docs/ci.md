@@ -115,9 +115,9 @@ test port. Hardware audio tests skip hosts without a default render endpoint;
 the guard logic tests still run. Scripted Claude tests use Bun as their available
 executable and never need a real CLI or login.
 
-## boite de nuit
+## boite (de nuit)
 
-The `boite de nuit` workflow runs daily at 03:23 UTC and also accepts manual
+The `boite (de nuit)` workflow runs daily at 03:23 UTC and also accepts manual
 `workflow_dispatch` runs on `main`. Both entry points are enabled by default.
 Set the repository variable `NIGHTLY_ENABLED` to `false` to stop both entry
 points. Removing it or setting it to `true` enables them again.
@@ -125,7 +125,7 @@ points. Removing it or setting it to `true` enables them again.
 Before building, the workflow compares the selected commit with published
 nightly releases. An unchanged commit skips the expensive jobs. Failed builds
 have no published release and are retried next time. For example, the first build
-on September 15 is `boite de nuit v2.0.0-nightly.20260915.1`; a new commit that day
+on September 15 is `boite (de nuit) v2.0.0-nightly.20260915.1`; a new commit that day
 gets `.2`. The counter resets the next UTC day. The base `2.0.0` comes from the
 manifest, without its stable prerelease suffix.
 

@@ -127,13 +127,13 @@ export const fr: Messages = {
 
   appUpdate: {
     heading: "Mises à jour de l'application",
-    intro: 'Choisissez les versions suivies par cette application de bureau. Boite et boite de nuit partagent cette installation, vos conversations et vos réglages.',
+    intro: 'Choisissez les versions suivies par cette application de bureau. Boite et boite (de nuit) partagent cette installation, vos conversations et vos réglages.',
     unsupported: 'Les mises à jour automatiques sont disponibles dans les versions Windows x64 installées.',
     channel: 'Canal de publication',
     stable: 'Boite',
-    nightly: 'boite de nuit',
-    nightlyHint: "Boite de nuit est expérimentale et peut contenir des changements inachevés. Vous pouvez revenir à Boite même si son numéro de version est inférieur.",
-    nightlyTitle: 'Cette application suit les versions expérimentales de boite de nuit',
+    nightly: 'boite (de nuit)',
+    nightlyHint: "boite (de nuit) est expérimentale et peut contenir des changements inachevés. Vous pouvez revenir à Boite même si son numéro de version est inférieur.",
+    nightlyTitle: 'Cette application suit les versions expérimentales de boite (de nuit)',
     installedVersion: 'Version installée',
     installedChannel: 'Canal installé',
     targetVersion: 'Version de mise à jour',

@@ -121,7 +121,7 @@ export const strings = {
     unsupported: 'Automatic app updates are available in installed Windows x64 builds.',
     channel: 'Release channel',
     stable: 'Boite',
-    nightly: 'boite de nuit',
+    nightly: 'boite (de nuit)',
     nightlyHint: 'Nightly is experimental and may contain unfinished changes. You can return to Boite even when its version number is lower.',
     nightlyTitle: 'This app follows experimental nightly releases',
     installedVersion: 'Installed version',

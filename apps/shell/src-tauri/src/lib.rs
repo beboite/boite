@@ -721,9 +721,17 @@ fn start_core<R: Runtime>(app: &AppHandle<R>, state: &CoreState) {
 // Window and tray.
 // ---------------------------------------------------------------------------
 
+/// What a nightly build calls itself in the window title and the tray. The
+/// installer keeps `productName` Boite: both tracks are one installation.
+const NIGHTLY_LABEL: &str = "boite (de nuit)";
+
 fn product_label<R: Runtime>(app: &AppHandle<R>, channel: Channel) -> &'static str {
-    if channel == Channel::Stable && app.package_info().version.pre.as_str().starts_with("nightly.") {
-        "boite de nuit"
+    label_for(channel, app.package_info().version.pre.as_str())
+}
+
+fn label_for(channel: Channel, prerelease: &str) -> &'static str {
+    if channel == Channel::Stable && prerelease.starts_with("nightly.") {
+        NIGHTLY_LABEL
     } else { channel.product_name() }
 }
 
@@ -927,7 +935,7 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::{effects_for, Channel};
+    use super::{effects_for, label_for, Channel};
     use tauri::window::Effect;
 
     #[test]
@@ -1056,6 +1064,14 @@ mod tests {
         assert_eq!(Channel::Dev.data_dir_name(), "boite2-dev");
         assert_eq!(Channel::Stable.product_name(), "Boite");
         assert_eq!(Channel::Dev.product_name(), "Boite Dev");
+    }
+
+    #[test]
+    fn a_nightly_build_names_itself_boite_de_nuit() {
+        assert_eq!(label_for(Channel::Stable, "nightly.20260923.1"), "boite (de nuit)");
+        assert_eq!(label_for(Channel::Stable, "beta.2"), "Boite");
+        assert_eq!(label_for(Channel::Stable, ""), "Boite");
+        assert_eq!(label_for(Channel::Dev, "nightly.20260923.1"), "Boite Dev");
     }
 
     #[test]
