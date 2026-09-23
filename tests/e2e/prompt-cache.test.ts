@@ -54,7 +54,8 @@ test('a warm Claude cache counts down beside the context meter', async () => {
   expect(await page.evaluate<string>(`document.querySelector('${CHIP}').dataset.state`)).toBe('warm');
   expect(await page.text(CHIP)).toContain('31 min');
   await capture(page, 'prompt-cache-desktop');
-  expect(await page.text('[data-testid="prompt-cache-detail"]')).toContain('1 h lifetime, reported by the agent');
+  expect(await page.text('[data-testid="prompt-cache-detail"]')).toContain('31 min left');
+  expect(await page.text('[data-testid="prompt-cache-detail"]')).toContain('1 h · API');
 }, 90_000);
 
 test('past the OpenAI 30 minutes the cache reads maybe, on a phone and in French', async () => {
@@ -62,7 +63,8 @@ test('past the OpenAI 30 minutes the cache reads maybe, on a phone and in French
   await page.waitFor(`document.querySelector('${CHIP}')?.dataset.state === 'maybe'`);
   expect(await page.text(CHIP)).toContain('23 h');
   await capture(page, 'prompt-cache-phone-fr');
-  expect(await page.text('[data-testid="prompt-cache-detail"]')).toContain('Peut-être encore chaud');
+  expect(await page.text('[data-testid="prompt-cache-detail"]')).toContain('peut-être · 23 h');
+  expect(await page.text('[data-testid="prompt-cache-detail"]')).toContain('30 min à 24 h');
 }, 90_000);
 
 test('another model reads cold, and the experiment off draws nothing', async () => {
@@ -71,7 +73,7 @@ test('another model reads cold, and the experiment off draws nothing', async () 
   await page.evaluate(`(async () => { (${STORE}).openThread.model = 'another-model'; })()`);
   await page.waitFor(`document.querySelector('${CHIP}')?.dataset.state === 'cold'`);
   await capture(page, 'prompt-cache-cold');
-  expect(await page.text('[data-testid="prompt-cache-detail"]')).toContain('another model or account');
+  expect(await page.text('[data-testid="prompt-cache-detail"]')).toContain('Model or account changed');
 
   const off = await open({ width: 1300, height: 850 }, { minutesAgo: 2, ttlSeconds: 300, source: 'documented' }, false);
   await off.waitFor(`document.querySelector('[data-testid="context-trigger"]')`);

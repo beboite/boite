@@ -84,19 +84,20 @@
         {#if !context.breakdown}<p class="note">{strings.thread.contextNoBreakdown}</p>{/if}
         <p class="note">{strings.thread.contextMeasured} · {time(context.at)}</p>
       {:else}<p class="note">{strings.thread.contextNoReading}</p>{/if}
-      {#if cache && cacheNow}
-        <div class="cache-detail" data-testid="prompt-cache-detail">
-          <div class="heading"><span>{strings.thread.cacheTitle}</span></div>
-          <p class="note state" data-state={cacheNow.kind}>{cacheNow.kind === 'warm' ? strings.thread.cacheWarm(remaining(cacheNow.secondsLeft))
-            : cacheNow.kind === 'maybe' ? strings.thread.cacheMaybe(remaining(cacheNow.secondsLeft))
-            : cacheNow.switched ? strings.thread.cacheSwitched : strings.thread.cacheExpired}</p>
-          <p class="note">{cache.maxSeconds !== undefined ? strings.thread.cacheBestEffort(lifetime(cache.ttlSeconds), lifetime(cache.maxSeconds))
-            : cache.source === 'reported' ? strings.thread.cacheReported(lifetime(cache.ttlSeconds)) : strings.thread.cacheDocumented(lifetime(cache.ttlSeconds))}</p>
-          {#if cache.readTokens > 0}<p class="note">{strings.thread.cacheRead(exact(cache.readTokens))}</p>{/if}
-        </div>
-      {/if}
       <button type="button" class="compact" data-testid="context-compact" disabled={reason !== null} title={reason ?? strings.composer.compact} onclick={() => void compact()}><Minimize2 size={14} />{strings.composer.compact}</button>
       {#if reason}<p class="note">{reason}</p>{/if}
+      {#if cache && cacheNow}
+        <div class="cache-detail" data-testid="prompt-cache-detail">
+          <div class="heading"><span>{strings.thread.cacheTitle}</span><span class="mono state" data-state={cacheNow.kind}>{cacheNow.kind === 'warm' ? strings.thread.cacheLeft(remaining(cacheNow.secondsLeft))
+            : cacheNow.kind === 'maybe' ? strings.thread.cacheMaybe(remaining(cacheNow.secondsLeft)) : strings.thread.cacheCold}</span></div>
+          <dl>
+            <div><dt>{strings.thread.cacheLifetime}</dt><dd class="mono">{cache.maxSeconds !== undefined ? strings.thread.cacheRange(lifetime(cache.ttlSeconds), lifetime(cache.maxSeconds))
+              : `${lifetime(cache.ttlSeconds)} · ${cache.source === 'reported' ? strings.thread.cacheSourceReported : strings.thread.cacheSourceDocumented}`}</dd></div>
+            {#if cache.readTokens > 0}<div><dt>{strings.thread.cacheReadLast}</dt><dd class="mono">{exact(cache.readTokens)}</dd></div>{/if}
+          </dl>
+          {#if cacheNow.kind === 'cold' && cacheNow.switched}<p class="note">{strings.thread.cacheSwitched}</p>{/if}
+        </div>
+      {/if}
     </div>
   {/if}
 </div>
@@ -113,8 +114,11 @@
   .cache-chip[data-state='warm'] :global(svg) { color: var(--color-success); }
   .cache-chip[data-state='maybe'] :global(svg), .cache-chip.low :global(svg) { color: var(--color-live); }
   .cache-detail { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--color-border); }
-  .cache-detail .note:first-of-type { margin-top: 6px; }
-  .state[data-state='warm'] { color: var(--color-foreground); }
+  .cache-detail dl { margin-bottom: 0; }
+  .state { font-weight: 400; }
+  .state[data-state='warm'] { color: var(--color-success); }
+  .state[data-state='maybe'] { color: var(--color-live); }
+  .state[data-state='cold'] { color: var(--color-muted-foreground); }
   .popup { position: fixed; width: min(290px, calc(100vw - 24px)); z-index: 60; padding: 16px; border-radius: var(--radius-lg); background: var(--color-surface-2); box-shadow: var(--shadow-e3); animation: pop var(--dur-2) var(--ease-out-quint); color: var(--color-foreground); }
   .popup.closing { animation: pop-out var(--dur-2) var(--ease-out-quint); pointer-events: none; }
   .heading { display: flex; justify-content: space-between; font-size: var(--text-sm); font-weight: 600; }
