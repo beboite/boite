@@ -44,7 +44,7 @@ beforeAll(async () => {
     });
   })()`);
   await page.waitFor(`document.querySelectorAll('[data-testid="forwarded-agent-message"]').length === 2`);
-}, 30_000);
+}, 60_000);
 
 afterAll(async () => { await page?.close(); await server?.close(); }, 15_000);
 

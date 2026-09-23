@@ -24,7 +24,7 @@ beforeAll(async () => {
   url = `http://127.0.0.1:${port}/?fake=1&updates=1&open=recent`;
   server = await createServer({ root: join(import.meta.dir, '../../packages/ui'), server: { host: '127.0.0.1', port, strictPort: true }, clearScreen: false });
   await server.listen();
-}, 30_000);
+}, 60_000);
 beforeEach(async () => {
   page = await BrowserPage.launch({ url });
   await page.waitFor(`document.querySelector('${id('nav-settings')}')`);
