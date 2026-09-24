@@ -619,8 +619,6 @@ export class ThreadStore {
     if (this.core.stopping) throw refused('the core is stopping; reconnect before sending another prompt');
     const thread = this.require(threadId);
     checkAttachmentArray(attachments);
-    // A turn of the user's own takes whatever the agent wrote by itself first.
-    if (operation !== 'background') this.pendingWakes.delete(threadId);
     let fingerprint = '';
     if (clientRequestId !== undefined) {
       if (typeof clientRequestId !== 'string' || !/^[A-Za-z0-9_-]{8,128}$/.test(clientRequestId)) throw refused('clientRequestId must contain 8 to 128 URL-safe characters');
@@ -691,6 +689,8 @@ export class ThreadStore {
       this.core.journal.putMessage(message);
       if (clientRequestId) this.core.journal.putTurnRequest(threadId, clientRequestId, fingerprint, turn.id);
     });
+    // A turn of the user's own, once accepted, takes whatever the agent wrote by itself first.
+    if (operation !== 'background') this.pendingWakes.delete(threadId);
     if (!activity && !operation) this.core.activity.userPrompt(threadId);
     this.core.bus.emit('message.started', message);
     this.core.bus.emit('message.completed', { threadId, messageId: message.id, state: 'complete' });
@@ -1111,14 +1111,17 @@ export class ThreadStore {
     const handle = this.handles.get(threadId);
     if (handle?.steer && !this.steering.has(threadId)) {
       this.steering.add(threadId);
+      const hold = () => {
+        this.defer(threadId, text);
+        // The turn may have ended while the steer was out, after its end looked for held answers.
+        if (!this.handles.has(threadId)) this.flushDeferred(threadId);
+      };
       void handle.steer(text)
-        .then(submitted => {
-          if (submitted) return;
-          this.defer(threadId, text);
-          // The turn may have ended while the steer was out, after its end looked for held answers.
-          if (!this.handles.has(threadId)) this.flushDeferred(threadId);
+        .then(submitted => { if (!submitted) hold(); })
+        .catch(error => {
+          this.core.log('warn', `thread ${threadId}: steering an async answer failed, it waits for the next turn: ${messageOf(error)}`);
+          hold();
         })
-        .catch(error => this.core.log('warn', `thread ${threadId}: an async answer may not have reached the agent: ${messageOf(error)}`))
         .finally(() => this.steering.delete(threadId));
       return;
     }

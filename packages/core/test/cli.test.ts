@@ -4,7 +4,9 @@ import { join } from 'node:path';
 import { AGENT_ENV } from '@boite/contracts';
 import { runCli, splitLine } from '../src/cli.ts';
 import type { CliIo } from '../src/cli.ts';
-import { echoThread, startTestCore } from './harness.ts';
+import { setDriver } from '../src/drivers/index.ts';
+import type { TurnResult } from '../src/drivers/index.ts';
+import { echoThread, startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
 
 let harness: TestCore;
@@ -244,4 +246,34 @@ test('ask draws a card that does not stop the agent, and the answer comes back a
   expect(prompts).toEqual(['hello', '> Deploy now?\n\nlater\nafter lunch']);
   const card = harness.core.journal.listMessages(threadId).flatMap((m) => m.parts).find((p) => p.type === 'question');
   expect(card).toMatchObject({ async: true, answer: { optionIds: ['2'], text: 'after lunch' } });
+});
+
+test('an answer the running turn refuses to take is held for the next prompt', async () => {
+  let finish: (() => void) | null = null;
+  let steers = 0;
+  const restore = setDriver('echo', { protocol: 'echo', startTurn() {
+    const first = finish === null;
+    let end!: () => void;
+    const done = new Promise<TurnResult>((resolve) => { end = () => resolve({ status: 'done', sessionId: null, usage: null }); });
+    if (first) finish = end; else end();
+    return { done, stop: end, async steer() { steers++; throw new Error('no turn to steer'); } };
+  } });
+  try {
+    const client = await harness.connect();
+    await client.call('turns.start', { threadId, prompt: 'hello' });
+    await waitFor(() => finish !== null);
+    const asked = await boite(['ask', 'Deploy now?', 'yes', 'later', '--json']);
+    const { questionId } = JSON.parse(asked.out) as { questionId: string };
+    await client.call('questions.answer', { threadId, questionId, optionIds: ['1'] });
+    await waitFor(() => steers === 1);
+
+    const next = client.next('turn.finished', (turn) => turn.threadId === threadId && turn.status === 'done', 10000);
+    finish!();
+    await next;
+    await waitFor(() => harness.core.journal.listMessages(threadId).filter((m) => m.role === 'user').length === 2, 10000);
+    const prompts = harness.core.journal.listMessages(threadId).filter((m) => m.role === 'user').map((m) => (m.parts[0]?.type === 'text' ? m.parts[0].text : ''));
+    expect(prompts).toEqual(['hello', '> Deploy now?\n\nyes']);
+  } finally {
+    restore();
+  }
 });
