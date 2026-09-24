@@ -333,8 +333,9 @@ export const appUpdater = new AppUpdater(
 
 /**
  * The name the app goes by: a nightly build is "boite (de nuit)" wherever it
- * says its own name, like the shell's window title and tray.
+ * says its own name, like the shell's window title and tray. The update card
+ * still names the track Boite Nightly.
  */
 export function appName(): string {
-  return appUpdater.snapshot.currentChannel === 'nightly' ? strings.appUpdate.nightly : strings.app.name;
+  return appUpdater.snapshot.currentChannel === 'nightly' ? strings.app.nightlyName : strings.app.name;
 }

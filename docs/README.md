@@ -2,7 +2,7 @@
 
 ## Using boite
 
-- [Desktop updates](updates.md): Boite, boite (de nuit), downloads and restarting.
+- [Desktop updates](updates.md): Boite, Boite Nightly, downloads and restarting.
 - [The tour](onboarding.md): the first launch, and what it sets up.
 - [Language](language.md): English and French, and where the sentences live.
 - [Accounts](accounts.md): agent logins and isolated accounts.

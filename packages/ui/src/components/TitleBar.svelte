@@ -123,7 +123,7 @@
     <span class="channel" title={strings.app.channelDevTitle} data-testid="titlebar-channel">{strings.app.channelDev}</span>
   {/if}
   {#if nightly}
-    <span class="channel" title={strings.appUpdate.nightlyTitle} data-testid="titlebar-update-channel">{strings.appUpdate.nightly}</span>
+    <span class="channel" title={strings.appUpdate.nightlyTitle} data-testid="titlebar-update-channel">{strings.app.nightlyName}</span>
   {/if}
   {#if showAppUpdateUi() && appUpdater.ready}
     <button

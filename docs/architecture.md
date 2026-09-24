@@ -12,7 +12,7 @@ Object, so a hard shell exit also stops that core. Adopted and remote cores are
 not owned by the shell and remain running. The shell also carries a channel, read once from its own
 bundle identifier: `Boite` and `Boite Dev` are two installs on one machine, and
 the channel is what keeps their data directories, and so their cores, apart.
-[docs/releasing.md](releasing.md). Boite and boite (de nuit) are update tracks
+[docs/releasing.md](releasing.md). Boite and Boite Nightly are update tracks
 within the regular install and share its data. The desktop updater belongs to
 the shell, uses main-webview-only IPC and never acts on the selected remote core.
 It verifies signed installers before offering a restart. [Updates](updates.md).

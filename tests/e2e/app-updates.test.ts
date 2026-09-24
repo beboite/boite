@@ -111,7 +111,7 @@ test('the titlebar installs with confirmation without leaving chat', async () =>
 test('ready desktop updates show versions, notes and a restart confirmation', async () => {
   await settings('ready', true);
   await page.waitFor(`document.querySelector('${id('app-update-install')}')`);
-  expect(await page.evaluate(`document.querySelector('${id('app-update-card')}').textContent`)).toContain('boite (de nuit)');
+  expect(await page.evaluate(`document.querySelector('${id('app-update-card')}').textContent`)).toContain('Boite Nightly');
   expect(await page.evaluate(`document.querySelector('${id('app-update-card')}').textContent`)).toContain('Faster startup');
   await capture('ready-desktop');
   await page.click(id('app-update-install'));
@@ -124,7 +124,7 @@ test('ready desktop updates show versions, notes and a restart confirmation', as
   await page.waitFor(`document.querySelector('[role="alertdialog"], [role="dialog"]') === null`);
   await page.click(id('app-update-stable'));
   await page.waitFor(`document.querySelector('${id('app-update-stable')}').getAttribute('aria-pressed') === 'true'`);
-  expect(await page.evaluate(`document.querySelector('${id('app-update-card')}').textContent`)).toContain('boite (de nuit)');
+  expect(await page.evaluate(`document.querySelector('${id('app-update-card')}').textContent`)).toContain('Boite Nightly');
   // Selecting a track does not mislabel the version currently running.
 }, 30_000);
 
@@ -140,6 +140,9 @@ test('an installed nightly calls itself boite (de nuit)', async () => {
   await page.click(id('nav-settings'));
   await page.waitFor(`document.querySelector('${id('app-update-card')}')`);
   expect(await page.evaluate(mentions)).toBe(1);
+  // Settings keep the track's own name.
+  expect(await page.evaluate(`document.querySelector('${id('app-update-card')}').textContent`)).toContain('Boite Nightly');
+  expect(await page.evaluate(`document.querySelector('${id('app-update-card')}').textContent`)).not.toContain('de nuit');
   await capture('nightly-settings');
   await page.navigate(`${base}/?fake=1&appUpdate=ready&appUpdateChannel=nightly&appUpdateCurrentChannel=nightly`);
   await width(390);

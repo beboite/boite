@@ -42,7 +42,7 @@ test('shows channel mismatch, versions, safe release notes and the ready action'
   const text = document.body.textContent ?? '';
   expect(text).toContain('Installed channel');
   expect(text).toContain('Boite');
-  expect(text).toContain('boite (de nuit)');
+  expect(text).toContain('Boite Nightly');
   expect(text).toContain('2.0.0-nightly.8');
   expect(text).toContain('Update downloads resume correctly');
   expect(document.querySelector('[data-testid=app-update-install]')).not.toBeNull();

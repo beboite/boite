@@ -1,7 +1,7 @@
 # Agent updates
 
 This page covers agent executables. Updating Boite itself and selecting
-boite (de nuit) are described in [Desktop updates](updates.md).
+Boite Nightly are described in [Desktop updates](updates.md).
 
 Boite keeps the agents of a machine current. The core of that machine does the
 work: it reads each agent's version, reads the newest one, and runs the update.
