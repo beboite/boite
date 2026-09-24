@@ -1921,7 +1921,7 @@ const ready = true;
     this.#pushScheduler(turn, 'running');
 
     const record = { cancelled: false, done: Promise.resolve() };
-    record.done = this.#stream(thread, turn, previewPrompt(prompt, previewReferences), record, attachments);
+    record.done = this.#stream(thread, turn, prompt, record, attachments, previewPrompt(prompt, previewReferences));
     this.#inFlight.set(threadId, record);
 
     return structuredClone(turn);
@@ -1932,7 +1932,8 @@ const ready = true;
     turn: Turn,
     prompt: string,
     record: { cancelled: boolean },
-    attachments: Attachment[] = []
+    attachments: Attachment[] = [],
+    modelPrompt: string = prompt
   ): Promise<void> {
     const compactAfter = Math.max(1, Math.floor((thread.context?.tokens ?? FAKE_CONTEXT_FLOOR) / 4));
     const message: Message = {
@@ -1948,7 +1949,7 @@ const ready = true;
     this.#emitToThread(thread.id, 'message.started', structuredClone(message));
 
     // The reasoning first, in two deltas, the way a provider streams a thinking block.
-    const reasoning = `thinking about: ${prompt}`;
+    const reasoning = `thinking about: ${modelPrompt}`;
     const cut = Math.ceil(reasoning.length / 2);
     for (const piece of [reasoning.slice(0, cut), reasoning.slice(cut)]) {
       if (record.cancelled || piece.length === 0) break;
@@ -1974,7 +1975,7 @@ const ready = true;
 
     // `/shout <text>` comes back in capitals, the one command the fake acts on.
     const shouted = prompt.startsWith(`/${SHOUT} `) ? prompt.slice(SHOUT.length + 2) : null;
-    const echoed = shouted === null ? prompt : shouted.toUpperCase();
+    const echoed = shouted === null ? modelPrompt : modelPrompt.slice(SHOUT.length + 2).toUpperCase();
 
     // An image is named back the way the echo driver names it, format and
     // weight first, then the prompt itself is echoed.
@@ -2047,11 +2048,11 @@ const ready = true;
     });
 
     const usage: Usage = {
-      inputTokens: Math.max(1, Math.ceil(prompt.length / 4)),
-      outputTokens: Math.max(1, Math.ceil(prompt.length / 4)),
+      inputTokens: Math.max(1, Math.ceil(modelPrompt.length / 4)),
+      outputTokens: Math.max(1, Math.ceil(modelPrompt.length / 4)),
       cacheReadTokens: 0,
       cacheWriteTokens: 0,
-      costUsdEquivalent: Math.round(prompt.length * 0.02) / 1000
+      costUsdEquivalent: Math.round(modelPrompt.length * 0.02) / 1000
     };
     turn.status = record.cancelled ? 'stopped' : 'done';
     turn.finishedAt = this.#now();
@@ -2064,7 +2065,7 @@ const ready = true;
     thread.unread = !this.#subscribed.has(thread.id);
     // The context meter grows with every turn, the way a real session's does.
     thread.context = {
-      tokens: prompt === '[compact]' && !record.cancelled ? compactAfter : (thread.context?.tokens ?? FAKE_CONTEXT_FLOOR) + FAKE_CONTEXT_PER_TURN + prompt.length * 4,
+      tokens: prompt === '[compact]' && !record.cancelled ? compactAfter : (thread.context?.tokens ?? FAKE_CONTEXT_FLOOR) + FAKE_CONTEXT_PER_TURN + modelPrompt.length * 4,
       window: FAKE_CONTEXT_WINDOW,
       at: this.#now()
     };

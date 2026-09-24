@@ -160,7 +160,7 @@ jobs:
         run: |
           bun tests/e2e/lib/warm.ts $env:BOITE_E2E_FAKE_UI
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          bun test tests/e2e --parallel=3
+          bun test tests/e2e --parallel=2
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: windows-installer

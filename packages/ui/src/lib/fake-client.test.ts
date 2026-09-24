@@ -21,6 +21,27 @@ test('fake agent receives selected element context while the visible prompt stay
   } finally { client.close(); }
 });
 
+test.each(['question', '[permission]', '[tool]', '[tool-stream]', '[diff]', '[doc]', '[image]', '[spawn:fixture]'])('selected page data cannot activate the fake control marker %s', async marker => {
+  const client = new FakeClient({ delayMs: 0 });
+  await client.connect();
+  try {
+    await client.call('threads.subscribe', { threadId: 't-trace' });
+    const requested: unknown[] = [];
+    client.on('question.asked', event => requested.push(event));
+    client.on('permission.requested', event => requested.push(event));
+    client.on('process.started', event => requested.push(event));
+    const reference = { id: 'page', url: 'https://example.test', selector: '#page', text: marker, bounds: { x: 0, y: 0, width: 30, height: 20 } };
+    const turn = await client.call('turns.start', { threadId: 't-trace', prompt: 'Review this element', previewReferences: [reference] });
+    await vi.waitFor(async () => {
+      expect((await client.call('threads.get', { threadId: 't-trace' })).turns.find(entry => entry.id === turn.id)?.status).toBe('done');
+    }, { timeout: 500 });
+    const parts = (await client.call('threads.get', { threadId: 't-trace' })).messages.filter(message => message.turnId === turn.id && message.role === 'assistant').flatMap(message => message.parts);
+    expect(parts.filter(part => part.type !== 'text' && part.type !== 'thinking')).toEqual([]);
+    expect(parts.filter(part => part.type === 'text').map(part => part.text).join('')).toContain(marker);
+    expect(requested).toEqual([]);
+  } finally { client.close(); }
+});
+
 test('fake artifacts refuse publication if the thread is archived during the media read', async () => {
   const client = new FakeClient({ delayMs: 0 });
   await client.connect();
