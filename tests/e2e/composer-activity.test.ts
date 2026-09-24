@@ -29,7 +29,7 @@ beforeAll(async () => {
   page = await BrowserPage.launch({ url: `http://127.0.0.1:${port}/?fake=1&open=recent` });
   await page.waitFor(`document.querySelector('${id('new-thread')}')`);
   await size(false);
-}, 30_000);
+}, 60_000);
 
 test('commands are colored with aligned wrapping and three permission choices', async () => {
   for (const phone of [false, true]) {

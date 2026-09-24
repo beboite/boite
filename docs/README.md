@@ -7,8 +7,10 @@
 - [Language](language.md): English and French, and where the sentences live.
 - [Accounts](accounts.md): agent logins and isolated accounts.
 - [Agent updates](agent-updates.md): update notices, the automatic update and remote machines.
+- [Agent brain](brain.md): shared instructions, skill discovery and Git synchronization.
 - [Model switching](model-switching.md): changing models and providers in one conversation.
 - [Context](context.md): context usage and compaction.
+- [Prompt cache timer](prompt-cache.md): how long a thread's cache stays warm, per provider, and the sources.
 - [Agent coordination](coordination.md): messages between agents, machine links and limits.
 - [Agent delegation](delegation.md): model profiles, child conversations, live steering and team budgets.
 - [Usage](usage.md): tokens, API cost and limits per day, provider and model.

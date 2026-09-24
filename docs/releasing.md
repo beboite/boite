@@ -128,8 +128,8 @@ tree instead.
 
 Boite and boite de nuit are update tracks of the same installed application.
 They share `com.boite.two`, the Boite installer name and the `boite2` data
-directory. Nightly uses the alternate icon and displays boite de nuit in the
-window title and tray. The in-app channel selector downloads the selected
+directory. Nightly uses `icons-nightly/`, the white mark on violet and magenta, and
+displays boite de nuit in the window title and tray. The in-app channel selector downloads the selected
 track, including an older stable version when leaving nightly.
 [Desktop updates](updates.md) covers restart behavior and data compatibility.
 
@@ -255,6 +255,11 @@ deleted, as it is for the light set:
 ```bash
 bun run --cwd apps/shell tauri icon ../../packages/ui/public/icons/icon-dev.svg -o src-tauri/icons-dev
 ```
+
+Nightly keeps the white mark on a ground lit from below, near-black violet at
+the top fading to magenta, with a faint halo around the mark.
+`packages/ui/public/icons/icon-nightly.svg` renders into `src-tauri/icons-nightly`
+with the same command and the same cleanup.
 
 ## Version numbers
 

@@ -1,7 +1,8 @@
 <script lang="ts">
   import { MediaQuery } from 'svelte/reactivity';
   import MobileSettings from './MobileSettings.svelte';
-  import { ArrowLeft, ChevronRight, Coins, FlaskConical, Gauge, Keyboard, Mic, Monitor, Palette, Puzzle, Settings2, ShieldCheck, Users } from '@lucide/svelte';
+  import BrainPage from './BrainPage.svelte';
+  import { ArrowLeft, Brain, ChevronRight, Coins, FlaskConical, Gauge, Keyboard, Mic, Monitor, Palette, Puzzle, Settings2, ShieldCheck, Users } from '@lucide/svelte';
   import KeyboardPage from './KeyboardPage.svelte';
   import LimitsPage from './LimitsPage.svelte';
   import PluginsPage from './PluginsPage.svelte';
@@ -23,7 +24,7 @@
   const inShell = window.__TAURI_INTERNALS__ !== undefined;
 
   /** Providers, Plugins and Resources call nothing a paired device may call. */
-  const OWNER_TABS: SettingsTab[] = ['accounts', 'plugins', 'resources'];
+  const OWNER_TABS: SettingsTab[] = ['accounts', 'plugins', 'resources', 'brain'];
 
   // Derived, not built once: the nav is written in the language the app is
   // speaking, and the language changes without a reload.
@@ -35,6 +36,7 @@
     { id: 'keyboard', label: strings.settings.tabs.keyboard, icon: Keyboard },
     { id: 'accounts', label: strings.settings.tabs.accounts, icon: Users },
     { id: 'plugins', label: strings.settings.tabs.plugins, icon: Puzzle },
+    { id: 'brain', label: strings.brain.heading, icon: Brain },
     { id: 'usage', label: strings.settings.tabs.usage, icon: Coins },
     { id: 'limits', label: strings.usage.limits, icon: Gauge },
     { id: 'resources', label: strings.settings.tabs.resources, icon: ShieldCheck },
@@ -48,7 +50,7 @@
       ...COMMAND_GROUPS.map(group => ({id: `keys-${group.id}`, label: strings.keyboard.groups[group.id]})),
       {id: 'keybinding-file', label: strings.keyboard.file}
     ],
-    experiments: [{id: 'theme-grain', label: strings.experiments.themeGrain.title}, {id: 'session-import', label: strings.experiments.sessionImport.title}],
+    experiments: [{id: 'theme-grain', label: strings.experiments.themeGrain.title}, {id: 'session-import', label: strings.experiments.sessionImport.title}, {id: 'prompt-cache', label: strings.experiments.promptCache.title}],
     usage: [
       { id: 'usage-overview', label: strings.usage.overview },
       { id: 'usage-breakdown', label: strings.usage.breakdown },
@@ -152,7 +154,9 @@
        rather than swapping it in one frame. -->
   {#key tab}
     <section>
-      {#if tab === 'voice'}
+      {#if tab === 'brain'}
+        <BrainPage {store} />
+      {:else if tab === 'voice'}
         <VoiceSettings {store} />
       {:else if tab === 'general'}
         <GeneralSettings {store} />

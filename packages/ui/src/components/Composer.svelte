@@ -4,7 +4,7 @@
   import type { Attachment, PermissionMode } from '@boite/contracts';
   import { bytes, tokens as formatTokens } from '../lib/format';
   import { confirm } from '../lib/confirm.svelte';
-  import { switchDropsHistory } from '../lib/switch-warning';
+  import { switchDropsHistory, switchResetsCache, type CacheKey } from '../lib/switch-warning';
   import { ATTACHMENT_MAX_BYTES, ATTACHMENTS_PER_TURN } from '@boite/contracts';
   import { acceptAttachments, decodedBytes, readAttachmentFile } from '../lib/attachments';
   import { AGENT_PREFIX, appCommands, isAgentCommand, runCommand } from '../lib/commands.svelte';
@@ -327,6 +327,16 @@
   let speeds = $derived(store.modelOf(choice)?.speeds ?? []);
   let activeEffort = $derived(choice?.effort ?? store.modelOf(choice)?.effort?.default ?? null);
 
+  /** A null effort runs at the model's own default, not at a preset the client configured. */
+  function cacheKey(selection: Choice): CacheKey {
+    return {
+      accountId: selection.accountId,
+      model: selection.model ?? null,
+      effort: selection.effort ?? store.modelOf(selection)?.effort?.default ?? null,
+      speed: selection.speed ?? null,
+    };
+  }
+
   /** On a thread only the model and the effort change and they are saved at once; on a draft the whole choice is remembered. */
   async function pick(patch: PickPatch) {
     if (!choice || picking) return;
@@ -345,6 +355,14 @@
             body: fill(strings.composer.switchBody, { provider: to }),
             confirmLabel: strings.composer.switchConfirm,
             cancelLabel: fill(strings.composer.switchCancel, { provider: from }),
+          });
+          if (!go) return;
+        } else if (switchResetsCache(thread, cacheKey(choice), cacheKey(target))) {
+          const go = await confirm.ask({
+            title: fill(strings.composer.cacheTitle, { tokens: formatTokens(thread.context?.tokens ?? 0) }),
+            body: strings.composer.cacheBody,
+            confirmLabel: strings.composer.cacheConfirm,
+            cancelLabel: strings.composer.cacheCancel,
           });
           if (!go) return;
         }

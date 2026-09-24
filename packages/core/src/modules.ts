@@ -25,6 +25,9 @@ export function registerModules(core: Core): void {
   core.router.register('delegation.spawn', params => core.delegation.spawn(params));
   core.router.register('delegation.send', (params, ctx) => core.delegation.send(params, ctx.connection.identity.principal === 'agent' ? 'agent' : 'user'));
   core.router.register('delegation.stop', params => ({ stopped: core.delegation.stop(params.threadId, params.agentId) }));
+  core.router.register('brain.status', () => core.brain.status());
+  core.router.register('brain.configure', params => core.brain.configure(params));
+  core.router.register('brain.sync', () => core.brain.sync());
   registerTelemetry(core);
   registerCoordination(core);
   registerSpeechMethods(core);

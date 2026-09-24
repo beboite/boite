@@ -309,7 +309,7 @@ screen looks like.
 
 The plugin-page fixture uses `tests/e2e/lib/ui.ts`. With
 `BOITE_E2E_PREBUILT_UI=1`, it builds a separate fake-client UI under
-`.artifacts/fake-ui` before browser interactions, so loading Settings does not
+`.artifacts/fake-ui-<pid>`, one per test process, before browser interactions, so loading Settings does not
 wait for cold development transforms. The installer still uses the production
 build, which does not enable the fake client. Without the flag, the fixture uses Vite's
 development server.

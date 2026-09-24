@@ -6,7 +6,9 @@ percentage beside it. When the agent compacts its conversation mid-turn, the
 timeline gets a divider saying how many tokens went. Both come from the agent
 itself: the core never estimates a context size, and a provider whose protocol
 says nothing shows an unfilled ring. Hovering, focusing or tapping the ring
-opens exact counts and a separate manual compaction button.
+opens exact counts and a separate manual compaction button. Behind the
+`prompt-cache` experiment the meter also carries the
+[prompt cache timer](prompt-cache.md).
 
 ## What is measured
 

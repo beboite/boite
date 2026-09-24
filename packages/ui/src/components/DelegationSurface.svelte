@@ -117,7 +117,6 @@
   <header class="surface-head">
     <div>
       <h2><UsersRound size={17} strokeWidth={1.75} />{strings.delegation.heading}</h2>
-      <p>{strings.delegation.intro}</p>
     </div>
     {#if view}
       <div class="usage" title={strings.delegation.usage}>
@@ -138,12 +137,12 @@
         <summary>{strings.delegation.configure}</summary>
         <div class="settings-body">
           <label class="switch-row">
-            <span><strong>{strings.delegation.enabled}</strong><small>{strings.delegation.enabledHint}</small></span>
+            <span><strong>{strings.delegation.enabled}</strong></span>
             <input type="checkbox" role="switch" checked={config.enabled} disabled={store.delegationSaving || config.profiles.length === 0} onchange={(event) => save({ enabled: event.currentTarget.checked, paused: false })} />
           </label>
 
           <div class="profiles-head">
-            <div><strong>{strings.delegation.profiles}</strong><small>{strings.delegation.profilesHint}</small></div>
+            <div><strong>{strings.delegation.profiles}</strong></div>
             <button type="button" class="quiet small" data-testid="delegation-add-profile" disabled={store.delegationSaving} onclick={addProfile}><Plus size={14} />{strings.delegation.addProfile}</button>
           </div>
           <div class="profiles">
@@ -259,7 +258,6 @@
   .delegation { container-type: inline-size; height: 100%; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
   .surface-head { flex: none; padding: 14px 16px 12px; display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--color-border); }
   .surface-head h2 { display: flex; align-items: center; gap: 7px; font-size: var(--text-md); }
-  .surface-head p { margin: 3px 0 0; color: var(--color-muted-foreground); font-size: var(--text-sm); }
   .usage { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 2px 5px; color: var(--color-muted-foreground); font-size: var(--text-xs); font-variant-numeric: tabular-nums; }
   .usage strong { color: var(--color-foreground); }
   .settings { flex: none; border-bottom: 1px solid var(--color-border); }
@@ -267,8 +265,7 @@
   .settings-body { max-height: min(52dvh, 520px); padding: 0 16px 14px; overflow-y: auto; }
   .switch-row { min-height: var(--control-lg); display: flex; align-items: center; gap: 14px; }
   .switch-row > span { flex: 1; }
-  .switch-row strong, .switch-row small, .profiles-head strong, .profiles-head small { display: block; }
-  .switch-row small, .profiles-head small { color: var(--color-muted-foreground); font-size: var(--text-xs); font-weight: 400; }
+  .switch-row strong, .profiles-head strong { display: block; }
   input[role='switch'] { appearance: none; position: relative; width: 40px; height: 24px; min-height: 24px; padding: 0; border-radius: 999px; background: var(--color-surface-3); }
   input[role='switch']::after { content: ''; position: absolute; width: 16px; height: 16px; top: 3px; left: 3px; border-radius: 50%; background: var(--color-muted-foreground); transition: transform var(--dur-2) var(--ease-out-quint); }
   input[role='switch']:checked { background: var(--color-foreground); }
