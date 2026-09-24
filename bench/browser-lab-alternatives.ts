@@ -8,6 +8,7 @@ import { createBrowserLabEngine } from './browser-lab-engine.ts';
 import { BrowserLabRecording } from './browser-lab-recording.ts';
 import { labTasks } from './browser-lab-tasks.ts';
 import { BrowserLabCodex, type BrowserContentItem } from './browser-lab-codex.ts';
+import { recoverLabModel } from './browser-lab-model.ts';
 
 const dependencyDirectory = process.env.BOITE_BENCH_ALTERNATIVE_DEPS;
 if (!dependencyDirectory) throw new Error('Set BOITE_BENCH_ALTERNATIVE_DEPS to the scratch dependency directory.');
@@ -29,7 +30,9 @@ async function main() {
   const browserBinary = runtimeOptions.browserBinary ?? process.env.BOITE_BROWSER_TEST_BINARY;
   if (typeof browserBinary !== 'string' || !existsSync(browserBinary)) throw new Error('Browser binary must name an existing executable.');
   const h=await startTestCore();
-  const model = new BrowserLabCodex(h.core, process.env.BOITE_BENCH_CODEX_BINARY!, out);
+  const createModel = () => new BrowserLabCodex(h.core, process.env.BOITE_BENCH_CODEX_BINARY!, out);
+  const models = { current: createModel(), groups: [] as string[] };
+  models.groups.push(models.current.processKey);
   let engine: Awaited<ReturnType<typeof createBrowserLabEngine>> | undefined;
   let framework: any, browser: any, server: ReturnType<typeof Bun.serve> | undefined;
   const sample:any={mode,taskId:selectedId,task,rubric:selectedTask?.rubric,startedAt:new Date().toISOString(),cadence:'Fresh ephemeral Codex thread per framework inference. Framework supplies its own prompts, schemas, observations and history.',calls:[],actions:[]};
@@ -53,7 +56,8 @@ async function main() {
       }
       const id=String(callCount).padStart(2,'0'),at=performance.now();
       writeFileSync(join(out,'inference-'+id+'-input.json'),JSON.stringify(params,clean,2));
-      const result=await model.run(input,[],async()=>{throw new Error('Framework inference cannot call tools');},Math.min(120_000,deadline-performance.now()));
+      await recoverLabModel(models, createModel);
+      const result=await models.current.run(input,[],async()=>{throw new Error('Framework inference cannot call tools');},Math.min(120_000,deadline-performance.now()));
       writeFileSync(join(out,'inference-'+id+'-result.json'),JSON.stringify(result,clean,2));
       const text=result.events.filter((e:any)=>e.method==='item/completed'&&e.params.item.type==='agentMessage').map((e:any)=>e.params.item.text).join('\n');
       const usage=result.events.filter((e:any)=>e.method==='thread/tokenUsage/updated').at(-1)?.params.tokenUsage;
@@ -65,7 +69,7 @@ async function main() {
     } finally {busy=false;}
   };
   try {
-    sample.model=await model.initialize();
+    sample.model=await models.current.initialize();
     // Stagehand's extension opens a CDP WebSocket from chrome-extension origin.
     // Its documented local launcher includes these flags. Apply only to this owned test core launch.
     const originalSpawn = h.core.procs.spawnPiped.bind(h.core.procs);
@@ -118,7 +122,7 @@ async function main() {
       }});
       const env:Record<string,string>={};for(const key of ['PATH','Path','SystemRoot','WINDIR','TEMP','TMP','USERPROFILE','LOCALAPPDATA','APPDATA'])if(process.env[key])env[key]=process.env[key]!;
       Object.assign(env,{BENCH_BRIDGE_URL:`http://127.0.0.1:${server.port}`,BENCH_BRIDGE_TOKEN:token,BENCH_CDP_URL:engine.cdpUrl,BENCH_OUTPUT:out,BENCH_TASK:task,BENCH_HOSTS:JSON.stringify(selectedTask?.hosts ?? ['github.com']),BROWSER_USE_CONFIG_DIR:join(out,'browser-use-config'),BENCH_TIMEOUT_MS:String(timeoutMs),ANONYMIZED_TELEMETRY:'false',BROWSER_USE_LOGGING_LEVEL:'info',PYTHONIOENCODING:'utf-8'});
-      const child=h.core.procs.spawnChild('framework-browser-use',join(scratch,'.venv/Scripts/python.exe'),[join(import.meta.dir,'browser-lab-alternatives.py')],{cwd:out,env});
+      const child=h.core.procs.spawnChild('framework-browser-use',join(scratch, process.platform === 'win32' ? '.venv/Scripts/python.exe' : '.venv/bin/python'),[join(import.meta.dir,'browser-lab-alternatives.py')],{cwd:out,env});
       let stdout='',stderr='';child.stdout.on('data',c=>stdout+=c);child.stderr.on('data',c=>stderr+=c);
       const timer=setTimeout(()=>h.core.procs.killTree('framework-browser-use'),timeoutMs+30_000);
       try {sample.exitCode=await new Promise(resolve=>child.once('close',resolve));}finally{clearTimeout(timer);writeFileSync(join(out,'python.stdout.log'),stdout);writeFileSync(join(out,'python.stderr.log'),stderr);await h.core.procs.stopAndWait('framework-browser-use');}
@@ -129,7 +133,11 @@ async function main() {
     if(engine)try{sample.tabs=await engine.command('tabs');sample.final=await engine.command('evaluate',{script:'JSON.stringify({url:location.href,title:document.title,text:document.body.innerText,viewport:{width:innerWidth,height:innerHeight,devicePixelRatio},prefersDark:matchMedia("(prefers-color-scheme: dark)").matches})'});await engine.command('screenshot',{path:join(out,'final.png')});}catch(error){sample.captureError=String(error);}
     if(recording)try{sample.recording=await recording.stop();}catch(error){sample.recordingError=String(error);}
     try{await framework?.close();await browser?.close();}catch(error){sample.frameworkCloseError=String(error);}
-    await engine?.close();await model.close();server?.stop(true);sample.processesAfter=h.core.procs.liveCount(model.processKey) + h.core.procs.liveCount(`browser:alternative-${mode}`) + h.core.procs.liveCount('framework-browser-use') + (recording ? h.core.procs.liveCount(recording.processGroup) : 0);await h.stop();
+    try {
+      try { await engine?.close(); } finally { await models.current.close(); }
+      sample.modelGroups = models.groups.map(group => ({ group, remaining: h.core.procs.liveCount(group) }));
+      sample.processesAfter=sample.modelGroups.reduce((sum: number, group: any) => sum + group.remaining, 0) + h.core.procs.liveCount(`browser:alternative-${mode}`) + h.core.procs.liveCount('framework-browser-use') + (recording ? h.core.procs.liveCount(recording.processGroup) : 0);
+    } finally { server?.stop(true); await h.stop(); }
     writeFileSync(join(out,'summary.json'),JSON.stringify(sample,clean,2));console.log(JSON.stringify({mode,out,error:sample.error,calls:sample.calls.length,totalMs:sample.totalMs,processesAfter:sample.processesAfter}));
   }
 }

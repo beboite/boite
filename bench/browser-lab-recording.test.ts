@@ -51,7 +51,7 @@ live('continuous recording follows two actual public tabs in both engines and de
         expect(result.bytes).toBeGreaterThan(1000);
         const metadata = JSON.parse(readFileSync(`${result.path}.json`, 'utf8'));
         expect(metadata.errors).toEqual([]);
-        const raw = await tool(`${engine.processGroup}:probe`, join(dirname(ffmpegPath), 'ffprobe.exe'), ['-v', 'error', '-show_entries', 'format=duration:stream=width,height,nb_frames', '-of', 'json', result.path]);
+        const raw = await tool(`${engine.processGroup}:probe`, join(dirname(ffmpegPath), process.platform === 'win32' ? 'ffprobe.exe' : 'ffprobe'), ['-v', 'error', '-show_entries', 'format=duration:stream=width,height,nb_frames', '-of', 'json', result.path]);
         const probe = JSON.parse(raw);
         expect(Number(probe.streams[0].nb_frames)).toBe(result.frames);
         expect([probe.streams[0].width, probe.streams[0].height]).toEqual([1280, 800]);
