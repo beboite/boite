@@ -2,12 +2,13 @@ import { statSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { activityPrompt } from './activity-prompt.ts';
 import { relative, resolve } from 'node:path';
-import { attachmentError, MESSAGE_PAGE, MESSAGE_PAGE_MAX } from '@boite/contracts';
+import { attachmentError, previewReferencesError, previewPrompt, MESSAGE_PAGE, MESSAGE_PAGE_MAX } from '@boite/contracts';
 import type {
   Account,
   AccountId,
   AgentCommand,
   Attachment,
+  PreviewReference,
   ImageMimeType,
   Message,
   MessageId,
@@ -595,14 +596,17 @@ export class ThreadStore {
     return this.startTurn(threadId, protocol === 'echo' ? '[compact]' : '/compact', [], expectedSelectionVersion, 'compact');
   }
 
-  startTurn(threadId: ThreadId, prompt: string, attachments: Attachment[] = [], expectedSelectionVersion?: number, operation?: 'compact' | 'coordination' | 'delegation', activity?: { kind: 'goal' | 'loop'; iteration: number }, clientRequestId?: string, displayText?: string): Turn {
+  startTurn(threadId: ThreadId, prompt: string, attachments: Attachment[] = [], expectedSelectionVersion?: number, operation?: 'compact' | 'coordination' | 'delegation', activity?: { kind: 'goal' | 'loop'; iteration: number }, clientRequestId?: string, displayText?: string, previewReferences: PreviewReference[] = []): Turn {
     if (this.core.stopping) throw refused('the core is stopping; reconnect before sending another prompt');
     const thread = this.require(threadId);
     checkAttachmentArray(attachments);
+    const referenceError = previewReferencesError(previewReferences, prompt);
+    if (referenceError) throw refused(referenceError);
+    previewReferences = structuredClone(previewReferences);
     let fingerprint = '';
     if (clientRequestId !== undefined) {
       if (typeof clientRequestId !== 'string' || !/^[A-Za-z0-9_-]{8,128}$/.test(clientRequestId)) throw refused('clientRequestId must contain 8 to 128 URL-safe characters');
-      fingerprint = createHash('sha256').update(JSON.stringify([prompt, attachments.map(a => [a.kind, a.mimeType, a.data, a.name])])).digest('hex');
+      fingerprint = createHash('sha256').update(JSON.stringify([prompt, attachments.map(a => [a.kind, a.mimeType, a.data, a.name]), ...(previewReferences.length ? [previewReferences] : [])])).digest('hex');
       const existing = this.core.journal.turnRequest(threadId, clientRequestId);
       if (existing) {
         if (existing.fingerprint !== fingerprint) throw refused('clientRequestId was already used for different content');
@@ -651,7 +655,7 @@ export class ThreadStore {
       turnId: turn.id,
       role: operation === 'coordination' || operation === 'delegation' ? 'system' : 'user',
       parts: [
-        { type: 'text', text: prompt, ...(operation === 'coordination' || operation === 'delegation' ? { displayText: displayText ?? (operation === 'delegation' ? 'Agent delegation' : 'Agent coordination') } : {}), ...(activity ? { activity } : {}) },
+        { type: 'text', text: previewPrompt(prompt, previewReferences), ...(previewReferences.length ? { displayText: prompt, previewReferences } : {}), ...(operation === 'coordination' || operation === 'delegation' ? { displayText: displayText ?? (operation === 'delegation' ? 'Agent delegation' : 'Agent coordination') } : {}), ...(activity ? { activity } : {}) },
         ...attachments.map((attachment): MessagePart => attachment.kind === 'file' ? { type: 'file', mimeType: attachment.mimeType, data: attachment.data, name: attachment.name } : ({
           type: 'image',
           mimeType: attachment.mimeType,
@@ -1417,7 +1421,7 @@ export function registerThreadMethods(core: Core): void {
     return { ok: true } as const;
   });
   core.router.register('turns.start', (params) =>
-    core.threads.startTurn(params.threadId, params.prompt, params.attachments ?? [], params.expectedSelectionVersion, undefined, undefined, params.clientRequestId),
+    core.threads.startTurn(params.threadId, params.prompt, params.attachments ?? [], params.expectedSelectionVersion, undefined, undefined, params.clientRequestId, undefined, params.previewReferences ?? []),
   );
   core.router.register('turns.stop', (params) => {
     core.activity.pauseAll(params.threadId);

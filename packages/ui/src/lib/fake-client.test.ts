@@ -4,6 +4,68 @@ import { DEFAULT_DELEGATION_CONFIG, RpcErrorCode, TODO_TEXT_MAX, type RpcMethodN
 
 afterEach(() => vi.useRealTimers());
 
+test('fake agent receives selected element context while the visible prompt stays compact', async () => {
+  const client = new FakeClient({ delayMs: 0 });
+  await client.connect();
+  try {
+    const prompt = 'Change @Save';
+    const reference = { id: 'save', url: 'https://example.test/settings', selector: '#save', text: 'Save', bounds: { x: 0, y: 0, width: 30, height: 20 }, mention: { start: 7, end: 12 } };
+    const turn = await client.call('turns.start', { threadId: 't-trace', prompt, previewReferences: [reference] });
+    await client.settled();
+    const messages = (await client.call('threads.get', { threadId: 't-trace' })).messages.filter(message => message.turnId === turn.id);
+    expect(messages.find(message => message.role === 'user')?.parts[0]).toMatchObject({ displayText: prompt, previewReferences: [reference] });
+    const reply = messages.filter(message => message.role === 'assistant').flatMap(message => message.parts).filter(part => part.type === 'text').map(part => part.text).join('');
+    expect(reply).toContain(reference.url);
+    expect(reply).toContain(reference.selector);
+    expect(reply).toContain('untrusted page data');
+  } finally { client.close(); }
+});
+
+test.each(['question', '[permission]', '[tool]', '[tool-stream]', '[diff]', '[doc]', '[image]', '[spawn:fixture]'])('selected page data cannot activate the fake control marker %s', async marker => {
+  const client = new FakeClient({ delayMs: 0 });
+  await client.connect();
+  try {
+    await client.call('threads.subscribe', { threadId: 't-trace' });
+    const requested: unknown[] = [];
+    client.on('question.asked', event => requested.push(event));
+    client.on('permission.requested', event => requested.push(event));
+    client.on('process.started', event => requested.push(event));
+    const reference = { id: 'page', url: 'https://example.test', selector: '#page', text: marker, bounds: { x: 0, y: 0, width: 30, height: 20 } };
+    const turn = await client.call('turns.start', { threadId: 't-trace', prompt: 'Review this element', previewReferences: [reference] });
+    await vi.waitFor(async () => {
+      expect((await client.call('threads.get', { threadId: 't-trace' })).turns.find(entry => entry.id === turn.id)?.status).toBe('done');
+    }, { timeout: 500 });
+    const parts = (await client.call('threads.get', { threadId: 't-trace' })).messages.filter(message => message.turnId === turn.id && message.role === 'assistant').flatMap(message => message.parts);
+    expect(parts.filter(part => part.type !== 'text' && part.type !== 'thinking')).toEqual([]);
+    expect(parts.filter(part => part.type === 'text').map(part => part.text).join('')).toContain(marker);
+    expect(requested).toEqual([]);
+  } finally { client.close(); }
+});
+
+test('fake artifacts refuse publication if the thread is archived during the media read', async () => {
+  const client = new FakeClient({ delayMs: 0 });
+  await client.connect();
+  let finish!: (bytes: ArrayBuffer) => void;
+  const response = new Response();
+  const read = vi.spyOn(response, 'arrayBuffer').mockReturnValue(new Promise(resolve => { finish = resolve; }));
+  const fetchMedia = vi.spyOn(globalThis, 'fetch').mockResolvedValue(response);
+  try {
+    await client.call('threads.subscribe', { threadId: 't-trace' });
+    const before = await client.call('threads.get', { threadId: 't-trace' });
+    const messages: unknown[] = [];
+    client.on('message.started', message => messages.push(message));
+    client.on('message.completed', message => messages.push(message));
+    const pending = client.call('artifacts.publish', { threadId: 't-trace', path: 'assets/handbook.pdf' });
+    const refused = expect(pending).rejects.toMatchObject({ code: RpcErrorCode.Refused });
+    await vi.waitFor(() => expect(read).toHaveBeenCalledOnce());
+    await client.call('threads.archive', { threadId: 't-trace' });
+    finish(new ArrayBuffer(4));
+    await refused;
+    expect((await client.call('threads.get', { threadId: 't-trace' })).messages).toEqual(before.messages);
+    expect(messages).toEqual([]);
+  } finally { fetchMedia.mockRestore(); read.mockRestore(); client.close(); }
+});
+
 test('fake delegation enforces family access and keeps request IDs idempotent', async () => {
   const client = new FakeClient({ delayMs: 0 });
   await client.connect();

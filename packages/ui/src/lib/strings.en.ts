@@ -1,5 +1,24 @@
 /** Every user-facing string of the UI. No literal UI text lives anywhere else. */
 export const strings = {
+  previewComments: {
+  annotate: 'Reference an element',
+  picking: 'Select an element in the page. Escape cancels.',
+  comment: 'What should change?',
+  add: 'Add to message',
+  cancel: 'Cancel',
+  added: 'Element added to your message.',
+  unavailable: 'Element selection is unavailable on this page. Use the desktop app for cross-origin pages.',
+  failed: 'Element selection failed. Reload the page and try again.',
+  reveal: 'Show this element in the preview',
+  remove: 'Remove element reference',
+  stale: 'This preview has changed page. Reopen the original page or select the element again.',
+  missing: 'This element no longer exists on the page. Select it again.',
+  tooMany: 'A message can reference at most 8 page elements.',
+  activityUnsupported: 'Element references cannot be used with /goal or /loop. Send a regular message or remove the references.',
+  stashUnsupported: 'This draft contains element references and cannot be stashed. Send it or remove the references first.'
+},
+  artifacts: { preview: 'Preview', download: 'Download', close: 'Close preview', loading: 'Loading file', unavailable: 'No inline preview for this file. Download it to open it.', failed: 'Could not open this file', ownerOnly: 'Local file links need an owner connection. Ask the agent to attach the file to share it with this device.' },
+
   brain: {
     heading: 'Brain', description: 'Your agents share the same instructions and skills.',
     folder: 'Brain folder', pathHint: 'Folder path', save: 'Connect folder', browse: 'Browse', useFolder: 'Choose this folder',
@@ -1073,6 +1092,8 @@ export const strings = {
   },
 
   experiments: {
+    chatArtifacts: { title: 'Chat files and previews', hint: 'Open file links and preview files returned by an agent in the conversation' },
+    previewComments: { title: 'Preview comments', hint: 'Select an element in the integrated browser and add feedback to the conversation draft' },
     themeGrain: {
       title: 'Grain theme',
       hint: 'A grainy ground fading from light grey at the top left to black at the bottom right'

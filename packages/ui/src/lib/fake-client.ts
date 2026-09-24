@@ -1,6 +1,8 @@
 import {
   DEFAULT_DELEGATION_CONFIG,
   attachmentError,
+  previewReferencesError,
+  previewPrompt,
   KEYBINDING_COMMANDS,
   MESSAGE_PAGE,
   MESSAGE_PAGE_MAX,
@@ -39,6 +41,7 @@ import {
   type PanelSurface,
   type PermissionRequest,
   type Principal,
+  type PreviewReference,
   type ProcessRecord,
   type Project,
   type ProviderInstallState,
@@ -984,9 +987,11 @@ export class FakeClient implements ObservableClient {
       return { ok: true };
     },
     'turns.start': async (params) => {
+      const referenceError = previewReferencesError(params.previewReferences ?? [], params.prompt);
+      if (referenceError) throw new RpcFailure({ code: RpcErrorCode.Refused, message: referenceError });
       if (params.attachments !== undefined && (!Array.isArray(params.attachments) || params.attachments.some(a => !a || typeof a !== 'object'))) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'attachments must be an array of attachment objects' });
       const key = params.clientRequestId ? `${params.threadId}:${params.clientRequestId}` : null;
-      const content = JSON.stringify([params.prompt, (params.attachments ?? []).map(a => [a.kind, a.mimeType, a.data, a.name])]);
+      const content = JSON.stringify([params.prompt, (params.attachments ?? []).map(a => [a.kind, a.mimeType, a.data, a.name]), ...(params.previewReferences?.length ? [params.previewReferences] : [])]);
       if (params.clientRequestId !== undefined && !/^[A-Za-z0-9_-]{8,128}$/.test(params.clientRequestId)) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'clientRequestId must contain 8 to 128 URL-safe characters' });
       const previous = key ? this.#turnRequests.get(key) : undefined;
       if (previous) {
@@ -1008,7 +1013,7 @@ export class FakeClient implements ObservableClient {
         if (!config.enabled || config.paused) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'delegation is disabled or paused' });
         if ((this.#delegationTurns.get(rootId) ?? 0) >= config.maxTurns) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'delegation turn budget reached' });
       }
-      const turn = this.#startTurn(params.threadId, params.prompt, params.attachments ?? [], rootId ? 'delegation' : undefined);
+      const turn = this.#startTurn(params.threadId, params.prompt, params.attachments ?? [], rootId ? 'delegation' : undefined, undefined, undefined, params.previewReferences ?? []);
       if (rootId) this.#delegationTurns.set(rootId, (this.#delegationTurns.get(rootId) ?? 0) + 1);
       if (key) this.#turnRequests.set(key, { content, turn });
       return turn;
@@ -1606,6 +1611,24 @@ export class FakeClient implements ObservableClient {
       };
       return where;
     },
+    'artifacts.publish': async (params) => {
+      const thread = this.#thread(params.threadId);
+      if (thread.archived) throw refusal('artifacts.publish needs an active thread');
+      const turn = thread.turns.at(-1);
+      if (!turn) throw refusal('artifacts.publish needs a thread with a turn');
+      const path = this.#inside(thread.cwd, params.path, 'artifacts.publish path', 'file');
+      const media = FAKE_MEDIA[path];
+      const body = media ? new Uint8Array(await (await fetch(media.url())).arrayBuffer()) : new TextEncoder().encode(this.#files.get(path) ?? '');
+      if (body.length > 5 * 1024 * 1024) throw refusal('artifacts.publish file must be at most 5 MB');
+      if (thread.archived) throw refusal('artifacts.publish needs an active thread');
+      let binary = '';
+      for (const byte of body) binary += String.fromCharCode(byte);
+      const message: Message = { id: `m-${++this.#seq}`, threadId: thread.id, turnId: turn.id, role: 'assistant', state: 'complete', createdAt: this.#now(), parts: [{ type: 'file', name: path.split('/').at(-1) ?? path, mimeType: media?.mime ?? 'application/octet-stream', data: btoa(binary) }] };
+      thread.messages.push(message);
+      this.#emitToThread(thread.id, 'message.started', structuredClone(message));
+      this.#emitToThread(thread.id, 'message.completed', { threadId: thread.id, messageId: message.id, state: 'complete' });
+      return structuredClone(message);
+    },
     'panel.open': async (params) => {
       const thread = this.#thread(params.threadId);
       const surface = this.#checkSurface(thread.cwd, params.surface);
@@ -1897,7 +1920,9 @@ const ready = true;
     return stopped;
   }
 
-  #startTurn(threadId: ThreadId, prompt: string, attachments: Attachment[] = [], operation?: 'compact' | 'delegation', activityKind?: 'goal' | 'loop', queuedTurn?: Turn): Turn {
+  #startTurn(threadId: ThreadId, prompt: string, attachments: Attachment[] = [], operation?: 'compact' | 'delegation', activityKind?: 'goal' | 'loop', queuedTurn?: Turn, previewReferences: PreviewReference[] = []): Turn {
+    // The real transport serializes Svelte proxies before they reach the core.
+    previewReferences = JSON.parse(JSON.stringify(previewReferences)) as PreviewReference[];
     const thread = this.#thread(threadId);
     if (thread.archived) {
       throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'cannot start a turn on an archived thread', data: { threadId } });
@@ -1936,7 +1961,7 @@ const ready = true;
       role: 'user',
       // The images ride after the text, the order the core journals them in.
       parts: [
-        { type: 'text', text: activityKind ? `/${activityKind} ${prompt}` : prompt, ...(activityKind ? { activity: { kind: activityKind, iteration: (thread.activity?.[activityKind]?.iterations ?? 0) + 1 } } : {}) },
+        { type: 'text', text: activityKind ? `/${activityKind} ${prompt}` : previewPrompt(prompt, previewReferences), ...(previewReferences.length ? { displayText: prompt, previewReferences: structuredClone(previewReferences) } : {}), ...(activityKind ? { activity: { kind: activityKind, iteration: (thread.activity?.[activityKind]?.iterations ?? 0) + 1 } } : {}) },
         ...attachments.map((attachment): MessagePart => attachment.kind === 'file' ? { type: 'file', mimeType: attachment.mimeType, data: attachment.data, name: attachment.name } : ({
           type: 'image',
           mimeType: attachment.mimeType,
@@ -1967,7 +1992,7 @@ const ready = true;
     this.#pushScheduler(turn, 'running');
 
     const record = { cancelled: false, done: Promise.resolve() };
-    record.done = this.#stream(thread, turn, prompt, record, attachments);
+    record.done = this.#stream(thread, turn, prompt, record, attachments, previewPrompt(prompt, previewReferences));
     this.#inFlight.set(threadId, record);
 
     return structuredClone(turn);
@@ -1978,7 +2003,8 @@ const ready = true;
     turn: Turn,
     prompt: string,
     record: { cancelled: boolean },
-    attachments: Attachment[] = []
+    attachments: Attachment[] = [],
+    modelPrompt: string = prompt
   ): Promise<void> {
     const compactAfter = Math.max(1, Math.floor((thread.context?.tokens ?? FAKE_CONTEXT_FLOOR) / 4));
     const message: Message = {
@@ -1994,7 +2020,7 @@ const ready = true;
     this.#emitToThread(thread.id, 'message.started', structuredClone(message));
 
     // The reasoning first, in two deltas, the way a provider streams a thinking block.
-    const reasoning = `thinking about: ${prompt}`;
+    const reasoning = `thinking about: ${modelPrompt}`;
     const cut = Math.ceil(reasoning.length / 2);
     for (const piece of [reasoning.slice(0, cut), reasoning.slice(cut)]) {
       if (record.cancelled || piece.length === 0) break;
@@ -2020,7 +2046,7 @@ const ready = true;
 
     // `/shout <text>` comes back in capitals, the one command the fake acts on.
     const shouted = prompt.startsWith(`/${SHOUT} `) ? prompt.slice(SHOUT.length + 2) : null;
-    const echoed = shouted === null ? prompt : shouted.toUpperCase();
+    const echoed = shouted === null ? modelPrompt : modelPrompt.slice(SHOUT.length + 2).toUpperCase();
 
     // An image is named back the way the echo driver names it, format and
     // weight first, then the prompt itself is echoed.
@@ -2093,11 +2119,11 @@ const ready = true;
     });
 
     const usage: Usage = {
-      inputTokens: Math.max(1, Math.ceil(prompt.length / 4)),
-      outputTokens: Math.max(1, Math.ceil(prompt.length / 4)),
+      inputTokens: Math.max(1, Math.ceil(modelPrompt.length / 4)),
+      outputTokens: Math.max(1, Math.ceil(modelPrompt.length / 4)),
       cacheReadTokens: 0,
       cacheWriteTokens: 0,
-      costUsdEquivalent: Math.round(prompt.length * 0.02) / 1000
+      costUsdEquivalent: Math.round(modelPrompt.length * 0.02) / 1000
     };
     turn.status = record.cancelled ? 'stopped' : 'done';
     turn.finishedAt = this.#now();
@@ -2110,7 +2136,7 @@ const ready = true;
     thread.unread = !this.#subscribed.has(thread.id);
     // The context meter grows with every turn, the way a real session's does.
     thread.context = {
-      tokens: prompt === '[compact]' && !record.cancelled ? compactAfter : (thread.context?.tokens ?? FAKE_CONTEXT_FLOOR) + FAKE_CONTEXT_PER_TURN + prompt.length * 4,
+      tokens: prompt === '[compact]' && !record.cancelled ? compactAfter : (thread.context?.tokens ?? FAKE_CONTEXT_FLOOR) + FAKE_CONTEXT_PER_TURN + modelPrompt.length * 4,
       window: FAKE_CONTEXT_WINDOW,
       at: this.#now()
     };

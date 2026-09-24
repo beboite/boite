@@ -83,8 +83,11 @@ for end-to-end testing. It does not recompile the core just to stage it again.
 The tested installer becomes the release artifact, with no second release build.
 CI sets `BOITE_E2E_PREBUILT_UI=1` to test the UI already built for that installer.
 The test refuses a missing UI build. Local end-to-end runs rebuild it by default.
-The suite runs on three `bun test --parallel` workers: every file takes its own
-ports, data directory and browser profile. `tests/e2e/lib/warm.ts` runs first.
+The Windows suite runs files sequentially: every file takes its own ports,
+data directory and browser profile. Two and three parallel workers produced
+repeated browser navigation and startup hook timeouts on 2026-09-24.
+Sequential execution keeps the same assertions and deadlines.
+`tests/e2e/lib/warm.ts` runs first.
 It optimizes Vite's dependencies once, since on a fresh checkout each dev
 server would otherwise empty `packages/ui/node_modules/.vite` under the
 servers of the other workers. It also builds the fake-client bundle that

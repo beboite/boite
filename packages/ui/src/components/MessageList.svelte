@@ -20,9 +20,11 @@
   import PermissionCard from './PermissionCard.svelte';
   import QuestionCard from './QuestionCard.svelte';
   import Prose from './Prose.svelte';
+  import ChatFile from './ChatFile.svelte';
   import ThinkingPart from './ThinkingPart.svelte';
   import TurnSummary from './TurnSummary.svelte';
   import { promptCommand, promptText } from '../lib/message-display';
+  import PreviewReferences from './PreviewReferences.svelte';
   import ToolCard from './ToolCard.svelte';
   import MessageOutline from './MessageOutline.svelte';
   import ForwardedAgentMessage from './ForwardedAgentMessage.svelte';
@@ -601,7 +603,7 @@
                 {#if part.type === 'text'}
                   {@const prompt = promptText(part)}
                   {@const command = promptCommand(prompt)}
-                  <p class="user-text" data-testid="text-part">{#if command}<span class="command">{command}</span>{prompt.slice(command.length)}{:else}{prompt}{/if}</p>
+                  <p class="user-text" data-testid="text-part">{#if part.previewReferences?.length}<PreviewReferences text={prompt} references={part.previewReferences} {store} threadId={message.threadId} />{:else if command}<span class="command">{command}</span>{prompt.slice(command.length)}{:else}{prompt}{/if}</p>
                 {:else if part.type === 'file'}
                   <a class="file-attachment" data-testid="file-part" href="data:application/octet-stream;base64,{part.data}" download={part.name ?? strings.composer.attachAlt}>
                     <FileText size={20} strokeWidth={1.5} />
@@ -655,9 +657,11 @@
                   {#if part.type === 'text'}
                     {@const shownText = message.role === 'system' ? promptText(part) : visibleAnswer(part.text)}
                     {#if shownText.length > 0 || index === caretAt}
-                      <Prose text={shownText} live={index === caretAt} />
+                      <Prose text={shownText} live={index === caretAt} {store} {threadId} />
                     {/if}
 
+                  {:else if part.type === 'file'}
+                    <ChatFile file={part} />
                   {:else if part.type === 'tool'}
                     <ToolCard
                       name={part.name}

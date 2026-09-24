@@ -10,6 +10,25 @@
 import type { Messages } from './i18n.svelte';
 
 export const fr: Messages = {
+  previewComments: {
+  annotate: 'Référencer un élément',
+  picking: 'Sélectionnez un élément dans la page. Échap annule.',
+  comment: 'Que faut-il changer ?',
+  add: 'Ajouter au message',
+  cancel: 'Annuler',
+  added: 'Élément ajouté à votre message.',
+  unavailable: 'Cet élément est inaccessible. Utilisez l’application de bureau pour les pages d’une autre origine.',
+  failed: 'La sélection a échoué. Rechargez la page et réessayez.',
+  reveal: 'Montrer cet élément dans l’aperçu',
+  remove: 'Retirer la référence à cet élément',
+  stale: 'Cet aperçu a changé de page. Rouvrez la page d’origine ou sélectionnez à nouveau l’élément.',
+  missing: 'Cet élément n’existe plus dans la page. Sélectionnez-le à nouveau.',
+  tooMany: 'Un message peut référencer au maximum 8 éléments de page.',
+  activityUnsupported: 'Les références ne sont pas disponibles avec /goal ou /loop. Envoyez un message ordinaire ou retirez les références.',
+  stashUnsupported: 'Ce brouillon contient des références et ne peut pas être mis de côté. Envoyez-le ou retirez les références.'
+},
+  artifacts: { preview: 'Aperçu', download: 'Télécharger', close: 'Fermer l’aperçu', loading: 'Chargement du fichier', unavailable: 'Ce fichier ne peut pas être affiché ici. Téléchargez-le pour l’ouvrir.', failed: 'Impossible d’ouvrir ce fichier', ownerOnly: 'Les liens vers les fichiers locaux nécessitent une connexion propriétaire. Demandez à l’agent de joindre le fichier pour le partager avec cet appareil.' },
+
   brain: {
     heading: 'Brain', description: 'Les mêmes instructions et skills pour tes agents.',
     folder: 'Dossier du brain', pathHint: 'Chemin du dossier', save: 'Connecter le dossier', browse: 'Parcourir', useFolder: 'Choisir ce dossier',
@@ -1058,6 +1077,8 @@ export const fr: Messages = {
   },
 
   experiments: {
+    chatArtifacts: { title: 'Fichiers et aperçus dans le chat', hint: 'Ouvrir les liens de fichiers et afficher les fichiers envoyés par un agent dans la conversation' },
+    previewComments: { title: 'Commentaires sur les aperçus', hint: 'Sélectionner un élément dans le navigateur intégré et l’ajouter au brouillon de la conversation' },
     themeGrain: {
       title: 'Thème Grain',
       hint: 'Un fond grainé qui passe du gris clair en haut à gauche au noir en bas à droite'
