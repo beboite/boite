@@ -1,5 +1,18 @@
 import { expect, test } from 'vitest';
-import { promptSegments, visibleAnswer, visibleUserText } from './message-display';
+import { claudeKeywords, promptSegments, visibleAnswer, visibleUserText } from './message-display';
+
+test('the keywords count only for a Claude model run by Claude Code', () => {
+  expect(claudeKeywords('claude-sdk', 'claude-opus-5-5')).toBe(true);
+  expect(claudeKeywords('claude-sdk', 'opus[1m]')).toBe(true);
+  expect(claudeKeywords('claude-sdk', 'sonnet')).toBe(true);
+  expect(claudeKeywords('claude-sdk', null)).toBe(true);
+  // Claude Code routed to another model, or a Claude model behind another harness.
+  expect(claudeKeywords('claude-sdk', 'glm-5')).toBe(false);
+  expect(claudeKeywords('claude-sdk', 'deepseek-v4')).toBe(false);
+  expect(claudeKeywords('claude-sdk', 'opusx-1')).toBe(false);
+  expect(claudeKeywords('acp', 'claude-sonnet-5')).toBe(false);
+  expect(claudeKeywords(undefined, 'claude-sonnet-5')).toBe(false);
+});
 
 test('old goal instructions display only the colored-command input, ordinary text stays intact', () => {
   expect(visibleUserText('Work toward this goal: Ship it\nContinue until the objective is achieved. private instructions')).toBe('/goal Ship it');

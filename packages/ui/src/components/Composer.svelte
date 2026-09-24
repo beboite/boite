@@ -10,7 +10,7 @@
   import { AGENT_PREFIX, appCommands, isAgentCommand, runCommand } from '../lib/commands.svelte';
   import { rankItems, type PaletteItem } from '../lib/palette';
   import { clearStash, DRAFT_STASH_KEY, readStash, writeStash } from '../lib/prefs';
-  import { promptSegments, promptText } from '../lib/message-display';
+  import { claudeKeywords, promptSegments, promptText } from '../lib/message-display';
   import { fill, strings } from '../lib/strings';
   import type { Choice, PickPatch, Store } from '../lib/store.svelte';
   import EffortSlider from './EffortSlider.svelte';
@@ -290,7 +290,7 @@
     const token = /^\/[^\s]+/.exec(text)?.[0];
     return token && [...agentItems, ...boiteItems].some(item => item.label === token) ? token : '';
   });
-  let segments = $derived(promptSegments(text, commandToken || undefined, provider?.protocol === 'claude-sdk'));
+  let segments = $derived(promptSegments(text, commandToken || undefined, claudeKeywords(provider?.protocol, choice?.model)));
   let painted = $derived(segments.some(segment => segment.kind !== 'plain'));
 
   function syncInput() {

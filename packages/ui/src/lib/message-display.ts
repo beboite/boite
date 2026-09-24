@@ -45,6 +45,17 @@ export interface PromptSegment {
  */
 const PROMPT_KEYWORDS = /\b(ultrathink|ultracode)\b/gi;
 
+/**
+ * Whether the keywords do anything: Claude Code has to run the turn, and on a
+ * Claude model. A `claude-sdk` descriptor routed to another model, or a Claude
+ * model behind another harness, reads them as plain words. No model is the
+ * CLI's own default, a Claude one.
+ */
+export function claudeKeywords(protocol: string | undefined, model: string | null | undefined): boolean {
+  if (protocol !== 'claude-sdk') return false;
+  return model == null || /^(claude|opus|sonnet|haiku|fable|default)(?![a-z0-9])/i.test(model);
+}
+
 /** A prompt cut where it is drawn differently: the command it opens with, then each keyword. */
 export function promptSegments(text: string, command: string | undefined, keywords: boolean): PromptSegment[] {
   const segments: PromptSegment[] = [];

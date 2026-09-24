@@ -22,7 +22,7 @@
   import Prose from './Prose.svelte';
   import ThinkingPart from './ThinkingPart.svelte';
   import TurnSummary from './TurnSummary.svelte';
-  import { promptCommand, promptSegments, promptText } from '../lib/message-display';
+  import { claudeKeywords, promptCommand, promptSegments, promptText } from '../lib/message-display';
   import ToolCard from './ToolCard.svelte';
   import MessageOutline from './MessageOutline.svelte';
   import ForwardedAgentMessage from './ForwardedAgentMessage.svelte';
@@ -600,7 +600,9 @@
               {#each message.parts as part, index (index)}
                 {#if part.type === 'text'}
                   {@const prompt = promptText(part)}
-                  {@const keywords = store.providerOf(turn?.execution?.providerId ?? store.openThread?.providerId ?? '')?.protocol === 'claude-sdk'}
+                  {@const keywords = turn?.execution
+                    ? claudeKeywords(store.providerOf(turn.execution.providerId)?.protocol, turn.execution.model)
+                    : claudeKeywords(store.providerOf(store.openThread?.providerId ?? '')?.protocol, store.openThread?.model)}
                   <p class="user-text" data-testid="text-part">{#each promptSegments(prompt, promptCommand(prompt), keywords) as segment, at (at)}{#if segment.kind === 'command'}<span class="command">{segment.text}</span>{:else if segment.kind === 'plain'}{segment.text}{:else}<span class="keyword-{segment.kind}" data-testid="keyword-highlight">{segment.text}</span>{/if}{/each}</p>
                 {:else if part.type === 'file'}
                   <a class="file-attachment" data-testid="file-part" href="data:application/octet-stream;base64,{part.data}" download={part.name ?? strings.composer.attachAlt}>
