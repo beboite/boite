@@ -1,5 +1,5 @@
 import type { MessageId, MessagePart, ToolStatus, Usage } from '@boite/contracts';
-import type { TurnContext, TurnResult } from '../types.ts';
+import type { PromptCacheLife, TurnContext, TurnResult } from '../types.ts';
 import type { CodexTurnRecord, ToolView } from './protocol.ts';
 
 // ---------------------------------------------------------------------------
@@ -42,6 +42,8 @@ export class CodexTurn {
   /** The Codex turn id, known once `turn/start` answers. */
   turnId: string | null = null;
   usage: Usage | null = null;
+  /** The published prompt cache lifetime of the model this turn ran on. */
+  cacheLife: PromptCacheLife | null = null;
   decided = false;
   isStopped = false;
   settled = false;
@@ -110,6 +112,7 @@ export class CodexTurn {
       sessionId: this.sessionId,
       usage: this.usage,
       error: this.error ?? undefined,
+      promptCache: this.cacheLife,
     });
   }
 

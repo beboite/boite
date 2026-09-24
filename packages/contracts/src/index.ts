@@ -483,6 +483,37 @@ export interface ContextUse {
   at: Timestamp;
 }
 
+/**
+ * How long the provider keeps the conversation's prompt prefix cached after the
+ * last turn. A request inside that time reads the prefix from the cache at a
+ * fraction of the input price; after it, the provider processes the whole
+ * context again. Every hit restarts the clock, so `at` is the end of the turn
+ * that last touched the cache, not the turn that first wrote it.
+ */
+export interface PromptCache {
+  /** When the turn that last used the cache finished. */
+  at: Timestamp;
+  /** Seconds the prefix is kept after `at`. */
+  ttlSeconds: number;
+  /**
+   * Seconds the provider may keep it on a best-effort basis beyond
+   * `ttlSeconds` (OpenAI: up to an hour under low load). Absent when the
+   * lifetime is fixed.
+   */
+  maxSeconds?: number;
+  /**
+   * `reported`: the agent's own usage named the lifetime of this request
+   * (Claude's `cache_creation.ephemeral_1h_input_tokens`). `documented`: the
+   * provider's published lifetime for what this agent sends.
+   */
+  source: 'reported' | 'documented';
+  /** Tokens the last turn read from the cache, zero on a turn that started cold. */
+  readTokens: number;
+  /** The model and account the cache belongs to: another model or account starts cold. */
+  model: string | null;
+  accountId: AccountId;
+}
+
 export interface ThreadSummary {
   /** Last accepted user message, independent of assistant activity and renames. */
   lastUserMessageAt?: Timestamp | null;
@@ -519,6 +550,11 @@ export interface ThreadSummary {
   load: ThreadLoad | null;
   /** The context meter, written at the end of every turn whose agent reports its usage. */
   context: ContextUse | null;
+  /**
+   * The prompt cache the last turn left behind, null when the provider's
+   * lifetime is unknown or no turn has finished. Missing on older cores.
+   */
+  promptCache?: PromptCache | null;
   createdAt: Timestamp;
   updatedAt: Timestamp;
 }

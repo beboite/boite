@@ -358,6 +358,21 @@ export const strings = {
     contextNoBreakdown: 'This agent does not report a breakdown.',
     contextNoReading: 'No measurement received from this agent yet.',
     contextMeasured: 'Last measurement',
+    cacheTitle: 'Prompt cache',
+    cacheChipWarm: (left: string) => `Prompt cache warm, about ${left} left`,
+    cacheChipMaybe: (most: string) => `Prompt cache maybe still warm, ${most} at most`,
+    cacheChipCold: 'Prompt cache cold',
+    cacheCold: 'cold',
+    cacheLeft: (left: string) => `${left} left`,
+    cacheMaybe: (left: string) => `maybe · ${left}`,
+    cacheSwitched: 'Model or account changed.',
+    cacheLifetime: 'Lifetime',
+    cacheSourceReported: 'API',
+    cacheSourceDocumented: 'docs',
+    cacheRange: (lifetime: string, most: string) => `${lifetime} to ${most}`,
+    cacheReadLast: 'Read last turn',
+    minutes: (n: number) => `${n} min`,
+    hours: (n: number) => `${n} h`,
     none: 'No thread open',
     noneBody: 'Pick one on the left, or start a new one.',
     trace: 'Trace',
@@ -981,6 +996,10 @@ export const strings = {
     sessionImport: {
       title: 'Claude Code session import',
       hint: 'Turn a session started in the terminal into a thread, from the project menu and the palette'
+    },
+    promptCache: {
+      title: 'Prompt cache timer',
+      hint: 'A clock beside the context meter counting down how long the provider keeps the conversation cached'
     }
   },
 

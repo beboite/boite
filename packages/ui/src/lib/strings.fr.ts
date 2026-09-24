@@ -365,6 +365,21 @@ export const fr: Messages = {
     contextNoBreakdown: 'Cet agent ne détaille pas sa consommation.',
     contextNoReading: "Aucune mesure reçue de cet agent pour l'instant.",
     contextMeasured: 'Dernière mesure',
+    cacheTitle: 'Cache de prompt',
+    cacheChipWarm: (left: string) => `Cache de prompt chaud, encore environ ${left}`,
+    cacheChipMaybe: (most: string) => `Cache de prompt peut-être encore chaud, ${most} au plus`,
+    cacheChipCold: 'Cache de prompt froid',
+    cacheCold: 'froid',
+    cacheLeft: (left: string) => `encore ${left}`,
+    cacheMaybe: (left: string) => `peut-être · ${left}`,
+    cacheSwitched: 'Modèle ou compte changé.',
+    cacheLifetime: 'Durée de vie',
+    cacheSourceReported: 'API',
+    cacheSourceDocumented: 'doc',
+    cacheRange: (lifetime: string, most: string) => `${lifetime} à ${most}`,
+    cacheReadLast: 'Lu au dernier tour',
+    minutes: (n: number) => `${n} min`,
+    hours: (n: number) => `${n} h`,
     none: 'Aucune conversation ouverte',
     noneBody: 'Choisissez-en une à gauche, ou lancez-en une nouvelle.',
     trace: 'Trace',
@@ -966,6 +981,10 @@ export const fr: Messages = {
     sessionImport: {
       title: 'Import de session Claude Code',
       hint: 'Transformer une session lancée dans le terminal en conversation, depuis le menu du projet et la palette'
+    },
+    promptCache: {
+      title: 'Minuteur du cache de prompt',
+      hint: 'Une horloge à côté de la jauge de contexte, qui décompte le temps pendant lequel le provider garde la conversation en cache'
     }
   },
 
