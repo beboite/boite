@@ -1067,6 +1067,9 @@ export class Store {
   async #switchTo(endpoint: Endpoint): Promise<void> {
     this.#client?.close();
     this.detach();
+    this.composerStates = {};
+    this.#previewUndo.clear();
+    this.#composerInsertions.clear();
     this.openThread = null;
     this.draft = null;
     this.pairing = null;

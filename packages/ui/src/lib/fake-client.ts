@@ -1921,7 +1921,7 @@ const ready = true;
     this.#pushScheduler(turn, 'running');
 
     const record = { cancelled: false, done: Promise.resolve() };
-    record.done = this.#stream(thread, turn, prompt, record, attachments);
+    record.done = this.#stream(thread, turn, previewPrompt(prompt, previewReferences), record, attachments);
     this.#inFlight.set(threadId, record);
 
     return structuredClone(turn);

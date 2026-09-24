@@ -4,6 +4,23 @@ import { DEFAULT_DELEGATION_CONFIG, RpcErrorCode, TODO_TEXT_MAX, type RpcMethodN
 
 afterEach(() => vi.useRealTimers());
 
+test('fake agent receives selected element context while the visible prompt stays compact', async () => {
+  const client = new FakeClient({ delayMs: 0 });
+  await client.connect();
+  try {
+    const prompt = 'Change @Save';
+    const reference = { id: 'save', url: 'https://example.test/settings', selector: '#save', text: 'Save', bounds: { x: 0, y: 0, width: 30, height: 20 }, mention: { start: 7, end: 12 } };
+    const turn = await client.call('turns.start', { threadId: 't-trace', prompt, previewReferences: [reference] });
+    await client.settled();
+    const messages = (await client.call('threads.get', { threadId: 't-trace' })).messages.filter(message => message.turnId === turn.id);
+    expect(messages.find(message => message.role === 'user')?.parts[0]).toMatchObject({ displayText: prompt, previewReferences: [reference] });
+    const reply = messages.filter(message => message.role === 'assistant').flatMap(message => message.parts).filter(part => part.type === 'text').map(part => part.text).join('');
+    expect(reply).toContain(reference.url);
+    expect(reply).toContain(reference.selector);
+    expect(reply).toContain('untrusted page data');
+  } finally { client.close(); }
+});
+
 test('fake artifacts refuse publication if the thread is archived during the media read', async () => {
   const client = new FakeClient({ delayMs: 0 });
   await client.connect();
