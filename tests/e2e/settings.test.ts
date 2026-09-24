@@ -1,11 +1,9 @@
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { join } from 'node:path';
-import { createRequire } from 'node:module';
 import { BrowserPage, freePort } from './lib/cdp.ts';
+import { startDevUi } from './lib/ui.ts';
 // Vite belongs to the UI workspace, not the repository root.
-const uiRequire = createRequire(join(import.meta.dir, '../../packages/ui/package.json'));
-const { createServer } = await import(uiRequire.resolve('vite'));
-let server: { listen(): Promise<unknown>; close(): Promise<void> };
+let server: { close(): Promise<void> };
 let uiUrl: string;
 let page: BrowserPage;
 const id = (name: string) => `[data-testid="${name}"]`;
@@ -16,8 +14,7 @@ async function capture(name: string) { await settled(); await page.screenshot(jo
 beforeAll(async () => {
   // The fake client is deliberately absent from production bundles.
   const port = await freePort();
-  server = await createServer({ root: join(import.meta.dir, '../../packages/ui'), server: { host: '127.0.0.1', port, strictPort: true }, clearScreen: false });
-  await server.listen();
+  server = await startDevUi(port);
   uiUrl = `http://127.0.0.1:${port}`;
   page = await BrowserPage.launch({ url: `${uiUrl}/?fake=1&open=recent` });
   await page.waitFor(`document.querySelector('${id('nav-settings')}')`);

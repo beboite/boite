@@ -126,10 +126,10 @@ tree instead.
 
 ## Channels
 
-Boite and boite de nuit are update tracks of the same installed application.
+Boite and Boite Nightly are update tracks of the same installed application.
 They share `com.boite.two`, the Boite installer name and the `boite2` data
 directory. Nightly uses `icons-nightly/`, the white mark on violet and magenta, and
-displays boite de nuit in the window title and tray. The in-app channel selector downloads the selected
+displays boite (de nuit) in the window title and tray. The in-app channel selector downloads the selected
 track, including an older stable version when leaving nightly.
 [Desktop updates](updates.md) covers restart behavior and data compatibility.
 

@@ -1,10 +1,8 @@
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { join } from 'node:path';
-import { createRequire } from 'node:module';
 import { BrowserPage, freePort } from './lib/cdp.ts';
-const uiRequire = createRequire(join(import.meta.dir, '../../packages/ui/package.json'));
-const { createServer } = await import(uiRequire.resolve('vite'));
-let server: { listen(): Promise<unknown>; close(): Promise<void> };
+import { startUi } from './lib/ui.ts';
+let server: { close(): Promise<void> };
 let page: BrowserPage;
 let url: string;
 async function capture(name: string) {
@@ -13,8 +11,8 @@ async function capture(name: string) {
 }
 beforeAll(async () => {
   const port = await freePort();
-  server = await createServer({ root: join(import.meta.dir, '../../packages/ui'), server: { host: '127.0.0.1', port, strictPort: true }, clearScreen: false });
-  await server.listen(); url = `http://127.0.0.1:${port}/?fake=1&open=recent`;
+  server = await startUi(port);
+  url = `http://127.0.0.1:${port}/?fake=1&open=recent`;
   page = await BrowserPage.launch({ url });
   await page.waitFor(`document.querySelector('[data-testid=composer-picker]')`);
 }, 60_000);

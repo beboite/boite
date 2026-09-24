@@ -95,6 +95,8 @@ export class BrowserPage {
   #pending = new Map<number, Pending>();
   #closed = false;
   #pageErrors: string[] = [];
+  /** Requests the page sent and has not finished loading, reported when a wait times out. */
+  #requests = new Map<string, { url: string; at: number; answered: boolean }>();
   errors(): string[] { return [...this.#pageErrors]; }
 
   private constructor(socket: WebSocket, pid: number | null, userDataDir: string | null) {
@@ -159,6 +161,7 @@ export class BrowserPage {
       const page = new BrowserPage(socket, proc.pid, ownsUserDataDir ? userDataDir : null);
       await page.send('Page.enable', {});
       await page.send('Runtime.enable', {});
+      await page.send('Network.enable', {});
       if (options.showTour !== true) await page.send('Page.addScriptToEvaluateOnNewDocument', { source: SEEN_TOUR });
       // Windows may clamp the headless window. Pin the CSS viewport before startup.
       await page.send('Emulation.setDeviceMetricsOverride', {
@@ -251,7 +254,7 @@ export class BrowserPage {
       }
       if (Date.now() > deadline) {
         const state = await this.evaluate(`({ location: location.origin + location.pathname, ready: document.readyState, title: document.title, text: document.body?.innerText.slice(0, 500) })`).catch(() => 'page unresponsive');
-        throw new Error(`waitFor timed out on ${expression}: ${last}\nPage: ${JSON.stringify(state)}\nErrors: ${JSON.stringify(this.#pageErrors)}`);
+        throw new Error(`waitFor timed out on ${expression}: ${last}\nPage: ${JSON.stringify(state)}\nErrors: ${JSON.stringify(this.#pageErrors)}\nIn flight: ${JSON.stringify(this.#inFlight())}`);
       }
       await Bun.sleep(POLL_MS);
     }
@@ -347,9 +350,16 @@ export class BrowserPage {
     if (this.#userDataDir !== null) await removeDirectory(this.#userDataDir);
   }
 
+  /** What a stalled page is still waiting on: whether the server never answered or the body never arrived. */
+  #inFlight(): string[] {
+    const now = Date.now();
+    return [...this.#requests.values()].filter((request) => now - request.at > 1_000).slice(0, 10)
+      .map((request) => `${request.url} ${request.answered ? 'answered, body pending' : 'no response'} for ${now - request.at} ms`);
+  }
+
   #receive(raw: string): void {
     if (raw === '') return;
-    let frame: { id?: unknown; method?: string; params?: { exceptionDetails?: { text?: string; exception?: { description?: string } } }; result?: unknown; error?: { message?: string } };
+    let frame: { id?: unknown; method?: string; params?: { exceptionDetails?: { text?: string; exception?: { description?: string } }; requestId?: string; request?: { url?: string } }; result?: unknown; error?: { message?: string } };
     try {
       frame = JSON.parse(raw) as typeof frame;
     } catch {
@@ -360,6 +370,13 @@ export class BrowserPage {
         const detail = frame.params?.exceptionDetails;
         this.#pageErrors.push(detail?.exception?.description ?? detail?.text ?? 'unknown page exception');
         if (this.#pageErrors.length > 10) this.#pageErrors.shift();
+      }
+      const id = frame.params?.requestId;
+      if (id !== undefined) {
+        const url = frame.params?.request?.url ?? '';
+        if (frame.method === 'Network.requestWillBeSent' && !url.startsWith('data:')) this.#requests.set(id, { url, at: Date.now(), answered: false });
+        else if (frame.method === 'Network.responseReceived') { const request = this.#requests.get(id); if (request) request.answered = true; }
+        else if (frame.method === 'Network.loadingFinished' || frame.method === 'Network.loadingFailed') this.#requests.delete(id);
       }
       return;
     }

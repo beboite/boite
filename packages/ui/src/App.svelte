@@ -23,7 +23,7 @@
   import { workspace } from './lib/workspace.svelte';
   import { tourRequested, tourSeen } from './lib/onboarding.svelte';
   import { startTheme } from './lib/theme';
-  import { appUpdater } from './lib/app-update.svelte';
+  import { appName, appUpdater } from './lib/app-update.svelte';
   import MobileNavigation from './components/MobileNavigation.svelte';
   import { startViewport } from './lib/viewport';
   import { WsClient } from './lib/client';
@@ -209,7 +209,8 @@
   // tab say "(2) Boite" while the window is somewhere behind.
   $effect(() => {
     const unread = store.unreadCount;
-    document.title = unread > 0 ? `(${unread}) ${strings.app.name}` : strings.app.name;
+    const name = appName();
+    document.title = unread > 0 ? `(${unread}) ${name}` : name;
   });
 
   onMount(() => {
