@@ -1,4 +1,6 @@
 import { afterEach, expect, spyOn, test } from 'bun:test';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { DEFAULT_DELEGATION_CONFIG } from '@boite/contracts';
 import type { DelegationConfig } from '@boite/contracts';
 import { connect } from '../src/client.ts';
@@ -54,6 +56,17 @@ test('approved profiles launch ordinary isolated sessions in the parent checkout
   await expect(spawn('same', 'different task')).rejects.toThrow('different content');
   await expect(owner.call('delegation.spawn', { threadId, profileId: 'arbitrary', task: 'Task', requestId: 'bad' })).rejects.toThrow('profileId');
   await expect(spawn('long', 'a'.repeat(12001))).rejects.toThrow('12000');
+});
+
+test('a fresh delegated session receives the configured brain instructions', async () => {
+  const runs = scripted(); const { h, owner, spawn } = await setup();
+  const path = join(h.dataDir, 'shared-brain');
+  mkdirSync(path);
+  writeFileSync(join(path, 'AGENTS.md'), 'Run parser checks before reporting completion.');
+  await owner.call('brain.configure', { path, enabled: true });
+  const child = await spawn();
+  expect(runs.get(child.thread.id)?.ctx.sessionId).toBeNull();
+  expect(runs.get(child.thread.id)?.ctx.prompt).toContain('Run parser checks before reporting completion.');
 });
 
 test('agent tokens can only delegate inside their own owner-enabled family, never change policy or nest', async () => {

@@ -28,8 +28,10 @@
   let selectedLetters = $derived(selected ? view?.messages.filter(letter => letter.from.threadId === selected.thread.id || letter.to.threadId === selected.thread.id) ?? [] : []);
   let totalTokens = $derived(view ? view.usage.inputTokens + view.usage.outputTokens + view.usage.cacheReadTokens + view.usage.cacheWriteTokens : 0);
 
+  let openThreadId = $derived(store.openThread?.id);
+
   $effect(() => {
-    const threadId = store.openThread?.id;
+    const threadId = openThreadId;
     task = '';
     selectedProfileId = null;
     if (threadId) void store.loadDelegation(threadId);

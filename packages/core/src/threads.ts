@@ -1067,7 +1067,7 @@ export class ThreadStore {
       account,
       provider,
       turn,
-      prompt: (turn.execution?.operation || prepared.prompt.trimStart().startsWith('/') ? '' : this.core.brain.instructions(provider.id)) + prepared.prompt + (turn.execution?.operation === 'compact' ? '' : this.core.coordination.instructions(threadId) + this.core.delegation.instructions(threadId) + this.core.delegation.initialInput(threadId, turn.id)),
+      prompt: ((turn.execution?.operation && thread.sessionId !== null) || prepared.prompt.trimStart().startsWith('/') ? '' : this.core.brain.instructions(provider.id)) + prepared.prompt + (turn.execution?.operation === 'compact' ? '' : this.core.coordination.instructions(threadId) + this.core.delegation.instructions(threadId) + this.core.delegation.initialInput(threadId, turn.id)),
       coordination: () => this.core.delegation.take(threadId, turn.id) ?? this.core.coordination.take(threadId, turn.id),
       attachments: prepared.attachments,
       sessionId: thread.sessionId,
