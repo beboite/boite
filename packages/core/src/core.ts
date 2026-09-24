@@ -31,6 +31,7 @@ import { SpeechStore } from './speech.ts';
 import { Telemetry } from './telemetry.ts';
 import { HarnessUpdates } from './providers/updates.ts';
 import { Coordination } from './coordination.ts';
+import { BrainStore } from './brain.ts';
 
 export const CORE_VERSION: string = pkg.version;
 
@@ -117,6 +118,7 @@ export class Core {
   readonly telemetry: Telemetry;
   readonly updates: HarnessUpdates;
   readonly coordination: Coordination;
+  readonly brain: BrainStore;
 
   /**
    * The server tells the core what it alone can know. The default answers no
@@ -159,6 +161,7 @@ export class Core {
     this.telemetry = new Telemetry(this);
     this.updates = new HarnessUpdates(this);
     this.coordination = new Coordination(this);
+    this.brain = new BrainStore(this);
 
     registerModules(this);
     this.procs.applySettings(this.settings.get());
@@ -166,6 +169,7 @@ export class Core {
     // The journal is open and no socket is accepted yet: whatever a dead core
     // left running or queued is closed here, or nothing ever would.
     this.threads.recoverStuckTurns();
+    this.brain.start();
   }
 
   setEndpoint(host: string, port: number): void {
@@ -222,6 +226,7 @@ export class Core {
 
   async close(): Promise<void> {
     this.#stopping = true;
+    await this.brain.close();
     this.updates.close();
     await this.drain();
     await this.coordination.close();

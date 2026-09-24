@@ -83,7 +83,19 @@ journal remains unchanged.
 A thread whose last context reading is over 200,000 tokens asks before it moves
 to another account: the receiving agent gets these excerpts, not what the old
 session held, and a compaction summary is not part of them. A model change
-inside one account keeps its session and asks nothing.
+inside one account keeps its session.
+
+Keeping the session does not keep the provider's prompt cache. Measured on
+2026-09-22 with a four-turn probe per provider: a model change on Claude sent
+the conversation again uncached; on Codex every effort change missed (`high`,
+`low`, `low`, `medium`, `high` cached 9k, 13k, 39k, 8k and 31k of 31k to
+47k input tokens); on Claude Sonnet 5 an effort change kept the system prompt
+and tools but rewrote every message, while Claude Opus 5.5 kept its cache. Fast
+mode was not measured. So a change of model, effort or speed inside one account
+asks first when the last context reading is over 100,000 tokens and less than
+an hour old, the longest a provider keeps a cache. An older reading asks
+nothing: that cache is already gone. A change of account is the case above and
+asks only that question.
 
 Historical images use remaining slots within the eight-image turn limit. The
 current prompt's attachments take priority, then the most recent historical

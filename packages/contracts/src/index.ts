@@ -483,6 +483,37 @@ export interface ContextUse {
   at: Timestamp;
 }
 
+/**
+ * How long the provider keeps the conversation's prompt prefix cached after the
+ * last turn. A request inside that time reads the prefix from the cache at a
+ * fraction of the input price; after it, the provider processes the whole
+ * context again. Every hit restarts the clock, so `at` is the end of the turn
+ * that last touched the cache, not the turn that first wrote it.
+ */
+export interface PromptCache {
+  /** When the turn that last used the cache finished. */
+  at: Timestamp;
+  /** Seconds the prefix is kept after `at`. */
+  ttlSeconds: number;
+  /**
+   * Seconds the provider may keep it on a best-effort basis beyond
+   * `ttlSeconds` (OpenAI: up to an hour under low load). Absent when the
+   * lifetime is fixed.
+   */
+  maxSeconds?: number;
+  /**
+   * `reported`: the agent's own usage named the lifetime of this request
+   * (Claude's `cache_creation.ephemeral_1h_input_tokens`). `documented`: the
+   * provider's published lifetime for what this agent sends.
+   */
+  source: 'reported' | 'documented';
+  /** Tokens the last turn read from the cache, zero on a turn that started cold. */
+  readTokens: number;
+  /** The model and account the cache belongs to: another model or account starts cold. */
+  model: string | null;
+  accountId: AccountId;
+}
+
 export interface ThreadSummary {
   /** Last accepted user message, independent of assistant activity and renames. */
   lastUserMessageAt?: Timestamp | null;
@@ -519,6 +550,11 @@ export interface ThreadSummary {
   load: ThreadLoad | null;
   /** The context meter, written at the end of every turn whose agent reports its usage. */
   context: ContextUse | null;
+  /**
+   * The prompt cache the last turn left behind, null when the provider's
+   * lifetime is unknown or no turn has finished. Missing on older cores.
+   */
+  promptCache?: PromptCache | null;
   createdAt: Timestamp;
   updatedAt: Timestamp;
 }
@@ -1327,7 +1363,45 @@ export interface CoordinationView {
   wakeLimit: number;
 }
 
+/** A brain lives on the core's machine. Detected plugins are not installed by Boite. */
+export interface BrainConfig {
+  path: string | null;
+  enabled: boolean;
+  /** Pull only. An interval of 0 disables periodic pulls. Defaults to off. */
+  autoPull?: { onStartup: boolean; intervalMinutes: number };
+  /** Link the root AGENTS.md into user-level harness profiles on this machine. */
+  globalInstructions?: boolean;
+}
+
+export interface BrainLink {
+  name: string;
+  path: string;
+  state: 'linked' | 'existing' | 'blocked';
+  error: string | null;
+}
+
+export interface BrainEntry {
+  kind: 'instructions' | 'skill' | 'plugin';
+  path: string;
+  name: string;
+  description: string;
+  error: string | null;
+}
+
+export interface BrainStatus {
+  config: BrainConfig;
+  entries: BrainEntry[];
+  problems: string[];
+  git: { branch: string | null; upstream: string | null; ahead: number; behind: number; dirty: boolean } | null;
+  lastSync: number | null;
+  links?: BrainLink[];
+}
+
 export interface RpcMethods {
+  'brain.status': { params: Record<string, never>; result: BrainStatus };
+  'brain.configure': { params: BrainConfig; result: BrainStatus };
+  /** Fetch, fast-forward and push existing commits. Never stage, stash, reset or force. */
+  'brain.sync': { params: Record<string, never>; result: BrainStatus };
   'collaboration.get': { params: { threadId: ThreadId }; result: CoordinationView };
   'collaboration.configure': { params: { threadId: ThreadId; config: CoordinationConfig }; result: CoordinationView };
   'collaboration.directory': { params: { threadId: ThreadId }; result: { agents: AgentContact[]; unavailable: string[] } };

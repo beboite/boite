@@ -1,5 +1,24 @@
 /** Every user-facing string of the UI. No literal UI text lives anywhere else. */
 export const strings = {
+  brain: {
+    heading: 'Brain', description: 'Your agents share the same instructions and skills.',
+    folder: 'Brain folder', pathHint: 'Folder path', save: 'Connect folder', browse: 'Browse', useFolder: 'Choose this folder',
+    enabled: 'Use with agents', disconnect: 'Disconnect', refresh: 'Refresh', sync: 'Synchronize', working: 'Working',
+    empty: 'Connect your brain', emptyHint: 'Choose the folder with your instructions and skills.',
+    change: 'Change folder', cancel: 'Cancel', saveChanges: 'Save',
+    autoPull: 'Pull automatically', onStartup: 'At startup', periodic: 'Periodically', minutes: 'min',
+    globalInstructions: 'Global AGENTS.md', globalDetails: 'Connected harnesses',
+    globalHint: 'Uses this brain in every project, including outside Boite. Existing files are backed up and restored when disabled.',
+    linked: 'Linked', existing: 'Already linked', blocked: 'Needs attention',
+    interval: 'Pull interval in minutes', intervalHint: 'Choose a whole number from 1 to 1440 minutes.',
+    detected: 'Contents', instructions: 'Instructions', skill: 'Skills', plugin: 'Plugins',
+    pluginHint: 'Detected here. Install plugins through their agent.',
+    details: 'Sync details', noGit: 'Local folder. Connect a Git repository to sync between computers.',
+    noUpstream: 'Set an upstream branch in Git to enable sync.', dirty: 'Commit your changes in Git before syncing.',
+    counts: '{ahead} to send, {behind} to receive', lastSync: 'Last synchronized', never: 'Not synchronized yet',
+    upToDate: 'Up to date', noEntries: 'Nothing detected in this category.',
+    missing: 'Update Boite on this machine to connect a brain.',
+  },
   telemetry: {
     heading: 'Privacy and analytics',
     description: 'Basic counters are on by default. Enhanced analytics are optional. No messages, project names, paths, account details or recordings are collected.',
@@ -360,6 +379,21 @@ export const strings = {
     contextNoBreakdown: 'This agent does not report a breakdown.',
     contextNoReading: 'No measurement received from this agent yet.',
     contextMeasured: 'Last measurement',
+    cacheTitle: 'Prompt cache',
+    cacheChipWarm: (left: string) => `Prompt cache warm, about ${left} left`,
+    cacheChipMaybe: (most: string) => `Prompt cache maybe still warm, ${most} at most`,
+    cacheChipCold: 'Prompt cache cold',
+    cacheCold: 'cold',
+    cacheLeft: (left: string) => `${left} left`,
+    cacheMaybe: (left: string) => `maybe · ${left}`,
+    cacheSwitched: 'Model or account changed.',
+    cacheLifetime: 'Lifetime',
+    cacheSourceReported: 'API',
+    cacheSourceDocumented: 'docs',
+    cacheRange: (lifetime: string, most: string) => `${lifetime} to ${most}`,
+    cacheReadLast: 'Read last turn',
+    minutes: (n: number) => `${n} min`,
+    hours: (n: number) => `${n} h`,
     none: 'No thread open',
     noneBody: 'Pick one on the left, or start a new one.',
     trace: 'Trace',
@@ -496,6 +530,10 @@ export const strings = {
     switchBody: '{provider} starts a new session and receives excerpts of the opening and of the most recent exchanges, about 20k tokens. The rest is lost to it. Compacting first changes nothing.',
     switchConfirm: 'Switch',
     switchCancel: 'Stay on {provider}',
+    cacheTitle: 'Rebuild the cache of a {tokens} token thread?',
+    cacheBody: 'The provider caches this thread for the current model, reasoning effort and speed. Changing one can make the next turn send the whole thread again uncached, once, which uses far more quota than a usual turn.',
+    cacheConfirm: 'Change',
+    cacheCancel: 'Keep as is',
     options: 'Message options',
     placeholder: 'Message {provider} in {project}',
     placeholderNoProject: 'Message the agent',
@@ -983,6 +1021,10 @@ export const strings = {
     sessionImport: {
       title: 'Claude Code session import',
       hint: 'Turn a session started in the terminal into a thread, from the project menu and the palette'
+    },
+    promptCache: {
+      title: 'Prompt cache timer',
+      hint: 'A clock beside the context meter counting down how long the provider keeps the conversation cached'
     }
   },
 

@@ -16,6 +16,7 @@ import type {
   ModelInfo,
   PermissionRequest,
   Project,
+  PromptCache,
   Protocol,
   ProviderDescriptor,
   QuestionAnswer,
@@ -53,6 +54,37 @@ type CreateParams = RpcParams<'threads.create'>;
 
 function titleOf(title: string | undefined): string {
   return title !== undefined && title.length > 0 ? title : 'New thread';
+}
+
+/**
+ * The prompt cache a finished turn left, or null when the driver names no
+ * lifetime or nothing shows a request went out: a turn stopped before its
+ * first call reported no usage and touched no cache. A lifetime that is not a
+ * whole positive number of seconds is dropped, never shown.
+ */
+export function promptCacheOf(
+  result: TurnResult,
+  thread: Pick<ThreadSummary, 'model' | 'accountId'>,
+  at: number,
+  previous: PromptCache | null = null,
+): PromptCache | null {
+  // A turn that only read from the cache restarts the clock of the lifetime
+  // the earlier write had, as long as it ran on the same model and account.
+  const reread = (result.usage?.cacheReadTokens ?? 0) > 0 && previous !== null
+    && previous.model === thread.model && previous.accountId === thread.accountId ? previous : null;
+  const life = result.promptCache ?? reread;
+  if (!life || (result.usage === null && result.status !== 'done')) return null;
+  if (!Number.isInteger(life.ttlSeconds) || life.ttlSeconds <= 0) return null;
+  const max = life.maxSeconds !== undefined && Number.isInteger(life.maxSeconds) && life.maxSeconds > life.ttlSeconds ? life.maxSeconds : undefined;
+  return {
+    at,
+    ttlSeconds: life.ttlSeconds,
+    ...(max === undefined ? {} : { maxSeconds: max }),
+    source: life.source,
+    readTokens: result.usage?.cacheReadTokens ?? 0,
+    model: thread.model,
+    accountId: thread.accountId,
+  };
 }
 
 /**
@@ -854,6 +886,7 @@ export class ThreadStore {
       sessionId: sameSession ? result.sessionId ?? current.sessionId : current.sessionId,
       status: result.status === 'error' ? 'error' : 'idle',
       unread: current.unread || !this.core.subscribers.hasSubscribers(threadId),
+      promptCache: promptCacheOf(result, thread, finished.finishedAt ?? Date.now(), current.promptCache ?? null) ?? current.promptCache ?? null,
     };
     this.save(next, 'thread.finished');
     if (result.status !== 'done') this.core.coordination.pause(threadId);
@@ -1021,7 +1054,7 @@ export class ThreadStore {
       account,
       provider,
       turn,
-      prompt: prepared.prompt + (turn.execution?.operation === 'compact' ? '' : this.core.coordination.instructions(threadId)),
+      prompt: (turn.execution?.operation || prepared.prompt.trimStart().startsWith('/') ? '' : this.core.brain.instructions(provider.id)) + prepared.prompt + (turn.execution?.operation === 'compact' ? '' : this.core.coordination.instructions(threadId)),
       coordination: () => this.core.coordination.take(threadId, turn.id),
       attachments: prepared.attachments,
       sessionId: thread.sessionId,
