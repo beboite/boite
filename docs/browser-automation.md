@@ -73,14 +73,29 @@ uncertain submission independently before resubmitting it.
 
 The loop supports links, buttons, tabs, menu items, radio buttons, explicit
 checkbox states, text fields and selects. Text and select values must appear
-in `values`; Jev cannot generate them. At most eight named strings and 120
-candidate actions are accepted. Accessibility snapshots are limited to 24,000
-characters, with at most 12,000 characters of rendered page text alongside.
+in `values`; Jev cannot generate them. At most eight named strings are accepted.
+Interactive snapshots expose controls without the full article text. Each
+decision receives up to 120 actions and 24,000 characters of control state,
+plus 4,000 characters of rendered page text. Jev can inspect subsequent groups
+of controls on large pages; these inspections consume the same step budget.
+Controls retain document order. A blocked decision advances to any unexamined
+group before handing the task back.
+
+An editable ARIA combobox is filled; a native select is selected by its option
+value or label. The adapter inspects the focused control to distinguish them,
+including controls in open shadow roots. A temporary marker verifies that the
+focused element matches the chosen reference and is removed before the field
+action. Unsupported widgets return control
+to the caller. Every fill or selection reads the field value back; a successful
+driver response alone cannot authorize the next submission.
 
 Each decision uses a new snapshot and checks it again before acting. If the
 page changed, no action is sent for that decision. The next iteration reads
 the page again. Jev's choice confidence is not treated as a calibrated
 probability that a browser action is safe or correct.
+An empty document during navigation is observed again before asking Jev.
+Completion or handoff decisions are checked against a fresh observation, so
+content that arrived during the model call is considered before stopping.
 
 Defaults are 20 decisions and two minutes, with maxima of 60 decisions and
 five minutes. At most two tasks run on a host and one in a conversation.

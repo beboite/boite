@@ -45,7 +45,7 @@ if (import.meta.main) {
     try {
       const result = await realCommand.call(this, action, args);
       if (!evidence && action === 'snapshot') sample.snapshots.push({ characters: String(result.snapshot).length, refs: Object.keys(result.refs as object ?? {}).length });
-      if (!evidence && action === 'evaluate' && result.result && typeof result.result === 'object') sample.observations.push(result.result);
+      if (!evidence && action === 'evaluate' && result.result && typeof result.result === 'object' && typeof (result.result as { url?: unknown }).url === 'string') sample.observations.push(result.result);
       if (!evidence && action === 'navigate') sample.startupMs = performance.now() - sample.started;
       return result;
     } catch (error) {
@@ -66,7 +66,7 @@ if (import.meta.main) {
       sample.destinationVerified = sample.final.url === expected.url && sample.final.text.includes(expected.text);
       sample.workflowVerified = sample.task !== 'govuk' || sample.observations.some((o: {url: string}) => {
         const url = new URL(o.url);
-        return url.pathname.startsWith('/search/') && url.searchParams.get('keywords') === 'renew adult passport';
+        return url.origin === 'https://www.gov.uk' && url.pathname.startsWith('/search/') && url.searchParams.get('keywords') === 'renew adult passport';
       });
       sample.verified = sample.destinationVerified && sample.workflowVerified;
       await realCommand.call(this, 'screenshot', { path: resolve(output, `${sample.task}-${sample.run}.png`), fullPage: true });

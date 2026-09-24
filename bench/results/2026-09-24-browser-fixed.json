@@ -1,0 +1,365 @@
+{
+  "date": "2026-09-24",
+  "baselineCommit": "fea0d0e3d9e6fd96fb3e92ec94e5374637582a29",
+  "loopSha256": "45f273f000b16933737083675126e39203cdf127a830198bd4c72f67d2151ba4",
+  "model": "jev-1.13.0",
+  "driver": "agent-browser 0.37.1 native JSONL",
+  "browser": "Edge 153.0.4234.48",
+  "viewport": {
+    "width": 1280,
+    "height": 800
+  },
+  "repetitions": 3,
+  "maxSteps": 30,
+  "timeoutMs": 120000,
+  "samples": [
+    {
+      "task": "wikipedia",
+      "run": 1,
+      "date": "2026-09-24T08:43:39.927Z",
+      "status": "succeeded",
+      "verified": true,
+      "destinationVerified": true,
+      "workflowVerified": true,
+      "startupMs": 1572.9414,
+      "executionMs": 2188.5330000000004,
+      "cleanupMs": 315.09469999999965,
+      "calls": 2,
+      "inputTokens": 11771,
+      "processesAfter": 0,
+      "urls": [
+        "https://en.wikipedia.org/wiki/Main_Page",
+        "https://en.wikipedia.org/wiki/Ada_Lovelace"
+      ],
+      "choices": [
+        {
+          "choice": "a3",
+          "label": "Set searchbox \"Search Wikipedia\" to supplied \"search\" = \"Ada Lovelace\"",
+          "ms": 614.5765999999999
+        },
+        {
+          "choice": "a4",
+          "label": "Click button \"Search\"",
+          "ms": 259.60440000000017
+        }
+      ]
+    },
+    {
+      "task": "github",
+      "run": 1,
+      "date": "2026-09-24T08:43:44.608Z",
+      "status": "succeeded",
+      "verified": true,
+      "destinationVerified": true,
+      "workflowVerified": true,
+      "startupMs": 2503.1901,
+      "executionMs": 3325.6662000000006,
+      "cleanupMs": 327.22099999999955,
+      "calls": 6,
+      "inputTokens": 33890,
+      "processesAfter": 0,
+      "urls": [
+        "https://github.com/vercel-labs/agent-browser",
+        "https://github.com/vercel-labs/agent-browser/tags",
+        "https://github.com/vercel-labs/agent-browser/releases/tag/v0.37.1"
+      ],
+      "choices": [
+        {
+          "choice": "a26",
+          "label": "Click link \"110 Tags\"",
+          "ms": 258.28960000000006
+        },
+        {
+          "choice": "a26",
+          "label": "Click link \"110 Tags\"",
+          "ms": 253.63160000000062
+        },
+        {
+          "choice": "a27",
+          "label": "Set combobox \"Go to file\" to supplied \"version\" = \"v0.37.1\"",
+          "ms": 278.34550000000127
+        },
+        {
+          "choice": "a42",
+          "label": "Click link \"v0.37.1\"",
+          "ms": 263.3533000000007
+        },
+        {
+          "choice": "a42",
+          "label": "Click link \"v0.37.1\"",
+          "ms": 224.65680000000066
+        },
+        {
+          "choice": "a42",
+          "label": "Click link \"v0.37.1\"",
+          "ms": 266.96039999999994
+        }
+      ]
+    },
+    {
+      "task": "govuk",
+      "run": 1,
+      "date": "2026-09-24T08:43:50.973Z",
+      "status": "succeeded",
+      "verified": true,
+      "destinationVerified": true,
+      "workflowVerified": true,
+      "startupMs": 1836.7376000000004,
+      "executionMs": 1731.4869999999992,
+      "cleanupMs": 371.9960999999985,
+      "calls": 4,
+      "inputTokens": 16172,
+      "processesAfter": 0,
+      "urls": [
+        "https://www.gov.uk/",
+        "https://www.gov.uk/search/all?keywords=renew+adult+passport",
+        "https://www.gov.uk/renew-adult-passport",
+        "https://www.gov.uk/renew-adult-passport/renew"
+      ],
+      "choices": [
+        {
+          "choice": "a7",
+          "label": "Set combobox \"Search\" to supplied \"search\" = \"renew adult passport\"",
+          "ms": 266.34670000000006
+        },
+        {
+          "choice": "a8",
+          "label": "Click button \"Search GOV.UK\"",
+          "ms": 271.70780000000013
+        },
+        {
+          "choice": "a11",
+          "label": "Click link \"Renew or replace your adult passport\"",
+          "ms": 290.6071000000011
+        },
+        {
+          "choice": "a11",
+          "label": "Click link \"Renew\"",
+          "ms": 234.79399999999987
+        }
+      ]
+    },
+    {
+      "task": "github",
+      "run": 2,
+      "date": "2026-09-24T08:43:55.202Z",
+      "status": "succeeded",
+      "verified": true,
+      "destinationVerified": true,
+      "workflowVerified": true,
+      "startupMs": 2123.347599999999,
+      "executionMs": 1406.340400000001,
+      "cleanupMs": 325.04049999999916,
+      "calls": 2,
+      "inputTokens": 11206,
+      "processesAfter": 0,
+      "urls": [
+        "https://github.com/vercel-labs/agent-browser",
+        "https://github.com/vercel-labs/agent-browser/tags",
+        "https://github.com/vercel-labs/agent-browser/releases/tag/v0.37.1"
+      ],
+      "choices": [
+        {
+          "choice": "a26",
+          "label": "Click link \"110 Tags\"",
+          "ms": 234.28909999999814
+        },
+        {
+          "choice": "a42",
+          "label": "Click link \"v0.37.1\"",
+          "ms": 237.6820000000007
+        }
+      ]
+    },
+    {
+      "task": "govuk",
+      "run": 2,
+      "date": "2026-09-24T08:43:59.256Z",
+      "status": "succeeded",
+      "verified": true,
+      "destinationVerified": true,
+      "workflowVerified": true,
+      "startupMs": 1587.8436999999976,
+      "executionMs": 1590.4879,
+      "cleanupMs": 270.3229999999967,
+      "calls": 4,
+      "inputTokens": 16172,
+      "processesAfter": 0,
+      "urls": [
+        "https://www.gov.uk/",
+        "https://www.gov.uk/search/all?keywords=renew+adult+passport",
+        "https://www.gov.uk/renew-adult-passport",
+        "https://www.gov.uk/renew-adult-passport/renew"
+      ],
+      "choices": [
+        {
+          "choice": "a7",
+          "label": "Set combobox \"Search\" to supplied \"search\" = \"renew adult passport\"",
+          "ms": 241.1450999999979
+        },
+        {
+          "choice": "a8",
+          "label": "Click button \"Search GOV.UK\"",
+          "ms": 253.46910000000207
+        },
+        {
+          "choice": "a11",
+          "label": "Click link \"Renew or replace your adult passport\"",
+          "ms": 240.04199999999764
+        },
+        {
+          "choice": "a11",
+          "label": "Click link \"Renew\"",
+          "ms": 233.04320000000007
+        }
+      ]
+    },
+    {
+      "task": "wikipedia",
+      "run": 2,
+      "date": "2026-09-24T08:44:02.993Z",
+      "status": "succeeded",
+      "verified": true,
+      "destinationVerified": true,
+      "workflowVerified": true,
+      "startupMs": 1642.4832999999999,
+      "executionMs": 1495.5622000000003,
+      "cleanupMs": 316.50870000000214,
+      "calls": 3,
+      "inputTokens": 17885,
+      "processesAfter": 0,
+      "urls": [
+        "https://en.wikipedia.org/wiki/Main_Page",
+        "https://en.wikipedia.org/wiki/Ada_Lovelace"
+      ],
+      "choices": [
+        {
+          "choice": "a3",
+          "label": "Set searchbox \"Search Wikipedia\" to supplied \"search\" = \"Ada Lovelace\"",
+          "ms": 270.6993000000002
+        },
+        {
+          "choice": "a4",
+          "label": "Click button \"Search\"",
+          "ms": 259.86239999999816
+        },
+        {
+          "choice": "a4",
+          "label": "Click link \"Ada Lovelace English mathematician (1815–1852)\"",
+          "ms": 249.25499999999738
+        }
+      ]
+    },
+    {
+      "task": "govuk",
+      "run": 3,
+      "date": "2026-09-24T08:44:07.545Z",
+      "status": "succeeded",
+      "verified": true,
+      "destinationVerified": true,
+      "workflowVerified": true,
+      "startupMs": 1544.1314999999995,
+      "executionMs": 1572.1627000000008,
+      "cleanupMs": 264.20679999999993,
+      "calls": 4,
+      "inputTokens": 16172,
+      "processesAfter": 0,
+      "urls": [
+        "https://www.gov.uk/",
+        "https://www.gov.uk/search/all?keywords=renew+adult+passport",
+        "https://www.gov.uk/renew-adult-passport",
+        "https://www.gov.uk/renew-adult-passport/renew"
+      ],
+      "choices": [
+        {
+          "choice": "a7",
+          "label": "Set combobox \"Search\" to supplied \"search\" = \"renew adult passport\"",
+          "ms": 240.7387000000017
+        },
+        {
+          "choice": "a8",
+          "label": "Click button \"Search GOV.UK\"",
+          "ms": 230.03099999999904
+        },
+        {
+          "choice": "a11",
+          "label": "Click link \"Renew or replace your adult passport\"",
+          "ms": 245.21310000000085
+        },
+        {
+          "choice": "a11",
+          "label": "Click link \"Renew\"",
+          "ms": 224.45769999999902
+        }
+      ]
+    },
+    {
+      "task": "wikipedia",
+      "run": 3,
+      "date": "2026-09-24T08:44:11.202Z",
+      "status": "succeeded",
+      "verified": true,
+      "destinationVerified": true,
+      "workflowVerified": true,
+      "startupMs": 1630.381900000004,
+      "executionMs": 2327.3165999999983,
+      "cleanupMs": 318.2037999999957,
+      "calls": 3,
+      "inputTokens": 17885,
+      "processesAfter": 0,
+      "urls": [
+        "https://en.wikipedia.org/wiki/Main_Page",
+        "https://en.wikipedia.org/wiki/Ada_Lovelace"
+      ],
+      "choices": [
+        {
+          "choice": "a3",
+          "label": "Set searchbox \"Search Wikipedia\" to supplied \"search\" = \"Ada Lovelace\"",
+          "ms": 251.26980000000185
+        },
+        {
+          "choice": "a4",
+          "label": "Click button \"Search\"",
+          "ms": 259.7936999999947
+        },
+        {
+          "choice": "a4",
+          "label": "Click link \"Ada Lovelace English mathematician (1815–1852)\"",
+          "ms": 235.6405999999988
+        }
+      ]
+    },
+    {
+      "task": "github",
+      "run": 3,
+      "date": "2026-09-24T08:44:16.599Z",
+      "status": "succeeded",
+      "verified": true,
+      "destinationVerified": true,
+      "workflowVerified": true,
+      "startupMs": 1943.4459999999963,
+      "executionMs": 1464.659599999999,
+      "cleanupMs": 466.6811999999991,
+      "calls": 2,
+      "inputTokens": 11206,
+      "processesAfter": 0,
+      "urls": [
+        "https://github.com/vercel-labs/agent-browser",
+        "https://github.com/vercel-labs/agent-browser/tags",
+        "https://github.com/vercel-labs/agent-browser/releases/tag/v0.37.1"
+      ],
+      "choices": [
+        {
+          "choice": "a26",
+          "label": "Click link \"110 Tags\"",
+          "ms": 243.17060000000492
+        },
+        {
+          "choice": "a42",
+          "label": "Click link \"v0.37.1\"",
+          "ms": 276.1603000000032
+        }
+      ]
+    }
+  ]
+}
