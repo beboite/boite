@@ -504,6 +504,22 @@ details.disclosure[open] > summary::before {
   color: var(--color-subtle);
 }
 
+/* The prompt words Claude Code acts on (lib/message-display.ts): ultrathink in
+   the spectrum, the way the CLI paints it, ultracode in the accent. No weight
+   change: the composer's mirror has to keep the textarea's glyph widths. */
+.keyword-ultrathink {
+  background: var(--accent-spectrum);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.keyword-ultracode {
+  color: var(--color-accent);
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+
 /* One tracking for every uppercase label, table headers included: 0.06em. */
 .section-label {
   font-size: var(--text-xs);

@@ -1,5 +1,18 @@
 import { expect, test } from 'vitest';
-import { visibleAnswer, visibleUserText } from './message-display';
+import { claudeKeywords, promptSegments, sliceSegments, visibleAnswer, visibleUserText } from './message-display';
+
+test('the keywords count only for a Claude model run by Claude Code', () => {
+  expect(claudeKeywords('claude-sdk', 'claude-opus-5-5')).toBe(true);
+  expect(claudeKeywords('claude-sdk', 'opus[1m]')).toBe(true);
+  expect(claudeKeywords('claude-sdk', 'sonnet')).toBe(true);
+  expect(claudeKeywords('claude-sdk', null)).toBe(true);
+  // Claude Code routed to another model, or a Claude model behind another harness.
+  expect(claudeKeywords('claude-sdk', 'glm-5')).toBe(false);
+  expect(claudeKeywords('claude-sdk', 'deepseek-v4')).toBe(false);
+  expect(claudeKeywords('claude-sdk', 'opusx-1')).toBe(false);
+  expect(claudeKeywords('acp', 'claude-sonnet-5')).toBe(false);
+  expect(claudeKeywords(undefined, 'claude-sonnet-5')).toBe(false);
+});
 
 test('old goal instructions display only the colored-command input, ordinary text stays intact', () => {
   expect(visibleUserText('Work toward this goal: Ship it\nContinue until the objective is achieved. private instructions')).toBe('/goal Ship it');
@@ -56,4 +69,30 @@ test('a new thought replaces previous bold headings even within one protocol par
   expect(currentThought('plain reasoning')).toEqual({title:null,text:'plain reasoning'});
   expect(currentThought('Check **all files** first')).toEqual({title:null,text:'Check **all files** first'});
   expect(currentThought('**Heading**\nCheck **all files** first')).toEqual({title:'Heading',text:'**Heading**\nCheck **all files** first'});
+});
+
+test('a prompt is cut at its command and at the words Claude Code acts on', () => {
+  expect(promptSegments('/goal ultrathink it', '/goal', true)).toEqual([
+    { text: '/goal', kind: 'command' },
+    { text: ' ', kind: 'plain' },
+    { text: 'ultrathink', kind: 'ultrathink' },
+    { text: ' it', kind: 'plain' }
+  ]);
+  expect(promptSegments('Refactor it, UltraCode.', undefined, true)).toEqual([
+    { text: 'Refactor it, ', kind: 'plain' },
+    { text: 'UltraCode', kind: 'ultracode' },
+    { text: '.', kind: 'plain' }
+  ]);
+  // Inside a longer word, or on another harness, the word is plain text.
+  expect(promptSegments('ultrathinking', undefined, true)).toEqual([{ text: 'ultrathinking', kind: 'plain' }]);
+  expect(promptSegments('ultrathink', undefined, false)).toEqual([{ text: 'ultrathink', kind: 'plain' }]);
+  expect(promptSegments('', undefined, true)).toEqual([]);
+});
+
+test('sliceSegments cuts a range out of the whole prompt, keywords split at the edges', () => {
+  const segments = promptSegments('go ultrathink now', undefined, true);
+  expect(sliceSegments(segments, 0, 3)).toEqual([{ text: 'go ', kind: 'plain' }]);
+  expect(sliceSegments(segments, 1, 8)).toEqual([{ text: 'o ', kind: 'plain' }, { text: 'ultra', kind: 'ultrathink' }]);
+  expect(sliceSegments(segments, 13, 17)).toEqual([{ text: ' now', kind: 'plain' }]);
+  expect(sliceSegments(segments, 17, 20)).toEqual([]);
 });

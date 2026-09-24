@@ -617,3 +617,55 @@ test('fake files and diffs stay inside the thread directory like the core', asyn
     expect((await client.call('files.list', { threadId: 't-trace', path: 'docs/' })).map((entry) => entry.path)).toContain('docs/guide');
   } finally { client.close(); }
 });
+
+test('fake [ask] leaves a card nobody waits on, and its answer opens the next turn', async () => {
+  const client = new FakeClient({ delayMs: 0 });
+  await client.connect();
+  try {
+    const { id: threadId } = await newThread(client);
+    await client.call('turns.start', { threadId, prompt: '[ask] [background] serve it' });
+    await client.settled();
+    const thread = await client.call('threads.get', { threadId });
+    // The turn ended with the question still open and the shell still listed.
+    expect(thread.status).toBe('idle');
+    expect(thread.background?.map((task) => task.kind)).toEqual(['shell']);
+    const [question] = await client.call('questions.list', { threadId });
+    expect(question).toMatchObject({ async: true, text: 'Which port should the dev server take?' });
+    const tool = thread.messages.flatMap((message) => message.parts).find((part) => part.type === 'tool');
+    expect(tool).toMatchObject({ name: 'Bash', status: 'done', startedAt: expect.any(Number), finishedAt: expect.any(Number) });
+
+    await client.call('questions.answer', { threadId, questionId: question!.id, optionIds: ['2'] });
+    await client.settled();
+    const after = await client.call('threads.get', { threadId });
+    expect(after.turns).toHaveLength(2);
+    const prompts = after.messages.filter((message) => message.role === 'user').map((message) => message.parts[0]?.type === 'text' ? message.parts[0].text : '');
+    expect(prompts.at(-1)).toBe('> Which port should the dev server take?\n\n4173');
+
+    // Stop on the idle thread ends the background work.
+    expect(await client.call('turns.stop', { threadId })).toEqual({ stopped: true });
+    expect((await client.call('threads.get', { threadId })).background).toEqual([]);
+  } finally { client.close(); }
+});
+
+test('fake async answers given while a turn runs start one turn together after it', async () => {
+  const client = new FakeClient({ delayMs: 0 });
+  await client.connect();
+  try {
+    const { id: threadId } = await newThread(client);
+    for (const prompt of ['[ask] one', '[ask] two']) {
+      await client.call('turns.start', { threadId, prompt });
+      await client.settled();
+    }
+    const questions = await client.call('questions.list', { threadId });
+    expect(questions).toHaveLength(2);
+    await client.call('turns.start', { threadId, prompt: 'hello' });
+    for (const [index, question] of questions.entries()) {
+      await client.call('questions.answer', { threadId, questionId: question.id, optionIds: [String(index + 1)] });
+    }
+    await client.settled();
+    const after = await client.call('threads.get', { threadId });
+    expect(after.turns).toHaveLength(4);
+    const prompts = after.messages.filter((message) => message.role === 'user').map((message) => message.parts[0]?.type === 'text' ? message.parts[0].text : '');
+    expect(prompts.at(-1)).toBe('> Which port should the dev server take?\n\n5173\n\n> Which port should the dev server take?\n\n4173');
+  } finally { client.close(); }
+});

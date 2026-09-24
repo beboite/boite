@@ -23,7 +23,7 @@
   import ChatFile from './ChatFile.svelte';
   import ThinkingPart from './ThinkingPart.svelte';
   import TurnSummary from './TurnSummary.svelte';
-  import { promptCommand, promptText } from '../lib/message-display';
+  import { claudeKeywords, promptCommand, promptSegments, promptText } from '../lib/message-display';
   import PreviewReferences from './PreviewReferences.svelte';
   import ToolCard from './ToolCard.svelte';
   import MessageOutline from './MessageOutline.svelte';
@@ -602,8 +602,10 @@
               {#each message.parts as part, index (index)}
                 {#if part.type === 'text'}
                   {@const prompt = promptText(part)}
-                  {@const command = promptCommand(prompt)}
-                  <p class="user-text" data-testid="text-part">{#if part.previewReferences?.length}<PreviewReferences text={prompt} references={part.previewReferences} {store} threadId={message.threadId} />{:else if command}<span class="command">{command}</span>{prompt.slice(command.length)}{:else}{prompt}{/if}</p>
+                  {@const keywords = turn?.execution
+                    ? claudeKeywords(store.providerOf(turn.execution.providerId)?.protocol, turn.execution.model)
+                    : claudeKeywords(store.providerOf(store.openThread?.providerId ?? '')?.protocol, store.openThread?.model)}
+                  <p class="user-text" data-testid="text-part">{#if part.previewReferences?.length}<PreviewReferences text={prompt} references={part.previewReferences} {store} threadId={message.threadId} {keywords} />{:else}{#each promptSegments(prompt, promptCommand(prompt), keywords) as segment, at (at)}{#if segment.kind === 'command'}<span class="command">{segment.text}</span>{:else if segment.kind === 'plain'}{segment.text}{:else}<span class="keyword-{segment.kind}" data-testid="keyword-highlight">{segment.text}</span>{/if}{/each}{/if}</p>
                 {:else if part.type === 'file'}
                   <a class="file-attachment" data-testid="file-part" href="data:application/octet-stream;base64,{part.data}" download={part.name ?? strings.composer.attachAlt}>
                     <FileText size={20} strokeWidth={1.5} />
@@ -670,6 +672,9 @@
                       output={part.output}
                       status={part.status}
                       documents={part.documents ?? []}
+                      startedAt={part.startedAt ?? null}
+                      finishedAt={part.finishedAt ?? null}
+                      background={store.openThread?.background?.some((task) => task.toolId === part.toolId) ?? false}
                     />
                   {:else if part.type === 'permission'}
                     <PermissionCard
@@ -684,6 +689,7 @@
                       options={part.options}
                       allowText={part.allowText}
                       multiple={part.multiple}
+                      async={part.async === true}
                       answer={part.answer ?? null}
                       pending={store.pendingQuestions.some((q) => q.id === part.questionId)}
                       submit={(optionIds, text) =>
@@ -714,7 +720,12 @@
             </div>
           {/if}
           {#if turn && lastInTurn.get(turn.id) === message.id}
-            <TurnSummary {turn} waiting={store.openThread?.status === 'waiting' && turn.status === 'running'} />
+            <TurnSummary
+              {turn}
+              waiting={store.openThread?.status === 'waiting' && turn.status === 'running'}
+              background={store.openThread?.turns.at(-1)?.id === turn.id ? store.openThread?.background ?? [] : []}
+              stop={() => void store.stop()}
+            />
           {/if}
         </article>
       {/each}
