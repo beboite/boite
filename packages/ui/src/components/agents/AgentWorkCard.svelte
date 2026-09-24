@@ -18,8 +18,8 @@
   }
 </script>
 
-<article class="agent-work" data-status={work.status} data-testid="agent-work-{work.id}">
-  <div class="agent-section-heading"><span>{name}</span><span class="agent-state" data-status={work.status}>{strings.agents[work.status]}</span></div>
+<article class="card agent-work" data-status={work.status} data-testid="agent-work-{work.id}">
+  <div class="agent-card-head"><strong>{name}</strong><span class="agent-state" data-status={work.status}>{strings.agents[work.status]}</span></div>
   <p class="agent-work-prompt">{work.prompt.slice(0, 220)}</p>
   {#if work.error}<p class="agent-error">{work.error}</p>{/if}
   {#if run}

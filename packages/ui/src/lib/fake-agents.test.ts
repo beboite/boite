@@ -1,6 +1,5 @@
 import { expect, test } from 'vitest';
 import { FakeClient } from './fake-client';
-import { agentScene } from './agent-scene';
 
 test('the fake executes bounded groups, keeps native contexts distinct and refuses direct starts', async () => {
   const client = new FakeClient({ delayMs: 0 }); await client.connect();
@@ -18,9 +17,6 @@ test('the fake executes bounded groups, keeps native contexts distinct and refus
     expect(snapshot.deliveries.filter(d => d.status === 'limited')).toHaveLength(1);
     expect(snapshot.messages.filter(m => m.scope.kind === 'group').some(m => m.text.includes('Private topic'))).toBe(false);
     await expect(client.call('turns.start', { threadId: snapshot.sessions[0]!.threadId, prompt: 'bypass' })).rejects.toThrow('persistent');
-    const layout = agentScene(snapshot);
-    expect(layout.nodes.filter(n => n.kind === 'profile').map(n => n.id)).toEqual([a.id, b.id]);
-    expect(layout.nodes.every(n => n.y >= 0 && n.y < layout.height)).toBe(true);
   } finally { client.close(); }
 });
 

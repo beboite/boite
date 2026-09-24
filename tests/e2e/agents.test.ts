@@ -14,16 +14,15 @@ beforeAll(async () => {
 
 async function missionJourney() {
   await page.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
-  await page.click('[data-testid="agents-category-profile"]');
   await page.evaluate(`document.querySelector('[data-testid="agent-entry-' + window.__agentsFixture.first.id + '"]').click()`);
-  await page.evaluate(`Array.from(document.querySelectorAll('.agent-detail-tabs button')).find(b => b.textContent === 'Memory').click()`);
+  await page.click('[data-testid="agent-tab-memory"]');
   await page.click('[data-testid="agent-memory-add"]');
   await page.type('.agent-knowledge form input', 'Prototype preference');
   await page.type('.agent-knowledge form textarea', 'Prefer small offline prototypes.');
   await page.click('.agent-knowledge form button.primary');
   await page.waitFor(`document.querySelector('.agent-knowledge summary')?.textContent.includes('Prototype preference')`);
   await page.click('.agent-knowledge summary');
-  await page.evaluate(`Array.from(document.querySelectorAll('.agent-knowledge button')).find(b => b.textContent === 'Configure').click()`);
+  await page.evaluate(`Array.from(document.querySelectorAll('.agent-knowledge button')).find(b => b.textContent === 'Edit').click()`);
   await page.type('.agent-knowledge form textarea', 'Keep the prototype playable in five minutes.');
   await page.click('.agent-knowledge form button.primary');
   await page.waitFor(`document.querySelector('.agent-knowledge').textContent.includes('Keep the prototype playable')`);
@@ -36,9 +35,9 @@ async function missionJourney() {
   await page.evaluate(`Array.from(document.querySelectorAll('#app input[type="checkbox"], [data-testid="agent-editor"] input[type="checkbox"]')).find(c => c.closest('label')?.textContent.includes('Atlas')).click()`);
   await page.click('[data-testid="agent-save"]');
   await page.waitFor(`document.querySelector('[data-testid="agent-mission-finish"]')`);
-  await page.evaluate(`Array.from(document.querySelectorAll('.agents-content button')).find(b => b.textContent === 'Add task').click()`);
+  await page.evaluate(`Array.from(document.querySelectorAll('.agents-main button')).find(b => b.textContent === 'Add task').click()`);
   await page.type('[data-testid="agent-task-title"]', 'Present the proposal');
-  await page.click('.agents-content form button.primary');
+  await page.click('.agents-main form button.primary');
   await page.waitFor(`document.querySelector('.agent-task button[aria-label="Assign"]')`);
   await page.click('.agent-task button[aria-label="Assign"]');
   await page.evaluate(`document.querySelector('[data-value="' + window.__agentsFixture.second.id + '"]').click()`);
@@ -50,7 +49,7 @@ async function missionJourney() {
   await page.evaluate(`Array.from(document.querySelectorAll('.agent-task button')).find(b => b.textContent === 'Accept result').click()`);
   await page.waitFor(`!document.querySelector('[data-testid="agent-mission-finish"]').disabled`);
   await page.click('[data-testid="agent-mission-finish"]');
-  await page.waitFor(`document.querySelector('.agents-content [data-status="done"]')`);
+  await page.waitFor(`document.querySelector('.agents-main [data-status="done"]')`);
 
   await page.evaluate(`(async () => {
     const { workspace } = window.__boiteTest;
@@ -63,7 +62,7 @@ async function missionJourney() {
     const run = (await c.call('agents.snapshot', {})).runs.find(r => r.status === 'running');
     await c.call('agents.decision.request', { threadId: run.threadId, prompt: 'Which prototype should I explore?', options: ['Puzzle', 'Simulation'], requestId: 'e2e_decision_request' });
   })()`);
-  await page.evaluate(`Array.from(document.querySelectorAll('.agents-overview button')).find(b => b.textContent.includes('needs attention')).click()`);
+  await page.click('[data-testid="agents-attention"]');
   await page.waitFor(`document.querySelector('[data-testid="agent-decision"]')`);
   await capture('agents-attention-phone.png');
   await page.evaluate(`Array.from(document.querySelectorAll('[data-testid="agent-decision"] button')).find(b => b.textContent === 'Puzzle').click()`);
@@ -80,6 +79,7 @@ async function capture(name: string) { await settled(); await page.screenshot(jo
 test('create, converse, configure the resident engine and follow background work on desktop and phone', async () => {
   await page.click('[data-testid="nav-agents"]');
   await page.waitFor(`document.querySelector('[data-testid="agents-page"]')`);
+  await capture('agents-welcome-desktop.png');
   await page.click('[data-testid="agents-create"]');
   await page.click('[data-value="profile"]');
   await page.type('[data-testid="agent-name"]', 'Mira');
@@ -92,19 +92,19 @@ test('create, converse, configure the resident engine and follow background work
   await page.waitFor(`document.querySelectorAll('.agent-message').length >= 2`);
   expect(await page.evaluate(`document.querySelector('[data-testid="agent-transcript"]').textContent`)).toContain('Mira');
   await capture('agents-conversation-desktop.png');
-  await page.evaluate(`Array.from(document.querySelectorAll('.agent-detail-tabs button')).find(b => b.textContent === 'Brain').click()`);
+  await page.click('[data-testid="agent-tab-memory"]');
   await page.waitFor(`document.querySelector('[data-testid="agent-brain-memory"]')`);
   await page.type('[data-testid="agent-brain-memory"]', 'Keep prototypes private until reviewed.');
   await page.click('[data-testid="agent-brain"] button.primary');
   await page.waitFor(`!document.querySelector('[data-testid="agent-brain"] button.primary').disabled`);
   await capture('agents-brain-desktop.png');
-  await page.evaluate(`Array.from(document.querySelectorAll('.agent-detail-tabs button')).find(b => b.textContent === 'Routines').click()`);
+  await page.click('[data-testid="agent-tab-routines"]');
   await page.type('[data-testid="routine-name"]', 'Morning review');
   await page.type('[data-testid="routine-prompt"]', 'Review current ideas and prepare one proposal.');
   await page.click('[data-testid="routine-save"]');
   await page.waitFor(`document.querySelector('[data-testid="agent-routines"] article')?.textContent.includes('Morning review')`);
   await capture('agents-routines-desktop.png');
-  await page.evaluate(`Array.from(document.querySelectorAll('.agent-detail-tabs button')).find(b => b.textContent === 'Models and limits').click()`);
+  await page.click('[data-testid="agent-tab-settings"]');
   await page.waitFor(`document.querySelector('[data-testid="agent-runtime"]')`);
   await capture('agents-runtime-desktop.png');
   await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
@@ -127,19 +127,19 @@ test('create, converse, configure the resident engine and follow background work
   await page.waitFor(`!document.querySelector('[data-testid="agents-page"]')`);
   await page.waitFor(`(async () => { const { workspace } = window.__boiteTest; return (await workspace.active.client.call('agents.snapshot', {})).work.every(w => w.status === 'done'); })()`);
   await page.click('[data-testid="nav-agents"]');
-  await page.waitFor(`document.querySelector('[data-testid="agents-category-group"]')`);
-  expect(await page.evaluate(`document.querySelector('[data-testid="agents-scene-toggle"]') === null`)).toBe(true);
+  await page.waitFor(`document.querySelector('[data-testid="agent-entry-' + window.__agentsFixture.group.id + '"]')`);
   await capture('agents-directory-desktop.png');
   await page.evaluate(`window.__boiteTest.setTheme('light')`);
   await page.waitFor(`document.documentElement.dataset.theme === 'light'`);
   await capture('agents-directory-light.png');
   await page.evaluate(`window.__boiteTest.setTheme('dark')`);
   expect(await page.evaluate(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true);
-  await page.click('[data-testid="agents-category-group"]');
   await page.evaluate(`document.querySelector('[data-testid="agent-entry-' + window.__agentsFixture.group.id + '"]').click()`);
   await page.waitFor(`document.querySelectorAll('.agent-message').length === 4`);
   await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
   await capture('agents-group-phone.png');
+  await page.click('.agents-main .agent-mobile-back');
+  await capture('agents-list-phone.png');
   expect(await page.evaluate(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true);
   expect(await page.evaluate(`getComputedStyle(document.querySelector('[data-testid="mobile-agents"]')).display`)).not.toBe('none');
   await missionJourney();

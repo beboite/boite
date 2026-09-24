@@ -3,6 +3,17 @@ import type { Store } from './store.svelte';
 
 export type AgentEntryKind = Extract<AgentEntityKind, 'profile' | 'group' | 'team' | 'mission'>;
 export type AgentSelection = { kind: AgentEntryKind; id: string };
+/** What the agents page shows: one record, the work waiting on the user, or the engine settings. */
+export type AgentFocus = AgentSelection | { kind: 'attention' | 'engine' };
+
+/** Work the user has to act on: a decision, an interruption, a failure, or a result to review. */
+export function attentionOf(snapshot: AgentsSnapshot, threads: Store['threads']) {
+  const blocked = (runId: string | null) => threads.some(t => t.agentSessionId && t.status === 'waiting' && snapshot.runs.some(r => r.id === runId && r.threadId === t.id));
+  return {
+    work: snapshot.work.filter(w => ['waiting', 'interrupted', 'error', 'paused'].includes(w.status) || w.status === 'running' && blocked(w.runId)),
+    review: snapshot.tasks.filter(t => t.status === 'review')
+  };
+}
 
 /** One view controller per owning Store. No renderer owns an execution. */
 export class AgentsView {
