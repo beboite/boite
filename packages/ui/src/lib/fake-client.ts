@@ -595,7 +595,10 @@ export class FakeClient implements ObservableClient {
     'projects.remove': async (params) => {
       this.#projects = this.#projects.filter((p) => p.id !== params.projectId);
       const threads = [...this.#threads.values()].filter((thread) => thread.projectId === params.projectId);
-      for (const thread of threads) thread.archived = true;
+      for (const thread of threads) {
+        thread.archived = true;
+        this.#plugins.stopThread(thread.id);
+      }
       await Promise.all(threads.map((thread) => this.#stopTurn(thread.id)));
       for (const thread of threads) {
         this.#threads.delete(thread.id);

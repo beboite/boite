@@ -331,6 +331,27 @@ test('fake thread archive cancels only its unfinished browser tasks and restore 
   } finally { client.close(); }
 });
 
+test('fake project removal cancels its browser tasks before deleting threads and releases the plugin', async () => {
+  const client = new FakeClient({ delayMs: 0, browserTask: true });
+  await client.connect();
+  try {
+    const project = await client.call('projects.add', { path: '/workspace/browser-removal' });
+    const thread = await newThread(client, project.id);
+    const task = await client.call('browser.start', { threadId: thread.id, pluginId: 'jev-browser', url: 'https://example.org', goal: 'Save', completion: { text: 'Saved' } });
+    const events: string[] = [];
+    client.on('browser.updated', updated => { if (updated.id === task.id) events.push(updated.status); });
+    client.on('thread.removed', removed => { if (removed.threadId === thread.id) events.push('removed'); });
+
+    await client.call('projects.remove', { projectId: project.id });
+    expect(events).toEqual(['cancelled', 'removed']);
+    const status = await client.call('browser.status', {});
+    expect(status.tasks.find(item => item.id === task.id)?.status).toBe('cancelled');
+    expect(status.tasks.find(item => item.id === 'browser-fixture')?.status).toBe('running');
+    await client.call('browser.cancel', { threadId: 't-trace', id: 'browser-fixture' });
+    expect((await client.call('plugins.uninstall', { id: 'jev-browser' })).status).toBe('not-installed');
+  } finally { client.close(); }
+});
+
 test.each([{ data: '?' }, { mimeType: '' }, { name: 42 }, { kind: 'unknown' }, { data: 'A'.repeat(7 * 1048576) }])('fake uploads refuse malformed attachment fields before creating a turn: %#', async change => {
   const client = new FakeClient({ delayMs: 0 });
   await client.connect();
