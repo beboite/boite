@@ -1,17 +1,15 @@
 <script lang="ts">
-  import { ArrowDown, ArrowRight, ArrowUp, Bell, Check, ChevronDown, FileCode2, Folder, LockKeyhole, Mic, Monitor, Pause, Play, RotateCcw, ShieldCheck, Smartphone, VolumeX } from '@lucide/svelte';
+  import { ArrowDown, ArrowRight, ArrowUp, Bell, Check, ChevronDown, FileCode2, Folder, LockKeyhole, Mic, Monitor, Pause, Play, RotateCcw, Smartphone, VolumeX } from '@lucide/svelte';
   import ProviderLogo from './ProviderLogo.svelte';
   import BoiteMark from './BoiteMark.svelte';
   import { strings } from '../lib/strings';
-  import { strings as english } from '../lib/strings.en';
 
-  let { scene }: { scene: 'welcome' | 'agents' | 'voice' | 'panel' | 'usage' | 'reach' | 'quiet' | 'privacy' } = $props();
+  let { scene }: { scene: 'welcome' | 'agents' | 'voice' | 'panel' | 'usage' | 'reach' | 'quiet' } = $props();
   let paused = $state(false);
   let replay = $state(0);
-  // Keep artwork copy short and stable across locales; controls remain translated.
-  const t = english.onboarding.demo;
-  const controls = $derived(strings.onboarding.demo);
-  const description = $derived(scene === 'voice' ? controls.voiceHint : scene === 'agents' ? controls.continued : scene === 'panel' ? controls.reviewed : scene === 'usage' ? controls.trayHint : scene === 'reach' ? controls.reachHint : scene === 'quiet' ? controls.quietBody : scene === 'privacy' ? strings.onboarding.privacy.body : strings.onboarding.welcome.body);
+  // One markup per scene: the artwork reads the same strings as the tour around it.
+  const t = $derived(strings.onboarding.demo);
+  const description = $derived(scene === 'voice' ? t.voiceHint : scene === 'agents' ? t.continued : scene === 'panel' ? t.reviewed : scene === 'usage' ? t.trayHint : scene === 'reach' ? t.reachHint : scene === 'quiet' ? t.quietBody : strings.onboarding.welcome.body);
 </script>
 
 {#snippet pointer(extra: string)}
@@ -28,17 +26,15 @@
   {#key `${scene}-${replay}`}
     <div class="stage {scene}" role="img" aria-label={description} data-testid="onboarding-animation">
       {#if scene === 'welcome'}
-        <div class="workspace-head"><BoiteMark size={22} /><strong>Boite</strong><span>{t.background}</span></div>
-        <div class="tasks">
-          {#each [{ name: t.task, provider: 'claude', result: t.taskResult }, { name: t.secondTask, provider: 'codex', result: t.loginResult }, { name: t.thirdTask, provider: 'claude', result: t.testsResult }] as item, i (item.name)}
-            <div class="task" style:--order={i}>
-              <ProviderLogo providerId={item.provider} size={24} />
-              <div><strong>{item.name}</strong><span class="task-state"><span class="task-working">{t.working}</span><span class="task-done">{item.result}</span></span></div>
-              <span class="task-status"><span class="spinner"></span><Check size={20} /></span>
-              <div class="task-progress"><span></span></div>
-            </div>
+        <ul class="tasks">
+          {#each [{ name: t.task, provider: 'claude', result: t.taskResult }, { name: t.secondTask, provider: 'codex', result: t.loginResult }, { name: t.thirdTask, provider: 'claude', result: t.testsResult }] as item, i (i)}
+            <li class="task" style:--order={i}>
+              <ProviderLogo providerId={item.provider} size={18} />
+              <strong>{item.name}</strong>
+              <span class="task-state"><span class="task-working"><span class="spinner"></span>{t.working}</span><span class="task-done"><Check size={15} />{item.result}</span></span>
+            </li>
           {/each}
-        </div>
+        </ul>
       {:else if scene === 'agents'}
         <div class="mini-app">
           {@render threadHeader()}
@@ -96,28 +92,34 @@
           <div class="taskbar"><span class="desktop-app"><Folder size={18} /></span><span class="desktop-app"><Monitor size={18} /></span><div class="system-tray"><ChevronDown size={14} /><span class="tray-target"><BoiteMark size={20} />{@render pointer('tray-pointer')}</span><VolumeX size={16} /><span class="clock">14:32</span></div></div>
         </div>
       {:else if scene === 'reach'}
+        <!-- The same three lines on both screens: the picture says "same conversation" without text to read. -->
+        {#snippet chat()}
+          <span class="line user-line"></span>
+          <span class="reply"><ProviderLogo providerId="claude" size={14} /><span class="line"></span></span>
+          <span class="done"><Check size={13} /></span>
+        {/snippet}
         <div class="devices">
-          <div class="computer-device"><span class="device-label"><Monitor size={15} />{t.desktop}</span><div class="mini-app">{@render threadHeader()}<div class="device-chat">{@render author('claude')}<p>{t.sameResult}</p><div class="form-preview"><span>{t.file}</span><div class="form-input">email@example.com</div><div class="new-button">{t.buttonAfter}</div></div></div></div><div class="monitor-foot"></div></div>
-          <div class="sync-link"><svg viewBox="0 0 56 40" aria-hidden="true"><path d="M2 20h47m-8-7 8 7-8 7" /><circle cx="4" cy="20" r="3" /></svg></div>
-          <div class="phone-device"><div class="phone-speaker"></div><span class="device-label">{t.phone}</span><div class="phone-message">{@render author('claude')}<p>{t.sameResult}</p><span class="received"><Check size={14} />{t.complete}</span></div><div class="phone-home"></div></div>
+          <div class="computer"><div class="monitor">{@render chat()}</div><div class="stand"></div><span class="device-label"><Monitor size={14} />{t.desktop}</span></div>
+          <div class="sync-link" aria-hidden="true"><span></span></div>
+          <div class="phone-side"><div class="phone">{@render chat()}</div><span class="device-label"><Smartphone size={14} />{t.phone}</span></div>
         </div>
-        <div class="scene-outcome"><Smartphone size={16} />{t.synced}</div>
-      {:else if scene === 'quiet'}
-        <div class="quiet-desktop"><div class="background-agent"><BoiteMark size={18} /><span>{t.background}</span></div><div class="notes"><div class="chrome"><FileCode2 size={15} />{t.notes}<span class="chrome-end"><VolumeX size={15} /></span></div><strong>{t.writing}</strong><p><span class="empty-check"></span>{t.noteOne}</p><p><span class="empty-check"></span>{t.noteTwo}<span class="caret"></span></p></div><div class="notification"><Bell size={18} /><div><strong>Boite</strong><span>{t.notification}</span></div><Check size={16} /></div></div>
+        <div class="scene-outcome"><Check size={16} />{t.synced}</div>
       {:else}
-        <div class="privacy-diagram"><div class="private-vault"><div class="vault-icon"><ShieldCheck size={36} /><LockKeyhole size={15} /></div><div><strong>{t.privateContent}</strong><span>{t.staysHere}</span></div></div><div class="count-example"><svg viewBox="0 0 86 46" aria-hidden="true"><path d="M4 42h78" />{#each [14, 23, 20, 35, 30] as h, i (i)}<rect x={9+i*15} y={42-h} width="8" height={h} rx="2" />{/each}</svg><div><strong>{t.anonymousCount}</strong></div></div></div>
+        <div class="quiet-desktop"><div class="background-agent"><BoiteMark size={18} /><span>{t.background}</span></div><div class="notes"><div class="chrome"><FileCode2 size={15} />{t.notes}<span class="chrome-end"><VolumeX size={15} /></span></div><strong>{t.writing}</strong><p><span class="empty-check"></span>{t.noteOne}</p><p><span class="empty-check"></span>{t.noteTwo}<span class="caret"></span></p></div><div class="notification"><Bell size={18} /><div><strong>Boite</strong><span>{t.notification}</span></div><Check size={16} /></div></div>
       {/if}
     </div>
   {/key}
   <figcaption>
-    <button class="ghost small" aria-pressed={paused} data-testid="onboarding-animation-pause" onclick={() => paused = !paused}>{#if paused}<Play size={13} />{controls.resume}{:else}<Pause size={13} />{controls.pause}{/if}</button>
-    <button class="ghost small" data-testid="onboarding-animation-replay" onclick={() => { paused = false; replay++; }}><RotateCcw size={13} />{controls.play}</button>
+    <button class="ghost small" aria-pressed={paused} data-testid="onboarding-animation-pause" onclick={() => paused = !paused}>{#if paused}<Play size={13} />{t.resume}{:else}<Pause size={13} />{t.pause}{/if}</button>
+    <button class="ghost small" data-testid="onboarding-animation-replay" onclick={() => { paused = false; replay++; }}><RotateCcw size={13} />{t.play}</button>
   </figcaption>
 </figure>
 
 <style>
   figure { margin: 18px 0 8px; container-type: inline-size; }
-  .stage { --demo-duration: calc(var(--dur-3) * 30); font-size: var(--text-sm); line-height: 1.5; color: var(--color-foreground); }
+  .stage { --demo-duration: calc(var(--dur-3) * 16); font-size: var(--text-sm); line-height: 1.5; color: var(--color-foreground); }
+  /* The two conversation demos carry text to read; the others are over in under four seconds. */
+  .stage.agents, .stage.voice { --demo-duration: calc(var(--dur-3) * 22); }
   .stage :global(svg) { flex: none; }
   .stage p { margin: 0; }
   .mini-app { background: var(--color-surface-2); border: 1px solid var(--color-edge); border-radius: var(--radius-lg); overflow: hidden; box-shadow: var(--shadow-e1); }
@@ -187,7 +189,7 @@
   .old-button { justify-self: start; font-size: var(--text-xs); border: 1px solid var(--color-edge); padding: 3px 9px; border-radius: var(--radius-sm); color: var(--color-muted-foreground); }
   .new-button { display: flex; justify-content: center; align-items: center; gap: 7px; background: var(--color-foreground); color: var(--color-surface); border-radius: var(--radius-md); padding: 8px; font-weight: 500; }
   .desktop-space { position: relative; min-height: 288px; padding: 16px 0 52px; border: 1px solid var(--color-edge); border-radius: var(--radius-lg); background: var(--color-surface-2); overflow: hidden; }
-  .quota-popup { width: min(290px, calc(100% - 32px)); margin: 0 18px 0 auto; padding: 18px; border: 1px solid var(--color-edge); border-radius: var(--radius-lg); background: var(--color-surface); box-shadow: var(--shadow-e2); animation: early var(--demo-duration) both; }
+  .quota-popup { width: min(290px, calc(100% - 32px)); margin: 0 18px 0 auto; padding: 18px; border: 1px solid var(--color-edge); border-radius: var(--radius-lg); background: var(--color-surface); box-shadow: var(--shadow-e2); animation: pop var(--demo-duration) both; }
   .quota-title { display: flex; align-items: center; gap: 9px; margin-bottom: 18px; }
   .quota-value { display: flex; justify-content: space-between; gap: 8px; }
   .quota-track { height: 8px; background: var(--color-surface-3); border-radius: 8px; margin: 10px 0; overflow: hidden; }
@@ -201,36 +203,31 @@
   .tray-pointer { top: 17px; left: 16px; animation: hover var(--demo-duration) both; }
   .clock { font-variant-numeric: tabular-nums; }
   .tray-instruction { display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin: 14px 85px 0 12px; color: var(--color-muted-foreground); }
-  .workspace-head { display: flex; align-items: center; gap: 9px; padding-bottom: 16px; }
-  .workspace-head > span { margin-left: auto; color: var(--color-muted-foreground); }
-  .tasks { display: grid; gap: 10px; }
-  .task { position: relative; overflow: hidden; display: flex; align-items: center; gap: 13px; padding: 14px 16px 17px; border: 1px solid var(--color-edge); background: var(--color-surface-2); border-radius: var(--radius-lg); }
-  .task > div { min-width: 0; }
-  .task strong { font-weight: 500; }
-  .task-state { display: block; position: relative; color: var(--color-muted-foreground); margin-top: 3px; }
-  .task-working { animation: first var(--demo-duration) both; animation-delay: calc(var(--order) * var(--dur-3) * 3); }
-  .task-done { position: absolute; inset: 0 auto auto 0; white-space: nowrap; animation: second var(--demo-duration) both; animation-delay: calc(var(--order) * var(--dur-3) * 3); }
-  .task-status { margin-left: auto; width: 20px; height: 20px; position: relative; color: var(--color-success); }
-  .task-status > :global(svg) { position: absolute; inset: 0; animation: second var(--demo-duration) both; animation-delay: calc(var(--order) * var(--dur-3) * 3); }
-  .spinner { display: block; width: 14px; height: 14px; border: 2px solid var(--color-edge); border-top-color: var(--color-accent); border-radius: 50%; animation: first var(--demo-duration) both; animation-delay: calc(var(--order) * var(--dur-3) * 3); }
-  .task-progress { position: absolute; inset: auto 0 0; height: 3px; background: var(--color-border); }
-  .task-progress span { display: block; height: 100%; background: var(--color-accent); transform-origin: left; animation: progress var(--demo-duration) both; animation-delay: calc(var(--order) * var(--dur-3) * 3); }
-  .devices { display: grid; grid-template-columns: minmax(0, 1.6fr) 40px minmax(0, 1fr); align-items: center; min-height: 296px; }
-  .device-label { display: flex; align-items: center; gap: 6px; font-size: var(--text-xs); color: var(--color-muted-foreground); margin-bottom: 10px; }
-  .device-chat { padding: 14px; }
-  .device-chat p { margin-top: 7px; }
-  .form-preview { margin-top: 15px; padding: 10px; border: 1px solid var(--color-border); border-radius: var(--radius-md); font-size: var(--text-xs); }
-  .form-input { margin: 7px 0; padding: 6px; border: 1px solid var(--color-edge); border-radius: var(--radius-sm); color: var(--color-muted-foreground); }
-  .monitor-foot { width: 55px; height: 16px; margin: auto; border-bottom: 3px solid var(--color-edge); background: linear-gradient(90deg, transparent 40%, var(--color-edge) 40%, var(--color-edge) 60%, transparent 60%); }
-  .sync-link svg { width: 100%; stroke: var(--color-accent); fill: none; stroke-width: 2; }
-  .sync-link circle { fill: var(--color-accent); stroke: none; animation: sync var(--demo-duration) both; }
-  .phone-device { position: relative; align-self: center; min-height: 258px; padding: 12px 10px 24px; border: 2px solid var(--color-edge); border-radius: 23px; background: var(--color-surface-2); }
-  .phone-speaker { width: 30%; height: 4px; border-radius: 5px; background: var(--color-edge); margin: 0 auto 15px; }
-  .phone-device .device-label { justify-content: center; text-align: center; }
-  .phone-message { padding-top: 14px; border-top: 1px solid var(--color-border); animation: second var(--demo-duration) both; }
-  .phone-message p { margin: 10px 0; }
-  .phone-home { position: absolute; bottom: 9px; width: 32%; height: 3px; left: 34%; border-radius: 3px; background: var(--color-edge); }
-  .received { display: flex; align-items: center; gap: 5px; color: var(--color-success); font-size: var(--text-xs); }
+  .tasks { margin: 0; padding: 0; list-style: none; border: 1px solid var(--color-edge); border-radius: var(--radius-lg); background: var(--color-surface-2); }
+  .task { --delay: calc(var(--order) * var(--dur-3) * 2); display: flex; align-items: center; gap: 11px; padding: 11px 14px; }
+  .task + .task { border-top: 1px solid var(--color-border); }
+  .task strong { flex: 1; min-width: 0; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .task-state { display: grid; justify-items: end; color: var(--color-muted-foreground); }
+  .task-working, .task-done { grid-area: 1 / 1; display: flex; align-items: center; gap: 6px; white-space: nowrap; animation: first var(--demo-duration) both var(--delay); }
+  .task-done { color: var(--color-success); animation-name: second; }
+  .spinner { display: block; width: 12px; height: 12px; border: 2px solid var(--color-edge); border-top-color: var(--color-accent); border-radius: 50%; animation: spin calc(var(--dur-3) * 4) linear 4; }
+  .devices { display: flex; align-items: flex-end; justify-content: center; gap: 12px; padding-top: 4px; }
+  .computer, .phone-side { display: grid; justify-items: center; gap: 0; }
+  .device-label { display: flex; align-items: center; gap: 6px; margin-top: 8px; font-size: var(--text-xs); color: var(--color-muted-foreground); }
+  .monitor, .phone { display: flex; flex-direction: column; gap: 9px; padding: 14px; border: 2px solid var(--color-edge); background: var(--color-surface-2); }
+  .monitor { width: 216px; height: 136px; border-radius: var(--radius-md); }
+  .phone { width: 92px; height: 164px; padding: 22px 10px 10px; border-radius: 18px; }
+  .stand { width: 48px; height: 12px; border-bottom: 3px solid var(--color-edge); background: linear-gradient(90deg, transparent 42%, var(--color-edge) 42%, var(--color-edge) 58%, transparent 58%); }
+  .line { display: block; height: 9px; border-radius: 9px; background: var(--color-edge); }
+  .user-line { align-self: flex-end; width: 58%; background: var(--color-active); }
+  .reply { display: flex; align-items: center; gap: 6px; }
+  .reply .line { flex: 1; }
+  .done { display: grid; place-items: center; width: 22px; height: 22px; margin-top: auto; border-radius: 50%; color: var(--color-background); background: var(--color-success); }
+  .monitor > *, .phone > * { animation: rise var(--demo-duration) both; }
+  .monitor > .reply { animation-name: rise-2; } .monitor > .done { animation-name: rise-3; }
+  .phone > * { animation-name: mirror; } .phone > .reply { animation-name: mirror-2; } .phone > .done { animation-name: mirror-3; }
+  .sync-link { position: relative; align-self: center; width: 44px; height: 2px; margin-bottom: 40px; background: repeating-linear-gradient(90deg, var(--color-edge) 0 5px, transparent 5px 9px); }
+  .sync-link span { position: absolute; top: -3px; left: 0; width: 8px; height: 8px; border-radius: 50%; background: var(--color-accent); animation: sync var(--demo-duration) both; }
   .quiet-desktop { position: relative; padding: 0 0 42px; }
   .background-agent { display: flex; align-items: center; gap: 8px; margin: 0 16px -9px; padding: 9px 12px 16px; background: var(--color-surface-3); border: 1px solid var(--color-border); border-radius: var(--radius-lg) var(--radius-lg) 0 0; color: var(--color-muted-foreground); }
   .notes { position: relative; border: 1px solid var(--color-edge); background: var(--color-surface-2); border-radius: var(--radius-lg); overflow: hidden; padding-bottom: 18px; box-shadow: var(--shadow-e1); }
@@ -241,16 +238,6 @@
   .notification div { display: grid; gap: 2px; }
   .notification strong { font-size: var(--text-xs); }
   .notification > :global(svg:last-child) { color: var(--color-success); }
-  .privacy-diagram { display: flex; gap: 18px; align-items: center; padding: 16px; border: 1px solid var(--color-edge); border-radius: var(--radius-lg); background: var(--color-surface-2); }
-  .private-vault { flex: 1; display: flex; align-items: center; gap: 12px; }
-  .vault-icon { position: relative; display: flex; color: var(--color-accent); padding: 10px; background: var(--color-accent-soft); border-radius: var(--radius-lg); }
-  .vault-icon > :global(svg:last-child) { position: absolute; bottom: 7px; right: 5px; background: var(--color-surface-2); border-radius: 4px; }
-  .private-vault strong, .count-example strong { display: block; font-weight: 500; }
-  .private-vault span, .count-example span { display: block; color: var(--color-muted-foreground); font-size: var(--text-xs); margin-top: 3px; }
-  .count-example { padding-left: 18px; border-left: 1px solid var(--color-edge); }
-  .count-example svg { width: 72px; height: 38px; }
-  .count-example path { stroke: var(--color-edge); }
-  .count-example rect { fill: var(--color-accent); transform-box: fill-box; transform-origin: bottom; animation: progress var(--demo-duration) both; }
   figcaption { display: flex; justify-content: flex-end; gap: 4px; margin-top: 7px; }
   figcaption button { display: inline-flex; align-items: center; gap: 5px; color: var(--color-muted-foreground); }
   .paused .stage, .paused .stage :global(*) { animation-play-state: paused !important; }
@@ -261,29 +248,35 @@
   @keyframes menu { 0%, 18%, 52%, 100% { opacity: 0; } 24%, 46% { opacity: 1; } }
   @keyframes agent-point { 0% { opacity: 0; transform: translate(6px, 6px); } 12%, 20% { opacity: 1; transform: none; } 32%, 45% { opacity: 1; transform: translate(0, -50px); } 55%, 100% { opacity: 0; transform: translate(0, -50px); } }
   @keyframes tap { 0% { opacity: 0; transform: translate(5px, 5px); } 12%, 22% { opacity: 1; transform: none; } 30%, 100% { opacity: 0; } }
-  @keyframes hover { 0% { opacity: 0; transform: translate(8px, 6px); } 20%, 100% { opacity: 1; transform: none; } }
+  @keyframes hover { 0% { opacity: 0; transform: translate(8px, 6px); } 8%, 100% { opacity: 1; transform: none; } }
+  @keyframes pop { 0%, 8% { opacity: 0; transform: translateY(6px); } 13%, 100% { opacity: 1; transform: none; } }
   @keyframes waveform { from { transform: scaleY(.2); opacity: .6; } to { transform: scaleY(1); opacity: 1; } }
   @keyframes word { 0%, 28% { opacity: 0; } 32%, 100% { opacity: 1; } }
   @keyframes mic-active { 0%, 12% { box-shadow: 0 0 0 0 transparent; } 20%, 45% { box-shadow: 0 0 0 5px var(--color-accent-soft); } 60%, 100% { box-shadow: 0 0 0 0 transparent; } }
-  @keyframes meter { 0%, 22% { transform: scaleX(0); transform-origin: left; } 45%, 100% { transform: scaleX(1); transform-origin: left; } }
-  @keyframes progress { from { transform: scaleX(.08); } 58%, 100% { transform: scaleX(1); } }
-  @keyframes sync { 0%, 25% { opacity: 0; transform: none; } 30% { opacity: 1; } 52% { opacity: 1; transform: translateX(40px); } 56%, 100% { opacity: 0; transform: translateX(40px); } }
+  @keyframes meter { 0%, 13% { transform: scaleX(0); transform-origin: left; } 35%, 100% { transform: scaleX(1); transform-origin: left; } }
+  @keyframes spin { to { transform: rotate(1turn); } }
+  @keyframes sync { 0%, 32% { opacity: 0; transform: none; } 36% { opacity: 1; } 50% { opacity: 1; transform: translateX(36px); } 54%, 100% { opacity: 0; transform: translateX(36px); } }
+  @keyframes rise { 0% { opacity: 0; transform: translateY(4px); } 8%, 100% { opacity: 1; transform: none; } }
+  @keyframes rise-2 { 0%, 12% { opacity: 0; transform: translateY(4px); } 20%, 100% { opacity: 1; transform: none; } }
+  @keyframes rise-3 { 0%, 24% { opacity: 0; transform: scale(.6); } 32%, 100% { opacity: 1; transform: none; } }
+  @keyframes mirror { 0%, 48% { opacity: 0; transform: translateY(4px); } 56%, 100% { opacity: 1; transform: none; } }
+  @keyframes mirror-2 { 0%, 54% { opacity: 0; transform: translateY(4px); } 62%, 100% { opacity: 1; transform: none; } }
+  @keyframes mirror-3 { 0%, 60% { opacity: 0; transform: scale(.6); } 68%, 100% { opacity: 1; transform: none; } }
   @container (max-width: 400px) {
     .voice-sequence { gap: 8px; font-size: var(--text-xs); } .voice-sequence > span { flex-direction: column; align-items: flex-start; gap: 5px; }
-    .workspace-head { flex-wrap: wrap; } .workspace-head > span { flex-basis: 100%; margin-left: 0; }
+    .task { padding: 10px 12px; gap: 9px; } .task-state { font-size: var(--text-xs); }
     .split-view { grid-template-columns: 1fr; } .chat-side { flex-direction: row; align-items: start; gap: 12px; } .chat-side .user { flex: 1; } .chat-side .assistant { flex: 1; } .file-chip { display: none; }
     .diff-side { border-left: 0; border-top: 1px solid var(--color-edge); } .preview { grid-template-columns: 1fr 1fr; align-items: center; } .preview > span { grid-column: 1; } .preview > div { grid-column: 2; } .old-button { justify-self: stretch; text-align: center; }
-    .devices { grid-template-columns: minmax(0, 1.2fr) 20px minmax(0, 1fr); } .computer-device .chrome { display: none; } .device-chat { padding: 10px; } .form-preview { padding: 6px; } .form-input { overflow: hidden; font-size: 10px; } .phone-device { padding: 10px 8px 24px; } .phone-message .author { gap: 4px; }
-    .privacy-diagram { flex-direction: column; align-items: stretch; gap: 12px; } .count-example { display: flex; align-items: center; gap: 12px; padding: 12px 0 0; border-left: 0; border-top: 1px solid var(--color-border); } .count-example svg { width: 56px; }
+    .devices { gap: 8px; } .monitor { width: 168px; height: 112px; padding: 12px; } .sync-link { width: 24px; }
     .notification { left: 12px; right: 0; gap: 7px; font-size: var(--text-xs); }
     .quota-popup { margin-right: 14px; } .tray-instruction { margin-right: 16px; } .desktop-app { display: none; }
   }
   @media (prefers-reduced-motion: reduce) {
     .stage :global(*) { animation: none !important; }
-    .agent-old, .agent-draft > span:first-child, .before-handoff, .recording-live, .task-working, .spinner, .agent-menu, .pointer, .sync-link circle { opacity: 0; }
+    .agent-old, .agent-draft > span:first-child, .before-handoff, .recording-live, .task-working, .agent-menu, .pointer, .sync-link span { opacity: 0; }
     figcaption { display: none; }
   }
   :global(html[data-motion="reduced"]) .stage :global(*) { animation: none !important; }
-  :global(html[data-motion="reduced"]) :is(.agent-old, .agent-draft > span:first-child, .before-handoff, .recording-live, .task-working, .spinner, .agent-menu, .pointer, .sync-link circle) { opacity: 0; }
+  :global(html[data-motion="reduced"]) :is(.agent-old, .agent-draft > span:first-child, .before-handoff, .recording-live, .task-working, .agent-menu, .pointer, .sync-link span) { opacity: 0; }
   :global(html[data-motion="reduced"]) figcaption { display: none; }
 </style>
