@@ -71,15 +71,19 @@
   }
 
   async function save() {
-    // The Settings tab saves beside the runtime card, which may have moved the revision and the
-    // model since this form opened: keep the record's current route rather than the one we read.
+    // A profile's Settings tab saves beside the runtime card, which may have moved the revision and
+    // the model since this form opened: keep the current route and revision, but only while every
+    // field this form edits is unchanged. Anything else keeps the revision it read, so a stale
+    // form is refused rather than written over newer values.
     const latest = stored();
-    const version = initial.record ? { id: initial.record.id, expectedRevision: (latest ?? initial.record).revision } : {};
+    const edited = (r: AgentProfile) => JSON.stringify([r.name, r.domain, r.instructions, r.status, r.tools, r.accountIntegration]);
+    const rebase = kind === 'profile' && latest && profile && edited(latest as AgentProfile) === edited(profile);
+    const version = initial.record ? { id: initial.record.id, expectedRevision: (rebase ? latest : initial.record).revision } : {};
     let result: AgentEntities[AgentEntryKind] | null = null;
-    if (kind === 'profile') result = await view.call('agents.profile.save', { ...version, value: { name, domain, instructions, avatar: profile?.avatar ?? '', selection: creating ? selection : (latest as AgentProfile | undefined)?.selection ?? selection, status, tools, accountIntegration } });
+    if (kind === 'profile') result = await view.call('agents.profile.save', { ...version, value: { name, domain, instructions, avatar: profile?.avatar ?? '', selection: creating || !rebase ? selection : (latest as AgentProfile).selection, status, tools, accountIntegration } });
     if (kind === 'group') result = await view.call('agents.group.save', { ...version, value: { name, memberIds, mode, maxTurns, maxTurnsPerAgent: perAgent, paused } });
     if (kind === 'team') result = await view.call('agents.team.save', { ...version, value: { name, description, members: memberIds.map(agentId => ({ agentId, responsibility: responsibilities[agentId] ?? '' })), groupId, projectIds, paused } });
-    if (kind === 'mission') result = await view.call('agents.mission.save', { ...version, value: { title: name, objective, expectedResult, agentIds: memberIds, teamId, projectId, status: mission?.status ?? 'open', maxTurns, maxDurationMs: Math.round(minutes * 60000), maxTokens: tokens || null, resourceIds: resourceIds.filter(id => resourceOptions.some(r => r.id === id)) } });
+    if (kind === 'mission') result = await view.call('agents.mission.save', { ...version, value: { title: name, objective, expectedResult, agentIds: memberIds, teamId, projectId, status: (latest as AgentMission | undefined)?.status ?? mission?.status ?? 'open', maxTurns, maxDurationMs: Math.round(minutes * 60000), maxTokens: tokens || null, resourceIds: resourceIds.filter(id => resourceOptions.some(r => r.id === id)) } });
     if (result) ondone({ kind, id: result.id });
   }
 </script>
