@@ -1,3 +1,5 @@
+import { strings } from './strings';
+
 export type UpdateChannel = 'stable' | 'nightly';
 
 export type UpdatePhase =
@@ -328,3 +330,12 @@ export const appUpdater = new AppUpdater(
   systemClock,
   showAppUpdateUi
 );
+
+/**
+ * The name the app goes by: a nightly build is "boite (de nuit)" wherever it
+ * says its own name, like the shell's window title and tray. The update card
+ * still names the track Boite Nightly.
+ */
+export function appName(): string {
+  return appUpdater.snapshot.currentChannel === 'nightly' ? strings.app.nightlyName : strings.app.name;
+}

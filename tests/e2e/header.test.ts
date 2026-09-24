@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { join } from 'node:path';
 import { BrowserPage, freePort } from './lib/cdp';
-import { startUi } from './lib/ui';
+import { startDevUi } from './lib/ui.ts';
 
 let server: { close(): Promise<void> };
 let page: BrowserPage;
@@ -19,7 +19,7 @@ async function capture(name: string) {
 }
 beforeAll(async () => {
   const port = await freePort();
-  server = await startUi(port, { development: true });
+  server = await startDevUi(port);
   url = `http://127.0.0.1:${port}/?fake=1&open=recent&long=1&machines=1`;
   page = await BrowserPage.launch({ url, windowSize: { width: 1310, height: 820 } });
   await page.waitFor(`document.querySelector('${id('timeline')}')`);

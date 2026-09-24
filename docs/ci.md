@@ -93,14 +93,12 @@ server would otherwise empty `packages/ui/node_modules/.vite` under the
 servers of the other workers. It also builds the fake-client bundle that
 `BOITE_E2E_FAKE_UI` hands to every worker. Warming under a `NODE_ENV` other
 than `test`, the one `bun test` sets, changes Vite's config hash and brings the
-race back. Every dev server still transforms the UI sources itself, so hooks
-that start one allow at least 60 s: with three workers busy, `composer-activity`
-took more than 30 s to open its page on 2026-09-22.
-Fake UI tests share `startUi` and the warmed test bundle. Tests that import source
-modules pass `{ sourceModules: true }`, bypassing both `BOITE_E2E_FAKE_UI` and
-the prebuilt fixture. Their dev server warms the entry and fake-client import
-graphs during setup, before the browser navigation deadline. The header and
-harness-update setup hooks allow 120 s for this preparation.
+race back. Every file that only drives the page serves that bundle through
+`startUi`. A file whose page imports `/src/...`, or blocks a module by its
+source URL, needs a dev server: `startDevUi` transforms every module the page
+can load before its hook returns, and that hook allows 60 s. Before this, the
+cold transform ran inside the first browser launch: on 2026-09-24 it outran the
+30 s test hook of `app-updates` or `harness-updates` in three failed runs.
 
 When Cargo uses a shared target directory, staging snapshots its shell into the
 checkout before the tests. Another checkout's later build cannot replace it.
@@ -114,8 +112,8 @@ These are cache and job boundaries, not a promise of a particular runner time.
 Measure actual workflow durations after the first cold and warm runs on GitHub.
 
 Browser tests wait for committed navigation and resolved asynchronous conditions.
-They disable background timer throttling and report page state and JavaScript
-errors on an unmet condition. Windows setup has an explicit startup timeout.
+They disable background timer throttling and report page state, JavaScript
+errors and the requests still in flight on an unmet condition. Windows setup has an explicit startup timeout.
 The hidden shell test
 passes `BOITE_SHELL_DEBUG_PORT` through WebView2's API because elevated runners
 ignore environment-based WebView2 debug switches. Normal launches ignore this
@@ -123,9 +121,9 @@ test port. Hardware audio tests skip hosts without a default render endpoint;
 the guard logic tests still run. Scripted Claude tests use Bun as their available
 executable and never need a real CLI or login.
 
-## boite de nuit
+## boite (de nuit)
 
-The `boite de nuit` workflow runs daily at 03:23 UTC and also accepts manual
+The `boite (de nuit)` workflow runs daily at 03:23 UTC and also accepts manual
 `workflow_dispatch` runs on `main`. Both entry points are enabled by default.
 Set the repository variable `NIGHTLY_ENABLED` to `false` to stop both entry
 points. Removing it or setting it to `true` enables them again.
@@ -133,7 +131,7 @@ points. Removing it or setting it to `true` enables them again.
 Before building, the workflow compares the selected commit with published
 nightly releases. An unchanged commit skips the expensive jobs. Failed builds
 have no published release and are retried next time. For example, the first build
-on September 15 is `boite de nuit v2.0.0-nightly.20260915.1`; a new commit that day
+on September 15 is `boite (de nuit) v2.0.0-nightly.20260915.1`; a new commit that day
 gets `.2`. The counter resets the next UTC day. The base `2.0.0` comes from the
 manifest, without its stable prerelease suffix.
 

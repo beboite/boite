@@ -1,11 +1,9 @@
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { join } from 'node:path';
-import { createRequire } from 'node:module';
 import { BrowserPage, freePort } from './lib/cdp.ts';
+import { startDevUi } from './lib/ui.ts';
 
-const uiRequire = createRequire(join(import.meta.dir, '../../packages/ui/package.json'));
-const { createServer } = await import(uiRequire.resolve('vite'));
-let server: { listen(): Promise<unknown>; close(): Promise<void> };
+let server: { close(): Promise<void> };
 let page: BrowserPage;
 const id = (name: string) => `[data-testid="${name}"]`;
 async function size(phone: boolean) {
@@ -24,8 +22,7 @@ async function command(text: string) {
 }
 beforeAll(async () => {
   const port = await freePort();
-  server = await createServer({ root: join(import.meta.dir, '../../packages/ui'), server: { host: '127.0.0.1', port, strictPort: true }, clearScreen: false });
-  await server.listen();
+  server = await startDevUi(port);
   page = await BrowserPage.launch({ url: `http://127.0.0.1:${port}/?fake=1&open=recent` });
   await page.waitFor(`document.querySelector('${id('new-thread')}')`);
   await size(false);

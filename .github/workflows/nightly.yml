@@ -1,4 +1,4 @@
-name: boite de nuit
+name: boite (de nuit)
 
 on:
   schedule:
@@ -123,5 +123,5 @@ jobs:
             gh release upload "$RELEASE_TAG" ./*.exe ./*.sig latest.json SHA256SUMS.txt --clobber
             gh release edit "$RELEASE_TAG" --draft=false --prerelease --latest=false
           else
-            gh release create "$RELEASE_TAG" ./*.exe ./*.sig latest.json SHA256SUMS.txt --target "$GITHUB_SHA" --title "boite de nuit $RELEASE_TAG" --prerelease --latest=false --notes-file release-notes.md
+            gh release create "$RELEASE_TAG" ./*.exe ./*.sig latest.json SHA256SUMS.txt --target "$GITHUB_SHA" --title "boite (de nuit) $RELEASE_TAG" --prerelease --latest=false --notes-file release-notes.md
           fi

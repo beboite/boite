@@ -1,11 +1,9 @@
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { join } from 'node:path';
-import { createRequire } from 'node:module';
 import { BrowserPage, freePort } from './lib/cdp.ts';
+import { startUi } from './lib/ui.ts';
 
-const uiRequire = createRequire(join(import.meta.dir, '../../packages/ui/package.json'));
-const { createServer } = await import(uiRequire.resolve('vite'));
-let server: { listen(): Promise<unknown>; close(): Promise<void> };
+let server: { close(): Promise<void> };
 let page: BrowserPage;
 let origin = '';
 
@@ -48,8 +46,7 @@ async function openLimits() {
 
 beforeAll(async () => {
   const port = await freePort();
-  server = await createServer({ root: join(import.meta.dir, '../../packages/ui'), server: { host: '127.0.0.1', port, strictPort: true }, clearScreen: false });
-  await server.listen();
+  server = await startUi(port);
   origin = `http://127.0.0.1:${port}`;
   page = await BrowserPage.launch({ url: `${origin}/?fake=1`, windowSize: { width: 1280, height: 800 } });
   await scheme('dark');
