@@ -2,6 +2,8 @@
 
 These 2026-09-24 diagnostics explain failures seen in the [large-site experiment](2026-09-24-browser-lab-protocol.md). They are deterministic probes, not autonomous task successes.
 
+These probes use agent-browser 0.38.1. The installed Jev Browser plugin still pins 0.37.1; these results describe the newer experimental controller, not the shipped Jev daemon.
+
 ## Native ZIP downloads on Windows
 
 Four fresh, hidden Edge 153 profiles used native agent-browser 0.38.1 clicks on the same observed Playwright release asset. A separate CDP connection configured the destination before the click and matched download events by GUID.
@@ -46,3 +48,5 @@ After all scored campaigns ended, the default factory adopted the independent na
 The default factory's live Wikipedia regression read a 1,100,000-character native response and then another successful command while the launch owner's socket stayed open. A deliberately invalid capture target then exercised the new fallback: direct CDP capture reported its failure, and the original native screenshot saved a viewed 1280 by 800 PNG. Later captures use that fallback instead of repeating the broken adapter. Only screenshots are retried; no page action is replayed. Cleanup ended at zero.
 
 The recorder now records its own follow-target errors without replacing the wrapped action's result or error. Its regression and the capture fallback regression both failed before their fixes and passed afterward. These changes are included in subsequent recordings, not retroactively counted in any scored campaign. `bun test bench/browser-lab-capture.test.ts bench/browser-lab-recording.test.ts` passed 11 assertions across two unit tests. The live native transport and capture-fallback check passed 20 assertions across six tests.
+
+A later live regression first established a successful direct-capture session and then injected a bad target. Closing the adapter socket during fallback restored the browser's dark preference, reproducing a review finding. The corrected fallback retains existing sessions until engine shutdown and restores rendering through the underlying engine before capturing. The same check then returned `[1280, 800, false]` for width, height and dark-mode preference, with a viewed light-mode PNG and zero remaining processes. The extended transport test passed 21 assertions. Campaign and demonstration outcomes remain tied to their original frozen sources.

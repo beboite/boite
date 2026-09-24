@@ -59,7 +59,12 @@ export async function useDirectCapture(engine: BrowserLabEngine, log: (entry: Br
       // same timeout on every later observation; never replay a page action.
       fallback = true;
       engine.metadata.directCaptureFallback = String(error);
-      fail('Direct capture disabled after failure.'); socket.close(); sessions.clear();
+      // Retain successful emulation sessions until shutdown. Detaching them
+      // here can restore the browser's theme in the middle of an observation.
+      fail('Direct capture disabled after failure.');
+      // An already disconnected socket cannot retain its sessions. Restore
+      // rendering through the underlying engine before the fallback capture.
+      await command('prepare_observation');
       return command(action, args);
     }
   };

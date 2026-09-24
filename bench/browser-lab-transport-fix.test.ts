@@ -111,6 +111,9 @@ live('native French Apollo 11 observation survives its large snapshot and cleans
     const activeTargetId = engine.activeTargetId;
     try {
       await useDirectCapture(engine, entry => commands.push(entry));
+      // Establish an emulation session before the later failure. Detaching that
+      // successful session during fallback must not change the page layout.
+      await engine.command('screenshot', { path: join(output, 'direct-before-fallback.png') });
       engine.activeTargetId = async () => '00000000000000000000000000000000';
       const capture = join(output, 'capture-fallback.png');
       await engine.command('screenshot', { path: capture });
@@ -119,6 +122,8 @@ live('native French Apollo 11 observation survives its large snapshot and cleans
       summary.captureDimensions = [png.readUInt32BE(16), png.readUInt32BE(20)];
       expect(String(summary.captureFallback)).toContain('Capture CDP');
       expect(summary.captureDimensions).toEqual([1280, 800]);
+      summary.captureState = (await engine.command('evaluate', { script: '[innerWidth, innerHeight, matchMedia("(prefers-color-scheme: dark)").matches]' })).result;
+      expect(summary.captureState).toEqual([1280, 800, false]);
     } finally { engine.activeTargetId = activeTargetId; }
   } finally {
     if (engine) { await engine.close(); summary.processesAfter = harness.core.procs.liveCount(engine.processGroup); }

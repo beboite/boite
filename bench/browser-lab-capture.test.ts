@@ -26,7 +26,7 @@ test('a failed CDP attachment falls back to engine capture without replaying pag
     expect(await engine.command('screenshot', { path: 'first.png' })).toEqual({ source: 'engine', action: 'screenshot' });
     expect(await engine.command('screenshot', { path: 'second.png' })).toEqual({ source: 'engine', action: 'screenshot' });
     expect(attaches).toBe(1);
-    expect(calls).toEqual(['click', 'screenshot', 'screenshot']);
+    expect(calls).toEqual(['click', 'prepare_observation', 'screenshot', 'screenshot']);
     expect(engine.metadata.directCaptureFallback).toContain('Target attach failed');
     expect(logs.some(entry => entry.success === false)).toBe(true);
   } finally { await engine.close(); server.stop(true); }

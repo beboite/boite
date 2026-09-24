@@ -4,6 +4,15 @@ The four-arm comparison completed 64 scored attempts on eight workflows. Playwri
 
 All arms used GPT-6 Luna, max reasoning, priority service, the existing ChatGPT subscription, fresh logged-out Edge 153 profiles, a 180-second execution budget and at most 60 actions. Installed versions were agent-browser 0.38.1 and Playwright 1.63.0. Read the [protocol](2026-09-24-browser-lab-protocol.md) for task limits, model transport, source freezing and exclusions. [Per-attempt results](2026-09-24-browser-lab.json) contain all criterion decisions, viewed capture IDs, evidence hashes, usage and cleanup checks.
 
+## Actual recordings
+
+Two separate Astra/native-controller trials passed all six requirements under independent review. They are continuous browser screencasts at normal speed, including waits, not part of the timing comparison. Every frame decoded successfully; both encoders and all owned browser/model processes closed.
+
+- [Wikipedia, 50.4 seconds](https://pub-15ca30b4efbf4285a292416a3e0e6c38.r2.dev/202609/08934422343bd39b705b3fa3e7fe9c80/recording.mp4): search, French language switch, revision history in a second tab, and NASA reference in a third.
+- [Google Flights, 113.9 seconds](https://pub-15ca30b4efbf4285a292416a3e0e6c38.r2.dev/202609/47ae6df947629781e2ab0415f7eb76b5/recording.mp4): exact dates, two adults, nonstop filter, both Air France legs and the EUR 464 total. Two covered-element click errors and recovery remain in the recording. No booking provider was opened.
+
+The two recordings use the post-campaign transport and recorder corrections from commit `45fdc4e`. They do not replace any failed attempt. Short unaccelerated excerpts also appear in [PR 57](https://github.com/beboite/boite/pull/57).
+
 ## Completed workflows
 
 Each cell has two attempts. A pass requires all three task requirements, an actual completed model turn, no task error, and clean shutdown.

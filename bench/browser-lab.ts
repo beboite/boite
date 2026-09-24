@@ -142,10 +142,11 @@ async function main() {
   } finally {
     clearInterval(stopWatcher);
     process.off('SIGINT', onInterrupt); process.off('SIGTERM', onTerminate);
-    await model.close();
-    writeFileSync(join(output, 'model-diagnostics.log'), model.diagnostics.join(''));
-    writeFileSync(join(output, 'cleanup.json'), JSON.stringify({ stopReason, completedTrials: summaries.length, modelGroups: modelGroups.map(group => ({ group, remaining: harness.core.procs.liveCount(group) })) }));
-    try { await harness.stop(); } finally { context.close(); }
+    try {
+      await model.close();
+      writeFileSync(join(output, 'model-diagnostics.log'), model.diagnostics.join(''));
+      writeFileSync(join(output, 'cleanup.json'), JSON.stringify({ stopReason, completedTrials: summaries.length, modelGroups: modelGroups.map(group => ({ group, remaining: harness.core.procs.liveCount(group) })) }));
+    } finally { try { await harness.stop(); } finally { context.close(); } }
   }
 }
 await main();
