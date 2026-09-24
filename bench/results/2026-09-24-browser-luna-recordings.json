@@ -1,0 +1,459 @@
+{
+  "schema": 1,
+  "campaignDate": "2026-09-24T13:24:26.281Z",
+  "complete": true,
+  "totals": {
+    "expected": 4,
+    "completed": 4,
+    "pending": 0,
+    "successful": 3,
+    "toolCalls": 17,
+    "batchCommandsRequested": 24,
+    "batchCommandsExecuted": 17,
+    "actions": 17
+  },
+  "modes": {
+    "luna": {
+      "expected": 2,
+      "completed": 2,
+      "pending": 0,
+      "successful": 2,
+      "successfulTimingMs": {
+        "medianMs": 49582.45190000001,
+        "minMs": 23745.4694,
+        "maxMs": 75419.43440000001
+      },
+      "allTimingMs": {
+        "n": 2,
+        "medianMs": 49582.45190000001,
+        "p90Ms": 75419.43440000001,
+        "minMs": 23745.4694,
+        "maxMs": 75419.43440000001
+      },
+      "failedTimingMs": {
+        "n": 0,
+        "medianMs": null,
+        "p90Ms": null,
+        "minMs": null,
+        "maxMs": null
+      },
+      "fallback": 0,
+      "fallbackSuccessful": 0,
+      "jevOnly": 0,
+      "jevOnlySuccessful": 0
+    },
+    "hybrid": {
+      "expected": 2,
+      "completed": 2,
+      "pending": 0,
+      "successful": 1,
+      "successfulTimingMs": {
+        "medianMs": 33471.8524,
+        "minMs": 33471.8524,
+        "maxMs": 33471.8524
+      },
+      "allTimingMs": {
+        "n": 2,
+        "medianMs": 61727.43224999998,
+        "p90Ms": 89983.01209999996,
+        "minMs": 33471.8524,
+        "maxMs": 89983.01209999996
+      },
+      "failedTimingMs": {
+        "n": 1,
+        "medianMs": 89983.01209999996,
+        "p90Ms": 89983.01209999996,
+        "minMs": 89983.01209999996,
+        "maxMs": 89983.01209999996
+      },
+      "fallback": 2,
+      "fallbackSuccessful": 1,
+      "jevOnly": 0,
+      "jevOnlySuccessful": 0
+    }
+  },
+  "paired": {
+    "expected": 2,
+    "completed": 2,
+    "pending": 0,
+    "directSuccessful": 2,
+    "hybridSuccessful": 1,
+    "bothSuccessful": 1,
+    "bothSuccessfulTimingMs": {
+      "direct": {
+        "medianMs": 23745.4694,
+        "minMs": 23745.4694,
+        "maxMs": 23745.4694
+      },
+      "hybrid": {
+        "medianMs": 33471.8524,
+        "minMs": 33471.8524,
+        "maxMs": 33471.8524
+      }
+    }
+  },
+  "modelAudit": {
+    "expectedOnCompletedTrials": 4,
+    "recordedLegs": 4,
+    "missingRecords": 0,
+    "acknowledged": 4,
+    "turnStatuses": {
+      "completed": 4
+    },
+    "unexpectedToolCount": 0,
+    "tokenUsage": {
+      "totalTokens": 647111,
+      "inputTokens": 641039,
+      "cachedInputTokens": 568064,
+      "cacheWriteInputTokens": 0,
+      "outputTokens": 6072,
+      "reasoningOutputTokens": 5249
+    },
+    "uncachedInputTokens": 72975,
+    "inconsistentUsageTrials": 0
+  },
+  "cleanup": {
+    "browserZero": 4,
+    "browserNonzeroOrMissing": 0,
+    "codexProcessesAfter": 0
+  },
+  "possibleCriterionAlias": [],
+  "protocol": {
+    "tasks": 2,
+    "repetitions": 1,
+    "modes": [
+      "luna",
+      "hybrid"
+    ],
+    "recorded": true,
+    "model": "gpt-6-luna",
+    "effort": "max",
+    "serviceTier": "priority",
+    "browserDriver": {
+      "name": "agent-browser",
+      "version": "0.37.1",
+      "transport": "native daemon JSONL"
+    },
+    "modelCatalogue": {
+      "model": "gpt-6-luna",
+      "supportsMax": true,
+      "supportsPriority": true
+    },
+    "policy": {
+      "direct": "Luna controls a fresh browser for the whole task.",
+      "hybrid": "Jev runs for at most 10 steps or 15 seconds; Luna resumes the same browser after handoff or error.",
+      "sharedActionLimit": 30,
+      "sharedExecutionLimitMs": 120000,
+      "viewport": {
+        "width": 1280,
+        "height": 800
+      },
+      "graderTriggersFallback": false,
+      "lunaReceivesRenderedFieldMetadata": true
+    },
+    "hashes": {
+      "browserBinary": "29a003139ff4eb96fa4d1ed341830b26eb3e082843bf776b4e88ad3443bb8fde",
+      "runner": "4ce27aa5e7b61bde2e60817fde458f0ecadcdf13198837dc3bcebc35ce8bf06b",
+      "codexTransport": "5d890c7880208e0f812d8c99599154e0a4b5b8802db781a11fdfb3aebfb3187b",
+      "pageAdapter": "86296a8705b895ab13b91ffc0324e39809303169ad47f6fb4c11e8a04462b84b",
+      "taskManifest": "3601c3f774d8cce219297a2a45bab63440dde7fe7febb2f061be3edd27cfe46e",
+      "grader": "91eb29e5636fe1bcc5df876de4a282da61083e66d2830fa20c70b0f4c6d0181c",
+      "jevLoop": "45f273f000b16933737083675126e39203cdf127a830198bd4c72f67d2151ba4"
+    }
+  },
+  "pending": [],
+  "attempts": [
+    {
+      "task": "calculatornet-bmi",
+      "site": "Calculator.net",
+      "category": "calculator-tabs",
+      "mode": "luna",
+      "run": 1,
+      "verified": true,
+      "fallback": false,
+      "jevOutcome": null,
+      "timingMs": {
+        "startup": 1275.1747,
+        "execution": 22470.294700000002,
+        "total": 23745.4694,
+        "jev": null
+      },
+      "counts": {
+        "actions": 4,
+        "jevDecisions": 0,
+        "toolCalls": 2,
+        "batchCommandsRequested": 4,
+        "batchCommandsExecuted": 4
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "completed",
+        "timedOut": false,
+        "tokenUsage": {
+          "totalTokens": 77331,
+          "inputTokens": 76649,
+          "cachedInputTokens": 67840,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 682,
+          "reasoningOutputTokens": 560
+        },
+        "uncachedInputTokens": 8809,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://www.calculator.net/bmi-calculator.html",
+        "urlQueryRedacted": true,
+        "title": "BMI Calculator",
+        "graderChecks": [
+          true,
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "graderPassed": true,
+        "controls": {
+          "#cage": [
+            {
+              "value": "35",
+              "checked": false
+            }
+          ],
+          "#cheightmeter": [
+            {
+              "value": "180",
+              "checked": false
+            }
+          ],
+          "#ckg": [
+            {
+              "value": "75",
+              "checked": false
+            }
+          ],
+          "#csex1": [
+            {
+              "value": "m",
+              "checked": true
+            }
+          ],
+          "#ctype": [
+            {
+              "value": "metric",
+              "checked": false
+            }
+          ]
+        },
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "calculatornet-bmi",
+      "site": "Calculator.net",
+      "category": "calculator-tabs",
+      "mode": "hybrid",
+      "run": 1,
+      "verified": true,
+      "fallback": true,
+      "jevOutcome": "needs-agent",
+      "timingMs": {
+        "startup": 1302.8983999999982,
+        "execution": 32168.954000000005,
+        "total": 33471.8524,
+        "jev": 2791.005799999999
+      },
+      "counts": {
+        "actions": 8,
+        "jevDecisions": 6,
+        "toolCalls": 2,
+        "batchCommandsRequested": 4,
+        "batchCommandsExecuted": 4
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "completed",
+        "timedOut": false,
+        "tokenUsage": {
+          "totalTokens": 77825,
+          "inputTokens": 77075,
+          "cachedInputTokens": 64768,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 750,
+          "reasoningOutputTokens": 640
+        },
+        "uncachedInputTokens": 12307,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://www.calculator.net/bmi-calculator.html",
+        "urlQueryRedacted": true,
+        "title": "BMI Calculator",
+        "graderChecks": [
+          true,
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "graderPassed": true,
+        "controls": {
+          "#cage": [
+            {
+              "value": "35",
+              "checked": false
+            }
+          ],
+          "#cheightmeter": [
+            {
+              "value": "180",
+              "checked": false
+            }
+          ],
+          "#ckg": [
+            {
+              "value": "75",
+              "checked": false
+            }
+          ],
+          "#csex1": [
+            {
+              "value": "m",
+              "checked": true
+            }
+          ],
+          "#ctype": [
+            {
+              "value": "metric",
+              "checked": false
+            }
+          ]
+        },
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "w3c-css-recommendation",
+      "site": "W3C",
+      "category": "filters-and-accordion",
+      "mode": "luna",
+      "run": 1,
+      "verified": true,
+      "fallback": false,
+      "jevOutcome": null,
+      "timingMs": {
+        "startup": 1744.1212999999989,
+        "execution": 73675.31310000001,
+        "total": 75419.43440000001,
+        "jev": null
+      },
+      "counts": {
+        "actions": 5,
+        "jevDecisions": 0,
+        "toolCalls": 7,
+        "batchCommandsRequested": 10,
+        "batchCommandsExecuted": 7
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "completed",
+        "timedOut": false,
+        "tokenUsage": {
+          "totalTokens": 275913,
+          "inputTokens": 273424,
+          "cachedInputTokens": 238592,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 2489,
+          "reasoningOutputTokens": 2145
+        },
+        "uncachedInputTokens": 34832,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://www.w3.org/TR/css-color-3/",
+        "urlQueryRedacted": false,
+        "title": "CSS Color Module Level 3",
+        "graderChecks": [
+          true,
+          true,
+          true
+        ],
+        "graderPassed": true,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "w3c-css-recommendation",
+      "site": "W3C",
+      "category": "filters-and-accordion",
+      "mode": "hybrid",
+      "run": 1,
+      "verified": false,
+      "fallback": true,
+      "jevOutcome": "error",
+      "timingMs": {
+        "startup": 1857.6100999999908,
+        "execution": 88125.40199999997,
+        "total": 89983.01209999996,
+        "jev": 15475.881300000008
+      },
+      "counts": {
+        "actions": null,
+        "jevDecisions": 9,
+        "toolCalls": 6,
+        "batchCommandsRequested": 6,
+        "batchCommandsExecuted": 2
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "completed",
+        "timedOut": false,
+        "tokenUsage": {
+          "totalTokens": 216042,
+          "inputTokens": 213891,
+          "cachedInputTokens": 196864,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 2151,
+          "reasoningOutputTokens": 1904
+        },
+        "uncachedInputTokens": 17027,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": null,
+        "urlQueryRedacted": false,
+        "title": null,
+        "graderChecks": [],
+        "graderPassed": false,
+        "controls": {},
+        "errorCategory": "connection",
+        "recordingErrorCategory": "connection"
+      }
+    }
+  ]
+}

@@ -114,6 +114,11 @@ The [public-site evaluation](../bench/results/2026-09-24-browser-wide.md) ran
 Six attempts had incorrect test criteria; six separate reruns passed after
 correcting those criteria. Unnamed fields, large control lists and premature
 completion still cause failures. Live recordings show successes and a failure.
+The [Luna max Fast comparison](../bench/results/2026-09-24-browser-luna.md)
+adds 120 public-site trials of direct Luna and Jev with Luna fallback, plus
+separate live recordings. Both policies pass 43/60 frozen automatic checks;
+the report distinguishes verifier defects, blocked sites and driver failures.
+These policies are benchmark prototypes and are not plugin settings.
 Linux and macOS use the driver's Unix socket transport, but their
 browser execution and forced cleanup need platform verification. Windows
 owns the headless browser tree through the native driver's job object.
