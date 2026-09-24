@@ -14,12 +14,12 @@
   let thread = $derived(store.openThread);
   let activity = $derived(thread?.activity ?? null);
   let tasks = $derived(activity?.tasks ?? []);
-  let todos = $derived(thread ? (store.todos[thread.projectId] ?? []) : []);
+  let todos = $derived(thread?.projectId ? (store.todos[thread.projectId] ?? []) : []);
 
   // The project's list is the same for every thread of it, so it is read once
   // when the surface shows and again whenever the thread changes project.
   $effect(() => {
-    const id = thread?.id;
+    const id = thread?.projectId ? thread.id : null;
     if (id) void store.loadTodos(id);
   });
 

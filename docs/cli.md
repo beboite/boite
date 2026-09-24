@@ -59,12 +59,32 @@ boite todo list|add <text>|claim <id>
 boite agents list|inbox
 boite agents send <core-id>/<thread-id> <text>
 boite agents reply <message-id> <text>
+boite agent context|inbox|missions
+boite agent send <recipient-ids|-> <text>
+boite agent reply <message-id> <text>
+boite agent acquire <task-id>
+boite agent submit <task-id> <assignment-generation> <result>
+boite agent artifact <json>
+boite agent decide <json>
+boite agent memory [query]
+boite agent remember <json>
+boite agent routines
+boite agent schedule <json>
 boite delegate profiles|list
 boite delegate spawn <profile-id> <brief>
 boite delegate send <thread-id> <text>
 boite delegate stop [thread-id]
 boite help
 ```
+
+Persistent agents with the `routines` tool enabled can schedule work from their
+direct conversation. `agent schedule` accepts `name`, `prompt`, and `schedule`,
+for example `{"kind":"daily","time":"09:00","timezone":"Europe/Paris"}`.
+Other schedules use `{"kind":"interval","everyMinutes":60}` or
+`{"kind":"once","at":1790240400000}` with a Unix timestamp in milliseconds.
+To edit or pause a routine, include its `id`, `expectedRevision` and `enabled`.
+The host enqueues occurrences even when clients are closed. An unfinished
+occurrence blocks overlap and missed intervals never create a catch-up burst.
 
 Paths are resolved against the current directory and must stay inside the
 thread's working directory; the core refuses the rest by name. `show src/a.ts:12`
@@ -103,6 +123,14 @@ usage error (the usage text on stderr).
 agent can send messages. The directory includes only authorized contacts.
 Replies preserve their message reference and authenticated sender identity.
 
+The singular `agent` commands belong to [persistent agents](agents.md), not
+ordinary thread coordination. They use the calling session's current scope.
+Pass `--request-id <stable-id>` when retrying a send, artifact or decision after
+a lost response. An artifact object contains `missionId`, `taskId`, `title`,
+`summary`, `paths`, `commit` and `verification`. A decision contains `prompt`
+and `options`; it yields execution until the user answers. A memory contains
+`title` and `text`, with `id` and `expectedRevision` for an edit. The core adds
+the source context. Use `--json` to preserve the structured result.
 [Delegation](delegation.md) uses owner-approved model profiles and a separate
 team budget. Children share the parent's checkout, retain their own sessions,
 and return bounded results automatically. `delegate stop` pauses the whole team;

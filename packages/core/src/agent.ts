@@ -93,12 +93,12 @@ export function agentEnvOf(core: Core, threadId: ThreadId, base: Record<string, 
 }
 
 function whereOf(core: Core, thread: ThreadSummary): AgentWhere {
-  const project = core.projects.require(thread.projectId);
+  const project = thread.projectId === null ? null : core.projects.require(thread.projectId);
   return {
     threadId: thread.id,
     title: thread.title,
-    projectId: project.id,
-    projectPath: project.path,
+    projectId: project?.id ?? null,
+    projectPath: project?.path ?? null,
     cwd: thread.cwd,
     branch: thread.branch,
     // A thread only carries a branch when the core placed it in a worktree of

@@ -305,6 +305,7 @@ export async function shellRun(): Promise<ShellRun | null> {
   }
   delete env.BOITE_CORE_COMMAND;
   env.BOITE_SHELL_HIDDEN = '1';
+  env.BOITE_CORE_RESIDENT = '0';
   env.BOITE_DATA_DIR = dataDir;
   env.BOITE_TELEMETRY_URL = '';
   env.BOITE_ECHO = '1';

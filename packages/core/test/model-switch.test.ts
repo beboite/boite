@@ -57,7 +57,7 @@ test('a queued turn keeps its original account and late completion cannot attach
   const { client, threadId, accountId } = await setup();
   h.core.settings.set({ maxConcurrentTurns: 1 });
   const blocker = await client.call('threads.create', {
-    projectId: h.core.threads.require(threadId).projectId, providerId: 'echo', accountId,
+    projectId: h.core.projects.require(h.core.threads.require(threadId).projectId).id, providerId: 'echo', accountId,
   });
   const seen: TurnContext[] = [];
   let finish!: (value: TurnResult) => void;
@@ -150,6 +150,7 @@ test('migration preserves legacy native sessions and persists new selections and
   const path = join(h.dataDir, 'migration.db');
   const legacy = new Journal(path);
   legacy.putThread({ ...h.core.threads.require(threadId), sessionId: 'legacy-session' });
+  legacy.db.exec('DROP TABLE agent_entities; DROP TABLE agent_requests; ALTER TABLE threads DROP COLUMN agent_session_id;');
   legacy.db.exec('DROP TABLE delegated_agents; DROP TABLE delegation_messages; DROP INDEX threads_parent; ALTER TABLE threads DROP COLUMN parent_thread_id;');
   legacy.db.exec('DROP TABLE coordination_letters; DROP TABLE coordination_wakes; DROP TABLE turn_requests; ALTER TABLE threads DROP COLUMN prompt_cache; ALTER TABLE threads DROP COLUMN speed; ALTER TABLE threads DROP COLUMN session_generation; ALTER TABLE threads DROP COLUMN selection_version; ALTER TABLE turns DROP COLUMN execution; PRAGMA user_version = 8;');
   legacy.close();

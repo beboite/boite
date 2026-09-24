@@ -182,7 +182,11 @@ test('the accent persists and colours the effort track continuously to the thumb
   await page.click('[data-testid=settings-tab-appearance]');
   await capture('appearance-accent-phone.png');
   await page.click('[data-testid=accent-260]');
+  const overlay = await page.evaluate<string>('history.state?.boiteOverlay');
   await page.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
+  // The wide layout unmounts the phone panel, which pops its history entry. A navigation sent before
+  // that back() lands is replaced by the old document, and the next test waits on a dead loader.
+  await page.waitFor(`history.state?.boiteOverlay !== ${JSON.stringify(overlay)}`);
 }, 30_000);
 
 

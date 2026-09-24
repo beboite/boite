@@ -50,7 +50,7 @@
 
 
     {#if thread}
-      {#key thread.id}<CoordinationPanel {store} threadId={thread.id} />{/key}
+      {#if !thread.agentSessionId}{#key thread.id}<CoordinationPanel {store} threadId={thread.id} />{/key}{/if}
       <!-- One timeline per thread: the heights it measured and the ids that
            already played the rise belong to that thread alone, and kept across
            a switch they grew for every message the page had ever shown. -->
@@ -85,7 +85,11 @@
     {/if}
 
     {#if thread}<AgentDock {store} threadId={thread.id} />{/if}
-    <Composer {store} centered={!thread} />
+    {#if thread?.agentSessionId}
+      <button class="ghost" onclick={() => store.showAgents()}>{strings.agents.heading}</button>
+    {:else}
+      <Composer {store} centered={!thread} />
+    {/if}
 
     <!-- The draft's heading and composer are one block in the middle of the
          column: the body above and this tail below share the free space. -->

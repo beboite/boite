@@ -144,7 +144,7 @@ test('coordination arrives once through Claude PostToolUse with agent provenance
   scripted(fake => fake.emit(init('coordination-session')));
   const client = await harness.connect();
   const threadId = await claudeThread(client);
-  const projectId = harness.core.threads.require(threadId).projectId;
+  const projectId = harness.core.projects.require(harness.core.threads.require(threadId).projectId).id;
   const account = (await client.call('accounts.list', {})).find(a => a.providerId === 'echo')!;
   const source = await client.call('threads.create', { projectId, providerId: 'echo', accountId: account.id, title: 'Maintenance' });
   const config = { mode: 'brief' as const, resources: 'shared VM', remote: false, paused: false };
@@ -1344,7 +1344,7 @@ test('a new Claude session learns `boite ask` once, and the setting turns it off
   expect(calls[0]!.prompts[1]).toBe('second');
 
   harness.core.settings.set({ asyncQuestions: false, warmProcessMinutes: 0 });
-  const other = await client.call('threads.create', { projectId: harness.core.threads.require(threadId).projectId, providerId: 'claude', accountId: harness.core.threads.require(threadId).accountId, title: 'untaught' });
+  const other = await client.call('threads.create', { projectId: harness.core.threads.require(threadId).projectId!, providerId: 'claude', accountId: harness.core.threads.require(threadId).accountId, title: 'untaught' });
   await client.call('threads.update', { threadId: other.id, title: 'untaught' });
   expect(await runTurn(client, other.id, 'third')).toBe('done');
   expect(calls.at(-1)!.prompts[0]).toBe('third');

@@ -1,3 +1,6 @@
+import type { AgentsRpcMethods, AgentsRpcEvents } from './agents';
+export * from './agents';
+
 /**
  * Boite 2 wire contract: the JSON-RPC methods and events between the core
  * (the host process that runs the agents) and its clients (the desktop shell,
@@ -532,7 +535,9 @@ export interface ThreadSummary {
   lastUserMessageAt?: Timestamp | null;
   pullRequest?: { number: number; url: string; state: 'OPEN' | 'CLOSED' | 'MERGED' } | null;
   id: ThreadId;
-  projectId: ProjectId;
+  projectId: ProjectId | null;
+  /** Only persistent agent sessions have no project. */
+  agentSessionId?: string;
   title: string;
   titleSource: TitleSource;
   providerId: ProviderId;
@@ -607,7 +612,7 @@ export interface UsageHistoryRow {
 export interface UsageHistoryThread {
   threadId: ThreadId;
   title: string;
-  projectId: ProjectId;
+  projectId: ProjectId | null;
   providerId: ProviderId;
   archived: boolean;
   turns: number;
@@ -1228,8 +1233,8 @@ export const AGENT_ENV = {
 export interface AgentWhere {
   threadId: ThreadId;
   title: string;
-  projectId: ProjectId;
-  projectPath: string;
+  projectId: ProjectId | null;
+  projectPath: string | null;
   /** The thread's working directory: the project, or its worktree. */
   cwd: string;
   branch: string | null;
@@ -1526,7 +1531,8 @@ export interface TerminalState {
   output: string;
 }
 
-export interface RpcMethods {
+export interface RpcMethods extends AgentsRpcMethods {
+  'core.shutdown': { params: Record<string, never>; result: { ok: true } };
   'delegation.get': { params: { threadId: ThreadId }; result: DelegationView };
   'delegation.configure': { params: { threadId: ThreadId; config: DelegationConfig }; result: DelegationView };
   'delegation.spawn': { params: { threadId: ThreadId; profileId: string; task: string; title?: string; requestId: string }; result: DelegatedAgent };
@@ -1945,7 +1951,7 @@ export type RpcMethodName = keyof RpcMethods;
 export type RpcParams<M extends RpcMethodName> = RpcMethods[M]['params'];
 export type RpcResult<M extends RpcMethodName> = RpcMethods[M]['result'];
 
-export interface RpcEvents {
+export interface RpcEvents extends AgentsRpcEvents {
   'delegation.changed': { threadId: ThreadId };
   'collaboration.changed': { threadId: ThreadId };
   'thread.activity': { threadId: ThreadId; activity: ThreadActivity };

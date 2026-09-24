@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import type { Project, ThreadId } from '@boite/contracts';
 import type { Core } from './core.ts';
@@ -44,6 +44,34 @@ export interface PlacedWorktree {
  */
 export class Worktrees {
   constructor(private readonly core: Core) {}
+
+  /** Adopt only the exact branch/path recorded before preparation, or create it once. */
+  async ensure(threadId: ThreadId, project: Project, branch: string): Promise<PlacedWorktree> {
+    const path = join(worktreeRoot(project.path), slugOf(branch.slice(BRANCH_PREFIX.length)));
+    const listed = await this.git(threadId, project.path, ['worktree', 'list', '--porcelain', '-z']);
+    if (listed.code !== 0) throw refused(`cannot inspect worktrees in ${project.path}: ${listed.stderr.trim()}`);
+    for (const entry of listed.stdout.split('\0\0')) {
+      const fields = entry.split('\0');
+      const location = fields.find(field => field.startsWith('worktree '))?.slice(9);
+      const name = fields.find(field => field.startsWith('branch '))?.slice(7);
+      if (location && name === `refs/heads/${branch}` && existsSync(location) && existsSync(join(path, '.git'))) {
+        // Git may report a long Windows path while the journal carries its 8.3 alias.
+        const registered = statSync(location, { bigint: true });
+        const expected = statSync(path, { bigint: true });
+        if (registered.ino !== 0n && registered.dev === expected.dev && registered.ino === expected.ino) return { path, branch };
+      }
+      if (location && name === `refs/heads/${branch}` && existsSync(location)) throw refused(`branch ${branch} is already checked out at ${location}; expected ${path}`);
+    }
+    if (await this.branchExists(threadId, project.path, branch)) {
+      if (existsSync(path)) throw refused(`cannot recover ${branch}: ${path} already exists`);
+      // No live checkout uses this branch. One --force permits an obsolete registration,
+      // but does not bypass a locked worktree or overwrite an existing directory.
+      const added = await this.git(threadId, project.path, ['worktree', 'add', '--force', path, branch]);
+      if (added.code !== 0) throw refused(`cannot recover ${branch} at ${path}: ${added.stderr.trim()}`);
+      return { path, branch };
+    }
+    return this.add(threadId, project, branch, branch);
+  }
 
   async add(threadId: ThreadId, project: Project, title: string, wanted?: string): Promise<PlacedWorktree> {
     if (!existsSync(join(project.path, '.git'))) {
@@ -107,16 +135,14 @@ export class Worktrees {
     return result.code === 0;
   }
 
-  private async git(threadId: ThreadId, cwd: string, args: string[]): Promise<{ code: number; stderr: string }> {
+  private async git(threadId: ThreadId, cwd: string, args: string[]): Promise<{ code: number; stderr: string; stdout: string }> {
     let spawned;
     try {
       spawned = this.core.procs.spawn(threadId, 'git', args, { cwd });
     } catch (error) {
       throw refused(`git did not start (${messageOf(error)}): a worktree needs git on PATH`, { cwd, args });
     }
-    const [stderr, code] = await Promise.all([new Response(spawned.proc.stderr).text(), spawned.exited]);
-    // stdout is piped by the registry; drained so a chatty git never blocks on it.
-    await new Response(spawned.proc.stdout).text();
-    return { code, stderr };
+    const [stderr, stdout, code] = await Promise.all([new Response(spawned.proc.stderr).text(), new Response(spawned.proc.stdout).text(), spawned.exited]);
+    return { code, stderr, stdout };
   }
 }

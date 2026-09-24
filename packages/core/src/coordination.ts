@@ -134,6 +134,7 @@ export class Coordination {
   }
   configure(threadId: string, config: CoordinationConfig): CoordinationView {
     const thread = this.core.threads.require(threadId);
+    if (thread.agentSessionId) throw refused('persistent agent sessions collaborate through their group or mission');
     if (thread.archived) throw refused('coordination requires an unarchived thread');
     if (!config || !['off', 'brief', 'team'].includes(config.mode) || typeof config.resources !== 'string' || config.resources.length > 500 || typeof config.remote !== 'boolean' || typeof config.paused !== 'boolean') throw invalidParams('config: expected mode off/brief/team, resources up to 500 characters, remote and paused booleans');
     this.saveConfig(threadId, { mode: config.mode, resources: config.resources, remote: config.remote, paused: config.paused });
@@ -187,7 +188,7 @@ export class Coordination {
     const thread = this.core.threads.require(threadId);
     const config = this.config(threadId);
     if (thread.archived || config.mode === 'off') return { agents: [], unavailable: [] };
-    const local = this.localDirectory(thread.projectId);
+    const local = thread.projectId === null ? [] : this.localDirectory(thread.projectId);
     if (config.remote) for (const contact of this.localDirectory()) if (!local.some(a => same(a, contact))) local.push(contact);
     const agents = local.filter(a => a.threadId !== threadId);
     const unavailable: string[] = [];

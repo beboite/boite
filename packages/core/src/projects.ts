@@ -26,7 +26,8 @@ export class ProjectStore {
     return this.core.journal.listProjects();
   }
 
-  require(projectId: ProjectId): Project {
+  require(projectId: ProjectId | null): Project {
+    if (projectId === null) throw refused('this agent session has no project');
     if (this.removing.has(projectId)) throw refused('this project is being removed', { projectId });
     const project = this.core.journal.getProject(projectId);
     if (project === null) throw notFound(`unknown project ${projectId}`, { projectId });
@@ -61,6 +62,12 @@ export class ProjectStore {
 
   async remove(projectId: ProjectId): Promise<void> {
     const project = this.require(projectId);
+    if (this.core.workforce.records.list('mission').some(mission => mission.projectId === projectId)
+      || this.core.workforce.records.list('team').some(team => team.projectIds.includes(projectId))
+      || this.core.workforce.records.list('resource').some(resource => resource.scope.kind === 'project' && resource.scope.id === projectId)
+      || this.core.workforce.records.list('memory').some(memory => memory.scope.kind === 'project' && memory.scope.id === projectId)) {
+      throw refused('this project is referenced by persistent agents; keep it registered to preserve their workspaces and shared context', { projectId });
+    }
     this.removing.add(projectId);
     try {
       const threads = this.core.journal.listThreads(projectId);

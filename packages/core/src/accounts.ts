@@ -147,6 +147,15 @@ export class AccountStore {
 
   async remove(accountId: AccountId): Promise<void> {
     const account = this.require(accountId);
+    const checkAgentReferences = () => {
+      if (this.core.workforce.records.list('profile').some(agent => {
+        const config = this.core.workforce.resident.config(agent.id);
+        return agent.selection.accountId === accountId || [...config.allowedRoutes, ...config.subagents.profiles].some(route => route.accountId === accountId);
+      })) {
+        throw refused('this account is used by a persistent agent; choose another account on its profile first', { accountId });
+      }
+    };
+    checkAgentReferences();
     if (this.core.scheduler.activeAccountIds().includes(accountId) || this.core.journal.listThreads().some((thread) => thread.accountId === accountId)) {
       throw refused('this account is used by a thread; remove its project before removing the account', { accountId });
     }
@@ -156,6 +165,7 @@ export class AccountStore {
       throw refused('the account isolationDir must be its own directory under accounts', { accountId, field: 'isolationDir' });
     }
     await this.loginCancel(accountId);
+    checkAgentReferences();
     // Cancelling yields to RPC work; a new thread may have claimed this account.
     if (this.core.scheduler.activeAccountIds().includes(accountId) || this.core.journal.listThreads().some((thread) => thread.accountId === accountId)) {
       throw refused('this account is used by a thread; remove its project before removing the account', { accountId });
@@ -165,6 +175,9 @@ export class AccountStore {
       { type: 'account.removed', threadId: null, version: 1, payload: { accountId } },
       () => {
         this.core.journal.deleteAccount(accountId);
+        // A stale grant would make every later agents.accounts.set refuse the whole list.
+        const grants = this.core.workforce.resident.grants();
+        if (grants.some(g => g.accountId === accountId)) this.core.journal.setSetting('agents:account-grants', grants.filter(g => g.accountId !== accountId));
       },
     );
     this.core.bus.emit('accounts.removed', { accountId });

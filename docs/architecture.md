@@ -7,9 +7,12 @@ DPAPI, the OAuth callback on `127.0.0.1` and the user profile are all
 unreachable from session 0. Execution stays on the machine that owns the folder.
 The shell starts a local core and adopts one that already answers, and it can
 point at a core on another machine instead; the phone only ever points at one.
-On Windows the shell holds a local core it starts in a `KILL_ON_JOB_CLOSE` Job
-Object, so a hard shell exit also stops that core. Adopted and remote cores are
-not owned by the shell and remain running. The shell also carries a channel, read once from its own
+Local cores are resident by default: shell exit leaves them running, and an
+owner can stop them explicitly through `core.shutdown`. Tests can set
+`BOITE_CORE_RESIDENT=0`; on Windows that mode retains the shell's
+`KILL_ON_JOB_CLOSE` Job Object. Adopted and remote cores remain independent.
+[Persistent agents](agents.md) describes the background queue and recovery.
+The shell also carries a channel, read once from its own
 bundle identifier: `Boite` and `Boite Dev` are two installs on one machine, and
 the channel is what keeps their data directories, and so their cores, apart.
 [docs/releasing.md](releasing.md). Boite and Boite Nightly are update tracks

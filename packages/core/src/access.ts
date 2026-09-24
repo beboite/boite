@@ -27,6 +27,9 @@ import type { Connection } from './router.ts';
  * process of its own or changes what the core trusts.
  */
 export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>([
+  // A paired phone follows persistent work, talks to agents and answers its owner's decisions.
+  'agents.snapshot', 'agents.message.send', 'agents.decision.answer', 'agents.work.control',
+  'agents.runtime.get', 'agents.brain.get', // Read the same identity settings and memory shown on its host.
   // Follow and steer an owner-enabled team from the phone, without changing routes or limits.
   'delegation.get', 'delegation.send', 'delegation.stop',
   // Coordination is visible with the conversation; only the owner enables it.
@@ -89,6 +92,7 @@ export function isDeviceMethod(method: RpcMethodName): boolean {
 
 /** Push events must not bypass the read permissions enforced on RPC calls. */
 export const DEVICE_EVENTS: ReadonlySet<RpcEventName> = new Set<RpcEventName>([
+  'agents.changed', // Invalidation only; agents.snapshot applies the device read policy.
   // Team invalidation contains only the subscribed root ID; delegation.get enforces its read scope.
   'delegation.changed',
   'collaboration.changed', 'thread.activity',
@@ -125,6 +129,14 @@ export function mayReceiveEvent(name: RpcEventName, connection: Connection): boo
  * of these methods changes the owner's trust, routes or permissions.
  */
 export const AGENT_METHODS: ReadonlyMap<RpcMethodName, string> = new Map<RpcMethodName, string>([
+  ['agents.routine.save', 'bounded durable scheduling for its own identity from its direct conversation, when the owner enabled routines'],
+  ['agents.snapshot', 'only the persistent identity, context and resources of this execution'],
+  ['agents.message.send', 'a bounded message as this agent to recipients in its current conversation'],
+  ['agents.memory.save', 'scoped memory with mandatory provenance, no widening of access'],
+  ['agents.task.acquire', 'atomic self-assignment inside the current authorized mission'],
+  ['agents.task.submit', 'submission by the current assignment generation, never final approval'],
+  ['agents.artifact.add', 'versioned results from the current mission and working directory'],
+  ['agents.decision.request', 'durable requests for a human decision without an idle provider process'],
   ['delegation.get', 'its own team summaries, approved profiles and remaining budget'],
   ['delegation.spawn', 'one direct child on an owner-approved route, within durable team limits'],
   ['delegation.send', 'messages only between this parent and its direct children'],
@@ -170,6 +182,7 @@ export function assertAllowed(method: RpcMethodName, connection: Connection, par
     }
     return;
   }
+  if (method === 'agents.message.send' && (params as { threadId?: unknown } | null | undefined)?.threadId !== undefined) throw refused('agents.message.send: paired devices must omit threadId and speak as the user');
   if (isDeviceMethod(method)) return;
   throw refused(`${method} is for the owner only`, { method, principal: identity.principal });
 }

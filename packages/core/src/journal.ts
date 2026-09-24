@@ -13,7 +13,7 @@ import type {
   Usage,
 } from '@boite/contracts';
 
-export const SCHEMA_VERSION = 14;
+export const SCHEMA_VERSION = 15;
 const DELTA_WINDOW_MS = 16;
 
 /** What `listMessagePage` hands back: the page itself and the cursor for what is behind it. */
@@ -48,7 +48,8 @@ interface ThreadRow {
   parent_thread_id: string | null;
   last_user_message_at?: number | null;
   id: string;
-  project_id: string;
+  project_id: string | null;
+  agent_session_id?: string | null;
   title: string;
   title_source: string;
   provider_id: string;
@@ -154,7 +155,7 @@ export interface UsageThreadRow extends UsageSums {
   /** The provider the turns of this row ran on; a thread that switched has one row per provider. */
   provider_id: string;
   title: string;
-  project_id: string;
+  project_id: string | null;
   thread_provider_id: string;
   archived: number;
 }
@@ -365,8 +366,8 @@ function migrate(db: Database): void {
     version = 12;
   }
   // The prompt cache the last turn left, as JSON (`PromptCache`).
-  if (version < 13) { db.exec('ALTER TABLE threads ADD COLUMN prompt_cache TEXT'); version = 13; }
-  if (version < 14) {
+  if (!db.query("SELECT 1 FROM pragma_table_info('threads') WHERE name = 'prompt_cache'").get()) { db.exec('ALTER TABLE threads ADD COLUMN prompt_cache TEXT'); version = 13; }
+  if (!db.query("SELECT 1 FROM sqlite_master WHERE name = 'delegated_agents'").get()) {
     db.transaction(() => {
       db.exec(`ALTER TABLE threads ADD COLUMN parent_thread_id TEXT;
         CREATE INDEX threads_parent ON threads(parent_thread_id);
@@ -385,8 +386,41 @@ function migrate(db: Database): void {
         CREATE INDEX delegation_pending ON delegation_messages(status, created_at);
         CREATE INDEX delegation_history ON delegation_messages(root_id, created_at);`);
     })();
-    version = 14;
   }
+  if (!db.query("SELECT 1 FROM sqlite_master WHERE name = 'agent_entities'").get()) {
+    db.exec(`CREATE TABLE agent_entities (
+      kind TEXT NOT NULL, id TEXT NOT NULL, revision INTEGER NOT NULL,
+      created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+      data TEXT NOT NULL CHECK(json_valid(data)), PRIMARY KEY(kind, id)
+    );
+    CREATE UNIQUE INDEX agent_session_context ON agent_entities (
+      json_extract(data, '$.agentId'), json_extract(data, '$.scope.kind'), json_extract(data, '$.scope.id')
+    ) WHERE kind = 'session';
+    CREATE UNIQUE INDEX agent_delivery_recipient ON agent_entities (
+      json_extract(data, '$.messageId'), json_extract(data, '$.agentId')
+    ) WHERE kind = 'delivery';
+    CREATE INDEX agent_work_status ON agent_entities (json_extract(data, '$.status'), created_at) WHERE kind = 'work';
+    CREATE INDEX agent_run_status ON agent_entities (json_extract(data, '$.status'), created_at) WHERE kind = 'run';
+    CREATE TABLE agent_requests (
+      actor TEXT NOT NULL, request_id TEXT NOT NULL, fingerprint TEXT NOT NULL,
+      result TEXT NOT NULL CHECK(json_valid(result)), PRIMARY KEY(actor, request_id)
+    );`);
+    version = 13;
+  }
+  if (!db.query("SELECT 1 FROM pragma_table_info('threads') WHERE name = 'agent_session_id'").get()) {
+    // Rebuild only this table to remove NOT NULL; preserve every existing column and row.
+    const definition = db.query("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'threads'").get() as { sql: string };
+    const indexes = db.query("SELECT sql FROM sqlite_master WHERE type = 'index' AND tbl_name = 'threads' AND sql IS NOT NULL").all() as { sql: string }[];
+    const replacement = definition.sql.replace(/CREATE TABLE (?:IF NOT EXISTS )?["`\[]?threads["`\]]?/i, 'CREATE TABLE threads_next').replace(/project_id TEXT NOT NULL/i, 'project_id TEXT');
+    db.exec(replacement);
+    db.exec('INSERT INTO threads_next SELECT * FROM threads');
+    db.exec('DROP TABLE threads');
+    db.exec('ALTER TABLE threads_next RENAME TO threads');
+    db.exec('ALTER TABLE threads ADD COLUMN agent_session_id TEXT');
+    for (const index of indexes) db.exec(index.sql);
+    version = 15;
+  }
+  version = Math.max(version, 15);
   db.exec(`PRAGMA user_version = ${version}`);
 }
 
@@ -408,6 +442,7 @@ function toThread(row: ThreadRow): ThreadSummary {
     lastUserMessageAt: row.last_user_message_at ?? null,
     id: row.id,
     projectId: row.project_id,
+    ...(row.agent_session_id ? { agentSessionId: row.agent_session_id } : {}),
     title: row.title,
     titleSource: row.title_source as ThreadSummary['titleSource'],
     providerId: row.provider_id,
@@ -600,8 +635,8 @@ export class Journal {
     this.db
       .query(
         `INSERT OR REPLACE INTO threads
-         (id, project_id, title, title_source, provider_id, account_id, model, effort, cwd, branch, permission_mode, status, unread, archived, pinned, session_id, context, created_at, updated_at, session_generation, selection_version, speed, parent_thread_id, prompt_cache)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (id, project_id, title, title_source, provider_id, account_id, model, effort, cwd, branch, permission_mode, status, unread, archived, pinned, session_id, context, created_at, updated_at, session_generation, selection_version, speed, parent_thread_id, prompt_cache, agent_session_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         thread.id,
@@ -628,6 +663,7 @@ export class Journal {
         thread.speed ?? null,
         thread.parentThreadId ?? null,
         thread.promptCache ? JSON.stringify(thread.promptCache) : null,
+        thread.agentSessionId ?? null,
       );
   }
 
@@ -783,7 +819,7 @@ export class Journal {
            FROM turns t LEFT JOIN threads th ON th.id = t.thread_id
            WHERE t.finished_at >= ? AND t.finished_at < ?
          )
-         SELECT x.thread_id, x.provider_id, COALESCE(th.title, '') AS title, COALESCE(th.project_id, '') AS project_id,
+         SELECT x.thread_id, x.provider_id, COALESCE(th.title, '') AS title, th.project_id,
            COALESCE(th.provider_id, '') AS thread_provider_id, COALESCE(th.archived, 0) AS archived, ${USAGE_SUMS}
          FROM x LEFT JOIN threads th ON th.id = x.thread_id
          GROUP BY x.thread_id, x.provider_id`,

@@ -115,7 +115,7 @@ describe('terminals', () => {
     expect(harness.core.terminals.has(id)).toBe(false);
 
     await client.call('terminals.open', { threadId, cols: 80, rows: 24 });
-    await client.call('projects.remove', { projectId });
+    await client.call('projects.remove', { projectId: projectId! });
     expect(harness.core.procs.liveCount(id)).toBe(0);
   }, 30_000);
 

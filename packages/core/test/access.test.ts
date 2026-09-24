@@ -46,6 +46,10 @@ async function pairedDevice(): Promise<Awaited<ReturnType<typeof connect>>> {
 }
 
 describe('the access gate', () => {
+  test('paired messages cannot impersonate a persistent agent session', () => {
+    expect(() => assertAllowed('agents.message.send', deviceConnection(), { threadId: 'thr_other' })).toThrow('threadId');
+    expect(() => assertAllowed('agents.message.send', deviceConnection(), { scope: { kind: 'agent', id: 'identity' } })).not.toThrow();
+  });
   test('agent sockets cannot receive owner broadcasts or another thread activity', async () => {
     const owner = await harness.connect();
     const { threadId } = await echoThread(harness, owner);
@@ -153,7 +157,7 @@ describe('the access gate', () => {
     const owner = await harness.connect();
     const { threadId } = await echoThread(harness, owner);
     const other = await harness.core.threads.create({
-      projectId: harness.core.threads.require(threadId).projectId,
+      projectId: harness.core.projects.require(harness.core.threads.require(threadId).projectId).id,
       providerId: 'echo',
       accountId: harness.core.threads.require(threadId).accountId,
       title: 'another thread',

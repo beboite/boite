@@ -34,5 +34,6 @@ try {
 
 const outDir = process.argv[2];
 if (outDir) {
-  await build({ root, define: { 'import.meta.env.DEV': 'true' }, build: { outDir: resolve(outDir), emptyOutDir: true }, logLevel: 'warn' });
+  const { fixtureBridge } = await import('./ui.ts');
+  await build({ root, plugins: [fixtureBridge], define: { 'import.meta.env.DEV': 'true' }, build: { outDir: resolve(outDir), emptyOutDir: true }, logLevel: 'warn' });
 }
