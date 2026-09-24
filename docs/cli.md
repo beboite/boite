@@ -47,6 +47,7 @@ token is read.
 
 ```
 boite where                      thread, title, project, cwd, branch, worktree, agent
+boite attach <file>               publish a file snapshot in chat, at most 5 MB
 boite show <file>[:line]         open the file in the panel, at that line
 boite diff [file]                open the changes surface, or one file's diff
 boite browse <url>               open the url in the panel's browser (http, https)
@@ -76,6 +77,11 @@ opens the file at line 12. A `show`, `diff`, `browse` or `open` answers
 `shown: yes` when a client subscribed to the thread received the request, and
 `shown: no ...` when nobody was watching: the request still lands on the
 thread's panel and is there when the thread is next opened.
+
+`attach` saves a copy in an assistant message, so it remains downloadable from
+desktop and paired phones after the original changes or disappears. The thread
+must have a turn and must not be archived. The optional rich preview is under
+the [Chat files and previews experiment](experiments.md#chat-files-and-previews).
 
 Task ids are `t1`, `t2` and so on, allocated by the CLI; `start 2` and
 `start t2` mean the same. `task` rows print as `t1 [ ] text`, `[>]` in

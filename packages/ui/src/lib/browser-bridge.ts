@@ -10,6 +10,9 @@
  * line.
  */
 import { TauriBridge } from './browser-bridge-tauri';
+import { installPreviewPicker, validPreviewSelection, type PreviewSelection } from './preview-comments';
+import highlightPreviewElement from './preview-highlight.js';
+import { previewReferencesError, type PreviewReference } from '@boite/contracts';
 
 /** A slot's place on the screen, in CSS pixels, the way `getBoundingClientRect` gives it. */
 export interface SurfaceRect {
@@ -20,6 +23,9 @@ export interface SurfaceRect {
 }
 
 export type BrowserEvent =
+  | { type: 'highlight-result'; id: string; requestId: string; error: string | null }
+  | { type: 'selection'; id: string; requestId: string; selection: PreviewSelection | null }
+  | { type: 'selection-failed'; id: string; requestId: string; reason: string }
   | { type: 'url'; id: string; url: string }
   | { type: 'title'; id: string; title: string }
   | { type: 'loading'; id: string; loading: boolean }
@@ -30,6 +36,7 @@ export type BrowserEvent =
 export interface BrowserBridge {
   /** Whether this bridge paints anything at all. False keeps the slot's muted line. */
   readonly paints: boolean;
+  isReady(id: string): boolean;
   create(id: string, url: string): void;
   navigate(id: string, url: string): void;
   back(id: string): void;
@@ -39,6 +46,9 @@ export interface BrowserBridge {
   setBounds(id: string, rect: SurfaceRect | null): void;
   /** A rung of `ZOOM_STEPS`, which `Ctrl+=`, `Ctrl+-` and `Ctrl+0` walk. */
   setZoom(id: string, factor: number): void;
+  /** One explicit pick. A null request cancels it. */
+  annotate(id: string, requestId: string | null): void;
+  highlight(id: string, requestId: string, reference: PreviewReference): void;
   destroy(id: string): void;
   on(handler: (event: BrowserEvent) => void): () => void;
 }
@@ -62,10 +72,13 @@ const PLACEHOLDER = `<!doctype html><meta charset="utf-8"><title>New tab</title>
 </style>
 <div><b>New tab</b>The fake client draws this page.</div>`;
 
-class FakeBridge implements BrowserBridge {
+export class FakeBridge implements BrowserBridge {
   readonly paints = true;
   #views = new Map<string, HTMLIFrameElement>();
   #handlers = new Set<(event: BrowserEvent) => void>();
+  #pickers = new Map<string, () => void>();
+  #loaded = new Set<string>();
+  isReady(id: string): boolean { return this.#loaded.has(id); }
 
   create(id: string, url: string): void {
     if (this.#views.has(id)) return;
@@ -73,17 +86,21 @@ class FakeBridge implements BrowserBridge {
     frame.dataset.browserId = id;
     frame.setAttribute('title', 'Browser surface');
     frame.style.cssText =
-      'position:fixed;border:0;background:#101014;z-index:5;display:none;color-scheme:dark;';
+      'position:fixed;border:0;background:#101014;z-index:35;display:none;color-scheme:dark;';
     if (url === '') frame.srcdoc = PLACEHOLDER;
     else frame.src = url;
     document.body.append(frame);
     this.#views.set(id, frame);
     frame.addEventListener('load', () => {
+      this.#loaded.add(id);
+      this.annotate(id, null);
       this.#emit({ type: 'loading', id, loading: false });
     });
   }
 
   navigate(id: string, url: string): void {
+    this.#loaded.delete(id);
+    this.annotate(id, null);
     const frame = this.#views.get(id);
     if (!frame) return;
     frame.removeAttribute('srcdoc');
@@ -132,6 +149,8 @@ class FakeBridge implements BrowserBridge {
   }
 
   destroy(id: string): void {
+    this.#loaded.delete(id);
+    this.annotate(id, null);
     this.#views.get(id)?.remove();
     this.#views.delete(id);
   }
@@ -139,6 +158,41 @@ class FakeBridge implements BrowserBridge {
   on(handler: (event: BrowserEvent) => void): () => void {
     this.#handlers.add(handler);
     return () => this.#handlers.delete(handler);
+  }
+
+  annotate(id: string, requestId: string | null): void {
+    this.#pickers.get(id)?.();
+    this.#pickers.delete(id);
+    if (!requestId) return;
+    const frame = this.#views.get(id);
+    if (!frame) return;
+    try {
+      const doc = frame?.contentDocument;
+      if (!doc?.documentElement) throw new Error('The page document is inaccessible');
+      const cleanup = installPreviewPicker(doc, selection => {
+        this.#pickers.delete(id);
+        // The callback closes over the exact iframe document and surface.
+        if (this.#views.get(id) !== frame || frame.contentDocument !== doc) return;
+        if (selection !== null && !validPreviewSelection(selection)) {
+          this.#emit({ type: 'selection-failed', id, requestId, reason: 'invalid' });
+          return;
+        }
+        this.#emit({ type: 'selection', id, requestId, selection });
+      });
+      this.#pickers.set(id, cleanup);
+    } catch {
+      this.#emit({ type: 'selection-failed', id, requestId, reason: 'inaccessible' });
+    }
+  }
+
+  highlight(id: string, requestId: string, reference: PreviewReference): void {
+    const done = (error: string | null) => this.#emit({ type: 'highlight-result', id, requestId, error });
+    if (previewReferencesError([reference])) { done('unavailable'); return; }
+    try {
+      const doc = this.#views.get(id)?.contentDocument;
+      if (!doc) { done('unavailable'); return; }
+      highlightPreviewElement(doc, reference, done);
+    } catch { done('unavailable'); }
   }
 
   #history(id: string, delta: number): void {
@@ -157,6 +211,7 @@ class FakeBridge implements BrowserBridge {
 /** Nothing to park a page over yet: the slot says so in one line. */
 class NoBridge implements BrowserBridge {
   readonly paints = false;
+  isReady(): boolean { return false; }
   create(): void {}
   navigate(): void {}
   back(): void {}
@@ -164,9 +219,17 @@ class NoBridge implements BrowserBridge {
   reload(): void {}
   setBounds(): void {}
   setZoom(): void {}
+  annotate(id: string, requestId: string | null): void {
+    if (requestId) for (const handler of this.#handlers) handler({ type: 'selection-failed', id, requestId, reason: 'unavailable' });
+  }
+  highlight(id: string, requestId: string): void {
+    for (const handler of this.#handlers) handler({ type: 'highlight-result', id, requestId, error: 'unavailable' });
+  }
   destroy(): void {}
-  on(): () => void {
-    return () => {};
+  #handlers = new Set<(event: BrowserEvent) => void>();
+  on(handler: (event: BrowserEvent) => void): () => void {
+    this.#handlers.add(handler);
+    return () => this.#handlers.delete(handler);
   }
 }
 

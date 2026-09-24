@@ -11,15 +11,15 @@ const fixtureDir = join(import.meta.dir, `../.artifacts/fake-ui-${process.pid}`)
 let fixtureBuild: Promise<unknown> | undefined;
 
 /** Build fake-client fixtures once in CI, keeping cold transforms outside browser interaction deadlines. */
-export async function startUi(port: number, options: { sourceModules?: boolean } = {}): Promise<{ close(): Promise<void> }> {
+export async function startUi(port: number, options: { development?: boolean } = {}): Promise<{ close(): Promise<void> }> {
   const address = { host: '127.0.0.1', port, strictPort: true };
   const shared = process.env.BOITE_E2E_FAKE_UI;
-  if (shared && !options.sourceModules) {
+  if (shared && !options.development) {
     // Built once by `lib/warm.ts` before a parallel run.
     if (!existsSync(join(shared, 'index.html'))) throw new Error(`BOITE_E2E_FAKE_UI=${shared} holds no index.html; build it with bun tests/e2e/lib/warm.ts ${shared}`);
     return preview({ root, build: { outDir: resolve(shared) }, preview: address, clearScreen: false });
   }
-  if (process.env.BOITE_E2E_PREBUILT_UI === '1' && !options.sourceModules) {
+  if (process.env.BOITE_E2E_PREBUILT_UI === '1' && !options.development) {
     // Production intentionally excludes ?fake=1. This separate test bundle
     // enables it without changing the UI staged in the installer.
     fixtureBuild ??= build({ root, define: { 'import.meta.env.DEV': 'true' }, build: { outDir: fixtureDir, emptyOutDir: true }, logLevel: 'warn' });
@@ -28,7 +28,7 @@ export async function startUi(port: number, options: { sourceModules?: boolean }
   }
   const server = await createServer({ root, server: address, clearScreen: false });
   await server.listen();
-  if (options.sourceModules) {
+  if (options.development) {
     // Source-importing tests need the dev server, but compilation belongs in
     // setup rather than inside the browser's navigation deadline.
     try {

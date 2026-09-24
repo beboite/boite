@@ -34,6 +34,7 @@ import { Coordination } from './coordination.ts';
 import { BrowserStore } from './browser.ts';
 import { Delegation } from './delegation.ts';
 import { BrainStore } from './brain.ts';
+import { TerminalStore } from './terminals.ts';
 
 export const CORE_VERSION: string = pkg.version;
 
@@ -123,6 +124,7 @@ export class Core {
   readonly browser: BrowserStore;
   readonly delegation: Delegation;
   readonly brain: BrainStore;
+  readonly terminals: TerminalStore;
 
   /**
    * The server tells the core what it alone can know. The default answers no
@@ -168,6 +170,7 @@ export class Core {
     this.browser = new BrowserStore(this);
     this.delegation = new Delegation(this);
     this.brain = new BrainStore(this);
+    this.terminals = new TerminalStore(this);
 
     registerModules(this);
     this.procs.applySettings(this.settings.get());
@@ -245,6 +248,7 @@ export class Core {
     this.providers.installs.stop();
     shutdownDrivers();
     await this.accounts.closeLogins();
+    await this.terminals.closeAll();
     this.procs.killAll();
     this.procs.close();
     this.keybindings.close();

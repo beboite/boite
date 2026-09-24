@@ -152,7 +152,7 @@ export function seedAccounts() {
       name: 'OpenCode',
       shortName: 'OpenCode',
       protocol: 'acp',
-      login: { kind: 'command' },
+      login: { kind: 'terminal' },
       alwaysIsolated: false,
       source: 'shipped',
       available: true,

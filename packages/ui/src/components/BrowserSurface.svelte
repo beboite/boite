@@ -1,13 +1,73 @@
 <script lang="ts">
   import { untrack } from 'svelte';
-  import { ArrowLeft, ArrowRight, ExternalLink, RotateCw } from '@lucide/svelte';
+  import { ArrowLeft, ArrowRight, ExternalLink, RotateCw, MousePointer2 } from '@lucide/svelte';
   import { browserBridge, normalizeUrl } from '../lib/browser-bridge';
   import { openExternal } from '../lib/links';
   import { strings } from '../lib/strings';
   import { ZOOM_DEFAULT, stepZoom } from '../lib/right-panel.svelte';
   import type { BoundPanel, Surface } from '../lib/right-panel.svelte';
+  import type { Store } from '../lib/store.svelte';
+  import { experimentOn } from '../lib/experiments.svelte';
+  import { validPreviewSelection } from '../lib/preview-comments';
+  const previewStrings = $derived(strings.previewComments);
 
-  let { surface, panel }: { surface: Surface; panel: BoundPanel } = $props();
+  let { surface, panel, store }: { surface: Surface; panel: BoundPanel; store: Store } = $props();
+
+  let request = $state<string | null>(null);
+  let notice = $state('');
+  let selectionOwner: { store: Store; threadId: string; client: Store['client']; machineId: string } | null = null;
+  const enabled = $derived(experimentOn('preview-comments'));
+
+  function cancelSelection(): void {
+    request = null;
+    browserBridge.annotate(id, null);
+  }
+
+  function beginSelection(): void {
+    if (request) { cancelSelection(); return; }
+    const threadId = store.openThread?.id;
+    if (!enabled || !threadId) return;
+    selectionOwner = { store, threadId, client: store.client, machineId: store.machineId };
+    notice = '';
+    request = crypto.randomUUID();
+    browserBridge.annotate(id, request);
+  }
+
+  $effect(() => {
+    const surfaceId = id;
+    const on = enabled;
+    if (!on) untrack(cancelSelection);
+    const off = browserBridge.on(event => {
+      if (!on || event.id !== surfaceId) return;
+      if (event.type === 'selection' && event.requestId === request) {
+        request = null;
+        if (event.selection !== null && !validPreviewSelection(event.selection)) {
+          notice = previewStrings.failed;
+          return;
+        }
+        if (event.selection && selectionOwner && selectionOwner.store.client === selectionOwner.client && selectionOwner.store.machineId === selectionOwner.machineId) {
+          const added = selectionOwner.store.addPreviewReference(selectionOwner.threadId, {
+            ...event.selection, id: crypto.randomUUID(), surfaceId
+          });
+          notice = added ? previewStrings.added : '';
+          if (added && window.innerWidth <= 980) panel.toggle();
+        }
+      } else if (event.type === 'selection-failed' && event.requestId === request) {
+        request = null;
+        notice = event.reason === 'inaccessible' || event.reason === 'unavailable' ? previewStrings.unavailable : previewStrings.failed;
+      // WebView2 finishes the refused picker callback navigation by reporting
+      // the unchanged page URL and loading=false. Keep its returned selection.
+      } else if ((event.type === 'loading' && event.loading) ||
+        (event.type === 'url' && event.url !== surface.url)) {
+        cancelSelection();
+        notice = '';
+      }
+    });
+    return () => {
+      off();
+      browserBridge.annotate(surfaceId, null);
+    };
+  });
 
   let slot = $state<HTMLDivElement | undefined>(undefined);
   let field = $state<HTMLInputElement | undefined>(undefined);
@@ -79,6 +139,7 @@
 
   function onkeydown(event: KeyboardEvent): void {
     if (event.key !== 'Escape') return;
+    if (request) cancelSelection();
     event.stopPropagation();
     draft = null;
     field?.blur();
@@ -86,6 +147,11 @@
 
   /** `Ctrl+=`, `Ctrl+-` and `Ctrl+0` while this surface is the one showing. */
   function onZoomKey(event: KeyboardEvent): void {
+    if (event.key === 'Escape' && request) {
+      event.preventDefault();
+      cancelSelection();
+      return;
+    }
     if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
     const key = event.key;
     let next: number | null = null;
@@ -166,7 +232,18 @@
         <ExternalLink size={13} strokeWidth={1.75} />
       </button>
     </form>
+    {#if enabled}
+      <button type="button" class="ghost small icon" title={previewStrings.annotate}
+        aria-label={previewStrings.annotate} aria-pressed={!!request}
+        disabled={!store.openThread} data-testid="preview-annotate" onclick={beginSelection}>
+        <MousePointer2 size={14} strokeWidth={1.75} />
+      </button>
+    {/if}
   </div>
+
+  {#if enabled && (request || notice)}
+    <p class="annotation-notice" role="status">{request ? previewStrings.picking : notice}</p>
+  {/if}
 
   <div class="slot" bind:this={slot} data-testid="browser-slot">
     {#if !browserBridge.paints}
@@ -176,6 +253,8 @@
 </div>
 
 <style>
+  .annotation-notice { margin: 0; padding: 8px 12px; font-size: var(--text-sm); color: var(--color-muted-foreground); border-bottom: 1px solid var(--color-border); }
+  .chrome button[aria-pressed="true"] { color: var(--color-accent); background: var(--color-accent-soft); }
   .browser-surface {
     display: flex;
     flex-direction: column;

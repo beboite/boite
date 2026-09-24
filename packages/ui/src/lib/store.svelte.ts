@@ -1,4 +1,6 @@
-import { RpcErrorCode } from '@boite/contracts';
+import { RpcErrorCode, PREVIEW_REFERENCES_PER_TURN, previewReferencesError, type PreviewReference } from '@boite/contracts';
+import { showPreviewReference } from './preview-navigation';
+import { editPreviewMentions, insertPreviewMention } from './preview-mentions';
 import { resetPullRequestSupport } from './pull-request';
 import { activityCommand } from './activity-command';
 import type {
@@ -46,6 +48,7 @@ import type {
   SchedulerState,
   Settings,
   TelemetryState,
+  TerminalState,
   Thread,
   ThreadId,
   ThreadResources,
@@ -222,7 +225,7 @@ export class Store {
     if (bytes <= 4 * 1024 * 1024 && thread.messages.length <= 2000) this.#readingThreads.set(thread.id, thread);
     while (this.#readingThreads.size > 4) this.#readingThreads.delete(this.#readingThreads.keys().next().value!);
   }
-  #pendingSends = new Map<string, { id: string; prompt: string; attachments: Attachment[]; selectionVersion: number }>();
+  #pendingSends = new Map<string, { id: string; prompt: string; attachments: Attachment[]; previewReferences: PreviewReference[]; selectionVersion: number }>();
   machineId = '';
   visible = true;
   threadKey(id: string): string { return this.machineId ? JSON.stringify([this.machineId, id]) : id; }
@@ -338,6 +341,10 @@ export class Store {
   accounts = $state<Account[]>([]);
   /** Keyed by account id: one entry while a login runs, and after one failed. */
   logins = $state<Record<string, LoginState>>({});
+  /** Threads whose terminal drawer shows. The shell lives in the core and outlasts a hidden drawer. */
+  terminalThreads = $state<ThreadId[]>([]);
+  /** Accounts whose sign-in terminal is open on the Providers page. */
+  loginTerminals = $state<string[]>([]);
   scheduler = $state<SchedulerState | null>(null);
   settings = $state<Settings | null>(null);
   /** The keybindings file as the core last read it; null until the first `keybindings.get`. */
@@ -674,6 +681,8 @@ export class Store {
     this.#pendingSends.clear();
     this.logins = {};
     this.#loginChanges.clear();
+    this.terminalThreads = [];
+    this.loginTerminals = [];
     this.#client = client;
     this.probedModels = {};
     this.#probeEpoch++;
@@ -1066,6 +1075,9 @@ export class Store {
   async #switchTo(endpoint: Endpoint): Promise<void> {
     this.#client?.close();
     this.detach();
+    this.composerStates = {};
+    this.#previewUndo.clear();
+    this.#composerInsertions.clear();
     this.openThread = null;
     this.draft = null;
     this.pairing = null;
@@ -1599,6 +1611,78 @@ export class Store {
   }
 
   // -------------------------------------------------------------------------
+  // Terminals
+  // -------------------------------------------------------------------------
+
+  terminalShown(threadId: ThreadId): boolean {
+    return this.terminalThreads.includes(threadId);
+  }
+
+  /** Ctrl+J: the open thread's drawer, shown or hidden. A shell is the owner's to run. */
+  toggleTerminal(): void {
+    const open = this.openThread;
+    if (!open || !this.owner) return;
+    if (this.terminalShown(open.id)) this.hideTerminal(open.id);
+    else this.terminalThreads = [...this.terminalThreads, open.id];
+  }
+
+  hideTerminal(threadId: ThreadId): void {
+    this.terminalThreads = this.terminalThreads.filter((id) => id !== threadId);
+  }
+
+  /** The thread's shell, attached or started; null when the core refused, with the reason in the toast. */
+  async openTerminal(threadId: ThreadId, cols: number, rows: number): Promise<TerminalState | null> {
+    const client = this.#client;
+    if (!client) return null;
+    try {
+      return await client.call('terminals.open', { threadId, cols, rows });
+    } catch (error) {
+      this.#fail(error);
+      return null;
+    }
+  }
+
+  /** The account's sign-in shell with its login command typed in, attached or started. */
+  async loginTerminal(accountId: string, cols: number, rows: number): Promise<TerminalState | null> {
+    const client = this.#client;
+    if (!client) return null;
+    try {
+      return await client.call('accounts.loginTerminal', { accountId, cols, rows });
+    } catch (error) {
+      this.#fail(error);
+      return null;
+    }
+  }
+
+  showLoginTerminal(accountId: string): void {
+    if (!this.loginTerminals.includes(accountId)) this.loginTerminals = [...this.loginTerminals, accountId];
+  }
+
+  hideLoginTerminal(accountId: string): void {
+    this.loginTerminals = this.loginTerminals.filter((id) => id !== accountId);
+  }
+
+  /** Keystrokes. A shell that ended in between has nothing to take them, which is not an error to show. */
+  writeTerminal(id: string, data: string): void {
+    void this.#client?.call('terminals.write', { id, data }).catch(() => undefined);
+  }
+
+  resizeTerminal(id: string, cols: number, rows: number): void {
+    void this.#client?.call('terminals.resize', { id, cols, rows }).catch(() => undefined);
+  }
+
+  /** Kills the shell; `terminal.exited` follows. */
+  async closeTerminal(id: string): Promise<void> {
+    const client = this.#client;
+    if (!client) return;
+    try {
+      await client.call('terminals.close', { id });
+    } catch (error) {
+      this.#fail(error);
+    }
+  }
+
+  // -------------------------------------------------------------------------
   // Projects
   // -------------------------------------------------------------------------
 
@@ -1885,10 +1969,74 @@ export class Store {
   composerStates = $state<Record<string, {
     text: string;
     attachments: Attachment[];
-    queued: { text: string; attachments: Attachment[] }[];
+    previewReferences?: PreviewReference[];
+    selection?: { start: number; end: number };
+    mentionInsertion?: number;
+    queued: { text: string; attachments: Attachment[]; previewReferences?: PreviewReference[] }[];
     sending: boolean;
     paused: boolean;
   }>>({});
+
+  #previewUndo = new Map<string, { text: string; references: PreviewReference[] }[]>();
+  #composerInsertions = new Map<string, (start: number, end: number, text: string) => void>();
+
+  registerComposerInsertion(key: string, insert: (start: number, end: number, text: string) => void): () => void {
+    this.#composerInsertions.set(key, insert);
+    return () => { if (this.#composerInsertions.get(key) === insert) this.#composerInsertions.delete(key); };
+  }
+
+  editComposerText(key: string, value: string, undo = false, edit?: { start: number; end: number }): void {
+    this.composerStates[key] ??= { text: '', attachments: [], queued: [], sending: false, paused: false };
+    const draft = this.composerStates[key]!;
+    const historyKey = this.threadKey(key);
+    const previous = this.#previewUndo.get(historyKey);
+    if (!previous && !draft.previewReferences?.length) { draft.text = value; return; }
+    const history = previous ?? [];
+    const restored = undo ? history.findLast(entry => entry.text === value) : undefined;
+    history.push({ text: draft.text, references: draft.previewReferences ?? [] });
+    if (history.length > 50) history.shift();
+    this.#previewUndo.set(historyKey, history);
+    draft.previewReferences = restored?.references ?? editPreviewMentions(draft.text, value, draft.previewReferences ?? [], edit);
+    draft.text = value;
+  }
+
+  addPreviewReference(threadId: string, reference: PreviewReference): boolean {
+    if (previewReferencesError([reference])) { this.error = strings.previewComments.failed; return false; }
+    this.composerStates[threadId] ??= { text: '', attachments: [], queued: [], sending: false, paused: false };
+    const draft = this.composerStates[threadId]!;
+    const refs = draft.previewReferences ?? [];
+    if (refs.some(item => item.id === reference.id)) return true;
+    const inserted = insertPreviewMention(draft.text, refs, reference, draft.selection?.start, draft.selection?.end);
+    if (inserted.references.length > PREVIEW_REFERENCES_PER_TURN) { this.error = strings.previewComments.tooMany; return false; }
+    const historyKey = this.threadKey(threadId);
+    const history = this.#previewUndo.get(historyKey) ?? [];
+    history.push({ text: draft.text, references: refs });
+    if (history.length > 50) history.shift();
+    this.#previewUndo.set(historyKey, history);
+    const start = Math.min(draft.text.length, draft.selection?.start ?? draft.text.length);
+    const end = Math.min(draft.text.length, draft.selection?.end ?? draft.text.length);
+    this.#composerInsertions.get(threadId)?.(start, end, inserted.text.slice(start, inserted.text.length - draft.text.length + end));
+    draft.text = inserted.text;
+    draft.previewReferences = inserted.references;
+    draft.selection = { start: inserted.caret, end: inserted.caret };
+    draft.mentionInsertion = (draft.mentionInsertion ?? 0) + 1;
+    return true;
+  }
+
+  async revealPreviewReference(threadId: string, reference: PreviewReference): Promise<void> {
+    try { await showPreviewReference(this, threadId, reference); }
+    catch (error) { this.#fail(error); }
+  }
+
+  /** Add reviewed context to this machine's unsent draft without queuing a turn. */
+  appendComposerText(threadId: string, text: string): void {
+    if (!text.trim()) return;
+    this.composerStates[threadId] ??= {
+      text: '', attachments: [], queued: [], sending: false, paused: false
+    };
+    const draft = this.composerStates[threadId]!;
+    draft.text = draft.text ? `${draft.text}\n\n${text}` : text;
+  }
 
   /**
    * The composer's one action. On a draft it creates the thread first, titled
@@ -1916,9 +2064,10 @@ export class Store {
     return choice;
   }
 
-  async submit(prompt: string, choice: Choice, attachments: Attachment[] = []): Promise<boolean> {
-    if ((prompt.trim().length === 0 && attachments.length === 0) || this.connection !== 'ready') return false;
+  async submit(prompt: string, choice: Choice, attachments: Attachment[] = [], previewReferences: PreviewReference[] = []): Promise<boolean> {
+    if ((prompt.trim().length === 0 && attachments.length === 0 && previewReferences.length === 0) || this.connection !== 'ready') return false;
     try {
+      if (activityCommand(prompt) && previewReferences.length) throw new Error(strings.previewComments.activityUnsupported);
       if (activityCommand(prompt) && attachments.length) throw new Error(strings.activity.noAttachments);
     } catch (error) { this.#fail(error); return false; }
     if (this.draft && !this.openThread) {
@@ -1930,7 +2079,7 @@ export class Store {
     }
     this.remember(choice);
     if (this.openThread) {
-      return this.send(prompt, this.openThread.id, attachments);
+      return this.send(prompt, this.openThread.id, attachments, previewReferences);
     }
     const draft = this.draft;
     if (!draft) return false;
@@ -1951,7 +2100,7 @@ export class Store {
       this.composerStates[created.id] = composer;
       delete this.composerStates[DRAFT_STASH_KEY];
     }
-    return this.send(prompt, created.id, attachments);
+    return this.send(prompt, created.id, attachments, previewReferences);
   }
 
   /**
@@ -1964,11 +2113,12 @@ export class Store {
   async submitAndDraft(
     prompt: string,
     choice: Choice,
-    attachments: Attachment[] = []
+    attachments: Attachment[] = [],
+    previewReferences: PreviewReference[] = []
   ): Promise<boolean> {
     const projectId = this.openThread?.projectId ?? this.draft?.projectId;
     const threadId = this.openThread?.id;
-    if (!(await this.submit(prompt, choice, attachments))) return false;
+    if (!(await this.submit(prompt, choice, attachments, previewReferences))) return false;
     if (projectId !== undefined && (threadId === undefined || this.openThread?.id === threadId)) {
       this.startDraft(projectId);
       this.draftChoice = { ...choice };
@@ -1979,17 +2129,19 @@ export class Store {
   async send(
     prompt: string,
     threadId = this.openThread?.id,
-    attachments: Attachment[] = []
+    attachments: Attachment[] = [],
+    previewReferences: PreviewReference[] = []
   ): Promise<boolean> {
     const client = this.#client;
     if (!client || !threadId || this.connection !== 'ready') return false;
-    if (prompt.trim().length === 0 && attachments.length === 0) return false;
+    if (prompt.trim().length === 0 && attachments.length === 0 && previewReferences.length === 0) return false;
     try {
       // Reconnect snapshots must land before a new stream starts mutating the thread.
       await this.#reloading?.promise;
       if (this.#client !== client || this.connection !== 'ready') return false;
       const activity = activityCommand(prompt);
       if (activity) {
+        if (previewReferences.length) throw new Error(strings.previewComments.activityUnsupported);
         if (attachments.length) throw new Error(strings.activity.noAttachments);
         const accepted = await client.call('threads.activity.set', { threadId, ...activity }).catch((error: unknown) => {
           if (error instanceof RpcFailure && error.code === RpcErrorCode.MethodNotFound) {
@@ -2017,9 +2169,9 @@ export class Store {
       // image sends the params it always sent.
       let pending = this.#pendingSends.get(threadId);
       const selectionVersion = (this.openThread?.id === threadId ? this.openThread : this.threads.find((thread) => thread.id === threadId))?.selectionVersion ?? 0;
-      if (!pending || pending.selectionVersion !== selectionVersion || pending.prompt !== prompt || pending.attachments.length !== attachments.length || pending.attachments.some((a, i) => a.kind !== attachments[i]?.kind || a.data !== attachments[i]?.data || a.mimeType !== attachments[i]?.mimeType || a.name !== attachments[i]?.name)) {
+      if (!pending || pending.selectionVersion !== selectionVersion || pending.prompt !== prompt || JSON.stringify(pending.previewReferences) !== JSON.stringify(previewReferences) || pending.attachments.length !== attachments.length || pending.attachments.some((a, i) => a.kind !== attachments[i]?.kind || a.data !== attachments[i]?.data || a.mimeType !== attachments[i]?.mimeType || a.name !== attachments[i]?.name)) {
         const bytes = crypto.getRandomValues(new Uint8Array(16));
-        pending = { id: Array.from(bytes, b => b.toString(16).padStart(2, '0')).join(''), prompt, attachments: [...attachments], selectionVersion };
+        pending = { id: Array.from(bytes, b => b.toString(16).padStart(2, '0')).join(''), prompt, attachments: [...attachments], previewReferences: JSON.parse(JSON.stringify(previewReferences)) as PreviewReference[], selectionVersion };
         this.#pendingSends.set(threadId, pending);
       }
       await client.call('turns.start', {
@@ -2027,7 +2179,8 @@ export class Store {
         prompt,
         clientRequestId: pending.id,
         expectedSelectionVersion: selectionVersion,
-        ...(attachments.length > 0 ? { attachments } : {})
+        ...(attachments.length > 0 ? { attachments } : {}),
+        ...(previewReferences.length > 0 ? { previewReferences } : {})
       });
       this.#pendingSends.delete(threadId);
       return true;

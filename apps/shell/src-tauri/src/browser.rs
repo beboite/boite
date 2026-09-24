@@ -17,6 +17,8 @@
 //! navigation handler refuses it again for a link the page itself followed.
 
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::sync::{LazyLock, Mutex};
 use tauri::webview::{NewWindowResponse, PageLoadEvent, WebviewBuilder};
 use tauri::{
     AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, Position, Rect, Runtime, Size, Url,
@@ -38,15 +40,128 @@ const SCHEMES: [&str; 3] = ["http", "https", "about"];
 /// The page a surface with no url of its own sits on.
 const BLANK: &str = "about:blank";
 
+// Only the main UI can arm a picker. The page can return one bounded data
+// record through its own navigation callback, never invoke a host command.
+static PICKS: LazyLock<Mutex<HashMap<String, String>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+const PICKER: &str = include_str!("../../../../packages/ui/src/lib/preview-picker.js");
+const HIGHLIGHTER: &str = include_str!("../../../../packages/ui/src/lib/preview-highlight.js");
+static HIGHLIGHTS: LazyLock<Mutex<HashMap<String, (String, String)>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+// Even if every allowed payload byte needs JSON escaping and percent encoding,
+// the 56,384 field bytes plus the fixed envelope fit this transport budget.
+const MAX_SELECTION_CALLBACK_BYTES: usize = 1024 * 1024;
+
+#[derive(Clone, Deserialize, Serialize)]
+struct SelectionBounds {
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+struct PreviewSelection {
+    url: String,
+    selector: String,
+    #[serde(default, rename = "shadowPath")]
+    shadow_path: Vec<String>,
+    text: String,
+    bounds: SelectionBounds,
+}
+
+#[derive(Deserialize, Serialize)]
+pub struct PreviewHighlight {
+    id: String,
+    #[serde(flatten)]
+    selection: PreviewSelection,
+}
+
+fn valid_selection(selection: &PreviewSelection) -> bool {
+    selection.url.len() <= 16384
+        && selection.selector.len() <= 4000
+        && !selection.selector.is_empty()
+        && selection.text.len() <= 4000
+        && selection.shadow_path.len() <= 8
+        && selection.shadow_path.iter().all(|part| !part.trim().is_empty() && part.len() <= 4000)
+        && checked_url("selection", &selection.url).is_ok()
+        && [
+            selection.bounds.x,
+            selection.bounds.y,
+            selection.bounds.width,
+            selection.bounds.height,
+        ]
+        .iter()
+        .all(|n| n.is_finite() && n.abs() <= 1e7)
+        && selection.bounds.width >= 0.0
+        && selection.bounds.height >= 0.0
+}
+
+fn cancel_pick(id: &str) {
+    if let Ok(mut picks) = PICKS.lock() {
+        picks.remove(id);
+    }
+}
+
+fn read_selection(id: &str, url: &Url) -> Option<(String, Option<PreviewSelection>)> {
+    if url.host_str() != Some("selection") {
+        return None;
+    }
+    // Request IDs contain only ASCII alphanumerics and hyphens, so this finds
+    // the matching request without decoding an unbounded data parameter.
+    let request = url.query()?.split('&').find_map(|field| field.strip_prefix("request="))?;
+    let mut picks = PICKS.lock().ok()?;
+    if picks.get(id)?.as_str() != request {
+        return None;
+    }
+    let request = picks.remove(id)?;
+    drop(picks);
+    // A matching malformed callback also settles the UI, like cancellation.
+    if url.as_str().len() > MAX_SELECTION_CALLBACK_BYTES {
+        return Some((request, None));
+    }
+    let fields: HashMap<_, _> = url.query_pairs().into_owned().collect();
+    let selection = fields.get("data")
+        .and_then(|data| serde_json::from_str::<Option<PreviewSelection>>(data).ok())
+        .flatten().filter(valid_selection);
+    Some((request, selection))
+}
+
 /// The shape `BrowserEvent` takes in `packages/ui/src/lib/browser-bridge.ts`.
 #[derive(Clone, Serialize)]
 #[serde(tag = "type", rename_all = "kebab-case")]
 enum Event {
-    Url { id: String, url: String },
-    Title { id: String, title: String },
-    Loading { id: String, loading: bool },
-    Failed { id: String, reason: String },
-    NewWindow { id: String, url: String },
+    HighlightResult {
+        id: String,
+        #[serde(rename = "requestId")]
+        request_id: String,
+        error: Option<String>,
+    },
+    Selection {
+        id: String,
+        #[serde(rename = "requestId")]
+        request_id: String,
+        selection: Option<PreviewSelection>,
+    },
+    Url {
+        id: String,
+        url: String,
+    },
+    Title {
+        id: String,
+        title: String,
+    },
+    Loading {
+        id: String,
+        loading: bool,
+    },
+    Failed {
+        id: String,
+        reason: String,
+    },
+    NewWindow {
+        id: String,
+        url: String,
+    },
 }
 
 /// A slot's place in the window's content area, in logical pixels, which is
@@ -96,6 +211,10 @@ pub fn only_main(webview: &Webview) -> Result<(), String> {
 /// them. Called on every load of the main webview, the first one included,
 /// where there is nothing to close.
 pub fn close_all<R: Runtime>(app: &AppHandle<R>) {
+    if let Ok(mut highlights) = HIGHLIGHTS.lock() { highlights.clear(); }
+    if let Ok(mut picks) = PICKS.lock() {
+        picks.clear();
+    }
     for (label, view) in app.webviews() {
         if !label.starts_with(LABEL_PREFIX) {
             continue;
@@ -180,7 +299,9 @@ pub async fn browser_create(
     }
     let start = checked_url(&id, &url)?;
     let window = app.get_window(MAIN_LABEL).ok_or_else(|| {
-        format!("the browser surface {id:?} has no window to sit in: the {MAIN_LABEL:?} window is gone")
+        format!(
+            "the browser surface {id:?} has no window to sit in: the {MAIN_LABEL:?} window is gone"
+        )
     })?;
 
     let mut builder = WebviewBuilder::new(label.clone(), WebviewUrl::External(start))
@@ -202,6 +323,54 @@ pub async fn browser_create(
     let handle = app.clone();
     let surface = id.clone();
     builder = builder.on_navigation(move |url| {
+        if url.scheme() == "boite-preview" {
+            if url.host_str() == Some("highlight") && url.as_str().len() < 1024 {
+                let fields: HashMap<_, _> = url.query_pairs().into_owned().collect();
+                let result = HIGHLIGHTS.lock().ok().and_then(|mut highlights| {
+                    let (request, _) = highlights.get(&surface)?;
+                    if fields.get("request")? != request { return None; }
+                    highlights.remove(&surface)
+                });
+                if let Some((request_id, expected_url)) = result {
+                    let actual = view_of(&handle, &surface).and_then(|view| view.url().map_err(|error| error.to_string()));
+                    let status = fields.get("status").map(String::as_str).unwrap_or("unavailable");
+                    let error = if actual.ok().as_ref().map(Url::as_str) != Some(expected_url.as_str()) { Some("stale".into()) }
+                        else if status == "ok" { None }
+                        else if ["stale", "missing", "unavailable"].contains(&status) { Some(status.into()) }
+                        else { Some("unavailable".into()) };
+                    announce(&handle, Event::HighlightResult { id: surface.clone(), request_id, error });
+                }
+                return false;
+            }
+            if let Some((request_id, mut selection)) = read_selection(&surface, url) {
+                // The page supplies text and coordinates; the host supplies its
+                // actual URL, so it cannot impersonate a different origin.
+                if let Some(value) = selection.as_mut() {
+                    let Ok(view) = view_of(&handle, &surface) else {
+                        return false;
+                    };
+                    let Ok(actual_url) = view.url() else {
+                        return false;
+                    };
+                    value.url = actual_url.to_string();
+                }
+                announce(
+                    &handle,
+                    Event::Selection {
+                        id: surface.clone(),
+                        request_id,
+                        selection,
+                    },
+                );
+            }
+            return false;
+        }
+        cancel_pick(&surface);
+        if let Ok(mut highlights) = HIGHLIGHTS.lock() {
+            if let Some((request_id, _)) = highlights.remove(&surface) {
+                announce(&handle, Event::HighlightResult { id: surface.clone(), request_id, error: Some("stale".into()) });
+            }
+        }
         if !SCHEMES.contains(&url.scheme()) {
             fail(
                 &handle,
@@ -378,8 +547,74 @@ pub async fn browser_set_zoom(
 }
 
 #[tauri::command]
+pub async fn browser_annotate(
+    app: AppHandle,
+    webview: Webview,
+    id: String,
+    request_id: Option<String>,
+) -> Result<(), String> {
+    only_main(&webview)?;
+    let view = view_of(&app, &id)?;
+    cancel_pick(&id);
+    view.eval(
+        "if (typeof window.__boiteStopPreviewPick === 'function') window.__boiteStopPreviewPick();",
+    )
+    .map_err(|error| format!("browser {id:?} could not cancel selection: {error}"))?;
+    let Some(request) = request_id else {
+        return Ok(());
+    };
+    if request.len() > 80
+        || request.is_empty()
+        || !request
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-')
+    {
+        return Err(
+            "preview requestId must contain 1 to 80 ASCII letters, digits or hyphens".into(),
+        );
+    }
+    PICKS
+        .lock()
+        .map_err(|_| "preview selection state is unavailable")?
+        .insert(id.clone(), request.clone());
+    let request_json = serde_json::to_string(&request).map_err(|error| error.to_string())?;
+    // The UI imports this function normally under its CSP. Only the child
+    // webview receives a script expression, with its module export removed.
+    let picker = PICKER.replacen("export default ", "", 1);
+    let script = format!("window.__boiteStopPreviewPick = ({picker})(document, selection => {{ location.href = 'boite-preview://selection/?request=' + encodeURIComponent({request_json}) + '&data=' + encodeURIComponent(JSON.stringify(selection)); }});");
+    view.eval(script).map_err(|error| {
+        cancel_pick(&id);
+        format!("browser {id:?} could not start selection: {error}")
+    })
+}
+
+#[tauri::command]
+pub async fn browser_highlight(app: AppHandle, webview: Webview, id: String, request_id: String, reference: PreviewHighlight) -> Result<(), String> {
+    only_main(&webview)?;
+    if request_id.is_empty() || request_id.len() > 80 || !request_id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') ||
+        reference.id.is_empty() || reference.id.len() > 80 || !valid_selection(&reference.selection) {
+        return Err("unavailable".into());
+    }
+    let view = view_of(&app, &id)?;
+    if view.url().map_err(|error| error.to_string())?.as_str() != reference.selection.url { return Err("stale".into()); }
+    let replaced = HIGHLIGHTS.lock().map_err(|_| "unavailable")?.insert(id.clone(), (request_id.clone(), reference.selection.url.clone()));
+    if let Some((previous, _)) = replaced {
+        announce(&app, Event::HighlightResult { id: id.clone(), request_id: previous, error: Some("superseded".into()) });
+    }
+    let request = serde_json::to_string(&request_id).map_err(|error| error.to_string())?;
+    let data = serde_json::to_string(&reference).map_err(|error| error.to_string())?;
+    let highlighter = HIGHLIGHTER.replacen("export default ", "", 1);
+    view.eval(format!("({highlighter})(document, {data}, error => {{ location.href = 'boite-preview://highlight/?request=' + encodeURIComponent({request}) + '&status=' + encodeURIComponent(error || 'ok'); }});")).map_err(|error| {
+        if let Ok(mut highlights) = HIGHLIGHTS.lock() { highlights.remove(&id); }
+        format!("browser {id:?} could not highlight selection: {error}")
+    })
+}
+
+#[tauri::command]
 pub async fn browser_destroy(app: AppHandle, webview: Webview, id: String) -> Result<(), String> {
     only_main(&webview)?;
+    cancel_pick(&id);
+    if let Ok(mut highlights) = HIGHLIGHTS.lock() { highlights.remove(&id); }
     view_of(&app, &id)?
         .close()
         .map_err(|error| format!("the browser surface {id:?} could not be closed: {error}"))
@@ -387,7 +622,60 @@ pub async fn browser_destroy(app: AppHandle, webview: Webview, id: String) -> Re
 
 #[cfg(test)]
 mod tests {
-    use super::{checked_url, label_of, LABEL_PREFIX};
+    use super::{checked_url, label_of, read_selection, LABEL_PREFIX, MAX_SELECTION_CALLBACK_BYTES, PICKS};
+
+    #[test]
+    fn preview_selection_is_bound_to_one_surface_and_consumed_once() {
+        let id = "preview-test-one";
+        PICKS.lock().unwrap().insert(id.into(), "request-1".into());
+        let mut url = tauri::Url::parse("boite-preview://selection/").unwrap();
+        url.query_pairs_mut().append_pair("request", "request-1").append_pair("data", r#"{"url":"https://example.test","selector":"button","text":"Save","bounds":{"x":1,"y":2,"width":30,"height":40}}"#);
+        assert!(read_selection("different-view", &url).is_none());
+        let selected = read_selection(id, &url).unwrap();
+        assert_eq!(selected.0, "request-1");
+        assert_eq!(selected.1.unwrap().text, "Save");
+        assert!(read_selection(id, &url).is_none());
+    }
+
+    #[test]
+    fn preview_rejects_wrong_requests_and_invalid_content() {
+        let id = "preview-test-invalid";
+        PICKS.lock().unwrap().insert(id.into(), "expected".into());
+        let wrong =
+            tauri::Url::parse("boite-preview://selection/?request=wrong&data=null").unwrap();
+        assert!(read_selection(id, &wrong).is_none());
+        let mut invalid = tauri::Url::parse("boite-preview://selection/").unwrap();
+        invalid.query_pairs_mut().append_pair("request", "expected").append_pair("data", r#"{"url":"file:///private","selector":"button","text":"Save","bounds":{"x":1,"y":2,"width":30,"height":40}}"#);
+        assert!(read_selection(id, &invalid).unwrap().1.is_none());
+        assert!(!PICKS.lock().unwrap().contains_key(id));
+        PICKS.lock().unwrap().insert(id.into(), "expected".into());
+        let cancel =
+            tauri::Url::parse("boite-preview://selection/?request=expected&data=null").unwrap();
+        assert!(read_selection(id, &cancel).unwrap().1.is_none());
+    }
+
+    #[test]
+    fn percent_encoded_selection_fits_and_oversized_callbacks_settle_once() {
+        let id = "preview-test-encoding";
+        let payload = serde_json::json!({
+            "url": format!("https://example.test/{}", "é".repeat(8000)),
+            "selector": format!("#{}", "é".repeat(1999)),
+            "shadowPath": vec!["\u{0001}".repeat(4000); 8],
+            "text": "é".repeat(2000),
+            "bounds": { "x": 0, "y": 0, "width": 10, "height": 10 }
+        });
+        PICKS.lock().unwrap().insert(id.into(), "encoded".into());
+        let mut url = tauri::Url::parse("boite-preview://selection/").unwrap();
+        url.query_pairs_mut().append_pair("request", "encoded").append_pair("data", &payload.to_string());
+        assert!(url.as_str().len() > 65536);
+        assert!(url.as_str().len() < MAX_SELECTION_CALLBACK_BYTES);
+        assert!(read_selection(id, &url).unwrap().1.is_some());
+        PICKS.lock().unwrap().insert(id.into(), "oversized".into());
+        url.set_query(None);
+        url.query_pairs_mut().append_pair("request", "oversized").append_pair("data", &"x".repeat(MAX_SELECTION_CALLBACK_BYTES));
+        assert!(read_selection(id, &url).unwrap().1.is_none());
+        assert!(read_selection(id, &url).is_none());
+    }
 
     #[test]
     fn a_surface_id_becomes_a_label() {
