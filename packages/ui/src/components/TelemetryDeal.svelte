@@ -19,6 +19,8 @@
   const reduced = document.documentElement.dataset.motion === 'reduced' || (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false);
 
   let consent = $state<TelemetryState | null>(null);
+  /** The client `consent` came from: a reconnect swaps it without re-running the read. */
+  let consentFrom: Store['client'] = null;
   let busy = $state(false);
   let refusing = $state(false);
   let error = $state('');
@@ -29,9 +31,11 @@
 
   $effect(() => {
     const client = store.client;
+    // Another machine's saved mode says nothing about this one.
+    consent = null;
     if (!client || !store.owner) return;
     let active = true;
-    void store.telemetryState().then(value => { if (active) consent = value; })
+    void store.telemetryState().then(value => { if (active) { consent = value; consentFrom = client; } })
       .catch(reason => { if (active) error = String(reason); });
     return () => { active = false; };
   });
@@ -40,16 +44,33 @@
     const client = store.client;
     if (!client) return false;
     busy = true; error = '';
-    try { consent = await store.configureTelemetry(mode); return store.client === client; }
+    try { consent = await store.configureTelemetry(mode); consentFrom = client; return store.client === client; }
     catch (reason) { if (store.client === client) error = String(reason); return false; }
+    finally { busy = false; }
+  }
+
+  /** The saved mode of the client connected now, read again when it changed since. */
+  async function savedMode(): Promise<TelemetryState['mode'] | null> {
+    const client = store.client;
+    if (!client) return null;
+    if (consent && consentFrom === client) return consent.mode;
+    busy = true; error = '';
+    try {
+      const value = await store.telemetryState();
+      if (store.client !== client) return null;
+      consent = value; consentFrom = client;
+      return value.mode;
+    } catch (reason) { if (store.client === client) error = String(reason); return null; }
     finally { busy = false; }
   }
 
   async function enough() {
     // Until the saved mode is known, "enough" could write basic over an opt-out.
     if (busy || refusing || !consent) return;
+    const saved = await savedMode();
+    if (!saved) return;
     // A replay never turns counters back on after a saved opt-out.
-    if (!await choose(consent?.mode === 'off' ? 'off' : 'basic')) return;
+    if (!await choose(saved === 'off' ? 'off' : 'basic')) return;
     if (reduced) { onchosen(); return; }
     // The clip swaps at the size the first one had, so the rows do not jump.
     const box = clip?.getBoundingClientRect();

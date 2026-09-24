@@ -292,6 +292,23 @@ test('refusing waits for the saved mode, so an unread opt-out is never overwritt
   expect(query('[data-testid=telemetry-deal] [role=alert]').textContent).toContain('state unreadable');
 });
 
+test('a client swapped under the screen is asked for its own saved mode before refusing', async () => {
+  document.documentElement.dataset.motion = 'reduced';
+  try {
+    await open();
+    await click('onboarding-dot-privacy');
+    await new Promise(resolve => setTimeout(resolve, 0)); flushSync();
+    // The first client said basic; the one attached now has opted out.
+    const next = new FakeClient({ delayMs: 0 });
+    store.attach(next);
+    await store.connect();
+    await next.call('telemetry.configure', { mode: 'off' } as never);
+    await answer('onboarding-telemetry-basic');
+    await new Promise(resolve => setTimeout(resolve, 0)); flushSync();
+    expect(await next.call('telemetry.state', {} as never)).toMatchObject({ mode: 'off' });
+  } finally { delete document.documentElement.dataset.motion; }
+});
+
 test('the deal opts into enhanced analytics and ends the tour', async () => {
   await open();
   await click('onboarding-dot-privacy');
