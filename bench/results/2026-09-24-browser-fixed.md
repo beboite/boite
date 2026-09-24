@@ -42,7 +42,7 @@ search URL. Its instrumentation now excludes field metadata objects that have
 no URL; these otherwise caused `Invalid URL` while grading an actual success.
 
 The nine published runs made 30 Jev requests, using 152,359 input tokens.
-Median request latency was 253 ms. At the published
+Median request latency was 252 ms. At the published
 [$0.042 per million input tokens](https://docs.typesafe.ai/models), their
 estimated model cost is $0.006399, excluding development runs.
 

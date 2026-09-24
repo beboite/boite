@@ -47,6 +47,10 @@ export const USAGE = `usage: boite <command> [args] [--json]
   agents inbox                   agent messages, provenance and delivery state
   agents send <core>/<thread> <text>
   agents reply <message-id> <text>
+  delegate profiles|list         approved models, team status and bounded results
+  delegate spawn <profile> <brief>
+  delegate send <thread-id> <text>
+  delegate stop [thread-id]      stop one child, or pause the whole team
 
   --thread <id> --data-dir <dir> --channel <stable|dev>
                                  drive a thread from outside it, as the owner`;
@@ -212,6 +216,37 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
         const task = await client.call('browser.start', { ...request, threadId } as import('@boite/contracts').BrowserRequest);
         print([`id: ${task.id}`, `status: ${task.status}`, 'Use boite browser list to read progress.'], task);
       } else throw new Usage(`unknown browser action ${action}`);
+      return;
+    }
+    case 'delegate': {
+      const action = want(0, 'profiles, list, spawn, send or stop');
+      if (action === 'profiles' || action === 'list') {
+        const view = await client.call('delegation.get', { threadId });
+        print([
+          `parent: ${view.rootThreadId}`,
+          `delegation: ${!view.config.enabled ? 'disabled' : view.config.paused ? 'paused' : 'enabled'}`,
+          `turns: ${view.turnsUsed}/${view.config.maxTurns}`,
+          ...(action === 'profiles'
+            ? view.config.profiles.map(p => `${p.id} ${JSON.stringify(p.name)} ${p.providerId}/${p.model} effort=${p.effort ?? 'default'}`)
+            : view.agents.map(a => `${a.thread.id} ${a.thread.status} ${a.thread.providerId}/${a.thread.model} ${JSON.stringify(a.thread.title)}${a.result ? ` result=${JSON.stringify(a.result)}` : ''}`)),
+          'Results arrive automatically. Do not poll repeatedly or wait inside a running tool.',
+        ], view);
+      } else if (action === 'spawn') {
+        const profileId = want(1, 'a profile id from delegate profiles');
+        const task = rest.slice(2).join(' ');
+        if (!task) throw new Usage('delegate spawn needs a bounded task brief');
+        const agent = await client.call('delegation.spawn', { threadId, profileId, task, requestId: crypto.randomUUID() });
+        print([`agent: ${agent.thread.id}`, `status: ${agent.thread.status}`, `model: ${agent.thread.providerId}/${agent.thread.model}`, 'Result will be forwarded to the parent automatically.'], agent);
+      } else if (action === 'send') {
+        const toThreadId = want(1, 'a parent or child thread id');
+        const body = rest.slice(2).join(' ');
+        if (!body) throw new Usage('delegate send needs message text');
+        const letter = await client.call('delegation.send', { threadId, toThreadId, text: body, requestId: crypto.randomUUID() });
+        print([`id: ${letter.id}`, `status: ${letter.status}`, 'Queued messages are not an acknowledgement or consent.'], letter);
+      } else if (action === 'stop') {
+        const result = await client.call('delegation.stop', { threadId, ...(rest[1] ? { agentId: rest[1] } : {}) });
+        print([`stopped: ${result.stopped}`], result);
+      } else throw new Usage('delegate expects profiles, list, spawn, send or stop');
       return;
     }
     case 'agents': {

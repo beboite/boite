@@ -146,6 +146,7 @@ interface PendingQuestion {
 
 export class ThreadStore {
   private readonly handles = new Map<ThreadId, TurnHandle>();
+  private readonly steering = new Set<ThreadId>();
   private readonly permissions = new Map<RequestId, PendingPermission>();
   private readonly questions = new Map<RequestId, PendingQuestion>();
   /**
@@ -257,13 +258,14 @@ export class ThreadStore {
     }
   }
 
-  create(params: CreateParams, placed?: { id: ThreadId; branch: string }): ThreadSummary {
+  create(params: CreateParams, placed?: { id: ThreadId; branch: string | null; parentThreadId?: ThreadId }): ThreadSummary {
     const { project, provider, account } = this.check(params);
 
     const now = Date.now();
     const model = checkModel(provider, account.id, params.model ?? defaultModel(provider));
     const thread: ThreadSummary = {
       id: placed?.id ?? newId('thr_'),
+      ...(placed?.parentThreadId ? { parentThreadId: placed.parentThreadId } : {}),
       projectId: project.id,
       title: titleOf(params.title),
       titleSource: 'prompt',
@@ -478,6 +480,7 @@ export class ThreadStore {
     // now, and the commands that process listed go with it.
     if (archived) {
       void this.core.browser.stopThread(threadId);
+      this.core.delegation.stop(threadId);
       this.core.scheduler.stop(threadId);
       releaseThread(threadId);
       this.commands.delete(threadId);
@@ -591,7 +594,7 @@ export class ThreadStore {
     return this.startTurn(threadId, protocol === 'echo' ? '[compact]' : '/compact', [], expectedSelectionVersion, 'compact');
   }
 
-  startTurn(threadId: ThreadId, prompt: string, attachments: Attachment[] = [], expectedSelectionVersion?: number, operation?: 'compact' | 'coordination', activity?: { kind: 'goal' | 'loop'; iteration: number }, clientRequestId?: string): Turn {
+  startTurn(threadId: ThreadId, prompt: string, attachments: Attachment[] = [], expectedSelectionVersion?: number, operation?: 'compact' | 'coordination' | 'delegation', activity?: { kind: 'goal' | 'loop'; iteration: number }, clientRequestId?: string, displayText?: string): Turn {
     if (this.core.stopping) throw refused('the core is stopping; reconnect before sending another prompt');
     const thread = this.require(threadId);
     checkAttachmentArray(attachments);
@@ -645,9 +648,9 @@ export class ThreadStore {
       id: newId('msg_'),
       threadId,
       turnId: turn.id,
-      role: operation === 'coordination' ? 'system' : 'user',
+      role: operation === 'coordination' || operation === 'delegation' ? 'system' : 'user',
       parts: [
-        { type: 'text', text: prompt, ...(operation === 'coordination' ? { displayText: 'Agent coordination' } : {}), ...(activity ? { activity } : {}) },
+        { type: 'text', text: prompt, ...(operation === 'coordination' || operation === 'delegation' ? { displayText: displayText ?? (operation === 'delegation' ? 'Agent delegation' : 'Agent coordination') } : {}), ...(activity ? { activity } : {}) },
         ...attachments.map((attachment): MessagePart => attachment.kind === 'file' ? { type: 'file', mimeType: attachment.mimeType, data: attachment.data, name: attachment.name } : ({
           type: 'image',
           mimeType: attachment.mimeType,
@@ -660,6 +663,7 @@ export class ThreadStore {
     };
 
     this.core.journal.append({ type: 'turn.queued', threadId, version: 1, payload: turn }, () => {
+      this.core.delegation.reserveTurn(threadId, operation);
       this.core.journal.putTurn(turn);
       this.core.journal.putMessage(message);
       if (clientRequestId) this.core.journal.putTurnRequest(threadId, clientRequestId, fingerprint, turn.id);
@@ -675,7 +679,8 @@ export class ThreadStore {
   stopTurn(threadId: ThreadId): boolean {
     this.require(threadId);
     this.core.coordination.pause(threadId);
-    return this.core.scheduler.stop(threadId);
+    const childrenStopped = this.core.delegation.stop(threadId);
+    return this.core.scheduler.stop(threadId) || childrenStopped > 0;
   }
 
   stopQueuedCoordination(threadId: ThreadId): boolean {
@@ -687,12 +692,15 @@ export class ThreadStore {
 
   async steer(threadId: string, text: string): Promise<boolean> {
     const handle = this.handles.get(threadId);
-    if (!handle?.steer) return false;
+    if (!handle?.steer || this.steering.has(threadId)) return false;
     const turn = this.core.journal.listTurns(threadId).find(t => t.status === 'running');
     if (!turn) return false;
-    const submitted = await handle.steer(text);
-    if (submitted) this.noteCoordination(threadId, turn.id, text);
-    return submitted;
+    this.steering.add(threadId);
+    try {
+      const submitted = await handle.steer(text);
+      if (submitted && !this.core.journal.isClosed()) this.noteCoordination(threadId, turn.id, text);
+      return submitted;
+    } finally { this.steering.delete(threadId); }
   }
 
   noteCoordination(threadId: string, turnId: string, text: string): void {
@@ -828,6 +836,10 @@ export class ThreadStore {
     const queued = this.core.journal.getTurn(turnId);
     const selected = this.core.journal.getThread(threadId);
     if (queued === null || selected === null) return;
+    if (!this.core.delegation.prepareTurn(queued)) {
+      this.markQueuedStopped(turnId);
+      return;
+    }
     if (queued.execution?.operation === 'coordination' && !this.core.coordination.prepareWake(threadId, turnId)) {
       this.markQueuedStopped(turnId);
       return;
@@ -857,6 +869,7 @@ export class ThreadStore {
     }
 
     if (this.core.journal.isClosed()) return;
+    this.core.delegation.submitted(threadId, turnId, result.status === 'done');
     this.core.journal.flushDeltas();
     this.core.bus.flush();
     this.clearPermissionsOf(threadId);
@@ -1055,8 +1068,8 @@ export class ThreadStore {
       account,
       provider,
       turn,
-      prompt: (turn.execution?.operation || prepared.prompt.trimStart().startsWith('/') ? '' : this.core.brain.instructions(provider.id)) + prepared.prompt + (turn.execution?.operation === 'compact' ? '' : this.core.coordination.instructions(threadId)),
-      coordination: () => this.core.coordination.take(threadId, turn.id),
+      prompt: ((turn.execution?.operation && thread.sessionId !== null) || prepared.prompt.trimStart().startsWith('/') ? '' : this.core.brain.instructions(provider.id)) + prepared.prompt + (turn.execution?.operation === 'compact' ? '' : this.core.coordination.instructions(threadId) + this.core.delegation.instructions(threadId) + this.core.delegation.initialInput(threadId, turn.id)),
+      coordination: () => this.core.delegation.take(threadId, turn.id) ?? this.core.coordination.take(threadId, turn.id),
       attachments: prepared.attachments,
       sessionId: thread.sessionId,
       sessionBefore: this.sessionBefore(thread, turn.id),
@@ -1220,7 +1233,7 @@ export class ThreadStore {
 
   private lastUserInput(threadId: ThreadId, turnId: TurnId): { prompt: string; attachments: Attachment[] } {
     const operation = this.core.journal.getTurn(turnId)?.execution?.operation;
-    const message = operation === 'coordination'
+    const message = operation === 'coordination' || operation === 'delegation'
       ? Array.from(this.core.journal.walkTurnMessages(threadId, turnId)).find(m => m.role === 'system') ?? null
       : this.core.journal.lastUserMessage(threadId, turnId);
     if (message !== null) {
@@ -1316,7 +1329,7 @@ function modelsFor(provider: ProviderDescriptor, accountId: AccountId): ModelInf
  * Null is always allowed and means the provider's own default. Anything else
  * must be a model the descriptor lists or one the last probe read.
  */
-function checkModel(provider: ProviderDescriptor, accountId: AccountId, model: string | null): string | null {
+export function checkModel(provider: ProviderDescriptor, accountId: AccountId, model: string | null): string | null {
   if (model === null) return null;
   const models = modelsFor(provider, accountId);
   if (models.some((entry) => entry.id === model)) return model;
@@ -1333,7 +1346,7 @@ function checkModel(provider: ProviderDescriptor, accountId: AccountId, model: s
  * be one of the levels that model lists, from the descriptor or from the probe,
  * or the call is refused.
  */
-function checkEffort(
+export function checkEffort(
   provider: ProviderDescriptor,
   accountId: AccountId,
   model: string | null,

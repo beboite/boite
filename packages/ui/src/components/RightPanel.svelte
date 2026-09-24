@@ -11,6 +11,7 @@
     Maximize2,
     Minimize2,
     Plus,
+    UsersRound,
     X
   } from '@lucide/svelte';
   import { browserBridge } from '../lib/browser-bridge';
@@ -22,6 +23,7 @@
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
   import BrowserSurface from './BrowserSurface.svelte';
+  import DelegationSurface from './DelegationSurface.svelte';
   import ChangesSurface from './ChangesSurface.svelte';
   import FileSurface from './FileSurface.svelte';
   import FilesSurface from './FilesSurface.svelte';
@@ -61,6 +63,7 @@
    * letter its card shows, which is also the key the launcher answers to.
    */
   const CARDS: { kind: SurfaceKind; key: string }[] = [
+    { kind: 'agents', key: 'A' },
     { kind: 'browser', key: 'B' },
     { kind: 'changes', key: 'C' },
     { kind: 'files', key: 'F' },
@@ -70,6 +73,7 @@
 
   /** The name of a kind, which a card, a tab and the new-surface menu all read. */
   function kindName(kind: SurfaceKind): string {
+    if (kind === 'agents') return strings.delegation.heading;
     if (kind === 'browser') return strings.rightPanel.browser;
     if (kind === 'changes') return strings.rightPanel.changes;
     if (kind === 'files') return strings.rightPanel.files;
@@ -79,6 +83,7 @@
   }
 
   function kindHint(kind: SurfaceKind): string {
+    if (kind === 'agents') return strings.delegation.panelHint;
     if (kind === 'browser') return strings.rightPanel.browserHint;
     if (kind === 'changes') return strings.rightPanel.changesHint;
     if (kind === 'files') return strings.rightPanel.filesHint;
@@ -88,6 +93,7 @@
 
   /** A page needs a webview; everything else reads what only the owner may ask for. */
   function available(kind: SurfaceKind): boolean {
+    if (kind === 'agents') return true;
     return kind === 'browser' ? inShell : store.owner;
   }
 
@@ -403,6 +409,8 @@
             <span class="glyph">
               {#if surface.kind === 'trace'}
                 <Activity size={14} strokeWidth={1.75} />
+              {:else if surface.kind === 'agents'}
+                <UsersRound size={14} strokeWidth={1.75} />
               {:else if surface.kind === 'changes'}
                 <GitCompare size={14} strokeWidth={1.75} />
               {:else if surface.kind === 'files'}
@@ -477,7 +485,9 @@
   </header>
 
   <div class="body">
-    {#if active?.kind === 'trace'}
+    {#if active?.kind === 'agents'}
+      <DelegationSurface {store} />
+    {:else if active?.kind === 'trace'}
       <TraceSurface {store} />
     {:else if active?.kind === 'browser'}
       {#key active.id}
@@ -510,6 +520,8 @@
             >
               {#if card.kind === 'browser'}
                 <Globe size={16} strokeWidth={1.75} />
+              {:else if card.kind === 'agents'}
+                <UsersRound size={16} strokeWidth={1.75} />
               {:else if card.kind === 'changes'}
                 <GitCompare size={16} strokeWidth={1.75} />
               {:else if card.kind === 'files'}

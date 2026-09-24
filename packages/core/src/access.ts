@@ -27,6 +27,8 @@ import type { Connection } from './router.ts';
  * process of its own or changes what the core trusts.
  */
 export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>([
+  // Follow and steer an owner-enabled team from the phone, without changing routes or limits.
+  'delegation.get', 'delegation.send', 'delegation.stop',
   // Coordination is visible with the conversation; only the owner enables it.
   'collaboration.get',
   'collaboration.directory',
@@ -87,6 +89,8 @@ export function isDeviceMethod(method: RpcMethodName): boolean {
 
 /** Push events must not bypass the read permissions enforced on RPC calls. */
 export const DEVICE_EVENTS: ReadonlySet<RpcEventName> = new Set<RpcEventName>([
+  // Team invalidation contains only the subscribed root ID; delegation.get enforces its read scope.
+  'delegation.changed',
   'collaboration.changed', 'thread.activity',
   'project.added', 'project.removed',
   'thread.created', 'thread.updated', 'thread.removed', 'thread.commands',
@@ -101,6 +105,8 @@ export const DEVICE_EVENTS: ReadonlySet<RpcEventName> = new Set<RpcEventName>([
 /** The server also checks the thread or project scope of these agent events. */
 export const AGENT_EVENTS: ReadonlySet<RpcEventName> = new Set<RpcEventName>([
   'browser.updated', // Progress for the agent's own owner-enabled browser tasks.
+  // The server restricts this invalidation to the agent's own subscribed thread.
+  'delegation.changed',
   'thread.activity', 'todos.updated', 'collaboration.changed',
 ]);
 
@@ -115,13 +121,19 @@ export function mayReceiveEvent(name: RpcEventName, connection: Connection): boo
  * this as the CLI's manual: the agent says where it is, shows the user
  * something, keeps its task list and the project's cards, reads the changes and
  * the files around it. Browser tasks start an owner-enabled plugin in an
- * isolated process group. No method changes what the core trusts, and every
- * call is held to the thread whose token it carries.
+ * isolated process group. Delegation can start a child only on owner-approved
+ * routes within that thread's team budget. Every call is held to the token's
+ * thread; team methods check the relationship before reaching a child. None
+ * of these methods changes the owner's trust, routes or permissions.
  */
 export const AGENT_METHODS: ReadonlyMap<RpcMethodName, string> = new Map<RpcMethodName, string>([
   ['browser.start', 'bounded browser tasks for its own thread, only after the owner installs a plugin and enables automation'],
   ['browser.list', 'progress and verified completion for its own browser tasks'],
   ['browser.cancel', 'stopping only a browser task that belongs to its thread'],
+  ['delegation.get', 'its own team summaries, approved profiles and remaining budget'],
+  ['delegation.spawn', 'one direct child on an owner-approved route, within durable team limits'],
+  ['delegation.send', 'messages only between this parent and its direct children'],
+  ['delegation.stop', 'stop its own children or itself, never unrelated work'],
   ['collaboration.get', 'its own coordination inbox and remaining budget, never other conversations'],
   ['collaboration.directory', 'opted-in contacts in this project and explicitly trusted machines'],
   ['collaboration.send', 'authenticated delivery as this thread to a separately authorized recipient'],

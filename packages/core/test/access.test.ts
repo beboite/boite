@@ -58,6 +58,8 @@ describe('the access gate', () => {
       harness.core.bus.emit('thread.updated', harness.core.threads.require(threadId));
       harness.core.bus.emit('thread.activity', { threadId: 'another-thread', activity: { goal: null, loop: null, tasks: [] } });
       harness.core.bus.emit('thread.activity', { threadId, activity: { goal: null, loop: null, tasks: [] } });
+      harness.core.bus.emit('delegation.changed', { threadId: 'another-thread' });
+      harness.core.bus.emit('delegation.changed', { threadId });
       // The response follows every event on this socket, with no timing guess.
       await agent.call('agent.where', { threadId });
       expect(seen).toEqual(['thread.activity']);
@@ -65,7 +67,10 @@ describe('the access gate', () => {
   });
 
   test('device sockets receive readable state, but no login output, trace or diagnostics', async () => {
+    const owner = await harness.connect();
+    const { threadId } = await echoThread(harness, owner);
     const phone = await pairedDevice();
+    await phone.call('threads.subscribe', { threadId });
     const seen: string[] = [];
     phone.onAny(name => seen.push(name));
     try {
@@ -74,8 +79,10 @@ describe('the access gate', () => {
       harness.core.bus.emit('process.focusPushed', { threadId: 'private-thread', pid: 123, title: 'private window', restored: true, at: Date.now() });
       harness.core.bus.emit('quotas.updated', []);
       harness.core.bus.emit('settings.updated', harness.core.settings.get());
+      harness.core.bus.emit('delegation.changed', { threadId: 'another-thread' });
+      harness.core.bus.emit('delegation.changed', { threadId });
       await phone.call('settings.get', {});
-      expect(seen).toEqual(['settings.updated']);
+      expect(seen).toEqual(['settings.updated', 'delegation.changed']);
     } finally { phone.close(); }
   });
 

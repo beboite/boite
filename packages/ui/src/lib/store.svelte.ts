@@ -8,6 +8,9 @@ import type {
   CoordinationConfig,
   CoordinationPeer,
   CoordinationView,
+  DelegatedAgent,
+  DelegationConfig,
+  DelegationView,
   CoreInfo,
   FileContent,
   FileEntry,
@@ -363,6 +366,16 @@ export class Store {
   coordinationSaving = $state(false);
   #coordinationEpoch = 0;
   coordinationError = $state<string | null>(null);
+  /** The bounded child team of the open root or child thread. */
+  delegation = $state<DelegationView | null>(null);
+  delegationThread = $state<Thread | null>(null);
+  delegationSelectedAgentId = $state<ThreadId | null>(null);
+  delegationLoading = $state(false);
+  delegationSaving = $state(false);
+  delegationError = $state<string | null>(null);
+  #delegationEpoch = 0;
+  #delegationSelectionEpoch = 0;
+  #delegationConfigureEpoch = 0;
   /** Kept after the answer so a folded card still shows what was asked. Same bound. */
   questionRequests = $state<Record<RequestId, QuestionRequest>>({});
   collapsedProjects = $state<string[]>([]);
@@ -370,6 +383,8 @@ export class Store {
   #client: Client | null = null;
   #off: (() => void)[] = [];
   #subscribedThreadId: ThreadId | null = null;
+  /** The one child transcript shown in Agents, beside the normal open-thread subscription. */
+  #delegationSubscribedThreadId: ThreadId | null = null;
   /** The number of the newest `open()`, so an older one writes nothing. */
   #openGeneration = 0;
   /** What that newest run is opening, so an older one knows what to give back. */
@@ -422,7 +437,7 @@ export class Store {
   }
 
   threadsOf(projectId: ProjectId): ThreadSummary[] {
-    return this.threads.filter((t) => t.projectId === projectId && !t.archived);
+    return this.threads.filter((t) => t.projectId === projectId && !t.archived && !t.parentThreadId);
   }
 
   /** Pinned threads first, then the live ones, then by last activity; the search box narrows it. */
@@ -707,6 +722,7 @@ export class Store {
       this.#upsertThread(summary);
       const open = this.openThread;
       if (open && open.id === summary.id) Object.assign(open, summary);
+      if (this.delegationThread?.id === summary.id) Object.assign(this.delegationThread, summary);
     });
     // The agent's `/name` list is the whole list each time, and it lives on the
     // open thread only: a summary in the sidebar carries none.
@@ -719,6 +735,13 @@ export class Store {
     });
     on('collaboration.changed', ({ threadId }) => {
       if (this.openThread?.id === threadId) void this.loadCoordination(threadId, false);
+    });
+    on('delegation.changed', ({ threadId }) => {
+      const open = this.openThread;
+      const view = this.delegation;
+      if (open && (threadId === open.id || threadId === open.parentThreadId || threadId === view?.rootThreadId)) {
+        void this.loadDelegation(open.id);
+      }
     });
     // The agent of a thread asked its panel for something. The layout is per
     // thread, so it is written on that thread's panel even while another one is
@@ -755,33 +778,30 @@ export class Store {
     });
 
     on('message.started', (message) => {
-      const open = this.openThread;
-      if (!open || open.id !== message.threadId) return;
-      const index = open.messages.findIndex((m) => m.id === message.id);
-      if (index >= 0) open.messages[index] = message;
-      else open.messages.push(message);
+      for (const target of this.#threadSnapshots(message.threadId)) {
+        const index = target.messages.findIndex((m) => m.id === message.id);
+        if (index >= 0) target.messages[index] = message;
+        else target.messages.push(message);
+      }
     });
 
     on('message.delta', ({ threadId, messageId, partIndex, text }) => {
-      const message = this.#message(threadId, messageId);
-      if (!message) return;
-      const part = message.parts[partIndex];
-      // A delta appends to whatever kind of text part sits there: text or thinking.
-      if (part && (part.type === 'text' || part.type === 'thinking')) part.text += text;
-      // On a tool part it is the input's JSON, still being typed by the model.
-      else if (part && part.type === 'tool') part.inputText = (part.inputText ?? '') + text;
-      else if (!part) message.parts[partIndex] = { type: 'text', text };
+      for (const message of this.#messages(threadId, messageId)) {
+        const part = message.parts[partIndex];
+        // A delta appends to whatever kind of text part sits there: text or thinking.
+        if (part && (part.type === 'text' || part.type === 'thinking')) part.text += text;
+        // On a tool part it is the input's JSON, still being typed by the model.
+        else if (part && part.type === 'tool') part.inputText = (part.inputText ?? '') + text;
+        else if (!part) message.parts[partIndex] = { type: 'text', text };
+      }
     });
 
     on('message.part', ({ threadId, messageId, partIndex, part }) => {
-      const message = this.#message(threadId, messageId);
-      if (!message) return;
-      message.parts[partIndex] = part;
+      for (const message of this.#messages(threadId, messageId)) message.parts[partIndex] = part;
     });
 
     on('message.completed', ({ threadId, messageId, state }) => {
-      const message = this.#message(threadId, messageId);
-      if (message) message.state = state;
+      for (const message of this.#messages(threadId, messageId)) message.state = state;
     });
 
     on('permission.requested', (request) => {
@@ -898,10 +918,20 @@ export class Store {
     this.coordinationLoading = false;
     this.coordinationSaving = false;
     this.coordinationError = null;
+    this.#delegationEpoch++;
+    this.#delegationSelectionEpoch++;
+    this.#delegationConfigureEpoch++;
+    this.delegation = null;
+    this.delegationThread = null;
+    this.delegationSelectedAgentId = null;
+    this.delegationLoading = false;
+    this.delegationSaving = false;
+    this.delegationError = null;
     for (const off of this.#off) off();
     this.#off = [];
     this.#client = null;
     this.#subscribedThreadId = null;
+    this.#delegationSubscribedThreadId = null;
   }
 
   /** Stop streaming the hidden conversation while keeping machine summaries live. */
@@ -942,6 +972,7 @@ export class Store {
         this.attach(
           new FakeClient({
             long: params.get('long') === '1',
+            delegationDemo: params.get('team') === '1',
             uninstalled: params.get('uninstalled') === '1',
             browserTask: params.get('browser-task') === '1',
             ...(params.get('principal') === 'session' ? { principal: 'session' as const } : {})
@@ -991,6 +1022,7 @@ export class Store {
     else if (name === 'files') panel.openFiles(path === '' ? undefined : path);
     else if (name === 'file' && path !== '') panel.openFile(path);
     else if (name === 'tasks') panel.openTasks();
+    else if (name === 'agents') panel.open('agents');
     else if (name === 'trace') panel.open('trace');
   }
 
@@ -1059,7 +1091,7 @@ export class Store {
     try { stored = localStorage.getItem(this.#lastProjectKey()); } catch { /* storage unavailable */ }
     const known = this.projects.find((p) => p.id === stored);
     if (known) return known.id;
-    const recent = this.threads.filter((t) => !t.archived).sort((a, b) => b.updatedAt - a.updatedAt)[0];
+    const recent = this.threads.filter((t) => !t.archived && !t.parentThreadId).sort((a, b) => b.updatedAt - a.updatedAt)[0];
     return recent?.projectId ?? this.projects[0]?.id ?? null;
   }
 
@@ -1076,7 +1108,7 @@ export class Store {
   async openWhereLeft(): Promise<void> {
     if (!this.visible) return;
     if (this.openThread || this.draft) return;
-    const live = this.threads.filter((t) => !t.archived);
+    const live = this.threads.filter((t) => !t.archived && !t.parentThreadId);
     const recent = [...live].sort((a, b) => b.updatedAt - a.updatedAt)[0];
     if (recent) {
       await this.open(recent.id);
@@ -1172,6 +1204,145 @@ export class Store {
       if (this.#client === client && this.openThread?.id === threadId) this.coordinationError = error instanceof Error ? error.message : String(error);
     } finally {
       if (this.#client === client) this.coordinationSaving = false;
+    }
+  }
+
+  async loadDelegation(threadId = this.openThread?.id): Promise<void> {
+    const client = this.#client;
+    if (!client || !threadId) return;
+    const epoch = ++this.#delegationEpoch;
+    const current = () => this.#client === client && this.openThread?.id === threadId && this.#delegationEpoch === epoch;
+    this.delegationLoading = true;
+    this.delegationError = null;
+    try {
+      const view = await client.call('delegation.get', { threadId });
+      if (!current()) return;
+      this.delegation = view;
+      const selected = this.delegationSelectedAgentId;
+      if (selected && !view.agents.some(agent => agent.thread.id === selected)) {
+        await this.selectDelegatedAgent(null);
+      } else if (selected && this.delegationThread?.id === selected) {
+        const summary = view.agents.find(agent => agent.thread.id === selected)?.thread;
+        if (summary) Object.assign(this.delegationThread, summary);
+      }
+    } catch (error) {
+      if (current()) this.delegationError = this.#reason(error);
+    } finally {
+      if (current()) this.delegationLoading = false;
+    }
+  }
+
+  #delegationRootId(): ThreadId | null {
+    const thread = this.openThread;
+    if (!thread) return null;
+    const root = thread.parentThreadId ?? thread.id;
+    if (this.delegation) return this.delegation.rootThreadId === root ? root : null;
+    return thread.parentThreadId ? null : root;
+  }
+
+  async configureDelegation(config: DelegationConfig): Promise<void> {
+    const client = this.#client;
+    const openThreadId = this.openThread?.id;
+    const threadId = this.#delegationRootId();
+    if (!client || !threadId || !this.owner || this.delegationSaving) return;
+    const epoch = ++this.#delegationConfigureEpoch;
+    this.delegationSaving = true;
+    this.delegationError = null;
+    try {
+      const view = await client.call('delegation.configure', { threadId, config });
+      if (client === this.#client && this.openThread?.id === openThreadId && epoch === this.#delegationConfigureEpoch) {
+        if (openThreadId === threadId) this.delegation = view;
+        else await this.loadDelegation(openThreadId);
+      }
+    } catch (error) {
+      if (client === this.#client && this.openThread?.id === openThreadId && epoch === this.#delegationConfigureEpoch) this.delegationError = this.#reason(error);
+    } finally {
+      if (client === this.#client && epoch === this.#delegationConfigureEpoch) this.delegationSaving = false;
+    }
+  }
+
+  /** One child transcript in the panel, while the parent conversation keeps streaming. */
+  async selectDelegatedAgent(threadId: ThreadId | null): Promise<void> {
+    const client = this.#client;
+    if (!client) return;
+    const epoch = ++this.#delegationSelectionEpoch;
+    const previous = this.#delegationSubscribedThreadId;
+    this.delegationSelectedAgentId = threadId;
+    this.delegationThread = null;
+    this.#delegationSubscribedThreadId = null;
+    if (previous && previous !== this.#subscribedThreadId && previous !== threadId) {
+      await client.call('threads.unsubscribe', { threadId: previous }).catch(() => undefined);
+    }
+    if (threadId === null) return;
+    try {
+      if (threadId !== this.#subscribedThreadId) {
+        await client.call('threads.subscribe', { threadId });
+        if (epoch !== this.#delegationSelectionEpoch || client !== this.#client) {
+          if (this.delegationSelectedAgentId !== threadId && this.#subscribedThreadId !== threadId) {
+            await client.call('threads.unsubscribe', { threadId }).catch(() => undefined);
+          }
+          return;
+        }
+      }
+      if (epoch === this.#delegationSelectionEpoch && client === this.#client) this.#delegationSubscribedThreadId = threadId;
+      const thread = await client.call('threads.get', { threadId });
+      if (epoch === this.#delegationSelectionEpoch && client === this.#client && this.delegationSelectedAgentId === threadId) {
+        this.delegationThread = thread;
+      }
+    } catch (error) {
+      if (epoch === this.#delegationSelectionEpoch && client === this.#client) this.delegationError = this.#reason(error);
+    }
+  }
+
+  async spawnDelegatedAgent(profileId: string, task: string, title?: string): Promise<DelegatedAgent | null> {
+    const client = this.#client;
+    const openThreadId = this.openThread?.id;
+    const threadId = this.#delegationRootId();
+    if (!client || !threadId || !this.owner || !task.trim()) return null;
+    this.delegationError = null;
+    try {
+      const agent = await client.call('delegation.spawn', {
+        threadId,
+        profileId,
+        task: task.trim(),
+        ...(title?.trim() ? { title: title.trim() } : {}),
+        requestId: crypto.randomUUID()
+      });
+      if (client !== this.#client || this.openThread?.id !== openThreadId) return null;
+      await this.loadDelegation(openThreadId);
+      return agent;
+    } catch (error) {
+      if (client === this.#client && this.openThread?.id === openThreadId) this.delegationError = this.#reason(error);
+      return null;
+    }
+  }
+
+  async messageDelegatedAgent(toThreadId: ThreadId, text: string): Promise<boolean> {
+    const client = this.#client;
+    const threadId = this.#delegationRootId();
+    if (!client || !threadId || !text.trim()) return false;
+    this.delegationError = null;
+    try {
+      await client.call('delegation.send', { threadId, toThreadId, text: text.trim(), requestId: crypto.randomUUID() });
+      if (client !== this.#client || this.delegation?.rootThreadId !== threadId) return false;
+      await this.loadDelegation(this.openThread?.id);
+      return true;
+    } catch (error) {
+      if (client === this.#client && this.delegation?.rootThreadId === threadId) this.delegationError = this.#reason(error);
+      return false;
+    }
+  }
+
+  async stopDelegatedAgent(agentId?: ThreadId): Promise<void> {
+    const client = this.#client;
+    const threadId = this.#delegationRootId();
+    if (!client || !threadId) return;
+    this.delegationError = null;
+    try {
+      await client.call('delegation.stop', { threadId, ...(agentId ? { agentId } : {}) });
+      if (client === this.#client && this.delegation?.rootThreadId === threadId) await this.loadDelegation(this.openThread?.id);
+    } catch (error) {
+      if (client === this.#client && this.delegation?.rootThreadId === threadId) this.delegationError = this.#reason(error);
     }
   }
 
@@ -1544,6 +1715,10 @@ export class Store {
     const generation = ++this.#openGeneration;
     this.#openTarget = threadId;
     const newest = (): boolean => this.#openGeneration === generation;
+    if (this.openThread?.id !== threadId && this.delegationSelectedAgentId && this.delegationSelectedAgentId !== threadId) {
+      await this.selectDelegatedAgent(null);
+      if (!newest()) return;
+    }
     try {
       const previous = this.#subscribedThreadId;
       // Everything this open needs leaves in one burst, in the order the core
@@ -1573,7 +1748,7 @@ export class Store {
       this.#subscribedThreadId = threadId;
       // A thread already left that the core will not let go of costs a few
       // events, not the open of this one.
-      const unsubscribed: Promise<unknown> = previous && previous !== threadId
+      const unsubscribed: Promise<unknown> = previous && previous !== threadId && previous !== this.#delegationSubscribedThreadId
         ? client.call('threads.unsubscribe', { threadId: previous }).catch(() => undefined)
         : Promise.resolve();
       const thread = await fetched;
@@ -1600,6 +1775,14 @@ export class Store {
       this.draft = null;
       // The last page, pinned to the bottom; what is above it arrives on scroll.
       this.loadingOlder = false;
+      if (this.openThread?.id !== threadId) {
+        this.#delegationEpoch++;
+        this.#delegationConfigureEpoch++;
+        this.delegation = null;
+        this.delegationLoading = false;
+        this.delegationSaving = false;
+        this.delegationError = null;
+      }
       this.openThread = thread;
       // The thread that was open takes its permission and question cards with it.
       this.#keepRequestsOf(threadId);
@@ -2491,13 +2674,15 @@ export class Store {
   async #unsubscribe(): Promise<void> {
     const client = this.#client;
     const previous = this.#subscribedThreadId;
-    if (!client || !previous) return;
+    const delegated = this.#delegationSubscribedThreadId;
+    this.#delegationSelectionEpoch++;
     this.#subscribedThreadId = null;
-    try {
-      await client.call('threads.unsubscribe', { threadId: previous });
-    } catch {
-      /* the thread may already be gone */
-    }
+    this.#delegationSubscribedThreadId = null;
+    this.delegationSelectedAgentId = null;
+    this.delegationThread = null;
+    if (!client || (!previous && !delegated)) return;
+    const ids = [...new Set([previous, delegated].filter((id): id is string => id !== null))];
+    await Promise.all(ids.map(threadId => client.call('threads.unsubscribe', { threadId }).catch(() => undefined)));
   }
 
   /** A toast for what happened where the user was not looking; the decision is `shouldNotify`. */
@@ -2533,18 +2718,25 @@ export class Store {
     else this.threads.push(summary);
   }
 
-  #message(threadId: ThreadId, messageId: string): Message | null {
-    const open = this.openThread;
-    if (!open || open.id !== threadId) return null;
-    return open.messages.find((m) => m.id === messageId) ?? null;
+  #threadSnapshots(threadId: ThreadId): Set<Thread> {
+    return new Set([this.openThread, this.delegationThread].filter((thread): thread is Thread => thread?.id === threadId));
+  }
+
+  #messages(threadId: ThreadId, messageId: string): Set<Message> {
+    const messages = new Set<Message>();
+    for (const thread of this.#threadSnapshots(threadId)) {
+      const message = thread.messages.find((m) => m.id === messageId);
+      if (message) messages.add(message);
+    }
+    return messages;
   }
 
   #upsertTurn(threadId: ThreadId, turn: Thread['turns'][number]): void {
-    const open = this.openThread;
-    if (!open || open.id !== threadId) return;
-    const index = open.turns.findIndex((t) => t.id === turn.id);
-    if (index >= 0) open.turns[index] = turn;
-    else open.turns.push(turn);
+    for (const thread of this.#threadSnapshots(threadId)) {
+      const index = thread.turns.findIndex((t) => t.id === turn.id);
+      if (index >= 0) thread.turns[index] = turn;
+      else thread.turns.push(turn);
+    }
   }
 
   /** What was probed for one account, dropped: the account itself changed. */

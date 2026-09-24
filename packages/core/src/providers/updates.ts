@@ -314,6 +314,7 @@ export class HarnessUpdates {
     if (command === null) throw new Error(`${target.descriptor.name} is not on this machine any more`);
     const spawned = this.core.procs.spawnPiped(updateThreadId(target.descriptor.id), command.executable, [...command.prefix, ...args], {
       cwd: this.core.dataDir,
+      env: { ...process.env, ...command.updateEnv },
     });
     spawned.proc.stdin.end();
     let timedOut = false;

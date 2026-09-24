@@ -20,12 +20,14 @@ time out. It leaves on Update, on Skip, or when the core reports the agent
 current. Three notices show at most; a phone shows one at a time and only on
 the conversation screen.
 
-- Update releases the provider's warm processes, runs the update and shows a
-  progress card. The threads stay; the next turn starts the new version.
+- Update releases the provider's warm processes and runs the update in the
+  background: the notice leaves at once. The threads stay; the next turn starts
+  the new version. Settings, Providers shows the agent as updating meanwhile.
 - Skip stops offering that version. A later version is offered again.
   Settings, Providers, Agent updates lists every agent with its versions and
   offers a skipped version again.
-- A failed update keeps its notice with the updater's last line and Try again.
+- A failed update brings its notice back with the updater's last line and Try
+  again.
 
 `Update agents automatically` in the same card makes the core update by
 itself. It is off by default.
@@ -53,6 +55,13 @@ A profile opts in with an `update` block:
 - `latestNpm`: an npm package whose `latest` tag names the newest release.
 - `latestArgs`: arguments that print JSON carrying `latestVersion`, for an
   agent that checks by itself. Grok uses `update --check --json`.
+
+An executable candidate can carry `updateEnv`, set only when the updater runs
+from that candidate. It stands in for a launcher Boite skips: Codex's npm
+package starts its binary through a Node script that sets
+`CODEX_MANAGED_BY_NPM`, and `codex update` refuses with `Could not detect the
+Codex installation method` without it. The Windows descriptor runs that binary
+directly, so its two npm candidates set the variable themselves.
 
 `latestNpm` and `latestArgs` exclude each other. With neither, the installed
 version is listed, no update is announced and `Run its updater` stays on the
