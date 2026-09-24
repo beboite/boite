@@ -125,26 +125,21 @@ test('dates and numbers keep the machine region when it speaks the same language
   expect(formatLocale()).toBe('fr');
 });
 
-test('the catalogues carry the same keys, so no screen is half translated', () => {
-  const paths = (value: unknown, path: string[] = [], out: string[] = []): string[] => {
-    if (value === null || typeof value !== 'object' || Array.isArray(value)) {
-      out.push(`${path.join('.')}:${Array.isArray(value) ? `array.${value.length}` : typeof value}`);
-      return out;
-    }
-    for (const [key, child] of Object.entries(value)) paths(child, [...path, key], out);
-    return out;
-  };
-
-  expect(paths(fr)).toEqual(paths(en));
-  // And the placeholders a sentence fills are the same on both sides.
+test('a translation only carries sentences English has, with the same kind and the same slots', () => {
+  // A sentence French lacks is allowed here, since main and the nightly show it
+  // in English; `scripts/ci/translations.ts --release` is what refuses a release
+  // that still lacks one.
+  const kind = (value: unknown): string => (Array.isArray(value) ? `array.${value.length}` : typeof value);
   const slots = (text: string): string[] => [...text.matchAll(/\{(\w+)\}/g)].map((hit) => hit[1] ?? '').sort();
   const walk = (a: unknown, b: unknown, path: string[]): void => {
+    const at = path.join('.');
+    expect({ at, kind: kind(b) }).toEqual({ at, kind: kind(a) });
     if (typeof a === 'string') {
-      expect({ at: path.join('.'), slots: slots(b as string) }).toEqual({ at: path.join('.'), slots: slots(a) });
+      expect({ at, slots: slots(b as string) }).toEqual({ at, slots: slots(a) });
       return;
     }
     if (a === null || typeof a !== 'object' || Array.isArray(a)) return;
-    for (const [key, child] of Object.entries(a)) walk(child, (b as Record<string, unknown>)[key], [...path, key]);
+    for (const [key, child] of Object.entries(b as Record<string, unknown>)) walk((a as Record<string, unknown>)[key], child, [...path, key]);
   };
   walk(en, fr, []);
 });

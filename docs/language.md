@@ -32,7 +32,7 @@ on a French machine reads as English, not as a French machine writing English.
 |---|---|
 | `packages/ui/src/lib/strings.ts` | What every component imports: `strings` in the language of the moment, and `fill`. |
 | `packages/ui/src/lib/strings.en.ts` | English. Every user-facing sentence of the UI, and the shape every translation mirrors. |
-| `packages/ui/src/lib/strings.fr.ts` | French, typed `Messages`, which is the English catalogue with its literals widened. |
+| `packages/ui/src/lib/strings.fr.ts` | French, typed `Translation`: the English catalogue's shape, literals widened, every sentence optional. |
 | `packages/ui/src/lib/i18n.svelte.ts` | The choice, the detection, and the proxy `strings.ts` re-exports. |
 
 `strings` is a proxy over the catalogue of the moment, not one of the two
@@ -48,14 +48,21 @@ imports `lib/i18n.svelte` for `setLocaleSetting` and the list of locales.
 ## Adding a sentence
 
 Put it in `strings.en.ts`, under the block its screen belongs to, then in
-`strings.fr.ts` at the same path. `Messages` requires every key, so
-`bun run --cwd packages/ui check` fails until French has it, and
-`src/lib/i18n.test.ts` fails too, on the key list and on the `{slots}` of each
-sentence, which must match on both sides.
+`strings.fr.ts` at the same path.
 
-A sentence that somehow reaches a build without a translation, a cast that went
-around the type, shows in English on its own: the fallback is per key, never
-per screen, and a dotted path never reaches the screen.
+English alone is enough to merge and to ship a nightly. A sentence French has
+not got shows in English, key by key, never per screen, and a dotted path never
+reaches the screen. A release is refused until every language has every
+sentence: the `release` workflow runs `bun run check:translations`, which lists
+each missing path and fails. Every pull request runs the same script without
+`--release`, so the missing paths show as warnings long before a release.
+
+What fails everywhere, English only or not: a key English does not have, a
+value of another kind (a sentence where English has a function, a list of
+another length), and a sentence whose `{slots}` differ from the English one.
+`bun run --cwd packages/ui check` refuses the first two through the
+`Translation` type, and `src/lib/i18n.test.ts` and `scripts/ci/translations.ts`
+refuse all three.
 
 Read the sentence, not the key: a string is captured when a module runs, so a
 value read once at the top of a module or in a `const` is stuck in the language
@@ -64,7 +71,9 @@ of the first frame. In a component, read `strings.x.y` in the markup or in a
 
 ## Adding a language
 
-1. Copy `strings.fr.ts` to `strings.<code>.ts`, translate it, keep the type.
+1. Copy `strings.fr.ts` to `strings.<code>.ts`, translate it, keep the type,
+   and name its export after the code: `scripts/ci/translations.ts` finds a
+   catalogue by that file name and that export.
 2. Add the code to `Locale` and `LOCALES` in `i18n.svelte.ts`, and the
    catalogue to `CATALOGUES`.
 3. Name it in `settings.languageNames`, in every catalogue, in its own

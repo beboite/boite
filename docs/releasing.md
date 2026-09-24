@@ -10,6 +10,7 @@ images and the daily nightly schedule.
 
 ```bash
 bun run check
+bun run check:translations
 bun run test
 bun run test:shell
 bun run build:shell
