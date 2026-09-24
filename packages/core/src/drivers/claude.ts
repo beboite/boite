@@ -612,6 +612,11 @@ class ClaudeSession {
   private orphans: SDKMessage[] = [];
   /** The core was asked for a turn for the orphans and has not attached one yet. */
   private woken = false;
+  /**
+   * Results still owed to a run the CLI started by itself, which a user's turn
+   * took over before that run finished: they close that run, not the turn.
+   */
+  private foreignResults = 0;
   private linger: Timer | null = null;
 
   private query: Query | null = null;
@@ -689,6 +694,8 @@ class ClaudeSession {
         this.receive(message);
       }
       if (adopted) return;
+      // The CLI's own run is still going: its result is not this turn's.
+      if (!replay.some(message => message.type === 'result')) this.foreignResults += 1;
     } else {
       // Bookkeeping that no output followed was already applied as it came.
       this.orphans = [];
@@ -857,6 +864,11 @@ class ClaudeSession {
       return;
     }
     if (this.sessionId !== null) turn.noteSession(this.sessionId);
+    if (message.type === 'result' && this.foreignResults > 0) {
+      this.foreignResults -= 1;
+      if (typeof message.total_cost_usd === 'number') this.costSoFar = message.total_cost_usd;
+      return;
+    }
     // `total_cost_usd` counts from the start of the CLI process, so on a warm
     // query every result after the first carries the turns before it too. The
     // turn is told what was already charged before it reads the result. A cold
@@ -961,6 +973,7 @@ class ClaudeSession {
     this.clearLinger();
     this.orphans = [];
     this.woken = false;
+    this.foreignResults = 0;
     // What the CLI ran in the background went with it.
     if (this.background.length > 0) {
       this.background = [];

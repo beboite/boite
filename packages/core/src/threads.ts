@@ -164,6 +164,8 @@ export class ThreadStore {
    * as the next prompt once that turn finished.
    */
   private readonly deferredAnswers = new Map<ThreadId, string[]>();
+  /** A driver asked for a background turn while the thread's last turn was still closing. */
+  private readonly pendingWakes = new Map<ThreadId, string>();
   /** Where each open asynchronous card is drawn, so its answer can be written back after its turn ended. */
   private readonly asyncCards = new Map<RequestId, { threadId: ThreadId; messageId: MessageId; partIndex: number; part: Extract<MessagePart, { type: 'question' }> }>();
   /** The threads a title is being written for right now: a second ask is refused, not doubled. */
@@ -502,6 +504,7 @@ export class ThreadStore {
       // Nobody answers a card on a thread put away, and no turn should start from one.
       this.clearQuestionsOf(threadId, true);
       this.deferredAnswers.delete(threadId);
+      this.pendingWakes.delete(threadId);
     }
     const thread = this.require(threadId);
     return this.save({ ...thread, archived }, 'thread.archived');
@@ -616,6 +619,8 @@ export class ThreadStore {
     if (this.core.stopping) throw refused('the core is stopping; reconnect before sending another prompt');
     const thread = this.require(threadId);
     checkAttachmentArray(attachments);
+    // A turn of the user's own takes whatever the agent wrote by itself first.
+    if (operation !== 'background') this.pendingWakes.delete(threadId);
     let fingerprint = '';
     if (clientRequestId !== undefined) {
       if (typeof clientRequestId !== 'string' || !/^[A-Za-z0-9_-]{8,128}$/.test(clientRequestId)) throw refused('clientRequestId must contain 8 to 128 URL-safe characters');
@@ -929,6 +934,12 @@ export class ThreadStore {
     this.save(next, 'thread.finished');
     if (result.status !== 'done') this.core.coordination.pause(threadId);
     if (result.status === 'done' && sameSession && !queued.execution?.operation) this.autoTitle(threadId, turnId);
+    const woke = this.pendingWakes.get(threadId);
+    if (woke !== undefined) {
+      this.pendingWakes.delete(threadId);
+      // First, so the output the agent wrote by itself goes before any held answer.
+      if (!next.archived) setTimeout(() => this.wake(threadId, woke), 0);
+    }
     // Answers that came in while this turn could not take them go out now. A
     // stopped or failed turn keeps them for the next prompt the user sends.
     if (result.status === 'done' && !next.archived && this.deferredAnswers.has(threadId)) {
@@ -1160,7 +1171,11 @@ export class ThreadStore {
   private wake(threadId: ThreadId, text: string): void {
     const thread = this.core.journal.getThread(threadId);
     if (thread === null || thread.archived) return;
-    if (['queued', 'running', 'waiting'].includes(thread.status) || this.handles.has(threadId)) return;
+    if (['queued', 'running', 'waiting'].includes(thread.status) || this.handles.has(threadId)) {
+      // The turn that ended is still being saved: open this one right after it.
+      this.pendingWakes.set(threadId, text);
+      return;
+    }
     try {
       this.startTurn(threadId, text, [], undefined, 'background');
     } catch (error) {
