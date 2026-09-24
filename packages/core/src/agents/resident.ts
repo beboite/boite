@@ -55,7 +55,8 @@ export class ResidentAgents {
       return this.core.workforce.saveProfile({id:agent.id,expectedRevision:params.expectedRevision,value:{...agent,selection}});
     });
     this.enforce();
-    for(const session of this.records.list('session').filter(s=>s.agentId===agent.id))this.core.delegation.configure(session.threadId,config.subagents);
+    // An archived session keeps its old config; delegation.configure refuses it after the commit above.
+    for(const session of this.records.list('session').filter(s=>s.agentId===agent.id&&this.core.journal.getThread(s.threadId)?.archived===false))this.core.delegation.configure(session.threadId,config.subagents);
     this.core.workforce.changed();return saved;
   }
   setGrants(grants: AgentAccountGrant[]): AgentAccountGrant[] {

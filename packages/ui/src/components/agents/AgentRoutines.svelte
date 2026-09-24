@@ -12,7 +12,7 @@
   const showForm = $derived(adding || !routines.length);
   async function create() {
     const schedule: AgentSchedule = kind === 'interval' ? { kind, everyMinutes: minutes } : kind === 'daily' ? { kind, time, timezone } : { kind, at: new Date(at).getTime() };
-    const saved = await view.call('agents.routine.save', { value: { agentId, name, prompt, schedule, enabled: true, nextAt: kind === 'once' ? schedule.kind === 'once' ? schedule.at : null : Date.now() + minutes * 60000, lastWorkId: null, lastScheduledAt: null } });
+    const saved = await view.call('agents.routine.save', { value: { agentId, name, prompt, schedule, enabled: true, nextAt: null, lastWorkId: null, lastScheduledAt: null } });
     if (saved) { name = ''; prompt = ''; adding = false; }
   }
   async function toggle(routine: AgentRoutine) { await view.call('agents.routine.save', { id: routine.id, expectedRevision: routine.revision, value: { ...routine, enabled: !routine.enabled } }); }

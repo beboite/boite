@@ -102,7 +102,7 @@ function parse(argv: string[]): Parsed {
     const arg = argv[index] ?? '';
     const next = (): string => {
       const value = argv[index + 1];
-      if (value === undefined) throw new Usage(`${arg} needs a value`);
+      if (value === undefined || value === '' || value.startsWith('--')) throw new Usage(`${arg} needs a value`);
       index += 1;
       return value;
     };

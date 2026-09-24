@@ -33,6 +33,15 @@ test('default route must be allowed; account grants restrict identity and child 
  await expect(client.call('agents.runtime.configure',{agentId:agent.id,expectedRevision:agent.revision,config:policy()})).rejects.toThrow('account');
 });
 
+test('removing an account drops its grant, so later grant edits still apply',async()=>{
+ const spare=await client.call('accounts.add',{providerId:'echo',label:'Spare'});
+ await client.call('agents.accounts.set',{grants:[{accountId:spare.id,agentIds:[]}]});
+ await client.call('accounts.remove',{accountId:spare.id});
+ const {accountGrants}=await client.call('agents.snapshot',{});
+ expect(accountGrants).toEqual([]);
+ expect(await client.call('agents.accounts.set',{grants:accountGrants})).toEqual([]);
+});
+
 test('paired clients receive resident updates and cannot impersonate agents or change model policy', async () => {
  const {grant}=await client.call('pairing.grant',{});
  const remote=await connect(h.url,'',{grant,client:{name:'Remote PC',version:'test'}});

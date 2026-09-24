@@ -180,6 +180,7 @@ export class FakeClient implements ObservableClient {
     create: (agent, sessionId, work) => this.#createAgentSession(agent, sessionId, work),
     start: (threadId, prompt, agent) => { Object.assign(this.#thread(threadId), agent.selection); return this.#startTurn(threadId, prompt); },
     stop: threadId => { void this.#stopTurn(threadId); },
+    protocol: providerId => this.#providers.find(p => p.id === providerId)?.protocol,
   });
   #createAgentSession(agent: AgentProfile, sessionId: string, work: AgentWork): string {
     const mission = work.scope.kind === 'mission' ? this.#agents.snapshot().missions.find(m => m.id === work.scope.id) : null;

@@ -612,8 +612,12 @@ fn spawn_core(channel: Channel, resources: Option<&Path>, resident: bool) -> Res
         // No pipe belongs to the shell after it exits. Broken stdout must not kill the host.
         let directory = data_dir(channel)?;
         std::fs::create_dir_all(&directory).map_err(|e| e.to_string())?;
-        let output = std::fs::OpenOptions::new().create(true).append(true).open(directory.join("core-output.log")).map_err(|e| format!("core-output.log could not be opened: {e}"))?;
-        if output.metadata().map(|m| m.len() > 8 * 1024 * 1024).unwrap_or(false) { output.set_len(0).map_err(|e| e.to_string())?; }
+        let path = directory.join("core-output.log");
+        // An append handle on Windows lacks FILE_WRITE_DATA, so it cannot truncate: a separate write handle does.
+        if std::fs::metadata(&path).map(|m| m.len() > 8 * 1024 * 1024).unwrap_or(false) {
+            std::fs::OpenOptions::new().write(true).truncate(true).open(&path).map_err(|e| format!("core-output.log could not be truncated: {e}"))?;
+        }
+        let output = std::fs::OpenOptions::new().create(true).append(true).open(&path).map_err(|e| format!("core-output.log could not be opened: {e}"))?;
         command.stdout(Stdio::from(output.try_clone().map_err(|e| e.to_string())?)).stderr(Stdio::from(output));
         #[cfg(unix)]
         { use std::os::unix::process::CommandExt; command.process_group(0); }

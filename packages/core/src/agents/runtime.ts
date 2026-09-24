@@ -127,7 +127,12 @@ export class AgentRuntime {
         if (active.length >= cap || scheduler.queued.length > 0) break;
         if (work.status !== 'pending' || work.notBefore > Date.now() || active.some(run => run.agentId === work.agentId)) continue;
         try { if (this.eligible(work)) await this.start(work); }
-        catch (error) { if (!this.closed && !this.core.journal.isClosed()) this.fail(this.r.get('work', work.id), messageOf(error)); }
+        catch (error) {
+          if (this.closed || this.core.journal.isClosed()) continue;
+          // A pause or cancel during workspace preparation is the reason, not an error.
+          const current = this.r.get('work', work.id);
+          if (['pending', 'running'].includes(current.status)) this.fail(current, messageOf(error));
+        }
       }
     } finally { this.pumping = false; for (const done of this.drained.splice(0)) done(); }
   }
@@ -287,10 +292,11 @@ export class AgentRuntime {
     for (const run of this.active()) {
       const work = this.r.get('work', run.workId);
       const mission = work.scope.kind === 'mission' ? this.r.get('mission', work.scope.id) : null;
-      const limit = mission?.maxDurationMs ?? this.store.resident.config(run.agentId).maxRunMinutes * 60000;
-      const elapsed = mission ? this.elapsed(this.r.episodeRuns(work.episodeId)) : run.startedAt === null ? 0 : Date.now() - run.startedAt;
+      // One execution stops at the agent's limit; a mission also stops at its cumulative budget.
+      const overRun = run.startedAt !== null && Date.now() - run.startedAt >= this.store.resident.config(run.agentId).maxRunMinutes * 60000;
+      const overMission = mission !== null && this.elapsed(this.r.episodeRuns(work.episodeId)) >= mission.maxDurationMs;
       const paused = this.pauseReason(work);
-      if (paused || work.status === 'waiting' || elapsed >= limit) {
+      if (paused || work.status === 'waiting' || overRun || overMission) {
         if (work.status !== 'waiting') this.fail(work, paused ?? 'Execution time limit reached.', mission?.status === 'cancelled' ? 'cancelled' : 'paused');
         this.core.threads.stopTurn(run.threadId);
       } else if (work.taskId && run.status === 'running') {

@@ -1219,9 +1219,14 @@ export class ThreadStore {
   private enqueueResident(threadId: ThreadId, text: string): boolean {
     const thread = this.core.journal.getThread(threadId);
     if (!thread?.agentSessionId || thread.archived) return false;
-    const session = this.core.workforce.session(threadId);
-    this.core.workforce.resident.enqueue(session.agentId, text, session.scope);
-    this.core.workforce.changed();
+    // A resident thread never falls back to a direct turn: a refused session only logs.
+    try {
+      const session = this.core.workforce.session(threadId);
+      this.core.workforce.resident.enqueue(session.agentId, text, session.scope);
+      this.core.workforce.changed();
+    } catch (error) {
+      this.core.log('warn', `thread ${threadId}: resident work was not queued: ${messageOf(error)}`);
+    }
     return true;
   }
 

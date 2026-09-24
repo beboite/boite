@@ -112,6 +112,9 @@ describe('usage', () => {
     const flag = await boite(['where', '--nope']);
     expect(flag.code).toBe(2);
     expect(flag.err).toContain('unknown flag --nope');
+    const missing = await boite(['where', '--request-id', '--json']);
+    expect(missing.code).toBe(2);
+    expect(missing.err).toContain('--request-id needs a value');
     const help = await boite(['help']);
     expect(help.code).toBe(0);
     expect(help.err).toContain('usage: boite');

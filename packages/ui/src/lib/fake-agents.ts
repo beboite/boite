@@ -1,7 +1,15 @@
 import type { AgentDraft, AgentEntities, AgentEntityKind, AgentRecord, AgentSave, AgentWork, AgentsRpcMethods, AgentsSnapshot, RpcParams, AgentProfile, Turn } from '@boite/contracts';
 import { RpcErrorCode, DEFAULT_DELEGATION_CONFIG } from '@boite/contracts';
-import type { AgentAccountGrant, AgentBrain, AgentRuntimeConfig } from '@boite/contracts';
+import type { AgentAccountGrant, AgentBrain, AgentRuntimeConfig, AgentSchedule } from '@boite/contracts';
 import { RpcFailure } from './client';
+
+/** The core's `nextOccurrence` in local time, without its timezone and DST search. */
+function nextOccurrence(schedule: AgentSchedule, after: number): number | null {
+  if (schedule.kind === 'once') return schedule.at > after ? schedule.at : null;
+  if (schedule.kind === 'interval') return after + schedule.everyMinutes * 60000;
+  const [h = 0, m = 0] = schedule.time.split(':').map(Number), next = new Date(after); next.setHours(h, m, 0, 0);
+  return next.getTime() > after ? next.getTime() : next.getTime() + 86400000;
+}
 
 /** In-memory projection for interface journeys. Real process and crash behavior is tested against the core. */
 export class FakeAgents {
@@ -23,6 +31,7 @@ export class FakeAgents {
     create: (agent: AgentProfile, sessionId: string, work: AgentWork) => string;
     start: (threadId: string, prompt: string, agent: AgentProfile) => Turn;
     stop: (threadId: string) => void;
+    protocol: (providerId: string) => string | undefined;
   }) {}
   close(): void { this.closed = true; }
   open(): void { this.closed = false; this.kick(); }
@@ -162,7 +171,11 @@ export class FakeAgents {
         if (brain.revision !== p.expectedRevision) this.refuse('brain revision changed');
         const saved = { ...brain, instructions: p.instructions, memory: p.memory, revision: String(Number(brain.revision) + 1) }; this.brains.set(p.agentId, saved); return structuredClone(saved);
       }
-      case 'agents.routine.save': { const p = raw as RpcParams<typeof method>; this.get('profile', p.value.agentId); return this.save('routine', p); }
+      case 'agents.routine.save': {
+        const p = raw as RpcParams<typeof method>; this.get('profile', p.value.agentId);
+        const previous = p.id ? this.get('routine', p.id) : null, s = p.value.schedule, same = previous?.enabled && JSON.stringify(previous.schedule) === JSON.stringify(s);
+        return this.save('routine', { ...p, value: { ...p.value, nextAt: !p.value.enabled ? null : same ? previous.nextAt : nextOccurrence(s, Date.now()) } });
+      }
       case 'agents.routine.run': {
         const p = raw as RpcParams<typeof method>; return this.once(p.requestId, p, () => { const routine = this.get('routine', p.routineId); if (routine.lastWorkId && !['done','cancelled'].includes(this.get('work', routine.lastWorkId).status)) this.refuse('previous work is unfinished'); const work = this.work({ agentId: routine.agentId, scope: { kind: 'agent', id: routine.agentId }, prompt: routine.prompt, episodeId: crypto.randomUUID() }); this.update('routine', { ...routine, lastWorkId: work.id, lastScheduledAt: Date.now() }); return work; });
       }
@@ -171,7 +184,7 @@ export class FakeAgents {
       case 'agents.profile.save': {
         const p = raw as RpcParams<typeof method>;
         if (!p.value.name.trim()) this.refuse('name: expected nonempty text');
-        if (p.value.accountIntegration === 'kebacc-experiment' && (!this.limits.kebaccExperiment || p.value.selection.providerId !== 'antigravity-cli')) this.refuse('enable the kebacc experiment for an Antigravity CLI agent first');
+        if (p.value.accountIntegration === 'kebacc-experiment' && (!this.limits.kebaccExperiment || this.runner?.protocol(p.value.selection.providerId) !== 'agy')) this.refuse('enable the kebacc experiment for an Antigravity CLI agent first');
         return this.save('profile', p);
       }
       case 'agents.group.save': {

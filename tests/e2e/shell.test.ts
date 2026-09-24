@@ -287,6 +287,7 @@ shellTest('a resident core finishes agent work after shell exit, is adopted, and
     await started;
     await ownPage.evaluate(`window.__TAURI_INTERNALS__.invoke('quit_shell')`).catch(() => undefined);
     await waitUntil(() => !pidAlive(shellPid), CORE_GONE_TIMEOUT_MS);
+    expect(pidAlive(shellPid)).toBe(false);
     expect(await healthy(found.port)).toBe(true);
     expect((await finished).status).toBe('done');
     expect((await client.call('agents.snapshot', {})).work[0]?.status).toBe('done');

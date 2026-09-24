@@ -50,7 +50,7 @@
   let objective = $state(mission?.objective ?? '');
   let expectedResult = $state(mission?.expectedResult ?? '');
   let minutes = $state((mission?.maxDurationMs ?? 600000) / 60000);
-  let tokens = $state(mission?.maxTokens?.toString() ?? '');
+  let tokens = $state<number | null>(mission?.maxTokens ?? null);
   let resourceIds = $state(mission?.resourceIds ?? []);
 
   const labels = $derived(strings.agents);
@@ -79,7 +79,7 @@
     if (kind === 'profile') result = await view.call('agents.profile.save', { ...version, value: { name, domain, instructions, avatar: profile?.avatar ?? '', selection: creating ? selection : (latest as AgentProfile | undefined)?.selection ?? selection, status, tools, accountIntegration } });
     if (kind === 'group') result = await view.call('agents.group.save', { ...version, value: { name, memberIds, mode, maxTurns, maxTurnsPerAgent: perAgent, paused } });
     if (kind === 'team') result = await view.call('agents.team.save', { ...version, value: { name, description, members: memberIds.map(agentId => ({ agentId, responsibility: responsibilities[agentId] ?? '' })), groupId, projectIds, paused } });
-    if (kind === 'mission') result = await view.call('agents.mission.save', { ...version, value: { title: name, objective, expectedResult, agentIds: memberIds, teamId, projectId, status: mission?.status ?? 'open', maxTurns, maxDurationMs: Math.round(minutes * 60000), maxTokens: tokens.trim() ? Number(tokens) : null, resourceIds: resourceIds.filter(id => resourceOptions.some(r => r.id === id)) } });
+    if (kind === 'mission') result = await view.call('agents.mission.save', { ...version, value: { title: name, objective, expectedResult, agentIds: memberIds, teamId, projectId, status: mission?.status ?? 'open', maxTurns, maxDurationMs: Math.round(minutes * 60000), maxTokens: tokens || null, resourceIds: resourceIds.filter(id => resourceOptions.some(r => r.id === id)) } });
     if (result) ondone({ kind, id: result.id });
   }
 </script>
@@ -197,7 +197,7 @@
       <div class="agent-columns">
         <label class="agent-field">{labels.maxTurns}<input required type="number" min="1" max="1000" bind:value={maxTurns} /></label>
         <label class="agent-field">{labels.minutes}<input required type="number" min="1" max="1440" bind:value={minutes} /></label>
-        <label class="agent-field">{labels.tokens}<input inputmode="numeric" bind:value={tokens} /></label>
+        <label class="agent-field">{labels.tokens}<input type="number" min="1" step="1" bind:value={tokens} /></label>
       </div>
       {#if resourceOptions.length}<fieldset class="agent-field"><legend>{labels.resources}</legend><div class="agent-checks">{#each resourceOptions as resource (resource.id)}<label class="agent-chip-check"><input type="checkbox" checked={resourceIds.includes(resource.id)} onchange={() => { resourceIds = toggle(resourceIds, resource.id); }} />{resource.name} · {labels[resource.access]}</label>{/each}</div></fieldset>{/if}
     {/if}

@@ -175,6 +175,9 @@ export class AccountStore {
       { type: 'account.removed', threadId: null, version: 1, payload: { accountId } },
       () => {
         this.core.journal.deleteAccount(accountId);
+        // A stale grant would make every later agents.accounts.set refuse the whole list.
+        const grants = this.core.workforce.resident.grants();
+        if (grants.some(g => g.accountId === accountId)) this.core.journal.setSetting('agents:account-grants', grants.filter(g => g.accountId !== accountId));
       },
     );
     this.core.bus.emit('accounts.removed', { accountId });
