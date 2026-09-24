@@ -809,7 +809,7 @@ test('a slash lists the agent commands first, filters, and completes the box', a
   expect(document.body.textContent).toContain('Agent');
   expect(document.body.textContent).toContain('Boite');
 
-  await type('/sh');
+  await type('/sho');
   await waitFor(() => slashRows().length === 1);
   expect(slashRows()).toEqual(['shout']);
 

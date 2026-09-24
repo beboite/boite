@@ -25,7 +25,8 @@ const OWNER_COMMANDS = new Set<string>([
   'files',
   'tasks',
   'providers',
-  'pair'
+  'pair',
+  'terminal'
 ]);
 
 /** True while this row is a command the agent reported, not one of Boite's. */
@@ -69,6 +70,7 @@ export function appCommands(store: Store, inShell: boolean): PaletteItem[] {
       items.push(row('files', strings.palette.files, 'tree directory explorer'));
       items.push(row('tasks', strings.palette.tasks, 'todo goal loop'));
       items.push(row('trace', strings.palette.trace, 'processes load'));
+      items.push(row('terminal', strings.palette.terminal, 'shell console powershell cmd bash'));
     }
   }
   items.push(row('sidebar', strings.palette.sidebar));
@@ -116,6 +118,7 @@ export function commandLabel(id: KeybindingCommand): string {
     case 'theme-system': return strings.palette.themeSystem;
     case 'archive': return strings.palette.archive;
     case 'import-session': return strings.palette.importSession;
+    case 'terminal': return strings.palette.terminal;
   }
 }
 
@@ -142,6 +145,7 @@ export function runCommand(store: Store, id: string, inShell: boolean): void {
     case 'changes': store.showChat(); store.panel.toggleKind('changes'); break;
     case 'files': store.showChat(); store.panel.toggleKind('files'); break;
     case 'tasks': store.showChat(); store.panel.toggleKind('tasks'); break;
+    case 'terminal': if (open) { store.showChat(); store.toggleTerminal(); } break;
     case 'sidebar': store.toggleSidebar(); break;
     case 'settings': store.showSettings(); break;
     case 'appearance': store.showSettings('appearance'); break;

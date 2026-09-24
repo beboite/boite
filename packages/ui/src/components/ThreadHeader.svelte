@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { ArrowLeft, GitBranch, PanelRight, UsersRound } from '@lucide/svelte';
+  import { ArrowLeft, GitBranch, PanelRight, SquareTerminal, UsersRound } from '@lucide/svelte';
   import { focusOnMount } from '../lib/actions';
   import { contextMenu } from '../lib/context-menu.svelte';
   import { separator } from '../lib/menu';
@@ -133,8 +133,22 @@
         </button>
       {/if}
       <!-- Every surface of the panel reads something only the owner may ask
-           for, so the button is not in a paired device's header at all. -->
+           for, so the button is not in a paired device's header at all. The
+           shell is the same: a phone reaches it by this button, not by Ctrl+J. -->
       {#if thread && store.owner}
+        {@const terminalKey = store.keyLabel('terminal')}
+        <button
+          type="button"
+          class="ghost trace"
+          class:on={store.terminalShown(thread.id)}
+          title={terminalKey ? `${strings.thread.terminalHint} (${terminalKey})` : strings.thread.terminalHint}
+          aria-label={strings.thread.terminalHint}
+          aria-pressed={store.terminalShown(thread.id)}
+          data-testid="terminal-toggle"
+          onclick={() => store.toggleTerminal()}
+        >
+          <SquareTerminal size={16} strokeWidth={1.75} />
+        </button>
         <button
           type="button"
           class="ghost trace"

@@ -61,6 +61,7 @@ test('the list carries every app command, the thread ones only while one is open
     'files',
     'tasks',
     'trace',
+    'terminal',
     'sidebar',
     'settings',
     'appearance',
