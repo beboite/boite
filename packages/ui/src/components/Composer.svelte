@@ -10,7 +10,7 @@
   import { AGENT_PREFIX, appCommands, isAgentCommand, runCommand } from '../lib/commands.svelte';
   import { rankItems, type PaletteItem } from '../lib/palette';
   import { clearStash, DRAFT_STASH_KEY, readStash, writeStash } from '../lib/prefs';
-  import { promptText } from '../lib/message-display';
+  import { promptSegments, promptText } from '../lib/message-display';
   import { fill, strings } from '../lib/strings';
   import type { Choice, PickPatch, Store } from '../lib/store.svelte';
   import EffortSlider from './EffortSlider.svelte';
@@ -290,6 +290,8 @@
     const token = /^\/[^\s]+/.exec(text)?.[0];
     return token && [...agentItems, ...boiteItems].some(item => item.label === token) ? token : '';
   });
+  let segments = $derived(promptSegments(text, commandToken || undefined, provider?.protocol === 'claude-sdk'));
+  let painted = $derived(segments.some(segment => segment.kind !== 'plain'));
 
   function syncInput() {
     if (!box) return;
@@ -824,13 +826,13 @@
     {/if}
 
     <div class="input-wrap">
-    {#if commandToken}
+    {#if painted}
       <div class="input-highlight" aria-hidden="true" data-testid="composer-highlight" style:width={`${inputWidth}px`}>
-        <div class="input-paint input-mirror" style:transform={`translateY(${-inputScroll}px)`}><span class="command-token" data-testid="command-highlight">{commandToken}</span>{text.slice(commandToken.length)}{'\n'}</div>
+        <div class="input-paint input-mirror" style:transform={`translateY(${-inputScroll}px)`}>{#each segments as segment, index (index)}{#if segment.kind === 'command'}<span class="command-token" data-testid="command-highlight">{segment.text}</span>{:else if segment.kind === 'plain'}{segment.text}{:else}<span class="keyword-{segment.kind}" data-testid="keyword-highlight">{segment.text}</span>{/if}{/each}{'\n'}</div>
       </div>
     {/if}
     <textarea
-      class:highlighted={Boolean(commandToken)}
+      class:highlighted={painted}
       bind:this={box}
       bind:value={() => text, setText}
       {oninput}

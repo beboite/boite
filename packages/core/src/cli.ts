@@ -33,6 +33,8 @@ export const USAGE = `usage: boite <command> [args] [--json]
   browse <url>                   open a url in the panel's browser
   open trace|tasks|changes|files [dir]
   status                         git status of the working directory
+  ask <question> [option ...]    ask the user without stopping; the answer
+                                 arrives later as a message (--multiple)
   task list                      the agent's task list
   task add <text>                add a task (id t1, t2, ...)
   task start|done|remove <id>    move or drop one task
@@ -73,13 +75,14 @@ class Usage extends Error {}
 interface Parsed {
   positional: string[];
   json: boolean;
+  multiple: boolean;
   thread: string | undefined;
   dataDir: string | undefined;
   channel: Channel;
 }
 
 function parse(argv: string[]): Parsed {
-  const parsed: Parsed = { positional: [], json: false, thread: undefined, dataDir: undefined, channel: 'stable' };
+  const parsed: Parsed = { positional: [], json: false, multiple: false, thread: undefined, dataDir: undefined, channel: 'stable' };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index] ?? '';
     const next = (): string => {
@@ -89,6 +92,7 @@ function parse(argv: string[]): Parsed {
       return value;
     };
     if (arg === '--json') parsed.json = true;
+    else if (arg === '--multiple') parsed.multiple = true;
     else if (arg === '--thread') parsed.thread = next();
     else if (arg === '--data-dir') parsed.dataDir = next();
     else if (arg === '--channel') {
@@ -293,6 +297,13 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
         const dir = rest[1];
         await opened(dir === undefined ? { kind: 'files' } : { kind: 'files', path: absolute(io.cwd, dir) });
       } else throw new Usage(`open: unknown surface ${kind}`);
+      return;
+    }
+    case 'ask': {
+      const text = want(0, 'a question');
+      const options = rest.slice(1);
+      const asked = await client.call('questions.ask', { threadId, text, ...(options.length > 0 ? { options } : {}), ...(parsed.multiple ? { multiple: true } : {}) });
+      print([`asked: ${asked.questionId}`, 'Keep working. The answer arrives as a message quoting the question; without one, go on with a sensible default.'], asked);
       return;
     }
     case 'status': {

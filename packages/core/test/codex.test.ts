@@ -139,6 +139,68 @@ async function codexThread(client: CoreClient, permissionMode?: PermissionMode, 
 }
 
 describe('codex driver', () => {
+  test('an asynchronous question draws a card without waiting, and its answer steers the running turn', async () => {
+    const client = await startCore();
+    const threadId = await codexThread(client);
+    const asked = client.next('question.asked', (q) => q.threadId === threadId);
+    await client.call('turns.start', { threadId, prompt: 'Build [async][slow]' });
+    const question = await asked;
+    expect(question).toMatchObject({ text: 'Which name?', async: true, allowText: true, multiple: false });
+    expect(question.options.map((option) => option.label)).toEqual(['later.txt', 'extra.txt']);
+    await waitFor(() => fakeLog().includes('waiting for interrupt'));
+    // Nothing waits on the card: the thread keeps running.
+    expect(harness!.core.journal.getThread(threadId)?.status).toBe('running');
+    // The question's own text is the card, not a line of the answer.
+    const texts = harness!.core.journal.listMessages(threadId).flatMap((m) => m.parts).filter((p) => p.type === 'text' && p.text.includes('- later.txt'));
+    expect(texts).toEqual([]);
+
+    await client.call('questions.answer', { threadId, questionId: question.id, optionIds: [question.options[0]!.id] });
+    await waitFor(() => fakeLog().includes('turn/steer codex-fake-turn-1 > Which name?'));
+    const card = harness!.core.journal.listMessages(threadId).flatMap((m) => m.parts).find((p) => p.type === 'question');
+    expect(card).toMatchObject({ async: true, answer: { optionIds: [question.options[0]!.id] } });
+    expect(harness!.core.journal.listTurns(threadId)).toHaveLength(1);
+    await client.call('turns.stop', { threadId });
+  });
+
+  test('an asynchronous question answered after its turn ended goes out as the next prompt', async () => {
+    const client = await startCore();
+    const threadId = await codexThread(client);
+    const asked = client.next('question.asked', (q) => q.threadId === threadId);
+    const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 20000);
+    await client.call('turns.start', { threadId, prompt: 'Build [async]' });
+    const question = await asked;
+    expect((await finished).status).toBe('done');
+    // The card outlives its turn.
+    expect(await client.call('questions.list', { threadId })).toHaveLength(1);
+
+    const next = client.next('turn.finished', (turn) => turn.threadId === threadId, 20000);
+    await client.call('questions.answer', { threadId, questionId: question.id, optionIds: [], text: 'notes-2.txt' });
+    expect((await next).status).toBe('done');
+    const prompts = harness!.core.journal.listMessages(threadId).filter((m) => m.role === 'user').map((m) => m.parts[0]?.type === 'text' ? m.parts[0].text : '');
+    expect(prompts).toEqual(['Build [async]', '> Which name?\n\nnotes-2.txt']);
+    expect(await client.call('questions.list', { threadId })).toEqual([]);
+  });
+
+  test('a running command draws its output live, a sleep is a card, and both carry their times', async () => {
+    const client = await startCore();
+    const threadId = await codexThread(client);
+    const seen: MessagePart[] = [];
+    client.on('message.part', (event) => { if (event.threadId === threadId) seen.push(event.part); });
+    await runTurn(client, threadId, 'Run [stream]');
+    const live = seen.find((part) => part.type === 'tool' && part.status === 'running' && part.output === 'line one\n');
+    expect(live).toBeDefined();
+    const parts = harness!.core.journal.listMessages(threadId).flatMap((m) => m.parts);
+    const command = parts.find((part) => part.type === 'tool' && part.name === 'Bash');
+    const sleep = parts.find((part) => part.type === 'tool' && part.name === 'Sleep');
+    expect(command).toMatchObject({ status: 'done', output: 'line one\nline two\n' });
+    expect(sleep).toMatchObject({ status: 'done', input: { durationMs: 50 } });
+    for (const part of [command, sleep]) {
+      if (part?.type !== 'tool') throw new Error('no tool part');
+      expect(typeof part.startedAt).toBe('number');
+      expect(part.finishedAt! - part.startedAt!).toBeGreaterThanOrEqual(400);
+    }
+  });
+
   test('service tiers are model-specific, persisted and sent on the frozen turn', async () => {
     const client = await startCore();
     const { projectId, accountId } = await codexAccount(client);

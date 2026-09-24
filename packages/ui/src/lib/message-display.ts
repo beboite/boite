@@ -33,6 +33,36 @@ export function promptText(part: Extract<MessagePart, { type: 'text' }>): string
   return part.displayText ?? visibleUserText(part.text);
 }
 
+export interface PromptSegment {
+  text: string;
+  kind: 'plain' | 'command' | 'ultrathink' | 'ultracode';
+}
+
+/**
+ * The words Claude Code acts on anywhere in a prompt: `ultrathink` asks for the
+ * deepest thinking on that turn, `ultracode` opts the turn into the Workflow
+ * tool. Other harnesses read them as plain words.
+ */
+const PROMPT_KEYWORDS = /\b(ultrathink|ultracode)\b/gi;
+
+/** A prompt cut where it is drawn differently: the command it opens with, then each keyword. */
+export function promptSegments(text: string, command: string | undefined, keywords: boolean): PromptSegment[] {
+  const segments: PromptSegment[] = [];
+  const start = command && text.startsWith(command) ? command.length : 0;
+  if (start > 0) segments.push({ text: command!, kind: 'command' });
+  let at = start;
+  if (keywords) {
+    for (const match of text.slice(start).matchAll(PROMPT_KEYWORDS)) {
+      const index = start + match.index;
+      if (index > at) segments.push({ text: text.slice(at, index), kind: 'plain' });
+      segments.push({ text: match[0], kind: match[0].toLowerCase() as 'ultrathink' | 'ultracode' });
+      at = index + match[0].length;
+    }
+  }
+  if (at < text.length) segments.push({ text: text.slice(at), kind: 'plain' });
+  return segments;
+}
+
 /** The Boite command a prompt opens with, drawn in the accent wherever the prompt is shown. */
 export function promptCommand(text: string): string | undefined {
   return /^\/(goal|loop)(?=\s|$)/.exec(text)?.[0];

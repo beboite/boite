@@ -29,6 +29,14 @@ current level centred above the track. The track reaches the thumb and becomes
 more saturated at higher levels. Ultrathink belongs only to Claude and is offered
 when its SDK reports adaptive thinking.
 
+Claude Code also acts on two words typed anywhere in a prompt: `ultrathink`
+asks for the deepest thinking on that turn, and `ultracode` opts the turn into
+the Workflow tool when the account has workflows. On a Claude thread the
+composer and the sent message draw them apart, `ultrathink` in the spectrum and
+`ultracode` in the accent. Other harnesses read them as plain words, and they
+stay plain there. `ultraplan` and `ultrareview` run on claude.ai and are not
+available through the SDK.
+
 Model catalogs persist in client storage, scoped to the core endpoint and data
 directory and checked against the current provider/account records. Opening an
 agent shows the cached list immediately while discovery runs in the background.

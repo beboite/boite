@@ -6,6 +6,10 @@ import type { CodexTurnRecord, ToolView } from './protocol.ts';
 // The turn and what it draws
 // ---------------------------------------------------------------------------
 
+/** How much of a running command's output the card carries, and how often it is redrawn. */
+const LIVE_OUTPUT_MAX = 16_000;
+const LIVE_OUTPUT_BEAT_MS = 250;
+
 interface ToolEntry {
   index: number;
   name: string;
@@ -25,6 +29,9 @@ export class CodexTurn {
   private textIndex: number | null = null;
   private thinkingIndex: number | null = null;
   private readonly tools = new Map<string, ToolEntry>();
+  /** Tools whose streamed output waits for the next flush, so a chatty command costs one write per beat. */
+  private readonly dirty = new Set<string>();
+  private flushTimer: ReturnType<typeof setTimeout> | null = null;
 
   private status: TurnResult['status'] = 'done';
   private error: string | null = null;
@@ -100,6 +107,7 @@ export class CodexTurn {
 
   settle(): void {
     if (this.settled) return;
+    this.flushOutput();
     this.settled = true;
     this.decided = true;
     this.wake();
@@ -160,6 +168,32 @@ export class CodexTurn {
     this.ctx.emit.delta(this.message(), this.thinkingIndex, text);
   }
 
+  /**
+   * `item/commandExecution/outputDelta`: what a running command printed so
+   * far, drawn under its card while it runs. Only the tail is kept; the
+   * completed item carries the whole output anyway.
+   */
+  appendOutput(itemId: string, delta: string): void {
+    const entry = this.tools.get(itemId);
+    if (entry === undefined || entry.status !== 'running' || delta.length === 0) return;
+    const output = (entry.output ?? '') + delta;
+    entry.output = output.length > LIVE_OUTPUT_MAX ? output.slice(output.length - LIVE_OUTPUT_MAX) : output;
+    this.dirty.add(itemId);
+    if (this.flushTimer !== null) return;
+    this.flushTimer = setTimeout(() => this.flushOutput(), LIVE_OUTPUT_BEAT_MS);
+    this.flushTimer.unref?.();
+  }
+
+  private flushOutput(): void {
+    if (this.flushTimer !== null) clearTimeout(this.flushTimer);
+    this.flushTimer = null;
+    for (const itemId of this.dirty) {
+      const entry = this.tools.get(itemId);
+      if (entry !== undefined && entry.status === 'running') this.drawTool(itemId, entry);
+    }
+    this.dirty.clear();
+  }
+
   /** `item/started` opens the part, `item/completed` replaces the same one by item id. */
   upsertTool(itemId: string, view: ToolView): void {
     const entry = this.tools.get(itemId) ?? {
@@ -174,6 +208,11 @@ export class CodexTurn {
     if (view.output !== null) entry.output = view.output;
     entry.status = view.status;
     this.tools.set(itemId, entry);
+    this.dirty.delete(itemId);
+    this.drawTool(itemId, entry);
+  }
+
+  private drawTool(itemId: string, entry: ToolEntry): void {
     this.part(entry.index, {
       type: 'tool',
       toolId: itemId,

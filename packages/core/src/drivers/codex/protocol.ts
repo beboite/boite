@@ -23,6 +23,8 @@ export const EXIT_GRACE_MS = 500;
 
 /** Codex names no tool for a shell command, so the card carries the usual one. */
 export const COMMAND_TOOL_NAME = 'Bash';
+/** The Codex `sleep` item, drawn as a tool card. */
+export const SLEEP_TOOL_NAME = 'Sleep';
 
 /** Nor for a patch: `fileChange` is the apply-patch item under another name. */
 export const FILE_CHANGE_TOOL_NAME = 'ApplyPatch';
@@ -104,6 +106,12 @@ export interface CodexItem {
   result?: unknown;
   error?: { message?: string } | null;
   contentItems?: unknown;
+  /** `agentMessage`: `async` when the agent asked without stopping. */
+  delivery?: string | null;
+  /** `agentMessage` with `delivery: "async"`: what it asks, with option labels. */
+  questions?: { title?: string; options?: string[] | null }[] | null;
+  /** `sleep`: how long the agent waits before it goes on. */
+  durationMs?: number;
 }
 
 /**

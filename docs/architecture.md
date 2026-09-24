@@ -116,6 +116,18 @@ is the protocol's own cancel; usage folded onto the turn, with a real price only
 where the wire carries one; and a lazy module, so a driver nobody used costs
 nothing at start.
 
+Questions come in two kinds. A blocking one (Claude's `AskUserQuestion`, one
+card per question) holds the turn in `waiting` until it is answered. An
+asynchronous one (Codex's `delivery: "async"` messages, or `boite ask` from any
+agent) draws the same card without stopping anything; the core answers it by
+steering the running turn, or by sending `> question` and the answer as the
+next prompt once the thread is idle. The core stamps `startedAt` and
+`finishedAt` on every tool part, so a card shows how long a command has run.
+Work a Claude session leaves in the background (a shell, an agent, a monitor)
+is reported as `thread.background`: the CLI stays alive while it runs, the turn
+footer counts it, Stop on the idle thread ends it, and what the CLI writes when
+it finishes opens a turn of its own, marked "Background work finished".
+
 Where they differ is worth knowing before you touch one. `claude-sdk` runs the
 Claude Agent SDK with a `PreToolUse` hook as the single gate that journals and
 decides every tool call. `acp` speaks the Agent Client Protocol over the agent's

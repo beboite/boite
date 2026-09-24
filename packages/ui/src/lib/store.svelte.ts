@@ -730,6 +730,11 @@ export class Store {
       const open = this.openThread;
       if (open && open.id === threadId) open.commands = commands;
     });
+    // What the agent still runs in the background, whole each time, like the commands.
+    on('thread.background', ({ threadId, tasks }) => {
+      const open = this.openThread;
+      if (open && open.id === threadId) open.background = tasks;
+    });
     on('thread.activity', ({ threadId, activity }) => {
       if (this.openThread?.id === threadId) this.openThread.activity = activity;
     });

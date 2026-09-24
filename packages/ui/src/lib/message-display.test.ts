@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { visibleAnswer, visibleUserText } from './message-display';
+import { promptSegments, visibleAnswer, visibleUserText } from './message-display';
 
 test('old goal instructions display only the colored-command input, ordinary text stays intact', () => {
   expect(visibleUserText('Work toward this goal: Ship it\nContinue until the objective is achieved. private instructions')).toBe('/goal Ship it');
@@ -56,4 +56,22 @@ test('a new thought replaces previous bold headings even within one protocol par
   expect(currentThought('plain reasoning')).toEqual({title:null,text:'plain reasoning'});
   expect(currentThought('Check **all files** first')).toEqual({title:null,text:'Check **all files** first'});
   expect(currentThought('**Heading**\nCheck **all files** first')).toEqual({title:'Heading',text:'**Heading**\nCheck **all files** first'});
+});
+
+test('a prompt is cut at its command and at the words Claude Code acts on', () => {
+  expect(promptSegments('/goal ultrathink it', '/goal', true)).toEqual([
+    { text: '/goal', kind: 'command' },
+    { text: ' ', kind: 'plain' },
+    { text: 'ultrathink', kind: 'ultrathink' },
+    { text: ' it', kind: 'plain' }
+  ]);
+  expect(promptSegments('Refactor it, UltraCode.', undefined, true)).toEqual([
+    { text: 'Refactor it, ', kind: 'plain' },
+    { text: 'UltraCode', kind: 'ultracode' },
+    { text: '.', kind: 'plain' }
+  ]);
+  // Inside a longer word, or on another harness, the word is plain text.
+  expect(promptSegments('ultrathinking', undefined, true)).toEqual([{ text: 'ultrathinking', kind: 'plain' }]);
+  expect(promptSegments('ultrathink', undefined, false)).toEqual([{ text: 'ultrathink', kind: 'plain' }]);
+  expect(promptSegments('', undefined, true)).toEqual([]);
 });
