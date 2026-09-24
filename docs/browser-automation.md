@@ -108,8 +108,13 @@ This version does not automate native desktop applications, reuse login
 profiles, manage uploads/downloads or provide multi-tab workflows. It stops
 after observing navigation outside the starting origin. This is a task
 boundary, not a network filter. Iframes, complex widgets, authentication,
-anti-bot behavior and arbitrary real websites are not covered by the live
-fixture. Linux and macOS use the driver's Unix socket transport, but their
+anti-bot behavior and arbitrary real websites are not established capabilities.
+The [public-site evaluation](../bench/results/2026-09-24-browser-wide.md) ran
+30 workflows on 23 sites, three times each: 38/84 valid trials succeeded.
+Six attempts had incorrect test criteria; six separate reruns passed after
+correcting those criteria. Unnamed fields, large control lists and premature
+completion still cause failures. Live recordings show successes and a failure.
+Linux and macOS use the driver's Unix socket transport, but their
 browser execution and forced cleanup need platform verification. Windows
 owns the headless browser tree through the native driver's job object.
 

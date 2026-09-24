@@ -4,6 +4,10 @@ Measured on 2026-09-24. The [original baseline](2026-09-24-browser.md)
 remains unchanged: 0/9 complete Jev workflows before these fixes.
 The corrected plugin completed 9/9, with three fresh profiles per task.
 
+The subsequent [30-workflow evaluation](2026-09-24-browser-wide.md) completed
+38/84 valid trials across 23 sites. It includes live recordings and all failed
+attempts. Use that broader sample when assessing general website reliability.
+
 | Site | Corrected Jev, three attempts | Earlier GPT visual | Earlier GPT + agent-browser |
 | --- | --- | --- | --- |
 | Wikipedia | 3/3, 1.50-2.33 s | 22.86 s | 17.42 s |

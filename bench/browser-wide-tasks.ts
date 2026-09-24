@@ -120,8 +120,8 @@ export const wideTasks: WideTask[] = [
     id: 'openlibrary-hobbit', site: 'Open Library', category: 'catalog-search',
     goal: 'Search Open Library for The Hobbit and display the matching catalog entries by J. R. R. Tolkien. Do not borrow, log in, or add anything to a list.',
     url: 'https://openlibrary.org/', values: { search: 'The Hobbit' },
-    completion: { text: 'J. R. R. Tolkien', url: 'https://openlibrary.org/search?q=The+Hobbit' },
-    grader: { all: [{ kind: 'url', pathname: '/search', query: { q: 'The Hobbit' } }, { kind: 'text', contains: 'The Hobbit' }, { kind: 'text', contains: 'J. R. R. Tolkien' }] },
+    completion: { text: 'J.R.R. Tolkien', url: 'https://openlibrary.org/search?q=The+Hobbit' },
+    grader: { all: [{ kind: 'url', pathname: '/search', query: { q: 'The Hobbit' } }, { kind: 'text', contains: 'The Hobbit' }, { kind: 'text', contains: 'J.R.R. Tolkien' }] },
   },
   {
     id: 'archive-voynich', site: 'Internet Archive', category: 'media-search',
@@ -134,7 +134,7 @@ export const wideTasks: WideTask[] = [
     id: 'commons-lunar-images', site: 'Wikimedia Commons', category: 'media-search',
     goal: 'Search Wikimedia Commons for Lunar eclipse using Media search and display the results. Do not download files.',
     url: 'https://commons.wikimedia.org/wiki/Main_Page', values: { search: 'Lunar eclipse' },
-    completion: { text: 'Media search', url: 'https://commons.wikimedia.org/w/index.php?search=Lunar+eclipse&title=Special%3AMediaSearch' },
+    completion: { text: 'Search media', url: 'https://commons.wikimedia.org/w/index.php?search=Lunar+eclipse&title=Special%3AMediaSearch&type=image' },
     grader: { all: [{ kind: 'url', pathname: '/w/index.php', query: { title: 'Special:MediaSearch', search: 'Lunar eclipse' } }, { kind: 'text', contains: 'Images' }] },
   },
   {
