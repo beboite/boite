@@ -1930,7 +1930,8 @@ export class Store {
       const older = page.messages.filter((m) => !known.has(m.id));
       still.messages.unshift(...older);
       const knownTurns = new Set(still.turns.map((turn) => turn.id));
-      still.turns.push(...(page.turns ?? []).filter((turn) => !knownTurns.has(turn.id)));
+      // Older turns go first, as in the journal: the last one is the latest turn.
+      still.turns.unshift(...(page.turns ?? []).filter((turn) => !knownTurns.has(turn.id)));
       still.messagesBefore = page.before;
       return older.length;
     } catch (error) {

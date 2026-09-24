@@ -253,6 +253,8 @@ export class FakeClient implements ObservableClient {
     { request: QuestionRequest; resolve: (answer: QuestionAnswer | null) => void }
   >();
   #inFlight = new Map<ThreadId, { cancelled: boolean; done: Promise<void> }>();
+  /** Async answers waiting for the thread to be free, oldest first. */
+  #heldAnswers = new Map<ThreadId, string[]>();
   /** The current output of every active fake login, also returned after reconnect. */
   #logins = new Map<string, RpcEvents['account.login']>();
   /** Fake shells by terminal id: what they printed and the line being typed. */
@@ -971,6 +973,7 @@ export class FakeClient implements ObservableClient {
           this.#pendingQuestions.delete(questionId);
           pending.resolve(null);
         }
+        this.#heldAnswers.delete(thread.id);
         if ((thread.background?.length ?? 0) > 0) this.#setBackground(thread, []);
       }
       return this.#touch(thread);
@@ -2360,13 +2363,30 @@ const ready = true;
         if (answer === null) return;
         const picked = answer.optionIds.map((id) => asked.options.find((option) => option.id === id)?.label ?? id).join(', ');
         const reply = [picked, answer.text ?? ''].filter((line) => line.length > 0).join('\n');
-        const prompt = `> ${text}\n\n${reply}`;
-        void (this.#inFlight.get(thread.id)?.done ?? Promise.resolve()).then(() => {
-          if (!thread.archived) this.#startTurn(thread.id, prompt);
-        });
+        this.#holdAnswer(thread, `> ${text}\n\n${reply}`);
       }
     });
     return questionId;
+  }
+
+  /** As the core's deferred answers: the ones given while a turn runs start one turn together after it. */
+  #holdAnswer(thread: Thread, prompt: string): void {
+    const held = this.#heldAnswers.get(thread.id);
+    if (held) {
+      held.push(prompt);
+      return;
+    }
+    this.#heldAnswers.set(thread.id, [prompt]);
+    void this.#flushAnswers(thread);
+  }
+
+  async #flushAnswers(thread: Thread): Promise<void> {
+    for (let running = this.#inFlight.get(thread.id); running; running = this.#inFlight.get(thread.id)) {
+      await running.done.catch(() => undefined);
+    }
+    const held = this.#heldAnswers.get(thread.id) ?? [];
+    this.#heldAnswers.delete(thread.id);
+    if (held.length > 0 && !thread.archived) this.#startTurn(thread.id, held.join('\n\n'));
   }
 
   /** A shell sent to the background: the call returns at once, the task stays listed. */

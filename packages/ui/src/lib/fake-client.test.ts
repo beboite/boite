@@ -576,3 +576,26 @@ test('fake [ask] leaves a card nobody waits on, and its answer opens the next tu
     expect((await client.call('threads.get', { threadId })).background).toEqual([]);
   } finally { client.close(); }
 });
+
+test('fake async answers given while a turn runs start one turn together after it', async () => {
+  const client = new FakeClient({ delayMs: 0 });
+  await client.connect();
+  try {
+    const { id: threadId } = await newThread(client);
+    for (const prompt of ['[ask] one', '[ask] two']) {
+      await client.call('turns.start', { threadId, prompt });
+      await client.settled();
+    }
+    const questions = await client.call('questions.list', { threadId });
+    expect(questions).toHaveLength(2);
+    await client.call('turns.start', { threadId, prompt: 'hello' });
+    for (const [index, question] of questions.entries()) {
+      await client.call('questions.answer', { threadId, questionId: question.id, optionIds: [String(index + 1)] });
+    }
+    await client.settled();
+    const after = await client.call('threads.get', { threadId });
+    expect(after.turns).toHaveLength(4);
+    const prompts = after.messages.filter((message) => message.role === 'user').map((message) => message.parts[0]?.type === 'text' ? message.parts[0].text : '');
+    expect(prompts.at(-1)).toBe('> Which port should the dev server take?\n\n5173\n\n> Which port should the dev server take?\n\n4173');
+  } finally { client.close(); }
+});

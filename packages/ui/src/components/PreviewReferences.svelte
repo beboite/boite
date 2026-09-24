@@ -1,15 +1,18 @@
 <script lang="ts">
   import type { PreviewReference } from '@boite/contracts';
   import type { Store } from '../lib/store.svelte';
+  import { promptSegments } from '../lib/message-display';
   import { previewTextParts } from '../lib/preview-mentions';
   import { strings } from '../lib/strings';
 
-  let { text = '', references, store, threadId, editing = false, onreference }: {
+  let { text = '', references, store, threadId, editing = false, keywords = false, onreference }: {
     text?: string;
     references: PreviewReference[];
     store: Store;
     threadId: string;
     editing?: boolean;
+    /** Paint Claude Code's prompt keywords in the text around the references. */
+    keywords?: boolean;
     onreference?: (reference: PreviewReference) => void;
   } = $props();
   const parts = $derived(previewTextParts(text, references));
@@ -24,7 +27,7 @@
   title={`${strings.previewComments.reveal}\n${reference.url}\n${reference.selector}`}
   onpointerdown={(event) => { if (editing) event.preventDefault(); }}
   onclick={() => reveal(reference)}
-  onkeydown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); reveal(reference); } }}>{part.text}</span>{:else}<span aria-hidden={editing}>{part.text}</span>{/if}{/each}</span>
+  onkeydown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); reveal(reference); } }}>{part.text}</span>{:else}<span aria-hidden={editing}>{#each promptSegments(part.text, undefined, keywords) as segment, at (at)}{#if segment.kind === 'plain'}{segment.text}{:else}<span class="keyword-{segment.kind}" data-testid="keyword-highlight">{segment.text}</span>{/if}{/each}</span>{/if}{/each}</span>
 
 <style>
   .references { white-space: pre-wrap; overflow-wrap: break-word; }

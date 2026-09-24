@@ -293,7 +293,8 @@
     const token = /^\/[^\s]+/.exec(text)?.[0];
     return token && [...agentItems, ...boiteItems].some(item => item.label === token) ? token : '';
   });
-  let segments = $derived(promptSegments(text, commandToken || undefined, claudeKeywords(provider?.protocol, choice?.model)));
+  let keywords = $derived(claudeKeywords(provider?.protocol, choice?.model));
+  let segments = $derived(promptSegments(text, commandToken || undefined, keywords));
   let painted = $derived(segments.some(segment => segment.kind !== 'plain'));
 
   function syncInput() {
@@ -888,7 +889,7 @@
     <div class="input-wrap">
     {#if painted || previewReferences.length}
       <div class="input-highlight" aria-hidden={previewReferences.length ? undefined : true} data-testid="composer-highlight" style:width={`${inputWidth}px`}>
-        <div class="input-paint input-mirror" style:transform={`translateY(${-inputScroll}px)`}>{#if previewReferences.length}<PreviewReferences {text} references={previewReferences} {store} threadId={key} editing onreference={(reference) => {
+        <div class="input-paint input-mirror" style:transform={`translateY(${-inputScroll}px)`}>{#if previewReferences.length}<PreviewReferences {text} references={previewReferences} {store} threadId={key} editing {keywords} onreference={(reference) => {
           if (box && reference.mention) { box.focus(); box.setSelectionRange(reference.mention.end, reference.mention.end); track(); }
         }} />{:else}<span aria-hidden="true">{#each segments as segment, index (index)}{#if segment.kind === 'command'}<span class="command-token" data-testid="command-highlight">{segment.text}</span>{:else if segment.kind === 'plain'}{segment.text}{:else}<span class="keyword-{segment.kind}" data-testid="keyword-highlight">{segment.text}</span>{/if}{/each}</span>{/if}{'\n'}</div>
       </div>
