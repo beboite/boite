@@ -27,32 +27,16 @@ PDFs, images, audio and video have inline previews. Other files remain downloada
 Remote images are links, so reading an answer does not fetch a tracking image.
 Executable URL schemes and arbitrary HTML are not rendered.
 
-## Compare proposals
-
-The comparison button in an owner's thread header opens a shared prompt and
-two model pickers. Running it creates two independent Git worktrees and starts
-one turn in each with Ask permissions. The project must be a Git repository.
-
-Responses, status and working-tree changes appear side by side on desktop and
-stack vertically on a phone-sized owner client. Select a changed file to read
-its diff. Continue in either thread to answer a permission request, inspect its
-other output or carry on with that proposal. Choosing a thread does not merge
-its branch or delete the other proposal.
-
-Each start reports its own failure. If creating a thread succeeded but starting
-it was not confirmed, open that thread before trying again. Closing the view
-leaves both threads running. The pair stays available during the client session;
-the underlying threads and worktrees persist independently.
-
 ## Preview comments
 
 Open a Browser tab in the integrated panel and choose Reference an element.
-Clicking an element adds a compact, removable `@element` reference to the
-existing composer. Write the request there and send it normally. Draft text,
+Clicking an element inserts an `@element` mention at the cursor in the
+existing composer. Write around it and send normally. Draft text,
 attachments and queued messages stay intact. On a phone-sized window, selection
 returns to the composer. There is no separate comment form.
 
-References appear in the accent color in the composer and sent messages. Click
+References stay inline with the text, in the accent color, in drafts and sent
+messages. Editing a mention removes its element association. Click
 one to reopen its thread's browser and highlight the element. A closed tab is
 reopened at the captured URL; a surviving tab that changed pages is refused.
 Missing elements and inaccessible pages report errors. Open shadow roots are
@@ -61,9 +45,9 @@ and resize for three seconds. Existing references remain clickable with the
 experiment switched off.
 
 Each message carries up to eight typed references. The core validates the URL,
-selector, shadow-root path, selected text and viewport bounds, then supplies
+mention positions, selector, shadow-root path, selected text and viewport bounds, then supplies
 them as labeled untrusted context to every agent. The visible message keeps
-only the user's prose and reference chips. References survive queued sends,
+only the user's prose and inline mentions. References survive queued sends,
 failed sends, idempotent retries and prompt recall. Stashing a referenced draft
 or sending it with `/goal` or `/loop` is refused explicitly, preserving the draft.
 
@@ -77,7 +61,12 @@ a screenshot to the reference.
 ## Verification
 
 `artifacts.test.ts` covers publication, path boundaries and byte preservation in
-the core. The end-to-end tests `artifacts.test.ts`, `proposals.test.ts` and
-`preview-comments.test.ts` cover desktop and phone-sized interfaces. The proposal
-and preview unit tests cover partial failures, owning-machine boundaries and
-selection validation. No live provider login is required.
+the core. The end-to-end tests `artifacts.test.ts` and
+`preview-comments.test.ts` cover desktop and phone-sized interfaces. Preview
+unit tests cover owning-machine boundaries and selection validation.
+No live provider login is required.
+
+The opt-in `codex.live.test.ts` attachment case asks a real Codex process to
+discover file publication through `boite --help`. It checks the inherited CLI,
+delivery during the active turn, and unchanged bytes after deleting the source.
+It requires `BOITE_E2E_CODEX=1` and uses the default Codex login.

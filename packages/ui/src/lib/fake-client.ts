@@ -11,6 +11,7 @@ import {
   RpcErrorCode,
   TODO_STATUSES,
   type Account,
+  type BrainStatus,
   type AccountQuota,
   type AgentLetter,
   type AgentTask,
@@ -148,6 +149,7 @@ function quietUpdates(): boolean {
 }
 
 export class FakeClient implements ObservableClient {
+  #brain: BrainStatus = { config: { path: null, enabled: false }, entries: [], problems: [], git: null, lastSync: null };
   #telemetry: import('@boite/contracts').TelemetryState = { mode: 'basic', configured: true, pendingDeletion: false };
   #plugins = new FakePlugins({
     emit: (event, payload) => this.#emit(event, payload),
@@ -462,6 +464,32 @@ export class FakeClient implements ObservableClient {
 
   // Every method's input and output are checked against the real RPC contract.
   #methods: FakeMethods = {
+    'brain.status': async () => structuredClone(this.#brain),
+    'brain.configure': async (config) => {
+        if (typeof config.enabled !== 'boolean' || (config.enabled && !config.path) || (config.path !== null && (typeof config.path !== 'string' || !/^(?:[A-Za-z]:[\\/]|\/)/.test(config.path)))) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'brain.path must be an absolute folder path or null; enabled must be a boolean' });
+        const autoPull = config.autoPull === undefined ? this.#brain.config.autoPull : config.autoPull;
+        const globalInstructions = config.globalInstructions === undefined ? this.#brain.config.globalInstructions : config.globalInstructions;
+        if (globalInstructions !== undefined && typeof globalInstructions !== 'boolean') throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'brain.globalInstructions must be a boolean' });
+        if (autoPull !== undefined && (!autoPull || typeof autoPull.onStartup !== 'boolean' || !Number.isInteger(autoPull.intervalMinutes) || autoPull.intervalMinutes < 0 || autoPull.intervalMinutes > 1440)) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'brain.autoPull.onStartup must be a boolean; intervalMinutes must be an integer from 0 to 1440' });
+        if (this.#brain.config.path !== config.path) this.#brain.lastSync = null;
+        this.#brain.config = { ...config, ...(autoPull ? { autoPull: { ...autoPull } } : {}), ...(globalInstructions !== undefined ? { globalInstructions } : {}) };
+        this.#brain.links = config.path && config.enabled && globalInstructions ? [
+          ['Claude Code', '.claude/CLAUDE.md'], ['Codex', '.codex/AGENTS.md'], ['OpenCode', '.config/opencode/AGENTS.md'],
+          ['pi', '.pi/agent/AGENTS.md'], ['Grok', '.grok/AGENTS.md'], ['Gemini / Antigravity', '.gemini/GEMINI.md'], ['Muse', '.config/muse/AGENTS.md'],
+        ].map(([name, path]) => ({ name: name!, path: `/home/user/${path}`, state: 'linked' as const, error: null })) : [];
+        this.#brain.entries = config.path ? [
+          { kind: 'instructions', name: 'AGENTS.md', path: 'AGENTS.md', description: '', error: null },
+          { kind: 'skill', name: 'code-review', path: 'skills/code-review/SKILL.md', description: 'Review changes and check the affected behavior.', error: null },
+          { kind: 'plugin', name: 'team-tools', path: 'plugins/team-tools/.claude-plugin/plugin.json', description: 'Shared tools for the team.', error: null },
+        ] : [];
+        this.#brain.git = config.path ? { branch: 'main', upstream: 'origin/main', ahead: 0, behind: 0, dirty: false } : null;
+        return structuredClone(this.#brain);
+    },
+    'brain.sync': async () => {
+        if (!this.#brain.git) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'brain.path must point to the root of a Git checkout to synchronize' });
+        this.#brain.lastSync = Date.now();
+        return structuredClone(this.#brain);
+    },
     'quotas.configure': async (params) => {
       this.#quotaEnabled[params.accountId] = params.enabled;
       const rows = this.#quotas(); this.#emit('quotas.updated', rows); return rows;
@@ -874,7 +902,7 @@ export class FakeClient implements ObservableClient {
       return { ok: true };
     },
     'turns.start': async (params) => {
-      const referenceError = previewReferencesError(params.previewReferences ?? []);
+      const referenceError = previewReferencesError(params.previewReferences ?? [], params.prompt);
       if (referenceError) throw new RpcFailure({ code: RpcErrorCode.Refused, message: referenceError });
       if (params.attachments !== undefined && (!Array.isArray(params.attachments) || params.attachments.some(a => !a || typeof a !== 'object'))) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'attachments must be an array of attachment objects' });
       const key = params.clientRequestId ? `${params.threadId}:${params.clientRequestId}` : null;

@@ -7,8 +7,8 @@
   const copy: Record<ExperimentId, { title: string; hint: string }> = {
     'theme-grain': strings.experiments.themeGrain,
     'session-import': strings.experiments.sessionImport,
+    'prompt-cache': strings.experiments.promptCache,
     'chat-artifacts': strings.experiments.chatArtifacts,
-    'proposal-comparison': strings.experiments.proposalComparison,
     'preview-comments': strings.experiments.previewComments
   };
 

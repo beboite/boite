@@ -7,8 +7,6 @@
   import type { Store } from '../lib/store.svelte';
   import ContextControl from './ContextControl.svelte';
   import StatusMark from './StatusMark.svelte';
-  import ProposalComparison from './ProposalComparison.svelte';
-  import { experimentOn } from '../lib/experiments.svelte';
   let { store }: { store: Store } = $props();
   let thread = $derived(store.openThread);
   let project = $derived(store.openProject);
@@ -114,9 +112,6 @@
         </span>
       {/if}
       {#if thread}<ContextControl {store} />{/if}
-      {#if project && store.owner && experimentOn('proposal-comparison')}
-        {#key store}<ProposalComparison {store} />{/key}
-      {/if}
       <!-- Every surface of the panel reads something only the owner may ask
            for, so the button is not in a paired device's header at all. -->
       {#if thread && store.owner}

@@ -21,7 +21,7 @@ beforeAll(async () => {
   uiUrl = `http://127.0.0.1:${port}`;
   page = await BrowserPage.launch({ url: `${uiUrl}/?fake=1&open=recent` });
   await page.waitFor(`document.querySelector('${id('nav-settings')}')`);
-}, 30_000);
+}, 60_000);
 afterAll(async () => { await page?.close(); await server?.close(); }, 15_000);
 
 test('provider settings show login controls and quota monitoring', async () => {

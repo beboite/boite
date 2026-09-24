@@ -30,7 +30,7 @@ import { messageOf, unavailable } from '../errors.ts';
 import type { SpawnedChild } from '../procs.ts';
 import { profileFor, resolveExecutable } from '../providers/loader.ts';
 import { titleRequest } from '../titles.ts';
-import type { ProbeContext, ProbeResult, Driver, TitleContext, TurnContext, TurnHandle, TurnResult } from './types.ts';
+import type { ProbeContext, ProbeResult, Driver, PromptCacheLife, TitleContext, TurnContext, TurnHandle, TurnResult } from './types.ts';
 
 /** How long `stop()` lets the CLI end its turn before the abort signal takes it. */
 const STOP_GRACE_MS = 3_000;
@@ -248,6 +248,8 @@ class ClaudeTurn {
   private costBefore = 0;
   /** What the last API request of the turn carried, the context meter's reading. */
   private contextTokens: number | null = null;
+  /** The lifetime of the last cache write the main loop made in this turn. */
+  private cacheLife: PromptCacheLife | null = null;
   private status: TurnResult['status'] = 'done';
   private error: string | null = null;
   private resolve: (result: TurnResult) => void = () => undefined;
@@ -301,6 +303,7 @@ class ClaudeTurn {
       sessionId: this.sessionId,
       usage: this.usage,
       error: this.error ?? undefined,
+      promptCache: this.cacheLife,
     });
   }
 
@@ -418,6 +421,8 @@ class ClaudeTurn {
     const apiId = body?.id ?? '';
     const carried = requestTokens(body?.usage);
     if (carried !== null) this.contextTokens = carried;
+    // A subagent's requests build their own prefix; the thread's cache is the main loop's.
+    if (message.parent_tool_use_id === null) this.cacheLife = cacheLifeOf(body?.usage) ?? this.cacheLife;
     for (const block of contentBlocks(body?.content)) {
       if (block.type === 'text') {
         const text = block.text ?? '';
@@ -1117,6 +1122,25 @@ function mapUsage(result: SDKResultMessage, costBefore: number): Usage {
     // A total under what was already charged is a process that started over.
     costUsdEquivalent: total === null ? null : total >= costBefore ? total - costBefore : total,
   };
+}
+
+/**
+ * How long the cache written by one API request lives, from the split the API
+ * reports under `usage.cache_creation`. A request writing at both lifetimes is
+ * as warm as its shorter one, since the conversation's tail is the part the
+ * next request needs most. Null when the request wrote nothing: a pure read
+ * restarts the clock of whatever lifetime the earlier write had.
+ */
+export function cacheLifeOf(usage: unknown): PromptCacheLife | null {
+  if (usage === null || typeof usage !== 'object') return null;
+  const creation = (usage as { cache_creation?: unknown }).cache_creation;
+  if (creation === null || typeof creation !== 'object') return null;
+  const split = creation as { ephemeral_5m_input_tokens?: unknown; ephemeral_1h_input_tokens?: unknown };
+  const short = typeof split.ephemeral_5m_input_tokens === 'number' ? split.ephemeral_5m_input_tokens : 0;
+  const long = typeof split.ephemeral_1h_input_tokens === 'number' ? split.ephemeral_1h_input_tokens : 0;
+  if (short > 0) return { ttlSeconds: 300, source: 'reported' };
+  if (long > 0) return { ttlSeconds: 3600, source: 'reported' };
+  return null;
 }
 
 /** What one API request carried: its input, plus what it read from and wrote to the cache. */

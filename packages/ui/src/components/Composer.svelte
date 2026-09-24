@@ -1,10 +1,11 @@
 <script lang="ts">
   import { ArrowUp, FileText, GitBranch, Paperclip, ShieldCheck, Square, X } from '@lucide/svelte';
   import { tick, untrack } from 'svelte';
-  import type { Attachment, PermissionMode } from '@boite/contracts';
+  import type { Attachment, PermissionMode, PreviewReference } from '@boite/contracts';
+  import { restorePreviewMentions } from '../lib/preview-mentions';
   import { bytes, tokens as formatTokens } from '../lib/format';
   import { confirm } from '../lib/confirm.svelte';
-  import { switchDropsHistory } from '../lib/switch-warning';
+  import { switchDropsHistory, switchResetsCache, type CacheKey } from '../lib/switch-warning';
   import { ATTACHMENT_MAX_BYTES, ATTACHMENTS_PER_TURN } from '@boite/contracts';
   import { acceptAttachments, decodedBytes, readAttachmentFile } from '../lib/attachments';
   import { AGENT_PREFIX, appCommands, isAgentCommand, runCommand } from '../lib/commands.svelte';
@@ -58,6 +59,7 @@
   let slashAt = $state(0);
   /** Where the caret stands in the text, kept for the mention menu. */
   let caret = $state(0);
+  let pendingEdit: { start: number; end: number } | undefined;
   /** Escape shuts the mention menu on text it keeps, until that text changes again. */
   let mentionDismissed = $state(false);
   /** The row the keyboard is on in the mention menu. */
@@ -128,8 +130,7 @@
       .map((message) => ({ text: message.parts
           .filter((part) => part.type === 'text')
           .map((part) => (part.type === 'text' ? promptText(part) : ''))
-          .join('\n')
-          .trim(), previewReferences: message.parts.flatMap(part => part.type === 'text' ? part.previewReferences ?? [] : [])
+          .join('\n'), previewReferences: message.parts.flatMap(part => part.type === 'text' ? part.previewReferences ?? [] : [])
       }))
       .filter((prompt) => prompt.text.length > 0 || prompt.previewReferences.length > 0)
       .reverse()
@@ -185,6 +186,7 @@
 
   /** The word being typed after an `@`, or null while the caret is not on one. */
   let mentionQuery = $derived.by((): string | null => {
+    if (previewReferences.some(reference => reference.mention && caret > reference.mention.start && caret <= reference.mention.end)) return null;
     const match = /(?:^|\s)@([^\s@]*)$/.exec(text.slice(0, caret));
     return match ? (match[1] ?? '') : null;
   });
@@ -328,6 +330,16 @@
   let speeds = $derived(store.modelOf(choice)?.speeds ?? []);
   let activeEffort = $derived(choice?.effort ?? store.modelOf(choice)?.effort?.default ?? null);
 
+  /** A null effort runs at the model's own default, not at a preset the client configured. */
+  function cacheKey(selection: Choice): CacheKey {
+    return {
+      accountId: selection.accountId,
+      model: selection.model ?? null,
+      effort: selection.effort ?? store.modelOf(selection)?.effort?.default ?? null,
+      speed: selection.speed ?? null,
+    };
+  }
+
   /** On a thread only the model and the effort change and they are saved at once; on a draft the whole choice is remembered. */
   async function pick(patch: PickPatch) {
     if (!choice || picking) return;
@@ -346,6 +358,14 @@
             body: fill(strings.composer.switchBody, { provider: to }),
             confirmLabel: strings.composer.switchConfirm,
             cancelLabel: fill(strings.composer.switchCancel, { provider: from }),
+          });
+          if (!go) return;
+        } else if (switchResetsCache(thread, cacheKey(choice), cacheKey(target))) {
+          const go = await confirm.ask({
+            title: fill(strings.composer.cacheTitle, { tokens: formatTokens(thread.context?.tokens ?? 0) }),
+            body: strings.composer.cacheBody,
+            confirmLabel: strings.composer.cacheConfirm,
+            cancelLabel: strings.composer.cacheCancel,
           });
           if (!go) return;
         }
@@ -404,8 +424,41 @@
     return () => { current = false; };
   });
 
+  $effect(() => {
+    const insertion = composer?.mentionInsertion;
+    if (!insertion) return;
+    const currentKey = key;
+    const selection = untrack(() => composer?.selection);
+    void tick().then(() => {
+      if (key === currentKey && box && selection) {
+        box.setSelectionRange(selection.start, selection.end);
+        caret = selection.end;
+      }
+    });
+  });
+
+  $effect(() => {
+    const element = box;
+    if (!element) return;
+    return store.registerComposerInsertion(key, (start, end, replacement) => {
+      element.focus();
+      element.setSelectionRange(start, end);
+      // Chromium and WebKit keep insertText in the textarea's native undo stack.
+      // Hosts without that editing command still receive the shared draft below.
+      if (typeof document.execCommand === 'function') document.execCommand('insertText', false, replacement);
+    });
+  });
+
   /** Typing is the user's own, so it takes the composer out of recall. */
-  function oninput() {
+  function oninput(event: Event) {
+    const input = event as InputEvent;
+    const element = event.currentTarget as HTMLTextAreaElement;
+    if (pendingEdit && pendingEdit.start === pendingEdit.end && input.inputType?.startsWith('delete')) {
+      if (input.inputType.endsWith('Backward')) pendingEdit.start = element.selectionStart;
+      else pendingEdit.end += Math.max(0, text.length - element.value.length);
+    }
+    store.editComposerText(key, element.value, input.inputType === 'historyUndo' || input.inputType === 'historyRedo', pendingEdit);
+    pendingEdit = undefined;
     recall = null;
     // Typing is proof the box has the keyboard, whatever the focus event did.
     focused = true;
@@ -416,6 +469,7 @@
   /** Where the caret is now: read after every key, click and input. */
   function track() {
     caret = box?.selectionEnd ?? text.length;
+    if (box) stateForInput().selection = { start: box.selectionStart, end: box.selectionEnd };
   }
 
   /** Writes a recalled or restored prompt in, caret at its end. */
@@ -448,7 +502,7 @@
   }
 
   function setText(value: string) {
-    stateForInput().text = value;
+    store.editComposerText(key, value);
   }
 
   async function drain(threadId: string, state: NonNullable<typeof composer>) {
@@ -606,8 +660,7 @@
     const prompt = sent[next];
     if (prompt === undefined) return recall !== null;
     recall = next;
-    put(prompt.text);
-    stateForInput().previewReferences = [...prompt.previewReferences];
+    restorePrompt(prompt.text, prompt.previewReferences);
     return true;
   }
 
@@ -617,9 +670,8 @@
     const entry = state.queued.splice(at, 1)[0];
     if (!entry) return;
     state.attachments = entry.attachments;
-    state.previewReferences = entry.previewReferences ?? [];
     recall = null;
-    put(entry.text);
+    restorePrompt(entry.text, entry.previewReferences ?? []);
     box?.focus();
   }
 
@@ -636,9 +688,14 @@
     const prompt = sent[next];
     if (prompt === undefined) return true;
     recall = next;
-    put(prompt.text);
-    stateForInput().previewReferences = [...prompt.previewReferences];
+    restorePrompt(prompt.text, prompt.previewReferences);
     return true;
+  }
+
+  function restorePrompt(text: string, references: PreviewReference[]) {
+    const restored = restorePreviewMentions(text, references);
+    put(restored.text);
+    stateForInput().previewReferences = restored.references;
   }
 
   /** Ctrl+S: text goes aside for this thread, an empty composer takes it back. */
@@ -826,31 +883,31 @@
       </div>
     {/if}
 
-    {#if previewReferences.length && store.openThread}
-      <PreviewReferences references={previewReferences} {store} threadId={store.openThread.id}
-        onremove={(id) => { stateForInput().previewReferences = previewReferences.filter(reference => reference.id !== id); }} />
-    {/if}
     <div class="input-wrap">
-    {#if commandToken}
-      <div class="input-highlight" aria-hidden="true" data-testid="composer-highlight" style:width={`${inputWidth}px`}>
-        <div class="input-paint input-mirror" style:transform={`translateY(${-inputScroll}px)`}><span class="command-token" data-testid="command-highlight">{commandToken}</span>{text.slice(commandToken.length)}{'\n'}</div>
+    {#if commandToken || previewReferences.length}
+      <div class="input-highlight" aria-hidden={previewReferences.length ? undefined : true} data-testid="composer-highlight" style:width={`${inputWidth}px`}>
+        <div class="input-paint input-mirror" style:transform={`translateY(${-inputScroll}px)`}>{#if previewReferences.length}<PreviewReferences {text} references={previewReferences} {store} threadId={key} editing onreference={(reference) => {
+          if (box && reference.mention) { box.focus(); box.setSelectionRange(reference.mention.end, reference.mention.end); track(); }
+        }} />{:else}<span aria-hidden="true"><span class="command-token" data-testid="command-highlight">{commandToken}</span>{text.slice(commandToken.length)}</span>{/if}{'\n'}</div>
       </div>
     {/if}
     <textarea
-      class:highlighted={Boolean(commandToken)}
+      class:highlighted={Boolean(commandToken) || previewReferences.length > 0}
       bind:this={box}
-      bind:value={() => text, setText}
+      value={text}
+      onbeforeinput={() => { pendingEdit = box ? { start: box.selectionStart, end: box.selectionEnd } : undefined; }}
       {oninput}
       {onkeydown}
       {onpaste}
       onkeyup={track}
       onscroll={syncInput}
       onclick={track}
+      onselect={track}
       onfocus={() => {
         focused = true;
         track();
       }}
-      onblur={() => (focused = false)}
+      onblur={() => { track(); focused = false; }}
       rows="1"
       {placeholder}
       aria-label={placeholder}
@@ -1096,6 +1153,7 @@
     inset: 0 auto 0 0;
     overflow: hidden;
     pointer-events: none;
+    z-index: 1;
   }
 
   .input-paint {

@@ -816,7 +816,8 @@ shellTest('native preview references attach to the composer and highlight from s
     await page.click(testid('settings-tab-experiments'));
     await page.click(testid('experiment-preview-comments'));
     await page.click(testid('settings-back'));
-    await page.type(testid('composer-input'), 'Existing native draft.');
+    await page.type(testid('composer-input'), 'Make clearer.');
+    await page.evaluate(`(() => { const input = document.querySelector('${testid('composer-input')}'); input.setSelectionRange(5, 5); input.dispatchEvent(new Event('select')); })()`);
     await page.click(testid('panel-toggle'));
     await page.waitFor(`document.querySelector('${testid('launch-browser')}')`);
     await page.click(testid('launch-browser'));
@@ -839,16 +840,15 @@ shellTest('native preview references attach to the composer and highlight from s
     expect(await page.text(`${testid('composer')} ${testid('preview-reference')}`)).toBe('@Save changes');
     expect(await child.evaluate('location.href')).toBe(url);
     const draft = await page.evaluate<string>(`document.querySelector('${testid('composer-input')}').value`);
-    expect(draft).toBe('Existing native draft.');
+    expect(draft).toBe('Make @Save changes clearer.');
     expect(await page.evaluate(`!!document.querySelector('${testid('preview-comment-form')}')`)).toBe(false);
     await page.click(`${testid('composer')} ${testid('preview-reference')}`);
     await child.waitFor(`document.querySelector('[data-boite-preview-highlight]')`);
     await page.screenshot(join(import.meta.dir, '.artifacts', 'preview-native-reference.png'));
-    await page.type(testid('composer-input'), 'Make the save action clearer.');
     await clickWhenEnabled(testid('composer-send'));
     await page.waitFor(`document.querySelector('[data-role="user"] ${testid('preview-reference')}')`);
     await page.waitFor(`!document.querySelector('${testid('composer')} ${testid('preview-reference')}')`);
-    expect(await page.evaluate(`Array.from(document.querySelectorAll('[data-role="user"] ${testid('text-part')}')).at(-1).textContent`)).toBe('Make the save action clearer.');
+    expect(await page.evaluate(`Array.from(document.querySelectorAll('[data-role="user"] ${testid('text-part')}')).at(-1).textContent`)).toBe('Make @Save changes clearer.');
     await child.close();
     child = undefined;
     await page.click(testid('panel-tab-close'));

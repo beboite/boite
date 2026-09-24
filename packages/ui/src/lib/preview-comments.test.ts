@@ -9,6 +9,7 @@ import { installPreviewPicker, previewReferenceLabel, validPreviewSelection } fr
 import highlightPreviewElement from './preview-highlight.js';
 import { Store } from './store.svelte';
 import { FakeClient } from './fake-client';
+import { editPreviewMentions, insertPreviewMention, restorePreviewMentions } from './preview-mentions';
 
 afterEach(() => { document.body.innerHTML = ''; });
 
@@ -232,14 +233,40 @@ test('adding context preserves each machine and thread draft without sending or 
   second.composerStates.same = { text: 'Other machine', attachments: [], queued: [], sending: false, paused: false };
   const reference = { id: 'ref', url: 'https://example.test', selector: 'button', text: 'Save', bounds: { x: 0, y: 0, width: 1, height: 1 } };
   first.addPreviewReference('same', reference);
-  expect(first.composerStates.same.text).toBe('Existing draft');
-  expect(first.composerStates.same.previewReferences).toEqual([reference]);
+  expect(first.composerStates.same.text).toBe('Existing draft @Save');
+  expect(first.composerStates.same.previewReferences).toEqual([{ ...reference, mention: { start: 15, end: 20 } }]);
   expect(first.composerStates.same.queued).toHaveLength(1);
   expect(first.composerStates.same.paused).toBe(true);
   expect(second.composerStates.same.text).toBe('Other machine');
   first.addPreviewReference('different', reference);
-  expect(first.composerStates.different?.previewReferences).toEqual([reference]);
+  expect(first.composerStates.different?.previewReferences).toEqual([{ ...reference, mention: { start: 0, end: 5 } }]);
   expect(first.composerStates.different?.queued).toEqual([]);
+});
+
+test('inline mentions distinguish identical labels and restore metadata on native undo and redo', () => {
+  const reference = { id: 'first', url: 'https://example.test', selector: '#first', text: 'Save', bounds: { x: 0, y: 0, width: 1, height: 1 } };
+  const first = insertPreviewMention('', [], reference);
+  const both = insertPreviewMention(first.text, first.references, { ...reference, id: 'second', selector: '#second' });
+  expect(both.text).toBe('@Save @Save');
+  const remaining = editPreviewMentions(both.text, '@Save', both.references, { start: 0, end: 6 });
+  expect(remaining.map(ref => ref.id)).toEqual(['second']);
+  expect(remaining[0]?.mention).toEqual({ start: 0, end: 5 });
+  const store = new Store();
+  store.composerStates.thread = { text: both.text, previewReferences: both.references, attachments: [], queued: [], sending: false, paused: false };
+  store.editComposerText('thread', '@Save', false, { start: 0, end: 6 });
+  store.editComposerText('thread', both.text, true);
+  expect(store.composerStates.thread.previewReferences).toEqual(both.references);
+  store.editComposerText('thread', '@Save', true);
+  expect(store.composerStates.thread.previewReferences?.map(ref => ref.id)).toEqual(['second']);
+  store.addPreviewReference('thread', remaining[0]!);
+  expect(store.composerStates.thread.previewReferences).toHaveLength(1);
+  expect(restorePreviewMentions('Old prompt', [reference])).toMatchObject({ text: 'Old prompt @Save', references: [{ mention: { start: 11, end: 16 } }] });
+  const capped = new Store();
+  for (let id = 0; id < 8; id++) capped.addPreviewReference('thread', { ...reference, id: `ref-${id}` });
+  capped.composerStates.thread!.selection = capped.composerStates.thread!.previewReferences![0]!.mention;
+  expect(capped.addPreviewReference('thread', { ...reference, id: 'replacement' })).toBe(true);
+  expect(capped.composerStates.thread!.previewReferences).toHaveLength(8);
+  expect(capped.composerStates.thread!.previewReferences?.some(ref => ref.id === 'ref-0')).toBe(false);
 });
 
 test('accepted sends retry the same reference request and changed references receive a new request id', async () => {

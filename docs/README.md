@@ -7,14 +7,16 @@
 - [Language](language.md): English and French, and where the sentences live.
 - [Accounts](accounts.md): agent logins and isolated accounts.
 - [Agent updates](agent-updates.md): update notices, the automatic update and remote machines.
+- [Agent brain](brain.md): shared instructions, skill discovery and Git synchronization.
 - [Model switching](model-switching.md): changing models and providers in one conversation.
 - [Context](context.md): context usage and compaction.
+- [Prompt cache timer](prompt-cache.md): how long a thread's cache stays warm, per provider, and the sources.
 - [Agent coordination](coordination.md): messages between agents, machine links and limits.
 - [Usage](usage.md): tokens, API cost and limits per day, provider and model.
 - [Analytics](analytics.md): optional telemetry, consent, collected fields and data controls.
 - [Keyboard shortcuts](keybindings.md): defaults and customization.
 - [The right panel](panel.md): browser, changes, files, tasks and trace beside the chat.
-- [Chat and preview experiments](experiments.md): file delivery, proposal comparison and browser comments.
+- [Chat and preview experiments](experiments.md): file delivery and browser comments.
 - [The `boite` CLI](cli.md): what an agent runs to reach its thread and its panel.
 - [Titles](titles.md): automatic and manual conversation titles.
 - [Session import](imports.md): bringing in a Claude Code conversation.

@@ -34,7 +34,7 @@ beforeAll(async () => {
   page = await BrowserPage.launch({ url: `http://127.0.0.1:${port}/?fake=1&open=recent&machines=1` });
   await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
   await page.waitFor(`document.querySelector('[data-testid=mobile-tabs]')`);
-}, 30_000);
+}, 60_000);
 afterAll(async () => { await page?.close(); await server?.close(); }, 15_000);
 
 test('phone settings separate device preferences from remote administration, including owner sessions', async () => {

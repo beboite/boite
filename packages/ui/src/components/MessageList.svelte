@@ -582,8 +582,7 @@
                 {#if part.type === 'text'}
                   {@const prompt = promptText(part)}
                   {@const command = promptCommand(prompt)}
-                  <p class="user-text" data-testid="text-part">{#if command}<span class="command">{command}</span>{prompt.slice(command.length)}{:else}{prompt}{/if}</p>
-                  {#if part.previewReferences?.length}<PreviewReferences references={part.previewReferences} {store} threadId={message.threadId} />{/if}
+                  <p class="user-text" data-testid="text-part">{#if part.previewReferences?.length}<PreviewReferences text={prompt} references={part.previewReferences} {store} threadId={message.threadId} />{:else if command}<span class="command">{command}</span>{prompt.slice(command.length)}{:else}{prompt}{/if}</p>
                 {:else if part.type === 'file'}
                   <a class="file-attachment" data-testid="file-part" href="data:application/octet-stream;base64,{part.data}" download={part.name ?? strings.composer.attachAlt}>
                     <FileText size={20} strokeWidth={1.5} />

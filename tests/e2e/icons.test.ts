@@ -53,7 +53,11 @@ test('no button shows its icon smaller than it was drawn', async () => {
     await page.click(id(`launch-${kind}`));
     await page.waitFor(`document.querySelector('${id('panel-tab')}[data-kind="${kind}"]')`);
     found.push(...await squeezed(`panel ${kind}`));
+    // Closing the last tab shuts the panel; its launcher only shows while the
+    // exit plays, so the test opens the panel again rather than racing that.
     await page.click(id('panel-tab-close'));
+    await page.waitFor(`document.querySelector('${id('panel-toggle')}').getAttribute('aria-pressed') === 'false'`);
+    await page.click(id('panel-toggle'));
     await page.waitFor(`document.querySelector('${id('panel-launcher')}')`);
   }
 

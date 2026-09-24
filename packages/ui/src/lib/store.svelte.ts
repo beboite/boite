@@ -1,5 +1,6 @@
 import { RpcErrorCode, PREVIEW_REFERENCES_PER_TURN, previewReferencesError, type PreviewReference } from '@boite/contracts';
 import { showPreviewReference } from './preview-navigation';
+import { editPreviewMentions, insertPreviewMention } from './preview-mentions';
 import { resetPullRequestSupport } from './pull-request';
 import { activityCommand } from './activity-command';
 import type {
@@ -88,7 +89,7 @@ import { DEFAULT_MODEL_NAMES, INITIAL_MODEL_DEFAULTS, readModelDefaults, writeMo
 import { FAVORITES_KEY, isNamedModel, readFavorites, type FavoriteModel } from './model-order';
 
 export type Page = 'chat' | 'settings';
-export type SettingsTab = 'voice' | 'general' | 'machines' | 'appearance' | 'keyboard' | 'accounts' | 'plugins' | 'usage' | 'limits' | 'resources' | 'experiments';
+export type SettingsTab = 'brain' | 'voice' | 'general' | 'machines' | 'appearance' | 'keyboard' | 'accounts' | 'plugins' | 'usage' | 'limits' | 'resources' | 'experiments';
 
 /** A login process the core runs for one account, as `account.login` reports it. */
 export interface LoginState {
@@ -1703,19 +1704,56 @@ export class Store {
     text: string;
     attachments: Attachment[];
     previewReferences?: PreviewReference[];
+    selection?: { start: number; end: number };
+    mentionInsertion?: number;
     queued: { text: string; attachments: Attachment[]; previewReferences?: PreviewReference[] }[];
     sending: boolean;
     paused: boolean;
   }>>({});
+
+  #previewUndo = new Map<string, { text: string; references: PreviewReference[] }[]>();
+  #composerInsertions = new Map<string, (start: number, end: number, text: string) => void>();
+
+  registerComposerInsertion(key: string, insert: (start: number, end: number, text: string) => void): () => void {
+    this.#composerInsertions.set(key, insert);
+    return () => { if (this.#composerInsertions.get(key) === insert) this.#composerInsertions.delete(key); };
+  }
+
+  editComposerText(key: string, value: string, undo = false, edit?: { start: number; end: number }): void {
+    this.composerStates[key] ??= { text: '', attachments: [], queued: [], sending: false, paused: false };
+    const draft = this.composerStates[key]!;
+    const historyKey = this.threadKey(key);
+    const previous = this.#previewUndo.get(historyKey);
+    if (!previous && !draft.previewReferences?.length) { draft.text = value; return; }
+    const history = previous ?? [];
+    const restored = undo ? history.findLast(entry => entry.text === value) : undefined;
+    history.push({ text: draft.text, references: draft.previewReferences ?? [] });
+    if (history.length > 50) history.shift();
+    this.#previewUndo.set(historyKey, history);
+    draft.previewReferences = restored?.references ?? editPreviewMentions(draft.text, value, draft.previewReferences ?? [], edit);
+    draft.text = value;
+  }
 
   addPreviewReference(threadId: string, reference: PreviewReference): boolean {
     if (previewReferencesError([reference])) { this.error = strings.previewComments.failed; return false; }
     this.composerStates[threadId] ??= { text: '', attachments: [], queued: [], sending: false, paused: false };
     const draft = this.composerStates[threadId]!;
     const refs = draft.previewReferences ?? [];
-    if (refs.some(item => item.url === reference.url && item.selector === reference.selector && JSON.stringify(item.shadowPath ?? []) === JSON.stringify(reference.shadowPath ?? []))) return true;
-    if (refs.length >= PREVIEW_REFERENCES_PER_TURN) { this.error = strings.previewComments.tooMany; return false; }
-    draft.previewReferences = [...refs, reference];
+    if (refs.some(item => item.id === reference.id)) return true;
+    const inserted = insertPreviewMention(draft.text, refs, reference, draft.selection?.start, draft.selection?.end);
+    if (inserted.references.length > PREVIEW_REFERENCES_PER_TURN) { this.error = strings.previewComments.tooMany; return false; }
+    const historyKey = this.threadKey(threadId);
+    const history = this.#previewUndo.get(historyKey) ?? [];
+    history.push({ text: draft.text, references: refs });
+    if (history.length > 50) history.shift();
+    this.#previewUndo.set(historyKey, history);
+    const start = Math.min(draft.text.length, draft.selection?.start ?? draft.text.length);
+    const end = Math.min(draft.text.length, draft.selection?.end ?? draft.text.length);
+    this.#composerInsertions.get(threadId)?.(start, end, inserted.text.slice(start, inserted.text.length - draft.text.length + end));
+    draft.text = inserted.text;
+    draft.previewReferences = inserted.references;
+    draft.selection = { start: inserted.caret, end: inserted.caret };
+    draft.mentionInsertion = (draft.mentionInsertion ?? 0) + 1;
     return true;
   }
 

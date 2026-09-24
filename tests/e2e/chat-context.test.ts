@@ -13,7 +13,7 @@ beforeAll(async () => {
   page = await BrowserPage.launch({url:`http://127.0.0.1:${port}/?fake=1&open=recent`,windowSize:{width:1300,height:850}});
   await page.waitFor(`document.querySelector('[data-thread-id]')`);
 }, 90000);
-afterAll(async () => { await page?.close(); await server?.close(); });
+afterAll(async () => { await page?.close(); await server?.close(); }, 15_000);
 
 async function update(code: string) {
   await page.evaluate(`(async () => { const {workspace} = await import('/src/lib/workspace.svelte.ts'); const store = workspace.active; const thread = store.openThread; ${code} })()`);

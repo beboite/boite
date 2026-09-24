@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { affectedChecks, needsCodeChecks, needsWorkflowLint } from './changes.ts';
+import { affectedChecks, ciMode, needsCodeChecks, needsWorkflowLint, plan } from './changes.ts';
 
 test('checks follow runtime boundaries and combine changed paths', () => {
   expect(affectedChecks(['apps/shell/src-tauri/src/main.rs'])).toEqual({ core: false, web: false, desktop: true, server: false });
@@ -32,4 +32,26 @@ test('runtime, build inputs and unknown files require the complete suite', () =>
   for (const path of ['packages/core/src/main.ts', 'bun.lock', 'Dockerfile', '.github/workflows/ci.yml', 'new-config.json', 'docs/example.ts']) {
     expect(needsCodeChecks(['README.md', path])).toBe(true);
   }
+});
+
+test('pull requests, main pushes and forced runs pick their mode', () => {
+  expect(ciMode('pull_request', false)).toBe('pr');
+  expect(ciMode('push', false)).toBe('warm');
+  expect(ciMode('push', true)).toBe('full');
+  expect(ciMode('workflow_dispatch', false)).toBe('full');
+  expect(ciMode('schedule', false)).toBe('full');
+});
+
+test('a pull request skips the extra architectures, a main push skips what the pull request passed', () => {
+  const all = affectedChecks(['packages/core/src/main.ts']);
+  const pr = plan(all, 'pr');
+  expect(pr).toMatchObject({ core: true, web: true, desktop: true, server: true, e2e: true });
+  expect(JSON.parse(pr.portable)).toEqual(['ubuntu-24.04', 'macos-15']);
+  const warm = plan(all, 'warm');
+  expect(warm).toMatchObject({ core: false, web: true, desktop: true, server: true, e2e: false });
+  expect(JSON.parse(warm.portable)).toEqual(['ubuntu-24.04', 'ubuntu-24.04-arm', 'macos-15', 'macos-15-intel']);
+  const full = plan(all, 'full');
+  expect(full).toMatchObject({ core: true, e2e: true });
+  expect(JSON.parse(full.portable)).toHaveLength(4);
+  expect(plan(affectedChecks(['README.md']), 'warm')).toMatchObject({ core: false, web: false, desktop: false, server: false });
 });
