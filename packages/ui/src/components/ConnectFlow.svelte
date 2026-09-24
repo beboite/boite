@@ -150,7 +150,7 @@
 
   function use() {
     if (!provider) return;
-    store.useProvider(provider.id);
+    store.useProvider(provider.id, accountId);
     store.closeConnect();
   }
 

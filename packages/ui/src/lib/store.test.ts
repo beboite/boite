@@ -695,3 +695,16 @@ test('account lifecycle newer cancellation beats a stale reload snapshot', async
     spy.mockRestore();
   }
 });
+
+test('connecting a second account moves the composer to that account, not the first signed in', async () => {
+  const store = new Store();
+  store.attach(new FakeClient({ delayMs: 0 }));
+  await store.connect();
+  store.accounts = store.accounts.map((a) => (a.id === 'a-claude-side' ? { ...a, status: 'ok' } : a));
+  expect(store.useProvider('claude', 'a-claude-side')).toBe(true);
+  expect(store.prefs.accountId).toBe('a-claude-side');
+  // Unnamed, or named but not signed in: the first signed-in account.
+  store.accounts = store.accounts.map((a) => (a.id === 'a-claude-side' ? { ...a, status: 'unauthenticated' } : a));
+  expect(store.useProvider('claude', 'a-claude-side')).toBe(true);
+  expect(store.prefs.accountId).toBe('a-claude-main');
+});

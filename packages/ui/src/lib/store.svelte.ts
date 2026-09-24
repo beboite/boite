@@ -654,11 +654,13 @@ export class Store {
 
   /**
    * The composer moves to this provider's signed-in account, the way a pick in
-   * the model picker would. False when it has none yet.
+   * the model picker would: the one just connected when it is named and signed
+   * in, else the first signed in. False when it has none yet.
    */
-  useProvider(providerId: ProviderId): boolean {
+  useProvider(providerId: ProviderId, accountId: string | null = null): boolean {
     const provider = this.providerOf(providerId);
-    const account = this.accountsOf(providerId).find((a) => a.status === 'ok');
+    const signedIn = this.accountsOf(providerId).filter((a) => a.status === 'ok');
+    const account = signedIn.find((a) => a.id === accountId) ?? signedIn[0];
     if (!provider || !provider.available || !account) return false;
     const model = this.defaultModelOf(provider, account.id);
     this.remember({
@@ -1559,6 +1561,8 @@ export class Store {
     if (!client || this.connection !== 'ready') return;
     try {
       const fresh = new Map((await client.call('projects.list', {})).map((project) => [project.id, project]));
+      // Another machine took this Store meanwhile: project ids can collide between machines.
+      if (this.#client !== client) return;
       if (this.projects.every((project) => project.repository === fresh.get(project.id)?.repository)) return;
       this.projects = this.projects.map((project) => fresh.get(project.id) ?? project);
     } catch {
@@ -1577,6 +1581,7 @@ export class Store {
     if (!client) return null;
     try {
       const project = await client.call('projects.drafts', {});
+      if (this.#client !== client) return null;
       if (!this.projects.some((p) => p.id === project.id)) this.projects = [...this.projects, project];
       return project.id;
     } catch (error) {
