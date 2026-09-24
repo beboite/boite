@@ -7,6 +7,7 @@
 
   /** The store is the machine whose settings are open, so the switch and the list are that machine's. */
   let { store }: { store: Store } = $props();
+  const uid = $props.id();
 
   let checking = $state(false);
   let busy = $derived(checking || store.harnessUpdates.some((update) => update.state === 'checking'));
@@ -46,9 +47,9 @@
       </button>
     </div>
 
-    <label class="switch-row">
-      <span class="text">{strings.harnessUpdates.auto}<InfoTip topic={strings.harnessUpdates.auto} text={strings.harnessUpdates.autoHint} /></span>
-      <input
+    <label for="{uid}-auto" class="switch-row">
+      <span class="text"><span id="{uid}-auto-name">{strings.harnessUpdates.auto}</span><InfoTip topic={strings.harnessUpdates.auto} text={strings.harnessUpdates.autoHint} /></span>
+      <input id="{uid}-auto" aria-labelledby="{uid}-auto-name"
         type="checkbox"
         role="switch"
         data-testid="setting-auto-update-harnesses"

@@ -2,6 +2,8 @@
   import InfoTip from './InfoTip.svelte';
   import { onMount } from 'svelte';
   import { strings } from '../lib/strings';
+
+  const uid = $props.id();
   let enabled = $state(false);
   let ready = $state(false);
   let error = $state('');
@@ -18,9 +20,9 @@
 </script>
 
 <section class="card" data-testid="shell-settings">
-  <label class="switch-row">
-    <span class="text">{strings.settings.closeToTray}<InfoTip topic={strings.settings.closeToTray} text={strings.settings.closeToTrayHint} /></span>
-    <input type="checkbox" role="switch" data-testid="close-to-tray" checked={enabled} disabled={!ready} onchange={(event) => void update(event.currentTarget.checked)} />
+  <label for="{uid}-close-to-tray" class="switch-row">
+    <span class="text"><span id="{uid}-close-to-tray-name">{strings.settings.closeToTray}</span><InfoTip topic={strings.settings.closeToTray} text={strings.settings.closeToTrayHint} /></span>
+    <input id="{uid}-close-to-tray" aria-labelledby="{uid}-close-to-tray-name" type="checkbox" role="switch" data-testid="close-to-tray" checked={enabled} disabled={!ready} onchange={(event) => void update(event.currentTarget.checked)} />
   </label>
   {#if error}<p role="alert">{error}</p>{/if}
 </section>

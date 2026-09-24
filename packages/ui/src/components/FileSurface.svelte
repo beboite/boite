@@ -91,7 +91,8 @@
     link.href = url;
     link.download = baseName(content.path);
     link.click();
-    setTimeout(() => URL.revokeObjectURL(url), 0);
+    // Firefox and Safari start the download after this task, so the URL lives a second.
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
   async function save(): Promise<void> {

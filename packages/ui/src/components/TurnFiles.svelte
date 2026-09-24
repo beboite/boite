@@ -17,8 +17,9 @@
     deleted: () => strings.chat.fileDeleted
   } satisfies Record<TurnFile['change'], () => string>;
 
+  /** A paired device cannot read files, so its rows stay plain text instead of opening a refusal. */
   function openable(file: TurnFile): boolean {
-    return file.relative !== null && file.change !== 'deleted';
+    return store.owner && file.relative !== null && file.change !== 'deleted';
   }
 
   async function reveal(file: TurnFile): Promise<void> {

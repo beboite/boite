@@ -5,6 +5,7 @@
   import { strings } from '../lib/strings';
   import { installApp, installed, PUSH_ENABLED_KEY, worker } from '../lib/pwa';
   let { store, showServerSettings = true }: { store: Store; showServerSettings?: boolean } = $props();
+  const uid = $props.id();
   const inShell = window.__TAURI_INTERNALS__ !== undefined;
   const secure = window.isSecureContext;
   const capable = secure && 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
@@ -79,7 +80,7 @@
   <h2>{strings.phone.heading}</h2>
   {#if store.owner && showServerSettings}
     <div class="block">
-      <label><span>{strings.phone.publicUrl}<InfoTip topic={strings.phone.publicUrl} text={strings.phone.publicUrlHint} /></span><input type="url" bind:value={publicUrl} placeholder={strings.phone.urlPlaceholder} data-testid="phone-public-url" /></label>
+      <label for="{uid}-public-url"><span><span id="{uid}-public-url-name">{strings.phone.publicUrl}</span><InfoTip topic={strings.phone.publicUrl} text={strings.phone.publicUrlHint} /></span><input id="{uid}-public-url" aria-labelledby="{uid}-public-url-name" type="url" bind:value={publicUrl} placeholder={strings.phone.urlPlaceholder} data-testid="phone-public-url" /></label>
       <div class="actions">
         <button disabled={store.connection !== 'ready'} onclick={() => void store.saveSettings({ publicUrl: publicUrl.trim() || null })}>{strings.settings.save}</button>
       </div>

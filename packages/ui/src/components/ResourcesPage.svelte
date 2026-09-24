@@ -8,6 +8,7 @@
   import StatusMark from './StatusMark.svelte';
 
   let { store }: { store: Store } = $props();
+  const uid = $props.id();
 
   let cpu = $state(untrack(() => store.settings?.agentCpuCapPercent ?? 75));
   let memory = $state(untrack(() => store.settings?.threadMemoryCapMb ?? 0));
@@ -28,13 +29,13 @@
 
   <section class="card" id="settings-quiet">
     <h2>{strings.protection.quiet}<InfoTip topic={strings.protection.quiet} text={strings.protection.windows} /></h2>
-    <label class="switch-row">
-      <span class="text">{strings.settings.focusGuard}<InfoTip topic={strings.settings.focusGuard} text={strings.settings.focusGuardHint} /></span>
-      <input type="checkbox" role="switch" data-testid="setting-focus-guard" checked={store.settings?.focusGuard ?? true} onchange={(event) => void store.saveSettings({focusGuard: event.currentTarget.checked})} />
+    <label for="{uid}-focus-guard" class="switch-row">
+      <span class="text"><span id="{uid}-focus-guard-name">{strings.settings.focusGuard}</span><InfoTip topic={strings.settings.focusGuard} text={strings.settings.focusGuardHint} /></span>
+      <input id="{uid}-focus-guard" aria-labelledby="{uid}-focus-guard-name" type="checkbox" role="switch" data-testid="setting-focus-guard" checked={store.settings?.focusGuard ?? true} onchange={(event) => void store.saveSettings({focusGuard: event.currentTarget.checked})} />
     </label>
-    <label class="switch-row">
-      <span class="text">{strings.settings.muteAgents}<InfoTip topic={strings.settings.muteAgents} text={strings.settings.muteAgentsHint} /></span>
-      <input type="checkbox" role="switch" data-testid="setting-mute-agents" checked={store.settings?.muteAgents ?? true} onchange={(event) => void store.saveSettings({muteAgents: event.currentTarget.checked})} />
+    <label for="{uid}-mute-agents" class="switch-row">
+      <span class="text"><span id="{uid}-mute-agents-name">{strings.settings.muteAgents}</span><InfoTip topic={strings.settings.muteAgents} text={strings.settings.muteAgentsHint} /></span>
+      <input id="{uid}-mute-agents" aria-labelledby="{uid}-mute-agents-name" type="checkbox" role="switch" data-testid="setting-mute-agents" checked={store.settings?.muteAgents ?? true} onchange={(event) => void store.saveSettings({muteAgents: event.currentTarget.checked})} />
     </label>
   </section>
   <section class="card" id="settings-limits">

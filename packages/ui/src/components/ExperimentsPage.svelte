@@ -4,6 +4,8 @@
   import { EXPERIMENT_IDS, readExperiments, setExperiment, type ExperimentId } from '../lib/experiments';
   import { strings } from '../lib/strings';
 
+  const uid = $props.id();
+
   /** One entry per shipped id, so a new experiment cannot land without its words. */
   const copy: Record<ExperimentId, { title: string; hint: string }> = {
     'theme-grain': strings.experiments.themeGrain,
@@ -28,11 +30,11 @@
 
   <section class="card">
     {#each EXPERIMENT_IDS as id (id)}
-      <label class="switch-row" id="settings-{id}">
+      <label for="{uid}-{id}" class="switch-row" id="settings-{id}">
         <span class="text">
-          {copy[id].title}<InfoTip topic={copy[id].title} text={copy[id].hint} />
+          <span id="{uid}-{id}-name">{copy[id].title}</span><InfoTip topic={copy[id].title} text={copy[id].hint} />
         </span>
-        <input
+        <input id="{uid}-{id}" aria-labelledby="{uid}-{id}-name"
           type="checkbox"
           role="switch"
           data-testid="experiment-{id}"

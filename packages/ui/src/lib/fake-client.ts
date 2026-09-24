@@ -769,7 +769,7 @@ export class FakeClient implements ObservableClient {
       const title = params.title ?? 'Untitled thread';
       // The core's own placement: a branch named after the title, the
       // worktree beside the repository. No git here, only the two strings.
-      if (params.worktree !== undefined && project.kind === 'drafts') throw new Error('a draft has no worktree: the drafts folder is not a git repository');
+      if (params.worktree !== undefined && project.kind === 'drafts') throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'a draft has no worktree: the drafts folder is not a git repository', data: { projectId: project.id } });
       const placed = params.worktree === undefined ? null : fakeWorktree(project.path, title, params.worktree.branch);
       // The core makes a dated folder per draft; the fake only names it.
       const draftFolder = project.kind === 'drafts' && !params.cwd

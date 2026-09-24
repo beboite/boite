@@ -52,3 +52,25 @@ test('the page carries one switch per experiment and a toggle writes the enabled
   expect(window.localStorage.getItem(EXPERIMENTS_STORAGE_KEY)).toBe('[]');
   expect(query<HTMLInputElement>('[data-testid=experiment-theme-grain]').checked).toBe(false);
 });
+
+test('a click on a row name flips its switch, the "i" beside it only opens the tip', async () => {
+  running = mount(ExperimentsPage, { target: document.body });
+  flushSync();
+  await tick();
+
+  const grain = query<HTMLInputElement>('[data-testid=experiment-theme-grain]');
+  const row = grain.closest('label')!;
+  // The switch is named by its title alone, not by the button's label too.
+  expect(document.getElementById(grain.getAttribute('aria-labelledby')!)?.textContent).toBe('Grain theme');
+
+  row.querySelector<HTMLButtonElement>('[data-testid=info-tip]')!.click();
+  flushSync();
+  expect(grain.checked).toBe(false);
+  expect(query('[data-testid=info-tip-text]').textContent).toBeTruthy();
+
+  document.getElementById(grain.getAttribute('aria-labelledby')!)!.click();
+  flushSync();
+  await tick();
+  expect(grain.checked).toBe(true);
+  expect(window.localStorage.getItem(EXPERIMENTS_STORAGE_KEY)).toBe('["theme-grain"]');
+});

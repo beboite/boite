@@ -16,6 +16,7 @@
   import type { Store } from '../lib/store.svelte';
 
   let { store }: { store: Store } = $props();
+  const uid = $props.id();
 
   const inShell = window.__TAURI_INTERNALS__ !== undefined;
 
@@ -110,11 +111,11 @@
 
   <section class="card" id="settings-background">
     <h2>{strings.settings.background}</h2>
-    <label class="switch-row">
+    <label for="{uid}-notifications" class="switch-row">
       <span class="text">
-        {strings.settings.notifications}<InfoTip topic={strings.settings.notifications} text={strings.settings.notificationsHint} />
+        <span id="{uid}-notifications-name">{strings.settings.notifications}</span><InfoTip topic={strings.settings.notifications} text={strings.settings.notificationsHint} />
       </span>
-      <input
+      <input id="{uid}-notifications" aria-labelledby="{uid}-notifications-name"
         type="checkbox"
         role="switch"
         data-testid="setting-notifications"
@@ -139,11 +140,11 @@
       {#if store.settings && !store.settings.listenOnLan}
         <p class="subtle hint">{strings.settings.pairing.lanHint}</p>
       {/if}
-      <label class="switch-row">
+      <label for="{uid}-pairing-owner" class="switch-row">
         <span class="text">
-          {strings.settings.pairing.owner}<InfoTip topic={strings.settings.pairing.owner} text={strings.settings.pairing.ownerHint} />
+          <span id="{uid}-pairing-owner-name">{strings.settings.pairing.owner}</span><InfoTip topic={strings.settings.pairing.owner} text={strings.settings.pairing.ownerHint} />
         </span>
-        <input type="checkbox" role="switch" data-testid="pairing-owner" bind:checked={ownerLink} />
+        <input id="{uid}-pairing-owner" aria-labelledby="{uid}-pairing-owner-name" type="checkbox" role="switch" data-testid="pairing-owner" bind:checked={ownerLink} />
       </label>
       <div class="actions">
         <button
@@ -223,11 +224,11 @@
           <input type="number" min="0" max="120" bind:value={warmProcessMinutes} />
         </label>
       </div>
-      <label class="switch-row">
+      <label for="{uid}-listen-on-lan" class="switch-row">
         <span class="text">
-          {strings.settings.listenOnLan}<InfoTip topic={strings.settings.listenOnLan} text={strings.settings.listenOnLanHint} />
+          <span id="{uid}-listen-on-lan-name">{strings.settings.listenOnLan}</span><InfoTip topic={strings.settings.listenOnLan} text={strings.settings.listenOnLanHint} />
         </span>
-        <input type="checkbox" role="switch" data-testid="setting-listen-on-lan" bind:checked={listenOnLan} />
+        <input id="{uid}-listen-on-lan" aria-labelledby="{uid}-listen-on-lan-name" type="checkbox" role="switch" data-testid="setting-listen-on-lan" bind:checked={listenOnLan} />
       </label>
       <div class="actions">
         <button type="button" class="primary" onclick={() => void save()}>{strings.settings.save}</button>

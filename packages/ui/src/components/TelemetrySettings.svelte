@@ -5,6 +5,7 @@
   import { strings } from '../lib/strings';
 
   let { store, embedded = false }: { store: Store; embedded?: boolean } = $props();
+  const uid = $props.id();
   let consent = $state<TelemetryState | null>(null);
   let error = $state('');
   let busy = $state(false);
@@ -50,15 +51,15 @@
     {#if !embedded}<h2>{strings.telemetry.heading}<InfoTip topic={strings.telemetry.heading} text={strings.telemetry.description} /></h2>{/if}
     {#if consent}
       {#if !consent.configured && !embedded}<p class="hint">{strings.telemetry.unconfigured}</p>{/if}
-      <label class="switch-row">
+      <label for="{uid}-basic" class="switch-row">
         <!-- The tour is there to explain, so it keeps the sentence in view. -->
-        <span class="text">{strings.telemetry.basic}{#if embedded}<span class="hint">{strings.onboarding.privacy.basic}</span>{:else}<InfoTip topic={strings.telemetry.basic} text={strings.telemetry.basicHint} />{/if}</span>
-        <input type="checkbox" role="switch" checked={consent.mode !== 'off'} disabled={busy}
+        <span class="text"><span id="{uid}-basic-name">{strings.telemetry.basic}</span>{#if embedded}<span class="hint" id="{uid}-basic-hint">{strings.onboarding.privacy.basic}</span>{:else}<InfoTip topic={strings.telemetry.basic} text={strings.telemetry.basicHint} />{/if}</span>
+        <input id="{uid}-basic" aria-labelledby="{uid}-basic-name" aria-describedby={embedded ? `${uid}-basic-hint` : undefined} type="checkbox" role="switch" checked={consent.mode !== 'off'} disabled={busy}
           onchange={event => void change(event.currentTarget.checked ? 'basic' : 'off')} />
       </label>
-      <label class="switch-row">
-        <span class="text">{strings.telemetry.enhanced}{#if embedded}<span class="hint">{strings.onboarding.privacy.enhanced}</span>{:else}<InfoTip topic={strings.telemetry.enhanced} text={strings.telemetry.enhancedHint} />{/if}</span>
-        <input type="checkbox" role="switch" checked={consent.mode === 'enhanced'} disabled={busy}
+      <label for="{uid}-enhanced" class="switch-row">
+        <span class="text"><span id="{uid}-enhanced-name">{strings.telemetry.enhanced}</span>{#if embedded}<span class="hint" id="{uid}-enhanced-hint">{strings.onboarding.privacy.enhanced}</span>{:else}<InfoTip topic={strings.telemetry.enhanced} text={strings.telemetry.enhancedHint} />{/if}</span>
+        <input id="{uid}-enhanced" aria-labelledby="{uid}-enhanced-name" aria-describedby={embedded ? `${uid}-enhanced-hint` : undefined} type="checkbox" role="switch" checked={consent.mode === 'enhanced'} disabled={busy}
           onchange={event => void change(event.currentTarget.checked ? 'enhanced' : 'basic')} />
       </label>
       {#if !embedded}
