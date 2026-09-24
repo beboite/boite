@@ -183,6 +183,10 @@ test('the accent persists and colours the effort track continuously to the thumb
   await capture('appearance-accent-phone.png');
   await page.click('[data-testid=accent-260]');
   await page.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
+  const settingsHistory = await page.evaluate<string>(`history.state.boiteOverlay`);
+  await page.click('[data-testid=settings-back]');
+  // Closing settings opened on mobile schedules history.back(); finish it before navigating.
+  await page.waitFor(`history.state?.boiteOverlay !== ${JSON.stringify(settingsHistory)}`);
 }, 30_000);
 
 
