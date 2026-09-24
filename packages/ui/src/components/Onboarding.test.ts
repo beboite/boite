@@ -252,6 +252,7 @@ test('refusing the deal keeps basic counters, turns the row red and closes after
   await open();
   await click('onboarding-dot-privacy');
   expect(document.querySelector('.soul')).not.toBeNull();
+  await new Promise(resolve => setTimeout(resolve, 0)); flushSync();
   await answer('onboarding-telemetry-basic');
   expect(await store.client!.call('telemetry.state', {})).toMatchObject({ mode: 'basic' });
   expect(query('[data-testid=onboarding-telemetry-basic]').classList.contains('refused')).toBe(true);
@@ -272,6 +273,23 @@ test('under reduced motion refusing closes at once, and a replay keeps a saved o
     expect(document.querySelector('[data-testid=onboarding]')).toBeNull();
     expect(tourSeen()).toBe(true);
   } finally { delete document.documentElement.dataset.motion; }
+});
+
+test('refusing waits for the saved mode, so an unread opt-out is never overwritten', async () => {
+  const client = store.client!;
+  const call = client.call.bind(client);
+  vi.spyOn(client, 'call').mockImplementation((async (method: string, params: never) => {
+    if (method === 'telemetry.state') throw new Error('state unreadable');
+    return call(method as never, params);
+  }) as typeof client.call);
+  await call('telemetry.configure', { mode: 'off' } as never);
+  await open();
+  await click('onboarding-dot-privacy');
+  await new Promise(resolve => setTimeout(resolve, 0)); flushSync();
+  expect(query<HTMLButtonElement>('[data-testid=onboarding-telemetry-basic]').disabled).toBe(true);
+  await answer('onboarding-telemetry-basic');
+  expect(await call('telemetry.state', {} as never)).toMatchObject({ mode: 'off' });
+  expect(query('[data-testid=telemetry-deal] [role=alert]').textContent).toContain('state unreadable');
 });
 
 test('the deal opts into enhanced analytics and ends the tour', async () => {

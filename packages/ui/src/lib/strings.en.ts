@@ -1196,9 +1196,9 @@ export const strings = {
       video: 'Trade offer meme',
       basic: 'NO! Enough is enough',
       basicDefault: '(default)',
-      basicHint: 'Anonymous counts of launches and finished tasks, nothing else. No profile, nothing that says who you are.',
+      basicHint: 'Counts of active installs, launches, conversations and turn outcomes. The usage IDs change every day. No profile.',
       deal: 'DEAL',
-      dealHint: 'Adds public model names, speed and token counts under a separate random ID kept on your machine. Still no idea who you are, but it helps a lot. Thank you!',
+      dealHint: 'Adds the public models you pick, reasoning level, speed and permission modes, durations and token volumes, under a stable random ID. Private models count as "other". It helps a lot. Thank you!',
       optOut: "If you REALLY don't want to help Boite, Settings > General > Privacy and analytics turns everything off. :c",
       doc: 'What is collected'
     },

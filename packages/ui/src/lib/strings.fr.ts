@@ -1170,15 +1170,15 @@ export const fr: Messages = {
   onboarding: {
     privacy: {
       title: 'VENDEZ VOTRE ÂME À BOITE !',
-      intro: "Boite compte quelques statistiques d'utilisation anonymes pour savoir quoi corriger en premier. Vos messages, fichiers et comptes ne quittent jamais votre machine, l'application marche pareil dans tous les cas, et vous pouvez changer d'avis quand vous voulez dans les paramètres.",
+      intro: "Boite compte quelques statistiques d'utilisation anonymes pour savoir quoi corriger en premier. Vos messages, fichiers et comptes ne quittent jamais votre machine, l'application marche pareil dans tous les cas, et vous pouvez changer d'avis quand vous voulez dans les réglages.",
       question: 'Marché conclu ?',
       video: 'Mème Trade Offer',
       basic: 'NON ! Ça suffit',
       basicDefault: '(par défaut)',
-      basicHint: "Des compteurs anonymes de lancements et de tâches terminées, rien d'autre. Aucun profil, rien qui dise qui vous êtes.",
+      basicHint: "Des compteurs d'installations actives, de lancements, de conversations et de résultats des tours. Les identifiants d'usage changent chaque jour. Aucun profil.",
       deal: 'MARCHÉ CONCLU',
-      dealHint: "Ajoute les noms de modèles publics, la vitesse et les volumes de jetons, sous un identifiant aléatoire distinct gardé sur votre machine. Toujours aucune idée de qui vous êtes, mais ça aide beaucoup. Merci !",
-      optOut: 'Si vous ne voulez VRAIMENT pas aider Boite, Paramètres > Général > Confidentialité et statistiques désactive tout. :c',
+      dealHint: "Ajoute les modèles publics choisis, le niveau de raisonnement, les modes de vitesse et de permission, les durées et les volumes de jetons, sous un identifiant aléatoire stable. Les modèles privés comptent comme « autre ». Ça aide beaucoup. Merci !",
+      optOut: 'Si vous ne voulez VRAIMENT pas aider Boite, Réglages > Général > Confidentialité et statistiques désactive tout. :c',
       doc: 'Ce qui est collecté'
     },
     demo: {

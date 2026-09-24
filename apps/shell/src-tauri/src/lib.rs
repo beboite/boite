@@ -735,10 +735,12 @@ const MAIN_MIN_SIZE: (f64, f64) = (880.0, 560.0);
 
 /// Logical `(x, y, width, height)` of a window of `size` centred in `area`
 /// (`left, top, width, height`), shrunk to 92% of the area on a smaller screen.
+/// An area below the minimum size gets the window at its top left, so the
+/// title bar stays on screen.
 fn centred(size: (f64, f64), min: (f64, f64), area: (f64, f64, f64, f64)) -> (f64, f64, f64, f64) {
     let width = size.0.min(area.2 * 0.92).max(min.0);
     let height = size.1.min(area.3 * 0.92).max(min.1);
-    (area.0 + (area.2 - width) / 2.0, area.1 + (area.3 - height) / 2.0, width, height)
+    (area.0 + ((area.2 - width) / 2.0).max(0.0), area.1 + ((area.3 - height) / 2.0).max(0.0), width, height)
 }
 
 /// The primary monitor's work area, in logical pixels. Windows puts a window
@@ -970,8 +972,9 @@ mod tests {
         assert_eq!(((x * 2.0).round(), (y * 2.0).round()), (102.0, 55.0));
         // A taskbar on the left moves the centre with the work area.
         assert_eq!(super::centred((1280.0, 890.0), (880.0, 560.0), (60.0, 0.0, 1860.0, 1080.0)).0, 350.0);
-        // Never below the minimum size.
-        assert_eq!(super::centred((1280.0, 890.0), (880.0, 560.0), (0.0, 0.0, 800.0, 500.0)).2, 880.0);
+        // Never below the minimum size, and then pinned to the top left.
+        assert_eq!(super::centred((1280.0, 890.0), (880.0, 560.0), (0.0, 0.0, 800.0, 500.0)), (0.0, 0.0, 880.0, 560.0));
+        assert_eq!(super::centred((1280.0, 890.0), (880.0, 560.0), (60.0, 40.0, 800.0, 500.0)), (60.0, 40.0, 880.0, 560.0));
     }
 
     #[test]

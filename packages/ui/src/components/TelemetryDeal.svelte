@@ -46,7 +46,8 @@
   }
 
   async function enough() {
-    if (busy || refusing) return;
+    // Until the saved mode is known, "enough" could write basic over an opt-out.
+    if (busy || refusing || !consent) return;
     // A replay never turns counters back on after a saved opt-out.
     if (!await choose(consent?.mode === 'off' ? 'off' : 'basic')) return;
     if (reduced) { onchosen(); return; }
@@ -71,7 +72,7 @@
   <p class="intro">{strings.onboarding.privacy.intro}</p>
   <p class="question">{strings.onboarding.privacy.question}</p>
   <div class="rows">
-    <button class="row no" class:refused={refusing} disabled={busy || refusing} data-testid="onboarding-telemetry-basic" onclick={() => void enough()}>
+    <button class="row no" class:refused={refusing} disabled={busy || refusing || !consent} data-testid="onboarding-telemetry-basic" onclick={() => void enough()}>
       <span class="label">{strings.onboarding.privacy.basic}<small>{strings.onboarding.privacy.basicDefault}</small></span>
       <span class="hint">{strings.onboarding.privacy.basicHint}</span>
     </button>
