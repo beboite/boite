@@ -50,6 +50,13 @@ export interface ExecutableCandidate {
    */
   kind: 'path' | 'file' | 'npm';
   value: string;
+  /**
+   * Environment the agent's updater gets when it runs from this candidate: what
+   * a launcher Boite skips would have set. Codex's npm package runs its binary
+   * through a Node script that sets `CODEX_MANAGED_BY_NPM`, and `codex update`
+   * without it cannot tell how it was installed.
+   */
+  updateEnv?: Record<string, string>;
 }
 
 /**
@@ -175,7 +182,9 @@ export interface ProviderAuth {
  *
  * `command` is a CLI Boite runs under the account's isolation directory,
  * streaming its output back as `account.login`; the user answers a prompt with
- * `accounts.loginInput`.
+ * `accounts.loginInput`. With `terminal`, the same command is typed into a
+ * shell the user sees instead (`accounts.loginTerminal`), for a CLI whose login
+ * is an interactive menu a pipe cannot drive.
  *
  * `acp` is the protocol's own `authenticate` call: the core starts the agent
  * like a turn would, sends `initialize` then `authenticate` with that method
@@ -190,6 +199,8 @@ export interface ProviderLogin {
   env?: Record<string, string>;
   /** The ACP `authenticate` method id, for an agent that logs in over the protocol. */
   acp?: { methodId: string };
+  /** Type `command` into a terminal the user drives rather than piping it. Only with `command`. */
+  terminal?: boolean;
 }
 
 /** How this provider's accounts are kept apart, whatever the OS profile does. */
@@ -276,8 +287,8 @@ export interface ProviderSummary {
   executable: string | null;
   models: ModelInfo[];
   capabilities: ProviderCapabilities;
-  /** Whether Boite can start login, and which protocol owns it. */
-  login: false | { kind: 'command' | 'acp' };
+  /** Whether Boite can start login, and how: a piped command, the ACP call, or a command typed into a terminal. */
+  login: false | { kind: 'command' | 'acp' | 'terminal' };
   /** True when the provider cannot use its default login location. */
   alwaysIsolated: boolean;
   /** Where the managed install stands, null when this profile has no `install` block. */
@@ -486,7 +497,40 @@ export interface ContextUse {
   at: Timestamp;
 }
 
+/**
+ * How long the provider keeps the conversation's prompt prefix cached after the
+ * last turn. A request inside that time reads the prefix from the cache at a
+ * fraction of the input price; after it, the provider processes the whole
+ * context again. Every hit restarts the clock, so `at` is the end of the turn
+ * that last touched the cache, not the turn that first wrote it.
+ */
+export interface PromptCache {
+  /** When the turn that last used the cache finished. */
+  at: Timestamp;
+  /** Seconds the prefix is kept after `at`. */
+  ttlSeconds: number;
+  /**
+   * Seconds the provider may keep it on a best-effort basis beyond
+   * `ttlSeconds` (OpenAI: up to an hour under low load). Absent when the
+   * lifetime is fixed.
+   */
+  maxSeconds?: number;
+  /**
+   * `reported`: the agent's own usage named the lifetime of this request
+   * (Claude's `cache_creation.ephemeral_1h_input_tokens`). `documented`: the
+   * provider's published lifetime for what this agent sends.
+   */
+  source: 'reported' | 'documented';
+  /** Tokens the last turn read from the cache, zero on a turn that started cold. */
+  readTokens: number;
+  /** The model and account the cache belongs to: another model or account starts cold. */
+  model: string | null;
+  accountId: AccountId;
+}
+
 export interface ThreadSummary {
+  /** Core-owned delegation relationship. Absent on ordinary conversations. */
+  parentThreadId?: ThreadId | null;
   /** Last accepted user message, independent of assistant activity and renames. */
   lastUserMessageAt?: Timestamp | null;
   pullRequest?: { number: number; url: string; state: 'OPEN' | 'CLOSED' | 'MERGED' } | null;
@@ -524,6 +568,11 @@ export interface ThreadSummary {
   load: ThreadLoad | null;
   /** The context meter, written at the end of every turn whose agent reports its usage. */
   context: ContextUse | null;
+  /**
+   * The prompt cache the last turn left behind, null when the provider's
+   * lifetime is unknown or no turn has finished. Missing on older cores.
+   */
+  promptCache?: PromptCache | null;
   createdAt: Timestamp;
   updatedAt: Timestamp;
 }
@@ -585,7 +634,15 @@ export type TurnStatus = 'queued' | 'running' | 'done' | 'stopped' | 'error';
 /** Frozen when a prompt is accepted, including while it waits in the scheduler. */
 export type TurnExecution = Pick<ThreadSummary,
   'providerId' | 'accountId' | 'model' | 'effort' | 'speed' | 'permissionMode' | 'sessionId'
-> & { sessionGeneration: number; selectionVersion: number; operation?: 'compact' | 'coordination' };
+> & {
+  sessionGeneration: number;
+  selectionVersion: number;
+  /**
+   * `background`: the agent resumed on its own after background work it
+   * started finished; the turn carries no prompt of the user's.
+   */
+  operation?: 'compact' | 'coordination' | 'delegation' | 'background';
+};
 
 export interface Turn {
   id: TurnId;
@@ -612,13 +669,9 @@ export type ToolDocument =
   /** `data` is base64 with no `data:` prefix. The core caps it before it is journalled. */
   | { kind: 'image'; mimeType: string; data: string; alt: string | null };
 
-/** The image formats every agent that takes images accepts. */
-export const IMAGE_MIME_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'] as const;
-export type ImageMimeType = (typeof IMAGE_MIME_TYPES)[number];
-/** The maximum decoded bytes per attachment, including non-image files. */
-export const ATTACHMENT_MAX_BYTES = 5 * 1024 * 1024;
-/** The maximum total number of attachments per turn. */
-export const ATTACHMENTS_PER_TURN = 8;
+export { IMAGE_MIME_TYPES, ATTACHMENT_MAX_BYTES, ATTACHMENTS_PER_TURN } from './attachment-limits.ts';
+import type { ImageMimeType } from './attachment-limits.ts';
+export type { ImageMimeType } from './attachment-limits.ts';
 
 /**
  * An image sent with a prompt. `data` is base64 with no `data:` prefix. The
@@ -644,8 +697,23 @@ export interface FileAttachment {
 
 export type Attachment = ImageAttachment | FileAttachment;
 
+/** A user-selected element. Page text is untrusted context, never instructions. */
+export interface PreviewReference {
+  id: string;
+  url: string;
+  selector: string;
+  shadowPath?: string[];
+  text: string;
+  bounds: { x: number; y: number; width: number; height: number };
+  surfaceId?: string;
+  /** UTF-16 offsets of the visible mention in the prompt/displayText. */
+  mention?: { start: number; end: number };
+}
+
+export { PREVIEW_REFERENCES_PER_TURN, previewReferencesError, previewPrompt } from './preview';
+
 export type MessagePart =
-  | { type: 'text'; text: string; displayText?: string; activity?: { kind: 'goal' | 'loop'; iteration: number } }
+  | { type: 'text'; text: string; displayText?: string; previewReferences?: PreviewReference[]; activity?: { kind: 'goal' | 'loop'; iteration: number } }
   /** An image the user sent with the prompt, journalled with the message. */
   | { type: 'image'; mimeType: ImageMimeType; data: string; alt: string | null }
   | { type: 'file'; mimeType: string; data: string; name: string | null }
@@ -662,6 +730,10 @@ export type MessagePart =
       status: ToolStatus;
       /** What the call produced or changed, under the input and the output. Absent on a journal row written before documents existed. */
       documents?: ToolDocument[];
+      /** Stamped by the core when the card first shows up, for every driver. Absent on older rows. */
+      startedAt?: Timestamp;
+      /** Stamped by the core when the status leaves `running`. */
+      finishedAt?: Timestamp | null;
     }
   | { type: 'permission'; requestId: RequestId; toolName: string; decision: 'allow' | 'deny' | null }
   /**
@@ -678,6 +750,8 @@ export type MessagePart =
       allowText: boolean;
       multiple: boolean;
       answer?: QuestionAnswer | null;
+      /** Asked without stopping: see `QuestionRequest.async`. */
+      async?: boolean;
     }
   /**
    * The agent compacted its context mid-turn: what it held before, what is
@@ -754,6 +828,11 @@ export interface Thread extends ThreadSummary {
    */
   commands: AgentCommand[];
   /**
+   * What the agent still runs in the background (`thread.background`). Kept in
+   * memory like `commands`; missing on older cores.
+   */
+  background?: BackgroundTask[];
+  /**
    * The oldest message `messages` carries, when the thread has older ones behind
    * it; null when this page is the whole thread. It is the cursor `messages.list`
    * takes as `before`.
@@ -807,7 +886,27 @@ export interface QuestionRequest {
   /** No options plus this true is a plain free-text prompt. */
   allowText: boolean;
   multiple: boolean;
+  /**
+   * The agent did not stop for it. The thread is not `waiting`, the card
+   * outlives its turn, and the answer reaches the agent as a steer when a turn
+   * is running or as the next prompt when none is.
+   */
+  async?: boolean;
   createdAt: Timestamp;
+}
+
+/**
+ * Work the agent left running beyond one tool call: a shell started in the
+ * background, a subagent, a monitor or a workflow. The list is the agent's
+ * own, whole, each time it changes, and lives as long as the agent process.
+ */
+export interface BackgroundTask {
+  id: string;
+  kind: 'shell' | 'agent' | 'monitor' | 'workflow' | 'other';
+  description: string;
+  /** The tool call that started it, when the agent says so. */
+  toolId: string | null;
+  startedAt: Timestamp;
 }
 
 // ---------------------------------------------------------------------------
@@ -855,6 +954,13 @@ export interface SchedulerState {
   queued: { turnId: TurnId; threadId: ThreadId; position: number; queuedAt: Timestamp }[];
 }
 
+/** Per-core consent. Installation identifiers never cross RPC. */
+export interface TelemetryState {
+  mode: 'off' | 'basic' | 'enhanced';
+  configured: boolean;
+  pendingDeletion: boolean;
+}
+
 export interface Settings {
   /** Exact browser origins allowed to connect alongside the shell and this core's own origin. */
   browserOrigins?: string[];
@@ -896,6 +1002,12 @@ export interface Settings {
    * flight. It needs no client connected, which is how a server stays current.
    */
   autoUpdateHarnesses: boolean;
+  /**
+   * Agents without asynchronous questions of their own are told about
+   * `boite ask` at the start of a session, so they can ask without stopping.
+   * Missing on older cores, which read as on.
+   */
+  asyncQuestions?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -930,6 +1042,7 @@ export const KEYBINDING_COMMANDS = [
   'theme-system',
   'archive',
   'import-session',
+  'terminal',
 ] as const;
 export type KeybindingCommand = (typeof KEYBINDING_COMMANDS)[number];
 
@@ -1306,6 +1419,8 @@ export interface AgentContact extends AgentAddress {
   mode: CoordinationMode;
 }
 export interface AgentLetter {
+  /** Authenticated source of delegation mail. Older coordination mail is agent-authored. */
+  origin?: 'user' | 'agent' | 'result';
   id: string;
   from: AgentContact;
   to: AgentAddress;
@@ -1329,8 +1444,104 @@ export interface CoordinationView {
   wakeLimit: number;
 }
 
+/** Owner-selected routes. Agents name a profile, never arbitrary credentials or permissions. */
+export interface DelegationProfile {
+  id: string;
+  name: string;
+  providerId: ProviderId;
+  accountId: AccountId;
+  model: string;
+  effort: string | null;
+}
+export interface DelegationConfig {
+  enabled: boolean;
+  paused: boolean;
+  maxAgents: number;
+  maxConcurrent: number;
+  /** Total child turns and automatic parent wake turns across this team's lifetime. */
+  maxTurns: number;
+  /** Deadline for child turns and automatic parent wakes, including time awaiting an answer. */
+  maxMinutes: number;
+  profiles: DelegationProfile[];
+}
+export const DEFAULT_DELEGATION_CONFIG: DelegationConfig = {
+  enabled: false, paused: false, maxAgents: 4, maxConcurrent: 2,
+  maxTurns: 12, maxMinutes: 30, profiles: [],
+};
+export interface DelegatedAgent {
+  thread: ThreadSummary;
+  profileId: string;
+  task: string;
+  lastTurn: Turn | null;
+  /** Bounded final answer, without tool payloads or a summarization model call. */
+  result: string | null;
+}
+export interface DelegationView {
+  rootThreadId: ThreadId;
+  config: DelegationConfig;
+  agents: DelegatedAgent[];
+  messages: AgentLetter[];
+  turnsUsed: number;
+  usage: Usage;
+}
+
+/** A brain lives on the core's machine. Detected plugins are not installed by Boite. */
+export interface BrainConfig {
+  path: string | null;
+  enabled: boolean;
+  /** Pull only. An interval of 0 disables periodic pulls. Defaults to off. */
+  autoPull?: { onStartup: boolean; intervalMinutes: number };
+  /** Link the root AGENTS.md into user-level harness profiles on this machine. */
+  globalInstructions?: boolean;
+}
+
+export interface BrainLink {
+  name: string;
+  path: string;
+  state: 'linked' | 'existing' | 'blocked';
+  error: string | null;
+}
+
+export interface BrainEntry {
+  kind: 'instructions' | 'skill' | 'plugin';
+  path: string;
+  name: string;
+  description: string;
+  error: string | null;
+}
+
+export interface BrainStatus {
+  config: BrainConfig;
+  entries: BrainEntry[];
+  problems: string[];
+  git: { branch: string | null; upstream: string | null; ahead: number; behind: number; dirty: boolean } | null;
+  lastSync: number | null;
+  links?: BrainLink[];
+}
+
+/**
+ * A shell the core runs in a pseudo-terminal. Its id names what it belongs to:
+ * `terminal:<threadId>` for a thread's, `login:<accountId>` for a sign-in.
+ */
+export interface TerminalState {
+  id: string;
+  /** Where the shell started. */
+  cwd: string;
+  /** What it printed lately, so a client that attaches late draws the same screen. */
+  output: string;
+}
+
 export interface RpcMethods extends AgentsRpcMethods {
   'core.shutdown': { params: Record<string, never>; result: { ok: true } };
+  'delegation.get': { params: { threadId: ThreadId }; result: DelegationView };
+  'delegation.configure': { params: { threadId: ThreadId; config: DelegationConfig }; result: DelegationView };
+  'delegation.spawn': { params: { threadId: ThreadId; profileId: string; task: string; title?: string; requestId: string }; result: DelegatedAgent };
+  'delegation.send': { params: { threadId: ThreadId; toThreadId: ThreadId; text: string; requestId: string }; result: AgentLetter };
+  'delegation.stop': { params: { threadId: ThreadId; agentId?: ThreadId }; result: { stopped: number } };
+  'brain.status': { params: Record<string, never>; result: BrainStatus };
+  'brain.configure': { params: BrainConfig; result: BrainStatus };
+  /** Fetch, fast-forward and push existing commits. Never stage, stash, reset or force. */
+  'brain.sync': { params: Record<string, never>; result: BrainStatus };
   'collaboration.get': { params: { threadId: ThreadId }; result: CoordinationView };
   'collaboration.configure': { params: { threadId: ThreadId; config: CoordinationConfig }; result: CoordinationView };
   'collaboration.directory': { params: { threadId: ThreadId }; result: { agents: AgentContact[]; unavailable: string[] } };
@@ -1404,6 +1615,8 @@ export interface RpcMethods extends AgentsRpcMethods {
    * and refuses by name otherwise.
    */
   'panel.open': { params: { threadId: ThreadId; surface: PanelSurface }; result: { shown: boolean } };
+  /** Explicitly publish a bounded file snapshot from this thread's working directory. */
+  'artifacts.publish': { params: { threadId: ThreadId; path: string }; result: Message };
   /** The agent's task list, whole, as the tasks surface shows it. */
   'threads.tasks.set': { params: { threadId: ThreadId; tasks: AgentTask[] }; result: ThreadActivity };
   'threads.tasks.get': { params: { threadId: ThreadId }; result: AgentTask[] };
@@ -1545,6 +1758,21 @@ export interface RpcMethods extends AgentsRpcMethods {
   'accounts.loginCancel': { params: { accountId: AccountId }; result: { ok: true } };
   /** One line into the running login's stdin, for a CLI that asks for a code. */
   'accounts.loginInput': { params: { accountId: AccountId; text: string }; result: { ok: true } };
+  /**
+   * Open a shell with this account's environment and type its login command
+   * into it, or attach to the one already open. Only for a login whose
+   * descriptor says `terminal`. The default account is allowed: the user drives
+   * the shell, as in their own terminal. Closing the terminal rechecks the account.
+   */
+  'accounts.loginTerminal': { params: { accountId: AccountId; cols: number; rows: number }; result: TerminalState };
+
+  /** Attach to the thread's shell, starting one in the thread's working directory when none runs. */
+  'terminals.open': { params: { threadId: ThreadId; cols: number; rows: number }; result: TerminalState };
+  /** Keystrokes, as the terminal emulator encodes them. */
+  'terminals.write': { params: { id: string; data: string }; result: { ok: true } };
+  'terminals.resize': { params: { id: string; cols: number; rows: number }; result: { ok: true } };
+  /** Kill the shell and its tree. `terminal.exited` follows. */
+  'terminals.close': { params: { id: string }; result: { ok: true } };
 
   'threads.list': { params: { projectId?: ProjectId; includeArchived?: boolean }; result: ThreadSummary[] };
   /** Read the working branch's PR using the execution machine's GitHub CLI. */
@@ -1628,7 +1856,7 @@ export interface RpcMethods extends AgentsRpcMethods {
   'threads.unsubscribe': { params: { threadId: ThreadId }; result: { ok: true } };
 
   /** `attachments` are journalled with the prompt. Files become host paths; images use native provider payloads. */
-  'turns.start': { params: { threadId: ThreadId; prompt: string; attachments?: Attachment[]; expectedSelectionVersion?: number; clientRequestId?: string }; result: Turn };
+  'turns.start': { params: { threadId: ThreadId; prompt: string; attachments?: Attachment[]; previewReferences?: PreviewReference[]; expectedSelectionVersion?: number; clientRequestId?: string }; result: Turn };
   'turns.stop': { params: { threadId: ThreadId }; result: { stopped: boolean } };
 
   /**
@@ -1657,6 +1885,16 @@ export interface RpcMethods extends AgentsRpcMethods {
     params: { threadId: ThreadId; questionId: RequestId; optionIds: string[]; text?: string };
     result: { ok: true };
   };
+  /**
+   * An asynchronous question from the agent of a thread (`boite ask`): the card
+   * is drawn in the running turn, the agent keeps working, and the answer
+   * reaches it later as a steer or as the next prompt. `options` are labels;
+   * none makes a free-text question.
+   */
+  'questions.ask': {
+    params: { threadId: ThreadId; text: string; options?: string[]; multiple?: boolean };
+    result: { questionId: RequestId };
+  };
 
   'trace.get': { params: { threadId: ThreadId; limit?: number }; result: ProcessRecord[] };
   'resources.list': { params: Record<string, never>; result: ThreadResources[] };
@@ -1674,6 +1912,10 @@ export interface RpcMethods extends AgentsRpcMethods {
    */
   'usage.history': { params: { edges: Timestamp[] }; result: UsageHistory };
 
+  'telemetry.state': { params: Record<string, never>; result: TelemetryState };
+  'telemetry.configure': { params: { mode: TelemetryState['mode'] }; result: TelemetryState };
+  'telemetry.export': { params: Record<string, never>; result: Record<string, unknown> };
+  'telemetry.retryForget': { params: Record<string, never>; result: TelemetryState };
   'settings.get': { params: Record<string, never>; result: Settings };
   'settings.set': { params: Partial<Settings>; result: Settings };
   /** The keybindings file as last read: the path, the entries it names, and what it got wrong. */
@@ -1710,6 +1952,7 @@ export type RpcParams<M extends RpcMethodName> = RpcMethods[M]['params'];
 export type RpcResult<M extends RpcMethodName> = RpcMethods[M]['result'];
 
 export interface RpcEvents extends AgentsRpcEvents {
+  'delegation.changed': { threadId: ThreadId };
   'collaboration.changed': { threadId: ThreadId };
   'thread.activity': { threadId: ThreadId; activity: ThreadActivity };
   /** Subscribed threads only: the agent asked for something in the panel. */
@@ -1729,6 +1972,8 @@ export interface RpcEvents extends AgentsRpcEvents {
   'thread.removed': { threadId: ThreadId };
   /** The agent's `/name` commands, whole, each time the list it reports changes. */
   'thread.commands': { threadId: ThreadId; commands: AgentCommand[] };
+  /** What the agent still runs in the background, whole, each time it changes. */
+  'thread.background': { threadId: ThreadId; tasks: BackgroundTask[] };
 
   'turn.started': Turn;
   'turn.finished': Turn;
@@ -1810,6 +2055,10 @@ export interface RpcEvents extends AgentsRpcEvents {
     exitCode: number | null;
   };
   'core.log': { level: 'info' | 'warn' | 'error'; message: string; at: Timestamp };
+  /** What a shell printed, as it printed it. */
+  'terminal.output': { id: string; data: string };
+  /** The shell ended: typed `exit`, closed, or killed with its thread. */
+  'terminal.exited': { id: string; exitCode: number | null };
 }
 
 export type RpcEventName = keyof RpcEvents;

@@ -55,6 +55,12 @@ describe('echo driver', () => {
     expect(thread.messages).toHaveLength(2);
     expect(thread.messages[0]?.role).toBe('user');
     expect(thread.messages[1]?.parts).toEqual([{ type: 'text', text: prompt }]);
+
+    // The lifetime the driver named, stamped by the core and kept in the journal.
+    await waitFor(() => harness.core.journal.getThread(threadId)?.promptCache != null);
+    const cache = harness.core.journal.getThread(threadId)?.promptCache;
+    expect(cache).toMatchObject({ ttlSeconds: 300, source: 'documented', readTokens: 0, model: thread.model, accountId: thread.accountId });
+    expect(cache?.at).toBeGreaterThanOrEqual(done.finishedAt ?? 0);
   });
 
   test('a think directive streams a thinking part in two deltas before the text', async () => {

@@ -7,6 +7,7 @@
 
 import type { KeybindingCommand } from '@boite/contracts';
 import { experimentOn } from './experiments.svelte';
+import { openTour } from './onboarding.svelte';
 import type { PaletteItem } from './palette';
 import { strings } from './strings';
 import type { Store } from './store.svelte';
@@ -24,7 +25,8 @@ const OWNER_COMMANDS = new Set<string>([
   'files',
   'tasks',
   'providers',
-  'pair'
+  'pair',
+  'terminal'
 ]);
 
 /** True while this row is a command the agent reported, not one of Boite's. */
@@ -68,6 +70,7 @@ export function appCommands(store: Store, inShell: boolean): PaletteItem[] {
       items.push(row('files', strings.palette.files, 'tree directory explorer'));
       items.push(row('tasks', strings.palette.tasks, 'todo goal loop'));
       items.push(row('trace', strings.palette.trace, 'processes load'));
+      items.push(row('terminal', strings.palette.terminal, 'shell console powershell cmd bash'));
     }
   }
   items.push(row('sidebar', strings.palette.sidebar));
@@ -77,6 +80,9 @@ export function appCommands(store: Store, inShell: boolean): PaletteItem[] {
     items.push(row('providers', strings.palette.providers, 'accounts login install'));
     items.push(row('pair', strings.palette.pair, 'phone link devices'));
   }
+  // The tour again. It is no chord's command, so it is written here rather
+  // than through `row`, which reads the keyboard table.
+  items.push({ id: 'tour', kind: 'command', label: strings.onboarding.replay, keywords: 'onboarding guide tour intro' });
   items.push(row('theme-dark', strings.palette.themeDark));
   items.push(row('theme-light', strings.palette.themeLight));
   items.push(row('theme-system', strings.palette.themeSystem));
@@ -112,6 +118,7 @@ export function commandLabel(id: KeybindingCommand): string {
     case 'theme-system': return strings.palette.themeSystem;
     case 'archive': return strings.palette.archive;
     case 'import-session': return strings.palette.importSession;
+    case 'terminal': return strings.palette.terminal;
   }
 }
 
@@ -138,11 +145,13 @@ export function runCommand(store: Store, id: string, inShell: boolean): void {
     case 'changes': store.showChat(); store.panel.toggleKind('changes'); break;
     case 'files': store.showChat(); store.panel.toggleKind('files'); break;
     case 'tasks': store.showChat(); store.panel.toggleKind('tasks'); break;
+    case 'terminal': if (open) { store.showChat(); store.toggleTerminal(); } break;
     case 'sidebar': store.toggleSidebar(); break;
     case 'settings': store.showSettings(); break;
     case 'appearance': store.showSettings('appearance'); break;
     case 'providers': store.showSettings('accounts'); break;
     case 'pair': store.showSettings('general'); break;
+    case 'tour': store.showChat(); openTour(); break;
     case 'theme-dark': setTheme('dark'); break;
     case 'theme-light': setTheme('light'); break;
     case 'theme-system': setTheme('system'); break;

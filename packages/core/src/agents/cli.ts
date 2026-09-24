@@ -20,6 +20,11 @@ export async function agentCommand(client: CoreClient, threadId: string, args: s
     case 'context': return snapshot;
     case 'inbox': return { messages: snapshot.messages, deliveries: snapshot.deliveries };
     case 'missions': return { missions: snapshot.missions, tasks: snapshot.tasks };
+    case 'routines': return snapshot.routines;
+    case 'schedule': {
+      const value = json<{ name: string; prompt: string; schedule: RpcParams<'agents.routine.save'>['value']['schedule']; id?: string; expectedRevision?: number; enabled?: boolean }>();
+      return client.call('agents.routine.save', { threadId, ...(value.id ? { id: value.id, expectedRevision: value.expectedRevision } : {}), value: { agentId: session.agentId, name: value.name, prompt: value.prompt, schedule: value.schedule, enabled: value.enabled ?? true, nextAt: null, lastWorkId: null, lastScheduledAt: null } });
+    }
     case 'send': return client.call('agents.message.send', { threadId, scope: session.scope, recipientIds: need(0, 'recipient ids separated by commas, or -') === '-' ? [] : rest[0]!.split(','), text: rest.slice(1).join(' '), requestId });
     case 'reply': {
       const parent = snapshot.messages.find(m => m.id === need(0, 'an incoming message id'));
@@ -42,6 +47,6 @@ export async function agentCommand(client: CoreClient, threadId: string, args: s
       const value = json<{ title: string; text: string; id?: string; expectedRevision?: number }>();
       return client.call('agents.memory.save', { threadId, ...(value.id ? { id: value.id, expectedRevision: value.expectedRevision } : {}), value: { scope: session.scope, title: value.title, text: value.text, sourceScopes: [session.scope], sourceRunId: null, expiresAt: null } });
     }
-    default: throw new Error('agent expects context, inbox, send, reply, missions, acquire, submit, artifact, decide, memory or remember');
+    default: throw new Error('agent expects context, inbox, send, reply, missions, acquire, submit, artifact, decide, memory, remember, routines or schedule');
   }
 }

@@ -16,11 +16,22 @@ import { registerTraceMethods } from './trace.ts';
 import { registerUsageMethods } from './usage.ts';
 import { registerPushMethods } from './push.ts';
 import { registerSpeechMethods } from './speech.ts';
+import { registerTelemetry } from './telemetry.ts';
 import { registerCoordination } from './coordination.ts';
+import { registerTerminalMethods } from './terminals.ts';
 
 /** Adding a module is one file plus one line here. `hello` is the server's own. */
 export function registerModules(core: Core): void {
   registerPersistentAgents(core);
+  core.router.register('delegation.get', params => core.delegation.get(params.threadId));
+  core.router.register('delegation.configure', params => core.delegation.configure(params.threadId, params.config));
+  core.router.register('delegation.spawn', params => core.delegation.spawn(params));
+  core.router.register('delegation.send', (params, ctx) => core.delegation.send(params, ctx.connection.identity.principal === 'agent' ? 'agent' : 'user'));
+  core.router.register('delegation.stop', params => ({ stopped: core.delegation.stop(params.threadId, params.agentId) }));
+  core.router.register('brain.status', () => core.brain.status());
+  core.router.register('brain.configure', params => core.brain.configure(params));
+  core.router.register('brain.sync', () => core.brain.sync());
+  registerTelemetry(core);
   registerCoordination(core);
   registerSpeechMethods(core);
   registerPushMethods(core);
@@ -49,6 +60,7 @@ export function registerModules(core: Core): void {
   registerKeybindingMethods(core);
   registerSessionMethods(core);
   registerImportMethods(core);
+  registerTerminalMethods(core);
   // The agent's own door, and the thread surfaces a client shares with it.
   registerAgentMethods(core);
 }

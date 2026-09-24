@@ -11,14 +11,18 @@ import { newId } from '../ids.ts';
 import { existingInside } from '../workdir.ts';
 import { checkModel, checkEffort } from '../threads.ts';
 import { AgentsRepository } from './repository.ts';
+import { ResidentAgents } from './resident.ts';
+import { AgentRoutines } from './routines.ts';
 import { boolean, ids, integer, object, oneOf, sameScope, scope, text } from './validation.ts';
 
 const DEFAULT_LIMITS: AgentsSnapshot['limits'] = { backgroundConcurrency: 2, paused: false, kebaccExperiment: false };
-const TOOLS = ['messages', 'missions', 'memory', 'artifacts', 'decisions'] as const;
+const TOOLS = ['messages', 'missions', 'memory', 'artifacts', 'decisions', 'routines'] as const;
 
 export class AgentStore {
+  readonly resident: ResidentAgents;
+  readonly routines: AgentRoutines;
   readonly records: AgentsRepository;
-  constructor(readonly core: Core) { this.records = new AgentsRepository(core.journal); }
+  constructor(readonly core: Core) { this.records = new AgentsRepository(core.journal); this.resident = new ResidentAgents(core); this.routines = new AgentRoutines(core); }
 
   changed(): void { this.core.bus.emit('agents.changed', { revision: this.records.revision() }); }
   limits(): AgentsSnapshot['limits'] { return (this.core.journal.getSetting('agents:limits') as AgentsSnapshot['limits'] | undefined) ?? { ...DEFAULT_LIMITS }; }
@@ -42,17 +46,22 @@ export class AgentStore {
     const provider = this.core.providers.require(text(v.selection.providerId, 'selection.providerId', 100));
     const account = this.core.accounts.require(text(v.selection.accountId, 'selection.accountId', 160));
     if (account.providerId !== provider.id) throw refused('selection.accountId: account belongs to another provider');
-    const model = checkModel(provider, account.id, v.selection.model);
+    const model = checkModel(provider, account.id, v.selection.model ?? provider.models.find(m => m.default)?.id ?? provider.models[0]?.id ?? null);
+    if (!model) throw refused('selection.model: choose a default model');
+    const previous = params.id ? this.records.get('profile', params.id) : null;
+    if (previous && this.core.journal.getSetting(`agents:runtime:${previous.id}`) && JSON.stringify(previous.selection) !== JSON.stringify({ ...v.selection, model }) && !this.resident.allowed(previous.id, { ...v.selection, model })) throw refused('selection.model: default model must be allowed by this agent policy');
     const effort = checkEffort(provider, account.id, model, v.selection.effort);
     const accountIntegration = oneOf(v.accountIntegration, 'accountIntegration', ['provider', 'kebacc-experiment']);
     if (accountIntegration === 'kebacc-experiment' && (provider.protocol !== 'agy' || !this.limits().kebaccExperiment)) throw refused('accountIntegration: enable the kebacc experiment for an Antigravity CLI agent first');
     const tools = ids(v.tools, 'tools', TOOLS.length);
     for (const tool of tools) oneOf(tool, 'tools', TOOLS);
-    return this.save('profile', params, {
+    const saved = this.save('profile', params, {
       name: text(v.name, 'name', 100), domain: text(v.domain, 'domain', 500, true), instructions: text(v.instructions, 'instructions', 32000, true),
       avatar: text(v.avatar, 'avatar', 40, true), status: oneOf(v.status, 'status', ['active', 'paused', 'archived']), tools, accountIntegration,
       selection: { providerId: provider.id, accountId: account.id, model, effort, permissionMode: oneOf(v.selection.permissionMode, 'permissionMode', ['default', 'acceptEdits', 'plan', 'bypassPermissions', 'dontAsk']) },
     });
+    if (previous && saved.status !== 'active') this.resident.enforce();
+    return saved;
   }
 
   private members(value: unknown, field = 'memberIds'): string[] {
@@ -153,6 +162,7 @@ export class AgentStore {
     return target;
   }
   assertScope(session: AgentSession, target: AgentScope, tool: typeof TOOLS[number]): void {
+    if (this.resident.isCompacting(session.threadId)) throw refused('compaction only produces a continuation note; collaboration writes are disabled');
     const agent = this.records.get('profile', session.agentId);
     if (agent.status !== 'active' || !agent.tools.includes(tool)) throw refused(`agent ${agent.id}: ${tool} is not enabled`);
     if (!sameScope(session.scope, target) || !this.canRead(agent.id, target)) throw refused('scope: this execution cannot access another conversation or mission');
@@ -376,6 +386,8 @@ export class AgentStore {
     const missions = r.list('mission').filter(m => allowed({ kind: 'mission', id: m.id }));
     const work = r.list('work').filter(w => !session || w.agentId === session.agentId && sameScope(w.scope, session.scope));
     return {
+      routines: r.list('routine').filter(v => !session || v.agentId === session.agentId),
+      accountGrants: session ? [] : this.resident.grants(),
       revision: r.revision(), limits: this.limits(),
       profiles: r.list('profile').filter(p => !session || p.id === session.agentId || (session.scope.kind === 'group' && this.records.get('group', session.scope.id).memberIds.includes(p.id))).map(p => session && p.id !== session.agentId ? { ...p, instructions: '', selection: { ...p.selection, accountId: '', model: null, effort: null }, tools: [] } : p),
       groups: r.list('group').filter(g => allowed({ kind: 'group', id: g.id })), teams: r.list('team').filter(t => allowed({ kind: 'team', id: t.id })), missions,
@@ -394,6 +406,14 @@ export class AgentStore {
 
 export function registerPersistentAgents(core: Core): void {
   const store = core.workforce;
+  core.router.register('agents.runtime.get', p => store.resident.config(p.agentId));
+  core.router.register('agents.runtime.configure', p => store.resident.configure(p));
+  core.router.register('agents.accounts.set', p => store.resident.setGrants(p.grants));
+  core.router.register('agents.brain.get', p => store.resident.brain(p.agentId));
+  core.router.register('agents.brain.save', p => store.resident.saveBrain(p));
+  core.router.register('agents.routine.save', p => store.routines.save(p));
+  core.router.register('agents.routine.run', p => store.routines.run(p));
+  core.router.register('agents.context.compact', p => store.resident.compact(p.sessionId, p.requestId));
   core.router.register('agents.snapshot', p => store.snapshot(p.threadId));
   core.router.register('agents.profile.save', p => store.saveProfile(p));
   core.router.register('agents.group.save', p => store.saveGroup(p));

@@ -1,19 +1,16 @@
 import { afterAll, beforeAll, expect, test } from 'bun:test';
-import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { BrowserPage, freePort } from './lib/cdp';
-const req = createRequire(join(import.meta.dir, '../../packages/ui/package.json'));
-const { createServer } = await import(req.resolve('vite'));
+import { startDevUi } from './lib/ui.ts';
 let server: { close(): Promise<void> };
 let page: BrowserPage;
 beforeAll(async () => {
   const port = await freePort();
-  const vite = await createServer({root:join(import.meta.dir,'../../packages/ui'),server:{host:'127.0.0.1',port,strictPort:true}});
-  server = vite; await vite.listen();
+  server = await startDevUi(port);
   page = await BrowserPage.launch({url:`http://127.0.0.1:${port}/?fake=1&open=recent`,windowSize:{width:1300,height:850}});
   await page.waitFor(`document.querySelector('[data-thread-id]')`);
 }, 90000);
-afterAll(async () => { await page?.close(); await server?.close(); });
+afterAll(async () => { await page?.close(); await server?.close(); }, 15_000);
 
 async function update(code: string) {
   await page.evaluate(`(async () => { const {workspace} = await import('/src/lib/workspace.svelte.ts'); const store = workspace.active; const thread = store.openThread; ${code} })()`);
@@ -22,13 +19,14 @@ async function capture(name: string) {
   await page.evaluate(`Promise.all(document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {})))`);
   await page.screenshot(join(import.meta.dir,'.artifacts',name + '.png'));
 }
-test('receipts follow actual activity, response indicator stays left and completion contains only duration', async () => {
+test('receipts follow actual activity, response indicator stays left and the summary reads time, finish and tokens', async () => {
   await update(`window.__answer = JSON.parse(JSON.stringify(thread.messages.at(-1)));`);
   await update(`thread.messages = thread.messages.filter(m => m.role === 'user'); const turn = thread.turns[0]; turn.status = 'running'; turn.startedAt = Date.now(); turn.finishedAt = null; thread.status = 'running';`);
   await page.waitFor(`document.querySelector('[data-testid="turn-summary"][data-status="running"]')`);
   expect(await page.evaluate(`document.querySelector('.author') === null`)).toBe(true);
   expect(await page.evaluate(`document.querySelectorAll('.receipts .received').length`)).toBe(1);
-  expect(await page.evaluate(`document.querySelector('[data-testid="turn-summary"]').textContent.trim()`)).toBe('');
+  expect(await page.evaluate(`document.querySelector('[data-testid="turn-elapsed"]').textContent`)).toMatch(/^Working for \d+s$/);
+  expect(await page.evaluate(`document.querySelector('[data-testid="turn-finished-at"]') === null`)).toBe(true);
   expect(await page.evaluate(`document.querySelector('[data-testid="turn-summary"]').getBoundingClientRect().left < document.querySelector('.bubble').getBoundingClientRect().left`)).toBe(true);
   await page.send('Emulation.setEmulatedMedia', {features:[{name:'prefers-reduced-motion',value:'reduce'}]});
   expect(await page.evaluate(`getComputedStyle(document.querySelector('[data-testid="turn-summary"] svg')).animationName`)).toBe('none');
@@ -40,8 +38,10 @@ test('receipts follow actual activity, response indicator stays left and complet
   await update(`const answer = window.__answer; answer.parts = [{type:'text',text:'A complete answer.'}]; answer.state = 'streaming'; thread.messages.push(answer);`);
   await page.waitFor(`document.querySelectorAll('.receipts .received').length === 2`);
   await update(`const turn = thread.turns[0]; turn.status = 'done'; turn.finishedAt = turn.startedAt + 3800; thread.status = 'idle'; thread.messages.at(-1).state = 'complete';`);
-  await page.waitFor(`document.querySelector('[data-testid="turn-summary"]').textContent.includes('3.8')`);
-  expect(await page.evaluate(`document.querySelector('[data-testid="turn-summary"]').textContent.trim()`)).toBe('3.8 s');
+  await page.waitFor(`document.querySelector('[data-testid="turn-summary"]').dataset.status === 'done'`);
+  expect(await page.evaluate(`document.querySelector('[data-testid="turn-elapsed"]').textContent`)).toBe('Worked for 3s');
+  expect(await page.evaluate(`document.querySelector('[data-testid="turn-finished-at"]').textContent`)).toMatch(/^done \d{1,2}:\d{2}/);
+  expect(await page.evaluate(`document.querySelector('[data-testid="turn-tokens"]').textContent`)).toContain('tokens');
   await capture('quiet-chat-done');
 }, 30000);
 test('context opens on hover, shows exact segments, and compaction needs its own click', async () => {

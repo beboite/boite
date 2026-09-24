@@ -43,7 +43,10 @@ that sidecar beside a newly built shell for end-to-end tests.
 - The shell owns windows, the tray, native dialogs and core startup. Execution
   and application logic belong in the core.
 - UI colors, radii and durations come from `app.css`, strings from
-  `lib/strings.ts`. No native `<select>`, `window.confirm` or hard-coded hex.
+  `lib/strings.ts`, which serves them in the language the app speaks. Write
+  English in `lib/strings.en.ts` and mirror it in every translation
+  ([docs/language.md](docs/language.md)). No native `<select>`,
+  `window.confirm` or hard-coded hex.
 - Each connected machine owns its client and Store. Route actions through the
   owning Store; project and thread IDs can collide between machines.
 
@@ -77,6 +80,7 @@ failing checks; report any blocker that needs the user's decision.
   executable detection, isolation and login.
 - [Agent updates](docs/agent-updates.md): version checks, the agent's own
   updater and what a remote machine does by itself.
+- [Desktop updates](docs/updates.md): signed app updates and switching nightly channels.
 - [Model switching](docs/model-switching.md) and [context](docs/context.md):
   session reuse, queued turns and compaction.
 - [Phone](docs/phone.md) and [server](docs/server.md): pairing and deployment.

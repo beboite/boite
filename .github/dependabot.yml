@@ -1,12 +1,27 @@
 version: 2
+# The workflow actions, the agent CLIs and the shell's Cargo dependencies share
+# one weekly pull request, majors included as before, so a week of their updates
+# costs one CI run instead of three.
+multi-ecosystem-groups:
+  weekly:
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: chore
+      include: scope
 updates:
   - package-ecosystem: github-actions
     directory: /
-    schedule:
-      interval: weekly
-    groups:
-      actions:
-        patterns: ['*']
+    multi-ecosystem-group: weekly
+    patterns: ['*']
+  - package-ecosystem: npm
+    directory: /docker/agents
+    multi-ecosystem-group: weekly
+    patterns: ['*']
+  - package-ecosystem: cargo
+    directory: /apps/shell/src-tauri
+    multi-ecosystem-group: weekly
+    patterns: ['*']
   - package-ecosystem: bun
     directory: /
     schedule:
@@ -22,20 +37,6 @@ updates:
       workspace:
         patterns: ['*']
         update-types: [minor, patch]
-  - package-ecosystem: npm
-    directory: /docker/agents
-    schedule:
-      interval: weekly
-    groups:
-      agent-clis:
-        patterns: ['*']
-  - package-ecosystem: cargo
-    directory: /apps/shell/src-tauri
-    schedule:
-      interval: weekly
-    groups:
-      rust:
-        patterns: ['*']
   - package-ecosystem: docker
     directory: /
     schedule:

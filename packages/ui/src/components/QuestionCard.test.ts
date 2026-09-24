@@ -174,3 +174,15 @@ test('a question whose turn ended says so instead of offering a button', () => {
   expect(query('[data-testid=question-cancelled]').textContent).toContain('turn ended');
   expect(options()[0]?.disabled).toBe(true);
 });
+
+test('a card asked without waiting says so until it is answered', () => {
+  running = mount(QuestionCard, {
+    target: document.body,
+    props: { text: 'Which port?', options: OPTIONS, allowText: true, multiple: false, async: true, answer: null, pending: true, submit: () => {} }
+  });
+  flushSync();
+  const card = query('[data-testid=question-card]');
+  expect(card.getAttribute('data-async')).toBe('true');
+  expect(card.textContent).toContain('Asks you, without waiting');
+  expect(document.querySelector('[data-testid=question-async-hint]')).not.toBeNull();
+});

@@ -29,14 +29,25 @@ current level centred above the track. The track reaches the thumb and becomes
 more saturated at higher levels. Ultrathink belongs only to Claude and is offered
 when its SDK reports adaptive thinking.
 
+Claude Code also acts on two words typed anywhere in a prompt: `ultrathink`
+asks for the deepest thinking on that turn, and `ultracode` opts the turn into
+the Workflow tool when the account has workflows. When Claude Code runs a Claude
+model, the composer and the sent message draw them apart, `ultrathink` in the
+spectrum and `ultracode` in the accent. Another harness, or Claude Code routed
+to another model, reads them as plain words, and they stay plain there. `ultraplan` and `ultrareview` run on claude.ai and are not
+available through the SDK.
+
 Model catalogs persist in client storage, scoped to the core endpoint and data
 directory and checked against the current provider/account records. Opening an
 agent shows the cached list immediately while discovery runs in the background.
-The top-right refresh button forces a new probe; concurrent requests share one
+The refresh button forces a new probe; concurrent requests share one
 operation. A failed refresh keeps the visible list and waits for a manual retry.
 The menu floats without changing the page layout. It prefers the space below the
-composer and flips above when needed. Provider tabs sit above the models; the
-menu fits its content up to a scrollable height limit. Legacy models open in a
+composer and flips above when needed. On desktop, provider logos sit in a
+narrow left column, with names in tooltips. On phones, they form a horizontal
+strip above them. The frame keeps the same size when switching providers or
+favorites, limited by the available viewport space. Models scroll independently
+below the provider name and account chips. Legacy models open in a
 side submenu, with a left-side or in-viewport fallback on narrow screens.
 Both menus use the browser's top layer so the composer's glass or Grain blur
 cannot offset or clip them. Pointer-click checks cover both materials.
@@ -80,7 +91,19 @@ journal remains unchanged.
 A thread whose last context reading is over 200,000 tokens asks before it moves
 to another account: the receiving agent gets these excerpts, not what the old
 session held, and a compaction summary is not part of them. A model change
-inside one account keeps its session and asks nothing.
+inside one account keeps its session.
+
+Keeping the session does not keep the provider's prompt cache. Measured on
+2026-09-22 with a four-turn probe per provider: a model change on Claude sent
+the conversation again uncached; on Codex every effort change missed (`high`,
+`low`, `low`, `medium`, `high` cached 9k, 13k, 39k, 8k and 31k of 31k to
+47k input tokens); on Claude Sonnet 5 an effort change kept the system prompt
+and tools but rewrote every message, while Claude Opus 5.5 kept its cache. Fast
+mode was not measured. So a change of model, effort or speed inside one account
+asks first when the last context reading is over 100,000 tokens and less than
+an hour old, the longest a provider keeps a cache. An older reading asks
+nothing: that cache is already gone. A change of account is the case above and
+asks only that question.
 
 Historical images use remaining slots within the eight-image turn limit. The
 current prompt's attachments take priority, then the most recent historical

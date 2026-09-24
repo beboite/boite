@@ -57,6 +57,17 @@ async function echoAccount(): Promise<string> {
 }
 
 describe('a thread in its own worktree', () => {
+  test('workspace recovery reattaches a surviving branch after its directory was removed', async () => {
+    const project = await repoProject();
+    const row = harness.core.projects.require(project.id);
+    const branch = 'boite/recovered-directory';
+    const original = await harness.core.worktrees.ensure('thr_recover', row, branch);
+    git(original.path, 'commit', '-q', '--allow-empty', '-m', 'work to preserve');
+    const head = git(original.path, 'rev-parse', 'HEAD');
+    git(project.path, 'worktree', 'remove', original.path);
+    const recovered = await harness.core.worktrees.ensure('thr_recover', row, branch);
+    expect(git(recovered.path, 'rev-parse', 'HEAD')).toBe(head);
+  });
   test('workspace recovery adopts the registered directory through a parent alias', async () => {
     const root = join(harness.dataDir, 'real');
     mkdirSync(root);

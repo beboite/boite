@@ -7,6 +7,7 @@
 
 <p align="center">
   <a href="docs/server.md">Headless server</a> ·
+  <a href="docs/updates.md">Updates and nightly</a> ·
   <a href="docs/development.md">Build from source</a> ·
   <a href="docs/README.md">Documentation</a> ·
   <a href="LICENSE">MIT license</a>
@@ -28,13 +29,29 @@ The agents run on the computer that holds your project.
 - Read streaming answers, tool calls, reasoning and permission requests together.
 - Queue tasks with global and per-account concurrency limits.
 - Pair a phone with the web app, or connect the desktop to a headless server.
+- Download desktop updates in the background, read their release notes and
+  restart when ready. Switch between Boite and Boite Nightly in General settings.
+- Dictate prompts, attach files, browse project changes and manage tasks beside
+  the conversation.
 - On Windows, trace agent processes and their resource use, mute their audio and
   stop their windows from taking focus.
 
 ## Get started
 
-boite is in beta. The desktop build currently targets Windows x64. The headless
-core runs on Linux; its process tracking is more limited than on Windows.
+boite is in beta. Download the Windows x64 installer from
+[GitHub Releases](https://github.com/beboite/boite/releases). Choose a regular
+release for Boite or a `nightly` prerelease for boite (de nuit). The nightly workflow
+publishes changed commits daily at 03:23 UTC after its checks pass.
+
+Both update channels keep the same projects, accounts and conversations. General
+settings lets you switch channels and shows download progress, release notes and
+the installed version. Updates are signed and download automatically; installing
+one asks before restarting. [Desktop updates](docs/updates.md) covers the details.
+
+Linux and macOS desktop packages are built and smoke-tested in CI on x64 and
+ARM64; their public installers and automatic updates are not published yet.
+The headless core runs on Linux and macOS too, with more limited process tracking
+than on Windows.
 
 For a local build, install the Bun version named in `package.json`, then:
 
@@ -54,7 +71,7 @@ Install and authenticate the agents you want to use on that computer. Configure
 them in Settings, Providers. See [accounts](docs/accounts.md) and
 [provider support](docs/providers.md).
 
-For the Windows installer, see [building and releasing](docs/releasing.md).
+For building an installer, see [building and releasing](docs/releasing.md).
 For Docker, persistent storage and image updates, see the
 [boite-server guide](docs/server.md).
 

@@ -15,6 +15,21 @@ Everything below runs from the repository root, on a `bun install` that has
 already happened. The rules these commands are meant to prove are in
 [../AGENTS.md](../AGENTS.md).
 
+## Desktop updater tests
+
+Desktop updater checks use a local HTTP fixture and a signed inert payload in
+`cargo test --lib`. The fixture never launches an installer. Its Windows test
+executable links the shell's Common Controls v6 manifest too; without that
+resource, loading the native dialog dependency fails before tests start.
+
+`bun test tests/e2e/app-updates.test.ts` checks the update card, channel choice,
+restart confirmation, progress, errors and absence of installer controls on a
+phone. Development-only `?fake=1&appUpdate=ready` and the `downloading` and
+`error` variants support captures without network updates. Set
+`appUpdateChannel=nightly` to preview a nightly target and
+`appUpdateCurrentChannel=nightly` for an installed nightly. These fixtures are
+removed from production builds.
+
 ## The core
 
 ```bash
@@ -193,7 +208,7 @@ BOITE_ECHO=1 bun run dev:core
 ## Checks and tests
 
 ```bash
-bun run check    # tsc on contracts and core, svelte-check --tsgo on the UI
+bun run check    # contracts, core, UI and end-to-end test types
 bun run test     # bun test in packages/core, vitest in packages/ui
 bun run build:ui # required by the core-backed browser tests on a fresh checkout
 bun run e2e      # tests/e2e
@@ -292,12 +307,14 @@ through ANGLE, muted, in a throwaway profile, and drives it over CDP.
 visual: a diff, a passing test and a green build all say nothing about what a
 screen looks like.
 
-The plugin-page fixture uses `tests/e2e/lib/ui.ts`. With
-`BOITE_E2E_PREBUILT_UI=1`, it builds a separate fake-client UI under
-`.artifacts/fake-ui` before browser interactions, so loading Settings does not
-wait for cold development transforms. The installer still uses the production
-build, which does not enable the fake client. Without the flag, the fixture uses Vite's
-development server.
+An end-to-end file serves the UI through `tests/e2e/lib/ui.ts`. `startUi` uses
+the fake-client bundle in `BOITE_E2E_FAKE_UI` when set. With
+`BOITE_E2E_PREBUILT_UI=1`, it builds one under `.artifacts/fake-ui-<pid>`, one per
+test process, before browser interactions. The installer still uses the
+production build, which does not enable the fake client. Without either, it
+falls back to `startDevUi`. A file whose page imports `/src/...` calls
+`startDevUi` directly. It transforms every module the page can load before
+returning, so the first page load finds warm transforms.
 
 `BOITE_E2E_BROWSER` overrides the browser lookup when the candidates in that file
 find nothing. Helium is the last of them: on a fresh profile it reloads the tab
@@ -362,6 +379,24 @@ bun run bench/idle-rss.ts   # the core's idle working set against bare bun
 Both set their own fresh data directory. Quote a figure with the date of the run
 it came from, and rerun before quoting an old one.
 
+## Architecture checks
+
+Core tests default to 15 seconds per case because scripted driver tests start
+several traced child processes. Their explicit protocol and shutdown deadlines
+still apply. Override the default with `bun run --cwd packages/core test --timeout 5000`
+when reproducing a timing failure. A slow assertion still fails; this timeout
+does not retry or skip tests.
+
+`bun run check` includes `bun run check:architecture`. The architecture check
+uses Bun's parser and needs no installed workspace dependencies. CI runs it in
+the changes job on every pull request. `bun test scripts/architecture` verifies
+cycle detection, import resolution and the package boundaries.
+
+`bun run audit:complexity` ranks production functions by cyclomatic complexity.
+Use `bun run audit:complexity --json` to save a comparison. It is advisory;
+the [architecture guide](architecture.md#module-boundaries-and-complexity)
+describes its scope and the module boundaries behind the checks.
+
 ## The worktree trap
 
 An agent usually works in a detached git worktree of this repository, and the
@@ -372,6 +407,19 @@ and invisible to the review that follows. The tracked docs, this page included,
 are the ones a worktree can actually change. Check where a file you are about to
 edit really lives before editing it.
 
+
+## UI spacing and motion
+
+Settings pages share their width and card padding through `--settings-width`
+and `--settings-padding` in `app.css`. A page that wraps its cards for a loading
+state uses `settings-stack` on that wrapper. This keeps its cards on the same
+spacing rules as direct children of a settings page.
+
+Native `details.disclosure` sections animate their height in browsers that
+support intrinsic-size transitions, with an immediate fallback elsewhere.
+Task sections use a grid fold and become inert while collapsed. Both read the
+shared motion durations, including the reduced-motion override. The Usage and
+panel end-to-end tests cover card spacing, folded drafts and phone controls.
 
 ## Chat readability
 

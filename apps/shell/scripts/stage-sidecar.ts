@@ -24,7 +24,7 @@
  *
  * Run from the repository root: `bun run apps/shell/scripts/stage-sidecar.ts`.
  */
-import { copyFileSync, existsSync, mkdirSync, readdirSync, rmSync, statSync, utimesSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, rmSync, statSync, utimesSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { nativeTarget } from './targets.ts';
@@ -131,6 +131,7 @@ export function stageCore(targetDir: string, exeName: string): void {
     const bytes = sizeOf(source, `${source} does not exist; the shims are tracked in packages/core/shims`);
     const target = join(targetDir, name);
     copyFileSync(source, target);
+    if (process.platform !== 'win32' && name === 'boite') chmodSync(target, 0o755);
     console.log(`stage-sidecar: ${target} (${bytes} bytes)`);
   }
 }

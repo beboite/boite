@@ -63,6 +63,13 @@ async function threads(): Promise<{ echo: ThreadSummary; codex: ThreadSummary }>
   return { echo, codex };
 }
 
+test('projectless usage keeps a null project identity', async () => {
+  const { echo } = await threads();
+  harness.core.journal.putThread({ ...echo, projectId: null });
+  harness.core.journal.putTurn(turn(echo, D0, usage(1, 2)));
+  expect(harness.core.journal.usageByThread(D0, D0 + DAY)[0]?.project_id).toBeNull();
+});
+
 test('usage.history puts a turn finished on an edge in the later bucket and drops turns outside the range', async () => {
   const { echo } = await threads();
   const journal = harness.core.journal;

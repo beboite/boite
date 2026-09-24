@@ -19,10 +19,10 @@
  */
 import { appendFileSync } from 'node:fs';
 
-const DIRECTIVE = /\[(command|approve|thought|usage|late-context|slow|crash|input)\]/g;
+const DIRECTIVE = /\[(command|approve|thought|usage|late-context|slow|crash|input|async|stream)\]/g;
 const CHUNKS = 3;
 
-type Directive = 'command' | 'approve' | 'thought' | 'usage' | 'late-context' | 'slow' | 'crash' | 'input';
+type Directive = 'command' | 'approve' | 'thought' | 'usage' | 'late-context' | 'slow' | 'crash' | 'input' | 'async' | 'stream';
 
 let threadCounter = 0;
 let turnCounter = 0;
@@ -306,6 +306,30 @@ async function runTurn(turnId: string, text: string): Promise<void> {
         say(q1.length === 0 ? 'input refused' : `input answered ${q1}`);
         break;
       }
+      case 'async': {
+        // GPT-6 Astra's asynchronous question: an agentMessage with
+        // `delivery: "async"`, its text streamed like any other, and no wait.
+        const item = {
+          type: 'agentMessage', id: 'async-1', phase: 'final_answer', memoryCitation: null, delivery: 'async',
+          questions: [{ title: 'Which name?', options: ['later.txt', 'extra.txt'] }],
+          text: 'Which name?\n- later.txt\n- extra.txt',
+        };
+        notify('item/started', { item: { ...item, text: '' }, threadId, turnId, startedAtMs: Date.now() });
+        notify('item/agentMessage/delta', { threadId, turnId, itemId: 'async-1', delta: item.text });
+        notify('item/completed', { item, threadId, turnId, completedAtMs: Date.now() });
+        break;
+      }
+      case 'stream': {
+        itemCounter += 1;
+        const itemId = `item-${itemCounter}`;
+        notify('item/started', { item: commandItem(itemId, 'inProgress', null), threadId, turnId, startedAtMs: Date.now() });
+        notify('item/commandExecution/outputDelta', { threadId, turnId, itemId, delta: 'line one\n' });
+        notify('item/started', { item: { type: 'sleep', id: 'sleep-1', durationMs: 50 }, threadId, turnId, startedAtMs: Date.now() });
+        await Bun.sleep(600);
+        notify('item/completed', { item: { type: 'sleep', id: 'sleep-1', durationMs: 50 }, threadId, turnId, completedAtMs: Date.now() });
+        notify('item/completed', { item: commandItem(itemId, 'completed', 'line one\nline two\n'), threadId, turnId, completedAtMs: Date.now() });
+        break;
+      }
       case 'late-context':
         notify('turn/completed', { threadId, turn: turnRecord(turnId, 'completed') });
         await Bun.sleep(80);
@@ -378,7 +402,7 @@ function handle(method: string, raw: unknown): unknown {
     case 'thread/start': {
       planEnabled = (params['config'] as Record<string, unknown> | undefined)?.['tools.update_plan.enabled'] === true;
       threadCounter += 1;
-      threadId = `codex-fake-${Math.random().toString(16).slice(2, 10)}-${threadCounter}`;
+      threadId = `codex-fake-${crypto.randomUUID().slice(0, 8)}-${threadCounter}`;
       log(
         `thread/start approvalPolicy=${textOf(params['approvalPolicy'])} sandbox=${textOf(params['sandbox'])} model=${textOf(params['model'])}`,
       );

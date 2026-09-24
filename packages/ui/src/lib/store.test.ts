@@ -5,6 +5,30 @@ import { FakeClient } from './fake-client';
 import { setNotificationSender, type Toast } from './notify';
 import { resumeAnchor, Store } from './store.svelte';
 
+test('changing a Store endpoint drops the previous machine composer and element callbacks', async () => {
+  const { store, client } = await ready();
+  const saved = Object.entries(localStorage);
+  const connect = vi.spyOn(store, 'connect').mockResolvedValue();
+  const open = vi.spyOn(store, 'openWhereLeft').mockResolvedValue();
+  const insert = vi.fn();
+  const reference = { id: 'save', url: 'https://first.test', selector: '#save', text: 'Save', bounds: { x: 0, y: 0, width: 30, height: 20 } };
+  store.editComposerText('same', 'First machine');
+  store.addPreviewReference('same', reference);
+  store.registerComposerInsertion('same', insert);
+  try {
+    await store.connectTo('https://second.test', 'fixture-token');
+    expect(store.composerStates).toEqual({});
+    store.addPreviewReference('same', { ...reference, url: 'https://second.test' });
+    expect(insert).not.toHaveBeenCalled();
+    expect(store.composerStates.same?.text).toBe('@Save');
+  } finally {
+    connect.mockRestore(); open.mockRestore();
+    store.client?.close(); store.detach(); client.close();
+    localStorage.clear();
+    for (const [key, value] of saved) localStorage.setItem(key, value);
+  }
+});
+
 test('dropped folders use the local core when a remote machine is selected', async () => {
   const { store, client: remote } = await ready();
   const local = new FakeClient({ delayMs: 0 });
@@ -57,6 +81,235 @@ async function ready(): Promise<{ store: Store; client: FakeClient }> {
   await store.connect();
   return { store, client };
 }
+
+test('delegation selection keeps one child subscription and ignores an overtaken A-B-A response', async () => {
+  const client = new FakeClient({ delayMs: 0, delegationDemo: true });
+  const store = new Store();
+  const real = client.call.bind(client);
+  let releaseFirstA: (() => void) | null = null;
+  let heldFirstA = true;
+  const asked = vi.spyOn(client, 'call').mockImplementation(((method: string, params: { threadId?: string }) => {
+    if (method === 'threads.subscribe' && params.threadId === 't-team-running' && heldFirstA) {
+      heldFirstA = false;
+      return new Promise(resolve => { releaseFirstA = () => { void real(method as never, params as never).then(resolve); }; });
+    }
+    return real(method as never, params as never);
+  }) as typeof client.call);
+  store.attach(client);
+  try {
+    await store.connect();
+    await store.open('t-trace');
+    await store.loadDelegation('t-trace');
+    const first = store.selectDelegatedAgent('t-team-running');
+    await vi.waitFor(() => expect(releaseFirstA).not.toBeNull());
+    await store.selectDelegatedAgent('t-team-done');
+    await store.selectDelegatedAgent('t-team-running');
+    releaseFirstA!();
+    await first;
+    expect(store.delegationSelectedAgentId).toBe('t-team-running');
+    expect(store.delegationThread?.id).toBe('t-team-running');
+    const unsubscribed = asked.mock.calls.filter(([method, params]) => method === 'threads.unsubscribe' && (params as { threadId?: string }).threadId === 't-team-running');
+    expect(unsubscribed).toHaveLength(0);
+  } finally { store.detach(); client.close(); }
+});
+
+test('recent-thread recovery does not open delegated children', async () => {
+  const client = new FakeClient({ delayMs: 0, delegationDemo: true });
+  const store = new Store();
+  store.attach(client);
+  try {
+    await store.connect();
+    await store.openWhereLeft();
+    expect(store.openThread?.parentThreadId).toBeFalsy();
+  } finally { store.detach(); client.close(); }
+});
+
+test('a later navigation wins while the previous agent subscription is being released', async () => {
+  const client = new FakeClient({ delayMs: 0, delegationDemo: true });
+  const store = new Store();
+  store.attach(client);
+  let release: (() => void) | undefined;
+  try {
+    await store.connect();
+    await store.open('t-trace');
+    await store.selectDelegatedAgent('t-team-running');
+    const real = client.call.bind(client);
+    vi.spyOn(client, 'call').mockImplementation(((method: string, params: { threadId?: string }) => {
+      if (method === 'threads.unsubscribe' && params.threadId === 't-team-running') {
+        return new Promise(resolve => { release = () => { void real(method as never, params as never).then(resolve); }; });
+      }
+      return real(method as never, params as never);
+    }) as typeof client.call);
+    const older = store.open('t-descriptors');
+    await vi.waitFor(() => expect(release).toBeDefined());
+    await store.open('t-trace');
+    release!();
+    await older;
+    expect(store.openThread?.id).toBe('t-trace');
+  } finally { store.detach(); client.close(); }
+});
+
+test('reloading the current conversation keeps the selected agent transcript subscribed', async () => {
+  const client = new FakeClient({ delayMs: 0, delegationDemo: true });
+  const store = new Store();
+  store.attach(client);
+  try {
+    await store.connect();
+    await store.open('t-trace');
+    await store.selectDelegatedAgent('t-team-running');
+    const called = vi.spyOn(client, 'call');
+    await store.reload();
+    expect(store.openThread?.id).toBe('t-trace');
+    expect(store.delegationSelectedAgentId).toBe('t-team-running');
+    expect(store.delegationThread?.id).toBe('t-team-running');
+    expect(called).not.toHaveBeenCalledWith('threads.unsubscribe', { threadId: 't-team-running' });
+  } finally { store.detach(); client.close(); }
+});
+
+test('starting a draft cancels a pending child subscription even without an open subscription', async () => {
+  const client = new FakeClient({ delayMs: 0, delegationDemo: true });
+  const store = new Store();
+  store.attach(client);
+  let release: (() => void) | undefined;
+  try {
+    await store.connect();
+    store.startDraft('p-boite');
+    const real = client.call.bind(client);
+    const called = vi.spyOn(client, 'call').mockImplementation(((method: string, params: { threadId?: string }) => {
+      if (method === 'threads.subscribe' && params.threadId === 't-team-running') {
+        return new Promise(resolve => { release = () => { void real(method as never, params as never).then(resolve); }; });
+      }
+      return real(method as never, params as never);
+    }) as typeof client.call);
+    const selecting = store.selectDelegatedAgent('t-team-running');
+    await vi.waitFor(() => expect(release).toBeDefined());
+    store.startDraft('p-boite');
+    release!();
+    await selecting;
+    expect(store.delegationSelectedAgentId).toBeNull();
+    expect(store.delegationThread).toBeNull();
+    expect(called).toHaveBeenCalledWith('threads.unsubscribe', { threadId: 't-team-running' });
+  } finally { store.detach(); client.close(); }
+});
+
+test.each([false, true])('the chat and agent panel receive complete streaming updates, shared snapshot: %s', async (shared) => {
+  const { store, client } = await ready();
+  try {
+    await store.open('t-trace');
+    await store.selectDelegatedAgent('t-trace');
+    if (shared) store.delegationThread = store.openThread;
+    else client.on('message.started', () => {
+      // A separate threads.get snapshot can land between the start and first delta.
+      store.delegationThread = JSON.parse(JSON.stringify(store.openThread));
+    });
+    await store.send('[tool] one streamed answer');
+    await client.settled();
+    for (const snapshot of [store.openThread, store.delegationThread]) {
+      expect(snapshot?.messages.at(-1)?.state).toBe('complete');
+      const parts = snapshot?.messages.at(-1)?.parts ?? [];
+      expect(parts.filter(part => part.type !== 'tool')).toEqual([
+        { type: 'thinking', text: 'thinking about: [tool] one streamed answer' },
+        { type: 'text', text: '[tool] one streamed answer' }
+      ]);
+      expect(parts.find(part => part.type === 'tool')).toMatchObject({ status: 'done' });
+      expect(snapshot?.turns.at(-1)?.status).toBe('done');
+    }
+  } finally { store.detach(); client.close(); }
+});
+
+test('a replacement part followed by a delta is appended once in each independent snapshot', async () => {
+  const client = new FakeClient({ delayMs: 0 });
+  const handlers = new Map<string, (payload: never) => void>();
+  const on = client.on.bind(client);
+  vi.spyOn(client, 'on').mockImplementation(((event: string, handler: (payload: never) => void) => {
+    handlers.set(event, handler);
+    return on(event as never, handler);
+  }) as typeof client.on);
+  const store = new Store();
+  store.attach(client);
+  try {
+    await store.connect();
+    await store.open('t-trace');
+    await store.selectDelegatedAgent('t-trace');
+    const messageId = store.openThread!.messages.at(-1)!.id;
+    const target = { threadId: 't-trace', messageId, partIndex: 0 };
+    handlers.get('message.part')!({ ...target, part: { type: 'text', text: 'hello' } } as never);
+    handlers.get('message.delta')!({ ...target, text: ' world' } as never);
+    for (const snapshot of [store.openThread, store.delegationThread]) {
+      expect(snapshot!.messages.at(-1)!.parts[0]).toEqual({ type: 'text', text: 'hello world' });
+    }
+  } finally { store.detach(); client.close(); }
+});
+
+test('launching from a child refreshes its team and returns the sibling without another spawn', async () => {
+  const client = new FakeClient({ delayMs: 0, delegationDemo: true });
+  const store = new Store();
+  store.attach(client);
+  try {
+    await store.connect();
+    await store.open('t-team-done');
+    await store.loadDelegation();
+    const profile = store.delegation!.config.profiles[0]!;
+    const agent = await store.spawnDelegatedAgent(profile.id, 'Review the error path');
+    expect(agent).not.toBeNull();
+    expect(agent?.thread.parentThreadId).toBe('t-trace');
+    expect(store.openThread?.id).toBe('t-team-done');
+    expect(store.delegation?.agents).toHaveLength(3);
+    expect(store.delegation?.agents.some(entry => entry.thread.id === agent?.thread.id)).toBe(true);
+    const call = client.call.bind(client);
+    vi.spyOn(client, 'call').mockImplementation((async (method, params) => {
+      if (method === 'delegation.configure') throw new Error('Configuration refused');
+      return call(method, params);
+    }) as typeof client.call);
+    await store.configureDelegation(store.delegation!.config);
+    expect(store.delegationError).toBe('Configuration refused');
+  } finally { store.detach(); client.close(); }
+});
+
+test('switching conversations clears the old team and refuses missing or mismatched child views', async () => {
+  const client = new FakeClient({ delayMs: 0, delegationDemo: true });
+  const store = new Store();
+  store.attach(client);
+  try {
+    await store.connect();
+    await store.open('t-trace');
+    await store.loadDelegation();
+    const previous = store.delegation!;
+    await store.open('t-bench');
+    expect(store.delegation).toBeNull();
+    const called = vi.spyOn(client, 'call');
+    store.delegation = previous;
+    await store.configureDelegation(previous.config);
+    expect(await store.spawnDelegatedAgent('reviewer', 'Do not launch on the old team')).toBeNull();
+    expect(await store.messageDelegatedAgent('t-team-running', 'Do not steer the old team')).toBe(false);
+    await store.stopDelegatedAgent();
+    expect(called.mock.calls.filter(([method]) => ['delegation.configure', 'delegation.spawn', 'delegation.send', 'delegation.stop'].includes(method))).toEqual([]);
+    await store.open('t-team-done');
+    store.delegation = null;
+    called.mockClear();
+    await store.configureDelegation(previous.config);
+    expect(await store.spawnDelegatedAgent('reviewer', 'Wait for this child team')).toBeNull();
+    expect(called.mock.calls).toEqual([]);
+  } finally { store.detach(); client.close(); }
+});
+
+test('telemetry actions route through the owning client and retain deletion state', async () => {
+  const { store, client } = await ready();
+  const other = new FakeClient({ delayMs: 0 });
+  try {
+    expect(await store.telemetryState()).toMatchObject({ mode: 'basic', pendingDeletion: false });
+    await store.configureTelemetry('enhanced');
+    expect(await store.exportTelemetry()).toEqual({ events: [], truncated: false });
+    expect(await store.configureTelemetry('off')).toMatchObject({ mode: 'off', pendingDeletion: true });
+    expect(await store.configureTelemetry('enhanced')).toMatchObject({ mode: 'enhanced', pendingDeletion: true });
+    expect(await store.retryTelemetryDeletion()).toMatchObject({ pendingDeletion: false });
+    await store.configureTelemetry('enhanced');
+    store.attach(other);
+    await store.connect();
+    expect(await store.telemetryState()).toMatchObject({ mode: 'basic' });
+    expect(await client.call('telemetry.state', {})).toMatchObject({ mode: 'enhanced' });
+  } finally { store.detach(); client.close(); other.close(); }
+});
 
 test('uninstalled setup starts without account-dependent demo state', async () => {
   const client = new FakeClient({ delayMs: 0, uninstalled: true });

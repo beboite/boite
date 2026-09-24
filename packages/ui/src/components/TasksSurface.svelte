@@ -6,6 +6,7 @@
   import type { Store } from '../lib/store.svelte';
 
   let { store }: { store: Store } = $props();
+  const sectionId = $props.id();
 
   let draft = $state('');
   let open = $state({ activity: true, tasks: true, todos: true });
@@ -43,6 +44,7 @@
       type="button"
       class="ghost head"
       aria-expanded={open.activity}
+      aria-controls="{sectionId}-activity"
       data-testid="tasks-section-activity"
       title={open.activity ? strings.tasks.collapse : strings.tasks.expand}
       onclick={() => (open.activity = !open.activity)}
@@ -50,8 +52,8 @@
       <ChevronDown size={13} strokeWidth={1.75} class={open.activity ? 'turned' : ''} />
       <span class="section-label">{strings.tasks.goalSection}</span>
     </button>
-    {#if open.activity}
-      <div class="body">
+    <div class="disclosure-fold" id="{sectionId}-activity" class:open={open.activity} inert={!open.activity}>
+      <div class="disclosure-clip"><div class="body">
         {#if activity?.goal}
           <div class="line" data-testid="tasks-goal">
             <Target size={13} strokeWidth={1.75} />
@@ -75,8 +77,8 @@
         {#if !activity?.goal && !activity?.loop}
           <p class="empty">{strings.tasks.noActivity}</p>
         {/if}
-      </div>
-    {/if}
+      </div></div>
+    </div>
   </section>
 
   <section>
@@ -84,6 +86,7 @@
       type="button"
       class="ghost head"
       aria-expanded={open.tasks}
+      aria-controls="{sectionId}-tasks"
       data-testid="tasks-section-agent"
       title={open.tasks ? strings.tasks.collapse : strings.tasks.expand}
       onclick={() => (open.tasks = !open.tasks)}
@@ -99,8 +102,8 @@
         </span>
       {/if}
     </button>
-    {#if open.tasks}
-      <div class="body">
+    <div class="disclosure-fold" id="{sectionId}-tasks" class:open={open.tasks} inert={!open.tasks}>
+      <div class="disclosure-clip"><div class="body">
         {#each tasks as task (task.id)}
           <div class="line" class:muted={task.status === 'completed'} data-testid="agent-task" data-status={task.status}>
             <span class="mark" data-status={task.status} title={strings.activity[task.status]}>
@@ -117,8 +120,8 @@
         {:else}
           <p class="empty">{strings.tasks.noTasks}</p>
         {/each}
-      </div>
-    {/if}
+      </div></div>
+    </div>
   </section>
 
   <section>
@@ -126,6 +129,7 @@
       type="button"
       class="ghost head"
       aria-expanded={open.todos}
+      aria-controls="{sectionId}-todos"
       data-testid="tasks-section-todos"
       title={open.todos ? strings.tasks.collapse : strings.tasks.expand}
       onclick={() => (open.todos = !open.todos)}
@@ -133,8 +137,8 @@
       <ChevronDown size={13} strokeWidth={1.75} class={open.todos ? 'turned' : ''} />
       <span class="section-label">{strings.tasks.todoSection}</span>
     </button>
-    {#if open.todos}
-      <div class="body">
+    <div class="disclosure-fold" id="{sectionId}-todos" class:open={open.todos} inert={!open.todos}>
+      <div class="disclosure-clip"><div class="body">
         <form
           class="composer"
           onsubmit={(event) => {
@@ -170,10 +174,11 @@
                 <Circle size={13} strokeWidth={1.75} />
               {/if}
             </span>
-            <span class="text" title={todo.text}>{todo.text}</span>
+            <span class="todo-copy"><span class="text">{todo.text}</span>
             {#if todo.status === 'claimed'}
               <span class="await" data-testid="todo-awaiting" title={strings.tasks.awaitingHint}>{strings.tasks.awaiting}</span>
             {/if}
+            </span>
             {#if todo.status !== 'open'}
               <button
                 type="button"
@@ -224,8 +229,8 @@
         {:else}
           <p class="empty">{strings.tasks.noTodos}</p>
         {/each}
-      </div>
-    {/if}
+      </div></div>
+    </div>
   </section>
 </div>
 
@@ -267,17 +272,17 @@
 
   .body {
     padding: 0 12px 8px;
-    animation: rise var(--dur-3) var(--ease-out-quint);
   }
 
   .line {
     display: flex;
     align-items: center;
     gap: 6px;
-    min-height: var(--control-sm);
+    min-height: var(--row);
     min-width: 0;
-    padding: 2px 0;
-    font-size: var(--text-xs);
+    padding: 8px 0;
+    flex-wrap: wrap;
+    font-size: var(--text-sm);
     color: var(--color-foreground);
   }
 
@@ -294,18 +299,18 @@
   .text {
     flex: 1;
     min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    overflow-wrap: anywhere;
   }
 
   .meta {
+    font-size: var(--text-xs);
     flex: none;
     color: var(--color-muted-foreground);
     font-variant-numeric: tabular-nums;
   }
 
   .state {
+    font-size: var(--text-xs);
     flex: none;
     padding: 1px 6px;
     border-radius: var(--radius-sm);
@@ -336,13 +341,19 @@
   /* The wording a claimed card carries: the agent finished it, the user has not
      said so yet, and the row has to read as waiting rather than as done. */
   .await {
-    /* Outside the text's ellipsis: the card's own name is what gets cut,
-       never the words saying what the card is waiting for. */
+    /* Keep the pending status below the title, clear of the action buttons. */
     flex: none;
-    margin-left: 6px;
+    display: block;
+    margin-top: 3px;
+    font-size: var(--text-xs);
     color: var(--color-live);
     white-space: nowrap;
   }
+
+  .todo-copy { flex: 1; min-width: 0; }
+  .todo + .todo { border-top: 1px solid var(--color-border); }
+  .head:active:not(:disabled) { transform: none; }
+  section + section { border-top: 1px solid var(--color-border); padding-top: 4px; }
 
   .composer {
     display: flex;
@@ -354,8 +365,8 @@
   .composer input {
     flex: 1;
     min-width: 0;
-    height: var(--control-sm);
-    font-size: var(--text-xs);
+    height: var(--input);
+    font-size: var(--text-sm);
   }
 
   .todo .ghost {
@@ -371,14 +382,18 @@
   .empty {
     margin: 0;
     padding: 4px 0;
-    font-size: var(--text-xs);
+    font-size: var(--text-sm);
     color: var(--color-muted-foreground);
   }
 
   /* A finger has no hover, so the row's actions are always there on a phone. */
-  @media (hover: none) {
+  @media (hover: none), (max-width: 720px) {
     .todo .ghost {
       opacity: 1;
     }
+  }
+
+  @media (max-width: 720px) {
+    .composer input { font-size: var(--text-md); }
   }
 </style>

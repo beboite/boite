@@ -1,4 +1,30 @@
-import type { PermissionMode, TurnExecution } from './index';
+import type { DelegationConfig, DelegationProfile, PermissionMode, TurnExecution } from './index';
+
+export interface AgentRuntimeConfig {
+  defaultRoute: AgentSelection;
+  allowedRoutes: DelegationProfile[];
+  subagents: DelegationConfig;
+  compactAfterTurns: number;
+  maxRunMinutes: number;
+}
+export interface AgentAccountGrant { accountId: string; agentIds: string[] | null }
+export interface AgentBrain {
+  path: string;
+  instructions: string;
+  memory: string;
+  revision: string;
+}
+export type AgentSchedule = { kind: 'once'; at: number } | { kind: 'interval'; everyMinutes: number } | { kind: 'daily'; time: string; timezone: string };
+export interface AgentRoutine extends AgentRecord {
+  agentId: string;
+  name: string;
+  prompt: string;
+  schedule: AgentSchedule;
+  enabled: boolean;
+  nextAt: number | null;
+  lastWorkId: string | null;
+  lastScheduledAt: number | null;
+}
 
 /** Stable identities are independent of provider processes and native sessions. */
 export interface AgentRecord {
@@ -88,6 +114,7 @@ export interface AgentDelivery extends AgentRecord {
   workId: string | null;
 }
 export interface AgentWork extends AgentRecord {
+  purpose?: 'work' | 'compaction';
   agentId: string;
   scope: AgentScope;
   taskId: string | null;
@@ -149,6 +176,7 @@ export interface AgentDecision extends AgentRecord {
   answer: string | null;
 }
 export interface AgentEntities {
+  routine: AgentRoutine;
   profile: AgentProfile;
   group: AgentGroup;
   team: AgentTeam;
@@ -168,6 +196,8 @@ export type AgentEntityKind = keyof AgentEntities;
 export type AgentDraft<T extends AgentRecord> = Omit<T, keyof AgentRecord>;
 export type AgentSave<T extends AgentRecord> = { id?: string; expectedRevision?: number; value: AgentDraft<T> };
 export interface AgentsSnapshot {
+  routines: AgentRoutine[];
+  accountGrants: AgentAccountGrant[];
   revision: number;
   profiles: AgentProfile[];
   groups: AgentGroup[];
@@ -186,6 +216,14 @@ export interface AgentsSnapshot {
   limits: { backgroundConcurrency: number; paused: boolean; kebaccExperiment: boolean };
 }
 export interface AgentsRpcMethods {
+  'agents.runtime.get': { params: { agentId: string }; result: AgentRuntimeConfig };
+  'agents.runtime.configure': { params: { agentId: string; expectedRevision: number; config: AgentRuntimeConfig }; result: AgentProfile };
+  'agents.accounts.set': { params: { grants: AgentAccountGrant[] }; result: AgentAccountGrant[] };
+  'agents.brain.get': { params: { agentId: string }; result: AgentBrain };
+  'agents.brain.save': { params: { agentId: string; expectedRevision: string; instructions: string; memory: string }; result: AgentBrain };
+  'agents.routine.save': { params: AgentSave<AgentRoutine> & { threadId?: string }; result: AgentRoutine };
+  'agents.routine.run': { params: { routineId: string; requestId: string }; result: AgentWork };
+  'agents.context.compact': { params: { sessionId: string; requestId: string }; result: AgentWork };
   'agents.snapshot': { params: { threadId?: string }; result: AgentsSnapshot };
   'agents.profile.save': { params: AgentSave<AgentProfile>; result: AgentProfile };
   'agents.group.save': { params: AgentSave<AgentGroup>; result: AgentGroup };

@@ -5,7 +5,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import type { HarnessUpdate } from '@boite/contracts';
 import type { CoreClient } from '../src/client.ts';
 import { compareVersions, inside, readVersion } from '../src/providers/updates.ts';
-import { startTestCore, waitFor } from './harness.ts';
+import { echoThread, startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
 
 const FAKE = fileURLToPath(new URL('./fixtures/update-agent.ts', import.meta.url));
@@ -18,14 +18,14 @@ afterEach(async () => {
 });
 
 /** A user descriptor whose updater is the fixture, reading its newest version the way `source` says. */
-function writeDescriptor(dataDir: string, source: 'command' | 'npm' | 'none', updater: string): string {
+function writeDescriptor(dataDir: string, source: 'command' | 'npm' | 'none', updater: string, updateEnv?: Record<string, string>): string {
   const dir = join(dataDir, 'providers');
   mkdirSync(dir, { recursive: true });
   const state = join(dataDir, 'fake-version.txt');
   writeFileSync(state, '1.0.0');
   const profile = {
     detect: {},
-    executable: [{ kind: 'path', value: 'bun' }],
+    executable: [{ kind: 'path', value: 'bun', ...(updateEnv === undefined ? {} : { updateEnv }) }],
     update: {
       versionArgs: [FAKE, state, '--version'],
       ...(source === 'command' ? { latestArgs: [FAKE, state, 'check'] } : source === 'npm' ? { latestNpm: '@boite-test/fake-agent' } : {}),
@@ -52,7 +52,7 @@ function writeDescriptor(dataDir: string, source: 'command' | 'npm' | 'none', up
   return state;
 }
 
-async function start(source: 'command' | 'npm' | 'none', updater = 'update'): Promise<{ client: CoreClient; state: string }> {
+async function start(source: 'command' | 'npm' | 'none', updater = 'update', updateEnv?: Record<string, string>): Promise<{ client: CoreClient; state: string }> {
   harness = await startTestCore();
   // Only the fixture: a check must never run the agents of the machine the tests run on.
   harness.core.updates.only = new Set(['update-fake']);
@@ -60,7 +60,7 @@ async function start(source: 'command' | 'npm' | 'none', updater = 'update'): Pr
     expect(name).toBe('@boite-test/fake-agent');
     return '1.1.0';
   };
-  const state = writeDescriptor(harness.dataDir, source, updater);
+  const state = writeDescriptor(harness.dataDir, source, updater, updateEnv);
   const client = await harness.connect();
   const loaded = await client.call('providers.reload', {});
   expect(loaded.rejected).toEqual([]);
@@ -149,6 +149,23 @@ describe('harness updates', () => {
     expect(update.message).toContain('the release server refused the download');
   });
 
+  test('an updater that reads how it was installed gets the environment its skipped launcher sets', async () => {
+    const bare = await start('command', 'update-launched');
+    await bare.client.call('providers.updates', {});
+    const failed = bare.client.next('providers.updatesChanged', (list) => list[0]?.state === 'failed', 20000);
+    await bare.client.call('providers.update', { providerId: 'update-fake' });
+    expect(only(await failed).message).toContain('Could not detect the installation method');
+    await harness!.stop();
+
+    const { client, state } = await start('command', 'update-launched', { FAKE_MANAGED_BY_NPM: '1' });
+    await client.call('providers.updates', {});
+    const changed = client.next('providers.updatesChanged', (list) => list[0]?.state === 'idle' && list[0]?.current === '1.2.0', 20000);
+    await client.call('providers.update', { providerId: 'update-fake' });
+    expect(only(await changed)).toMatchObject({ current: '1.2.0', message: null });
+    expect(readFileSync(state, 'utf8')).toBe('1.2.0');
+    await waitFor(() => harness?.core.procs.liveCount('update:update-fake') === 0);
+  });
+
   test('a provider with a turn in flight is not updated under it', async () => {
     const { client } = await start('command');
     await client.call('providers.updates', {});
@@ -158,6 +175,24 @@ describe('harness updates', () => {
     harness!.core.journal.putThread({ ...harness!.core.journal.getThread(thread.id)!, status: 'running' });
 
     await expect(client.call('providers.update', { providerId: 'update-fake' })).rejects.toThrow(/1 turn in flight/);
+  });
+
+  test('an accepted turn still protects its provider after the picker changes', async () => {
+    const { client, state } = await start('command');
+    const core = harness!.core;
+    await client.call('providers.updates', {});
+    await client.call('settings.set', { maxConcurrentTurns: 1 });
+    const blocker = await echoThread(harness!, client);
+    await client.call('turns.start', { threadId: blocker.threadId, prompt: '[sleep:60000]' });
+    const account = await client.call('accounts.add', { providerId: 'update-fake', label: 'Fake', useDefaultLocation: true });
+    const thread = await client.call('threads.create', { projectId: core.threads.require(blocker.threadId).projectId!, providerId: 'update-fake', accountId: account.id });
+    await client.call('turns.start', { threadId: thread.id, prompt: 'queued on the old provider' });
+    await client.call('threads.update', { threadId: thread.id, accountId: blocker.accountId });
+    expect(core.threads.require(thread.id).providerId).toBe('echo');
+    try {
+      await expect(client.call('providers.update', { providerId: 'update-fake' })).rejects.toThrow(/1 turn in flight/);
+      expect(readFileSync(state, 'utf8')).toBe('1.0.0');
+    } finally { await client.call('turns.stop', { threadId: thread.id }); }
   });
 
   test('an update asked for during a check waits for it, and a second one is refused while the first runs', async () => {
@@ -204,5 +239,24 @@ describe('harness updates', () => {
     const loaded = await client.call('providers.reload', {});
     expect(loaded.rejected).toHaveLength(1);
     expect(loaded.rejected[0]?.field).toContain('update.latestNpm');
+  });
+
+  test('an updater waiting on a check cannot start after the store closes', async () => {
+    const { state } = await start('npm');
+    const updates = harness!.core.updates;
+    await updates.check();
+    let release!: () => void;
+    let entered!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const checking = new Promise<void>(resolve => { entered = resolve; });
+    updates.npmLatest = async () => { entered(); await gate; return '1.1.0'; };
+    const checked = updates.check();
+    await checking;
+    const update = updates.update('update-fake');
+    updates.close();
+    release();
+    await checked;
+    await expect(update).rejects.toThrow('stopping');
+    expect(readFileSync(state, 'utf8')).toBe('1.0.0');
   });
 });

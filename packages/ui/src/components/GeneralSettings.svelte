@@ -4,10 +4,14 @@
   import ShellSettings from './ShellSettings.svelte';
   import PhoneSettings from './PhoneSettings.svelte';
   import ModelDefaultsSettings from './ModelDefaultsSettings.svelte';
+  import AppUpdateCard from './AppUpdateCard.svelte';
+  import { showAppUpdateUi } from '../lib/app-update.svelte';
+  import TelemetrySettings from './TelemetrySettings.svelte';
   import { confirm } from '../lib/confirm.svelte';
   import { ago, time } from '../lib/format';
   import { qrSvg } from '../lib/qr';
   import { fill, strings } from '../lib/strings';
+  import { openTour } from '../lib/onboarding.svelte';
   import type { Store } from '../lib/store.svelte';
 
   let { store }: { store: Store } = $props();
@@ -57,6 +61,7 @@
   let perAccountConcurrency = $state(untrack(() => store.settings?.perAccountConcurrency ?? 2));
   let warmProcessMinutes = $state(untrack(() => store.settings?.warmProcessMinutes ?? 5));
   let listenOnLan = $state(untrack(() => store.settings?.listenOnLan ?? false));
+  let asyncQuestions = $state(untrack(() => store.settings?.asyncQuestions ?? true));
   let savedAt = $state<number | null>(null);
 
   async function save() {
@@ -64,7 +69,8 @@
       maxConcurrentTurns,
       perAccountConcurrency,
       warmProcessMinutes,
-      listenOnLan
+      listenOnLan,
+      asyncQuestions
     });
     savedAt = Date.now();
   }
@@ -77,9 +83,11 @@
   </header>
 
   {#if inShell}<ShellSettings />{/if}
+  {#if showAppUpdateUi()}<AppUpdateCard />{/if}
 
   <PhoneSettings {store} />
   <ModelDefaultsSettings {store} />
+  <TelemetrySettings {store} />
 
   <section class="card" id="settings-projects">
     <h2>{strings.settings.projects}</h2>
@@ -229,6 +237,13 @@
         </span>
         <input type="checkbox" role="switch" data-testid="setting-listen-on-lan" bind:checked={listenOnLan} />
       </label>
+      <label class="switch-row">
+        <span class="text">
+          {strings.settings.asyncQuestions}
+          <span class="hint">{strings.settings.asyncQuestionsHint}</span>
+        </span>
+        <input type="checkbox" role="switch" data-testid="setting-async-questions" bind:checked={asyncQuestions} />
+      </label>
       <div class="actions">
         <button type="button" class="primary" onclick={() => void save()}>{strings.settings.save}</button>
         {#if savedAt !== null}
@@ -237,6 +252,14 @@
       </div>
     </section>
   {/if}
+
+  <section class="card" id="settings-tour">
+    <h2>{strings.onboarding.label}</h2>
+    <p class="subtle hint">{strings.onboarding.replayHint}</p>
+    <button type="button" data-testid="settings-tour" onclick={() => { store.showChat(); openTour(); }}>
+      {strings.onboarding.replay}
+    </button>
+  </section>
 
   <section class="card" id="settings-core">
     <h2>{strings.settings.core}</h2>

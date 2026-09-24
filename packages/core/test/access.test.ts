@@ -46,6 +46,50 @@ async function pairedDevice(): Promise<Awaited<ReturnType<typeof connect>>> {
 }
 
 describe('the access gate', () => {
+  test('paired messages cannot impersonate a persistent agent session', () => {
+    expect(() => assertAllowed('agents.message.send', deviceConnection(), { threadId: 'thr_other' })).toThrow('threadId');
+    expect(() => assertAllowed('agents.message.send', deviceConnection(), { scope: { kind: 'agent', id: 'identity' } })).not.toThrow();
+  });
+  test('agent sockets cannot receive owner broadcasts or another thread activity', async () => {
+    const owner = await harness.connect();
+    const { threadId } = await echoThread(harness, owner);
+    const agent = await connect(harness.url, harness.core.agents.tokenFor(threadId));
+    const seen: string[] = [];
+    agent.onAny(name => seen.push(name));
+    try {
+      harness.core.bus.emit('core.log', { level: 'info', message: 'private diagnostic', at: Date.now() });
+      harness.core.bus.emit('account.login', { accountId: 'other-account', state: 'running', output: 'private login output', url: 'https://example.test/login', exitCode: null });
+      harness.core.bus.emit('thread.updated', harness.core.threads.require(threadId));
+      harness.core.bus.emit('thread.activity', { threadId: 'another-thread', activity: { goal: null, loop: null, tasks: [] } });
+      harness.core.bus.emit('thread.activity', { threadId, activity: { goal: null, loop: null, tasks: [] } });
+      harness.core.bus.emit('delegation.changed', { threadId: 'another-thread' });
+      harness.core.bus.emit('delegation.changed', { threadId });
+      // The response follows every event on this socket, with no timing guess.
+      await agent.call('agent.where', { threadId });
+      expect(seen).toEqual(['thread.activity']);
+    } finally { agent.close(); }
+  });
+
+  test('device sockets receive readable state, but no login output, trace or diagnostics', async () => {
+    const owner = await harness.connect();
+    const { threadId } = await echoThread(harness, owner);
+    const phone = await pairedDevice();
+    await phone.call('threads.subscribe', { threadId });
+    const seen: string[] = [];
+    phone.onAny(name => seen.push(name));
+    try {
+      harness.core.bus.emit('account.login', { accountId: 'other-account', state: 'running', output: 'private login output', url: 'https://example.test/login', exitCode: null });
+      harness.core.bus.emit('core.log', { level: 'error', message: 'private diagnostic', at: Date.now() });
+      harness.core.bus.emit('process.focusPushed', { threadId: 'private-thread', pid: 123, title: 'private window', restored: true, at: Date.now() });
+      harness.core.bus.emit('quotas.updated', []);
+      harness.core.bus.emit('settings.updated', harness.core.settings.get());
+      harness.core.bus.emit('delegation.changed', { threadId: 'another-thread' });
+      harness.core.bus.emit('delegation.changed', { threadId });
+      await phone.call('settings.get', {});
+      expect(seen).toEqual(['settings.updated', 'delegation.changed']);
+    } finally { phone.close(); }
+  });
+
   test('every method outside DEVICE_METHODS is refused to a session, the gate being the only list', () => {
     const connection = deviceConnection();
     const owner: Connection = { ...connection, identity: { principal: 'owner', sessionId: null, threadId: null } };

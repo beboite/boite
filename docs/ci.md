@@ -14,6 +14,11 @@ takes the title, so it must read `type(scope): summary` with a type among `feat`
 `fix`, `perf`, `refactor`, `docs`, `test`, `ci`, `build`, `chore` and `revert`.
 The squash commit message body is left empty.
 
+The changes job also runs `check:architecture` and its regression tests, even
+for documentation-only changes. Runtime dependency cycles and forbidden
+cross-package imports fail before the build matrix starts. The advisory
+complexity report does not impose a numeric merge threshold.
+
 The `release tags` ruleset keeps `v*` tags from being moved or deleted. Creating
 one stays open, which the nightly reservation and a manual release rely on.
 
@@ -22,15 +27,24 @@ one stays open, which the nightly reservation and a manual release rely on.
 | Change | Checks |
 | --- | --- |
 | Markdown docs, license, security policy, code of conduct, issue and pull request templates, CODEOWNERS, labeler rules, topics | Local documentation links and CI decision tests |
-| Shell files or end-to-end tests | Windows shell tests, installer build and full end-to-end suite; Linux/macOS shell builds and Rust tests |
+| Shell files or end-to-end tests | Windows shell tests, installer build and full end-to-end suite; Linux x64 and macOS ARM64 shell builds and Rust tests |
 | Dockerfile, .dockerignore, docker/ | Docker smoke tests on native x64 and ARM64 |
 | UI files | Type checks, UI tests, desktop checks and Docker smoke tests |
 | Core, contracts, dependencies, shared build files, workflows, unknown paths | All checks, including core tests on Windows, Linux and macOS |
 | Version tag | Complete checks, then a draft Windows release |
-| Enabled nightly with an unpublished commit | Complete checks, development installer, development server image, prerelease |
+| Nightly with an unpublished commit | Complete checks, signed nightly installer, development server image, prerelease |
 
 Pull requests against any branch run CI. A newer commit cancels an older run of
 that same PR. New main commits also cancel superseded ordinary CI runs.
+
+`scripts/ci/changes.ts` picks a mode besides the affected checks. A pull request
+(`pr`) runs the portable desktop checks on Linux x64 and macOS ARM64 only. The
+push on main that follows a merge (`warm`) skips the core tests and the Windows
+end-to-end suite the pull request already passed. It still builds every
+affected job, runs the Rust tests and the portable checks on all four
+platforms, Linux ARM64 and macOS x64 included, and saves the caches pull
+requests restore. A tag, a release, a nightly and a manual run (`full`) run
+everything.
 Release and publication jobs finish instead of being interrupted
 halfway through an upload. Live-provider tests stay disabled.
 
@@ -40,32 +54,57 @@ The Debian install, extracted AppImage and signed macOS bundle each run the smok
 test, which checks core startup, bundled UI serving, authenticated RPC and an
 echo turn with a fresh data directory. It does not exercise native desktop controls.
 The WebView2 shell end-to-end suite remains Windows-only.
-Portable desktop checks run on x64 and ARM64 for both Linux and macOS.
+Portable desktop checks run on x64 and ARM64 for both Linux and macOS, the
+second architecture of each only after a merge and on a release.
 
 ## Build cost
 
+Caches are saved from main only: Cargo, Vitest and Docker BuildKit. GitHub
+lets a pull request read main's caches but scopes what it saves to that pull
+request, and a repository keeps 10 GB. When every pull request saved its own
+copies, 13.5 GB were active on 2026-09-22 and the eviction had removed main's
+Windows Cargo cache and both Linux ones, so the Windows job rebuilt the whole
+shell on every run.
+
 Bun uses `packageManager` in the root manifest. Installs use the frozen lockfile
-and cache the download store separately per OS and architecture. The UI tests
+without a cached download store: its 200 to 350 MB per platform took a quarter
+of the cache, and an install without it was no slower (the whole setup step on
+macOS ARM64, 2026-09-22: 8 s on a miss, 10 s on a hit). The UI tests
 use at most eight workers and persist transformed modules in Vitest's disk cache.
 The cache key includes the lockfile and the Svelte and Vitest configuration;
 Vitest validates individual source files when loading cached transforms.
 
 The Windows job builds the installer and runs Rust tests in the release profile,
-sharing compiled dependencies. Successful jobs save Cargo caches for PRs as well
-as main, under a release-specific key. Failed or interrupted jobs do not save an
-incomplete cache that GitHub would keep immutable. GitHub scopes PR caches to
-their merge ref.
+sharing compiled dependencies. Successful main jobs save Cargo caches under a
+release-specific key. Failed or interrupted jobs do not save an incomplete cache
+that GitHub would keep immutable.
 It builds the installer once, then copies the existing sidecar beside the shell
 for end-to-end testing. It does not recompile the core just to stage it again.
 The tested installer becomes the release artifact, with no second release build.
 CI sets `BOITE_E2E_PREBUILT_UI=1` to test the UI already built for that installer.
 The test refuses a missing UI build. Local end-to-end runs rebuild it by default.
+The Windows suite runs files sequentially: every file takes its own ports,
+data directory and browser profile. Two and three parallel workers produced
+repeated browser navigation and startup hook timeouts on 2026-09-24.
+Sequential execution keeps the same assertions and deadlines.
+`tests/e2e/lib/warm.ts` runs first.
+It optimizes Vite's dependencies once, since on a fresh checkout each dev
+server would otherwise empty `packages/ui/node_modules/.vite` under the
+servers of the other workers. It also builds the fake-client bundle that
+`BOITE_E2E_FAKE_UI` hands to every worker. Warming under a `NODE_ENV` other
+than `test`, the one `bun test` sets, changes Vite's config hash and brings the
+race back. Every file that only drives the page serves that bundle through
+`startUi`. A file whose page imports `/src/...`, or blocks a module by its
+source URL, needs a dev server: `startDevUi` transforms every module the page
+can load before its hook returns, and that hook allows 60 s. Before this, the
+cold transform ran inside the first browser launch: on 2026-09-24 it outran the
+30 s test hook of `app-updates` or `harness-updates` in three failed runs.
 
 When Cargo uses a shared target directory, staging snapshots its shell into the
 checkout before the tests. Another checkout's later build cannot replace it.
 
 Docker builds on native x64 and ARM64 runners. Each architecture has its own
-BuildKit cache. Dependency manifests are copied before source files, so a core
+BuildKit cache, written from main only. Dependency manifests are copied before source files, so a core
 change does not reinstall agent CLIs. Publication pushes the image that passed
 the smoke test and combines both digests into one multi-platform tag.
 
@@ -73,8 +112,8 @@ These are cache and job boundaries, not a promise of a particular runner time.
 Measure actual workflow durations after the first cold and warm runs on GitHub.
 
 Browser tests wait for committed navigation and resolved asynchronous conditions.
-They disable background timer throttling and report page state and JavaScript
-errors on an unmet condition. Windows setup has an explicit startup timeout.
+They disable background timer throttling and report page state, JavaScript
+errors and the requests still in flight on an unmet condition. Windows setup has an explicit startup timeout.
 The hidden shell test
 passes `BOITE_SHELL_DEBUG_PORT` through WebView2's API because elevated runners
 ignore environment-based WebView2 debug switches. Normal launches ignore this
@@ -82,21 +121,17 @@ test port. Hardware audio tests skip hosts without a default render endpoint;
 the guard logic tests still run. Scripted Claude tests use Bun as their available
 executable and never need a real CLI or login.
 
-## boite de nuit
+## boite (de nuit)
 
-The `boite de nuit` workflow has a daily schedule at 03:23 UTC and a manual
-`workflow_dispatch` entry. Both are gated by the repository variable
-`NIGHTLY_ENABLED`, which must equal `true`. It is disabled by default. No variable
-is created by this repository.
-
-To enable it later, set that variable in Settings, Secrets and variables,
-Actions, Variables. Remove it or set it to `false` to disable both entry points.
-Manual runs must target `main`.
+The `boite (de nuit)` workflow runs daily at 03:23 UTC and also accepts manual
+`workflow_dispatch` runs on `main`. Both entry points are enabled by default.
+Set the repository variable `NIGHTLY_ENABLED` to `false` to stop both entry
+points. Removing it or setting it to `true` enables them again.
 
 Before building, the workflow compares the selected commit with published
 nightly releases. An unchanged commit skips the expensive jobs. Failed builds
 have no published release and are retried next time. For example, the first build
-on September 15 is `boite de nuit v2.0.0-nightly.20260915.1`; a new commit that day
+on September 15 is `boite (de nuit) v2.0.0-nightly.20260915.1`; a new commit that day
 gets `.2`. The counter resets the next UTC day. The base `2.0.0` comes from the
 manifest, without its stable prerelease suffix.
 
@@ -105,9 +140,10 @@ A failed build reuses that version on retry, even on a later day. A reserved tag
 alone is not a successful release. The installer and core carry the nightly
 version through temporary build inputs; source manifests keep their version.
 
-The desktop uses the development identifier and data directory, shared with
-local Boite Dev builds and separate from stable Boite. The server uses the `dev`
-channel. Use a separate Compose project for nightly volumes. Nightly publication
+The desktop shares Boite's identifier, installation and data directory, allowing
+the in-app update selector to move between stable and nightly. Local Boite Dev
+builds remain isolated. The server uses the `dev` channel; use a separate Compose
+project for nightly volumes. Nightly publication
 never changes the stable Docker `latest` tag or GitHub's latest stable release.
 Nightly verification skips the stable Docker job. Its publication job builds,
 smoke-tests and pushes the development image once per architecture after the
@@ -131,8 +167,9 @@ must be pinned to a full commit SHA; the repository setting refuses a tag.
 
 Dependabot updates the Bun workspace, the agent CLIs in `docker/agents`, the
 shell's Cargo dependencies, the Docker base image and the workflow actions
-weekly. Workspace minor and patch updates share one pull request; each major
-update gets its own.
+weekly. The actions, the agent CLIs and the Cargo dependencies share one pull
+request, the `weekly` multi-ecosystem group. Workspace minor and patch updates
+share another; each workspace major update gets its own.
 
 The `labeler` workflow labels pull requests by path with `core`, `ui`, `shell`,
 `server`, `ci` and `documentation`, following `.github/labeler.yml`. It runs on
@@ -145,10 +182,21 @@ A `v<version>` tag must match all package manifests, Cargo and the Tauri config.
 Alternatively, manually run `release` on the branch or commit to publish: it
 uses the version already in the manifests and creates its tag after the checks.
 Neither entry point increments the version automatically.
-The release workflow runs the complete CI and attaches the tested installer and
-`SHA256SUMS.txt` to a draft. A maintainer reviews and publishes that draft.
-Installers are currently unsigned; checksums detect corruption, not publisher
-identity. No updater signature is implied by these files.
+The release workflow runs the complete CI and attaches the tested installer,
+its updater `.sig`, `latest.json` and `SHA256SUMS.txt` to a draft. A maintainer
+reviews and publishes that draft. The nightly publishes the same signed update
+artifacts as a prerelease after its checks pass.
+
+Only release callers set the reusable CI's `sign-updates` input and inherit the
+`TAURI_SIGNING_PRIVATE_KEY` secret. Ordinary PR builds require no signing key.
+The build refuses an empty key when signing is requested. The Tauri updater
+overlay generates signatures without recompiling the tested installer in the
+publication job. `scripts/ci/updater-manifest.ts` requires exactly one installer
+and its signature, and binds its URL to the reserved version tag.
+
+Updater signatures authenticate the payload to Boite. They are separate from
+Windows Authenticode signing: the shell installer still has no Authenticode
+publisher certificate. The bundled Bun runtime retains its own signature.
 
 Publishing a release starts `publish server`. It requires a successful release
 workflow on that exact commit before building and testing both architectures.

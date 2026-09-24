@@ -1,11 +1,9 @@
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { join } from 'node:path';
-import { createRequire } from 'node:module';
 import { BrowserPage, freePort } from './lib/cdp';
+import { startDevUi } from './lib/ui.ts';
 
-const uiRequire = createRequire(join(import.meta.dir, '../../packages/ui/package.json'));
-const { createServer } = await import(uiRequire.resolve('vite'));
-let server: Awaited<ReturnType<typeof createServer>>;
+let server: { close(): Promise<void> };
 let page: BrowserPage;
 const id = (name: string) => `[data-testid="${name}"]`;
 
@@ -27,8 +25,7 @@ async function phone(on: boolean) {
 
 beforeAll(async () => {
   const port = await freePort();
-  server = await createServer({ root: join(import.meta.dir, '../../packages/ui'), server: { host: '127.0.0.1', port, strictPort: true }, clearScreen: false });
-  await server.listen();
+  server = await startDevUi(port);
   page = await BrowserPage.launch({ url: `http://127.0.0.1:${port}/?fake=1&open=recent&long=1`, windowSize: { width: 1310, height: 820 } });
   await page.waitFor(`document.querySelector('${id('timeline')}')`);
   await onStore(`await store.open('t-trace');`);
@@ -44,6 +41,7 @@ test('the panel opens on its launcher, and the workbench surfaces fit both width
   await page.click(id('panel-toggle'));
   await page.waitFor(`document.querySelector('${id('panel-launcher')}')`);
   expect(await page.evaluate(`Array.from(document.querySelectorAll('${id('panel-launcher')} .card')).map(card => card.dataset.testid)`)).toEqual([
+    'launch-agents',
     'launch-browser',
     'launch-changes',
     'launch-files',
@@ -90,12 +88,30 @@ test('the panel opens on its launcher, and the workbench surfaces fit both width
   await page.waitFor(`document.querySelectorAll('${id('todo-row')}').length === 3`);
   await page.waitFor(`document.querySelectorAll('${id('agent-task')}').length === 3`);
   expect(await page.evaluate(`document.querySelectorAll('${id('panel-tab')}').length`)).toBe(2);
+  // Closing preserves the body during its transition and removes its controls
+  // from keyboard navigation immediately; reopening keeps the draft intact.
+  await page.type(id('todo-input'), 'Keep this draft while folded');
+  await page.click(id('tasks-section-todos'));
+  expect(await page.evaluate(`document.querySelector('${id('todo-input')}').closest('[inert]') !== null`)).toBe(true);
+  await page.waitFor(`document.querySelector('${id('todo-input')}').closest('[inert]').getBoundingClientRect().height < 1`);
+  await page.click(id('tasks-section-todos'));
+  await page.waitFor(`!document.querySelector('${id('todo-input')}').closest('[inert]')`);
+  expect(await page.evaluate(`document.querySelector('${id('todo-input')}').value`)).toBe('Keep this draft while folded');
+  await page.type(id('todo-input'), '');
+  await page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
+  await page.click(id('tasks-section-todos'));
+  await page.waitFor(`document.querySelector('${id('todo-input')}').closest('[inert]').getBoundingClientRect().height < 1`);
+  expect(await page.evaluate(`parseFloat(getComputedStyle(document.querySelector('${id('todo-input')}').closest('[inert]')).transitionDuration) < 0.001`)).toBe(true);
+  await page.click(id('tasks-section-todos'));
+  await page.send('Emulation.setEmulatedMedia', { features: [] });
   await capture('tasks-desktop.png');
 
   await phone(true);
   await page.waitFor(`document.querySelector('${id('tasks-panel')}')`);
   await capture('tasks-phone.png');
   expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
+  expect(await page.evaluate(`Array.from(document.querySelectorAll('${id('todo-row')} button')).every(button => getComputedStyle(button).opacity === '1' && button.getBoundingClientRect().height >= 44)`)).toBe(true);
+  expect(await page.evaluate(`Array.from(document.querySelectorAll('${id('todo-row')} .text')).every(text => getComputedStyle(text).whiteSpace !== 'nowrap')`)).toBe(true);
 
   await page.click(`${id('panel-tab')}[data-kind=changes]`);
   await page.waitFor(`document.querySelector('${id('changes-panel')}')`);
@@ -111,7 +127,7 @@ test('the panel opens on its launcher, and the workbench surfaces fit both width
 
 /** The middle of an element, in the page's own pixels, for a real pointer. */
 async function middleOf(selector: string): Promise<{ x: number; y: number }> {
-  return await page.evaluate(`(() => { const box = document.querySelector('${selector}').getBoundingClientRect(); return { x: box.left + box.width / 2, y: box.top + box.height / 2 }; })()`);
+  return await page.evaluate<{ x: number; y: number }>(`(() => { const box = document.querySelector('${selector}').getBoundingClientRect(); return { x: box.left + box.width / 2, y: box.top + box.height / 2 }; })()`);
 }
 
 async function zoomPercent(): Promise<number> {

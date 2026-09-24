@@ -13,6 +13,13 @@ mod platform;
 use platform::{job, default_data_dir};
 use platform::job::CoreJob;
 mod quota_window;
+mod updater;
+
+// Tauri links its manifest into binaries, but not the library test executable.
+// Native updater tests import TaskDialogIndirect, which needs Common Controls v6.
+#[cfg(all(test, target_os = "windows"))]
+#[link(name = "resource", kind = "static", modifiers = "-bundle")]
+unsafe extern "C" {}
 
 use serde::{Deserialize, Serialize};
 use tauri::{
@@ -574,6 +581,23 @@ fn core_program() -> Result<(String, Vec<String>, Option<PathBuf>), String> {
     ))
 }
 
+/// Tauri keeps resources separate from executables on Linux and macOS.
+fn configure_core_resources(command: &mut Command, resources: &Path) {
+    let ui = resources.join("ui");
+    if ui.join("index.html").is_file() { command.env("BOITE_UI_DIR", ui); }
+    #[cfg(not(windows))]
+    if resources.join("boite").is_file()
+        && Path::new(command.get_program()).is_absolute()
+        && Path::new(command.get_program()).file_name().is_some_and(|name| name == "boite-core")
+    {
+        let executable = command.get_program().to_os_string();
+        command.env("BOITE_CORE_EXECUTABLE", executable);
+        if std::env::var_os("BOITE_CLI_DIR").filter(|value| !value.is_empty()).is_none() {
+            command.env("BOITE_CLI_DIR", resources);
+        }
+    }
+}
+
 fn spawn_core(channel: Channel, resources: Option<&Path>, resident: bool) -> Result<(Child, Arc<AtomicBool>, Option<CoreJob>), String> {
     let (program, args, working_directory) = core_command(channel)?;
     let job = if resident { None } else { Some(job::create_core_job()?) };
@@ -597,9 +621,7 @@ fn spawn_core(channel: Channel, resources: Option<&Path>, resident: bool) -> Res
     if let Some(directory) = working_directory {
         command.current_dir(directory);
     }
-    if let Some(ui) = resources.map(|path| path.join("ui")).filter(|path| path.join("index.html").is_file()) {
-        command.env("BOITE_UI_DIR", ui);
-    }
+    if let Some(resources) = resources { configure_core_resources(&mut command, resources); }
     platform::prepare_command(&mut command);
 
     let mut child = command
@@ -718,6 +740,45 @@ fn start_core<R: Runtime>(app: &AppHandle<R>, state: &CoreState) {
 // Window and tray.
 // ---------------------------------------------------------------------------
 
+/// What a nightly build calls itself in the window title and the tray. The
+/// installer keeps `productName` Boite: both tracks are one installation.
+const NIGHTLY_LABEL: &str = "boite (de nuit)";
+
+fn product_label<R: Runtime>(app: &AppHandle<R>, channel: Channel) -> &'static str {
+    label_for(channel, app.package_info().version.pre.as_str())
+}
+
+fn label_for(channel: Channel, prerelease: &str) -> &'static str {
+    if channel == Channel::Stable && prerelease.starts_with("nightly.") {
+        NIGHTLY_LABEL
+    } else { channel.product_name() }
+}
+
+/// The size the main window opens at. The height fits the tour's tallest screen
+/// without a scrollbar: 808 px (French consent screen, measured 2026-09-23) plus
+/// the scrim's 32 px margin and the 44 px title bar left above it.
+const MAIN_SIZE: (f64, f64) = (1280.0, 890.0);
+const MAIN_MIN_SIZE: (f64, f64) = (880.0, 560.0);
+
+/// Logical `(x, y, width, height)` of a window of `size` centred in `area`
+/// (`left, top, width, height`), shrunk to 92% of the area on a smaller screen.
+/// An area below the minimum size gets the window at its top left, so the
+/// title bar stays on screen.
+fn centred(size: (f64, f64), min: (f64, f64), area: (f64, f64, f64, f64)) -> (f64, f64, f64, f64) {
+    let width = size.0.min(area.2 * 0.92).max(min.0);
+    let height = size.1.min(area.3 * 0.92).max(min.1);
+    (area.0 + ((area.2 - width) / 2.0).max(0.0), area.1 + ((area.3 - height) / 2.0).max(0.0), width, height)
+}
+
+/// The primary monitor's work area, in logical pixels. Windows puts a window
+/// with no position at its cascade spot, the top left of the first launch.
+fn work_area<R: Runtime>(app: &AppHandle<R>) -> Option<(f64, f64, f64, f64)> {
+    let monitor = app.primary_monitor().ok()??;
+    let scale = monitor.scale_factor();
+    let area = monitor.work_area();
+    Some((area.position.x as f64 / scale, area.position.y as f64 / scale, area.size.width as f64 / scale, area.size.height as f64 / scale))
+}
+
 /// The main window, built here rather than in `tauri.conf.json` so a run on its
 /// own data directory (a test, a bench) keeps its WebView2 profile there too.
 /// WebView2 runs one browser process per profile: on the default profile the
@@ -729,9 +790,9 @@ fn build_main_window<R: Runtime>(
 ) -> tauri::Result<tauri::WebviewWindow<R>> {
     let mut builder =
         tauri::WebviewWindowBuilder::new(app, MAIN_LABEL, tauri::WebviewUrl::default())
-            .title(channel.product_name())
-            .inner_size(1280.0, 800.0)
-            .min_inner_size(880.0, 560.0)
+            .title(product_label(app, channel))
+            .inner_size(MAIN_SIZE.0, MAIN_SIZE.1)
+            .min_inner_size(MAIN_MIN_SIZE.0, MAIN_MIN_SIZE.1)
             .resizable(true)
             .decorations(false)
             .visible(false)
@@ -756,6 +817,13 @@ fn build_main_window<R: Runtime>(
             color: None,
         });
     }
+    builder = match work_area(app) {
+        Some(area) => {
+            let (x, y, width, height) = centred(MAIN_SIZE, MAIN_MIN_SIZE, area);
+            builder.inner_size(width, height).position(x, y)
+        }
+        None => builder.center(),
+    };
     if let Some(directory) = webview_profile() {
         builder = builder.data_directory(directory);
     }
@@ -804,7 +872,7 @@ fn build_tray<R: Runtime>(app: &AppHandle<R>, channel: Channel) -> tauri::Result
     let menu = Menu::with_items(app, &[&show, &leave])?;
 
     let mut builder = TrayIconBuilder::with_id("boite")
-        .tooltip(channel.product_name())
+        .tooltip(product_label(app, channel))
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_tray_icon_event(|tray, event| {
@@ -851,10 +919,15 @@ pub fn run() {
     };
     let preferences_path = directory.join("shell-settings.json");
     let close_to_tray = close_to_tray_or_default(&preferences_path);
+    let app_updater = updater::AppUpdater::new(context.package_info().version.to_string(), directory.clone(),
+        cfg!(all(windows, target_arch = "x86_64")) && !cfg!(debug_assertions)
+            && channel == Channel::Stable && !hidden());
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .manage(app_updater)
         .manage(CoreState::new(channel))
         .manage(quota_window::HoverState::default())
         .manage(CloseBehavior { enabled: AtomicBool::new(close_to_tray), path: preferences_path })
@@ -863,6 +936,10 @@ pub fn run() {
             quit_shell,
             notify,
             close_behavior,
+            updater::app_update_status,
+            updater::app_update_check,
+            updater::app_update_download,
+            updater::app_update_install,
             quota_window::quota_window,
             window_material,
             window_material_supported,
@@ -873,6 +950,8 @@ pub fn run() {
             browser::browser_reload,
             browser::browser_set_bounds,
             browser::browser_set_zoom,
+            browser::browser_annotate,
+            browser::browser_highlight,
             browser::browser_destroy,
         ])
         .setup(move |app| {
@@ -909,8 +988,23 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::{effects_for, Channel};
+    use super::{effects_for, label_for, Channel};
     use tauri::window::Effect;
+
+    #[test]
+    fn the_main_window_opens_centred_and_fits_a_small_screen() {
+        // 1080p at 100%, taskbar at the bottom: the full size, centred.
+        assert_eq!(super::centred((1280.0, 890.0), (880.0, 560.0), (0.0, 0.0, 1920.0, 1032.0)), (320.0, 71.0, 1280.0, 890.0));
+        // 1080p at 150%: 1280 x 688 logical, so 92% of it, still centred.
+        let (x, y, width, height) = super::centred((1280.0, 890.0), (880.0, 560.0), (0.0, 0.0, 1280.0, 688.0));
+        assert_eq!((width.round(), height.round()), (1178.0, 633.0));
+        assert_eq!(((x * 2.0).round(), (y * 2.0).round()), (102.0, 55.0));
+        // A taskbar on the left moves the centre with the work area.
+        assert_eq!(super::centred((1280.0, 890.0), (880.0, 560.0), (60.0, 0.0, 1860.0, 1080.0)).0, 350.0);
+        // Never below the minimum size, and then pinned to the top left.
+        assert_eq!(super::centred((1280.0, 890.0), (880.0, 560.0), (0.0, 0.0, 800.0, 500.0)), (0.0, 0.0, 880.0, 560.0));
+        assert_eq!(super::centred((1280.0, 890.0), (880.0, 560.0), (60.0, 40.0, 800.0, 500.0)), (60.0, 40.0, 880.0, 560.0));
+    }
 
     #[test]
     fn both_sidecar_workers_are_required() {
@@ -1038,6 +1132,14 @@ mod tests {
         assert_eq!(Channel::Dev.data_dir_name(), "boite2-dev");
         assert_eq!(Channel::Stable.product_name(), "Boite");
         assert_eq!(Channel::Dev.product_name(), "Boite Dev");
+    }
+
+    #[test]
+    fn a_nightly_build_names_itself_boite_de_nuit() {
+        assert_eq!(label_for(Channel::Stable, "nightly.20260923.1"), "boite (de nuit)");
+        assert_eq!(label_for(Channel::Stable, "beta.2"), "Boite");
+        assert_eq!(label_for(Channel::Stable, ""), "Boite");
+        assert_eq!(label_for(Channel::Dev, "nightly.20260923.1"), "Boite Dev");
     }
 
     #[test]

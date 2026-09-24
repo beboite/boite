@@ -29,11 +29,14 @@ export interface CliIo {
 export const USAGE = `usage: boite <command> [args] [--json]
 
   where                          this thread, project, cwd, branch
+  attach <file>                  publish a file in chat, up to 5 MB (experimental)
   show <file>[:line]             open a file in the panel, at a line
   diff [file]                    open the changes, or one file's diff
   browse <url>                   open a url in the panel's browser
   open trace|tasks|changes|files [dir]
   status                         git status of the working directory
+  ask <question> [option ...]    ask the user without stopping; the answer
+                                 arrives later as a message (--multiple)
   task list                      the agent's task list
   task add <text>                add a task (id t1, t2, ...)
   task start|done|remove <id>    move or drop one task
@@ -54,7 +57,13 @@ export const USAGE = `usage: boite <command> [args] [--json]
   agent decide <json>            prompt and options; yield until the user answers
   agent memory [query]           search memory in this context
   agent remember <json>          title and text, optional id and expectedRevision
+  agent routines                list this identity's scheduled work
+  agent schedule <json>          name, prompt, schedule; optional id, expectedRevision, enabled
   --request-id <id>              reuse for a retried collaboration command
+  delegate profiles|list         approved models, team status and bounded results
+  delegate spawn <profile> <brief>
+  delegate send <thread-id> <text>
+  delegate stop [thread-id]      stop one child, or pause the whole team
 
   --thread <id> --data-dir <dir> --channel <stable|dev>
                                  drive a thread from outside it, as the owner`;
@@ -80,6 +89,7 @@ class Usage extends Error {}
 interface Parsed {
   positional: string[];
   json: boolean;
+  multiple: boolean;
   thread: string | undefined;
   dataDir: string | undefined;
   channel: Channel;
@@ -87,7 +97,7 @@ interface Parsed {
 }
 
 function parse(argv: string[]): Parsed {
-  const parsed: Parsed = { positional: [], json: false, thread: undefined, dataDir: undefined, channel: 'stable' };
+  const parsed: Parsed = { positional: [], json: false, multiple: false, thread: undefined, dataDir: undefined, channel: 'stable' };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index] ?? '';
     const next = (): string => {
@@ -98,6 +108,7 @@ function parse(argv: string[]): Parsed {
     };
     if (arg === '--json') parsed.json = true;
     else if (arg === '--request-id') parsed.requestId = next();
+    else if (arg === '--multiple') parsed.multiple = true;
     else if (arg === '--thread') parsed.thread = next();
     else if (arg === '--data-dir') parsed.dataDir = next();
     else if (arg === '--channel') {
@@ -210,6 +221,42 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
       print([JSON.stringify(result)], result);
       return;
     }
+    case 'attach': {
+      const message = await client.call('artifacts.publish', { threadId, path: absolute(io.cwd, want(0, 'a file')) });
+      print([`attached: ${rest[0]}`, `message: ${message.id}`], message);
+      return;
+    }
+    case 'delegate': {
+      const action = want(0, 'profiles, list, spawn, send or stop');
+      if (action === 'profiles' || action === 'list') {
+        const view = await client.call('delegation.get', { threadId });
+        print([
+          `parent: ${view.rootThreadId}`,
+          `delegation: ${!view.config.enabled ? 'disabled' : view.config.paused ? 'paused' : 'enabled'}`,
+          `turns: ${view.turnsUsed}/${view.config.maxTurns}`,
+          ...(action === 'profiles'
+            ? view.config.profiles.map(p => `${p.id} ${JSON.stringify(p.name)} ${p.providerId}/${p.model} effort=${p.effort ?? 'default'}`)
+            : view.agents.map(a => `${a.thread.id} ${a.thread.status} ${a.thread.providerId}/${a.thread.model} ${JSON.stringify(a.thread.title)}${a.result ? ` result=${JSON.stringify(a.result)}` : ''}`)),
+          'Results arrive automatically. Do not poll repeatedly or wait inside a running tool.',
+        ], view);
+      } else if (action === 'spawn') {
+        const profileId = want(1, 'a profile id from delegate profiles');
+        const task = rest.slice(2).join(' ');
+        if (!task) throw new Usage('delegate spawn needs a bounded task brief');
+        const agent = await client.call('delegation.spawn', { threadId, profileId, task, requestId: crypto.randomUUID() });
+        print([`agent: ${agent.thread.id}`, `status: ${agent.thread.status}`, `model: ${agent.thread.providerId}/${agent.thread.model}`, 'Result will be forwarded to the parent automatically.'], agent);
+      } else if (action === 'send') {
+        const toThreadId = want(1, 'a parent or child thread id');
+        const body = rest.slice(2).join(' ');
+        if (!body) throw new Usage('delegate send needs message text');
+        const letter = await client.call('delegation.send', { threadId, toThreadId, text: body, requestId: crypto.randomUUID() });
+        print([`id: ${letter.id}`, `status: ${letter.status}`, 'Queued messages are not an acknowledgement or consent.'], letter);
+      } else if (action === 'stop') {
+        const result = await client.call('delegation.stop', { threadId, ...(rest[1] ? { agentId: rest[1] } : {}) });
+        print([`stopped: ${result.stopped}`], result);
+      } else throw new Usage('delegate expects profiles, list, spawn, send or stop');
+      return;
+    }
     case 'agents': {
       const action = want(0, 'list, inbox, send or reply');
       if (action === 'list') {
@@ -276,6 +323,13 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
         const dir = rest[1];
         await opened(dir === undefined ? { kind: 'files' } : { kind: 'files', path: absolute(io.cwd, dir) });
       } else throw new Usage(`open: unknown surface ${kind}`);
+      return;
+    }
+    case 'ask': {
+      const text = want(0, 'a question');
+      const options = rest.slice(1);
+      const asked = await client.call('questions.ask', { threadId, text, ...(options.length > 0 ? { options } : {}), ...(parsed.multiple ? { multiple: true } : {}) });
+      print([`asked: ${asked.questionId}`, 'Keep working. The answer arrives as a message quoting the question; without one, go on with a sensible default.'], asked);
       return;
     }
     case 'status': {

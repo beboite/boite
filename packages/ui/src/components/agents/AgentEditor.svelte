@@ -14,12 +14,13 @@
   const team = initial.kind === 'team' ? initial.record as AgentTeam | null : null;
   const mission = initial.kind === 'mission' ? initial.record as AgentMission | null : null;
   const defaultAccount = untrack(() => view.store.accounts.find(a => view.store.providerOf(a.providerId)?.available));
+  const defaultModels = untrack(() => defaultAccount ? view.store.modelsOf(defaultAccount.providerId, defaultAccount.id) : []);
   let name = $state(profile?.name ?? group?.name ?? team?.name ?? mission?.title ?? '');
   let domain = $state(profile?.domain ?? '');
   let instructions = $state(profile?.instructions ?? '');
   let description = $state(team?.description ?? '');
-  let selection = $state<ExecutionSelection>({ ...(profile?.selection ?? { providerId: defaultAccount?.providerId ?? '', accountId: defaultAccount?.id ?? '', model: null, effort: null, permissionMode: 'default' }) });
-  let tools = $state(profile?.tools ?? ['messages', 'missions', 'memory', 'artifacts', 'decisions']);
+  let selection = $state<ExecutionSelection>({ ...(profile?.selection ?? { providerId: defaultAccount?.providerId ?? '', accountId: defaultAccount?.id ?? '', model: defaultModels.find(m => m.default)?.id ?? defaultModels[0]?.id ?? null, effort: null, permissionMode: 'default' }) });
+  let tools = $state(profile?.tools ?? ['messages', 'missions', 'memory', 'artifacts', 'decisions', 'routines']);
   let status = $state(profile?.status ?? 'active');
   let accountIntegration = $state(profile?.accountIntegration ?? 'provider');
   let memberIds = $state(group?.memberIds ?? team?.members.map(m => m.agentId) ?? mission?.agentIds ?? []);
@@ -68,7 +69,7 @@
       {labels.permissions}: {({ default: labels.ask, acceptEdits: labels.edits, plan: labels.plan, bypassPermissions: labels.full, dontAsk: labels.deny })[selection.permissionMode]}
     </Menu>
     {#if view.store.providerOf(selection.providerId)?.capabilities.approvals === false}<p class="muted">{labels.noApprovals}</p>{/if}
-    <fieldset><legend>{labels.tools}</legend><div class="agent-checks">{#each ['messages', 'missions', 'memory', 'artifacts', 'decisions'] as tool (tool)}<label><input type="checkbox" checked={tools.includes(tool)} onchange={() => { tools = toggle(tools, tool); }} />{labels[tool as 'messages']}</label>{/each}</div></fieldset>
+    <fieldset><legend>{labels.tools}</legend><div class="agent-checks">{#each ['messages', 'missions', 'memory', 'artifacts', 'decisions', 'routines'] as tool (tool)}<label><input type="checkbox" checked={tools.includes(tool)} onchange={() => { tools = toggle(tools, tool); }} />{labels[tool as 'messages']}</label>{/each}</div></fieldset>
     <Menu placement="bottom" label={labels.activity} items={(['active', 'paused', 'archived'] as const).map(id => ({ id, label: labels[id], active: status === id }))} onpick={id => { status = id as AgentProfile['status']; }}>{labels[status]}</Menu>
     {#if view.store.providerOf(selection.providerId)?.protocol === 'agy'}
       <label class="agent-check"><input type="checkbox" disabled={!view.snapshot?.limits.kebaccExperiment} checked={accountIntegration === 'kebacc-experiment'} onchange={e => { accountIntegration = e.currentTarget.checked ? 'kebacc-experiment' : 'provider'; }} />{labels.kebacc}</label><p class="muted">{labels.kebaccHint}</p>
@@ -97,5 +98,5 @@
     {/if}
     {#if kind !== 'mission'}<label class="agent-check"><input type="checkbox" bind:checked={paused} />{labels.paused}</label>{/if}
   {/if}
-  <button class="primary" type="submit" disabled={view.pending || !name.trim() || kind === 'profile' && !selection.accountId} data-testid="agent-save">{labels.save}</button>
+  <button class="primary" type="submit" disabled={view.pending || !name.trim() || kind === 'profile' && (!selection.accountId || !selection.model)} data-testid="agent-save">{labels.save}</button>
 </form>

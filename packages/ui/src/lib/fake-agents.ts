@@ -1,9 +1,17 @@
 import type { AgentDraft, AgentEntities, AgentEntityKind, AgentRecord, AgentSave, AgentWork, AgentsRpcMethods, AgentsSnapshot, RpcParams, AgentProfile, Turn } from '@boite/contracts';
-import { RpcErrorCode } from '@boite/contracts';
+import { RpcErrorCode, DEFAULT_DELEGATION_CONFIG } from '@boite/contracts';
+import type { AgentAccountGrant, AgentBrain, AgentRuntimeConfig } from '@boite/contracts';
 import { RpcFailure } from './client';
 
 /** In-memory projection for interface journeys. Real process and crash behavior is tested against the core. */
 export class FakeAgents {
+  private configs = new Map<string, AgentRuntimeConfig>();
+  private brains = new Map<string, AgentBrain>();
+  private grants: AgentAccountGrant[] = [];
+  private runtime(id: string): AgentRuntimeConfig {
+    const agent = this.get('profile', id);
+    return structuredClone(this.configs.get(id) ?? { defaultRoute: agent.selection, allowedRoutes: [{ ...agent.selection, model: agent.selection.model ?? 'default', id: 'default', name: 'Default' }], subagents: DEFAULT_DELEGATION_CONFIG, compactAfterTurns: 12, maxRunMinutes: 10 });
+  }
   private closed = false;
   private pumping = false;
   private rows = new Map<string, AgentRecord>();
@@ -128,13 +136,37 @@ export class FakeAgents {
     const result = run(); this.receipts.set(requestId, { fingerprint, result: structuredClone(result) }); return result;
   }
   snapshot(): AgentsSnapshot {
-    return { revision: this.revision, limits: { ...this.limits }, profiles: this.all('profile'), groups: this.all('group'), teams: this.all('team'), missions: this.all('mission'), tasks: this.all('task'), sessions: this.all('session'), messages: this.all('message'), deliveries: this.all('delivery'), work: this.all('work'), runs: this.all('run'), memories: this.all('memory'), resources: this.all('resource'), artifacts: this.all('artifact'), decisions: this.all('decision') };
+    return { revision: this.revision, routines: this.all('routine'), accountGrants: structuredClone(this.grants), limits: { ...this.limits }, profiles: this.all('profile'), groups: this.all('group'), teams: this.all('team'), missions: this.all('mission'), tasks: this.all('task'), sessions: this.all('session'), messages: this.all('message'), deliveries: this.all('delivery'), work: this.all('work'), runs: this.all('run'), memories: this.all('memory'), resources: this.all('resource'), artifacts: this.all('artifact'), decisions: this.all('decision') };
   }
   call(method: keyof AgentsRpcMethods, raw: unknown): unknown {
     try { return this.dispatch(method, raw); } finally { if (method !== 'agents.snapshot') this.kick(); }
   }
   private dispatch(method: keyof AgentsRpcMethods, raw: unknown): unknown {
     switch (method) {
+      case 'agents.runtime.get': return this.runtime((raw as RpcParams<typeof method>).agentId);
+      case 'agents.runtime.configure': {
+        const p = raw as RpcParams<typeof method>, agent = this.get('profile', p.agentId);
+        if (!p.config.defaultRoute.model || !p.config.allowedRoutes.some(r => r.providerId === p.config.defaultRoute.providerId && r.accountId === p.config.defaultRoute.accountId && r.model === p.config.defaultRoute.model)) this.refuse('defaultRoute must be allowed');
+        for (const route of [...p.config.allowedRoutes, ...p.config.subagents.profiles]) { const grant = this.grants.find(g => g.accountId === route.accountId); if (grant?.agentIds && !grant.agentIds.includes(agent.id)) this.refuse('account is not granted to this agent'); }
+        const saved = this.save('profile', { id: agent.id, expectedRevision: p.expectedRevision, value: { ...agent, selection: p.config.defaultRoute } });
+        this.configs.set(agent.id, structuredClone(p.config)); return saved;
+      }
+      case 'agents.accounts.set': { this.grants = structuredClone((raw as RpcParams<typeof method>).grants); this.changed(++this.revision); return structuredClone(this.grants); }
+      case 'agents.brain.get': {
+        const p = raw as RpcParams<typeof method>, agent = this.get('profile', p.agentId);
+        if (!this.brains.has(agent.id)) this.brains.set(agent.id, { path: `/agent-workspaces/${agent.id}/brain`, instructions: agent.instructions, memory: '', revision: '0' });
+        return structuredClone(this.brains.get(agent.id));
+      }
+      case 'agents.brain.save': {
+        const p = raw as RpcParams<typeof method>, brain = this.dispatch('agents.brain.get', p) as AgentBrain;
+        if (brain.revision !== p.expectedRevision) this.refuse('brain revision changed');
+        const saved = { ...brain, instructions: p.instructions, memory: p.memory, revision: String(Number(brain.revision) + 1) }; this.brains.set(p.agentId, saved); return structuredClone(saved);
+      }
+      case 'agents.routine.save': { const p = raw as RpcParams<typeof method>; this.get('profile', p.value.agentId); return this.save('routine', p); }
+      case 'agents.routine.run': {
+        const p = raw as RpcParams<typeof method>; return this.once(p.requestId, p, () => { const routine = this.get('routine', p.routineId); if (routine.lastWorkId && !['done','cancelled'].includes(this.get('work', routine.lastWorkId).status)) this.refuse('previous work is unfinished'); const work = this.work({ agentId: routine.agentId, scope: { kind: 'agent', id: routine.agentId }, prompt: routine.prompt, episodeId: crypto.randomUUID() }); this.update('routine', { ...routine, lastWorkId: work.id, lastScheduledAt: Date.now() }); return work; });
+      }
+      case 'agents.context.compact': { const p = raw as RpcParams<typeof method>, session = this.get('session', p.sessionId); return this.once(p.requestId, p, () => this.work({ agentId: session.agentId, scope: session.scope, prompt: 'Compact context', purpose: 'compaction', episodeId: crypto.randomUUID() })); }
       case 'agents.snapshot': return this.snapshot();
       case 'agents.profile.save': {
         const p = raw as RpcParams<typeof method>;

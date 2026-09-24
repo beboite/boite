@@ -15,7 +15,10 @@ owner can stop them explicitly through `core.shutdown`. Tests can set
 The shell also carries a channel, read once from its own
 bundle identifier: `Boite` and `Boite Dev` are two installs on one machine, and
 the channel is what keeps their data directories, and so their cores, apart.
-[docs/releasing.md](releasing.md).
+[docs/releasing.md](releasing.md). Boite and Boite Nightly are update tracks
+within the regular install and share its data. The desktop updater belongs to
+the shell, uses main-webview-only IPC and never acts on the selected remote core.
+It verifies signed installers before offering a restart. [Updates](updates.md).
 
 ## One WebSocket, one contract
 
@@ -64,6 +67,21 @@ lets a driver keep its own one for the next turn. Raising the global cap alone
 changes nothing when every thread shares one account, which is the shape of the
 bench.
 
+## Delegation shares the scheduler
+
+An owner-enabled team creates ordinary child threads with a persisted parent
+relationship and a separate provider session per child. The owner's named
+profiles select the account, model and effort. The child inherits the parent's
+checkout and permission mode. No additional orchestration model runs.
+
+Delegation admission applies team limits before the existing global and
+account scheduler limits. Compact briefs and bounded final answers cross the
+thread boundary; transcripts and tool payloads stay in their own threads.
+The core serializes live steering with ordinary coordination and queues input
+for drivers without steering. Results can also join the next user prompt.
+Restart retains the records but pauses automatic work. [Delegation](delegation.md)
+describes controls, delivery semantics and costs.
+
 ## Process tracking follows the host OS
 
 `procs.ts` calls the platform interface for native tracking and protections.
@@ -91,7 +109,7 @@ mute across restarts. Both decisions are pure logic classes tested on a fake of
 the Win32 calls, so no test ever creates a window or plays a sound.
 [docs/trace.md](trace.md) has the caps and the settings.
 
-## Six drivers, one interface
+## Drivers, one interface
 
 `Driver.startTurn(ctx) -> TurnHandle`, and the driver's whole job is mapping one
 protocol onto the contract's parts. What they share: one process and one agent
@@ -100,6 +118,18 @@ permission question drawn as the same inline card whatever asked it; a stop that
 is the protocol's own cancel; usage folded onto the turn, with a real price only
 where the wire carries one; and a lazy module, so a driver nobody used costs
 nothing at start.
+
+Questions come in two kinds. A blocking one (Claude's `AskUserQuestion`, one
+card per question) holds the turn in `waiting` until it is answered. An
+asynchronous one (Codex's `delivery: "async"` messages, or `boite ask` from any
+agent) draws the same card without stopping anything; the core answers it by
+steering the running turn, or by sending `> question` and the answer as the
+next prompt once the thread is idle. The core stamps `startedAt` and
+`finishedAt` on every tool part, so a card shows how long a command has run.
+Work a Claude session leaves in the background (a shell, an agent, a monitor)
+is reported as `thread.background`: the CLI stays alive while it runs, the turn
+footer counts it, Stop on the idle thread ends it, and what the CLI writes when
+it finishes opens a turn of its own, marked "Background work finished".
 
 Where they differ is worth knowing before you touch one. `claude-sdk` runs the
 Claude Agent SDK with a `PreToolUse` hook as the single gate that journals and
@@ -178,6 +208,45 @@ measures it, and a height measured above the reading point put back into
 `scrollTop` so the viewport never jumps. Under sixty, the list renders whole.
 The transport sits behind one `Client` interface, so the same UI runs on the real
 core, on a WebSocket to a remote core, and on an in-memory fake.
+
+## Module boundaries and complexity
+
+The Codex and Muse entry files compose their drivers. Each has a directory with
+`rpc.ts` for framing and requests, `session.ts` for the warm process lifecycle,
+`turn.ts` for message parts, `models.ts` for discovery, `mapping.ts` for protocol
+conversion, and `protocol.ts` for wire types and constants. Internal modules do
+not import their entry file. Public imports remain unchanged.
+
+Both drivers use `drivers/model-probes.ts` to coalesce concurrent model reads.
+Completion checks entry identity, so an invalidated probe cannot overwrite or
+remove its replacement's cached result. Session ownership,
+permissions and shutdown remain specific to each driver.
+
+The server separates connection buffering, frame dispatch and the initial
+authentication handshake under `server/`. The Git reader separates porcelain
+parsing, bounded file reads and diff assembly under `git/`. A ref resolves to an
+object ID before its size and content are read; a working-tree file is sized and
+read through the same handle.
+
+The in-memory client checks each RPC handler's input and result against the
+shared contract. Its plugin domain owns installation state and cancellation;
+file, conversation and provider fixtures live under `lib/fake-client/`.
+
+`bun run check:architecture` checks runtime imports in production TypeScript
+and JavaScript, including literal dynamic imports. It rejects cycles, core/UI
+cross-imports, contracts importing either runtime, direct native-backend imports
+outside the platform directory, and internal modules importing their entry file.
+Type-only imports, Svelte component scripts and Rust dependencies are outside
+this check. Type checks, UI tests and shell checks still cover those sources.
+New workspace package exports need a source mapping in the check's alias table;
+unmapped workspace imports fail instead of disappearing from the graph.
+
+`bun run audit:complexity` prints an advisory ranking from pinned oxlint 1.82.0.
+It measures TypeScript, JavaScript and Svelte scripts, not Rust, and accepts
+`--json` for comparison. The first run downloads the tool through Bun's cache.
+Complexity is not a CI threshold: a method router and a short validation guard
+can legitimately have many branches. Review state ownership and repeated logic
+before splitting a high-scoring function.
 
 ## Agent coordination
 

@@ -126,17 +126,39 @@ test('historical images travel before current attachments and unsupported image 
   expect(() => continuationInput(h.core.journal, threadId, 'new', input, { ...provider, capabilities: { ...provider.capabilities, images: false } })).toThrow('historical images');
 });
 
+test('delegation migration preserves threads from the prompt-cache schema', async () => {
+  const { threadId } = await setup();
+  const path = join(h.dataDir, 'cache-schema.db');
+  const legacy = new Journal(path);
+  legacy.putThread({ ...h.core.threads.require(threadId), sessionId: 'cached-session' });
+  legacy.db.exec('DROP TABLE delegated_agents; DROP TABLE delegation_messages; DROP INDEX threads_parent; ALTER TABLE threads DROP COLUMN parent_thread_id; PRAGMA user_version = 13;');
+  legacy.close();
+  const migrated = new Journal(path);
+  try {
+    const thread = migrated.getThread(threadId)!;
+    expect(thread.sessionId).toBe('cached-session');
+    expect(thread.parentThreadId).toBeUndefined();
+    expect(thread.promptCache).toBeNull();
+    migrated.putThread({ ...thread, parentThreadId: 'parent' });
+    expect(migrated.getThread(threadId)?.parentThreadId).toBe('parent');
+    expect(migrated.db.query('SELECT COUNT(*) AS count FROM delegated_agents').get()).toEqual({ count: 0 });
+  } finally { migrated.close(); }
+});
+
 test('migration preserves legacy native sessions and persists new selections and turn execution', async () => {
   const { client, threadId } = await setup();
   const path = join(h.dataDir, 'migration.db');
   const legacy = new Journal(path);
   legacy.putThread({ ...h.core.threads.require(threadId), sessionId: 'legacy-session' });
-  legacy.db.exec('DROP TABLE agent_entities; DROP TABLE agent_requests; ALTER TABLE threads DROP COLUMN agent_session_id; DROP TABLE coordination_letters; DROP TABLE coordination_wakes; DROP TABLE turn_requests; ALTER TABLE threads DROP COLUMN speed; ALTER TABLE threads DROP COLUMN session_generation; ALTER TABLE threads DROP COLUMN selection_version; ALTER TABLE turns DROP COLUMN execution; PRAGMA user_version = 8;');
+  legacy.db.exec('DROP TABLE agent_entities; DROP TABLE agent_requests; ALTER TABLE threads DROP COLUMN agent_session_id;');
+  legacy.db.exec('DROP TABLE delegated_agents; DROP TABLE delegation_messages; DROP INDEX threads_parent; ALTER TABLE threads DROP COLUMN parent_thread_id;');
+  legacy.db.exec('DROP TABLE coordination_letters; DROP TABLE coordination_wakes; DROP TABLE turn_requests; ALTER TABLE threads DROP COLUMN prompt_cache; ALTER TABLE threads DROP COLUMN speed; ALTER TABLE threads DROP COLUMN session_generation; ALTER TABLE threads DROP COLUMN selection_version; ALTER TABLE turns DROP COLUMN execution; PRAGMA user_version = 8;');
   legacy.close();
   const migrated = new Journal(path);
   try {
     expect(migrated.getThread(threadId)?.sessionId).toBe('legacy-session');
     expect(migrated.getThread(threadId)?.sessionGeneration).toBe(0);
+    expect(migrated.getThread(threadId)?.promptCache).toBeNull();
   } finally { migrated.close(); }
   await client.call('threads.update', { threadId, accountId: 'second-account', model: 'echo' });
   const turn = await client.call('turns.start', { threadId, prompt: 'persist' });

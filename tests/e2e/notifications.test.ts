@@ -1,19 +1,16 @@
 import { afterAll, beforeAll, expect, test } from 'bun:test';
-import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { BrowserPage, freePort } from './lib/cdp';
-const req = createRequire(join(import.meta.dir, '../../packages/ui/package.json'));
-const { createServer } = await import(req.resolve('vite'));
+import { startDevUi } from './lib/ui.ts';
 let server: { close(): Promise<void> };
 let page: BrowserPage;
 beforeAll(async () => {
   const port = await freePort();
-  const vite = await createServer({root:join(import.meta.dir,'../../packages/ui'),server:{host:'127.0.0.1',port,strictPort:true}});
-  server = vite; await vite.listen();
+  server = await startDevUi(port);
   page = await BrowserPage.launch({url:`http://127.0.0.1:${port}/?fake=1&open=recent`,windowSize:{width:1300,height:850}});
   await page.waitFor(`document.querySelector('[data-thread-id]')`);
 }, 90000);
-afterAll(async () => { await page?.close(); await server?.close(); });
+afterAll(async () => { await page?.close(); await server?.close(); }, 15_000);
 test('notification stays readable and can be dismissed', async () => {
   await page.evaluate(`(async () => { const {workspace} = await import('/src/lib/workspace.svelte.ts'); workspace.active.error = 'Could not connect to the build machine. Check the connection in Settings and try again. The current conversation is saved.'; })()`);
   await page.waitFor(`document.querySelector('[data-testid="error-toast"]')`);

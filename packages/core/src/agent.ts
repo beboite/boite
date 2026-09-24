@@ -18,6 +18,7 @@ import { newToken } from './ids.ts';
 import { registerGitMethods } from './git.ts';
 import { registerTodoMethods } from './todos.ts';
 import { existingInside, registerWorkdirMethods, resolveInside } from './workdir.ts';
+import { publishArtifact } from './artifacts.ts';
 
 /** More than a plan, and the tasks surface stops being readable anyway. */
 export const TASKS_MAX = 200;
@@ -63,6 +64,7 @@ export class AgentTokens {
 export function agentEnvFor(
   base: Record<string, string | undefined>,
   fields: { threadId: ThreadId; coreUrl: string; token: string; cliDir: string | null },
+  platform: NodeJS.Platform = process.platform,
 ): Record<string, string | undefined> {
   const env: Record<string, string | undefined> = {
     ...base,
@@ -71,7 +73,9 @@ export function agentEnvFor(
     [AGENT_ENV.token]: fields.token,
   };
   if (fields.cliDir === null) return env;
-  const key = Object.keys(env).find((name) => name.toLowerCase() === 'path') ?? 'PATH';
+  const key = platform === 'win32'
+    ? Object.keys(env).find((name) => name.toLowerCase() === 'path') ?? 'PATH'
+    : 'PATH';
   const current = env[key] ?? '';
   if ((current.split(delimiter)[0] ?? '') === fields.cliDir) return env;
   env[key] = current.length === 0 ? fields.cliDir : `${fields.cliDir}${delimiter}${current}`;
@@ -185,6 +189,7 @@ export function setTasks(core: Core, params: RpcParams<'threads.tasks.set'>): Th
  * here keeps the door in one file: `access.ts` says who may knock.
  */
 export function registerAgentMethods(core: Core): void {
+  core.router.register('artifacts.publish', (params) => publishArtifact(core, params));
   core.router.register('agent.where', (params) => whereOf(core, core.threads.require(params.threadId)));
   core.router.register('panel.open', (params) => {
     const thread = core.threads.require(params.threadId);

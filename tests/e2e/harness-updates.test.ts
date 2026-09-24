@@ -1,13 +1,12 @@
-import { afterAll, beforeAll, expect, test } from 'bun:test';
+import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from 'bun:test';
 import { join } from 'node:path';
-import { createRequire } from 'node:module';
 import { BrowserPage, freePort } from './lib/cdp.ts';
+import { startUi } from './lib/ui.ts';
 
-const uiRequire = createRequire(join(import.meta.dir, '../../packages/ui/package.json'));
-const { createServer } = await import(uiRequire.resolve('vite'));
 
-let server: { listen(): Promise<unknown>; close(): Promise<void> };
+let server: { close(): Promise<void> };
 let page: BrowserPage;
+let url: string;
 const id = (name: string) => `[data-testid="${name}"]`;
 const notice = (provider: string) => `${id('harness-update-notice')}[data-update-provider="${provider}"]`;
 async function settled() {
@@ -20,15 +19,18 @@ const phone = () => page.send('Emulation.setDeviceMetricsOverride', { width: 390
 beforeAll(async () => {
   // The fake client is deliberately absent from production bundles.
   const port = await freePort();
-  server = await createServer({ root: join(import.meta.dir, '../../packages/ui'), server: { host: '127.0.0.1', port, strictPort: true }, clearScreen: false });
-  await server.listen();
-  page = await BrowserPage.launch({ url: `http://127.0.0.1:${port}/?fake=1&updates=1&open=recent` });
+  url = `http://127.0.0.1:${port}/?fake=1&updates=1&open=recent`;
+  server = await startUi(port);
+}, 60_000);
+beforeEach(async () => {
+  page = await BrowserPage.launch({ url });
   await page.waitFor(`document.querySelector('${id('nav-settings')}')`);
+  await desktop();
 }, 30_000);
-afterAll(async () => { await page?.close(); await server?.close(); }, 15_000);
+afterEach(async () => { await page?.close(); }, 15_000);
+afterAll(async () => { await server?.close(); }, 15_000);
 
 test('an agent update is a pinned notice with Update and Skip, on a desktop and on a phone', async () => {
-  await desktop();
   await page.waitFor(`document.querySelectorAll('${id('harness-update-notice')}').length === 2`);
   // Pinned to the top right corner, where neither the composer nor the sidebar is.
   const overlap = await page.evaluate(`(() => {
@@ -53,14 +55,14 @@ test('an agent update is a pinned notice with Update and Skip, on a desktop and 
   await page.waitFor(`document.querySelector('${notice('claude')}') === null`);
   expect(await page.evaluate(`document.querySelectorAll('${id('harness-update-notice')}').length`)).toBe(1);
 
-  // Update turns the card into a progress card, then the core says it is current and the card leaves.
+  // Update takes the card away at once; the agent updates in the background.
   await page.click(`${notice('codex')} ${id('harness-update-run')}`);
-  await page.waitFor(`document.querySelector('${notice('codex')}')?.dataset.state === 'updating'`);
-  await capture('harness-updates-updating.png');
   await page.waitFor(`document.querySelector('${id('harness-update-notices')}') === null`);
-});
+}, 20_000);
 
 test('Settings, Providers lists every agent, offers a skipped version again and carries the automatic switch', async () => {
+  await page.click(`${notice('claude')} ${id('harness-update-skip')}`);
+  await page.waitFor(`document.querySelector('${notice('claude')}') === null`);
   await page.click(id('nav-settings')); await page.click(id('settings-tab-accounts'));
   await page.waitFor(`document.querySelectorAll('${id('harness-update-row')}').length === 4`);
   const text = await page.evaluate(`document.querySelector('${id('harness-updates-card')}').textContent`) as string;
@@ -83,4 +85,5 @@ test('Settings, Providers lists every agent, offers a skipped version again and 
   expect(await page.evaluate(`document.documentElement.scrollWidth <= 390`)).toBe(true);
   await capture('harness-updates-settings-phone.png');
   await desktop();
-});
+// Includes the first lazy Settings import and captures at both viewport sizes.
+}, 20_000);

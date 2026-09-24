@@ -87,7 +87,7 @@ Mission turn limits count started runs and accepted reservations. The time
 limit sums execution durations across agents and retries, excluding human wait
 time. Token limits check reported usage between turns, not inside a provider
 call. Missing usage pauses further work instead of counting it as zero. Direct
-and group executions each have a ten-minute time limit.
+and group executions default to ten minutes, configurable per identity.
 
 Closing the page stops rendering. Quitting the shell leaves its core running
 in the user's session. Reopening adopts that core. Background settings exposes
@@ -118,16 +118,67 @@ prevents their work when disabled. It does not copy credentials, rotate logins
 or implement another switcher. Collaboration uses the provider-independent
 [`boite agent` commands](cli.md).
 
+## Individual brain and compaction
+
+Each identity owns `agent-workspaces/<agent-id>/brain` in the host's data
+directory. `AGENTS.md` holds its reusable instructions, `MEMORY.md` its personal
+notes, and `skills/` its procedures. The Brain tab edits both text files with a
+content revision check. The brain stays on the host across model changes and
+client disconnects. Personal notes are supplied only in direct conversations;
+shared contexts use scoped memory. Filesystem access still follows provider
+permissions, not a separate OS sandbox per identity.
+
+Compaction runs after twelve completed turns by default, configurable from two
+to one hundred, at 85% of a reported context window, or on demand from Brain.
+It asks the current model for a bounded
+continuation note, stores that note for this context, then drops the native
+session. The next turn uses the note and bounded recent messages. Journal
+history and durable memory stay intact. Empty or failed summaries retain the
+old context and require review. Compaction waits for active children; managed
+collaboration writes and interactive tool approvals are denied during it.
+Providers without an approval channel still use their own launch permissions.
+
+## Routines and subscription allocation
+
+Routines belong to one identity and run in its direct context. Choose a single
+date, an interval in minutes, or a daily local time with an IANA timezone. The
+core wakes them without an idle model loop. One unfinished occurrence blocks
+the next. After downtime, at most one overdue occurrence enters the durable
+queue; missed intervals are not replayed. Daily routines run once per local
+date, even when clocks move back. A skipped local time runs the following day.
+Pausing the identity or the engine also holds its routines.
+
+Models and limits separates the required default route, allowed main routes,
+and allowed subagent profiles. A route names a provider, account and model.
+For example, a Kimi main route can delegate only to configured Luna profiles
+without having access to the Claude, GPT or Gemini main routes. Availability
+comes from the existing provider/account probes, not from these example names.
+There is no silent fallback to an unapproved model.
+
+Account access grants each subscription to all identities or an explicit list.
+These grants also apply to their children. Revocation stops affected managed
+executions and pauses queued work for review. Routes are checked again just
+before driver launch. This controls Boite-managed launches; it does not prevent
+an unrestricted shell from invoking a provider independently.
+
+Children reuse the existing delegation driver and global scheduler. Each new
+request or routine has a bounded delegation budget; its child results share
+that budget. Completed children remain in history when a new episode begins.
+Configuration and account grants remain owner-only. A paired device can read
+the brain and policy, converse and handle decisions on the selected host.
+
 ## Interface and storage
 
-The list and studio open the same detail panes. The Canvas 2D scene represents
-agents as characters, groups as tables and teams as areas. It uses real work
-states and messages. Local animation is limited to 15 frames per second while
-active and stops when hidden or reduced motion is requested. HTML controls
-provide keyboard and phone access. Disconnection marks the last state as stale.
+The directory opens conversations, activity, scoped memory, routines, the
+individual brain and model limits. The machine picker selects the owning core;
+closing this client does not stop that core. Disconnection marks the last state
+as stale. Portrait experiments and the graphical studio are deliberately
+deferred. The scene source remains available, but has no navigation entry.
 
-Contracts live in `packages/contracts/src/agents.ts`. Schema 13 adds domain
-records and receipts; schema 14 permits projectless managed threads. Records and
+Contracts live in `packages/contracts/src/agents.ts`. Schema 15 combines domain
+records, receipts and projectless managed threads with prompt-cache and native
+delegation storage. It accepts the earlier persistent-agent schema 14 and the
+main branch's schema 14 without discarding their history. Records and
 events commit together. Revision checks protect edits; request receipts protect
 message, artifact and decision retries. Runs freeze execution and supplied
 context. `agents.changed` invalidates a revision without broadcasting messages.
@@ -143,6 +194,7 @@ Run `bun run check`, `bun run test`, `bun run test:shell`, then
 Core tests cover assignments, scope isolation, receipts, decisions, resource
 serialization, CLI tools, interrupted runs and workspace preparation recovery.
 The UI journey creates and converses with an agent, leaves the page, edits
-memory, accepts a task and answers a decision. Captures are under
+memory and brain files, creates a routine, inspects model limits, accepts a task
+and answers a decision. Captures are under
 `tests/e2e/.artifacts`. The shell journey finishes work after shell exit,
 adopts the same PID and stops it explicitly. Real-provider inference is opt-in.

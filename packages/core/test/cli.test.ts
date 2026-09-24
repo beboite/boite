@@ -4,6 +4,8 @@ import { join } from 'node:path';
 import { AGENT_ENV } from '@boite/contracts';
 import { runCli, splitLine } from '../src/cli.ts';
 import type { CliIo } from '../src/cli.ts';
+import { setDriver } from '../src/drivers/index.ts';
+import type { TurnResult } from '../src/drivers/index.ts';
 import { echoThread, startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
 
@@ -239,4 +241,62 @@ describe('access', () => {
     expect(run.code).toBe(0);
     expect(run.out).toContain(`thread: ${threadId}`);
   });
+});
+
+test('ask draws a card that does not stop the agent, and the answer comes back as the next prompt', async () => {
+  const none = await boite(['ask', 'Deploy now?']);
+  expect(none.code).toBe(1);
+  expect(none.err).toContain('no turn to ask in');
+
+  const client = await harness.connect();
+  const first = client.next('turn.finished', (turn) => turn.threadId === threadId, 10000);
+  await client.call('turns.start', { threadId, prompt: 'hello' });
+  expect((await first).status).toBe('done');
+
+  const asked = await boite(['ask', 'Deploy now?', 'yes', 'later', '--json']);
+  expect(asked.code).toBe(0);
+  const { questionId } = JSON.parse(asked.out) as { questionId: string };
+  const [question] = await client.call('questions.list', { threadId });
+  expect(question).toMatchObject({ id: questionId, text: 'Deploy now?', async: true, allowText: true, multiple: false });
+  expect(question?.options.map((option) => option.label)).toEqual(['yes', 'later']);
+  // Nobody waits on it: the thread stays idle.
+  expect((await client.call('threads.get', { threadId })).status).toBe('idle');
+
+  const next = client.next('turn.finished', (turn) => turn.threadId === threadId, 10000);
+  await client.call('questions.answer', { threadId, questionId, optionIds: ['2'], text: 'after lunch' });
+  expect((await next).status).toBe('done');
+  const prompts = harness.core.journal.listMessages(threadId).filter((m) => m.role === 'user').map((m) => (m.parts[0]?.type === 'text' ? m.parts[0].text : ''));
+  expect(prompts).toEqual(['hello', '> Deploy now?\n\nlater\nafter lunch']);
+  const card = harness.core.journal.listMessages(threadId).flatMap((m) => m.parts).find((p) => p.type === 'question');
+  expect(card).toMatchObject({ async: true, answer: { optionIds: ['2'], text: 'after lunch' } });
+});
+
+test('an answer the running turn refuses to take is held for the next prompt', async () => {
+  let finish: (() => void) | null = null;
+  let steers = 0;
+  const restore = setDriver('echo', { protocol: 'echo', startTurn() {
+    const first = finish === null;
+    let end!: () => void;
+    const done = new Promise<TurnResult>((resolve) => { end = () => resolve({ status: 'done', sessionId: null, usage: null }); });
+    if (first) finish = end; else end();
+    return { done, stop: end, async steer() { steers++; throw new Error('no turn to steer'); } };
+  } });
+  try {
+    const client = await harness.connect();
+    await client.call('turns.start', { threadId, prompt: 'hello' });
+    await waitFor(() => finish !== null);
+    const asked = await boite(['ask', 'Deploy now?', 'yes', 'later', '--json']);
+    const { questionId } = JSON.parse(asked.out) as { questionId: string };
+    await client.call('questions.answer', { threadId, questionId, optionIds: ['1'] });
+    await waitFor(() => steers === 1);
+
+    const next = client.next('turn.finished', (turn) => turn.threadId === threadId && turn.status === 'done', 10000);
+    finish!();
+    await next;
+    await waitFor(() => harness.core.journal.listMessages(threadId).filter((m) => m.role === 'user').length === 2, 10000);
+    const prompts = harness.core.journal.listMessages(threadId).filter((m) => m.role === 'user').map((m) => (m.parts[0]?.type === 'text' ? m.parts[0].text : ''));
+    expect(prompts).toEqual(['hello', '> Deploy now?\n\nyes']);
+  } finally {
+    restore();
+  }
 });

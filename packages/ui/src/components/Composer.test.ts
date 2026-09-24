@@ -3,6 +3,7 @@ import { mount, unmount } from 'svelte';
 import App from '../App.svelte';
 import { defaultPrefs, PREFS_STORAGE_KEY, STASH_STORAGE_KEY } from '../lib/prefs';
 import { store } from '../lib/store.svelte';
+import { closeTour } from '../lib/onboarding.svelte';
 
 /**
  * The three composer keys, on the whole app over the in-memory fake: Ctrl+Enter
@@ -12,6 +13,98 @@ import { store } from '../lib/store.svelte';
  */
 
 let running: Record<string, unknown> | null = null;
+
+const previewReference = { id: 'composer-element', url: 'https://example.test', selector: '#save', text: 'Save', bounds: { x: 0, y: 0, width: 80, height: 30 } };
+
+test('preview mentions insert at the caret inside prose and keep identical labels distinct', async () => {
+  await mountOnFake();
+  await store.open('t-trace');
+  await waitFor(() => !store.busy);
+  await type('Change this please');
+  input().setSelectionRange(7, 11);
+  input().dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  store.addPreviewReference('t-trace', previewReference);
+  await waitFor(() => input().value === 'Change @Save please');
+  expect(query('[data-testid="composer"] .input-wrap [data-testid="preview-reference"]').textContent).toBe('@Save');
+  input().setSelectionRange(input().value.length, input().value.length);
+  input().dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  store.addPreviewReference('t-trace', { ...previewReference, id: 'other-element', selector: '#other' });
+  await waitFor(() => input().value === 'Change @Save please @Save');
+  expect(store.composerStates['t-trace']!.previewReferences?.map(ref => ref.id)).toEqual(['composer-element', 'other-element']);
+  await type('Change @Save please');
+  expect(store.composerStates['t-trace']!.previewReferences?.map(ref => ref.id)).toEqual(['composer-element']);
+  await type('Change @Sav please');
+  expect(store.composerStates['t-trace']!.previewReferences).toEqual([]);
+});
+
+test('an intact preview mention never opens file completion, while editing it restores file completion', async () => {
+  await mountOnFake();
+  await store.open('t-trace');
+  await waitFor(() => !store.busy);
+  const call = vi.spyOn(store.client!, 'call');
+  store.addPreviewReference('t-trace', previewReference);
+  await waitFor(() => input().value === '@Save');
+  input().focus();
+  for (const at of [2, 5]) {
+    input().setSelectionRange(at, at);
+    input().dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await new Promise(resolve => setTimeout(resolve, 90));
+    expect(mentionMenu()).toBeNull();
+    expect(call.mock.calls.filter(([method]) => method === 'projects.files')).toEqual([]);
+  }
+  await type('@Sav');
+  expect(store.composerStates['t-trace']!.previewReferences).toEqual([]);
+  await waitFor(() => call.mock.calls.some(([method]) => method === 'projects.files'));
+  expect(mentionMenu()).not.toBeNull();
+});
+
+test('preview references survive queuing and a failed drain, and stashing refuses without changing the draft', async () => {
+  await mountOnFake();
+  await store.open('t-trace');
+  await waitFor(() => !store.busy);
+  await type('Change the selected control');
+  store.addPreviewReference('t-trace', previewReference);
+  const reference = store.composerStates['t-trace']!.previewReferences![0]!;
+  await waitFor(() => input().value.endsWith('@Save'));
+  input().focus();
+  press('s', { ctrlKey: true });
+  expect(store.error).toContain('cannot be stashed');
+  expect(input().value).toBe('Change the selected control @Save');
+  expect(store.composerStates['t-trace']?.previewReferences).toEqual([reference]);
+  const send = vi.spyOn(store, 'send').mockResolvedValue(false);
+  store.openThread!.status = 'running';
+  await new Promise(resolve => setTimeout(resolve, 0));
+  press('Enter');
+  await waitFor(() => store.composerStates['t-trace']?.queued.length === 1);
+  expect(store.composerStates['t-trace']!.queued[0]!.previewReferences).toEqual([reference]);
+  expect(store.composerStates['t-trace']!.previewReferences).toEqual([]);
+  store.openThread!.status = 'idle';
+  await waitFor(() => store.composerStates['t-trace']?.paused === true);
+  expect(send).toHaveBeenCalledWith('Change the selected control @Save', 't-trace', [], [reference]);
+  expect(store.composerStates['t-trace']!.text).toBe('Change the selected control @Save');
+  expect(store.composerStates['t-trace']!.previewReferences).toEqual([reference]);
+});
+
+test('preview references remain after refused activity commands and return with recalled sent prompts', async () => {
+  await mountOnFake();
+  await store.open('t-trace');
+  await waitFor(() => !store.busy);
+  await type('/goal Change the control');
+  store.addPreviewReference('t-trace', previewReference);
+  await waitFor(() => input().value.endsWith('@Save'));
+  input().focus(); press('Enter');
+  await waitFor(() => !!store.error?.includes('references cannot be used'));
+  expect(store.composerStates['t-trace']!.previewReferences).toHaveLength(1);
+  await send('Change the control @Save');
+  expect(store.composerStates['t-trace']!.previewReferences).toEqual([]);
+  expect(query('[data-role="user"] [data-testid="preview-reference"]').textContent).toBe('@Save');
+  input().focus(); press('ArrowUp');
+  await waitFor(() => input().value === 'Change the control @Save');
+  expect(store.composerStates['t-trace']!.previewReferences?.[0]?.id).toBe(previewReference.id);
+  await type('Change the control');
+  await waitFor(() => !document.querySelector('[data-testid="composer"] [data-testid="preview-reference"]'));
+  expect(input().value).toBe('Change the control');
+});
 
 afterEach(() => {
   if (running) unmount(running, { outro: false });
@@ -66,6 +159,8 @@ async function mountOnFake(): Promise<void> {
   store.composerStates = {};
   store.openThread = null;
   store.draft = null;
+  // The tour would be up over the composer on a device that has not seen it.
+  closeTour();
   running = mount(App, { target });
   await waitFor(() => store.booted && store.openThread !== null);
 }
@@ -714,7 +809,7 @@ test('a slash lists the agent commands first, filters, and completes the box', a
   expect(document.body.textContent).toContain('Agent');
   expect(document.body.textContent).toContain('Boite');
 
-  await type('/sh');
+  await type('/sho');
   await waitFor(() => slashRows().length === 1);
   expect(slashRows()).toEqual(['shout']);
 

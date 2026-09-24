@@ -1,6 +1,6 @@
 import { chmodSync, existsSync, lstatSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import type { Account, AccountId, ProviderDescriptor, ProviderId, RpcEvents } from '@boite/contracts';
+import type { Account, AccountId, ProviderDescriptor, ProviderId, RpcEvents, TerminalState } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { newId } from './ids.ts';
 import { invalidParams, messageOf, notFound, refused } from './errors.ts';
@@ -148,7 +148,10 @@ export class AccountStore {
   async remove(accountId: AccountId): Promise<void> {
     const account = this.require(accountId);
     const checkAgentReferences = () => {
-      if (this.core.workforce.records.list('profile').some(agent => agent.selection.accountId === accountId)) {
+      if (this.core.workforce.records.list('profile').some(agent => {
+        const config = this.core.workforce.resident.config(agent.id);
+        return agent.selection.accountId === accountId || [...config.allowedRoutes, ...config.subagents.profiles].some(route => route.accountId === accountId);
+      })) {
         throw refused('this account is used by a persistent agent; choose another account on its profile first', { accountId });
       }
     };
@@ -273,7 +276,7 @@ export class AccountStore {
         { accountId, providerId: provider.id, field: 'isolationDir' },
       );
     }
-    if (this.logins.has(accountId)) {
+    if (this.logins.has(accountId) || this.core.terminals.has(loginThreadId(accountId))) {
       throw refused(`a login is already running for ${account.label}`, { accountId });
     }
 
@@ -310,6 +313,62 @@ export class AccountStore {
     this.emitLogin(accountId, 'running', '', run);
     run.done = this.readLogin(accountId, run).finally(() => this.core.providers.installs.release(provider.id));
     return { ok: true };
+  }
+
+  /**
+   * The login command typed into a shell the user drives, for a CLI whose
+   * sign-in is a menu a pipe cannot answer. The shell runs with the account's
+   * environment, in its directory. The default account is allowed here: it is
+   * the user's own CLI in a terminal they see and type into, which is what the
+   * refusal of `login` asks them to do anyway. Closing the shell rechecks the
+   * account.
+   */
+  loginTerminal(accountId: AccountId, cols: number, rows: number): TerminalState {
+    const account = this.require(accountId);
+    const provider = this.core.providers.require(account.providerId);
+    const argv = provider.login?.command;
+    if (provider.login?.terminal !== true || argv === undefined) {
+      throw refused(`${provider.name} does not sign in from a terminal`, {
+        accountId,
+        providerId: provider.id,
+        field: 'login.terminal',
+        expected: true,
+      });
+    }
+    if (this.logins.has(accountId)) {
+      throw refused(`a login is already running for ${account.label}`, { accountId });
+    }
+    const id = loginThreadId(accountId);
+    const isolationDir = account.isolationDir;
+    if (isolationDir !== null) mkdirSync(isolationDir, { recursive: true });
+    const place = (value: string) => (isolationDir === null ? value : value.split('{isolationDir}').join(isolationDir));
+    const env = agentEnv(provider, this.accountEnv(account, provider));
+    for (const [key, value] of Object.entries(provider.login.env ?? {})) env[key] = place(value);
+    const [first, ...args] = argv.map(place);
+    if (first === undefined) throw refused('the login command is empty', { accountId, field: 'login.command' });
+    const starting = !this.core.terminals.has(id);
+    if (starting) this.core.providers.installs.acquire(provider.id);
+    try {
+      return this.core.terminals.open(id, {
+        cwd: isolationDir ?? homePath(),
+        env,
+        cols,
+        rows,
+        type: [this.loginExecutable(provider, first), ...args],
+        onExit: () => {
+          this.core.providers.installs.release(provider.id);
+          if (this.core.journal.isClosed()) return;
+          try {
+            this.check(accountId);
+          } catch {
+            // the account was removed while its terminal ran
+          }
+        },
+      });
+    } catch (error) {
+      if (starting && !this.core.terminals.has(id)) this.core.providers.installs.release(provider.id);
+      throw error;
+    }
   }
 
   /**
@@ -368,6 +427,7 @@ export class AccountStore {
 
   async loginCancel(accountId: AccountId): Promise<{ ok: true }> {
     this.require(accountId);
+    await this.core.terminals.close(loginThreadId(accountId));
     const run = this.logins.get(accountId);
     if (run !== undefined) {
       this.core.procs.killTree(loginThreadId(accountId));
@@ -563,6 +623,8 @@ export function registerAccountMethods(core: Core): void {
   core.router.register('accounts.check', (params) => core.accounts.check(params.accountId));
   core.router.register('accounts.login', (params) => core.accounts.login(params.accountId));
   core.router.register('accounts.logins', () => core.accounts.loginStates());
+  core.router.register('accounts.loginTerminal', (params) =>
+    core.accounts.loginTerminal(params.accountId, params.cols, params.rows));
   core.router.register('accounts.loginCancel', (params) => core.accounts.loginCancel(params.accountId));
   core.router.register('accounts.loginInput', (params) => {
     if (typeof params.text !== 'string') throw invalidParams('a login input needs text', { field: 'text' });

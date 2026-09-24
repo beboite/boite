@@ -217,6 +217,7 @@ export function languageOf(path: string): string | null {
 
 /** What a file no client can read as text is: a picture, a video, a sound, or bytes. */
 export function mediaOf(path: string): { kind: 'image' | 'video' | 'audio' | 'binary'; mime: string } {
+  if (extensionOf(path) === 'pdf') return { kind: 'binary', mime: 'application/pdf' };
   return MEDIA.get(extensionOf(path)) ?? { kind: 'binary', mime: 'application/octet-stream' };
 }
 
@@ -228,7 +229,8 @@ export function mediaOf(path: string): { kind: 'image' | 'video' | 'audio' | 'bi
 export async function readFileContent(core: Core, cwd: string, path: string): Promise<FileContent> {
   const found = existingInside(cwd, path, 'file', 'files.read path');
   const modifiedAt = Math.round(found.stats.mtimeMs);
-  if (found.stats.size <= FILE_MAX_BYTES) {
+  const media = mediaOf(found.relative);
+  if (found.stats.size <= FILE_MAX_BYTES && media.mime === 'application/octet-stream') {
     const data = await readFile(found.absolute);
     if (!hasNul(data)) {
       // Past the cap here only by being written while it is read; the text is cut and said to be.
@@ -245,7 +247,6 @@ export async function readFileContent(core: Core, cwd: string, path: string): Pr
       };
     }
   }
-  const media = mediaOf(found.relative);
   const ticket = core.fileTickets.mint(found.absolute, media.mime);
   return {
     kind: media.kind,
@@ -296,6 +297,15 @@ export interface FileTicketTarget {
   mime: string;
 }
 
+function fileIdentity(path: string): string | null {
+  try {
+    const real = realpathSync(path);
+    const stats = statSync(real, { bigint: true });
+    if (!stats.isFile()) return null;
+    return `${real}|${stats.dev}|${stats.ino}|${stats.size}|${stats.mtimeNs}|${stats.ctimeNs}`;
+  } catch { return null; }
+}
+
 /**
  * The tickets the file route answers. Random, held in memory, bound to one
  * absolute path and good for `FILE_TICKET_TTL_MS`: a url that ends up in a
@@ -303,12 +313,12 @@ export interface FileTicketTarget {
  * names a path to the HTTP server.
  */
 export class FileTickets {
-  private readonly held = new Map<string, { path: string; mime: string; expiresAt: number }>();
+  private readonly held = new Map<string, { path: string; mime: string; expiresAt: number; identity: string | null }>();
 
   mint(path: string, mime: string, now = Date.now()): string {
     this.sweep(now);
     const ticket = newToken();
-    this.held.set(ticket, { path, mime, expiresAt: now + FILE_TICKET_TTL_MS });
+    this.held.set(ticket, { path, mime, expiresAt: now + FILE_TICKET_TTL_MS, identity: fileIdentity(path) });
     return ticket;
   }
 
@@ -316,6 +326,10 @@ export class FileTickets {
     this.sweep(now);
     const entry = this.held.get(ticket);
     if (entry === undefined) return null;
+    if (entry.identity === null || fileIdentity(entry.path) !== entry.identity) {
+      this.held.delete(ticket);
+      return null;
+    }
     return { path: entry.path, mime: entry.mime };
   }
 

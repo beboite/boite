@@ -7,6 +7,8 @@ import { store } from './lib/store.svelte';
 import { workspace } from './lib/workspace.svelte';
 import { setExperiment, writeExperiments } from './lib/experiments';
 import { storeEndpoint, upsertEnvironment } from './lib/endpoint';
+import { closeTour } from './lib/onboarding.svelte';
+import { count } from './lib/format';
 
 // The opener plugin is the shell's system browser; nothing real may run here.
 const { openUrl } = vi.hoisted(() => ({ openUrl: vi.fn(async (_url: string) => {}) }));
@@ -114,6 +116,9 @@ async function mountOnFake(search = '/?fake=1'): Promise<void> {
   store.page = 'chat';
   store.composerStates = {};
   store.projectPickerOpen = false;
+  // A device that has never seen the tour gets it over everything on boot,
+  // which is the point of it and not what these tests are about.
+  closeTour();
   running = mount(App, { target });
   await waitFor(() => store.booted && (store.openThread !== null || store.draft !== null));
 }
@@ -649,6 +654,68 @@ test('an isolated account that is not logged in logs in from the Accounts page',
   await waitFor(() => document.querySelector('[data-testid=settings]') === null);
 });
 
+test('Ctrl+J opens the shell of the thread under the chat, hides it again, and its cross ends the shell', async () => {
+  await mountOnFake();
+  await waitFor(() => store.openThread !== null);
+  const threadId = store.openThread!.id;
+  const chord = () => new KeyboardEvent('keydown', { key: 'j', ctrlKey: true, bubbles: true, cancelable: true });
+
+  expect(document.body.dispatchEvent(chord())).toBe(false);
+  await waitFor(() => document.querySelector(`[data-testid=terminal][data-terminal-id="terminal:${threadId}"]`) !== null);
+  // xterm draws what the fake shell printed: its prompt, in the thread's folder.
+  await waitFor(() => query('[data-testid=terminal-drawer]').textContent?.includes('PS ') === true);
+  expect(query('[data-testid=terminal-toggle]').classList.contains('on')).toBe(true);
+  expect(query<HTMLButtonElement>('[data-testid=terminal-toggle]').title).toContain('Ctrl+J');
+
+  // Back from a dropped socket, the view asks the core for the shell again.
+  const reopen = vi.spyOn(store, 'openTerminal');
+  store.connection = 'connecting';
+  flushSync();
+  store.connection = 'ready';
+  flushSync();
+  await waitFor(() => reopen.mock.calls.length === 1);
+  expect(reopen.mock.calls[0]?.[0]).toBe(threadId);
+  reopen.mockRestore();
+
+  expect(document.body.dispatchEvent(chord())).toBe(false);
+  await waitFor(() => document.querySelector('[data-testid=terminal-drawer]') === null);
+  expect(store.terminalShown(threadId)).toBe(false);
+
+  query<HTMLButtonElement>('[data-testid=terminal-toggle]').click();
+  await waitFor(() => document.querySelector('[data-testid=terminal-drawer]') !== null);
+  query<HTMLButtonElement>('[data-testid=terminal-close]').click();
+  await waitFor(() => document.querySelector('[data-testid=terminal-drawer]') === null);
+  expect(store.terminalShown(threadId)).toBe(false);
+});
+
+test('OpenCode signs in from a terminal with its login command typed in, and closing it rechecks the account', async () => {
+  await mountOnFake();
+  query<HTMLButtonElement>('[data-testid=nav-settings]').click();
+  await waitFor(() => document.querySelector('[data-testid=settings-tab-accounts]') !== null);
+  query<HTMLButtonElement>('[data-testid=settings-tab-accounts]').click();
+  await waitFor(() => document.querySelector('[data-testid=accounts-page]') !== null);
+  await openProviderDetails('opencode');
+
+  // The user's own OpenCode login gets the button too: the terminal is theirs to answer.
+  const button = query<HTMLButtonElement>('[data-provider-id=opencode] [data-testid=account-login]');
+  expect(button.getAttribute('data-account-id')).toBe('a-opencode');
+  button.click();
+  await waitFor(() => document.querySelector('[data-testid=account-login-terminal] [data-testid=terminal]') !== null);
+  expect(query('[data-testid=account-login-terminal] [data-testid=terminal]').getAttribute('data-terminal-id')).toBe('login:a-opencode');
+  await waitFor(() => query('[data-testid=account-login-terminal]').textContent?.includes('Select provider') === true);
+  expect(query('[data-testid=account-login-terminal]').textContent).toContain('opencode auth login');
+  // No piped login and its code field while the terminal holds the sign-in.
+  expect(document.querySelector('[data-testid=account-login-row]')).toBeNull();
+  expect(query('[data-provider-id=opencode]').getAttribute('data-step')).toBe('signing-in');
+
+  query<HTMLButtonElement>('[data-testid=account-login-terminal-close]').click();
+  await waitFor(() => document.querySelector('[data-testid=account-login-terminal]') === null);
+  await waitFor(() => query('[data-provider-id=opencode]').getAttribute('data-step') === 'ready');
+
+  query<HTMLButtonElement>('[data-testid=settings-back]').click();
+  await waitFor(() => document.querySelector('[data-testid=settings]') === null);
+});
+
 test('the header wears the context meter, a compaction is a divider, and a turn moves the meter', async () => {
   await mountOnFake();
   await waitFor(() => store.openThread?.id === 't-descriptors');
@@ -660,7 +727,7 @@ test('the header wears the context meter, a compaction is a divider, and a turn 
   expect(meter.dataset.level).toBe('low');
   query<HTMLButtonElement>('[data-testid=context-trigger]').click();
   await waitFor(() => document.querySelector('[data-testid=context-popup]') !== null);
-  expect(query('[data-testid=context-popup]').textContent).toContain((31000).toLocaleString());
+  expect(query('[data-testid=context-popup]').textContent).toContain(count(31000));
   expect(query('[data-testid=compaction-part]').textContent?.replace(/\s+/g, ' ').trim()).toBe(
     'Context compacted, 184k to 31k tokens'
   );
@@ -1184,20 +1251,21 @@ test('outside the shell the same link goes through window.open', async () => {
   }
 });
 
-test('a ctrl-click on an external link is left alone', async () => {
+test.each([false, true])('a ctrl-click uses the opener only in the shell: %s', async (shell) => {
   const opened = vi.fn(() => null);
   const original = window.open;
   window.open = opened as unknown as typeof window.open;
   try {
     const link = await loginLink();
-    window.__TAURI_INTERNALS__ = {};
+    if (shell) window.__TAURI_INTERNALS__ = {};
     const click = new MouseEvent('click', { bubbles: true, cancelable: true, ctrlKey: true });
     link.dispatchEvent(click);
 
     await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(openUrl).not.toHaveBeenCalled();
+    if (shell) expect(openUrl).toHaveBeenCalledWith(LOGIN_URL);
+    else expect(openUrl).not.toHaveBeenCalled();
     expect(opened).not.toHaveBeenCalled();
-    expect(click.defaultPrevented).toBe(false);
+    expect(click.defaultPrevented).toBe(shell);
 
     await backToChat();
   } finally {

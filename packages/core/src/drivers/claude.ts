@@ -16,11 +16,13 @@ import type {
 } from '@anthropic-ai/claude-agent-sdk';
 import type {
   AgentCommand,
+  BackgroundTask,
   ModelInfo,
   ImageAttachment,
   MessageId,
   MessagePart,
   PermissionMode,
+  QuestionAnswer,
   ThreadId,
   ToolDocument,
   ToolStatus,
@@ -30,7 +32,7 @@ import { messageOf, unavailable } from '../errors.ts';
 import type { SpawnedChild } from '../procs.ts';
 import { profileFor, resolveExecutable } from '../providers/loader.ts';
 import { titleRequest } from '../titles.ts';
-import type { ProbeContext, ProbeResult, Driver, TitleContext, TurnContext, TurnHandle, TurnResult } from './types.ts';
+import type { ProbeContext, ProbeResult, Driver, PromptCacheLife, TitleContext, TurnContext, TurnHandle, TurnResult } from './types.ts';
 
 /** How long `stop()` lets the CLI end its turn before the abort signal takes it. */
 const STOP_GRACE_MS = 3_000;
@@ -39,6 +41,16 @@ const FINISH_GRACE_MS = 5_000;
 const STDERR_MAX = 400;
 const DENIED = 'Denied in Boite';
 const MINUTE_MS = 60_000;
+/**
+ * How long a session with nothing left in the background waits for the CLI to
+ * go on by itself (it reads the task's notification and answers it) before the
+ * usual idle or close rule applies.
+ */
+const LINGER_MS = 15_000;
+/** What a session keeps of the output the CLI writes with no turn attached, until one is. */
+const ORPHANS_MAX = 5_000;
+/** The system message a turn the agent opened on its own starts with. */
+const WAKE_TEXT = 'Background work finished';
 
 /** The effort levels the SDK takes as an option; see `Options['effort']`. */
 const SDK_EFFORTS: readonly string[] = ['low', 'medium', 'high', 'xhigh', 'max'];
@@ -248,6 +260,8 @@ class ClaudeTurn {
   private costBefore = 0;
   /** What the last API request of the turn carried, the context meter's reading. */
   private contextTokens: number | null = null;
+  /** The lifetime of the last cache write the main loop made in this turn. */
+  private cacheLife: PromptCacheLife | null = null;
   private status: TurnResult['status'] = 'done';
   private error: string | null = null;
   private resolve: (result: TurnResult) => void = () => undefined;
@@ -301,6 +315,7 @@ class ClaudeTurn {
       sessionId: this.sessionId,
       usage: this.usage,
       error: this.error ?? undefined,
+      promptCache: this.cacheLife,
     });
   }
 
@@ -418,6 +433,8 @@ class ClaudeTurn {
     const apiId = body?.id ?? '';
     const carried = requestTokens(body?.usage);
     if (carried !== null) this.contextTokens = carried;
+    // A subagent's requests build their own prefix; the thread's cache is the main loop's.
+    if (message.parent_tool_use_id === null) this.cacheLife = cacheLifeOf(body?.usage) ?? this.cacheLife;
     for (const block of contentBlocks(body?.content)) {
       if (block.type === 'text') {
         const text = block.text ?? '';
@@ -587,6 +604,20 @@ class ClaudeSession {
   private readonly prompts = new PromptQueue();
   private readonly timers = new Set<Timer>();
   private readonly waiting: ClaudeTurn[] = [];
+  /** What the CLI runs in the background, as its last `background_tasks_changed` said. */
+  private background: BackgroundTask[] = [];
+  /** `task_started` by task id: the tool call that launched it and when. */
+  private readonly launched = new Map<string, { toolId: string | null; startedAt: number }>();
+  /** What the CLI wrote with no turn attached, replayed into the turn the core opens for it. */
+  private orphans: SDKMessage[] = [];
+  /** The core was asked for a turn for the orphans and has not attached one yet. */
+  private woken = false;
+  /**
+   * Results still owed to a run the CLI started by itself, which a user's turn
+   * took over before that run finished: they close that run, not the turn.
+   */
+  private foreignResults = 0;
+  private linger: Timer | null = null;
 
   private query: Query | null = null;
   private ctx: TurnContext;
@@ -621,9 +652,23 @@ class ClaudeSession {
     });
   }
 
-  /** Reusable only while the CLI is up and the turn asks for the very same setup. */
+  /**
+   * Reusable only while the CLI is up and the turn asks for the very same
+   * setup. A CLI kept for its background work is reused whatever the warm
+   * setting says: starting another would kill what it runs.
+   */
   usable(key: string, warmMs: number): boolean {
-    return !this.ended && !this.closing && this.key === key && warmMs > 0 && this.warmMs > 0;
+    return !this.ended && !this.closing && this.key === key && ((warmMs > 0 && this.warmMs > 0) || this.holding());
+  }
+
+  /** Background work, or output of the CLI's own that no turn took yet: the CLI must stay. */
+  holding(): boolean {
+    return this.background.length > 0 || this.woken || this.linger !== null;
+  }
+
+  /** The CLI went on by itself and wrote something the next turn is opened for. */
+  adoptable(): boolean {
+    return !this.ended && !this.closing && this.woken;
   }
 
   /** A turn is running or queued on it, so nothing may take the CLI away yet. */
@@ -635,7 +680,33 @@ class ClaudeSession {
     this.warmMs = warmMs;
     this.ctx = turn.ctx;
     this.clearIdle();
+    this.clearLinger();
     this.waiting.push(turn);
+    if (this.woken) {
+      // The turn opened for what the CLI writes on its own takes that output
+      // and sends no prompt; any other turn takes it first, without its result.
+      this.woken = false;
+      const adopted = turn.ctx.turn.execution?.operation === 'background';
+      const replay = this.orphans;
+      this.orphans = [];
+      for (const message of replay) {
+        if (!adopted && message.type === 'result') continue;
+        this.receive(message);
+      }
+      if (adopted) return;
+      // The CLI's own run is still going: its result is not this turn's.
+      if (!replay.some(message => message.type === 'result')) this.foreignResults += 1;
+    } else {
+      // Bookkeeping that no output followed was already applied as it came.
+      this.orphans = [];
+      if (turn.ctx.turn.execution?.operation === 'background') {
+        // Nothing to adopt: whatever woke the core is already gone.
+        this.waiting.pop();
+        turn.settle();
+        this.afterTurns();
+        return;
+      }
+    }
     if (!this.started) {
       this.started = true;
       // The options the query opens on are this turn's: nothing to apply yet.
@@ -786,9 +857,18 @@ class ClaudeSession {
   private receive(message: SDKMessage): void {
     const sessionId = (message as { session_id?: string }).session_id;
     if (typeof sessionId === 'string' && sessionId.length > 0) this.sessionId = sessionId;
+    if (message.type === 'system') this.noteTasks(message);
     const turn = this.head();
-    if (turn === null) return;
+    if (turn === null) {
+      this.adopt(message);
+      return;
+    }
     if (this.sessionId !== null) turn.noteSession(this.sessionId);
+    if (message.type === 'result' && this.foreignResults > 0) {
+      this.foreignResults -= 1;
+      if (typeof message.total_cost_usd === 'number') this.costSoFar = message.total_cost_usd;
+      return;
+    }
     // `total_cost_usd` counts from the start of the CLI process, so on a warm
     // query every result after the first carries the turns before it too. The
     // turn is told what was already charged before it reads the result. A cold
@@ -809,9 +889,78 @@ class ClaudeSession {
   private endTurn(turn: ClaudeTurn): void {
     this.waiting.shift();
     turn.settle();
-    if (this.closing || this.waiting.length > 0) return;
+    this.afterTurns();
+  }
+
+  /** Nothing attached any more: keep the CLI for its background work, else the warm rule. */
+  private afterTurns(): void {
+    if (this.closing || this.ended || this.waiting.length > 0) return;
+    if (this.background.length > 0 || this.woken) return;
     if (this.warmMs > 0) this.armIdle();
     else this.close(null);
+  }
+
+  /**
+   * `background_tasks_changed` is the whole set, each time; `task_started`
+   * names the tool call behind a task. Ambient tasks (watchers the CLI runs
+   * for itself) are not work anyone waits on.
+   */
+  private noteTasks(message: Extract<SDKMessage, { type: 'system' }>): void {
+    if (message.subtype === 'task_started') {
+      this.launched.set(message.task_id, { toolId: message.tool_use_id ?? null, startedAt: Date.now() });
+      return;
+    }
+    if (message.subtype !== 'background_tasks_changed') return;
+    const next = message.tasks.filter(task => task.ambient !== true).map((task): BackgroundTask => {
+      const known = this.launched.get(task.task_id) ?? this.background.find(entry => entry.id === task.task_id);
+      return {
+        id: task.task_id,
+        kind: backgroundKind(task.task_type),
+        description: task.description,
+        toolId: known?.toolId ?? null,
+        startedAt: known?.startedAt ?? Date.now(),
+      };
+    });
+    const ended = this.background.length > 0 && next.length === 0;
+    this.background = next;
+    for (const id of [...this.launched.keys()]) if (!next.some(task => task.id === id)) this.launched.delete(id);
+    this.ctx.background?.(next);
+    if (!ended || this.waiting.length > 0 || this.closing) return;
+    // The CLI usually answers the task's notification by itself within a
+    // second; the linger gives it that moment before the warm rule applies.
+    this.clearLinger();
+    this.linger = setTimeout(() => {
+      this.linger = null;
+      this.afterTurns();
+    }, LINGER_MS);
+    this.linger.unref?.();
+  }
+
+  /**
+   * Output with no turn attached: the CLI went on by itself once background
+   * work it started finished. It is kept, and the core is asked, once, for a
+   * turn to hold it. Only real output asks: bookkeeping alone opens nothing.
+   */
+  private adopt(message: SDKMessage): void {
+    if (this.closing || this.ended) return;
+    // The result closes the adopted turn: it is kept beyond the cap.
+    if (this.orphans.length >= ORPHANS_MAX && message.type !== 'result') return;
+    this.orphans.push(message);
+    // Bookkeeping before any output (a task list, a notification) is kept for
+    // the turn that may come, but holds nothing: the linger and the warm rule
+    // still close the CLI if no output follows.
+    if (!this.woken && message.type !== 'assistant' && message.type !== 'stream_event') return;
+    this.clearIdle();
+    this.clearLinger();
+    if (this.woken) return;
+    this.woken = true;
+    this.ctx.wake?.(WAKE_TEXT);
+  }
+
+  private clearLinger(): void {
+    if (this.linger === null) return;
+    clearTimeout(this.linger);
+    this.linger = null;
   }
 
   /** The loop is over: the CLI is gone, so nothing of this session survives. */
@@ -821,6 +970,15 @@ class ClaudeSession {
     // Nothing waits on a query that will never open.
     this.markReady();
     this.clearIdle();
+    this.clearLinger();
+    this.orphans = [];
+    this.woken = false;
+    this.foreignResults = 0;
+    // What the CLI ran in the background went with it.
+    if (this.background.length > 0) {
+      this.background = [];
+      this.ctx.background?.([]);
+    }
     for (const timer of this.timers) clearTimeout(timer);
     this.timers.clear();
     try {
@@ -923,6 +1081,7 @@ class ClaudeSession {
       this.ctx.log('warn', `claude asked for ${toolName} with no turn running: denied`);
       return { behavior: 'deny', message: DENIED };
     }
+    if (toolName === ASK_TOOL) return this.askUser(turn, input);
     const ticket = turn.ctx.requestPermission(toolName, input, options.title ?? options.description ?? null);
     const index = turn.takeIndex();
     turn.part(index, { type: 'permission', requestId: ticket.requestId, toolName, decision: null });
@@ -935,6 +1094,32 @@ class ClaudeSession {
     if (decision === 'allow') return { behavior: 'allow', updatedInput: input };
     return { behavior: 'deny', message: DENIED };
   };
+
+  /**
+   * `AskUserQuestion`: each question becomes a card, asked in order, and the
+   * answers go back in the tool's own input (`answers`, keyed by the question
+   * text, labels joined by a comma), which is what the CLI hands the model.
+   */
+  private async askUser(turn: ClaudeTurn, input: Record<string, unknown>): Promise<PermissionResult> {
+    const answers: Record<string, string> = {};
+    for (const question of askedQuestions(input['questions'])) {
+      const options = question.options.map((option, at) => ({
+        id: String(at + 1),
+        label: option.label,
+        ...(option.description ? { description: option.description } : {}),
+      }));
+      const ask = { text: question.question, options, allowText: true, multiple: question.multiSelect };
+      const ticket = turn.ctx.askQuestion(ask);
+      const index = turn.takeIndex();
+      turn.part(index, { type: 'question', questionId: ticket.questionId, ...ask, answer: null });
+      const answer: QuestionAnswer | null = await Promise.race([ticket, turn.stopped.then(() => null)]);
+      if (answer === null) return { behavior: 'deny', message: DENIED };
+      turn.part(index, { type: 'question', questionId: ticket.questionId, ...ask, answer });
+      const labels = answer.optionIds.map(id => options.find(option => option.id === id)?.label ?? id);
+      answers[question.question] = [...labels, ...(answer.text ? [answer.text] : [])].join(', ');
+    }
+    return { behavior: 'allow', updatedInput: { ...input, answers } };
+  }
 
   /** No matcher: this hook sees every tool call, which is what makes it the single gate. */
   private readonly preToolUse = async (input: HookInput): Promise<HookJSONOutput> => {
@@ -1119,6 +1304,25 @@ function mapUsage(result: SDKResultMessage, costBefore: number): Usage {
   };
 }
 
+/**
+ * How long the cache written by one API request lives, from the split the API
+ * reports under `usage.cache_creation`. A request writing at both lifetimes is
+ * as warm as its shorter one, since the conversation's tail is the part the
+ * next request needs most. Null when the request wrote nothing: a pure read
+ * restarts the clock of whatever lifetime the earlier write had.
+ */
+export function cacheLifeOf(usage: unknown): PromptCacheLife | null {
+  if (usage === null || typeof usage !== 'object') return null;
+  const creation = (usage as { cache_creation?: unknown }).cache_creation;
+  if (creation === null || typeof creation !== 'object') return null;
+  const split = creation as { ephemeral_5m_input_tokens?: unknown; ephemeral_1h_input_tokens?: unknown };
+  const short = typeof split.ephemeral_5m_input_tokens === 'number' ? split.ephemeral_5m_input_tokens : 0;
+  const long = typeof split.ephemeral_1h_input_tokens === 'number' ? split.ephemeral_1h_input_tokens : 0;
+  if (short > 0) return { ttlSeconds: 300, source: 'reported' };
+  if (long > 0) return { ttlSeconds: 3600, source: 'reported' };
+  return null;
+}
+
 /** What one API request carried: its input, plus what it read from and wrote to the cache. */
 function requestTokens(usage: unknown): number | null {
   if (usage === null || typeof usage !== 'object') return null;
@@ -1237,6 +1441,12 @@ export function createClaudeDriver(deps: ClaudeDeps): Driver {
 
     startTurn(ctx: TurnContext): TurnHandle {
       const turn = new ClaudeTurn(ctx);
+      // A turn opened for output the CLI wrote on its own belongs to that CLI.
+      // With the CLI gone there is nothing to adopt and no prompt to send.
+      if (ctx.turn.execution?.operation === 'background' && sessions.get(ctx.thread.id)?.adoptable() !== true) {
+        turn.settle();
+        return { done: turn.done, stop: (): void => undefined };
+      }
       attach(turn);
       return {
         done: turn.done,
@@ -1309,4 +1519,52 @@ async function readClaudeModels(ctx: ProbeContext, deps: ClaudeDeps): Promise<Pr
     }
     return { models: models.filter((model, index) => models.findIndex(m => m.id === model.id) === index), probedAt: Date.now() };
   } finally { if (timer) clearTimeout(timer); prompts.end(); query?.close(); abortController.abort(); ctx.killTree(); }
+}
+
+/** The tool whose questions Boite answers itself, as cards. */
+const ASK_TOOL = 'AskUserQuestion';
+
+interface AskedQuestion {
+  question: string;
+  multiSelect: boolean;
+  options: { label: string; description?: string }[];
+}
+
+/** `AskUserQuestion`'s `questions`, read defensively: a malformed entry is skipped, never thrown. */
+function askedQuestions(raw: unknown): AskedQuestion[] {
+  if (!Array.isArray(raw)) return [];
+  const out: AskedQuestion[] = [];
+  for (const entry of raw) {
+    if (entry === null || typeof entry !== 'object') continue;
+    const record = entry as Record<string, unknown>;
+    if (typeof record['question'] !== 'string' || record['question'].length === 0) continue;
+    const options = Array.isArray(record['options'])
+      ? (record['options'] as unknown[]).flatMap((option) => {
+        if (option === null || typeof option !== 'object') return [];
+        const fields = option as Record<string, unknown>;
+        if (typeof fields['label'] !== 'string' || fields['label'].length === 0) return [];
+        return [{ label: fields['label'], ...(typeof fields['description'] === 'string' && fields['description'].length > 0 ? { description: fields['description'] } : {}) }];
+      })
+      : [];
+    out.push({ question: record['question'], multiSelect: record['multiSelect'] === true, options });
+  }
+  return out;
+}
+
+/** The CLI's `task_type` as the kinds the UI draws. */
+function backgroundKind(type: string): BackgroundTask['kind'] {
+  switch (type) {
+    case 'local_bash':
+      return 'shell';
+    case 'local_agent':
+    case 'remote_agent':
+      return 'agent';
+    case 'monitor':
+    case 'mcp_task':
+      return 'monitor';
+    case 'local_workflow':
+      return 'workflow';
+    default:
+      return 'other';
+  }
 }

@@ -1,3 +1,4 @@
+import { richInline, fileLike, linkHtml } from './chat-links';
 /**
  * The markdown an agent answer needs: paragraphs, headings, nested and task
  * lists, block quotes, tables, rules, fenced and inline code, bold, italic,
@@ -14,16 +15,16 @@ function escape(text: string): string {
     .replaceAll('"', '&quot;');
 }
 
-function inline(text: string): string {
+function inline(text: string, rich = false): string {
   const code: string[] = [];
   let marker = '\0';
   while (text.includes(marker)) marker += '\0';
   const protectedText = text.replace(/(?<!`)(`+)(.+?)\1(?!`)/g, (_match, _ticks: string, value: string) => {
-    code.push(`<code>${escape(value)}</code>`);
+    code.push(`<code>${rich && fileLike(value) ? linkHtml(value, value) : escape(value)}</code>`);
     return `${marker}${code.length - 1}${marker}`;
   });
   // Format around opaque spans, then restore them without parsing their contents.
-  return inlineFormatting(protectedText).split(marker).map((part, index) => index % 2 ? code[Number(part)]! : part).join('');
+  return (rich ? richInline(protectedText, inlineFormatting) : inlineFormatting(protectedText)).split(marker).map((part, index) => index % 2 ? code[Number(part)]! : part).join('');
 }
 
 function inlineFormatting(text: string): string {
@@ -52,13 +53,13 @@ interface ListItem {
   children: ListItem[];
 }
 
-function renderItems(items: ListItem[]): string {
+function renderItems(items: ListItem[], rich = false): string {
   const kind = items[0]?.kind ?? 'ul';
   const rows = items.map((item) => {
-    const nested = item.children.length > 0 ? renderItems(item.children) : '';
-    if (item.task === null) return `<li>${inline(item.text)}${nested}</li>`;
+    const nested = item.children.length > 0 ? renderItems(item.children, rich) : '';
+    if (item.task === null) return `<li>${inline(item.text, rich)}${nested}</li>`;
     const checked = item.task === 'done' ? ' checked' : '';
-    return `<li class="task"><input type="checkbox" disabled${checked}> ${inline(item.text)}${nested}</li>`;
+    return `<li class="task"><input type="checkbox" disabled${checked}> ${inline(item.text, rich)}${nested}</li>`;
   });
   return `<${kind}>${rows.join('')}</${kind}>`;
 }
@@ -80,11 +81,11 @@ function alignments(line: string): (string | null)[] {
   });
 }
 
-function renderTable(head: string, delimiter: string, body: string[]): string {
+function renderTable(head: string, delimiter: string, body: string[], rich = false): string {
   const aligns = alignments(delimiter);
   const cell = (text: string, index: number, tag: 'th' | 'td'): string => {
     const align = aligns[index];
-    return `<${tag}${align ? ` style="text-align:${align}"` : ''}>${inline(text)}</${tag}>`;
+    return `<${tag}${align ? ` style="text-align:${align}"` : ''}>${inline(text, rich)}</${tag}>`;
   };
   const width = Math.max(cells(head).length, aligns.length);
   const row = (line: string, tag: 'th' | 'td'): string => {
@@ -96,15 +97,15 @@ function renderTable(head: string, delimiter: string, body: string[]): string {
   return `<table><thead>${row(head, 'th')}</thead><tbody>${rows}</tbody></table>`;
 }
 
-export function renderMarkdown(source: string): string {
+export function renderMarkdown(source: string, rich = false): string {
   const lines = source.replaceAll('\r\n', '\n').split('\n');
   const html: string[] = [];
   let paragraph: string[] = [];
-  const list = new MarkdownList();
+  const list = new MarkdownList(rich);
 
   const flushParagraph = (): void => {
     if (paragraph.length === 0) return;
-    html.push(`<p>${paragraph.map(inline).join('\n')}</p>`);
+    html.push(`<p>${paragraph.map(text => inline(text, rich)).join('\n')}</p>`);
     paragraph = [];
   };
   const flushList = (): void => {
@@ -140,11 +141,13 @@ export function renderMarkdown(source: string): string {
     if (heading) {
       flushAll();
       const level = Math.min(6, (heading[1]?.length ?? 1) + 2);
-      html.push(`<h${level}>${inline(heading[2] ?? '')}</h${level}>`);
+      const title = heading[2] ?? '';
+      const id = rich ? ` id="${escape(title.toLowerCase().replace(/[^\p{L}\p{N}_ -]/gu, '').trim().replace(/\s+/g, '-'))}"` : '';
+      html.push(`<h${level}${id}>${inline(title, rich)}</h${level}>`);
       continue;
     }
 
-    const quote = readQuote(lines, index);
+    const quote = readQuote(lines, index, rich);
     if (quote) {
       flushAll();
       html.push(quote.html);
@@ -153,7 +156,7 @@ export function renderMarkdown(source: string): string {
     }
 
     // A table is a row, a delimiter row, then rows until a blank or a line with no pipe.
-    const table = readTable(lines, index);
+    const table = readTable(lines, index, rich);
     if (table) {
       flushAll();
       html.push(table.html);
@@ -191,7 +194,7 @@ function readFence(lines: string[], start: number): Block | null {
   return { html: `<pre${language}><code>${escape(code.join('\n'))}</code></pre>`, end };
 }
 
-function readQuote(lines: string[], start: number): Block | null {
+function readQuote(lines: string[], start: number, rich: boolean): Block | null {
   const quoted: string[] = [];
   let cursor = start;
   while (cursor < lines.length) {
@@ -200,10 +203,10 @@ function readQuote(lines: string[], start: number): Block | null {
     quoted.push(match[1] ?? '');
     cursor++;
   }
-  return quoted.length ? { html: `<blockquote>${renderMarkdown(quoted.join('\n'))}</blockquote>`, end: cursor - 1 } : null;
+  return quoted.length ? { html: `<blockquote>${renderMarkdown(quoted.join('\n'), rich)}</blockquote>`, end: cursor - 1 } : null;
 }
 
-function readTable(lines: string[], start: number): Block | null {
+function readTable(lines: string[], start: number, rich: boolean): Block | null {
   const head = lines[start] ?? '';
   const delimiter = lines[start + 1] ?? '';
   if (!head.includes('|') || !TABLE_DELIMITER.test(delimiter) || ITEM.test(head)) return null;
@@ -215,7 +218,7 @@ function readTable(lines: string[], start: number): Block | null {
     body.push(line);
     cursor++;
   }
-  return { html: renderTable(head, delimiter, body), end: cursor - 1 };
+  return { html: renderTable(head, delimiter, body, rich), end: cursor - 1 };
 }
 
 function parseListItem(line: string): ListItem | null {
@@ -234,6 +237,7 @@ function parseListItem(line: string): ListItem | null {
 
 /** Open ancestors retain the list nesting while blocks consume source lines. */
 class MarkdownList {
+  constructor(private readonly rich: boolean) {}
   private items: ListItem[] = [];
   private stack: ListItem[] = [];
 
@@ -259,7 +263,7 @@ class MarkdownList {
   }
 
   flush(): string {
-    const html = this.items.length ? renderItems(this.items) : '';
+    const html = this.items.length ? renderItems(this.items, this.rich) : '';
     this.items = [];
     this.stack = [];
     return html;

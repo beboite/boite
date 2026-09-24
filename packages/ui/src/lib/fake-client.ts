@@ -1,38 +1,42 @@
+import { FakeAgents } from './fake-agents';
 import {
+  DEFAULT_DELEGATION_CONFIG,
+  attachmentError,
+  previewReferencesError,
+  previewPrompt,
   KEYBINDING_COMMANDS,
-  parseChord,
-  type Keybindings,
   MESSAGE_PAGE,
   MESSAGE_PAGE_MAX,
   PANEL_SURFACE_KINDS,
+  parseChord,
   PROTOCOL_VERSION,
   RpcErrorCode,
   TODO_STATUSES,
-  TODO_TEXT_MAX,
   type Account,
-  type AccountQuota,
-  type AgentCommand,
   type AgentProfile,
   type AgentWork,
+  type BrainStatus,
+  type AccountQuota,
+  type AgentLetter,
   type AgentTask,
   type AgentWhere,
-  type AgentLetter,
+  type Attachment,
+  type BackgroundTask,
   type CoordinationConfig,
   type CoordinationPeer,
   type CoordinationView,
-  type PluginManifest,
-  type PluginPreview,
-  type PluginState,
-  type PluginPool,
+  type DelegatedAgent,
+  type DelegationConfig,
+  type DelegationProfile,
+  type DelegationView,
   type CoreInfo,
   type FileContent,
   type FileEntry,
-  type GitChange,
   type GitDiff,
   type GitStatus,
-  type Attachment,
-  attachmentError,
+  type HarnessUpdate,
   type ImportableSession,
+  type Keybindings,
   type Message,
   type MessageId,
   type MessagePart,
@@ -41,13 +45,13 @@ import {
   type PanelSurface,
   type PermissionRequest,
   type Principal,
-  type QuestionAnswer,
-  type QuestionRequest,
+  type PreviewReference,
   type ProcessRecord,
   type Project,
-  type HarnessUpdate,
   type ProviderInstallState,
   type ProviderSummary,
+  type QuestionAnswer,
+  type QuestionRequest,
   type RpcEventName,
   type RpcEvents,
   type RpcMethodName,
@@ -58,20 +62,94 @@ import {
   type SpeechConfig,
   type SpeechStatus,
   type Thread,
+  type ThreadActivity,
   type ThreadId,
   type ThreadResources,
-  type ThreadActivity,
-  type ThreadStatus,
   type ThreadSummary,
   type Todo,
   type ToolDocument,
   type Turn,
-  type Usage
+  type Usage,
 } from '@boite/contracts';
 import { decodedBytes } from './attachments';
 import { RpcFailure, type ClientState, type EventHandler, type ObservableClient } from './client';
+import { seedAccounts } from './fake-client/accounts-seed';
+import {
+  DIFF_NEW,
+  DIFF_OLD,
+  DIFF_PATH,
+  DOC_TEXT,
+  DOC_TITLE,
+  IMAGE_BASE64,
+  ASYNC_QUESTION_OPTIONS,
+  ASYNC_QUESTION_TEXT,
+  QUESTION_OPTIONS,
+  QUESTION_TEXT,
+  SPAWN_MARKER,
+  STREAMED_TOOL_INPUT
+} from './fake-client/conversation.ts';
+import {
+  FAKE_CHANGES,
+  FAKE_DIFFS,
+  FAKE_FILES,
+  FAKE_MEDIA,
+  FAKE_MEDIA_PATHS,
+  FAKE_TREE,
+  fakeBytes,
+  fakeLanguage,
+  scoreFakeFile,
+} from './fake-client/files.ts';
+import { FakePlugins } from './fake-client/plugins';
+import {
+  FAKE_CONTEXT_FLOOR,
+  FAKE_CONTEXT_PER_TURN,
+  FAKE_CONTEXT_WINDOW,
+  IMPORT_LIST_MS,
+  INSTALL_STEP_MS,
+  INSTALL_STEPS,
+  MANAGED_ARCHIVE_BYTES,
+  MANAGED_EXE,
+  MANAGED_ID,
+  MANAGED_VERSION,
+  MUSE_EFFORT,
+  PROBE_MS,
+  PROBED_MODELS,
+  RELEASES,
+  RETITLE_DELAY_MS,
+  UPDATABLE_ID
+} from './fake-client/providers.ts';
+import {
+  addUsage,
+  chunkText,
+  DATA_DIR,
+  DEVICE_METHODS,
+  ECHO_COMMANDS,
+  emptyUsage,
+  fakeWorktree,
+  refusal,
+  SHOUT,
+  T0,
+  todoText,
+  toSummary,
+} from './fake-client/shared.ts';
+import { longThread, seedThreads } from './fake-client/threads-seed';
 import { fakeUsageHistory, type FakeFinishedTurn } from './fake-usage';
-import { FakeAgents } from './fake-agents';
+
+/** What OpenCode's menu looks like once the command is typed: the capture shows the real thing's shape. */
+const FAKE_LOGIN_MENU = [
+  '\x1b[90m┌\x1b[39m  Add credential',
+  '\x1b[90m│\x1b[39m',
+  '\x1b[36m◆\x1b[39m  Select provider',
+  '\x1b[36m│\x1b[39m  \x1b[32m●\x1b[39m OpenCode Zen \x1b[90m(recommended)\x1b[39m',
+  '\x1b[36m│\x1b[39m  ○ OpenAI',
+  '\x1b[36m│\x1b[39m  ○ GitHub Copilot',
+  '\x1b[36m│\x1b[39m  ○ Anthropic',
+  '\x1b[36m│\x1b[39m  ○ Google',
+  '\x1b[36m└\x1b[39m',
+  ''
+].join('\r\n');
+
+type FakeMethods = { [M in Exclude<RpcMethodName, `plugins.${string}` | `agents.${string}`>]: (params: RpcParams<M>) => Promise<RpcResult<M>> };
 
 export interface FakeClientOptions {
   /** Milliseconds between two streamed chunks. Tests pass 0. */
@@ -80,6 +158,8 @@ export interface FakeClientOptions {
   long?: boolean;
   /** A fresh machine with no agents or accounts, for the setup flow. */
   uninstalled?: boolean;
+  /** Adds a deterministic active team for visual checks on `?fake=1&team=1`. */
+  delegationDemo?: boolean;
   /** Who this client is. `'session'` makes it a paired phone, refused like one. */
   principal?: Principal;
   /** Stable public identity for multi-machine coordination tests. */
@@ -88,828 +168,7 @@ export interface FakeClientOptions {
   publicUrl?: string;
 }
 
-/*
- * The device boundary, copied. `packages/core/src/access.ts` owns it, and the
- * UI package cannot import the core, so this list is a mirror kept by hand: a
- * method added there and forgotten here only makes the fake stricter than the
- * core, which shows up as a test failing rather than a screen that lies.
- * `hello` is not in it because the core answers it before the router's gate.
- */
-const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>([
-  'agents.snapshot', 'agents.message.send', 'agents.decision.answer', 'agents.work.control',
-  'sessions.list',
-  'push.status', 'push.subscribe', 'push.unsubscribe', 'push.test',
-  'projects.list',
-  'projects.files',
-  'providers.list',
-  'accounts.list',
-  'threads.list',
-  'threads.pullRequest',
-  'threads.create',
-  'threads.get',
-  'threads.activity.set',
-  'threads.activity.control',
-  'messages.list',
-  'threads.update',
-  'threads.retitle',
-  'threads.compact',
-  'threads.archive',
-  'threads.pin',
-  'threads.markRead',
-  'threads.subscribe',
-  'threads.unsubscribe',
-  'turns.start',
-  'turns.stop',
-  'permissions.list',
-  'permissions.answer',
-  'questions.list',
-  'questions.answer',
-  'scheduler.get',
-  'usage.get',
-  'usage.history',
-  'settings.get',
-  'collaboration.get',
-  'collaboration.directory',
-  'speech.status', 'speech.transcribe', 'speech.cancel',
-  'keybindings.get'
-]);
-
-const T0 = Date.UTC(2026, 8, 5, 9, 0, 0);
-const DATA_DIR = 'C:\\Users\\you\\AppData\\Local\\boite2';
-
-/** What the echo driver reports as its `/name` list, the same two commands. */
-const ECHO_COMMANDS: AgentCommand[] = [
-  { name: 'shout', description: 'The prompt back in capitals', hint: '<text>' },
-  { name: 'whisper', description: 'The prompt back as it came', hint: null }
-];
-/** The one the fake acts on: `/shout <text>` comes back in capitals. */
-const SHOUT = 'shout';
-
-/** What `projects.files` names for any project of the seed: a small repository's tree. */
-const FAKE_FILES = [
-  'README.md',
-  'package.json',
-  'src/main.ts',
-  'src/app.css',
-  'src/App.svelte',
-  'src/lib/store.svelte.ts',
-  'src/lib/strings.ts',
-  'src/lib/client.ts',
-  'src/components/Composer.svelte',
-  'src/components/Sidebar.svelte',
-  'docs/development.md',
-  'docs/providers.md',
-  'tests/e2e/ui.test.ts'
-];
-
-/**
- * The core's ranking in short: the file's own name first, prefix over
- * substring, then the whole path, ties to the shorter path.
- */
-function scoreFakeFile(query: string, path: string): number {
-  const word = query.toLowerCase();
-  if (word.length === 0) return 1;
-  const lower = path.toLowerCase();
-  const name = lower.slice(lower.lastIndexOf('/') + 1);
-  if (name.startsWith(word)) return 80;
-  if (name.includes(word)) return 60;
-  if (lower.includes(word)) return 40;
-  return 0;
-}
-
-// ---------------------------------------------------------------------------
-// The workbench: what the changes, files and tasks surfaces read. One working
-// tree, small enough to hold in a file and wide enough to draw every badge.
-// ---------------------------------------------------------------------------
-
-/** One row per `GitChangeStatus`, so the changes list draws all seven marks. */
-const FAKE_CHANGES: GitChange[] = [
-  { path: 'src/components/RightPanel.svelte', status: 'modified', oldPath: null, staged: false, additions: 84, deletions: 12 },
-  { path: 'src/components/ChangesSurface.svelte', status: 'added', oldPath: null, staged: true, additions: 196, deletions: 0 },
-  { path: 'src/components/TracePanel.svelte', status: 'deleted', oldPath: null, staged: true, additions: 0, deletions: 141 },
-  { path: 'docs/panel.md', status: 'renamed', oldPath: 'docs/right-panel.md', staged: true, additions: 9, deletions: 2 },
-  { path: 'src/lib/panel-layout.ts', status: 'copied', oldPath: 'src/lib/right-panel.svelte.ts', staged: false, additions: 31, deletions: 0 },
-  { path: 'docs/panel.svg', status: 'untracked', oldPath: null, staged: false, additions: null, deletions: null },
-  { path: 'src/lib/store.svelte.ts', status: 'conflict', oldPath: null, staged: false, additions: 26, deletions: 4 }
-];
-
-/**
- * The sides `git.diff` answers with. A picture is binary and carries no text, a
- * file that was added has no old side, one that was deleted has no new one, and
- * the conflicted file comes back cut so the truncation notice is drawn too.
- */
-const FAKE_DIFFS: Record<string, Pick<GitDiff, 'oldText' | 'newText' | 'binary' | 'truncated'>> = {
-  'src/components/RightPanel.svelte': {
-    oldText: [
-      '{#if active?.kind === "trace"}',
-      '  <TraceSurface {store} />',
-      '{:else}',
-      '  <BrowserSurface surface={active} {panel} />',
-      '{/if}'
-    ].join('\n'),
-    newText: [
-      '{#if active?.kind === "trace"}',
-      '  <TraceSurface {store} />',
-      '{:else if active?.kind === "changes"}',
-      '  <ChangesSurface {store} surface={active} {panel} />',
-      '{:else if active?.kind === "tasks"}',
-      '  <TasksSurface {store} />',
-      '{:else}',
-      '  <BrowserSurface surface={active} {panel} />',
-      '{/if}'
-    ].join('\n'),
-    binary: false,
-    truncated: false
-  },
-  'src/components/ChangesSurface.svelte': {
-    oldText: null,
-    newText: [
-      '<script lang="ts">',
-      '  let { store, surface, panel } = $props();',
-      '</script>',
-      '',
-      '<div class="changes-surface" data-testid="changes-panel"></div>'
-    ].join('\n'),
-    binary: false,
-    truncated: false
-  },
-  'src/components/TracePanel.svelte': {
-    oldText: [
-      '<script lang="ts">',
-      '  // The trace had its own panel before the workbench took the slot.',
-      '  let { store } = $props();',
-      '</script>'
-    ].join('\n'),
-    newText: null,
-    binary: false,
-    truncated: false
-  },
-  'docs/panel.svg': { oldText: null, newText: null, binary: true, truncated: false },
-  'src/lib/store.svelte.ts': {
-    oldText: ['export class Store {', '  todos = $state({});', '}'].join('\n'),
-    newText: [
-      'export class Store {',
-      '  todos = $state<Record<ProjectId, Todo[]>>({});',
-      '',
-      '  async loadTodos(threadId: ThreadId) {',
-      '    const todos = await this.#client.call("todos.list", { threadId });',
-      '  }',
-      '}'
-    ].join('\n'),
-    binary: false,
-    truncated: true
-  }
-};
-
-/**
- * The one file long enough that the editor has something to scroll, and the
- * one `panel.open` sends a line of. Eighty-odd lines of plausible source.
- */
-const FAKE_STORE_SOURCE = `import type { FileContent, FileEntry, ThreadId } from '@boite/contracts';
-import { RpcFailure } from './client';
-import { rightPanel } from './right-panel.svelte';
-
-/** What one files call answers with: the value, or what the surface prints. */
-export type Answer<T> = { ok: true; value: T } | { ok: false; error: string };
-
-interface Cached {
-  entries: FileEntry[];
-  readAt: number;
-}
-
-const CACHE_MS = 2_000;
-
-export class Workbench {
-  #client: Client | null = null;
-  #cache = new Map<string, Cached>();
-  #reads = new Map<string, Promise<FileContent>>();
-
-  attach(client: Client): void {
-    this.#client = client;
-    this.#cache.clear();
-    this.#reads.clear();
-  }
-
-  /** One directory, from the cache when it was read a moment ago. */
-  async list(threadId: ThreadId, path: string): Promise<Answer<FileEntry[]>> {
-    const client = this.#client;
-    if (client === null) return { ok: false, error: 'no core' };
-    const key = threadId + ':' + path;
-    const cached = this.#cache.get(key);
-    if (cached !== undefined && Date.now() - cached.readAt < CACHE_MS) {
-      return { ok: true, value: cached.entries };
-    }
-    try {
-      const entries = await client.call('files.list', { threadId, path });
-      this.#cache.set(key, { entries, readAt: Date.now() });
-      return { ok: true, value: entries };
-    } catch (error) {
-      return { ok: false, error: this.#message(error) };
-    }
-  }
-
-  /** One file. Two tabs asking at once share the call that is already out. */
-  async read(threadId: ThreadId, path: string): Promise<Answer<FileContent>> {
-    const client = this.#client;
-    if (client === null) return { ok: false, error: 'no core' };
-    const key = threadId + ':' + path;
-    const running = this.#reads.get(key);
-    if (running !== undefined) return { ok: true, value: await running };
-    const call = client.call('files.read', { threadId, path });
-    this.#reads.set(key, call);
-    try {
-      return { ok: true, value: await call };
-    } catch (error) {
-      return { ok: false, error: this.#message(error) };
-    } finally {
-      this.#reads.delete(key);
-    }
-  }
-
-  /** The editor's save. The directory it sits in is read again after it. */
-  async write(threadId: ThreadId, path: string, text: string): Promise<Answer<number>> {
-    const client = this.#client;
-    if (client === null) return { ok: false, error: 'no core' };
-    try {
-      const written = await client.call('files.write', { threadId, path, text });
-      this.forget(threadId, directoryOf(path));
-      return { ok: true, value: written.bytes };
-    } catch (error) {
-      return { ok: false, error: this.#message(error) };
-    }
-  }
-
-  /** A directory whose contents changed under us: the next list asks the core. */
-  forget(threadId: ThreadId, path: string): void {
-    this.#cache.delete(threadId + ':' + path);
-  }
-
-  #message(error: unknown): string {
-    if (error instanceof RpcFailure) return error.message + ' (' + error.code + ')';
-    if (error instanceof Error) return error.message;
-    return String(error);
-  }
-}
-
-/** The directory a path sits in, forward slashes the way the core writes them. */
-export function directoryOf(path: string): string {
-  const cut = path.lastIndexOf('/');
-  return cut < 0 ? '' : path.slice(0, cut);
-}
-
-export const workbench = new Workbench();
-
-// The panel asks for the surface, the surface asks this, and nothing in the
-// tree ever touches the browser's own file system.
-rightPanel.onOpen(() => workbench.attach(client));
-`;
-
-/**
- * The tree `files.list` walks and `files.read` answers from: three levels, a
- * file per kind the viewer draws, and one source file long enough to scroll.
- */
-const FAKE_TREE: Record<string, string> = {
-  'README.md': ['# boite', '', 'The workbench sits beside the thread, one tab per surface.', ''].join('\n'),
-  'package.json': ['{', '  "name": "boite",', '  "private": true', '}', ''].join('\n'),
-  'docs/panel.md': [
-    '# The panel',
-    '',
-    'Every thread owns its strip of surfaces: trace, changes, files, tasks.',
-    '',
-    '| Surface | Tab      | What it reads              |',
-    '| ------- | -------- | -------------------------- |',
-    '| Changes | one      | `git.status` of the cwd    |',
-    '| Files   | one      | `files.list`, lazily       |',
-    '| File    | per path | `files.read`, `files.write`|',
-    ''
-  ].join('\n'),
-  'docs/guide/editor.md': [
-    '# The editor',
-    '',
-    'Tab writes two spaces. Ctrl+S saves. A file cut at its size limit is read only.',
-    ''
-  ].join('\n'),
-  'docs/guide/tree.md': [
-    '# The tree',
-    '',
-    'One directory per call, on the expand. The arrows walk, Enter opens.',
-    ''
-  ].join('\n'),
-  'src/app.css': [':root {', '  --row: 34px;', '  --control-sm: 26px;', '}', ''].join('\n'),
-  'src/main.ts': [
-    "import { mount } from 'svelte';",
-    "import App from './App.svelte';",
-    '',
-    'mount(App, { target: document.body });',
-    ''
-  ].join('\n'),
-  'src/lib/panel-layout.ts': ['export const PANEL_DEFAULT = 360;', 'export const PANEL_MIN = 300;', ''].join('\n'),
-  'src/lib/store.svelte.ts': FAKE_STORE_SOURCE,
-  'src/lib/strings.ts': [
-    'export const strings = {',
-    "  save: 'Save',",
-    "  fit: 'Fit'",
-    '};',
-    ''
-  ].join('\n'),
-  'src/components/RightPanel.svelte': [
-    '<script lang="ts">',
-    '  let { store, panel } = $props();',
-    '</script>',
-    '',
-    '<aside class="panel" data-testid="right-panel"></aside>',
-    ''
-  ].join('\n'),
-  'src/components/surfaces/FilesSurface.svelte': [
-    '<script lang="ts">',
-    '  let { store, surface, panel } = $props();',
-    '</script>',
-    ''
-  ].join('\n'),
-  'src/components/surfaces/FileSurface.svelte': [
-    '<script lang="ts">',
-    '  let { store, surface } = $props();',
-    '</script>',
-    ''
-  ].join('\n'),
-  'tests/e2e/panel.test.ts': [
-    "import { expect, test } from 'bun:test';",
-    '',
-    "test('the tree expands a directory', async () => {",
-    '  expect(true).toBe(true);',
-    '});',
-    ''
-  ].join('\n')
-};
-
-/** The one picture of the tree, a data url so a capture needs no server. */
-const FAKE_IMAGE_PATH = 'docs/panel.svg';
-const FAKE_IMAGE_URL =
-  'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNDAiIGhlaWdodD0iMTIwIiB2aWV3Qm94PSIwIDAgMjQwIDEyMCI+PHJlY3Qgd2lkdGg9IjI0MCIgaGVpZ2h0PSIxMjAiIHJ4PSIxMiIgZmlsbD0iIzFmMjkzNyIvPjxyZWN0IHg9IjE2IiB5PSIxNiIgd2lkdGg9IjEyMCIgaGVpZ2h0PSIxNiIgcng9IjQiIGZpbGw9IiM2MGE1ZmEiLz48cmVjdCB4PSIxNiIgeT0iNDQiIHdpZHRoPSIyMDgiIGhlaWdodD0iMTAiIHJ4PSI0IiBmaWxsPSIjNGI1NTYzIi8+PHJlY3QgeD0iMTYiIHk9IjY0IiB3aWR0aD0iMTc2IiBoZWlnaHQ9IjEwIiByeD0iNCIgZmlsbD0iIzRiNTU2MyIvPjxyZWN0IHg9IjE2IiB5PSI4NCIgd2lkdGg9Ijk2IiBoZWlnaHQ9IjEwIiByeD0iNCIgZmlsbD0iIzM0ZDM5OSIvPjwvc3ZnPg==';
-const FAKE_IMAGE_BYTES = 612;
-
-/** The bytes behind a data url, which is what the core would report as the size. */
-function dataUrlBytes(url: string): number {
-  const comma = url.indexOf(',');
-  if (comma < 0) return 0;
-  const payload = url.slice(comma + 1);
-  if (!url.slice(0, comma).includes(';base64')) return payload.length;
-  const padding = payload.endsWith('==') ? 2 : payload.endsWith('=') ? 1 : 0;
-  return Math.max(0, Math.floor((payload.length * 3) / 4) - padding);
-}
-
-function base64(bytes: Uint8Array): string {
-  let raw = '';
-  // One chunk at a time: a whole buffer spread into `fromCharCode` overflows
-  // the argument list well before a picture is large.
-  for (let at = 0; at < bytes.length; at += 4096) {
-    raw += String.fromCharCode(...bytes.subarray(at, at + 4096));
-  }
-  return btoa(raw);
-}
-
-/**
- * The picture the image viewer is looked at on: 640 by 400, drawn once on a
- * canvas so zooming into it shows something. jsdom draws nothing, so the SVG
- * beside it stands in there and a test still gets a url.
- */
-let drawnPng: string | null = null;
-function fakePng(): string {
-  if (drawnPng !== null) return drawnPng;
-  drawnPng = FAKE_IMAGE_URL;
-  // jsdom has no canvas and says so loudly on every call, so the probe is a
-  // thing only a real browser carries rather than the drawing itself.
-  if (typeof OffscreenCanvas === 'undefined') return drawnPng;
-  try {
-    const canvas = document.createElement('canvas');
-    canvas.width = 640;
-    canvas.height = 400;
-    const paint = canvas.getContext('2d');
-    if (paint === null) return drawnPng;
-    const sky = paint.createLinearGradient(0, 0, 640, 400);
-    sky.addColorStop(0, '#0f172a');
-    sky.addColorStop(0.55, '#3730a3');
-    sky.addColorStop(1, '#f97316');
-    paint.fillStyle = sky;
-    paint.fillRect(0, 0, 640, 400);
-    paint.fillStyle = '#fbbf24';
-    paint.beginPath();
-    paint.arc(470, 120, 56, 0, Math.PI * 2);
-    paint.fill();
-    paint.fillStyle = 'rgba(15, 23, 42, 0.85)';
-    paint.beginPath();
-    paint.moveTo(0, 400);
-    paint.lineTo(180, 210);
-    paint.lineTo(320, 330);
-    paint.lineTo(430, 240);
-    paint.lineTo(640, 400);
-    paint.closePath();
-    paint.fill();
-    paint.strokeStyle = '#34d399';
-    paint.lineWidth = 6;
-    paint.strokeRect(24, 24, 592, 352);
-    paint.fillStyle = '#e2e8f0';
-    paint.font = '600 34px sans-serif';
-    paint.fillText('640 x 400', 48, 82);
-    const url = canvas.toDataURL('image/png');
-    if (url.startsWith('data:image/png')) drawnPng = url;
-  } catch {
-    /* no canvas here: the SVG above is the picture */
-  }
-  return drawnPng;
-}
-
-/**
- * Four tenths of a second of a 440 Hz tone, written as a RIFF file. A real
- * WebM would need an encoder, so the fake has a sound and no video; the video
- * branch of the viewer is the same native element with another mime.
- */
-let recordedWav: string | null = null;
-function fakeWav(): string {
-  if (recordedWav !== null) return recordedWav;
-  const rate = 8000;
-  const samples = Math.round(rate * 0.4);
-  const bytes = new Uint8Array(44 + samples * 2);
-  const view = new DataView(bytes.buffer);
-  const ascii = (at: number, text: string): void => {
-    for (let index = 0; index < text.length; index++) view.setUint8(at + index, text.charCodeAt(index));
-  };
-  ascii(0, 'RIFF');
-  view.setUint32(4, 36 + samples * 2, true);
-  ascii(8, 'WAVEfmt ');
-  view.setUint32(16, 16, true);
-  view.setUint16(20, 1, true);
-  view.setUint16(22, 1, true);
-  view.setUint32(24, rate, true);
-  view.setUint32(28, rate * 2, true);
-  view.setUint16(32, 2, true);
-  view.setUint16(34, 16, true);
-  ascii(36, 'data');
-  view.setUint32(40, samples * 2, true);
-  for (let index = 0; index < samples; index++) {
-    // Faded at both ends, so the tone neither clicks in nor clicks out.
-    const fade = Math.min(1, Math.min(index, samples - index) / (rate * 0.05));
-    view.setInt16(44 + index * 2, Math.round(Math.sin((2 * Math.PI * 440 * index) / rate) * 9000 * fade), true);
-  }
-  recordedWav = `data:audio/wav;base64,${base64(bytes)}`;
-  return recordedWav;
-}
-
-/** The blob of the tree: a one-page PDF, which the viewer offers to download. */
-let printedPdf: string | null = null;
-function fakePdf(): string {
-  if (printedPdf !== null) return printedPdf;
-  const source = [
-    '%PDF-1.4',
-    '1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj',
-    '2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj',
-    '3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 120]>>endobj',
-    'trailer<</Root 1 0 R>>',
-    '%%EOF',
-    ''
-  ].join('\n');
-  printedPdf = `data:application/pdf;base64,${btoa(source)}`;
-  return printedPdf;
-}
-
-/** Everything of the tree that is not text, each one answered as a url. */
-const FAKE_MEDIA: Record<string, { kind: 'image' | 'video' | 'audio' | 'binary'; mime: string; url: () => string }> = {
-  [FAKE_IMAGE_PATH]: { kind: 'image', mime: 'image/svg+xml', url: () => FAKE_IMAGE_URL },
-  'assets/preview.png': { kind: 'image', mime: 'image/png', url: fakePng },
-  'assets/chime.wav': { kind: 'audio', mime: 'audio/wav', url: fakeWav },
-  'assets/handbook.pdf': { kind: 'binary', mime: 'application/pdf', url: fakePdf }
-};
-
-const FAKE_MEDIA_PATHS = Object.keys(FAKE_MEDIA);
-
-/** What one entry of the tree weighs, text or not. */
-function fakeBytes(path: string, text: string | undefined): number {
-  if (path === FAKE_IMAGE_PATH) return FAKE_IMAGE_BYTES;
-  const media = FAKE_MEDIA[path];
-  if (media) return dataUrlBytes(media.url());
-  return text?.length ?? 0;
-}
-
-/** A refusal worded like the core's, so a screen tested here shows what the real one would. */
-function refusal(message: string): RpcFailure {
-  return new RpcFailure({ code: RpcErrorCode.Refused, message });
-}
-
-/** The core's `checkText` in `todos.ts`: a card needs text, and a line of it. */
-function todoText(text: unknown): string {
-  if (typeof text !== 'string' || text.trim().length === 0) throw refusal('a todo needs text');
-  const trimmed = text.trim();
-  if (trimmed.length > TODO_TEXT_MAX) {
-    throw refusal(`a todo is at most ${TODO_TEXT_MAX} characters, this one is ${trimmed.length}`);
-  }
-  return trimmed;
-}
-
-/** What the editor colours a file with, by the only thing the core has: the extension. */
-function fakeLanguage(path: string): string | null {
-  const dot = path.lastIndexOf('.');
-  const extension = dot < 0 ? '' : path.slice(dot + 1).toLowerCase();
-  const known: Record<string, string> = {
-    ts: 'typescript',
-    js: 'javascript',
-    svelte: 'svelte',
-    md: 'markdown',
-    json: 'json',
-    css: 'css',
-    html: 'html'
-  };
-  return known[extension] ?? null;
-}
-
-/** The managed provider of the seed: a release Boite downloads, 468 MB of it. */
-const MANAGED_ID = 'antigravity';
-const MANAGED_VERSION = 'agy_acp_server_1.1.1';
-const MANAGED_ARCHIVE_BYTES = 468_238_392;
-const MANAGED_EXE = `${DATA_DIR}\\agents\\${MANAGED_ID}\\current\\agy_acp_server.exe`;
-
-/** The second one is already down, one version behind: that is the Update row. */
-const UPDATABLE_ID = 'opencode';
-const UPDATABLE_VERSION = '0.4.12';
-const UPDATABLE_AVAILABLE = '0.5.0';
-const UPDATABLE_ARCHIVE_BYTES = 41_268_224;
-
-/** What one `providers.install` on that provider would fetch, and how big it is. */
-const RELEASES: Record<string, { version: string; archiveBytes: number }> = {
-  claude: { version: '2.1.267', archiveBytes: 220_051_616 },
-  codex: { version: '0.155.1', archiveBytes: 107_573_195 },
-  [MANAGED_ID]: { version: MANAGED_VERSION, archiveBytes: MANAGED_ARCHIVE_BYTES },
-  [UPDATABLE_ID]: { version: UPDATABLE_AVAILABLE, archiveBytes: UPDATABLE_ARCHIVE_BYTES }
-};
-/** Sixteen steps of 120 ms: about two seconds of download, long enough to be seen. */
-const INSTALL_STEPS = 16;
-const INSTALL_STEP_MS = 120;
-
-/** A fake plugin install ticks this many times, INSTALL_STEP_MS apart. */
-const PLUGIN_STEPS = 8;
-const KEBACC_RELEASE = 'https://github.com/kebab1337420/kebacc-switch/releases/download/kebacc-v2.0.1';
-
-/** The account pool command lines the core shows, `<pool>` and `<email>` standing for the values. */
-function poolCommands(executable: string): string[] {
-  return [
-    `${executable} list -<pool> -Json`,
-    `${executable} list -<pool> -Json -Refresh`,
-    `${executable} add -<pool>`,
-    `${executable} switch -<pool> -Email <email> -Yes`,
-    `${executable} remove -<pool> -Email <email> -Yes`
-  ];
-}
-
-/**
- * Every state the Plugins page draws: the recommended one not installed yet,
- * one added from a URL and installed, one stuck mid-download, and one whose
- * installed.json the core refuses.
- */
-function fakePlugins(): PluginState[] {
-  const base = { platform: 'win32-x64', progress: 0, error: null, rejected: null };
-  const legacy = `${DATA_DIR}\\plugins\\pool-legacy\\installed.json`;
-  return [
-    {
-      ...base, id: 'kebacc-switcher', name: 'kebacc-switcher', origin: 'recommended',
-      description: 'Save and switch Claude, Codex and Antigravity CLI logins, with quota readings for each saved account.',
-      homepage: 'https://github.com/kebab1337420/kebacc-switch', version: null, availableVersion: '2.0.1', status: 'not-installed', source: null,
-      artifact: { url: `${KEBACC_RELEASE}/kebacc-x86_64-pc-windows-msvc.exe`, sha256: '9edc5c3af1db76e97a9c07e2fd1c3399ad8c9db22e0ad2684a1b885e33acc538' },
-      commands: poolCommands('kebacc'), pools: ['claude', 'codex', 'antigravity']
-    },
-    {
-      ...base, id: 'seat-pool', name: 'Seat pool', origin: 'url',
-      description: 'Keeps several OpenCode logins and switches the active one.',
-      homepage: 'https://github.com/example/seat-pool', version: '1.4.0', availableVersion: '1.4.0', status: 'installed',
-      source: { url: 'https://github.com/example/seat-pool', ref: 'v1.4.0', commit: '3f9c2a7e5b1d4c6a8e0f2b4d6c8a0e2f4b6d8c0a' },
-      artifact: { url: 'https://github.com/example/seat-pool/releases/download/v1.4.0/seat-pool-win32-x64.exe', sha256: 'c41e9b0a7d3f5e2b8a6c4d1f0e9b7a5c3d2e1f0a9b8c7d6e5f4a3b2c1d0e9f8a' },
-      commands: poolCommands('seat-pool'), pools: ['opencode']
-    },
-    {
-      ...base, id: 'grok-seats', name: 'Grok seats', origin: 'url',
-      description: 'Saves Grok CLI logins and reads the quota of each one.',
-      homepage: 'https://github.com/example/grok-seats', version: null, availableVersion: '0.3.0', status: 'installing', progress: 45,
-      source: { url: 'https://github.com/example/grok-seats', ref: 'HEAD', commit: '8a1c3e5f7b9d0f2a4c6e8b0d2f4a6c8e0b2d4f6a' },
-      artifact: { url: 'https://github.com/example/grok-seats/releases/download/v0.3.0/grok-seats-win32-x64.exe', sha256: '0d2f4b6a8c1e3f5a7b9c2d4e6f8a0b1c3d5e7f9a2b4c6d8e0f1a3b5c7d9e2f4a' },
-      commands: poolCommands('grok-seats'), pools: ['grok']
-    },
-    {
-      ...base, id: 'pool-legacy', name: 'pool-legacy', origin: 'url', description: '', homepage: null,
-      version: null, availableVersion: null, status: 'rejected', source: null, artifact: null, commands: [], pools: [],
-      rejected: { file: legacy, field: 'manifest.schema', expected: '1', message: `${legacy}: manifest.schema must be 1, found number 0` }
-    }
-  ];
-}
-
-function fakePluginPools(): Record<string, PluginPool[]> {
-  return {
-    'kebacc-switcher': ['claude', 'codex', 'antigravity'].map((provider) => ({ provider, accounts: [
-      { email: 'work@example.com', active: true, checkedSecondsAgo: 10, windows: [{ id: 'fiveHour', label: '5 hours', usedPercent: 32, resetsAt: null }, { id: 'sevenDay', label: 'Weekly', usedPercent: 74, resetsAt: null }] },
-      { email: 'personal@example.com', active: false, checkedSecondsAgo: 10, windows: [{ id: 'fiveHour', label: '5 hours', usedPercent: 8, resetsAt: null }] },
-    ] })),
-    'seat-pool': [{ provider: 'opencode', accounts: [
-      { email: 'team@example.com', active: true, checkedSecondsAgo: 42, windows: [{ id: 'fiveHour', label: '5 hours', usedPercent: 18, resetsAt: null }, { id: 'sevenDay', label: 'Weekly', usedPercent: 51, resetsAt: null }] },
-      { email: 'side@example.com', active: false, checkedSecondsAgo: null, windows: [] },
-    ] }],
-    'grok-seats': [{ provider: 'grok', accounts: [] }]
-  };
-}
-
-/** Where the core would put a worktree: `<parent>/.boite-worktrees/<repo>/<slug>` on `boite/<slug>`. */
-function fakeWorktree(projectPath: string, title: string, branch?: string): { branch: string; path: string } {
-  const slug =
-    title
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '')
-      .slice(0, 40) || 'thread';
-  const separator = projectPath.includes('\\') ? '\\' : '/';
-  const parts = projectPath.split(/[\\/]/);
-  const repo = parts.pop() ?? 'repo';
-  const dir = branch === undefined ? slug : branch.replace(/^boite\//, '').replace(/[^a-z0-9]+/gi, '-').toLowerCase();
-  return {
-    branch: branch ?? `boite/${slug}`,
-    path: [...parts, '.boite-worktrees', repo, dir].join(separator)
-  };
-}
-
-function toSummary(thread: Thread): ThreadSummary {
-  const { messages: _messages, turns: _turns, ...rest } = thread;
-  return { ...rest, lastUserMessageAt: thread.messages.filter(m => m.role === 'user').at(-1)?.createdAt ?? null };
-}
-
-function emptyUsage(): Usage {
-  return {
-    inputTokens: 0,
-    outputTokens: 0,
-    cacheReadTokens: 0,
-    cacheWriteTokens: 0,
-    costUsdEquivalent: 0
-  };
-}
-
-function addUsage(a: Usage, b: Usage): Usage {
-  return {
-    inputTokens: a.inputTokens + b.inputTokens,
-    outputTokens: a.outputTokens + b.outputTokens,
-    cacheReadTokens: a.cacheReadTokens + b.cacheReadTokens,
-    cacheWriteTokens: a.cacheWriteTokens + b.cacheWriteTokens,
-    costUsdEquivalent: (a.costUsdEquivalent ?? 0) + (b.costUsdEquivalent ?? 0)
-  };
-}
-
-function chunkText(text: string, pieces: number): string[] {
-  if (text.length === 0) return [''];
-  const size = Math.max(1, Math.ceil(text.length / pieces));
-  const out: string[] = [];
-  for (let i = 0; i < text.length; i += size) out.push(text.slice(i, i + size));
-  return out;
-}
-
-const SPAWN_MARKER = /\[spawn:([^\]]+)\]/;
-
-/** What `[tool-stream]` types one piece at a time before the parsed input lands. */
-const STREAMED_TOOL_INPUT = '{"command":"echo streamed","description":"a streamed input"}';
-
-/** The three tool documents, the same ones the core's echo driver produces. */
-/** What the fake agent asks when a prompt mentions a question, echo's wording. */
-const QUESTION_TEXT = 'Which shape should the echo take?';
-const QUESTION_OPTIONS = [
-  { id: 'short', label: 'Short', description: 'one line back' },
-  { id: 'long', label: 'Long', description: 'the whole prompt back' }
-];
-
-const DIFF_PATH = 'src/app.ts';
-const DIFF_OLD = 'export function boot() {\n  return start();\n}';
-const DIFF_NEW = "export function boot() {\n  return start({ warm: true });\n  log('booted');\n}";
-const DOC_TITLE = 'README.md';
-const DOC_TEXT = [
-  '# README',
-  '- the first item',
-  '- the second item',
-  '```ts',
-  'export const answer = 42;',
-  '```'
-].join('\n');
-const IMAGE_BASE64 =
-  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
-
-/** The questions the four-hundred-message thread repeats, so heights vary down the list. */
-const LONG_ASKS = [
-  'Where does the scheduler decide a turn may start?',
-  'Read the descriptor loader and tell me what it refuses',
-  'Why does the shell start its own core?',
-  'What does the Job Object give us that a pid list does not?',
-  'Show me the part of the journal that survives a crash'
-];
-
-/** The answers beside them, of deliberately uneven length. */
-const LONG_ANSWERS = [
-  'In `packages/core/src/scheduler.ts`: a turn leaves the queue when both caps hold, the global one and the one on its account.',
-  [
-    'The loader refuses four things, each with the file, the field and what was expected:',
-    '',
-    '- a `protocol` it does not know',
-    '- a `roots` entry that resolves outside the descriptor directory',
-    '- an `env` key it would have to invent a value for',
-    '- a `login` block on a provider whose account is the default one',
-    '',
-    'Nothing is dropped in silence, which is the rule the whole module is written to.'
-  ].join('\n'),
-  'Because the window is a client. The core is the host, and the shell owns it through a `KILL_ON_JOB_CLOSE` job so closing the window never leaves an agent running.',
-  'Exact start and exit events for every process a thread launched, grandchildren included, plus the CPU and the peak memory the kernel already counted. A pid list gives you a guess and a race.',
-  [
-    'The journal is SQLite in WAL mode, so the last committed write is what a restart reads:',
-    '',
-    '```ts',
-    "db.run('PRAGMA journal_mode = WAL');",
-    "db.run('PRAGMA synchronous = NORMAL');",
-    '```',
-    '',
-    'A turn that was running when the core died comes back as `stopped`, never as `running`.'
-  ].join('\n')
-];
-
-/** How long the fake agent takes to answer a probe, so the picker shows it reading. */
-const PROBE_MS = 150;
-/** How long the fake's `threads.retitle` takes: long enough for the menu to say it is writing. */
-const RETITLE_DELAY_MS = 200;
-/** How long the fake takes to read its transcripts, and to import one. */
-const IMPORT_LIST_MS = 120;
-/** The fake's context meter: a window, a floor on the first turn, a step per turn on top of the prompt. */
-const FAKE_CONTEXT_WINDOW = 200_000;
-const FAKE_CONTEXT_FLOOR = 1_200;
-const FAKE_CONTEXT_PER_TURN = 600;
-
-/**
- * What the fake ACP agent lists in the `configOptions` of a `session/new`: its
- * own models, the descriptor's `default` first, and one reasoning scale that
- * belongs to the session rather than to a model.
- */
-const PROBED_EFFORT = {
-  levels: [
-    { id: 'think', label: 'Think' },
-    { id: 'think-hard', label: 'Think hard' }
-  ],
-  default: 'think'
-};
-
-/**
- * A real OpenCode answers with hundreds of models across a dozen prefixes (534
- * on the machine this was written on), so the fake answers with enough of them
- * to put the picker's model column past its search threshold.
- */
-const PROBED_CATALOGUE: [string, string][] = [
-  ['openrouter/anthropic/claude-sonnet-4-5', 'Claude Sonnet 4.5'],
-  ['openrouter/anthropic/claude-haiku-4-5', 'Claude Haiku 4.5'],
-  ['openrouter/openai/gpt-5-mini', 'GPT-5 Mini'],
-  ['openrouter/google/gemini-3-pro', 'Gemini 3 Pro'],
-  ['openrouter/meta-llama/llama-4-scout', 'Llama 4 Scout'],
-  ['openrouter/deepseek/deepseek-v4', 'DeepSeek V4'],
-  ['openrouter/qwen/qwen3-max', 'Qwen3 Max'],
-  ['opencode/grok-code', 'Grok Code'],
-  ['opencode/claude-sonnet-5', 'Claude Sonnet 5 zen'],
-  ['opencode/gpt-5-codex', 'GPT-5 Codex zen'],
-  ['opencode/kimi-k2', 'Kimi K2'],
-  ['opencode/glm-4-7', 'GLM 4.7'],
-  ['opencode/minimax-m2', 'MiniMax M2'],
-  ['nvidia/nemotron-4-340b', 'Nemotron 4 340B'],
-  ['nvidia/llama-3-3-nemotron-super', 'Llama 3.3 Nemotron Super'],
-  ['nvidia/mistral-nemo-12b', 'Mistral Nemo 12B'],
-  ['nvidia/deepseek-r2', 'DeepSeek R2'],
-  ['nvidia/qwen3-coder-480b', 'Qwen3 Coder 480B'],
-  ['nvidia/gpt-oss-120b', 'GPT-OSS 120B'],
-  ['nvidia/phi-4-reasoning', 'Phi 4 Reasoning']
-];
-
-/** The scale the Muse probe falls back to when its model catalog lists none. */
-const MUSE_EFFORT: NonNullable<ModelInfo['effort']> = {
-  levels: [
-    { id: 'low', label: 'Low' },
-    { id: 'medium', label: 'Medium' },
-    { id: 'high', label: 'High' },
-    { id: 'xhigh', label: 'Extra high' },
-    { id: 'max', label: 'Max' }
-  ],
-  default: 'high'
-};
-
-const PROBED_MODELS: ModelInfo[] = [
-  { id: 'default', name: 'OpenCode default', default: false, effort: PROBED_EFFORT },
-  { id: 'anthropic/claude-sonnet-5', name: 'Claude Sonnet 5', default: true, effort: PROBED_EFFORT },
-  { id: 'openai/gpt-5-codex', name: 'GPT-5 Codex', default: false, effort: PROBED_EFFORT },
-  ...PROBED_CATALOGUE.map(([id, name]): ModelInfo => ({ id, name, default: false, effort: PROBED_EFFORT }))
-];
-
-const PROBE_PROVIDERS: Pick<ProviderSummary, 'id' | 'name' | 'protocol' | 'login'>[] = [
-  { id: 'codex', name: 'Codex', protocol: 'codex-appserver', login: { kind: 'command' } },
-  { id: 'pi', name: 'pi', protocol: 'pi', login: false },
-  { id: 'grok', name: 'Grok', protocol: 'acp', login: { kind: 'command' } },
-  { id: 'muse', name: 'Muse Code', protocol: 'muse', login: { kind: 'command' } }
-];
-
-/**
- * The whole core in memory, contract-accurate: what `vite dev` uses behind
- * `?fake=1` and what every test runs against.
- */
+/** Keep update notices out of ordinary demo fixtures. */
 function quietUpdates(): boolean {
   if (typeof location === 'undefined') return false;
   const query = new URLSearchParams(location.search);
@@ -935,6 +194,15 @@ export class FakeClient implements ObservableClient {
     this.#emit('thread.created', structuredClone(toSummary(thread)));
     return thread.id;
   }
+
+  #brain: BrainStatus = { config: { path: null, enabled: false }, entries: [], problems: [], git: null, lastSync: null };
+  #telemetry: import('@boite/contracts').TelemetryState = { mode: 'basic', configured: true, pendingDeletion: false };
+  #plugins = new FakePlugins({
+    emit: (event, payload) => this.#emit(event, payload),
+    now: () => this.#now(),
+    nextId: () => ++this.#seq,
+    delayMs: () => this.#delayMs,
+  });
   static #cores = new Map<string, FakeClient>();
   #state: ClientState = 'idle';
   #handlers = new Map<string, Set<(payload: unknown) => void>>();
@@ -956,6 +224,12 @@ export class FakeClient implements ObservableClient {
   #accounts: Account[] = [];
   #threads = new Map<ThreadId, Thread>();
   #coordination = new Map<ThreadId, CoordinationConfig>();
+  #delegationConfigs = new Map<ThreadId, DelegationConfig>();
+  #delegationAgents = new Map<ThreadId, { threadId: ThreadId; profileId: string; task: string }[]>();
+  #delegationLetters = new Map<ThreadId, AgentLetter[]>();
+  #delegationTurns = new Map<ThreadId, number>();
+  #delegationRequests = new Map<string, { fingerprint: string; threadId: ThreadId }>();
+  #delegationSendRequests = new Map<string, { fingerprint: string; letter: AgentLetter }>();
   #letters = new Map<ThreadId, AgentLetter[]>();
   #peers = new Map<string, CoordinationPeer>();
   #identity: CoordinationPeer;
@@ -982,11 +256,6 @@ export class FakeClient implements ObservableClient {
     errors: ['keybindings.json: "trace": "t" has no modifier: a chord needs mod, ctrl, alt or meta before its key']
   };
   #quotaEnabled: Record<string, boolean> = {};
-  #plugins: PluginState[] = fakePlugins();
-  #pluginPools: Record<string, PluginPool[]> = fakePluginPools();
-  #pluginPreviews = new Map<string, PluginPreview>();
-  /** Bumped by cancel and uninstall, so a fake install in flight stops where it is. */
-  #pluginRuns = new Map<string, number>();
   #scheduler: SchedulerState;
   #core: CoreInfo;
   /** One phone already paired, so the devices list has a row to revoke. */
@@ -1006,8 +275,12 @@ export class FakeClient implements ObservableClient {
     { request: QuestionRequest; resolve: (answer: QuestionAnswer | null) => void }
   >();
   #inFlight = new Map<ThreadId, { cancelled: boolean; done: Promise<void> }>();
+  /** Async answers waiting for the thread to be free, oldest first. */
+  #heldAnswers = new Map<ThreadId, string[]>();
   /** The current output of every active fake login, also returned after reconnect. */
   #logins = new Map<string, RpcEvents['account.login']>();
+  /** Fake shells by terminal id: what they printed and the line being typed. */
+  #terminals = new Map<string, { cwd: string; output: string; line: string }>();
   #seq = 0;
   #turnRequests = new Map<string, { content: string; turn: Turn }>();
   #delayMs: number;
@@ -1059,6 +332,7 @@ export class FakeClient implements ObservableClient {
       queued: []
     };
     this.#seed();
+    if (options.delegationDemo) this.#seedDelegationDemo();
     if (options.uninstalled) {
       this.#providers = this.#providers.filter(provider => provider.id !== 'echo').map(provider => ({
         ...provider, available: false, executable: null,
@@ -1138,7 +412,7 @@ export class FakeClient implements ObservableClient {
     this.#agents.close();
     if (FakeClient.#cores.get(this.#identity.coreId) === this) FakeClient.#cores.delete(this.#identity.coreId);
     for (const thread of this.#threads.values()) this.#pauseActivity(thread);
-    for (const [id, run] of this.#pluginRuns) this.#pluginRuns.set(id, run + 1);
+    this.#plugins.close();
     this.#setState('closed');
     this.#dropPending('client closed');
   }
@@ -1185,6 +459,7 @@ export class FakeClient implements ObservableClient {
     if (this.#principal === 'session' && method !== 'hello' && !DEVICE_METHODS.has(method)) {
       throw new RpcFailure({ code: RpcErrorCode.Refused, message: `${method} is for the owner only` });
     }
+    if (this.#principal === 'session' && method === 'agents.message.send' && (params as RpcParams<'agents.message.send'>).threadId !== undefined) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'agents.message.send: paired devices must omit threadId and speak as the user' });
     const result = await this.#hold(this.#dispatch(method, params)) as RpcResult<M>;
     // The real client writes its set from the answer, never from the request.
     if (method === 'threads.subscribe') {
@@ -1214,7 +489,7 @@ export class FakeClient implements ObservableClient {
    */
   clearRequestsOf(threadId: ThreadId): void {
     for (const [questionId, pending] of [...this.#pendingQuestions]) {
-      if (pending.request.threadId !== threadId) continue;
+      if (pending.request.threadId !== threadId || pending.request.async === true) continue;
       this.#pendingQuestions.delete(questionId);
       this.#emit('question.answered', { questionId, threadId, answer: null });
       pending.resolve(null);
@@ -1238,1148 +513,1421 @@ export class FakeClient implements ObservableClient {
   // Dispatch
   // -------------------------------------------------------------------------
 
-  async #dispatch(method: RpcMethodName, rawParams: unknown): Promise<unknown> {
-    switch (method) {
-      case 'core.shutdown': {
-        this.#agents.close();
-        await Promise.all([...this.#threads.keys()].map(id => this.#stopTurn(id)));
-        setTimeout(() => this.close(), 25);
-        return { ok: true };
-      }
-      case 'agents.snapshot':
-      case 'agents.profile.save':
-      case 'agents.group.save':
-      case 'agents.team.save':
-      case 'agents.mission.save':
-      case 'agents.task.save':
-      case 'agents.resource.save':
-      case 'agents.memory.save':
-      case 'agents.message.send':
-      case 'agents.task.acquire':
-      case 'agents.task.submit':
-      case 'agents.artifact.add':
-      case 'agents.decision.request':
-      case 'agents.decision.answer':
-      case 'agents.work.control':
-      case 'agents.limits.set':
-        return this.#agents.call(method, rawParams);
-      case 'quotas.configure': {
-        const params = rawParams as RpcParams<'quotas.configure'>;
-        this.#quotaEnabled[params.accountId] = params.enabled;
-        const rows = this.#quotas(); this.#emit('quotas.updated', rows); return rows;
-      }
-      case 'quotas.list': return this.#quotas();
-      // The core's order: recommended plugins as shipped, then the URL ones by id.
-      case 'plugins.list': return structuredClone(this.#plugins).sort((a, b) => a.origin === b.origin ? (a.origin === 'url' ? a.id.localeCompare(b.id) : 0) : a.origin === 'recommended' ? -1 : 1);
-      case 'plugins.inspect': return this.#inspectPlugin(rawParams as RpcParams<'plugins.inspect'>);
-      case 'plugins.add': return this.#addPlugin((rawParams as RpcParams<'plugins.add'>).previewId);
-      case 'plugins.install': {
-        const plugin = this.#requirePlugin((rawParams as RpcParams<'plugins.install'>).id);
-        if (plugin.status === 'installing') return structuredClone(plugin);
-        if (plugin.status === 'rejected' && plugin.origin === 'url') {
-          throw new RpcFailure({ code: RpcErrorCode.Refused, message: `${plugin.id} was refused (${plugin.rejected?.message ?? ''}). Remove it, then add it again from its URL.` });
-        }
-        Object.assign(plugin, { status: 'installing', progress: 0, error: null });
-        this.#emit('plugins.updated', structuredClone(plugin));
-        void this.#runPluginInstall(plugin.id);
-        return structuredClone(plugin);
-      }
-      case 'plugins.cancel': {
-        const plugin = this.#requirePlugin((rawParams as RpcParams<'plugins.cancel'>).id);
-        if (plugin.status !== 'installing') return structuredClone(plugin);
-        this.#pluginRuns.set(plugin.id, (this.#pluginRuns.get(plugin.id) ?? 0) + 1);
-        if (plugin.origin === 'url' && plugin.version === null) return this.#dropPlugin(plugin);
-        Object.assign(plugin, { status: plugin.version ? 'installed' : 'not-installed', progress: 0 });
-        this.#emit('plugins.updated', structuredClone(plugin));
-        return structuredClone(plugin);
-      }
-      case 'plugins.uninstall': {
-        const plugin = this.#requirePlugin((rawParams as RpcParams<'plugins.uninstall'>).id);
-        if (plugin.status === 'installing') throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'Wait for the current plugin operation before uninstalling.' });
-        this.#pluginRuns.set(plugin.id, (this.#pluginRuns.get(plugin.id) ?? 0) + 1);
-        if (plugin.origin === 'url') return this.#dropPlugin(plugin);
-        Object.assign(plugin, { status: 'not-installed', version: null, progress: 0, error: null, rejected: null });
-        this.#emit('plugins.updated', structuredClone(plugin));
-        return structuredClone(plugin);
-      }
-      case 'plugins.accounts': {
-        const plugin = this.#requirePlugin((rawParams as RpcParams<'plugins.accounts'>).id);
-        if (plugin.status !== 'installed') throw new RpcFailure({ code: RpcErrorCode.Refused, message: `Install ${plugin.id} first.` });
-        return structuredClone(this.#pluginPools[plugin.id] ?? []);
-      }
-      case 'plugins.accountAction': {
-        const params = rawParams as RpcParams<'plugins.accountAction'>;
-        const pools = this.#pluginPools[this.#requirePlugin(params.id).id] ?? [];
-        const pool = pools.find((pool) => pool.provider === params.provider);
-        if (pool && params.action === 'switch') for (const account of pool.accounts) account.active = account.email === params.email;
-        if (pool && params.action === 'remove') pool.accounts = pool.accounts.filter((a) => a.email !== params.email);
-        return structuredClone(pools);
-      }
-      case 'hello':
-        return { core: this.#core, principal: this.#principal };
-      case 'pairing.grant': {
-        const params = rawParams as RpcParams<'pairing.grant'>;
-        const grant = `fake-grant-${++this.#seq}`;
-        return {
-          url: `http://192.168.1.20:8777/?grant=${grant}`,
-          grant,
-          role: params?.role ?? 'device',
-          expiresAt: this.#now() + 10 * 60 * 1000
-        };
-      }
-      case 'sessions.list':
-        return structuredClone(this.#sessions);
-      case 'push.status':
-        return { publicKey: '', subscribed: false };
-      case 'push.subscribe':
-      case 'push.unsubscribe':
-      case 'push.test':
-        throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'Web Push needs a paired connection to a real core' });
-      case 'sessions.revoke': {
-        const params = rawParams as RpcParams<'sessions.revoke'>;
-        if (!this.#sessions.some((session) => session.id === params.sessionId)) {
-          throw new RpcFailure({ code: RpcErrorCode.Refused, message: `unknown session ${params.sessionId}` });
-        }
-        this.#sessions = this.#sessions.filter((session) => session.id !== params.sessionId);
-        this.#emit('sessions.updated', { sessionId: params.sessionId, state: 'revoked' });
-        return { ok: true };
-      }
+  #dispatch(method: RpcMethodName, rawParams: unknown): Promise<unknown> {
+    if (method.startsWith('agents.')) return Promise.resolve(this.#agents.call(method as Extract<RpcMethodName, `agents.${string}`>, rawParams));
+    if (this.#plugins.handles(method)) return this.#plugins.call(method, rawParams);
+    if (!Object.hasOwn(this.#methods, method)) {
+      return Promise.reject(new RpcFailure({ code: RpcErrorCode.MethodNotFound, message: `unknown method ${String(method)}` }));
+    }
+    const handler = this.#methods[method as keyof FakeMethods];
+    return handler(rawParams as never);
+  }
 
-      case 'projects.list':
-        return structuredClone(this.#projects);
-      case 'projects.browse': {
-        const { path = '/workspace' } = rawParams as RpcParams<'projects.browse'>;
-        return { path, parent: path === '/' ? null : '/', directories: path === '/workspace' ? [
+  // Every method's input and output are checked against the real RPC contract.
+  #methods: FakeMethods = {
+    'core.shutdown': async () => { this.#agents.close(); await Promise.all([...this.#threads.keys()].map(id => this.#stopTurn(id))); setTimeout(() => this.close(), 25); return { ok: true }; },
+    'brain.status': async () => structuredClone(this.#brain),
+    'brain.configure': async (config) => {
+        if (typeof config.enabled !== 'boolean' || (config.enabled && !config.path) || (config.path !== null && (typeof config.path !== 'string' || !/^(?:[A-Za-z]:[\\/]|\/)/.test(config.path)))) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'brain.path must be an absolute folder path or null; enabled must be a boolean' });
+        const autoPull = config.autoPull === undefined ? this.#brain.config.autoPull : config.autoPull;
+        const globalInstructions = config.globalInstructions === undefined ? this.#brain.config.globalInstructions : config.globalInstructions;
+        if (globalInstructions !== undefined && typeof globalInstructions !== 'boolean') throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'brain.globalInstructions must be a boolean' });
+        if (autoPull !== undefined && (!autoPull || typeof autoPull.onStartup !== 'boolean' || !Number.isInteger(autoPull.intervalMinutes) || autoPull.intervalMinutes < 0 || autoPull.intervalMinutes > 1440)) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'brain.autoPull.onStartup must be a boolean; intervalMinutes must be an integer from 0 to 1440' });
+        if (this.#brain.config.path !== config.path) this.#brain.lastSync = null;
+        this.#brain.config = { ...config, ...(autoPull ? { autoPull: { ...autoPull } } : {}), ...(globalInstructions !== undefined ? { globalInstructions } : {}) };
+        this.#brain.links = config.path && config.enabled && globalInstructions ? [
+          ['Claude Code', '.claude/CLAUDE.md'], ['Codex', '.codex/AGENTS.md'], ['OpenCode', '.config/opencode/AGENTS.md'],
+          ['pi', '.pi/agent/AGENTS.md'], ['Grok', '.grok/AGENTS.md'], ['Gemini / Antigravity', '.gemini/GEMINI.md'], ['Muse', '.config/muse/AGENTS.md'],
+        ].map(([name, path]) => ({ name: name!, path: `/home/user/${path}`, state: 'linked' as const, error: null })) : [];
+        this.#brain.entries = config.path ? [
+          { kind: 'instructions', name: 'AGENTS.md', path: 'AGENTS.md', description: '', error: null },
+          { kind: 'skill', name: 'code-review', path: 'skills/code-review/SKILL.md', description: 'Review changes and check the affected behavior.', error: null },
+          { kind: 'plugin', name: 'team-tools', path: 'plugins/team-tools/.claude-plugin/plugin.json', description: 'Shared tools for the team.', error: null },
+        ] : [];
+        this.#brain.git = config.path ? { branch: 'main', upstream: 'origin/main', ahead: 0, behind: 0, dirty: false } : null;
+        return structuredClone(this.#brain);
+    },
+    'brain.sync': async () => {
+        if (!this.#brain.git) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'brain.path must point to the root of a Git checkout to synchronize' });
+        this.#brain.lastSync = Date.now();
+        return structuredClone(this.#brain);
+    },
+    'quotas.configure': async (params) => {
+      this.#quotaEnabled[params.accountId] = params.enabled;
+      const rows = this.#quotas(); this.#emit('quotas.updated', rows); return rows;
+    },
+    'quotas.list': async (params) => {
+      return this.#quotas();
+    },
+    'hello': async (params) => {
+      return { core: this.#core, principal: this.#principal };
+    },
+    'pairing.grant': async (params) => {
+      const grant = `fake-grant-${++this.#seq}`;
+      return {
+        url: `http://192.168.1.20:8777/?grant=${grant}`,
+        grant,
+        role: params?.role ?? 'device',
+        expiresAt: this.#now() + 10 * 60 * 1000
+      };
+    },
+    'sessions.list': async (params) => {
+      return structuredClone(this.#sessions);
+    },
+    'push.status': async (params) => {
+      return { publicKey: '', subscribed: false };
+    },
+    'push.subscribe': async (params) => {
+      throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'Web Push needs a paired connection to a real core' });
+    },
+    'push.unsubscribe': async (params) => {
+      throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'Web Push needs a paired connection to a real core' });
+    },
+    'push.test': async (params) => {
+      throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'Web Push needs a paired connection to a real core' });
+    },
+    'sessions.revoke': async (params) => {
+      if (!this.#sessions.some((session) => session.id === params.sessionId)) {
+        throw new RpcFailure({ code: RpcErrorCode.Refused, message: `unknown session ${params.sessionId}` });
+      }
+      this.#sessions = this.#sessions.filter((session) => session.id !== params.sessionId);
+      this.#emit('sessions.updated', { sessionId: params.sessionId, state: 'revoked' });
+      return { ok: true };
+    },
+    'projects.list': async (params) => {
+      return structuredClone(this.#projects);
+    },
+    'projects.browse': async (params) => {
+      const { path = '/workspace' } = params;
+      return {
+        path, parent: path === '/' ? null : '/', directories: path === '/workspace' ? [
           { name: 'boite', path: '/workspace/boite' }, { name: 'notes', path: '/workspace/notes' }
-        ] : [] };
+        ] : []
+      };
+    },
+    'projects.add': async (params) => {
+      const project: Project = {
+        id: `p-${++this.#seq}`,
+        name: params.name ?? params.path.split(/[\\/]/).filter(Boolean).pop() ?? params.path,
+        path: params.path,
+        createdAt: this.#now()
+      };
+      this.#projects.push(project);
+      this.#emit('project.added', structuredClone(project));
+      return structuredClone(project);
+    },
+    'threads.pullRequest': async (params) => {
+      const thread = this.#threads.get(params.threadId);
+      return thread?.pullRequest ?? null;
+    },
+    'projects.remove': async (params) => {
+      this.#projects = this.#projects.filter((p) => p.id !== params.projectId);
+      const threads = [...this.#threads.values()].filter((thread) => thread.projectId === params.projectId);
+      for (const thread of threads) thread.archived = true;
+      await Promise.all(threads.map((thread) => this.#stopTurn(thread.id)));
+      for (const thread of threads) {
+        this.#threads.delete(thread.id);
+        this.#emit('thread.removed', { threadId: thread.id });
       }
-      case 'projects.add': {
-        const params = rawParams as RpcParams<'projects.add'>;
-        const project: Project = {
-          id: `p-${++this.#seq}`,
-          name: params.name ?? params.path.split(/[\\/]/).filter(Boolean).pop() ?? params.path,
-          path: params.path,
-          createdAt: this.#now()
-        };
-        this.#projects.push(project);
-        this.#emit('project.added', structuredClone(project));
-        return structuredClone(project);
+      this.#emit('project.removed', { projectId: params.projectId });
+      return { ok: true };
+    },
+    'projects.files': async (params) => {
+      if (!this.#projects.some((p) => p.id === params.projectId)) {
+        throw new RpcFailure({ code: RpcErrorCode.NotFound, message: `unknown project ${params.projectId}` });
       }
-      case 'threads.pullRequest': {
-        const params = rawParams as RpcParams<'threads.pullRequest'>;
-        const thread = this.#threads.get(params.threadId);
-        return thread?.pullRequest ?? null;
-      }
-      case 'projects.remove': {
-        const params = rawParams as RpcParams<'projects.remove'>;
-        this.#projects = this.#projects.filter((p) => p.id !== params.projectId);
-        const threads = [...this.#threads.values()].filter((thread) => thread.projectId === params.projectId);
-        for (const thread of threads) thread.archived = true;
-        await Promise.all(threads.map((thread) => this.#stopTurn(thread.id)));
-        for (const thread of threads) {
-          this.#threads.delete(thread.id);
-          this.#emit('thread.removed', { threadId: thread.id });
-        }
-        this.#emit('project.removed', { projectId: params.projectId });
-        return { ok: true };
-      }
-      case 'projects.files': {
-        const params = rawParams as RpcParams<'projects.files'>;
-        if (!this.#projects.some((p) => p.id === params.projectId)) {
-          throw new RpcFailure({ code: RpcErrorCode.NotFound, message: `unknown project ${params.projectId}` });
-        }
-        const limit = Math.max(1, Math.min(200, params.limit ?? 50));
-        const scored = FAKE_FILES.map((path) => ({ path, score: scoreFakeFile(params.query, path) }))
-          .filter((entry) => entry.score > 0)
-          .sort((a, b) => b.score - a.score || a.path.length - b.path.length || (a.path < b.path ? -1 : 1));
-        return { files: scored.slice(0, limit).map((entry) => entry.path), total: scored.length, capped: false };
-      }
-
-      case 'providers.list':
-        return { loaded: structuredClone(this.#providers), rejected: [] };
-      case 'providers.reload': {
-        for (const provider of this.#providers) {
-          if (!provider.available || this.#accounts.some(account => account.providerId === provider.id)) continue;
-          const id = `a-${++this.#seq}`;
-          const account: Account = {
-            id, providerId: provider.id, label: 'Default',
-            isolationDir: provider.alwaysIsolated ? `${DATA_DIR}/accounts/${id}` : null,
-            status: provider.alwaysIsolated ? 'unauthenticated' : 'ok', identity: null, createdAt: this.#now(),
-          };
-          this.#accounts.push(account);
-          this.#emit('accounts.updated', structuredClone(account));
-        }
-        const result = { loaded: structuredClone(this.#providers), rejected: [] };
-        this.#emit('providers.updated', structuredClone(result));
-        return result;
-      }
-      case 'providers.probe': {
-        const params = rawParams as RpcParams<'providers.probe'>;
-        // The fixture catalogue already carries each model's own scale, so a probe
-        // naming a model answers the same list; only the refusal is mirrored.
-        if (params.model !== undefined && (typeof params.model !== 'string' || params.model.length === 0)) {
-          throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'model must be a non-empty string when given', data: { field: 'model', expected: 'a non-empty string' } });
-        }
-        return this.#probe(params.providerId, params.accountId);
-      }
-      case 'providers.install': {
-        const params = rawParams as RpcParams<'providers.install'>;
-        return this.#startInstall(params.providerId);
-      }
-      case 'providers.installCancel': {
-        const params = rawParams as RpcParams<'providers.installCancel'>;
-        return this.#cancelInstall(params.providerId, params.operationId);
-      }
-      case 'providers.uninstall': {
-        const params = rawParams as RpcParams<'providers.uninstall'>;
-        return this.#uninstall(params.providerId);
-      }
-      case 'providers.updates':
-        return structuredClone(this.#harnessUpdates);
-      case 'providers.update': {
-        const params = rawParams as RpcParams<'providers.update'>;
-        return this.#updateHarness(params.providerId);
-      }
-      case 'providers.updateSkip': {
-        const params = rawParams as RpcParams<'providers.updateSkip'>;
-        const update = this.#harnessUpdate(params.providerId);
-        update.skipped = params.version;
-        update.pending = update.latest !== update.current && update.skipped !== update.latest;
-        this.#emit('providers.updatesChanged', structuredClone(this.#harnessUpdates));
-        return structuredClone(update);
-      }
-      case 'providers.dryRun': {
-        const params = rawParams as RpcParams<'providers.dryRun'>;
-        const provider = this.#providers[0];
-        if (!params.file.endsWith('.json') || !provider) {
-          return {
-            ok: false,
-            rejected: {
-              file: params.file,
-              field: 'file',
-              expected: 'a path ending in .json',
-              message: 'not a descriptor file'
-            }
-          };
-        }
-        return {
-          ok: true,
-          summary: structuredClone(provider),
-          plan: { roots: [DATA_DIR], env: ['BOITE_ISOLATION_DIR'], closes: [] }
-        };
-      }
-
-      case 'accounts.list':
-        return structuredClone(this.#accounts);
-      case 'accounts.add': {
-        const params = rawParams as RpcParams<'accounts.add'>;
-        const provider = this.#providers.find((p) => p.id === params.providerId);
-        if (!provider) throw this.#notFound('provider', params.providerId);
+      const limit = Math.max(1, Math.min(200, params.limit ?? 50));
+      const scored = FAKE_FILES.map((path) => ({ path, score: scoreFakeFile(params.query, path) }))
+        .filter((entry) => entry.score > 0)
+        .sort((a, b) => b.score - a.score || a.path.length - b.path.length || (a.path < b.path ? -1 : 1));
+      return { files: scored.slice(0, limit).map((entry) => entry.path), total: scored.length, capped: false };
+    },
+    'providers.list': async (params) => {
+      return { loaded: structuredClone(this.#providers), rejected: [] };
+    },
+    'providers.reload': async (params) => {
+      for (const provider of this.#providers) {
+        if (!provider.available || this.#accounts.some(account => account.providerId === provider.id)) continue;
         const id = `a-${++this.#seq}`;
         const account: Account = {
-          id,
-          providerId: params.providerId,
-          label: params.label,
-          isolationDir: params.useDefaultLocation && !provider.alwaysIsolated ? null : `${DATA_DIR}\\accounts\\${id}`,
-          status: 'unknown',
-          identity: null,
-          createdAt: this.#now()
+          id, providerId: provider.id, label: 'Default',
+          isolationDir: provider.alwaysIsolated ? `${DATA_DIR}/accounts/${id}` : null,
+          status: provider.alwaysIsolated ? 'unauthenticated' : 'ok', identity: null, createdAt: this.#now(),
         };
         this.#accounts.push(account);
         this.#emit('accounts.updated', structuredClone(account));
-        return structuredClone(account);
       }
-      case 'accounts.remove': {
-        const params = rawParams as RpcParams<'accounts.remove'>;
-        if (!this.#accounts.some((a) => a.id === params.accountId)) throw this.#notFound('account', params.accountId);
-        const referenced = [...this.#threads.values()].find((t) => t.accountId === params.accountId);
-        if (referenced) {
-          throw new RpcFailure({ code: RpcErrorCode.Refused, message: `account ${params.accountId} is used by thread ${referenced.id}` });
-        }
-        this.#cancelLogin(params.accountId);
-        this.#accounts = this.#accounts.filter((a) => a.id !== params.accountId);
-        this.#emit('accounts.removed', { accountId: params.accountId });
-        return { ok: true };
+      const result = { loaded: structuredClone(this.#providers), rejected: [] };
+      this.#emit('providers.updated', structuredClone(result));
+      return result;
+    },
+    'providers.probe': async (params) => {
+      // The fixture catalogue already carries each model's own scale, so a probe
+      // naming a model answers the same list; only the refusal is mirrored.
+      if (params.model !== undefined && (typeof params.model !== 'string' || params.model.length === 0)) {
+        throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'model must be a non-empty string when given', data: { field: 'model', expected: 'a non-empty string' } });
       }
-      case 'accounts.check': {
-        const params = rawParams as RpcParams<'accounts.check'>;
-        const account = this.#accounts.find((a) => a.id === params.accountId);
-        if (!account) throw this.#notFound('account', params.accountId);
-        account.status = account.isolationDir === null ? 'ok' : 'unauthenticated';
-        account.identity = account.status === 'ok' ? 'you@example.com' : null;
-        this.#emit('accounts.updated', structuredClone(account));
-        return structuredClone(account);
-      }
-      case 'accounts.login': {
-        const params = rawParams as RpcParams<'accounts.login'>;
-        const account = this.#accounts.find((a) => a.id === params.accountId);
-        if (!account) throw this.#notFound('account', params.accountId);
-        const provider = this.#providers.find((p) => p.id === account.providerId);
-        if (!provider?.available || !provider.login) {
-          throw new RpcFailure({ code: RpcErrorCode.Refused, message: `login is not available for ${account.providerId}` });
-        }
-        if (account.isolationDir === null) {
-          throw new RpcFailure({
-            code: RpcErrorCode.Refused,
-            message: `${account.label} uses the provider's own location: log it in with your own CLI, outside Boite`
-          });
-        }
-        if (this.#logins.has(account.id)) {
-          throw new RpcFailure({
-            code: RpcErrorCode.Refused,
-            message: `a login is already running for ${account.label}`
-          });
-        }
-        this.#loginEvent({
-          accountId: account.id,
-          state: 'running',
-          output: '',
-          url: null,
-          exitCode: null
-        });
-        void this.#fakeLoginPrompt(account.id);
-        return { ok: true };
-      }
-      case 'accounts.logins':
-        return structuredClone([...this.#logins.values()]);
-      case 'accounts.loginCancel': {
-        const params = rawParams as RpcParams<'accounts.loginCancel'>;
-        if (!this.#accounts.some((a) => a.id === params.accountId)) throw this.#notFound('account', params.accountId);
-        this.#cancelLogin(params.accountId);
-        return { ok: true };
-      }
-      case 'accounts.loginInput': {
-        const params = rawParams as RpcParams<'accounts.loginInput'>;
-        const account = this.#accounts.find((a) => a.id === params.accountId);
-        if (!account) throw this.#notFound('account', params.accountId);
-        if (!this.#logins.has(account.id)) {
-          throw new RpcFailure({
-            code: RpcErrorCode.Refused,
-            message: `no login is running for ${account.id}`
-          });
-        }
-        void this.#finishFakeLogin(account);
-        return { ok: true };
-      }
-
-      case 'threads.list': {
-        const params = rawParams as RpcParams<'threads.list'>;
-        return [...this.#threads.values()]
-          .filter((t) => (params.projectId ? t.projectId === params.projectId : true))
-          .filter((t) => (params.includeArchived ? true : !t.archived))
-          .map((t) => structuredClone(toSummary(t)));
-      }
-      case 'threads.create': {
-        const params = rawParams as RpcParams<'threads.create'>;
-        if (!this.#providers.some(provider => provider.id === params.providerId)) throw this.#notFound('provider', params.providerId);
-        const project = this.#projects.find((p) => p.id === params.projectId);
-        if (!project) throw this.#notFound('project', params.projectId);
-        this.#checkSpeed(params.providerId, params.accountId, params.model ?? null, params.speed ?? null);
-        const at = this.#now();
-        const title = params.title ?? 'Untitled thread';
-        // The core's own placement: a branch named after the title, the
-        // worktree beside the repository. No git here, only the two strings.
-        const placed = params.worktree === undefined ? null : fakeWorktree(project.path, title, params.worktree.branch);
-        const thread: Thread = {
-          id: `t-${++this.#seq}`,
-          projectId: params.projectId,
-          title,
-          titleSource: 'prompt',
-          providerId: params.providerId,
-          accountId: params.accountId,
-          model: params.model ?? null,
-          effort: params.effort ?? null,
-          speed: params.speed ?? null,
-          cwd: placed?.path ?? params.cwd ?? project.path,
-          branch: placed?.branch ?? null,
-          permissionMode: params.permissionMode ?? 'default',
-          status: 'idle',
-          unread: false,
-          archived: false,
-          pinned: false,
-          sessionId: null,
-          load: null,
-          context: null,
-          createdAt: at,
-          updatedAt: at,
-          messages: [],
-          commands: [],
-          messagesBefore: null,
-          turns: []
+      return this.#probe(params.providerId, params.accountId);
+    },
+    'providers.install': async (params) => {
+      return this.#startInstall(params.providerId);
+    },
+    'providers.installCancel': async (params) => {
+      return this.#cancelInstall(params.providerId, params.operationId);
+    },
+    'providers.uninstall': async (params) => {
+      return this.#uninstall(params.providerId);
+    },
+    'providers.updates': async (params) => {
+      return structuredClone(this.#harnessUpdates);
+    },
+    'providers.update': async (params) => {
+      return this.#updateHarness(params.providerId);
+    },
+    'providers.updateSkip': async (params) => {
+      const update = this.#harnessUpdate(params.providerId);
+      update.skipped = params.version;
+      update.pending = update.latest !== update.current && update.skipped !== update.latest;
+      this.#emit('providers.updatesChanged', structuredClone(this.#harnessUpdates));
+      return structuredClone(update);
+    },
+    'providers.dryRun': async (params) => {
+      const provider = this.#providers[0];
+      if (!params.file.endsWith('.json') || !provider) {
+        return {
+          ok: false,
+          rejected: {
+            file: params.file,
+            field: 'file',
+            expected: 'a path ending in .json',
+            message: 'not a descriptor file'
+          }
         };
-        this.#threads.set(thread.id, thread);
-        this.#emit('thread.created', structuredClone(toSummary(thread)));
-        return structuredClone(toSummary(thread));
       }
-      case 'threads.get': {
-        const params = rawParams as RpcParams<'threads.get'>;
-        const thread = this.#thread(params.threadId);
-        // The core's rule: from the named message on, unless it is unknown or
-        // the tail is longer than a page, and then the whole page as before.
-        const from = params.after === undefined ? -1 : thread.messages.findIndex((message) => message.id === params.after);
-        if (from !== -1 && thread.messages.length - from <= MESSAGE_PAGE) {
-          const messages = thread.messages.slice(from);
-          // As the core's `listTurnsFor`: the turns of the messages sent, and whatever is still queued or running.
-          const sent = new Set(messages.map((message) => message.turnId));
-          const turns = thread.turns.filter((turn) => turn.status === 'queued' || turn.status === 'running' || sent.has(turn.id));
-          return structuredClone({ ...thread, messages, turns, messagesBefore: null, messagesFrom: params.after });
-        }
-        const page = this.#page(thread.messages, thread.messages.length, MESSAGE_PAGE);
-        return structuredClone({ ...thread, messages: page.messages, messagesBefore: page.before });
+      return {
+        ok: true,
+        summary: structuredClone(provider),
+        plan: { roots: [DATA_DIR], env: ['BOITE_ISOLATION_DIR'], closes: [] }
+      };
+    },
+    'accounts.list': async (params) => {
+      return structuredClone(this.#accounts);
+    },
+    'accounts.add': async (params) => {
+      const provider = this.#providers.find((p) => p.id === params.providerId);
+      if (!provider) throw this.#notFound('provider', params.providerId);
+      const id = `a-${++this.#seq}`;
+      const account: Account = {
+        id,
+        providerId: params.providerId,
+        label: params.label,
+        isolationDir: params.useDefaultLocation && !provider.alwaysIsolated ? null : `${DATA_DIR}\\accounts\\${id}`,
+        status: 'unknown',
+        identity: null,
+        createdAt: this.#now()
+      };
+      this.#accounts.push(account);
+      this.#emit('accounts.updated', structuredClone(account));
+      return structuredClone(account);
+    },
+    'accounts.remove': async (params) => {
+      if (!this.#accounts.some((a) => a.id === params.accountId)) throw this.#notFound('account', params.accountId);
+      const referenced = [...this.#threads.values()].find((t) => t.accountId === params.accountId);
+      if (referenced) {
+        throw new RpcFailure({ code: RpcErrorCode.Refused, message: `account ${params.accountId} is used by thread ${referenced.id}` });
       }
-      case 'messages.list': {
-        const params = rawParams as RpcParams<'messages.list'>;
-        const thread = this.#thread(params.threadId);
-        const at = thread.messages.findIndex((message) => message.id === params.before);
-        if (at < 0) {
-          throw new RpcFailure({
-            code: RpcErrorCode.Refused,
-            message: `message ${params.before} is not a message of thread ${params.threadId}`,
-            data: { threadId: params.threadId, before: params.before }
-          });
-        }
-        const asked = params.limit ?? MESSAGE_PAGE;
-        const limit = Math.min(Math.max(1, Math.trunc(asked)), MESSAGE_PAGE_MAX);
-        const page = this.#page(thread.messages, at, limit);
-        const turns = new Set(page.messages.map((message) => message.turnId));
-        return structuredClone({ ...page, turns: thread.turns.filter((turn) => turns.has(turn.id)) });
+      this.#cancelLogin(params.accountId);
+      this.#accounts = this.#accounts.filter((a) => a.id !== params.accountId);
+      this.#emit('accounts.removed', { accountId: params.accountId });
+      return { ok: true };
+    },
+    'accounts.check': async (params) => {
+      const account = this.#accounts.find((a) => a.id === params.accountId);
+      if (!account) throw this.#notFound('account', params.accountId);
+      account.status = account.isolationDir === null ? 'ok' : 'unauthenticated';
+      account.identity = account.status === 'ok' ? 'you@example.com' : null;
+      this.#emit('accounts.updated', structuredClone(account));
+      return structuredClone(account);
+    },
+    'accounts.login': async (params) => {
+      const account = this.#accounts.find((a) => a.id === params.accountId);
+      if (!account) throw this.#notFound('account', params.accountId);
+      const provider = this.#providers.find((p) => p.id === account.providerId);
+      if (!provider?.available || !provider.login) {
+        throw new RpcFailure({ code: RpcErrorCode.Refused, message: `login is not available for ${account.providerId}` });
       }
-      case 'threads.update': {
-        const params = rawParams as RpcParams<'threads.update'>;
-        const thread = this.#thread(params.threadId);
-        if (params.expectedSelectionVersion !== undefined && params.expectedSelectionVersion !== (thread.selectionVersion ?? 0)) {
-          throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'the model selection changed; review the selected model and send again' });
-        }
-        const nextAccountId = params.accountId ?? thread.accountId;
-        const nextProviderId = this.#accounts.find(a => a.id === nextAccountId)?.providerId ?? thread.providerId;
-        const changedModel = (params.model !== undefined && params.model !== thread.model) || nextAccountId !== thread.accountId;
-        this.#checkSpeed(nextProviderId, nextAccountId, params.model !== undefined ? params.model : thread.model, params.speed !== undefined ? params.speed : changedModel ? null : thread.speed ?? null);
-        const before = [thread.accountId, thread.model, thread.effort, thread.speed, thread.permissionMode].join('\0');
-        if (params.accountId !== undefined && params.accountId !== thread.accountId) {
-          const account = this.#accounts.find((entry) => entry.id === params.accountId);
-          const provider = account && this.#providers.find((entry) => entry.id === account.providerId);
-          if (!account || !provider?.available || account.status === 'unauthenticated') {
-            throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'the selected account is unavailable' });
+      if (account.isolationDir === null) {
+        throw new RpcFailure({
+          code: RpcErrorCode.Refused,
+          message: `${account.label} uses the provider's own location: log it in with your own CLI, outside Boite`
+        });
+      }
+      if (this.#logins.has(account.id)) {
+        throw new RpcFailure({
+          code: RpcErrorCode.Refused,
+          message: `a login is already running for ${account.label}`
+        });
+      }
+      this.#loginEvent({
+        accountId: account.id,
+        state: 'running',
+        output: '',
+        url: null,
+        exitCode: null
+      });
+      void this.#fakeLoginPrompt(account.id);
+      return { ok: true };
+    },
+    'accounts.logins': async (params) => {
+      return structuredClone([...this.#logins.values()]);
+    },
+    'accounts.loginCancel': async (params) => {
+      if (!this.#accounts.some((a) => a.id === params.accountId)) throw this.#notFound('account', params.accountId);
+      this.#cancelLogin(params.accountId);
+      return { ok: true };
+    },
+    'accounts.loginInput': async (params) => {
+      const account = this.#accounts.find((a) => a.id === params.accountId);
+      if (!account) throw this.#notFound('account', params.accountId);
+      if (!this.#logins.has(account.id)) {
+        throw new RpcFailure({
+          code: RpcErrorCode.Refused,
+          message: `no login is running for ${account.id}`
+        });
+      }
+      void this.#finishFakeLogin(account);
+      return { ok: true };
+    },
+    'accounts.loginTerminal': async (params) => {
+      const account = this.#accounts.find((a) => a.id === params.accountId);
+      if (!account) throw this.#notFound('account', params.accountId);
+      const provider = this.#providers.find((p) => p.id === account.providerId);
+      if (!provider?.login || provider.login.kind !== 'terminal') {
+        throw new RpcFailure({ code: RpcErrorCode.Refused, message: `${provider?.name ?? account.providerId} does not sign in from a terminal` });
+      }
+      const id = `login:${account.id}`;
+      const cwd = account.isolationDir ?? 'C:\\Users\\you';
+      if (!this.#terminals.has(id)) {
+        this.#terminals.set(id, { cwd, output: `PS ${cwd}> & ${provider.id} auth login\r\n${FAKE_LOGIN_MENU}`, line: '' });
+      }
+      const shell = this.#terminals.get(id)!;
+      return { id, cwd: shell.cwd, output: shell.output };
+    },
+    'terminals.open': async (params) => {
+      const thread = this.#threads.get(params.threadId);
+      if (!thread) throw this.#notFound('thread', params.threadId);
+      const id = `terminal:${thread.id}`;
+      if (!this.#terminals.has(id)) this.#terminals.set(id, { cwd: thread.cwd, output: `PS ${thread.cwd}> `, line: '' });
+      const shell = this.#terminals.get(id)!;
+      return { id, cwd: shell.cwd, output: shell.output };
+    },
+    'terminals.write': async (params) => {
+      const shell = this.#terminals.get(params.id);
+      if (!shell) throw this.#notFound('terminal', params.id);
+      let echo = '';
+      for (const char of params.data) {
+        if (char === '\r') {
+          const typed = shell.line.trim();
+          shell.line = '';
+          if (typed === 'exit') {
+            this.#closeTerminal(params.id);
+            return { ok: true };
           }
-          thread.accountId = account.id;
-          thread.providerId = account.providerId;
-          thread.model = params.model === undefined ? provider.models.find((model) => model.default)?.id ?? null : params.model;
-          thread.effort = null; thread.speed = null;
-          thread.sessionId = null;
-          thread.sessionGeneration = (thread.sessionGeneration ?? 0) + 1;
-          thread.context = null;
-          thread.commands = [];
-          this.#emit('thread.commands', { threadId: thread.id, commands: [] });
+          echo += `\r\n${typed.length > 0 ? `${typed}\r\n` : ''}PS ${shell.cwd}> `;
+        } else if (char === '\x7f') {
+          if (shell.line.length > 0) { shell.line = shell.line.slice(0, -1); echo += '\b \b'; }
+        } else if (char >= ' ') {
+          shell.line += char;
+          echo += char;
         }
-        if (params.title !== undefined) {
-          thread.title = params.title;
-          thread.titleSource = 'user';
+      }
+      shell.output += echo;
+      if (echo.length > 0) this.#emit('terminal.output', { id: params.id, data: echo });
+      return { ok: true };
+    },
+    'terminals.resize': async (params) => {
+      if (!this.#terminals.has(params.id)) throw this.#notFound('terminal', params.id);
+      return { ok: true };
+    },
+    'terminals.close': async (params) => {
+      this.#closeTerminal(params.id);
+      return { ok: true };
+    },
+    'threads.list': async (params) => {
+      return [...this.#threads.values()]
+        .filter((t) => (params.projectId ? t.projectId === params.projectId : true))
+        .filter((t) => (params.includeArchived ? true : !t.archived))
+        .map((t) => structuredClone(toSummary(t)));
+    },
+    'threads.create': async (params) => {
+      if (!this.#providers.some(provider => provider.id === params.providerId)) throw this.#notFound('provider', params.providerId);
+      const project = this.#projects.find((p) => p.id === params.projectId);
+      if (!project) throw this.#notFound('project', params.projectId);
+      this.#checkSpeed(params.providerId, params.accountId, params.model ?? null, params.speed ?? null);
+      const at = this.#now();
+      const title = params.title ?? 'Untitled thread';
+      // The core's own placement: a branch named after the title, the
+      // worktree beside the repository. No git here, only the two strings.
+      const placed = params.worktree === undefined ? null : fakeWorktree(project.path, title, params.worktree.branch);
+      const thread: Thread = {
+        id: `t-${++this.#seq}`,
+        projectId: params.projectId,
+        title,
+        titleSource: 'prompt',
+        providerId: params.providerId,
+        accountId: params.accountId,
+        model: params.model ?? null,
+        effort: params.effort ?? null,
+        speed: params.speed ?? null,
+        cwd: placed?.path ?? params.cwd ?? project.path,
+        branch: placed?.branch ?? null,
+        permissionMode: params.permissionMode ?? 'default',
+        status: 'idle',
+        unread: false,
+        archived: false,
+        pinned: false,
+        sessionId: null,
+        load: null,
+        context: null,
+        createdAt: at,
+        updatedAt: at,
+        messages: [],
+        commands: [],
+        messagesBefore: null,
+        turns: []
+      };
+      this.#threads.set(thread.id, thread);
+      this.#emit('thread.created', structuredClone(toSummary(thread)));
+      return structuredClone(toSummary(thread));
+    },
+    'threads.get': async (params) => {
+      const thread = this.#thread(params.threadId);
+      // The core's rule: from the named message on, unless it is unknown or
+      // the tail is longer than a page, and then the whole page as before.
+      const from = params.after === undefined ? -1 : thread.messages.findIndex((message) => message.id === params.after);
+      if (from !== -1 && thread.messages.length - from <= MESSAGE_PAGE) {
+        const messages = thread.messages.slice(from);
+        // As the core's `listTurnsFor`: the turns of the messages sent, and whatever is still queued or running.
+        const sent = new Set(messages.map((message) => message.turnId));
+        const turns = thread.turns.filter((turn) => turn.status === 'queued' || turn.status === 'running' || sent.has(turn.id));
+        return structuredClone({ ...thread, messages, turns, messagesBefore: null, messagesFrom: params.after });
+      }
+      const page = this.#page(thread.messages, thread.messages.length, MESSAGE_PAGE);
+      return structuredClone({ ...thread, messages: page.messages, messagesBefore: page.before });
+    },
+    'messages.list': async (params) => {
+      const thread = this.#thread(params.threadId);
+      const at = thread.messages.findIndex((message) => message.id === params.before);
+      if (at < 0) {
+        throw new RpcFailure({
+          code: RpcErrorCode.Refused,
+          message: `message ${params.before} is not a message of thread ${params.threadId}`,
+          data: { threadId: params.threadId, before: params.before }
+        });
+      }
+      const asked = params.limit ?? MESSAGE_PAGE;
+      const limit = Math.min(Math.max(1, Math.trunc(asked)), MESSAGE_PAGE_MAX);
+      const page = this.#page(thread.messages, at, limit);
+      const turns = new Set(page.messages.map((message) => message.turnId));
+      return structuredClone({ ...page, turns: thread.turns.filter((turn) => turns.has(turn.id)) });
+    },
+    'threads.update': async (params) => {
+      const thread = this.#thread(params.threadId);
+      if (params.expectedSelectionVersion !== undefined && params.expectedSelectionVersion !== (thread.selectionVersion ?? 0)) {
+        throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'the model selection changed; review the selected model and send again' });
+      }
+      const nextAccountId = params.accountId ?? thread.accountId;
+      const nextProviderId = this.#accounts.find(a => a.id === nextAccountId)?.providerId ?? thread.providerId;
+      const changedModel = (params.model !== undefined && params.model !== thread.model) || nextAccountId !== thread.accountId;
+      this.#checkSpeed(nextProviderId, nextAccountId, params.model !== undefined ? params.model : thread.model, params.speed !== undefined ? params.speed : changedModel ? null : thread.speed ?? null);
+      const before = [thread.accountId, thread.model, thread.effort, thread.speed, thread.permissionMode].join('\0');
+      if (params.accountId !== undefined && params.accountId !== thread.accountId) {
+        const account = this.#accounts.find((entry) => entry.id === params.accountId);
+        const provider = account && this.#providers.find((entry) => entry.id === account.providerId);
+        if (!account || !provider?.available || account.status === 'unauthenticated') {
+          throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'the selected account is unavailable' });
         }
-        if (params.model !== undefined && params.model !== thread.model) { thread.model = params.model; thread.effort = null; thread.speed = null; }
-        if (params.effort !== undefined) thread.effort = params.effort;
-        if (params.speed !== undefined) thread.speed = params.speed;
-        if (params.permissionMode !== undefined) thread.permissionMode = params.permissionMode;
-        if (before !== [thread.accountId, thread.model, thread.effort, thread.speed, thread.permissionMode].join('\0')) thread.selectionVersion = (thread.selectionVersion ?? 0) + 1;
-        return this.#touch(thread);
+        thread.accountId = account.id;
+        thread.providerId = account.providerId;
+        thread.model = params.model === undefined ? provider.models.find((model) => model.default)?.id ?? null : params.model;
+        thread.effort = null; thread.speed = null;
+        thread.sessionId = null;
+        thread.sessionGeneration = (thread.sessionGeneration ?? 0) + 1;
+        thread.context = null;
+        thread.commands = [];
+        this.#emit('thread.commands', { threadId: thread.id, commands: [] });
       }
-      case 'threads.retitle': {
-        const params = rawParams as RpcParams<'threads.retitle'>;
-        const thread = this.#thread(params.threadId);
-        const first = thread.messages.find((message) => message.role === 'user');
-        if (first === undefined) {
-          throw new RpcFailure({
-            code: RpcErrorCode.Refused,
-            message: 'this thread has no prompt to write a title from',
-            data: { threadId: params.threadId }
-          });
+      if (params.title !== undefined) {
+        thread.title = params.title;
+        thread.titleSource = 'user';
+      }
+      if (params.model !== undefined && params.model !== thread.model) { thread.model = params.model; thread.effort = null; thread.speed = null; }
+      if (params.effort !== undefined) thread.effort = params.effort;
+      if (params.speed !== undefined) thread.speed = params.speed;
+      if (params.permissionMode !== undefined) thread.permissionMode = params.permissionMode;
+      if (before !== [thread.accountId, thread.model, thread.effort, thread.speed, thread.permissionMode].join('\0')) thread.selectionVersion = (thread.selectionVersion ?? 0) + 1;
+      return this.#touch(thread);
+    },
+    'threads.retitle': async (params) => {
+      const thread = this.#thread(params.threadId);
+      const first = thread.messages.find((message) => message.role === 'user');
+      if (first === undefined) {
+        throw new RpcFailure({
+          code: RpcErrorCode.Refused,
+          message: 'this thread has no prompt to write a title from',
+          data: { threadId: params.threadId }
+        });
+      }
+      // The echo agent's rule, at the echo agent's pace: its prefix and the first five words.
+      await new Promise<void>((resolve) => setTimeout(resolve, RETITLE_DELAY_MS));
+      const words = first.parts
+        .map((part) => (part.type === 'text' ? part.text : ''))
+        .join(' ')
+        .split(/\s+/)
+        .filter((word) => word.length > 0);
+      thread.title = `Echo: ${words.slice(0, 5).join(' ')}`;
+      thread.titleSource = 'agent';
+      return this.#touch(thread);
+    },
+    'threads.archive': async (params) => {
+      const thread = this.#thread(params.threadId);
+      thread.archived = params.archived ?? true;
+      if (thread.archived) {
+        await this.#stopTurn(thread.id);
+        // As the core: nobody answers a card on a thread put away, and its background work goes.
+        for (const [questionId, pending] of [...this.#pendingQuestions]) {
+          if (pending.request.threadId !== thread.id) continue;
+          this.#pendingQuestions.delete(questionId);
+          pending.resolve(null);
         }
-        // The echo agent's rule, at the echo agent's pace: its prefix and the first five words.
-        await new Promise<void>((resolve) => setTimeout(resolve, RETITLE_DELAY_MS));
-        const words = first.parts
-          .map((part) => (part.type === 'text' ? part.text : ''))
-          .join(' ')
-          .split(/\s+/)
-          .filter((word) => word.length > 0);
-        thread.title = `Echo: ${words.slice(0, 5).join(' ')}`;
-        thread.titleSource = 'agent';
-        return this.#touch(thread);
+        this.#heldAnswers.delete(thread.id);
+        if ((thread.background?.length ?? 0) > 0) this.#setBackground(thread, []);
       }
-      case 'threads.archive': {
-        const params = rawParams as RpcParams<'threads.archive'>;
-        const thread = this.#thread(params.threadId);
-        thread.archived = params.archived ?? true;
-        if (thread.archived) await this.#stopTurn(thread.id);
-        return this.#touch(thread);
+      return this.#touch(thread);
+    },
+    'threads.pin': async (params) => {
+      const thread = this.#thread(params.threadId);
+      const pinned = params.pinned ?? true;
+      if (thread.pinned === pinned) return structuredClone(toSummary(thread));
+      thread.pinned = pinned;
+      return this.#touch(thread);
+    },
+    'threads.markRead': async (params) => {
+      const thread = this.#thread(params.threadId);
+      thread.unread = false;
+      this.#touch(thread);
+      return { ok: true };
+    },
+    'threads.subscribe': async (params) => {
+      // The core runs `threads.require` first, so an unknown id is a NotFound.
+      this.#thread(params.threadId);
+      this.#subscribed.add(params.threadId);
+      return { ok: true };
+    },
+    'threads.unsubscribe': async (params) => {
+      this.#subscribed.delete(params.threadId);
+      return { ok: true };
+    },
+    'turns.start': async (params) => {
+      if (this.#thread(params.threadId).agentSessionId) throw refusal('persistent agent sessions accept work through Agents');
+      const referenceError = previewReferencesError(params.previewReferences ?? [], params.prompt);
+      if (referenceError) throw new RpcFailure({ code: RpcErrorCode.Refused, message: referenceError });
+      if (params.attachments !== undefined && (!Array.isArray(params.attachments) || params.attachments.some(a => !a || typeof a !== 'object'))) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'attachments must be an array of attachment objects' });
+      const key = params.clientRequestId ? `${params.threadId}:${params.clientRequestId}` : null;
+      const content = JSON.stringify([params.prompt, (params.attachments ?? []).map(a => [a.kind, a.mimeType, a.data, a.name]), ...(params.previewReferences?.length ? [params.previewReferences] : [])]);
+      if (params.clientRequestId !== undefined && !/^[A-Za-z0-9_-]{8,128}$/.test(params.clientRequestId)) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'clientRequestId must contain 8 to 128 URL-safe characters' });
+      const previous = key ? this.#turnRequests.get(key) : undefined;
+      if (previous) {
+        if (previous.content !== content) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'clientRequestId was already used for different content' });
+        return previous.turn;
       }
-      case 'threads.pin': {
-        const params = rawParams as RpcParams<'threads.pin'>;
-        const thread = this.#thread(params.threadId);
-        const pinned = params.pinned ?? true;
-        if (thread.pinned === pinned) return structuredClone(toSummary(thread));
-        thread.pinned = pinned;
-        return this.#touch(thread);
+      if (params.expectedSelectionVersion !== undefined && params.expectedSelectionVersion !== (this.#thread(params.threadId).selectionVersion ?? 0)) {
+        throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'the model selection changed; review the selected model and send again' });
       }
-      case 'threads.markRead': {
-        const params = rawParams as RpcParams<'threads.markRead'>;
-        const thread = this.#thread(params.threadId);
-        thread.unread = false;
+      const thread = this.#thread(params.threadId);
+      const providerId = thread.providerId;
+      const provider = this.#providers.find(p => p.id === providerId);
+      if (!provider) throw this.#notFound('provider', providerId);
+      const error = attachmentError(params.attachments ?? [], provider);
+      if (error) throw new RpcFailure({ code: RpcErrorCode.Refused, ...error });
+      const rootId = thread.parentThreadId;
+      if (rootId) {
+        const config = this.#delegationConfig(rootId);
+        if (!config.enabled || config.paused) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'delegation is disabled or paused' });
+        if ((this.#delegationTurns.get(rootId) ?? 0) >= config.maxTurns) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'delegation turn budget reached' });
+      }
+      const turn = this.#startTurn(params.threadId, params.prompt, params.attachments ?? [], rootId ? 'delegation' : undefined, undefined, undefined, params.previewReferences ?? []);
+      if (rootId) this.#delegationTurns.set(rootId, (this.#delegationTurns.get(rootId) ?? 0) + 1);
+      if (key) this.#turnRequests.set(key, { content, turn });
+      return turn;
+    },
+    'threads.activity.set': async (params) => {
+      if (this.#thread(params.threadId).agentSessionId) throw refusal('persistent agent sessions use missions instead of conversation loops');
+      const thread = this.#thread(params.threadId);
+      if (thread.archived) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'activity requires an unarchived thread' });
+      const activity = structuredClone(thread.activity ?? { goal: null, loop: null, tasks: [] });
+      if (params.goal !== undefined) {
+        if (params.goal !== null && !params.goal.objective?.trim()) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'goal.objective must be non-empty text' });
+        activity.goal = params.goal === null ? null : { objective: params.goal.objective.trim(), status: 'active', iterations: 0, error: null };
+      }
+      if (params.loop !== undefined) {
+        if (params.loop !== null && (!params.loop.prompt?.trim() || !Number.isInteger(params.loop.intervalMs) || (params.loop.intervalMs < 1000 && !(params.loop.intervalMs === 0 && params.loop.maxIterations)) || params.loop.intervalMs > 86400000 || (params.loop.maxIterations != null && (!Number.isInteger(params.loop.maxIterations) || params.loop.maxIterations < 1 || params.loop.maxIterations > 1000)))) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'loop requires text and an interval from 1000 to 86400000 ms, or 0 with 1 to 1000 iterations' });
+        activity.loop = params.loop === null ? null : { prompt: params.loop.prompt.trim(), intervalMs: params.loop.intervalMs, maxIterations: params.loop.maxIterations ?? null, status: 'active', iterations: 0, nextRunAt: Date.now(), error: null, history: [] };
+      }
+      for (const kind of ['goal', 'loop'] as const) if (params[kind] !== undefined) {
+        const key = `${thread.id}:${kind}`;
+        this.#activityGenerations.set(key, (this.#activityGenerations.get(key) ?? 0) + 1);
+      }
+      thread.activity = activity;
+      this.#publishActivity(thread);
+      this.#scheduleActivity(thread.id);
+      return structuredClone(activity);
+    },
+    'threads.activity.control': async (params) => {
+      const thread = this.#thread(params.threadId);
+      const activity = thread.activity;
+      if (params.action === 'resume' && thread.archived) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'cannot resume activity on an archived thread' });
+      const item = activity?.[params.kind];
+      if (!activity || !item) throw new RpcFailure({ code: RpcErrorCode.Refused, message: `this thread has no ${params.kind}` });
+      if (params.action === 'complete' && params.kind !== 'goal') throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'only a goal can be completed' });
+      if (params.action === 'resume' && params.kind === 'loop' && activity.loop?.maxIterations && activity.loop.iterations >= activity.loop.maxIterations) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'this loop has finished all its iterations' });
+      if (params.action === 'remove') activity[params.kind] = null;
+      else if (params.action === 'complete' && activity.goal) activity.goal.status = 'complete';
+      else { item.status = params.action === 'resume' ? 'active' : 'paused'; item.error = null; if (params.kind === 'goal' && activity.goal) activity.goal.dismissed = false; }
+      if (params.action === 'remove' || params.action === 'complete') {
+        const key = `${thread.id}:${params.kind}`;
+        this.#activityGenerations.set(key, (this.#activityGenerations.get(key) ?? 0) + 1);
+      }
+      if (activity.loop && activity.loop.status !== 'active') activity.loop.nextRunAt = null;
+      if (params.kind === 'loop' && params.action === 'resume' && activity.loop) activity.loop.nextRunAt = Date.now();
+      this.#publishActivity(thread);
+      this.#scheduleActivity(thread.id);
+      return structuredClone(activity);
+    },
+    'threads.compact': async (params) => {
+      const thread = this.#thread(params.threadId);
+      if (params.expectedSelectionVersion !== undefined && params.expectedSelectionVersion !== (thread.selectionVersion ?? 0)) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'the model selection changed' });
+      if (!thread.sessionId) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'this thread has no native session to compact' });
+      if (this.#providers.find((p) => p.id === thread.providerId)?.protocol === 'acp' && !thread.commands.some((c) => c.name === 'compact')) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'this agent has not advertised a compact command' });
+      if (this.#providers.find((p) => p.id === thread.providerId)?.protocol === 'agy') throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'the Antigravity CLI takes no /compact in print mode' });
+      return this.#startTurn(params.threadId, '[compact]', [], 'compact');
+    },
+    'turns.stop': async (params) => {
+      const thread = this.#thread(params.threadId);
+      const root = thread.parentThreadId ?? thread.id;
+      let childrenStopped = 0;
+      if (thread.parentThreadId || this.#delegationConfig(root).enabled || (this.#delegationAgents.get(root)?.length ?? 0) > 0) {
+        childrenStopped = await this.#stopDelegation(root, thread.parentThreadId ? thread.id : undefined);
+        this.#emit('delegation.changed', { threadId: root });
+      }
+      const stopped = await this.#stopTurn(params.threadId) || childrenStopped > 0;
+      // As the core: Stop on an idle thread ends what it still runs in the background.
+      if (!stopped && (thread.background?.length ?? 0) > 0) {
+        this.#setBackground(thread, []);
+        return { stopped: true };
+      }
+      return { stopped };
+    },
+    'permissions.list': async (params) => {
+      const requests = [...this.#pendingPermissions.values()]
+        .map((pending) => pending.request)
+        .filter((request) => params.threadId === undefined || request.threadId === params.threadId)
+        .sort((a, b) => a.createdAt - b.createdAt);
+      return structuredClone(requests);
+    },
+    'permissions.answer': async (params) => {
+      const pending = this.#pendingPermissions.get(params.requestId);
+      if (!pending) throw this.#notFound('permission request', params.requestId);
+      this.#pendingPermissions.delete(params.requestId);
+      pending.resolve(params.decision);
+      return { ok: true };
+    },
+    'questions.list': async (params) => {
+      const requests = [...this.#pendingQuestions.values()]
+        .map((pending) => pending.request)
+        .filter((request) => params.threadId === undefined || request.threadId === params.threadId)
+        .sort((a, b) => a.createdAt - b.createdAt);
+      return structuredClone(requests);
+    },
+    'questions.ask': async (params) => {
+      const thread = this.#thread(params.threadId);
+      const turn = thread.turns.at(-1);
+      if (!turn) {
+        throw new RpcFailure({
+          code: RpcErrorCode.Refused,
+          message: `thread ${params.threadId} has no turn to ask in yet`,
+          data: { threadId: params.threadId }
+        });
+      }
+      return { questionId: this.#askAsync(thread, turn, null, params.text, params.options ?? [], params.multiple === true) };
+    },
+    'questions.answer': async (params) => {
+      const pending = this.#pendingQuestions.get(params.questionId);
+      if (!pending) throw this.#notFound('question', params.questionId);
+      this.#pendingQuestions.delete(params.questionId);
+      const text = params.text ?? '';
+      const answer: QuestionAnswer =
+        text.length > 0 ? { optionIds: params.optionIds, text } : { optionIds: params.optionIds };
+      pending.resolve(answer);
+      return { ok: true };
+    },
+    'trace.get': async (params) => {
+      const rows = this.#processes
+        .filter((p) => p.threadId === params.threadId)
+        .sort((a, b) => b.startedAt - a.startedAt);
+      return structuredClone(params.limit ? rows.slice(0, params.limit) : rows);
+    },
+    'resources.list': async (params) => {
+      return structuredClone(this.#resources());
+    },
+    'resources.killTree': async (params) => {
+      let killed = 0;
+      for (const record of this.#processes) {
+        if (record.threadId !== params.threadId || record.exitedAt !== null) continue;
+        record.exitedAt = this.#now();
+        record.exitCode = 1;
+        killed += 1;
+        this.#emit('process.exited', structuredClone(record));
+      }
+      const thread = this.#threads.get(params.threadId);
+      if (thread) {
+        thread.load = null;
         this.#touch(thread);
-        return { ok: true };
       }
-      case 'threads.subscribe': {
-        const params = rawParams as RpcParams<'threads.subscribe'>;
-        // The core runs `threads.require` first, so an unknown id is a NotFound.
-        this.#thread(params.threadId);
-        this.#subscribed.add(params.threadId);
-        return { ok: true };
+      return { killed };
+    },
+    'scheduler.get': async (params) => {
+      return structuredClone(this.#scheduler);
+    },
+    'usage.get': async (params) => {
+      const byThread: Record<ThreadId, Usage> = {};
+      let total = emptyUsage();
+      for (const [threadId, usage] of this.#usage) {
+        if (params.threadId && params.threadId !== threadId) continue;
+        byThread[threadId] = { ...usage };
+        total = addUsage(total, usage);
       }
-      case 'threads.unsubscribe': {
-        const params = rawParams as RpcParams<'threads.unsubscribe'>;
-        this.#subscribed.delete(params.threadId);
-        return { ok: true };
+      return { byThread, total };
+    },
+    'usage.history': async (params) => {
+      const { edges } = params;
+      const valid = Array.isArray(edges) && edges.length >= 2 && edges.length <= 367 &&
+        edges.every((edge, index) => typeof edge === 'number' && Number.isFinite(edge) && (index === 0 || edge > edges[index - 1]!));
+      if (!valid) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'edges: expected 2 to 367 strictly ascending timestamps in milliseconds' });
+      return fakeUsageHistory(edges, { seeded: this.#usageSeeded, finished: this.#finished });
+    },
+    'telemetry.state': async () => ({ ...this.#telemetry }),
+    'telemetry.configure': async ({ mode }) => {
+      if (!['off', 'basic', 'enhanced'].includes(mode)) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'mode: expected off, basic or enhanced' });
+      if (this.#telemetry.mode === 'enhanced' && mode !== 'enhanced') this.#telemetry.pendingDeletion = true;
+      this.#telemetry.mode = mode;
+      return { ...this.#telemetry };
+    },
+    'telemetry.retryForget': async () => {
+      this.#telemetry.pendingDeletion = false;
+      return { ...this.#telemetry };
+    },
+    'telemetry.export': async () => {
+      if (this.#telemetry.mode !== 'enhanced') throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'telemetry export: expected enhanced mode' });
+      return { events: [], truncated: false };
+    },
+    'settings.get': async (params) => {
+      return { ...this.#settings };
+    },
+    'delegation.get': async ({ threadId }) => {
+      return this.#delegationView(this.#delegationRoot(threadId), threadId);
+    },
+    'delegation.configure': async ({ threadId, config: value }) => {
+      const root = this.#delegationRoot(threadId);
+      if (root !== threadId || !value || typeof value.enabled !== 'boolean' || typeof value.paused !== 'boolean' || !Array.isArray(value.profiles) || value.profiles.length > 16) {
+        throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'delegation.configure requires a parent thread and a valid config' });
       }
-
-      case 'turns.start': {
-        const params = rawParams as RpcParams<'turns.start'>;
-        if (this.#thread(params.threadId).agentSessionId) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'persistent agent sessions accept work through Agents, not turns.start' });
-        if (params.attachments !== undefined && (!Array.isArray(params.attachments) || params.attachments.some(a => !a || typeof a !== 'object'))) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'attachments must be an array of attachment objects' });
-        const key = params.clientRequestId ? `${params.threadId}:${params.clientRequestId}` : null;
-        const content = JSON.stringify([params.prompt, (params.attachments ?? []).map(a => [a.kind, a.mimeType, a.data, a.name])]);
-        if (params.clientRequestId !== undefined && !/^[A-Za-z0-9_-]{8,128}$/.test(params.clientRequestId)) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'clientRequestId must contain 8 to 128 URL-safe characters' });
-        const previous = key ? this.#turnRequests.get(key) : undefined;
-        if (previous) {
-          if (previous.content !== content) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'clientRequestId was already used for different content' });
-          return previous.turn;
+      const integer = (field: keyof Pick<DelegationConfig, 'maxAgents' | 'maxConcurrent' | 'maxTurns' | 'maxMinutes'>, max: number): number => {
+        const number = value[field];
+        if (!Number.isSafeInteger(number) || number < 1 || number > max) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: `${field} must be an integer from 1 to ${max}` });
+        return number;
+      };
+      const profiles = value.profiles.map(profile => {
+        const provider = this.#providers.find(entry => entry.id === profile.providerId);
+        const account = this.#accounts.find(entry => entry.id === profile.accountId);
+        if (!profile.id || !profile.name.trim() || !provider || !account || account.providerId !== provider.id || !profile.model) {
+          throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'each profile needs a unique id, name, provider, account and model' });
         }
-        if (params.expectedSelectionVersion !== undefined && params.expectedSelectionVersion !== (this.#thread(params.threadId).selectionVersion ?? 0)) {
-          throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'the model selection changed; review the selected model and send again' });
-        }
-        const providerId = this.#thread(params.threadId).providerId;
-        const provider = this.#providers.find(p => p.id === providerId);
-        if (!provider) throw this.#notFound('provider', providerId);
-        const error = attachmentError(params.attachments ?? [], provider);
-        if (error) throw new RpcFailure({ code: RpcErrorCode.Refused, ...error });
-        const turn = this.#startTurn(params.threadId, params.prompt, params.attachments ?? []);
-        if (key) this.#turnRequests.set(key, { content, turn });
-        return turn;
+        return { ...profile, name: profile.name.trim() };
+      });
+      if (new Set(profiles.map(profile => profile.id)).size !== profiles.length) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'profile ids must be unique' });
+      if (value.enabled && profiles.length === 0) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'choose at least one profile before enabling delegation' });
+      const config: DelegationConfig = {
+        enabled: value.enabled,
+        paused: value.paused,
+        maxAgents: integer('maxAgents', 8),
+        maxConcurrent: integer('maxConcurrent', 8),
+        maxTurns: integer('maxTurns', 100),
+        maxMinutes: integer('maxMinutes', 120),
+        profiles
+      };
+      if (config.maxConcurrent > config.maxAgents) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'maxConcurrent must not exceed maxAgents' });
+      this.#delegationConfigs.set(root, structuredClone(config));
+      if (!config.enabled || config.paused) await this.#stopDelegation(root);
+      this.#emit('delegation.changed', { threadId: root });
+      return this.#delegationView(root);
+    },
+    'delegation.spawn': async (params) => {
+      const parent = this.#thread(params.threadId);
+      if (parent.parentThreadId) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'delegation supports one level' });
+      const task = params.task.trim();
+      if (!task || task.length > 12000) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'task must contain 1 to 12000 characters' });
+      const fingerprint = JSON.stringify([params.profileId, task, params.title ?? null]);
+      const requestKey = `${parent.id}:${params.requestId}`;
+      const prior = this.#delegationRequests.get(requestKey);
+      if (prior) {
+        if (prior.fingerprint !== fingerprint) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'requestId already used for different content' });
+        const row = (this.#delegationAgents.get(parent.id) ?? []).find(entry => entry.threadId === prior.threadId);
+        if (!row) throw this.#notFound('delegated agent', prior.threadId);
+        return this.#delegatedAgent(row);
       }
-      case 'threads.activity.set': {
-        const params = rawParams as RpcParams<'threads.activity.set'>;
-        const thread = this.#thread(params.threadId);
-        if (thread.agentSessionId) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'persistent agent sessions use missions instead of conversation loops' });
-        if (thread.archived) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'activity requires an unarchived thread' });
-        const activity = structuredClone(thread.activity ?? { goal: null, loop: null, tasks: [] });
-        if (params.goal !== undefined) {
-          if (params.goal !== null && !params.goal.objective?.trim()) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'goal.objective must be non-empty text' });
-          activity.goal = params.goal === null ? null : { objective: params.goal.objective.trim(), status: 'active', iterations: 0, error: null };
-        }
-        if (params.loop !== undefined) {
-          if (params.loop !== null && (!params.loop.prompt?.trim() || !Number.isInteger(params.loop.intervalMs) || (params.loop.intervalMs < 1000 && !(params.loop.intervalMs === 0 && params.loop.maxIterations)) || params.loop.intervalMs > 86400000 || (params.loop.maxIterations != null && (!Number.isInteger(params.loop.maxIterations) || params.loop.maxIterations < 1 || params.loop.maxIterations > 1000)))) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'loop requires text and an interval from 1000 to 86400000 ms, or 0 with 1 to 1000 iterations' });
-          activity.loop = params.loop === null ? null : { prompt: params.loop.prompt.trim(), intervalMs: params.loop.intervalMs, maxIterations: params.loop.maxIterations ?? null, status: 'active', iterations: 0, nextRunAt: Date.now(), error: null, history: [] };
-        }
-        for (const kind of ['goal', 'loop'] as const) if (params[kind] !== undefined) {
-          const key = `${thread.id}:${kind}`;
-          this.#activityGenerations.set(key, (this.#activityGenerations.get(key) ?? 0) + 1);
-        }
-        thread.activity = activity;
-        this.#publishActivity(thread);
-        this.#scheduleActivity(thread.id);
-        return structuredClone(activity);
+      const config = this.#delegationConfig(parent.id);
+      if (!config.enabled || config.paused) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'delegation is disabled or paused' });
+      const rows = this.#delegationAgents.get(parent.id) ?? [];
+      if (rows.length >= config.maxAgents) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'delegation agent limit reached' });
+      if ((this.#delegationTurns.get(parent.id) ?? 0) >= config.maxTurns) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'delegation turn budget reached' });
+      const running = rows.filter(row => ['queued', 'running', 'waiting'].includes(this.#thread(row.threadId).status)).length;
+      const profile = config.profiles.find(entry => entry.id === params.profileId);
+      if (!profile) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'unknown delegation profile' });
+      const id = `t-${++this.#seq}`;
+      const at = this.#now();
+      const child: Thread = {
+        ...parent,
+        id,
+        parentThreadId: parent.id,
+        title: params.title?.trim() || task.split('\n')[0]!.slice(0, 80),
+        titleSource: 'user',
+        providerId: profile.providerId,
+        accountId: profile.accountId,
+        model: profile.model,
+        effort: profile.effort,
+        status: 'idle', unread: false, archived: false, pinned: false,
+        sessionId: null, sessionGeneration: 0, selectionVersion: 0, load: null, context: null,
+        createdAt: at, updatedAt: at, messagesBefore: null, messages: [], turns: [], commands: []
+      };
+      delete child.pullRequest;
+      delete child.lastUserMessageAt;
+      this.#threads.set(id, child);
+      const row = { threadId: id, profileId: profile.id, task };
+      this.#delegationAgents.set(parent.id, [...rows, row]);
+      this.#delegationTurns.set(parent.id, (this.#delegationTurns.get(parent.id) ?? 0) + 1);
+      this.#emit('thread.created', structuredClone(toSummary(child)));
+      const turn = running >= config.maxConcurrent
+        ? { id: `turn-${++this.#seq}`, threadId: id, status: 'queued' as const, queuedAt: at, startedAt: null, finishedAt: null, usage: null, error: null }
+        : this.#startTurn(id, task, [], 'delegation');
+      if (turn.status === 'queued') {
+        child.turns.push(turn);
+        child.status = 'queued';
+        this.#scheduler.queued = [...this.#scheduler.queued, { turnId: turn.id, threadId: id, position: this.#scheduler.queued.length + 1, queuedAt: turn.queuedAt }];
+        this.#emit('scheduler.updated', structuredClone(this.#scheduler));
       }
-      case 'threads.activity.control': {
-        const params = rawParams as RpcParams<'threads.activity.control'>;
-        const thread = this.#thread(params.threadId);
-        const activity = thread.activity;
-        if (params.action === 'resume' && thread.archived) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'cannot resume activity on an archived thread' });
-        const item = activity?.[params.kind];
-        if (!activity || !item) throw new RpcFailure({ code: RpcErrorCode.Refused, message: `this thread has no ${params.kind}` });
-        if (params.action === 'complete' && params.kind !== 'goal') throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'only a goal can be completed' });
-        if (params.action === 'resume' && params.kind === 'loop' && activity.loop?.maxIterations && activity.loop.iterations >= activity.loop.maxIterations) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'this loop has finished all its iterations' });
-        if (params.action === 'remove') activity[params.kind] = null;
-        else if (params.action === 'complete' && activity.goal) activity.goal.status = 'complete';
-        else { item.status = params.action === 'resume' ? 'active' : 'paused'; item.error = null; if (params.kind === 'goal' && activity.goal) activity.goal.dismissed = false; }
-        if (params.action === 'remove' || params.action === 'complete') {
-          const key = `${thread.id}:${params.kind}`;
-          this.#activityGenerations.set(key, (this.#activityGenerations.get(key) ?? 0) + 1);
-        }
-        if (activity.loop && activity.loop.status !== 'active') activity.loop.nextRunAt = null;
-        if (params.kind === 'loop' && params.action === 'resume' && activity.loop) activity.loop.nextRunAt = Date.now();
-        this.#publishActivity(thread);
-        this.#scheduleActivity(thread.id);
-        return structuredClone(activity);
+      const agent = this.#delegatedAgent(row);
+      this.#delegationRequests.set(requestKey, { fingerprint, threadId: id });
+      this.#emit('delegation.changed', { threadId: parent.id });
+      void turn;
+      return structuredClone(agent);
+    },
+    'delegation.send': async (params) => {
+      if (params.requestId.startsWith('result:')) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'requestId prefix result: is reserved' });
+      const sender = this.#thread(params.threadId);
+      const recipient = this.#thread(params.toThreadId);
+      const root = this.#delegationRoot(sender.id);
+      const direct = sender.parentThreadId ? recipient.id === sender.parentThreadId : recipient.parentThreadId === sender.id;
+      if (!direct) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'toThreadId must be the parent or a direct child' });
+      const body = params.text.trim();
+      if (!body || body.length > 4000) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'text must contain 1 to 4000 characters' });
+      const key = `${sender.id}:${params.requestId}`;
+      const fingerprint = JSON.stringify([recipient.id, body]);
+      const prior = this.#delegationSendRequests.get(key);
+      if (prior) {
+        if (prior.fingerprint !== fingerprint) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'requestId already used for different content' });
+        return structuredClone(prior.letter);
       }
-      case 'threads.compact': {
-        const params = rawParams as RpcParams<'threads.compact'>;
-        const thread = this.#thread(params.threadId);
-        if (params.expectedSelectionVersion !== undefined && params.expectedSelectionVersion !== (thread.selectionVersion ?? 0)) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'the model selection changed' });
-        if (!thread.sessionId) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'this thread has no native session to compact' });
-        if (this.#providers.find((p) => p.id === thread.providerId)?.protocol === 'acp' && !thread.commands.some((c) => c.name === 'compact')) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'this agent has not advertised a compact command' });
-        if (this.#providers.find((p) => p.id === thread.providerId)?.protocol === 'agy') throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'the Antigravity CLI takes no /compact in print mode' });
-        return this.#startTurn(params.threadId, '[compact]', [], 'compact');
+      const config = this.#delegationConfig(root);
+      if (!config.enabled || config.paused) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'delegation is disabled or paused' });
+      const letter: AgentLetter = {
+        id: `letter-${++this.#seq}`,
+        origin: 'user',
+        from: { coreId: 'local', threadId: sender.id, title: sender.title, machine: 'Boite', resources: '', status: sender.status, mode: 'team' },
+        to: { coreId: 'local', threadId: recipient.id }, toTitle: recipient.title,
+        text: body, replyTo: null, createdAt: this.#now(), expiresAt: this.#now() + 15 * 60_000,
+        status: 'received', error: null
+      };
+      this.#delegationLetters.set(root, [...(this.#delegationLetters.get(root) ?? []), letter]);
+      this.#delegationSendRequests.set(key, { fingerprint, letter });
+      this.#emit('delegation.changed', { threadId: root });
+      return structuredClone(letter);
+    },
+    'delegation.stop': async (params) => {
+      const caller = this.#thread(params.threadId);
+      const root = caller.parentThreadId ?? caller.id;
+      if (caller.parentThreadId && params.agentId && params.agentId !== caller.id) {
+        throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'a delegated child can only stop itself' });
       }
-      case 'turns.stop': {
-        const params = rawParams as RpcParams<'turns.stop'>;
-        return { stopped: await this.#stopTurn(params.threadId) };
+      const target = params.agentId ?? (caller.parentThreadId ? caller.id : undefined);
+      const stopped = await this.#stopDelegation(root, target);
+      this.#emit('delegation.changed', { threadId: root });
+      return { stopped };
+    },
+    'collaboration.get': async (params) => {
+      const { threadId } = params;
+      this.#thread(threadId);
+      return this.#coordinationView(threadId);
+    },
+    'collaboration.configure': async (params) => {
+      const { threadId, config } = params;
+      this.#thread(threadId);
+      if (!['off', 'brief', 'team'].includes(config.mode) || typeof config.resources !== 'string' || config.resources.length > 500 || typeof config.remote !== 'boolean' || typeof config.paused !== 'boolean') {
+        throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'config: expected mode, resources, remote and paused' });
       }
-
-      case 'permissions.list': {
-        const params = rawParams as RpcParams<'permissions.list'>;
-        const requests = [...this.#pendingPermissions.values()]
-          .map((pending) => pending.request)
-          .filter((request) => params.threadId === undefined || request.threadId === params.threadId)
-          .sort((a, b) => a.createdAt - b.createdAt);
-        return structuredClone(requests);
-      }
-
-      case 'permissions.answer': {
-        const params = rawParams as RpcParams<'permissions.answer'>;
-        const pending = this.#pendingPermissions.get(params.requestId);
-        if (!pending) throw this.#notFound('permission request', params.requestId);
-        this.#pendingPermissions.delete(params.requestId);
-        pending.resolve(params.decision);
-        return { ok: true };
-      }
-
-      case 'questions.list': {
-        const params = rawParams as RpcParams<'questions.list'>;
-        const requests = [...this.#pendingQuestions.values()]
-          .map((pending) => pending.request)
-          .filter((request) => params.threadId === undefined || request.threadId === params.threadId)
-          .sort((a, b) => a.createdAt - b.createdAt);
-        return structuredClone(requests);
-      }
-
-      case 'questions.answer': {
-        const params = rawParams as RpcParams<'questions.answer'>;
-        const pending = this.#pendingQuestions.get(params.questionId);
-        if (!pending) throw this.#notFound('question', params.questionId);
-        this.#pendingQuestions.delete(params.questionId);
-        const text = params.text ?? '';
-        const answer: QuestionAnswer =
-          text.length > 0 ? { optionIds: params.optionIds, text } : { optionIds: params.optionIds };
-        pending.resolve(answer);
-        return { ok: true };
-      }
-
-      case 'trace.get': {
-        const params = rawParams as RpcParams<'trace.get'>;
-        const rows = this.#processes
-          .filter((p) => p.threadId === params.threadId)
-          .sort((a, b) => b.startedAt - a.startedAt);
-        return structuredClone(params.limit ? rows.slice(0, params.limit) : rows);
-      }
-      case 'resources.list':
-        return structuredClone(this.#resources());
-      case 'resources.killTree': {
-        const params = rawParams as RpcParams<'resources.killTree'>;
-        let killed = 0;
-        for (const record of this.#processes) {
-          if (record.threadId !== params.threadId || record.exitedAt !== null) continue;
-          record.exitedAt = this.#now();
-          record.exitCode = 1;
-          killed += 1;
-          this.#emit('process.exited', structuredClone(record));
-        }
-        const thread = this.#threads.get(params.threadId);
-        if (thread) {
-          thread.load = null;
-          this.#touch(thread);
-        }
-        return { killed };
-      }
-
-      case 'scheduler.get':
-        return structuredClone(this.#scheduler);
-      case 'usage.get': {
-        const params = rawParams as RpcParams<'usage.get'>;
-        const byThread: Record<ThreadId, Usage> = {};
-        let total = emptyUsage();
-        for (const [threadId, usage] of this.#usage) {
-          if (params.threadId && params.threadId !== threadId) continue;
-          byThread[threadId] = { ...usage };
-          total = addUsage(total, usage);
-        }
-        return { byThread, total };
-      }
-      case 'usage.history': {
-        const { edges } = rawParams as RpcParams<'usage.history'>;
-        const valid = Array.isArray(edges) && edges.length >= 2 && edges.length <= 367 &&
-          edges.every((edge, index) => typeof edge === 'number' && Number.isFinite(edge) && (index === 0 || edge > edges[index - 1]!));
-        if (!valid) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'edges: expected 2 to 367 strictly ascending timestamps in milliseconds' });
-        return fakeUsageHistory(edges, { seeded: this.#usageSeeded, finished: this.#finished });
-      }
-
-      case 'settings.get':
-        return { ...this.#settings };
-      case 'collaboration.get': {
-        const { threadId } = rawParams as RpcParams<'collaboration.get'>;
-        this.#thread(threadId);
-        return this.#coordinationView(threadId);
-      }
-      case 'collaboration.configure': {
-        const { threadId, config } = rawParams as RpcParams<'collaboration.configure'>;
-        this.#thread(threadId);
-        if (!['off', 'brief', 'team'].includes(config.mode) || typeof config.resources !== 'string' || config.resources.length > 500 || typeof config.remote !== 'boolean' || typeof config.paused !== 'boolean') {
-          throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'config: expected mode, resources, remote and paused' });
-        }
-        this.#coordination.set(threadId, { ...config, resources: config.resources.trim() });
-        this.#emit('collaboration.changed', { threadId });
-        return this.#coordinationView(threadId);
-      }
-      case 'collaboration.directory': {
-        const { threadId } = rawParams as RpcParams<'collaboration.directory'>;
-        const source = this.#thread(threadId);
-        const sourceConfig = this.#coordinationConfig(threadId);
-        if (sourceConfig.mode === 'off') return { agents: [], unavailable: [] };
-        const agents = [...this.#threads.values()]
-          .filter(thread => thread.id !== threadId && !thread.archived && (thread.projectId === source.projectId || sourceConfig.remote && this.#coordinationConfig(thread.id).remote))
-          .map(thread => {
-            const config = this.#coordinationConfig(thread.id);
-            return {
-              coreId: this.#identity.coreId,
-              threadId: thread.id,
-              title: thread.title,
-              machine: this.#identity.name,
-              resources: config.resources,
-              status: thread.status,
-              mode: config.mode
-            };
-          })
-          .filter(agent => agent.mode !== 'off');
-        const unavailable: string[] = [];
-        if (sourceConfig.remote) for (const peer of this.#peers.values()) {
-          const target = FakeClient.#cores.get(peer.coreId);
-          if (!target || !target.#peers.has(this.#identity.coreId)) { unavailable.push(peer.name); continue; }
-          for (const thread of target.#threads.values()) {
-            const config = target.#coordinationConfig(thread.id);
-            if (thread.archived || config.mode === 'off' || !config.remote) continue;
-            agents.push({ coreId: peer.coreId, threadId: thread.id, title: thread.title, machine: peer.name, resources: config.resources, status: thread.status, mode: config.mode });
-          }
-        }
-        return { agents, unavailable };
-      }
-      case 'collaboration.send': {
-        const params = rawParams as RpcParams<'collaboration.send'>;
-        const source = this.#thread(params.threadId);
-        const config = this.#coordinationConfig(source.id);
-        if (config.mode === 'off' || config.paused) {
-          throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'coordination is off or paused for this thread' });
-        }
-        const existing = this.#letters.get(source.id)?.find(letter => letter.id === params.requestId);
-        if (existing) {
-          if (existing.text !== params.text.trim() || existing.to.coreId !== params.to.coreId || existing.to.threadId !== params.to.threadId || existing.replyTo !== (params.replyTo ?? null)) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'requestId already used for different content' });
-          return structuredClone(existing);
-        }
-        if (!params.text.trim() || params.text.length > 4000 || this.#coordinationView(source.id).sent >= (config.mode === 'brief' ? 6 : 40)) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'message size or hourly budget exceeded' });
-        const destination = params.to.coreId === this.#identity.coreId ? this : FakeClient.#cores.get(params.to.coreId);
-        const target = destination ? destination.#threads.get(params.to.threadId) : undefined;
-        if (!target || target.archived || destination!.#coordinationConfig(target.id).mode === 'off') {
-          throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'recipient is unavailable for coordination' });
-        }
-        if (destination === this && target.projectId !== source.projectId && !(config.remote && this.#coordinationConfig(target.id).remote)) {
-          throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'both threads must allow coordination across projects' });
-        }
-        if (destination !== this && (!config.remote || !this.#peers.has(params.to.coreId) || !destination || !destination.#peers.has(this.#identity.coreId) || !destination.#coordinationConfig(target.id).remote)) {
-          throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'remote core is not trusted' });
-        }
-        const letter: AgentLetter = {
-          id: params.requestId,
-          from: {
+      this.#coordination.set(threadId, { ...config, resources: config.resources.trim() });
+      this.#emit('collaboration.changed', { threadId });
+      return this.#coordinationView(threadId);
+    },
+    'collaboration.directory': async (params) => {
+      const { threadId } = params;
+      const source = this.#thread(threadId);
+      const sourceConfig = this.#coordinationConfig(threadId);
+      if (sourceConfig.mode === 'off') return { agents: [], unavailable: [] };
+      const agents = [...this.#threads.values()]
+        .filter(thread => thread.id !== threadId && !thread.archived && (thread.projectId === source.projectId || sourceConfig.remote && this.#coordinationConfig(thread.id).remote))
+        .map(thread => {
+          const config = this.#coordinationConfig(thread.id);
+          return {
             coreId: this.#identity.coreId,
-            threadId: source.id,
-            title: source.title,
+            threadId: thread.id,
+            title: thread.title,
             machine: this.#identity.name,
             resources: config.resources,
-            status: source.status,
+            status: thread.status,
             mode: config.mode
+          };
+        })
+        .filter(agent => agent.mode !== 'off');
+      const unavailable: string[] = [];
+      if (sourceConfig.remote) for (const peer of this.#peers.values()) {
+        const target = FakeClient.#cores.get(peer.coreId);
+        if (!target || !target.#peers.has(this.#identity.coreId)) { unavailable.push(peer.name); continue; }
+        for (const thread of target.#threads.values()) {
+          const config = target.#coordinationConfig(thread.id);
+          if (thread.archived || config.mode === 'off' || !config.remote) continue;
+          agents.push({ coreId: peer.coreId, threadId: thread.id, title: thread.title, machine: peer.name, resources: config.resources, status: thread.status, mode: config.mode });
+        }
+      }
+      return { agents, unavailable };
+    },
+    'collaboration.send': async (params) => {
+      const source = this.#thread(params.threadId);
+      const config = this.#coordinationConfig(source.id);
+      if (config.mode === 'off' || config.paused) {
+        throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'coordination is off or paused for this thread' });
+      }
+      const existing = this.#letters.get(source.id)?.find(letter => letter.id === params.requestId);
+      if (existing) {
+        if (existing.text !== params.text.trim() || existing.to.coreId !== params.to.coreId || existing.to.threadId !== params.to.threadId || existing.replyTo !== (params.replyTo ?? null)) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'requestId already used for different content' });
+        return structuredClone(existing);
+      }
+      if (!params.text.trim() || params.text.length > 4000 || this.#coordinationView(source.id).sent >= (config.mode === 'brief' ? 6 : 40)) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'message size or hourly budget exceeded' });
+      const destination = params.to.coreId === this.#identity.coreId ? this : FakeClient.#cores.get(params.to.coreId);
+      const target = destination ? destination.#threads.get(params.to.threadId) : undefined;
+      if (!target || target.archived || destination!.#coordinationConfig(target.id).mode === 'off') {
+        throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'recipient is unavailable for coordination' });
+      }
+      if (destination === this && target.projectId !== source.projectId && !(config.remote && this.#coordinationConfig(target.id).remote)) {
+        throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'both threads must allow coordination across projects' });
+      }
+      if (destination !== this && (!config.remote || !this.#peers.has(params.to.coreId) || !destination || !destination.#peers.has(this.#identity.coreId) || !destination.#coordinationConfig(target.id).remote)) {
+        throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'remote core is not trusted' });
+      }
+      const letter: AgentLetter = {
+        id: params.requestId,
+        from: {
+          coreId: this.#identity.coreId,
+          threadId: source.id,
+          title: source.title,
+          machine: this.#identity.name,
+          resources: config.resources,
+          status: source.status,
+          mode: config.mode
+        },
+        to: params.to,
+        toTitle: target?.title ?? this.#peers.get(params.to.coreId)?.name ?? params.to.threadId,
+        text: params.text.trim(),
+        replyTo: params.replyTo ?? null,
+        createdAt: this.#now(),
+        expiresAt: this.#now() + 15 * 60_000,
+        status: 'delivered',
+        error: null
+      };
+      this.#letters.set(source.id, [...(this.#letters.get(source.id) ?? []), letter]);
+      this.#emit('collaboration.changed', { threadId: source.id });
+      destination!.#letters.set(target.id, [...(destination!.#letters.get(target.id) ?? []), letter]);
+      destination!.#emit('collaboration.changed', { threadId: target.id });
+      return structuredClone(letter);
+    },
+    'collaboration.identity': async (params) => {
+      return structuredClone(this.#identity);
+    },
+    'collaboration.peers': async (params) => {
+      return structuredClone([...this.#peers.values()]);
+    },
+    'collaboration.check': async (params) => {
+      const { coreId } = params;
+      const peer = this.#peers.get(coreId);
+      const target = FakeClient.#cores.get(coreId);
+      if (!peer || !target || !target.#peers.has(this.#identity.coreId) || target.#identity.url !== peer.url) {
+        throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'machine is unreachable or mutual trust is missing' });
+      }
+      return { ok: true };
+    },
+    'collaboration.trust': async (params) => {
+      const { peer } = params;
+      let url: URL;
+      try { url = new URL(peer.url); } catch { throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'peer.url: expected an HTTPS or loopback URL' }); }
+      const loopback = url.protocol === 'http:' && ['127.0.0.1', '[::1]'].includes(url.hostname);
+      if (url.username || url.password || url.search || url.hash || url.pathname !== '/' || (url.protocol !== 'https:' && !loopback)) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'peer.url: expected HTTPS origin, or numeric loopback HTTP' });
+      if (!peer.coreId || !peer.publicKey || peer.coreId === this.#identity.coreId) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'peer: expected another core public identity' });
+      this.#peers.set(peer.coreId, structuredClone(peer));
+      return structuredClone(peer);
+    },
+    'collaboration.untrust': async (params) => {
+      const { coreId } = params;
+      this.#peers.delete(coreId);
+      return { ok: true };
+    },
+    'speech.config': async (params) => {
+      return { ...this.#speech };
+    },
+    'speech.status': async (params) => {
+      return { ...this.#speechStatus };
+    },
+    'speech.configure': async (params) => {
+      const p = params;
+      this.#speech = { engine: p.engine, language: p.language, apiProvider: p.apiProvider, fallback: p.fallback, executable: p.executable, modelPath: p.modelPath };
+      if (p.groqKey !== undefined) this.#speechStatus.groqKeySet = !!p.groqKey;
+      if (p.openrouterKey !== undefined) this.#speechStatus.openrouterKeySet = !!p.openrouterKey;
+      this.#speechStatus.engine = p.engine; this.#speechStatus.revision = crypto.randomUUID();
+      this.#speechStatus.ready = p.engine === 'local' ? this.#speechStatus.localReady : p.apiProvider === 'groq' ? this.#speechStatus.groqKeySet : this.#speechStatus.openrouterKeySet;
+      return { ...this.#speechStatus };
+    },
+    'speech.install': async (params) => {
+      this.#speechStatus.localReady = true;
+      this.#speechStatus.ready = this.#speech.engine === 'local' || this.#speechStatus.ready;
+      return { ...this.#speechStatus };
+    },
+    'speech.installCancel': async (params) => {
+      return { ...this.#speechStatus };
+    },
+    'speech.uninstall': async (params) => {
+      this.#speechStatus.localReady = false;
+      if (this.#speech.engine === 'local') this.#speechStatus.ready = false;
+      return { ...this.#speechStatus };
+    },
+    'speech.cancel': async (params) => {
+      this.#speechRequests.delete(params.requestId);
+      return { ok: true };
+    },
+    'speech.transcribe': async (params) => {
+      const p = params;
+      if (!this.#speechStatus.ready) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'Configure Voice first' });
+      if (p.revision !== this.#speechStatus.revision) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'Voice settings changed during recording; record again with the selected engine' });
+      if (this.#speechRequests.size) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'Another transcription is running; try again shortly' });
+      const request = Symbol(p.requestId);
+      this.#speechRequests.set(p.requestId, request);
+      await new Promise(resolve => setTimeout(resolve, 250));
+      if (this.#speechRequests.get(p.requestId) !== request) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'Transcription cancelled' });
+      this.#speechRequests.delete(p.requestId);
+      return { text: 'Please add a test for this change.' };
+    },
+    'keybindings.get': async (params) => {
+      return structuredClone(this.#keybindings);
+    },
+    'keybindings.set': async (params) => {
+      const { command, chord } = params;
+      if (!(KEYBINDING_COMMANDS as readonly string[]).includes(command)) {
+        throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: `command: "${command}" is not a command Boite has` });
+      }
+      if (chord !== null) {
+        const parsed = parseChord(chord);
+        if (!parsed.ok) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: `chord: ${parsed.reason}` });
+      }
+      this.#keybindings = { ...this.#keybindings, bindings: { ...this.#keybindings.bindings, [command]: chord === null ? null : chord.trim().toLowerCase() } };
+      this.#emit('keybindings.updated', structuredClone(this.#keybindings));
+      return structuredClone(this.#keybindings);
+    },
+    'keybindings.reset': async (params) => {
+      const { command } = params;
+      const bindings = { ...this.#keybindings.bindings };
+      if (command === undefined) for (const id of KEYBINDING_COMMANDS) delete bindings[id];
+      else delete bindings[command];
+      this.#keybindings = { ...this.#keybindings, bindings };
+      this.#emit('keybindings.updated', structuredClone(this.#keybindings));
+      return structuredClone(this.#keybindings);
+    },
+    'settings.set': async (params) => {
+      for (const field of ['maxConcurrentTurns', 'perAccountConcurrency'] as const) {
+        const value = params[field];
+        if (value !== undefined && (!Number.isInteger(value) || value < 1)) {
+          throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: `${field} must be a positive integer`, data: { field } });
+        }
+      }
+      this.#settings = { ...this.#settings, ...params };
+      this.#scheduler = {
+        ...this.#scheduler,
+        maxConcurrentTurns: this.#settings.maxConcurrentTurns,
+        perAccountConcurrency: this.#settings.perAccountConcurrency
+      };
+      this.#emit('scheduler.updated', structuredClone(this.#scheduler));
+      this.#emit('settings.updated', { ...this.#settings });
+      return { ...this.#settings };
+    },
+    'imports.list': async (params) => {
+      if (!this.#projects.some((p) => p.id === params.projectId)) throw this.#notFound('project', params.projectId);
+      await new Promise((resolve) => setTimeout(resolve, IMPORT_LIST_MS));
+      // Newest first, the core's order.
+      return structuredClone(
+        this.#importable
+          .filter((session) => session.projectId === params.projectId)
+          .sort((a, b) => b.updatedAt - a.updatedAt)
+          .map(({ projectId: _p, ...session }) => session)
+      );
+    },
+    'imports.run': async (params) => {
+      const project = this.#projects.find((p) => p.id === params.projectId);
+      if (!project) throw this.#notFound('project', params.projectId);
+      const session = this.#importable.find((entry) => entry.projectId === params.projectId && entry.sessionId === params.sessionId);
+      if (!session) {
+        throw new RpcFailure({ code: RpcErrorCode.NotFound, message: `no transcript for session ${params.sessionId}`, data: { sessionId: params.sessionId } });
+      }
+      if (session.threadId !== null) {
+        throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'this session is already a thread', data: { sessionId: params.sessionId, threadId: session.threadId } });
+      }
+      await new Promise((resolve) => setTimeout(resolve, IMPORT_LIST_MS));
+      const id: ThreadId = `t-${++this.#seq}`;
+      const turnA: Turn = { id: `turn-${id}-1`, threadId: id, status: 'done', queuedAt: session.startedAt, startedAt: session.startedAt, finishedAt: session.startedAt + 4_000, usage: null, error: null };
+      const turnB: Turn = { id: `turn-${id}-2`, threadId: id, status: 'done', queuedAt: session.updatedAt - 9_000, startedAt: session.updatedAt - 9_000, finishedAt: session.updatedAt, usage: null, error: null };
+      const thread: Thread = {
+        id,
+        projectId: params.projectId,
+        title: session.title,
+        titleSource: 'agent',
+        providerId: 'claude',
+        accountId: params.accountId,
+        model: 'claude-sonnet-5',
+        effort: null,
+        cwd: project.path,
+        branch: null,
+        permissionMode: 'default',
+        status: 'idle',
+        unread: false,
+        archived: false,
+        pinned: false,
+        sessionId: session.sessionId,
+        load: null,
+        context: null,
+        createdAt: session.startedAt,
+        updatedAt: session.updatedAt,
+        commands: [],
+        messagesBefore: null,
+        turns: [turnA, turnB],
+        messages: [
+          { id: `${id}-m1`, threadId: id, turnId: turnA.id, role: 'user', parts: [{ type: 'text', text: 'Where does the shell look for a core, in what order?' }], state: 'complete', createdAt: turnA.queuedAt },
+          {
+            id: `${id}-m2`, threadId: id, turnId: turnA.id, role: 'assistant', state: 'complete', createdAt: turnA.queuedAt + 1_000,
+            parts: [
+              { type: 'thinking', text: 'The order lives in the Rust side, next to the sidecar lookup.' },
+              { type: 'tool', toolId: `${id}-tool-1`, name: 'Grep', input: { pattern: 'boite-core', path: 'apps/shell/src-tauri/src' }, output: 'apps/shell/src-tauri/src/core.rs:41\napps/shell/src-tauri/src/core.rs:58', status: 'done' },
+              { type: 'text', text: 'Three places, in order: the sidecar beside the exe, `BOITE_CORE` in the environment, then `bun run core` from the repository.' }
+            ]
           },
-          to: params.to,
-          toTitle: target?.title ?? this.#peers.get(params.to.coreId)?.name ?? params.to.threadId,
-          text: params.text.trim(),
-          replyTo: params.replyTo ?? null,
-          createdAt: this.#now(),
-          expiresAt: this.#now() + 15 * 60_000,
-          status: 'delivered',
-          error: null
-        };
-        this.#letters.set(source.id, [...(this.#letters.get(source.id) ?? []), letter]);
-        this.#emit('collaboration.changed', { threadId: source.id });
-        destination!.#letters.set(target.id, [...(destination!.#letters.get(target.id) ?? []), letter]);
-        destination!.#emit('collaboration.changed', { threadId: target.id });
-        return structuredClone(letter);
+          { id: `${id}-m3`, threadId: id, turnId: turnB.id, role: 'user', parts: [{ type: 'text', text: 'Write that down in docs/releasing.md' }], state: 'complete', createdAt: turnB.queuedAt },
+          { id: `${id}-m4`, threadId: id, turnId: turnB.id, role: 'assistant', state: 'complete', createdAt: turnB.queuedAt + 2_000, parts: [{ type: 'text', text: 'Done: a short list under "Where the shell looks for a core".' }] }
+        ]
+      };
+      this.#threads.set(id, thread);
+      session.threadId = id;
+      this.#emit('thread.created', structuredClone(toSummary(thread)));
+      return structuredClone(toSummary(thread));
+    },
+    'agent.where': async (params) => {
+      const thread = this.#thread(params.threadId);
+      const project = this.#projects.find((one) => one.id === thread.projectId);
+      if (!project && thread.projectId !== null) throw this.#notFound('project', thread.projectId);
+      const where: AgentWhere = {
+        threadId: thread.id,
+        title: thread.title,
+        projectId: project?.id ?? null,
+        projectPath: project?.path ?? null,
+        cwd: thread.cwd,
+        branch: thread.branch,
+        // A thread of its own worktree does not sit in the project directory.
+        worktree: thread.branch !== null,
+        providerId: thread.providerId,
+        // A thread on no model of its own runs the provider's default.
+        model: thread.model ?? 'default'
+      };
+      return where;
+    },
+    'artifacts.publish': async (params) => {
+      const thread = this.#thread(params.threadId);
+      if (thread.archived) throw refusal('artifacts.publish needs an active thread');
+      const turn = thread.turns.at(-1);
+      if (!turn) throw refusal('artifacts.publish needs a thread with a turn');
+      const path = this.#inside(thread.cwd, params.path, 'artifacts.publish path', 'file');
+      const media = FAKE_MEDIA[path];
+      const body = media ? new Uint8Array(await (await fetch(media.url())).arrayBuffer()) : new TextEncoder().encode(this.#files.get(path) ?? '');
+      if (body.length > 5 * 1024 * 1024) throw refusal('artifacts.publish file must be at most 5 MB');
+      if (thread.archived) throw refusal('artifacts.publish needs an active thread');
+      let binary = '';
+      for (const byte of body) binary += String.fromCharCode(byte);
+      const message: Message = { id: `m-${++this.#seq}`, threadId: thread.id, turnId: turn.id, role: 'assistant', state: 'complete', createdAt: this.#now(), parts: [{ type: 'file', name: path.split('/').at(-1) ?? path, mimeType: media?.mime ?? 'application/octet-stream', data: btoa(binary) }] };
+      thread.messages.push(message);
+      this.#emitToThread(thread.id, 'message.started', structuredClone(message));
+      this.#emitToThread(thread.id, 'message.completed', { threadId: thread.id, messageId: message.id, state: 'complete' });
+      return structuredClone(message);
+    },
+    'panel.open': async (params) => {
+      const thread = this.#thread(params.threadId);
+      const surface = this.#checkSurface(thread.cwd, params.surface);
+      // The core sends this to every client subscribed to the thread, and
+      // `shown` says whether there was one to receive it.
+      const shown = this.#subscribed.has(thread.id);
+      this.#emitToThread(thread.id, 'panel.requested', {
+        threadId: thread.id,
+        surface,
+        at: this.#now()
+      });
+      return { shown };
+    },
+    'threads.tasks.set': async (params) => {
+      const thread = this.#thread(params.threadId);
+      const activity: ThreadActivity = structuredClone(thread.activity ?? { goal: null, loop: null, tasks: [] });
+      activity.tasks = params.tasks.map((task): AgentTask => ({ id: task.id, text: task.text, status: task.status }));
+      // A fresh list is something new to look at, so a dismissal does not hold.
+      activity.tasksDismissed = false;
+      thread.activity = activity;
+      this.#publishActivity(thread);
+      return structuredClone(activity);
+    },
+    'threads.tasks.get': async (params) => {
+      return structuredClone(this.#thread(params.threadId).activity?.tasks ?? []);
+    },
+    'todos.list': async (params) => {
+      return this.#projectTodos(this.#thread(params.threadId).projectId);
+    },
+    'todos.add': async (params) => {
+      const thread = this.#thread(params.threadId);
+      if (thread.projectId === null) throw refusal('this agent session has no project');
+      const at = this.#now();
+      const todo: Todo = {
+        id: `todo-${++this.#seq}`,
+        projectId: thread.projectId,
+        text: todoText(params.text),
+        status: 'open',
+        threadId: thread.id,
+        createdAt: at,
+        updatedAt: at
+      };
+      this.#todos.push(todo);
+      this.#emitTodos(thread.projectId);
+      return structuredClone(todo);
+    },
+    'todos.update': async (params) => {
+      const thread = this.#thread(params.threadId);
+      if (thread.projectId === null) throw refusal('this agent session has no project');
+      const todo = this.#todos.find((one) => one.id === params.todoId && one.projectId === thread.projectId);
+      if (!todo) throw this.#notFound('todo', params.todoId);
+      // The status is checked before the text moves, as the core's `updateTodo`
+      // builds the whole card before it saves anything.
+      if (params.status !== undefined && !TODO_STATUSES.includes(params.status)) {
+        throw refusal(`a todo is ${TODO_STATUSES.join(', ')}, not ${String(params.status)}`);
       }
-      case 'collaboration.identity':
-        return structuredClone(this.#identity);
-      case 'collaboration.peers':
-        return structuredClone([...this.#peers.values()]);
-      case 'collaboration.check': {
-        const { coreId } = rawParams as RpcParams<'collaboration.check'>;
-        const peer = this.#peers.get(coreId);
-        const target = FakeClient.#cores.get(coreId);
-        if (!peer || !target || !target.#peers.has(this.#identity.coreId) || target.#identity.url !== peer.url) {
-          throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'machine is unreachable or mutual trust is missing' });
-        }
-        return { ok: true };
-      }
-      case 'collaboration.trust': {
-        const { peer } = rawParams as RpcParams<'collaboration.trust'>;
-        let url: URL;
-        try { url = new URL(peer.url); } catch { throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'peer.url: expected an HTTPS or loopback URL' }); }
-        const loopback = url.protocol === 'http:' && ['127.0.0.1', '[::1]'].includes(url.hostname);
-        if (url.username || url.password || url.search || url.hash || url.pathname !== '/' || (url.protocol !== 'https:' && !loopback)) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'peer.url: expected HTTPS origin, or numeric loopback HTTP' });
-        if (!peer.coreId || !peer.publicKey || peer.coreId === this.#identity.coreId) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'peer: expected another core public identity' });
-        this.#peers.set(peer.coreId, structuredClone(peer));
-        return structuredClone(peer);
-      }
-      case 'collaboration.untrust': {
-        const { coreId } = rawParams as RpcParams<'collaboration.untrust'>;
-        this.#peers.delete(coreId);
-        return { ok: true };
-      }
-      case 'speech.config': return { ...this.#speech };
-      case 'speech.status': return { ...this.#speechStatus };
-      case 'speech.configure': {
-        const p = rawParams as RpcParams<'speech.configure'>;
-        this.#speech = { engine: p.engine, language: p.language, apiProvider: p.apiProvider, fallback: p.fallback, executable: p.executable, modelPath: p.modelPath };
-        if (p.groqKey !== undefined) this.#speechStatus.groqKeySet = !!p.groqKey;
-        if (p.openrouterKey !== undefined) this.#speechStatus.openrouterKeySet = !!p.openrouterKey;
-        this.#speechStatus.engine = p.engine; this.#speechStatus.revision = crypto.randomUUID();
-        this.#speechStatus.ready = p.engine === 'local' ? this.#speechStatus.localReady : p.apiProvider === 'groq' ? this.#speechStatus.groqKeySet : this.#speechStatus.openrouterKeySet;
-        return { ...this.#speechStatus };
-      }
-      case 'speech.install':
-        this.#speechStatus.localReady = true; this.#speechStatus.ready = this.#speech.engine === 'local' || this.#speechStatus.ready;
-        return { ...this.#speechStatus };
-      case 'speech.installCancel': return { ...this.#speechStatus };
-      case 'speech.uninstall':
-        this.#speechStatus.localReady = false; if (this.#speech.engine === 'local') this.#speechStatus.ready = false;
-        return { ...this.#speechStatus };
-      case 'speech.cancel': this.#speechRequests.delete((rawParams as RpcParams<'speech.cancel'>).requestId); return { ok: true };
-      case 'speech.transcribe': {
-        const p = rawParams as RpcParams<'speech.transcribe'>;
-        if (!this.#speechStatus.ready) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'Configure Voice first' });
-        if (p.revision !== this.#speechStatus.revision) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'Voice settings changed during recording; record again with the selected engine' });
-        if (this.#speechRequests.size) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'Another transcription is running; try again shortly' });
-        const request = Symbol(p.requestId);
-        this.#speechRequests.set(p.requestId, request);
-        await new Promise(resolve => setTimeout(resolve, 250));
-        if (this.#speechRequests.get(p.requestId) !== request) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'Transcription cancelled' });
-        this.#speechRequests.delete(p.requestId);
-        return { text: 'Please add a test for this change.' };
-      }
-      case 'keybindings.get':
-        return structuredClone(this.#keybindings);
-      case 'keybindings.set': {
-        const { command, chord } = rawParams as RpcParams<'keybindings.set'>;
-        if (!(KEYBINDING_COMMANDS as readonly string[]).includes(command)) {
-          throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: `command: "${command}" is not a command Boite has` });
-        }
-        if (chord !== null) {
-          const parsed = parseChord(chord);
-          if (!parsed.ok) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: `chord: ${parsed.reason}` });
-        }
-        this.#keybindings = { ...this.#keybindings, bindings: { ...this.#keybindings.bindings, [command]: chord === null ? null : chord.trim().toLowerCase() } };
-        this.#emit('keybindings.updated', structuredClone(this.#keybindings));
-        return structuredClone(this.#keybindings);
-      }
-      case 'keybindings.reset': {
-        const { command } = rawParams as RpcParams<'keybindings.reset'>;
-        const bindings = { ...this.#keybindings.bindings };
-        if (command === undefined) for (const id of KEYBINDING_COMMANDS) delete bindings[id];
-        else delete bindings[command];
-        this.#keybindings = { ...this.#keybindings, bindings };
-        this.#emit('keybindings.updated', structuredClone(this.#keybindings));
-        return structuredClone(this.#keybindings);
-      }
-      case 'settings.set': {
-        const params = rawParams as RpcParams<'settings.set'>;
-        for (const field of ['maxConcurrentTurns', 'perAccountConcurrency'] as const) {
-          const value = params[field];
-          if (value !== undefined && (!Number.isInteger(value) || value < 1)) {
-            throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: `${field} must be a positive integer`, data: { field } });
-          }
-        }
-        this.#settings = { ...this.#settings, ...params };
-        this.#scheduler = {
-          ...this.#scheduler,
-          maxConcurrentTurns: this.#settings.maxConcurrentTurns,
-          perAccountConcurrency: this.#settings.perAccountConcurrency
-        };
-        this.#emit('scheduler.updated', structuredClone(this.#scheduler));
-        this.#emit('settings.updated', { ...this.#settings });
-        return { ...this.#settings };
-      }
-
-      case 'imports.list': {
-        const params = rawParams as RpcParams<'imports.list'>;
-        if (!this.#projects.some((p) => p.id === params.projectId)) throw this.#notFound('project', params.projectId);
-        await new Promise((resolve) => setTimeout(resolve, IMPORT_LIST_MS));
-        // Newest first, the core's order.
-        return structuredClone(
-          this.#importable
-            .filter((session) => session.projectId === params.projectId)
-            .sort((a, b) => b.updatedAt - a.updatedAt)
-            .map(({ projectId: _p, ...session }) => session)
-        );
-      }
-      case 'imports.run': {
-        const params = rawParams as RpcParams<'imports.run'>;
-        const project = this.#projects.find((p) => p.id === params.projectId);
-        if (!project) throw this.#notFound('project', params.projectId);
-        const session = this.#importable.find((entry) => entry.projectId === params.projectId && entry.sessionId === params.sessionId);
-        if (!session) {
-          throw new RpcFailure({ code: RpcErrorCode.NotFound, message: `no transcript for session ${params.sessionId}`, data: { sessionId: params.sessionId } });
-        }
-        if (session.threadId !== null) {
-          throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'this session is already a thread', data: { sessionId: params.sessionId, threadId: session.threadId } });
-        }
-        await new Promise((resolve) => setTimeout(resolve, IMPORT_LIST_MS));
-        const id: ThreadId = `t-${++this.#seq}`;
-        const turnA: Turn = { id: `turn-${id}-1`, threadId: id, status: 'done', queuedAt: session.startedAt, startedAt: session.startedAt, finishedAt: session.startedAt + 4_000, usage: null, error: null };
-        const turnB: Turn = { id: `turn-${id}-2`, threadId: id, status: 'done', queuedAt: session.updatedAt - 9_000, startedAt: session.updatedAt - 9_000, finishedAt: session.updatedAt, usage: null, error: null };
-        const thread: Thread = {
-          id,
-          projectId: params.projectId,
-          title: session.title,
-          titleSource: 'agent',
-          providerId: 'claude',
-          accountId: params.accountId,
-          model: 'claude-sonnet-5',
-          effort: null,
-          cwd: project.path,
-          branch: null,
-          permissionMode: 'default',
-          status: 'idle',
-          unread: false,
-          archived: false,
-          pinned: false,
-          sessionId: session.sessionId,
-          load: null,
-          context: null,
-          createdAt: session.startedAt,
-          updatedAt: session.updatedAt,
-          commands: [],
-          messagesBefore: null,
-          turns: [turnA, turnB],
-          messages: [
-            { id: `${id}-m1`, threadId: id, turnId: turnA.id, role: 'user', parts: [{ type: 'text', text: 'Where does the shell look for a core, in what order?' }], state: 'complete', createdAt: turnA.queuedAt },
-            {
-              id: `${id}-m2`, threadId: id, turnId: turnA.id, role: 'assistant', state: 'complete', createdAt: turnA.queuedAt + 1_000,
-              parts: [
-                { type: 'thinking', text: 'The order lives in the Rust side, next to the sidecar lookup.' },
-                { type: 'tool', toolId: `${id}-tool-1`, name: 'Grep', input: { pattern: 'boite-core', path: 'apps/shell/src-tauri/src' }, output: 'apps/shell/src-tauri/src/core.rs:41\napps/shell/src-tauri/src/core.rs:58', status: 'done' },
-                { type: 'text', text: 'Three places, in order: the sidecar beside the exe, `BOITE_CORE` in the environment, then `bun run core` from the repository.' }
-              ]
-            },
-            { id: `${id}-m3`, threadId: id, turnId: turnB.id, role: 'user', parts: [{ type: 'text', text: 'Write that down in docs/releasing.md' }], state: 'complete', createdAt: turnB.queuedAt },
-            { id: `${id}-m4`, threadId: id, turnId: turnB.id, role: 'assistant', state: 'complete', createdAt: turnB.queuedAt + 2_000, parts: [{ type: 'text', text: 'Done: a short list under "Where the shell looks for a core".' }] }
-          ]
-        };
-        this.#threads.set(id, thread);
-        session.threadId = id;
-        this.#emit('thread.created', structuredClone(toSummary(thread)));
-        return structuredClone(toSummary(thread));
-      }
-
-      // ---------------------------------------------------------- the workbench
-      // What the agent's CLI asks for, and what the right panel's surfaces read
-      // behind the same methods.
-
-      case 'agent.where': {
-        const params = rawParams as RpcParams<'agent.where'>;
-        const thread = this.#thread(params.threadId);
-        const project = this.#projects.find((one) => one.id === thread.projectId);
-        if (!project && thread.projectId !== null) throw this.#notFound('project', thread.projectId);
-        const where: AgentWhere = {
-          threadId: thread.id,
-          title: thread.title,
-          projectId: project?.id ?? null,
-          projectPath: project?.path ?? null,
-          cwd: thread.cwd,
-          branch: thread.branch,
-          // A thread of its own worktree does not sit in the project directory.
-          worktree: thread.branch !== null,
-          providerId: thread.providerId,
-          // A thread on no model of its own runs the provider's default.
-          model: thread.model ?? 'default'
-        };
-        return where;
-      }
-      case 'panel.open': {
-        const params = rawParams as RpcParams<'panel.open'>;
-        const thread = this.#thread(params.threadId);
-        const surface = this.#checkSurface(thread.cwd, params.surface);
-        // The core sends this to every client subscribed to the thread, and
-        // `shown` says whether there was one to receive it.
-        const shown = this.#subscribed.has(thread.id);
-        this.#emitToThread(thread.id, 'panel.requested', {
-          threadId: thread.id,
-          surface,
-          at: this.#now()
-        });
-        return { shown };
-      }
-      case 'threads.tasks.set': {
-        const params = rawParams as RpcParams<'threads.tasks.set'>;
-        const thread = this.#thread(params.threadId);
-        const activity: ThreadActivity = structuredClone(thread.activity ?? { goal: null, loop: null, tasks: [] });
-        activity.tasks = params.tasks.map((task): AgentTask => ({ id: task.id, text: task.text, status: task.status }));
-        // A fresh list is something new to look at, so a dismissal does not hold.
-        activity.tasksDismissed = false;
-        thread.activity = activity;
-        this.#publishActivity(thread);
-        return structuredClone(activity);
-      }
-      case 'threads.tasks.get': {
-        const params = rawParams as RpcParams<'threads.tasks.get'>;
-        return structuredClone(this.#thread(params.threadId).activity?.tasks ?? []);
-      }
-
-      case 'todos.list': {
-        const params = rawParams as RpcParams<'todos.list'>;
-        return this.#projectTodos(this.#thread(params.threadId).projectId);
-      }
-      case 'todos.add': {
-        const params = rawParams as RpcParams<'todos.add'>;
-        const thread = this.#thread(params.threadId);
-        if (thread.projectId === null) throw refusal('this agent session has no project');
-        const at = this.#now();
-        const todo: Todo = {
-          id: `todo-${++this.#seq}`,
-          projectId: thread.projectId,
-          text: todoText(params.text),
-          status: 'open',
-          threadId: thread.id,
-          createdAt: at,
-          updatedAt: at
-        };
-        this.#todos.push(todo);
-        this.#emitTodos(thread.projectId);
-        return structuredClone(todo);
-      }
-      case 'todos.update': {
-        const params = rawParams as RpcParams<'todos.update'>;
-        const thread = this.#thread(params.threadId);
-        if (thread.projectId === null) throw refusal('this agent session has no project');
-        const todo = this.#todos.find((one) => one.id === params.todoId && one.projectId === thread.projectId);
-        if (!todo) throw this.#notFound('todo', params.todoId);
-        // The status is checked before the text moves, as the core's `updateTodo`
-        // builds the whole card before it saves anything.
-        if (params.status !== undefined && !TODO_STATUSES.includes(params.status)) {
-          throw refusal(`a todo is ${TODO_STATUSES.join(', ')}, not ${String(params.status)}`);
-        }
-        if (params.text !== undefined) todo.text = todoText(params.text);
-        if (params.status !== undefined) todo.status = params.status;
-        todo.threadId = thread.id;
-        todo.updatedAt = this.#now();
-        this.#emitTodos(thread.projectId);
-        return structuredClone(todo);
-      }
-      case 'todos.remove': {
-        const params = rawParams as RpcParams<'todos.remove'>;
-        const thread = this.#thread(params.threadId);
-        if (thread.projectId === null) throw refusal('this agent session has no project');
-        const index = this.#todos.findIndex((one) => one.id === params.todoId && one.projectId === thread.projectId);
-        if (index < 0) throw this.#notFound('todo', params.todoId);
-        this.#todos.splice(index, 1);
-        this.#emitTodos(thread.projectId);
-        return { ok: true as const };
-      }
-
-      case 'git.status': {
-        const params = rawParams as RpcParams<'git.status'>;
-        const thread = this.#thread(params.threadId);
-        const branch = thread.branch ?? 'main';
-        const status: GitStatus = {
-          branch,
-          upstream: `origin/${branch}`,
-          ahead: 2,
-          behind: 1,
-          changes: structuredClone(FAKE_CHANGES)
-        };
-        return status;
-      }
-      case 'git.diff': {
-        const params = rawParams as RpcParams<'git.diff'>;
-        const path = this.#inside(this.#thread(params.threadId).cwd, params.path, 'git.diff path');
-        const change = FAKE_CHANGES.find((one) => one.path === path);
-        if (!change) throw this.#notFound('change', path);
-        const sides = FAKE_DIFFS[path] ?? {
-          // A row with no fixture of its own still opens on two readable sides.
-          oldText: `// ${path}
+      if (params.text !== undefined) todo.text = todoText(params.text);
+      if (params.status !== undefined) todo.status = params.status;
+      todo.threadId = thread.id;
+      todo.updatedAt = this.#now();
+      this.#emitTodos(thread.projectId);
+      return structuredClone(todo);
+    },
+    'todos.remove': async (params) => {
+      const thread = this.#thread(params.threadId);
+      if (thread.projectId === null) throw refusal('this agent session has no project');
+      const index = this.#todos.findIndex((one) => one.id === params.todoId && one.projectId === thread.projectId);
+      if (index < 0) throw this.#notFound('todo', params.todoId);
+      this.#todos.splice(index, 1);
+      this.#emitTodos(thread.projectId);
+      return { ok: true as const };
+    },
+    'git.status': async (params) => {
+      const thread = this.#thread(params.threadId);
+      const branch = thread.branch ?? 'main';
+      const status: GitStatus = {
+        branch,
+        upstream: `origin/${branch}`,
+        ahead: 2,
+        behind: 1,
+        changes: structuredClone(FAKE_CHANGES)
+      };
+      return status;
+    },
+    'git.diff': async (params) => {
+      const path = this.#inside(this.#thread(params.threadId).cwd, params.path, 'git.diff path');
+      const change = FAKE_CHANGES.find((one) => one.path === path);
+      if (!change) throw this.#notFound('change', path);
+      const sides = FAKE_DIFFS[path] ?? {
+        // A row with no fixture of its own still opens on two readable sides.
+        oldText: `// ${path}
 const ready = false;
 `,
-          newText: `// ${path}
+        newText: `// ${path}
 const ready = true;
 `,
-          binary: false,
-          truncated: false
-        };
-        const diff: GitDiff = { path: change.path, oldPath: change.oldPath, status: change.status, ...sides };
-        return diff;
-      }
-
-      case 'files.list': {
-        const params = rawParams as RpcParams<'files.list'>;
-        const cwd = this.#thread(params.threadId).cwd;
-        return this.#listDir(this.#inside(cwd, params.path ?? '', 'files.list path', 'dir'));
-      }
-      case 'files.read': {
-        const params = rawParams as RpcParams<'files.read'>;
-        const path = this.#inside(this.#thread(params.threadId).cwd, params.path, 'files.read path', 'file');
-        // A picture, a sound and anything else binary answer as a url, the way
-        // the core hands out a ticket, except that these carry their own bytes.
-        const media = FAKE_MEDIA[path];
-        if (media) {
-          const url = media.url();
-          const blob: FileContent = {
-            kind: media.kind,
-            path,
-            bytes: fakeBytes(path, undefined),
-            modifiedAt: this.#fileTime(path),
-            mime: media.mime,
-            url
-          };
-          return blob;
-        }
-        const text = this.#files.get(path) ?? '';
-        const content: FileContent = {
-          kind: 'text',
+        binary: false,
+        truncated: false
+      };
+      const diff: GitDiff = { path: change.path, oldPath: change.oldPath, status: change.status, ...sides };
+      return diff;
+    },
+    'files.list': async (params) => {
+      const cwd = this.#thread(params.threadId).cwd;
+      return this.#listDir(this.#inside(cwd, params.path ?? '', 'files.list path', 'dir'));
+    },
+    'files.read': async (params) => {
+      const path = this.#inside(this.#thread(params.threadId).cwd, params.path, 'files.read path', 'file');
+      // A picture, a sound and anything else binary answer as a url, the way
+      // the core hands out a ticket, except that these carry their own bytes.
+      const media = FAKE_MEDIA[path];
+      if (media) {
+        const url = media.url();
+        const blob: FileContent = {
+          kind: media.kind,
           path,
-          bytes: text.length,
+          bytes: fakeBytes(path, undefined),
           modifiedAt: this.#fileTime(path),
-          text,
-          truncated: false,
-          language: fakeLanguage(path)
+          mime: media.mime,
+          url
         };
-        return content;
+        return blob;
       }
-      case 'files.write': {
-        const params = rawParams as RpcParams<'files.write'>;
-        const cwd = this.#thread(params.threadId).cwd;
-        const path = this.#inside(cwd, params.path, 'files.write path');
-        // The file may be new, its directory may not, and what is there already has to be a file.
-        this.#inside(cwd, path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '', 'files.write path directory', 'dir');
-        if (this.#isDir(path)) throw refusal(`files.write path is not a file: ${params.path}`);
-        if (FAKE_MEDIA[path]) {
-          throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'this file is not text' });
-        }
-        this.#files.set(path, params.text);
-        return { bytes: params.text.length, modifiedAt: this.#now() };
+      const text = this.#files.get(path) ?? '';
+      const content: FileContent = {
+        kind: 'text',
+        path,
+        bytes: text.length,
+        modifiedAt: this.#fileTime(path),
+        text,
+        truncated: false,
+        language: fakeLanguage(path)
+      };
+      return content;
+    },
+    'files.write': async (params) => {
+      const cwd = this.#thread(params.threadId).cwd;
+      const path = this.#inside(cwd, params.path, 'files.write path');
+      // The file may be new, its directory may not, and what is there already has to be a file.
+      this.#inside(cwd, path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '', 'files.write path directory', 'dir');
+      if (this.#isDir(path)) throw refusal(`files.write path is not a file: ${params.path}`);
+      if (FAKE_MEDIA[path]) {
+        throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'this file is not text' });
       }
-
-      default: {
-        const unreachable: never = method;
-        throw new RpcFailure({
-          code: RpcErrorCode.MethodNotFound,
-          message: `unknown method ${String(unreachable)}`
-        });
-      }
-    }
-  }
+      this.#files.set(path, params.text);
+      return { bytes: params.text.length, modifiedAt: this.#now() };
+    },
+  };
 
   #coordinationConfig(threadId: ThreadId): CoordinationConfig {
     return this.#coordination.get(threadId) ?? { mode: 'off', resources: '', remote: false, paused: false };
+  }
+
+  #delegationRoot(threadId: ThreadId): ThreadId {
+    const thread = this.#thread(threadId);
+    return thread.parentThreadId ?? thread.id;
+  }
+
+  #delegationConfig(rootId: ThreadId): DelegationConfig {
+    return structuredClone(this.#delegationConfigs.get(rootId) ?? DEFAULT_DELEGATION_CONFIG);
+  }
+
+  #delegatedAgent(row: { threadId: ThreadId; profileId: string; task: string }): DelegatedAgent {
+    const thread = this.#thread(row.threadId);
+    const lastTurn = thread.turns.at(-1) ?? null;
+    const result = lastTurn && !['queued', 'running'].includes(lastTurn.status)
+      ? thread.messages.filter(message => message.turnId === lastTurn.id && message.role === 'assistant').at(-1)?.parts
+          .filter(part => part.type === 'text').map(part => part.text).join('\n').trim().slice(0, 4000) || lastTurn.error
+      : null;
+    return { thread: structuredClone(toSummary(thread)), profileId: row.profileId, task: row.task, lastTurn: structuredClone(lastTurn), result: result || null };
+  }
+
+  #delegationView(rootId: ThreadId, callerId = rootId): DelegationView {
+    this.#thread(rootId);
+    const rows = this.#delegationAgents.get(rootId) ?? [];
+    let usage = emptyUsage();
+    for (const row of rows) for (const turn of this.#thread(row.threadId).turns) if (turn.usage) usage = addUsage(usage, turn.usage);
+    return {
+      rootThreadId: rootId,
+      config: this.#delegationConfig(rootId),
+      agents: rows.map(row => this.#delegatedAgent(row)),
+      messages: structuredClone((this.#delegationLetters.get(rootId) ?? []).filter(letter => callerId === rootId || letter.from.threadId === callerId || letter.to.threadId === callerId)),
+      turnsUsed: this.#delegationTurns.get(rootId) ?? 0,
+      usage
+    };
+  }
+
+  async #stopDelegation(rootId: ThreadId, agentId?: ThreadId): Promise<number> {
+    const rows = this.#delegationAgents.get(rootId) ?? [];
+    const selected = agentId ? rows.filter(row => row.threadId === agentId) : rows;
+    if (agentId && selected.length === 0) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'agentId must name a direct child' });
+    if (!agentId) this.#delegationConfigs.set(rootId, { ...this.#delegationConfig(rootId), paused: true });
+    let stopped = 0;
+    for (const row of selected) {
+      const thread = this.#thread(row.threadId);
+      if (['queued', 'running', 'waiting'].includes(thread.status)) stopped += 1;
+      const queued = thread.turns.at(-1);
+      if (queued?.status === 'queued') {
+        queued.status = 'stopped';
+        queued.finishedAt = this.#now();
+        this.#scheduler.queued = this.#scheduler.queued.filter(entry => entry.turnId !== queued.id);
+      }
+      await this.#stopTurn(thread.id);
+      thread.status = 'idle';
+      this.#touch(thread);
+    }
+    return stopped;
+  }
+
+  #seedDelegationDemo(): void {
+    const demoAt = Date.now() - 85_000;
+    const root = this.#thread('t-trace');
+    const reviewer: DelegationProfile = { id: 'reviewer', name: 'Reviewer', providerId: 'claude', accountId: 'a-claude-main', model: 'claude-sonnet-5', effort: 'high' };
+    const implementer: DelegationProfile = { id: 'implementer', name: 'Implementer', providerId: 'codex', accountId: 'a-codex', model: 'gpt-5.6-sol', effort: 'medium' };
+    this.#delegationConfigs.set(root.id, { enabled: true, paused: false, maxAgents: 4, maxConcurrent: 2, maxTurns: 12, maxMinutes: 30, profiles: [reviewer, implementer] });
+    const make = (id: string, title: string, task: string, status: Thread['status'], answer: string, profile: DelegationProfile): Thread => {
+      const turn: Turn = { id: `turn-${id}`, threadId: id, status: status === 'running' ? 'running' : 'done', queuedAt: demoAt, startedAt: demoAt + 1000, finishedAt: status === 'running' ? null : demoAt + 30_000, usage: status === 'running' ? null : { inputTokens: 820, outputTokens: 260, cacheReadTokens: 1200, cacheWriteTokens: 0, costUsdEquivalent: 0.012 }, error: null };
+      return {
+        ...root, id, parentThreadId: root.id, title, titleSource: 'user', status, unread: false, archived: false, pinned: false,
+        providerId: profile.providerId, accountId: profile.accountId, model: profile.model, effort: profile.effort,
+        sessionId: `session-${id}`, sessionGeneration: 0, selectionVersion: 0, load: status === 'running' ? { processes: 1, cpuPercent: 8, memoryBytes: 64 * 1024 * 1024 } : null,
+        createdAt: demoAt, updatedAt: demoAt + 30_000, messagesBefore: null, commands: [], turns: [turn],
+        messages: [
+          { id: `m-${id}-1`, threadId: id, turnId: turn.id, role: 'user', parts: [{ type: 'text', text: task }], state: 'complete', createdAt: demoAt },
+          { id: `m-${id}-2`, threadId: id, turnId: turn.id, role: 'assistant', parts: [{ type: 'text', text: answer }], state: status === 'running' ? 'streaming' : 'complete', createdAt: demoAt + 10_000 }
+        ]
+      };
+    };
+    const running = make('t-team-running', 'Audit subscription flow', 'Check selection races and own the store tests.', 'running', 'I found the subscription boundary and am checking stale responses.', reviewer);
+    const done = make('t-team-done', 'Review panel copy', 'Review the panel wording and report confusing states.', 'idle', 'The queued delivery label now matches the core state.', implementer);
+    this.#threads.set(running.id, running);
+    this.#threads.set(done.id, done);
+    this.#delegationAgents.set(root.id, [
+      { threadId: running.id, profileId: reviewer.id, task: 'Check selection races and own the store tests.' },
+      { threadId: done.id, profileId: implementer.id, task: 'Review the panel wording and report confusing states.' }
+    ]);
+    this.#delegationTurns.set(root.id, 2);
   }
 
   #coordinationView(threadId: ThreadId): CoordinationView {
@@ -2428,7 +1976,7 @@ const ready = true;
       pending.resolve('deny');
     }
     for (const [questionId, pending] of [...this.#pendingQuestions]) {
-      if (pending.request.threadId !== threadId) continue;
+      if (pending.request.threadId !== threadId || pending.request.async === true) continue;
       stopped = true;
       this.#pendingQuestions.delete(questionId);
       pending.resolve(null);
@@ -2437,12 +1985,14 @@ const ready = true;
     return stopped;
   }
 
-  #startTurn(threadId: ThreadId, prompt: string, attachments: Attachment[] = [], operation?: 'compact', activityKind?: 'goal' | 'loop'): Turn {
+  #startTurn(threadId: ThreadId, prompt: string, attachments: Attachment[] = [], operation?: 'compact' | 'delegation', activityKind?: 'goal' | 'loop', queuedTurn?: Turn, previewReferences: PreviewReference[] = []): Turn {
+    // The real transport serializes Svelte proxies before they reach the core.
+    previewReferences = JSON.parse(JSON.stringify(previewReferences)) as PreviewReference[];
     const thread = this.#thread(threadId);
     if (thread.archived) {
       throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'cannot start a turn on an archived thread', data: { threadId } });
     }
-    if (['queued', 'running', 'waiting'].includes(thread.status) || this.#inFlight.has(threadId)) {
+    if ((!queuedTurn && ['queued', 'running', 'waiting'].includes(thread.status)) || (queuedTurn && (thread.status !== 'queued' || queuedTurn.status !== 'queued')) || this.#inFlight.has(threadId)) {
       throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'this thread already has an in-flight turn', data: { threadId } });
     }
     // The agent names what it takes on its first turn, the way the echo driver
@@ -2456,23 +2006,18 @@ const ready = true;
     }
 
     const at = this.#now();
-    const turn: Turn = {
-      id: `turn-${++this.#seq}`,
-      threadId,
-      status: 'running',
-      queuedAt: at,
-      startedAt: at,
-      finishedAt: null,
-      usage: null,
-      error: null,
-      execution: {
+    const execution: NonNullable<Turn['execution']> = {
         providerId: thread.providerId, accountId: thread.accountId, model: thread.model,
         effort: thread.effort, speed: thread.speed ?? null, permissionMode: thread.permissionMode, sessionId: thread.sessionId,
         sessionGeneration: thread.sessionGeneration ?? 0, selectionVersion: thread.selectionVersion ?? 0,
         ...(operation ? { operation } : {}),
-      }
     };
-    thread.turns.push(turn);
+    const turn: Turn = queuedTurn ?? {
+      id: `turn-${++this.#seq}`, threadId, status: 'running', queuedAt: at,
+      startedAt: at, finishedAt: null, usage: null, error: null, execution
+    };
+    if (queuedTurn) Object.assign(turn, { status: 'running', startedAt: at, execution });
+    else thread.turns.push(turn);
 
     const user: Message = {
       id: `m-${++this.#seq}`,
@@ -2481,7 +2026,7 @@ const ready = true;
       role: 'user',
       // The images ride after the text, the order the core journals them in.
       parts: [
-        { type: 'text', text: activityKind ? `/${activityKind} ${prompt}` : prompt, ...(activityKind ? { activity: { kind: activityKind, iteration: (thread.activity?.[activityKind]?.iterations ?? 0) + 1 } } : {}) },
+        { type: 'text', text: activityKind ? `/${activityKind} ${prompt}` : previewPrompt(prompt, previewReferences), ...(previewReferences.length ? { displayText: prompt, previewReferences: structuredClone(previewReferences) } : {}), ...(activityKind ? { activity: { kind: activityKind, iteration: (thread.activity?.[activityKind]?.iterations ?? 0) + 1 } } : {}) },
         ...attachments.map((attachment): MessagePart => attachment.kind === 'file' ? { type: 'file', mimeType: attachment.mimeType, data: attachment.data, name: attachment.name } : ({
           type: 'image',
           mimeType: attachment.mimeType,
@@ -2512,7 +2057,7 @@ const ready = true;
     this.#pushScheduler(turn, 'running');
 
     const record = { cancelled: false, done: Promise.resolve() };
-    record.done = this.#stream(thread, turn, prompt, record, attachments);
+    record.done = this.#stream(thread, turn, prompt, record, attachments, previewPrompt(prompt, previewReferences));
     this.#inFlight.set(threadId, record);
 
     return structuredClone(turn);
@@ -2523,7 +2068,8 @@ const ready = true;
     turn: Turn,
     prompt: string,
     record: { cancelled: boolean },
-    attachments: Attachment[] = []
+    attachments: Attachment[] = [],
+    modelPrompt: string = prompt
   ): Promise<void> {
     const compactAfter = Math.max(1, Math.floor((thread.context?.tokens ?? FAKE_CONTEXT_FLOOR) / 4));
     const message: Message = {
@@ -2539,7 +2085,7 @@ const ready = true;
     this.#emitToThread(thread.id, 'message.started', structuredClone(message));
 
     // The reasoning first, in two deltas, the way a provider streams a thinking block.
-    const reasoning = `thinking about: ${prompt}`;
+    const reasoning = `thinking about: ${modelPrompt}`;
     const cut = Math.ceil(reasoning.length / 2);
     for (const piece of [reasoning.slice(0, cut), reasoning.slice(cut)]) {
       if (record.cancelled || piece.length === 0) break;
@@ -2565,7 +2111,7 @@ const ready = true;
 
     // `/shout <text>` comes back in capitals, the one command the fake acts on.
     const shouted = prompt.startsWith(`/${SHOUT} `) ? prompt.slice(SHOUT.length + 2) : null;
-    const echoed = shouted === null ? prompt : shouted.toUpperCase();
+    const echoed = shouted === null ? modelPrompt : modelPrompt.slice(SHOUT.length + 2).toUpperCase();
 
     // An image is named back the way the echo driver names it, format and
     // weight first, then the prompt itself is echoed.
@@ -2573,8 +2119,7 @@ const ready = true;
       attachments
         .map(
           (attachment) =>
-            `[${attachment.kind} ${attachment.mimeType}, ${decodedBytes(attachment.data)} bytes${
-              attachment.name === null ? '' : `, ${attachment.name}`
+            `[${attachment.kind} ${attachment.mimeType}, ${decodedBytes(attachment.data)} bytes${attachment.name === null ? '' : `, ${attachment.name}`
             }] `
         )
         .join('') + echoed;
@@ -2598,6 +2143,13 @@ const ready = true;
     // The bare word, like the echo driver: the fake agent asks one question.
     if (!record.cancelled && /\bquestion\b/.test(prompt)) {
       await this.#askQuestion(thread, turn, message);
+    }
+    // `boite ask`: a card the agent does not wait on, answered into the next prompt.
+    if (!record.cancelled && prompt.includes('[ask]')) {
+      this.#askAsync(thread, turn, message, ASYNC_QUESTION_TEXT, ASYNC_QUESTION_OPTIONS, false);
+    }
+    if (!record.cancelled && prompt.includes('[background]')) {
+      await this.#backgroundShell(thread, message);
     }
     if (!record.cancelled && prompt.includes('[tool-stream]')) {
       await this.#streamToolInput(thread, message);
@@ -2639,11 +2191,11 @@ const ready = true;
     });
 
     const usage: Usage = {
-      inputTokens: Math.max(1, Math.ceil(prompt.length / 4)),
-      outputTokens: Math.max(1, Math.ceil(prompt.length / 4)),
+      inputTokens: Math.max(1, Math.ceil(modelPrompt.length / 4)),
+      outputTokens: Math.max(1, Math.ceil(modelPrompt.length / 4)),
       cacheReadTokens: 0,
       cacheWriteTokens: 0,
-      costUsdEquivalent: Math.round(prompt.length * 0.02) / 1000
+      costUsdEquivalent: Math.round(modelPrompt.length * 0.02) / 1000
     };
     turn.status = record.cancelled ? 'stopped' : 'done';
     turn.finishedAt = this.#now();
@@ -2656,13 +2208,53 @@ const ready = true;
     thread.unread = !this.#subscribed.has(thread.id);
     // The context meter grows with every turn, the way a real session's does.
     thread.context = {
-      tokens: prompt === '[compact]' && !record.cancelled ? compactAfter : (thread.context?.tokens ?? FAKE_CONTEXT_FLOOR) + FAKE_CONTEXT_PER_TURN + prompt.length * 4,
+      tokens: prompt === '[compact]' && !record.cancelled ? compactAfter : (thread.context?.tokens ?? FAKE_CONTEXT_FLOOR) + FAKE_CONTEXT_PER_TURN + modelPrompt.length * 4,
       window: FAKE_CONTEXT_WINDOW,
       at: this.#now()
     };
     this.#touch(thread);
     this.#emit('turn.finished', structuredClone(turn));
     this.#pushScheduler(turn, 'finished');
+    if (turn.execution?.operation === 'delegation' && thread.parentThreadId) {
+      const root = thread.parentThreadId;
+      const text = message.parts.filter(part => part.type === 'text').map(part => part.text).join('\n').trim().slice(0, 4000);
+      const config = this.#delegationConfig(root);
+      if (!record.cancelled && config.enabled && !config.paused) {
+        const letter: AgentLetter = {
+          id: `letter-${++this.#seq}`,
+          origin: 'result',
+          from: { coreId: 'local', threadId: thread.id, title: thread.title, machine: 'Boite', resources: '', status: thread.status, mode: 'team' },
+          to: { coreId: 'local', threadId: root },
+          toTitle: this.#thread(root).title,
+          text,
+          replyTo: null,
+          createdAt: this.#now(),
+          expiresAt: Number.MAX_SAFE_INTEGER,
+          status: 'received',
+          error: null
+        };
+        this.#delegationLetters.set(root, [...(this.#delegationLetters.get(root) ?? []), letter]);
+      }
+      this.#pumpDelegation(root);
+      this.#emit('delegation.changed', { threadId: root });
+    }
+  }
+
+  #pumpDelegation(rootId: ThreadId): void {
+    const config = this.#delegationConfig(rootId);
+    if (!config.enabled || config.paused) return;
+    const rows = this.#delegationAgents.get(rootId) ?? [];
+    let running = rows.filter(row => ['running', 'waiting'].includes(this.#thread(row.threadId).status)).length;
+    for (const row of rows) {
+      if (running >= config.maxConcurrent) break;
+      const thread = this.#thread(row.threadId);
+      const turn = thread.turns.at(-1);
+      if (thread.status !== 'queued' || turn?.status !== 'queued') continue;
+      this.#scheduler.queued = this.#scheduler.queued.filter(entry => entry.turnId !== turn.id);
+      this.#scheduler.queued.forEach((entry, index) => { entry.position = index + 1; });
+      this.#startTurn(thread.id, row.task, [], 'delegation', undefined, turn);
+      running += 1;
+    }
   }
 
   async #askPermission(thread: Thread, turn: Turn, message: Message): Promise<void> {
@@ -2763,10 +2355,92 @@ const ready = true;
         options: request.options,
         allowText: request.allowText,
         multiple: request.multiple,
+        ...(request.async === true ? { async: true } : {}),
         answer
       }
     });
     this.#emit('question.answered', { questionId: request.id, threadId: thread.id, answer });
+  }
+
+  /**
+   * The core's `askAsync`: the card goes on the running message, or on a new
+   * assistant message of the last turn, and nothing waits on it. The answer
+   * comes back as a prompt quoting the question, once the thread is free.
+   */
+  #askAsync(thread: Thread, turn: Turn, running: Message | null, text: string, labels: string[], multiple: boolean): string {
+    const questionId = `qst-${++this.#seq}`;
+    const asked = {
+      text,
+      options: labels.map((label, index) => ({ id: String(index + 1), label })),
+      allowText: true,
+      multiple
+    };
+    let message = running;
+    if (message === null) {
+      message = { id: `m-${++this.#seq}`, threadId: thread.id, turnId: turn.id, role: 'assistant', parts: [], state: 'complete', createdAt: this.#now() };
+      thread.messages.push(message);
+      this.#emitToThread(thread.id, 'message.started', structuredClone(message));
+    }
+    const host = message;
+    const partIndex = host.parts.length;
+    const part: MessagePart = { type: 'question', questionId, ...asked, async: true, answer: null };
+    host.parts.push(part);
+    this.#emitToThread(thread.id, 'message.part', { threadId: thread.id, messageId: host.id, partIndex, part: structuredClone(part) });
+    const request: QuestionRequest = { id: questionId, threadId: thread.id, turnId: turn.id, ...asked, async: true, createdAt: this.#now() };
+    this.#emit('question.asked', structuredClone(request));
+    this.#pendingQuestions.set(questionId, {
+      request,
+      resolve: (answer) => {
+        this.#settleQuestion(thread, host, partIndex, request, answer);
+        if (answer === null) return;
+        const picked = answer.optionIds.map((id) => asked.options.find((option) => option.id === id)?.label ?? id).join(', ');
+        const reply = [picked, answer.text ?? ''].filter((line) => line.length > 0).join('\n');
+        this.#holdAnswer(thread, `> ${text}\n\n${reply}`);
+      }
+    });
+    return questionId;
+  }
+
+  /** As the core's deferred answers: the ones given while a turn runs start one turn together after it. */
+  #holdAnswer(thread: Thread, prompt: string): void {
+    const held = this.#heldAnswers.get(thread.id);
+    if (held) {
+      held.push(prompt);
+      return;
+    }
+    this.#heldAnswers.set(thread.id, [prompt]);
+    void this.#flushAnswers(thread);
+  }
+
+  async #flushAnswers(thread: Thread): Promise<void> {
+    for (let running = this.#inFlight.get(thread.id); running; running = this.#inFlight.get(thread.id)) {
+      await running.done.catch(() => undefined);
+    }
+    const held = this.#heldAnswers.get(thread.id) ?? [];
+    this.#heldAnswers.delete(thread.id);
+    if (held.length > 0 && !thread.archived) this.#startTurn(thread.id, held.join('\n\n'));
+  }
+
+  /** A shell sent to the background: the call returns at once, the task stays listed. */
+  async #backgroundShell(thread: Thread, message: Message): Promise<void> {
+    const partIndex = message.parts.length;
+    const toolId = `tool-${++this.#seq}`;
+    const input = { command: 'bun run dev:ui', run_in_background: true };
+    const startedAt = this.#now();
+    const running: MessagePart = { type: 'tool', toolId, name: 'Bash', input, output: null, status: 'running', startedAt };
+    message.parts.push(running);
+    this.#emitToThread(thread.id, 'message.part', { threadId: thread.id, messageId: message.id, partIndex, part: structuredClone(running) });
+    await this.#pause();
+    const id = `bash-${this.#seq}`;
+    const done: MessagePart = { ...running, output: `Command running in background with ID: ${id}`, status: 'done', finishedAt: this.#now() };
+    message.parts[partIndex] = done;
+    this.#emitToThread(thread.id, 'message.part', { threadId: thread.id, messageId: message.id, partIndex, part: structuredClone(done) });
+    this.#setBackground(thread, [...(thread.background ?? []), { id, kind: 'shell', description: input.command, toolId, startedAt }]);
+  }
+
+  #setBackground(thread: Thread, tasks: BackgroundTask[]): void {
+    thread.background = tasks;
+    this.#emit('thread.background', { threadId: thread.id, tasks: structuredClone(tasks) });
   }
 
   /** Writes the answer into the part and tells everyone, whichever path asked. */
@@ -2965,6 +2639,18 @@ const ready = true;
       this.#logins.set(event.accountId, existing ? Object.assign(existing, event) : event);
     } else this.#logins.delete(event.accountId);
     this.#emit('account.login', structuredClone(event));
+  }
+
+  /** The shell goes; a sign-in one leaves its account signed in, as the real CLI would. */
+  #closeTerminal(id: string): void {
+    if (!this.#terminals.delete(id)) return;
+    this.#emit('terminal.exited', { id, exitCode: 0 });
+    if (!id.startsWith('login:')) return;
+    const account = this.#accounts.find((a) => `login:${a.id}` === id);
+    if (!account) return;
+    account.status = 'ok';
+    account.identity = 'you@example.com';
+    this.#emit('accounts.updated', structuredClone(account));
   }
 
   #cancelLogin(accountId: string): void {
@@ -3471,103 +3157,6 @@ const ready = true;
     return state;
   }
 
-  // -------------------------------------------------------------------------
-  // Plugins
-  // -------------------------------------------------------------------------
-
-  #requirePlugin(id: string): PluginState {
-    const plugin = this.#plugins.find((entry) => entry.id === id);
-    if (plugin === undefined) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: `unknown plugin ${id}; expected a plugin id from plugins.list` });
-    return plugin;
-  }
-
-  /** A URL plugin leaves the list; the event carries it back `not-installed`, as the core's does. */
-  #dropPlugin(plugin: PluginState): PluginState {
-    this.#plugins = this.#plugins.filter((entry) => entry.id !== plugin.id);
-    const gone: PluginState = { ...structuredClone(plugin), status: 'not-installed', version: null, progress: 0, error: null, rejected: null };
-    this.#emit('plugins.updated', structuredClone(gone));
-    return gone;
-  }
-
-  async #runPluginInstall(id: string): Promise<void> {
-    const run = (this.#pluginRuns.get(id) ?? 0) + 1;
-    this.#pluginRuns.set(id, run);
-    for (let step = 1; step <= PLUGIN_STEPS; step += 1) {
-      await new Promise((resolve) => setTimeout(resolve, INSTALL_STEP_MS));
-      const plugin = this.#plugins.find((entry) => entry.id === id);
-      if (this.#pluginRuns.get(id) !== run || plugin === undefined) return;
-      if (step < PLUGIN_STEPS) plugin.progress = Math.round((step / PLUGIN_STEPS) * 95);
-      else Object.assign(plugin, { status: 'installed', version: plugin.availableVersion, progress: 0, error: null, rejected: null });
-      this.#emit('plugins.updated', structuredClone(plugin));
-    }
-  }
-
-  /**
-   * What the core's `plugins.inspect` answers, without git: https only, a URL
-   * holding `broken` comes back refused, anything else reads as a Pi pool
-   * plugin named after the repository.
-   */
-  async #inspectPlugin(params: RpcParams<'plugins.inspect'>): Promise<PluginPreview> {
-    const text = params.url.trim().replace(/\/+$/, '');
-    let url: URL | null = null;
-    try { url = new URL(text); } catch { url = null; }
-    if (url === null || url.protocol !== 'https:' || url.username !== '' || url.password !== '' || url.search !== '' || url.hash !== '') {
-      throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'plugin url must be an https URL of a git repository, such as https://github.com/owner/repo' });
-    }
-    // The core takes a moment to fetch; the page shows it reading.
-    await new Promise((resolve) => setTimeout(resolve, this.#delayMs * 10));
-    const source = { url: `${url.origin}${url.pathname}`, ref: params.ref?.trim() || 'HEAD', commit: 'e7d1c9a35b2f4e6d8a0c1b3f5d7e9a2c4b6d8f0e' };
-    const base: PluginPreview = { previewId: null, source, manifest: null, rejected: null, artifact: null, platform: 'win32-x64', commands: [], replaces: null, expiresAt: this.#now() + 600_000 };
-    if (text.includes('broken')) {
-      return { ...base, rejected: { file: 'boite-plugin.json', field: 'artifacts.win32-x64.sha256', expected: '64 lowercase hexadecimal characters',
-        message: 'boite-plugin.json: artifacts.win32-x64.sha256 must be 64 lowercase hexadecimal characters, found "TODO"' } };
-    }
-    const slug = (url.pathname.split('/').filter(Boolean).pop() ?? '').toLowerCase().replace(/\.git$/, '').replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '') || 'plugin';
-    const manifest: PluginManifest = {
-      schema: 1, id: slug, name: slug.charAt(0).toUpperCase() + slug.slice(1).replace(/-/g, ' '), version: '1.5.0',
-      description: 'Saves Pi logins and switches the active one.', homepage: source.url, executable: slug,
-      artifacts: { 'win32-x64': { url: `${source.url}/releases/download/v1.5.0/${slug}-win32-x64.exe`, sha256: '5a7c9e1b3d5f7a9c2e4b6d8f0a1c3e5b7d9f2a4c6e8b0d1f3a5c7e9b2d4f6a8c' } },
-      provides: { accountPools: { providers: ['pi'] } }
-    };
-    const read: PluginPreview = { ...base, manifest, artifact: manifest.artifacts['win32-x64'] ?? null, commands: poolCommands(slug) };
-    const existing = this.#plugins.find((entry) => entry.id === slug);
-    if (existing?.origin === 'recommended') {
-      const expected = 'an id no recommended plugin uses (kebacc-switcher)';
-      return { ...read, rejected: { file: 'boite-plugin.json', field: 'id', expected, message: `boite-plugin.json: id must be ${expected}, found "${slug}"` } };
-    }
-    if (existing !== undefined && existing.source !== null && existing.source.url !== source.url) {
-      const expected = `an id not already used by the plugin from ${existing.source.url}`;
-      return { ...read, rejected: { file: 'boite-plugin.json', field: 'id', expected, message: `boite-plugin.json: id must be ${expected}, found "${slug}"` } };
-    }
-    const preview: PluginPreview = { ...read, previewId: `preview-${++this.#seq}`, replaces: existing?.version ?? null };
-    this.#pluginPreviews.set(preview.previewId!, preview);
-    return structuredClone(preview);
-  }
-
-  #addPlugin(previewId: string): PluginState {
-    const preview = this.#pluginPreviews.get(previewId);
-    const manifest = preview?.manifest;
-    // A preview is read once and only within its ten minutes, as the core's is.
-    if (preview !== undefined && preview.expiresAt <= this.#now()) this.#pluginPreviews.delete(previewId);
-    if (preview === undefined || manifest == null || preview.expiresAt <= this.#now()) {
-      throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'plugin preview is unknown or expired; inspect the URL again' });
-    }
-    this.#pluginPreviews.delete(previewId);
-    const existing = this.#plugins.find((entry) => entry.id === manifest.id);
-    const pools = manifest.provides.accountPools?.providers ?? [];
-    const plugin: PluginState = {
-      id: manifest.id, name: manifest.name, origin: 'url', description: manifest.description, homepage: manifest.homepage,
-      version: existing?.version ?? null, availableVersion: manifest.version, status: 'installing', progress: 0, error: null,
-      source: preview.source, artifact: preview.artifact, platform: preview.platform, commands: preview.commands, pools, rejected: null
-    };
-    if (existing !== undefined) Object.assign(existing, plugin);
-    else this.#plugins.push(plugin);
-    this.#pluginPools[manifest.id] ??= pools.map((provider) => ({ provider, accounts: [] }));
-    this.#emit('plugins.updated', structuredClone(plugin));
-    void this.#runPluginInstall(manifest.id);
-    return structuredClone(plugin);
-  }
-
   /** The download ticks, then the two short states, then the files are there. */
   async #runInstall(
     provider: ProviderSummary,
@@ -3717,524 +3306,11 @@ const ready = true;
       }
     ];
 
-    this.#providers = [
-      {
-        id: 'claude',
-        name: 'Claude',
-        shortName: 'Claude',
-        protocol: 'claude-sdk',
-        login: { kind: 'command' },
-        alwaysIsolated: false,
-        source: 'shipped',
-        available: true,
-        executable: 'C:\\Users\\you\\.local\\bin\\claude.exe',
-        models: [
-          { id: 'claude-fable-5-1', name: 'Claude Fable 5.1', badge: 'new', effort: {
-              levels: [
-                { id: 'low', label: 'Low' },
-                { id: 'medium', label: 'Medium' },
-                { id: 'high', label: 'High' },
-                { id: 'xhigh', label: 'Extra high' },
-                { id: 'max', label: 'Max' },
-                { id: 'ultrathink', label: 'Ultrathink', description: 'Extended thinking, asked for in the prompt' }
-              ],
-              default: 'high'
-            } },
-          { id: 'claude-opus-5', name: 'Claude Opus 5', speeds: [{ id: 'fast', label: 'Fast' }], effort: {
-              levels: [
-                { id: 'low', label: 'Low' },
-                { id: 'medium', label: 'Medium' },
-                { id: 'high', label: 'High' },
-                { id: 'xhigh', label: 'Extra high' },
-                { id: 'max', label: 'Max' },
-                { id: 'ultrathink', label: 'Ultrathink', description: 'Extended thinking, asked for in the prompt' }
-              ],
-              default: 'high'
-            } },
-          { id: 'claude-sonnet-5', name: 'Claude Sonnet 5', default: true, effort: {
-              levels: [
-                { id: 'low', label: 'Low' },
-                { id: 'medium', label: 'Medium' },
-                { id: 'high', label: 'High' },
-                { id: 'xhigh', label: 'Extra high' },
-                { id: 'max', label: 'Max' },
-                { id: 'ultrathink', label: 'Ultrathink', description: 'Extended thinking, asked for in the prompt' }
-              ],
-              default: 'high'
-            } },
-          { id: 'claude-fable-5', name: 'Claude Fable 5', legacy: true, effort: {
-              levels: [
-                { id: 'low', label: 'Low' },
-                { id: 'medium', label: 'Medium' },
-                { id: 'high', label: 'High' }
-              ],
-              default: 'high'
-            } },
-          { id: 'claude-opus-4-8', name: 'Claude Opus 4.8', legacy: true, effort: {
-              levels: [
-                { id: 'low', label: 'Low' },
-                { id: 'medium', label: 'Medium' },
-                { id: 'high', label: 'High' }
-              ],
-              default: 'high'
-            } },
-          { id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6', legacy: true, effort: {
-              levels: [
-                { id: 'low', label: 'Low' },
-                { id: 'medium', label: 'Medium' },
-                { id: 'high', label: 'High' }
-              ],
-              default: 'high'
-            } },
-          { id: 'claude-haiku-4-5-20251001', name: 'Claude Haiku 4.5', legacy: true }
-        ],
-        install: null,
-        capabilities: {
-          approvals: true,
-          hooks: true,
-          checkpoint: true,
-          images: true,
-          planMode: true,
-          resume: true
-        }
-      },
-      {
-        id: 'echo',
-        name: 'Echo',
-        shortName: 'Echo',
-        protocol: 'echo',
-        login: false,
-        alwaysIsolated: false,
-        source: 'shipped',
-        available: true,
-        executable: null,
-        models: [
-          {
-            id: 'echo-1',
-            name: 'Echo',
-            default: true,
-            effort: {
-              levels: [
-                { id: 'low', label: 'Low' },
-                { id: 'high', label: 'High' }
-              ],
-              default: 'high'
-            }
-          }
-        ],
-        install: null,
-        // The shipped echo descriptor reads images too: the fake agent names
-        // back what it was sent, which is what the attachment capture proves.
-        capabilities: {
-          approvals: true,
-          hooks: false,
-          checkpoint: false,
-          images: true,
-          planMode: false,
-          resume: true
-        }
-      },
-      {
-        id: UPDATABLE_ID,
-        name: 'OpenCode',
-        shortName: 'OpenCode',
-        protocol: 'acp',
-        login: { kind: 'command' },
-        alwaysIsolated: false,
-        source: 'shipped',
-        available: true,
-        executable: 'C:\\Users\\you\\AppData\\Roaming\\npm\\opencode.exe',
-        // One model in the descriptor: the agent owns the rest, and a probe reads them.
-        models: [{ id: 'default', name: 'OpenCode default', default: true }],
-        // Its files are down and one version behind: the Providers page offers Update.
-        install: {
-          state: 'installed',
-          version: UPDATABLE_VERSION,
-          installedAt: T0,
-          available: UPDATABLE_AVAILABLE
-        },
-        capabilities: {
-          approvals: true,
-          hooks: false,
-          checkpoint: false,
-          images: false,
-          planMode: false,
-          resume: true
-        }
-      },
-      {
-        id: MANAGED_ID,
-        name: 'Antigravity',
-        shortName: 'Antigravity',
-        protocol: 'acp',
-        login: { kind: 'acp' },
-        alwaysIsolated: true,
-        source: 'shipped',
-        // Nothing runs until the release lands: the picker row offers the download.
-        available: false,
-        executable: null,
-        models: [{ id: 'default', name: 'Antigravity default', default: true }],
-        install: {
-          state: 'absent',
-          version: MANAGED_VERSION,
-          archiveBytes: MANAGED_ARCHIVE_BYTES
-        },
-        capabilities: {
-          approvals: true,
-          hooks: false,
-          checkpoint: false,
-          images: false,
-          planMode: false,
-          resume: true
-        }
-      }
-    ];
-    this.#providers.push(...PROBE_PROVIDERS.map((provider): ProviderSummary => ({
-      ...provider,
-      shortName: provider.name,
-      source: 'shipped',
-      available: true,
-      executable: `${DATA_DIR}\\demo\\${provider.id}.exe`,
-      models: [{ id: 'default', name: `${provider.name} default`, default: true }],
-      capabilities: {
-        approvals: provider.protocol !== 'pi', hooks: false, checkpoint: false,
-        images: false, planMode: provider.protocol !== 'pi', resume: true
-      },
-      install: null,
-      alwaysIsolated: false
-    })));
-    this.#accounts = [
-      {
-        id: 'a-echo',
-        providerId: 'echo',
-        label: 'Echo',
-        isolationDir: `${DATA_DIR}\\accounts\\a-echo`,
-        status: 'ok',
-        identity: 'echo',
-        createdAt: T0
-      },
-      {
-        id: 'a-antigravity',
-        providerId: MANAGED_ID,
-        label: 'Antigravity',
-        isolationDir: `${DATA_DIR}\\accounts\\a-antigravity`,
-        // A managed provider is signed into from the Accounts page, once its
-        // files are down: nothing on this machine has logged it in yet.
-        status: 'unauthenticated',
-        identity: null,
-        createdAt: T0
-      },
-      {
-        id: 'a-claude-main',
-        providerId: 'claude',
-        label: 'Default login',
-        isolationDir: null,
-        status: 'ok',
-        identity: 'you@example.com',
-        createdAt: T0
-      },
-      {
-        id: 'a-claude-side',
-        providerId: 'claude',
-        label: 'Second seat',
-        isolationDir: `${DATA_DIR}\\accounts\\a-claude-side`,
-        status: 'unauthenticated',
-        identity: null,
-        createdAt: T0
-      },
-      {
-        id: 'a-opencode',
-        providerId: 'opencode',
-        label: 'Default',
-        isolationDir: null,
-        status: 'ok',
-        identity: 'you@example.com',
-        createdAt: T0
-      }
-    ];
+    const { providers, accounts } = seedAccounts();
+    this.#providers = providers;
+    this.#accounts = accounts;
 
-    this.#accounts.push(...PROBE_PROVIDERS.map((provider): Account => ({
-      id: `a-${provider.id}`,
-      providerId: provider.id,
-      label: 'Default',
-      isolationDir: null,
-      status: 'ok',
-      identity: 'you@example.com',
-      createdAt: T0
-    })));
-
-    const base = {
-      providerId: 'echo',
-      accountId: 'a-echo',
-      model: 'echo-1',
-      effort: null,
-      permissionMode: 'default' as const,
-      archived: false,
-      pinned: false,
-      branch: null,
-      titleSource: 'prompt' as const,
-      // A stored thread is the whole record; `threads.get` is what pages it.
-      messagesBefore: null,
-      commands: []
-    };
-
-    const finished: Thread = {
-      ...base,
-      id: 't-trace',
-      projectId: 'p-boite',
-      title: 'Finish the trace tab',
-      cwd: 'C:\\src\\boite',
-      status: 'idle',
-      unread: false,
-      sessionId: 'sess-trace',
-      load: null,
-      context: null,
-      createdAt: T0,
-      updatedAt: T0 + 60_000,
-      turns: [
-        {
-          id: 'turn-seed-1',
-          threadId: 't-trace',
-          status: 'done',
-          queuedAt: T0,
-          startedAt: T0,
-          finishedAt: T0 + 41_000,
-          usage: {
-            inputTokens: 1840,
-            outputTokens: 520,
-            cacheReadTokens: 12_400,
-            cacheWriteTokens: 900,
-            costUsdEquivalent: 0.041
-          },
-          error: null
-        }
-      ],
-      messages: [
-        {
-          id: 'm-1',
-          threadId: 't-trace',
-          turnId: 'turn-seed-1',
-          role: 'user',
-          parts: [{ type: 'text', text: 'What does the trace tab need from the core?' }],
-          state: 'complete',
-          createdAt: T0
-        },
-        {
-          id: 'm-2',
-          threadId: 't-trace',
-          turnId: 'turn-seed-1',
-          role: 'assistant',
-          parts: [
-            {
-              type: 'thinking',
-              text: 'The table wants a row per process, so the question is what procs already reports and what the panel would have to ask for on top. Start with trace.get.'
-            },
-            {
-              type: 'text',
-              text: 'It needs trace.get for the table and the TraceCapability note above it. Let me look at what procs already reports.'
-            },
-            {
-              type: 'tool',
-              toolId: 'tool-seed-1',
-              name: 'Grep',
-              input: { pattern: 'process.started', path: 'packages/core/src' },
-              output: 'packages/core/src/procs.ts:88\npackages/core/src/trace.ts:20',
-              status: 'done'
-            },
-            {
-              type: 'text',
-              text: 'Both events carry the pid, the exe, the CPU time and the peak memory, so the table can be filled without a second call.'
-            }
-          ],
-          state: 'complete',
-          createdAt: T0 + 20_000
-        }
-      ]
-    };
-
-    const running: Thread = {
-      ...base,
-      id: 't-scheduler',
-      projectId: 'p-boite',
-      title: 'Port the scheduler',
-      // The one seeded thread in its own worktree: what the header badge is looked at on.
-      cwd: 'C:\\src\\.boite-worktrees\\boite\\port-the-scheduler',
-      branch: 'boite/port-the-scheduler',
-      // Waiting on a question nobody has answered, the same reason as `t-bench`
-      // and its permission: a page that loads now draws the card from the list.
-      status: 'waiting',
-      unread: false,
-      sessionId: 'sess-scheduler',
-      load: { processes: 2, cpuPercent: 34, memoryBytes: 412 * 1024 * 1024 },
-      // Running at a high share: the meter turns full past nine tenths.
-      context: { tokens: 183_000, window: 200_000, at: T0 + 100_000 },
-      createdAt: T0 + 100_000,
-      updatedAt: T0 + 180_000,
-      turns: [
-        {
-          id: 'turn-seed-2',
-          threadId: 't-scheduler',
-          status: 'running',
-          queuedAt: T0 + 170_000,
-          startedAt: T0 + 170_500,
-          finishedAt: null,
-          usage: null,
-          error: null
-        }
-      ],
-      messages: [
-        {
-          id: 'm-3',
-          threadId: 't-scheduler',
-          turnId: 'turn-seed-2',
-          role: 'user',
-          parts: [{ type: 'text', text: 'Count turns, never threads. Start with the caps.' }],
-          state: 'complete',
-          createdAt: T0 + 170_000
-        },
-        {
-          id: 'm-4',
-          threadId: 't-scheduler',
-          turnId: 'turn-seed-2',
-          role: 'assistant',
-          parts: [
-            { type: 'text', text: 'Reading the current caps and the queue order' },
-            {
-              type: 'question',
-              questionId: 'qst-seed-1',
-              text: QUESTION_TEXT,
-              options: QUESTION_OPTIONS,
-              allowText: true,
-              multiple: false,
-              answer: null
-            }
-          ],
-          state: 'streaming',
-          createdAt: T0 + 171_000
-        }
-      ]
-    };
-
-    // Its turn is stopped on a permission nobody has answered, which is what a
-    // page that loads now shows without ever having seen `permission.requested`.
-    const waiting: Thread = {
-      ...base,
-      id: 't-bench',
-      projectId: 'p-boite',
-      title: 'Bench against legacy',
-      cwd: 'C:\\src\\boite',
-      status: 'waiting',
-      unread: false,
-      sessionId: 'sess-bench',
-      load: null,
-      context: null,
-      createdAt: T0 + 200_000,
-      updatedAt: T0 + 200_000,
-      turns: [
-        {
-          id: 'turn-seed-3',
-          threadId: 't-bench',
-          status: 'running',
-          queuedAt: T0 + 200_000,
-          startedAt: T0 + 200_500,
-          finishedAt: null,
-          usage: null,
-          error: null
-        }
-      ],
-      messages: [
-        {
-          id: 'm-5',
-          threadId: 't-bench',
-          turnId: 'turn-seed-3',
-          role: 'user',
-          parts: [{ type: 'text', text: 'Fifty echo threads, RSS and throughput.' }],
-          state: 'complete',
-          createdAt: T0 + 200_000
-        },
-        {
-          id: 'm-8',
-          threadId: 't-bench',
-          turnId: 'turn-seed-3',
-          role: 'assistant',
-          parts: [
-            { type: 'text', text: 'Writing the run script before the fifty threads go out.' },
-            { type: 'permission', requestId: 'req-seed-1', toolName: 'Write', decision: null }
-          ],
-          state: 'streaming',
-          createdAt: T0 + 201_000
-        }
-      ]
-    };
-
-    const unread: Thread = {
-      ...base,
-      id: 't-descriptors',
-      projectId: 'p-notes',
-      title: 'Review the descriptor loader',
-      cwd: 'C:\\src\\notes',
-      // The most recent thread, so this is the one a boot opens: it has already
-      // run a turn, so the echo agent has already named what it takes.
-      commands: structuredClone(ECHO_COMMANDS),
-      status: 'idle',
-      unread: true,
-      sessionId: 'sess-descriptors',
-      load: null,
-      context: null,
-      createdAt: T0 + 300_000,
-      updatedAt: T0 + 340_000,
-      turns: [
-        {
-          id: 'turn-seed-4',
-          threadId: 't-descriptors',
-          status: 'done',
-          queuedAt: T0 + 300_000,
-          startedAt: T0 + 300_000,
-          finishedAt: T0 + 340_000,
-          usage: {
-            inputTokens: 640,
-            outputTokens: 210,
-            cacheReadTokens: 0,
-            cacheWriteTokens: 0,
-            costUsdEquivalent: 0.008
-          },
-          error: null
-        }
-      ],
-      messages: [
-        {
-          id: 'm-6',
-          threadId: 't-descriptors',
-          turnId: 'turn-seed-4',
-          role: 'user',
-          parts: [{ type: 'text', text: 'Does an unknown field refuse the file?' }],
-          state: 'complete',
-          createdAt: T0 + 300_000
-        },
-        {
-          id: 'm-7',
-          threadId: 't-descriptors',
-          turnId: 'turn-seed-4',
-          role: 'assistant',
-          parts: [
-            {
-              type: 'text',
-              text: 'It does, with the file, the field and what was expected. One case is still silent: a roots entry that resolves outside the descriptor directory.'
-            },
-            // The agent compacted on its way out: the divider under the answer.
-            { type: 'compaction', trigger: 'auto', preTokens: 184_000, postTokens: 31_000 },
-            { type: 'text', text: 'The loader test now names that case too.' }
-          ],
-          state: 'complete',
-          createdAt: T0 + 320_000
-        }
-      ]
-    };
-    // The meters: the trace thread at a comfortable share, the descriptor one just compacted.
-    finished.context = { tokens: 84_000, window: 200_000, at: T0 + 60_000 };
-    finished.branch = 'boite/trace';
-    finished.pullRequest = { number: 84, url: 'https://github.com/example/project/pull/84', state: 'OPEN' };
-    unread.context = { tokens: 31_000, breakdown: {input: 18000, cache: 10000, output: 3000}, window: 200_000, at: T0 + 340_000 };
+    const { finished, running, waiting, unread } = seedThreads();
 
     for (const thread of [finished, running, waiting, unread]) this.#threads.set(thread.id, thread);
 
@@ -4249,7 +3325,7 @@ const ready = true;
     ];
 
     if (this.#long) {
-      const long = this.#longThread();
+      const long = longThread();
       this.#threads.set(long.id, long);
     }
 
@@ -4414,90 +3490,5 @@ const ready = true;
     };
 
     this.#seq = 100;
-  }
-
-  /**
-   * Four hundred messages of uneven height in one thread: what the windowed
-   * list is looked at on, behind `?fake=1&long=1`.
-   */
-  #longThread(): Thread {
-    const messages: Message[] = [];
-    for (let index = 0; index < 400; index += 1) {
-      const at = T0 + 400_000 + index * 1000;
-      messages.push(
-        index % 2 === 0
-          ? {
-              id: `m-long-${index}`,
-              threadId: 't-long',
-              turnId: 'turn-long',
-              role: 'user',
-              parts: [
-                {
-                  type: 'text',
-                  text: `${LONG_ASKS[(index / 2) % LONG_ASKS.length] ?? ''} (${index})`
-                }
-              ],
-              state: 'complete',
-              createdAt: at
-            }
-          : {
-              id: `m-long-${index}`,
-              threadId: 't-long',
-              turnId: 'turn-long',
-              role: 'assistant',
-              parts: [
-                {
-                  type: 'text',
-                  text: LONG_ANSWERS[((index - 1) / 2) % LONG_ANSWERS.length] ?? ''
-                }
-              ],
-              state: 'complete',
-              createdAt: at
-            }
-      );
-    }
-    return {
-      id: 't-long',
-      projectId: 'p-boite',
-      providerId: 'echo',
-      accountId: 'a-echo',
-      model: 'echo-1',
-      effort: null,
-      permissionMode: 'default',
-      archived: false,
-      pinned: false,
-      title: 'Four hundred messages',
-      titleSource: 'prompt',
-      cwd: 'C:\\src\\boite',
-      branch: null,
-      status: 'idle',
-      unread: false,
-      sessionId: 'sess-long',
-      load: null,
-      context: null,
-      createdAt: T0 + 400_000,
-      updatedAt: T0 + 800_000,
-      messagesBefore: null,
-      commands: [],
-      turns: [
-        {
-          id: 'turn-long',
-          threadId: 't-long',
-          status: 'done',
-          queuedAt: T0 + 400_000,
-          startedAt: T0 + 400_000,
-          finishedAt: T0 + 800_000,
-          usage: {
-            inputTokens: 41_200,
-            outputTokens: 18_400,
-            cacheReadTokens: 210_000,
-            cacheWriteTokens: 12_000,
-            costUsdEquivalent: 1.24
-          },
-          error: null
-        }
-      ],
-      messages
-    };
   }
 }

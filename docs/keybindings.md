@@ -76,6 +76,7 @@ A chord is modifiers, then one key, joined with `+`, case and spaces ignored.
 | `changes` | `mod+shift+c` | The changes surface, the working tree of the thread |
 | `files` | `mod+shift+f` | The files surface, the tree of the working directory |
 | `tasks` | `mod+shift+k` | The tasks surface, the agent's list and the project's |
+| `terminal` | `mod+j` | The thread's shell under the chat ([terminal.md](terminal.md)) |
 | `close-surface` | `mod+w` | The active surface of the panel, never the window |
 | `settings` | `mod+,` | Settings |
 | `stash` | `mod+s` | Put the composer text aside, or take it back |

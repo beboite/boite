@@ -6,6 +6,7 @@
   import type { Store } from '../lib/store.svelte';
   import { workspace } from '../lib/workspace.svelte';
   import Composer from './Composer.svelte';
+  import AgentDock from './AgentDock.svelte';
   import CoordinationPanel from './CoordinationPanel.svelte';
   import Menu from './Menu.svelte';
   import MessageList from './MessageList.svelte';
@@ -83,6 +84,7 @@
       </div>
     {/if}
 
+    {#if thread}<AgentDock {store} threadId={thread.id} />{/if}
     {#if thread?.agentSessionId}
       <button class="ghost" onclick={() => store.showAgents()}>{strings.agents.heading}</button>
     {:else}

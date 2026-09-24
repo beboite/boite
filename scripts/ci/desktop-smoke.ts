@@ -1,8 +1,9 @@
 /** Run the installed layout, from outside the checkout, without Bun on PATH. */
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { connect, type CoreClient } from '../../packages/core/src/client.ts';
+import { waitForCoreEndpoint } from './desktop-smoke-endpoint.ts';
 
 const executable = resolve(process.argv[2] ?? '');
 if (!process.argv[2] || !existsSync(executable)) throw new Error('Expected an installed shell executable');
@@ -18,8 +19,9 @@ let corePid: number | undefined;
 const child = Bun.spawn([executable], {
   cwd: directory,
   env: { ...process.env, PATH: process.platform === 'win32' ? process.env.SystemRoot + '\\System32' : '/usr/bin:/bin',
-    BOITE_CORE_COMMAND: undefined, BOITE_UI_DIR: undefined, HOME: home,
-    BOITE_DATA_DIR: data, BOITE_SHELL_HIDDEN: '1', BOITE_CORE_RESIDENT: '0', BOITE_ECHO: '1' },
+    BOITE_CORE_COMMAND: undefined, BOITE_UI_DIR: undefined, BOITE_CLI_DIR: undefined,
+    BOITE_CORE_EXECUTABLE: undefined, HOME: home,
+    BOITE_DATA_DIR: data, BOITE_SHELL_HIDDEN: '1', BOITE_CORE_RESIDENT: '0', BOITE_ECHO: '1', BOITE_TELEMETRY_URL: '' },
   stdout: 'pipe', stderr: 'pipe', windowsHide: true,
   detached: process.platform !== 'win32',
 });
@@ -29,12 +31,7 @@ const failures: unknown[] = [];
 try {
   const file = join(data, 'core.json');
   const deadline = Date.now() + 30_000;
-  while (!existsSync(file)) {
-    if (child.exitCode !== null) throw new Error(`Shell exited with ${child.exitCode}`);
-    if (Date.now() > deadline) throw new Error('Installed shell did not start its core within 30 seconds');
-    await Bun.sleep(100);
-  }
-  const endpoint = JSON.parse(readFileSync(file, 'utf8'));
+  const endpoint = await waitForCoreEndpoint(file, { deadline, exitCode: () => child.exitCode });
   corePid = endpoint.pid;
   const origin = `http://127.0.0.1:${endpoint.port}`;
   const health = await (await fetch(`${origin}/health`, { signal: AbortSignal.timeout(5000) })).json() as { ok: boolean; pid: number };
@@ -53,10 +50,14 @@ try {
   const thread = await client.call('threads.create', { projectId: project.id, providerId: 'echo', accountId: account.id, title: 'Installed smoke' });
   await client.call('threads.subscribe', { threadId: thread.id });
   const finished = client.next('turn.finished', turn => turn.threadId === thread.id, 15_000);
-  await client.call('turns.start', { threadId: thread.id, prompt: 'installed desktop smoke' });
+  await client.call('turns.start', { threadId: thread.id, prompt: '[spawn:boite where]' });
   const turn = await finished;
   if (turn.status !== 'done') throw new Error(`Installed echo turn ended with ${turn.status}`);
-  console.log('Installed desktop: core startup, bundled UI, authenticated RPC and echo turn passed');
+  const conversation = await client.call('threads.get', { threadId: thread.id });
+  const output = conversation.messages.filter(message => message.role === 'assistant').flatMap(message => message.parts)
+    .filter(part => part.type === 'text').map(part => part.text).join('\n');
+  if (!output.includes(`thread: ${thread.id}`)) throw new Error(`The installed boite CLI did not reach its thread: ${output}`);
+  console.log('Installed desktop: core startup, bundled UI, authenticated RPC and boite CLI passed');
 } catch (error) {
   failures.push(error);
 } finally {

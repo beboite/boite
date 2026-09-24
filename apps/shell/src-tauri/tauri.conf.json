@@ -3,6 +3,12 @@
   "productName": "Boite",
   "version": "2.0.0-beta.1",
   "identifier": "com.boite.two",
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEIxQUMwNkU2MzREQjRFMTUKUldRVlR0czA1Z2Fzc1JuNTArSldvdXVsRi9NbGNrTWQ5QUFxcmdOZXllRnBKL1djRFVwMFg3MS8K",
+      "windows": { "installMode": "quiet" }
+    }
+  },
   "build": {
     "frontendDist": "../../../packages/ui/dist",
     "devUrl": "http://localhost:5173",
@@ -12,7 +18,7 @@
   "app": {
     "windows": [],
     "security": {
-      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: http://127.0.0.1:*; media-src 'self' http://127.0.0.1:*; font-src 'self'; connect-src ipc: http://ipc.localhost ws://127.0.0.1:* ws: wss:; object-src 'none'"
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: http://127.0.0.1:*; media-src 'self' blob: http://127.0.0.1:*; font-src 'self'; connect-src ipc: http://ipc.localhost ws://127.0.0.1:* ws: wss:; frame-src 'self' blob:; object-src 'none'"
     }
   },
   "bundle": {

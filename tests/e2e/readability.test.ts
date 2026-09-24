@@ -1,9 +1,7 @@
 import { afterAll, beforeAll, expect, test } from 'bun:test';
-import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { BrowserPage, freePort } from './lib/cdp';
-const req = createRequire(join(import.meta.dir, '../../packages/ui/package.json'));
-const { createServer } = await import(req.resolve('vite'));
+import { startDevUi } from './lib/ui.ts';
 let server: { close(): Promise<void> };
 let page: BrowserPage;
 const id = (name: string) => `[data-testid="${name}"]`;
@@ -16,13 +14,12 @@ async function update(code: string) {
 }
 beforeAll(async () => {
   const port = await freePort();
-  const vite = await createServer({root:join(import.meta.dir,'../../packages/ui'),server:{host:'127.0.0.1',port,strictPort:true}});
-  server = vite; await vite.listen();
+  server = await startDevUi(port);
   page = await BrowserPage.launch({url:`http://127.0.0.1:${port}/?fake=1&open=recent&machines=1`,windowSize:{width:1300,height:850}});
   await page.waitFor(`document.querySelector('[data-thread-id="t-trace"]')`);
   await page.click('[data-thread-id="t-trace"]');
 }, 90000);
-afterAll(async () => { await page?.close(); await server?.close(); });
+afterAll(async () => { await page?.close(); await server?.close(); }, 15_000);
 
 test('thread metadata, message identity and expandable trace fit a narrow panel', async () => {
   await page.waitFor(`document.querySelectorAll('${id('thread-pr')}').length === 2`);

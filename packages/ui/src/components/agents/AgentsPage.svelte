@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, untrack } from 'svelte';
-  import { ArrowLeft, Bot, Boxes, List, Plus, Search, Users } from '@lucide/svelte';
+  import { ArrowLeft, Bot, Plus, Search, Users } from '@lucide/svelte';
   import type { AgentScope } from '@boite/contracts';
   import { AgentsView, type AgentSelection, type AgentEntryKind } from '../../lib/agents.svelte';
   import type { Store } from '../../lib/store.svelte';
@@ -11,7 +11,10 @@
   import AgentMissionView from './AgentMissionView.svelte';
   import AgentWorkCard from './AgentWorkCard.svelte';
   import AgentKnowledge from './AgentKnowledge.svelte';
-  import AgentsScene from './AgentsScene.svelte';
+  import AgentRuntimeSettings from './AgentRuntimeSettings.svelte';
+  import AgentBrainEditor from './AgentBrainEditor.svelte';
+  import AgentRoutines from './AgentRoutines.svelte';
+  import AgentAccountAccess from './AgentAccountAccess.svelte';
   import Menu from '../Menu.svelte';
   import { confirm } from '../../lib/confirm.svelte';
   import './agents.css';
@@ -21,8 +24,8 @@
   let selected = $state<AgentSelection | null>(null);
   let creating = $state<AgentEntryKind | null>(null);
   let editing = $state(false);
-  let tab = $state<'conversation' | 'activity' | 'memory' | 'missions'>('conversation');
-  let scene = $state(false);
+  let tab = $state<'conversation' | 'activity' | 'memory' | 'missions' | 'runtime' | 'brain' | 'routines'>('conversation');
+
   let search = $state('');
   const snapshot = $derived(view.snapshot);
   const profile = $derived(selected?.kind === 'profile' ? snapshot?.profiles.find(a => a.id === selected?.id) : null);
@@ -41,9 +44,9 @@
   const missions = $derived(snapshot?.missions.filter(m => profile ? m.agentIds.includes(profile.id) : team ? m.teamId === team.id : false) ?? []);
   onMount(() => { view.start(); return () => view.close(); });
   $effect(() => { if (store.connection === 'ready') void view.refresh(); });
-  function choose(selection: AgentSelection) { selected = selection; section = selection.kind; creating = null; editing = false; scene = false; tab = selection.kind === 'team' || selection.kind === 'mission' ? 'missions' : 'conversation'; }
-  function category(next: typeof section) { section = next; selected = null; creating = null; editing = false; scene = false; }
-  function create(kind: AgentEntryKind) { creating = kind; editing = false; scene = false; }
+  function choose(selection: AgentSelection) { selected = selection; section = selection.kind; creating = null; editing = false; tab = selection.kind === 'team' || selection.kind === 'mission' ? 'missions' : 'conversation'; }
+  function category(next: typeof section) { section = next; selected = null; creating = null; editing = false; }
+  function create(kind: AgentEntryKind) { creating = kind; editing = false; }
   async function stopEngine() {
     if (!await confirm.ask({ title: labels.stopEngine, body: labels.stopEngineBody, confirmLabel: labels.stopEngine, cancelLabel: labels.cancel, danger: true })) return;
     try { await store.client?.call('core.shutdown', {}); store.client?.close(); }
@@ -57,7 +60,6 @@
     <div><h1>{labels.heading}</h1><p class="muted">{labels.intro}</p></div>
     <div class="agent-actions">
       <Menu placement="bottom" label={strings.machines.heading} items={workspace.machines.map(m => ({ id: m.id, label: m.label, active: m.store === store }))} onpick={id => { const target = workspace.machines.find(m => m.id === id); if (target) void workspace.select(target.store).then(() => target.store.showAgents()); }}>{workspace.machines.find(m => m.store === store)?.label ?? store.core?.hostname ?? strings.machines.local}</Menu>
-      <button class="ghost" class:active={scene} aria-pressed={scene} onclick={() => { scene = !scene; creating = null; editing = false; }} data-testid="agents-scene-toggle">{#if scene}<List size={16} />{labels.list}{:else}<Boxes size={16} />{labels.scene}{/if}</button>
       {#if store.owner}<Menu placement="bottom" label={labels.create} items={sections.filter(s => s.id !== 'attention').map(s => ({ id: s.id, label: s.label }))} onpick={id => create(id as AgentEntryKind)} testid="agents-create"><Plus size={16} />{labels.create}</Menu>{/if}
     </div>
   </header>
@@ -71,28 +73,30 @@
         <div class="agents-search"><Search size={15} /><input type="search" bind:value={search} aria-label={labels.search} placeholder={labels.search} /></div>
         <div class="agents-entries">{#each entries as entry (entry.id)}<button class="ghost agent-entry" class:active={selected?.id === entry.id} onclick={() => { if (section !== 'attention') choose({ kind: section, id: entry.id }); }} data-testid="agent-entry-{entry.id}"><span class="agent-avatar">{entry.name.slice(0, 2)}</span><span><strong>{entry.name}</strong><small>{entry.hint}</small></span></button>{:else}{#if section !== 'attention'}<p class="agent-empty">{labels.empty}</p>{/if}{/each}</div>
         {#if store.owner}<details class="agent-background"><summary>{labels.backgroundSettings}</summary><form class="agents-form" onsubmit={event => { event.preventDefault(); }}>
-          <label>{labels.concurrency}<input type="number" min="1" max="8" value={snapshot.limits.backgroundConcurrency} onchange={event => { void view.call('agents.limits.set', { ...snapshot.limits, backgroundConcurrency: Number(event.currentTarget.value) }); }} /></label>
-          <label class="agent-check"><input type="checkbox" checked={snapshot.limits.paused} onchange={event => { void view.call('agents.limits.set', { ...snapshot.limits, paused: event.currentTarget.checked }); }} />{labels.paused}</label>
-          <label class="agent-check"><input type="checkbox" checked={snapshot.limits.kebaccExperiment} onchange={event => { void view.call('agents.limits.set', { ...snapshot.limits, kebaccExperiment: event.currentTarget.checked }); }} />{labels.kebacc}</label><p class="muted">{labels.kebaccHint}</p>
+          <label>{labels.concurrency}<input type="number" min="1" max="8" disabled={view.pending} value={snapshot.limits.backgroundConcurrency} onchange={event => { void view.call('agents.limits.set', { ...snapshot.limits, backgroundConcurrency: Number(event.currentTarget.value) }); }} /></label>
+          <label class="agent-check"><input type="checkbox" disabled={view.pending} checked={snapshot.limits.paused} onchange={event => { void view.call('agents.limits.set', { ...snapshot.limits, paused: event.currentTarget.checked }); }} />{labels.paused}</label>
+          <label class="agent-check"><input type="checkbox" disabled={view.pending} checked={snapshot.limits.kebaccExperiment} onchange={event => { void view.call('agents.limits.set', { ...snapshot.limits, kebaccExperiment: event.currentTarget.checked }); }} />{labels.kebacc}</label><p class="muted">{labels.kebaccHint}</p>
           <button type="button" class="ghost" onclick={() => void stopEngine()}>{labels.stopEngine}</button>
         </form></details>{/if}
+        {#if store.owner}<AgentAccountAccess {view} />{/if}
       </aside>
       <main class="agents-content">
         {#if creating || editing && selected}
           {@const kind = creating ?? selected!.kind}
           {#key `${kind}:${creating ? 'new' : selected?.id}`}<AgentEditor {view} {kind} record={creating ? null : record} ondone={choose} oncancel={() => { creating = null; editing = false; }} />{/key}
-        {:else if scene}
-          <AgentsScene {snapshot} onpick={choose} />
         {:else if section === 'attention'}
           <h2>{labels.attention}</h2>{#each attention as item (item.id)}<AgentWorkCard {view} work={item} />{/each}{#each review as task (task.id)}<button class="agent-review-link" onclick={() => choose({ kind: 'mission', id: task.missionId })}>{task.title} · {labels.review}</button>{/each}{#if !attention.length && !review.length}<p class="agent-empty">{labels.noAttention}</p>{/if}
         {:else if selected && record && scope}
           <div class="agent-detail-heading"><button class="ghost small agent-mobile-back" onclick={() => { selected = null; }}>{labels.list}</button><div><h2>{title}</h2>{#if profile}<p class="muted">{profile.domain} · {store.providerOf(profile.selection.providerId)?.name} · {profile.selection.model ?? labels.model}</p>{/if}</div>{#if store.owner}<button class="ghost small" onclick={() => { editing = true; }}>{labels.edit}</button>{/if}</div>
           <nav class="agent-detail-tabs" aria-label={title}>
-            {#each (profile || group ? ['conversation', 'activity', 'memory', ...(profile ? ['missions'] : [])] : ['missions', 'activity', 'memory']) as item (item)}<button class="ghost" class:active={tab === item} aria-pressed={tab === item} onclick={() => { tab = item as typeof tab; }}>{labels[item as 'conversation']}</button>{/each}
+            {#each (profile || group ? ['conversation', 'activity', 'memory', ...(profile ? ['routines', 'brain', 'runtime', 'missions'] : [])] : ['missions', 'activity', 'memory']) as item (item)}<button class="ghost" class:active={tab === item} aria-pressed={tab === item} onclick={() => { tab = item as typeof tab; }}>{labels[item as 'conversation']}</button>{/each}
           </nav>
           {#key `${selected.kind}:${selected.id}`}
             {#if tab === 'conversation'}<AgentConversation {view} {scope} />
             {:else if tab === 'activity'}{#each work as item (item.id)}<AgentWorkCard {view} work={item} />{:else}<p class="agent-empty">{labels.noWork}</p>{/each}
+            {:else if tab === 'runtime' && profile}<AgentRuntimeSettings {view} agent={profile} />
+            {:else if tab === 'brain' && profile}<AgentBrainEditor {view} agentId={profile.id} />
+            {:else if tab === 'routines' && profile}<AgentRoutines {view} agentId={profile.id} />
             {:else if tab === 'memory'}<AgentKnowledge {view} {scope} />
             {:else if mission}<AgentMissionView {view} {mission} />
             {:else}

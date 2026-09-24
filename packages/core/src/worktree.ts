@@ -60,6 +60,15 @@ export class Worktrees {
         const expected = statSync(path, { bigint: true });
         if (registered.ino !== 0n && registered.dev === expected.dev && registered.ino === expected.ino) return { path, branch };
       }
+      if (location && name === `refs/heads/${branch}` && existsSync(location)) throw refused(`branch ${branch} is already checked out at ${location}; expected ${path}`);
+    }
+    if (await this.branchExists(threadId, project.path, branch)) {
+      if (existsSync(path)) throw refused(`cannot recover ${branch}: ${path} already exists`);
+      // No live checkout uses this branch. One --force permits an obsolete registration,
+      // but does not bypass a locked worktree or overwrite an existing directory.
+      const added = await this.git(threadId, project.path, ['worktree', 'add', '--force', path, branch]);
+      if (added.code !== 0) throw refused(`cannot recover ${branch} at ${path}: ${added.stderr.trim()}`);
+      return { path, branch };
     }
     return this.add(threadId, project, branch, branch);
   }

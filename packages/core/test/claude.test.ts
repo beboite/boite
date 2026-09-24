@@ -1168,3 +1168,184 @@ test('Claude discovery reports only its model capabilities, caches and refreshes
   expect(await runTurn(client, id, 'standard turn')).toBe('done');
   expect(calls.at(-1)?.options.settings).toEqual({ fastMode: false });
 });
+
+describe('claude driver: questions and background work', () => {
+  test('AskUserQuestion draws one card per question and hands the answers back in the tool input', async () => {
+    const client = await harness.connect();
+    const threadId = await claudeThread(client);
+    const input = {
+      questions: [
+        { question: 'Which database?', header: 'DB', multiSelect: false, options: [{ label: 'Postgres', description: 'relational' }, { label: 'SQLite' }] },
+        { question: 'Which extras?', header: 'Extras', multiSelect: true, options: [{ label: 'Auth' }, { label: 'Search' }, { label: 'Billing' }] },
+      ],
+    };
+    const answers: (PermissionResult | null)[] = [];
+    scripted((fake, options) => {
+      const ask = options.canUseTool!;
+      fake.emit(init('sess-askq'));
+      void (async () => {
+        answers.push(await ask('AskUserQuestion', input, { signal: new AbortController().signal, toolUseID: 'toolu_q', requestId: 'req_q' }));
+        fake.emit(success('sess-askq'));
+        fake.end();
+      })();
+    });
+    const first = client.next('question.asked', (q) => q.threadId === threadId, 10000);
+    const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 10000);
+    await client.call('turns.start', { threadId, prompt: 'set it up' });
+    const one = await first;
+    expect(one).toMatchObject({ text: 'Which database?', multiple: false, allowText: true });
+    expect(one.options).toEqual([{ id: '1', label: 'Postgres', description: 'relational' }, { id: '2', label: 'SQLite' }]);
+    expect((await client.call('threads.get', { threadId })).status).toBe('waiting');
+    const second = client.next('question.asked', (q) => q.threadId === threadId, 10000);
+    await client.call('questions.answer', { threadId, questionId: one.id, optionIds: ['2'] });
+    const two = await second;
+    expect(two.multiple).toBe(true);
+    await client.call('questions.answer', { threadId, questionId: two.id, optionIds: ['1', '3'], text: 'and logs' });
+    expect((await finished).status).toBe('done');
+    expect(answers).toEqual([{
+      behavior: 'allow',
+      updatedInput: { ...input, answers: { 'Which database?': 'SQLite', 'Which extras?': 'Auth, Billing, and logs' } },
+    }]);
+    const parts = (await client.call('threads.get', { threadId })).messages.flatMap((m) => m.parts);
+    // Cards, never a permission to use the tool.
+    expect(parts.filter((part) => part.type === 'permission')).toEqual([]);
+    expect(parts.filter((part) => part.type === 'question').map((part) => part.type === 'question' ? part.answer?.optionIds : null)).toEqual([['2'], ['1', '3']]);
+  });
+
+  test('a background shell keeps the CLI after the turn, and what it writes when done opens a turn of its own', async () => {
+    const client = await harness.connect();
+    const threadId = await claudeThread(client);
+    const sessionId = 'sess-bg';
+    scripted((fake) => {
+      fake.emit(init(sessionId));
+      fake.emit(assistant(sessionId, [{ type: 'tool_use', id: 'toolu_bg', name: 'Bash', input: { command: 'sleep 25', run_in_background: true } }]));
+      fake.emit(sdk({ type: 'system', subtype: 'task_started', session_id: sessionId, task_id: 'bash-1', tool_use_id: 'toolu_bg', description: 'sleep 25', task_type: 'local_bash', is_backgrounded: true }));
+      fake.emit(sdk({ type: 'system', subtype: 'background_tasks_changed', session_id: sessionId, tasks: [
+        { task_id: 'bash-1', task_type: 'local_bash', description: 'sleep 25' },
+        { task_id: 'watch-1', task_type: 'monitor', description: 'file watcher', ambient: true },
+      ] }));
+      fake.emit(toolResult(sessionId, 'toolu_bg', 'Command running in background with ID: bash-1'));
+      fake.emit(assistant(sessionId, [{ type: 'text', text: 'started' }]));
+      fake.emit(success(sessionId));
+    });
+    const background = client.next('thread.background', (event) => event.threadId === threadId && event.tasks.length > 0, 10000);
+    expect(await runTurn(client, threadId, 'run it in the background')).toBe('done');
+    const running = await background;
+    expect(running.tasks).toEqual([{ id: 'bash-1', kind: 'shell', description: 'sleep 25', toolId: 'toolu_bg', startedAt: expect.any(Number) }]);
+    expect((await client.call('threads.get', { threadId })).background).toHaveLength(1);
+    // warmProcessMinutes is 0, and still the CLI stays: closing it kills the shell.
+    await Bun.sleep(300);
+    expect(queries[0]!.closes).toBe(0);
+    expect((queries[0] as unknown as { ended: boolean }).ended).toBe(false);
+
+    const cleared = client.next('thread.background', (event) => event.threadId === threadId && event.tasks.length === 0, 10000);
+    const woke = client.next('turn.finished', (turn) => turn.threadId === threadId, 10000);
+    const fake = queries[0]!;
+    fake.emit(sdk({ type: 'system', subtype: 'background_tasks_changed', session_id: sessionId, tasks: [] }));
+    fake.emit(sdk({ type: 'system', subtype: 'task_notification', session_id: sessionId, task_id: 'bash-1', tool_use_id: 'toolu_bg', status: 'completed', output_file: '', summary: 'sleep 25 finished' }));
+    fake.emit(init(sessionId));
+    fake.emit(assistant(sessionId, [{ type: 'text', text: 'FINISHED' }]));
+    fake.emit(success(sessionId));
+    await cleared;
+    const turn = await woke;
+    expect(turn.status).toBe('done');
+    expect(turn.execution?.operation).toBe('background');
+    const messages = harness.core.journal.listMessages(threadId).filter((m) => m.turnId === turn.id);
+    expect(messages.map((m) => m.role)).toEqual(['system', 'assistant']);
+    expect(messages[0]?.parts[0]).toMatchObject({ type: 'text', displayText: 'Background work finished' });
+    expect(messages[1]?.parts).toEqual([{ type: 'text', text: 'FINISHED' }]);
+    // The background turn sent no prompt; the CLI went on by itself.
+    expect(calls[0]!.prompts).toHaveLength(1);
+    // Nothing left to keep it for: the cold rule closes it now.
+    await waitFor(() => (queries[0] as unknown as { ended: boolean }).ended);
+  });
+
+  test('output the CLI writes while the last turn is still closing opens its turn right after', async () => {
+    const client = await harness.connect();
+    const threadId = await claudeThread(client);
+    const sessionId = 'sess-bg-race';
+    scripted((fake) => {
+      fake.emit(init(sessionId));
+      fake.emit(sdk({ type: 'system', subtype: 'background_tasks_changed', session_id: sessionId, tasks: [{ task_id: 'bash-3', task_type: 'local_bash', description: 'sleep 1' }] }));
+      fake.emit(assistant(sessionId, [{ type: 'text', text: 'started' }]));
+      fake.emit(success(sessionId));
+      // Before the core saved that turn: the task ends and the CLI goes on by itself.
+      fake.emit(sdk({ type: 'system', subtype: 'background_tasks_changed', session_id: sessionId, tasks: [] }));
+      fake.emit(assistant(sessionId, [{ type: 'text', text: 'ON ITS OWN' }]));
+      fake.emit(success(sessionId));
+    });
+    const woke = client.next('turn.finished', (turn) => turn.threadId === threadId && turn.execution?.operation === 'background', 10000);
+    expect(await runTurn(client, threadId, 'run it')).toBe('done');
+    const turn = await woke;
+    expect(turn.status).toBe('done');
+    const texts = (turnId: string) => harness.core.journal.listMessages(threadId).filter((m) => m.turnId === turnId && m.role === 'assistant').flatMap((m) => m.parts).map((p) => (p.type === 'text' ? p.text : ''));
+    expect(texts(turn.id)).toEqual(['ON ITS OWN']);
+    const first = harness.core.journal.listMessages(threadId).find((m) => m.role === 'user')!.turnId;
+    expect(texts(first)).toEqual(['started']);
+  });
+
+  test('a turn of the user that takes over a run the CLI started by itself is not closed by that run', async () => {
+    const client = await harness.connect();
+    const threadId = await claudeThread(client);
+    const sessionId = 'sess-bg-takeover';
+    harness.core.settings.set({ warmProcessMinutes: 5 });
+    scripted((fake) => {
+      fake.emit(init(sessionId));
+      fake.emit(success(sessionId));
+    });
+    expect(await runTurn(client, threadId, 'first')).toBe('done');
+    // The core is told the output is there, but the user's prompt gets in first.
+    const fake = queries[0]!;
+    const threads = harness.core.threads as unknown as { wake(threadId: string, text: string): void };
+    const wake = threads.wake.bind(threads);
+    threads.wake = () => {};
+    fake.emit(assistant(sessionId, [{ type: 'text', text: 'ON ITS OWN' }]));
+    await Bun.sleep(50);
+    threads.wake = wake;
+    const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 10000);
+    await client.call('turns.start', { threadId, prompt: 'second' });
+    await Bun.sleep(100);
+    // The CLI's own run ends: that result is not the user's.
+    fake.emit(success(sessionId));
+    await Bun.sleep(100);
+    expect((await client.call('threads.get', { threadId })).status).toBe('running');
+    fake.emit(assistant(sessionId, [{ type: 'text', text: 'answer to second' }]));
+    fake.emit(success(sessionId));
+    expect((await finished).status).toBe('done');
+    harness.core.settings.set({ warmProcessMinutes: 0 });
+  });
+
+  test('Stop on an idle thread ends the work it still runs in the background', async () => {
+    const client = await harness.connect();
+    const threadId = await claudeThread(client);
+    scripted((fake) => {
+      fake.emit(init('sess-stop-bg'));
+      fake.emit(sdk({ type: 'system', subtype: 'background_tasks_changed', session_id: 'sess-stop-bg', tasks: [{ task_id: 'bash-2', task_type: 'local_bash', description: 'npm run dev' }] }));
+      fake.emit(success('sess-stop-bg'));
+    });
+    expect(await runTurn(client, threadId, 'serve')).toBe('done');
+    await waitFor(() => (harness.core.threads.get(threadId).background ?? []).length === 1);
+    const cleared = client.next('thread.background', (event) => event.threadId === threadId && event.tasks.length === 0, 10000);
+    expect(await client.call('turns.stop', { threadId })).toEqual({ stopped: true });
+    await cleared;
+    await waitFor(() => (queries[0] as unknown as { ended: boolean }).ended);
+  });
+});
+
+test('a new Claude session learns `boite ask` once, and the setting turns it off', async () => {
+  harness.core.settings.set({ asyncQuestions: true, warmProcessMinutes: 5 });
+  scripted(() => undefined, answerEach('sess-teach'));
+  const client = await harness.connect();
+  const threadId = await claudeThread(client);
+  expect(await runTurn(client, threadId, 'first')).toBe('done');
+  expect(await runTurn(client, threadId, 'second')).toBe('done');
+  expect(calls[0]!.prompts[0]).toContain('boite ask "<question>"');
+  // The session has it already.
+  expect(calls[0]!.prompts[1]).toBe('second');
+
+  harness.core.settings.set({ asyncQuestions: false, warmProcessMinutes: 0 });
+  const other = await client.call('threads.create', { projectId: harness.core.threads.require(threadId).projectId!, providerId: 'claude', accountId: harness.core.threads.require(threadId).accountId, title: 'untaught' });
+  await client.call('threads.update', { threadId: other.id, title: 'untaught' });
+  expect(await runTurn(client, other.id, 'third')).toBe('done');
+  expect(calls.at(-1)!.prompts[0]).toBe('third');
+});
