@@ -70,7 +70,8 @@ test('the snapshot stays bounded as history grows and pages reach every record o
     // Twenty kilobytes of instructions per run would make this megabytes.
     expect(JSON.stringify(snapshot).length).toBeLessThan(100_000);
     // Snapshot lists are oldest first, like the unbounded ones were.
-    expect(snapshot.messages.map(m => m.text).at(-1)).toBe(`message ${HISTORY - 1}`);
+    expect(snapshot.messages.some(m => m.text === `message ${HISTORY - 1}`)).toBe(true);
+    expect(snapshot.messages.every((m, i, all) => i === 0 || all[i - 1]!.createdAt <= m.createdAt)).toBe(true);
 
     const messages = await walk(c, 'message', snapshot.messages);
     expect(messages).toHaveLength(HISTORY);
