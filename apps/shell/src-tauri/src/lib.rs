@@ -133,7 +133,11 @@ pub struct CoreState {
     /// Read once from the bundle identifier, then carried everywhere the data
     /// directory and the core's argv are decided.
     channel: Channel,
+    resident: bool,
 }
+
+/// Normal installations keep the core alive. Automation can request owned lifetime.
+fn resident_core() -> bool { std::env::var("BOITE_CORE_RESIDENT").as_deref() != Ok("0") }
 
 #[derive(Default, Serialize, Deserialize)]
 struct ShellPreferences { close_to_tray: bool }
@@ -184,15 +188,15 @@ impl CoreState {
             child: Arc::new(Mutex::new(None)),
             job: Arc::new(Mutex::new(None)),
             channel,
+            resident: resident_core(),
         }
     }
 
-    /// Kills the core this shell started. A core that was already running when
-    /// the shell opened is left alone.
+    /// Closing a client leaves a resident core running. Automation may own its child.
     fn kill_child(&self) {
         if let Ok(mut guard) = self.child.lock() {
             if let Some(mut child) = guard.take() {
-                job::stop_core(&mut child);
+                if !self.resident { job::stop_core(&mut child); }
             }
         }
         // Dropping the job closes its handle, which kills whatever is still in
@@ -207,9 +211,7 @@ impl CoreState {
 // The commands the shell's own page can invoke.
 // ---------------------------------------------------------------------------
 
-/// The clean quit, the very one the tray's Quit item runs: `kill_child` first,
-/// then the app. Closing the window takes this path too, unless the saved
-/// close behavior explicitly keeps the shell in the notification area.
+/// Quits the client. The resident engine has a separate authenticated stop action.
 /// `tests/e2e/shell.test.ts` invokes this.
 #[tauri::command]
 fn quit_shell(app: AppHandle, webview: Webview) -> Result<(), String> {
@@ -596,9 +598,9 @@ fn configure_core_resources(command: &mut Command, resources: &Path) {
     }
 }
 
-fn spawn_core(channel: Channel, resources: Option<&Path>) -> Result<(Child, Arc<AtomicBool>, CoreJob), String> {
+fn spawn_core(channel: Channel, resources: Option<&Path>, resident: bool) -> Result<(Child, Arc<AtomicBool>, Option<CoreJob>), String> {
     let (program, args, working_directory) = core_command(channel)?;
-    let job = job::create_core_job()?;
+    let job = if resident { None } else { Some(job::create_core_job()?) };
 
     let mut command = Command::new(&program);
     command
@@ -606,6 +608,20 @@ fn spawn_core(channel: Channel, resources: Option<&Path>) -> Result<(Child, Arc<
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
+    if resident {
+        // No pipe belongs to the shell after it exits. Broken stdout must not kill the host.
+        let directory = data_dir(channel)?;
+        std::fs::create_dir_all(&directory).map_err(|e| e.to_string())?;
+        let path = directory.join("core-output.log");
+        // An append handle on Windows lacks FILE_WRITE_DATA, so it cannot truncate: a separate write handle does.
+        if std::fs::metadata(&path).map(|m| m.len() > 8 * 1024 * 1024).unwrap_or(false) {
+            std::fs::OpenOptions::new().write(true).truncate(true).open(&path).map_err(|e| format!("core-output.log could not be truncated: {e}"))?;
+        }
+        let output = std::fs::OpenOptions::new().create(true).append(true).open(&path).map_err(|e| format!("core-output.log could not be opened: {e}"))?;
+        command.stdout(Stdio::from(output.try_clone().map_err(|e| e.to_string())?)).stderr(Stdio::from(output));
+        #[cfg(unix)]
+        { use std::os::unix::process::CommandExt; command.process_group(0); }
+    }
     if let Some(directory) = working_directory {
         command.current_dir(directory);
     }
@@ -616,10 +632,12 @@ fn spawn_core(channel: Channel, resources: Option<&Path>) -> Result<(Child, Arc<
         .spawn()
         .map_err(|error| format!("the core could not be started with `{program}`: {error}"))?;
 
-    if let Err(error) = job::assign(&job, &child) {
-        let _ = child.kill();
-        let _ = child.wait();
-        return Err(format!("the core could not be put in this shell's job object: {error}"));
+    if let Some(ref owned) = job {
+        if let Err(error) = job::assign(owned, &child) {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(format!("the core could not be put in this shell's job object: {error}"));
+        }
     }
 
     let ready = Arc::new(AtomicBool::new(false));
@@ -644,6 +662,7 @@ fn resolve_core(
     child_slot: &Mutex<Option<Child>>,
     job_slot: &Mutex<Option<CoreJob>>,
     resources: Option<&Path>,
+    resident: bool,
 ) -> Result<CoreEndpoint, String> {
     let directory = data_dir(channel)?;
     let file = directory.join("core.json");
@@ -656,17 +675,17 @@ fn resolve_core(
         Err(error) => eprintln!("[shell] {error}"),
     }
 
-    let (child, ready, job) = spawn_core(channel, resources)?;
+    let (child, ready, job) = spawn_core(channel, resources, resident)?;
     if let Ok(mut guard) = child_slot.lock() {
         *guard = Some(child);
     }
     if let Ok(mut guard) = job_slot.lock() {
-        *guard = Some(job);
+        *guard = job;
     }
 
     let started = Instant::now();
     while started.elapsed() < START_TIMEOUT {
-        if ready.load(Ordering::Acquire) || started.elapsed() > Duration::from_secs(1) {
+        if resident || ready.load(Ordering::Acquire) || started.elapsed() > Duration::from_secs(1) {
             if let Ok(Some(found)) = read_core_file(&file) {
                 if found.pid.map_or(false, |pid| health(found.port, pid)) {
                     return Ok(endpoint_of(&found));
@@ -676,6 +695,9 @@ fn resolve_core(
         std::thread::sleep(POLL_INTERVAL);
     }
 
+    // A failed start is ours to clean up, including in resident mode.
+    if let Ok(mut guard) = child_slot.lock() { if let Some(mut child) = guard.take() { job::stop_core(&mut child); } }
+    if let Ok(mut guard) = job_slot.lock() { drop(guard.take()); }
     Err(format!(
         "the core did not write {} and answer /health within {} s",
         file.display(),
@@ -688,11 +710,12 @@ fn start_core<R: Runtime>(app: &AppHandle<R>, state: &CoreState) {
     let child_slot = state.child.clone();
     let job_slot = state.job.clone();
     let channel = state.channel;
+    let resident = state.resident;
     let handle = app.clone();
     let resources = app.path().resource_dir().ok();
 
     std::thread::spawn(move || {
-        let outcome = resolve_core(channel, &child_slot, &job_slot, resources.as_deref());
+        let outcome = resolve_core(channel, &child_slot, &job_slot, resources.as_deref(), resident);
         {
             let (lock, ready) = &*slot;
             if let Ok(mut guard) = lock.lock() {

@@ -118,7 +118,7 @@
   {#if threadHeader}
     {#key store}<ThreadHeader {store} />{/key}
   {:else}
-    <span class="name">{heading}</span>
+    <span class="name">{store.page === 'agents' ? strings.agents.heading : heading}</span>
   {/if}
   {#if dev}
     <span class="channel" title={strings.app.channelDevTitle} data-testid="titlebar-channel">{strings.app.channelDev}</span>

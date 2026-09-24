@@ -59,6 +59,24 @@ export class Delegation {
     return (this.core.journal.getSetting(`delegation:${rootId}`) as DelegationConfig | undefined) ?? structuredClone(DEFAULT_DELEGATION_CONFIG);
   }
   private used(rootId: string): number { return (this.core.journal.getSetting(`delegation-turns:${rootId}`) as number | undefined) ?? 0; }
+  /** A fresh user request or routine gets a fresh bounded delegation budget. Results keep their episode. */
+  beginEpisode(rootId: string, episodeId: string, config: DelegationConfig): boolean {
+    if (this.core.journal.getSetting(`delegation-episode:${rootId}`) === episodeId) return true;
+    const children = this.rows(rootId).map(row => this.core.threads.require(row.thread_id));
+    if (children.some(t => ['queued', 'running', 'waiting'].includes(t.status)) || this.inbox(rootId).length) return false;
+    this.core.journal.db.transaction(() => {
+      for (const child of children.filter(t => !t.archived)) {
+        releaseThread(child.id);
+        const archived = { ...child, archived: true, updatedAt: Date.now() };
+        this.core.journal.putThread(archived);
+        this.core.bus.emit('thread.updated', archived);
+      }
+      this.core.journal.setSetting(`delegation-episode:${rootId}`, episodeId);
+      this.core.journal.setSetting(`delegation-turns:${rootId}`, 0);
+      this.saveConfig(rootId, config);
+    })();
+    return true;
+  }
   private rows(rootId: string): AgentRow[] { return this.core.journal.db.query('SELECT * FROM delegated_agents WHERE root_id = ? ORDER BY rowid').all(rootId) as AgentRow[]; }
   private lastTurn(threadId: string): Turn | null {
     const row = this.core.journal.db.query('SELECT id FROM turns WHERE thread_id = ? ORDER BY rowid DESC LIMIT 1').get(threadId) as { id: string } | null;
@@ -98,6 +116,14 @@ export class Delegation {
   configure(threadId: string, value: DelegationConfig): DelegationView {
     const thread = this.core.threads.require(threadId);
     if (thread.parentThreadId || thread.archived) throw refused('delegation.configure requires an unarchived parent thread');
+    const config = this.validateConfig(value);
+    this.saveConfig(threadId, config);
+    if (!config.enabled || config.paused) this.stop(threadId);
+    this.changed(threadId);
+    this.core.scheduler.onSettingsChanged();
+    return this.get(threadId);
+  }
+  validateConfig(value: DelegationConfig): DelegationConfig {
     if (!value || typeof value.enabled !== 'boolean' || typeof value.paused !== 'boolean' || !Array.isArray(value.profiles) || value.profiles.length > 16) throw invalidParams('config: expected enabled, paused and up to 16 profiles');
     const config: DelegationConfig = {
       enabled: value.enabled, paused: value.paused,
@@ -119,11 +145,7 @@ export class Delegation {
     if (new Set(config.profiles.map(p => p.id)).size !== config.profiles.length) throw invalidParams('profile.id: expected unique ids');
     if (config.enabled && !config.profiles.length) throw invalidParams('profiles: choose at least one model before enabling delegation');
     if (config.maxConcurrent > config.maxAgents) throw invalidParams('maxConcurrent must not exceed maxAgents');
-    this.saveConfig(threadId, config);
-    if (!config.enabled || config.paused) this.stop(threadId);
-    this.changed(threadId);
-    this.core.scheduler.onSettingsChanged();
-    return this.get(threadId);
+    return config;
   }
   private available(root: ThreadSummary): DelegationConfig {
     const config = this.config(root.id);
@@ -132,6 +154,7 @@ export class Delegation {
   }
 
   spawn(params: RpcParams<'delegation.spawn'>): DelegatedAgent {
+    if (this.core.workforce.resident.isCompacting(params.threadId)) throw refused('compaction cannot start subagents');
     const parent = this.core.threads.require(params.threadId);
     if (parent.parentThreadId) throw refused('delegation supports one level; ask the parent to delegate another task');
     const requestId = text(params.requestId, 'requestId', 128);
@@ -144,10 +167,12 @@ export class Delegation {
       return this.member(existing);
     }
     const config = this.available(parent);
-    if (this.rows(parent.id).length >= config.maxAgents) throw refused('delegation agent limit reached; reuse an existing agent');
+    if (this.rows(parent.id).filter(row => !this.core.threads.require(row.thread_id).archived).length >= config.maxAgents) throw refused('delegation agent limit reached; reuse an existing agent');
     if (this.used(parent.id) >= config.maxTurns) throw refused('delegation turn budget reached');
     const profile = config.profiles.find(p => p.id === params.profileId);
     if (!profile) throw invalidParams('profileId: expected an owner-configured delegation profile');
+    const persistentOwner = this.core.workforce.resident.ownerOf(parent.id);
+    if (persistentOwner && !this.core.workforce.resident.allowed(persistentOwner, { ...profile, permissionMode: parent.permissionMode }, true)) throw refused('account/model access was withdrawn from this agent');
     const provider = this.core.providers.require(profile.providerId);
     assertDriverRunnable(provider.protocol, this.core.providers.summary(provider.id), this.core.accounts.require(profile.accountId));
     const id = newId('thr_');
@@ -155,7 +180,14 @@ export class Delegation {
     // Relationship and creation commit together. Start can fail (missing executable,
     // expired login); keep a visible failed child instead of silently retrying a spawn.
     this.core.journal.db.transaction(() => {
-      this.core.threads.create({ projectId: parent.projectId, ...profile, title, cwd: parent.cwd, permissionMode: parent.permissionMode }, { id, branch: parent.branch, parentThreadId: parent.id });
+      if (parent.projectId === null) {
+        const now = Date.now();
+        const child: ThreadSummary = { ...parent, parentThreadId: parent.id, agentSessionId: undefined, ...profile, id,
+          title, titleSource: 'user', status: 'idle', sessionId: null, sessionGeneration: 0, selectionVersion: 0,
+          context: null, promptCache: null, load: null, unread: false, pinned: false, createdAt: now, updatedAt: now };
+        this.core.journal.append({ type: 'thread.created', threadId: id, version: 1, payload: child }, () => this.core.journal.putThread(child));
+        this.core.bus.emit('thread.created', child);
+      } else this.core.threads.create({ projectId: parent.projectId, ...profile, title, cwd: parent.cwd, permissionMode: parent.permissionMode }, { id, branch: parent.branch, parentThreadId: parent.id });
       this.core.journal.db.query('INSERT INTO delegated_agents VALUES (?, ?, ?, ?, ?, ?)').run(id, parent.id, requestId, fingerprint, profile.id, task);
       const child = this.core.threads.require(id);
       this.core.journal.putThread({ ...child, titleSource: 'user' });
@@ -291,6 +323,17 @@ export class Delegation {
       } else {
         const root = this.root(threadId);
         if (this.used(root.id) >= this.config(root.id).maxTurns) return;
+        if (thread.agentSessionId) {
+          const session = this.core.workforce.session(threadId);
+          this.core.workforce.records.transaction(() => {
+            this.reserveTurn(threadId, 'delegation');
+            const episodeId = this.core.journal.getSetting(`delegation-episode:${threadId}`) as string | undefined;
+            const work = this.core.workforce.resident.enqueue(session.agentId, prompt, session.scope, episodeId);
+            for (const letter of letters) this.update(letter, 'delivered', `Durably queued as work ${work.id}`);
+          });
+          this.core.workforce.changed();
+          return;
+        }
         const turn = this.core.threads.startTurn(threadId, prompt, [], undefined, 'delegation');
         // The scheduler may have started it synchronously before startTurn returns.
         for (const letter of letters) this.update(letter, 'uncertain', `${turn.status === 'queued' && this.core.journal.getTurn(turn.id)?.status === 'queued' ? 'Queued for' : 'Awaiting'} provider turn ${turn.id}`);

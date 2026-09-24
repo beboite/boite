@@ -287,7 +287,7 @@ test('running deadline stops a child and project removal deletes delegation reco
   const now = Date.now(); const clock = spyOn(Date, 'now').mockReturnValue(now + 61_000);
   try { await waitFor(() => h.core.threads.require(child.thread.id).status === 'idle', 5000); }
   finally { clock.mockRestore(); }
-  await owner.call('projects.remove', { projectId: h.core.threads.require(threadId).projectId });
+  await owner.call('projects.remove', { projectId: h.core.threads.require(threadId).projectId! });
   expect(h.core.journal.db.query('SELECT count(*) AS n FROM delegated_agents').get()).toEqual({ n: 0 });
   expect(h.core.journal.db.query('SELECT count(*) AS n FROM delegation_messages').get()).toEqual({ n: 0 });
 });

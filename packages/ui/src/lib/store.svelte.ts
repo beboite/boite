@@ -94,7 +94,7 @@ import { strings } from './strings';
 import { DEFAULT_MODEL_NAMES, INITIAL_MODEL_DEFAULTS, readModelDefaults, writeModelDefaults, resolveModelDefault, type ModelDefaults } from './model-defaults';
 import { FAVORITES_KEY, isNamedModel, readFavorites, type FavoriteModel } from './model-order';
 
-export type Page = 'chat' | 'settings';
+export type Page = 'chat' | 'settings' | 'agents';
 export type SettingsTab = 'brain' | 'voice' | 'general' | 'machines' | 'appearance' | 'keyboard' | 'accounts' | 'plugins' | 'usage' | 'limits' | 'resources' | 'experiments';
 
 /** A login process the core runs for one account, as `account.login` reports it. */
@@ -1669,6 +1669,11 @@ export class Store {
     this.page = 'chat';
   }
 
+  showAgents(): void {
+    this.page = 'agents';
+    this.sidebarOpen = false;
+  }
+
   /** The right panel of the thread that is open, surfaces and all. */
   get panel(): BoundPanel {
     return rightPanel.for(this.openThread ? this.threadKey(this.openThread.id) : null);
@@ -2001,7 +2006,7 @@ export class Store {
       if (navigate) {
         this.page = 'chat';
         this.sidebarOpen = false;
-        this.#rememberProject(thread.projectId);
+        if (thread.projectId) this.#rememberProject(thread.projectId);
       }
       // The trace is read by its surface alone, so it is fetched only while
       // that surface is on screen, and never in the way of the messages.

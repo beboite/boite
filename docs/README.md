@@ -13,6 +13,7 @@
 - [Context](context.md): context usage and compaction.
 - [Prompt cache timer](prompt-cache.md): how long a thread's cache stays warm, per provider, and the sources.
 - [Agent coordination](coordination.md): messages between agents, machine links and limits.
+- [Persistent agents](agents.md): identities, groups, teams, missions, memory and background execution.
 - [Agent delegation](delegation.md): model profiles, child conversations, live steering and team budgets.
 - [Usage](usage.md): tokens, API cost and limits per day, provider and model.
 - [Analytics](analytics.md): optional telemetry, consent, collected fields and data controls.

@@ -1,3 +1,4 @@
+import { FakeAgents } from './fake-agents';
 import {
   DEFAULT_DELEGATION_CONFIG,
   attachmentError,
@@ -12,6 +13,8 @@ import {
   RpcErrorCode,
   TODO_STATUSES,
   type Account,
+  type AgentProfile,
+  type AgentWork,
   type BrainStatus,
   type AccountQuota,
   type AgentLetter,
@@ -148,7 +151,7 @@ const FAKE_LOGIN_MENU = [
   ''
 ].join('\r\n');
 
-type FakeMethods = { [M in Exclude<RpcMethodName, `plugins.${string}`>]: (params: RpcParams<M>) => Promise<RpcResult<M>> };
+type FakeMethods = { [M in Exclude<RpcMethodName, `plugins.${string}` | `agents.${string}`>]: (params: RpcParams<M>) => Promise<RpcResult<M>> };
 
 export interface FakeClientOptions {
   /** Milliseconds between two streamed chunks. Tests pass 0. */
@@ -175,6 +178,26 @@ function quietUpdates(): boolean {
 }
 
 export class FakeClient implements ObservableClient {
+  #agents = new FakeAgents(revision => this.#emit('agents.changed', { revision }), {
+    create: (agent, sessionId, work) => this.#createAgentSession(agent, sessionId, work),
+    start: (threadId, prompt, agent) => { Object.assign(this.#thread(threadId), agent.selection); return this.#startTurn(threadId, prompt); },
+    stop: threadId => { void this.#stopTurn(threadId); },
+    protocol: providerId => this.#providers.find(p => p.id === providerId)?.protocol,
+  });
+  #createAgentSession(agent: AgentProfile, sessionId: string, work: AgentWork): string {
+    const mission = work.scope.kind === 'mission' ? this.#agents.snapshot().missions.find(m => m.id === work.scope.id) : null;
+    const project = this.#projects.find(p => p.id === mission?.projectId);
+    const placed = project ? fakeWorktree(project.path, `${agent.name} ${mission?.title ?? ''}`) : null;
+    const now = Date.now();
+    const thread: Thread = { id: `t-${++this.#seq}`, projectId: project?.id ?? null, agentSessionId: sessionId, ...agent.selection,
+      title: agent.name, titleSource: 'user', speed: null, cwd: placed?.path ?? `${DATA_DIR}/agent-workspaces/${agent.id}/${work.scope.id}`, branch: placed?.branch ?? null,
+      status: 'idle', unread: false, archived: false, pinned: false, sessionId: null, sessionGeneration: 0, selectionVersion: 0, load: null, context: null,
+      createdAt: now, updatedAt: now, messages: [], messagesBefore: null, turns: [], commands: [] };
+    this.#threads.set(thread.id, thread);
+    this.#emit('thread.created', structuredClone(toSummary(thread)));
+    return thread.id;
+  }
+
   #brain: BrainStatus = { config: { path: null, enabled: false }, entries: [], problems: [], git: null, lastSync: null };
   #telemetry: import('@boite/contracts').TelemetryState = { mode: 'basic', configured: true, pendingDeletion: false };
   #plugins = new FakePlugins({
@@ -383,6 +406,7 @@ export class FakeClient implements ObservableClient {
   }
 
   async connect(): Promise<CoreInfo> {
+    this.#agents.open();
     this.#setState('connecting');
     await this.#tick();
     this.#setState('ready');
@@ -390,6 +414,7 @@ export class FakeClient implements ObservableClient {
   }
 
   close(): void {
+    this.#agents.close();
     if (FakeClient.#cores.get(this.#identity.coreId) === this) FakeClient.#cores.delete(this.#identity.coreId);
     for (const thread of this.#threads.values()) this.#pauseActivity(thread);
     this.#plugins.close();
@@ -439,6 +464,7 @@ export class FakeClient implements ObservableClient {
     if (this.#principal === 'session' && method !== 'hello' && !DEVICE_METHODS.has(method)) {
       throw new RpcFailure({ code: RpcErrorCode.Refused, message: `${method} is for the owner only` });
     }
+    if (this.#principal === 'session' && method === 'agents.message.send' && (params as RpcParams<'agents.message.send'>).threadId !== undefined) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'agents.message.send: paired devices must omit threadId and speak as the user' });
     const result = await this.#hold(this.#dispatch(method, params)) as RpcResult<M>;
     // The real client writes its set from the answer, never from the request.
     if (method === 'threads.subscribe') {
@@ -493,16 +519,18 @@ export class FakeClient implements ObservableClient {
   // -------------------------------------------------------------------------
 
   #dispatch(method: RpcMethodName, rawParams: unknown): Promise<unknown> {
+    if (method.startsWith('agents.')) return Promise.resolve(this.#agents.call(method as Extract<RpcMethodName, `agents.${string}`>, rawParams));
     if (this.#plugins.handles(method)) return this.#plugins.call(method, rawParams);
     if (!Object.hasOwn(this.#methods, method)) {
       return Promise.reject(new RpcFailure({ code: RpcErrorCode.MethodNotFound, message: `unknown method ${String(method)}` }));
     }
-    const handler = this.#methods[method];
+    const handler = this.#methods[method as keyof FakeMethods];
     return handler(rawParams as never);
   }
 
   // Every method's input and output are checked against the real RPC contract.
   #methods: FakeMethods = {
+    'core.shutdown': async () => { this.#agents.close(); await Promise.all([...this.#threads.keys()].map(id => this.#stopTurn(id))); setTimeout(() => this.close(), 25); return { ok: true }; },
     'brain.status': async () => structuredClone(this.#brain),
     'brain.configure': async (config) => {
         if (typeof config.enabled !== 'boolean' || (config.enabled && !config.path) || (config.path !== null && (typeof config.path !== 'string' || !/^(?:[A-Za-z]:[\\/]|\/)/.test(config.path)))) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'brain.path must be an absolute folder path or null; enabled must be a boolean' });
@@ -1028,6 +1056,7 @@ export class FakeClient implements ObservableClient {
       return { ok: true };
     },
     'turns.start': async (params) => {
+      if (this.#thread(params.threadId).agentSessionId) throw refusal('persistent agent sessions accept work through Agents');
       const referenceError = previewReferencesError(params.previewReferences ?? [], params.prompt);
       if (referenceError) throw new RpcFailure({ code: RpcErrorCode.Refused, message: referenceError });
       if (params.attachments !== undefined && (!Array.isArray(params.attachments) || params.attachments.some(a => !a || typeof a !== 'object'))) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'attachments must be an array of attachment objects' });
@@ -1060,6 +1089,7 @@ export class FakeClient implements ObservableClient {
       return turn;
     },
     'threads.activity.set': async (params) => {
+      if (this.#thread(params.threadId).agentSessionId) throw refusal('persistent agent sessions use missions instead of conversation loops');
       const thread = this.#thread(params.threadId);
       if (thread.archived) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'activity requires an unarchived thread' });
       const activity = structuredClone(thread.activity ?? { goal: null, loop: null, tasks: [] });
@@ -1654,16 +1684,16 @@ export class FakeClient implements ObservableClient {
     'agent.where': async (params) => {
       const thread = this.#thread(params.threadId);
       const project = this.#projects.find((one) => one.id === thread.projectId);
-      if (!project) throw this.#notFound('project', thread.projectId);
+      if (!project && thread.projectId !== null) throw this.#notFound('project', thread.projectId);
       const where: AgentWhere = {
         threadId: thread.id,
         title: thread.title,
-        projectId: project.id,
-        projectPath: project.path,
+        projectId: project?.id ?? null,
+        projectPath: project?.path ?? null,
         cwd: thread.cwd,
         branch: thread.branch,
         // A thread of its own worktree does not sit in the project directory.
-        worktree: thread.cwd !== project.path,
+        worktree: thread.branch !== null,
         providerId: thread.providerId,
         // A thread on no model of its own runs the provider's default.
         model: thread.model ?? 'default'
@@ -1719,6 +1749,7 @@ export class FakeClient implements ObservableClient {
     },
     'todos.add': async (params) => {
       const thread = this.#thread(params.threadId);
+      if (thread.projectId === null) throw refusal('this agent session has no project');
       const at = this.#now();
       const todo: Todo = {
         id: `todo-${++this.#seq}`,
@@ -1735,6 +1766,7 @@ export class FakeClient implements ObservableClient {
     },
     'todos.update': async (params) => {
       const thread = this.#thread(params.threadId);
+      if (thread.projectId === null) throw refusal('this agent session has no project');
       const todo = this.#todos.find((one) => one.id === params.todoId && one.projectId === thread.projectId);
       if (!todo) throw this.#notFound('todo', params.todoId);
       // The status is checked before the text moves, as the core's `updateTodo`
@@ -1751,6 +1783,7 @@ export class FakeClient implements ObservableClient {
     },
     'todos.remove': async (params) => {
       const thread = this.#thread(params.threadId);
+      if (thread.projectId === null) throw refusal('this agent session has no project');
       const index = this.#todos.findIndex((one) => one.id === params.todoId && one.projectId === thread.projectId);
       if (index < 0) throw this.#notFound('todo', params.todoId);
       this.#todos.splice(index, 1);
@@ -2788,6 +2821,8 @@ const ready = true;
   #emit<E extends RpcEventName>(event: E, payload: RpcEvents[E]): void {
     if (event === 'turn.finished') {
       const turn = payload as Turn;
+      const agentThread = this.#threads.get(turn.threadId);
+      if (agentThread?.agentSessionId) this.#agents.finished(turn, agentThread.messages.filter(m => m.turnId === turn.id && m.role === 'assistant').flatMap(m => m.parts.flatMap(p => p.type === 'text' ? [p.text] : [])).join('\n'));
       const owned = this.#activityTurns.get(turn.id);
       this.#activityTurns.delete(turn.id);
       const thread = this.#threads.get(turn.threadId);
@@ -2848,7 +2883,8 @@ const ready = true;
   }
 
   /** The project's cards, the ones already done last, the core's order. */
-  #projectTodos(projectId: string): Todo[] {
+  #projectTodos(projectId: string | null): Todo[] {
+    if (projectId === null) throw refusal('this agent session has no project');
     const rank = (todo: Todo): number => (todo.status === 'done' ? 1 : 0);
     return structuredClone(
       this.#todos

@@ -1,4 +1,5 @@
 import type { Core } from './core.ts';
+import { registerPersistentAgents } from './agents/store.ts';
 import { registerAccountMethods } from './accounts.ts';
 import { registerAgentMethods } from './agent.ts';
 import { registerImportMethods } from './imports.ts';
@@ -21,6 +22,7 @@ import { registerTerminalMethods } from './terminals.ts';
 
 /** Adding a module is one file plus one line here. `hello` is the server's own. */
 export function registerModules(core: Core): void {
+  registerPersistentAgents(core);
   core.router.register('delegation.get', params => core.delegation.get(params.threadId));
   core.router.register('delegation.configure', params => core.delegation.configure(params.threadId, params.config));
   core.router.register('delegation.spawn', params => core.delegation.spawn(params));

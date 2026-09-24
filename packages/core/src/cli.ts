@@ -17,6 +17,7 @@ import { connect } from './client.ts';
 import type { CoreClient } from './client.ts';
 import { CORE_VERSION } from './core.ts';
 import { resolveDataDir } from './paths.ts';
+import { agentCommand } from './agents/cli.ts';
 
 export interface CliIo {
   out(text: string): void;
@@ -47,6 +48,18 @@ export const USAGE = `usage: boite <command> [args] [--json]
   agents inbox                   agent messages, provenance and delivery state
   agents send <core>/<thread> <text>
   agents reply <message-id> <text>
+  agent context|inbox|missions   this persistent agent's authorized context
+  agent send <ids|-> <text>      post to its group or direct conversation
+  agent reply <message-id> <text>
+  agent acquire <task-id>        acquire a mission task atomically
+  agent submit <task-id> <generation> <result>
+  agent artifact <json>          title, summary, missionId, taskId, paths, commit, verification
+  agent decide <json>            prompt and options; yield until the user answers
+  agent memory [query]           search memory in this context
+  agent remember <json>          title and text, optional id and expectedRevision
+  agent routines                list this identity's scheduled work
+  agent schedule <json>          name, prompt, schedule; optional id, expectedRevision, enabled
+  --request-id <id>              reuse for a retried collaboration command
   delegate profiles|list         approved models, team status and bounded results
   delegate spawn <profile> <brief>
   delegate send <thread-id> <text>
@@ -80,6 +93,7 @@ interface Parsed {
   thread: string | undefined;
   dataDir: string | undefined;
   channel: Channel;
+  requestId?: string;
 }
 
 function parse(argv: string[]): Parsed {
@@ -88,11 +102,12 @@ function parse(argv: string[]): Parsed {
     const arg = argv[index] ?? '';
     const next = (): string => {
       const value = argv[index + 1];
-      if (value === undefined) throw new Usage(`${arg} needs a value`);
+      if (value === undefined || value === '' || value.startsWith('--')) throw new Usage(`${arg} needs a value`);
       index += 1;
       return value;
     };
     if (arg === '--json') parsed.json = true;
+    else if (arg === '--request-id') parsed.requestId = next();
     else if (arg === '--multiple') parsed.multiple = true;
     else if (arg === '--thread') parsed.thread = next();
     else if (arg === '--data-dir') parsed.dataDir = next();
@@ -201,6 +216,11 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
   };
 
   switch (command) {
+    case 'agent': {
+      const result = await agentCommand(client, threadId, rest, parsed.requestId ?? crypto.randomUUID());
+      print([JSON.stringify(result)], result);
+      return;
+    }
     case 'attach': {
       const message = await client.call('artifacts.publish', { threadId, path: absolute(io.cwd, want(0, 'a file')) });
       print([`attached: ${rest[0]}`, `message: ${message.id}`], message);

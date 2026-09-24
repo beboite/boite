@@ -1,4 +1,5 @@
 import { mkdirSync, statSync } from 'node:fs';
+import type { AgentProfile } from '@boite/contracts';
 import { createHash } from 'node:crypto';
 import { activityPrompt } from './activity-prompt.ts';
 import { join, relative, resolve } from 'node:path';
@@ -183,6 +184,20 @@ interface PendingQuestion {
 }
 
 export class ThreadStore {
+  /** Internal-only entry: callers supply an already authorized workspace, never a fabricated project. */
+  createAgentSession(agent: AgentProfile, sessionId: string, cwd: string, projectId: string | null = null, branch: string | null = null): ThreadSummary {
+    const provider = this.core.providers.require(agent.selection.providerId);
+    const account = this.core.accounts.require(agent.selection.accountId);
+    if (account.providerId !== provider.id) throw refused('agent account belongs to another provider');
+    const now = Date.now();
+    const thread: ThreadSummary = {
+      id: newId('thr_'), projectId, agentSessionId: sessionId, title: agent.name, titleSource: 'user',
+      ...agent.selection, speed: null, cwd, branch, status: 'idle', unread: false, archived: false, pinned: false,
+      sessionId: null, sessionGeneration: 0, selectionVersion: 0, load: null, context: null, createdAt: now, updatedAt: now,
+    };
+    this.core.journal.append({ type: 'thread.created', threadId: thread.id, version: 1, payload: thread }, () => this.core.journal.putThread(thread));
+    return thread;
+  }
   private readonly handles = new Map<ThreadId, TurnHandle>();
   private readonly steering = new Set<ThreadId>();
   private readonly permissions = new Map<RequestId, PendingPermission>();
@@ -662,9 +677,13 @@ export class ThreadStore {
     return this.startTurn(threadId, protocol === 'echo' ? '[compact]' : '/compact', [], expectedSelectionVersion, 'compact');
   }
 
-  startTurn(threadId: ThreadId, prompt: string, attachments: Attachment[] = [], expectedSelectionVersion?: number, operation?: NonNullable<Turn['execution']>['operation'], activity?: { kind: 'goal' | 'loop'; iteration: number }, clientRequestId?: string, displayText?: string, previewReferences: PreviewReference[] = []): Turn {
+  startTurn(threadId: ThreadId, prompt: string, attachments: Attachment[] = [], expectedSelectionVersion?: number, operation?: NonNullable<Turn['execution']>['operation'], activity?: { kind: 'goal' | 'loop'; iteration: number }, clientRequestId?: string, displayText?: string, previewReferences: PreviewReference[] = [], agentRunId?: string): Turn {
     if (this.core.stopping) throw refused('the core is stopping; reconnect before sending another prompt');
     const thread = this.require(threadId);
+    if (thread.agentSessionId && operation !== 'compact') {
+      const run = agentRunId ? this.core.workforce.records.get('run', agentRunId) : null;
+      if (!run || run.threadId !== threadId || run.status !== 'accepted' || run.id !== clientRequestId) throw refused('persistent agent sessions accept work through Agents, not turns.start');
+    }
     checkAttachmentArray(attachments);
     const referenceError = previewReferencesError(previewReferences, prompt);
     if (referenceError) throw refused(referenceError);
@@ -934,6 +953,7 @@ export class ThreadStore {
 
     let result: TurnResult;
     try {
+      this.core.workforce.resident.assertThreadRoute(threadId, thread);
       const provider = this.core.providers.require(thread.providerId);
       const account = this.core.accounts.require(thread.accountId);
       const driver = getDriver(provider.protocol);
@@ -979,7 +999,7 @@ export class ThreadStore {
       sessionId: sameSession ? result.sessionId ?? current.sessionId : current.sessionId,
       status: result.status === 'error' ? 'error' : 'idle',
       unread: current.unread || !this.core.subscribers.hasSubscribers(threadId),
-      promptCache: promptCacheOf(result, thread, finished.finishedAt ?? Date.now(), current.promptCache ?? null) ?? current.promptCache ?? null,
+      promptCache: sameSession ? promptCacheOf(result, thread, finished.finishedAt ?? Date.now(), current.promptCache ?? null) ?? current.promptCache ?? null : current.promptCache ?? null,
     };
     this.save(next, 'thread.finished');
     if (result.status !== 'done') this.core.coordination.pause(threadId);
@@ -1158,6 +1178,7 @@ export class ThreadStore {
    * sent as a prompt of its own when the thread is idle.
    */
   private deliverAnswer(threadId: ThreadId, text: string): void {
+    if (this.enqueueResident(threadId, text)) return;
     const handle = this.handles.get(threadId);
     if (handle?.steer && !this.steering.has(threadId)) {
       this.steering.add(threadId);
@@ -1224,6 +1245,7 @@ export class ThreadStore {
   private wake(threadId: ThreadId, text: string): void {
     const thread = this.core.journal.getThread(threadId);
     if (thread === null || thread.archived) return;
+    if (this.enqueueResident(threadId, text)) return;
     if (['queued', 'running', 'waiting'].includes(thread.status) || this.handles.has(threadId)) {
       // The turn that ended is still being saved: open this one right after it.
       this.pendingWakes.set(threadId, text);
@@ -1237,6 +1259,20 @@ export class ThreadStore {
   }
 
   // -- internals ------------------------------------------------------------
+
+  private enqueueResident(threadId: ThreadId, text: string): boolean {
+    const thread = this.core.journal.getThread(threadId);
+    if (!thread?.agentSessionId || thread.archived) return false;
+    // A resident thread never falls back to a direct turn: a refused session only logs.
+    try {
+      const session = this.core.workforce.session(threadId);
+      this.core.workforce.resident.enqueue(session.agentId, text, session.scope);
+      this.core.workforce.changed();
+    } catch (error) {
+      this.core.log('warn', `thread ${threadId}: resident work was not queued: ${messageOf(error)}`);
+    }
+    return true;
+  }
 
   private makeContext(
     thread: ThreadSummary,
@@ -1303,7 +1339,7 @@ export class ThreadStore {
     };
 
     const input = this.lastUserInput(threadId, turn.id);
-    const continued = thread.sessionId === null && (thread.sessionGeneration ?? 0) > 0
+    const continued = !thread.agentSessionId && thread.sessionId === null && (thread.sessionGeneration ?? 0) > 0
       ? continuationInput(this.core.journal, threadId, turn.id, input, provider, part => fileReference(this.core.dataDir, part))
       : input;
     const prepared = prepareAttachments(this.core.dataDir, continued);
@@ -1395,6 +1431,7 @@ export class ThreadStore {
     input: unknown,
     description: string | null,
   ): PermissionTicket {
+    if (this.core.workforce.resident.isCompacting(thread.id)) return Object.assign(Promise.resolve('deny' as const), { requestId: newId('req_') });
     const request: PermissionRequest = {
       id: newId('req_'),
       threadId: thread.id,

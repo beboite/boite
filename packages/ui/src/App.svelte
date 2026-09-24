@@ -76,6 +76,13 @@
     for (const name of Object.keys(deferredLoaders) as (keyof Deferred)[]) need(name);
   }
   let SettingsShell = $state<typeof import('./components/SettingsShell.svelte').default>();
+  let AgentsPage = $state<typeof import('./components/agents/AgentsPage.svelte').default>();
+  let agentsLoadError = $state('');
+  $effect(() => {
+    if (store.page !== 'agents' || AgentsPage) return;
+    void import('./components/agents/AgentsPage.svelte').then(module => { AgentsPage = module.default; })
+      .catch(() => { agentsLoadError = strings.agents.offline; });
+  });
   let settingsLoadError = $state('');
   $effect(() => {
     if (store.page !== 'settings' || SettingsShell) return;
@@ -409,6 +416,8 @@
       {#if store.page === 'settings'}
         {#if SettingsShell}<SettingsShell {store} />{:else}<p class="empty">{settingsLoadError || strings.app.loading}</p>{/if}
       {/if}
+    {:else if store.page === 'agents'}
+      {#if AgentsPage}{#key store}<AgentsPage {store} />{/key}{:else}<p class="empty">{agentsLoadError || strings.app.loading}</p>{/if}
     {:else if store.page === 'settings'}
       {#if SettingsShell}<SettingsShell {store} />{:else}<p class="empty">{settingsLoadError || strings.app.loading}</p>{/if}
     {:else}

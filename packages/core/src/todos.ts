@@ -54,7 +54,7 @@ function save(core: Core, projectId: ProjectId, todos: Todo[]): Todo[] {
 
 /** The project a thread belongs to: the agent names its thread, never a project of its own. */
 export function projectOfThread(core: Core, threadId: ThreadId): ProjectId {
-  return core.threads.require(threadId).projectId;
+  return core.projects.require(core.threads.require(threadId).projectId).id;
 }
 
 function checkText(text: unknown): string {

@@ -44,6 +44,7 @@ async function once(): Promise<Run> {
   delete env.BOITE_CORE_COMMAND;
   if (CORE_COMMAND !== '') env.BOITE_CORE_COMMAND = CORE_COMMAND;
   env.BOITE_SHELL_HIDDEN = '1';
+  env.BOITE_CORE_RESIDENT = '0';
   env.BOITE_DATA_DIR = dataDir;
   env.BOITE_TELEMETRY_URL = '';
   env.BOITE_ECHO = '1';

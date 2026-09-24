@@ -185,7 +185,7 @@ describe('harness updates', () => {
     const blocker = await echoThread(harness!, client);
     await client.call('turns.start', { threadId: blocker.threadId, prompt: '[sleep:60000]' });
     const account = await client.call('accounts.add', { providerId: 'update-fake', label: 'Fake', useDefaultLocation: true });
-    const thread = await client.call('threads.create', { projectId: core.threads.require(blocker.threadId).projectId, providerId: 'update-fake', accountId: account.id });
+    const thread = await client.call('threads.create', { projectId: core.threads.require(blocker.threadId).projectId!, providerId: 'update-fake', accountId: account.id });
     await client.call('turns.start', { threadId: thread.id, prompt: 'queued on the old provider' });
     await client.call('threads.update', { threadId: thread.id, accountId: blocker.accountId });
     expect(core.threads.require(thread.id).providerId).toBe('echo');

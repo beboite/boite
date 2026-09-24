@@ -63,7 +63,7 @@ describe('the todo list of a project', () => {
   });
 
   test('every change sends the whole list, with the project it belongs to', async () => {
-    const projectId = harness.core.threads.require(threadId).projectId;
+    const projectId = harness.core.projects.require(harness.core.threads.require(threadId).projectId).id;
     const added = client.next<'todos.updated'>('todos.updated');
     const todo = await client.call('todos.add', { threadId, text: 'one card' });
     const event = await added;
