@@ -333,7 +333,7 @@ export function startServer(options: ServerOptions): RunningServer {
       if (!connection.authenticated) continue;
       if (!mayReceiveEvent(name, connection)) continue;
       if (connection.identity.principal === 'agent' && name !== 'todos.updated' && connection.identity.threadId !== threadId) continue;
-      if (name === 'collaboration.changed' && !connection.subscriptions.has(threadId ?? '')) continue;
+      if ((name === 'collaboration.changed' || name === 'delegation.changed') && !connection.subscriptions.has(threadId ?? '')) continue;
       if (scoped && (threadId === null || !connection.subscriptions.has(threadId))) continue;
       if (name === 'todos.updated' && !mayReadTodos(core, connection, (payload as RpcEvents['todos.updated']).projectId)) continue;
       connection.sendEvent(name, payload);

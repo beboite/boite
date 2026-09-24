@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { GitBranch, PanelRight } from '@lucide/svelte';
+  import { ArrowLeft, GitBranch, PanelRight, UsersRound } from '@lucide/svelte';
   import { focusOnMount } from '../lib/actions';
   import { contextMenu } from '../lib/context-menu.svelte';
   import { separator } from '../lib/menu';
@@ -105,6 +105,12 @@
       {#if project && thread}
         <span class="chip path" title={project.path}>{project.name}</span>
       {/if}
+      {#if thread?.parentThreadId}
+        <button type="button" class="chip parent" data-testid="delegation-back-parent" onclick={() => void store.open(thread!.parentThreadId!)}>
+          <ArrowLeft size={13} strokeWidth={1.75} />
+          {strings.delegation.parent}
+        </button>
+      {/if}
       {#if thread?.branch}
         <span class="chip path branch mono" title="{strings.thread.branchHint}: {thread.cwd}" data-testid="thread-branch">
           <GitBranch size={13} strokeWidth={1.75} />
@@ -112,6 +118,20 @@
         </span>
       {/if}
       {#if thread}<ContextControl {store} />{/if}
+      {#if thread}
+        <button
+          type="button"
+          class="ghost trace"
+          class:on={store.panelOpen && store.panel.active?.kind === 'agents'}
+          title={strings.delegation.panelHint}
+          aria-pressed={store.panelOpen && store.panel.active?.kind === 'agents'}
+          data-testid="agents-toggle"
+          onclick={() => store.panel.toggleKind('agents')}
+        >
+          <UsersRound size={16} strokeWidth={1.75} />
+          {strings.delegation.heading}
+        </button>
+      {/if}
       <!-- Every surface of the panel reads something only the owner may ask
            for, so the button is not in a paired device's header at all. -->
       {#if thread && store.owner}
@@ -181,6 +201,7 @@
     flex: none;
     padding: 0 10px 0 8px;
   }
+  .parent { gap: 4px; cursor: pointer; }
 
   .on {
     background: var(--color-active);

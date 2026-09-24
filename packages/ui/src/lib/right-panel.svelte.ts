@@ -9,10 +9,11 @@
 import type { PanelSurface } from '@boite/contracts';
 import { browserBridge } from './browser-bridge';
 
-export type SurfaceKind = 'trace' | 'browser' | 'changes' | 'files' | 'file' | 'tasks';
+export type SurfaceKind = 'agents' | 'trace' | 'browser' | 'changes' | 'files' | 'file' | 'tasks';
 
 /** Every kind a stored layout may name, and what `parse` checks a blob against. */
 export const SURFACE_KINDS: readonly SurfaceKind[] = [
+  'agents',
   'trace',
   'browser',
   'changes',
@@ -25,7 +26,7 @@ export const SURFACE_KINDS: readonly SurfaceKind[] = [
  * The kinds that get one tab and no more: asking for them again brings the tab
  * that exists forward. A browser page and a file are the two that multiply.
  */
-const SINGLETON_KINDS: readonly SurfaceKind[] = ['trace', 'changes', 'files', 'tasks'];
+const SINGLETON_KINDS: readonly SurfaceKind[] = ['agents', 'trace', 'changes', 'files', 'tasks'];
 
 export interface Surface {
   id: string;
@@ -67,6 +68,7 @@ export const SIBLING_MIN = 360;
 export const PANEL_INLINE_MIN_VIEWPORT = 981;
 
 export const TRACE_SURFACE_ID = 'trace';
+export const AGENTS_SURFACE_ID = 'agents';
 export const CHANGES_SURFACE_ID = 'changes';
 export const FILES_SURFACE_ID = 'files';
 export const TASKS_SURFACE_ID = 'tasks';
