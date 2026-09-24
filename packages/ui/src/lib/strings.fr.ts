@@ -10,6 +10,25 @@
 import type { Messages } from './i18n.svelte';
 
 export const fr: Messages = {
+  brain: {
+    heading: 'Brain', description: 'Les mêmes instructions et skills pour tes agents.',
+    folder: 'Dossier du brain', pathHint: 'Chemin du dossier', save: 'Connecter le dossier', browse: 'Parcourir', useFolder: 'Choisir ce dossier',
+    enabled: 'Utiliser avec les agents', disconnect: 'Déconnecter', refresh: 'Actualiser', sync: 'Synchroniser', working: 'En cours',
+    empty: 'Connecte ton brain', emptyHint: 'Choisis le dossier de tes instructions et skills.',
+    change: 'Changer de dossier', cancel: 'Annuler', saveChanges: 'Enregistrer',
+    autoPull: 'Pull automatique', onStartup: 'Au démarrage', periodic: 'À intervalle régulier', minutes: 'min',
+    globalInstructions: 'AGENTS.md global', globalDetails: 'Harness reliés',
+    globalHint: 'Ce brain s\'applique à tous les projets, même hors de Boite. Les fichiers existants sont sauvegardés puis restaurés à la désactivation.',
+    linked: 'Relié', existing: 'Déjà relié', blocked: 'À vérifier',
+    interval: 'Intervalle du pull en minutes', intervalHint: 'Choisis un nombre entier entre 1 et 1440 minutes.',
+    detected: 'Contenu', instructions: 'Instructions', skill: 'Skills', plugin: 'Plugins',
+    pluginHint: 'Détectés ici. Installe les plugins depuis leur agent.',
+    details: 'Détails de la synchro', noGit: 'Dossier local. Connecte un dépôt Git pour synchroniser entre PC.',
+    noUpstream: 'Configure une branche distante dans Git pour activer la synchro.', dirty: 'Enregistre tes changements dans Git avant de synchroniser.',
+    counts: '{ahead} à envoyer, {behind} à recevoir', lastSync: 'Dernière synchro', never: 'Pas encore synchronisé',
+    upToDate: 'À jour', noEntries: 'Rien de détecté dans cette catégorie.',
+    missing: 'Mets Boite à jour sur cette machine pour connecter un brain.',
+  },
   "telemetry": {
     "heading": "Confidentialité et statistiques",
     "description": "Les compteurs de base sont activés par défaut. Les statistiques améliorées restent facultatives. Aucun message, nom de projet, chemin, compte ou enregistrement n'est collecté.",
