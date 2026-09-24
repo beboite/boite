@@ -11,7 +11,7 @@
   import { AGENT_PREFIX, appCommands, isAgentCommand, runCommand } from '../lib/commands.svelte';
   import { rankItems, type PaletteItem } from '../lib/palette';
   import { clearStash, DRAFT_STASH_KEY, readStash, writeStash } from '../lib/prefs';
-  import { promptText } from '../lib/message-display';
+  import { claudeKeywords, promptSegments, promptText } from '../lib/message-display';
   import { fill, strings } from '../lib/strings';
   import type { Choice, PickPatch, Store } from '../lib/store.svelte';
   import EffortSlider from './EffortSlider.svelte';
@@ -293,6 +293,9 @@
     const token = /^\/[^\s]+/.exec(text)?.[0];
     return token && [...agentItems, ...boiteItems].some(item => item.label === token) ? token : '';
   });
+  let keywords = $derived(claudeKeywords(provider?.protocol, choice?.model));
+  let segments = $derived(promptSegments(text, commandToken || undefined, keywords));
+  let painted = $derived(segments.some(segment => segment.kind !== 'plain'));
 
   function syncInput() {
     if (!box) return;
@@ -884,15 +887,15 @@
     {/if}
 
     <div class="input-wrap">
-    {#if commandToken || previewReferences.length}
+    {#if painted || previewReferences.length}
       <div class="input-highlight" aria-hidden={previewReferences.length ? undefined : true} data-testid="composer-highlight" style:width={`${inputWidth}px`}>
-        <div class="input-paint input-mirror" style:transform={`translateY(${-inputScroll}px)`}>{#if previewReferences.length}<PreviewReferences {text} references={previewReferences} {store} threadId={key} editing onreference={(reference) => {
+        <div class="input-paint input-mirror" style:transform={`translateY(${-inputScroll}px)`}>{#if previewReferences.length}<PreviewReferences {text} references={previewReferences} {store} threadId={key} editing {keywords} onreference={(reference) => {
           if (box && reference.mention) { box.focus(); box.setSelectionRange(reference.mention.end, reference.mention.end); track(); }
-        }} />{:else}<span aria-hidden="true"><span class="command-token" data-testid="command-highlight">{commandToken}</span>{text.slice(commandToken.length)}</span>{/if}{'\n'}</div>
+        }} />{:else}<span aria-hidden="true">{#each segments as segment, index (index)}{#if segment.kind === 'command'}<span class="command-token" data-testid="command-highlight">{segment.text}</span>{:else if segment.kind === 'plain'}{segment.text}{:else}<span class="keyword-{segment.kind}" data-testid="keyword-highlight">{segment.text}</span>{/if}{/each}</span>{/if}{'\n'}</div>
       </div>
     {/if}
     <textarea
-      class:highlighted={Boolean(commandToken) || previewReferences.length > 0}
+      class:highlighted={painted || previewReferences.length > 0}
       bind:this={box}
       value={text}
       onbeforeinput={() => { pendingEdit = box ? { start: box.selectionStart, end: box.selectionEnd } : undefined; }}

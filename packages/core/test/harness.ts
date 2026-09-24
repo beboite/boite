@@ -43,7 +43,9 @@ export async function startTestCore(options: TestCoreOptions = {}): Promise<Test
 
   const token = newToken();
   const core = new Core({ dataDir, token });
-  if (options.settings !== undefined) core.settings.set(options.settings);
+  // The scripted agents echo their prompt, and the line that teaches `boite ask`
+  // would ride along in every reply: a test that wants it turns it back on.
+  core.settings.set({ asyncQuestions: false, ...options.settings });
 
   const server = startServer({
     core,

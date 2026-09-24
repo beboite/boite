@@ -63,6 +63,25 @@ export function time(value: number): string {
   return formatters().clock.format(new Date(value));
 }
 
+/** `10:31` today, `Tue 10:31` within the week, `12 Sep 10:31` before that: when a turn finished. */
+export function clockTime(value: number, now = Date.now()): string {
+  const set = formatters();
+  const then = new Date(value);
+  const today = new Date(now);
+  if (then.toDateString() === today.toDateString()) return set.dayClock.format(then);
+  if (now - value < 6 * 86_400_000) return set.weekday.format(then);
+  return `${set.calendar.format(then)} ${set.dayClock.format(then)}`;
+}
+
+/** `12s`, `4m 41s`, `1h 02m`: a stopwatch, the way a turn's footer reads it. */
+export function elapsed(ms: number): string {
+  const seconds = Math.max(0, Math.floor(ms / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ${String(seconds % 60).padStart(2, '0')}s`;
+  return `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, '0')}m`;
+}
+
 /** A day and an hour: what a quota window's reset reads as. */
 export function weekdayTime(value: number): string {
   return formatters().weekday.format(new Date(value));

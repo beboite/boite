@@ -77,6 +77,8 @@ describe('settings', () => {
       focusGuard: true,
       muteAgents: true,
       autoUpdateHarnesses: false,
+      // Off only because the harness turns it off; a missing value reads as on.
+      asyncQuestions: false,
     });
 
     const next = await client.call('settings.set', { maxConcurrentTurns: 3 });

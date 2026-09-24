@@ -8,6 +8,7 @@ import type {
   AccountId,
   AgentCommand,
   Attachment,
+  BackgroundTask,
   PreviewReference,
   ImageMimeType,
   Message,
@@ -157,6 +158,18 @@ export class ThreadStore {
    * next turn, and nothing here is worth a journal row.
    */
   private readonly commands = new Map<ThreadId, AgentCommand[]>();
+  /** What each thread's agent still runs in the background. Memory only, like `commands`. */
+  private readonly background = new Map<ThreadId, BackgroundTask[]>();
+  /**
+   * Answers to asynchronous questions that could not reach the agent yet: a
+   * turn was running with no way to steer it, or queued. They go out together
+   * as the next prompt once that turn finished.
+   */
+  private readonly deferredAnswers = new Map<ThreadId, string[]>();
+  /** A driver asked for a background turn while the thread's last turn was still closing. */
+  private readonly pendingWakes = new Map<ThreadId, string>();
+  /** Where each open asynchronous card is drawn, so its answer can be written back after its turn ended. */
+  private readonly asyncCards = new Map<RequestId, { threadId: ThreadId; messageId: MessageId; partIndex: number; part: Extract<MessagePart, { type: 'question' }> }>();
   /** The threads a title is being written for right now: a second ask is refused, not doubled. */
   private readonly retitling = new Set<ThreadId>();
 
@@ -199,6 +212,7 @@ export class ThreadStore {
       ...(tail === null || after === undefined ? {} : { messagesFrom: after }),
       messages: page.messages,
       commands: this.commands.get(threadId) ?? [],
+      background: this.background.get(threadId) ?? [],
       activity: this.core.activity.get(threadId),
       messagesBefore: page.before,
       // The turns of that page and the ones still in flight, never the whole history.
@@ -463,7 +477,10 @@ export class ThreadStore {
       next.selectionVersion = (thread.selectionVersion ?? 0) + 1;
     }
     if (switched) {
-      if (!['queued', 'running', 'waiting'].includes(thread.status)) releaseThread(thread.id);
+      if (!['queued', 'running', 'waiting'].includes(thread.status)) {
+        releaseThread(thread.id);
+        this.noteBackground(thread.id, []);
+      }
       this.commands.delete(thread.id);
       this.core.bus.emit('thread.commands', { threadId: thread.id, commands: [] });
     }
@@ -485,6 +502,11 @@ export class ThreadStore {
       this.core.scheduler.stop(threadId);
       releaseThread(threadId);
       this.commands.delete(threadId);
+      this.noteBackground(threadId, []);
+      // Nobody answers a card on a thread put away, and no turn should start from one.
+      this.clearQuestionsOf(threadId, true);
+      this.deferredAnswers.delete(threadId);
+      this.pendingWakes.delete(threadId);
       void this.core.terminals.close(threadTerminalId(threadId));
     }
     const thread = this.require(threadId);
@@ -596,7 +618,7 @@ export class ThreadStore {
     return this.startTurn(threadId, protocol === 'echo' ? '[compact]' : '/compact', [], expectedSelectionVersion, 'compact');
   }
 
-  startTurn(threadId: ThreadId, prompt: string, attachments: Attachment[] = [], expectedSelectionVersion?: number, operation?: 'compact' | 'coordination' | 'delegation', activity?: { kind: 'goal' | 'loop'; iteration: number }, clientRequestId?: string, displayText?: string, previewReferences: PreviewReference[] = []): Turn {
+  startTurn(threadId: ThreadId, prompt: string, attachments: Attachment[] = [], expectedSelectionVersion?: number, operation?: NonNullable<Turn['execution']>['operation'], activity?: { kind: 'goal' | 'loop'; iteration: number }, clientRequestId?: string, displayText?: string, previewReferences: PreviewReference[] = []): Turn {
     if (this.core.stopping) throw refused('the core is stopping; reconnect before sending another prompt');
     const thread = this.require(threadId);
     checkAttachmentArray(attachments);
@@ -653,9 +675,9 @@ export class ThreadStore {
       id: newId('msg_'),
       threadId,
       turnId: turn.id,
-      role: operation === 'coordination' || operation === 'delegation' ? 'system' : 'user',
+      role: systemOperation(operation) ? 'system' : 'user',
       parts: [
-        { type: 'text', text: previewPrompt(prompt, previewReferences), ...(previewReferences.length ? { displayText: prompt, previewReferences } : {}), ...(operation === 'coordination' || operation === 'delegation' ? { displayText: displayText ?? (operation === 'delegation' ? 'Agent delegation' : 'Agent coordination') } : {}), ...(activity ? { activity } : {}) },
+        { type: 'text', text: previewPrompt(prompt, previewReferences), ...(previewReferences.length ? { displayText: prompt, previewReferences } : {}), ...(systemOperation(operation) ? { displayText: displayText ?? SYSTEM_LABEL[operation] } : {}), ...(activity ? { activity } : {}) },
         ...attachments.map((attachment): MessagePart => attachment.kind === 'file' ? { type: 'file', mimeType: attachment.mimeType, data: attachment.data, name: attachment.name } : ({
           type: 'image',
           mimeType: attachment.mimeType,
@@ -673,6 +695,8 @@ export class ThreadStore {
       this.core.journal.putMessage(message);
       if (clientRequestId) this.core.journal.putTurnRequest(threadId, clientRequestId, fingerprint, turn.id);
     });
+    // A turn of the user's own, once accepted, takes whatever the agent wrote by itself first.
+    if (operation !== 'background') this.pendingWakes.delete(threadId);
     if (!activity && !operation) this.core.activity.userPrompt(threadId);
     this.core.bus.emit('message.started', message);
     this.core.bus.emit('message.completed', { threadId, messageId: message.id, state: 'complete' });
@@ -685,7 +709,13 @@ export class ThreadStore {
     this.require(threadId);
     this.core.coordination.pause(threadId);
     const childrenStopped = this.core.delegation.stop(threadId);
-    return this.core.scheduler.stop(threadId) || childrenStopped > 0;
+    if (this.core.scheduler.stop(threadId) || childrenStopped > 0) return true;
+    // No turn left, but the agent still runs work in the background: Stop ends
+    // the agent process, and that work with it.
+    if ((this.background.get(threadId)?.length ?? 0) === 0) return false;
+    releaseThread(threadId);
+    this.noteBackground(threadId, []);
+    return true;
   }
 
   stopQueuedCoordination(threadId: ThreadId): boolean {
@@ -910,6 +940,17 @@ export class ThreadStore {
     this.save(next, 'thread.finished');
     if (result.status !== 'done') this.core.coordination.pause(threadId);
     if (result.status === 'done' && sameSession && !queued.execution?.operation) this.autoTitle(threadId, turnId);
+    const woke = this.pendingWakes.get(threadId);
+    if (woke !== undefined) {
+      this.pendingWakes.delete(threadId);
+      // First, so the output the agent wrote by itself goes before any held answer.
+      if (!next.archived) setTimeout(() => this.wake(threadId, woke), 0);
+    }
+    // Answers that came in while this turn could not take them go out now. A
+    // stopped or failed turn keeps them for the next prompt the user sends.
+    if (result.status === 'done' && !next.archived && this.deferredAnswers.has(threadId)) {
+      setTimeout(() => this.flushDeferred(threadId), 0);
+    }
   }
 
   /**
@@ -930,7 +971,7 @@ export class ThreadStore {
    */
   private waitingOn(threadId: ThreadId): boolean {
     for (const entry of this.permissions.values()) if (entry.request.threadId === threadId) return true;
-    for (const entry of this.questions.values()) if (entry.request.threadId === threadId) return true;
+    for (const entry of this.questions.values()) if (entry.request.threadId === threadId && entry.request.async !== true) return true;
     return false;
   }
 
@@ -1008,8 +1049,147 @@ export class ThreadStore {
       () => undefined,
     );
     this.core.bus.emit('question.answered', { questionId: request.id, threadId: request.threadId, answer });
+    if (request.async === true) {
+      this.foldAsyncCard(request.id, answer);
+      pending.resolve(answer);
+      this.deliverAnswer(request.threadId, `> ${request.text}\n\n${answerTextOf(request, answer)}`);
+      return;
+    }
     this.setStatus(request.threadId, this.waitingOn(request.threadId) ? 'waiting' : 'running');
     pending.resolve(answer);
+  }
+
+  /**
+   * `boite ask`: an agent asks without stopping. The card goes in the running
+   * turn, or under the last one when the agent asks between turns (from a
+   * background shell of its own, say), in a message of its own.
+   */
+  askAsync(params: { threadId: ThreadId; text: string; options?: string[]; multiple?: boolean }): { questionId: RequestId } {
+    const thread = this.require(params.threadId);
+    if (thread.archived) throw refused('cannot ask on an archived thread', { threadId: thread.id });
+    const text = typeof params.text === 'string' ? params.text.trim() : '';
+    if (text.length === 0 || text.length > 2000) throw refused('text must hold 1 to 2000 characters', { field: 'text' });
+    const labels = params.options ?? [];
+    if (!Array.isArray(labels) || labels.length > 12 || labels.some(label => typeof label !== 'string' || label.trim().length === 0 || label.length > 200)) {
+      throw refused('options must be at most 12 labels of 1 to 200 characters', { field: 'options' });
+    }
+    if (params.multiple !== undefined && typeof params.multiple !== 'boolean') throw refused('multiple must be a boolean', { field: 'multiple' });
+    const turns = this.core.journal.listTurns(thread.id);
+    const turn = turns.find(t => t.status === 'running') ?? turns.at(-1);
+    if (turn === undefined) throw refused('the thread has no turn to ask in yet', { threadId: thread.id });
+    const ask: QuestionAsk = {
+      text,
+      options: labels.map((label, index) => ({ id: String(index + 1), label: label.trim() })),
+      allowText: true,
+      multiple: params.multiple === true && labels.length > 1,
+      async: true,
+    };
+    const ticket = this.askQuestion(thread, turn, ask);
+    const part: Extract<MessagePart, { type: 'question' }> = { type: 'question', questionId: ticket.questionId, ...ask, answer: null };
+    const message: Message = { id: newId('msg_'), threadId: thread.id, turnId: turn.id, role: 'assistant', parts: [part], state: 'complete', createdAt: Date.now() };
+    this.core.journal.append({ type: 'message.started', threadId: thread.id, version: 1, payload: message }, () => this.core.journal.putMessage(message));
+    this.core.bus.emit('message.started', message);
+    this.core.bus.emit('message.completed', { threadId: thread.id, messageId: message.id, state: 'complete' });
+    this.asyncCards.set(ticket.questionId, { threadId: thread.id, messageId: message.id, partIndex: 0, part });
+    return { questionId: ticket.questionId };
+  }
+
+  /** The answered card, written back where it was drawn, whichever turn that was. */
+  private foldAsyncCard(questionId: RequestId, answer: QuestionAnswer | null): void {
+    const card = this.asyncCards.get(questionId);
+    if (card === undefined) return;
+    this.asyncCards.delete(questionId);
+    const threadId = card.threadId;
+    const part: MessagePart = { ...card.part, answer };
+    this.core.journal.append(
+      { type: 'message.part', threadId, version: 1, payload: { messageId: card.messageId, partIndex: card.partIndex, part } },
+      () => this.core.journal.setMessagePart(card.messageId, card.partIndex, part),
+    );
+    this.core.bus.emit('message.part', { threadId, messageId: card.messageId, partIndex: card.partIndex, part });
+  }
+
+  /**
+   * An asynchronous answer on its way to the agent: steered into the running
+   * turn when the driver can, held while a turn is busy and cannot take it, or
+   * sent as a prompt of its own when the thread is idle.
+   */
+  private deliverAnswer(threadId: ThreadId, text: string): void {
+    const handle = this.handles.get(threadId);
+    if (handle?.steer && !this.steering.has(threadId)) {
+      this.steering.add(threadId);
+      const hold = () => {
+        this.defer(threadId, text);
+        // The turn may have ended while the steer was out, after its end looked for held answers.
+        if (!this.handles.has(threadId)) this.flushDeferred(threadId);
+      };
+      void handle.steer(text)
+        .then(submitted => { if (!submitted) hold(); })
+        .catch(error => {
+          this.core.log('warn', `thread ${threadId}: steering an async answer failed, it waits for the next turn: ${messageOf(error)}`);
+          hold();
+        })
+        .finally(() => this.steering.delete(threadId));
+      return;
+    }
+    this.defer(threadId, text);
+    if (!this.handles.has(threadId)) this.flushDeferred(threadId);
+  }
+
+  private defer(threadId: ThreadId, text: string): void {
+    this.deferredAnswers.set(threadId, [...(this.deferredAnswers.get(threadId) ?? []), text]);
+  }
+
+  /** The held answers as one prompt, when the thread can take one. */
+  private flushDeferred(threadId: ThreadId): void {
+    const held = this.deferredAnswers.get(threadId);
+    const thread = this.core.journal.getThread(threadId);
+    if (held === undefined || thread === null || thread.archived) return;
+    if (['queued', 'running', 'waiting'].includes(thread.status) || this.handles.has(threadId)) return;
+    this.deferredAnswers.delete(threadId);
+    try {
+      this.startTurn(threadId, held.join('\n\n'));
+    } catch (error) {
+      // Kept for the next prompt the user sends, which carries them first.
+      this.deferredAnswers.set(threadId, held);
+      this.core.log('warn', `thread ${threadId}: async answers wait for the next prompt: ${messageOf(error)}`);
+    }
+  }
+
+  /** What was held and never sent: it goes in front of the next prompt. */
+  private takeDeferred(threadId: ThreadId): string {
+    const held = this.deferredAnswers.get(threadId);
+    if (held === undefined) return '';
+    this.deferredAnswers.delete(threadId);
+    return held.join('\n\n') + '\n\n';
+  }
+
+  /** What the agent still runs in the background, told to the clients when it changed. */
+  noteBackground(threadId: ThreadId, list: BackgroundTask[]): void {
+    const before = this.background.get(threadId) ?? [];
+    if (JSON.stringify(before) === JSON.stringify(list)) return;
+    if (list.length === 0) this.background.delete(threadId);
+    else this.background.set(threadId, list);
+    this.core.bus.emit('thread.background', { threadId, tasks: list });
+  }
+
+  /**
+   * The agent went on by itself once the turn ended: a background shell it
+   * started finished. A turn opens for what it writes next; when the thread is
+   * busy the running turn takes that output instead.
+   */
+  private wake(threadId: ThreadId, text: string): void {
+    const thread = this.core.journal.getThread(threadId);
+    if (thread === null || thread.archived) return;
+    if (['queued', 'running', 'waiting'].includes(thread.status) || this.handles.has(threadId)) {
+      // The turn that ended is still being saved: open this one right after it.
+      this.pendingWakes.set(threadId, text);
+      return;
+    }
+    try {
+      this.startTurn(threadId, text, [], undefined, 'background');
+    } catch (error) {
+      this.core.log('warn', `thread ${threadId}: the agent resumed on its own but no turn could open: ${messageOf(error)}`);
+    }
   }
 
   // -- internals ------------------------------------------------------------
@@ -1022,6 +1202,20 @@ export class ThreadStore {
   ): TurnContext {
     const threadId = thread.id;
     const env = this.core.accounts.accountEnv(account, provider);
+    // When each tool card first showed up and when it stopped running, by slot.
+    const toolTimes = new Map<string, { startedAt: number; finishedAt: number | null }>();
+    const stamp = (messageId: MessageId, partIndex: number, part: MessagePart): MessagePart => {
+      if (part.type === 'question' && part.async === true && (part.answer ?? null) === null && this.questions.has(part.questionId)) {
+        this.asyncCards.set(part.questionId, { threadId, messageId, partIndex, part });
+      }
+      if (part.type !== 'tool') return part;
+      const key = `${messageId}:${partIndex}`;
+      const now = Date.now();
+      const seen = toolTimes.get(key) ?? { startedAt: part.startedAt ?? now, finishedAt: null };
+      if (part.status !== 'running' && seen.finishedAt === null) seen.finishedAt = part.finishedAt ?? now;
+      toolTimes.set(key, seen);
+      return { ...part, startedAt: seen.startedAt, finishedAt: seen.finishedAt };
+    };
     const emit: EmitSink = {
       startMessage: (role: MessageRole): MessageId => {
         const message: Message = {
@@ -1043,7 +1237,8 @@ export class ThreadStore {
         this.core.journal.appendDelta(threadId, messageId, partIndex, text);
         this.core.bus.emit('message.delta', { threadId, messageId, partIndex, text });
       },
-      part: (messageId: MessageId, partIndex: number, part: MessagePart): void => {
+      part: (messageId: MessageId, partIndex: number, raw: MessagePart): void => {
+        const part = stamp(messageId, partIndex, raw);
         this.core.journal.append(
           { type: 'message.part', threadId, version: 1, payload: { messageId, partIndex, part } },
           () => {
@@ -1073,7 +1268,7 @@ export class ThreadStore {
       account,
       provider,
       turn,
-      prompt: ((turn.execution?.operation && thread.sessionId !== null) || prepared.prompt.trimStart().startsWith('/') ? '' : this.core.brain.instructions(provider.id)) + prepared.prompt + (turn.execution?.operation === 'compact' ? '' : this.core.coordination.instructions(threadId) + this.core.delegation.instructions(threadId) + this.core.delegation.initialInput(threadId, turn.id)),
+      prompt: ((turn.execution?.operation && thread.sessionId !== null) || prepared.prompt.trimStart().startsWith('/') ? '' : this.core.brain.instructions(provider.id)) + (turn.execution?.operation || prepared.prompt.trimStart().startsWith('/') ? '' : this.takeDeferred(threadId)) +prepared.prompt + (turn.execution?.operation === 'compact' ? '' : this.core.coordination.instructions(threadId) + this.core.delegation.instructions(threadId) + this.core.delegation.initialInput(threadId, turn.id)) + this.askInstructions(thread, provider, turn, prepared.prompt),
       coordination: () => this.core.delegation.take(threadId, turn.id) ?? this.core.coordination.take(threadId, turn.id),
       attachments: prepared.attachments,
       sessionId: thread.sessionId,
@@ -1091,6 +1286,10 @@ export class ThreadStore {
         if ((this.require(threadId).selectionVersion ?? 0) === (thread.selectionVersion ?? 0)) this.noteContext(threadId, use);
       },
       tasks: (list) => this.core.activity.tasks(threadId, list),
+      background: (list) => {
+        if ((this.core.journal.getThread(threadId)?.sessionGeneration ?? 0) === (thread.sessionGeneration ?? 0)) this.noteBackground(threadId, list);
+      },
+      wake: (text) => this.wake(threadId, text),
       requestPermission: (toolName: string, input: unknown, description: string | null): PermissionTicket =>
         this.requestPermission(thread, turn, toolName, input, description),
       askQuestion: (ask: QuestionAsk): QuestionTicket => this.askQuestion(thread, turn, ask),
@@ -1184,6 +1383,7 @@ export class ThreadStore {
       options: ask.options,
       allowText: ask.allowText,
       multiple: ask.multiple,
+      ...(ask.async === true ? { async: true } : {}),
       createdAt: Date.now(),
     };
     let resolve: (answer: QuestionAnswer | null) => void = () => undefined;
@@ -1195,16 +1395,23 @@ export class ThreadStore {
       { type: 'question.asked', threadId: thread.id, version: 1, payload: request },
       () => undefined,
     );
-    this.setStatus(thread.id, 'waiting');
+    // Nobody waits on an asynchronous card: the thread keeps its status.
+    if (ask.async !== true) this.setStatus(thread.id, 'waiting');
     this.core.bus.emit('question.asked', request);
     return Object.assign(promise, { questionId: request.id });
   }
 
-  /** The turn ended with a question still open: it is cancelled, so the driver settles. */
-  private clearQuestionsOf(threadId: ThreadId): void {
+  /**
+   * The turn ended with a question still open: it is cancelled, so the driver
+   * settles. An asynchronous card outlives its turn and goes only with `all`,
+   * when the thread is put away.
+   */
+  private clearQuestionsOf(threadId: ThreadId, all = false): void {
     for (const [id, pending] of [...this.questions]) {
       if (pending.request.threadId !== threadId) continue;
+      if (pending.request.async === true && !all) continue;
       this.questions.delete(id);
+      this.asyncCards.delete(id);
       this.core.bus.emit('question.answered', { questionId: id, threadId, answer: null });
       pending.resolve(null);
     }
@@ -1220,6 +1427,17 @@ export class ThreadStore {
       this.core.bus.emit('permission.resolved', { requestId: id, threadId, decision: 'deny' });
       pending.resolve('deny');
     }
+  }
+
+  /**
+   * Once per agent session, how to ask without stopping. Codex has its own
+   * asynchronous questions, and echo is the test agent.
+   */
+  private askInstructions(thread: ThreadSummary, provider: ProviderDescriptor, turn: Turn, prompt: string): string {
+    if (thread.sessionId !== null || turn.execution?.operation || prompt.trimStart().startsWith('/')) return '';
+    if (provider.protocol === 'codex-appserver' || provider.protocol === 'echo') return '';
+    if (this.core.settings.get().asyncQuestions === false) return '';
+    return ASK_INSTRUCTIONS;
   }
 
   /** The user message of the turn, read back from the journal: the text and the images it carried. */
@@ -1238,7 +1456,7 @@ export class ThreadStore {
 
   private lastUserInput(threadId: ThreadId, turnId: TurnId): { prompt: string; attachments: Attachment[] } {
     const operation = this.core.journal.getTurn(turnId)?.execution?.operation;
-    const message = operation === 'coordination' || operation === 'delegation'
+    const message = systemOperation(operation)
       ? Array.from(this.core.journal.walkTurnMessages(threadId, turnId)).find(m => m.role === 'system') ?? null
       : this.core.journal.lastUserMessage(threadId, turnId);
     if (message !== null) {
@@ -1433,6 +1651,7 @@ export function registerThreadMethods(core: Core): void {
     return { ok: true } as const;
   });
   core.router.register('questions.list', (params) => core.threads.listQuestions(params.threadId));
+  core.router.register('questions.ask', (params) => core.threads.askAsync(params));
   core.router.register('questions.answer', (params) => {
     core.threads.answerQuestion({
       threadId: params.threadId,
@@ -1449,4 +1668,20 @@ function checkSpeed(provider: ProviderDescriptor, accountId: string, model: stri
   const options = modelsFor(provider, accountId).find(entry => entry.id === model)?.speeds ?? [];
   if (options.some(option => option.id === speed)) return speed;
   throw refused('the model does not offer this speed', { providerId: provider.id, model, speed, expected: options.map(option => option.id) });
+}
+
+const SYSTEM_LABEL = { coordination: 'Agent coordination', delegation: 'Agent delegation', background: 'Background work finished' } as const;
+
+/** The turns whose opening message is Boite's and not the user's. */
+function systemOperation(operation: string | undefined): operation is keyof typeof SYSTEM_LABEL {
+  return operation === 'coordination' || operation === 'delegation' || operation === 'background';
+}
+
+/** Told once per session to agents that have no asynchronous questions of their own. */
+export const ASK_INSTRUCTIONS = '\n\nBoite: to ask the user something without stopping, run `boite ask "<question>" [option ...]` and keep working on what does not depend on it. The answer arrives later as a message quoting the question; if none comes, go on with a sensible default and say which.';
+
+/** What the agent reads for an answer: the labels picked, then what the user typed. */
+function answerTextOf(request: QuestionRequest, answer: QuestionAnswer): string {
+  const labels = answer.optionIds.map(id => request.options.find(option => option.id === id)?.label ?? id);
+  return [labels.join(', '), answer.text ?? ''].filter(line => line.length > 0).join('\n');
 }
