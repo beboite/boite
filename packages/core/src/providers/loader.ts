@@ -174,7 +174,7 @@ function checkRoots(value: unknown, file: string): string[] {
 
 function checkCandidate(value: unknown, file: string, field: string): ExecutableCandidate {
   const obj = asObject(value, file, field);
-  checkKeys(obj, ['kind', 'value'], file, field);
+  checkKeys(obj, ['kind', 'value', 'updateEnv'], file, field);
   const kind = asString(obj['kind'], file, `${field}.kind`);
   if (!CANDIDATE_KINDS.includes(kind as ExecutableCandidate['kind'])) {
     reject(file, `${field}.kind`, `one of: ${CANDIDATE_KINDS.join(', ')}`, `unknown candidate kind ${kind}`);
@@ -183,7 +183,9 @@ function checkCandidate(value: unknown, file: string, field: string): Executable
   if (kind === 'npm' && !isNpmSpec(candidateValue)) {
     reject(file, `${field}.value`, 'an npm package name, @scope/name, with an optional #bin', `${candidateValue} is not an npm package name`);
   }
-  return { kind: kind as ExecutableCandidate['kind'], value: candidateValue };
+  const candidate: ExecutableCandidate = { kind: kind as ExecutableCandidate['kind'], value: candidateValue };
+  if (obj['updateEnv'] !== undefined) candidate.updateEnv = checkStringMap(obj['updateEnv'], file, `${field}.updateEnv`);
+  return candidate;
 }
 
 function checkStringMap(value: unknown, file: string, field: string): Record<string, string> {
@@ -547,7 +549,7 @@ function expandDescriptor(descriptor: ProviderDescriptor, dataDir: string): Prov
     profiles[os] = {
       ...profile,
       executable: profile.executable.map((candidate) => ({
-        kind: candidate.kind,
+        ...candidate,
         value: candidate.kind === 'file' ? normalize(expand(candidate.value)) : expand(candidate.value),
       })),
       // A launch argument can name a path like an executable candidate does,
@@ -667,22 +669,25 @@ export interface ResolvedCommand {
   executable: string;
   prefix: string[];
   shown: string;
+  /** The candidate's `updateEnv`, empty when it names none. */
+  updateEnv: Record<string, string>;
 }
 
 export function resolveCommand(profile: OsProfile): ResolvedCommand | null {
   for (const candidate of profile.executable) {
+    const updateEnv = candidate.updateEnv ?? {};
     if (candidate.kind === 'path') {
       const found = Bun.which(candidate.value);
-      if (found !== null) return { executable: found, prefix: [], shown: found };
+      if (found !== null) return { executable: found, prefix: [], shown: found, updateEnv };
     } else if (candidate.kind === 'file') {
       try {
         if (!statSync(candidate.value).isFile()) continue;
         accessSync(candidate.value, constants.X_OK);
-        return { executable: candidate.value, prefix: [], shown: candidate.value };
+        return { executable: candidate.value, prefix: [], shown: candidate.value, updateEnv };
       } catch { /* Missing or non-executable candidates leave the next one available. */ }
     } else if (candidate.kind === 'npm') {
       const found = resolveNpm(candidate.value);
-      if (found !== null) return { executable: found.executable, prefix: [found.script], shown: found.script };
+      if (found !== null) return { executable: found.executable, prefix: [found.script], shown: found.script, updateEnv };
     }
   }
   return null;

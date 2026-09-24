@@ -16,7 +16,7 @@
 export const ONBOARDING_STORAGE_KEY = 'boite.onboarding';
 
 /** Bumped when the tour changes shape, not when a sentence in it is reworded. */
-export const ONBOARDING_VERSION = 4;
+export const ONBOARDING_VERSION = 5;
 
 export interface OnboardingRecord {
   version: number;

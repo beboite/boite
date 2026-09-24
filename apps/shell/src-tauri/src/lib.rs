@@ -727,6 +727,31 @@ fn product_label<R: Runtime>(app: &AppHandle<R>, channel: Channel) -> &'static s
     } else { channel.product_name() }
 }
 
+/// The size the main window opens at. The height fits the tour's tallest screen
+/// without a scrollbar: 808 px (French consent screen, measured 2026-09-23) plus
+/// the scrim's 32 px margin and the 44 px title bar left above it.
+const MAIN_SIZE: (f64, f64) = (1280.0, 890.0);
+const MAIN_MIN_SIZE: (f64, f64) = (880.0, 560.0);
+
+/// Logical `(x, y, width, height)` of a window of `size` centred in `area`
+/// (`left, top, width, height`), shrunk to 92% of the area on a smaller screen.
+/// An area below the minimum size gets the window at its top left, so the
+/// title bar stays on screen.
+fn centred(size: (f64, f64), min: (f64, f64), area: (f64, f64, f64, f64)) -> (f64, f64, f64, f64) {
+    let width = size.0.min(area.2 * 0.92).max(min.0);
+    let height = size.1.min(area.3 * 0.92).max(min.1);
+    (area.0 + ((area.2 - width) / 2.0).max(0.0), area.1 + ((area.3 - height) / 2.0).max(0.0), width, height)
+}
+
+/// The primary monitor's work area, in logical pixels. Windows puts a window
+/// with no position at its cascade spot, the top left of the first launch.
+fn work_area<R: Runtime>(app: &AppHandle<R>) -> Option<(f64, f64, f64, f64)> {
+    let monitor = app.primary_monitor().ok()??;
+    let scale = monitor.scale_factor();
+    let area = monitor.work_area();
+    Some((area.position.x as f64 / scale, area.position.y as f64 / scale, area.size.width as f64 / scale, area.size.height as f64 / scale))
+}
+
 /// The main window, built here rather than in `tauri.conf.json` so a run on its
 /// own data directory (a test, a bench) keeps its WebView2 profile there too.
 /// WebView2 runs one browser process per profile: on the default profile the
@@ -739,8 +764,8 @@ fn build_main_window<R: Runtime>(
     let mut builder =
         tauri::WebviewWindowBuilder::new(app, MAIN_LABEL, tauri::WebviewUrl::default())
             .title(product_label(app, channel))
-            .inner_size(1280.0, 800.0)
-            .min_inner_size(880.0, 560.0)
+            .inner_size(MAIN_SIZE.0, MAIN_SIZE.1)
+            .min_inner_size(MAIN_MIN_SIZE.0, MAIN_MIN_SIZE.1)
             .resizable(true)
             .decorations(false)
             .visible(false)
@@ -765,6 +790,13 @@ fn build_main_window<R: Runtime>(
             color: None,
         });
     }
+    builder = match work_area(app) {
+        Some(area) => {
+            let (x, y, width, height) = centred(MAIN_SIZE, MAIN_MIN_SIZE, area);
+            builder.inner_size(width, height).position(x, y)
+        }
+        None => builder.center(),
+    };
     if let Some(directory) = webview_profile() {
         builder = builder.data_directory(directory);
     }
@@ -931,6 +963,21 @@ pub fn run() {
 mod tests {
     use super::{effects_for, Channel};
     use tauri::window::Effect;
+
+    #[test]
+    fn the_main_window_opens_centred_and_fits_a_small_screen() {
+        // 1080p at 100%, taskbar at the bottom: the full size, centred.
+        assert_eq!(super::centred((1280.0, 890.0), (880.0, 560.0), (0.0, 0.0, 1920.0, 1032.0)), (320.0, 71.0, 1280.0, 890.0));
+        // 1080p at 150%: 1280 x 688 logical, so 92% of it, still centred.
+        let (x, y, width, height) = super::centred((1280.0, 890.0), (880.0, 560.0), (0.0, 0.0, 1280.0, 688.0));
+        assert_eq!((width.round(), height.round()), (1178.0, 633.0));
+        assert_eq!(((x * 2.0).round(), (y * 2.0).round()), (102.0, 55.0));
+        // A taskbar on the left moves the centre with the work area.
+        assert_eq!(super::centred((1280.0, 890.0), (880.0, 560.0), (60.0, 0.0, 1860.0, 1080.0)).0, 350.0);
+        // Never below the minimum size, and then pinned to the top left.
+        assert_eq!(super::centred((1280.0, 890.0), (880.0, 560.0), (0.0, 0.0, 800.0, 500.0)), (0.0, 0.0, 880.0, 560.0));
+        assert_eq!(super::centred((1280.0, 890.0), (880.0, 560.0), (60.0, 40.0, 800.0, 500.0)), (60.0, 40.0, 880.0, 560.0));
+    }
 
     #[test]
     fn both_sidecar_workers_are_required() {

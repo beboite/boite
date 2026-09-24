@@ -64,6 +64,21 @@ lets a driver keep its own one for the next turn. Raising the global cap alone
 changes nothing when every thread shares one account, which is the shape of the
 bench.
 
+## Delegation shares the scheduler
+
+An owner-enabled team creates ordinary child threads with a persisted parent
+relationship and a separate provider session per child. The owner's named
+profiles select the account, model and effort. The child inherits the parent's
+checkout and permission mode. No additional orchestration model runs.
+
+Delegation admission applies team limits before the existing global and
+account scheduler limits. Compact briefs and bounded final answers cross the
+thread boundary; transcripts and tool payloads stay in their own threads.
+The core serializes live steering with ordinary coordination and queues input
+for drivers without steering. Results can also join the next user prompt.
+Restart retains the records but pauses automatic work. [Delegation](delegation.md)
+describes controls, delivery semantics and costs.
+
 ## Process tracking follows the host OS
 
 `procs.ts` calls the platform interface for native tracking and protections.

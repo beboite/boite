@@ -28,6 +28,7 @@
   import ToolCard from './ToolCard.svelte';
   import MessageOutline from './MessageOutline.svelte';
   import ForwardedAgentMessage from './ForwardedAgentMessage.svelte';
+  import DelegationActivity from './DelegationActivity.svelte';
   import { visibleAnswer } from '../lib/message-display';
   import { isNamedModel } from '../lib/model-order';
 
@@ -37,10 +38,17 @@
     messages
   }: { store: Store; threadId: string; messages: Message[] } = $props();
   const coordination = $derived(store.coordination?.self.threadId === threadId ? store.coordination : null);
-  const letters = $derived(coordination?.messages ?? []);
+  const delegation = $derived(store.delegation && (store.delegation.rootThreadId === threadId || store.delegation.agents.some(agent => agent.thread.id === threadId)) ? store.delegation : null);
+  const letters = $derived([
+    ...(coordination?.messages ?? []),
+    ...(delegation?.messages.filter(letter => letter.from.threadId === threadId || letter.to.threadId === threadId) ?? [])
+  ]);
+  const delegationLetterIds = $derived(new Set(delegation?.messages.map(letter => letter.id) ?? []));
   const letterRows = $derived.by(() => new Map(letters.map(letter => [`coordination:${letter.id}`, letter])));
+  const team = $derived(delegation?.rootThreadId === threadId ? delegation.agents : []);
+  const teamRowId = $derived(`delegation:${threadId}`);
   const timeline = $derived.by(() => {
-    if (letters.length === 0) return messages;
+    if (letters.length === 0 && team.length === 0) return messages;
     const ids = new Set(letters.map(letter => letter.id));
     const visible = messages.filter(message => !coordinationPlaceholder(message, ids));
     const forwarded = letters.map((letter): Message => ({
@@ -52,14 +60,25 @@
       state: 'complete',
       createdAt: letter.createdAt
     }));
-    return [...visible, ...forwarded].sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
+    const activity: Message[] = team.length ? [{
+      id: teamRowId, threadId, turnId: teamRowId, role: 'system', parts: [], state: 'complete',
+      createdAt: Math.min(...team.map(agent => agent.thread.createdAt))
+    }] : [];
+    return [...visible, ...forwarded, ...activity].sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
   });
   const timelineOrder = $derived(timeline.map(message => message.id).join('\0'));
   const savedReading = untrack(() => store.readingPositions?.get(threadId));
 
   function coordinationPlaceholder(message: Message, ids: Set<string>): boolean {
     if (message.role !== 'system') return false;
-    return message.parts.some(part => part.type === 'text' && part.text.startsWith('Boite agent coordination.') && [...ids].some(id => part.text.includes(`"id":"${id}"`)));
+    return message.parts.some(part => part.type === 'text' &&
+      (part.text.startsWith('Boite agent coordination.') || part.text.startsWith('Boite delegation messages.')) &&
+      [...ids].some(id => part.text.includes(`"id":"${id}"`)));
+  }
+
+  function letterSelf(letter: AgentLetter): { coreId: string; threadId: string } | null {
+    if (delegationLetterIds.has(letter.id)) return { coreId: 'local', threadId };
+    return coordination?.self ?? null;
   }
 
   /** Under this many messages the list renders whole: a window would cost more than it saves. */
@@ -573,8 +592,10 @@
           data-testid="message"
           data-role={letter ? 'agent-letter' : message.role}
         >
-          {#if letter && coordination}
-            <ForwardedAgentMessage {letter} self={coordination.self} />
+          {#if message.id === teamRowId}
+            <DelegationActivity {store} agents={team} />
+          {:else if letter && letterSelf(letter)}
+            <ForwardedAgentMessage {letter} self={letterSelf(letter)!} />
           {:else if message.role === 'user'}
             {@const images = imagesOf(message)}
             <div class="bubble">
