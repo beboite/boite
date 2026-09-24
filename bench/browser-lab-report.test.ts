@@ -9,6 +9,7 @@ test('self-reported finish cannot replace independent evidence or clean completi
   expect(validateReview(review(), { ...raw, processesAfter: 1 })).toBe(false);
   expect(validateReview(review(), { ...raw, cancelled: 'stop' })).toBe(false);
   expect(validateReview(review(), { ...raw, cleanupError: 'failed' })).toBe(false);
+  expect(validateReview({ ...review(), excluded: { cohort: 'all affected task arms', reason: 'Instrumented transport rejected a valid large response.' } }, raw)).toBe(false);
   expect(validateReview(review(), { ...raw, model: { ...raw.model, events: [{ method: 'item/started', params: { item: { type: 'commandExecution' } } }] } })).toBe(false);
   const noEvidence = review(); noEvidence.criteria[0]!.observations = [];
   expect(() => validateReview(noEvidence, raw)).toThrow('needs observation');
@@ -42,11 +43,19 @@ test('combining lanes preserves failed attempts and rejects mixed or duplicate p
   expect(report.modes.dom.succeeded).toBe(2);
   expect(report.modes.dom.allTiming.n).toBe(4);
   expect(report.modes.dom.allTiming.medianMs).toBe(90500);
+  b.attempts[0].excluded = { cohort: 'whole affected task', reason: 'Invalid setup.' };
+  b.attempts[1].excluded = { cohort: 'whole affected task', reason: 'Invalid setup.' };
+  const corrected = combineLabReports([a, b]);
+  expect(corrected.modes.dom).toMatchObject({ expected: 4, reviewed: 4, scored: 2, excluded: 2, succeeded: 1 });
+  expect(corrected.modes.dom.allTiming.n).toBe(2);
+  expect(corrected.attempts).toHaveLength(4);
   expect(() => combineLabReports([a, a])).toThrow('Duplicate lane');
   b.protocol.timeoutMs = 360000;
   expect(() => combineLabReports([a, b])).toThrow('protocols differ');
 });
 test('public review notes refuse private paths and credential-like strings', () => {
+  const publicUrl = review(); publicUrl.criteria[0]!.note = 'Observed NASA page https://www.nasa.gov/history/alsj-and-afj/.';
+  expect(validateReview(publicUrl, raw)).toBe(true);
   const privatePath = review(); privatePath.criteria[0]!.note = 'Read C:/Users/example/profile';
   expect(() => validateReview(privatePath, raw)).toThrow('Private path');
   const credential = review(); credential.criteria[0]!.note = 'token=not-a-real-secret';

@@ -19,6 +19,8 @@ The current registry versions were checked before the campaign: agent-browser 0.
 
 Each workflow runs twice per arm, 64 attempts total, split between two concurrent lanes of four workflows. Lane A covers GitHub, Maps and Amazon; lane B covers Booking, YouTube, Wikipedia and Flights. Task order rotates between repetitions and arm order rotates between tasks. Shared subscription and network contention remain a timing limitation. Each attempt starts a fresh logged-out Edge 153 profile at 1280 by 800 with an explicit light color scheme. Both arms share the agent-browser-owned browser launch; Playwright attaches over CDP. This compares action and observation stacks, not independent browser launch infrastructure.
 
+Playwright attachment also initializes its persistent context's download policy. It is not a passive connection. The native and Playwright ZIP results therefore compare their complete download implementations and policy setup on this Edge installation. They do not establish that the native implementation fails in every Chromium browser.
+
 Each attempt has 180 seconds for execution and 60 attempted actions. Startup is timed separately and included in total time. Final capture and cleanup are separate. All completed failures and blocked attempts remain in the denominator. A slow successful retry will be a separate diagnostic, never a replacement for its original attempt.
 
 The model can use observed links across the task's named domains, multiple tabs, keyboard, scrolling, forms and a public ZIP download. There are no site-specific locator recipes or model-authored scripts. Account changes, purchases, public messages and CAPTCHA completion are outside these tasks.
@@ -32,6 +34,14 @@ Two live transport probes found that native dynamic-tool image output was accept
 Completion is reviewed against every manifest requirement, using the saved sequence and captures. The model's `finish` answer is a claim, not a pass. Review records each satisfied requirement and cites the observation that supports it. A CAPTCHA, missing required field, wrong itinerary, hidden result or missing file cannot be counted as complete. Site blocks and tool errors are classified separately without removing them from the success rate.
 
 Timing uses all attempts with a recorded duration, plus a separate successful-attempt measure. Missing timing is reported explicitly. Usage comes from final cumulative model events. No subscription dollar price is inferred.
+
+## Transport correction and follow-up experiments
+
+During the first repetition, the native French Wikipedia snapshot exposed a benchmark transport bug. The benchmark borrowed the launch owner's TCP connection while its production receive listener remained attached. That listener closed the connection above 1,000,000 characters, even with no pending production request. A valid 1,099,970-character native response crossed that limit. This was a benchmark failure, not evidence that agent-browser could not read Wikipedia.
+
+Before the second Wikipedia repetition was reviewed, all eight original Wikipedia attempts were excluded from scoring, including successful Playwright attempts. Their outcomes and captures remain in the report. The other 56 attempts keep their original cohort. A separate matched rerun repeats Wikipedia twice in all four arms using an independent TCP connection to the same daemon. The command implementations, observations, goals, model settings and limits remain unchanged. The correction has its own frozen source hashes. A live regression verified a 1.1-million-character response followed by another successful command, with no owned processes left after cleanup.
+
+A further prototype tests a fresh model thread per decision, a bounded memory of at most 6,000 characters, and direct CDP viewport capture. It retains complete raw observations for review. This changes orchestration and capture together, so any measured improvement belongs to that combination. A local page with a pending web font reproduced a five-second Playwright screenshot timeout; direct capture produced a valid 1280 by 800 PNG in 28 ms. This fixture diagnoses a mechanism and is not a real-site speed result. Live prototype runs remain separate from the four-arm comparison.
 
 ## Other candidates and recordings
 

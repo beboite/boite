@@ -1,9 +1,11 @@
 import { expect, test } from 'bun:test';
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createBrowserLabEngine } from './browser-lab-engine.ts';
 import { LabPage } from './browser-lab-page.ts';
 import { labTasks } from './browser-lab-tasks.ts';
+import { useNativeDownload } from './browser-lab-download.ts';
 
 const live = process.env.BOITE_BENCH_PIN === '1' ? test : test.skip;
 
@@ -18,8 +20,21 @@ live('characterize native pinned public ZIP download and active web target', asy
   const commands: unknown[] = [];
   const summary: any = { pinTab: true, concurrency: 'Two main benchmark lanes may run concurrently; this probe is not latency-matched.' };
   const engine = await createBrowserLabEngine('agent-browser', { core: harness.core, taskId: 'pin-download-probe', binary, executablePath: findBrowser(), log: entry => commands.push(entry) });
+  let attached: any;
   try {
-    await engine.command('evaluate', { script: '0', pinTab: true });
+    if (process.env.BOITE_BENCH_NATIVE_DOWNLOAD_FIX === '1') {
+      useNativeDownload(engine, entry => commands.push(entry));
+      summary.nativeDownloadCorrection = engine.metadata.downloadCorrection;
+    }
+    if (process.env.BOITE_BENCH_PIN_PW_ATTACH === '1') {
+      const modulePath = process.env.BOITE_BENCH_PLAYWRIGHT_MODULE;
+      if (!modulePath) throw new Error('Playwright module path required for the attachment diagnostic.');
+      const pw = await import(pathToFileURL(modulePath).href);
+      attached = await pw.chromium.connectOverCDP(engine.cdpUrl);
+      summary.playwrightAttached = true;
+      summary.playwrightActions = 0;
+    }
+    if (process.env.BOITE_BENCH_NATIVE_DOWNLOAD_FIX !== '1') await engine.command('evaluate', { script: '0', pinTab: true });
     await engine.command('viewport', { width: 1280, height: 800 });
     await engine.command('navigate', { url: 'https://github.com/microsoft/playwright/releases/latest', waitUntil: 'domcontentloaded' });
     const page = new LabPage(engine, labTasks.find(task => task.id === 'github-release-download')!, true, output, performance.now() + 75_000);
@@ -63,6 +78,7 @@ live('characterize native pinned public ZIP download and active web target', asy
     summary.zipBytes = summary.zipExists ? statSync(path).size : 0;
     summary.zipSignature = summary.zipExists ? readFileSync(path).subarray(0, 4).toString('hex') : null;
     summary.savedZip = summary.zipBytes > 0 && summary.zipSignature === '504b0304';
+    if (process.env.BOITE_BENCH_NATIVE_DOWNLOAD_FIX === '1') expect(summary.savedZip).toBe(true);
     const final = await page.observe();
     summary.finalState = { url: final.text.url, viewport: page.history.at(-1).state.viewport, darkMode: page.history.at(-1).state.darkMode, screenshot: page.history.at(-1).screenshot };
     summary.pinRetainedOriginalWebTarget = summary.targetBefore === summary.targetAfter;
@@ -74,11 +90,12 @@ live('characterize native pinned public ZIP download and active web target', asy
     expect(download).toBeDefined();
     expect(Boolean(download.success)).toBe(summary.savedZip);
   } finally {
-    await engine.close();
-    summary.processesAfter = harness.core.procs.liveCount(engine.processGroup);
-    writeFileSync(join(output, 'commands.json'), JSON.stringify(commands, null, 2));
-    writeFileSync(join(output, 'summary.json'), JSON.stringify(summary, null, 2));
-    await harness.stop();
+    try {
+      try { await attached?.close(); } finally { await engine.close(); }
+      summary.processesAfter = harness.core.procs.liveCount(engine.processGroup);
+      writeFileSync(join(output, 'commands.json'), JSON.stringify(commands, null, 2));
+      writeFileSync(join(output, 'summary.json'), JSON.stringify(summary, null, 2));
+    } finally { await harness.stop(); }
     console.log(JSON.stringify({ pinTab: true, savedZip: summary.savedZip, zipBytes: summary.zipBytes, pinRetainedOriginalWebTarget: summary.pinRetainedOriginalWebTarget, processesAfter: summary.processesAfter }));
     expect(summary.processesAfter).toBe(0);
   }

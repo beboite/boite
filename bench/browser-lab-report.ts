@@ -9,6 +9,7 @@ export interface LabReview {
   criteria: Array<{ met: boolean; observations: number[]; note: string }>;
   capturesViewed: number[];
   category: 'complete' | 'site-block' | 'interaction' | 'budget' | 'tool-error' | 'model-error' | 'incorrect-answer';
+  excluded?: { cohort: string; reason: string };
 }
 const json = (path: string): Data => JSON.parse(readFileSync(path, 'utf8'));
 const sha = (path: string) => createHash('sha256').update(readFileSync(path)).digest('hex');
@@ -20,10 +21,11 @@ function times(values: number[]) {
 }
 function safeNote(note: unknown): string {
   if (typeof note !== 'string' || !note.trim()) throw new Error('Each review criterion needs a concrete note.');
-  if (/[A-Za-z]:[\\/]|(?:\/Users|\/home)\/|bearer\s|api[_-]?key|(?:secret|token|password)[=:]/i.test(note)) throw new Error('Private path or credential-like text in review note.');
+  if (/(?<![A-Za-z])[A-Za-z]:[\\/]|(?:\/Users|\/home)\/|bearer\s|api[_-]?key|(?:secret|token|password)[=:]/i.test(note)) throw new Error('Private path or credential-like text in review note.');
   return note.replace(/\u2014/g, '-').replace(/\u2026/g, '...');
 }
 export function validateReview(review: LabReview, raw: Data, directory?: string) {
+  if (review.excluded) { safeNote(review.excluded.cohort); safeNote(review.excluded.reason); }
   const observationIds = new Set((raw.observations ?? []).map((entry: Data) => entry.id));
   if (!Array.isArray(review.criteria) || review.criteria.length !== 3) throw new Error('Exactly three independent rubric decisions required.');
   for (const criterion of review.criteria) {
@@ -41,7 +43,7 @@ export function validateReview(review: LabReview, raw: Data, directory?: string)
   if (allMet !== (review.category === 'complete')) throw new Error('Review category contradicts rubric decisions.');
   return allMet && !raw.error && !raw.cancelled && !raw.model?.timedOut && raw.model?.turn?.status === 'completed'
     && raw.finished === true && raw.processesAfter === 0 && !raw.cleanupError
-    && toolAudit(raw.model?.events).unexpectedTypes.length === 0;
+    && toolAudit(raw.model?.events).unexpectedTypes.length === 0 && !review.excluded;
 }
 export function verifyLabSources(input: string, hashes: Data) {
   for (const file of requiredSources) if (typeof hashes?.[file] !== 'string' || !/^[a-f0-9]{64}$/.test(hashes[file])) throw new Error('Missing source hash: ' + file);
@@ -52,10 +54,11 @@ export function verifyLabSources(input: string, hashes: Data) {
 function summarizeModes(protocol: Data, rows: Data[]) {
   return Object.fromEntries(protocol.modes.map((mode: string) => {
     const attempts = rows.filter(r => r.mode === mode);
-    return [mode, { expected: protocol.tasks.length * protocol.repetitions, reviewed: attempts.length, succeeded: attempts.filter(r => r.verified).length,
-      allTiming: times(attempts.filter(r => r.timing.totalMs !== null).map(r => r.timing.totalMs)),
-      successfulTiming: times(attempts.filter(r => r.verified && r.timing.totalMs !== null).map(r => r.timing.totalMs)),
-      categories: Object.fromEntries([...new Set(attempts.map(r => r.category))].map(category => [category, attempts.filter(r => r.category === category).length])),
+    const eligible = attempts.filter(r => !r.excluded);
+    return [mode, { expected: protocol.tasks.length * protocol.repetitions, reviewed: attempts.length, scored: eligible.length, excluded: attempts.length - eligible.length, succeeded: eligible.filter(r => r.verified).length,
+      allTiming: times(eligible.filter(r => r.timing.totalMs !== null).map(r => r.timing.totalMs)),
+      successfulTiming: times(eligible.filter(r => r.verified && r.timing.totalMs !== null).map(r => r.timing.totalMs)),
+      categories: Object.fromEntries([...new Set(eligible.map(r => r.category))].map(category => [category, eligible.filter(r => r.category === category).length])),
     }];
   }));
 }
@@ -92,7 +95,7 @@ export function buildLabReport(input: string, reviewFile: string, partial = fals
     const commands = json(join(directory, 'commands.json')) as unknown as Data[];
     const commandMs = commands.filter(c => c.phase !== 'keepalive').reduce((sum, c) => sum + (num(c.ms) ?? 0), 0);
     const totalMs = num(raw.totalMs) ?? num(raw.elapsedBeforeCleanupMs);
-    rows.push({ id, task: task.id, mode, run, verified, category: review.category,
+    rows.push({ id, task: task.id, mode, run, verified, category: review.category, excluded: review.excluded ? { cohort: safeNote(review.excluded.cohort), reason: safeNote(review.excluded.reason) } : null,
       criteria: review.criteria.map(c => ({ ...c, note: safeNote(c.note) })), capturesViewed: review.capturesViewed,
       timing: { totalMs, executionMs: num(raw.executionMs), startupMs: num(raw.startupMs), commandMs,
         timedOut: Boolean(raw.model?.timedOut), durationSource: raw.totalMs === undefined ? 'elapsed-before-cleanup' : 'startup-plus-execution' },
@@ -107,12 +110,17 @@ export function buildLabReport(input: string, reviewFile: string, partial = fals
   }
   if (!partial && pending.length) throw new Error(`${pending.length} attempts or reviews missing.`);
   const cleanup = existsSync(join(input, 'cleanup.json')) ? json(join(input, 'cleanup.json')) : null;
-  if (!partial && (!cleanup || cleanup.stopReason || cleanup.modelGroups.some((g: Data) => g.remaining !== 0))) throw new Error('Complete clean shutdown required.');
-  const modelGroupsZero = cleanup?.modelGroups.every((g: Data) => g.remaining === 0) ?? false;
+  const modelGroupsZero = Array.isArray(cleanup?.modelGroups) && cleanup.modelGroups.length > 0
+    && new Set(cleanup.modelGroups.map((g: Data) => g.group)).size === cleanup.modelGroups.length
+    && cleanup.modelGroups.every((g: Data) => typeof g.group === 'string' && g.group.startsWith('benchmark-browser-lab:') && g.remaining === 0);
+  if (!partial && (!cleanup || cleanup.stopReason || !modelGroupsZero)) throw new Error('Complete clean shutdown required.');
   return { campaign: protocol.date, expected, reviewed: rows.length, pending, complete: pending.length === 0 && cleanup !== null && !cleanup.stopReason && modelGroupsZero && rows.every(r => r.processesAfter === 0),
     protocol: { tasks: protocol.tasks, modes: protocol.modes, repetitions: protocol.repetitions, timeoutMs: protocol.timeoutMs,
-      maxActions: protocol.maxActions, model: protocol.model, effort: protocol.effort, tier: protocol.tier, recorded: protocol.recorded, isolatedContext: protocol.isolatedContext,
-      campaignLane: protocol.campaignLane, campaignConcurrency: protocol.campaignConcurrency, cadence: protocol.cadence ?? 'one conversation per task with steered observations', sourceHashes: protocol.sourceHashes, binaryHash: protocol.binaryHash },
+      maxActions: protocol.maxActions, maxDecisions: protocol.maxDecisions ?? null, model: protocol.model, effort: protocol.effort, tier: protocol.tier, recorded: protocol.recorded, isolatedContext: protocol.isolatedContext,
+      campaignLane: protocol.campaignLane, campaignConcurrency: protocol.campaignConcurrency, cadence: protocol.cadence ?? 'one conversation per task with steered observations',
+      directCapture: protocol.directCapture ?? false, nativeDownloadCorrection: protocol.nativeDownloadCorrection ?? false,
+      transportCorrection: protocol.transportCorrection ?? null,
+      sourceHashes: protocol.sourceHashes, binaryHash: protocol.binaryHash },
     modes: summarizeModes(protocol, rows), cleanup: { browserZero: rows.filter(r => r.processesAfter === 0).length, modelGroupsZero }, attempts: rows };
 }
 export function combineLabReports(reports: ReturnType<typeof buildLabReport>[]) {
