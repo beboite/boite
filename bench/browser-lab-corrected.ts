@@ -10,6 +10,8 @@ import { LabPage, labTool, LabInfrastructureError } from './browser-lab-page.ts'
 import { labTasks } from './browser-lab-tasks.ts';
 import { BrowserLabRecording } from './browser-lab-recording.ts';
 import { createLabContext } from './browser-lab-isolation.ts';
+import { useDirectCapture } from './browser-lab-capture.ts';
+import { useNativeDownload } from './browser-lab-download.ts';
 
 const sha = (file: string) => createHash('sha256').update(readFileSync(file)).digest('hex');
 const arms = ['agent-browser-dom', 'playwright-dom', 'agent-browser-vision', 'playwright-vision'] as const;
@@ -27,17 +29,19 @@ async function main() {
   const repetitions = Number(process.env.BOITE_BENCH_REPETITIONS ?? 2);
   const timeoutMs = Number(process.env.BOITE_BENCH_TIMEOUT_MS ?? 180_000);
   const recorded = process.env.BOITE_BENCH_RECORD === '1';
+  const directCapture = process.env.BOITE_BENCH_FAST_CAPTURE === '1';
+  const nativeDownloadCorrection = process.env.BOITE_BENCH_NATIVE_DOWNLOAD_FIX === '1';
   const isolatedContext = process.env.BOITE_BENCH_ISOLATED_CONTEXT === '1';
   const ffmpegPath = process.env.BOITE_BENCH_FFMPEG;
   if (recorded && !ffmpegPath) throw new Error('BOITE_BENCH_FFMPEG is required for recording.');
   if (!Number.isInteger(repetitions) || repetitions < 1 || repetitions > 3 || timeoutMs < 30_000 || timeoutMs > 360_000) throw new Error('Invalid campaign limits.');
   mkdirSync(output, { recursive: true });
   const workspace = join(output, 'workspace'); mkdirSync(workspace);
-  const protocol = { date: new Date().toISOString(), tasks, modes, repetitions, timeoutMs, recorded, isolatedContext, campaignLane: process.env.BOITE_BENCH_LANE ?? 'serial', campaignConcurrency: Number(process.env.BOITE_BENCH_CONCURRENCY ?? 1), maxActions: 60, model: process.env.BOITE_BENCH_MODEL ?? 'gpt-6-luna', effort: 'max', tier: 'priority',
+  const protocol = { date: new Date().toISOString(), tasks, modes, repetitions, timeoutMs, recorded, directCapture, nativeDownloadCorrection, isolatedContext, campaignLane: process.env.BOITE_BENCH_LANE ?? 'serial', campaignConcurrency: Number(process.env.BOITE_BENCH_CONCURRENCY ?? 1), maxActions: 60, model: process.env.BOITE_BENCH_MODEL ?? 'gpt-6-luna', effort: 'max', tier: 'priority',
     resultDelivery: 'steer for both DOM and vision; dynamic image output was not visible to Luna in two probes', profiles: 'fresh isolated logged-out browser per attempt', viewport: { width: 1280, height: 800 }, colorScheme: 'light', transportCorrection: 'Independent loopback native connection; borrowed receiver invalidated the original Wikipedia cohort.',
     grading: 'Independent review of all rubric requirements using saved per-action state, screenshot, tabs, downloaded files and final answer. Self-reported completion is not a pass.',
     limitations: ['Both action engines share agent-browser-owned browser launch.', 'This compares action and observation stacks together; installed engine versions and snapshot APIs are recorded per attempt.', 'Screenshots are captured in both arms for independent evidence; only vision arms receive them.', 'No CAPTCHA solving, account mutation, purchases or public messages.'],
-    sourceHashes: Object.fromEntries(['browser-lab.ts', 'browser-lab-page.ts', 'browser-lab-tasks.ts', 'browser-lab-codex.ts', 'browser-lab-engine.ts', 'browser-lab-isolation.ts', 'browser-lab-recording.ts', 'browser-lab-corrected.ts', 'browser-lab-transport-fix.ts'].map(file => [file, sha(join(import.meta.dir, file))])),
+    sourceHashes: Object.fromEntries(['browser-lab.ts', 'browser-lab-page.ts', 'browser-lab-tasks.ts', 'browser-lab-codex.ts', 'browser-lab-engine.ts', 'browser-lab-isolation.ts', 'browser-lab-recording.ts', 'browser-lab-corrected.ts', 'browser-lab-transport-fix.ts', 'browser-lab-capture.ts', 'browser-lab-download.ts'].map(file => [file, sha(join(import.meta.dir, file))])),
     binaryHash: sha(binary),
   };
   writeFileSync(join(output, 'protocol.json'), JSON.stringify(protocol, null, 2));
@@ -93,6 +97,8 @@ async function main() {
             writeFileSync(join(output, `model-${modelGroups.length}.json`), JSON.stringify(await model.initialize(), null, 2));
           }
           engine = await createBrowserLabEngine(mode.startsWith('playwright') ? 'playwright' : 'agent-browser', { core: harness.core, taskId: id, binary, executablePath: findBrowser(), signal: cancellation.signal, log: entry => logs.push(entry) });
+          if (directCapture) await useDirectCapture(engine, entry => logs.push(entry));
+          if (nativeDownloadCorrection) useNativeDownload(engine, entry => logs.push(entry));
           owned();
           writeFileSync(join(directory, 'owned-processes.json'), JSON.stringify(harness.core.procs.liveOf(engine.processGroup), null, 2));
           sample.engine = engine.metadata;
