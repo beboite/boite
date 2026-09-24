@@ -4,6 +4,20 @@ import { mkdirSync, readFileSync } from 'node:fs';
 import { createBrowserLabEngine } from './browser-lab-engine.ts';
 import { BrowserLabRecording } from './browser-lab-recording.ts';
 
+test('recording follow failures preserve both successful and failed action outcomes', async () => {
+  const actionError = new Error('Action rejected by the page');
+  const recorder = new (BrowserLabRecording as any)({ processGroup: 'recording-regression',
+    command: async (_action: string, args: Record<string, unknown>) => {
+      if (args.fail) throw actionError;
+      return { clicked: true };
+    },
+  }, { output: 'recording-regression.mp4' });
+  recorder.follow = async () => { throw new Error('Recorder lost its target'); };
+  expect(await recorder.wrappedCommand('click')).toEqual({ clicked: true });
+  await expect(recorder.wrappedCommand('click', { fail: true })).rejects.toBe(actionError);
+  expect(recorder.errors).toEqual(['Error: Recorder lost its target', 'Error: Recorder lost its target']);
+});
+
 const live = process.env.BOITE_BENCH_RECORDING_SMOKE === '1' ? test : test.skip;
 live('continuous recording follows two actual public tabs in both engines and decodes to a filmstrip', async () => {
   const { startTestCore } = await import('../packages/core/test/harness.ts');

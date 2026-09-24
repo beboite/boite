@@ -1,4 +1,5 @@
-import type { Socket } from 'node:net';
+import { BrowserLabNativeTransport, connectIndependentNativeTransport } from './browser-lab-native.ts';
+export { BrowserLabNativeTransport } from './browser-lab-native.ts';
 import { pathToFileURL } from 'node:url';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -25,66 +26,6 @@ export interface BrowserLabEngine {
   activeTargetId(): Promise<string>;
   command(action: string, args?: Record<string, unknown>): Promise<Record<string, unknown>>;
   close(): Promise<void>;
-}
-
-/** Benchmark-only transport. BrowserDaemon still owns launch and cleanup.
- * Its normal command transport replaces native errors and kills the connection
- * on a timeout. This observer preserves the raw error and leaves late replies
- * readable. Timed-out actions are never replayed and may still complete.
- */
-export class BrowserLabNativeTransport {
-  private next = 0;
-  private buffer = '';
-  private pending: { id: string; resolve: (data: Record<string, unknown>) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> } | undefined;
-  constructor(private socket: Socket, private timeoutMs = 10_000, private signal?: AbortSignal) {
-    socket.on('data', this.receive);
-    socket.on('close', this.onClose);
-    socket.on('error', this.onError);
-    signal?.addEventListener('abort', this.onAbort);
-  }
-  private reject(error: Error) {
-    if (!this.pending) return;
-    clearTimeout(this.pending.timer);
-    this.pending.reject(error);
-    this.pending = undefined;
-  }
-  private onClose = () => this.reject(new Error('Native browser connection closed.'));
-  private onError = (error: Error) => this.reject(error);
-  private onAbort = () => this.reject(new Error('Browser laboratory command aborted.'));
-  private receive = (chunk: string | Buffer) => {
-    this.buffer += String(chunk);
-    if (this.buffer.length > 16_000_000) { this.reject(new Error('Native reply exceeds 16 MB.')); this.buffer = ''; return; }
-    let index: number;
-    while ((index = this.buffer.indexOf('\n')) >= 0) {
-      const line = this.buffer.slice(0, index); this.buffer = this.buffer.slice(index + 1);
-      let reply: { id?: string; success?: boolean; data?: Record<string, unknown>; error?: unknown };
-      try { reply = JSON.parse(line); } catch { this.reject(new Error(`Invalid native JSON: ${line}`)); continue; }
-      if (!this.pending || reply.id !== this.pending.id) continue;
-      const pending = this.pending;
-      if (!reply.success || !reply.data || typeof reply.data !== 'object' || Array.isArray(reply.data)) {
-        this.reject(new Error(`Native browser command failed: ${typeof reply.error === 'string' ? reply.error : JSON.stringify(reply)}`));
-      } else {
-        clearTimeout(pending.timer); this.pending = undefined; pending.resolve(reply.data);
-      }
-    }
-  };
-  command(action: string, args: Record<string, unknown> = {}) {
-    this.signal?.throwIfAborted();
-    if (this.pending) return Promise.reject(new Error('Only one native browser command may run at a time.'));
-    if (this.socket.destroyed) return Promise.reject(new Error('Native browser connection closed.'));
-    const id = `lab-${++this.next}`;
-    return new Promise<Record<string, unknown>>((resolve, reject) => {
-      const timeout = ['navigate', 'download'].includes(action) ? Math.max(this.timeoutMs, 35_000) : this.timeoutMs;
-      const timer = setTimeout(() => this.reject(new Error(`Native ${action} timed out after ${timeout} ms; it was not cancelled or retried and may still complete.`)), timeout);
-      this.pending = { id, resolve, reject, timer };
-      this.socket.write(JSON.stringify({ ...args, action, id }) + '\n');
-    });
-  }
-  dispose() {
-    this.reject(new Error('Native laboratory transport disposed.'));
-    this.socket.off('data', this.receive); this.socket.off('close', this.onClose); this.socket.off('error', this.onError);
-    this.signal?.removeEventListener('abort', this.onAbort);
-  }
 }
 
 export function playwrightSelector(selector: string): string {
@@ -199,9 +140,9 @@ export class BrowserLabPlaywrightCommands {
 export async function createBrowserLabEngine(kind: BrowserLabEngineKind, options: BrowserLabEngineOptions): Promise<BrowserLabEngine> {
   const signal = options.signal ?? new AbortController().signal;
   const daemon = await BrowserDaemon.launch(options.core, options.taskId, options.binary, options.executablePath, signal);
-  // Deliberately isolated here: private runtime socket access is benchmark-only.
-  const socket = (daemon as unknown as { socket: Socket }).socket;
-  const native = new BrowserLabNativeTransport(socket, options.commandTimeoutMs, signal);
+  let native: BrowserLabNativeTransport;
+  try { native = await connectIndependentNativeTransport(daemon, options.commandTimeoutMs, signal); }
+  catch (error) { await daemon.close(); throw error; }
   const group = `browser:${options.taskId}`;
   let browser: Pw;
   let closed = false;
@@ -234,7 +175,7 @@ export async function createBrowserLabEngine(kind: BrowserLabEngineKind, options
       pw = new BrowserLabPlaywrightCommands(browser);
     }
     const metadata = { kind, userAgent: agent.result, executablePath: options.executablePath, browserLifecycle: 'BrowserDaemon launches the same isolated headless muted browser for both engines; Playwright attaches over CDP. This compares actions and observations, not independent Playwright lifecycle.', agentBrowserVersion: options.agentBrowserVersion ?? packageVersion(join(dirname(options.binary), '..', 'package.json'), 'agent-browser') ?? 'unknown', playwrightVersion: playwrightVersion ?? null, playwrightProtocol: kind === 'playwright' ? `${typeof browser.contexts()[0].pages()[0].ariaSnapshot === 'function' ? 'Public page.ariaSnapshot({mode:ai})' : 'Internal _snapshotForAI fallback for older versions'} and aria-ref; default locator actionability` : null, nativeTimeout: 'No automatic retry. A timed-out native command may complete later; socket remains open.', snapshotFiltering: kind === 'playwright' ? 'AI snapshot full tree; interactive retains lines with refs; compact is already implicit; selector scoping unsupported.' : 'Native snapshot options' };
-    Object.assign(metadata, { colorScheme: 'light', observationRendering: 'prepare_observation reapplies the requested viewport and light color scheme on the current target before every LabPage observation, including after failed actions and downloads.' });
+    Object.assign(metadata, { nativeTransport: 'Independent connection to the owned TCP or Unix endpoint; production BrowserDaemon receives only its own replies.', colorScheme: 'light', observationRendering: 'prepare_observation reapplies the requested viewport and light color scheme on the current target before every LabPage observation, including after failed actions and downloads.' });
     const command = async (action: string, args: Record<string, unknown> = {}) => {
       signal.throwIfAborted();
       if (keepingAlive) await keepingAlive;

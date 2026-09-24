@@ -12,6 +12,7 @@ export class BrowserDaemon implements Driver {
   private nextId = 0;
   private pending: { id: string; resolve: (data: Record<string, unknown>) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> } | null = null;
   private socket: Socket | null = null;
+  private endpoint: { host: string; port: number } | { path: string } | null = null;
   private closed = false;
   private constructor(private dispose: () => Promise<void>, private readonly signal: AbortSignal) {}
 
@@ -59,8 +60,9 @@ export class BrowserDaemon implements Driver {
         await delay(50, signal);
       }
       signal.throwIfAborted();
-      const socket = process.platform === 'win32'
-        ? connect({ host: '127.0.0.1', port: Number(readFileSync(path, 'utf8').trim()) }) : connect(path);
+      daemon.endpoint = process.platform === 'win32'
+        ? { host: '127.0.0.1', port: Number(readFileSync(path, 'utf8').trim()) } : { path };
+      const socket = daemon.openClientSocket();
       daemon.socket = socket;
       socket.setEncoding('utf8');
       socket.on('error', () => daemon.fail(new Error('Browser connection failed.')));
@@ -74,6 +76,17 @@ export class BrowserDaemon implements Driver {
       });
       return daemon;
     } catch (error) { await daemon.close(); throw error; }
+  }
+
+  /** Opens another connection to this daemon's owned endpoint. The caller must
+   * await connect, handle errors and close the socket. No command receiver is
+   * installed, so independent clients cannot trigger this driver's reply cap.
+   */
+  openClientSocket(): Socket {
+    this.signal.throwIfAborted();
+    if (this.closed) throw new Error('Browser daemon is closed.');
+    if (!this.endpoint) throw new Error('Browser daemon endpoint is not available.');
+    return connect(this.endpoint);
   }
 
   private fail(error: Error): void {

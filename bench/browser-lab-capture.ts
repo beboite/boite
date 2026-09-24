@@ -24,6 +24,7 @@ export async function useDirectCapture(engine: BrowserLabEngine, log: (entry: Br
     socket.addEventListener('error', () => { clearTimeout(timer); socket.close(); reject(new Error('Capture CDP connection failed.')); }, { once: true });
   });
   const send = (method: string, params: Record<string, unknown>, sessionId?: string): Promise<any> => new Promise((resolve, reject) => {
+    if (socket.readyState !== WebSocket.OPEN) { reject(new Error('Capture CDP is not open.')); return; }
     const id = ++next;
     const timer = setTimeout(() => { pending.delete(id); reject(new Error(`Capture ${method} timed out.`)); }, 5000);
     pending.set(id, { resolve, reject, timer });
@@ -32,10 +33,12 @@ export async function useDirectCapture(engine: BrowserLabEngine, log: (entry: Br
   });
   const command = engine.command, close = engine.close;
   const sessions = new Map<string, string>();
+  let fallback = false;
   engine.metadata.directCapture = 'CDP Page.captureScreenshot on the exact selected target; no font-readiness wait.';
   engine.command = async (action, args = {}) => {
     if (action !== 'screenshot') return command(action, args);
     if (typeof args.path !== 'string' || args.fullPage === true) throw new Error('Direct capture requires a viewport PNG output path.');
+    if (fallback) return command(action, args);
     const started = performance.now();
     try {
       const targetId = await engine.activeTargetId();
@@ -52,7 +55,12 @@ export async function useDirectCapture(engine: BrowserLabEngine, log: (entry: Br
       return result;
     } catch (error) {
       log({ engine: engine.kind, action, args, ms: performance.now() - started, success: false, error: String(error) });
-      throw error;
+      // Capture is read-only. Disable a failed adapter instead of spending the
+      // same timeout on every later observation; never replay a page action.
+      fallback = true;
+      engine.metadata.directCaptureFallback = String(error);
+      fail('Direct capture disabled after failure.'); socket.close(); sessions.clear();
+      return command(action, args);
     }
   };
   engine.close = async () => { fail('Capture adapter closed.'); socket.close(); await close(); };

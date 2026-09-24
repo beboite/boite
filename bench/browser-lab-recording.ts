@@ -83,7 +83,11 @@ export class BrowserLabRecording {
       this.mark(action);
       let result: Record<string, unknown>;
       try { result = await this.originalCommand(action, args); }
-      finally { if (['tab_switch', 'tab_new', 'tab_close', 'click', 'press'].includes(action)) await this.follow(); }
+      finally {
+        if (['tab_switch', 'tab_new', 'tab_close', 'click', 'press'].includes(action)) {
+          await this.follow().catch(error => { this.errors.push(String(error)); });
+        }
+      }
       return result;
     };
   }

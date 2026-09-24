@@ -4,6 +4,35 @@ import { join } from 'node:path';
 import { createBrowserLabEngine } from './browser-lab-engine.ts';
 import { useDirectCapture } from './browser-lab-capture.ts';
 
+test('a failed CDP attachment falls back to engine capture without replaying page actions', async () => {
+  let attaches = 0, closed = false;
+  const server = Bun.serve({ hostname: '127.0.0.1', port: 0,
+    fetch(request, server) { if (server.upgrade(request)) return; return new Response('', { status: 400 }); },
+    websocket: { message(socket, data) {
+      const request = JSON.parse(String(data));
+      if (request.method === 'Target.attachToTarget') attaches++;
+      socket.send(JSON.stringify({ id: request.id, error: { message: 'Target attach failed' } }));
+    } },
+  });
+  const calls: string[] = [], logs: any[] = [];
+  const engine: any = { kind: 'agent-browser', cdpUrl: `ws://127.0.0.1:${server.port}`, metadata: {},
+    activeTargetId: async () => 'current-target',
+    command: async (action: string) => { calls.push(action); return { source: 'engine', action }; },
+    close: async () => { closed = true; },
+  };
+  try {
+    await useDirectCapture(engine, entry => logs.push(entry));
+    expect(await engine.command('click', { selector: '@e1' })).toEqual({ source: 'engine', action: 'click' });
+    expect(await engine.command('screenshot', { path: 'first.png' })).toEqual({ source: 'engine', action: 'screenshot' });
+    expect(await engine.command('screenshot', { path: 'second.png' })).toEqual({ source: 'engine', action: 'screenshot' });
+    expect(attaches).toBe(1);
+    expect(calls).toEqual(['click', 'screenshot', 'screenshot']);
+    expect(engine.metadata.directCaptureFallback).toContain('Target attach failed');
+    expect(logs.some(entry => entry.success === false)).toBe(true);
+  } finally { await engine.close(); server.stop(true); }
+  expect(closed).toBe(true);
+});
+
 const live = process.env.BOITE_BENCH_FAST_CAPTURE === '1' ? test : test.skip;
 live('direct capture records rendered pixels while a page font remains pending', async () => {
   const { startTestCore } = await import('../packages/core/test/harness.ts');

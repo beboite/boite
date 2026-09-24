@@ -119,6 +119,14 @@ adds 120 public-site trials of direct Luna and Jev with Luna fallback, plus
 separate live recordings. Both policies pass 43/60 frozen automatic checks;
 the report distinguishes verifier defects, blocked sites and driver failures.
 These policies are benchmark prototypes and are not plugin settings.
+The [large-site controller comparison](../bench/results/2026-09-24-browser-lab.md)
+adds eight longer workflows with independent per-requirement review, two
+repetitions across four native/Playwright and DOM/vision configurations,
+and separate controller, model and memory prototypes. It includes actual
+downloads, product comparisons, maps and a round-trip flight selection.
+The [integration diagnostics](../bench/results/2026-09-24-browser-diagnostics.md)
+separate transport, download and capture failures from server redirects.
+These experiments do not expand the installed Jev plugin's capabilities.
 Linux and macOS use the driver's Unix socket transport, but their
 browser execution and forced cleanup need platform verification. Windows
 owns the headless browser tree through the native driver's job object.

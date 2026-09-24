@@ -6,6 +6,49 @@ import { findBrowser } from '../tests/e2e/lib/cdp.ts';
 import { createBrowserLabEngineTransportFix } from './browser-lab-transport-fix.ts';
 import { useDirectCapture } from './browser-lab-capture.ts';
 
+async function prepareHelium(url: string, events: any[]) {
+  const socket = new WebSocket(url), pending = new Map<number, { resolve(value: any): void; reject(error: Error): void; timer: ReturnType<typeof setTimeout> }>();
+  let next = 0;
+  socket.addEventListener('message', event => {
+    const value = JSON.parse(String(event.data));
+    if (/^(Target\.|Inspector\.)/.test(value.method ?? '')) events.push({ at: Date.now(), ...value });
+    const item = pending.get(value.id); if (!item) return;
+    pending.delete(value.id); clearTimeout(item.timer);
+    if (value.error) item.reject(new Error(JSON.stringify(value.error))); else item.resolve(value.result);
+  });
+  const close = () => { for (const item of pending.values()) { clearTimeout(item.timer); item.reject(new Error('Helium readiness CDP closed.')); } pending.clear(); socket.close(); };
+  socket.addEventListener('close', () => events.push({ at: Date.now(), type: 'cdp-close' }));
+  socket.addEventListener('error', () => events.push({ at: Date.now(), type: 'cdp-error' }));
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => { close(); reject(new Error('Helium readiness CDP connection timeout.')); }, 5000);
+      socket.addEventListener('open', () => { clearTimeout(timer); resolve(); }, { once: true });
+      socket.addEventListener('error', () => { clearTimeout(timer); reject(new Error('Helium readiness CDP connection error.')); }, { once: true });
+    });
+    const send = (method: string, params: any, sessionId?: string) => new Promise<any>((resolve, reject) => {
+      const id = ++next, timer = setTimeout(() => { pending.delete(id); reject(new Error('Helium readiness ' + method + ' timeout.')); }, 5000);
+      pending.set(id, { resolve, reject, timer }); socket.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) }));
+    });
+    await send('Target.setDiscoverTargets', { discover: true });
+    const started = performance.now(), deadline = started + 60_000;
+    let sessionId: string | undefined;
+    while (performance.now() < deadline) {
+      if (!sessionId) {
+        const targets = await send('Target.getTargets', {});
+        const block = targets.targetInfos.find((target: any) => target.url.startsWith('chrome-extension://blockjmkbacgjkknlgpkjjiijinjdanf/'));
+        if (block) sessionId = (await send('Target.attachToTarget', { targetId: block.targetId, flatten: true })).sessionId;
+      }
+      if (sessionId) {
+        const ready = await send('Runtime.evaluate', { expression: 'typeof µBlock !== "undefined" && µBlock.readyToFilter === true', returnByValue: true }, sessionId);
+        if (ready.result?.value === true) return { close, readyToFilter: true, readinessMs: performance.now() - started };
+      }
+      // Condition polling, not a fixed delay before navigation.
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    throw new Error('Helium uBlock.readyToFilter was not true within 60000ms.');
+  } catch (error) { close(); throw error; }
+}
+
 // A deterministic access diagnostic, never an autonomous task success or timing sample.
 async function main() {
   if (process.env.BOITE_BENCH_BOOKING_PROBE !== '1') throw new Error('Live Booking diagnostic is opt-in.');
@@ -13,8 +56,9 @@ async function main() {
   const binary = process.env.BOITE_BROWSER_TEST_BINARY, modulePath = process.env.BOITE_BENCH_PLAYWRIGHT_MODULE;
   if (!process.env.BOITE_BENCH_OUTPUT || existsSync(output) || !binary || !modulePath) throw new Error('Fresh output and browser/Playwright paths required.');
   mkdirSync(output, { recursive: true });
-  const harness = await startTestCore(), log: any[] = [], steps: any[] = [];
+  const harness = await startTestCore(), log: any[] = [], steps: any[] = [], cdpEvents: any[] = [];
   let engine: Awaited<ReturnType<typeof createBrowserLabEngineTransportFix>> | undefined, browser: any;
+  let helium: Awaited<ReturnType<typeof prepareHelium>> | undefined;
   let capture: ((name: string) => Promise<void>) | undefined;
   const summary: any = { kind: 'deterministic public search diagnostic; not agent evaluation' };
   try {
@@ -22,6 +66,10 @@ async function main() {
     await useDirectCapture(engine, () => {});
     const pw = await import(pathToFileURL(modulePath).href);
     browser = await pw.chromium.connectOverCDP(engine.cdpUrl);
+    if (/helium/i.test(findBrowser())) {
+      helium = await prepareHelium(engine.cdpUrl, cdpEvents);
+      summary.helium = { readyToFilter: helium.readyToFilter, readinessMs: helium.readinessMs };
+    }
     const page = browser.contexts()[0].pages()[0];
     page.setDefaultTimeout(10000);
     page.on('response', (response: any) => {
@@ -61,10 +109,10 @@ async function main() {
     summary.finalUrl = page.url(); summary.engine = engine.metadata;
   } catch (error) { summary.error = String(error); try { await capture?.('error'); } catch (captureError) { summary.captureError = String(captureError); } }
   finally {
-    try { await browser?.close(); } finally {
+    try { helium?.close(); await browser?.close(); } finally {
       try { await engine?.close(); } finally {
         summary.processesAfter = harness.core.procs.liveCount('browser:booking-access-probe');
-        try { await harness.stop(); } finally { writeFileSync(join(output, 'network.json'), JSON.stringify(log, null, 2)); writeFileSync(join(output, 'summary.json'), JSON.stringify(summary, null, 2)); }
+        try { await harness.stop(); } finally { writeFileSync(join(output, 'network.json'), JSON.stringify(log, null, 2)); writeFileSync(join(output, 'cdp-events.json'), JSON.stringify(cdpEvents, null, 2)); writeFileSync(join(output, 'summary.json'), JSON.stringify(summary, null, 2)); }
       }
     }
   }

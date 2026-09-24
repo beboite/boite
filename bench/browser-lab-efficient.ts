@@ -36,7 +36,7 @@ async function main() {
   const mode = `memory-${kind}-vision`;
   mkdirSync(output, { recursive: true });
   const workspace = join(output, 'workspace'); mkdirSync(workspace);
-  const sources = ['browser-lab.ts', 'browser-lab-page.ts', 'browser-lab-tasks.ts', 'browser-lab-codex.ts', 'browser-lab-engine.ts', 'browser-lab-isolation.ts', 'browser-lab-recording.ts', 'browser-lab-efficient.ts', 'browser-lab-memory.ts', 'browser-lab-capture.ts', 'browser-lab-transport-fix.ts'];
+  const sources = ['browser-lab.ts', 'browser-lab-page.ts', 'browser-lab-tasks.ts', 'browser-lab-codex.ts', 'browser-lab-engine.ts', 'browser-lab-native.ts', 'browser-lab-isolation.ts', 'browser-lab-recording.ts', 'browser-lab-efficient.ts', 'browser-lab-memory.ts', 'browser-lab-capture.ts', 'browser-lab-transport-fix.ts'];
   if (nativeDownloadCorrection) sources.push('browser-lab-download.ts');
   const protocol = { date: new Date().toISOString(), tasks, modes: [mode], repetitions: 1, timeoutMs, maxActions: 60, maxDecisions: 40,
     model: process.env.BOITE_BENCH_MODEL ?? 'gpt-6-luna', effort: 'max', tier: 'priority', isolatedContext: true,
