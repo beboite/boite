@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdirSync, writeFileSync, existsSync, rmSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { startTestCore } from '../packages/core/test/harness.ts';
@@ -18,6 +18,7 @@ type Command = { action: string; [key: string]: unknown };
 type Session = { daemon: BrowserDaemon; arm: 'visual' | 'classic'; task: typeof tasks[number]; run: number; prefix: string; start: number; executionStart: number; startupMs: number; logs: any[]; urls: string[]; calls: number; actions: number; shots: number; id: string };
 let session: Session | null = null;
 let busy = false;
+let ownsControl = false;
 
 async function command(s: Session, action: string, args: Record<string, unknown>, phase: string) {
   const start = performance.now();
@@ -133,21 +134,22 @@ async function finish(body: any) {
     result.urlMatches = result.final?.url === s.task.completion.url;
     result.textMatches = typeof result.final?.text === 'string' && result.final.text.includes(s.task.completion.text);
     result.govukSearchUsed = s.task.id !== 'govuk' || s.urls.some(url => { const u = new URL(url); return u.origin === 'https://www.gov.uk' && u.pathname.startsWith('/search/') && u.searchParams.get('keywords') === 'renew adult passport'; });
-    result.withinLimits = executionMs <= 120_000 && s.actions <= 30;
+    result.withinLimits = executionMs < 120_000 && s.actions <= 30;
     result.verified = result.urlMatches && result.textMatches && result.govukSearchUsed && result.withinLimits;
     result.screenshot = await screenshot(s, true);
   } catch (error) { result.evidenceError = String(error); }
   finally {
     const cleanupStart = performance.now();
-    await s.daemon.close();
+    try { await s.daemon.close(); }
+    catch (error) { result.cleanupError = String(error); result.verified = false; }
     result.cleanupMs = performance.now() - cleanupStart;
     result.processesAfter = harness.core.procs.liveCount(`browser:${s.id}`);
     result.wallMs = performance.now() - s.start;
     result.commands = s.logs;
     result.urls = s.urls;
     const path = join(output, `${s.prefix}.json`);
-    writeFileSync(path, JSON.stringify(result, null, 2));
-    session = null;
+    try { writeFileSync(path, JSON.stringify(result, null, 2)); }
+    finally { session = null; }
     result.resultPath = path;
   }
   return { resultPath: result.resultPath, verified: result.verified, startupMs: result.startupMs, executionMs, wallMs: result.wallMs, agentToolCalls: result.agentToolCalls, actionCommands: result.actionCommands, processesAfter: result.processesAfter, screenshot: result.screenshot };
@@ -168,6 +170,7 @@ const server = Bun.serve({ hostname: '127.0.0.1', port: 0, idleTimeout: 120, asy
       if (session) await finish({ note: 'Service shutdown' });
       clearInterval(heartbeat);
       await harness.stop();
+      if (ownsControl) { rmSync(control, { force: true }); ownsControl = false; }
       setTimeout(() => { server.stop(true); process.exit(0); }, 100);
       return Response.json({ shutdown: true });
     }
@@ -180,9 +183,22 @@ const server = Bun.serve({ hostname: '127.0.0.1', port: 0, idleTimeout: 120, asy
 const heartbeat = setInterval(async () => {
   if (busy || !session) return;
   busy = true;
-  try { await command(session, 'evaluate', { script: '0' }, 'keepalive'); } catch {} finally { busy = false; }
+  try {
+    if (performance.now() - session.executionStart >= 120_000) await finish({ note: '120 second execution limit' });
+    else await command(session, 'evaluate', { script: '0' }, 'keepalive');
+  } catch {} finally { busy = false; }
 }, 10_000);
 const control = join(output, 'control.json');
-writeFileSync(control, JSON.stringify({ url: `http://127.0.0.1:${server.port}`, token, pid: process.pid, output }, null, 2));
-writeFileSync(join(output, 'metadata.json'), JSON.stringify({ pid: process.pid, output, binary, executable, viewport: { width: 1280, height: 800 }, controlFile: control, agentBrowserVersion: '0.37.1' }, null, 2));
+try {
+  // Windows inherits directory ACLs, as the core's own token file does.
+  writeFileSync(control, JSON.stringify({ url: `http://127.0.0.1:${server.port}`, token, pid: process.pid, output }, null, 2), { mode: 0o600, flag: 'wx' });
+  ownsControl = true;
+  writeFileSync(join(output, 'metadata.json'), JSON.stringify({ pid: process.pid, output, binary, executable, viewport: { width: 1280, height: 800 }, controlFile: control, agentBrowserVersion: '0.37.1' }, null, 2));
+} catch (error) {
+  clearInterval(heartbeat);
+  server.stop(true);
+  try { await harness.stop(); }
+  finally { if (ownsControl) rmSync(control, { force: true }); }
+  throw error;
+}
 console.log(`READY controlFile=${control} metadata=${join(output, 'metadata.json')}`);

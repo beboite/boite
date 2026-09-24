@@ -1154,7 +1154,7 @@ export const fr: Messages = {
     browserSaved: 'Réglages du navigateur enregistrés',
     browserTasks: 'Tâches récentes du navigateur',
     browserEmpty: 'Aucune tâche pour le moment. Les agents peuvent en lancer une avec boite browser run.',
-    browserProgress: 'Étape {step} sur {max} · {tokens} tokens en entrée',
+    browserProgress: 'Étape {step} sur {max} · {tokens} jetons en entrée',
     browserStatus: { running: 'En cours', succeeded: 'Vérifié', 'needs-agent': 'Intervention de l’agent', error: 'Échec', cancelled: 'Annulé' },
     heading: 'Extensions',
     intro: "Les extensions ajoutent des fonctions à Boite. Chacune est un programme qui tourne sur la machine hébergeant votre cœur, téléchargé en https et vérifié contre le SHA-256 publié par son manifeste.",

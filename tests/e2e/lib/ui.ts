@@ -32,7 +32,9 @@ export async function startUi(port: number, options: { sourceModules?: boolean }
     // Source-importing tests need the dev server, but compilation belongs in
     // setup rather than inside the browser's navigation deadline.
     try {
-      await Promise.all(['/src/main.ts', '/src/lib/fake-client.ts'].map(url => server.environments.client.warmupRequest(url)));
+      await Promise.all(['/src/main.ts', '/src/lib/fake-client.ts'].map(async url => {
+        if (!await server.environments.client.transformRequest(url)) throw new Error(`UI setup could not transform ${url}`);
+      }));
       await server.environments.client.waitForRequestsIdle();
     } catch (error) { await server.close(); throw error; }
   }

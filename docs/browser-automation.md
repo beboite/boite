@@ -64,8 +64,9 @@ which values were saved. Callers remain responsible for any stronger domain
 check, such as reading the saved record through the application's API.
 
 Results are `succeeded`, `needs-agent`, `error` or `cancelled`. A result needing
-the agent names the reason: step/time limit, missing evidence, page leaving
-the starting origin, or uncertain action delivery. The engine does not
+the agent names the reason. Examples include a step/time limit, missing evidence,
+the page leaving the starting origin, uncertain action delivery, or Jev handing
+off because it needs another capability, missing text, or human input. The engine does not
 replay a failed action. A fresh task starts a new browser, so inspect an
 uncertain submission independently before resubmitting it.
 
