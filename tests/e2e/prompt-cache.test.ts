@@ -1,19 +1,15 @@
 import { afterAll, beforeAll, expect, test } from 'bun:test';
-import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { BrowserPage, freePort } from './lib/cdp';
+import { startDevUi } from './lib/ui.ts';
 
-const req = createRequire(join(import.meta.dir, '../../packages/ui/package.json'));
-const { createServer } = await import(req.resolve('vite'));
 let server: { close(): Promise<void> };
 let port = 0;
 const pages: BrowserPage[] = [];
 
 beforeAll(async () => {
   port = await freePort();
-  const vite = await createServer({ root: join(import.meta.dir, '../../packages/ui'), server: { host: '127.0.0.1', port, strictPort: true } });
-  server = vite;
-  await vite.listen();
+  server = await startDevUi(port);
 }, 90_000);
 afterAll(async () => {
   await Promise.all(pages.map((page) => page.close()));

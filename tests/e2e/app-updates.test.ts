@@ -1,11 +1,9 @@
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from 'bun:test';
-import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { BrowserPage, freePort } from './lib/cdp';
+import { startUi } from './lib/ui.ts';
 
-const uiRequire = createRequire(join(import.meta.dir, '../../packages/ui/package.json'));
-const { createServer } = await import(uiRequire.resolve('vite'));
-let server: { listen(): Promise<unknown>; close(): Promise<void> };
+let server: { close(): Promise<void> };
 let page: BrowserPage;
 let base: string;
 const id = (name: string) => `[data-testid="${name}"]`;
@@ -35,8 +33,7 @@ async function pickDesktopLocale(locale: 'en' | 'fr') {
 beforeAll(async () => {
   const port = await freePort();
   base = `http://127.0.0.1:${port}`;
-  server = await createServer({ root: join(import.meta.dir, '../../packages/ui'), server: { host: '127.0.0.1', port, strictPort: true }, clearScreen: false });
-  await server.listen();
+  server = await startUi(port);
 }, 60_000);
 
 beforeEach(async () => {
