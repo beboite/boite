@@ -74,6 +74,22 @@ export function promptSegments(text: string, command: string | undefined, keywor
   return segments;
 }
 
+/**
+ * The segments that fall in `[start, end)` of the prompt they were cut from, so
+ * a piece of the prompt keeps the keyword boundaries of the whole.
+ */
+export function sliceSegments(segments: PromptSegment[], start: number, end: number): PromptSegment[] {
+  const slice: PromptSegment[] = [];
+  let at = 0;
+  for (const segment of segments) {
+    const from = Math.max(at, start);
+    const to = Math.min(at + segment.text.length, end);
+    if (from < to) slice.push({ text: segment.text.slice(from - at, to - at), kind: segment.kind });
+    at += segment.text.length;
+  }
+  return slice;
+}
+
 /** The Boite command a prompt opens with, drawn in the accent wherever the prompt is shown. */
 export function promptCommand(text: string): string | undefined {
   return /^\/(goal|loop)(?=\s|$)/.exec(text)?.[0];

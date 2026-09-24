@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { claudeKeywords, promptSegments, visibleAnswer, visibleUserText } from './message-display';
+import { claudeKeywords, promptSegments, sliceSegments, visibleAnswer, visibleUserText } from './message-display';
 
 test('the keywords count only for a Claude model run by Claude Code', () => {
   expect(claudeKeywords('claude-sdk', 'claude-opus-5-5')).toBe(true);
@@ -87,4 +87,12 @@ test('a prompt is cut at its command and at the words Claude Code acts on', () =
   expect(promptSegments('ultrathinking', undefined, true)).toEqual([{ text: 'ultrathinking', kind: 'plain' }]);
   expect(promptSegments('ultrathink', undefined, false)).toEqual([{ text: 'ultrathink', kind: 'plain' }]);
   expect(promptSegments('', undefined, true)).toEqual([]);
+});
+
+test('sliceSegments cuts a range out of the whole prompt, keywords split at the edges', () => {
+  const segments = promptSegments('go ultrathink now', undefined, true);
+  expect(sliceSegments(segments, 0, 3)).toEqual([{ text: 'go ', kind: 'plain' }]);
+  expect(sliceSegments(segments, 1, 8)).toEqual([{ text: 'o ', kind: 'plain' }, { text: 'ultra', kind: 'ultrathink' }]);
+  expect(sliceSegments(segments, 13, 17)).toEqual([{ text: ' now', kind: 'plain' }]);
+  expect(sliceSegments(segments, 17, 20)).toEqual([]);
 });
