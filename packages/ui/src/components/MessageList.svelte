@@ -10,7 +10,7 @@
 
 <script lang="ts">
   import { onDestroy, onMount, tick, untrack } from 'svelte';
-  import { ArrowDown, Check, FileText } from '@lucide/svelte';
+  import { ArrowDown, Check, CircleAlert, FileText } from '@lucide/svelte';
   import type { AgentLetter, Message } from '@boite/contracts';
   import { bytes } from '../lib/format';
   import { decodedBytes } from '../lib/attachments';
@@ -23,6 +23,8 @@
   import ChatFile from './ChatFile.svelte';
   import ThinkingPart from './ThinkingPart.svelte';
   import TurnSummary from './TurnSummary.svelte';
+  import TurnFiles from './TurnFiles.svelte';
+  import { turnFiles, type TurnFile } from '../lib/turn-files';
   import { claudeKeywords, promptCommand, promptSegments, promptText } from '../lib/message-display';
   import PreviewReferences from './PreviewReferences.svelte';
   import ToolCard from './ToolCard.svelte';
@@ -44,6 +46,13 @@
     ...(delegation?.messages.filter(letter => letter.from.threadId === threadId || letter.to.threadId === threadId) ?? [])
   ]);
   const delegationLetterIds = $derived(new Set(delegation?.messages.map(letter => letter.id) ?? []));
+  /** The thread's account is signed out: an error then carries the way back in. */
+  const signedOut = $derived.by(() => {
+    const thread = store.openThread;
+    if (!thread || thread.id !== threadId) return null;
+    const account = store.accountOf(thread.accountId);
+    return account?.status === 'unauthenticated' ? account : null;
+  });
   const letterRows = $derived.by(() => new Map(letters.map(letter => [`coordination:${letter.id}`, letter])));
   const team = $derived(delegation?.rootThreadId === threadId ? delegation.agents : []);
   const teamRowId = $derived(`delegation:${threadId}`);
@@ -545,6 +554,23 @@
     return result;
   });
   const responded = $derived(new Set(messages.filter(m => m.role === 'assistant' && m.parts.some(p => p.type === 'text' || p.type === 'thinking' ? p.text.length > 0 : true)).map(m => m.turnId)));
+  /** What each finished turn wrote, shown once at its end; a turn still running is left alone. */
+  const filesByTurn = $derived.by(() => {
+    const thread = store.openThread;
+    const result = new Map<string, TurnFile[]>();
+    if (!thread || thread.id !== threadId) return result;
+    const parts = new Map<string, Message['parts']>();
+    for (const message of messages) {
+      if (message.role !== 'assistant') continue;
+      parts.set(message.turnId, [...(parts.get(message.turnId) ?? []), ...message.parts]);
+    }
+    for (const turn of thread.turns) {
+      if (turn.status === 'running' || turn.status === 'queued') continue;
+      const files = turnFiles(parts.get(turn.id) ?? [], thread.cwd);
+      if (files.length > 0) result.set(turn.id, files);
+    }
+    return result;
+  });
   const lastInTurn = $derived.by(() => {
     const result = new Map<string, string>();
     for (const message of messages) result.set(message.turnId, message.id);
@@ -710,14 +736,20 @@
                     </div>
                   {:else if part.type === 'error'}
                     <div class="error" data-testid="error-part">
-                      <span class="section-label">{strings.chat.error}</span>
+                      <span class="section-label error-head"><CircleAlert size={13} strokeWidth={2} />{strings.chat.error}</span>
                       <p>{part.message}</p>
+                      {#if signedOut && store.owner}
+                        <button type="button" class="quiet small reconnect" data-testid="error-reconnect" onclick={() => store.openConnect(signedOut.providerId, signedOut.id)}>{strings.connect.reconnect}</button>
+                      {/if}
                     </div>
                   {/if}
                 </div>
                 {/if}
               {/each}
             </div>
+          {/if}
+          {#if turn && lastInTurn.get(turn.id) === message.id && filesByTurn.has(turn.id)}
+            <TurnFiles {store} files={filesByTurn.get(turn.id)!} />
           {/if}
           {#if turn && lastInTurn.get(turn.id) === message.id}
             <TurnSummary
@@ -898,10 +930,19 @@
   .error {
     padding: 8px 12px;
     border: 1px solid var(--color-border);
-    border-left: 3px solid var(--color-danger);
     border-radius: var(--radius-md);
     background: var(--color-surface);
   }
+
+  .error-head {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .error-head :global(svg) { color: var(--color-danger); }
+
+  .error .reconnect { margin-top: 8px; }
 
   .error p {
     margin-top: 4px;

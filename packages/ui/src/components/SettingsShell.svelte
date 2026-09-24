@@ -45,7 +45,7 @@
 
   let children: Partial<Record<SettingsTab, { id: string; label: string }[]>> = $derived({
     accounts: store.providers.map(provider => ({id: `provider-${provider.id}`, label: provider.name})),
-    appearance: [{id: 'theme', label: strings.settings.theme}],
+    appearance: [{id: 'theme', label: strings.settings.theme}, {id: 'workspace', label: strings.settings.workspace}],
     keyboard: [
       ...COMMAND_GROUPS.map(group => ({id: `keys-${group.id}`, label: strings.keyboard.groups[group.id]})),
       {id: 'keybinding-file', label: strings.keyboard.file}
@@ -58,13 +58,13 @@
     ],
     general: [
       ...(showAppUpdateUi() ? [{ id: 'app-update', label: strings.appUpdate.heading }] : []),
-      { id: 'phone', label: strings.phone.heading },
       { id: 'projects', label: strings.settings.projects },
       { id: 'background', label: strings.settings.background },
       { id: 'machines', label: strings.machines.heading },
       { id: 'devices', label: strings.settings.pairing.heading },
       { id: 'scheduler', label: strings.settings.scheduler },
       { id: 'tour', label: strings.onboarding.label },
+      { id: 'phone', label: strings.phone.heading },
       { id: 'core', label: strings.settings.core }
     ],
     resources: [

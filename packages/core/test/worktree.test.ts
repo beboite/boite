@@ -41,7 +41,7 @@ function git(cwd: string, ...args: string[]): string {
 }
 
 /** A repository with one commit inside the test data directory, so its worktrees land in the data directory too. */
-async function repoProject(name = 'repo'): Promise<{ id: string; path: string }> {
+async function repoProject(name = 'repo'): Promise<{ id: string; path: string; repository?: boolean }> {
   const path = join(harness.dataDir, name);
   mkdirSync(path, { recursive: true });
   git(path, 'init', '-q');
@@ -147,6 +147,21 @@ describe('a thread in its own worktree', () => {
     ).rejects.toThrow(`${path} is not a git repository`);
     expect(await client.call('threads.list', {})).toHaveLength(0);
     expect(existsSync(worktreeRoot(path))).toBe(false);
+  });
+
+  test('a project says whether it is a repository, on add and on list, by the test the worktree refuses on', async () => {
+    const plainPath = join(harness.dataDir, 'plain');
+    mkdirSync(plainPath, { recursive: true });
+    const plain = await client.call('projects.add', { path: plainPath, name: 'plain' });
+    const repo = await repoProject();
+    expect(plain.repository).toBe(false);
+    expect(repo.repository).toBe(true);
+    const listed = await client.call('projects.list', {});
+    expect(listed.find((project) => project.id === plain.id)?.repository).toBe(false);
+    expect(listed.find((project) => project.id === repo.id)?.repository).toBe(true);
+    // Read on each answer: a folder that becomes a repository says so next time.
+    git(plainPath, 'init', '-q');
+    expect((await client.call('projects.list', {})).find((project) => project.id === plain.id)?.repository).toBe(true);
   });
 
   test('a model nobody offers is refused before any worktree exists', async () => {

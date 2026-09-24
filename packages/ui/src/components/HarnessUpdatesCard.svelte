@@ -1,4 +1,5 @@
 <script lang="ts">
+  import InfoTip from './InfoTip.svelte';
   import type { HarnessUpdate } from '@boite/contracts';
   import { strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
@@ -6,6 +7,7 @@
 
   /** The store is the machine whose settings are open, so the switch and the list are that machine's. */
   let { store }: { store: Store } = $props();
+  const uid = $props.id();
 
   let checking = $state(false);
   let busy = $derived(checking || store.harnessUpdates.some((update) => update.state === 'checking'));
@@ -38,17 +40,16 @@
   <section class="card updates" id="settings-harness-updates" data-testid="harness-updates-card">
     <div class="top">
       <div>
-        <h2>{strings.harnessUpdates.heading}</h2>
-        <p class="hint">{strings.harnessUpdates.intro}</p>
+        <h2>{strings.harnessUpdates.heading}<InfoTip topic={strings.harnessUpdates.heading} text={strings.harnessUpdates.intro} /></h2>
       </div>
       <button type="button" class="quiet small" data-testid="harness-updates-check" disabled={busy} onclick={() => void check()}>
         {busy ? strings.harnessUpdates.checking : strings.harnessUpdates.check}
       </button>
     </div>
 
-    <label class="switch-row">
-      <span class="text">{strings.harnessUpdates.auto}<span class="hint">{strings.harnessUpdates.autoHint}</span></span>
-      <input
+    <label for="{uid}-auto" class="switch-row">
+      <span class="text"><span id="{uid}-auto-name">{strings.harnessUpdates.auto}</span><InfoTip topic={strings.harnessUpdates.auto} text={strings.harnessUpdates.autoHint} /></span>
+      <input id="{uid}-auto" aria-labelledby="{uid}-auto-name"
         type="checkbox"
         role="switch"
         data-testid="setting-auto-update-harnesses"
@@ -94,8 +95,6 @@
     justify-content: space-between;
     gap: 12px;
   }
-
-  .top .hint { margin: 2px 0 0; }
 
   ul {
     list-style: none;

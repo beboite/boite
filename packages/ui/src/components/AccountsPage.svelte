@@ -1,4 +1,5 @@
 <script lang="ts">
+  import InfoTip from './InfoTip.svelte';
   import { onMount } from 'svelte';
   import { slide } from 'svelte/transition';
   import { ChevronRight, Plus, RefreshCw, Terminal } from '@lucide/svelte';
@@ -250,8 +251,7 @@
 <div class="page" data-testid="accounts-page">
   <header>
     <div>
-      <h1>{strings.providerSettings.heading}</h1>
-      <p>{strings.providerSettings.intro}</p>
+      <h1>{strings.providerSettings.heading}<InfoTip topic={strings.providerSettings.heading} text={strings.providerSettings.intro} /></h1>
     </div>
   </header>
 

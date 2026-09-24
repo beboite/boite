@@ -435,6 +435,15 @@ Each protocol takes them differently, and the difference is not cosmetic.
   says so once in the log. A driver that waited for a permission question there
   would wait forever.
 
+The composer offers three of the five and names each by what the agent may do
+without asking (`lib/permission-modes.ts`): Ask, Edit freely, No confirmation.
+The list follows the agent. Codex loses Edit freely, which is the same pair as
+its default, and its default reads "This folder", because workspace-write lets
+it edit and run commands there without a card. An agent whose
+`capabilities.approvals` is false gets no mode chip: every choice would describe
+something it does not do. No confirmation keeps the warning colour on its chip,
+since it reaches the whole computer.
+
 A permission is not the only thing an agent asks. A protocol that carries a
 free-form question maps it to `askQuestion` on the turn context, which draws a
 question card in the timeline and answers the agent with what the user picked;

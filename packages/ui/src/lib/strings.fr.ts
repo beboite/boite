@@ -308,15 +308,45 @@ export const fr: Messages = {
     error: 'erreur'
   },
 
+  drafts: {
+    name: 'Brouillons',
+    hint: 'Un dossier par conversation, dans Documents/Boite',
+    openFolder: 'Travailler dans un de mes dossiers',
+    pickFolder: 'Ouvrir un dossier'
+  },
   firstRun: {
     heading: 'Ouvrir un projet',
-    body: "Choisissez le dossier dans lequel un agent travaillera. Les conversations vivent dedans.",
     deviceBody: "Les projets s'ouvrent depuis l'application où tourne le cœur. Ceux qu'il détient apparaissent ici.",
     pick: 'Choisir un dossier',
-    dropHint: "ou déposez un dossier n'importe où dans cette fenêtre",
-    typePath: 'Ou saisir le chemin',
     pathPlaceholder: 'Chemin absolu du dossier',
     add: 'Ouvrir'
+  },
+
+  connect: {
+    button: 'Connecter une IA',
+    title: 'Connecter une IA',
+    intro: "Boite fonctionne avec un abonnement IA que vous avez déjà. Choisissez-le, Boite installe ce qu'il faut et ouvre sa page de connexion.",
+    more: 'Autres agents',
+    plan: {
+      claude: 'Avec un forfait Claude Pro ou Max',
+      codex: 'Avec un forfait ChatGPT'
+    },
+    otherPlan: 'Avec votre compte {provider}',
+    install: 'Installer {provider}',
+    installNote: "Télécharge {size}. Rien d'autre ne change sur cet ordinateur.",
+    signIn: 'Se connecter à {provider}',
+    signInNote: 'Votre navigateur ouvre la page de connexion. Revenez ici une fois connecté.',
+    manual: "{provider} s'installe avec son propre installateur. Lancez-le, puis vérifiez à nouveau ici.",
+    manualOpen: "Ouvrir la page d'installation",
+    external: '{provider} se connecte depuis sa propre fenêtre. Connectez-vous là-bas, puis vérifiez à nouveau.',
+    checkAgain: 'Vérifier à nouveau',
+    ready: '{provider} est connecté.',
+    use: 'Utiliser {provider}',
+    back: 'Retour',
+    close: 'Fermer',
+    device: "Aucune IA n'est encore connectée sur l'ordinateur qui fait tourner Boite. Connectez-en une depuis cet ordinateur.",
+    reconnect: 'Se reconnecter',
+    signedOut: "{provider} n'est plus connecté"
   },
 
   drop: {
@@ -458,18 +488,23 @@ export const fr: Messages = {
 
   permissionMode: {
     default: 'Demander',
-    acceptEdits: 'Décider seul',
-    bypassPermissions: 'Yolo',
+    acceptEdits: 'Modifier librement',
+    bypassPermissions: 'Sans confirmation',
     plan: 'Plan',
     dontAsk: 'Tout refuser'
   },
 
   permissionModeLong: {
-    default: "Demander avant chaque appel d'outil",
-    acceptEdits: 'Accepter les modifications, demander pour le reste',
-    bypassPermissions: 'Tout exécuter sans demander',
+    default: 'Lit librement, demande avant de modifier un fichier ou de lancer une commande',
+    acceptEdits: 'Modifie les fichiers sans demander, demande avant de lancer une commande',
+    bypassPermissions: 'Exécute tout sans demander, partout sur cet ordinateur',
     plan: 'Plan seulement, aucune modification',
     dontAsk: 'Refuser tout ce qui demanderait une autorisation'
+  },
+
+  permissionModeCodex: {
+    default: 'Ce dossier',
+    defaultLong: 'Modifie et lance des commandes dans ce dossier sans demander, demande pour aller au-delà'
   },
 
   thread: {
@@ -579,7 +614,27 @@ export const fr: Messages = {
     compactionNoPost: 'Contexte compacté depuis {pre} jetons',
     compactionUnknown: 'Contexte compacté',
     compactionManual: 'à la main',
-    permissionHeading: 'Veut utiliser',
+    permissionAsk: {
+      command: 'Lancer une commande',
+      edit: 'Modifier {file}',
+      editFiles: 'Modifier des fichiers',
+      editFolder: 'Écrire dans {folder} à partir de maintenant',
+      write: 'Créer ou remplacer {file}',
+      read: 'Lire {file}',
+      search: 'Chercher {subject} dans les fichiers',
+      fetch: 'Ouvrir {subject}',
+      web: 'Chercher {subject} sur le web',
+      agent: 'Lancer un agent auxiliaire',
+      other: 'Utiliser son outil {tool}'
+    },
+    permissionTechnical: 'Détails techniques',
+    turnFiles: 'Fichiers de cette réponse',
+    fileCreated: 'Nouveau',
+    fileChanged: 'Modifié',
+    fileDeleted: 'Supprimé',
+    openFile: 'Ouvrir {name}',
+    revealFile: 'Afficher dans le dossier',
+    revealFailed: "Le dossier n'a pas pu s'ouvrir : {reason}",
     allow: 'Autoriser',
     deny: 'Refuser',
     allowed: 'Autorisé',
@@ -693,6 +748,9 @@ export const fr: Messages = {
     options: 'Options du message',
     placeholder: 'Message à {provider} dans {project}',
     placeholderNoProject: "Message à l'agent",
+    placeholderNew: 'Que voulez-vous faire ?',
+    moreOptions: 'Options',
+    pin: 'Garder {option} dans la barre',
     send: 'Envoyer',
     stop: 'Arrêter',
     queued: 'Envoyé à la fin du tour en cours',
@@ -726,7 +784,7 @@ export const fr: Messages = {
     model: 'Modèle',
     unavailable: 'pas installé',
     noAccount: 'aucun compte',
-    noProvider: 'Aucun fournisseur',
+    noProvider: 'Aucune IA connectée',
     hint: 'Entrée pour envoyer, Maj+Entrée pour une nouvelle ligne',
     worktree: 'Worktree',
     worktreeOff: 'Démarrer dans un worktree git sur sa propre branche',
@@ -962,13 +1020,13 @@ export const fr: Messages = {
 
   usage: {
     heading: 'Consommation',
-    note: "Sur un abonnement, ce coût est un équivalent API, pas de l'argent dépensé.",
+    note: "Les coûts sont estimés au tarif API. Sur un abonnement, ce n'est pas une facture.",
     thread: 'Conversation',
     input: 'Entrée',
     output: 'Sortie',
     cacheRead: 'Cache lu',
     cacheWrite: 'Cache écrit',
-    cost: 'Équivalent API',
+    cost: 'Estimation au tarif API',
     total: 'Total',
     empty: 'Aucun jeton dépensé pour le moment.',
     today: "aujourd'hui",
@@ -976,13 +1034,13 @@ export const fr: Messages = {
     range: 'Période',
     days: '{days} jours',
     metric: 'Mesure',
-    metrics: { tokens: 'Jetons', cost: 'Coût API', turns: 'Tours' },
+    metrics: { tokens: 'Jetons', cost: 'Estimation API', turns: 'Tours' },
     totalOf: {
       tokens: 'Jetons, {days} derniers jours',
-      cost: 'Équivalent API, {days} derniers jours',
+      cost: 'Estimation au tarif API, {days} derniers jours',
       turns: 'Tours, {days} derniers jours'
     },
-    summary: '{turns} tours · {tokens} jetons · {cost} en équivalent API',
+    summary: '{turns} tours · {tokens} jetons · {cost} au tarif API',
     overview: "Vue d'ensemble",
     chart: 'Par jour',
     chartLabel: '{metric} par jour et par fournisseur. Utilisez les flèches pour lire chaque jour.',
@@ -1053,6 +1111,16 @@ export const fr: Messages = {
     },
     material: 'Matériau de la fenêtre',
     materialHint: 'Ce que Windows dessine derrière la fenêtre',
+    workspace: 'Espace de travail',
+    startIn: "L'appli s'ouvre sur",
+    startInHint: "Là où une nouvelle conversation attend à l'ouverture de l'appli. Nouvelle conversation commence toujours dans le projet affiché.",
+    startDrafts: 'Brouillons',
+    startProject: 'Le dernier projet',
+    panelStart: "Le panneau latéral s'ouvre sur",
+    panelStartHint: "Ce que le panneau montre quand il s'ouvre sans rien dedans.",
+    panelLauncher: 'Son menu',
+    panelFiles: 'Fichiers',
+    panelChanges: 'Modifications',
     materialAcrylic: 'Acrylique',
     materialMica: 'Mica',
     materialSolid: 'Opaque',
@@ -1113,7 +1181,7 @@ export const fr: Messages = {
       expires: "Valable une fois, jusqu'à {time}",
       qr: "Le lien d'appairage en QR code",
       scan: 'Scannez le code avec le téléphone, ou ouvrez le lien dessus.',
-      lanHint: "Le cœur n'écoute que sur cette machine : activez le réseau local ci-dessus, puis redémarrez-le, avant qu'un téléphone puisse atteindre ce lien.",
+      lanHint: "Le cœur n'écoute que sur cette machine : activez le réseau local dans Ordonnanceur, plus bas, puis redémarrez-le, avant qu'un téléphone puisse atteindre ce lien.",
       devices: 'Appareils appairés',
       noDevices: 'Aucun appareil appairé pour le moment.',
       thisDevice: 'cet appareil',
@@ -1357,6 +1425,7 @@ export const fr: Messages = {
     yes: 'oui',
     no: 'non',
     close: 'Fermer',
+    moreInfo: 'À propos : {topic}',
     refresh: 'Actualiser',
     dismiss: 'Ignorer',
     cancel: 'Annuler',
@@ -1405,6 +1474,15 @@ export const fr: Messages = {
     replay: 'Revoir la présentation',
     replayHint: "Les mêmes écrans qu'au premier lancement. Rien de ce que vous avez réglé n'est défait.",
     changeLater: 'Tout ça se retrouve dans les réglages.',
+
+    profile: {
+      title: "D'abord, lequel êtes-vous ?",
+      everyday: "Je ne suis pas dev ! Ne m'embrouillez pas avec du code et des commandes !",
+      everydayHint: "Une nouvelle conversation attend dans Documents/Boite jusqu'à ce que vous lui donniez un dossier, la barre reste simple et l'agent demande avant d'agir.",
+      developer: 'Je suis dev, mettez-moi la totale.',
+      developerHint: "L'appli s'ouvre sur votre dernier projet, l'effort et le worktree restent dans la barre, le panneau s'ouvre sur les modifications.",
+      later: "Rien n'est retiré, dans un cas comme dans l'autre. Le menu Options du champ de message et les réglages changent tout ça."
+    },
 
     welcome: {
       title: 'Boite fait tourner vos agents',

@@ -321,11 +321,34 @@ test('uninstalled setup starts without account-dependent demo state', async () =
     expect(store.accounts).toEqual([]);
     expect(store.threads).toEqual([]);
     expect(store.openThread).toBeNull();
-    expect(await client.call('imports.list', { projectId: 'p-boite' })).toEqual([]);
     expect(await client.call('scheduler.get', {})).toMatchObject({ running: [], queued: [] });
-    expect(store.projects.length).toBeGreaterThan(0);
+    // No folder yet: the app lands on a draft in the drafts, which nothing has made.
+    expect(store.projects).toEqual([]);
+    expect(store.draft).toEqual({ projectId: null, worktree: false });
     expect((await client.call('sessions.list', {})).length).toBeGreaterThan(0);
   } finally { store.detach(); client.close(); }
+});
+
+test('a drafts folder asked of a machine left since fails there, not on the new one', async () => {
+  const { store, client } = await ready();
+  const other = new FakeClient({ delayMs: 0 });
+  const real = client.call.bind(client);
+  let reject: (error: Error) => void = () => {};
+  vi.spyOn(client, 'call').mockImplementation(((method: string, params: unknown) => {
+    if (method === 'projects.drafts') return new Promise((_, no) => { reject = no; });
+    return real(method as never, params as never);
+  }) as typeof client.call);
+  try {
+    store.draft = { projectId: null, worktree: false };
+    const sent = store.submit('Sort my photos', { providerId: 'echo', accountId: 'a-echo', permissionMode: 'default', model: 'echo-1', effort: null });
+    await vi.waitFor(() => expect(client.call).toHaveBeenCalledWith('projects.drafts', {}));
+    store.attach(other);
+    await store.connect();
+    // Closing the old socket rejects its call: that is not the new machine's error.
+    reject(new Error('client closed'));
+    expect(await sent).toBe(false);
+    expect(store.error).toBeNull();
+  } finally { store.detach(); client.close(); other.close(); }
 });
 
 test('provider actions report RPC failures through their owning store', async () => {
@@ -928,4 +951,17 @@ test('account lifecycle newer cancellation beats a stale reload snapshot', async
     release();
     spy.mockRestore();
   }
+});
+
+test('connecting a second account moves the composer to that account, not the first signed in', async () => {
+  const store = new Store();
+  store.attach(new FakeClient({ delayMs: 0 }));
+  await store.connect();
+  store.accounts = store.accounts.map((a) => (a.id === 'a-claude-side' ? { ...a, status: 'ok' } : a));
+  expect(store.useProvider('claude', 'a-claude-side')).toBe(true);
+  expect(store.prefs.accountId).toBe('a-claude-side');
+  // Unnamed, or named but not signed in: the first signed-in account.
+  store.accounts = store.accounts.map((a) => (a.id === 'a-claude-side' ? { ...a, status: 'unauthenticated' } : a));
+  expect(store.useProvider('claude', 'a-claude-side')).toBe(true);
+  expect(store.prefs.accountId).toBe('a-claude-main');
 });

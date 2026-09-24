@@ -277,7 +277,7 @@ export class Workspace {
     const local = this.machines.find(m => m.store.localCore)?.store;
     if (!local) { this.active.error = strings.connection.unavailable; return; }
     await local.addProjects(paths);
-    await this.select(local, undefined, local.draft?.projectId);
+    await this.select(local, undefined, local.draft?.projectId ?? undefined);
   }
 
   async remove(id: string): Promise<void> {

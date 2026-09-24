@@ -137,8 +137,7 @@
 
 <style>
   .question {
-    border: 1px solid var(--color-border);
-    border-left: 2px solid color-mix(in srgb, var(--color-live) 60%, var(--color-border));
+    border: 1px solid var(--color-edge);
     border-radius: var(--radius-md);
     background: var(--color-surface);
     box-shadow: var(--shadow-e1);
@@ -155,7 +154,7 @@
 
   /* Answered, it drops to a collapsed tool card's weight: the question and what went back. */
   .question.resolved {
-    border-left-color: var(--color-border);
+    border-color: var(--color-border);
     background: transparent;
     box-shadow: none;
     padding: 4px 10px;

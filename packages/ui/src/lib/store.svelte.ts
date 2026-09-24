@@ -87,6 +87,8 @@ import {
   writePrefs,
   type ComposerPrefs
 } from './prefs';
+import { work, type Profile } from './work-prefs.svelte';
+import { onboardingSeen } from './onboarding';
 import { rightPanel, type BoundPanel } from './right-panel.svelte';
 import { strings } from './strings';
 import { DEFAULT_MODEL_NAMES, INITIAL_MODEL_DEFAULTS, readModelDefaults, writeModelDefaults, resolveModelDefault, type ModelDefaults } from './model-defaults';
@@ -107,7 +109,11 @@ export interface LoginState {
 
 /** A thread that exists only in the UI until its first message is sent. */
 export interface Draft {
-  projectId: ProjectId;
+  /**
+   * Null is the drafts project before the core made it: the first send asks
+   * for it with `projects.drafts`, so opening the app writes nothing to disk.
+   */
+  projectId: ProjectId | null;
   /** The first send starts the thread in a git worktree of the project, on a branch of its own. */
   worktree: boolean;
 }
@@ -246,6 +252,12 @@ export class Store {
   /** The cores this device remembers: pairing or connecting adds one, forgetting removes one. */
   environments = $state<StoredEnvironment[]>([]);
   projectPickerOpen = $state(false);
+  /**
+   * The guided connection dialog: open on a provider's steps, or on the list
+   * when `providerId` is null. `accountId` names the account a "sign in again"
+   * is for, so the login lands on it rather than on a new one.
+   */
+  connectDialog = $state<{ providerId: ProviderId | null; accountId: string | null } | null>(null);
   machineStates = $state<Record<string, { state: ClientState; error?: string }>>({});
   /** Toasts for threads the user is not looking at, per machine. */
   notifications = $state(readNotifications());
@@ -436,6 +448,18 @@ export class Store {
   get openProject(): Project | null {
     const id = this.openThread?.projectId ?? this.draft?.projectId ?? null;
     return id === null ? null : (this.projects.find((p) => p.id === id) ?? null);
+  }
+
+  /** The project `projects.drafts` made, once the core has made it. */
+  get draftsProject(): Project | null {
+    return this.projects.find((p) => p.kind === 'drafts') ?? null;
+  }
+
+  /** The drafts, whether the core has made them yet or not: where a draft with no project goes. */
+  get draftInDrafts(): boolean {
+    const draft = this.draft;
+    if (!draft) return false;
+    return draft.projectId === null || this.projects.find((p) => p.id === draft.projectId)?.kind === 'drafts';
   }
 
   get busy(): boolean {
@@ -640,6 +664,51 @@ export class Store {
       effort,
       speed: this.modelsOf(provider.id, account.id).find(m => m.id === model)?.speeds?.some(option => option.id === this.prefs.speed) ? this.prefs.speed : null
     };
+  }
+
+  openConnect(providerId: ProviderId | null = null, accountId: string | null = null): void {
+    this.connectDialog = { providerId, accountId };
+  }
+
+  closeConnect(): void {
+    this.connectDialog = null;
+  }
+
+  /**
+   * The composer moves to this provider's signed-in account, the way a pick in
+   * the model picker would: the one just connected when it is named and signed
+   * in, else the first signed in. False when it has none yet.
+   */
+  useProvider(providerId: ProviderId, accountId: string | null = null): boolean {
+    const provider = this.providerOf(providerId);
+    const signedIn = this.accountsOf(providerId).filter((a) => a.status === 'ok');
+    const account = signedIn.find((a) => a.id === accountId) ?? signedIn[0];
+    if (!provider || !provider.available || !account) return false;
+    const model = this.defaultModelOf(provider, account.id);
+    this.remember({
+      providerId,
+      accountId: account.id,
+      permissionMode: this.prefs.permissionMode,
+      model,
+      effort: this.defaultEffortOf(providerId, account.id, model),
+      speed: null
+    });
+    return true;
+  }
+
+  /**
+   * The tour's question: the preset lands in the device's settings, the
+   * everyday answer asks before each action, and a draft still empty on
+   * screen moves to where this answer starts.
+   */
+  applyProfile(profile: Profile): void {
+    work.choose(profile);
+    if (profile === 'everyday' && this.prefs.permissionMode !== 'default') {
+      this.prefs = { ...this.prefs, permissionMode: 'default' };
+      writePrefs(this.prefs);
+      if (this.draftChoice) this.draftChoice = { ...this.draftChoice, permissionMode: 'default' };
+    }
+    if (this.draft && !this.openThread) this.setDraftProject(profile === 'everyday' ? null : this.lastProject());
   }
 
   remember(choice: Choice): void {
@@ -1116,8 +1185,8 @@ export class Store {
     if (!this.visible) return;
     // Settings opened while the core was still answering stays open.
     if (this.openThread || this.draft || this.page !== 'chat') return;
-    const project = this.lastProject();
-    if (project) this.startDraft(project);
+    // The drafts, so the first screen is a composer, not a folder picker; or the last project.
+    this.startDraft(work.current.startIn === 'drafts' ? null : this.lastProject());
   }
 
   /** The most recent thread, a draft in the first project, or nothing on a first run. */
@@ -1130,8 +1199,7 @@ export class Store {
       await this.open(recent.id);
       return;
     }
-    const project = this.projects[0];
-    if (project) this.startDraft(project.id);
+    this.startDraft(this.projects[0]?.id ?? null);
   }
 
   async connect(): Promise<void> {
@@ -1494,7 +1562,12 @@ export class Store {
     if (permissions.status === 'fulfilled') this.#mergePermissions(permissions.value, 'all');
     if (questions.status === 'fulfilled') this.#mergeQuestions(questions.value, 'all');
     if (projects.status === 'fulfilled') this.projects = projects.value;
-    if (threads.status === 'fulfilled') this.threads = threads.value;
+    if (threads.status === 'fulfilled') {
+      this.threads = threads.value;
+      // A device with no record of how it works: conversations already here, or
+      // a tour already seen, mean an install from before the question.
+      work.settle(threads.value.length > 0 || onboardingSeen());
+    }
     if (providers.status === 'fulfilled') {
       this.providers = providers.value.loaded;
       this.rejectedProviders = providers.value.rejected;
@@ -1613,10 +1686,10 @@ export class Store {
 
   /**
    * The header's Panel button: the panel itself, open or shut. An empty panel
-   * opens on its launcher rather than forcing one surface on the user.
+   * opens on the surface this device starts with, else on its launcher.
    */
   togglePanel(): void {
-    this.panel.toggle();
+    this.panel.toggle(this.openProject?.repository !== false);
   }
 
   // -------------------------------------------------------------------------
@@ -1742,6 +1815,47 @@ export class Store {
     if (first) this.startDraft(first.id);
   }
 
+  /**
+   * What the core reads from disk on each answer, whether a folder is a git
+   * repository, can change while the app is open: a draft asks again, so its
+   * worktree switch follows a `git init` done in a terminal. A failure keeps
+   * the list the app has; the boot already reported a core that cannot answer.
+   */
+  async #refreshProjects(): Promise<void> {
+    const client = this.#client;
+    if (!client || this.connection !== 'ready') return;
+    try {
+      const fresh = new Map((await client.call('projects.list', {})).map((project) => [project.id, project]));
+      // Another machine took this Store meanwhile: project ids can collide between machines.
+      if (this.#client !== client) return;
+      if (this.projects.every((project) => project.repository === fresh.get(project.id)?.repository)) return;
+      this.projects = this.projects.map((project) => fresh.get(project.id) ?? project);
+    } catch {
+      /* the list the app holds stays */
+    }
+  }
+
+  /**
+   * The drafts project, asked of the core on the first send into it. The core
+   * makes the folder then, and the thread the send creates goes in it.
+   */
+  async #ensureDrafts(): Promise<ProjectId | null> {
+    const known = this.draftsProject;
+    if (known) return known.id;
+    const client = this.#client;
+    if (!client) return null;
+    try {
+      const project = await client.call('projects.drafts', {});
+      if (this.#client !== client) return null;
+      if (!this.projects.some((p) => p.id === project.id)) this.projects = [...this.projects, project];
+      return project.id;
+    } catch (error) {
+      // A switched machine closed the old client: its rejection is not this machine's error.
+      if (this.#client === client) this.#fail(error);
+      return null;
+    }
+  }
+
   async removeProject(projectId: ProjectId): Promise<void> {
     const client = this.#client;
     if (!client) return;
@@ -1758,9 +1872,13 @@ export class Store {
   // -------------------------------------------------------------------------
 
   /** An empty chat in a project, composer focused. Nothing reaches the core until the first send. */
-  startDraft(projectId?: ProjectId): void {
-    const target = projectId ?? this.openProject?.id ?? this.projects[0]?.id;
-    if (target === undefined) return;
+  startDraft(projectId?: ProjectId | null): void {
+    // Named, a project; null, the drafts; unnamed, the project on screen, in
+    // either preset, so work spread over several folders stays in its folder.
+    // With nothing on screen, where this device opens: the drafts or the last project.
+    const drafts = this.draftsProject?.id ?? null;
+    const target = projectId === null ? drafts
+      : projectId ?? this.openProject?.id ?? (work.current.startIn === 'drafts' ? drafts : this.lastProject());
     this.rememberReadingThread();
     void this.#unsubscribe();
     this.openThread = null;
@@ -1769,7 +1887,8 @@ export class Store {
     this.#tracedThreadId = null;
     this.#keepRequestsOf(null);
     this.draft = { projectId: target, worktree: false };
-    this.#rememberProject(target);
+    if (target !== null) this.#rememberProject(target);
+    void this.#refreshProjects();
     this.page = 'chat';
     this.sidebarOpen = false;
   }
@@ -1779,13 +1898,18 @@ export class Store {
    * own (`openProject`, the composer's placeholder, the sidebar group), and a
    * folded project is opened, because a draft nobody can see is a lost draft.
    */
-  setDraftProject(projectId: ProjectId): void {
+  setDraftProject(projectId: ProjectId | null): void {
     const draft = this.draft;
-    if (!draft || draft.projectId === projectId) return;
-    if (!this.projects.some((p) => p.id === projectId)) return;
-    this.draft = { projectId, worktree: draft.worktree };
-    this.#rememberProject(projectId);
-    this.collapsedProjects = this.collapsedProjects.filter((id) => id !== projectId);
+    const target = projectId ?? this.draftsProject?.id ?? null;
+    if (!draft || draft.projectId === target) return;
+    if (target !== null && !this.projects.some((p) => p.id === target)) return;
+    const project = target === null ? null : this.projects.find((p) => p.id === target);
+    // The drafts folder is no repository: the worktree switch does not follow the draft there.
+    const drafts = target === null || project?.kind === 'drafts';
+    this.draft = { projectId: target, worktree: drafts ? false : draft.worktree };
+    if (target === null) return;
+    this.#rememberProject(target);
+    this.collapsedProjects = this.collapsedProjects.filter((id) => id !== target);
   }
 
   /** The draft's worktree switch: on, the first send asks the core for a branch and a worktree. */
@@ -2093,9 +2217,11 @@ export class Store {
     }
     const draft = this.draft;
     if (!draft) return false;
+    const projectId = draft.projectId ?? (await this.#ensureDrafts());
+    if (projectId === null || this.draft !== draft) return false;
     const composer = this.composerStates[DRAFT_STASH_KEY];
     const created = await this.createThread({
-      projectId: draft.projectId,
+      projectId,
       providerId: choice.providerId,
       accountId: choice.accountId,
       permissionMode: choice.permissionMode,
@@ -2130,6 +2256,7 @@ export class Store {
     const threadId = this.openThread?.id;
     if (!(await this.submit(prompt, choice, attachments, previewReferences))) return false;
     if (projectId !== undefined && (threadId === undefined || this.openThread?.id === threadId)) {
+      // Null names the drafts, which the send has made by now.
       this.startDraft(projectId);
       this.draftChoice = { ...choice };
     }

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import InfoTip from './InfoTip.svelte';
   import Prose from './Prose.svelte';
   import { appUpdater, type AppUpdater, type UpdateChannel } from '../lib/app-update.svelte';
   import { appUpdateInstall } from '../lib/app-update-install.svelte';
@@ -32,11 +33,10 @@
 </script>
 
 <section class="card update-card" id="settings-app-update" data-testid="app-update-card">
-  <h2>{strings.appUpdate.heading}</h2>
+  <h2>{strings.appUpdate.heading}{#if update.supported}<InfoTip topic={strings.appUpdate.heading} text={strings.appUpdate.intro} />{/if}</h2>
   {#if !update.supported}
     <p class="hint">{strings.appUpdate.unsupported}</p>
   {:else}
-    <p class="hint">{strings.appUpdate.intro}</p>
 
     <div class="channel-row">
       <span class="label">{strings.appUpdate.channel}</span>

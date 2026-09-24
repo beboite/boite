@@ -16,7 +16,7 @@
 export const ONBOARDING_STORAGE_KEY = 'boite.onboarding';
 
 /** Bumped when the tour changes shape, not when a sentence in it is reworded. */
-export const ONBOARDING_VERSION = 5;
+export const ONBOARDING_VERSION = 6;
 
 export interface OnboardingRecord {
   version: number;
@@ -24,14 +24,15 @@ export interface OnboardingRecord {
   at: number;
 }
 
-export type OnboardingStep = 'welcome' | 'agents' | 'usage' | 'reach' | 'quiet' | 'privacy';
+export type OnboardingStep = 'welcome' | 'profile' | 'agents' | 'usage' | 'reach' | 'quiet' | 'privacy';
 
 /**
- * The order they come in: what you talk to, then how you talk to it, then what
- * sits beside the conversation, what it costs, how far it reaches, how it
+ * The order they come in: what you talk to, who you are (the answer sets how
+ * much the app shows), then how you talk to it, then what sits beside the
+ * conversation, what it costs, how far it reaches, how it
  * behaves while you work, and finally the folder it all happens in.
  */
-const ORDER: readonly OnboardingStep[] = ['welcome', 'agents', 'usage', 'reach', 'quiet', 'privacy'];
+const ORDER: readonly OnboardingStep[] = ['welcome', 'profile', 'agents', 'usage', 'reach', 'quiet', 'privacy'];
 
 /** The screens this build shows, in order. A fresh array: the caller owns it. */
 export function steps(owner = true): OnboardingStep[] {

@@ -1,9 +1,11 @@
 <script lang="ts">
+  import InfoTip from './InfoTip.svelte';
   import type { TelemetryState } from '@boite/contracts';
   import type { Store } from '../lib/store.svelte';
   import { strings } from '../lib/strings';
 
   let { store }: { store: Store } = $props();
+  const uid = $props.id();
   let consent = $state<TelemetryState | null>(null);
   let error = $state('');
   let busy = $state(false);
@@ -46,18 +48,17 @@
 
 {#if store.owner}
   <section class="card" data-testid="telemetry-settings">
-    <h2>{strings.telemetry.heading}</h2>
-    <p class="hint">{strings.telemetry.description}</p>
+    <h2>{strings.telemetry.heading}<InfoTip topic={strings.telemetry.heading} text={strings.telemetry.description} /></h2>
     {#if consent}
       {#if !consent.configured}<p class="hint">{strings.telemetry.unconfigured}</p>{/if}
-      <label class="switch-row">
-        <span class="text">{strings.telemetry.basic}<span class="hint">{strings.telemetry.basicHint}</span></span>
-        <input type="checkbox" role="switch" checked={consent.mode !== 'off'} disabled={busy}
+      <label for="{uid}-basic" class="switch-row">
+        <span class="text"><span id="{uid}-basic-name">{strings.telemetry.basic}</span><InfoTip topic={strings.telemetry.basic} text={strings.telemetry.basicHint} /></span>
+        <input id="{uid}-basic" aria-labelledby="{uid}-basic-name" type="checkbox" role="switch" checked={consent.mode !== 'off'} disabled={busy}
           onchange={event => void change(event.currentTarget.checked ? 'basic' : 'off')} />
       </label>
-      <label class="switch-row">
-        <span class="text">{strings.telemetry.enhanced}<span class="hint">{strings.telemetry.enhancedHint}</span></span>
-        <input type="checkbox" role="switch" checked={consent.mode === 'enhanced'} disabled={busy}
+      <label for="{uid}-enhanced" class="switch-row">
+        <span class="text"><span id="{uid}-enhanced-name">{strings.telemetry.enhanced}</span><InfoTip topic={strings.telemetry.enhanced} text={strings.telemetry.enhancedHint} /></span>
+        <input id="{uid}-enhanced" aria-labelledby="{uid}-enhanced-name" type="checkbox" role="switch" checked={consent.mode === 'enhanced'} disabled={busy}
           onchange={event => void change(event.currentTarget.checked ? 'enhanced' : 'basic')} />
       </label>
       {#if consent.pendingDeletion}<p class="hint">{strings.telemetry.pending}</p>{/if}

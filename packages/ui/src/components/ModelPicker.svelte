@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { ChevronDown, ChevronRight, Search, Sparkles, Star, RefreshCw } from '@lucide/svelte';
+  import { ChevronDown, ChevronRight, Plug, Search, Sparkles, Star, RefreshCw } from '@lucide/svelte';
   import { isNamedModel, orderedModels, type FavoriteModel } from '../lib/model-order';
   import type { Account, ModelInfo, ProviderSummary } from '@boite/contracts';
   import ProviderLogo from './ProviderLogo.svelte';
@@ -404,6 +404,13 @@
 <svelte:window onpointerdown={onWindowPointerdown} />
 
 <div class="picker" bind:this={root}>
+  {#if !choice && store.owner}
+    <!-- Nothing to pick from yet: the chip is the way to get something. -->
+    <button type="button" class="chip trigger connect" data-testid="composer-connect" onclick={() => store.openConnect()}>
+      <Plug size={14} strokeWidth={1.75} />
+      <span class="label">{strings.connect.button}</span>
+    </button>
+  {:else}
   <button
     type="button"
     class="chip trigger"
@@ -424,6 +431,7 @@
     <span class="label">{label}</span>
     <ChevronDown size={12} strokeWidth={2} />
   </button>
+  {/if}
 
   {#if popover.shown}
     <div

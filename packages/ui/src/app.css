@@ -604,10 +604,12 @@ tr:last-child td {
 
 /*
  * Every settings category speaks one grammar, desktop and phone alike: the
- * page scrolls on its own; its header carries the title, an optional intro
- * paragraph and the page's one action; a card holds a title, an optional hint
- * straight under it, then its rows. A page keeps in its own style only what
- * no other page has.
+ * page scrolls on its own; its header carries the title and the page's one
+ * action; a card holds a title, then its rows. What a page, a card or a row
+ * is for sits behind an "i" beside its title (`InfoTip.svelte`), so the
+ * page reads as a list of settings. A `.hint` line in view is for a state or
+ * an answer: an error, a count, what to do because something is missing. A
+ * page keeps in its own style only what no other page has.
  */
 .page {
   height: 100%;

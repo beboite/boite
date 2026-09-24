@@ -81,10 +81,11 @@ afterAll(async () => {
 }, 15_000);
 
 test(
-  'a fresh core opens on the first-run card, connected to the core it was paired with',
+  'a fresh core opens on a draft in the drafts, connected to the core it was paired with',
   async () => {
     await page.waitFor(`document.querySelector('[data-testid=status-connection]')?.dataset.state === 'ready'`, 30_000);
-    await page.waitFor(`document.querySelector('${testid('first-run')}')`);
+    await page.waitFor(`document.querySelector('${testid('draft-open-folder')}')`);
+    expect(await page.evaluate<string>(`document.querySelector('${testid('draft-project')}').textContent`)).toContain('Drafts');
     await page.waitFor(`document.querySelector('${testid('sidebar')}')`);
   },
   TIMEOUT,
@@ -832,10 +833,10 @@ test(
     await page.waitFor(`document.querySelector('${testid('sidebar')}')`, RECONNECT_TIMEOUT_MS);
     expect(await page.evaluate<string>('document.title')).toBe('Boite');
     // The threads are the core's, so with no answer the shell opens on its
-    // first-run card: the point is that it is the app drawing it, not Chromium.
+    // empty chat: the point is that it is the app drawing it, not Chromium.
     expect(
       await page.evaluate<boolean>(
-        `!!document.querySelector('${testid('first-run')}') || !!document.querySelector('${testid('chat')}')`,
+        `!!document.querySelector('${testid('no-thread')}') || !!document.querySelector('${testid('chat')}')`,
       ),
     ).toBe(true);
     const offline = await page.evaluate<string>(`document.querySelector('[data-testid=status-connection]').dataset.state`);

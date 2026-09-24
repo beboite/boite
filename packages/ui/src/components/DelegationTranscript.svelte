@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { Message } from '@boite/contracts';
   import { strings } from '../lib/strings';
+  import { permissionSentence } from '../lib/tool-summary';
   import Prose from './Prose.svelte';
 
   let { messages }: { messages: Message[] } = $props();
@@ -20,7 +21,7 @@
           {:else if part.type === 'tool'}
             <p class="tool">{part.name} · {strings.chat.toolStatus[part.status]}</p>
           {:else if part.type === 'permission'}
-            <p class="card">{strings.chat.permissionHeading} {part.toolName}</p>
+            <p class="card">{permissionSentence(part.toolName, undefined)}</p>
           {:else if part.type === 'question'}
             <p class="card">{part.text}</p>
           {/if}

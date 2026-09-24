@@ -49,6 +49,8 @@ export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>
   // The sidebar and the composer's `@`.
   'projects.list',
   'projects.files',
+  // A phone starts a draft like the desktop: the core picks the folder, the device names no path.
+  'projects.drafts',
   // What a thread needs to name its agent.
   'providers.list',
   'accounts.list',

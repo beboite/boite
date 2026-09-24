@@ -1,4 +1,5 @@
 <script lang="ts">
+  import InfoTip from './InfoTip.svelte';
   import { AlertTriangle, Check, Cloud, Cpu, Download, Mic, Trash2 } from '@lucide/svelte';
   import { RpcErrorCode, type SpeechConfig, type SpeechStatus } from '@boite/contracts';
   import { RpcFailure } from '../lib/client';
@@ -102,8 +103,7 @@
 <div class="page" data-testid="voice-settings">
   <header class="top">
     <div>
-      <h1>{strings.speech.heading}</h1>
-      <p class="intro">{strings.speech.description}</p>
+      <h1>{strings.speech.heading}<InfoTip topic={strings.speech.heading} text={strings.speech.description} /></h1>
     </div>
     {#if saved}<span class="saved" role="status"><Check size={14} />{strings.speech.saved}</span>{/if}
   </header>
@@ -231,7 +231,6 @@
   :global(.settings) .page > header.top { margin-bottom: 10px; }
   .page > .card, .page .card { max-width: 880px; margin: 0; padding: 18px 20px; display: flex; flex-direction: column; gap: 12px; }
   .top { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
-  .intro { color: var(--color-muted-foreground); margin-top: 6px; }
   p, small { color: var(--color-muted-foreground); font-size: var(--text-sm); line-height: 1.55; margin: 0; }
   h2.section-label { margin: 10px 0 -4px; }
   h3 { margin: 0; font-size: var(--text-base); font-weight: 600; color: var(--color-foreground); }

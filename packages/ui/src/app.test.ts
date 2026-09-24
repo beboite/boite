@@ -8,6 +8,7 @@ import { workspace } from './lib/workspace.svelte';
 import { setExperiment, writeExperiments } from './lib/experiments';
 import { storeEndpoint, upsertEnvironment } from './lib/endpoint';
 import { closeTour } from './lib/onboarding.svelte';
+import { work } from './lib/work-prefs.svelte';
 import { count } from './lib/format';
 
 // The opener plugin is the shell's system browser; nothing real may run here.
@@ -24,6 +25,7 @@ afterEach(() => {
   // Through the writer, so the reactive mirror hears the reset too.
   writeExperiments([]);
   window.localStorage.clear();
+  work.load();
   delete window.__TAURI_INTERNALS__;
   openUrl.mockClear();
 });
@@ -212,6 +214,52 @@ test('the draft worktree chip puts the first send on its own branch, and the hea
   expect(document.querySelector('[data-testid=composer-worktree]')).toBeNull();
 });
 
+test('a draft on a folder that is not a repository offers no worktree switch', async () => {
+  await mountOnFake();
+  query<HTMLButtonElement>('[data-testid=new-thread]').click();
+  await waitFor(() => document.querySelector('[data-testid=composer-worktree]') !== null);
+  const project = store.projects.find((one) => one.id === store.draft?.projectId);
+  if (!project) throw new Error('the draft has no project');
+  project.repository = false;
+  await waitFor(() => document.querySelector('[data-testid=composer-worktree]') === null);
+  // A core older than the field says nothing, and the switch stays.
+  delete project.repository;
+  await waitFor(() => document.querySelector('[data-testid=composer-worktree]') !== null);
+});
+
+test('a machine with no AI offers to connect one, and the composer keeps its text and lands on it', async () => {
+  await mountOnFake('/?fake=1&uninstalled=1');
+  if (!store.draft) query<HTMLButtonElement>('[data-testid=new-thread]').click();
+  await waitFor(() => document.querySelector('[data-testid=composer-connect]') !== null);
+  const input = query<HTMLTextAreaElement>('[data-testid=composer-input]');
+  input.value = 'Sort my holiday photos';
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+
+  query<HTMLButtonElement>('[data-testid=composer-connect]').click();
+  await waitFor(() => document.querySelector('[data-testid=connect-dialog]') !== null);
+  // The two services most people already pay for come first, each saying which plan it uses.
+  const services = Array.from(document.querySelectorAll('[data-testid=connect-service]')).map((row) => row.getAttribute('data-provider'));
+  expect(services.slice(0, 2)).toEqual(['claude', 'codex']);
+  expect(query('[data-testid=connect-dialog]').textContent).toContain('Uses a Claude Pro or Max plan');
+
+  query<HTMLButtonElement>('[data-testid=connect-service][data-provider=claude]').click();
+  await waitFor(() => document.querySelector('[data-testid=connect-install]') !== null);
+  query<HTMLButtonElement>('[data-testid=connect-install]').click();
+  // The download chains into the sign-in, which hands over a page to open and a field for its code.
+  await waitFor(() => document.querySelector('[data-testid=connect-login-url]') !== null, 20_000);
+  const code = query<HTMLInputElement>('[data-testid=connect-login-input]');
+  code.value = 'fake-code';
+  code.dispatchEvent(new Event('input', { bubbles: true }));
+  code.closest('form')!.requestSubmit();
+  await waitFor(() => document.querySelector('[data-testid=connect-use]') !== null, 20_000);
+  query<HTMLButtonElement>('[data-testid=connect-use]').click();
+
+  await waitFor(() => document.querySelector('[data-testid=connect-dialog]') === null);
+  await waitFor(() => document.querySelector('[data-testid=composer-connect]') === null);
+  expect(query('[data-testid=composer-picker]').textContent).not.toContain('No AI connected');
+  expect(query<HTMLTextAreaElement>('[data-testid=composer-input]').value).toBe('Sort my holiday photos');
+});
+
 test('the sidebar draft row hands the keyboard back to the composer', async () => {
   await mountOnFake();
 
@@ -255,9 +303,12 @@ test('a draft names its project in the heading and the dropdown moves it to anot
   const rows = Array.from(
     document.querySelectorAll<HTMLButtonElement>('[data-testid=draft-project-menu] [data-row]')
   );
-  expect(rows.map((row) => JSON.parse(row.dataset['value']!)[1])).toEqual(['p-boite', 'p-notes']);
+  // The drafts lead, made or not, and opening a folder closes the list.
+  const places = rows.filter((row) => row.dataset['value']!.startsWith('['));
+  expect(places.map((row) => JSON.parse(row.dataset['value']!)[1])).toEqual([null, 'p-boite', 'p-notes']);
+  expect(rows.at(-1)?.dataset['value']).toBe('open-folder');
 
-  rows[0]?.click();
+  places[1]?.click();
   await waitFor(() => store.draft?.projectId === 'p-boite');
   await waitFor(() => (query('[data-testid=draft-empty]').textContent ?? '').includes('boite'));
   // The draft row moved with it, and the composer took the keyboard back.
@@ -714,6 +765,32 @@ test('OpenCode signs in from a terminal with its login command typed in, and clo
 
   query<HTMLButtonElement>('[data-testid=settings-back]').click();
   await waitFor(() => document.querySelector('[data-testid=settings]') === null);
+});
+
+test('the guided connection signs OpenCode in from a terminal too, then hands it to the composer', async () => {
+  await mountOnFake();
+  // Signed out since: the dialog has a sign-in to offer.
+  await waitFor(() => store.accountOf('a-opencode') !== null);
+  store.accountOf('a-opencode')!.status = 'unauthenticated';
+  store.openConnect('opencode');
+  await waitFor(() => document.querySelector('[data-testid=connect-sign-in]') !== null);
+  query<HTMLButtonElement>('[data-testid=connect-sign-in]').click();
+  // The user's own OpenCode login, in a terminal: its menu is not something a pipe can answer.
+  await waitFor(() => document.querySelector('[data-testid=connect-login-terminal] [data-testid=terminal]') !== null);
+  expect(query('[data-testid=connect-login-terminal] [data-testid=terminal]').getAttribute('data-terminal-id')).toBe('login:a-opencode');
+  await waitFor(() => query('[data-testid=connect-login-terminal]').textContent?.includes('opencode auth login') === true);
+  expect(query('[data-testid=connect-step]').getAttribute('data-step')).toBe('signing-in');
+  expect(document.querySelector('[data-testid=connect-login-input]')).toBeNull();
+  // Escape inside the terminal steps back in the CLI's menu; it does not close the dialog.
+  query('[data-testid=connect-login-terminal] [data-testid=terminal]').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+  flushSync();
+  expect(document.querySelector('[data-testid=connect-dialog]')).not.toBeNull();
+
+  query<HTMLButtonElement>('[data-testid=connect-login-terminal-close]').click();
+  await waitFor(() => document.querySelector('[data-testid=connect-use]') !== null);
+  query<HTMLButtonElement>('[data-testid=connect-use]').click();
+  await waitFor(() => document.querySelector('[data-testid=connect-dialog]') === null);
+  expect(store.accountOf('a-opencode')?.status).toBe('ok');
 });
 
 test('the header wears the context meter, a compaction is a divider, and a turn moves the meter', async () => {
@@ -1325,6 +1402,48 @@ test('a tool card shows the input as the model types it, then switches to the pa
   expect(shown).not.toBe(STREAMED_TOOL_INPUT);
 });
 
+test('a finished answer lists the files it changed, and a row opens one in the panel', async () => {
+  await mountOnFake();
+
+  const input = query<HTMLTextAreaElement>('[data-testid=composer-input]');
+  input.value = 'fix it [diff]';
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  await waitFor(() => !query<HTMLButtonElement>('[data-testid=composer-send]').disabled);
+  query<HTMLButtonElement>('[data-testid=composer-send]').click();
+
+  await waitFor(() => document.querySelector('[data-testid=turn-files]') !== null);
+  const row = query('[data-testid=turn-files] li');
+  expect(row.querySelector('.name')?.textContent).toBe('app.ts');
+  expect(row.querySelector('.folder')?.textContent).toBe('src');
+  expect(row.querySelector('[data-testid=turn-file-change]')?.textContent).toBe('Changed');
+  // A browser has no file manager to hand the path to.
+  expect(row.querySelector('[data-testid=turn-file-reveal]')).toBeNull();
+
+  row.querySelector<HTMLButtonElement>('[data-testid=turn-file]')?.click();
+  await waitFor(() => document.querySelector('[data-testid=file-text]') !== null);
+  expect(query('[data-testid=file-path]').textContent).toContain('src/app.ts');
+
+  // A text file downloads as what the editor shows.
+  const created: Blob[] = [];
+  const createObjectURL = URL.createObjectURL;
+  const revokeObjectURL = URL.revokeObjectURL;
+  URL.createObjectURL = (blob: Blob) => { created.push(blob); return 'blob:turn-file'; };
+  URL.revokeObjectURL = () => {};
+  const click = HTMLAnchorElement.prototype.click;
+  let downloaded = '';
+  HTMLAnchorElement.prototype.click = function (this: HTMLAnchorElement) { downloaded = this.download; };
+  try {
+    query<HTMLButtonElement>('[data-testid=file-download-text]').click();
+  } finally {
+    URL.createObjectURL = createObjectURL;
+    URL.revokeObjectURL = revokeObjectURL;
+    HTMLAnchorElement.prototype.click = click;
+  }
+  expect(downloaded).toBe('app.ts');
+  expect(await created[0]?.text()).toBe(query<HTMLTextAreaElement>('[data-testid=file-text]').value);
+  store.panel.closeAll();
+});
+
 test('a tool card shows the diff, the markdown and the image it produced', async () => {
   await mountOnFake();
 
@@ -1669,19 +1788,67 @@ test('browser Add project keeps refused paths and Escape returns to its button',
   }
 });
 
-test('first run uses the same path form to open its first project', async () => {
-  await mountOnFake();
+/** The app as a first launch sees it: no project, no thread, nothing open. */
+async function emptyCore(): Promise<void> {
   store.projects = [];
+  store.threads = [];
   store.openThread = null;
   store.draft = null;
-  await waitFor(() => document.querySelector('[data-testid=first-run]') !== null);
-  query<HTMLButtonElement>('[data-testid=add-project]').click();
+  await store.openWhereLeft();
+}
+
+test('first run opens a draft in the drafts, and the first send makes them', async () => {
+  await mountOnFake();
+  await emptyCore();
+  await waitFor(() => store.draft !== null);
+  expect(store.draft?.projectId).toBeNull();
+  expect(query('[data-testid=draft-project]').textContent).toContain('Drafts');
+  // A draft in the drafts has no repository to branch.
+  expect(document.querySelector('[data-testid=composer-worktree]')).toBeNull();
+
+  const input = query<HTMLTextAreaElement>('[data-testid=composer-input]');
+  input.value = 'Write a letter to the bank';
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  await waitFor(() => !query<HTMLButtonElement>('[data-testid=composer-send]').disabled);
+  query<HTMLButtonElement>('[data-testid=composer-send]').click();
+
+  await waitFor(() => store.openThread !== null && store.draft === null);
+  const drafts = store.draftsProject;
+  expect(drafts?.kind).toBe('drafts');
+  expect(store.openThread?.projectId).toBe(drafts?.id);
+  expect(store.openThread?.cwd).toMatch(/Documents\\Boite\\\d{4}-\d{2}-\d{2} Write a letter to the bank$/);
+});
+
+test('first run keeps opening a folder one click away', async () => {
+  await mountOnFake();
+  await emptyCore();
+  await waitFor(() => document.querySelector('[data-testid=draft-open-folder]') !== null);
+  query<HTMLButtonElement>('[data-testid=draft-open-folder]').click();
   await waitFor(() => document.querySelector('[data-testid=project-path]') !== null);
   await type(query<HTMLInputElement>('[data-testid=project-path]'), 'D:\\work\\first-project');
   query<HTMLButtonElement>('[data-testid=project-add]').click();
-  await waitFor(() => store.draft !== null);
-  expect(store.openProject?.path).toBe('D:\\work\\first-project');
-  expect(document.querySelector('[data-testid=first-run]')).toBeNull();
+  await waitFor(() => store.openProject?.path === 'D:\\work\\first-project');
+  expect(store.draftInDrafts).toBe(false);
+  expect(document.querySelector('[data-testid=draft-open-folder]')).toBeNull();
+});
+
+test('not a developer, New thread still follows the project on screen', async () => {
+  await mountOnFake();
+  work.choose('everyday');
+  // Work in two folders: each New thread stays in the folder on screen.
+  await store.open('t-descriptors');
+  store.startDraft();
+  expect(store.draft?.projectId).toBe('p-notes');
+  store.startDraft('p-boite');
+  store.startDraft();
+  expect(store.draft?.projectId).toBe('p-boite');
+  // In the drafts, it stays in the drafts; with nothing on screen, the drafts too.
+  store.startDraft(null);
+  store.startDraft();
+  expect(store.draftInDrafts).toBe(true);
+  store.draft = null;
+  store.startDraft();
+  expect(store.draftInDrafts).toBe(true);
 });
 
 test('an ACP login accepts the phone redirect URL through the login input', async () => {

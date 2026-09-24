@@ -4,6 +4,7 @@
   import { contextMenu } from '../lib/context-menu.svelte';
   import { separator } from '../lib/menu';
   import { strings } from '../lib/strings';
+  import { projectName } from '../lib/format';
   import type { Store } from '../lib/store.svelte';
   import ContextControl from './ContextControl.svelte';
   import StatusMark from './StatusMark.svelte';
@@ -103,7 +104,7 @@
 
       <!-- A draft names its project in the heading below, so the chip would say it twice. -->
       {#if project && thread}
-        <span class="chip path" title={project.path}>{project.name}</span>
+        <span class="chip path" title={project.path}>{projectName(project)}</span>
       {/if}
       {#if thread?.parentThreadId}
         <button type="button" class="chip parent" data-testid="delegation-back-parent" onclick={() => void store.open(thread!.parentThreadId!)}>

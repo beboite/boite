@@ -83,6 +83,18 @@
     }
   }
 
+  /** A text file leaves as what the editor shows, unsaved edits included, through the browser's own download. */
+  function downloadText(): void {
+    if (content?.kind !== 'text') return;
+    const url = URL.createObjectURL(new Blob([draft], { type: 'text/plain;charset=utf-8' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = baseName(content.path);
+    link.click();
+    // Firefox and Safari start the download after this task, so the URL lives a second.
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
   async function save(): Promise<void> {
     const id = threadId;
     const wanted = path;
@@ -313,6 +325,19 @@
       <span class="meta" data-testid="file-language">{content.language}</span>
     {/if}
     <span class="meta" data-testid="file-size">{bytes(content?.bytes ?? null)}</span>
+
+    {#if content?.kind === 'text'}
+      <button
+        type="button"
+        class="ghost small icon"
+        data-testid="file-download-text"
+        title={strings.files.download}
+        aria-label={strings.files.download}
+        onclick={downloadText}
+      >
+        <Download size={13} strokeWidth={1.75} />
+      </button>
+    {/if}
 
     {#if content?.kind === 'text' && !readOnly}
       <button

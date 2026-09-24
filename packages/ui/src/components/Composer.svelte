@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { ArrowUp, FileText, GitBranch, Paperclip, ShieldCheck, Square, X } from '@lucide/svelte';
+  import { ArrowUp, FileText, GitBranch, Paperclip, ShieldAlert, ShieldCheck, Square, X } from '@lucide/svelte';
   import { tick, untrack } from 'svelte';
   import type { Attachment, PermissionMode, PreviewReference } from '@boite/contracts';
   import { restorePreviewMentions } from '../lib/preview-mentions';
@@ -12,6 +12,7 @@
   import { rankItems, type PaletteItem } from '../lib/palette';
   import { clearStash, DRAFT_STASH_KEY, readStash, writeStash } from '../lib/prefs';
   import { claudeKeywords, promptSegments, promptText } from '../lib/message-display';
+  import { modeHint, modeLabel, modesFor, shownMode } from '../lib/permission-modes';
   import { fill, strings } from '../lib/strings';
   import type { Choice, PickPatch, Store } from '../lib/store.svelte';
   import EffortSlider from './EffortSlider.svelte';
@@ -22,6 +23,7 @@
   import ThreadActivity from './ThreadActivity.svelte';
   import Dictation from './Dictation.svelte';
   import ComposerOptions from './ComposerOptions.svelte';
+  import { work } from '../lib/work-prefs.svelte';
   import PreviewReferences from './PreviewReferences.svelte';
 
   /**
@@ -31,7 +33,6 @@
    */
   let { store, centered = false }: { store: Store; centered?: boolean } = $props();
 
-  const MODES: PermissionMode[] = ['bypassPermissions', 'acceptEdits', 'default'];
   const MAX_LINES = 8;
 
   let key = $derived(store.openThread?.id ?? DRAFT_STASH_KEY);
@@ -163,10 +164,13 @@
       !composer?.sending
   );
 
+  // A new conversation asks what the user wants done; one under way names who reads the message.
   let placeholder = $derived(
-    store.openProject && provider
-      ? fill(strings.composer.placeholder, { provider: provider.name, project: store.openProject.name })
-      : strings.composer.placeholderNoProject
+    !store.openThread && store.draft
+      ? strings.composer.placeholderNew
+      : store.openProject && provider
+        ? fill(strings.composer.placeholder, { provider: provider.name, project: store.openProject.name })
+        : strings.composer.placeholderNoProject
   );
 
   // -- the slash menu -----------------------------------------------------------
@@ -317,14 +321,24 @@
   });
 
   // Older modes keep their execution policy until the user makes a choice.
-  let displayedMode = $derived<PermissionMode>(choice?.permissionMode ?? 'default');
+  let displayedMode = $derived<PermissionMode>(shownMode(choice?.permissionMode ?? 'default', provider));
+  let modes = $derived(modesFor(provider));
+  /** The chosen account answered that it is signed out: the next send would fail on it. */
+  let signedOut = $derived.by(() => {
+    const account = choice ? store.accountOf(choice.accountId) : null;
+    return account?.status === 'unauthenticated' ? account : null;
+  });
   let modeItems = $derived(
-    MODES.map((mode) => ({
+    modes.map((mode) => ({
       id: mode,
-      label: strings.permissionMode[mode],
-      hint: strings.permissionModeLong[mode],
+      label: modeLabel(mode, provider),
+      hint: modeHint(mode, provider),
       active: displayedMode === mode
     }))
+  );
+  // The worktree switch exists where the core can honour it: a draft on a git repository.
+  let draftRepository = $derived(
+    store.draft && !store.draftInDrafts ? store.projects.find((project) => project.id === store.draft?.projectId)?.repository !== false : false
   );
 
   // The reasoning chip belongs to the model the choice is on, and a model that
@@ -332,6 +346,13 @@
   let effortLevels = $derived((store.modelOf(choice)?.effort?.levels ?? []).filter(level => provider?.protocol === 'claude-sdk' || level.id !== 'ultrathink'));
   let speeds = $derived(store.modelOf(choice)?.speeds ?? []);
   let activeEffort = $derived(choice?.effort ?? store.modelOf(choice)?.effort?.default ?? null);
+  // A chip stays in the bar when this device pinned it, or when it holds
+  // something other than the default: a choice nobody can see is a trap.
+  let effortChip = $derived(
+    (effortLevels.length > 0 || speeds.length > 0) &&
+      (work.current.pins.effort || activeEffort !== (store.modelOf(choice)?.effort?.default ?? null) || Boolean(choice?.speed))
+  );
+  let worktreeChip = $derived(Boolean(store.draft && draftRepository && (work.current.pins.worktree || store.draft.worktree)));
 
   /** A null effort runs at the model's own default, not at a preset the client configured. */
   function cacheKey(selection: Choice): CacheKey {
@@ -748,6 +769,8 @@
     await tick();
     const bar = box?.closest('[data-testid="composer"]');
     if (window.matchMedia('(max-width: 720px)').matches && testid !== 'composer-picker') testid = 'composer-options';
+    // An unpinned effort lives in the Options menu.
+    else if (testid === 'composer-effort' && !effortChip) testid = 'composer-more';
     bar?.querySelector<HTMLElement>(`[data-testid="${testid}"]`)?.click();
   }
 
@@ -945,23 +968,28 @@
 
     <div class="bar">
       {#key `${key}:${store.draft?.projectId ?? ''}`}
-      <ComposerOptions busy={picking} levels={effortLevels} effort={activeEffort} {speeds} speed={choice?.speed ?? null} mode={displayedMode} worktree={store.draft ? store.draft.worktree : null} {canAttach} onattach={() => picker?.click()} oneffort={pickEffort} onspeed={(speed) => void pick({ speed })} onmode={pickMode} onworktree={() => store.setDraftWorktree(!store.draft?.worktree)} />
+      <ComposerOptions busy={picking} levels={effortLevels} effort={activeEffort} {speeds} speed={choice?.speed ?? null} {modes} modeLabel={(mode) => modeLabel(mode, provider)} modeHint={(mode) => modeHint(mode, provider)} mode={displayedMode} worktree={store.draft && draftRepository ? store.draft.worktree : null} {canAttach} onattach={() => picker?.click()} oneffort={pickEffort} onspeed={(speed) => void pick({ speed })} onmode={pickMode} onworktree={() => store.setDraftWorktree(!store.draft?.worktree)} />
       {/key}
       <div class="chips">
         <ModelPicker {store} {choice} disabled={picking} onpick={pick} />
+        {#if signedOut && store.owner}
+          <button type="button" class="chip signed-out" data-testid="composer-reconnect" title={fill(strings.connect.signedOut, { provider: provider?.name ?? '' })} onclick={() => store.openConnect(signedOut.providerId, signedOut.id)}>{strings.connect.reconnect}</button>
+        {/if}
 
         <div class="desktop-options">
-        {#if effortLevels.length > 0 || speeds.length > 0}
+        {#if effortChip}
           <EffortSlider levels={effortLevels} active={activeEffort} onpick={pickEffort} {speeds} speed={choice?.speed ?? null} onspeed={(speed) => void pick({ speed })} />
         {/if}
 
-        <Menu items={modeItems} onpick={pickMode} label={strings.composer.mode} testid="composer-mode" align="end">
-          <ShieldCheck size={14} strokeWidth={1.75} />
-          {strings.permissionMode[displayedMode]}
-        </Menu>
+        {#if modes.length > 0}
+          <Menu items={modeItems} onpick={pickMode} label={strings.composer.mode} testid="composer-mode" align="end">
+            {#if displayedMode === 'bypassPermissions'}<span class="open-mode"><ShieldAlert size={14} strokeWidth={1.75} /></span>{:else}<ShieldCheck size={14} strokeWidth={1.75} />{/if}
+            {modeLabel(displayedMode, provider)}
+          </Menu>
+        {/if}
 
         <!-- A thread keeps its directory, so the switch exists on a draft alone. -->
-        {#if store.draft}
+        {#if store.draft && worktreeChip}
           <button
             type="button"
             class="chip worktree"
@@ -976,6 +1004,10 @@
             {strings.composer.worktree}
           </button>
         {/if}
+
+        {#key `${key}:${store.draft?.projectId ?? ''}`}
+          <ComposerOptions variant="desktop" busy={picking} levels={effortLevels} effort={activeEffort} {speeds} speed={choice?.speed ?? null} {modes} modeLabel={(mode) => modeLabel(mode, provider)} modeHint={(mode) => modeHint(mode, provider)} mode={displayedMode} worktree={store.draft && draftRepository ? store.draft.worktree : null} {canAttach} pins={work.current.pins} onattach={() => picker?.click()} oneffort={pickEffort} onspeed={(speed) => void pick({ speed })} onmode={pickMode} onworktree={() => store.setDraftWorktree(!store.draft?.worktree)} onpin={(id, on) => work.pin(id, on)} />
+        {/key}
         </div>
       </div>
 
@@ -1143,6 +1175,9 @@
   }
 
   /* Off it reads like the other chips; on it takes the active fill, the same as a pressed tab. */
+  .open-mode { display: inline-flex; color: var(--color-live); }
+  .chip.signed-out { color: var(--color-live); }
+
   .worktree.on {
     background: var(--color-active);
     border-color: var(--color-active);
@@ -1220,6 +1255,13 @@
     color: var(--color-foreground);
   }
 
+  /* Nothing to pick yet: the one chip that gets somewhere wears the accent. */
+  .chips :global(.trigger.connect) {
+    border-color: transparent;
+    background: var(--color-accent-soft);
+    color: var(--color-accent);
+  }
+
   .chips :global(.trigger:hover) {
     background: var(--color-surface-3);
   }
@@ -1245,6 +1287,7 @@
     .chips :global(.picker) { min-width: 0; max-width: 100%; }
     .chips :global(.picker > .trigger) { max-width: 100%; height: var(--touch-target); padding: 0 6px; border: none; background: transparent; font-weight: 500; color: var(--color-muted-foreground); }
     .chips :global(.picker > .trigger > .label) { min-width: 0; max-width: none; }
+    .chips :global(.picker > .trigger.connect) { padding: 0 12px; border-radius: var(--radius-md); background: var(--color-accent-soft); color: var(--color-accent); }
     .composer { box-shadow: none; border-radius: var(--radius-xl); }
     .composer:focus-within { box-shadow: none; border-color: var(--color-edge); }
     .send, .stop { border-radius: 50%; margin-left: 2px; }

@@ -1,9 +1,11 @@
 <script lang="ts">
+  import InfoTip from './InfoTip.svelte';
   import { untrack } from 'svelte';
   import type { Store } from '../lib/store.svelte';
   import { strings } from '../lib/strings';
   import { installApp, installed, PUSH_ENABLED_KEY, worker } from '../lib/pwa';
   let { store, showServerSettings = true }: { store: Store; showServerSettings?: boolean } = $props();
+  const uid = $props.id();
   const inShell = window.__TAURI_INTERNALS__ !== undefined;
   const secure = window.isSecureContext;
   const capable = secure && 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
@@ -78,8 +80,7 @@
   <h2>{strings.phone.heading}</h2>
   {#if store.owner && showServerSettings}
     <div class="block">
-      <label><span>{strings.phone.publicUrl}</span><input type="url" bind:value={publicUrl} placeholder={strings.phone.urlPlaceholder} data-testid="phone-public-url" /></label>
-      <p class="hint">{strings.phone.publicUrlHint}</p>
+      <label for="{uid}-public-url"><span><span id="{uid}-public-url-name">{strings.phone.publicUrl}</span><InfoTip topic={strings.phone.publicUrl} text={strings.phone.publicUrlHint} /></span><input id="{uid}-public-url" aria-labelledby="{uid}-public-url-name" type="url" bind:value={publicUrl} placeholder={strings.phone.urlPlaceholder} data-testid="phone-public-url" /></label>
       <div class="actions">
         <button disabled={store.connection !== 'ready'} onclick={() => void store.saveSettings({ publicUrl: publicUrl.trim() || null })}>{strings.settings.save}</button>
       </div>
@@ -89,9 +90,9 @@
     <div class="block">
       {#if standalone}<p class="hint">{strings.phone.installed}</p>
       {:else}
-        <p class="hint">{strings.phone.installHint}</p>
         <div class="actions">
           <button onclick={async () => { standalone = await installApp() || installed(); if (!standalone) message = strings.phone.installHint; }}>{strings.phone.install}</button>
+          <InfoTip topic={strings.phone.install} text={strings.phone.installHint} />
         </div>
       {/if}
     </div>
@@ -101,8 +102,8 @@
       {:else if !paired}<p class="hint">{strings.phone.pairFirst}</p>
       {:else if !capable}<p class="hint">{strings.phone.unsupported}</p>
       {:else}
-        <p class="hint">{strings.phone.pushHint}</p>
         <div class="actions">
+          <InfoTip topic={strings.phone.heading} text={strings.phone.pushHint} />
           {#if subscribed}
             <button disabled={busy} onclick={disable}>{strings.phone.disable}</button>
             <button disabled={busy} onclick={testPush}>{strings.phone.test}</button>

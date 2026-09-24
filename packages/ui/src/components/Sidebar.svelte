@@ -9,6 +9,7 @@
   import { separator } from '../lib/menu';
   import { clampSidebar, SIDEBAR_DEFAULT } from '../lib/prefs';
   import { fill, strings } from '../lib/strings';
+  import { projectName } from '../lib/format';
   import MachineStatus from './MachineStatus.svelte';
   import ThreadCard from './ThreadCard.svelte';
   import MachineIcon from './MachineIcon.svelte';
@@ -28,7 +29,7 @@
       .flatMap(({ machine, project }) =>
         machine.store
           .threadsOf(project.id)
-          .filter((thread) => `${thread.title} ${project.name} ${machine.label}`.toLowerCase().includes(needle))
+          .filter((thread) => `${thread.title} ${projectName(project)} ${machine.label}`.toLowerCase().includes(needle))
           .map((thread) => ({ machine, project, thread }))
       )
       .sort(
@@ -38,7 +39,7 @@
   );
   let target = $derived(store.openProject ?? store.projects[0]);
   let newLabel = $derived(
-    target ? fill(strings.sidebar.newThreadIn, { project: target.name }) : strings.sidebar.newThread
+    target ? fill(strings.sidebar.newThreadIn, { project: projectName(target) }) : strings.sidebar.newThread
   );
   $effect(() => {
     const timer = setInterval(() => (now = Date.now()), 30_000);
@@ -56,7 +57,7 @@
     contextMenu.open(
       event,
       [
-        { id: 'new', label: fill(strings.sidebar.newThreadIn, { project: project.name }) },
+        { id: 'new', label: fill(strings.sidebar.newThreadIn, { project: projectName(project) }) },
         { id: 'copy', label: strings.sidebar.copyPath, hint: project.path },
         ...(owner.owner
           ? [
@@ -76,7 +77,7 @@
         if (
           action === 'remove' &&
           (await confirm.ask({
-            title: fill(strings.sidebar.removeProjectTitle, { project: project.name }),
+            title: fill(strings.sidebar.removeProjectTitle, { project: projectName(project) }),
             body: strings.sidebar.removeProjectBody,
             confirmLabel: strings.sidebar.remove,
             cancelLabel: strings.common.cancel,
@@ -169,7 +170,7 @@
         {@const owner = machine.store}
         {@const threads = owner
           .threadsOf(project.id)
-          .filter((t) => `${t.title} ${project.name} ${machine.label}`.toLowerCase().includes(needle))
+          .filter((t) => `${t.title} ${projectName(project)} ${machine.label}`.toLowerCase().includes(needle))
           .sort(
             (a, b) =>
               Number(b.pinned) - Number(a.pinned) ||
@@ -189,8 +190,8 @@
               onclick={() => owner.toggleProject(project.id)}
             >
               <span class="caret" class:collapsed><ChevronRight size={12} /></span><span class="tile"
-                >{project.name.slice(0, 1).toUpperCase()}</span
-              ><span class="name">{project.name}</span><span class="host" title={machine.label}
+                >{projectName(project).slice(0, 1).toUpperCase()}</span
+              ><span class="name">{projectName(project)}</span><span class="host" title={machine.label}
                 ><MachineIcon icon={machine.icon} os={owner.core?.os} /></span
               >
             </button>
@@ -219,7 +220,7 @@
       {/each}
     {/if}
   </div>
-  {#if store.projects.length > 0 && store.owner}
+  {#if store.owner}
     <button class="ghost small add-project" data-testid="add-project" bind:this={projectButton} onclick={addProject}
       ><Plus size={13} />{strings.sidebar.addProject}</button
     >

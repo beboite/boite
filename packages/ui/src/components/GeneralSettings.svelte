@@ -1,4 +1,5 @@
 <script lang="ts">
+  import InfoTip from './InfoTip.svelte';
   import { untrack } from 'svelte';
   import type { PairedSession } from '@boite/contracts';
   import ShellSettings from './ShellSettings.svelte';
@@ -8,13 +9,14 @@
   import { showAppUpdateUi } from '../lib/app-update.svelte';
   import TelemetrySettings from './TelemetrySettings.svelte';
   import { confirm } from '../lib/confirm.svelte';
-  import { ago, time } from '../lib/format';
+  import { ago, projectName, time } from '../lib/format';
   import { qrSvg } from '../lib/qr';
   import { fill, strings } from '../lib/strings';
   import { openTour } from '../lib/onboarding.svelte';
   import type { Store } from '../lib/store.svelte';
 
   let { store }: { store: Store } = $props();
+  const uid = $props.id();
 
   const inShell = window.__TAURI_INTERNALS__ !== undefined;
 
@@ -85,22 +87,17 @@
   {#if inShell}<ShellSettings />{/if}
   {#if showAppUpdateUi()}<AppUpdateCard />{/if}
 
-  <PhoneSettings {store} />
-  <ModelDefaultsSettings {store} />
-  <TelemetrySettings {store} />
-
   <section class="card" id="settings-projects">
-    <h2>{strings.settings.projects}</h2>
+    <h2>{strings.settings.projects}{#if store.owner}<InfoTip topic={strings.settings.projects} text={strings.settings.projectsHint} />{/if}</h2>
     {#if store.projects.length > 0}
       <ul class="projects">
         {#each store.projects as project (project.id)}
           <li>
-            <span class="name">{project.name}</span>
+            <span class="name">{projectName(project)}</span>
             <span class="mono subtle path" title={project.path}>{project.path}</span>
           </li>
         {/each}
       </ul>
-      {#if store.owner}<p class="subtle hint">{strings.settings.projectsHint}</p>{/if}
     {/if}
     <!-- `projects.add` is the owner's, so a paired device reads the list and
          is told where the folders come from. -->
@@ -109,18 +106,18 @@
         <button type="button" data-testid="settings-project-add" onclick={() => (store.projectPickerOpen = true)}>{strings.firstRun.pick}</button>
       </div>
     {:else}
+      <!-- In place of the button a device lacks: a state, so it stays in view. -->
       <p class="subtle hint">{strings.settings.projectsDevice}</p>
     {/if}
   </section>
 
   <section class="card" id="settings-background">
     <h2>{strings.settings.background}</h2>
-    <label class="switch-row">
+    <label for="{uid}-notifications" class="switch-row">
       <span class="text">
-        {strings.settings.notifications}
-        <span class="hint">{strings.settings.notificationsHint}</span>
+        <span id="{uid}-notifications-name">{strings.settings.notifications}</span><InfoTip topic={strings.settings.notifications} text={strings.settings.notificationsHint} />
       </span>
-      <input
+      <input id="{uid}-notifications" aria-labelledby="{uid}-notifications-name"
         type="checkbox"
         role="switch"
         data-testid="setting-notifications"
@@ -130,27 +127,26 @@
     </label>
   </section>
 
+  <ModelDefaultsSettings {store} />
+
   <section class="card" id="settings-machines">
-    <h2>{strings.machines.heading}</h2>
-    <p class="subtle hint">{strings.machines.intro}</p>
+    <h2>{strings.machines.heading}<InfoTip topic={strings.machines.heading} text={strings.machines.intro} /></h2>
     <button data-testid="settings-machines" onclick={() => store.showSettings('machines')}>
       {strings.machines.heading}
     </button>
   </section>
 
   <section class="card" id="settings-devices" data-testid="pairing-card">
-    <h2>{strings.settings.pairing.heading}</h2>
+    <h2>{strings.settings.pairing.heading}<InfoTip topic={strings.settings.pairing.heading} text={strings.settings.pairing.intro} /></h2>
     {#if store.principal === 'owner'}
-      <p class="subtle hint">{strings.settings.pairing.intro}</p>
       {#if store.settings && !store.settings.listenOnLan}
         <p class="subtle hint">{strings.settings.pairing.lanHint}</p>
       {/if}
-      <label class="switch-row">
+      <label for="{uid}-pairing-owner" class="switch-row">
         <span class="text">
-          {strings.settings.pairing.owner}
-          <span class="hint">{strings.settings.pairing.ownerHint}</span>
+          <span id="{uid}-pairing-owner-name">{strings.settings.pairing.owner}</span><InfoTip topic={strings.settings.pairing.owner} text={strings.settings.pairing.ownerHint} />
         </span>
-        <input type="checkbox" role="switch" data-testid="pairing-owner" bind:checked={ownerLink} />
+        <input id="{uid}-pairing-owner" aria-labelledby="{uid}-pairing-owner-name" type="checkbox" role="switch" data-testid="pairing-owner" bind:checked={ownerLink} />
       </label>
       <div class="actions">
         <button
@@ -230,12 +226,11 @@
           <input type="number" min="0" max="120" bind:value={warmProcessMinutes} />
         </label>
       </div>
-      <label class="switch-row">
+      <label for="{uid}-listen-on-lan" class="switch-row">
         <span class="text">
-          {strings.settings.listenOnLan}
-          <span class="hint">{strings.settings.listenOnLanHint}</span>
+          <span id="{uid}-listen-on-lan-name">{strings.settings.listenOnLan}</span><InfoTip topic={strings.settings.listenOnLan} text={strings.settings.listenOnLanHint} />
         </span>
-        <input type="checkbox" role="switch" data-testid="setting-listen-on-lan" bind:checked={listenOnLan} />
+        <input id="{uid}-listen-on-lan" aria-labelledby="{uid}-listen-on-lan-name" type="checkbox" role="switch" data-testid="setting-listen-on-lan" bind:checked={listenOnLan} />
       </label>
       <label class="switch-row">
         <span class="text">
@@ -254,12 +249,16 @@
   {/if}
 
   <section class="card" id="settings-tour">
-    <h2>{strings.onboarding.label}</h2>
-    <p class="subtle hint">{strings.onboarding.replayHint}</p>
+    <h2>{strings.onboarding.label}<InfoTip topic={strings.onboarding.label} text={strings.onboarding.replayHint} /></h2>
     <button type="button" data-testid="settings-tour" onclick={() => { store.showChat(); openTour(); }}>
       {strings.onboarding.replay}
     </button>
   </section>
+
+  <TelemetrySettings {store} />
+  <!-- Serving the app over HTTPS behind a reverse proxy is a server's
+       business: it sits under everything a person on a laptop uses. -->
+  <PhoneSettings {store} />
 
   <section class="card" id="settings-core">
     <h2>{strings.settings.core}</h2>

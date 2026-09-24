@@ -126,6 +126,8 @@ import {
   ECHO_COMMANDS,
   emptyUsage,
   fakeWorktree,
+  fakeDraftFolder,
+  FAKE_DRAFTS_PATH,
   refusal,
   SHOUT,
   T0,
@@ -156,7 +158,7 @@ export interface FakeClientOptions {
   delayMs?: number;
   /** Seeds one thread of 400 messages, what `?fake=1&long=1` opens the list on. */
   long?: boolean;
-  /** A fresh machine with no agents or accounts, for the setup flow. */
+  /** A fresh machine with no agents, accounts or projects, for the setup flow. */
   uninstalled?: boolean;
   /** Adds a deterministic active team for visual checks on `?fake=1&team=1`. */
   delegationDemo?: boolean;
@@ -340,6 +342,8 @@ export class FakeClient implements ObservableClient {
         install: RELEASES[provider.id] ? { state: 'absent', ...RELEASES[provider.id]! } : null,
       }));
       this.#accounts = [];
+      // A first launch: no folder opened yet, so the app lands in the drafts.
+      this.#projects = [];
       this.#threads.clear();
       this.#importable = [];
       this.#pendingPermissions.clear();
@@ -611,7 +615,24 @@ export class FakeClient implements ObservableClient {
         id: `p-${++this.#seq}`,
         name: params.name ?? params.path.split(/[\\/]/).filter(Boolean).pop() ?? params.path,
         path: params.path,
-        createdAt: this.#now()
+        createdAt: this.#now(),
+        // No disk here: a folder the fake is handed counts as a repository.
+        repository: true
+      };
+      this.#projects.push(project);
+      this.#emit('project.added', structuredClone(project));
+      return structuredClone(project);
+    },
+    'projects.drafts': async () => {
+      const existing = this.#projects.find((p) => p.kind === 'drafts');
+      if (existing) return structuredClone(existing);
+      const project: Project = {
+        id: `p-${++this.#seq}`,
+        name: 'Drafts',
+        path: FAKE_DRAFTS_PATH,
+        createdAt: this.#now(),
+        repository: false,
+        kind: 'drafts'
       };
       this.#projects.push(project);
       this.#emit('project.added', structuredClone(project));
@@ -869,7 +890,12 @@ export class FakeClient implements ObservableClient {
       const title = params.title ?? 'Untitled thread';
       // The core's own placement: a branch named after the title, the
       // worktree beside the repository. No git here, only the two strings.
+      if (params.worktree !== undefined && project.kind === 'drafts') throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'a draft has no worktree: the drafts folder is not a git repository', data: { projectId: project.id } });
       const placed = params.worktree === undefined ? null : fakeWorktree(project.path, title, params.worktree.branch);
+      // The core makes a dated folder per draft; the fake only names it.
+      const draftFolder = project.kind === 'drafts' && !params.cwd
+        ? fakeDraftFolder(project.path, title, new Date(at), new Set([...this.#threads.values()].map((thread) => thread.cwd)))
+        : null;
       const thread: Thread = {
         id: `t-${++this.#seq}`,
         projectId: params.projectId,
@@ -880,7 +906,7 @@ export class FakeClient implements ObservableClient {
         model: params.model ?? null,
         effort: params.effort ?? null,
         speed: params.speed ?? null,
-        cwd: placed?.path ?? params.cwd ?? project.path,
+        cwd: placed?.path ?? draftFolder ?? params.cwd ?? project.path,
         branch: placed?.branch ?? null,
         permissionMode: params.permissionMode ?? 'default',
         status: 'idle',
@@ -2159,6 +2185,8 @@ const ready = true;
       await this.#runTool(thread, message);
     }
     if (!record.cancelled && prompt.includes('[diff]')) {
+      // The edit lands in the working tree, so the file it names opens.
+      this.#files.set(DIFF_PATH, DIFF_NEW);
       await this.#documentTool(thread, message, 'Edit', { file_path: DIFF_PATH }, 'edited 1 file', [
         { kind: 'diff', path: DIFF_PATH, oldText: DIFF_OLD, newText: DIFF_NEW }
       ]);
@@ -3273,8 +3301,8 @@ const ready = true;
 
   #seed(): void {
     this.#projects = [
-      { id: 'p-boite', name: 'boite', path: 'C:\\src\\boite', createdAt: T0 },
-      { id: 'p-notes', name: 'notes', path: 'C:\\src\\notes', createdAt: T0 }
+      { id: 'p-boite', name: 'boite', path: 'C:\\src\\boite', createdAt: T0, repository: true },
+      { id: 'p-notes', name: 'notes', path: 'C:\\src\\notes', createdAt: T0, repository: true }
     ];
 
     // What Claude Code left under its projects folder for boite: one session

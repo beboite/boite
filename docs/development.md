@@ -104,8 +104,8 @@ in-memory fake.
 The service worker never registers under `?fake=1`, so a rebuild is always what
 a reload shows.
 
-Opening a project uses one dialog from the sidebar, first-run card, settings
-and command palette. Choose a machine, then type an absolute path or browse
+Opening a project uses one dialog from the sidebar, the drafts' project menu
+and `Work in a folder of mine`, settings and the command palette. Choose a machine, then type an absolute path or browse
 its directories through the owner-only `projects.browse` method. The native
 folder button is available only for the shell's local core. A folder dropped
 from the desktop switches to that local core before opening the path.
@@ -127,7 +127,10 @@ names the root `.gitignore` lists outright, and stops at twenty thousand files,
 saying so in `capped`. A glob or a negation in `.gitignore` is not read, so a
 tree ignored through one still shows up in the menu.
 
-A draft has one more chip, `Worktree`. On, the first send passes
+A draft on a git repository has one more chip, `Worktree`. `Project.repository`
+says whether the folder holds a `.git`, read by the core on every answer with
+the test the worktree refuses on; a core that does not send the field keeps the
+chip. On, the first send passes
 `worktree: {}` to `threads.create` and the core runs `git worktree add -b`
 before writing the thread: the branch is `boite/<slug of the title>` (`-2`,
 `-3` when the name is taken, or the `branch` the call names), the directory
@@ -414,6 +417,13 @@ Settings pages share their width and card padding through `--settings-width`
 and `--settings-padding` in `app.css`. A page that wraps its cards for a loading
 state uses `settings-stack` on that wrapper. This keeps its cards on the same
 spacing rules as direct children of a settings page.
+
+A settings page shows titles and controls. The sentence saying what a page, a
+card or a row is for goes in an `InfoTip` beside its title: a small "i" that
+opens on hover with a mouse, on a tap with a finger (a sheet on the phone), and
+closes on Escape or a press elsewhere. A muted `.hint` line stays in view only
+for what is true now: an error, a count, a step that is missing. The tour is
+the exception, since explaining is its job.
 
 Native `details.disclosure` sections animate their height in browsers that
 support intrinsic-size transitions, with an immediate fallback elsewhere.

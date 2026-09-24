@@ -5,6 +5,7 @@
   import ThreadHeader from './ThreadHeader.svelte';
   import type { Window as TauriWindow } from '@tauri-apps/api/window';
   import { strings } from '../lib/strings';
+  import { projectName } from '../lib/format';
   import type { Store } from '../lib/store.svelte';
   import { appName, appUpdater, showAppUpdateUi } from '../lib/app-update.svelte';
   import { appUpdateInstall } from '../lib/app-update-install.svelte';
@@ -91,7 +92,7 @@
   }
 
   /** What the bar reads when no thread header takes its place. */
-  let heading = $derived(store.page === 'settings' ? strings.settings.heading : store.openProject?.name ?? appName());
+  let heading = $derived(store.page === 'settings' ? strings.settings.heading : (store.openProject ? projectName(store.openProject) : null) ?? appName());
   let threadHeader = $derived(store.page === 'chat' && (store.openThread || store.draft));
   /** The nightly chip, unless the bar already reads "boite (de nuit)". */
   let nightly = $derived(showAppUpdateUi() && appUpdater.snapshot.supported && appUpdater.snapshot.currentChannel === 'nightly'

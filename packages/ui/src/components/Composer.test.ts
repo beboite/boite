@@ -4,6 +4,7 @@ import App from '../App.svelte';
 import { defaultPrefs, PREFS_STORAGE_KEY, STASH_STORAGE_KEY } from '../lib/prefs';
 import { store } from '../lib/store.svelte';
 import { closeTour } from '../lib/onboarding.svelte';
+import { freshWork, work, WORK_STORAGE_KEY } from '../lib/work-prefs.svelte';
 
 /**
  * The three composer keys, on the whole app over the in-memory fake: Ctrl+Enter
@@ -111,6 +112,8 @@ afterEach(() => {
   running = null;
   document.body.innerHTML = '';
   window.localStorage.clear();
+  // The device's pins are module state: the next test starts with no record.
+  work.load();
   vi.restoreAllMocks();
 });
 
@@ -406,6 +409,50 @@ test('a model with no reasoning scale gets no chip at all', async () => {
   await waitFor(() => document.querySelector('[data-testid=composer-picker-menu]') === null);
   await waitFor(() => effortChip() === null);
   expect(query('[data-testid=composer-picker]').textContent).toContain('Claude Haiku 4.5');
+});
+
+test('an install that already has conversations keeps every chip in the bar', async () => {
+  await mountOnFake();
+  // No record on this device, and the core has threads: the chips stay where they were.
+  expect(work.current.pins).toEqual({ effort: true, worktree: true });
+  expect(JSON.parse(window.localStorage.getItem(WORK_STORAGE_KEY) ?? 'null')).toMatchObject({ pins: { effort: true, worktree: true }, panel: 'launcher' });
+  await openDraft();
+  await waitFor(() => effortChip() !== null);
+  query('[data-testid=composer-worktree]');
+  expect(input().placeholder).toBe('What do you want to do?');
+
+  // The Options menu still lists them, their pins pressed.
+  query<HTMLButtonElement>('[data-testid=composer-more]').click();
+  await waitFor(() => document.querySelector('[data-testid=composer-more-menu]') !== null);
+  expect(query('[data-testid=composer-pin-effort]').getAttribute('aria-pressed')).toBe('true');
+  expect(query('[data-testid=composer-pin-worktree]').getAttribute('aria-pressed')).toBe('true');
+});
+
+test('a first run keeps effort and worktree in Options until pinned, and a worktree turned on stays in view', async () => {
+  window.localStorage.setItem(WORK_STORAGE_KEY, JSON.stringify(freshWork()));
+  work.load();
+  await mountOnFake();
+  // The record on the device wins over the threads the core holds.
+  expect(work.current.pins).toEqual({ effort: false, worktree: false });
+  store.startDraft('p-boite');
+  await waitFor(() => query('[data-testid=composer-picker]').textContent?.includes('Claude Opus 5') === true);
+  expect(effortChip()).toBeNull();
+  expect(document.querySelector('[data-testid=composer-worktree]')).toBeNull();
+  // The permission mode is never hidden.
+  query('[data-testid=composer-mode]');
+
+  query<HTMLButtonElement>('[data-testid=composer-more]').click();
+  await waitFor(() => document.querySelector('[data-testid=composer-more-menu]') !== null);
+  expect(query('[data-testid=composer-pin-effort]').getAttribute('aria-pressed')).toBe('false');
+
+  // A worktree turned on is a choice away from the default: its chip shows, unpinned.
+  query<HTMLButtonElement>('[data-testid=composer-options-worktree]').click();
+  await waitFor(() => document.querySelector('[data-testid=composer-worktree]') !== null);
+  expect(work.current.pins.worktree).toBe(false);
+
+  query<HTMLButtonElement>('[data-testid=composer-pin-effort]').click();
+  await waitFor(() => effortChip() !== null);
+  expect(JSON.parse(window.localStorage.getItem(WORK_STORAGE_KEY) ?? 'null').pins).toEqual({ effort: true, worktree: false });
 });
 
 test('the picker keeps row, account and legacy keyboard navigation separate', async () => {
@@ -779,8 +826,8 @@ test('permission menu offers three policies and preserves legacy modes until pic
   query('[data-testid=composer-mode]').click();
   await waitFor(() => document.querySelector('[data-testid=composer-mode-menu]') !== null);
   const menu = query('[data-testid=composer-mode-menu]');
-  expect(Array.from(menu.querySelectorAll('.label')).map(row => row.textContent?.trim())).toEqual(['Yolo', 'Auto decide', 'Ask']);
-  for (const [mode, label] of [['bypassPermissions', 'Yolo'], ['acceptEdits', 'Auto decide'], ['default', 'Ask']]) {
+  expect(Array.from(menu.querySelectorAll('.label')).map(row => row.textContent?.trim())).toEqual(['No confirmation', 'Edit freely', 'Ask']);
+  for (const [mode, label] of [['bypassPermissions', 'No confirmation'], ['acceptEdits', 'Edit freely'], ['default', 'Ask']]) {
     query(`[data-testid=composer-mode-menu] [data-value="${mode}"]`).click();
     await waitFor(() => store.openThread?.permissionMode === mode);
     expect(query('[data-testid=composer-mode]').textContent?.trim()).toBe(label);

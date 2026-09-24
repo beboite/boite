@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, tick, untrack } from 'svelte';
-  import { AppWindow, ArrowLeftRight, Bell, Check, FileDiff, Languages, Mic, Minimize2, Palette, VolumeX, X } from '@lucide/svelte';
+  import { AppWindow, ArrowLeftRight, Bell, Check, FileDiff, Languages, MessageCircle, Mic, Minimize2, Palette, SquareTerminal, VolumeX, X } from '@lucide/svelte';
   import type { SpeechStatus } from '@boite/contracts';
   import TelemetryDeal from './TelemetryDeal.svelte';
   import OnboardingScene from './OnboardingScene.svelte';
@@ -10,6 +10,7 @@
   import { steps, type OnboardingStep } from '../lib/onboarding';
   import { closeTour } from '../lib/onboarding.svelte';
   import { readTheme, setTheme, type Theme } from '../lib/theme';
+  import { work, type Profile } from '../lib/work-prefs.svelte';
   import type { Store } from '../lib/store.svelte';
 
   let { store }: { store: Store } = $props();
@@ -25,6 +26,12 @@
   let theme = $state<Theme>(readTheme());
   const themes = $derived([{ id: 'system', label: strings.settings.themeSystem }, { id: 'dark', label: strings.settings.themeDark }, { id: 'light', label: strings.settings.themeLight }] as const);
   const examples = $derived([{ id: 'agents', label: strings.onboarding.demo.conversation }, { id: 'voice', label: strings.onboarding.demo.voice }, { id: 'panel', label: strings.onboarding.demo.panel }] as const);
+  const profiles = $derived([
+    { id: 'everyday', label: strings.onboarding.profile.everyday, hint: strings.onboarding.profile.everydayHint },
+    { id: 'developer', label: strings.onboarding.profile.developer, hint: strings.onboarding.profile.developerHint }
+  ] as const);
+  /** Picking writes the preset at once: skipping the rest of the tour keeps the answer. */
+  function pickProfile(profile: Profile) { store.applyProfile(profile); }
   const overlay = new Closing();
   overlay.show();
   $effect(() => { if (!overlay.shown) closeTour(); });
@@ -115,6 +122,17 @@
                 {#each themes as option (option.id)}<button class:on={theme === option.id} aria-pressed={theme === option.id} data-testid="onboarding-theme-{option.id}" onclick={() => { theme = option.id; setTheme(theme); }}>{option.label}</button>{/each}
               </div></div>
             </div>
+          {:else if step === 'profile'}
+            <div class="profiles" role="group" aria-labelledby="onboarding-title">
+              {#each profiles as item (item.id)}
+                <button class:on={work.current.profile === item.id} aria-pressed={work.current.profile === item.id} data-testid="onboarding-profile-{item.id}" onclick={() => pickProfile(item.id)}>
+                  {#if item.id === 'everyday'}<MessageCircle size={20} />{:else}<SquareTerminal size={20} />{/if}
+                  <span class="answer"><strong>{item.label}</strong><span>{item.hint}</span></span>
+                  {#if work.current.profile === item.id}<Check size={13} class="selected-mark" />{/if}
+                </button>
+              {/each}
+            </div>
+            <p class="detail">{strings.onboarding.profile.later}</p>
           {:else if step === 'agents'}
             <p class="lead">{strings.onboarding.demo.workspaceBody}</p>
             <div class="examples" role="group" aria-label={strings.onboarding.agents.title}>
@@ -210,6 +228,15 @@
   .examples button:hover { color: var(--color-foreground); background: var(--color-hover); border-color: var(--color-accent); }
   .examples button.on { border-color: var(--color-accent); background: var(--color-accent-soft); color: var(--color-foreground); box-shadow: inset 0 -2px var(--color-accent); }
   .examples :global(.selected-mark) { position: absolute; top: 7px; right: 7px; color: var(--color-accent); }
+  .profiles { display: grid; gap: 8px; margin: 16px 0 12px; }
+  .profiles button { position: relative; display: flex; align-items: flex-start; gap: 14px; height: auto; padding: 16px 36px 16px 16px; white-space: normal; text-align: left; border: 1px solid var(--color-edge); border-radius: var(--radius-lg); background: var(--color-surface-2); color: var(--color-muted-foreground); cursor: pointer; }
+  .profiles button :global(svg) { flex: none; margin-top: 2px; }
+  .profiles button:hover { color: var(--color-foreground); background: var(--color-hover); border-color: var(--color-accent); }
+  .profiles button.on { border-color: var(--color-accent); background: var(--color-accent-soft); color: var(--color-foreground); }
+  .profiles :global(.selected-mark) { position: absolute; top: 10px; right: 10px; color: var(--color-accent); }
+  .answer { display: grid; gap: 4px; }
+  .answer strong { font-size: var(--text-base); font-weight: 600; line-height: 1.4; color: var(--color-foreground); }
+  .answer span { font-size: var(--text-sm); line-height: 1.5; }
   .voice-setup { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 12px; font-size: var(--text-sm); color: var(--color-muted-foreground); }
   .voice-setup progress { display: block; width: 100%; margin-top: 6px; accent-color: var(--color-accent); }
   .quiet-scene { margin: auto; }

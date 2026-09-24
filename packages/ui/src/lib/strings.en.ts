@@ -299,15 +299,46 @@ export const strings = {
     error: 'error'
   },
 
+  drafts: {
+    name: 'Drafts',
+    hint: 'A folder of its own for each conversation, in Documents/Boite',
+    openFolder: 'Work in a folder of mine',
+    pickFolder: 'Open a folder'
+  },
   firstRun: {
     heading: 'Open a project',
-    body: 'Pick the folder an agent will work in. Threads live inside it.',
     deviceBody: 'Projects are opened from the app the core runs in. The ones it holds show up here.',
     pick: 'Choose a folder',
-    dropHint: 'or drop a folder anywhere in this window',
-    typePath: 'Or type the path',
     pathPlaceholder: 'Absolute path of the folder',
     add: 'Open'
+  },
+
+  /** The guided connection: from "nothing works yet" to a composer on a signed-in agent. */
+  connect: {
+    button: 'Connect an AI',
+    title: 'Connect an AI',
+    intro: 'Boite works with an AI subscription you already have. Pick it, Boite installs what it needs and opens its sign-in page.',
+    more: 'Other agents',
+    plan: {
+      claude: 'Uses a Claude Pro or Max plan',
+      codex: 'Uses a ChatGPT plan'
+    },
+    otherPlan: 'Uses your {provider} account',
+    install: 'Install {provider}',
+    installNote: 'Downloads {size}. Nothing else changes on this computer.',
+    signIn: 'Sign in to {provider}',
+    signInNote: 'Your browser opens the sign-in page. Come back here once it says you are connected.',
+    manual: '{provider} installs with its own installer. Run it, then check again here.',
+    manualOpen: 'Open the installer page',
+    external: '{provider} signs in from its own window. Sign in there, then check again.',
+    checkAgain: 'Check again',
+    ready: '{provider} is connected.',
+    use: 'Use {provider}',
+    back: 'Back',
+    close: 'Close',
+    device: 'No AI is connected on the computer running Boite yet. Connect one from that computer.',
+    reconnect: 'Sign in again',
+    signedOut: '{provider} is signed out'
   },
 
   drop: {
@@ -452,18 +483,24 @@ export const strings = {
 
   permissionMode: {
     default: 'Ask',
-    acceptEdits: 'Auto decide',
-    bypassPermissions: 'Yolo',
+    acceptEdits: 'Edit freely',
+    bypassPermissions: 'No confirmation',
     plan: 'Plan',
     dontAsk: 'Auto-deny'
   },
 
   permissionModeLong: {
-    default: 'Ask before every tool call',
-    acceptEdits: 'Accept edits, ask for the rest',
-    bypassPermissions: 'Run everything without asking',
+    default: 'Reads freely, asks before editing a file or running a command',
+    acceptEdits: 'Edits files without asking, asks before running a command',
+    bypassPermissions: 'Runs everything without asking, anywhere on this computer',
     plan: 'Plan only, no changes',
     dontAsk: 'Deny anything that would need asking'
+  },
+
+  /** Codex writes inside the folder on its default mode: the chip says so instead of "Ask". */
+  permissionModeCodex: {
+    default: 'This folder',
+    defaultLong: 'Edits and runs commands in this folder without asking, asks to go beyond it'
   },
 
   thread: {
@@ -584,7 +621,28 @@ export const strings = {
     compactionNoPost: 'Context compacted from {pre} tokens',
     compactionUnknown: 'Context compacted',
     compactionManual: 'by hand',
-    permissionHeading: 'Wants to use',
+    /** What the agent asks to do, one sentence per kind of tool (`lib/tool-summary.ts`). */
+    permissionAsk: {
+      command: 'Run a command',
+      edit: 'Change {file}',
+      editFiles: 'Change files',
+      editFolder: 'Write files in {folder} from now on',
+      write: 'Create or replace {file}',
+      read: 'Read {file}',
+      search: 'Search the files for {subject}',
+      fetch: 'Open {subject}',
+      web: 'Search the web for {subject}',
+      agent: 'Start a helper agent',
+      other: 'Use its {tool} tool'
+    },
+    permissionTechnical: 'Technical details',
+    turnFiles: 'Files from this answer',
+    fileCreated: 'New',
+    fileChanged: 'Changed',
+    fileDeleted: 'Deleted',
+    openFile: 'Open {name}',
+    revealFile: 'Show in folder',
+    revealFailed: 'The folder could not be opened: {reason}',
     allow: 'Allow',
     deny: 'Deny',
     allowed: 'Allowed',
@@ -700,6 +758,12 @@ export const strings = {
     options: 'Message options',
     placeholder: 'Message {provider} in {project}',
     placeholderNoProject: 'Message the agent',
+    /** A new conversation, before anything is sent. */
+    placeholderNew: 'What do you want to do?',
+    /** The desktop button holding the options the bar does not show. */
+    moreOptions: 'Options',
+    /** A pin in that menu: pressed, the option has its own chip in the bar. */
+    pin: 'Keep {option} in the bar',
     send: 'Send',
     stop: 'Stop',
     queued: 'Sent when the current turn ends',
@@ -733,7 +797,7 @@ export const strings = {
     model: 'Model',
     unavailable: 'not installed',
     noAccount: 'no account',
-    noProvider: 'No provider',
+    noProvider: 'No AI connected',
     hint: 'Enter to send, Shift+Enter for a new line',
     /** The draft's worktree switch, off and on. */
     worktree: 'Worktree',
@@ -979,13 +1043,13 @@ export const strings = {
 
   usage: {
     heading: 'Usage',
-    note: 'On a subscription this cost is an API equivalent, not money spent.',
+    note: 'Costs are estimated at API rates. On a subscription this is not an invoice.',
     thread: 'Thread',
     input: 'Input',
     output: 'Output',
     cacheRead: 'Cache read',
     cacheWrite: 'Cache write',
-    cost: 'API equivalent',
+    cost: 'API-rate estimate',
     total: 'Total',
     empty: 'No token spent yet.',
     today: 'today',
@@ -993,13 +1057,13 @@ export const strings = {
     range: 'Range',
     days: '{days} days',
     metric: 'Measure',
-    metrics: { tokens: 'Tokens', cost: 'API cost', turns: 'Turns' },
+    metrics: { tokens: 'Tokens', cost: 'API estimate', turns: 'Turns' },
     totalOf: {
       tokens: 'Tokens, last {days} days',
-      cost: 'API equivalent, last {days} days',
+      cost: 'API-rate estimate, last {days} days',
       turns: 'Turns, last {days} days'
     },
-    summary: '{turns} turns · {tokens} tokens · {cost} API equivalent',
+    summary: '{turns} turns · {tokens} tokens · {cost} at API rates',
     overview: 'Overview',
     chart: 'Per day',
     chartLabel: '{metric} per day and provider. Use the arrow keys to read each day.',
@@ -1071,6 +1135,16 @@ export const strings = {
     },
     material: 'Window material',
     materialHint: 'What Windows draws behind the window',
+    workspace: 'Workspace',
+    startIn: 'The app opens on',
+    startInHint: 'Where a new conversation waits when the app opens. New thread always starts in the project on screen.',
+    startDrafts: 'Drafts',
+    startProject: 'The last project',
+    panelStart: 'The side panel opens on',
+    panelStartHint: 'What the panel shows when it opens with nothing in it yet.',
+    panelLauncher: 'Its menu',
+    panelFiles: 'Files',
+    panelChanges: 'Changes',
     materialAcrylic: 'Acrylic',
     materialMica: 'Mica',
     materialSolid: 'Solid',
@@ -1131,7 +1205,7 @@ export const strings = {
       expires: 'Works once, until {time}',
       qr: 'The pairing link as a QR code',
       scan: 'Scan the code with the phone, or open the link on it.',
-      lanHint: 'The core listens on this machine only: turn on the LAN switch above, then restart it, before a phone can reach this link.',
+      lanHint: 'The core listens on this machine only: turn on the LAN switch in Scheduler below, then restart it, before a phone can reach this link.',
       devices: 'Paired devices',
       noDevices: 'No device paired yet.',
       thisDevice: 'this device',
@@ -1376,6 +1450,7 @@ export const strings = {
     yes: 'yes',
     no: 'no',
     close: 'Close',
+    moreInfo: 'About {topic}',
     refresh: 'Refresh',
     dismiss: 'Dismiss',
     cancel: 'Cancel',
@@ -1430,6 +1505,16 @@ export const strings = {
     replay: 'Show the tour again',
     replayHint: 'The same screens as the first launch. Nothing you have set is undone.',
     changeLater: 'All of this is in Settings.',
+
+    /** The question the preset hangs on: said plainly, with a smile, so nobody is unsure which one they are. */
+    profile: {
+      title: 'First, which one are you?',
+      everyday: "I'm not a developer! Don't confuse me with code and commands!",
+      everydayHint: 'A new conversation waits in Documents/Boite until you give it a folder, the bar stays simple, and the agent asks before it acts.',
+      developer: "I'm a developer, give me the works.",
+      developerHint: 'The app opens on your last project, effort and worktree stay in the bar, and the panel opens on the changes.',
+      later: "Nothing is taken away either way. The composer's Options menu and Settings change any of it."
+    },
 
     welcome: {
       title: 'Boite runs your agents',
