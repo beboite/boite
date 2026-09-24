@@ -256,7 +256,7 @@ export function summarize(protocol: Data, samples: Sample[], modelMetadata: Data
 }
 
 const sec = (value: number | null) => value === null ? 'n/a' : (value / 1000).toFixed(2) + ' s';
-const cell = (value: unknown) => String(value ?? '').replace(/\|/g, '\\|').replace(/[\r\n]/g, ' ');
+const cell = (value: unknown) => String(value ?? '').replace(/[\\|]/g, '\\$&').replace(/[\r\n]/g, ' ');
 
 export function reportMarkdown(result: ReturnType<typeof summarize>, tasks: Data[]): string {
   const direct = result.modes.luna!, hybrid = result.modes.hybrid!;

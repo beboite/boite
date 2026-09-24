@@ -60,6 +60,8 @@ test('strict paired summary includes only completed attempts and emits no raw ev
   expect(publicJson).not.toContain('#private');
   expect(publicJson).not.toContain('token=private');
   expect(reportMarkdown(result, [task])).toContain('[public result data](public-results.json)');
+  const escaped = reportMarkdown(result, [{ ...task, site: 'Example\\|extra\r\nrow' }]);
+  expect(escaped).toContain('| Example' + '\\'.repeat(3) + '|extra  row | public-form |');
 });
 
 test('all-attempt p90 retains a long failure outside successful timing', () => {
