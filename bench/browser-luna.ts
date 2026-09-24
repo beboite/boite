@@ -9,6 +9,7 @@ import { wideTasks } from './browser-wide-tasks.ts';
 import { LunaPage, lunaBrowserTool } from './browser-luna-page.ts';
 import { LunaCodex } from './browser-luna-codex.ts';
 import { BrowserVideo } from './browser-video.ts';
+import { LunaCommandGate } from './browser-luna-commands.ts';
 
 const digest = (path: string) => createHash('sha256').update(readFileSync(path)).digest('hex');
 const mutations = new Set(['click', 'fill', 'select', 'check', 'uncheck', 'press', 'scroll']);
@@ -38,7 +39,7 @@ async function main() {
     maxActions: 30, timeoutMs: 120_000, jevPhase: { maxSteps: 10, timeoutMs: 15_000 },
     viewport: { width: 1280, height: 800 }, profile: 'fresh logged-out profile per trial', recorded,
     browserSha256: digest(binary),
-    files: Object.fromEntries(['browser-luna.ts', 'browser-luna-codex.ts', 'browser-luna-page.ts', 'browser-wide-tasks.ts', 'browser-wide-grade.ts', '../packages/core/src/browser/loop.ts'].map(path => [path, digest(join(import.meta.dir, path))])),
+    files: Object.fromEntries(['browser-luna.ts', 'browser-luna-commands.ts', 'browser-luna-codex.ts', 'browser-luna-page.ts', 'browser-wide-tasks.ts', 'browser-wide-grade.ts', '../packages/core/src/browser/loop.ts'].map(path => [path, digest(join(import.meta.dir, path))])),
     limits: 'No direct URL navigation, arbitrary scripts, off-origin actions, file access, or external tools. Luna receives richer rendered field metadata than Jev. Hybrid resumes the same browser after needs-agent, error, or phase budget; independent grader is never used to trigger fallback.',
   };
   if (existsSync(join(output, 'protocol.json'))) throw new Error('Use a fresh output directory.');
@@ -58,14 +59,14 @@ async function main() {
         const started = performance.now();
         const sample: any = { task: task.id, mode, run, date: new Date().toISOString(), recorded, verified: false, commands: [], jevDecisions: [], jevUrls: [], fallback: false };
         let daemon: BrowserDaemon | undefined; let video: BrowserVideo | undefined; let heartbeat: ReturnType<typeof setInterval> | undefined;
-        let busy = false; let phase = 'startup'; let jevActions = 0; let executionDeadline = Infinity;
+        let phase = 'startup'; let jevActions = 0; let executionDeadline = Infinity;
         try {
           daemon = await BrowserDaemon.launch(harness.core, prefix, binary, executable, new AbortController().signal);
           const native = daemon.command.bind(daemon);
-          daemon.command = async (action, args = {}) => {
+          const gate = new LunaCommandGate();
+          const recordCommand = async (action: string, args: Record<string, unknown> = {}, commandPhase = phase) => {
             if (mutations.has(action) && performance.now() >= executionDeadline) throw new Error('No browser action may start after the execution deadline.');
-            if (busy) throw new Error('Concurrent browser command rejected.');
-            busy = true; const at = performance.now();
+            const at = performance.now();
             if (phase === 'jev' && mutations.has(action)) jevActions++;
             if (mutations.has(action)) video?.mark(`${phase}: ${action} ${String(args.selector ?? args.key ?? '')}`);
             try {
@@ -74,19 +75,20 @@ async function main() {
                 const url = (result.result as any).url;
                 if (sample.jevUrls.at(-1) !== url) sample.jevUrls.push(url);
               }
-              sample.commands.push({ phase, action, args, ms: performance.now() - at, success: true });
+              sample.commands.push({ phase: commandPhase, action, args, ms: performance.now() - at, success: true });
               return result;
             } catch (error) {
-              sample.commands.push({ phase, action, args, ms: performance.now() - at, success: false, error: String(error) }); throw error;
-            } finally { busy = false; }
+              sample.commands.push({ phase: commandPhase, action, args, ms: performance.now() - at, success: false, error: String(error) }); throw error;
+            }
           };
+          daemon.command = (action, args = {}) => gate.command(() => recordCommand(action, args));
           await daemon.command('viewport', protocol.viewport);
           await daemon.command('navigate', { url: task.url, waitUntil: 'load' });
           sample.startupMs = performance.now() - started;
           if (recorded) video = await BrowserVideo.start(daemon, join(output, `${prefix}.mp4`), `${mode}: ${task.id}`);
           const executionStart = performance.now();
           executionDeadline = executionStart + protocol.timeoutMs;
-          heartbeat = setInterval(() => { if (!busy) void daemon!.command('evaluate', { script: '0' }).catch(() => {}); }, 10_000);
+          heartbeat = setInterval(() => { void gate.heartbeat(() => recordCommand('evaluate', { script: '0' }, 'keepalive')).catch(() => {}); }, 10_000);
           if (mode === 'hybrid') {
             phase = 'jev'; const at = performance.now();
             const signal = AbortSignal.timeout(protocol.jevPhase.timeoutMs);

@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { reportMarkdown, runReport, sanitizeControls, sanitizeUrl, summarize, tokenUsage, toolAudit } from './browser-luna-report.ts';
 
 const task = {
@@ -113,5 +113,42 @@ test('publication refuses pending trials unless partial is explicit', () => {
     files['browser-luna.ts'] = '0'.repeat(64);
     writeFileSync(join(input, 'protocol.json'), JSON.stringify({ date: '2026-09-24', tasks: [task], modes: ['luna', 'hybrid'], repetitions: 1, files }));
     expect(() => runReport(input, output, true)).toThrow('Source hash differs');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('historical reports require every frozen hash from the explicitly selected source tree', () => {
+  const root = mkdtempSync(join(tmpdir(), 'boite-luna-historical-'));
+  const input = join(root, 'input'), output = join(root, 'output'), source = join(root, 'historical', 'bench');
+  const names = ['browser-luna.ts', 'browser-luna-codex.ts', 'browser-luna-page.ts', 'browser-wide-tasks.ts', 'browser-wide-grade.ts', '../packages/core/src/browser/loop.ts'];
+  const files: Record<string, string> = {};
+  try {
+    mkdirSync(input, { recursive: true });
+    for (const name of names) {
+      const path = join(source, name);
+      mkdirSync(dirname(path), { recursive: true });
+      const content = `// Historical source fixture: ${name}\n`;
+      writeFileSync(path, content);
+      files[name] = createHash('sha256').update(content).digest('hex');
+    }
+    const protocol = { date: '2026-09-24', tasks: [task], modes: ['luna', 'hybrid'], repetitions: 1, maxActions: 30, timeoutMs: 120000, files };
+    const save = () => writeFileSync(join(input, 'protocol.json'), JSON.stringify(protocol));
+    save();
+    expect(() => runReport(input, output, true)).toThrow('Source hash differs');
+    expect(runReport(input, output, true, source).totals.pending).toBe(2);
+    const helper = '// Frozen heartbeat helper\n';
+    writeFileSync(join(source, 'browser-luna-commands.ts'), helper);
+    files['browser-luna-commands.ts'] = createHash('sha256').update(helper).digest('hex'); save();
+    expect(runReport(input, output, true, source).protocol.hashes.commandGate).toBe(files['browser-luna-commands.ts']);
+    files['browser-luna-commands.ts'] = '0'.repeat(64); save();
+    expect(() => runReport(input, output, true, source)).toThrow('Source hash differs');
+    delete files['browser-luna-commands.ts']; save();
+    const original = files['browser-luna.ts'];
+    files['browser-luna.ts'] = '0'.repeat(64); save();
+    expect(() => runReport(input, output, true, source)).toThrow('Source hash differs');
+    delete files['browser-luna.ts']; save();
+    expect(() => runReport(input, output, true, source)).toThrow('Missing source hash');
+    files['browser-luna.ts'] = original!; save();
+    writeFileSync(join(source, 'browser-luna.ts'), '// Changed historical source\n');
+    expect(() => runReport(input, output, true, source)).toThrow('Source hash differs');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });

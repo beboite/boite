@@ -136,7 +136,8 @@ function errorCategory(raw: unknown): string | null {
 export function verifySourceHashes(protocol: Data, benchDir = import.meta.dir): Record<string, string> {
   if (!protocol.files || typeof protocol.files !== 'object') throw new Error('Protocol has no source hashes.');
   const hashes: Record<string, string> = {};
-  for (const file of sourceFiles) {
+  const files = [...sourceFiles, ...(Object.hasOwn(protocol.files, 'browser-luna-commands.ts') ? ['browser-luna-commands.ts'] : [])];
+  for (const file of files) {
     const expected = protocol.files[file];
     if (typeof expected !== 'string' || !/^[0-9a-f]{64}$/.test(expected)) throw new Error('Missing source hash for ' + file);
     const actual = digest(resolve(benchDir, file));
@@ -248,6 +249,7 @@ export function summarize(protocol: Data, samples: Sample[], modelMetadata: Data
         sharedActionLimit: protocol.maxActions, sharedExecutionLimitMs: protocol.timeoutMs, viewport: protocol.viewport,
         graderTriggersFallback: false, lunaReceivesRenderedFieldMetadata: true },
       hashes: { browserBinary: protocol.browserSha256,
+        ...(protocol.files?.['browser-luna-commands.ts'] ? { commandGate: protocol.files['browser-luna-commands.ts'] } : {}),
         runner: protocol.files?.['browser-luna.ts'], codexTransport: protocol.files?.['browser-luna-codex.ts'],
         pageAdapter: protocol.files?.['browser-luna-page.ts'], taskManifest: protocol.files?.['browser-wide-tasks.ts'],
         grader: protocol.files?.['browser-wide-grade.ts'], jevLoop: protocol.files?.['../packages/core/src/browser/loop.ts'] } },
@@ -283,15 +285,15 @@ export function reportMarkdown(result: ReturnType<typeof summarize>, tasks: Data
   lines.push('Tool calls: ' + result.totals.toolCalls + '. Batch commands requested: ' + result.totals.batchCommandsRequested + ', executed: ' + result.totals.batchCommandsExecuted + '. Browser actions: ' + result.totals.actions + '. Browser process groups with zero remaining processes: ' + result.cleanup.browserZero + '/' + result.totals.completed + '. Final Codex app-server processes: ' + (result.cleanup.codexProcessesAfter ?? 'pending') + '.');
   if (result.possibleCriterionAlias.length) lines.push('Possible frozen URL criterion mismatch: ' + result.possibleCriterionAlias.map(row => row.mode + '/' + row.task + '/' + row.run).join(', ') + ' reached the versioned French Python documentation path while the URL check failed. Strict failures remain unchanged. Separate adjudication would be needed.');
   lines.push('', '## Reproduction', '');
-  lines.push('The [public result data](public-results.json) contains frozen hashes and sanitized per-attempt outcomes. Rebuild this report from the raw campaign files with bun bench/browser-luna-report.ts --input RUN_DIR --output REPORT_DIR. Add --partial only while trials are still pending.');
+  lines.push('The [public result data](public-results.json) contains frozen hashes and sanitized per-attempt outcomes. Rebuild this report from the raw campaign files with bun bench/browser-luna-report.ts --input RUN_DIR --output REPORT_DIR. For a historical campaign, add --source-bench-dir HISTORICAL_CHECKOUT/bench; every frozen source hash must still match that tree. Add --partial only while trials are still pending.');
   lines.push('The earlier Jev-only 45.2% report used 84 valid attempts after excluding six defective criteria from 90 trials, with three repetitions. Its criteria and denominator differ from this campaign, so its percentage is context rather than a direct improvement measure.');
   if (!result.complete) lines.push('This report is partial. Rerun the command without --partial after the campaign finishes.');
   return lines.join('\n') + '\n';
 }
 
-export function runReport(input: string, output: string, partial = false): ReturnType<typeof summarize> {
+export function runReport(input: string, output: string, partial = false, sourceBenchDir = import.meta.dir): ReturnType<typeof summarize> {
   const protocol = readJson(join(input, 'protocol.json'));
-  verifySourceHashes(protocol);
+  verifySourceHashes(protocol, sourceBenchDir);
   const model = existsSync(join(input, 'model.json')) ? readJson(join(input, 'model.json')) : {};
   const samples: Sample[] = [];
   for (const task of protocol.tasks as Data[]) for (let run = 1; run <= protocol.repetitions; run++) for (const mode of protocol.modes as string[]) {
@@ -312,21 +314,25 @@ export function runReport(input: string, output: string, partial = false): Retur
 }
 
 function cli(args: string[]) {
-  let input: string | undefined, output: string | undefined, partial = false;
+  let input: string | undefined, output: string | undefined, sourceBenchDir: string | undefined, partial = false;
+  let start = 0;
   if (args[0] && !args[0].startsWith('--')) {
-    if (args.length !== 2 && !(args.length === 3 && args[2] === '--partial')) throw new Error('Expected input and output directory arguments, optionally followed by --partial.');
-    [input, output] = args; partial = args[2] === '--partial';
-  } else {
-    for (let index = 0; index < args.length; index++) {
-      const arg = args[index];
-      if (arg === '--partial') partial = true;
-      else if (arg === '--input') input = args[++index];
-      else if (arg === '--output') output = args[++index];
-      else throw new Error('Unknown report argument: ' + arg);
-    }
+    [input, output] = args;
+    if (!output || output.startsWith('--')) throw new Error('Expected input and output directory arguments.');
+    start = 2;
+  }
+  for (let index = start; index < args.length; index++) {
+    const arg = args[index];
+    if (arg === '--partial') { partial = true; continue; }
+    if (!['--input', '--output', '--source-bench-dir'].includes(String(arg))) throw new Error('Unknown report argument: ' + arg);
+    const value = args[++index];
+    if (!value || value.startsWith('--')) throw new Error('Expected a directory after ' + arg + '.');
+    if (arg === '--input') input = value;
+    else if (arg === '--output') output = value;
+    else sourceBenchDir = resolve(value);
   }
   if (!input || !output) throw new Error('Required: --input <run-directory> --output <report-directory>.');
-  const result = runReport(resolve(input), resolve(output), partial);
+  const result = runReport(resolve(input), resolve(output), partial, sourceBenchDir);
   console.log(JSON.stringify({ completed: result.totals.completed, expected: result.totals.expected, pending: result.totals.pending,
     direct: result.modes.luna!.successful, hybrid: result.modes.hybrid!.successful, codexProcessesAfter: result.cleanup.codexProcessesAfter }));
 }
