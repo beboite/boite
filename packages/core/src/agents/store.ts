@@ -256,7 +256,7 @@ export class AgentStore {
   }
 
   publishReply(work: AgentWork, runId: string, result: string): void {
-    if (!work.messageId || this.records.list('message').some(m => m.sourceRunId === runId)) return;
+    if (this.records.list('message').some(m => m.sourceRunId === runId)) return;
     const group = work.scope.kind === 'group' ? this.records.get('group', work.scope.id) : null;
     const members = group?.memberIds.filter(id => this.records.get('profile', id).status !== 'archived') ?? [];
     const next = members.length > 1 ? members[(members.indexOf(work.agentId) + 1) % members.length] : undefined;

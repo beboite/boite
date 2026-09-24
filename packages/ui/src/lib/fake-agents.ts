@@ -85,7 +85,7 @@ export class FakeAgents {
       this.update('work', { ...work, status: turn.status === 'done' ? 'done' : 'error', error: turn.error });
       if (turn.status === 'done') {
         if (work.taskId) { const task = this.get('task', work.taskId); if (task.generation === work.taskGeneration && task.status === 'running') this.update('task', { ...task, status: 'review', result, leaseUntil: null }); }
-        if (work.messageId && !this.all('message').some(m => m.sourceRunId === run.id)) {
+        if (work.purpose !== 'compaction' && !this.all('message').some(m => m.sourceRunId === run.id)) {
           const group = work.scope.kind === 'group' ? this.get('group', work.scope.id) : null;
           const members = group?.memberIds ?? [];
           const next = members.length > 1 ? members[(members.indexOf(work.agentId) + 1) % members.length] : undefined;

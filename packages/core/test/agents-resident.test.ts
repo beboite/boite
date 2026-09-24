@@ -74,6 +74,20 @@ test('missed routine creates one durable work item, never overlaps or catches up
  await expect(client.call('agents.routine.run',{...p,requestId:'routine-once-002'})).rejects.toThrow('unfinished');
  expect((await client.call('agents.snapshot',{})).work).toHaveLength(1);
 });
+
+test('routine results appear once in the identity conversation', async () => {
+ const routine=await client.call('agents.routine.save',{value:{agentId:agent.id,name:'Proposal',prompt:'A private puzzle prototype proposal',schedule:{kind:'interval',everyMinutes:60},enabled:false,nextAt:null,lastWorkId:null,lastScheduledAt:null}});
+ const request={routineId:routine.id,requestId:'routine-result-001'};
+ const work=await client.call('agents.routine.run',request);
+ unpause();
+ await waitFor(()=>h.core.workforce.records.get('work',work.id).status==='done');
+ await client.call('agents.routine.run',request);
+ const messages=h.core.workforce.records.list('message');
+ expect(messages).toHaveLength(1);
+ expect(messages[0]?.senderId).toBe(agent.id);
+ expect(messages[0]?.text).toContain('puzzle prototype proposal');
+ expect(messages[0]?.scope).toEqual({kind:'agent',id:agent.id});
+});
 test('brain and checkpoint survive compaction without publishing the summary as a reply',async()=>{
  unpause();
  await client.call('agents.message.send',{scope:{kind:'agent',id:agent.id},recipientIds:[agent.id],text:'Remember the prototype is a puzzle game.',requestId:'context-first-001'});
