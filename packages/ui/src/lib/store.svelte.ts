@@ -1840,7 +1840,8 @@ export class Store {
       if (!this.projects.some((p) => p.id === project.id)) this.projects = [...this.projects, project];
       return project.id;
     } catch (error) {
-      this.#fail(error);
+      // A switched machine closed the old client: its rejection is not this machine's error.
+      if (this.#client === client) this.#fail(error);
       return null;
     }
   }

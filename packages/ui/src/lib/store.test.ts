@@ -329,6 +329,28 @@ test('uninstalled setup starts without account-dependent demo state', async () =
   } finally { store.detach(); client.close(); }
 });
 
+test('a drafts folder asked of a machine left since fails there, not on the new one', async () => {
+  const { store, client } = await ready();
+  const other = new FakeClient({ delayMs: 0 });
+  const real = client.call.bind(client);
+  let reject: (error: Error) => void = () => {};
+  vi.spyOn(client, 'call').mockImplementation(((method: string, params: unknown) => {
+    if (method === 'projects.drafts') return new Promise((_, no) => { reject = no; });
+    return real(method as never, params as never);
+  }) as typeof client.call);
+  try {
+    store.draft = { projectId: null, worktree: false };
+    const sent = store.submit('Sort my photos', { providerId: 'echo', accountId: 'a-echo', permissionMode: 'default', model: 'echo-1', effort: null });
+    await vi.waitFor(() => expect(client.call).toHaveBeenCalledWith('projects.drafts', {}));
+    store.attach(other);
+    await store.connect();
+    // Closing the old socket rejects its call: that is not the new machine's error.
+    reject(new Error('client closed'));
+    expect(await sent).toBe(false);
+    expect(store.error).toBeNull();
+  } finally { store.detach(); client.close(); other.close(); }
+});
+
 test('provider actions report RPC failures through their owning store', async () => {
   const { store, client } = await ready();
   vi.spyOn(client, 'call').mockRejectedValue(new Error('provider unavailable'));
