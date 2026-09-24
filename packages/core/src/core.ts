@@ -31,6 +31,7 @@ import { SpeechStore } from './speech.ts';
 import { Telemetry } from './telemetry.ts';
 import { HarnessUpdates } from './providers/updates.ts';
 import { Coordination } from './coordination.ts';
+import { Delegation } from './delegation.ts';
 import { BrainStore } from './brain.ts';
 
 export const CORE_VERSION: string = pkg.version;
@@ -118,6 +119,7 @@ export class Core {
   readonly telemetry: Telemetry;
   readonly updates: HarnessUpdates;
   readonly coordination: Coordination;
+  readonly delegation: Delegation;
   readonly brain: BrainStore;
 
   /**
@@ -161,6 +163,7 @@ export class Core {
     this.telemetry = new Telemetry(this);
     this.updates = new HarnessUpdates(this);
     this.coordination = new Coordination(this);
+    this.delegation = new Delegation(this);
     this.brain = new BrainStore(this);
 
     registerModules(this);
@@ -212,6 +215,7 @@ export class Core {
   drain(timeoutMs?: number): Promise<void> {
     if (this.#drainPromise !== null) return this.#drainPromise;
     this.#stopping = true;
+    this.delegation.beginClose();
     this.coordination.beginClose();
     this.activity.close();
     this.#drainPromise = this.scheduler.drain(timeoutMs);
@@ -229,6 +233,7 @@ export class Core {
     await this.brain.close();
     this.updates.close();
     await this.drain();
+    await this.delegation.close();
     await this.coordination.close();
     await this.speech.close();
     await this.push.close();

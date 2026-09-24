@@ -18,14 +18,14 @@ afterEach(async () => {
 });
 
 /** A user descriptor whose updater is the fixture, reading its newest version the way `source` says. */
-function writeDescriptor(dataDir: string, source: 'command' | 'npm' | 'none', updater: string): string {
+function writeDescriptor(dataDir: string, source: 'command' | 'npm' | 'none', updater: string, updateEnv?: Record<string, string>): string {
   const dir = join(dataDir, 'providers');
   mkdirSync(dir, { recursive: true });
   const state = join(dataDir, 'fake-version.txt');
   writeFileSync(state, '1.0.0');
   const profile = {
     detect: {},
-    executable: [{ kind: 'path', value: 'bun' }],
+    executable: [{ kind: 'path', value: 'bun', ...(updateEnv === undefined ? {} : { updateEnv }) }],
     update: {
       versionArgs: [FAKE, state, '--version'],
       ...(source === 'command' ? { latestArgs: [FAKE, state, 'check'] } : source === 'npm' ? { latestNpm: '@boite-test/fake-agent' } : {}),
@@ -52,7 +52,7 @@ function writeDescriptor(dataDir: string, source: 'command' | 'npm' | 'none', up
   return state;
 }
 
-async function start(source: 'command' | 'npm' | 'none', updater = 'update'): Promise<{ client: CoreClient; state: string }> {
+async function start(source: 'command' | 'npm' | 'none', updater = 'update', updateEnv?: Record<string, string>): Promise<{ client: CoreClient; state: string }> {
   harness = await startTestCore();
   // Only the fixture: a check must never run the agents of the machine the tests run on.
   harness.core.updates.only = new Set(['update-fake']);
@@ -60,7 +60,7 @@ async function start(source: 'command' | 'npm' | 'none', updater = 'update'): Pr
     expect(name).toBe('@boite-test/fake-agent');
     return '1.1.0';
   };
-  const state = writeDescriptor(harness.dataDir, source, updater);
+  const state = writeDescriptor(harness.dataDir, source, updater, updateEnv);
   const client = await harness.connect();
   const loaded = await client.call('providers.reload', {});
   expect(loaded.rejected).toEqual([]);
@@ -147,6 +147,23 @@ describe('harness updates', () => {
     expect(update.current).toBe('1.0.0');
     expect(update.message).toContain('exited with 3');
     expect(update.message).toContain('the release server refused the download');
+  });
+
+  test('an updater that reads how it was installed gets the environment its skipped launcher sets', async () => {
+    const bare = await start('command', 'update-launched');
+    await bare.client.call('providers.updates', {});
+    const failed = bare.client.next('providers.updatesChanged', (list) => list[0]?.state === 'failed', 20000);
+    await bare.client.call('providers.update', { providerId: 'update-fake' });
+    expect(only(await failed).message).toContain('Could not detect the installation method');
+    await harness!.stop();
+
+    const { client, state } = await start('command', 'update-launched', { FAKE_MANAGED_BY_NPM: '1' });
+    await client.call('providers.updates', {});
+    const changed = client.next('providers.updatesChanged', (list) => list[0]?.state === 'idle' && list[0]?.current === '1.2.0', 20000);
+    await client.call('providers.update', { providerId: 'update-fake' });
+    expect(only(await changed)).toMatchObject({ current: '1.2.0', message: null });
+    expect(readFileSync(state, 'utf8')).toBe('1.2.0');
+    await waitFor(() => harness?.core.procs.liveCount('update:update-fake') === 0);
   });
 
   test('a provider with a turn in flight is not updated under it', async () => {

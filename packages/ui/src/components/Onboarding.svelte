@@ -2,7 +2,7 @@
   import { onMount, tick, untrack } from 'svelte';
   import { AppWindow, ArrowLeftRight, Bell, Check, FileDiff, Languages, Mic, Minimize2, Palette, VolumeX, X } from '@lucide/svelte';
   import type { SpeechStatus } from '@boite/contracts';
-  import TelemetrySettings from './TelemetrySettings.svelte';
+  import TelemetryDeal from './TelemetryDeal.svelte';
   import OnboardingScene from './OnboardingScene.svelte';
   import BoiteMark from './BoiteMark.svelte';
   import { Closing } from '../lib/closing.svelte';
@@ -97,12 +97,12 @@
 
 <svelte:window onkeydowncapture={onkeydown} />
 {#if overlay.shown}
-  <div class="scrim" class:closing={overlay.closing} role="presentation" data-testid="onboarding">
+  <div class="scrim" class:shell={inShell} class:closing={overlay.closing} role="presentation" data-testid="onboarding">
     <div class="panel" class:closing={overlay.closing} role="dialog" aria-modal="true" aria-labelledby="onboarding-title" tabindex="-1" bind:this={panel} use:overlay.attach onanimationend={overlay.end}>
       <header><BoiteMark size={18} /><span>{strings.onboarding.label}</span><button class="ghost icon" data-testid="onboarding-skip" aria-label={strings.onboarding.skip} onclick={finish}><X size={16} /></button></header>
       {#key step}
         <div class="screen" data-testid="onboarding-step" data-step={step}>
-          <h1 id="onboarding-title" tabindex="-1">{strings.onboarding[step].title}</h1>
+          <h1 id="onboarding-title" tabindex="-1" class:soul={step === 'privacy'}>{strings.onboarding[step].title}</h1>
           {#if step === 'welcome'}
             <p class="lead">{strings.onboarding.welcome.body}</p>
             <OnboardingScene scene="welcome" />
@@ -160,10 +160,7 @@
             </div>
             {#if error}<p role="alert">{error}</p>{/if}
           {:else if step === 'privacy'}
-            <p class="lead">{strings.onboarding.privacy.body}</p>
-            <div class="privacy-scene"><OnboardingScene scene="privacy" /></div>
-            <TelemetrySettings {store} embedded />
-            <p class="farewell">{strings.onboarding.demo.finish}</p>
+            <TelemetryDeal {store} onchosen={finish} />
           {/if}
         </div>
       {/key}
@@ -172,7 +169,8 @@
           {#each screens as id, position (id)}<button class="dot" class:on={position === index} aria-current={position === index ? 'step' : undefined} aria-label={fill(strings.onboarding.progress, { index: String(position + 1), title: strings.onboarding[id].title })} data-testid="onboarding-dot-{id}" onclick={() => go(position)}></button>{/each}
         </div>
         <button class="ghost" disabled={index === 0} data-testid="onboarding-back" onclick={() => go(index - 1)}>{strings.onboarding.back}</button>
-        <button class="primary" data-testid="onboarding-next" onclick={() => last ? finish() : go(index + 1)}>{last ? strings.onboarding.done : strings.onboarding.next}</button>
+        <!-- The consent rows are the privacy screen's way out. -->
+        {#if step !== 'privacy'}<button class="primary" data-testid="onboarding-next" onclick={() => last ? finish() : go(index + 1)}>{last ? strings.onboarding.done : strings.onboarding.next}</button>{/if}
       </footer>
     </div>
   </div>
@@ -181,6 +179,8 @@
 <style>
   .scrim { position: fixed; inset: 0; z-index: 55; display: grid; place-items: center; padding: 16px; background: var(--color-scrim); backdrop-filter: blur(4px); animation: fade var(--dur-2) var(--ease-out-quint); }
   .scrim.closing { animation-name: fade-out; pointer-events: none; }
+  /* The title bar stays above the tour: the window can still be moved, minimized or closed. */
+  .scrim.shell { top: var(--titlebar); }
   .panel { display: flex; flex-direction: column; width: min(640px, 100%); max-height: calc(100dvh - 32px); background: var(--color-surface); border: 1px solid var(--color-edge); border-radius: var(--radius-xl); box-shadow: var(--shadow-e3); animation: pop var(--dur-3) var(--ease-out-quint); }
   .panel:focus, h1:focus { outline: none; }
   .panel.closing { animation: pop-out var(--dur-2) var(--ease-out-quint); }
@@ -188,6 +188,12 @@
   header button { margin-left: auto; }
   .screen { overflow-y: auto; min-height: 0; padding: 12px 28px 24px; }
   h1 { font-size: var(--text-lg); line-height: 1.35; margin: 0 0 8px; }
+  h1.soul { text-align: center; font-size: var(--text-xl); font-weight: 900; letter-spacing: .08em; animation: soul 10s linear forwards; }
+  @keyframes soul {
+    from { color: var(--color-foreground); text-shadow: 0 0 0 transparent; }
+    40% { color: color-mix(in srgb, var(--color-danger) 65%, var(--color-foreground)); text-shadow: 0 0 6px color-mix(in srgb, var(--color-danger) 20%, transparent); }
+    to { color: var(--color-danger); text-shadow: 0 0 18px color-mix(in srgb, var(--color-danger) 60%, transparent); }
+  }
   p { margin: 0; }
   .lead, .detail { color: var(--color-muted-foreground); font-size: var(--text-base); line-height: 1.6; }
   .caption { font-size: var(--text-base); font-weight: 500; margin-top: 12px; }
@@ -206,7 +212,7 @@
   .examples :global(.selected-mark) { position: absolute; top: 7px; right: 7px; color: var(--color-accent); }
   .voice-setup { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 12px; font-size: var(--text-sm); color: var(--color-muted-foreground); }
   .voice-setup progress { display: block; width: 100%; margin-top: 6px; accent-color: var(--color-accent); }
-  .quiet-scene, .privacy-scene { margin: auto; }
+  .quiet-scene { margin: auto; }
   .rows { display: grid; gap: 4px; }
   .row { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--color-border); }
   .row > span { flex: 1; font-size: var(--text-base); }
@@ -214,7 +220,6 @@
   input[type=checkbox] { appearance: none; position: relative; flex: 0 0 36px; width: 36px; height: 22px; margin: 0; border: 1px solid var(--color-edge); border-radius: 999px; background: var(--color-surface-3); cursor: pointer; }
   input::after { content: ''; position: absolute; width: 14px; height: 14px; top: 3px; left: 3px; border-radius: 50%; background: var(--color-muted-foreground); transition: transform var(--dur-2) var(--ease-out-quint); }
   input:checked { background: var(--color-foreground); } input:checked::after { background: var(--color-background); transform: translateX(14px); }
-  .farewell { margin-top: 16px; color: var(--color-muted-foreground); }
   [role=alert] { color: var(--color-danger); overflow-wrap: anywhere; }
   footer { display: flex; align-items: center; gap: 8px; padding: 14px 20px; border-top: 1px solid var(--color-border); }
   .dots { display: flex; margin-right: auto; }
@@ -227,6 +232,7 @@
   }
   @media (prefers-reduced-motion: reduce) {
     .scrim, .panel { animation: none; }
+    h1.soul { animation: none; color: var(--color-danger); }
     /* Keep animationend so closing also persists the completed tour. */
     .scrim.closing, .panel.closing { animation-duration: 1ms; }
   }
