@@ -23,12 +23,13 @@ test('a missing sentence or block is listed sentence by sentence', () => {
 
 test('a key English lacks, other slots or another kind are refused by path', () => {
   const fr = {
-    common: { yes: 'oui', no: 'non', maybe: 'peut-être' },
+    common: { yes: 'oui', no: 'non', maybe: 'peut-être', toString: 'texte' },
     chat: { sent: 'Envoyé à {nom}', names: ['Bleu'], when: 'plus tard' },
     settings: { theme: { light: 'Clair', dark: 'Sombre' } }
   };
   const report = compare(en, fr);
-  expect(report.extra).toEqual(['common.maybe']);
+  // `toString` is on every object's prototype, not in English.
+  expect(report.extra).toEqual(['common.maybe', 'common.toString']);
   expect(report.mismatched).toEqual([
     'chat.sent: expected slots {name}, got {nom}',
     'chat.names: expected list of 2, got list of 1',

@@ -54,7 +54,7 @@ export function compare(reference: unknown, translation: unknown): Report {
     }
     if (!isNode(a) || !isNode(b)) return;
     for (const key of Object.keys(a)) walk(a[key], b[key], [...path, key]);
-    for (const key of Object.keys(b)) if (!(key in a)) report.extra.push([...path, key].join('.'));
+    for (const key of Object.keys(b)) if (!Object.hasOwn(a, key)) report.extra.push([...path, key].join('.'));
   };
   walk(reference, translation, []);
   return report;
