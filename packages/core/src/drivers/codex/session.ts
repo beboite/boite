@@ -57,6 +57,8 @@ export class CodexSession {
   private contextSink: CodexTurn['ctx']['context'] | null = null;
   private queue: Promise<void> = Promise.resolve();
   private running = 0;
+  /** `agentMessage` items that are asynchronous questions: drawn as cards, their text deltas dropped. */
+  private readonly asyncItems = new Set<string>();
   private closing = false;
   private ended = false;
 
@@ -366,7 +368,11 @@ export class CodexSession {
         break;
       }
       case 'item/agentMessage/delta':
+        if (typeof params['itemId'] === 'string' && this.asyncItems.has(params['itemId'])) break;
         turn.writeText(textOf(params['delta']));
+        break;
+      case 'item/commandExecution/outputDelta':
+        if (typeof params['itemId'] === 'string') turn.appendOutput(params['itemId'], textOf(params['delta']));
         break;
       case 'turn/plan/updated': {
         const plan = params['plan'];
@@ -388,7 +394,14 @@ export class CodexSession {
           turn.part(turn.takeIndex(), { type: 'compaction', trigger: turn.ctx.turn.execution?.operation === 'compact' ? 'manual' : 'auto', preTokens: turn.ctx.thread.context?.tokens ?? null, postTokens: null });
           break;
         }
-        const view = toolViewOf(item);
+        if (item.type === 'agentMessage' && item.delivery === 'async') {
+          if (!this.asyncItems.has(item.id)) {
+            this.asyncItems.add(item.id);
+            for (const question of item.questions ?? []) this.askAsync(turn, question);
+          }
+          break;
+        }
+        const view = toolViewOf(item, method === 'item/completed');
         if (view !== null) turn.upsertTool(item.id, view);
         break;
       }
@@ -488,6 +501,20 @@ export class CodexSession {
       answers[id] = answerTextOf(answer, options);
     }
     return answers;
+  }
+
+  /**
+   * An asynchronous question (GPT-6 Astra's `delivery: "async"`): the agent
+   * goes on, so nothing waits here. The core folds the answer into the card
+   * and brings it back with `turn/steer` or as the next prompt, framed as the
+   * Codex TUI frames it: `> title`, a blank line, the answer.
+   */
+  private askAsync(turn: CodexTurn, question: { title?: string; options?: string[] | null }): void {
+    const text = typeof question.title === 'string' ? question.title.trim() : '';
+    if (text.length === 0) return;
+    const ask: QuestionAsk = { text, options: optionsOf(question.options), allowText: true, multiple: false, async: true };
+    const ticket = turn.ctx.askQuestion(ask);
+    turn.part(turn.takeIndex(), { type: 'question', questionId: ticket.questionId, ...ask, answer: null });
   }
 
   /** One question card, drawn and then folded with what the user picked. */

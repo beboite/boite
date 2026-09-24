@@ -46,6 +46,12 @@ export interface QuestionAsk {
   /** True lets the user type an answer of their own beside the options. */
   allowText: boolean;
   multiple: boolean;
+  /**
+   * The agent does not wait for it: the thread does not turn `waiting`, the
+   * card outlives its turn, and the answer reaches the agent as a steer or as
+   * the next prompt. The ticket still resolves, for a driver that cares.
+   */
+  async?: boolean;
 }
 
 /**
@@ -93,6 +99,18 @@ export interface TurnContext {
    */
   commands(list: AgentCommand[]): void;
   tasks?(list: import('@boite/contracts').AgentTask[]): void;
+  /**
+   * What the agent still runs in the background, whole, whenever it changed.
+   * The set outlives the turn: an empty list is how a driver says it all ended.
+   */
+  background?(list: import('@boite/contracts').BackgroundTask[]): void;
+  /**
+   * The agent resumed on its own after the turn ended (a background shell
+   * finished and it went on). The core opens a turn for it with `text` as its
+   * system message; the driver that sees that turn attaches it to the output
+   * already flowing instead of sending a prompt.
+   */
+  wake?(text: string): void;
   /**
    * The context meter: what the agent's last request carried and the model's
    * window when the agent names it. The core writes it on the thread and

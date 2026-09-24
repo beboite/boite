@@ -642,7 +642,15 @@ export type TurnStatus = 'queued' | 'running' | 'done' | 'stopped' | 'error';
 /** Frozen when a prompt is accepted, including while it waits in the scheduler. */
 export type TurnExecution = Pick<ThreadSummary,
   'providerId' | 'accountId' | 'model' | 'effort' | 'speed' | 'permissionMode' | 'sessionId'
-> & { sessionGeneration: number; selectionVersion: number; operation?: 'compact' | 'coordination' | 'delegation' };
+> & {
+  sessionGeneration: number;
+  selectionVersion: number;
+  /**
+   * `background`: the agent resumed on its own after background work it
+   * started finished; the turn carries no prompt of the user's.
+   */
+  operation?: 'compact' | 'coordination' | 'delegation' | 'background';
+};
 
 export interface Turn {
   id: TurnId;
@@ -730,6 +738,10 @@ export type MessagePart =
       status: ToolStatus;
       /** What the call produced or changed, under the input and the output. Absent on a journal row written before documents existed. */
       documents?: ToolDocument[];
+      /** Stamped by the core when the card first shows up, for every driver. Absent on older rows. */
+      startedAt?: Timestamp;
+      /** Stamped by the core when the status leaves `running`. */
+      finishedAt?: Timestamp | null;
     }
   | { type: 'permission'; requestId: RequestId; toolName: string; decision: 'allow' | 'deny' | null }
   /**
@@ -746,6 +758,8 @@ export type MessagePart =
       allowText: boolean;
       multiple: boolean;
       answer?: QuestionAnswer | null;
+      /** Asked without stopping: see `QuestionRequest.async`. */
+      async?: boolean;
     }
   /**
    * The agent compacted its context mid-turn: what it held before, what is
@@ -822,6 +836,11 @@ export interface Thread extends ThreadSummary {
    */
   commands: AgentCommand[];
   /**
+   * What the agent still runs in the background (`thread.background`). Kept in
+   * memory like `commands`; missing on older cores.
+   */
+  background?: BackgroundTask[];
+  /**
    * The oldest message `messages` carries, when the thread has older ones behind
    * it; null when this page is the whole thread. It is the cursor `messages.list`
    * takes as `before`.
@@ -875,7 +894,27 @@ export interface QuestionRequest {
   /** No options plus this true is a plain free-text prompt. */
   allowText: boolean;
   multiple: boolean;
+  /**
+   * The agent did not stop for it. The thread is not `waiting`, the card
+   * outlives its turn, and the answer reaches the agent as a steer when a turn
+   * is running or as the next prompt when none is.
+   */
+  async?: boolean;
   createdAt: Timestamp;
+}
+
+/**
+ * Work the agent left running beyond one tool call: a shell started in the
+ * background, a subagent, a monitor or a workflow. The list is the agent's
+ * own, whole, each time it changes, and lives as long as the agent process.
+ */
+export interface BackgroundTask {
+  id: string;
+  kind: 'shell' | 'agent' | 'monitor' | 'workflow' | 'other';
+  description: string;
+  /** The tool call that started it, when the agent says so. */
+  toolId: string | null;
+  startedAt: Timestamp;
 }
 
 // ---------------------------------------------------------------------------
@@ -971,6 +1010,12 @@ export interface Settings {
    * flight. It needs no client connected, which is how a server stays current.
    */
   autoUpdateHarnesses: boolean;
+  /**
+   * Agents without asynchronous questions of their own are told about
+   * `boite ask` at the start of a session, so they can ask without stopping.
+   * Missing on older cores, which read as on.
+   */
+  asyncQuestions?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -1854,6 +1899,16 @@ export interface RpcMethods {
     params: { threadId: ThreadId; questionId: RequestId; optionIds: string[]; text?: string };
     result: { ok: true };
   };
+  /**
+   * An asynchronous question from the agent of a thread (`boite ask`): the card
+   * is drawn in the running turn, the agent keeps working, and the answer
+   * reaches it later as a steer or as the next prompt. `options` are labels;
+   * none makes a free-text question.
+   */
+  'questions.ask': {
+    params: { threadId: ThreadId; text: string; options?: string[]; multiple?: boolean };
+    result: { questionId: RequestId };
+  };
 
   'trace.get': { params: { threadId: ThreadId; limit?: number }; result: ProcessRecord[] };
   'resources.list': { params: Record<string, never>; result: ThreadResources[] };
@@ -1931,6 +1986,8 @@ export interface RpcEvents {
   'thread.removed': { threadId: ThreadId };
   /** The agent's `/name` commands, whole, each time the list it reports changes. */
   'thread.commands': { threadId: ThreadId; commands: AgentCommand[] };
+  /** What the agent still runs in the background, whole, each time it changes. */
+  'thread.background': { threadId: ThreadId; tasks: BackgroundTask[] };
 
   'turn.started': Turn;
   'turn.finished': Turn;

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { Check, ChevronRight, CircleSlash, Wrench, X } from '@lucide/svelte';
   import type { ToolDocument, ToolStatus } from '@boite/contracts';
-  import { json } from '../lib/format';
+  import { elapsed, json } from '../lib/format';
   import { fill, strings } from '../lib/strings';
   import { partialSummaryOf, summaryOf } from '../lib/tool-summary';
   import DocumentView from './DocumentView.svelte';
@@ -12,7 +12,10 @@
     inputText = null,
     output,
     status,
-    documents = []
+    documents = [],
+    startedAt = null,
+    finishedAt = null,
+    background = false
   }: {
     name: string;
     input: unknown;
@@ -20,7 +23,30 @@
     output: string | null;
     status: ToolStatus;
     documents?: ToolDocument[];
+    /** When the card first showed up and when it stopped running, as the core stamped them. */
+    startedAt?: number | null;
+    finishedAt?: number | null;
+    /** The work this call started still runs in the background. */
+    background?: boolean;
   } = $props();
+
+  let now = $state(Date.now());
+  let hidden = $state(document.hidden);
+  // A running call ticks once a second while the page is on screen.
+  $effect(() => {
+    if (status !== 'running' || startedAt === null || hidden) return;
+    now = Date.now();
+    const timer = setInterval(() => { now = Date.now(); }, 1000);
+    return () => clearInterval(timer);
+  });
+  /** Shown from one second on: a quick call needs no clock. */
+  let took = $derived.by(() => {
+    if (startedAt === null) return '';
+    const end = status === 'running' ? now : finishedAt;
+    if (end === null || end === undefined) return '';
+    const spent = end - startedAt;
+    return spent >= 1000 ? elapsed(spent) : '';
+  });
 
   let open = $state(false);
 
@@ -66,6 +92,7 @@
   });
 </script>
 
+<svelte:document onvisibilitychange={() => hidden = document.hidden} />
 <div class="tool" data-testid="tool-card" data-status={status} data-streaming={streaming}>
   <button
     type="button"
@@ -82,6 +109,12 @@
     {/if}
     {#if chip}
       <span class="chip" data-testid="tool-document-chip">{chip}</span>
+    {/if}
+    {#if background}
+      <span class="chip live" data-testid="tool-background"><span class="pulse" aria-hidden="true"></span>{strings.chat.backgroundChip}</span>
+    {/if}
+    {#if took}
+      <span class="took" data-testid="tool-elapsed">{took}</span>
     {/if}
     <span class="status {status}" title={strings.chat.toolStatus[status]}>
       {#if status === 'running'}
@@ -209,6 +242,37 @@
     color: var(--color-muted-foreground);
     font-size: var(--text-xs);
     font-variant-numeric: tabular-nums;
+  }
+
+  .chip.live {
+    gap: 5px;
+    color: var(--color-accent);
+    border-color: color-mix(in oklch, var(--color-accent) 40%, transparent);
+  }
+
+  .pulse {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+    animation: pulse 1.6s var(--ease-out-quint) infinite;
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: .3; }
+  }
+
+  .took {
+    flex: none;
+    margin-left: auto;
+    color: var(--color-subtle);
+    font-size: var(--text-xs);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .took + .status {
+    margin-left: 0;
   }
 
   .status {

@@ -63,6 +63,7 @@
   let perAccountConcurrency = $state(untrack(() => store.settings?.perAccountConcurrency ?? 2));
   let warmProcessMinutes = $state(untrack(() => store.settings?.warmProcessMinutes ?? 5));
   let listenOnLan = $state(untrack(() => store.settings?.listenOnLan ?? false));
+  let asyncQuestions = $state(untrack(() => store.settings?.asyncQuestions ?? true));
   let savedAt = $state<number | null>(null);
 
   async function save() {
@@ -70,7 +71,8 @@
       maxConcurrentTurns,
       perAccountConcurrency,
       warmProcessMinutes,
-      listenOnLan
+      listenOnLan,
+      asyncQuestions
     });
     savedAt = Date.now();
   }
@@ -229,6 +231,13 @@
           <span id="{uid}-listen-on-lan-name">{strings.settings.listenOnLan}</span><InfoTip topic={strings.settings.listenOnLan} text={strings.settings.listenOnLanHint} />
         </span>
         <input id="{uid}-listen-on-lan" aria-labelledby="{uid}-listen-on-lan-name" type="checkbox" role="switch" data-testid="setting-listen-on-lan" bind:checked={listenOnLan} />
+      </label>
+      <label class="switch-row">
+        <span class="text">
+          {strings.settings.asyncQuestions}
+          <span class="hint">{strings.settings.asyncQuestionsHint}</span>
+        </span>
+        <input type="checkbox" role="switch" data-testid="setting-async-questions" bind:checked={asyncQuestions} />
       </label>
       <div class="actions">
         <button type="button" class="primary" onclick={() => void save()}>{strings.settings.save}</button>

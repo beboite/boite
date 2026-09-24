@@ -53,6 +53,7 @@ boite diff [file]                open the changes surface, or one file's diff
 boite browse <url>               open the url in the panel's browser (http, https)
 boite open trace|tasks|changes|files [dir]
 boite status                     git status: branch, upstream, one row per change
+boite ask <question> [option ...] [--multiple]
 boite task list|add <text>|start <id>|done <id>|remove <id>|clear
 boite todo list|add <text>|claim <id>
 boite agents list|inbox
@@ -83,6 +84,17 @@ progress, `[x]` completed. A todo is a card of the project's list, shared by
 every thread of the project: an agent adds one or claims one, which marks it
 finished and awaiting the user's confirmation; `done` and removal are the user's
 in the Tasks surface.
+
+`ask` draws a question card in the thread without stopping the agent: the
+thread does not turn `waiting` and the card stays open after the turn ends.
+Each extra argument is an option label; with none the question takes free
+text, and `--multiple` lets the user pick several. The answer reaches the agent
+as a message that quotes the question, `> question` then the answer: steered
+into the running turn when the agent takes steering, otherwise sent as the next
+prompt once the thread is idle. Agents without asynchronous questions of their
+own are told about the command once per session, unless the "Asynchronous
+questions" setting is off. Codex asks natively (`delivery: "async"`), and
+Boite draws those cards the same way.
 
 Exit codes: 0, 1 on a refusal or a failure (`error: ...` on stderr), 2 on a
 usage error (the usage text on stderr).

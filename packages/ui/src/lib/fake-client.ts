@@ -18,6 +18,7 @@ import {
   type AgentTask,
   type AgentWhere,
   type Attachment,
+  type BackgroundTask,
   type CoordinationConfig,
   type CoordinationPeer,
   type CoordinationView,
@@ -77,6 +78,8 @@ import {
   DOC_TEXT,
   DOC_TITLE,
   IMAGE_BASE64,
+  ASYNC_QUESTION_OPTIONS,
+  ASYNC_QUESTION_TEXT,
   QUESTION_OPTIONS,
   QUESTION_TEXT,
   SPAWN_MARKER,
@@ -252,6 +255,8 @@ export class FakeClient implements ObservableClient {
     { request: QuestionRequest; resolve: (answer: QuestionAnswer | null) => void }
   >();
   #inFlight = new Map<ThreadId, { cancelled: boolean; done: Promise<void> }>();
+  /** Async answers waiting for the thread to be free, oldest first. */
+  #heldAnswers = new Map<ThreadId, string[]>();
   /** The current output of every active fake login, also returned after reconnect. */
   #logins = new Map<string, RpcEvents['account.login']>();
   /** Fake shells by terminal id: what they printed and the line being typed. */
@@ -463,7 +468,7 @@ export class FakeClient implements ObservableClient {
    */
   clearRequestsOf(threadId: ThreadId): void {
     for (const [questionId, pending] of [...this.#pendingQuestions]) {
-      if (pending.request.threadId !== threadId) continue;
+      if (pending.request.threadId !== threadId || pending.request.async === true) continue;
       this.#pendingQuestions.delete(questionId);
       this.#emit('question.answered', { questionId, threadId, answer: null });
       pending.resolve(null);
@@ -986,7 +991,17 @@ export class FakeClient implements ObservableClient {
     'threads.archive': async (params) => {
       const thread = this.#thread(params.threadId);
       thread.archived = params.archived ?? true;
-      if (thread.archived) await this.#stopTurn(thread.id);
+      if (thread.archived) {
+        await this.#stopTurn(thread.id);
+        // As the core: nobody answers a card on a thread put away, and its background work goes.
+        for (const [questionId, pending] of [...this.#pendingQuestions]) {
+          if (pending.request.threadId !== thread.id) continue;
+          this.#pendingQuestions.delete(questionId);
+          pending.resolve(null);
+        }
+        this.#heldAnswers.delete(thread.id);
+        if ((thread.background?.length ?? 0) > 0) this.#setBackground(thread, []);
+      }
       return this.#touch(thread);
     },
     'threads.pin': async (params) => {
@@ -1102,7 +1117,13 @@ export class FakeClient implements ObservableClient {
         childrenStopped = await this.#stopDelegation(root, thread.parentThreadId ? thread.id : undefined);
         this.#emit('delegation.changed', { threadId: root });
       }
-      return { stopped: await this.#stopTurn(params.threadId) || childrenStopped > 0 };
+      const stopped = await this.#stopTurn(params.threadId) || childrenStopped > 0;
+      // As the core: Stop on an idle thread ends what it still runs in the background.
+      if (!stopped && (thread.background?.length ?? 0) > 0) {
+        this.#setBackground(thread, []);
+        return { stopped: true };
+      }
+      return { stopped };
     },
     'permissions.list': async (params) => {
       const requests = [...this.#pendingPermissions.values()]
@@ -1124,6 +1145,18 @@ export class FakeClient implements ObservableClient {
         .filter((request) => params.threadId === undefined || request.threadId === params.threadId)
         .sort((a, b) => a.createdAt - b.createdAt);
       return structuredClone(requests);
+    },
+    'questions.ask': async (params) => {
+      const thread = this.#thread(params.threadId);
+      const turn = thread.turns.at(-1);
+      if (!turn) {
+        throw new RpcFailure({
+          code: RpcErrorCode.Refused,
+          message: `thread ${params.threadId} has no turn to ask in yet`,
+          data: { threadId: params.threadId }
+        });
+      }
+      return { questionId: this.#askAsync(thread, turn, null, params.text, params.options ?? [], params.multiple === true) };
     },
     'questions.answer': async (params) => {
       const pending = this.#pendingQuestions.get(params.questionId);
@@ -1937,7 +1970,7 @@ const ready = true;
       pending.resolve('deny');
     }
     for (const [questionId, pending] of [...this.#pendingQuestions]) {
-      if (pending.request.threadId !== threadId) continue;
+      if (pending.request.threadId !== threadId || pending.request.async === true) continue;
       stopped = true;
       this.#pendingQuestions.delete(questionId);
       pending.resolve(null);
@@ -2104,6 +2137,13 @@ const ready = true;
     // The bare word, like the echo driver: the fake agent asks one question.
     if (!record.cancelled && /\bquestion\b/.test(prompt)) {
       await this.#askQuestion(thread, turn, message);
+    }
+    // `boite ask`: a card the agent does not wait on, answered into the next prompt.
+    if (!record.cancelled && prompt.includes('[ask]')) {
+      this.#askAsync(thread, turn, message, ASYNC_QUESTION_TEXT, ASYNC_QUESTION_OPTIONS, false);
+    }
+    if (!record.cancelled && prompt.includes('[background]')) {
+      await this.#backgroundShell(thread, message);
     }
     if (!record.cancelled && prompt.includes('[tool-stream]')) {
       await this.#streamToolInput(thread, message);
@@ -2311,10 +2351,92 @@ const ready = true;
         options: request.options,
         allowText: request.allowText,
         multiple: request.multiple,
+        ...(request.async === true ? { async: true } : {}),
         answer
       }
     });
     this.#emit('question.answered', { questionId: request.id, threadId: thread.id, answer });
+  }
+
+  /**
+   * The core's `askAsync`: the card goes on the running message, or on a new
+   * assistant message of the last turn, and nothing waits on it. The answer
+   * comes back as a prompt quoting the question, once the thread is free.
+   */
+  #askAsync(thread: Thread, turn: Turn, running: Message | null, text: string, labels: string[], multiple: boolean): string {
+    const questionId = `qst-${++this.#seq}`;
+    const asked = {
+      text,
+      options: labels.map((label, index) => ({ id: String(index + 1), label })),
+      allowText: true,
+      multiple
+    };
+    let message = running;
+    if (message === null) {
+      message = { id: `m-${++this.#seq}`, threadId: thread.id, turnId: turn.id, role: 'assistant', parts: [], state: 'complete', createdAt: this.#now() };
+      thread.messages.push(message);
+      this.#emitToThread(thread.id, 'message.started', structuredClone(message));
+    }
+    const host = message;
+    const partIndex = host.parts.length;
+    const part: MessagePart = { type: 'question', questionId, ...asked, async: true, answer: null };
+    host.parts.push(part);
+    this.#emitToThread(thread.id, 'message.part', { threadId: thread.id, messageId: host.id, partIndex, part: structuredClone(part) });
+    const request: QuestionRequest = { id: questionId, threadId: thread.id, turnId: turn.id, ...asked, async: true, createdAt: this.#now() };
+    this.#emit('question.asked', structuredClone(request));
+    this.#pendingQuestions.set(questionId, {
+      request,
+      resolve: (answer) => {
+        this.#settleQuestion(thread, host, partIndex, request, answer);
+        if (answer === null) return;
+        const picked = answer.optionIds.map((id) => asked.options.find((option) => option.id === id)?.label ?? id).join(', ');
+        const reply = [picked, answer.text ?? ''].filter((line) => line.length > 0).join('\n');
+        this.#holdAnswer(thread, `> ${text}\n\n${reply}`);
+      }
+    });
+    return questionId;
+  }
+
+  /** As the core's deferred answers: the ones given while a turn runs start one turn together after it. */
+  #holdAnswer(thread: Thread, prompt: string): void {
+    const held = this.#heldAnswers.get(thread.id);
+    if (held) {
+      held.push(prompt);
+      return;
+    }
+    this.#heldAnswers.set(thread.id, [prompt]);
+    void this.#flushAnswers(thread);
+  }
+
+  async #flushAnswers(thread: Thread): Promise<void> {
+    for (let running = this.#inFlight.get(thread.id); running; running = this.#inFlight.get(thread.id)) {
+      await running.done.catch(() => undefined);
+    }
+    const held = this.#heldAnswers.get(thread.id) ?? [];
+    this.#heldAnswers.delete(thread.id);
+    if (held.length > 0 && !thread.archived) this.#startTurn(thread.id, held.join('\n\n'));
+  }
+
+  /** A shell sent to the background: the call returns at once, the task stays listed. */
+  async #backgroundShell(thread: Thread, message: Message): Promise<void> {
+    const partIndex = message.parts.length;
+    const toolId = `tool-${++this.#seq}`;
+    const input = { command: 'bun run dev:ui', run_in_background: true };
+    const startedAt = this.#now();
+    const running: MessagePart = { type: 'tool', toolId, name: 'Bash', input, output: null, status: 'running', startedAt };
+    message.parts.push(running);
+    this.#emitToThread(thread.id, 'message.part', { threadId: thread.id, messageId: message.id, partIndex, part: structuredClone(running) });
+    await this.#pause();
+    const id = `bash-${this.#seq}`;
+    const done: MessagePart = { ...running, output: `Command running in background with ID: ${id}`, status: 'done', finishedAt: this.#now() };
+    message.parts[partIndex] = done;
+    this.#emitToThread(thread.id, 'message.part', { threadId: thread.id, messageId: message.id, partIndex, part: structuredClone(done) });
+    this.#setBackground(thread, [...(thread.background ?? []), { id, kind: 'shell', description: input.command, toolId, startedAt }]);
+  }
+
+  #setBackground(thread: Thread, tasks: BackgroundTask[]): void {
+    thread.background = tasks;
+    this.#emit('thread.background', { threadId: thread.id, tasks: structuredClone(tasks) });
   }
 
   /** Writes the answer into the part and tells everyone, whichever path asked. */
