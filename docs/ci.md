@@ -109,8 +109,8 @@ These are cache and job boundaries, not a promise of a particular runner time.
 Measure actual workflow durations after the first cold and warm runs on GitHub.
 
 Browser tests wait for committed navigation and resolved asynchronous conditions.
-They disable background timer throttling and report page state and JavaScript
-errors on an unmet condition. Windows setup has an explicit startup timeout.
+They disable background timer throttling and report page state, JavaScript
+errors and the requests still in flight on an unmet condition. Windows setup has an explicit startup timeout.
 The hidden shell test
 passes `BOITE_SHELL_DEBUG_PORT` through WebView2's API because elevated runners
 ignore environment-based WebView2 debug switches. Normal launches ignore this
