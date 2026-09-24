@@ -144,3 +144,35 @@ test('create, converse, configure the resident engine and follow background work
   expect(await page.evaluate(`getComputedStyle(document.querySelector('[data-testid="mobile-agents"]')).display`)).not.toBe('none');
   await missionJourney();
 }, 60000);
+
+test('memory past the snapshot window stays reachable through Load earlier', async () => {
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
+  await page.evaluate(`(async () => {
+    const c = window.__boiteTest.workspace.active.client, agent = window.__agentsFixture.first;
+    const scope = { kind: 'agent', id: agent.id };
+    for (let i = 0; i < 55; i++) await c.call('agents.memory.save', { value: { scope, title: 'Bulk note ' + i, text: 'Filler', sourceScopes: [scope], sourceRunId: null, expiresAt: null } });
+    window.__boiteTest.workspace.active.showChat();
+  })()`);
+  // A new agents page starts from one bounded snapshot, not from what this page saw being created.
+  await page.waitFor(`!document.querySelector('[data-testid="agents-page"]')`);
+  await page.click('[data-testid="nav-agents"]');
+  await page.waitFor(`document.querySelector('[data-testid="agent-entry-' + window.__agentsFixture.first.id + '"]')`);
+  await page.evaluate(`document.querySelector('[data-testid="agent-entry-' + window.__agentsFixture.first.id + '"]').click()`);
+  await page.click('[data-testid="agent-tab-memory"]');
+  await page.waitFor(`document.querySelector('[data-testid="agent-memories-older"]')`);
+  const bulk = `Array.from(document.querySelectorAll('.agent-knowledge summary')).filter(s => s.textContent.includes('Bulk note')).length`;
+  expect(await page.evaluate(bulk)).toBe(50);
+  expect(await page.evaluate(`document.querySelector('.agent-knowledge').textContent`)).not.toContain('Prototype preference');
+  await page.evaluate(`document.querySelector('[data-testid="agent-memories-older"]').scrollIntoView({ block: 'center' })`);
+  await capture('agents-history-desktop.png');
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+  await page.evaluate(`document.querySelector('[data-testid="agent-memories-older"]').scrollIntoView({ block: 'center' })`);
+  await capture('agents-history-phone.png');
+  expect(await page.evaluate(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true);
+  await page.click('[data-testid="agent-memories-older"]');
+  await page.waitFor(`!document.querySelector('[data-testid="agent-memories-older"]')`);
+  expect(await page.evaluate(bulk)).toBe(55);
+  await page.evaluate(`document.querySelector('.agent-knowledge summary').scrollIntoView({ block: 'center' })`);
+  await capture('agents-history-loaded-phone.png');
+  expect(await page.evaluate(`document.querySelector('.agent-knowledge').textContent`)).toContain('Prototype preference');
+}, 60000);

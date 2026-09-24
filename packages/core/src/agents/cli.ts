@@ -1,5 +1,20 @@
-import type { RpcParams } from '@boite/contracts';
+import { AGENT_HISTORY_MAX_PAGE } from '@boite/contracts';
+import type { AgentHistoryCursor, AgentHistoryKind, AgentMemory, AgentRecord, AgentsHistoryPage, RpcParams } from '@boite/contracts';
 import type { CoreClient } from '../client.ts';
+
+const oldest = (records: AgentRecord[]) => records.reduce<AgentHistoryCursor | null>((min, r) => !min || r.updatedAt < min.updatedAt || r.updatedAt === min.updatedAt && r.id < min.id ? { updatedAt: r.updatedAt, id: r.id } : min, null);
+
+/** Older pages of one kind behind the records the snapshot carried. Only an explicit command walks them. */
+async function* older(client: CoreClient, threadId: string, kind: AgentHistoryKind, held: AgentRecord[]): AsyncGenerator<AgentsHistoryPage> {
+  let before = oldest(held);
+  for (;;) {
+    const page = await client.call('agents.history', { threadId, kind, limit: AGENT_HISTORY_MAX_PAGE, ...(before ? { before } : {}) });
+    yield page;
+    const records = [...page.messages, ...page.work, ...page.memories];
+    if (!page.more || !records.length) return;
+    before = oldest(records);
+  }
+}
 
 /** Provider-independent tools. Authentication stays in the existing boite CLI. */
 export async function agentCommand(client: CoreClient, threadId: string, args: string[], requestId: string): Promise<unknown> {
@@ -27,7 +42,9 @@ export async function agentCommand(client: CoreClient, threadId: string, args: s
     }
     case 'send': return client.call('agents.message.send', { threadId, scope: session.scope, recipientIds: need(0, 'recipient ids separated by commas, or -') === '-' ? [] : rest[0]!.split(','), text: rest.slice(1).join(' '), requestId });
     case 'reply': {
-      const parent = snapshot.messages.find(m => m.id === need(0, 'an incoming message id'));
+      const id = need(0, 'an incoming message id');
+      let parent = snapshot.messages.find(m => m.id === id);
+      if (!parent && snapshot.more.message) for await (const page of older(client, threadId, 'message', snapshot.messages)) if ((parent = page.messages.find(m => m.id === id))) break;
       if (!parent) throw new Error('message is not in this conversation');
       return client.call('agents.message.send', { threadId, scope: session.scope, recipientIds: parent.senderId ? [parent.senderId] : [], text: rest.slice(1).join(' '), replyTo: parent.id, requestId });
     }
@@ -41,7 +58,10 @@ export async function agentCommand(client: CoreClient, threadId: string, args: s
     case 'decide': return client.call('agents.decision.request', { ...json<Pick<RpcParams<'agents.decision.request'>, 'prompt' | 'options'>>(), threadId, requestId });
     case 'memory': {
       const query = rest.join(' ').toLocaleLowerCase();
-      return snapshot.memories.filter(m => `${m.title}\n${m.text}`.toLocaleLowerCase().includes(query));
+      const matches = (m: AgentMemory) => `${m.title}\n${m.text}`.toLocaleLowerCase().includes(query);
+      const found = snapshot.memories.filter(matches);
+      if (snapshot.more.memory) for await (const page of older(client, threadId, 'memory', snapshot.memories)) found.push(...page.memories.filter(matches));
+      return found.sort((a, b) => a.createdAt - b.createdAt);
     }
     case 'remember': {
       const value = json<{ title: string; text: string; id?: string; expectedRevision?: number }>();

@@ -183,6 +183,6 @@ test('schema 14 from the earlier persistent branch upgrades without losing proje
   expect(thread.agentSessionId).toBe(session.id);
   expect(thread.turns).toHaveLength(1);
   expect(next.workforce.records.get('profile',agent.id).name).toBe(agent.name);
-  expect(next.journal.db.query('PRAGMA user_version').get()).toEqual({user_version:15});
+  expect(next.journal.db.query('PRAGMA user_version').get()).toEqual({user_version:16});
  } finally { await next.close(); }
 });

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { AGENT_ENV } from '@boite/contracts';
+import { AGENT_ENV, AGENT_HISTORY_PAGE } from '@boite/contracts';
 import { runCli, splitLine } from '../src/cli.ts';
 import type { CliIo } from '../src/cli.ts';
 import { setDriver } from '../src/drivers/index.ts';
@@ -94,8 +94,21 @@ test('persistent agent CLI uses its own context, durable memory and idempotent d
   expect(JSON.parse(context.out).sessions[0].threadId).toBe(threadId);
   const remembered = await boite(['agent', 'remember', JSON.stringify({ title: 'A finding', text: 'Keep prototypes small.' }), '--json']);
   expect(remembered.code).toBe(0);
+  // Push the finding and the first message out of the snapshot's window: search and reply page back to them.
+  const scope = { kind: 'agent' as const, id: agent.id };
+  const opening = harness.core.workforce.records.list('message')[0]!;
+  for (let i = 0; i < AGENT_HISTORY_PAGE + 5; i++) {
+    harness.core.workforce.records.create('memory', { scope, title: `Filler ${i}`, text: 'unrelated', sourceScopes: [scope], sourceRunId: null, expiresAt: null });
+    harness.core.workforce.records.create('message', { scope, senderId: null, text: `filler ${i}`, recipientIds: [], replyTo: null, episodeId: 'filler', sourceRunId: null });
+  }
+  const bounded = JSON.parse((await boite(['agent', 'context', '--json'])).out);
+  expect(bounded.memories).toHaveLength(AGENT_HISTORY_PAGE);
+  expect(bounded.messages.some((m: { id: string }) => m.id === opening.id)).toBe(false);
   const found = await boite(['agent', 'memory', 'prototypes', '--json']);
   expect(JSON.parse(found.out)).toHaveLength(1);
+  const replied = await boite(['agent', 'reply', opening.id, 'Noted', '--json']);
+  expect(replied.code).toBe(0);
+  expect(JSON.parse(replied.out).replyTo).toBe(opening.id);
   const args = ['agent', 'decide', JSON.stringify({ prompt: 'Which prototype?', options: ['Puzzle', 'Simulation'] }), '--request-id', 'cli_agent_decision_001', '--json'];
   const first = await boite(args);
   expect(first.code).toBe(0);

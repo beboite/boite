@@ -81,7 +81,7 @@
   <section class="card">
     <h2>{labels.artifacts}</h2>
     {#each artifacts as artifact (artifact.id)}
-      {@const run = view.snapshot?.runs.find(r => r.id === artifact.runId)}
+      {@const run = view.seen.runs.find(r => r.id === artifact.runId) ?? view.snapshot?.sessions.find(s => s.agentId === artifact.agentId && s.scope.kind === 'mission' && s.scope.id === mission.id)}
       <article class="agent-task"><h3>{artifact.title}</h3><div class="prose">{@html renderMarkdown(artifact.summary)}</div><p class="hint">{labels.verification}: {artifact.verification || labels.noUsage}</p>{#if artifact.paths.length}<p class="agent-prewrap hint">{artifact.paths.join('\n')}</p>{/if}{#if artifact.commit}<code>{artifact.commit}</code>{/if}{#if run}<button type="button" class="ghost small" onclick={() => void view.store.open(run.threadId)}>{labels.openRun}</button>{/if}</article>
     {/each}
   </section>

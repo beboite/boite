@@ -1,15 +1,57 @@
 import { createHash } from 'node:crypto';
-import type { AgentDraft, AgentEntities, AgentEntityKind } from '@boite/contracts';
+import type { AgentDraft, AgentEntities, AgentEntityKind, AgentHistoryCursor, AgentScope } from '@boite/contracts';
 import { invalidParams, notFound, refused } from '../errors.ts';
 import { newId } from '../ids.ts';
 import type { Journal } from '../journal.ts';
 
 type Row = { data: string };
+/** Every work status but done and cancelled. Unfinished work stays in every snapshot. */
+export const OPEN_WORK: AgentEntities['work']['status'][] = ['pending', 'running', 'waiting', 'paused', 'interrupted', 'error'];
+export type RecentFilter = { scope?: AgentScope; agentId?: string };
+
+const KINDS: ReadonlySet<string> = new Set<AgentEntityKind>(['routine', 'profile', 'group', 'team', 'mission', 'task', 'session', 'message', 'delivery', 'work', 'run', 'memory', 'resource', 'artifact', 'decision']);
+/** SQLite uses a partial index only when the query names the same literal kind, so kinds and paths are inlined, never bound. */
+function kindSql(kind: AgentEntityKind): string {
+  if (!KINDS.has(kind)) throw new Error(`unknown agent record kind ${kind}`);
+  return `kind = '${kind}'`;
+}
+function pathSql(field: string): string {
+  if (!/^[A-Za-z]+$/.test(field)) throw new Error(`unsupported agent record field ${field}`);
+  return `json_extract(data, '$.${field}')`;
+}
+/** Bound parameters per IN list, well under SQLite's limit. */
+const CHUNK = 500;
+/**
+ * The expression index behind each targeted read. Without ANALYZE statistics
+ * SQLite can prefer the primary key's `kind` prefix and walk the whole kind, so
+ * every targeted read names its index: `INDEXED BY` fails the query outright
+ * when the index cannot serve it, instead of silently scanning.
+ */
+const LOOKUP: Record<string, string> = {
+  'session.threadId': 'agent_session_thread',
+  'message.sourceRunId': 'agent_message_source_run',
+  'work.episodeId': 'agent_work_episode',
+  'delivery.workId': 'agent_delivery_work',
+  'delivery.messageId': 'agent_delivery_recipient',
+  'run.workId': 'agent_run_work',
+  'decision.workId': 'agent_decision_work'
+};
+const SCOPED: Record<string, string> = { message: 'agent_message_scope', work: 'agent_work_scope', memory: 'agent_memory_scope' };
+function indexFor(table: Record<string, string>, key: string): string {
+  const index = table[key];
+  if (!index) throw new Error(`no index serves agent records by ${key}`);
+  return index;
+}
 
 /** Domain records and the journal event that changes them always commit together. */
 export class AgentsRepository {
   constructor(readonly journal: Journal) {}
 
+  private rows<K extends AgentEntityKind>(sql: string, ...params: (string | number)[]): AgentEntities[K][] {
+    return (this.journal.db.query(sql).all(...params) as Row[]).map(row => JSON.parse(row.data) as AgentEntities[K]);
+  }
+
+  /** Uses the partial index `events_agents`; its WHERE clause must stay textually identical. */
   revision(): number {
     const row = this.journal.db.query("SELECT COALESCE(MAX(id), 0) AS revision FROM events WHERE type IN ('agents.record', 'agents.limits')").get() as { revision: number };
     return row.revision;
@@ -21,20 +63,59 @@ export class AgentsRepository {
     return JSON.parse(row.data) as AgentEntities[K];
   }
 
+  /** Every record of a kind. Only for kinds the owner configures; history kinds go through `recent` or `find`. */
   list<K extends AgentEntityKind>(kind: K): AgentEntities[K][] {
-    const rows = this.journal.db.query('SELECT data FROM agent_entities WHERE kind = ? ORDER BY created_at, rowid').all(kind) as Row[];
-    return rows.map(row => JSON.parse(row.data) as AgentEntities[K]);
+    return this.rows<K>('SELECT data FROM agent_entities WHERE kind = ? ORDER BY created_at, rowid', kind);
   }
 
   withStatus<K extends 'run' | 'work'>(kind: K, statuses: AgentEntities[K]['status'][]): AgentEntities[K][] {
     if (!statuses.length) return [];
-    const rows = this.journal.db.query(`SELECT data FROM agent_entities WHERE kind = ? AND json_extract(data, '$.status') IN (${statuses.map(() => '?').join(',')}) ORDER BY created_at, rowid`).all(kind, ...statuses) as Row[];
-    return rows.map(row => JSON.parse(row.data) as AgentEntities[K]);
+    return this.rows<K>(`SELECT data FROM agent_entities INDEXED BY agent_${kind}_status WHERE ${kindSql(kind)} AND json_extract(data, '$.status') IN (${statuses.map(() => '?').join(',')}) ORDER BY created_at, rowid`, ...statuses);
   }
 
+  /** Records whose `field` is one of `values`, through that field's expression index. */
+  find<K extends AgentEntityKind>(kind: K, field: keyof AgentEntities[K] & string, values: readonly string[]): AgentEntities[K][] {
+    const index = indexFor(LOOKUP, `${kind}.${field}`);
+    const out: AgentEntities[K][] = [];
+    for (let i = 0; i < values.length; i += CHUNK) {
+      const chunk = values.slice(i, i + CHUNK);
+      out.push(...this.rows<K>(`SELECT data FROM agent_entities INDEXED BY ${index} WHERE ${kindSql(kind)} AND ${pathSql(field)} IN (${chunk.map(() => '?').join(',')}) ORDER BY created_at, rowid`, ...chunk));
+    }
+    return out;
+  }
+
+  /** Every run of an episode: its work through `agent_work_episode`, then their runs through `agent_run_work`. */
   episodeRuns(episodeId: string): AgentEntities['run'][] {
-    const rows = this.journal.db.query(`SELECT r.data FROM agent_entities r JOIN agent_entities w ON w.kind = 'work' AND w.id = json_extract(r.data, '$.workId') WHERE r.kind = 'run' AND json_extract(w.data, '$.episodeId') = ? ORDER BY r.created_at, r.rowid`).all(episodeId) as Row[];
-    return rows.map(row => JSON.parse(row.data) as AgentEntities['run']);
+    const work = this.find('work', 'episodeId', [episodeId]).map(w => w.id);
+    return this.find('run', 'workId', work).sort((a, b) => a.createdAt - b.createdAt);
+  }
+
+  /** The session of one agent in one context, through the unique index `agent_session_context`. */
+  sessionFor(agentId: string, scope: AgentScope): AgentEntities['session'] | null {
+    return this.rows<'session'>("SELECT data FROM agent_entities INDEXED BY agent_session_context WHERE kind = 'session' AND json_extract(data, '$.agentId') = ? AND json_extract(data, '$.scope.kind') = ? AND json_extract(data, '$.scope.id') = ?", agentId, scope.kind, scope.id)[0] ?? null;
+  }
+
+  /** Runs of a thread that finished successfully after `after`, oldest first. */
+  completedRuns(threadId: string, after: number): string[] {
+    const rows = this.journal.db.query("SELECT id FROM agent_entities INDEXED BY agent_run_thread WHERE kind = 'run' AND json_extract(data, '$.threadId') = ? AND json_extract(data, '$.finishedAt') > ? AND json_extract(data, '$.status') = 'done' ORDER BY json_extract(data, '$.finishedAt')").all(threadId, after) as { id: string }[];
+    return rows.map(row => row.id);
+  }
+
+  /**
+   * Newest first by last change, strictly before `before`. Reads one row past
+   * `limit` to tell whether more remain. The row-value cursor lets SQLite start
+   * the index walk at the cursor instead of skipping every newer row.
+   */
+  recent<K extends AgentEntityKind>(kind: K, filter: RecentFilter, before: AgentHistoryCursor | null, limit: number): { items: AgentEntities[K][]; more: boolean } {
+    // A scope narrows further than an agent: with both, the scope index serves and agentId filters its rows.
+    const index = filter.scope ? indexFor(SCOPED, kind) : filter.agentId ? indexFor({ work: 'agent_work_agent' }, kind) : 'agent_recent';
+    const clauses = [kindSql(kind)];
+    const params: (string | number)[] = [];
+    if (filter.scope) { clauses.push("json_extract(data, '$.scope.kind') = ? AND json_extract(data, '$.scope.id') = ?"); params.push(filter.scope.kind, filter.scope.id); }
+    if (filter.agentId) { clauses.push("json_extract(data, '$.agentId') = ?"); params.push(filter.agentId); }
+    if (before) { clauses.push('(updated_at, id) < (?, ?)'); params.push(before.updatedAt, before.id); }
+    const items = this.rows<K>(`SELECT data FROM agent_entities INDEXED BY ${index} WHERE ${clauses.join(' AND ')} ORDER BY updated_at DESC, id DESC LIMIT ?`, ...params, limit + 1);
+    return { items: items.slice(0, limit), more: items.length > limit };
   }
 
   create<K extends AgentEntityKind>(kind: K, value: AgentDraft<AgentEntities[K]>): AgentEntities[K] {

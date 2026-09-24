@@ -5,6 +5,7 @@ import type { Core } from '../core.ts';
 import { messageOf, refused } from '../errors.ts';
 import { newId } from '../ids.ts';
 import { sameScope } from './validation.ts';
+import { OPEN_WORK } from './repository.ts';
 
 /** Durable work owns execution. Subscriptions and rendering never start or stop it. */
 export class AgentRuntime {
@@ -137,7 +138,7 @@ export class AgentRuntime {
     } finally { this.pumping = false; for (const done of this.drained.splice(0)) done(); }
   }
   private async session(work: AgentWork, agent: AgentProfile): Promise<AgentSession> {
-    const previous = this.r.list('session').find(s => s.agentId === agent.id && sameScope(s.scope, work.scope));
+    const previous = this.r.sessionFor(agent.id, work.scope);
     if (previous) return previous;
     this.store.resident.brain(agent.id);
     const directory = join(this.core.dataDir, 'agent-workspaces', agent.id, `${work.scope.kind}-${work.scope.id}`);
@@ -175,12 +176,11 @@ export class AgentRuntime {
     return created;
   }
   private context(work: AgentWork, agent: AgentProfile): AgentRun['context'] {
-    const memories = this.r.list('memory').filter(m => (!m.expiresAt || m.expiresAt > Date.now()) && this.store.canRead(agent.id, m.scope, work.scope) && m.sourceScopes.every(s => sameScope(s, work.scope)));
-    const messages = this.r.list('message').filter(m => sameScope(m.scope, work.scope)).slice(-20);
-    const selectedMemories = memories.slice(-20);
+    const selectedMemories = this.store.memoriesFor(agent.id, work.scope, 20);
+    const messages = this.store.messagesIn(work.scope, 20);
     const resources = this.store.resourcesFor(work);
     const brain = this.store.resident.brain(agent.id);
-    const session = this.r.list('session').find(s => s.agentId === agent.id && sameScope(s.scope, work.scope));
+    const session = this.r.sessionFor(agent.id, work.scope);
     const checkpoint = session ? this.core.journal.getSetting(`agents:checkpoint:${session.id}`) as { text: string } | undefined : undefined;
     const instructions = [
       `You are ${agent.name}. Domain: ${agent.domain}.`, agent.instructions,
@@ -209,11 +209,11 @@ export class AgentRuntime {
     if (work.purpose === 'compaction' && this.core.delegation.get(thread.id).agents.some(a => ['running', 'waiting', 'queued'].includes(a.thread.status))) return;
     if (work.purpose !== 'compaction') {
       const checkpoint = this.core.journal.getSetting(`agents:checkpoint:${session.id}`) as { at: number } | undefined;
-      const completed = this.r.list('run').filter(r => r.threadId === thread.id && r.status === 'done' && (r.finishedAt ?? 0) > (checkpoint?.at ?? 0));
+      const completed = this.r.completedRuns(thread.id, checkpoint?.at ?? 0);
       const contextFull = thread.context?.window != null && thread.context.window > 0 && thread.context.tokens >= thread.context.window * 0.85;
       if (contextFull || completed.length >= this.store.resident.config(agent.id).compactAfterTurns) {
-        const held = this.r.list('work').find(w => w.agentId === agent.id && sameScope(w.scope, work.scope) && w.purpose === 'compaction' && !['done', 'cancelled'].includes(w.status));
-        if (!held) this.store.resident.compact(session.id, `auto-${thread.id}-${completed.at(-1)?.id ?? thread.context?.at ?? 0}`.slice(0, 128));
+        const held = this.r.withStatus('work', OPEN_WORK).find(w => w.agentId === agent.id && sameScope(w.scope, work.scope) && w.purpose === 'compaction');
+        if (!held) this.store.resident.compact(session.id, `auto-${thread.id}-${completed.at(-1) ?? thread.context?.at ?? 0}`.slice(0, 128));
         return;
       }
     }
@@ -249,7 +249,7 @@ export class AgentRuntime {
       const task = this.r.get('task', work.taskId);
       this.r.update('task', task.id, task.revision, { ...task, status: 'running', leaseUntil: Date.now() + 30000 });
     }
-    for (const delivery of this.r.list('delivery').filter(d => d.workId === work.id)) this.r.update('delivery', delivery.id, delivery.revision, { ...delivery, status: 'included' });
+    for (const delivery of this.r.find('delivery', 'workId', [work.id])) this.r.update('delivery', delivery.id, delivery.revision, { ...delivery, status: 'included' });
     this.store.changed();
   }
   private finished(turn: Turn, recovering?: AgentRun): void {
@@ -269,7 +269,7 @@ export class AgentRuntime {
       }
       this.r.update('work', work.id, work.revision, { ...work, status: 'done', error: null });
       this.store.publishReply(work, run.id, result);
-      for (const d of this.r.list('delivery').filter(d => d.workId === work.id)) this.r.update('delivery', d.id, d.revision, { ...d, status: 'processed' });
+      for (const d of this.r.find('delivery', 'workId', [work.id])) this.r.update('delivery', d.id, d.revision, { ...d, status: 'processed' });
       if (work.taskId) {
         const task = this.r.get('task', work.taskId);
         if (task.generation === work.taskGeneration && task.status === 'running') this.r.update('task', task.id, task.revision, { ...task, status: 'review', result, leaseUntil: null });
@@ -284,7 +284,7 @@ export class AgentRuntime {
       const task = this.r.get('task', work.taskId);
       if (task.generation === work.taskGeneration && ['assigned', 'running'].includes(task.status)) this.r.update('task', task.id, task.revision, { ...task, status: status === 'cancelled' ? 'cancelled' : 'waiting', leaseUntil: null });
     }
-    for (const d of this.r.list('delivery').filter(d => d.workId === work.id && d.status !== 'processed')) this.r.update('delivery', d.id, d.revision, { ...d, status: status === 'cancelled' ? 'cancelled' : 'failed' });
+    for (const d of this.r.find('delivery', 'workId', [work.id]).filter(d => d.status !== 'processed')) this.r.update('delivery', d.id, d.revision, { ...d, status: status === 'cancelled' ? 'cancelled' : 'failed' });
     this.store.changed();
   }
   private checkRuns(): void {

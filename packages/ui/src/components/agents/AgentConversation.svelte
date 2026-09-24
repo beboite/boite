@@ -9,7 +9,10 @@
   let recipients = $state<string[]>([]);
   let request: { text: string; recipients: string; id: string } | null = null;
   let group = $derived(scope.kind === 'group' ? view.snapshot?.groups.find(g => g.id === scope.id) : null);
-  let messages = $derived(view.snapshot?.messages.filter(m => m.scope.kind === scope.kind && m.scope.id === scope.id) ?? []);
+  let messages = $derived(view.seen.messages.filter(m => m.scope.kind === scope.kind && m.scope.id === scope.id));
+  const key = $derived(`message:${scope.kind}:${scope.id}`);
+  const history = $derived({ kind: 'message' as const, scopes: [scope] });
+  $effect(() => { view.fill(key, history, messages); });
   const nameOf = (id: string) => view.snapshot?.profiles.find(a => a.id === id)?.name ?? id;
 
   async function send() {
@@ -29,11 +32,12 @@
 
 <section class="agent-conversation" aria-label={strings.agents.conversation}>
   <div class="agent-transcript" data-testid="agent-transcript">
+    {#if view.hasOlder(key, 'message')}<button type="button" class="ghost small agent-older" disabled={view.loadingOlder === key} onclick={() => void view.loadOlder(key, history, messages)} data-testid="agent-messages-older">{strings.agents.loadEarlier}</button>{/if}
     {#each messages as message (message.id)}
       <article class="agent-message" class:from-user={message.senderId === null}>
         <header><span>{message.senderId === null ? strings.agents.user : nameOf(message.senderId)}</span><time datetime={new Date(message.createdAt).toISOString()}>{new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time></header>
         <div class="prose">{@html renderMarkdown(message.text)}</div>
-        {#if group && message.recipientIds.length}<div class="agent-receipts">{#each view.snapshot?.deliveries.filter(d => d.messageId === message.id) ?? [] as delivery (delivery.id)}<span>{nameOf(delivery.agentId)} · {strings.agents[delivery.status]}</span>{/each}</div>{/if}
+        {#if group && message.recipientIds.length}<div class="agent-receipts">{#each view.seen.deliveries.filter(d => d.messageId === message.id) as delivery (delivery.id)}<span>{nameOf(delivery.agentId)} · {strings.agents[delivery.status]}</span>{/each}</div>{/if}
       </article>
     {:else}<p class="agent-empty">{strings.agents.noMessages}</p>{/each}
   </div>
