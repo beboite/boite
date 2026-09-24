@@ -1,4 +1,5 @@
 import { expect, test, vi } from 'vitest';
+import type { AgentEntities } from '@boite/contracts';
 import { AgentsView } from './agents.svelte';
 import { FakeAgents } from './fake-agents';
 import type { Store } from './store.svelte';
@@ -37,5 +38,32 @@ test('background updates preserve a mutation error and a changed client gets a n
     expect(off).toHaveBeenCalledOnce();
     expect(second.on).toHaveBeenCalledWith('agents.changed', expect.any(Function));
     expect(view.snapshot?.revision).toBe(3);
+  } finally { view.close(); }
+});
+
+test('older pages and records that left the snapshot window stay in seen, the later revision winning', async () => {
+  const base = new FakeAgents(() => {}).snapshot();
+  const scope = { kind: 'agent' as const, id: 'agent_1' };
+  const message = (id: string, at: number, revision = 1): AgentEntities['message'] => ({ id, revision, createdAt: at, updatedAt: at, scope, senderId: null, text: id, recipientIds: [], replyTo: null, episodeId: id, sourceRunId: null });
+  const empty = { messages: [], work: [], memories: [], deliveries: [], runs: [], decisions: [] };
+  const call = vi.fn(async (method: string, params: { before?: { id: string } }) => {
+    if (method === 'agents.history') {
+      expect(params.before?.id).toBe('m2');
+      return { ...empty, messages: [message('m1', 1)], more: false };
+    }
+    return call.mock.calls.filter(([m]) => m === 'agents.snapshot').length === 1
+      ? { ...base, messages: [message('m2', 2), message('m3', 3)], more: { ...base.more, message: true } }
+      : { ...base, revision: 2, messages: [message('m3', 3, 2), message('m4', 4)], more: { ...base.more, message: true } };
+  });
+  const view = new AgentsView({ client: { call, on: () => () => {} } } as unknown as Store);
+  try {
+    await view.refresh();
+    expect(view.hasOlder('chat', 'message')).toBe(true);
+    await view.loadOlder('chat', { kind: 'message', scopes: [scope] }, view.seen.messages);
+    expect(view.hasOlder('chat', 'message')).toBe(false);
+    await view.refresh();
+    expect(view.seen.messages.map(m => `${m.id}@${m.revision}`)).toEqual(['m1@1', 'm2@1', 'm3@2', 'm4@1']);
+    view.fill('chat', { kind: 'message', scopes: [scope] }, view.seen.messages);
+    expect(call.mock.calls.filter(([m]) => m === 'agents.history')).toHaveLength(1);
   } finally { view.close(); }
 });

@@ -55,16 +55,22 @@
     : mission ? labels[mission.status] : ''
   );
   const running = $derived(profile ? snapshot?.work.some(w => w.agentId === profile.id && w.status === 'running') : false);
-  const work = $derived(snapshot?.work.filter(w =>
+  const missions = $derived(snapshot?.missions.filter(m => profile ? m.agentIds.includes(profile.id) : team ? m.teamId === team.id : false) ?? []);
+  const teamScopes = $derived(team ? missions.map(m => ({ kind: 'mission' as const, id: m.id })) : []);
+  const work = $derived(view.seen.work.filter(w =>
     profile ? w.agentId === profile.id
     : group ? w.scope.kind === 'group' && w.scope.id === group.id
     : mission ? w.scope.kind === 'mission' && w.scope.id === mission.id
-    : team ? snapshot.missions.some(m => m.teamId === team.id && w.scope.kind === 'mission' && w.scope.id === m.id)
-    : false).toReversed() ?? []);
-  const missions = $derived(snapshot?.missions.filter(m => profile ? m.agentIds.includes(profile.id) : team ? m.teamId === team.id : false) ?? []);
+    : team ? teamScopes.some(s => w.scope.kind === 'mission' && w.scope.id === s.id)
+    : false).toReversed());
+  /** The history page the activity tab asks for: the same filter as `work`. */
+  const workHistory = $derived<{ kind: 'work'; agentId?: string; scopes?: AgentScope[] } | null>(
+    profile ? { kind: 'work', agentId: profile.id } : scope && (group || mission) ? { kind: 'work', scopes: [scope] } : team && teamScopes.length ? { kind: 'work', scopes: teamScopes } : null);
+  const workKey = $derived(selected ? `work:${selected.kind}:${selected.id}` : '');
 
   onMount(() => { view.start(); return () => view.close(); });
   $effect(() => { if (store.connection === 'ready') void view.refresh(); });
+  $effect(() => { if (current === 'activity' && workHistory) view.fill(workKey, workHistory, work); });
 
   function open(next: AgentFocus) {
     chosen = next;
@@ -134,6 +140,7 @@
               <h3 class="section-label">{labels.history}</h3>
             {/if}
             {#each work as item (item.id)}<AgentWorkCard {view} work={item} />{:else}<p class="agent-empty">{labels.noWork}</p>{/each}
+            {#if workHistory && view.hasOlder(workKey, 'work')}<button type="button" class="ghost small agent-older" disabled={view.loadingOlder === workKey} onclick={() => void view.loadOlder(workKey, workHistory, work)} data-testid="agent-work-older">{labels.loadEarlier}</button>{/if}
           {:else if current === 'memory'}
             {#if profile}<AgentBrainEditor {view} agentId={profile.id} />{/if}
             <AgentKnowledge {view} {scope} />

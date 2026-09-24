@@ -175,7 +175,7 @@ closing this client does not stop that core. Disconnection marks the last state
 as stale. Portrait experiments and the graphical studio are deliberately
 deferred. The scene source remains available, but has no navigation entry.
 
-Contracts live in `packages/contracts/src/agents.ts`. Schema 15 combines domain
+Contracts live in `packages/contracts/src/agents.ts`. Schema 16 combines domain
 records, receipts and projectless managed threads with prompt-cache and native
 delegation storage. It accepts the earlier persistent-agent schema 14 and the
 main branch's schema 14 without discarding their history. Records and
@@ -185,6 +185,30 @@ context. `agents.changed` invalidates a revision without broadcasting messages.
 Agent RPC is restricted to its authenticated execution context. Paired devices
 can converse, inspect and answer; configuration and shutdown remain owner-only.
 
+History grows without bound, so `agents.snapshot` is bounded. It carries the
+newest 50 messages and memories, every unfinished work item plus the newest 50
+finished ones, and the deliveries, runs and decisions they point to. `more`
+says, per kind, whether older records exist. `agents.history` pages one kind
+newest first by last change, with an `(updatedAt, id)` cursor and at most 200
+records a page; `scopes` and, for work, `agentId` narrow it. Configuration
+kinds (profiles, groups, teams, missions, tasks, sessions, routines, resources,
+artifacts) stay whole. An agent session pages under the same rules as its
+snapshot: its own context only, and memory it may read by provenance. Runs
+leave out `context.instructions`; the frozen text stays in the core record and
+in the first turn of the run's thread.
+
+The UI keeps every record a snapshot or a page brought since it connected, so a
+record that leaves the snapshot window stays on screen. A view showing fewer
+than 20 records loads one older page by itself; `Load earlier` fetches the
+rest. The CLI pages back when `agent reply` or `agent memory` needs a record
+older than the snapshot.
+
+Targeted reads never load a whole kind. Each goes through a partial expression
+index and names it with `INDEXED BY`, so a query the index cannot serve fails
+instead of scanning: sessions by thread, messages by source run, work by
+episode, agent or scope, deliveries, runs and decisions by work, and completed
+runs of a thread. `events_agents` serves the snapshot's revision.
+
 ## Verification
 
 Run `bun run check`, `bun run test`, `bun run test:shell`, then
@@ -193,6 +217,9 @@ Run `bun run check`, `bun run test`, `bun run test:shell`, then
 
 Core tests cover assignments, scope isolation, receipts, decisions, resource
 serialization, CLI tools, interrupted runs and workspace preparation recovery.
+`agents-history.test.ts` covers bounded snapshots, paging every record once,
+same-millisecond cursors, session paging, the query plan of each targeted read
+and the migration from schema 15.
 The UI journey creates and converses with an agent, leaves the page, edits
 memory and brain files, creates a routine, inspects model limits, accepts a task
 and answers a decision. Captures are under

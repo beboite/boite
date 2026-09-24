@@ -46,7 +46,7 @@ export const strings = {
     objective: 'Objective', expectedResult: 'Expected result', minutes: 'Total execution minutes', tokens: 'Token limit, blank for none',
     finishMission: 'Finish mission', reopenMission: 'Reopen mission',
     conversation: 'Chat', activity: 'Activity', send: 'Send', message: 'Write a message', recipients: 'Recipients', everyone: 'Let the group rule choose',
-    noMessages: 'Start a conversation. It stays separate from this agent’s other groups and missions.', user: 'You', noWork: 'No execution yet.',
+    noMessages: 'Start a conversation. It stays separate from this agent’s other groups and missions.', user: 'You', noWork: 'No execution yet.', loadEarlier: 'Load earlier',
     openRun: 'Open execution', requested: 'Requested', executed: 'Executed', noUsage: 'Usage not reported',
     pending: 'Queued', running: 'Working', waiting: 'Waiting for a decision', done: 'Done', cancelled: 'Cancelled', interrupted: 'Interrupted', error: 'Failed', review: 'Ready for review', open: 'Open', assigned: 'Assigned', accepted: 'Accepted',
     included: 'Included in execution', processed: 'Processed', failed: 'Failed', limited: 'Exchange limit reached',

@@ -8,6 +8,7 @@ import { refused } from '../errors.ts';
 import { checkEffort, checkModel } from '../threads.ts';
 import { ids, integer, object, text } from './validation.ts';
 import { releaseThread } from '../drivers/index.ts';
+import { OPEN_WORK } from './repository.ts';
 
 export const sameRoute = (a: Pick<AgentSelection,'providerId'|'accountId'|'model'>, b: Pick<AgentSelection,'providerId'|'accountId'|'model'>) => a.providerId === b.providerId && a.accountId === b.accountId && a.model === b.model;
 
@@ -116,7 +117,7 @@ export class ResidentAgents {
   compact(sessionId:string,requestId:string):AgentWork {
     const session=this.records.get('session',sessionId);
     return this.records.command(`compact:${sessionId}`,requestId,{sessionId},()=>{
-      if(this.records.list('work').some(w=>w.agentId===session.agentId&&w.scope.kind===session.scope.kind&&w.scope.id===session.scope.id&&w.purpose==='compaction'&&!['done','cancelled'].includes(w.status)))throw refused('compaction already unfinished');
+      if(this.records.withStatus('work',OPEN_WORK).some(w=>w.agentId===session.agentId&&w.scope.kind===session.scope.kind&&w.scope.id===session.scope.id&&w.purpose==='compaction'))throw refused('compaction already unfinished');
       const work=this.records.create('work',{agentId:session.agentId,scope:session.scope,taskId:null,taskGeneration:null,messageId:null,episodeId:crypto.randomUUID(),purpose:'compaction',prompt:'Create a compact continuation note for THIS context only. Preserve the objective, decisions, unfinished tasks, paths, verification evidence and unresolved questions. Distinguish completed actions from proposed actions. Do not execute tools or continue the task. Return only the note, at most 6000 characters. This note will replace the native conversation context, not durable memory.',status:'pending',error:null,runId:null,notBefore:Date.now()});
       this.core.workforce.changed();return work;
     });

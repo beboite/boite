@@ -12,7 +12,11 @@
   let kind = $state<AgentResource['kind']>('instructions');
   let access = $state<AgentResource['access']>('read');
   const labels = $derived(strings.agents);
-  let memories = $derived(view.snapshot?.memories.filter(m => m.scope.kind === scope.kind && m.scope.id === scope.id && `${m.title} ${m.text}`.toLowerCase().includes(query.toLowerCase())) ?? []);
+  let scoped = $derived(view.seen.memories.filter(m => m.scope.kind === scope.kind && m.scope.id === scope.id));
+  let memories = $derived(scoped.filter(m => `${m.title} ${m.text}`.toLowerCase().includes(query.toLowerCase())));
+  const key = $derived(`memory:${scope.kind}:${scope.id}`);
+  const history = $derived({ kind: 'memory' as const, scopes: [scope] });
+  $effect(() => { view.fill(key, history, scoped); });
   let resources = $derived(view.snapshot?.resources.filter(r => r.scope.kind === scope.kind && r.scope.id === scope.id && `${r.name} ${r.value}`.toLowerCase().includes(query.toLowerCase())) ?? []);
   function edit(record: AgentMemory | AgentResource | null, target: 'memory' | 'resource') {
     original = record; mode = target; expiry = ''; title = ''; text = ''; kind = 'instructions'; access = 'read';
@@ -58,6 +62,8 @@
   {/if}
   <section class="card">
     <div class="agent-card-head"><h2>{labels.memories}</h2>{#if view.store.owner && mode !== 'memory'}<button type="button" class="small" data-testid="agent-memory-add" onclick={() => edit(null, 'memory')}>{labels.addMemory}</button>{/if}</div>
+    <!-- Oldest first: earlier memories load above the list. -->
+    {#if view.hasOlder(key, 'memory')}<button type="button" class="ghost small agent-older" disabled={view.loadingOlder === key} onclick={() => void view.loadOlder(key, history, scoped)} data-testid="agent-memories-older">{labels.loadEarlier}</button>{/if}
     {#each memories as memory (memory.id)}
       <details class="agent-record">
         <summary>{memory.title}{#if memory.expiresAt && memory.expiresAt <= Date.now()}<span class="muted"> · {labels.expired}</span>{/if}</summary>

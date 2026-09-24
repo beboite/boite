@@ -87,7 +87,8 @@ test('a persistent agent answers without a project and keeps group contexts sepa
     expect(snapshot.deliveries.every(d => d.status === 'processed')).toBe(true);
     expect(h.core.journal.listProjects()).toEqual([]);
     const groupRun = snapshot.runs.find(r => snapshot.sessions.find(s => s.threadId === r.threadId)?.scope.kind === 'group')!;
-    expect(groupRun.context.instructions).not.toContain('private greeting');
+    expect('instructions' in groupRun.context).toBe(false);
+    expect(h.core.workforce.records.get('run', groupRun.id).context.instructions).not.toContain('private greeting');
     const thread = h.core.threads.require(groupRun.threadId);
     expect(thread.projectId).toBeNull();
     await expect(client.call('turns.start', { threadId: thread.id, prompt: 'bypass scheduling' })).rejects.toThrow('persistent');

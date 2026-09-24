@@ -56,7 +56,7 @@ export const fr: Messages = {
     objective: 'Objectif', expectedResult: 'Résultat attendu', minutes: 'Minutes totales de travail', tokens: 'Limite de jetons, vide si aucune',
     finishMission: 'Terminer la mission', reopenMission: 'Rouvrir la mission',
     conversation: 'Discussion', activity: 'Activité', send: 'Envoyer', message: 'Écrire un message', recipients: 'Destinataires', everyone: 'Suivre la règle du groupe',
-    noMessages: 'Commence une conversation. Elle reste séparée des autres groupes et missions de cet agent.', user: 'Toi', noWork: 'Aucune exécution pour le moment.',
+    noMessages: 'Commence une conversation. Elle reste séparée des autres groupes et missions de cet agent.', user: 'Toi', noWork: 'Aucune exécution pour le moment.', loadEarlier: 'Afficher les plus anciens',
     openRun: 'Ouvrir cette exécution', requested: 'Demandé', executed: 'Exécuté', noUsage: 'Consommation non communiquée',
     pending: 'En attente', running: 'Au travail', waiting: 'Attend une décision', done: 'Terminé', cancelled: 'Annulé', interrupted: 'Interrompu', error: 'Échec', review: 'À relire', open: 'Ouvert', assigned: 'Attribué', accepted: 'Accepté',
     included: 'Inclus dans cette exécution', processed: 'Traité', failed: 'Échec', limited: 'Limite des échanges atteinte',

@@ -195,6 +195,28 @@ export interface AgentEntities {
 export type AgentEntityKind = keyof AgentEntities;
 export type AgentDraft<T extends AgentRecord> = Omit<T, keyof AgentRecord>;
 export type AgentSave<T extends AgentRecord> = { id?: string; expectedRevision?: number; value: AgentDraft<T> };
+/**
+ * A run as snapshots and history pages carry it. The frozen instructions stay in
+ * the core and in the run's thread, whose turn was started with them.
+ */
+export type AgentRunSummary = Omit<AgentRun, 'context'> & { context: Omit<AgentRun['context'], 'instructions'> };
+/** The record kinds that grow with use. Snapshots carry their newest records; `agents.history` pages back. */
+export type AgentHistoryKind = 'message' | 'work' | 'memory';
+/** Records are ordered by their last change, newest first. A cursor is the oldest record a client already holds. */
+export interface AgentHistoryCursor { updatedAt: number; id: string }
+export interface AgentsHistoryPage {
+  messages: AgentConversationMessage[];
+  work: AgentWork[];
+  memories: AgentMemory[];
+  /** The deliveries, runs and decisions of the page's messages and work. */
+  deliveries: AgentDelivery[];
+  runs: AgentRunSummary[];
+  decisions: AgentDecision[];
+  /** True when records older than this page remain. */
+  more: boolean;
+}
+export const AGENT_HISTORY_PAGE = 50;
+export const AGENT_HISTORY_MAX_PAGE = 200;
 export interface AgentsSnapshot {
   routines: AgentRoutine[];
   accountGrants: AgentAccountGrant[];
@@ -205,14 +227,19 @@ export interface AgentsSnapshot {
   missions: AgentMission[];
   tasks: AgentMissionTask[];
   sessions: AgentSession[];
+  /** The newest `AGENT_HISTORY_PAGE` messages. */
   messages: AgentConversationMessage[];
   deliveries: AgentDelivery[];
+  /** Every unfinished work item, then the newest `AGENT_HISTORY_PAGE` of any status. */
   work: AgentWork[];
-  runs: AgentRun[];
+  runs: AgentRunSummary[];
+  /** The newest `AGENT_HISTORY_PAGE` memories this caller may read. */
   memories: AgentMemory[];
   resources: AgentResource[];
   artifacts: AgentArtifact[];
   decisions: AgentDecision[];
+  /** Per kind, true when older records exist beyond this snapshot. */
+  more: Record<AgentHistoryKind, boolean>;
   limits: { backgroundConcurrency: number; paused: boolean; kebaccExperiment: boolean };
 }
 export interface AgentsRpcMethods {
@@ -225,6 +252,14 @@ export interface AgentsRpcMethods {
   'agents.routine.run': { params: { routineId: string; requestId: string }; result: AgentWork };
   'agents.context.compact': { params: { sessionId: string; requestId: string }; result: AgentWork };
   'agents.snapshot': { params: { threadId?: string }; result: AgentsSnapshot };
+  /**
+   * Older records of one kind, newest first, strictly before `before`. `scopes`
+   * and `agentId` narrow the page; an agent session is held to its own context.
+   */
+  'agents.history': {
+    params: { threadId?: string; kind: AgentHistoryKind; scopes?: AgentScope[]; agentId?: string; before?: AgentHistoryCursor; limit?: number };
+    result: AgentsHistoryPage;
+  };
   'agents.profile.save': { params: AgentSave<AgentProfile>; result: AgentProfile };
   'agents.group.save': { params: AgentSave<AgentGroup>; result: AgentGroup };
   'agents.team.save': { params: AgentSave<AgentTeam>; result: AgentTeam };

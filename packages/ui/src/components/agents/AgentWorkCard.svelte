@@ -6,8 +6,8 @@
   let answer = $state('');
   let note = $state('');
   let reconciling = $state(false);
-  let run = $derived(view.snapshot?.runs.find(r => r.id === work.runId));
-  let decision = $derived(view.snapshot?.decisions.find(d => d.workId === work.id && d.status === 'pending'));
+  let run = $derived(view.seen.runs.find(r => r.id === work.runId));
+  let decision = $derived(view.seen.decisions.find(d => d.workId === work.id && d.status === 'pending'));
   let name = $derived(view.snapshot?.profiles.find(a => a.id === work.agentId)?.name ?? work.agentId);
   async function control(action: 'pause' | 'resume' | 'cancel' | 'reconcile') {
     await view.call('agents.work.control', { workId: work.id, expectedRevision: work.revision, action, ...(action === 'reconcile' ? { note } : {}) });

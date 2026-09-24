@@ -1,6 +1,6 @@
 import type { AgentDraft, AgentEntities, AgentEntityKind, AgentRecord, AgentSave, AgentWork, AgentsRpcMethods, AgentsSnapshot, RpcParams, AgentProfile, Turn } from '@boite/contracts';
-import { RpcErrorCode, DEFAULT_DELEGATION_CONFIG } from '@boite/contracts';
-import type { AgentAccountGrant, AgentBrain, AgentRuntimeConfig, AgentSchedule } from '@boite/contracts';
+import { RpcErrorCode, DEFAULT_DELEGATION_CONFIG, AGENT_HISTORY_PAGE, AGENT_HISTORY_MAX_PAGE } from '@boite/contracts';
+import type { AgentAccountGrant, AgentBrain, AgentRuntimeConfig, AgentSchedule, AgentHistoryCursor, AgentHistoryKind, AgentsHistoryPage, AgentRun, AgentRunSummary, AgentScope } from '@boite/contracts';
 import { RpcFailure } from './client';
 
 /** The core's `nextOccurrence` in local time, without its timezone and DST search. */
@@ -10,6 +10,12 @@ function nextOccurrence(schedule: AgentSchedule, after: number): number | null {
   const [h = 0, m = 0] = schedule.time.split(':').map(Number), next = new Date(after); next.setHours(h, m, 0, 0);
   return next.getTime() > after ? next.getTime() : next.getTime() + 86400000;
 }
+
+const OPEN_WORK: AgentWork['status'][] = ['pending', 'running', 'waiting', 'paused', 'interrupted', 'error'];
+const newestFirst = (a: AgentRecord, b: AgentRecord) => b.updatedAt - a.updatedAt || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0);
+const byCreation = (a: AgentRecord, b: AgentRecord) => a.createdAt - b.createdAt || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+const summary = ({ context: { instructions: _instructions, ...context }, ...run }: AgentRun): AgentRunSummary => ({ ...run, context });
+const HISTORY_KIND = { message: 'message', work: 'work', memory: 'memory' } as const;
 
 /** In-memory projection for interface journeys. Real process and crash behavior is tested against the core. */
 export class FakeAgents {
@@ -144,11 +150,46 @@ export class FakeAgents {
     }
     const result = run(); this.receipts.set(requestId, { fingerprint, result: structuredClone(result) }); return result;
   }
+  /** The core's bounded snapshot and cursor pages, over the in-memory rows. */
+  private newest<K extends AgentHistoryKind>(kind: K, scopes: AgentScope[] | undefined, agentId: string | undefined, before: AgentHistoryCursor | null, limit: number): { items: AgentEntities[K][]; more: boolean } {
+    const found = this.all(kind).filter(r => {
+      const scope = (r as { scope: AgentScope }).scope;
+      if (scopes?.length && !scopes.some(s => s.kind === scope.kind && s.id === scope.id)) return false;
+      if (agentId !== undefined && (r as AgentWork).agentId !== agentId) return false;
+      return !before || r.updatedAt < before.updatedAt || r.updatedAt === before.updatedAt && r.id < before.id;
+    }).sort(newestFirst);
+    return { items: found.slice(0, limit).sort(byCreation), more: found.length > limit };
+  }
+  private related(messages: AgentEntities['message'][], work: AgentWork[]): Pick<AgentsHistoryPage, 'deliveries' | 'runs' | 'decisions'> {
+    const messageIds = new Set(messages.map(m => m.id)), workIds = new Set(work.map(w => w.id));
+    return {
+      deliveries: this.all('delivery').filter(d => messageIds.has(d.messageId) || d.workId !== null && workIds.has(d.workId)),
+      runs: this.all('run').filter(r => workIds.has(r.workId)).map(summary),
+      decisions: this.all('decision').filter(d => workIds.has(d.workId)),
+    };
+  }
   snapshot(): AgentsSnapshot {
-    return { revision: this.revision, routines: this.all('routine'), accountGrants: structuredClone(this.grants), limits: { ...this.limits }, profiles: this.all('profile'), groups: this.all('group'), teams: this.all('team'), missions: this.all('mission'), tasks: this.all('task'), sessions: this.all('session'), messages: this.all('message'), deliveries: this.all('delivery'), work: this.all('work'), runs: this.all('run'), memories: this.all('memory'), resources: this.all('resource'), artifacts: this.all('artifact'), decisions: this.all('decision') };
+    const messages = this.newest('message', undefined, undefined, null, AGENT_HISTORY_PAGE);
+    const recent = this.newest('work', undefined, undefined, null, AGENT_HISTORY_PAGE);
+    const ids = new Set(recent.items.map(w => w.id));
+    const work = [...this.all('work').filter(w => OPEN_WORK.includes(w.status) && !ids.has(w.id)), ...recent.items].sort(byCreation);
+    const memories = this.newest('memory', undefined, undefined, null, AGENT_HISTORY_PAGE);
+    return { revision: this.revision, routines: this.all('routine'), accountGrants: structuredClone(this.grants), limits: { ...this.limits }, profiles: this.all('profile'), groups: this.all('group'), teams: this.all('team'), missions: this.all('mission'), tasks: this.all('task'), sessions: this.all('session'), messages: messages.items, work, memories: memories.items, ...this.related(messages.items, work), resources: this.all('resource'), artifacts: this.all('artifact'), more: { message: messages.more, work: recent.more, memory: memories.more } };
+  }
+  private history(p: RpcParams<'agents.history'>): AgentsHistoryPage {
+    const kind = HISTORY_KIND[p.kind];
+    if (!kind) this.refuse('kind: expected message, work, memory');
+    if (p.agentId !== undefined && kind !== 'work') this.refuse('agentId: only work pages filter by agent');
+    const limit = p.limit ?? AGENT_HISTORY_PAGE;
+    if (!Number.isInteger(limit) || limit < 1 || limit > AGENT_HISTORY_MAX_PAGE) this.refuse(`limit: expected an integer from 1 to ${AGENT_HISTORY_MAX_PAGE}`);
+    const page = this.newest(kind, p.scopes, p.agentId, p.before ?? null, limit);
+    const empty = { messages: [], work: [], memories: [], deliveries: [], runs: [], decisions: [] };
+    if (kind === 'memory') return { ...empty, memories: page.items as AgentEntities['memory'][], more: page.more };
+    if (kind === 'message') return { ...empty, messages: page.items as AgentEntities['message'][], ...this.related(page.items as AgentEntities['message'][], []), more: page.more };
+    return { ...empty, work: page.items as AgentWork[], ...this.related([], page.items as AgentWork[]), more: page.more };
   }
   call(method: keyof AgentsRpcMethods, raw: unknown): unknown {
-    try { return this.dispatch(method, raw); } finally { if (method !== 'agents.snapshot') this.kick(); }
+    try { return this.dispatch(method, raw); } finally { if (method !== 'agents.snapshot' && method !== 'agents.history') this.kick(); }
   }
   private dispatch(method: keyof AgentsRpcMethods, raw: unknown): unknown {
     switch (method) {
@@ -181,6 +222,7 @@ export class FakeAgents {
       }
       case 'agents.context.compact': { const p = raw as RpcParams<typeof method>, session = this.get('session', p.sessionId); return this.once(p.requestId, p, () => this.work({ agentId: session.agentId, scope: session.scope, prompt: 'Compact context', purpose: 'compaction', episodeId: crypto.randomUUID() })); }
       case 'agents.snapshot': return this.snapshot();
+      case 'agents.history': return this.history(raw as RpcParams<typeof method>);
       case 'agents.profile.save': {
         const p = raw as RpcParams<typeof method>;
         if (!p.value.name.trim()) this.refuse('name: expected nonempty text');

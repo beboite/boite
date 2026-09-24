@@ -1,22 +1,32 @@
 import { realpathSync, statSync } from 'node:fs';
 import { isAbsolute } from 'node:path';
+import { AGENT_HISTORY_MAX_PAGE, AGENT_HISTORY_PAGE } from '@boite/contracts';
 import type {
   AgentDraft, AgentEntities, AgentEntityKind, AgentProfile, AgentGroup, AgentTeam,
   AgentMission, AgentMissionTask, AgentSave, AgentScope, AgentMemory, AgentResource,
-  AgentWork, AgentSession, AgentsSnapshot, RpcParams,
+  AgentWork, AgentSession, AgentsSnapshot, RpcParams, AgentHistoryCursor, AgentHistoryKind,
+  AgentsHistoryPage, AgentRun, AgentRunSummary, AgentConversationMessage, AgentRecord,
 } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { refused } from '../errors.ts';
 import { newId } from '../ids.ts';
 import { existingInside } from '../workdir.ts';
 import { checkModel, checkEffort } from '../threads.ts';
-import { AgentsRepository } from './repository.ts';
+import { AgentsRepository, OPEN_WORK, type RecentFilter } from './repository.ts';
 import { ResidentAgents } from './resident.ts';
 import { AgentRoutines } from './routines.ts';
 import { boolean, ids, integer, object, oneOf, sameScope, scope, text } from './validation.ts';
+import { invalidParams } from '../errors.ts';
 
 const DEFAULT_LIMITS: AgentsSnapshot['limits'] = { backgroundConcurrency: 2, paused: false, kebaccExperiment: false };
 const TOOLS = ['messages', 'missions', 'memory', 'artifacts', 'decisions', 'routines'] as const;
+
+const newestFirst = (a: AgentRecord, b: AgentRecord) => b.updatedAt - a.updatedAt || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0);
+const byCreation = (a: AgentRecord, b: AgentRecord) => a.createdAt - b.createdAt || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+function unique<T extends AgentRecord>(records: T[]): T[] { const seen = new Set<string>(); return records.filter(r => !seen.has(r.id) && !!seen.add(r.id)); }
+/** The frozen instructions stay in the core and in the run's own thread. */
+function summary({ context: { instructions: _instructions, ...context }, ...run }: AgentRun): AgentRunSummary { return { ...run, context }; }
+type Reader<K extends AgentHistoryKind> = { filters: RecentFilter[]; keep: (record: AgentEntities[K]) => boolean };
 
 export class AgentStore {
   readonly resident: ResidentAgents;
@@ -99,8 +109,8 @@ export class AgentStore {
     }
     if (params.id) {
       const previous = this.records.get('mission', params.id);
-      if (previous.projectId !== projectId && this.records.list('work').some(w => w.scope.kind === 'mission' && w.scope.id === previous.id)) throw refused('projectId: a mission with assigned work keeps its original project; create a new mission for another project');
-      if (v.status === 'done' && (this.records.list('task').some(t => t.missionId === previous.id && !['done', 'cancelled'].includes(t.status)) || this.records.list('work').some(w => w.scope.kind === 'mission' && w.scope.id === previous.id && !['done', 'cancelled'].includes(w.status)))) throw refused('mission: complete or cancel its tasks and executions before finishing it');
+      if (previous.projectId !== projectId && this.records.recent('work', { scope: { kind: 'mission', id: previous.id } }, null, 1).items.length) throw refused('projectId: a mission with assigned work keeps its original project; create a new mission for another project');
+      if (v.status === 'done' && (this.records.list('task').some(t => t.missionId === previous.id && !['done', 'cancelled'].includes(t.status)) || this.openWork({ kind: 'mission', id: previous.id }).length)) throw refused('mission: complete or cancel its tasks and executions before finishing it');
     }
     const saved = this.save('mission', params, {
       title: text(v.title, 'title', 200), objective: text(v.objective, 'objective', 32000), expectedResult: text(v.expectedResult, 'expectedResult', 8000, true), teamId, projectId, agentIds,
@@ -108,7 +118,7 @@ export class AgentStore {
       maxTokens: v.maxTokens === null ? null : integer(v.maxTokens, 'maxTokens', 1, 100_000_000), resourceIds,
     });
     if (saved.status === 'cancelled') {
-      for (const work of this.records.list('work').filter(w => w.scope.kind === 'mission' && w.scope.id === saved.id && !['done', 'cancelled'].includes(w.status))) this.control({ workId: work.id, expectedRevision: work.revision, action: 'cancel' });
+      for (const work of this.openWork({ kind: 'mission', id: saved.id })) this.control({ workId: work.id, expectedRevision: work.revision, action: 'cancel' });
     }
     return saved;
   }
@@ -116,7 +126,7 @@ export class AgentStore {
     const v = params.value; object(v, 'task');
     const missionId = text(v.missionId, 'missionId', 160); this.records.get('mission', missionId);
     const previous = params.id ? this.records.get('task', params.id) : null;
-    if (previous && this.records.list('run').some(run => ['accepted', 'running'].includes(run.status) && this.records.get('work', run.workId).taskId === previous.id)) throw refused('task: wait for its execution to finish before reviewing or editing it');
+    if (previous && this.records.withStatus('run', ['accepted', 'running']).some(run => this.records.get('work', run.workId).taskId === previous.id)) throw refused('task: wait for its execution to finish before reviewing or editing it');
     if (previous && previous.status !== 'open' && previous.status !== 'review') throw refused('task: only open or submitted tasks can be edited');
     if (previous && previous.missionId !== missionId) throw refused('missionId: a task cannot move between missions');
     const dependsOn = ids(v.dependsOn, 'dependsOn');
@@ -134,8 +144,9 @@ export class AgentStore {
       assigneeId: status === 'open' ? null : previous?.assigneeId ?? null, generation: previous?.generation ?? 0, leaseUntil: null, workspace: previous?.workspace ?? null, result: previous?.result ?? null });
   }
 
+  openWork(target: AgentScope): AgentWork[] { return this.records.withStatus('work', OPEN_WORK).filter(w => sameScope(w.scope, target)); }
   session(threadId: string): AgentSession {
-    const session = this.records.list('session').find(s => s.threadId === threadId);
+    const session = this.records.find('session', 'threadId', [threadId])[0];
     if (!session || this.core.threads.require(threadId).archived) throw refused('threadId: expected an active persistent agent session');
     if (this.records.get('profile', session.agentId).status === 'archived' || !this.canRead(session.agentId, session.scope)) throw refused('scope: this agent no longer belongs to this context');
     return session;
@@ -201,7 +212,7 @@ export class AgentStore {
   }
   currentWork(threadId: string): AgentWork {
     const session = this.session(threadId);
-    const run = this.records.list('run').find(r => r.threadId === threadId && r.status === 'running');
+    const run = this.records.withStatus('run', ['running']).find(r => r.threadId === threadId);
     if (!run) throw refused('threadId: this agent has no running collaboration execution');
     const work = this.records.get('work', run.workId);
     if (work.agentId !== session.agentId || work.runId !== run.id || work.status !== 'running') throw refused('execution is no longer current');
@@ -246,7 +257,7 @@ export class AgentStore {
   /** Called inside the message transaction, including when publishing a provider result. */
   deliver(message: AgentEntities['message']): void {
     const group = message.scope.kind === 'group' ? this.records.get('group', message.scope.id) : null;
-    const previous = this.records.list('work').filter(w => w.episodeId === message.episodeId);
+    const previous = this.records.find('work', 'episodeId', [message.episodeId]);
     for (const agentId of message.recipientIds) {
       const permitted = previous.length < (group?.maxTurns ?? 20) && previous.filter(w => w.agentId === agentId).length < (group?.maxTurnsPerAgent ?? 20);
       const work = permitted ? this.enqueue({ agentId, scope: message.scope, prompt: message.text, episodeId: message.episodeId, messageId: message.id }) : null;
@@ -256,7 +267,7 @@ export class AgentStore {
   }
 
   publishReply(work: AgentWork, runId: string, result: string): void {
-    if (this.records.list('message').some(m => m.sourceRunId === runId)) return;
+    if (this.records.find('message', 'sourceRunId', [runId]).length) return;
     const group = work.scope.kind === 'group' ? this.records.get('group', work.scope.id) : null;
     const members = group?.memberIds.filter(id => this.records.get('profile', id).status !== 'archived') ?? [];
     const next = members.length > 1 ? members[(members.indexOf(work.agentId) + 1) % members.length] : undefined;
@@ -342,7 +353,7 @@ export class AgentStore {
       const next = this.records.update('decision', decision.id, decision.revision, { ...decision, answer, status: 'answered' });
       this.records.update('work', work.id, work.revision, { ...work, status: 'done' });
       const continuation = this.enqueue({ agentId: work.agentId, scope: work.scope, episodeId: work.episodeId, messageId: work.messageId, taskId: work.taskId, taskGeneration: work.taskGeneration, prompt: `Decision on: ${decision.prompt}\nUser answer: ${answer}\nContinue the work using this decision. Inspect existing effects before taking any action again.` });
-      for (const d of this.records.list('delivery').filter(d => d.workId === work.id)) this.records.update('delivery', d.id, d.revision, { ...d, status: 'pending', workId: continuation.id });
+      for (const d of this.records.find('delivery', 'workId', [work.id])) this.records.update('delivery', d.id, d.revision, { ...d, status: 'pending', workId: continuation.id });
       if (work.taskId) {
         const task = this.records.get('task', work.taskId);
         this.records.update('task', task.id, task.revision, { ...task, status: 'assigned' });
@@ -370,8 +381,8 @@ export class AgentStore {
         taskGeneration = task.generation + 1;
         this.records.update('task', task.id, task.revision, { ...task, generation: taskGeneration, leaseUntil: null, status: action === 'cancel' ? 'cancelled' : 'assigned' });
       }
-      if (action === 'cancel') for (const decision of this.records.list('decision').filter(d => d.workId === work.id && d.status === 'pending')) this.records.update('decision', decision.id, decision.revision, { ...decision, status: 'cancelled' });
-      for (const d of this.records.list('delivery').filter(d => d.workId === work.id)) this.records.update('delivery', d.id, d.revision, { ...d, status: action === 'cancel' ? 'cancelled' : 'pending' });
+      if (action === 'cancel') for (const decision of this.records.find('decision', 'workId', [work.id]).filter(d => d.status === 'pending')) this.records.update('decision', decision.id, decision.revision, { ...decision, status: 'cancelled' });
+      for (const d of this.records.find('delivery', 'workId', [work.id])) this.records.update('delivery', d.id, d.revision, { ...d, status: action === 'cancel' ? 'cancelled' : 'pending' });
       const prompt = status === 'pending' ? `${work.prompt}\n\nResuming after an interruption. Inspect previous results and filesystem changes before repeating actions. Continue only unfinished work.\nOwner instructions: ${note || 'Continue from the last known state.'}` : work.prompt;
       return this.records.update('work', work.id, work.revision, { ...work, status, taskGeneration, prompt, error: null, runId: status === 'pending' ? null : work.runId });
     });
@@ -379,12 +390,83 @@ export class AgentStore {
     this.changed(); return result;
   }
 
+  /** What one caller may page through. An agent session is held to its own context; the owner and devices read every record. */
+  private reader<K extends AgentHistoryKind>(session: Pick<AgentSession, 'agentId' | 'scope'> | null, kind: K, scopes?: AgentScope[], agentId?: string): Reader<K> {
+    if (agentId !== undefined && kind !== 'work') throw invalidParams('agentId: only work pages filter by agent');
+    if (!session) return { filters: scopes?.length ? scopes.map(target => ({ scope: target, agentId })) : [{ agentId }], keep: () => true };
+    if (kind === 'memory') {
+      const now = Date.now();
+      const keep = (m: AgentMemory) => (!m.expiresAt || m.expiresAt > now) && this.canRead(session.agentId, m.scope, session.scope) && m.sourceScopes.every(s => sameScope(s, session.scope));
+      const readable = this.memoryScopes(session.agentId, session.scope);
+      return { filters: (scopes?.length ? readable.filter(c => scopes.some(s => sameScope(s, c))) : readable).map(target => ({ scope: target })), keep: keep as Reader<K>['keep'] };
+    }
+    if (scopes?.some(s => !sameScope(s, session.scope)) || agentId !== undefined && agentId !== session.agentId) throw refused('scopes: an agent session reads only its own context');
+    return { filters: [{ scope: session.scope, agentId: kind === 'work' ? session.agentId : undefined }], keep: () => true };
+  }
+
+  /**
+   * The newest `limit` records before the cursor that the reader keeps, one
+   * query per filter merged newest first. A filter that rejects records reads
+   * on, a page at a time, until the page is full or the kind is exhausted.
+   */
+  private page<K extends AgentHistoryKind>(kind: K, reader: Reader<K>, before: AgentHistoryCursor | null, limit: number): { items: AgentEntities[K][]; more: boolean } {
+    let more = false;
+    const found: AgentEntities[K][] = [];
+    for (const filter of reader.filters) {
+      const kept: AgentEntities[K][] = [];
+      let cursor = before;
+      for (;;) {
+        const batch = this.records.recent(kind, filter, cursor, limit);
+        for (const record of batch.items) if (reader.keep(record)) kept.push(record);
+        if (kept.length >= limit || !batch.more) { more ||= kept.length > limit || batch.more; break; }
+        const last = batch.items.at(-1)!;
+        cursor = { updatedAt: last.updatedAt, id: last.id };
+      }
+      found.push(...kept);
+    }
+    const items = unique(found).sort(newestFirst);
+    return { items: items.slice(0, limit), more: more || items.length > limit };
+  }
+
+  /** Where memory an execution in `target` may read can live: its agent, its context, and a mission's team and project. */
+  private memoryScopes(agentId: string, target: AgentScope): AgentScope[] {
+    const mission = target.kind === 'mission' ? this.records.get('mission', target.id) : null;
+    const scopes: AgentScope[] = [{ kind: 'agent', id: agentId }, target];
+    if (mission?.teamId) scopes.push({ kind: 'team', id: mission.teamId });
+    if (mission?.projectId) scopes.push({ kind: 'project', id: mission.projectId });
+    return scopes.filter((s, i) => scopes.findIndex(other => sameScope(other, s)) === i);
+  }
+  /** The newest memories an execution of `agentId` in `target` may read, oldest first. */
+  memoriesFor(agentId: string, target: AgentScope, limit: number): AgentMemory[] {
+    return this.page('memory', this.reader({ agentId, scope: target }, 'memory'), null, limit).items.sort(byCreation);
+  }
+  /** The newest messages of one conversation, oldest first. */
+  messagesIn(target: AgentScope, limit: number): AgentConversationMessage[] {
+    return this.records.recent('message', { scope: target }, null, limit).items.sort(byCreation);
+  }
+
+  /** Deliveries, runs and decisions of the given messages and work, held to the same session. */
+  private related(session: AgentSession | null, messages: AgentConversationMessage[], work: AgentWork[]): Pick<AgentsHistoryPage, 'deliveries' | 'runs' | 'decisions'> {
+    const workIds = work.map(w => w.id);
+    const deliveries = unique([...this.records.find('delivery', 'messageId', messages.map(m => m.id)), ...this.records.find('delivery', 'workId', workIds)])
+      .filter(d => !session || d.agentId === session.agentId && d.workId !== null);
+    return { deliveries: deliveries.sort(byCreation), runs: this.records.find('run', 'workId', workIds).map(summary).sort(byCreation), decisions: this.records.find('decision', 'workId', workIds).sort(byCreation) };
+  }
+
+  /**
+   * Bounded by configuration, not by history: the newest page of each growing
+   * kind, every unfinished work item, and what those records point to.
+   */
   snapshot(threadId?: string): AgentsSnapshot {
     const r = this.records;
     const session = threadId ? this.session(threadId) : null;
     const allowed = (target: AgentScope) => !session || this.canRead(session.agentId, target, session.scope);
     const missions = r.list('mission').filter(m => allowed({ kind: 'mission', id: m.id }));
-    const work = r.list('work').filter(w => !session || w.agentId === session.agentId && sameScope(w.scope, session.scope));
+    const messages = this.page('message', this.reader(session, 'message'), null, AGENT_HISTORY_PAGE);
+    const recentWork = this.page('work', this.reader(session, 'work'), null, AGENT_HISTORY_PAGE);
+    const open = r.withStatus('work', OPEN_WORK).filter(w => !session || w.agentId === session.agentId && sameScope(w.scope, session.scope));
+    const work = unique([...open, ...recentWork.items]).sort(byCreation);
+    const memories = this.page('memory', this.reader(session, 'memory'), null, AGENT_HISTORY_PAGE);
     return {
       routines: r.list('routine').filter(v => !session || v.agentId === session.agentId),
       accountGrants: session ? [] : this.resident.grants(),
@@ -392,15 +474,40 @@ export class AgentStore {
       profiles: r.list('profile').filter(p => !session || p.id === session.agentId || (session.scope.kind === 'group' && this.records.get('group', session.scope.id).memberIds.includes(p.id))).map(p => session && p.id !== session.agentId ? { ...p, instructions: '', selection: { ...p.selection, accountId: '', model: null, effort: null }, tools: [] } : p),
       groups: r.list('group').filter(g => allowed({ kind: 'group', id: g.id })), teams: r.list('team').filter(t => allowed({ kind: 'team', id: t.id })), missions,
       tasks: r.list('task').filter(t => missions.some(m => m.id === t.missionId)),
-      sessions: r.list('session').filter(s => !session || s.id === session.id),
-      messages: r.list('message').filter(m => !session || sameScope(m.scope, session.scope)),
-      deliveries: r.list('delivery').filter(d => !session || work.some(w => w.id === d.workId)), work,
-      runs: r.list('run').filter(run => !session || work.some(w => w.id === run.workId)),
-      memories: r.list('memory').filter(m => (!session || !m.expiresAt || m.expiresAt > Date.now()) && allowed(m.scope) && m.sourceScopes.every(s => !session || sameScope(s, session.scope))),
+      sessions: session ? [session] : r.list('session'),
+      messages: messages.items.sort(byCreation), work, memories: memories.items.sort(byCreation),
+      ...this.related(session, messages.items, work),
       resources: r.list('resource').filter(resource => allowed(resource.scope)),
       artifacts: r.list('artifact').filter(a => missions.some(m => m.id === a.missionId)),
-      decisions: r.list('decision').filter(d => !session || work.some(w => w.id === d.workId)),
+      more: { message: messages.more, work: recentWork.more, memory: memories.more },
     };
+  }
+
+  /** One page of older records, under the same session rules as the snapshot. */
+  history(params: RpcParams<'agents.history'>): AgentsHistoryPage {
+    object(params, 'params');
+    const kind = oneOf(params.kind, 'kind', ['message', 'work', 'memory']);
+    const limit = params.limit === undefined ? AGENT_HISTORY_PAGE : integer(params.limit, 'limit', 1, AGENT_HISTORY_MAX_PAGE);
+    if (params.scopes !== undefined && (!Array.isArray(params.scopes) || params.scopes.length > 100)) throw invalidParams('scopes: expected an array with at most 100 scopes');
+    const scopes = params.scopes?.map(s => scope(s));
+    const agentId = params.agentId === undefined ? undefined : text(params.agentId, 'agentId', 160);
+    let before: AgentHistoryCursor | null = null;
+    if (params.before !== undefined) {
+      object(params.before, 'before');
+      before = { updatedAt: integer(params.before.updatedAt, 'before.updatedAt', 0, Number.MAX_SAFE_INTEGER), id: text(params.before.id, 'before.id', 160) };
+    }
+    const session = params.threadId === undefined ? null : this.session(params.threadId);
+    const empty = { messages: [], work: [], memories: [], deliveries: [], runs: [], decisions: [] };
+    if (kind === 'memory') {
+      const page = this.page('memory', this.reader(session, 'memory', scopes, agentId), before, limit);
+      return { ...empty, memories: page.items.sort(byCreation), more: page.more };
+    }
+    if (kind === 'message') {
+      const page = this.page('message', this.reader(session, 'message', scopes, agentId), before, limit);
+      return { ...empty, messages: page.items.sort(byCreation), ...this.related(session, page.items, []), more: page.more };
+    }
+    const page = this.page('work', this.reader(session, 'work', scopes, agentId), before, limit);
+    return { ...empty, work: page.items.sort(byCreation), ...this.related(session, [], page.items), more: page.more };
   }
 }
 
@@ -415,6 +522,7 @@ export function registerPersistentAgents(core: Core): void {
   core.router.register('agents.routine.run', p => store.routines.run(p));
   core.router.register('agents.context.compact', p => store.resident.compact(p.sessionId, p.requestId));
   core.router.register('agents.snapshot', p => store.snapshot(p.threadId));
+  core.router.register('agents.history', p => store.history(p));
   core.router.register('agents.profile.save', p => store.saveProfile(p));
   core.router.register('agents.group.save', p => store.saveGroup(p));
   core.router.register('agents.team.save', p => store.saveTeam(p));

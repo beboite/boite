@@ -13,7 +13,7 @@ import type {
   Usage,
 } from '@boite/contracts';
 
-export const SCHEMA_VERSION = 15;
+export const SCHEMA_VERSION = 16;
 const DELTA_WINDOW_MS = 16;
 
 /** What `listMessagePage` hands back: the page itself and the cursor for what is behind it. */
@@ -420,7 +420,26 @@ function migrate(db: Database): void {
     for (const index of indexes) db.exec(index.sql);
     version = 15;
   }
-  version = Math.max(version, 15);
+  // Agent history grows without bound: targeted lookups and newest-first pages go through these, never a whole kind.
+  // A partial index serves only queries naming the same literal kind, which AgentsRepository does.
+  // IF NOT EXISTS: dropping agent_entities drops its indexes but keeps events_agents.
+  if (!db.query("SELECT 1 FROM sqlite_master WHERE name = 'agent_recent'").get()) {
+    db.exec(`CREATE INDEX IF NOT EXISTS agent_recent ON agent_entities (kind, updated_at, id);
+      CREATE INDEX IF NOT EXISTS agent_session_thread ON agent_entities (json_extract(data, '$.threadId')) WHERE kind = 'session';
+      CREATE INDEX IF NOT EXISTS agent_message_source_run ON agent_entities (json_extract(data, '$.sourceRunId')) WHERE kind = 'message';
+      CREATE INDEX IF NOT EXISTS agent_message_scope ON agent_entities (json_extract(data, '$.scope.kind'), json_extract(data, '$.scope.id'), updated_at, id) WHERE kind = 'message';
+      CREATE INDEX IF NOT EXISTS agent_work_episode ON agent_entities (json_extract(data, '$.episodeId')) WHERE kind = 'work';
+      CREATE INDEX IF NOT EXISTS agent_work_scope ON agent_entities (json_extract(data, '$.scope.kind'), json_extract(data, '$.scope.id'), updated_at, id) WHERE kind = 'work';
+      CREATE INDEX IF NOT EXISTS agent_work_agent ON agent_entities (json_extract(data, '$.agentId'), updated_at, id) WHERE kind = 'work';
+      CREATE INDEX IF NOT EXISTS agent_memory_scope ON agent_entities (json_extract(data, '$.scope.kind'), json_extract(data, '$.scope.id'), updated_at, id) WHERE kind = 'memory';
+      CREATE INDEX IF NOT EXISTS agent_delivery_work ON agent_entities (json_extract(data, '$.workId')) WHERE kind = 'delivery';
+      CREATE INDEX IF NOT EXISTS agent_run_work ON agent_entities (json_extract(data, '$.workId')) WHERE kind = 'run';
+      CREATE INDEX IF NOT EXISTS agent_run_thread ON agent_entities (json_extract(data, '$.threadId'), json_extract(data, '$.finishedAt')) WHERE kind = 'run';
+      CREATE INDEX IF NOT EXISTS agent_decision_work ON agent_entities (json_extract(data, '$.workId')) WHERE kind = 'decision';
+      CREATE INDEX IF NOT EXISTS events_agents ON events (id) WHERE type IN ('agents.record', 'agents.limits');`);
+    version = 16;
+  }
+  version = Math.max(version, SCHEMA_VERSION);
   db.exec(`PRAGMA user_version = ${version}`);
 }
 

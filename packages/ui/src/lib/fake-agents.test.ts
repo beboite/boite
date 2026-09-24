@@ -1,4 +1,7 @@
 import { expect, test } from 'vitest';
+import { AGENT_HISTORY_PAGE, type AgentRecord, type AgentsHistoryPage } from '@boite/contracts';
+import { oldestOf } from './agents.svelte';
+import { FakeAgents } from './fake-agents';
 import { FakeClient } from './fake-client';
 
 test('the fake executes bounded groups, keeps native contexts distinct and refuses direct starts', async () => {
@@ -27,4 +30,23 @@ test('the fake denies persistent configuration and engine shutdown to paired dev
     await expect(client.call('core.shutdown', {})).rejects.toThrow('owner');
     expect((await client.call('agents.snapshot', {})).profiles).toEqual([]);
   } finally { client.close(); }
+});
+
+test('the fake bounds its snapshot and pages older memories by cursor, like the core', () => {
+  const fake = new FakeAgents(() => {});
+  const save = (fake as unknown as { save: (kind: 'memory', p: { value: object }) => AgentRecord }).save.bind(fake);
+  const scope = { kind: 'agent' as const, id: 'agent_1' };
+  for (let i = 0; i < AGENT_HISTORY_PAGE + 25; i++) save('memory', { value: { scope, title: `Memory ${i}`, text: 'kept', sourceScopes: [scope], sourceRunId: null, expiresAt: null } });
+  const snapshot = fake.snapshot();
+  expect(snapshot.memories).toHaveLength(AGENT_HISTORY_PAGE);
+  expect(snapshot.more.memory).toBe(true);
+  const seen = new Set(snapshot.memories.map(m => m.id));
+  let before = oldestOf(snapshot.memories);
+  for (let more = true; more;) {
+    const page = fake.call('agents.history', { kind: 'memory', scopes: [scope], before, limit: 10 }) as AgentsHistoryPage;
+    for (const m of page.memories) { expect(seen.has(m.id)).toBe(false); seen.add(m.id); }
+    before = oldestOf(page.memories); more = page.more;
+  }
+  expect(seen.size).toBe(AGENT_HISTORY_PAGE + 25);
+  expect(() => fake.call('agents.history', { kind: 'memory', agentId: 'agent_1' })).toThrow('agentId');
 });

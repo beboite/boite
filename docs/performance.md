@@ -13,6 +13,25 @@ It warms up once, then reports six samples. On 2026-09-22, the median fell from
 that stops after the first user message and nonempty assistant answer.
 This measures local history lookup and title persistence, not provider latency.
 
+## Persistent-agent history
+
+`bun run bench/agents-snapshot.ts [steps]` records finished work, its run with
+20 KB of frozen instructions, a message and a memory per step, plus a session
+every ten steps, on a temporary core. It then reads `agents.snapshot` over RPC
+and looks up one live session among the recorded ones, six samples each after a
+warm-up. On 2026-09-24, at 2,000 steps:
+
+| | main (11631eb) | bounded snapshot |
+| --- | --- | --- |
+| Snapshot JSON | 43.0 MB | 121 KB |
+| Snapshot median | 351.78 ms | 3.66 ms |
+| Session lookup median | 0.238 ms | 0.021 ms |
+
+The snapshot carries the newest 50 messages, memories and finished work, all
+unfinished work, and runs without their instructions. At 500 and 8,000 steps it
+measured 86 KB and 260 KB; the difference is the session list, which grows with
+contexts rather than with history. Main measured 10.8 MB at 500 steps.
+
 ## A remote client and a local one are not served alike
 
 The core decides per connection. A WebSocket whose `Host` header is
