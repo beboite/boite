@@ -134,6 +134,8 @@ export const strings = {
   },
   app: {
     name: 'Boite',
+    /** What a nightly build calls itself: window title, tray and title bar. The settings name its track Boite Nightly. */
+    nightlyName: 'boite (de nuit)',
     /** The tag the title bar shows when the core is the dev install. */
     channelDev: 'Dev',
     channelDevTitle: 'The dev channel, on its own data directory',
@@ -159,7 +161,7 @@ export const strings = {
     unsupported: 'Automatic app updates are available in installed Windows x64 builds.',
     channel: 'Release channel',
     stable: 'Boite',
-    nightly: 'boite de nuit',
+    nightly: 'Boite Nightly',
     nightlyHint: 'Nightly is experimental and may contain unfinished changes. You can return to Boite even when its version number is lower.',
     nightlyTitle: 'This app follows experimental nightly releases',
     installedVersion: 'Installed version',

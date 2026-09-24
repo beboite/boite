@@ -1,19 +1,10 @@
 import { expect, test } from "bun:test";
 import { BrowserPage, freePort } from "./lib/cdp";
-import { join } from "node:path";
-import { createRequire } from "node:module";
-
-const uiRequire = createRequire(join(import.meta.dir, "../../packages/ui/package.json"));
-const { createServer } = await import(uiRequire.resolve("vite"));
+import { startUi } from "./lib/ui.ts";
 
 test("settings reveal sections and protection switches persist across navigation", async () => {
   const port = await freePort();
-  const server = await createServer({
-    root: join(import.meta.dir, "../../packages/ui"),
-    server: { host: "127.0.0.1", port, strictPort: true },
-    clearScreen: false,
-  });
-  await server.listen();
+  const server = await startUi(port);
   const page = await BrowserPage.launch({
     url: `http://127.0.0.1:${port}/?fake=1&open=recent`,
     windowSize: { width: 1440, height: 1000 },

@@ -30,7 +30,7 @@ The agents run on the computer that holds your project.
 - Queue tasks with global and per-account concurrency limits.
 - Pair a phone with the web app, or connect the desktop to a headless server.
 - Download desktop updates in the background, read their release notes and
-  restart when ready. Switch between Boite and boite de nuit in General settings.
+  restart when ready. Switch between Boite and Boite Nightly in General settings.
 - Dictate prompts, attach files, browse project changes and manage tasks beside
   the conversation.
 - On Windows, trace agent processes and their resource use, mute their audio and
@@ -40,7 +40,7 @@ The agents run on the computer that holds your project.
 
 boite is in beta. Download the Windows x64 installer from
 [GitHub Releases](https://github.com/beboite/boite/releases). Choose a regular
-release for Boite or a `nightly` prerelease for boite de nuit. The nightly workflow
+release for Boite or a `nightly` prerelease for boite (de nuit). The nightly workflow
 publishes changed commits daily at 03:23 UTC after its checks pass.
 
 Both update channels keep the same projects, accounts and conversations. General

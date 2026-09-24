@@ -1,6 +1,6 @@
 import { expect, test, vi } from 'vitest';
 import type { AppUpdateBackend, UpdateChannel, UpdateClock, UpdateSnapshot } from './app-update.svelte';
-import { AppUpdater } from './app-update.svelte';
+import { AppUpdater, appName, appUpdater } from './app-update.svelte';
 
 function snapshot(overrides: Partial<UpdateSnapshot> = {}): UpdateSnapshot {
   return {
@@ -235,4 +235,15 @@ test('cleans up its listener and timers and stops scheduled checks when ready', 
   expect(unlisten).toHaveBeenCalledOnce();
   expect(clock.intervals.size).toBe(0);
   expect(clock.clearedIntervals).toHaveLength(1);
+});
+
+test('a nightly build calls itself boite (de nuit)', () => {
+  const before = appUpdater.snapshot;
+  try {
+    expect(appName()).toBe('Boite');
+    appUpdater.snapshot = snapshot({ currentVersion: '2.1.0-nightly.8', currentChannel: 'nightly' });
+    expect(appName()).toBe('boite (de nuit)');
+  } finally {
+    appUpdater.snapshot = before;
+  }
 });
