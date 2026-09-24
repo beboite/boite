@@ -476,12 +476,11 @@ export class ThreadStore {
     }
   }
 
-  archive(threadId: ThreadId, archived: boolean): ThreadSummary {
+  async archive(threadId: ThreadId, archived: boolean): Promise<ThreadSummary> {
     this.require(threadId);
     // An archived thread is not coming back this minute: its warm process goes
     // now, and the commands that process listed go with it.
     if (archived) {
-      void this.core.browser.stopThread(threadId);
       this.core.delegation.stop(threadId);
       this.core.scheduler.stop(threadId);
       releaseThread(threadId);
@@ -489,7 +488,9 @@ export class ThreadStore {
       void this.core.terminals.close(threadTerminalId(threadId));
     }
     const thread = this.require(threadId);
-    return this.save({ ...thread, archived }, 'thread.archived');
+    const saved = this.save({ ...thread, archived }, 'thread.archived');
+    if (archived) await this.core.browser.stopThread(threadId);
+    return saved;
   }
 
   markRead(threadId: ThreadId): void {

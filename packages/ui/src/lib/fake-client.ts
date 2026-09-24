@@ -964,7 +964,10 @@ export class FakeClient implements ObservableClient {
     'threads.archive': async (params) => {
       const thread = this.#thread(params.threadId);
       thread.archived = params.archived ?? true;
-      if (thread.archived) await this.#stopTurn(thread.id);
+      if (thread.archived) {
+        this.#plugins.stopThread(thread.id);
+        await this.#stopTurn(thread.id);
+      }
       return this.#touch(thread);
     },
     'threads.pin': async (params) => {

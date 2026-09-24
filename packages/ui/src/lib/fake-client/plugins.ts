@@ -39,6 +39,11 @@ export class FakePlugins {
     this.#browser.tasks = [{ id: 'browser-fixture', threadId: 't-trace', pluginId: plugin.id, goal: 'Save weekly notifications', url: 'https://example.org', status: 'running', step: 1, maxSteps: 20, startedAt: T0, finishedAt: null, message: 'Checking the page', inputTokens: 120 }];
   }
   close(): void { for (const [id, run] of this.#pluginRuns) this.#pluginRuns.set(id, run + 1); }
+  stopThread(threadId: string): void {
+    for (const task of this.#browser.tasks) {
+      if (task.threadId === threadId && task.finishedAt === null) this.#cancelBrowserTask(task);
+    }
+  }
   handles(method: RpcMethodName): method is PluginMethod { return Object.hasOwn(this.handlers, method); }
   async call(method: PluginMethod, params: unknown): Promise<unknown> { return this.handlers[method](params as never); }
   private readonly handlers: Handlers = {

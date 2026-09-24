@@ -1,4 +1,4 @@
-import type { WidePredicate, WideTask } from './browser-wide-tasks.ts';
+import type { WideTask, WideUrlMatch } from './browser-wide-tasks.ts';
 
 export interface WideObservation {
   url: string;
@@ -7,7 +7,7 @@ export interface WideObservation {
   controls: Record<string, { value?: string; checked?: boolean; expanded?: boolean }[]>;
 }
 
-function matchesUrl(raw: string, predicate: Extract<WidePredicate, { kind: 'url' | 'visited-url' }>, origin: string): boolean {
+function matchesUrl(raw: string, predicate: WideUrlMatch, origin: string): boolean {
   try {
     const url = new URL(raw);
     return url.origin === origin && (!predicate.equals || url.href === predicate.equals)
@@ -22,6 +22,13 @@ export function gradeWide(task: WideTask, final: WideObservation, visited: strin
   const checks = task.grader.all.map(predicate => {
     if (predicate.kind === 'url') return matchesUrl(final.url, predicate, origin);
     if (predicate.kind === 'visited-url') return visited.some(url => matchesUrl(url, predicate, origin));
+    if (predicate.kind === 'visited-sequence') {
+      let next = 0;
+      for (const url of visited) {
+        if (next < predicate.urls.length && matchesUrl(url, predicate.urls[next]!, origin)) next++;
+      }
+      return next > 0 && next === predicate.urls.length;
+    }
     if (predicate.kind === 'text') return final.text.includes(predicate.contains);
     if (predicate.kind !== 'control') return false;
     return (final.controls[predicate.selector] ?? []).some(control =>

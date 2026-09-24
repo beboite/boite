@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { gradeWide, type WideObservation } from './browser-wide-grade.ts';
-import type { WideTask } from './browser-wide-tasks.ts';
+import { wideTasks, type WideTask } from './browser-wide-tasks.ts';
 
 const task: WideTask = {
   id: 'grader-fixture', site: 'example.test', category: 'search', url: 'https://example.test/',
@@ -35,4 +35,15 @@ test('field checks require the supplied value and checkbox state', () => {
   const fieldTask = { ...task, grader: { all: [{ kind: 'control' as const, selector: '#field', value: 'exact', checked: true }] } };
   expect(gradeWide(fieldTask, { ...final, controls: { '#field': [{ value: 'exact', checked: true }] } }, [], 1).passed).toBe(true);
   expect(gradeWide(fieldTask, { ...final, controls: { '#field': [{ value: 'wrong', checked: true }] } }, [], 1).passed).toBe(false);
+});
+
+test('pagination requires a distinct first-page search before the second page', () => {
+  const pagination = wideTasks.find(task => task.id === 'gutenberg-austen-page-two')!;
+  const first = 'https://www.gutenberg.org/ebooks/search/?query=Jane+Austen';
+  const second = `${first}&start_index=26`;
+  const result = { url: second, title: '', text: 'Jane Austen', controls: {} };
+  expect(gradeWide(pagination, result, [second], 1).passed).toBe(false);
+  expect(gradeWide(pagination, result, [second, first], 2).passed).toBe(false);
+  expect(gradeWide(pagination, result, [second, second], 2).passed).toBe(false);
+  expect(gradeWide(pagination, result, [first, second], 2).passed).toBe(true);
 });

@@ -93,6 +93,11 @@ Correcting only these test criteria and running three fresh attempts per task
 produced 6/6 successes. Those follow-ups are recorded separately, not substituted
 into the frozen score. The production loop hash is identical across all runs.
 
+Review subsequently tightened Gutenberg pagination grading: separate first-page
+and second-page observations must occur in that order, and the first page must
+not have a start_index parameter. All three original pagination trials already
+failed. The frozen results above were not rewritten or replaced by new trials.
+
 ## What failed
 
 - Unnamed form fields receive identical action descriptions. Calculator.net

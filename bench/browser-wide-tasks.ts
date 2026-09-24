@@ -1,6 +1,14 @@
+export interface WideUrlMatch {
+  equals?: string;
+  pathname?: string;
+  /** A null value requires the query parameter to be absent. */
+  query?: Record<string, string | null>;
+}
+
 /** Public, logged-out workflows. Freeze this manifest before running the model. */
 export type WidePredicate =
-  | { kind: 'url' | 'visited-url'; equals?: string; pathname?: string; query?: Record<string, string> }
+  | ({ kind: 'url' | 'visited-url' } & WideUrlMatch)
+  | { kind: 'visited-sequence'; urls: WideUrlMatch[] }
   | { kind: 'text'; contains: string }
   | { kind: 'control'; selector: string; value?: string; checked?: boolean; expanded?: boolean };
 
@@ -107,7 +115,13 @@ export const wideTasks: WideTask[] = [
     goal: 'Search Project Gutenberg for Jane Austen, then advance to the second page of results while preserving that search.',
     url: 'https://www.gutenberg.org/ebooks/', values: { search: 'Jane Austen' },
     completion: { text: 'Jane Austen', url: 'https://www.gutenberg.org/ebooks/search/?query=Jane+Austen&start_index=26' },
-    grader: { all: [{ kind: 'url', pathname: '/ebooks/search/', query: { query: 'Jane Austen', start_index: '26' } }, { kind: 'visited-url', pathname: '/ebooks/search/', query: { query: 'Jane Austen' } }] },
+    grader: { all: [
+      { kind: 'url', pathname: '/ebooks/search/', query: { query: 'Jane Austen', start_index: '26' } },
+      { kind: 'visited-sequence', urls: [
+        { pathname: '/ebooks/search/', query: { query: 'Jane Austen', start_index: null } },
+        { pathname: '/ebooks/search/', query: { query: 'Jane Austen', start_index: '26' } },
+      ] },
+    ] },
   },
   {
     id: 'standardebooks-frankenstein', site: 'Standard Ebooks', category: 'catalog-search',

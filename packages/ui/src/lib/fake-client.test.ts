@@ -1,6 +1,6 @@
 import { afterEach, expect, test, vi } from 'vitest';
 import { FakeClient } from './fake-client';
-import { DEFAULT_DELEGATION_CONFIG, RpcErrorCode, TODO_TEXT_MAX, type RpcMethodName } from '@boite/contracts';
+import { DEFAULT_DELEGATION_CONFIG, RpcErrorCode, TODO_TEXT_MAX, type BrowserTask, type RpcMethodName } from '@boite/contracts';
 
 afterEach(() => vi.useRealTimers());
 
@@ -301,6 +301,33 @@ test('seeded browser tasks belong to an existing thread', async () => {
   try {
     const threads = new Set((await client.call('threads.list', {})).map(thread => thread.id));
     for (const task of (await client.call('browser.status', {})).tasks) expect(threads.has(task.threadId)).toBe(true);
+  } finally { client.close(); }
+});
+
+test('fake thread archive cancels only its unfinished browser tasks and restore leaves tasks unchanged', async () => {
+  const client = new FakeClient({ delayMs: 0, browserTask: true });
+  await client.connect();
+  try {
+    const finished = await client.call('browser.cancel', { threadId: 't-trace', id: 'browser-fixture' });
+    const request = { pluginId: 'jev-browser', url: 'https://example.org', goal: 'Save', completion: { text: 'Saved' } };
+    const own = await client.call('browser.start', { ...request, threadId: 't-trace' });
+    const other = await client.call('browser.start', { ...request, threadId: 't-descriptors' });
+    const updates: BrowserTask[] = [];
+    client.on('browser.updated', task => updates.push(task));
+
+    await client.call('threads.archive', { threadId: 't-trace' });
+    const cancelled = (await client.call('browser.list', { threadId: 't-trace' })).find(task => task.id === own.id)!;
+    expect(cancelled).toMatchObject({ ...own, status: 'cancelled', message: 'The task was cancelled.', finishedAt: expect.any(Number) });
+    expect(updates).toEqual([cancelled]);
+    expect((await client.call('browser.list', { threadId: 't-trace' })).find(task => task.id === finished.id)).toEqual(finished);
+    expect(await client.call('browser.list', { threadId: 't-descriptors' })).toEqual([other]);
+
+    await client.call('threads.archive', { threadId: 't-trace' });
+    await client.call('threads.archive', { threadId: 't-trace', archived: false });
+    await client.call('threads.archive', { threadId: 't-descriptors', archived: false });
+    expect(await client.call('browser.list', { threadId: 't-trace' })).toEqual([cancelled, finished]);
+    expect(await client.call('browser.list', { threadId: 't-descriptors' })).toEqual([other]);
+    expect(updates).toEqual([cancelled]);
   } finally { client.close(); }
 });
 
