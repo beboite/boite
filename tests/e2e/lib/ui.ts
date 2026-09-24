@@ -38,8 +38,8 @@ export async function startUi(port: number): Promise<{ close(): Promise<void> }>
  */
 export async function startDevUi(port: number): Promise<{ close(): Promise<void> }> {
   const server = await createServer({ root, server: { host: '127.0.0.1', port, strictPort: true }, clearScreen: false });
-  await server.listen();
   try {
+    await server.listen();
     await transformAll(server, '/src/main.ts');
   } catch (error) {
     await server.close();
