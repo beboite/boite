@@ -36,7 +36,7 @@ OpenCode's descriptor, with the `linux` and `macos` profiles left out:
     }
   },
   "auth": { "kind": "oauth-cli", "session": ["opencode/auth.json"] },
-  "login": { "command": ["opencode", "auth", "login"] },
+  "login": { "command": ["opencode", "auth", "login"], "terminal": true },
   "models": [{ "id": "default", "name": "OpenCode default", "default": true }],
   "capabilities": { "approvals": true, "hooks": false, "checkpoint": false, "images": false, "planMode": false, "resume": true }
 }
@@ -58,7 +58,10 @@ OpenCode's descriptor, with the `linux` and `macos` profiles left out:
   account name comes from.
 - `login` is either `command`, the argv of the provider's own login command plus
   an optional `env`, or `acp: { methodId }`, the `authenticate` method of an ACP
-  agent whose sign-in has no command. A provider without one cannot be logged in
+  agent whose sign-in has no command. `terminal: true` beside a `command` runs it
+  in a real shell the user answers, for a login drawn as a menu
+  ([accounts.md](accounts.md#signing-in-from-a-terminal)); it is refused on an
+  `acp` login. A provider without one cannot be logged in
   from Boite, and the Accounts page says so instead of pretending.
 - `models` is a `ModelInfo` list: `id`, `name`, an optional `default`, `legacy`
   (still accepted, folded away in the picker), `badge: "new"`, and an `effort`
@@ -216,10 +219,10 @@ is the deterministic fake the tests and the bench run on, loaded only under
 | Provider | Protocol | Launched as | Isolated by | Session file | Login |
 |---|---|---|---|---|---|
 | Claude | `claude-sdk` | the SDK drives the CLI | `CLAUDE_CONFIG_DIR` | `.credentials.json` | `claude auth login` |
-| OpenCode | `acp` | `opencode acp --port 0` | `XDG_DATA_HOME`, `XDG_CONFIG_HOME` | `opencode/auth.json` | `opencode auth login` |
+| OpenCode | `acp` | `opencode acp --port 0` | `XDG_DATA_HOME`, `XDG_CONFIG_HOME` | `opencode/auth.json` | `opencode auth login` in a terminal |
 | Antigravity | `acp` | `agy_acp_server.exe` from the managed install | `GEMINI_HOME`, every account | `antigravity-acp/acp_token.json` | the protocol's `authenticate` |
 | Antigravity CLI | `agy` | `agy --input-format stream-json --output-format stream-json [--conversation <id>] [--model <id>] [--mode <mode> or --dangerously-skip-permissions] -p=` | nothing, the default account only | none, the token is in the system keyring | none, `agy` signs in in its own terminal |
-| Grok | `acp` | `grok [--permission-mode <mode>] agent [--always-approve] stdio` | `GROK_HOME` | `auth.json` | `grok login --device-auth` |
+| Grok | `acp` | `grok [--permission-mode <mode>] agent [--always-approve] stdio` | `GROK_HOME` | `auth.json` | `grok login --device-auth` in a terminal |
 | Codex | `codex-appserver` | `codex app-server` | `CODEX_HOME` | `auth.json` | `codex login --device-auth` |
 | Muse Code | `muse` | `muse serve --trust-workspace [mode flags]` | `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME` | `muse/auth.json` | `muse login` |
 | pi | `pi` | `node <the package's bin> --mode rpc`, or `pi --mode rpc` from PATH off Windows | `PI_CODING_AGENT_DIR` | `auth.json` | none |

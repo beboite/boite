@@ -83,7 +83,7 @@
     }
   },
   "auth": { "kind": "oauth-cli", "session": ["auth.json"] },
-  "login": { "command": ["grok", "login", "--device-auth"] },
+  "login": { "command": ["grok", "login", "--device-auth"], "terminal": true },
   "quirks": ["grok"],
   "models": [{ "id": "default", "name": "Grok default", "default": true }],
   "capabilities": {

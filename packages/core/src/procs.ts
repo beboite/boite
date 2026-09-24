@@ -32,6 +32,20 @@ export interface SpawnedPipedProcess {
   exited: Promise<number>;
 }
 
+export interface TerminalSpawnOptions {
+  cwd: string;
+  env: Record<string, string | undefined>;
+  cols: number;
+  rows: number;
+  onData(bytes: Uint8Array): void;
+}
+
+export interface SpawnedTerminal {
+  record: ProcessRecord;
+  terminal: Bun.Terminal;
+  exited: Promise<number>;
+}
+
 interface Entry {
   record: ProcessRecord;
   kill(): void;
@@ -193,6 +207,51 @@ export class ProcRegistry {
     });
 
     return { record, proc, exited };
+  }
+
+  /**
+   * `spawn` on a pseudo-terminal: ConPTY on Windows, a pty elsewhere, both
+   * through Bun's own. The shell a user types into needs one, a pipe makes it
+   * drop its prompt and line editing. The environment is passed as given.
+   */
+  spawnTerminal(threadId: ThreadId, cmd: string, args: string[], opts: TerminalSpawnOptions): SpawnedTerminal {
+    const proc = Bun.spawn({
+      cmd: [cmd, ...args],
+      cwd: opts.cwd,
+      env: opts.env,
+      windowsHide: true,
+      terminal: {
+        cols: opts.cols,
+        rows: opts.rows,
+        data: (_terminal, bytes) => {
+          opts.onData(bytes);
+        },
+      },
+    });
+    const terminal = proc.terminal;
+    if (terminal === undefined) {
+      proc.kill();
+      throw new Error('this Bun gave the process no terminal');
+    }
+
+    const record = this.register(threadId, proc.pid, cmd, args, {
+      kill: () => {
+        proc.kill();
+      },
+      usage: () => {
+        const usage = proc.resourceUsage();
+        if (!usage) return null;
+        return { cpuMs: Math.round(Number(usage.cpuTime.total) / 1000), peakMemoryBytes: Number(usage.maxRSS) };
+      },
+    });
+
+    const exited = proc.exited.then((code) => {
+      this.onExit(threadId, record.pid, code);
+      terminal.close();
+      return code;
+    });
+
+    return { record, terminal, exited };
   }
 
   /**

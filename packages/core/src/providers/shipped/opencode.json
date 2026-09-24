@@ -44,7 +44,7 @@
     }
   },
   "auth": { "kind": "oauth-cli", "session": ["opencode/auth.json"] },
-  "login": { "command": ["opencode", "auth", "login"] },
+  "login": { "command": ["opencode", "auth", "login"], "terminal": true },
   "models": [{ "id": "default", "name": "OpenCode default", "default": true }],
   "capabilities": {
     "approvals": true,

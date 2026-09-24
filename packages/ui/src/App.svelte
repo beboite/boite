@@ -46,11 +46,14 @@
     CommandPalette: () => import('./components/CommandPalette.svelte'),
     ProjectPicker: () => import('./components/ProjectPicker.svelte'),
     ImportDialog: () => import('./components/ImportDialog.svelte'),
-    Onboarding: () => import('./components/Onboarding.svelte')
+    Onboarding: () => import('./components/Onboarding.svelte'),
+    // xterm.js and its stylesheet: only once a terminal is asked for.
+    TerminalDrawer: () => import('./components/TerminalDrawer.svelte')
   };
   type Deferred = { [K in keyof typeof deferredLoaders]?: Awaited<ReturnType<(typeof deferredLoaders)[K]>>['default'] };
   let deferred = $state.raw<Deferred>({});
   const requested = new Set<keyof Deferred>();
+  let terminalShown = $derived(store.openThread !== null && store.owner && store.terminalShown(store.openThread.id));
   function need(name: keyof Deferred): void {
     if (requested.has(name)) return;
     requested.add(name);
@@ -82,6 +85,10 @@
 
   $effect(() => {
     if (panelSlot.shown) need('RightPanel');
+  });
+
+  $effect(() => {
+    if (terminalShown) need('TerminalDrawer');
   });
 
   // Asked for before the idle prefetch got to it: fetch it now.
@@ -421,6 +428,12 @@
         {:else}
           {#key store}
             <ChatView {store} />
+          {/key}
+        {/if}
+        {#if terminalShown && store.openThread && deferred.TerminalDrawer}
+          {@const TerminalDrawer = deferred.TerminalDrawer}
+          {#key `${store.endpointUrl}:${store.openThread.id}`}
+            <TerminalDrawer {store} threadId={store.openThread.id} cwd={store.openThread.cwd} />
           {/key}
         {/if}
       </main>

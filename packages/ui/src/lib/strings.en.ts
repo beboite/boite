@@ -253,6 +253,7 @@ export const strings = {
 
   palette: {
     placeholder: 'Search threads, or type a command',
+    terminal: 'Show or hide the terminal',
     threads: 'Threads',
     commands: 'Commands',
     empty: 'Nothing matches.',
@@ -399,6 +400,7 @@ export const strings = {
     /** The header's button: it shows or hides the panel, whatever surface is in it. */
     panel: 'Panel',
     panelHint: 'The workbench beside this thread',
+    terminalHint: "Terminal in this thread's folder",
     cwd: 'Working directory',
     model: 'Model',
     defaultModel: 'Default model',
@@ -768,6 +770,13 @@ export const strings = {
     slotEmpty: 'The page opens here once the shell provides the webview'
   },
 
+  terminal: {
+    title: 'Terminal',
+    hide: 'Hide the terminal',
+    close: 'Close the shell',
+    resize: 'Resize the terminal'
+  },
+
   trace: {
     exact: 'All child processes tracked',
     limited: 'Limited process tracking',
@@ -841,6 +850,8 @@ export const strings = {
     loginRedirectPlaceholder: 'On another device? Paste the localhost address the page ends on',
     loginSend: 'Send',
     loginCancel: 'Cancel',
+    terminalHint: 'Answer its questions in the terminal, then close it once you are signed in.',
+    terminalDone: 'Close the terminal',
     remove: 'Remove',
     removeTitle: 'Remove {account}?',
     removeBody: 'This signs the account out of Boite and deletes its files. Accounts used by a thread cannot be removed.',
