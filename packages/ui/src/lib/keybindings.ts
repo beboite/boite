@@ -35,7 +35,9 @@ export const DEFAULT_BINDINGS: Record<KeybindingCommand, string | null> = {
   'theme-light': null,
   'theme-system': null,
   archive: null,
-  'import-session': null
+  'import-session': null,
+  // T3 Code's key, and VS Code's for its panel.
+  terminal: 'mod+j'
 };
 
 /** The resolved table: every command, its chord parsed or null, and whether the file set it. */
@@ -146,7 +148,7 @@ export function chordFromEvent(event: KeyboardEvent, mac: boolean = isMac()): st
 /** The Keyboard page's sections. Every command sits in exactly one; a test holds that. */
 export const COMMAND_GROUPS: { id: 'general' | 'surfaces' | 'thread' | 'theme'; commands: KeybindingCommand[] }[] = [
   { id: 'general', commands: ['new-thread', 'palette', 'sidebar', 'panel', 'settings', 'providers', 'appearance', 'add-project', 'pair', 'import-session'] },
-  { id: 'surfaces', commands: ['browser', 'changes', 'files', 'tasks', 'trace', 'close-surface'] },
+  { id: 'surfaces', commands: ['terminal', 'browser', 'changes', 'files', 'tasks', 'trace', 'close-surface'] },
   { id: 'thread', commands: ['send-and-draft', 'stash', 'pin', 'rename', 'retitle', 'archive'] },
   { id: 'theme', commands: ['theme-dark', 'theme-light', 'theme-system'] }
 ];

@@ -654,6 +654,68 @@ test('an isolated account that is not logged in logs in from the Accounts page',
   await waitFor(() => document.querySelector('[data-testid=settings]') === null);
 });
 
+test('Ctrl+J opens the shell of the thread under the chat, hides it again, and its cross ends the shell', async () => {
+  await mountOnFake();
+  await waitFor(() => store.openThread !== null);
+  const threadId = store.openThread!.id;
+  const chord = () => new KeyboardEvent('keydown', { key: 'j', ctrlKey: true, bubbles: true, cancelable: true });
+
+  expect(document.body.dispatchEvent(chord())).toBe(false);
+  await waitFor(() => document.querySelector(`[data-testid=terminal][data-terminal-id="terminal:${threadId}"]`) !== null);
+  // xterm draws what the fake shell printed: its prompt, in the thread's folder.
+  await waitFor(() => query('[data-testid=terminal-drawer]').textContent?.includes('PS ') === true);
+  expect(query('[data-testid=terminal-toggle]').classList.contains('on')).toBe(true);
+  expect(query<HTMLButtonElement>('[data-testid=terminal-toggle]').title).toContain('Ctrl+J');
+
+  // Back from a dropped socket, the view asks the core for the shell again.
+  const reopen = vi.spyOn(store, 'openTerminal');
+  store.connection = 'connecting';
+  flushSync();
+  store.connection = 'ready';
+  flushSync();
+  await waitFor(() => reopen.mock.calls.length === 1);
+  expect(reopen.mock.calls[0]?.[0]).toBe(threadId);
+  reopen.mockRestore();
+
+  expect(document.body.dispatchEvent(chord())).toBe(false);
+  await waitFor(() => document.querySelector('[data-testid=terminal-drawer]') === null);
+  expect(store.terminalShown(threadId)).toBe(false);
+
+  query<HTMLButtonElement>('[data-testid=terminal-toggle]').click();
+  await waitFor(() => document.querySelector('[data-testid=terminal-drawer]') !== null);
+  query<HTMLButtonElement>('[data-testid=terminal-close]').click();
+  await waitFor(() => document.querySelector('[data-testid=terminal-drawer]') === null);
+  expect(store.terminalShown(threadId)).toBe(false);
+});
+
+test('OpenCode signs in from a terminal with its login command typed in, and closing it rechecks the account', async () => {
+  await mountOnFake();
+  query<HTMLButtonElement>('[data-testid=nav-settings]').click();
+  await waitFor(() => document.querySelector('[data-testid=settings-tab-accounts]') !== null);
+  query<HTMLButtonElement>('[data-testid=settings-tab-accounts]').click();
+  await waitFor(() => document.querySelector('[data-testid=accounts-page]') !== null);
+  await openProviderDetails('opencode');
+
+  // The user's own OpenCode login gets the button too: the terminal is theirs to answer.
+  const button = query<HTMLButtonElement>('[data-provider-id=opencode] [data-testid=account-login]');
+  expect(button.getAttribute('data-account-id')).toBe('a-opencode');
+  button.click();
+  await waitFor(() => document.querySelector('[data-testid=account-login-terminal] [data-testid=terminal]') !== null);
+  expect(query('[data-testid=account-login-terminal] [data-testid=terminal]').getAttribute('data-terminal-id')).toBe('login:a-opencode');
+  await waitFor(() => query('[data-testid=account-login-terminal]').textContent?.includes('Select provider') === true);
+  expect(query('[data-testid=account-login-terminal]').textContent).toContain('opencode auth login');
+  // No piped login and its code field while the terminal holds the sign-in.
+  expect(document.querySelector('[data-testid=account-login-row]')).toBeNull();
+  expect(query('[data-provider-id=opencode]').getAttribute('data-step')).toBe('signing-in');
+
+  query<HTMLButtonElement>('[data-testid=account-login-terminal-close]').click();
+  await waitFor(() => document.querySelector('[data-testid=account-login-terminal]') === null);
+  await waitFor(() => query('[data-provider-id=opencode]').getAttribute('data-step') === 'ready');
+
+  query<HTMLButtonElement>('[data-testid=settings-back]').click();
+  await waitFor(() => document.querySelector('[data-testid=settings]') === null);
+});
+
 test('the header wears the context meter, a compaction is a divider, and a turn moves the meter', async () => {
   await mountOnFake();
   await waitFor(() => store.openThread?.id === 't-descriptors');

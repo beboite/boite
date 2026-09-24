@@ -46,7 +46,20 @@
   const fold = (): number =>
     window.matchMedia('(prefers-reduced-motion: reduce)').matches || document.documentElement.dataset.motion === 'reduced' ? 0 : 180;
 
-  const loggingIn = (accountId: string): boolean => store.logins[accountId]?.state === 'running';
+  const loggingIn = (accountId: string): boolean =>
+    store.logins[accountId]?.state === 'running' || store.loginTerminals.includes(accountId);
+
+  /** xterm and its shell, loaded the first time a sign-in needs a terminal. */
+  const terminalView = () => import('./TerminalView.svelte');
+
+  /** A CLI that signs in through its own menu gets a real terminal with the command typed in. */
+  const inTerminal = (provider: ProviderSummary): boolean => provider.login !== false && provider.login.kind === 'terminal';
+
+  /** The row's sign-in, or an account's own button. */
+  async function startLogin(provider: ProviderSummary, account: Account) {
+    if (inTerminal(provider)) store.showLoginTerminal(account.id);
+    else await store.loginAccount(account.id);
+  }
 
   function stepOf(provider: ProviderSummary): SetupStep {
     return setupStep(provider, store.installOf(provider.id), store.accountsOf(provider.id), loggingIn);
@@ -103,9 +116,11 @@
     busy = provider.id;
     try {
       const accounts = store.accountsOf(provider.id);
-      const account = (another ? null : signInTarget(accounts))
+      // In a terminal the user's own CLI signs in, the way they would have typed it.
+      const own = inTerminal(provider) ? accounts.find((account) => account.isolationDir === null && account.status !== 'ok') : undefined;
+      const account = (another ? null : own ?? signInTarget(accounts))
         ?? await store.addAccount({ providerId: provider.id, label: nextAccountLabel(provider, accounts), useDefaultLocation: false });
-      if (account) await store.loginAccount(account.id);
+      if (account) await startLogin(provider, account);
     } finally { busy = null; }
   }
 
@@ -320,6 +335,28 @@
           <p class="hint">{strings.providerSettings.externalHint.replace('{provider}', provider.name)}</p>
         {/if}
 
+        {#each accounts.filter((account) => store.loginTerminals.includes(account.id)) as account (account.id)}
+          <div class="login" data-testid="account-login-terminal" data-account-id={account.id}>
+            <p class="hint">{strings.accounts.terminalHint}</p>
+            <div class="screen">
+              {#await terminalView() then { default: TerminalView }}
+                <TerminalView
+                  {store}
+                  id="login:{account.id}"
+                  start={(cols, rows) => store.loginTerminal(account.id, cols, rows)}
+                  onexit={() => store.hideLoginTerminal(account.id)}
+                  autofocus
+                />
+              {/await}
+            </div>
+            <div class="code">
+              <button type="button" class="quiet small" data-testid="account-login-terminal-close" onclick={() => void store.closeTerminal(`login:${account.id}`)}>
+                {strings.accounts.terminalDone}
+              </button>
+            </div>
+          </div>
+        {/each}
+
         {#if loginAccount && login}
           <div class="login" data-testid="account-login-row" data-account-id={loginAccount.id}>
             {#if login.state === 'running'}
@@ -377,8 +414,8 @@
                     </p>
                   </div>
                   <div class="act">
-                    {#if provider.available && provider.login && account.isolationDir !== null && !loggingIn(account.id)}
-                      <button class="quiet small" data-testid="account-login" data-account-id={account.id} onclick={() => void store.loginAccount(account.id)}>
+                    {#if provider.available && provider.login && (account.isolationDir !== null || inTerminal(provider)) && !loggingIn(account.id)}
+                      <button class="quiet small" data-testid="account-login" data-account-id={account.id} onclick={() => void startLogin(provider, account)}>
                         {account.status === 'ok' ? strings.providerSettings.reconnect : strings.accounts.login}
                       </button>
                     {/if}
@@ -518,6 +555,8 @@
   .bar.indeterminate { width: 100% !important; opacity: 0.4; }
 
   .login { display: grid; gap: 8px; padding: 12px; border-radius: var(--radius-md); background: var(--color-surface-2); animation: rise var(--dur-3) var(--ease-out-quint); }
+  /* The terminal's own height: a menu of a dozen lines fits without a scroll. */
+  .screen { height: 280px; min-width: 0; border-radius: var(--radius-sm); overflow: hidden; }
   .output { margin: 0; font-family: var(--font-mono); font-size: var(--text-sm); color: var(--color-muted-foreground); overflow-wrap: anywhere; }
   .code { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
   .code input { flex: 1; min-width: 0; max-width: 360px; }

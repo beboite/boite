@@ -46,6 +46,7 @@ import type {
   SchedulerState,
   Settings,
   TelemetryState,
+  TerminalState,
   Thread,
   ThreadId,
   ThreadResources,
@@ -338,6 +339,10 @@ export class Store {
   accounts = $state<Account[]>([]);
   /** Keyed by account id: one entry while a login runs, and after one failed. */
   logins = $state<Record<string, LoginState>>({});
+  /** Threads whose terminal drawer shows. The shell lives in the core and outlasts a hidden drawer. */
+  terminalThreads = $state<ThreadId[]>([]);
+  /** Accounts whose sign-in terminal is open on the Providers page. */
+  loginTerminals = $state<string[]>([]);
   scheduler = $state<SchedulerState | null>(null);
   settings = $state<Settings | null>(null);
   /** The keybindings file as the core last read it; null until the first `keybindings.get`. */
@@ -674,6 +679,8 @@ export class Store {
     this.#pendingSends.clear();
     this.logins = {};
     this.#loginChanges.clear();
+    this.terminalThreads = [];
+    this.loginTerminals = [];
     this.#client = client;
     this.probedModels = {};
     this.#probeEpoch++;
@@ -1595,6 +1602,78 @@ export class Store {
    */
   togglePanel(): void {
     this.panel.toggle();
+  }
+
+  // -------------------------------------------------------------------------
+  // Terminals
+  // -------------------------------------------------------------------------
+
+  terminalShown(threadId: ThreadId): boolean {
+    return this.terminalThreads.includes(threadId);
+  }
+
+  /** Ctrl+J: the open thread's drawer, shown or hidden. A shell is the owner's to run. */
+  toggleTerminal(): void {
+    const open = this.openThread;
+    if (!open || !this.owner) return;
+    if (this.terminalShown(open.id)) this.hideTerminal(open.id);
+    else this.terminalThreads = [...this.terminalThreads, open.id];
+  }
+
+  hideTerminal(threadId: ThreadId): void {
+    this.terminalThreads = this.terminalThreads.filter((id) => id !== threadId);
+  }
+
+  /** The thread's shell, attached or started; null when the core refused, with the reason in the toast. */
+  async openTerminal(threadId: ThreadId, cols: number, rows: number): Promise<TerminalState | null> {
+    const client = this.#client;
+    if (!client) return null;
+    try {
+      return await client.call('terminals.open', { threadId, cols, rows });
+    } catch (error) {
+      this.#fail(error);
+      return null;
+    }
+  }
+
+  /** The account's sign-in shell with its login command typed in, attached or started. */
+  async loginTerminal(accountId: string, cols: number, rows: number): Promise<TerminalState | null> {
+    const client = this.#client;
+    if (!client) return null;
+    try {
+      return await client.call('accounts.loginTerminal', { accountId, cols, rows });
+    } catch (error) {
+      this.#fail(error);
+      return null;
+    }
+  }
+
+  showLoginTerminal(accountId: string): void {
+    if (!this.loginTerminals.includes(accountId)) this.loginTerminals = [...this.loginTerminals, accountId];
+  }
+
+  hideLoginTerminal(accountId: string): void {
+    this.loginTerminals = this.loginTerminals.filter((id) => id !== accountId);
+  }
+
+  /** Keystrokes. A shell that ended in between has nothing to take them, which is not an error to show. */
+  writeTerminal(id: string, data: string): void {
+    void this.#client?.call('terminals.write', { id, data }).catch(() => undefined);
+  }
+
+  resizeTerminal(id: string, cols: number, rows: number): void {
+    void this.#client?.call('terminals.resize', { id, cols, rows }).catch(() => undefined);
+  }
+
+  /** Kills the shell; `terminal.exited` follows. */
+  async closeTerminal(id: string): Promise<void> {
+    const client = this.#client;
+    if (!client) return;
+    try {
+      await client.call('terminals.close', { id });
+    } catch (error) {
+      this.#fail(error);
+    }
   }
 
   // -------------------------------------------------------------------------

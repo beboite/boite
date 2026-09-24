@@ -263,6 +263,7 @@ export const fr: Messages = {
 
   palette: {
     placeholder: 'Cherchez une conversation, ou tapez une commande',
+    terminal: 'Afficher ou masquer le terminal',
     threads: 'Conversations',
     commands: 'Commandes',
     empty: 'Rien ne correspond.',
@@ -405,6 +406,7 @@ export const fr: Messages = {
     traceHint: 'Processus lancés par cette conversation',
     panel: 'Panneau',
     panelHint: "L'établi à côté de cette conversation",
+    terminalHint: 'Terminal dans le dossier de cette conversation',
     cwd: 'Répertoire de travail',
     model: 'Modèle',
     defaultModel: 'Modèle par défaut',
@@ -756,6 +758,13 @@ export const fr: Messages = {
     slotEmpty: "La page s'affiche ici dès que la coque fournit la vue web"
   },
 
+  terminal: {
+    title: 'Terminal',
+    hide: 'Masquer le terminal',
+    close: 'Fermer le shell',
+    resize: 'Redimensionner le terminal'
+  },
+
   trace: {
     exact: 'Tous les processus enfants suivis',
     limited: 'Suivi des processus limité',
@@ -828,6 +837,8 @@ export const fr: Messages = {
     loginRedirectPlaceholder: "Sur un autre appareil ? Collez l'adresse localhost sur laquelle la page se termine",
     loginSend: 'Envoyer',
     loginCancel: 'Annuler',
+    terminalHint: 'Répondez à ses questions dans le terminal, puis fermez-le une fois connecté.',
+    terminalDone: 'Fermer le terminal',
     remove: 'Supprimer',
     removeTitle: 'Supprimer {account} ?',
     removeBody: "Cela déconnecte le compte de Boite et supprime ses fichiers. Un compte utilisé par une conversation ne peut pas être supprimé.",

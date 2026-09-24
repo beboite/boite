@@ -126,6 +126,20 @@ import {
 import { longThread, seedThreads } from './fake-client/threads-seed';
 import { fakeUsageHistory, type FakeFinishedTurn } from './fake-usage';
 
+/** What OpenCode's menu looks like once the command is typed: the capture shows the real thing's shape. */
+const FAKE_LOGIN_MENU = [
+  '\x1b[90m┌\x1b[39m  Add credential',
+  '\x1b[90m│\x1b[39m',
+  '\x1b[36m◆\x1b[39m  Select provider',
+  '\x1b[36m│\x1b[39m  \x1b[32m●\x1b[39m OpenCode Zen \x1b[90m(recommended)\x1b[39m',
+  '\x1b[36m│\x1b[39m  ○ OpenAI',
+  '\x1b[36m│\x1b[39m  ○ GitHub Copilot',
+  '\x1b[36m│\x1b[39m  ○ Anthropic',
+  '\x1b[36m│\x1b[39m  ○ Google',
+  '\x1b[36m└\x1b[39m',
+  ''
+].join('\r\n');
+
 type FakeMethods = { [M in Exclude<RpcMethodName, `plugins.${string}`>]: (params: RpcParams<M>) => Promise<RpcResult<M>> };
 
 export interface FakeClientOptions {
@@ -235,6 +249,8 @@ export class FakeClient implements ObservableClient {
   #inFlight = new Map<ThreadId, { cancelled: boolean; done: Promise<void> }>();
   /** The current output of every active fake login, also returned after reconnect. */
   #logins = new Map<string, RpcEvents['account.login']>();
+  /** Fake shells by terminal id: what they printed and the line being typed. */
+  #terminals = new Map<string, { cwd: string; output: string; line: string }>();
   #seq = 0;
   #turnRequests = new Map<string, { content: string; turn: Turn }>();
   #delayMs: number;
@@ -745,6 +761,61 @@ export class FakeClient implements ObservableClient {
         });
       }
       void this.#finishFakeLogin(account);
+      return { ok: true };
+    },
+    'accounts.loginTerminal': async (params) => {
+      const account = this.#accounts.find((a) => a.id === params.accountId);
+      if (!account) throw this.#notFound('account', params.accountId);
+      const provider = this.#providers.find((p) => p.id === account.providerId);
+      if (!provider?.login || provider.login.kind !== 'terminal') {
+        throw new RpcFailure({ code: RpcErrorCode.Refused, message: `${provider?.name ?? account.providerId} does not sign in from a terminal` });
+      }
+      const id = `login:${account.id}`;
+      const cwd = account.isolationDir ?? 'C:\\Users\\you';
+      if (!this.#terminals.has(id)) {
+        this.#terminals.set(id, { cwd, output: `PS ${cwd}> & ${provider.id} auth login\r\n${FAKE_LOGIN_MENU}`, line: '' });
+      }
+      const shell = this.#terminals.get(id)!;
+      return { id, cwd: shell.cwd, output: shell.output };
+    },
+    'terminals.open': async (params) => {
+      const thread = this.#threads.get(params.threadId);
+      if (!thread) throw this.#notFound('thread', params.threadId);
+      const id = `terminal:${thread.id}`;
+      if (!this.#terminals.has(id)) this.#terminals.set(id, { cwd: thread.cwd, output: `PS ${thread.cwd}> `, line: '' });
+      const shell = this.#terminals.get(id)!;
+      return { id, cwd: shell.cwd, output: shell.output };
+    },
+    'terminals.write': async (params) => {
+      const shell = this.#terminals.get(params.id);
+      if (!shell) throw this.#notFound('terminal', params.id);
+      let echo = '';
+      for (const char of params.data) {
+        if (char === '\r') {
+          const typed = shell.line.trim();
+          shell.line = '';
+          if (typed === 'exit') {
+            this.#closeTerminal(params.id);
+            return { ok: true };
+          }
+          echo += `\r\n${typed.length > 0 ? `${typed}\r\n` : ''}PS ${shell.cwd}> `;
+        } else if (char === '\x7f') {
+          if (shell.line.length > 0) { shell.line = shell.line.slice(0, -1); echo += '\b \b'; }
+        } else if (char >= ' ') {
+          shell.line += char;
+          echo += char;
+        }
+      }
+      shell.output += echo;
+      if (echo.length > 0) this.#emit('terminal.output', { id: params.id, data: echo });
+      return { ok: true };
+    },
+    'terminals.resize': async (params) => {
+      if (!this.#terminals.has(params.id)) throw this.#notFound('terminal', params.id);
+      return { ok: true };
+    },
+    'terminals.close': async (params) => {
+      this.#closeTerminal(params.id);
       return { ok: true };
     },
     'threads.list': async (params) => {
@@ -2388,6 +2459,18 @@ const ready = true;
       this.#logins.set(event.accountId, existing ? Object.assign(existing, event) : event);
     } else this.#logins.delete(event.accountId);
     this.#emit('account.login', structuredClone(event));
+  }
+
+  /** The shell goes; a sign-in one leaves its account signed in, as the real CLI would. */
+  #closeTerminal(id: string): void {
+    if (!this.#terminals.delete(id)) return;
+    this.#emit('terminal.exited', { id, exitCode: 0 });
+    if (!id.startsWith('login:')) return;
+    const account = this.#accounts.find((a) => `login:${a.id}` === id);
+    if (!account) return;
+    account.status = 'ok';
+    account.identity = 'you@example.com';
+    this.#emit('accounts.updated', structuredClone(account));
   }
 
   #cancelLogin(accountId: string): void {

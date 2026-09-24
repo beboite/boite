@@ -179,7 +179,9 @@ export interface ProviderAuth {
  *
  * `command` is a CLI Boite runs under the account's isolation directory,
  * streaming its output back as `account.login`; the user answers a prompt with
- * `accounts.loginInput`.
+ * `accounts.loginInput`. With `terminal`, the same command is typed into a
+ * shell the user sees instead (`accounts.loginTerminal`), for a CLI whose login
+ * is an interactive menu a pipe cannot drive.
  *
  * `acp` is the protocol's own `authenticate` call: the core starts the agent
  * like a turn would, sends `initialize` then `authenticate` with that method
@@ -194,6 +196,8 @@ export interface ProviderLogin {
   env?: Record<string, string>;
   /** The ACP `authenticate` method id, for an agent that logs in over the protocol. */
   acp?: { methodId: string };
+  /** Type `command` into a terminal the user drives rather than piping it. Only with `command`. */
+  terminal?: boolean;
 }
 
 /** How this provider's accounts are kept apart, whatever the OS profile does. */
@@ -280,8 +284,8 @@ export interface ProviderSummary {
   executable: string | null;
   models: ModelInfo[];
   capabilities: ProviderCapabilities;
-  /** Whether Boite can start login, and which protocol owns it. */
-  login: false | { kind: 'command' | 'acp' };
+  /** Whether Boite can start login, and how: a piped command, the ACP call, or a command typed into a terminal. */
+  login: false | { kind: 'command' | 'acp' | 'terminal' };
   /** True when the provider cannot use its default login location. */
   alwaysIsolated: boolean;
   /** Where the managed install stands, null when this profile has no `install` block. */
@@ -973,6 +977,7 @@ export const KEYBINDING_COMMANDS = [
   'theme-system',
   'archive',
   'import-session',
+  'terminal',
 ] as const;
 export type KeybindingCommand = (typeof KEYBINDING_COMMANDS)[number];
 
@@ -1449,6 +1454,18 @@ export interface BrainStatus {
   links?: BrainLink[];
 }
 
+/**
+ * A shell the core runs in a pseudo-terminal. Its id names what it belongs to:
+ * `terminal:<threadId>` for a thread's, `login:<accountId>` for a sign-in.
+ */
+export interface TerminalState {
+  id: string;
+  /** Where the shell started. */
+  cwd: string;
+  /** What it printed lately, so a client that attaches late draws the same screen. */
+  output: string;
+}
+
 export interface RpcMethods {
   'delegation.get': { params: { threadId: ThreadId }; result: DelegationView };
   'delegation.configure': { params: { threadId: ThreadId; config: DelegationConfig }; result: DelegationView };
@@ -1673,6 +1690,21 @@ export interface RpcMethods {
   'accounts.loginCancel': { params: { accountId: AccountId }; result: { ok: true } };
   /** One line into the running login's stdin, for a CLI that asks for a code. */
   'accounts.loginInput': { params: { accountId: AccountId; text: string }; result: { ok: true } };
+  /**
+   * Open a shell with this account's environment and type its login command
+   * into it, or attach to the one already open. Only for a login whose
+   * descriptor says `terminal`. The default account is allowed: the user drives
+   * the shell, as in their own terminal. Closing the terminal rechecks the account.
+   */
+  'accounts.loginTerminal': { params: { accountId: AccountId; cols: number; rows: number }; result: TerminalState };
+
+  /** Attach to the thread's shell, starting one in the thread's working directory when none runs. */
+  'terminals.open': { params: { threadId: ThreadId; cols: number; rows: number }; result: TerminalState };
+  /** Keystrokes, as the terminal emulator encodes them. */
+  'terminals.write': { params: { id: string; data: string }; result: { ok: true } };
+  'terminals.resize': { params: { id: string; cols: number; rows: number }; result: { ok: true } };
+  /** Kill the shell and its tree. `terminal.exited` follows. */
+  'terminals.close': { params: { id: string }; result: { ok: true } };
 
   'threads.list': { params: { projectId?: ProjectId; includeArchived?: boolean }; result: ThreadSummary[] };
   /** Read the working branch's PR using the execution machine's GitHub CLI. */
@@ -1943,6 +1975,10 @@ export interface RpcEvents {
     exitCode: number | null;
   };
   'core.log': { level: 'info' | 'warn' | 'error'; message: string; at: Timestamp };
+  /** What a shell printed, as it printed it. */
+  'terminal.output': { id: string; data: string };
+  /** The shell ended: typed `exit`, closed, or killed with its thread. */
+  'terminal.exited': { id: string; exitCode: number | null };
 }
 
 export type RpcEventName = keyof RpcEvents;

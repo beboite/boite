@@ -429,7 +429,7 @@ test(
     expect(names.length).toBeGreaterThan(2);
     await page.screenshot(SLASH_SCREENSHOT);
 
-    await page.type(testid('composer-input'), '/sh');
+    await page.type(testid('composer-input'), '/sho');
     await page.waitFor(`document.querySelectorAll('${testid('slash-row')}').length === 1`, 10_000);
     await page.evaluate<null>(
       `(() => {

@@ -371,7 +371,7 @@ function checkAuth(value: unknown, file: string): ProviderAuth {
  */
 function checkLogin(value: unknown, file: string): ProviderLogin {
   const obj = asObject(value, file, 'login');
-  checkKeys(obj, ['command', 'env', 'acp'], file, 'login');
+  checkKeys(obj, ['command', 'env', 'acp', 'terminal'], file, 'login');
   const hasCommand = obj['command'] !== undefined;
   const hasAcp = obj['acp'] !== undefined;
   if (hasCommand === hasAcp) {
@@ -397,6 +397,10 @@ function checkLogin(value: unknown, file: string): ProviderLogin {
     login.acp = { methodId: asString(acp['methodId'], file, 'login.acp.methodId') };
   }
   if (obj['env'] !== undefined) login.env = checkStringMap(obj['env'], file, 'login.env');
+  if (obj['terminal'] !== undefined) {
+    if (!hasCommand) reject(file, 'login.terminal', 'a login with a command', 'login.terminal types a command, and this login has none');
+    login.terminal = asBoolean(obj['terminal'], file, 'login.terminal');
+  }
   return login;
 }
 
@@ -580,6 +584,13 @@ function expandDescriptor(descriptor: ProviderDescriptor, dataDir: string): Prov
  * matched without case, because Windows treats a variable name that way and an
  * alias would otherwise slip through.
  */
+/** How a client starts this provider's login, if it can. */
+function loginSummary(login: ProviderLogin | undefined): ProviderSummary['login'] {
+  if (login === undefined) return false;
+  if (login.acp !== undefined) return { kind: 'acp' };
+  return { kind: login.terminal === true ? 'terminal' : 'command' };
+}
+
 export function agentEnv(
   descriptor: ProviderDescriptor,
   accountEnv: Record<string, string>,
@@ -736,7 +747,7 @@ export function summarize(entry: LoadedProvider, installs: InstallManager, dataD
     source: entry.source,
     available,
     executable,
-    login: entry.descriptor.login === undefined ? false : { kind: entry.descriptor.login.acp === undefined ? 'command' : 'acp' },
+    login: loginSummary(entry.descriptor.login),
     alwaysIsolated: entry.descriptor.isolation?.alwaysIsolated === true,
     models: entry.descriptor.models,
     capabilities: entry.descriptor.capabilities,

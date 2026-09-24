@@ -32,6 +32,7 @@ import type {
 } from '@boite/contracts';
 import { agentEnvOf } from './agent.ts';
 import type { Core } from './core.ts';
+import { threadTerminalId } from './terminals.ts';
 import { messageOf, notFound, refused } from './errors.ts';
 import { newId } from './ids.ts';
 import { PullRequests } from './pull-requests.ts';
@@ -483,6 +484,7 @@ export class ThreadStore {
       this.core.scheduler.stop(threadId);
       releaseThread(threadId);
       this.commands.delete(threadId);
+      void this.core.terminals.close(threadTerminalId(threadId));
     }
     const thread = this.require(threadId);
     return this.save({ ...thread, archived }, 'thread.archived');
