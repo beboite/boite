@@ -469,11 +469,12 @@ export class BoundPanel {
 
   /**
    * The panel itself, open or shut. An empty panel opens on the surface this
-   * device starts with, else on its launcher.
+   * device starts with, else on its launcher. Outside a git repository, the
+   * drafts included, Changes has nothing to diff and Files takes its place.
    */
-  toggle(): void {
+  toggle(repository = true): void {
     const current = this.state;
-    const start = work.current.panel;
+    const start = work.current.panel === 'changes' && !repository ? 'files' : work.current.panel;
     if (!current.isOpen && current.surfaces.length === 0 && start !== 'launcher') {
       this.open(start);
       return;

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Protocol, ProviderSummary } from '@boite/contracts';
-import { modeHint, modeLabel, modesFor } from './permission-modes';
+import { modeHint, modeLabel, modesFor, shownMode } from './permission-modes';
 
 const provider = (protocol: Protocol, approvals = true) => ({
   id: protocol, name: protocol, shortName: protocol, protocol, source: 'shipped', available: true, executable: null, models: [],
@@ -15,6 +15,13 @@ describe('permission modes', () => {
 
   it('drops the Codex entry that would be the same sandbox as the default', () => {
     expect(modesFor(provider('codex-appserver'))).toEqual(['bypassPermissions', 'default']);
+  });
+
+  it('shows a Codex choice left on acceptEdits as the default it runs as', () => {
+    expect(shownMode('acceptEdits', provider('codex-appserver'))).toBe('default');
+    expect(shownMode('bypassPermissions', provider('codex-appserver'))).toBe('bypassPermissions');
+    expect(shownMode('acceptEdits', provider('claude-sdk'))).toBe('acceptEdits');
+    expect(shownMode('plan', provider('codex-appserver'))).toBe('plan');
   });
 
   it('offers nothing to an agent that never asks', () => {

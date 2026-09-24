@@ -339,7 +339,7 @@
       case 'panel':
         if (!store.openThread) return;
         event.preventDefault();
-        store.panel.toggle();
+        store.togglePanel();
         break;
       case 'browser': {
         if (!store.openThread || !inShell) return;

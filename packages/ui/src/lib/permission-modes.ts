@@ -17,6 +17,17 @@ export function modesFor(provider: ProviderSummary | null | undefined): Permissi
   return OFFERED;
 }
 
+/**
+ * The mode the chip shows. A choice made for another agent can hold a mode this
+ * one does not offer: Codex runs `acceptEdits` as its default, so the chip says
+ * so and a menu entry stays active. A legacy mode (`plan`, `dontAsk`) keeps its
+ * own label until another is picked. The stored choice is left as it was.
+ */
+export function shownMode(mode: PermissionMode, provider: ProviderSummary | null | undefined): PermissionMode {
+  const offered = modesFor(provider);
+  return offered.length === 0 || offered.includes(mode) || !OFFERED.includes(mode) ? mode : 'default';
+}
+
 /** The chip's word for the mode, as this agent actually applies it. */
 export function modeLabel(mode: PermissionMode, provider: ProviderSummary | null | undefined): string {
   if (mode === 'default' && provider?.protocol === 'codex-appserver') return strings.permissionModeCodex.default;

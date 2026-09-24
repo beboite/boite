@@ -12,7 +12,7 @@
   import { rankItems, type PaletteItem } from '../lib/palette';
   import { clearStash, DRAFT_STASH_KEY, readStash, writeStash } from '../lib/prefs';
   import { promptText } from '../lib/message-display';
-  import { modeHint, modeLabel, modesFor } from '../lib/permission-modes';
+  import { modeHint, modeLabel, modesFor, shownMode } from '../lib/permission-modes';
   import { fill, strings } from '../lib/strings';
   import type { Choice, PickPatch, Store } from '../lib/store.svelte';
   import EffortSlider from './EffortSlider.svelte';
@@ -318,7 +318,7 @@
   });
 
   // Older modes keep their execution policy until the user makes a choice.
-  let displayedMode = $derived<PermissionMode>(choice?.permissionMode ?? 'default');
+  let displayedMode = $derived<PermissionMode>(shownMode(choice?.permissionMode ?? 'default', provider));
   let modes = $derived(modesFor(provider));
   /** The chosen account answered that it is signed out: the next send would fail on it. */
   let signedOut = $derived.by(() => {

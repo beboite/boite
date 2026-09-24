@@ -781,6 +781,10 @@ test('the guided connection signs OpenCode in from a terminal too, then hands it
   await waitFor(() => query('[data-testid=connect-login-terminal]').textContent?.includes('opencode auth login') === true);
   expect(query('[data-testid=connect-step]').getAttribute('data-step')).toBe('signing-in');
   expect(document.querySelector('[data-testid=connect-login-input]')).toBeNull();
+  // Escape inside the terminal steps back in the CLI's menu; it does not close the dialog.
+  query('[data-testid=connect-login-terminal] [data-testid=terminal]').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+  flushSync();
+  expect(document.querySelector('[data-testid=connect-dialog]')).not.toBeNull();
 
   query<HTMLButtonElement>('[data-testid=connect-login-terminal-close]').click();
   await waitFor(() => document.querySelector('[data-testid=connect-use]') !== null);

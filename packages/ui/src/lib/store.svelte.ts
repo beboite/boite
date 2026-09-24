@@ -1679,7 +1679,7 @@ export class Store {
    * opens on the surface this device starts with, else on its launcher.
    */
   togglePanel(): void {
-    this.panel.toggle();
+    this.panel.toggle(this.openProject?.repository !== false);
   }
 
   // -------------------------------------------------------------------------

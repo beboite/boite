@@ -140,7 +140,7 @@ export function runCommand(store: Store, id: string, inShell: boolean): void {
     case 'pin': if (open) void store.pin(open.id, !open.pinned); break;
     case 'rename': store.showChat(); store.renameRequested = true; break;
     case 'retitle': if (open) void store.retitle(open.id); break;
-    case 'panel': store.showChat(); store.panel.toggle(); break;
+    case 'panel': store.showChat(); store.togglePanel(); break;
     case 'trace': store.showChat(); store.panel.toggleKind('trace'); break;
     case 'changes': store.showChat(); store.panel.toggleKind('changes'); break;
     case 'files': store.showChat(); store.panel.toggleKind('files'); break;

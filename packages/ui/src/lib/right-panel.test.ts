@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { browserBridge } from './browser-bridge';
+import { work } from './work-prefs.svelte';
 import {
   PANEL_DEFAULT,
   PANEL_MIN,
@@ -32,6 +33,18 @@ describe('the right panel', () => {
     expect(bound.isOpen).toBe(true);
     expect(bound.activeSurfaceId).toBe('trace');
     expect(bound.surfaces).toHaveLength(1);
+  });
+
+  test('an empty panel set to open on Changes opens Files outside a repository', () => {
+    work.setPanel('changes');
+    try {
+      const { bound } = panel();
+      bound.toggle(false);
+      expect(bound.surfaces.map((surface) => surface.kind)).toEqual(['files']);
+      const other = panel('t-2').bound;
+      other.toggle();
+      expect(other.surfaces.map((surface) => surface.kind)).toEqual(['changes']);
+    } finally { work.load(); }
   });
 
   test('trace is a singleton, a browser tab is one per id', () => {

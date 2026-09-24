@@ -164,6 +164,8 @@
 
   function onkeydown(event: KeyboardEvent) {
     if (!store.connectDialog || event.key !== 'Escape') return;
+    // A sign-in menu in the terminal steps back on Escape: that key is the CLI's.
+    if (event.target instanceof Element && event.target.closest('[data-testid=connect-login-terminal]')) return;
     event.preventDefault();
     event.stopPropagation();
     store.closeConnect();
