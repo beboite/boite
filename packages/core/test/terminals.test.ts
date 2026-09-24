@@ -101,6 +101,24 @@ describe('terminals', () => {
     await expect(client.call('terminals.open', { threadId, cols: 80, rows: 24 })).rejects.toThrow(/is archived/);
   }, 30_000);
 
+  test('a closing shell keeps its id until it exits, and removing the project waits for it', async () => {
+    const client = await harness.connect();
+    const { threadId } = await echoThread(harness, client);
+    const { projectId } = harness.core.threads.require(threadId);
+    const id = threadTerminalId(threadId);
+    await client.call('terminals.open', { threadId, cols: 80, rows: 24 });
+    const closed = harness.core.terminals.close(id);
+    // Killed, not gone yet: no keys, and no second shell under the same id.
+    expect(() => harness.core.terminals.openThread(threadId, 80, 24)).toThrow(/still closing/);
+    expect(() => harness.core.terminals.write(id, 'x')).toThrow(/no terminal is running/);
+    await closed;
+    expect(harness.core.terminals.has(id)).toBe(false);
+
+    await client.call('terminals.open', { threadId, cols: 80, rows: 24 });
+    await client.call('projects.remove', { projectId });
+    expect(harness.core.procs.liveCount(id)).toBe(0);
+  }, 30_000);
+
   test('a terminal login types its command, and closing the shell rechecks the account', async () => {
     const client = await harness.connect();
     await addTerminalLoginProvider(harness, client);

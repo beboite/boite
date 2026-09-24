@@ -77,6 +77,8 @@ interface Session {
   terminal: Bun.Terminal;
   history: string;
   exited: Promise<number | null>;
+  /** Killed, not gone yet: it takes no keys, and its id is not free for a new shell. */
+  closing: boolean;
 }
 
 export interface StartOptions {
@@ -106,6 +108,7 @@ export class TerminalStore {
     checkSize(options.cols, options.rows);
     const running = this.sessions.get(id);
     if (running !== undefined) {
+      if (running.closing) throw refused(`the shell ${id} is still closing, open it again in a moment`, { id });
       running.terminal.resize(options.cols, options.rows);
       return { id, cwd: running.cwd, output: running.history };
     }
@@ -160,7 +163,7 @@ export class TerminalStore {
       options.onExit?.();
       return code;
     });
-    session = { id, cwd: options.cwd, terminal: spawned.terminal, history: '', exited };
+    session = { id, cwd: options.cwd, terminal: spawned.terminal, history: '', exited, closing: false };
     this.sessions.set(id, session);
     return { id, cwd: options.cwd, output: '' };
   }
@@ -182,12 +185,13 @@ export class TerminalStore {
 
   /**
    * Kills the shell with everything it started, and waits for it to be gone.
-   * The session stops taking keys at once, even when the exit is slow.
+   * The session stops taking keys at once, even when the exit is slow, and
+   * keeps its id until the exit so a new shell never shares it.
    */
   async close(id: string): Promise<{ ok: true }> {
     const session = this.sessions.get(id);
     if (session === undefined) return { ok: true };
-    this.sessions.delete(id);
+    session.closing = true;
     this.core.procs.killTree(id);
     let timer: ReturnType<typeof setTimeout> | undefined;
     await Promise.race([
@@ -206,7 +210,7 @@ export class TerminalStore {
 
   private require(id: string): Session {
     const session = this.sessions.get(id);
-    if (session === undefined) throw notFound(`no terminal is running as ${id}`, { id });
+    if (session === undefined || session.closing) throw notFound(`no terminal is running as ${id}`, { id });
     return session;
   }
 }
