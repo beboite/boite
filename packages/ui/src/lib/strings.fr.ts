@@ -487,7 +487,7 @@ export const fr: Messages = {
     denied: 'Refusé',
     questionHeading: 'Vous demande',
     questionAsyncHeading: 'Vous demande, sans attendre',
-    questionAsyncHint: 'L’agent continue. Votre réponse lui parvient dès que vous l’envoyez ; sans réponse, il poursuit avec un choix par défaut.',
+    questionAsyncHint: 'L’agent continue. Votre réponse lui parvient pendant ce tour s’il peut la prendre, sinon juste après ; sans réponse, il poursuit avec un choix par défaut.',
     questionTextLabel: 'Votre propre réponse',
     questionTextPlaceholder: 'Écrivez une réponse',
     questionAnswer: 'Répondre',

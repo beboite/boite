@@ -889,7 +889,16 @@ export class FakeClient implements ObservableClient {
     'threads.archive': async (params) => {
       const thread = this.#thread(params.threadId);
       thread.archived = params.archived ?? true;
-      if (thread.archived) await this.#stopTurn(thread.id);
+      if (thread.archived) {
+        await this.#stopTurn(thread.id);
+        // As the core: nobody answers a card on a thread put away, and its background work goes.
+        for (const [questionId, pending] of [...this.#pendingQuestions]) {
+          if (pending.request.threadId !== thread.id) continue;
+          this.#pendingQuestions.delete(questionId);
+          pending.resolve(null);
+        }
+        if ((thread.background?.length ?? 0) > 0) this.#setBackground(thread, []);
+      }
       return this.#touch(thread);
     },
     'threads.pin': async (params) => {

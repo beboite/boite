@@ -658,12 +658,12 @@ class ClaudeSession {
 
   /** Background work, or output of the CLI's own that no turn took yet: the CLI must stay. */
   holding(): boolean {
-    return this.background.length > 0 || this.orphans.length > 0 || this.woken || this.linger !== null;
+    return this.background.length > 0 || this.woken || this.linger !== null;
   }
 
   /** The CLI went on by itself and wrote something the next turn is opened for. */
   adoptable(): boolean {
-    return !this.ended && !this.closing && (this.orphans.length > 0 || this.woken);
+    return !this.ended && !this.closing && this.woken;
   }
 
   /** A turn is running or queued on it, so nothing may take the CLI away yet. */
@@ -677,7 +677,7 @@ class ClaudeSession {
     this.clearIdle();
     this.clearLinger();
     this.waiting.push(turn);
-    if (this.orphans.length > 0 || this.woken) {
+    if (this.woken) {
       // The turn opened for what the CLI writes on its own takes that output
       // and sends no prompt; any other turn takes it first, without its result.
       this.woken = false;
@@ -689,12 +689,16 @@ class ClaudeSession {
         this.receive(message);
       }
       if (adopted) return;
-    } else if (turn.ctx.turn.execution?.operation === 'background') {
-      // Nothing to adopt: whatever woke the core is already gone.
-      this.waiting.pop();
-      turn.settle();
-      this.afterTurns();
-      return;
+    } else {
+      // Bookkeeping that no output followed was already applied as it came.
+      this.orphans = [];
+      if (turn.ctx.turn.execution?.operation === 'background') {
+        // Nothing to adopt: whatever woke the core is already gone.
+        this.waiting.pop();
+        turn.settle();
+        this.afterTurns();
+        return;
+      }
     }
     if (!this.started) {
       this.started = true;
@@ -879,7 +883,7 @@ class ClaudeSession {
   /** Nothing attached any more: keep the CLI for its background work, else the warm rule. */
   private afterTurns(): void {
     if (this.closing || this.ended || this.waiting.length > 0) return;
-    if (this.background.length > 0 || this.orphans.length > 0 || this.woken) return;
+    if (this.background.length > 0 || this.woken) return;
     if (this.warmMs > 0) this.armIdle();
     else this.close(null);
   }
@@ -927,11 +931,16 @@ class ClaudeSession {
    */
   private adopt(message: SDKMessage): void {
     if (this.closing || this.ended) return;
-    if (this.orphans.length >= ORPHANS_MAX) return;
+    // The result closes the adopted turn: it is kept beyond the cap.
+    if (this.orphans.length >= ORPHANS_MAX && message.type !== 'result') return;
     this.orphans.push(message);
+    // Bookkeeping before any output (a task list, a notification) is kept for
+    // the turn that may come, but holds nothing: the linger and the warm rule
+    // still close the CLI if no output follows.
+    if (!this.woken && message.type !== 'assistant' && message.type !== 'stream_event') return;
     this.clearIdle();
     this.clearLinger();
-    if (this.woken || (message.type !== 'assistant' && message.type !== 'stream_event')) return;
+    if (this.woken) return;
     this.woken = true;
     this.ctx.wake?.(WAKE_TEXT);
   }

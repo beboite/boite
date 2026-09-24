@@ -1101,7 +1101,12 @@ export class ThreadStore {
     if (handle?.steer && !this.steering.has(threadId)) {
       this.steering.add(threadId);
       void handle.steer(text)
-        .then(submitted => { if (!submitted) this.defer(threadId, text); })
+        .then(submitted => {
+          if (submitted) return;
+          this.defer(threadId, text);
+          // The turn may have ended while the steer was out, after its end looked for held answers.
+          if (!this.handles.has(threadId)) this.flushDeferred(threadId);
+        })
         .catch(error => this.core.log('warn', `thread ${threadId}: an async answer may not have reached the agent: ${messageOf(error)}`))
         .finally(() => this.steering.delete(threadId));
       return;
@@ -1239,7 +1244,7 @@ export class ThreadStore {
       account,
       provider,
       turn,
-      prompt: ((turn.execution?.operation && thread.sessionId !== null) || prepared.prompt.trimStart().startsWith('/') ? '' : this.core.brain.instructions(provider.id)) + (turn.execution?.operation ? '' : this.takeDeferred(threadId)) + prepared.prompt + (turn.execution?.operation === 'compact' ? '' : this.core.coordination.instructions(threadId) + this.core.delegation.instructions(threadId) + this.core.delegation.initialInput(threadId, turn.id)) + this.askInstructions(thread, provider, turn, prepared.prompt),
+      prompt: ((turn.execution?.operation && thread.sessionId !== null) || prepared.prompt.trimStart().startsWith('/') ? '' : this.core.brain.instructions(provider.id)) + (turn.execution?.operation || prepared.prompt.trimStart().startsWith('/') ? '' : this.takeDeferred(threadId)) +prepared.prompt + (turn.execution?.operation === 'compact' ? '' : this.core.coordination.instructions(threadId) + this.core.delegation.instructions(threadId) + this.core.delegation.initialInput(threadId, turn.id)) + this.askInstructions(thread, provider, turn, prepared.prompt),
       coordination: () => this.core.delegation.take(threadId, turn.id) ?? this.core.coordination.take(threadId, turn.id),
       attachments: prepared.attachments,
       sessionId: thread.sessionId,

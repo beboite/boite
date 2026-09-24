@@ -491,7 +491,7 @@ export const strings = {
     denied: 'Denied',
     questionHeading: 'Asks you',
     questionAsyncHeading: 'Asks you, without waiting',
-    questionAsyncHint: 'The agent keeps working. Your answer reaches it as soon as you send it; without one it goes on with a default.',
+    questionAsyncHint: 'The agent keeps working. Your answer reaches it during this turn when it can take one, otherwise right after; without one it goes on with a default.',
     questionTextLabel: 'Your own answer',
     questionTextPlaceholder: 'Type an answer',
     questionAnswer: 'Answer',
