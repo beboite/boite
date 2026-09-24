@@ -116,6 +116,30 @@ describeWindows('windows job objects', () => {
     }
   }, 30000);
 
+  test('the orphan sweep stops a ping whose shell exited and keeps one whose shell runs', async () => {
+    const client = await harness.connect();
+    const { threadId } = await echoThread(harness, client);
+    const procs = harness.core.procs;
+    const kept = procs.spawn(threadId, 'cmd', ['/c', 'ping -n 30 127.0.0.1']);
+    const left = procs.spawn(threadId, 'cmd', ['/c', 'start /b ping -n 30 127.0.0.1']);
+
+    await until('both pings to be reported', () => procs.liveOf(threadId).filter(isPing).length === 2, 10000);
+    await until('the detaching shell to leave the registry',
+      () => !procs.liveOf(threadId).some((record) => record.pid === left.record.pid), 10000);
+    const pings = procs.liveOf(threadId).filter(isPing);
+    const orphan = pings.find((record) => record.parentPid === left.record.pid) as ProcessRecord;
+    const control = pings.find((record) => record.parentPid === kept.record.pid) as ProcessRecord;
+    expect(orphan).toBeDefined();
+    expect(control).toBeDefined();
+
+    // Read as the timer would, past the grace that follows a turn.
+    expect(procs.sweepOrphans(threadId, Date.now() + 60_000)).toEqual([orphan.pid]);
+    await until('the orphan to be gone', () => !isRunning(orphan.pid), 5000);
+    await until('its exit to be reported', () => !procs.liveOf(threadId).some((record) => record.pid === orphan.pid), 5000);
+    expect(isRunning(control.pid)).toBe(true);
+    expect(isRunning(kept.record.pid)).toBe(true);
+  }, 30000);
+
   test('a grandchild that outlives its parent is still traced and still killed', async () => {
     const client = await harness.connect();
     const { threadId } = await echoThread(harness, client);

@@ -62,6 +62,8 @@ export interface ProcessPlatform {
   applySettings(settings: Settings): void;
   attach(threadId: string, pid: number): boolean;
   terminate(threadId: string): boolean;
+  /** One process the thread's job reported, through the handle held since its start. */
+  terminateProcess(threadId: string, pid: number): boolean;
   terminateUnassigned(pid: number): void;
   sample(threadId: string): ProcessSample | null;
   pidAdded(threadId: string, pid: number): void;

@@ -311,6 +311,7 @@ export class FakeClient implements ObservableClient {
       threadMemoryCapMb: 0,
       focusGuard: true,
       muteAgents: true,
+      reapOrphans: true,
       autoUpdateHarnesses: false
     };
     this.#core = {

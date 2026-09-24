@@ -76,6 +76,7 @@ describe('settings', () => {
       threadMemoryCapMb: 0,
       focusGuard: true,
       muteAgents: true,
+      reapOrphans: true,
       autoUpdateHarnesses: false,
       // Off only because the harness turns it off; a missing value reads as on.
       asyncQuestions: false,

@@ -11,6 +11,7 @@ export const DEFAULT_SETTINGS: Settings = {
   threadMemoryCapMb: 0,
   focusGuard: true,
   muteAgents: true,
+  reapOrphans: true,
   autoUpdateHarnesses: false,
 };
 
@@ -21,7 +22,7 @@ const NUMERIC_KEYS = [
   'agentCpuCapPercent',
   'threadMemoryCapMb',
 ] as const;
-const BOOLEAN_KEYS = ['listenOnLan', 'focusGuard', 'muteAgents', 'autoUpdateHarnesses', 'asyncQuestions'] as const;
+const BOOLEAN_KEYS = ['listenOnLan', 'focusGuard', 'muteAgents', 'reapOrphans', 'autoUpdateHarnesses', 'asyncQuestions'] as const;
 /** Keys whose value is a percentage of the machine, so anything past 100 is a mistake. */
 const PERCENT_KEYS = ['agentCpuCapPercent'] as const;
 

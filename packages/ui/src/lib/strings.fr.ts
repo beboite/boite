@@ -1163,6 +1163,8 @@ export const fr: Translation = {
     focusGuardHint: "Les fenêtres qu'un agent ouvre passent derrière Boite au lieu de vous voler le focus",
     muteAgents: 'Couper le son des agents',
     muteAgentsHint: "Les sons joués par un processus d'agent n'atteignent jamais vos haut-parleurs",
+    reapOrphans: 'Arrêter ce que les agents laissent tourner',
+    reapOrphansHint: "Dix secondes après un tour, un processus dont le parent est sorti est arrêté, comme ceux qu'une commande interrompue laisse derrière elle. Windows seulement.",
     asyncQuestions: 'Laisser les agents poser des questions sans s’arrêter',
     asyncQuestionsHint: 'Les agents sans questions asynchrones propres apprennent `boite ask` au début d’une session. Codex pose ses questions ainsi nativement.',
     save: 'Enregistrer',
