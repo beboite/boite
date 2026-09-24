@@ -962,10 +962,10 @@ export const strings = {
     material: 'Window material',
     materialHint: 'What Windows draws behind the window',
     workspace: 'Workspace',
-    startIn: 'New conversations start in',
-    startInHint: "Where New thread goes when no project is picked. A project's own new thread always starts in that project.",
+    startIn: 'The app opens on',
+    startInHint: 'Where a new conversation waits when the app opens. New thread always starts in the project on screen.',
     startDrafts: 'Drafts',
-    startProject: 'The current project',
+    startProject: 'The last project',
     panelStart: 'The side panel opens on',
     panelStartHint: 'What the panel shows when it opens with nothing in it yet.',
     panelLauncher: 'Its menu',
@@ -1321,9 +1321,9 @@ export const strings = {
     profile: {
       title: 'First, which one are you?',
       everyday: "I'm not a developer! Don't confuse me with code and commands!",
-      everydayHint: 'Conversations start in Documents/Boite, the bar stays simple, and the agent asks before it acts.',
+      everydayHint: 'A new conversation waits in Documents/Boite until you give it a folder, the bar stays simple, and the agent asks before it acts.',
       developer: "I'm a developer, give me the works.",
-      developerHint: 'Conversations start in your project, effort and worktree stay in the bar, and the panel opens on the changes.',
+      developerHint: 'The app opens on your last project, effort and worktree stay in the bar, and the panel opens on the changes.',
       later: "Nothing is taken away either way. The composer's Options menu and Settings change any of it."
     },
 

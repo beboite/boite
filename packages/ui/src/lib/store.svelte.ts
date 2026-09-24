@@ -1134,7 +1134,7 @@ export class Store {
     if (!this.visible) return;
     // Settings opened while the core was still answering stays open.
     if (this.openThread || this.draft || this.page !== 'chat') return;
-    // No project yet: the drafts, so the first screen is a composer, not a folder picker.
+    // The drafts, so the first screen is a composer, not a folder picker; or the last project.
     this.startDraft(work.current.startIn === 'drafts' ? null : this.lastProject());
   }
 
@@ -1602,11 +1602,12 @@ export class Store {
 
   /** An empty chat in a project, composer focused. Nothing reaches the core until the first send. */
   startDraft(projectId?: ProjectId | null): void {
-    // Named, a project; null, the drafts; unnamed, where this device starts
-    // (the drafts, or where the user is, else the first project, else the drafts).
-    const target = projectId === null || (projectId === undefined && work.current.startIn === 'drafts')
-      ? (this.draftsProject?.id ?? null)
-      : (projectId ?? this.openProject?.id ?? this.projects[0]?.id ?? null);
+    // Named, a project; null, the drafts; unnamed, the project on screen, in
+    // either preset, so work spread over several folders stays in its folder.
+    // With nothing on screen, where this device opens: the drafts or the last project.
+    const drafts = this.draftsProject?.id ?? null;
+    const target = projectId === null ? drafts
+      : projectId ?? this.openProject?.id ?? (work.current.startIn === 'drafts' ? drafts : this.lastProject());
     this.rememberReadingThread();
     void this.#unsubscribe();
     this.openThread = null;

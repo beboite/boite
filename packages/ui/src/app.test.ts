@@ -8,6 +8,7 @@ import { workspace } from './lib/workspace.svelte';
 import { setExperiment, writeExperiments } from './lib/experiments';
 import { storeEndpoint, upsertEnvironment } from './lib/endpoint';
 import { closeTour } from './lib/onboarding.svelte';
+import { work } from './lib/work-prefs.svelte';
 import { count } from './lib/format';
 
 // The opener plugin is the shell's system browser; nothing real may run here.
@@ -24,6 +25,7 @@ afterEach(() => {
   // Through the writer, so the reactive mirror hears the reset too.
   writeExperiments([]);
   window.localStorage.clear();
+  work.load();
   delete window.__TAURI_INTERNALS__;
   openUrl.mockClear();
 });
@@ -1739,6 +1741,25 @@ test('first run keeps opening a folder one click away', async () => {
   await waitFor(() => store.openProject?.path === 'D:\\work\\first-project');
   expect(store.draftInDrafts).toBe(false);
   expect(document.querySelector('[data-testid=draft-open-folder]')).toBeNull();
+});
+
+test('not a developer, New thread still follows the project on screen', async () => {
+  await mountOnFake();
+  work.choose('everyday');
+  // Work in two folders: each New thread stays in the folder on screen.
+  await store.open('t-descriptors');
+  store.startDraft();
+  expect(store.draft?.projectId).toBe('p-notes');
+  store.startDraft('p-boite');
+  store.startDraft();
+  expect(store.draft?.projectId).toBe('p-boite');
+  // In the drafts, it stays in the drafts; with nothing on screen, the drafts too.
+  store.startDraft(null);
+  store.startDraft();
+  expect(store.draftInDrafts).toBe(true);
+  store.draft = null;
+  store.startDraft();
+  expect(store.draftInDrafts).toBe(true);
 });
 
 test('an ACP login accepts the phone redirect URL through the login input', async () => {

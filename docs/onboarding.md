@@ -45,7 +45,7 @@ answer itself:
 | | Not a developer | Developer |
 |---|---|---|
 | Composer chips pinned in the bar | none | effort and worktree |
-| New thread with no project picked | the drafts, `Documents/Boite` | the project in use |
+| The app opens on | the drafts, `Documents/Boite` | the last project |
 | An empty side panel opens on | Files | Changes |
 | Permission mode | Ask, set once | left as it is |
 
@@ -53,6 +53,12 @@ answer itself:
 answer writes it at once, so skipping the rest of the tour keeps it, and picking
 the other one rewrites the whole preset. A draft still empty on screen moves
 to where the answer starts.
+
+Neither answer keeps work in one folder. New thread starts in the project on
+screen with both, a project's own new thread starts there, and a draft's
+project menu lists every project and "Open a folder". The drafts are where a
+conversation waits until it has a folder, not the only folder a non-developer
+gets.
 
 Each piece changes on its own afterwards. On a computer the composer's Options
 menu lists effort, speed and worktree with a pin beside each; a pinned option
@@ -64,8 +70,8 @@ the panel's first surface.
 
 A device with no record gets one the first time a core answers. A core that
 already holds conversations, or a device that has already seen the tour, is an
-install from before the question: everything stays pinned, New thread stays in
-the project, and the panel keeps its launcher. Anything else starts with the
+install from before the question: everything stays pinned, the app keeps
+opening on the last project, and the panel keeps its launcher. Anything else starts with the
 calm bar and the drafts, the not-a-developer preset without its permission
 change.
 

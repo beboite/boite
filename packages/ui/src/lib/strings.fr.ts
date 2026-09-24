@@ -942,10 +942,10 @@ export const fr: Messages = {
     material: 'Matériau de la fenêtre',
     materialHint: 'Ce que Windows dessine derrière la fenêtre',
     workspace: 'Espace de travail',
-    startIn: 'Les nouvelles conversations commencent dans',
-    startInHint: "Là où va Nouvelle conversation quand aucun projet n'est choisi. Celle lancée depuis un projet commence toujours dans ce projet.",
+    startIn: "L'appli s'ouvre sur",
+    startInHint: "Là où une nouvelle conversation attend à l'ouverture de l'appli. Nouvelle conversation commence toujours dans le projet affiché.",
     startDrafts: 'Brouillons',
-    startProject: 'Le projet en cours',
+    startProject: 'Le dernier projet',
     panelStart: "Le panneau latéral s'ouvre sur",
     panelStartHint: "Ce que le panneau montre quand il s'ouvre sans rien dedans.",
     panelLauncher: 'Son menu',
@@ -1294,9 +1294,9 @@ export const fr: Messages = {
     profile: {
       title: "D'abord, lequel êtes-vous ?",
       everyday: "Je ne suis pas dev ! Ne m'embrouillez pas avec du code et des commandes !",
-      everydayHint: "Les conversations commencent dans Documents/Boite, la barre reste simple et l'agent demande avant d'agir.",
+      everydayHint: "Une nouvelle conversation attend dans Documents/Boite jusqu'à ce que vous lui donniez un dossier, la barre reste simple et l'agent demande avant d'agir.",
       developer: 'Je suis dev, mettez-moi la totale.',
-      developerHint: "Les conversations commencent dans votre projet, l'effort et le worktree restent dans la barre, le panneau s'ouvre sur les modifications.",
+      developerHint: "L'appli s'ouvre sur votre dernier projet, l'effort et le worktree restent dans la barre, le panneau s'ouvre sur les modifications.",
       later: "Rien n'est retiré, dans un cas comme dans l'autre. Le menu Options du champ de message et les réglages changent tout ça."
     },
 

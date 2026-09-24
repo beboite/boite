@@ -12,7 +12,7 @@
 export type Profile = 'everyday' | 'developer';
 /** The composer options a pin can keep in the bar. The permission mode is never hidden. */
 export type PinId = 'effort' | 'worktree';
-/** Where New thread lands when no project is named: the drafts folder, or the project in use. */
+/** Where the app opens: the drafts folder, or the last project. New thread always follows the project on screen. */
 export type StartIn = 'drafts' | 'project';
 /** What an empty side panel opens on: its launcher, or one surface directly. */
 export type PanelStart = 'launcher' | 'files' | 'changes';
