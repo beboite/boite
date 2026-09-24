@@ -22,7 +22,7 @@ beforeAll(async () => {
   await page.waitFor(`document.querySelector('[data-thread-id="t-trace"]')`);
   await page.click('[data-thread-id="t-trace"]');
 }, 90000);
-afterAll(async () => { await page?.close(); await server?.close(); });
+afterAll(async () => { await page?.close(); await server?.close(); }, 15_000);
 
 test('thread metadata, message identity and expandable trace fit a narrow panel', async () => {
   await page.waitFor(`document.querySelectorAll('${id('thread-pr')}').length === 2`);

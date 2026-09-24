@@ -49,7 +49,23 @@ import type {
   TurnContext,
   TurnHandle,
   TurnResult,
+  PromptCacheLife,
 } from './types.ts';
+import { ANTHROPIC_DEFAULT, openAiCacheLife } from '../prompt-cache.ts';
+
+/**
+ * The prompt cache lifetime of an ACP agent's turn, from the thread's model.
+ * Only OpenCode has one: its `provider/model` ids name the vendor, it marks
+ * Anthropic prompts with a `cache_control` that carries no `ttl`, and it sends
+ * OpenAI no retention option. Grok, Gemini behind Antigravity, and OpenCode's
+ * own gateway publish no lifetime, so their threads show no timer.
+ */
+export function acpCacheLife(providerId: string, model: string | null): PromptCacheLife | null {
+  if (providerId !== 'opencode' || model === null) return null;
+  if (model.startsWith('anthropic/')) return ANTHROPIC_DEFAULT;
+  if (model.startsWith('openai/')) return openAiCacheLife(model);
+  return null;
+}
 
 /** What the agent sees as `clientInfo.name`, and the name of the JSON-RPC app. */
 const CLIENT_NAME = 'boite';
@@ -308,6 +324,7 @@ class AcpTurn {
       sessionId: this.sessionId,
       usage: this.usage,
       error: this.error ?? undefined,
+      promptCache: acpCacheLife(this.ctx.provider.id, this.ctx.thread.model),
     });
   }
 

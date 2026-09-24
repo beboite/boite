@@ -1,6 +1,7 @@
 import type { QuestionAnswer } from '@boite/contracts';
 import pkg from '../../../package.json';
 import { messageOf, unavailable } from '../../errors.ts';
+import { openAiCacheLife } from '../../prompt-cache.ts';
 import type { SpawnedChild } from '../../procs.ts';
 import { profileFor, resolveExecutable } from '../../providers/loader.ts';
 import type { QuestionAsk, TurnContext } from '../types.ts';
@@ -11,10 +12,11 @@ import {
   modelOf,
   optionsOf,
   questionTextOf,
+  servedOf,
   textOf,
   toolViewOf,
 } from './mapping.ts';
-import type { CodexItem, CodexQuestion, CodexTokenUsage, CodexTurnError, CodexTurnRecord, Timer } from './protocol.ts';
+import type { CodexItem, CodexQuestion, CodexThreadOpened, CodexTokenUsage, CodexTurnError, CodexTurnRecord, Timer } from './protocol.ts';
 import {
   CLIENT_NAME,
   COMMAND_TOOL_NAME,
@@ -44,6 +46,8 @@ export class CodexSession {
 
   /** The Codex thread id: what `ctx.sessionId` stores and `thread/resume` takes. */
   private threadId: string | null = null;
+  /** What `thread/start` or `thread/resume` said it runs on, for the prompt cache lifetime. */
+  private served: { model: string | null; provider: string | null } = { model: null, provider: null };
   private lastStderr = '';
   private exitCode: number | null = null;
   private exited: Promise<number | null> | null = null;
@@ -172,6 +176,9 @@ export class CodexSession {
 
     await turn.finished;
     this.current = null;
+    // Only OpenAI's own endpoint has a published lifetime; Codex never sends a
+    // retention option, so the default for the model applies.
+    if (this.served.provider === 'openai') turn.cacheLife = openAiCacheLife(modelOf(ctx) ?? this.served.model);
     this.endTurn(turn, turn.isStopped);
   }
 
@@ -225,7 +232,7 @@ export class CodexSession {
     const policy = MODE_POLICY[ctx.thread.permissionMode];
     const model = modelOf(ctx);
     if (ctx.sessionId !== null) {
-      const resumed = await rpc.request<{ thread: { id: string } }>('thread/resume', {
+      const resumed = await rpc.request<CodexThreadOpened>('thread/resume', {
         threadId: ctx.sessionId,
         cwd: ctx.thread.cwd,
         approvalPolicy: policy.approvalPolicy,
@@ -235,10 +242,11 @@ export class CodexSession {
         excludeTurns: true,
       });
       this.threadId = resumed.thread.id;
+      this.served = servedOf(resumed);
       return;
     }
 
-    const created = await rpc.request<{ thread: { id: string } }>('thread/start', {
+    const created = await rpc.request<CodexThreadOpened>('thread/start', {
       config: { 'tools.update_plan.enabled': true },
       cwd: ctx.thread.cwd,
       approvalPolicy: policy.approvalPolicy,
@@ -246,6 +254,7 @@ export class CodexSession {
       ...(model === null ? {} : { model }),
     });
     this.threadId = created.thread.id;
+    this.served = servedOf(created);
   }
 
   private watch(child: SpawnedChild, ctx: TurnContext, rpc: CodexRpc): void {

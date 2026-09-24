@@ -27,7 +27,7 @@ one stays open, which the nightly reservation and a manual release rely on.
 | Change | Checks |
 | --- | --- |
 | Markdown docs, license, security policy, code of conduct, issue and pull request templates, CODEOWNERS, labeler rules, topics | Local documentation links and CI decision tests |
-| Shell files or end-to-end tests | Windows shell tests, installer build and full end-to-end suite; Linux/macOS shell builds and Rust tests |
+| Shell files or end-to-end tests | Windows shell tests, installer build and full end-to-end suite; Linux x64 and macOS ARM64 shell builds and Rust tests |
 | Dockerfile, .dockerignore, docker/ | Docker smoke tests on native x64 and ARM64 |
 | UI files | Type checks, UI tests, desktop checks and Docker smoke tests |
 | Core, contracts, dependencies, shared build files, workflows, unknown paths | All checks, including core tests on Windows, Linux and macOS |
@@ -36,6 +36,15 @@ one stays open, which the nightly reservation and a manual release rely on.
 
 Pull requests against any branch run CI. A newer commit cancels an older run of
 that same PR. New main commits also cancel superseded ordinary CI runs.
+
+`scripts/ci/changes.ts` picks a mode besides the affected checks. A pull request
+(`pr`) runs the portable desktop checks on Linux x64 and macOS ARM64 only. The
+push on main that follows a merge (`warm`) skips the core tests and the Windows
+end-to-end suite the pull request already passed. It still builds every
+affected job, runs the Rust tests and the portable checks on all four
+platforms, Linux ARM64 and macOS x64 included, and saves the caches pull
+requests restore. A tag, a release, a nightly and a manual run (`full`) run
+everything.
 Release and publication jobs finish instead of being interrupted
 halfway through an upload. Live-provider tests stay disabled.
 
@@ -45,35 +54,56 @@ The Debian install, extracted AppImage and signed macOS bundle each run the smok
 test, which checks core startup, bundled UI serving, authenticated RPC and an
 echo turn with a fresh data directory. It does not exercise native desktop controls.
 The WebView2 shell end-to-end suite remains Windows-only.
-Portable desktop checks run on x64 and ARM64 for both Linux and macOS.
+Portable desktop checks run on x64 and ARM64 for both Linux and macOS, the
+second architecture of each only after a merge and on a release.
 
 ## Build cost
 
+Caches are saved from main only: Cargo, Vitest and Docker BuildKit. GitHub
+lets a pull request read main's caches but scopes what it saves to that pull
+request, and a repository keeps 10 GB. When every pull request saved its own
+copies, 13.5 GB were active on 2026-09-22 and the eviction had removed main's
+Windows Cargo cache and both Linux ones, so the Windows job rebuilt the whole
+shell on every run.
+
 Bun uses `packageManager` in the root manifest. Installs use the frozen lockfile
-and cache the download store separately per OS and architecture. The UI tests
+without a cached download store: its 200 to 350 MB per platform took a quarter
+of the cache, and an install without it was no slower (the whole setup step on
+macOS ARM64, 2026-09-22: 8 s on a miss, 10 s on a hit). The UI tests
 use at most eight workers and persist transformed modules in Vitest's disk cache.
 The cache key includes the lockfile and the Svelte and Vitest configuration;
 Vitest validates individual source files when loading cached transforms.
 
 The Windows job builds the installer and runs Rust tests in the release profile,
-sharing compiled dependencies. Successful jobs save Cargo caches for PRs as well
-as main, under a release-specific key. Failed or interrupted jobs do not save an
-incomplete cache that GitHub would keep immutable. GitHub scopes PR caches to
-their merge ref.
+sharing compiled dependencies. Successful main jobs save Cargo caches under a
+release-specific key. Failed or interrupted jobs do not save an incomplete cache
+that GitHub would keep immutable.
 It builds the installer once, then copies the existing sidecar beside the shell
 for end-to-end testing. It does not recompile the core just to stage it again.
 The tested installer becomes the release artifact, with no second release build.
 CI sets `BOITE_E2E_PREBUILT_UI=1` to test the UI already built for that installer.
 The test refuses a missing UI build. Local end-to-end runs rebuild it by default.
-Fake UI tests share `startUi` and its test bundle. Tests that import source
-modules pass `{ sourceModules: true }`; their dev server warms the entry and
-fake-client import graphs during setup, before the browser navigation deadline.
+The suite runs on three `bun test --parallel` workers: every file takes its own
+ports, data directory and browser profile. `tests/e2e/lib/warm.ts` runs first.
+It optimizes Vite's dependencies once, since on a fresh checkout each dev
+server would otherwise empty `packages/ui/node_modules/.vite` under the
+servers of the other workers. It also builds the fake-client bundle that
+`BOITE_E2E_FAKE_UI` hands to every worker. Warming under a `NODE_ENV` other
+than `test`, the one `bun test` sets, changes Vite's config hash and brings the
+race back. Every dev server still transforms the UI sources itself, so hooks
+that start one allow at least 60 s: with three workers busy, `composer-activity`
+took more than 30 s to open its page on 2026-09-22.
+Fake UI tests share `startUi` and the warmed test bundle. Tests that import source
+modules pass `{ sourceModules: true }`, bypassing both `BOITE_E2E_FAKE_UI` and
+the prebuilt fixture. Their dev server warms the entry and fake-client import
+graphs during setup, before the browser navigation deadline. The header and
+harness-update setup hooks allow 120 s for this preparation.
 
 When Cargo uses a shared target directory, staging snapshots its shell into the
 checkout before the tests. Another checkout's later build cannot replace it.
 
 Docker builds on native x64 and ARM64 runners. Each architecture has its own
-BuildKit cache. Dependency manifests are copied before source files, so a core
+BuildKit cache, written from main only. Dependency manifests are copied before source files, so a core
 change does not reinstall agent CLIs. Publication pushes the image that passed
 the smoke test and combines both digests into one multi-platform tag.
 
@@ -136,8 +166,9 @@ must be pinned to a full commit SHA; the repository setting refuses a tag.
 
 Dependabot updates the Bun workspace, the agent CLIs in `docker/agents`, the
 shell's Cargo dependencies, the Docker base image and the workflow actions
-weekly. Workspace minor and patch updates share one pull request; each major
-update gets its own.
+weekly. The actions, the agent CLIs and the Cargo dependencies share one pull
+request, the `weekly` multi-ecosystem group. Workspace minor and patch updates
+share another; each workspace major update gets its own.
 
 The `labeler` workflow labels pull requests by path with `core`, `ui`, `shell`,
 `server`, `ci` and `documentation`, following `.github/labeler.yml`. It runs on

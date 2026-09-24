@@ -118,7 +118,14 @@ export interface TurnResult {
   sessionId: string | null;
   usage: Usage | null;
   error?: string;
+  /**
+   * The lifetime of the prompt cache this turn left, when the driver knows it.
+   * The core stamps the time, the model and the account; see `PromptCache`.
+   */
+  promptCache?: PromptCacheLife | null;
 }
+
+export type PromptCacheLife = Pick<import('@boite/contracts').PromptCache, 'ttlSeconds' | 'maxSeconds' | 'source'>;
 
 export interface TurnHandle {
   done: Promise<TurnResult>;
