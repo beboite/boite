@@ -92,8 +92,8 @@ live('both engines use an owned Edge browser, real public pages, recover after a
         // Navigation commitment is observed explicitly rather than a fixed sleep.
         const deadline = Date.now() + 15_000;
         let url = '';
-        do { url = String((await engine.command('evaluate', { script: 'location.href' })).result); if (url.includes('iana.org')) break; await Bun.sleep(50); } while (Date.now() < deadline);
-        expect(url).toContain('iana.org');
+        do { url = String((await engine.command('evaluate', { script: 'location.href' })).result); if (/(^|\.)iana\.org$/.test(new URL(url).hostname)) break; await Bun.sleep(50); } while (Date.now() < deadline);
+        expect(new URL(url).hostname).toMatch(/(^|\.)iana\.org$/);
         await engine.command('back');
         const tabs = await engine.command('tabs');
         expect(Array.isArray(tabs.tabs)).toBe(true);
