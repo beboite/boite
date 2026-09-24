@@ -23,6 +23,7 @@
     "check:architecture": "bun scripts/architecture/check.ts",
     "audit:complexity": "bun scripts/architecture/complexity.ts",
     "check": "bun run check:architecture && bun run --cwd packages/contracts check && bun run --cwd packages/core check && bun run --cwd packages/ui check && bun run check:e2e",
+    "check:translations": "bun scripts/ci/translations.ts --release",
     "check:e2e": "bun run --cwd packages/core tsc -p ../../tests/e2e/tsconfig.json",
     "test": "bun run --cwd packages/core test && bun run --cwd packages/ui test",
     "test:shell": "cargo test --manifest-path apps/shell/src-tauri/Cargo.toml --lib",

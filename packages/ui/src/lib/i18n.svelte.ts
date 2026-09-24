@@ -3,8 +3,10 @@
  *
  * `lib/strings.en.ts` is English: the catalogue every other language mirrors,
  * the default, and the fallback for a key a translation has not got yet.
- * `lib/strings.fr.ts` is French, typed against that catalogue, so a key added
- * on one side fails `svelte-check` until the other side has it.
+ * `lib/strings.fr.ts` is French, typed against that catalogue: a key English
+ * lacks, or a value of another shape, fails `svelte-check`. A sentence French
+ * has not got yet is allowed and shows in English; `scripts/ci/translations.ts
+ * --release` refuses a release until every language has every sentence.
  *
  * The choice lives on the device under `boite.locale`, the way the theme and
  * the accent do: it is what this screen reads, not something the core knows.
@@ -39,6 +41,16 @@ type Widen<T> = T extends string
     ? readonly Widen<U>[]
     : { readonly [K in keyof T]: Widen<T[K]> };
 
+/**
+ * A translation: the catalogue's shape with any sentence still missing. A list
+ * (the accent names) is translated whole or not at all.
+ */
+export type Translation = Draft<Messages>;
+
+type Draft<T> = T extends string | ((...args: never[]) => unknown) | readonly unknown[]
+  ? T
+  : { readonly [K in keyof T]?: Draft<T[K]> };
+
 export type Locale = 'en' | 'fr';
 
 /** What the setting holds: a language, or `system` to follow the machine. */
@@ -51,7 +63,7 @@ export const DEFAULT_LOCALE: Locale = 'en';
 
 export const LOCALES: readonly Locale[] = ['en', 'fr'];
 
-const CATALOGUES: Record<Locale, Messages> = { en, fr };
+const CATALOGUES: Record<Locale, Translation> = { en, fr };
 
 export function isLocale(value: unknown): value is Locale {
   return typeof value === 'string' && (LOCALES as readonly string[]).includes(value);

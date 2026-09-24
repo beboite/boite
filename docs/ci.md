@@ -19,6 +19,12 @@ for documentation-only changes. Runtime dependency cycles and forbidden
 cross-package imports fail before the build matrix starts. The advisory
 complexity report does not impose a numeric merge threshold.
 
+The changes job runs `scripts/ci/translations.ts` too. A UI sentence that
+exists in English and not yet in another language is a warning there, with its
+path, and does not block a merge or a nightly. The release workflow runs the
+same script with `--release` in its version job, before any build, and a
+missing sentence fails it ([language.md](language.md)).
+
 The `release tags` ruleset keeps `v*` tags from being moved or deleted. Creating
 one stays open, which the nightly reservation and a manual release rely on.
 

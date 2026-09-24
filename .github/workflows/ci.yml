@@ -62,6 +62,8 @@ jobs:
         run: bun scripts/ci/changes.ts
       - run: bun scripts/check-docs.ts
       - run: bun test scripts/ci
+      # Missing sentences are warnings here and in the nightly; release.yml refuses them.
+      - run: bun scripts/ci/translations.ts
       - run: bun run check:architecture
       - run: bun test scripts/architecture
       - name: Validate workflows

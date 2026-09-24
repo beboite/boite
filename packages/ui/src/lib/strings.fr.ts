@@ -1,15 +1,17 @@
 /*
  * Le catalogue français, calqué sur `strings.en.ts`.
  *
- * Le type vient de l'anglais : une clé ajoutée là-bas et pas ici arrête
- * `svelte-check`, et une clé qui manquerait quand même s'affiche en anglais
- * plutôt qu'en chemin pointé (`lib/i18n.svelte.ts`). Les accolades sont des
- * emplacements remplis par `fill`, leur nom ne se traduit pas.
+ * Le type vient de l'anglais : une clé inconnue de l'anglais arrête
+ * `svelte-check`. Une phrase pas encore traduite peut manquer ici, elle
+ * s'affiche alors en anglais (`lib/i18n.svelte.ts`) et passe en nightly, mais
+ * `scripts/ci/translations.ts --release` bloque la release tant qu'elle manque.
+ * Les accolades sont des emplacements remplis par `fill`, leur nom ne se
+ * traduit pas.
  */
 
-import type { Messages } from './i18n.svelte';
+import type { Translation } from './i18n.svelte';
 
-export const fr: Messages = {
+export const fr: Translation = {
   agents: {
     runtime: "Modèles et limites",
     brain: "Cerveau",
