@@ -1,0 +1,2851 @@
+{
+  "date": "2026-09-24",
+  "frozenCommit": "2fce81f",
+  "productionLoopSha256": "45f273f000b16933737083675126e39203cdf127a830198bd4c72f67d2151ba4",
+  "frozenManifestSha256": "d7ab724bb84740a5fc8b5f1a436224c2f986653b91a927c620efe66482af129d",
+  "correctedManifestSha256": "7d7b2230547c380024b51ecff3000dd9a983228793b8b7151a9888b5626cb27d",
+  "model": "jev-1.13.0",
+  "driver": "agent-browser 0.37.1 native JSONL",
+  "protocol": {
+    "tasks": 30,
+    "domains": 23,
+    "repetitions": 3,
+    "maxSteps": 30,
+    "timeoutMs": 120000,
+    "viewport": {
+      "width": 1280,
+      "height": 800
+    },
+    "loggedOut": true
+  },
+  "counts": {
+    "original": 90,
+    "originalVerified": 38,
+    "invalidCriteria": 6,
+    "valid": 84,
+    "validVerified": 38,
+    "independentGraderPassed": 41,
+    "falseSuccesses": 0,
+    "corrected": 6,
+    "correctedVerified": 6,
+    "recorded": 6
+  },
+  "successfulExecutionMs": {
+    "min": 488.6589000000022,
+    "median": 1402.6118499999866,
+    "max": 3587.1256000000285
+  },
+  "successfulTotalMs": {
+    "min": 2033.5402000000176,
+    "median": 3383.7736499999883,
+    "max": 5427.888600000006
+  },
+  "failedTotalMs": {
+    "min": 2029.1412000000128,
+    "median": 2758.6867500000044,
+    "max": 42297.47389999998
+  },
+  "inputTokens": 1751748,
+  "modelCalls": 391,
+  "invalidCriteria": {
+    "commons-lunar-images": "Wrong heading and exact URL omitted type=image; all original runs reached the requested image results.",
+    "openlibrary-hobbit": "Expected author initials included spaces absent from the actual rendered author name; all original runs reached matching search results."
+  },
+  "original": [
+    {
+      "task": "wikipedia-hopper",
+      "site": "Wikipedia",
+      "category": "search",
+      "run": 1,
+      "status": "succeeded",
+      "verified": true,
+      "grading": {
+        "checks": [
+          true,
+          true
+        ],
+        "sameOrigin": true,
+        "acted": true,
+        "passed": true
+      },
+      "message": "The requested completion text and URL, when supplied, were observed.",
+      "startupMs": 1943.9463,
+      "executionMs": 2025.7491,
+      "totalMs": 3969.6954,
+      "cleanupMs": 270.0823999999993,
+      "calls": 3,
+      "inputTokens": 17886,
+      "actions": 2,
+      "finalUrl": "https://en.wikipedia.org/wiki/Grace_Hopper",
+      "processesAfter": 0
+    },
+    {
+      "task": "wikipedia-history",
+      "site": "Wikipedia",
+      "category": "history-navigation",
+      "run": 1,
+      "status": "needs-agent",
+      "verified": false,
+      "grading": {
+        "checks": [
+          false,
+          false
+        ],
+        "sameOrigin": true,
+        "acted": false,
+        "passed": false
+      },
+      "message": "Jev reported completion, but the requested evidence is absent.",
+      "startupMs": 1735.652,
+      "executionMs": 685.3921,
+      "totalMs": 2421.0441,
+      "cleanupMs": 259.54039999999986,
+      "calls": 1,
+      "inputTokens": 5780,
+      "actions": 0,
+      "finalUrl": "https://en.wikipedia.org/wiki/Alan_Turing",
+      "processesAfter": 0
+    },
+    {
+      "task": "mdn-tosorted",
+      "site": "MDN",
+      "category": "documentation-search",
+      "run": 1,
+      "status": "succeeded",
+      "verified": true,
+      "grading": {
+        "checks": [
+          true,
+          true
+        ],
+        "sameOrigin": true,
+        "acted": true,
+        "passed": true
+      },
+      "message": "The requested completion text and URL, when supplied, were observed.",
+      "startupMs": 1662.7104000000008,
+      "executionMs": 1262.7453999999998,
+      "totalMs": 2925.4558000000006,
+      "cleanupMs": 318.4764000000014,
+      "calls": 3,
+      "inputTokens": 8961,
+      "actions": 3,
+      "finalUrl": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/toSorted",
+      "processesAfter": 0
+    },
+    {
+      "task": "mdn-array-french",
+      "site": "MDN",
+      "category": "language",
+      "run": 1,
+      "status": "succeeded",
+      "verified": true,
+      "grading": {
+        "checks": [
+          true,
+          true
+        ],
+        "sameOrigin": true,
+        "acted": true,
+        "passed": true
+      },
+      "message": "The requested completion text and URL, when supplied, were observed.",
+      "startupMs": 1677.0077999999994,
+      "executionMs": 2431.4927000000007,
+      "totalMs": 4108.5005,
+      "cleanupMs": 321.91319999999905,
+      "calls": 2,
+      "inputTokens": 11099,
+      "actions": 2,
+      "finalUrl": "https://developer.mozilla.org/fr/docs/Web/JavaScript/Reference/Global_Objects/Array",
+      "processesAfter": 0
+    },
+    {
+      "task": "python-pathlib",
+      "site": "Python documentation",
+      "category": "documentation-search",
+      "run": 1,
+      "status": "succeeded",
+      "verified": true,
+      "grading": {
+        "checks": [
+          true,
+          true
+        ],
+        "sameOrigin": true,
+        "acted": true,
+        "passed": true
+      },
+      "message": "The requested completion text and URL, when supplied, were observed.",
+      "startupMs": 1555.3280000000013,
+      "executionMs": 2359.5760999999984,
+      "totalMs": 3914.9040999999997,
+      "cleanupMs": 269.1650000000009,
+      "calls": 6,
+      "inputTokens": 29690,
+      "actions": 3,
+      "finalUrl": "https://docs.python.org/3/library/pathlib.html",
+      "processesAfter": 0
+    },
+    {
+      "task": "python-json-french",
+      "site": "Python documentation",
+      "category": "language",
+      "run": 1,
+      "status": "needs-agent",
+      "verified": false,
+      "grading": {
+        "checks": [
+          false,
+          false
+        ],
+        "sameOrigin": true,
+        "acted": false,
+        "passed": false
+      },
+      "message": "The browser action did not confirm its outcome. It was not retried.",
+      "startupMs": 1703.6398999999983,
+      "executionMs": 454.80059999999867,
+      "totalMs": 2158.440499999997,
+      "cleanupMs": 258.55049999999756,
+      "calls": 1,
+      "inputTokens": 5997,
+      "actions": 0,
+      "finalUrl": "https://docs.python.org/3/library/json.html",
+      "processesAfter": 0
+    },
+    {
+      "task": "rust-borrowing",
+      "site": "The Rust Book",
+      "category": "documentation-navigation",
+      "run": 1,
+      "status": "succeeded",
+      "verified": true,
+      "grading": {
+        "checks": [
+          true,
+          true
+        ],
+        "sameOrigin": true,
+        "acted": true,
+        "passed": true
+      },
+      "message": "The requested completion text and URL, when supplied, were observed.",
+      "startupMs": 1628.3633999999984,
+      "executionMs": 488.6589000000022,
+      "totalMs": 2117.0223000000005,
+      "cleanupMs": 319.83480000000054,
+      "calls": 1,
+      "inputTokens": 6629,
+      "actions": 1,
+      "finalUrl": "https://doc.rust-lang.org/book/ch04-02-references-and-borrowing.html",
+      "processesAfter": 0
+    },
+    {
+      "task": "go-effective-maps",
+      "site": "Go documentation",
+      "category": "section-navigation",
+      "run": 1,
+      "status": "needs-agent",
+      "verified": false,
+      "grading": {
+        "checks": [
+          false,
+          false
+        ],
+        "sameOrigin": true,
+        "acted": true,
+        "passed": false
+      },
+      "message": "Jev reported completion, but the requested evidence is absent.",
+      "startupMs": 2061.7068,
+      "executionMs": 1284.5750999999982,
+      "totalMs": 3346.281899999998,
+      "cleanupMs": 374.10609999999724,
+      "calls": 3,
+      "inputTokens": 17400,
+      "actions": 2,
+      "finalUrl": "https://go.dev/doc/#effective_go",
+      "processesAfter": 0
+    },
+    {
+      "task": "npm-zod",
+      "site": "npm",
+      "category": "package-search",
+      "run": 1,
+      "status": "error",
+      "verified": false,
+      "message": "The browser or Jev request failed. No action was retried.",
+      "startupMs": 1866.7910999999986,
+      "executionMs": 11609.4381,
+      "totalMs": 13476.229199999998,
+      "cleanupMs": 176.30779999999504,
+      "calls": 4,
+      "inputTokens": 3548,
+      "actions": 1,
+      "processesAfter": 0
+    },
+    {
+      "task": "crates-serde",
+      "site": "crates.io",
+      "category": "package-search",
+      "run": 1,
+      "status": "succeeded",
+      "verified": true,
+      "grading": {
+        "checks": [
+          true,
+          true
+        ],
+        "sameOrigin": true,
+        "acted": true,
+        "passed": true
+      },
+      "message": "The requested completion text and URL, when supplied, were observed.",
+      "startupMs": 1906.1290000000008,
+      "executionMs": 2227.7883,
+      "totalMs": 4133.917300000001,
+      "cleanupMs": 317.53719999999885,
+      "calls": 6,
+      "inputTokens": 20328,
+      "actions": 3,
+      "finalUrl": "https://crates.io/crates/serde",
+      "processesAfter": 0
+    },
+    {
+      "task": "pypi-httpx",
+      "site": "PyPI",
+      "category": "package-search",
+      "run": 1,
+      "status": "needs-agent",
+      "verified": false,
+      "grading": {
+        "checks": [
+          false,
+          false
+        ],
+        "sameOrigin": true,
+        "acted": true,
+        "passed": false
+      },
+      "message": "Jev handed the task back to the main agent.",
+      "startupMs": 1552.1430000000037,
+      "executionMs": 1169.5282000000007,
+      "totalMs": 2721.6712000000043,
+      "cleanupMs": 259.7974000000031,
+      "calls": 3,
+      "inputTokens": 7222,
+      "actions": 2,
+      "finalUrl": "https://pypi.org/search/?q=httpx",
+      "processesAfter": 0
+    },
+    {
+      "task": "gutenberg-pride",
+      "site": "Project Gutenberg",
+      "category": "catalog-search",
+      "run": 1,
+      "status": "succeeded",
+      "verified": true,
+      "grading": {
+        "checks": [
+          true,
+          true
+        ],
+        "sameOrigin": true,
+        "acted": true,
+        "passed": true
+      },
+      "message": "The requested completion text and URL, when supplied, were observed.",
+      "startupMs": 2243.0434999999998,
+      "executionMs": 1193.7454999999973,
+      "totalMs": 3436.788999999997,
+      "cleanupMs": 311.15269999999873,
+      "calls": 3,
+      "inputTokens": 11677,
+      "actions": 3,
+      "finalUrl": "https://www.gutenberg.org/ebooks/1342",
+      "processesAfter": 0
+    },
+    {
+      "task": "gutenberg-austen-page-two",
+      "site": "Project Gutenberg",
+      "category": "search-pagination",
+      "run": 1,
+      "status": "needs-agent",
+      "verified": false,
+      "grading": {
+        "checks": [
+          false,
+          false
+        ],
+        "sameOrigin": true,
+        "acted": true,
+        "passed": false
+      },
+      "message": "Jev reported completion, but the requested evidence is absent.",
+      "startupMs": 2119.5659000000014,
+      "executionMs": 1813.105300000003,
+      "totalMs": 3932.6712000000043,
+      "cleanupMs": 268.1933000000063,
+      "calls": 3,
+      "inputTokens": 13998,
+      "actions": 2,
+      "finalUrl": "https://www.gutenberg.org/ebooks/results/",
+      "processesAfter": 0
+    },
+    {
+      "task": "standardebooks-frankenstein",
+      "site": "Standard Ebooks",
+      "category": "catalog-search",
+      "run": 1,
+      "status": "succeeded",
+      "verified": true,
+      "grading": {
+        "checks": [
+          true,
+          true
+        ],
+        "sameOrigin": true,
+        "acted": true,
+        "passed": true
+      },
+      "message": "The requested completion text and URL, when supplied, were observed.",
+      "startupMs": 1756.612000000001,
+      "executionMs": 1231.2425999999978,
+      "totalMs": 2987.8545999999988,
+      "cleanupMs": 309.08380000000034,
+      "calls": 3,
+      "inputTokens": 9513,
+      "actions": 3,
+      "finalUrl": "https://standardebooks.org/ebooks/mary-shelley/frankenstein",
+      "processesAfter": 0
+    },
+    {
+      "task": "openlibrary-hobbit",
+      "site": "Open Library",
+      "category": "catalog-search",
+      "run": 1,
+      "status": "needs-agent",
+      "verified": false,
+      "grading": {
+        "checks": [
+          true,
+          true,
+          false
+        ],
+        "sameOrigin": true,
+        "acted": true,
+        "passed": false
+      },
+      "message": "Jev reported completion, but the requested evidence is absent.",
+      "startupMs": 2927.431199999999,
+      "executionMs": 4019.0774999999994,
+      "totalMs": 6946.5086999999985,
+      "cleanupMs": 385.9195000000036,
+      "calls": 7,
+      "inputTokens": 37285,
+      "actions": 3,
+      "finalUrl": "https://openlibrary.org/search?q=The+Hobbit",
+      "processesAfter": 0
+    },
+    {
+      "task": "archive-voynich",
+      "site": "Internet Archive",
+      "category": "media-search",
+      "run": 1,
+      "status": "needs-agent",
+      "verified": false,
+      "grading": {
+        "checks": [
+          false,
+          false
+        ],
+        "sameOrigin": true,
+        "acted": false,
+        "passed": false
+      },
+      "message": "Jev reported completion, but the requested evidence is absent.",
+      "startupMs": 2407.9323000000004,
+      "executionMs": 279.4814000000042,
+      "totalMs": 2687.4137000000046,
+      "cleanupMs": 263.79469999999856,
+      "calls": 1,
+      "inputTokens": 1350,
+      "actions": 0,
+      "finalUrl": "https://archive.org/",
+      "processesAfter": 0
+    },
+    {
+      "task": "commons-lunar-images",
+      "site": "Wikimedia Commons",
+      "category": "media-search",
+      "run": 1,
+      "status": "needs-agent",
+      "verified": false,
+      "grading": {
+        "checks": [
+          true,
+          true
+        ],
+        "sameOrigin": true,
+        "acted": true,
+        "passed": true
+      },
+      "message": "Jev reported completion, but the requested evidence is absent.",
+      "startupMs": 1783.1805999999924,
+      "executionMs": 3051.4637000000075,
+      "totalMs": 4834.6443,
+      "cleanupMs": 370.76819999999134,
+      "calls": 5,
+      "inputTokens": 26131,
+      "actions": 2,
+      "finalUrl": "https://commons.wikimedia.org/w/index.php?search=Lunar+eclipse&title=Special%3AMediaSearch&type=image",
+      "processesAfter": 0
+    },
+    {
+      "task": "nasa-euclid-search",
+      "site": "NASA",
+      "category": "site-search",
+      "run": 1,
+      "status": "needs-agent",
+      "verified": false,
+      "grading": {
+        "checks": [
+          false,
+          false
+        ],
+        "sameOrigin": true,
+        "acted": false,
+        "passed": false
+      },
+      "message": "Jev reported completion, but the requested evidence is absent.",
+      "startupMs": 1866.3693000000058,
+      "executionMs": 337.7765999999974,
+      "totalMs": 2204.145900000003,
+      "cleanupMs": 265.1672000000108,
+      "calls": 1,
+      "inputTokens": 4536,
+      "actions": 0,
+      "finalUrl": "https://www.nasa.gov/",
+      "processesAfter": 0
+    },
+    {
+      "task": "esa-euclid",
+      "site": "European Space Agency",
+      "category": "site-search",
+      "run": 1,
+      "status": "succeeded",
+      "verified": true,
+      "grading": {
+        "checks": [
+          true,
+          true
+        ],
+        "sameOrigin": true,
+        "acted": true,
+        "passed": true
+      },
+      "message": "The requested completion text and URL, when supplied, were observed.",
+      "startupMs": 1669.1983000000037,
+      "executionMs": 2290.7108000000007,
+      "totalMs": 3959.9091000000044,
+      "cleanupMs": 329.22960000000603,
+      "calls": 4,
+      "inputTokens": 17209,
+      "actions": 4,
+      "finalUrl": "https://www.esa.int/Science_Exploration/Space_Science/Euclid",
+      "processesAfter": 0
+    },
+    {
+      "task": "nhs-hay-fever",
+      "site": "NHS",
+      "category": "site-search",
+      "run": 1,
+      "status": "succeeded",
+      "verified": true,
+      "grading": {
+        "checks": [
+          true,
+          true
+        ],
+        "sameOrigin": true,
+        "acted": true,
+        "passed": true
+      },
+      "message": "The requested completion text and URL, when supplied, were observed.",
+      "startupMs": 1762.8940000000002,
+      "executionMs": 1222.642599999992,
+      "totalMs": 2985.536599999992,
+      "cleanupMs": 319.10109999999986,
+      "calls": 3,
+      "inputTokens": 8211,
+      "actions": 3,
+      "finalUrl": "https://www.nhs.uk/conditions/hay-fever/",
+      "processesAfter": 0
+    },
+    {
+      "task": "who-physical-activity-french",
+      "site": "World Health Organization",
+      "category": "language",
+      "run": 1,
+      "status": "needs-agent",
+      "verified": false,
+      "grading": {
+        "checks": [
+          true,
+          false
+        ],
+        "sameOrigin": true,
+        "acted": true,
+        "passed": false
+      },
+      "message": "The browser action did not confirm its outcome. It was not retried.",
+      "startupMs": 2297.6512999999977,
+      "executionMs": 366.52969999999914,
+      "totalMs": 2664.180999999997,
+      "cleanupMs": 318.1823000000004,
+      "calls": 1,
+      "inputTokens": 4715,
+      "actions": 1,
+      "finalUrl": "https://www.who.int/fr/news-room/fact-sheets/detail/physical-activity",
+      "processesAfter": 0
+    },
+    {
+      "task": "timeanddate-leap-duration",
+      "site": "timeanddate",
+      "category": "date-calculator",
+      "run": 1,
+      "status": "needs-agent",
+      "verified": false,
+      "grading": {
+        "checks": [
+          false,
+          false
+        ],
+        "sameOrigin": true,
+        "acted": false,
+        "passed": false
+      },
+      "message": "Jev reported completion, but the requested evidence is absent.",
+      "startupMs": 2127.9335000000137,
+      "executionMs": 353.27099999999336,
+      "totalMs": 2481.204500000007,
+      "cleanupMs": 312.4198000000033,
+      "calls": 1,
+      "inputTokens": 694,
+      "actions": 0,
+      "finalUrl": "https://www.timeanddate.com/date/duration.html",
+      "processesAfter": 0
+    },
+    {
+      "task": "timeanddate-calendar",
+      "site": "timeanddate",
+      "category": "calendar-options",
+      "run": 1,
+      "status": "needs-agent",
+      "verified": false,
+      "grading": {
+        "checks": [
+          false,
+          false
+        ],
+        "sameOrigin": true,
+        "acted": false,
+        "passed": false
+      },
+      "message": "Jev handed the task back to the main agent.",
+      "startupMs": 1906.9162999999971,
+      "executionMs": 274.26280000001134,
+      "totalMs": 2181.1791000000085,
+      "cleanupMs": 312.8249999999971,
+      "calls": 1,
+      "inputTokens": 688,
+      "actions": 0,
+      "finalUrl": "https://www.timeanddate.com/calendar/",
+      "processesAfter": 0
+    },
+    {
+      "task": "calculatornet-bmi",
+      "site": "Calculator.net",
+      "category": "calculator-tabs",
+      "run": 1,
+      "status": "needs-agent",
+      "verified": false,
+      "grading": {
+        "checks": [
+          false,
+          false,
+          true,
+          false,
+          true,
+          true
+        ],
+        "sameOrigin": true,
+        "acted": true,
+        "passed": false
+      },
+      "message": "Jev reported completion, but the requested evidence is absent.",
+      "startupMs": 1839.8551000000007,
+      "executionMs": 2125.152199999997,
+      "totalMs": 3965.0072999999975,
+      "cleanupMs": 269.13099999999395,
+      "calls": 6,
+      "inputTokens": 20105,
+      "actions": 5,
+      "finalUrl": "https://www.calculator.net/bmi-calculator.html?cage=75&csex=m&cheightfeet=5&cheightinch=10&cpound=160&cheightmeter=180&ckg=65&printit=0&ctype=metric&x=Calculate",
+      "processesAfter": 0
+    },
+    {
+      "task": "calculatornet-percent",
+      "site": "Calculator.net",
+      "category": "calculator",
+      "run": 1,
+      "status": "needs-agent",
+      "verified": false,
+      "grading": {
+        "checks": [
+          false,
+          false,
+          false
+        ],
+        "sameOrigin": true,
+        "acted": true,
+        "passed": false
+      },
+      "message": "Jev reported completion, but the requested evidence is absent.",
+      "startupMs": 1928.636400000003,
+      "executionMs": 1278.0641999999934,
+      "totalMs": 3206.7005999999965,
+      "cleanupMs": 317.68000000000757,
+      "calls": 4,
+      "inputTokens": 14850,
+      "actions": 3,
+      "finalUrl": "https://www.calculator.net/percent-calculator.html?cpar1=240&cpar2=&cpar3=&ctype=1&x=Calculate",
+      "processesAfter": 0
+    },
+    {
+      "task": "calculatorsoup-percent",
+      "site": "CalculatorSoup",
+      "category": "calculator",
+      "run": 1,
+      "status": "succeeded",
+      "verified": true,
+      "grading": {
+        "checks": [
+          true,
+          true,
+          true
+        ],
+        "sameOrigin": true,
+        "acted": true,
+        "passed": true
+      },
+      "message": "The requested completion text and URL, when supplied, were observed.",
+      "startupMs": 2522.2926000000007,
+      "executionMs": 1266.6477000000014,
+      "totalMs": 3788.940300000002,
+      "cleanupMs": 321.88610000000335,
+      "calls": 3,
+      "inputTokens": 11361,
+      "actions": 3,
+      "finalUrl": "https://www.calculatorsoup.com/calculators/math/percentage.php",
+      "processesAfter": 0
+    },
+    {
+      "task": "unitconverters-length",
+      "site": "UnitConverters.net",
+      "category": "client-calculator",
+      "run": 1,
+      "status": "succeeded",
+      "verified": true,
+      "grading": {
+        "checks": [
+          true,
+          true
+        ],
+        "sameOrigin": true,
+        "acted": true,
+        "passed": true
+      },
+      "message": "The requested completion text and URL, when supplied, were observed.",
+      "startupMs": 1755.133600000001,
+      "executionMs": 783.4835999999923,
+      "totalMs": 2538.6171999999933,
+      "cleanupMs": 260.741399999999,
+      "calls": 2,
+      "inputTokens": 12111,
+      "actions": 2,
+      "finalUrl": "https://www.unitconverters.net/length/meters-to-feet.htm",
+      "processesAfter": 0
+    },
+    {
+      "task": "w3schools-color",
+      "site": "W3Schools",
+      "category": "client-state",
+      "run": 1,
+      "status": "needs-agent",
+      "verified": false,
+      "grading": {
+        "checks": [
+          false,
+          false
+        ],
+        "sameOrigin": true,
+        "acted": true,
+        "passed": false
+      },
+      "message": "Jev reported completion, but the requested evidence is absent.",
+      "startupMs": 1849.200800000006,
+      "executionMs": 1348.097099999999,
+      "totalMs": 3197.297900000005,
+      "cleanupMs": 312.07300000000396,
+      "calls": 3,
+      "inputTokens": 21827,
+      "actions": 2,
+      "finalUrl": "https://www.w3schools.com/colors/colors_picker.asp",
+      "processesAfter": 0
+    },
+    {
+      "task": "w3schools-startswith",
+      "site": "W3Schools",
+      "category": "reference-navigation",
+      "run": 1,
+      "status": "needs-agent",
+      "verified": false,
+      "grading": {
+        "checks": [
+          false,
+          true
+        ],
+        "sameOrigin": true,
+        "acted": true,
+        "passed": false
+      },
+      "message": "The browser action did not confirm its outcome. It was not retried.",
+      "startupMs": 1911.7516999999934,
+      "executionMs": 757.7873000000109,
+      "totalMs": 2669.5390000000043,
+      "cleanupMs": 310.9296999999933,
+      "calls": 2,
+      "inputTokens": 11806,
+      "actions": 1,
+      "finalUrl": "https://www.w3schools.com/python/python_ref_string.asp",
+      "processesAfter": 0
+    },
+    {
+      "task": "w3c-css-recommendation",
+      "site": "W3C",
+      "category": "filters-and-accordion",
+      "run": 1,
+      "status": "needs-agent",
+      "verified": false,
+      "grading": {
+        "checks": [
+          false,
+          false,
+          true
+        ],
+        "sameOrigin": true,
+        "acted": false,
+        "passed": false
+      },
+      "message": "The task reached its step limit.",
+      "startupMs": 2230.268599999996,
+      "executionMs": 39518.038499999995,
+      "totalMs": 41748.30709999999,
+      "cleanupMs": 278.7430999999924,
+      "calls": 30,
+      "inputTokens": 196953,
+      "actions": 0,
+      "finalUrl": "https://www.w3.org/TR/",
+      "processesAfter": 0
+    },
+    {
+      "task": "wikipedia-history",
+      "site": "Wikipedia",
+      "category": "history-navigation",
+      "run": 2,
+      "status": "succeeded",
+      "verified": true,
+      "grading": {
+        "checks": [
+          true,
+          true
+        ],
+        "sameOrigin": true,
+        "acted": true,
+        "passed": true
+      },
+      "message": "The requested completion text and URL, when supplied, were observed.",
+      "startupMs": 1740.4928000000073,
+      "executionMs": 1277.3355000000156,
+      "totalMs": 3017.828300000023,
+      "cleanupMs": 313.22529999999097,
+      "calls": 1,
+      "inputTokens": 5780,
+      "actions": 1,
+      "finalUrl": "https://en.wikipedia.org/w/index.php?title=Alan_Turing&action=history",
+      "processesAfter": 0
+    },
+    {
+      "task": "mdn-tosorted",
+      "site": "MDN",
+      "category": "documentation-search",
+      "run": 2,
+      "status": "succeeded",
+      "verified": true,
+      "grading": {
+        "checks": [
+          true,
+          true
+        ],
+        "sameOrigin": true,
+        "acted": true,
+        "passed": true
+      },
+      "message": "The requested completion text and URL, when supplied, were observed.",
+      "startupMs": 1572.8818000000028,
+      "executionMs": 3016.8701,
+      "totalMs": 4589.751900000003,
+      "cleanupMs": 319.9532000000181,
+      "calls": 4,
+      "inputTokens": 22634,
+      "actions": 3,
+      "finalUrl": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/toSorted",
+      "processesAfter": 0
+    },
+    {
+      "task": "mdn-array-french",
+      "site": "MDN",
+      "category": "language",
+      "run": 2,
+      "status": "succeeded",
+      "verified": true,
+      "grading": {
+        "checks": [
+          true,
+          true
+        ],
+        "sameOrigin": true,
+        "acted": true,
+        "passed": true
+      },
+      "message": "The requested completion text and URL, when supplied, were observed.",
+      "startupMs": 1727.353700000007,
+      "executionMs": 2411.1307999999844,
+      "totalMs": 4138.484499999991,
+      "cleanupMs": 335.1081000000122,
+      "calls": 2,
+      "inputTokens": 11119,
+      "actions": 2,
+      "finalUrl": "https://developer.mozilla.org/fr/docs/Web/JavaScript/Reference/Global_Objects/Array",
+      "processesAfter": 0
+    },
+    {
+      "task": "python-pathlib",
+      "site": "Python documentation",
+      "category": "documentation-search",
+      "run": 2,
+      "status": "succeeded",
+      "verified": true,
+      "grading": {
+        "checks": [
+          true,
+          true
+        ],
+        "sameOrigin": true,
+        "acted": true,
+        "passed": true
+      },
+      "message": "The requested completion text and URL, when supplied, were observed.",
+      "startupMs": 1534.181899999996,
+      "executionMs": 2549.3706999999995,
+      "totalMs": 4083.5525999999954,
+      "cleanupMs": 317.4337999999989,
+      "calls": 7,
+      "inputTokens": 32510,
+      "actions": 3,
+      "finalUrl": "https://docs.python.org/3/library/pathlib.html",
+      "processesAfter": 0
+    },
+    {
+      "task": "python-json-french",
+      "site": "Python documentation",
+      "category": "language",
+      "run": 2,
+      "status": "needs-agent",
+      "verified": false,
+      "grading": {
+        "checks": [
+          false,
+          false
+        ],
+        "sameOrigin": true,
+        "acted": false,
+        "passed": false
+      },
+      "message": "The browser action did not confirm its outcome. It was not retried.",
+      "startupMs": 1562.1536000000197,
+      "executionMs": 466.9875999999931,
+      "totalMs": 2029.1412000000128,
+      "cleanupMs": 357.663899999985,
+      "calls": 1,
+      "inputTokens": 5997,
+      "actions": 0,
+      "finalUrl": "https://docs.python.org/3/library/json.html",
+      "processesAfter": 0
+    },
+    {
+      "task": "rust-borrowing",
+      "site": "The Rust Book",
+      "category": "documentation-navigation",
+      "run": 2,
+      "status": "succeeded",
+      "verified": true,
+      "grading": {
+        "checks": [
+          true,
+          true
+        ],
+        "sameOrigin": true,
+        "acted": true,
+        "passed": true
+      },
+      "message": "The requested completion text and URL, when supplied, were observed.",
+      "startupMs": 1519.4599000000162,
+      "executionMs": 514.0803000000014,
+      "totalMs": 2033.5402000000176,
+      "cleanupMs": 259.5645000000077,
+      "calls": 1,
+      "inputTokens": 6629,
+      "actions": 1,
+      "finalUrl": "https://doc.rust-lang.org/book/ch04-02-references-and-borrowing.html",
+      "processesAfter": 0
+    },
+    {
+      "task": "go-effective-maps",
+      "site": "Go documentation",
+      "category": "section-navigation",
+      "run": 2,
+      "status": "needs-agent",
+      "verified": false,
+      "grading": {
+        "checks": [
+          false,
+          false
+        ],
+        "sameOrigin": true,
+        "acted": true,
+        "passed": false
+      },
+      "message": "Jev reported completion, but the requested evidence is absent.",
+      "startupMs": 1618.277700000006,
+      "executionMs": 1883.540800000017,
+      "totalMs": 3501.818500000023,
+      "cleanupMs": 325.2644999999902,
+      "calls": 4,
+      "inputTokens": 23160,
+      "actions": 2,
+      "finalUrl": "https://go.dev/doc/#effective_go",
+      "processesAfter": 0
+    },
+    {
+      "task": "npm-zod",
+      "site": "npm",
+      "category": "package-search",
+      "run": 2,
+      "status": "needs-agent",
+      "verified": false,
+      "grading": {
+        "checks": [
+          false,
+          false
+        ],
+        "sameOrigin": true,
+        "acted": true,
+        "passed": false
+      },
+      "message": "Jev handed the task back to the main agent.",
+      "startupMs": 1926.1095000000205,
+      "executionMs": 6137.891499999998,
+      "totalMs": 8064.001000000018,
+      "cleanupMs": 327.20209999999497,
+      "calls": 14,
+      "inputTokens": 12635,
+      "actions": 2,
+      "finalUrl": "https://www.npmjs.com/",
+      "processesAfter": 0
+    },
+    {
+      "task": "crates-serde",
+      "site": "crates.io",
+      "category": "package-search",
+      "run": 2,
+      "status": "succeeded",
+      "verified": true,
+      "grading": {
+        "checks": [
+          true,
+          true
+        ],
+        "sameOrigin": true,
+        "acted": true,
+        "passed": true
+      },
+      "message": "The requested completion text and URL, when supplied, were observed.",
+      "startupMs": 1737.1934000000183,
+      "executionMs": 2240.6551999999792,
+      "totalMs": 3977.8485999999975,
+      "cleanupMs": 320.57139999998617,
+      "calls": 6,
+      "inputTokens": 20242,
+      "actions": 3,
+      "finalUrl": "https://crates.io/crates/serde",
+      "processesAfter": 0
+    },
+    {
+      "task": "pypi-httpx",
+      "site": "PyPI",
+      "category": "package-search",
+      "run": 2,
+      "status": "needs-agent",
+      "verified": false,
+      "grading": {
+        "checks": [
+          false,
+          false
+        ],
+        "sameOrigin": true,
+        "acted": true,
+        "passed": false
+      },
+      "message": "Jev handed the task back to the main agent.",
+      "startupMs": 1526.2485999999917,
+      "executionMs": 1150.4654999999912,
+      "totalMs": 2676.714099999983,
+      "cleanupMs": 258.42049999997835,
+      "calls": 3,
+      "inputTokens": 7222,
+      "actions": 2,
+      "finalUrl": "https://pypi.org/search/?q=httpx",
+      "processesAfter": 0
+    },
+    {
+      "task": "gutenberg-pride",
+      "site": "Project Gutenberg",
+      "category": "catalog-search",
+      "run": 2,
+      "status": "succeeded",
+      "verified": true,
+      "grading": {
+        "checks": [
+          true,
+          true
+        ],
+        "sameOrigin": true,
+        "acted": true,
+        "passed": true
+      },
+      "message": "The requested completion text and URL, when supplied, were observed.",
+      "startupMs": 2082.6588000000047,
+      "executionMs": 1294.2397999999812,
+      "totalMs": 3376.898599999986,
+      "cleanupMs": 311.82829999999376,
+      "calls": 3,
+      "inputTokens": 11677,
+      "actions": 3,
+      "finalUrl": "https://www.gutenberg.org/ebooks/1342",
+      "processesAfter": 0
+    },
+    {
+      "task": "gutenberg-austen-page-two",
+      "site": "Project Gutenberg",
+      "category": "search-pagination",
+      "run": 2,
+      "status": "needs-agent",
+      "verified": false,
+      "grading": {
+        "checks": [
+          false,
+          false
+        ],
+        "sameOrigin": true,
+        "acted": true,
+        "passed": false
+      },
+      "message": "Jev reported completion, but the requested evidence is absent.",
+      "startupMs": 1951.230899999995,
+      "executionMs": 3112.0855999999912,
+      "totalMs": 5063.316499999986,
+      "cleanupMs": 264.5783999999985,
+      "calls": 5,
+      "inputTokens": 20749,
+      "actions": 2,
+      "finalUrl": "https://www.gutenberg.org/ebooks/results/",
+      "processesAfter": 0
+    },
+    {
+      "task": "standardebooks-frankenstein",
+      "site": "Standard Ebooks",
+      "category": "catalog-search",
+      "run": 2,
+      "status": "succeeded",
+      "verified": true,
+      "grading": {
+        "checks": [
+          true,
+          true
+        ],
+        "sameOrigin": true,
+        "acted": true,
+        "passed": true
+      },
+      "message": "The requested completion text and URL, when supplied, were observed.",
+      "startupMs": 2099.053199999995,
+      "executionMs": 1114.1782999999996,
+      "totalMs": 3213.2314999999944,
+      "cleanupMs": 260.465200000006,
+      "calls": 3,
+      "inputTokens": 9439,
+      "actions": 3,
+      "finalUrl": "https://standardebooks.org/ebooks/mary-shelley/frankenstein",
+      "processesAfter": 0
+    },
+    {
+      "task": "openlibrary-hobbit",
+      "site": "Open Library",
+      "category": "catalog-search",
+      "run": 2,
+      "status": "needs-agent",
+      "verified": false,
+      "grading": {
+        "checks": [
+          true,
+          true,
+          false
+        ],
+        "sameOrigin": true,
+        "acted": true,
+        "passed": false
+      },
+      "message": "Jev reported completion, but the requested evidence is absent.",
+      "startupMs": 2941.833899999998,
+      "executionMs": 2720.7075999999943,
+      "totalMs": 5662.541499999992,
+      "cleanupMs": 326.1786999999895,
+      "calls": 5,
+      "inputTokens": 24334,
+      "actions": 3,
+      "finalUrl": "https://openlibrary.org/search?q=The+Hobbit",
+      "processesAfter": 0
+    },
+    {
+      "task": "archive-voynich",
+      "site": "Internet Archive",
+      "category": "media-search",
+      "run": 2,
+      "status": "needs-agent",
+      "verified": false,
+      "grading": {
+        "checks": [
+          false,
+          false
+        ],
+        "sameOrigin": true,
+        "acted": false,
+        "passed": false
+      },
+      "message": "Jev reported completion, but the requested evidence is absent.",
+      "startupMs": 2385.123900000006,
+      "executionMs": 248.7173999999941,
+      "totalMs": 2633.8413,
+      "cleanupMs": 317.58969999998226,
+      "calls": 1,
+      "inputTokens": 1350,
+      "actions": 0,
+      "finalUrl": "https://archive.org/",
+      "processesAfter": 0
+    },
+    {
+      "task": "commons-lunar-images",
+      "site": "Wikimedia Commons",
+      "category": "media-search",
+      "run": 2,
+      "status": "needs-agent",
+      "verified": false,
+      "grading": {
+        "checks": [
+          true,
+          true
+        ],
+        "sameOrigin": true,
+        "acted": true,
+        "passed": true
+      },
+      "message": "Jev reported completion, but the requested evidence is absent.",
+      "startupMs": 1817.6833000000042,
+      "executionMs": 3237.6179999999877,
+      "totalMs": 5055.301299999992,
+      "cleanupMs": 319.9395000000077,
+      "calls": 5,
+      "inputTokens": 26131,
+      "actions": 2,
+      "finalUrl": "https://commons.wikimedia.org/w/index.php?search=Lunar+eclipse&title=Special%3AMediaSearch&type=image",
+      "processesAfter": 0
+    },
+    {
+      "task": "nasa-euclid-search",
+      "site": "NASA",
+      "category": "site-search",
+      "run": 2,
+      "status": "needs-agent",
+      "verified": false,
+      "grading": {
+        "checks": [
+          false,
+          false
+        ],
+        "sameOrigin": true,
+        "acted": false,
+        "passed": false
+      },
+      "message": "Jev reported completion, but the requested evidence is absent.",
+      "startupMs": 1765.8630999999878,
+      "executionMs": 293.30120000001625,
+      "totalMs": 2059.164300000004,
+      "cleanupMs": 312.2287999999826,
+      "calls": 1,
+      "inputTokens": 4536,
+      "actions": 0,
+      "finalUrl": "https://www.nasa.gov/",
+      "processesAfter": 0
+    },
+    {
+      "task": "esa-euclid",
+      "site": "European Space Agency",
+      "category": "site-search",
+      "run": 2,
+      "status": "succeeded",
+      "verified": true,
+      "grading": {
+        "checks": [
+          true,
+          true
+        ],
+        "sameOrigin": true,
+        "acted": true,
+        "passed": true
+      },
+      "message": "The requested completion text and URL, when supplied, were observed.",
+      "startupMs": 1640.817699999985,
+      "executionMs": 1745.7606000000087,
+      "totalMs": 3386.5782999999938,
+      "cleanupMs": 330.32070000001113,
+      "calls": 4,
+      "inputTokens": 17209,
+      "actions": 4,
+      "finalUrl": "https://www.esa.int/Science_Exploration/Space_Science/Euclid",
+      "processesAfter": 0
+    },
+    {
+      "task": "nhs-hay-fever",
+      "site": "NHS",
+      "category": "site-search",
+      "run": 2,
+      "status": "succeeded",
+      "verified": true,
+      "grading": {
+        "checks": [
+          true,
+          true
+        ],
+        "sameOrigin": true,
+        "acted": true,
+        "passed": true
+      },
+      "message": "The requested completion text and URL, when supplied, were observed.",
+      "startupMs": 1629.4943000000203,
+      "executionMs": 1470.316999999981,
+      "totalMs": 3099.811300000001,
+      "cleanupMs": 367.1342000000004,
+      "calls": 4,
+      "inputTokens": 10187,
+      "actions": 3,
+      "finalUrl": "https://www.nhs.uk/conditions/hay-fever/",
+      "processesAfter": 0
+    },
+    {
+      "task": "who-physical-activity-french",
+      "site": "World Health Organization",
+      "category": "language",
+      "run": 2,
+      "status": "needs-agent",
+      "verified": false,
+      "grading": {
+        "checks": [
+          true,
+          false
+        ],
+        "sameOrigin": true,
+        "acted": true,
+        "passed": false
+      },
+      "message": "The browser action did not confirm its outcome. It was not retried.",
+      "startupMs": 2302.4613000000245,
+      "executionMs": 401.85209999998915,
+      "totalMs": 2704.3134000000136,
+      "cleanupMs": 316.9087999999756,
+      "calls": 1,
+      "inputTokens": 4715,
+      "actions": 1,
+      "finalUrl": "https://www.who.int/fr/news-room/fact-sheets/detail/physical-activity",
+      "processesAfter": 0
+    },
+    {
+      "task": "timeanddate-leap-duration",
+      "site": "timeanddate",
+      "category": "date-calculator",
+      "run": 2,
+      "status": "needs-agent",
+      "verified": false,
+      "grading": {
+        "checks": [
+          false,
+          false
+        ],
+        "sameOrigin": true,
+        "acted": false,
+        "passed": false
+      },
+      "message": "Jev reported completion, but the requested evidence is absent.",
+      "startupMs": 1918.4121999999916,
+      "executionMs": 270.65950000000885,
+      "totalMs": 2189.0717000000004,
+      "cleanupMs": 258.58739999998943,
+      "calls": 1,
+      "inputTokens": 698,
+      "actions": 0,
+      "finalUrl": "https://www.timeanddate.com/date/duration.html",
+      "processesAfter": 0
+    },
+    {
+      "task": "timeanddate-calendar",
+      "site": "timeanddate",
+      "category": "calendar-options",
+      "run": 2,
+      "status": "needs-agent",
+      "verified": false,
+      "grading": {
+        "checks": [
+          false,
+          false
+        ],
+        "sameOrigin": true,
+        "acted": false,
+        "passed": false
+      },
+      "message": "Jev handed the task back to the main agent.",
+      "startupMs": 2182.657200000016,
+      "executionMs": 258.8801000000094,
+      "totalMs": 2441.5373000000254,
+      "cleanupMs": 317.6866999999911,
+      "calls": 1,
+      "inputTokens": 691,
+      "actions": 0,
+      "finalUrl": "https://www.timeanddate.com/calendar/",
+      "processesAfter": 0
+    },
+    {
+      "task": "calculatornet-bmi",
+      "site": "Calculator.net",
+      "category": "calculator-tabs",
+      "run": 2,
+      "status": "needs-agent",
+      "verified": false,
+      "grading": {
+        "checks": [
+          false,
+          false,
+          true,
+          false,
+          true,
+          true
+        ],
+        "sameOrigin": true,
+        "acted": true,
+        "passed": false
+      },
+      "message": "Jev reported completion, but the requested evidence is absent.",
+      "startupMs": 1803.7098000000115,
+      "executionMs": 2193.5327000000107,
+      "totalMs": 3997.242500000022,
+      "cleanupMs": 265.7488000000012,
+      "calls": 6,
+      "inputTokens": 20105,
+      "actions": 5,
+      "finalUrl": "https://www.calculator.net/bmi-calculator.html?cage=75&csex=m&cheightfeet=5&cheightinch=10&cpound=160&cheightmeter=180&ckg=65&printit=0&ctype=metric&x=Calculate",
+      "processesAfter": 0
+    },
+    {
+      "task": "calculatornet-percent",
+      "site": "Calculator.net",
+      "category": "calculator",
+      "run": 2,
+      "status": "needs-agent",
+      "verified": false,
+      "grading": {
+        "checks": [
+          false,
+          false,
+          false
+        ],
+        "sameOrigin": true,
+        "acted": true,
+        "passed": false
+      },
+      "message": "Jev reported completion, but the requested evidence is absent.",
+      "startupMs": 1804.3595999999961,
+      "executionMs": 1293.412400000001,
+      "totalMs": 3097.771999999997,
+      "cleanupMs": 310.914300000004,
+      "calls": 4,
+      "inputTokens": 14850,
+      "actions": 3,
+      "finalUrl": "https://www.calculator.net/percent-calculator.html?cpar1=240&cpar2=&cpar3=&ctype=1&x=Calculate",
+      "processesAfter": 0
+    },
+    {
+      "task": "calculatorsoup-percent",
+      "site": "CalculatorSoup",
+      "category": "calculator",
+      "run": 2,
+      "status": "succeeded",
+      "verified": true,
+      "grading": {
+        "checks": [
+          true,
+          true,
+          true
+        ],
+        "sameOrigin": true,
+        "acted": true,
+        "passed": true
+      },
+      "message": "The requested completion text and URL, when supplied, were observed.",
+      "startupMs": 2261.068099999975,
+      "executionMs": 1250.210000000021,
+      "totalMs": 3511.278099999996,
+      "cleanupMs": 269.59519999998156,
+      "calls": 3,
+      "inputTokens": 11361,
+      "actions": 3,
+      "finalUrl": "https://www.calculatorsoup.com/calculators/math/percentage.php",
+      "processesAfter": 0
+    },
+    {
+      "task": "unitconverters-length",
+      "site": "UnitConverters.net",
+      "category": "client-calculator",
+      "run": 2,
+      "status": "succeeded",
+      "verified": true,
+      "grading": {
+        "checks": [
+          true,
+          true
+        ],
+        "sameOrigin": true,
+        "acted": true,
+        "passed": true
+      },
+      "message": "The requested completion text and URL, when supplied, were observed.",
+      "startupMs": 1699.780000000028,
+      "executionMs": 792.4564999999711,
+      "totalMs": 2492.236499999999,
+      "cleanupMs": 258.37489999999525,
+      "calls": 2,
+      "inputTokens": 12111,
+      "actions": 2,
+      "finalUrl": "https://www.unitconverters.net/length/meters-to-feet.htm",
+      "processesAfter": 0
+    },
+    {
+      "task": "w3schools-color",
+      "site": "W3Schools",
+      "category": "client-state",
+      "run": 2,
+      "status": "needs-agent",
+      "verified": false,
+      "grading": {
+        "checks": [
+          false,
+          false
+        ],
+        "sameOrigin": true,
+        "acted": true,
+        "passed": false
+      },
+      "message": "Jev reported completion, but the requested evidence is absent.",
+      "startupMs": 1885.9075999999768,
+      "executionMs": 1528.1528000000399,
+      "totalMs": 3414.0604000000167,
+      "cleanupMs": 327.944199999969,
+      "calls": 3,
+      "inputTokens": 21827,
+      "actions": 2,
+      "finalUrl": "https://www.w3schools.com/colors/colors_picker.asp",
+      "processesAfter": 0
+    },
+    {
+      "task": "w3schools-startswith",
+      "site": "W3Schools",
+      "category": "reference-navigation",
+      "run": 2,
+      "status": "needs-agent",
+      "verified": false,
+      "grading": {
+        "checks": [
+          false,
+          true
+        ],
+        "sameOrigin": true,
+        "acted": true,
+        "passed": false
+      },
+      "message": "The browser action did not confirm its outcome. It was not retried.",
+      "startupMs": 1891.772100000002,
+      "executionMs": 744.1979999999749,
+      "totalMs": 2635.970099999977,
+      "cleanupMs": 311.5349999999744,
+      "calls": 2,
+      "inputTokens": 11806,
+      "actions": 1,
+      "finalUrl": "https://www.w3schools.com/python/python_ref_string.asp",
+      "processesAfter": 0
+    },
+    {
+      "task": "w3c-css-recommendation",
+      "site": "W3C",
+      "category": "filters-and-accordion",
+      "run": 2,
+      "status": "needs-agent",
+      "verified": false,
+      "grading": {
+        "checks": [
+          false,
+          false,
+          true
+        ],
+        "sameOrigin": true,
+        "acted": false,
+        "passed": false
+      },
+      "message": "The task reached its step limit.",
+      "startupMs": 2029.281799999997,
+      "executionMs": 40268.192099999986,
+      "totalMs": 42297.47389999998,
+      "cleanupMs": 287.9716999999946,
+      "calls": 30,
+      "inputTokens": 198529,
+      "actions": 0,
+      "finalUrl": "https://www.w3.org/TR/",
+      "processesAfter": 0
+    },
+    {
+      "task": "wikipedia-hopper",
+      "site": "Wikipedia",
+      "category": "search",
+      "run": 2,
+      "status": "succeeded",
+      "verified": true,
+      "grading": {
+        "checks": [
+          true,
+          true
+        ],
+        "sameOrigin": true,
+        "acted": true,
+        "passed": true
+      },
+      "message": "The requested completion text and URL, when supplied, were observed.",
+      "startupMs": 1751.4917000000132,
+      "executionMs": 2302.33189999999,
+      "totalMs": 4053.8236000000034,
+      "cleanupMs": 323.1091000000015,
+      "calls": 4,
+      "inputTokens": 22646,
+      "actions": 2,
+      "finalUrl": "https://en.wikipedia.org/wiki/Grace_Hopper",
+      "processesAfter": 0
+    },
+    {
+      "task": "mdn-tosorted",
+      "site": "MDN",
+      "category": "documentation-search",
+      "run": 3,
+      "status": "succeeded",
+      "verified": true,
+      "grading": {
+        "checks": [
+          true,
+          true
+        ],
+        "sameOrigin": true,
+        "acted": true,
+        "passed": true
+      },
+      "message": "The requested completion text and URL, when supplied, were observed.",
+      "startupMs": 1687.5852000000305,
+      "executionMs": 3007.3231999999844,
+      "totalMs": 4694.908400000015,
+      "cleanupMs": 326.6220999999787,
+      "calls": 3,
+      "inputTokens": 16813,
+      "actions": 2,
+      "finalUrl": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/toSorted",
+      "processesAfter": 0
+    },
+    {
+      "task": "mdn-array-french",
+      "site": "MDN",
+      "category": "language",
+      "run": 3,
+      "status": "succeeded",
+      "verified": true,
+      "grading": {
+        "checks": [
+          true,
+          true
+        ],
+        "sameOrigin": true,
+        "acted": true,
+        "passed": true
+      },
+      "message": "The requested completion text and URL, when supplied, were observed.",
+      "startupMs": 1840.7629999999772,
+      "executionMs": 3587.1256000000285,
+      "totalMs": 5427.888600000006,
+      "cleanupMs": 457.928899999999,
+      "calls": 2,
+      "inputTokens": 10909,
+      "actions": 2,
+      "finalUrl": "https://developer.mozilla.org/fr/docs/Web/JavaScript/Reference/Global_Objects/Array",
+      "processesAfter": 0
+    },
+    {
+      "task": "python-pathlib",
+      "site": "Python documentation",
+      "category": "documentation-search",
+      "run": 3,
+      "status": "succeeded",
+      "verified": true,
+      "grading": {
+        "checks": [
+          true,
+          true
+        ],
+        "sameOrigin": true,
+        "acted": true,
+        "passed": true
+      },
+      "message": "The requested completion text and URL, when supplied, were observed.",
+      "startupMs": 2110.4642999999924,
+      "executionMs": 2366.7891999999993,
+      "totalMs": 4477.253499999992,
+      "cleanupMs": 320.0286999999662,
+      "calls": 6,
+      "inputTokens": 28621,
+      "actions": 3,
+      "finalUrl": "https://docs.python.org/3/library/pathlib.html",
+      "processesAfter": 0
+    },
+    {
+      "task": "python-json-french",
+      "site": "Python documentation",
+      "category": "language",
+      "run": 3,
+      "status": "needs-agent",
+      "verified": false,
+      "grading": {
+        "checks": [
+          false,
+          false
+        ],
+        "sameOrigin": true,
+        "acted": false,
+        "passed": false
+      },
+      "message": "The browser action did not confirm its outcome. It was not retried.",
+      "startupMs": 1736.8806999999797,
+      "executionMs": 487.7741999999853,
+      "totalMs": 2224.654899999965,
+      "cleanupMs": 312.89790000003995,
+      "calls": 1,
+      "inputTokens": 5997,
+      "actions": 0,
+      "finalUrl": "https://docs.python.org/3/library/json.html",
+      "processesAfter": 0
+    },
+    {
+      "task": "rust-borrowing",
+      "site": "The Rust Book",
+      "category": "documentation-navigation",
+      "run": 3,
+      "status": "succeeded",
+      "verified": true,
+      "grading": {
+        "checks": [
+          true,
+          true
+        ],
+        "sameOrigin": true,
+        "acted": true,
+        "passed": true
+      },
+      "message": "The requested completion text and URL, when supplied, were observed.",
+      "startupMs": 1575.1220999999787,
+      "executionMs": 536.2076000000234,
+      "totalMs": 2111.329700000002,
+      "cleanupMs": 412.36149999999907,
+      "calls": 1,
+      "inputTokens": 6629,
+      "actions": 1,
+      "finalUrl": "https://doc.rust-lang.org/book/ch04-02-references-and-borrowing.html",
+      "processesAfter": 0
+    },
+    {
+      "task": "go-effective-maps",
+      "site": "Go documentation",
+      "category": "section-navigation",
+      "run": 3,
+      "status": "needs-agent",
+      "verified": false,
+      "grading": {
+        "checks": [
+          false,
+          false
+        ],
+        "sameOrigin": true,
+        "acted": true,
+        "passed": false
+      },
+      "message": "Jev reported completion, but the requested evidence is absent.",
+      "startupMs": 2022.5548000000417,
+      "executionMs": 1322.4103999999934,
+      "totalMs": 3344.965200000035,
+      "cleanupMs": 318.10470000002533,
+      "calls": 3,
+      "inputTokens": 17400,
+      "actions": 2,
+      "finalUrl": "https://go.dev/doc/#effective_go",
+      "processesAfter": 0
+    },
+    {
+      "task": "npm-zod",
+      "site": "npm",
+      "category": "package-search",
+      "run": 3,
+      "status": "needs-agent",
+      "verified": false,
+      "grading": {
+        "checks": [
+          false,
+          false
+        ],
+        "sameOrigin": true,
+        "acted": true,
+        "passed": false
+      },
+      "message": "The task reached its step limit.",
+      "startupMs": 2068.8298999999533,
+      "executionMs": 13041.652500000026,
+      "totalMs": 15110.482399999979,
+      "cleanupMs": 319.01030000002356,
+      "calls": 30,
+      "inputTokens": 27548,
+      "actions": 3,
+      "finalUrl": "https://www.npmjs.com/",
+      "processesAfter": 0
+    },
+    {
+      "task": "crates-serde",
+      "site": "crates.io",
+      "category": "package-search",
+      "run": 3,
+      "status": "succeeded",
+      "verified": true,
+      "grading": {
+        "checks": [
+          true,
+          true
+        ],
+        "sameOrigin": true,
+        "acted": true,
+        "passed": true
+      },
+      "message": "The requested completion text and URL, when supplied, were observed.",
+      "startupMs": 1879.3714000000036,
+      "executionMs": 2344.301700000011,
+      "totalMs": 4223.6731000000145,
+      "cleanupMs": 322.180400000012,
+      "calls": 6,
+      "inputTokens": 22429,
+      "actions": 3,
+      "finalUrl": "https://crates.io/crates/serde",
+      "processesAfter": 0
+    },
+    {
+      "task": "pypi-httpx",
+      "site": "PyPI",
+      "category": "package-search",
+      "run": 3,
+      "status": "needs-agent",
+      "verified": false,
+      "grading": {
+        "checks": [
+          false,
+          false
+        ],
+        "sameOrigin": true,
+        "acted": true,
+        "passed": false
+      },
+      "message": "Jev handed the task back to the main agent.",
+      "startupMs": 1606.2600999999559,
+      "executionMs": 1225.2299000000348,
+      "totalMs": 2831.4899999999907,
+      "cleanupMs": 314.44270000001416,
+      "calls": 3,
+      "inputTokens": 7222,
+      "actions": 2,
+      "finalUrl": "https://pypi.org/search/?q=httpx",
+      "processesAfter": 0
+    },
+    {
+      "task": "gutenberg-pride",
+      "site": "Project Gutenberg",
+      "category": "catalog-search",
+      "run": 3,
+      "status": "succeeded",
+      "verified": true,
+      "grading": {
+        "checks": [
+          true,
+          true
+        ],
+        "sameOrigin": true,
+        "acted": true,
+        "passed": true
+      },
+      "message": "The requested completion text and URL, when supplied, were observed.",
+      "startupMs": 1753.5989999999874,
+      "executionMs": 1237.8057000000263,
+      "totalMs": 2991.4047000000137,
+      "cleanupMs": 319.3817000000272,
+      "calls": 3,
+      "inputTokens": 11677,
+      "actions": 3,
+      "finalUrl": "https://www.gutenberg.org/ebooks/1342",
+      "processesAfter": 0
+    },
+    {
+      "task": "gutenberg-austen-page-two",
+      "site": "Project Gutenberg",
+      "category": "search-pagination",
+      "run": 3,
+      "status": "needs-agent",
+      "verified": false,
+      "grading": {
+        "checks": [
+          false,
+          false
+        ],
+        "sameOrigin": true,
+        "acted": true,
+        "passed": false
+      },
+      "message": "Jev reported completion, but the requested evidence is absent.",
+      "startupMs": 2068.728300000017,
+      "executionMs": 2181.176299999992,
+      "totalMs": 4249.904600000009,
+      "cleanupMs": 315.77619999996386,
+      "calls": 5,
+      "inputTokens": 25388,
+      "actions": 2,
+      "finalUrl": "https://www.gutenberg.org/ebooks/results/",
+      "processesAfter": 0
+    },
+    {
+      "task": "standardebooks-frankenstein",
+      "site": "Standard Ebooks",
+      "category": "catalog-search",
+      "run": 3,
+      "status": "succeeded",
+      "verified": true,
+      "grading": {
+        "checks": [
+          true,
+          true
+        ],
+        "sameOrigin": true,
+        "acted": true,
+        "passed": true
+      },
+      "message": "The requested completion text and URL, when supplied, were observed.",
+      "startupMs": 1839.4858999999706,
+      "executionMs": 1258.6151000000536,
+      "totalMs": 3098.101000000024,
+      "cleanupMs": 321.5707999999868,
+      "calls": 3,
+      "inputTokens": 9587,
+      "actions": 3,
+      "finalUrl": "https://standardebooks.org/ebooks/mary-shelley/frankenstein",
+      "processesAfter": 0
+    },
+    {
+      "task": "openlibrary-hobbit",
+      "site": "Open Library",
+      "category": "catalog-search",
+      "run": 3,
+      "status": "needs-agent",
+      "verified": false,
+      "grading": {
+        "checks": [
+          true,
+          true,
+          false
+        ],
+        "sameOrigin": true,
+        "acted": true,
+        "passed": false
+      },
+      "message": "Jev reported completion, but the requested evidence is absent.",
+      "startupMs": 2975.994800000044,
+      "executionMs": 3927.590099999972,
+      "totalMs": 6903.584900000016,
+      "cleanupMs": 326.6884999999893,
+      "calls": 6,
+      "inputTokens": 30277,
+      "actions": 3,
+      "finalUrl": "https://openlibrary.org/search?q=The+Hobbit",
+      "processesAfter": 0
+    },
+    {
+      "task": "archive-voynich",
+      "site": "Internet Archive",
+      "category": "media-search",
+      "run": 3,
+      "status": "needs-agent",
+      "verified": false,
+      "grading": {
+        "checks": [
+          false,
+          false
+        ],
+        "sameOrigin": true,
+        "acted": false,
+        "passed": false
+      },
+      "message": "Jev reported completion, but the requested evidence is absent.",
+      "startupMs": 2544.20140000002,
+      "executionMs": 251.50089999998454,
+      "totalMs": 2795.7023000000045,
+      "cleanupMs": 269.76210000005085,
+      "calls": 1,
+      "inputTokens": 1350,
+      "actions": 0,
+      "finalUrl": "https://archive.org/",
+      "processesAfter": 0
+    },
+    {
+      "task": "commons-lunar-images",
+      "site": "Wikimedia Commons",
+      "category": "media-search",
+      "run": 3,
+      "status": "needs-agent",
+      "verified": false,
+      "grading": {
+        "checks": [
+          true,
+          true
+        ],
+        "sameOrigin": true,
+        "acted": true,
+        "passed": true
+      },
+      "message": "Jev reported completion, but the requested evidence is absent.",
+      "startupMs": 1770.532499999972,
+      "executionMs": 3637.6489000000292,
+      "totalMs": 5408.181400000001,
+      "cleanupMs": 323.2078999999794,
+      "calls": 5,
+      "inputTokens": 26131,
+      "actions": 2,
+      "finalUrl": "https://commons.wikimedia.org/w/index.php?search=Lunar+eclipse&title=Special%3AMediaSearch&type=image",
+      "processesAfter": 0
+    },
+    {
+      "task": "nasa-euclid-search",
+      "site": "NASA",
+      "category": "site-search",
+      "run": 3,
+      "status": "needs-agent",
+      "verified": false,
+      "grading": {
+        "checks": [
+          false,
+          false
+        ],
+        "sameOrigin": true,
+        "acted": false,
+        "passed": false
+      },
+      "message": "Jev reported completion, but the requested evidence is absent.",
+      "startupMs": 1799.5286000000197,
+      "executionMs": 291.508600000001,
+      "totalMs": 2091.0372000000207,
+      "cleanupMs": 264.36040000000503,
+      "calls": 1,
+      "inputTokens": 4536,
+      "actions": 0,
+      "finalUrl": "https://www.nasa.gov/",
+      "processesAfter": 0
+    },
+    {
+      "task": "esa-euclid",
+      "site": "European Space Agency",
+      "category": "site-search",
+      "run": 3,
+      "status": "succeeded",
+      "verified": true,
+      "grading": {
+        "checks": [
+          true,
+          true
+        ],
+        "sameOrigin": true,
+        "acted": true,
+        "passed": true
+      },
+      "message": "The requested completion text and URL, when supplied, were observed.",
+      "startupMs": 1607.160199999984,
+      "executionMs": 1773.8087999999989,
+      "totalMs": 3380.9689999999828,
+      "cleanupMs": 371.781799999997,
+      "calls": 4,
+      "inputTokens": 17209,
+      "actions": 4,
+      "finalUrl": "https://www.esa.int/Science_Exploration/Space_Science/Euclid",
+      "processesAfter": 0
+    },
+    {
+      "task": "nhs-hay-fever",
+      "site": "NHS",
+      "category": "site-search",
+      "run": 3,
+      "status": "succeeded",
+      "verified": true,
+      "grading": {
+        "checks": [
+          true,
+          true
+        ],
+        "sameOrigin": true,
+        "acted": true,
+        "passed": true
+      },
+      "message": "The requested completion text and URL, when supplied, were observed.",
+      "startupMs": 1672.6504000000423,
+      "executionMs": 1334.9066999999923,
+      "totalMs": 3007.5571000000346,
+      "cleanupMs": 308.7097000000067,
+      "calls": 3,
+      "inputTokens": 8211,
+      "actions": 3,
+      "finalUrl": "https://www.nhs.uk/conditions/hay-fever/",
+      "processesAfter": 0
+    },
+    {
+      "task": "who-physical-activity-french",
+      "site": "World Health Organization",
+      "category": "language",
+      "run": 3,
+      "status": "needs-agent",
+      "verified": false,
+      "grading": {
+        "checks": [
+          true,
+          false
+        ],
+        "sameOrigin": true,
+        "acted": true,
+        "passed": false
+      },
+      "message": "The browser action did not confirm its outcome. It was not retried.",
+      "startupMs": 2122.301999999967,
+      "executionMs": 412.1663000000408,
+      "totalMs": 2534.4683000000077,
+      "cleanupMs": 267.6399000000092,
+      "calls": 1,
+      "inputTokens": 4715,
+      "actions": 1,
+      "finalUrl": "https://www.who.int/fr/news-room/fact-sheets/detail/physical-activity",
+      "processesAfter": 0
+    },
+    {
+      "task": "timeanddate-leap-duration",
+      "site": "timeanddate",
+      "category": "date-calculator",
+      "run": 3,
+      "status": "needs-agent",
+      "verified": false,
+      "grading": {
+        "checks": [
+          false,
+          false
+        ],
+        "sameOrigin": true,
+        "acted": false,
+        "passed": false
+      },
+      "message": "Jev reported completion, but the requested evidence is absent.",
+      "startupMs": 1838.989200000011,
+      "executionMs": 242.7907000000123,
+      "totalMs": 2081.779900000023,
+      "cleanupMs": 313.53190000000177,
+      "calls": 1,
+      "inputTokens": 698,
+      "actions": 0,
+      "finalUrl": "https://www.timeanddate.com/date/duration.html",
+      "processesAfter": 0
+    },
+    {
+      "task": "timeanddate-calendar",
+      "site": "timeanddate",
+      "category": "calendar-options",
+      "run": 3,
+      "status": "needs-agent",
+      "verified": false,
+      "grading": {
+        "checks": [
+          false,
+          false
+        ],
+        "sameOrigin": true,
+        "acted": false,
+        "passed": false
+      },
+      "message": "Jev handed the task back to the main agent.",
+      "startupMs": 1842.9990000000107,
+      "executionMs": 245.0626999999513,
+      "totalMs": 2088.061699999962,
+      "cleanupMs": 308.1491999999853,
+      "calls": 1,
+      "inputTokens": 691,
+      "actions": 0,
+      "finalUrl": "https://www.timeanddate.com/calendar/",
+      "processesAfter": 0
+    },
+    {
+      "task": "calculatornet-bmi",
+      "site": "Calculator.net",
+      "category": "calculator-tabs",
+      "run": 3,
+      "status": "needs-agent",
+      "verified": false,
+      "grading": {
+        "checks": [
+          false,
+          false,
+          true,
+          false,
+          true,
+          true
+        ],
+        "sameOrigin": true,
+        "acted": true,
+        "passed": false
+      },
+      "message": "Jev reported completion, but the requested evidence is absent.",
+      "startupMs": 1675.8245999999926,
+      "executionMs": 2245.850600000005,
+      "totalMs": 3921.675199999998,
+      "cleanupMs": 267.6042000000016,
+      "calls": 6,
+      "inputTokens": 20105,
+      "actions": 5,
+      "finalUrl": "https://www.calculator.net/bmi-calculator.html?cage=75&csex=m&cheightfeet=5&cheightinch=10&cpound=160&cheightmeter=180&ckg=65&printit=0&ctype=metric&x=Calculate",
+      "processesAfter": 0
+    },
+    {
+      "task": "calculatornet-percent",
+      "site": "Calculator.net",
+      "category": "calculator",
+      "run": 3,
+      "status": "needs-agent",
+      "verified": false,
+      "grading": {
+        "checks": [
+          false,
+          false,
+          false
+        ],
+        "sameOrigin": true,
+        "acted": true,
+        "passed": false
+      },
+      "message": "Jev reported completion, but the requested evidence is absent.",
+      "startupMs": 1784.9629999999888,
+      "executionMs": 1302.763200000045,
+      "totalMs": 3087.7262000000337,
+      "cleanupMs": 308.7464999999502,
+      "calls": 4,
+      "inputTokens": 14850,
+      "actions": 3,
+      "finalUrl": "https://www.calculator.net/percent-calculator.html?cpar1=240&cpar2=&cpar3=&ctype=1&x=Calculate",
+      "processesAfter": 0
+    },
+    {
+      "task": "calculatorsoup-percent",
+      "site": "CalculatorSoup",
+      "category": "calculator",
+      "run": 3,
+      "status": "succeeded",
+      "verified": true,
+      "grading": {
+        "checks": [
+          true,
+          true,
+          true
+        ],
+        "sameOrigin": true,
+        "acted": true,
+        "passed": true
+      },
+      "message": "The requested completion text and URL, when supplied, were observed.",
+      "startupMs": 2426.8168000000296,
+      "executionMs": 1558.1168999999645,
+      "totalMs": 3984.933699999994,
+      "cleanupMs": 265.8414000000339,
+      "calls": 4,
+      "inputTokens": 14334,
+      "actions": 3,
+      "finalUrl": "https://www.calculatorsoup.com/calculators/math/percentage.php",
+      "processesAfter": 0
+    },
+    {
+      "task": "unitconverters-length",
+      "site": "UnitConverters.net",
+      "category": "client-calculator",
+      "run": 3,
+      "status": "succeeded",
+      "verified": true,
+      "grading": {
+        "checks": [
+          true,
+          true
+        ],
+        "sameOrigin": true,
+        "acted": true,
+        "passed": true
+      },
+      "message": "The requested completion text and URL, when supplied, were observed.",
+      "startupMs": 1744.8301999999676,
+      "executionMs": 847.516500000027,
+      "totalMs": 2592.3466999999946,
+      "cleanupMs": 257.1849999999977,
+      "calls": 2,
+      "inputTokens": 12111,
+      "actions": 2,
+      "finalUrl": "https://www.unitconverters.net/length/meters-to-feet.htm",
+      "processesAfter": 0
+    },
+    {
+      "task": "w3schools-color",
+      "site": "W3Schools",
+      "category": "client-state",
+      "run": 3,
+      "status": "needs-agent",
+      "verified": false,
+      "grading": {
+        "checks": [
+          false,
+          false
+        ],
+        "sameOrigin": true,
+        "acted": true,
+        "passed": false
+      },
+      "message": "Jev reported completion, but the requested evidence is absent.",
+      "startupMs": 1786.7481999999727,
+      "executionMs": 1343.4765999999945,
+      "totalMs": 3130.224799999967,
+      "cleanupMs": 258.3942999999854,
+      "calls": 3,
+      "inputTokens": 21827,
+      "actions": 2,
+      "finalUrl": "https://www.w3schools.com/colors/colors_picker.asp",
+      "processesAfter": 0
+    },
+    {
+      "task": "w3schools-startswith",
+      "site": "W3Schools",
+      "category": "reference-navigation",
+      "run": 3,
+      "status": "needs-agent",
+      "verified": false,
+      "grading": {
+        "checks": [
+          false,
+          true
+        ],
+        "sameOrigin": true,
+        "acted": true,
+        "passed": false
+      },
+      "message": "The browser action did not confirm its outcome. It was not retried.",
+      "startupMs": 1843.6462000000174,
+      "executionMs": 776.234300000011,
+      "totalMs": 2619.8805000000284,
+      "cleanupMs": 311.0803999999771,
+      "calls": 2,
+      "inputTokens": 11806,
+      "actions": 1,
+      "finalUrl": "https://www.w3schools.com/python/python_ref_string.asp",
+      "processesAfter": 0
+    },
+    {
+      "task": "w3c-css-recommendation",
+      "site": "W3C",
+      "category": "filters-and-accordion",
+      "run": 3,
+      "status": "needs-agent",
+      "verified": false,
+      "grading": {
+        "checks": [
+          false,
+          false,
+          true
+        ],
+        "sameOrigin": true,
+        "acted": false,
+        "passed": false
+      },
+      "message": "The task reached its step limit.",
+      "startupMs": 1981.4694000000018,
+      "executionMs": 38381.134899999946,
+      "totalMs": 40362.60429999995,
+      "cleanupMs": 279.12939999997616,
+      "calls": 30,
+      "inputTokens": 196572,
+      "actions": 0,
+      "finalUrl": "https://www.w3.org/TR/",
+      "processesAfter": 0
+    },
+    {
+      "task": "wikipedia-hopper",
+      "site": "Wikipedia",
+      "category": "search",
+      "run": 3,
+      "status": "succeeded",
+      "verified": true,
+      "grading": {
+        "checks": [
+          true,
+          true
+        ],
+        "sameOrigin": true,
+        "acted": true,
+        "passed": true
+      },
+      "message": "The requested completion text and URL, when supplied, were observed.",
+      "startupMs": 1663.6670000000158,
+      "executionMs": 1523.2549,
+      "totalMs": 3186.9219000000157,
+      "cleanupMs": 322.671800000011,
+      "calls": 3,
+      "inputTokens": 17886,
+      "actions": 2,
+      "finalUrl": "https://en.wikipedia.org/wiki/Grace_Hopper",
+      "processesAfter": 0
+    },
+    {
+      "task": "wikipedia-history",
+      "site": "Wikipedia",
+      "category": "history-navigation",
+      "run": 3,
+      "status": "succeeded",
+      "verified": true,
+      "grading": {
+        "checks": [
+          true,
+          true
+        ],
+        "sameOrigin": true,
+        "acted": true,
+        "passed": true
+      },
+      "message": "The requested completion text and URL, when supplied, were observed.",
+      "startupMs": 1768.681500000006,
+      "executionMs": 1225.852200000023,
+      "totalMs": 2994.533700000029,
+      "cleanupMs": 313.1449999999604,
+      "calls": 1,
+      "inputTokens": 5780,
+      "actions": 1,
+      "finalUrl": "https://en.wikipedia.org/w/index.php?title=Alan_Turing&action=history",
+      "processesAfter": 0
+    }
+  ],
+  "corrected": [
+    {
+      "task": "openlibrary-hobbit",
+      "site": "Open Library",
+      "category": "catalog-search",
+      "run": 1,
+      "status": "succeeded",
+      "verified": true,
+      "grading": {
+        "checks": [
+          true,
+          true,
+          true
+        ],
+        "sameOrigin": true,
+        "acted": true,
+        "passed": true
+      },
+      "message": "The requested completion text and URL, when supplied, were observed.",
+      "startupMs": 2904.0508,
+      "executionMs": 3084.6062,
+      "totalMs": 5988.657,
+      "cleanupMs": 323.1759000000002,
+      "calls": 4,
+      "inputTokens": 16588,
+      "actions": 3,
+      "finalUrl": "https://openlibrary.org/search?q=The+Hobbit",
+      "processesAfter": 0
+    },
+    {
+      "task": "commons-lunar-images",
+      "site": "Wikimedia Commons",
+      "category": "media-search",
+      "run": 1,
+      "status": "succeeded",
+      "verified": true,
+      "grading": {
+        "checks": [
+          true,
+          true
+        ],
+        "sameOrigin": true,
+        "acted": true,
+        "passed": true
+      },
+      "message": "The requested completion text and URL, when supplied, were observed.",
+      "startupMs": 1724.7303000000002,
+      "executionMs": 2977.472600000001,
+      "totalMs": 4702.202900000001,
+      "cleanupMs": 319.9344000000001,
+      "calls": 4,
+      "inputTokens": 21978,
+      "actions": 2,
+      "finalUrl": "https://commons.wikimedia.org/w/index.php?search=Lunar+eclipse&title=Special%3AMediaSearch&type=image",
+      "processesAfter": 0
+    },
+    {
+      "task": "commons-lunar-images",
+      "site": "Wikimedia Commons",
+      "category": "media-search",
+      "run": 2,
+      "status": "succeeded",
+      "verified": true,
+      "grading": {
+        "checks": [
+          true,
+          true
+        ],
+        "sameOrigin": true,
+        "acted": true,
+        "passed": true
+      },
+      "message": "The requested completion text and URL, when supplied, were observed.",
+      "startupMs": 1625.6401000000005,
+      "executionMs": 2767.1720000000005,
+      "totalMs": 4392.812100000001,
+      "cleanupMs": 418.8594000000012,
+      "calls": 4,
+      "inputTokens": 21978,
+      "actions": 2,
+      "finalUrl": "https://commons.wikimedia.org/w/index.php?search=Lunar+eclipse&title=Special%3AMediaSearch&type=image",
+      "processesAfter": 0
+    },
+    {
+      "task": "openlibrary-hobbit",
+      "site": "Open Library",
+      "category": "catalog-search",
+      "run": 2,
+      "status": "succeeded",
+      "verified": true,
+      "grading": {
+        "checks": [
+          true,
+          true,
+          true
+        ],
+        "sameOrigin": true,
+        "acted": true,
+        "passed": true
+      },
+      "message": "The requested completion text and URL, when supplied, were observed.",
+      "startupMs": 2195.8394000000008,
+      "executionMs": 3368.1309999999976,
+      "totalMs": 5563.970399999998,
+      "cleanupMs": 399.7717999999986,
+      "calls": 6,
+      "inputTokens": 30589,
+      "actions": 3,
+      "finalUrl": "https://openlibrary.org/search?q=The+Hobbit",
+      "processesAfter": 0
+    },
+    {
+      "task": "openlibrary-hobbit",
+      "site": "Open Library",
+      "category": "catalog-search",
+      "run": 3,
+      "status": "succeeded",
+      "verified": true,
+      "grading": {
+        "checks": [
+          true,
+          true,
+          true
+        ],
+        "sameOrigin": true,
+        "acted": true,
+        "passed": true
+      },
+      "message": "The requested completion text and URL, when supplied, were observed.",
+      "startupMs": 2959.653699999999,
+      "executionMs": 2267.2765,
+      "totalMs": 5226.930199999999,
+      "cleanupMs": 322.3866999999991,
+      "calls": 4,
+      "inputTokens": 16588,
+      "actions": 3,
+      "finalUrl": "https://openlibrary.org/search?q=The+Hobbit",
+      "processesAfter": 0
+    },
+    {
+      "task": "commons-lunar-images",
+      "site": "Wikimedia Commons",
+      "category": "media-search",
+      "run": 3,
+      "status": "succeeded",
+      "verified": true,
+      "grading": {
+        "checks": [
+          true,
+          true
+        ],
+        "sameOrigin": true,
+        "acted": true,
+        "passed": true
+      },
+      "message": "The requested completion text and URL, when supplied, were observed.",
+      "startupMs": 1720.9570999999996,
+      "executionMs": 2748.4730999999992,
+      "totalMs": 4469.430199999999,
+      "cleanupMs": 328.2743000000046,
+      "calls": 3,
+      "inputTokens": 17911,
+      "actions": 2,
+      "finalUrl": "https://commons.wikimedia.org/w/index.php?search=Lunar+eclipse&title=Special%3AMediaSearch&type=image",
+      "processesAfter": 0
+    }
+  ],
+  "recorded": [
+    {
+      "task": "mdn-array-french",
+      "site": "MDN",
+      "category": "language",
+      "run": 1,
+      "status": "succeeded",
+      "verified": true,
+      "grading": {
+        "checks": [
+          true,
+          true
+        ],
+        "sameOrigin": true,
+        "acted": true,
+        "passed": true
+      },
+      "message": "The requested completion text and URL, when supplied, were observed.",
+      "startupMs": 1669.7582,
+      "executionMs": 6121.0267,
+      "totalMs": 7790.784900000001,
+      "cleanupMs": 271.90020000000004,
+      "calls": 2,
+      "inputTokens": 11099,
+      "actions": 2,
+      "finalUrl": "https://developer.mozilla.org/fr/docs/Web/JavaScript/Reference/Global_Objects/Array",
+      "processesAfter": 0,
+      "captureValid": true,
+      "retry": false
+    },
+    {
+      "task": "esa-euclid",
+      "site": "European Space Agency",
+      "category": "site-search",
+      "run": 1,
+      "status": "succeeded",
+      "verified": true,
+      "grading": {
+        "checks": [
+          true,
+          true
+        ],
+        "sameOrigin": true,
+        "acted": true,
+        "passed": true
+      },
+      "message": "The requested completion text and URL, when supplied, were observed.",
+      "startupMs": 1721.7653999999984,
+      "executionMs": 5116.100200000003,
+      "totalMs": 6837.865600000001,
+      "cleanupMs": 326.5671000000002,
+      "calls": 4,
+      "inputTokens": 17209,
+      "actions": 4,
+      "finalUrl": "https://www.esa.int/Science_Exploration/Space_Science/Euclid",
+      "processesAfter": 0,
+      "captureValid": true,
+      "retry": false
+    },
+    {
+      "task": "calculatornet-bmi",
+      "site": "Calculator.net",
+      "category": "calculator-tabs",
+      "run": 1,
+      "status": "needs-agent",
+      "verified": false,
+      "grading": {
+        "checks": [
+          false,
+          false,
+          true,
+          false,
+          true,
+          true
+        ],
+        "sameOrigin": true,
+        "acted": true,
+        "passed": false
+      },
+      "message": "Jev reported completion, but the requested evidence is absent.",
+      "startupMs": 1785.159599999999,
+      "executionMs": 5457.442800000001,
+      "totalMs": 7242.6024,
+      "cleanupMs": 314.1108999999997,
+      "calls": 6,
+      "inputTokens": 20098,
+      "actions": 5,
+      "finalUrl": "https://www.calculator.net/bmi-calculator.html?cage=75&csex=m&cheightfeet=5&cheightinch=10&cpound=160&cheightmeter=180&ckg=65&printit=0&ctype=metric&x=Calculate",
+      "processesAfter": 0,
+      "captureValid": true,
+      "retry": false
+    },
+    {
+      "task": "calculatorsoup-percent",
+      "site": "CalculatorSoup",
+      "category": "calculator",
+      "run": 1,
+      "status": "succeeded",
+      "verified": true,
+      "grading": {
+        "checks": [
+          true,
+          true,
+          true
+        ],
+        "sameOrigin": true,
+        "acted": true,
+        "passed": true
+      },
+      "message": "The requested completion text and URL, when supplied, were observed.",
+      "startupMs": 2306.9421,
+      "executionMs": 4659.997599999995,
+      "totalMs": 6966.939699999995,
+      "cleanupMs": 105.94950000000244,
+      "calls": 3,
+      "inputTokens": 11361,
+      "actions": 3,
+      "finalUrl": "https://www.calculatorsoup.com/calculators/math/percentage.php",
+      "processesAfter": 0,
+      "captureValid": false,
+      "videoError": "Recorder stop timed out; incomplete MP4 retained privately.",
+      "retry": false
+    },
+    {
+      "task": "calculatorsoup-percent",
+      "site": "CalculatorSoup",
+      "category": "calculator",
+      "run": 1,
+      "status": "succeeded",
+      "verified": true,
+      "grading": {
+        "checks": [
+          true,
+          true,
+          true
+        ],
+        "sameOrigin": true,
+        "acted": true,
+        "passed": true
+      },
+      "message": "The requested completion text and URL, when supplied, were observed.",
+      "startupMs": 3563.1987,
+      "executionMs": 5137.873700000001,
+      "totalMs": 8701.072400000001,
+      "cleanupMs": 114.27370000000519,
+      "calls": 3,
+      "inputTokens": 11361,
+      "actions": 3,
+      "finalUrl": "https://www.calculatorsoup.com/calculators/math/percentage.php",
+      "processesAfter": 0,
+      "captureValid": false,
+      "videoError": "Recorder stop timed out; incomplete MP4 retained privately.",
+      "retry": true
+    },
+    {
+      "task": "unitconverters-length",
+      "site": "UnitConverters.net",
+      "category": "client-calculator",
+      "run": 1,
+      "status": "succeeded",
+      "verified": true,
+      "grading": {
+        "checks": [
+          true,
+          true
+        ],
+        "sameOrigin": true,
+        "acted": true,
+        "passed": true
+      },
+      "message": "The requested completion text and URL, when supplied, were observed.",
+      "startupMs": 1953.5064000000002,
+      "executionMs": 4524.5451,
+      "totalMs": 6478.0515000000005,
+      "cleanupMs": 263.7574999999997,
+      "calls": 2,
+      "inputTokens": 12111,
+      "actions": 2,
+      "finalUrl": "https://www.unitconverters.net/length/meters-to-feet.htm",
+      "processesAfter": 0,
+      "captureValid": true,
+      "retry": false
+    }
+  ]
+}
