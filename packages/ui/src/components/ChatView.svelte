@@ -7,6 +7,7 @@
   import type { Store } from '../lib/store.svelte';
   import { workspace } from '../lib/workspace.svelte';
   import Composer from './Composer.svelte';
+  import AgentDock from './AgentDock.svelte';
   import CoordinationPanel from './CoordinationPanel.svelte';
   import Menu from './Menu.svelte';
   import MessageList from './MessageList.svelte';
@@ -108,6 +109,7 @@
       </div>
     {/if}
 
+    {#if thread}<AgentDock {store} threadId={thread.id} />{/if}
     <Composer {store} centered={!thread} />
 
     <!-- The draft's heading and composer are one block in the middle of the

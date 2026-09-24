@@ -178,7 +178,8 @@ function readCoreFile(path: string): CoreFile | undefined {
 async function healthy(port: number): Promise<boolean> {
   try {
     const response = await fetch(`http://127.0.0.1:${port}/health`, {
-      signal: AbortSignal.timeout(1_000),
+      // A freshly started core may still be probing providers on a busy runner.
+      signal: AbortSignal.timeout(5_000),
     });
     return response.ok;
   } catch {
@@ -208,6 +209,7 @@ function killWebviewsOf(dataDir: string): void {
     ],
     stdout: 'ignore',
     stderr: 'ignore',
+    windowsHide: true,
   });
 }
 
@@ -221,6 +223,7 @@ function parentOf(pid: number): number | null {
     ],
     stdout: 'pipe',
     stderr: 'ignore',
+    windowsHide: true,
   });
   const parsed = Number(query.stdout.toString().trim());
   return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
@@ -278,6 +281,19 @@ shellTest('close exits by default; the persisted setting hides instead; the nati
     ownCore = await waitForHealthyCore(ownDataDir);
     ownPage = await BrowserPage.attach(port);
     await ownPage.waitFor(TAURI_READY);
+    // A first launch opens centred in the work area, not at Windows' cascade spot.
+    const main = await ownPage.evaluate<{ dx: number; dy: number }>(`(async () => {
+      const invoke = window.__TAURI_INTERNALS__.invoke;
+      const [position, size, monitor] = await Promise.all([
+        invoke('plugin:window|outer_position', { label: 'main' }),
+        invoke('plugin:window|outer_size', { label: 'main' }),
+        invoke('plugin:window|primary_monitor')
+      ]);
+      const work = monitor.workArea;
+      return { dx: position.x + size.width / 2 - (work.position.x + work.size.width / 2), dy: position.y + size.height / 2 - (work.position.y + work.size.height / 2), position, size, work };
+    })()`);
+    expect(Math.abs(main.dx), JSON.stringify(main)).toBeLessThanOrEqual(16);
+    expect(Math.abs(main.dy), JSON.stringify(main)).toBeLessThanOrEqual(16);
     expect(await ownPage.evaluate(`window.__TAURI_INTERNALS__.invoke('close_behavior')`)).toBe(false);
     await ownPage.waitFor(`document.querySelector('[data-testid="titlebar"] .close')`);
     await ownPage.evaluate(`document.querySelector('[data-testid="titlebar"] .close').click()`);
@@ -294,6 +310,13 @@ shellTest('close exits by default; the persisted setting hides instead; the nati
     await ownPage.waitFor(`document.querySelector('[data-testid="close-to-tray"]').checked`);
     await ownPage.screenshot(join(import.meta.dir, '.artifacts', 'shell-close-settings.png'));
     expect(JSON.parse(readFileSync(join(ownDataDir, 'shell-settings.json'), 'utf8')).close_to_tray).toBe(true);
+    // The tour leaves the title bar above its scrim: the window still drags and closes.
+    await ownPage.click('[data-testid="settings-tour"]');
+    await ownPage.waitFor(`document.querySelector('[data-testid="onboarding-step"]')`);
+    expect(await ownPage.evaluate(`(() => { const r = document.querySelector('[data-testid="titlebar"]').getBoundingClientRect(); return [0.25, 0.5, 0.75].every(at => !!document.elementFromPoint(r.left + r.width * at, r.top + r.height / 2)?.closest('[data-testid="titlebar"]')); })()`)).toBe(true);
+    await ownPage.screenshot(join(import.meta.dir, '.artifacts', 'shell-tour.png'));
+    await ownPage.click('[data-testid="onboarding-skip"]');
+    await ownPage.waitFor(`!document.querySelector('[data-testid="onboarding"]')`);
     await ownPage.evaluate(`document.querySelector('[data-testid="titlebar"] .close').click()`);
     expect(await healthy(ownCore.port)).toBe(true);
     expect(pidAlive(ownPid)).toBe(true);
@@ -804,6 +827,76 @@ shellTest(
   TIMEOUT,
 );
 
+shellTest('native preview references attach to the composer and highlight from sent history', async () => {
+  if (!page) throw new Error('shell is not ready');
+  const fixture = Bun.serve({
+    hostname: '127.0.0.1', port: 0,
+    fetch: () => new Response('<!doctype html><html><head><title>Preview fixture</title></head><body><button id="native-preview-target">Save changes</button></body></html>', { headers: { 'content-type': 'text/html' } })
+  });
+  const url = `http://127.0.0.1:${fixture.port}/preview`;
+  let child: BrowserPage | undefined;
+  try {
+    await page.click(testid('nav-settings'));
+    await page.click(testid('settings-tab-experiments'));
+    await page.click(testid('experiment-preview-comments'));
+    await page.click(testid('settings-back'));
+    await page.type(testid('composer-input'), 'Make clearer.');
+    await page.evaluate(`(() => { const input = document.querySelector('${testid('composer-input')}'); input.setSelectionRange(5, 5); input.dispatchEvent(new Event('select')); })()`);
+    await page.click(testid('panel-toggle'));
+    await page.waitFor(`document.querySelector('${testid('launch-browser')}')`);
+    await page.click(testid('launch-browser'));
+    await page.type(testid('browser-url'), url);
+    await page.evaluate(`document.querySelector('${testid('browser-url')}').closest('form').requestSubmit()`);
+    await waitForTargets(url, 1, 20_000);
+    child = await BrowserPage.attach(debugPort, url);
+    await child.waitFor(`document.querySelector('#native-preview-target')`);
+    await page.click(testid('preview-annotate'));
+    await child.waitFor(`typeof window.__boiteStopPreviewPick === 'function'`);
+    // Even while the data-only picker is armed, a page gets no host commands.
+    const refused = await child.evaluate<string>(`(async () => {
+      if (!window.__TAURI_INTERNALS__?.invoke) return 'unavailable';
+      try { await window.__TAURI_INTERNALS__.invoke('core_endpoint'); return 'allowed'; }
+      catch { return 'refused'; }
+    })()`);
+    expect(refused).not.toBe('allowed');
+    await child.click('#native-preview-target');
+    await page.waitFor(`document.querySelector('${testid('composer')} ${testid('preview-reference')}')`);
+    expect(await page.text(`${testid('composer')} ${testid('preview-reference')}`)).toBe('@Save changes');
+    expect(await child.evaluate('location.href')).toBe(url);
+    const draft = await page.evaluate<string>(`document.querySelector('${testid('composer-input')}').value`);
+    expect(draft).toBe('Make @Save changes clearer.');
+    expect(await page.evaluate(`!!document.querySelector('${testid('preview-comment-form')}')`)).toBe(false);
+    await page.click(`${testid('composer')} ${testid('preview-reference')}`);
+    await child.waitFor(`document.querySelector('[data-boite-preview-highlight]')`);
+    await page.screenshot(join(import.meta.dir, '.artifacts', 'preview-native-reference.png'));
+    await clickWhenEnabled(testid('composer-send'));
+    await page.waitFor(`document.querySelector('[data-role="user"] ${testid('preview-reference')}')`);
+    await page.waitFor(`!document.querySelector('${testid('composer')} ${testid('preview-reference')}')`);
+    expect(await page.evaluate(`Array.from(document.querySelectorAll('[data-role="user"] ${testid('text-part')}')).at(-1).textContent`)).toBe('Make @Save changes clearer.');
+    await child.close();
+    child = undefined;
+    await page.click(testid('panel-tab-close'));
+    await waitForTargets(url, 0, 20_000);
+    // Closing the last tab already closes the panel. Its exit animation keeps
+    // the close button mounted briefly; clicking it would toggle the panel open.
+    await page.waitFor(`!document.querySelector('${testid('right-panel')}')`);
+    // A reference from history restores a closed tab, waits for the real page,
+    // then highlights its element in the newly created child webview.
+    await page.click(`[data-role="user"] ${testid('preview-reference')}`);
+    await waitForTargets(url, 1, 20_000);
+    child = await BrowserPage.attach(debugPort, url);
+    await child.waitFor(`document.querySelector('[data-boite-preview-highlight]')`);
+    expect(await child.evaluate('location.href')).toBe(url);
+    await page.screenshot(join(import.meta.dir, '.artifacts', 'preview-native-sent.png'));
+  } finally {
+    await child?.close();
+    // Closing the last tab destroys the child view and closes the panel.
+    if (await page.evaluate(`!!document.querySelector('${testid('panel-tab-close')}')`)) await page.click(testid('panel-tab-close'));
+    await page.type(testid('composer-input'), '');
+    fixture.stop(true);
+  }
+}, TIMEOUT);
+
 /**
  * The material itself is drawn by the compositor behind the window, so no
  * capture of this webview can show it. What is provable here is the half the UI
@@ -894,7 +987,7 @@ shellTest(
 
       // The shell alone, no `/T`: nothing walks the tree here, so only the Job
       // Object the shell owns can take the core down.
-      Bun.spawnSync(['taskkill', '/pid', String(shell), '/F'], { stdout: 'ignore', stderr: 'ignore' });
+      Bun.spawnSync(['taskkill', '/pid', String(shell), '/F'], { stdout: 'ignore', stderr: 'ignore', windowsHide: true });
 
       await waitUntil(() => !pidAlive(corePid), HARD_KILL_TIMEOUT_MS);
       expect(pidAlive(shell)).toBe(false);
@@ -963,9 +1056,18 @@ shellTest(
       await shellPage.waitFor(TAURI_READY);
       await shellPage.waitFor(`document.querySelector('[data-testid="titlebar"]')`);
 
-      // One tap: the hint comes and goes, nothing quits.
+      // One tap: the hint comes and goes, nothing quits. WebView2 drops a Ctrl
+      // chord sent in the first moments after load while plain keys get
+      // through, so the press repeats until the hint shows. A repeat that does
+      // land is key repeat, which the hold ignores, and the release comes well
+      // inside QUIT_HOLD_MS.
       await chord('keyDown');
-      await shellPage.waitFor(`document.querySelector('[data-testid="quit-hint"]')`);
+      for (const deadline = Date.now() + 15_000; ;) {
+        if (await shellPage.evaluate<boolean>(`!!document.querySelector('[data-testid="quit-hint"]')`)) break;
+        if (Date.now() > deadline) throw new Error('Ctrl+Q never reached the page');
+        await Bun.sleep(150);
+        await chord('keyDown');
+      }
       await chord('keyUp');
       await shellPage.waitFor(`!document.querySelector('[data-testid="quit-hint"]')`);
       await Bun.sleep(600);

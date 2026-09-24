@@ -27,6 +27,8 @@ import type { Connection } from './router.ts';
  * process of its own or changes what the core trusts.
  */
 export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>([
+  // Follow and steer an owner-enabled team from the phone, without changing routes or limits.
+  'delegation.get', 'delegation.send', 'delegation.stop',
   // Coordination is visible with the conversation; only the owner enables it.
   'collaboration.get',
   'collaboration.directory',
@@ -89,6 +91,8 @@ export function isDeviceMethod(method: RpcMethodName): boolean {
 
 /** Push events must not bypass the read permissions enforced on RPC calls. */
 export const DEVICE_EVENTS: ReadonlySet<RpcEventName> = new Set<RpcEventName>([
+  // Team invalidation contains only the subscribed root ID; delegation.get enforces its read scope.
+  'delegation.changed',
   'collaboration.changed', 'thread.activity',
   'project.added', 'project.removed',
   'thread.created', 'thread.updated', 'thread.removed', 'thread.commands',
@@ -102,6 +106,8 @@ export const DEVICE_EVENTS: ReadonlySet<RpcEventName> = new Set<RpcEventName>([
 
 /** The server also checks the thread or project scope of these agent events. */
 export const AGENT_EVENTS: ReadonlySet<RpcEventName> = new Set<RpcEventName>([
+  // The server restricts this invalidation to the agent's own subscribed thread.
+  'delegation.changed',
   'thread.activity', 'todos.updated', 'collaboration.changed',
 ]);
 
@@ -115,16 +121,22 @@ export function mayReceiveEvent(name: RpcEventName, connection: Connection): boo
  * token that sits in the environment of a process the user did not write. Read
  * this as the CLI's manual: the agent says where it is, shows the user
  * something, keeps its task list and the project's cards, reads the changes and
- * the files around it. Nothing here writes a file, starts a process, reads
- * another thread or changes what the core trusts, and every call is held to the
- * thread whose token it carries.
+ * the files around it. Delegation can start a child only on owner-approved
+ * routes within that thread's team budget. Every call is held to the token's
+ * thread; team methods check the relationship before reaching a child. None
+ * of these methods changes the owner's trust, routes or permissions.
  */
 export const AGENT_METHODS: ReadonlyMap<RpcMethodName, string> = new Map<RpcMethodName, string>([
+  ['delegation.get', 'its own team summaries, approved profiles and remaining budget'],
+  ['delegation.spawn', 'one direct child on an owner-approved route, within durable team limits'],
+  ['delegation.send', 'messages only between this parent and its direct children'],
+  ['delegation.stop', 'stop its own children or itself, never unrelated work'],
   ['collaboration.get', 'its own coordination inbox and remaining budget, never other conversations'],
   ['collaboration.directory', 'opted-in contacts in this project and explicitly trusted machines'],
   ['collaboration.send', 'authenticated delivery as this thread to a separately authorized recipient'],
   ['agent.where', 'the thread, its project, its working directory and its branch: what the CLI prints first'],
   ['panel.open', 'showing the user a file, a diff or a page instead of pasting it into the transcript'],
+  ['artifacts.publish', 'explicitly sharing a bounded snapshot from its own working directory in its own conversation'],
   ['threads.tasks.set', 'the plan the tasks surface draws, from an agent whose protocol carries no todo tool'],
   ['threads.tasks.get', 'the same plan read back, so a new process continues the list it did not write'],
   ['todos.list', 'the project cards, shared with the other threads of the project'],

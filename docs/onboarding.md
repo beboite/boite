@@ -19,16 +19,36 @@ tour set.
 | Usage | A named provider, a five-hour limit, used percentage and reset time | An illustrated taskbar hover, no live account list |
 | Reach | The host keeps working while the phone shows the same conversation | An animated desktop-to-phone illustration |
 | Quiet | Agents work without taking over the screen or speakers | Notifications, close to tray, focus guard, mute |
-| Privacy | Messages and files stay out of analytics | Two concise consent switches and the final welcome, owner only |
+| Privacy | The trade offer: anonymous counters, or the deal | Two consent rows that also close the tour, owner only |
 
-The miniatures use responsive English text, the real provider marks and theme tokens.
-Tour instructions, animation controls and accessible descriptions stay localized.
+The miniatures use the tour's language through the same strings, one markup per
+scene, with the real provider marks and theme tokens. The reach scene draws the
+same conversation as bars on a monitor and a phone rather than text to read.
+Each scene plays in under four seconds, the two conversation demos in under five.
 Three bordered icon buttons select the conversation demonstrations. Dictation
 shows microphone activation, speech, then a draft to review; agent switching
 shows the picker, a follow-up and the next agent's answer. Animations stop after their demonstration, can be paused and replayed,
 and show the completed state under reduced motion. The dots are the only progress
-indicator. Export and deletion management remain in Settings. Pending deletion
-does not prevent a fresh opt-in or leaving the consent screen.
+indicator.
+
+The privacy screen is Boite Legacy's: a title that turns red over ten seconds,
+the trade offer clip, and two rows. "No! Enough is enough" keeps the anonymous
+counters (or a saved opt-out on a replay), swaps to the refusal clip and closes
+the tour two seconds later, at once under reduced motion. "Deal" turns on
+enhanced analytics and closes it. That screen has no Next button; Escape and
+the cross leave the counters as they are. Export and deletion management remain
+in Settings.
+
+In the shell the scrim starts under the title bar, so the window can be dragged,
+minimized or closed during the tour.
+
+## The window it opens in
+
+The shell opens its main window at 1280 x 890, centred in the primary monitor's
+work area, and at 92% of that area on a smaller screen (`centred` in
+`apps/shell/src-tauri/src/lib.rs`). 890 is the tallest tour screen, the French
+consent screen at 808 px, plus the scrim's margin and the title bar. A screen
+that grows past it scrolls inside the panel; raise the constant with it.
 
 Escape leaves, the cross leaves, Tab stays inside. The dots at the bottom walk
 the screens and read as steps to a screen reader. Leaving at the first screen
@@ -80,7 +100,7 @@ change.
 Closing it writes `boite.onboarding` in `localStorage`:
 
 ```json
-{ "version": 5, "at": 1789660000000 }
+{ "version": 6, "at": 1789660000000 }
 ```
 
 The device that stores nothing, a browser refusing storage, sees the tour every

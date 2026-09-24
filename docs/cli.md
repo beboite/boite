@@ -47,6 +47,7 @@ token is read.
 
 ```
 boite where                      thread, title, project, cwd, branch, worktree, agent
+boite attach <file>               publish a file snapshot in chat, at most 5 MB
 boite show <file>[:line]         open the file in the panel, at that line
 boite diff [file]                open the changes surface, or one file's diff
 boite browse <url>               open the url in the panel's browser (http, https)
@@ -57,6 +58,10 @@ boite todo list|add <text>|claim <id>
 boite agents list|inbox
 boite agents send <core-id>/<thread-id> <text>
 boite agents reply <message-id> <text>
+boite delegate profiles|list
+boite delegate spawn <profile-id> <brief>
+boite delegate send <thread-id> <text>
+boite delegate stop [thread-id]
 boite help
 ```
 
@@ -66,6 +71,11 @@ opens the file at line 12. A `show`, `diff`, `browse` or `open` answers
 `shown: yes` when a client subscribed to the thread received the request, and
 `shown: no ...` when nobody was watching: the request still lands on the
 thread's panel and is there when the thread is next opened.
+
+`attach` saves a copy in an assistant message, so it remains downloadable from
+desktop and paired phones after the original changes or disappears. The thread
+must have a turn and must not be archived. The optional rich preview is under
+the [Chat files and previews experiment](experiments.md#chat-files-and-previews).
 
 Task ids are `t1`, `t2` and so on, allocated by the CLI; `start 2` and
 `start t2` mean the same. `task` rows print as `t1 [ ] text`, `[>]` in
@@ -80,6 +90,11 @@ usage error (the usage text on stderr).
 [Agent coordination](coordination.md) must be enabled by the owner before an
 agent can send messages. The directory includes only authorized contacts.
 Replies preserve their message reference and authenticated sender identity.
+
+[Delegation](delegation.md) uses owner-approved model profiles and a separate
+team budget. Children share the parent's checkout, retain their own sessions,
+and return bounded results automatically. `delegate stop` pauses the whole team;
+only the owner can change profiles or resume a paused team.
 
 ## Where the command lives
 

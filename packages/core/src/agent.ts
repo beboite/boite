@@ -18,6 +18,7 @@ import { newToken } from './ids.ts';
 import { registerGitMethods } from './git.ts';
 import { registerTodoMethods } from './todos.ts';
 import { existingInside, registerWorkdirMethods, resolveInside } from './workdir.ts';
+import { publishArtifact } from './artifacts.ts';
 
 /** More than a plan, and the tasks surface stops being readable anyway. */
 export const TASKS_MAX = 200;
@@ -188,6 +189,7 @@ export function setTasks(core: Core, params: RpcParams<'threads.tasks.set'>): Th
  * here keeps the door in one file: `access.ts` says who may knock.
  */
 export function registerAgentMethods(core: Core): void {
+  core.router.register('artifacts.publish', (params) => publishArtifact(core, params));
   core.router.register('agent.where', (params) => whereOf(core, core.threads.require(params.threadId)));
   core.router.register('panel.open', (params) => {
     const thread = core.threads.require(params.threadId);

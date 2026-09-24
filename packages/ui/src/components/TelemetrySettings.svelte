@@ -4,7 +4,7 @@
   import type { Store } from '../lib/store.svelte';
   import { strings } from '../lib/strings';
 
-  let { store, embedded = false }: { store: Store; embedded?: boolean } = $props();
+  let { store }: { store: Store } = $props();
   const uid = $props.id();
   let consent = $state<TelemetryState | null>(null);
   let error = $state('');
@@ -47,28 +47,25 @@
 </script>
 
 {#if store.owner}
-  <section class:card={!embedded} data-testid="telemetry-settings">
-    {#if !embedded}<h2>{strings.telemetry.heading}<InfoTip topic={strings.telemetry.heading} text={strings.telemetry.description} /></h2>{/if}
+  <section class="card" data-testid="telemetry-settings">
+    <h2>{strings.telemetry.heading}<InfoTip topic={strings.telemetry.heading} text={strings.telemetry.description} /></h2>
     {#if consent}
-      {#if !consent.configured && !embedded}<p class="hint">{strings.telemetry.unconfigured}</p>{/if}
+      {#if !consent.configured}<p class="hint">{strings.telemetry.unconfigured}</p>{/if}
       <label for="{uid}-basic" class="switch-row">
-        <!-- The tour is there to explain, so it keeps the sentence in view. -->
-        <span class="text"><span id="{uid}-basic-name">{strings.telemetry.basic}</span>{#if embedded}<span class="hint" id="{uid}-basic-hint">{strings.onboarding.privacy.basic}</span>{:else}<InfoTip topic={strings.telemetry.basic} text={strings.telemetry.basicHint} />{/if}</span>
-        <input id="{uid}-basic" aria-labelledby="{uid}-basic-name" aria-describedby={embedded ? `${uid}-basic-hint` : undefined} type="checkbox" role="switch" checked={consent.mode !== 'off'} disabled={busy}
+        <span class="text"><span id="{uid}-basic-name">{strings.telemetry.basic}</span><InfoTip topic={strings.telemetry.basic} text={strings.telemetry.basicHint} /></span>
+        <input id="{uid}-basic" aria-labelledby="{uid}-basic-name" type="checkbox" role="switch" checked={consent.mode !== 'off'} disabled={busy}
           onchange={event => void change(event.currentTarget.checked ? 'basic' : 'off')} />
       </label>
       <label for="{uid}-enhanced" class="switch-row">
-        <span class="text"><span id="{uid}-enhanced-name">{strings.telemetry.enhanced}</span>{#if embedded}<span class="hint" id="{uid}-enhanced-hint">{strings.onboarding.privacy.enhanced}</span>{:else}<InfoTip topic={strings.telemetry.enhanced} text={strings.telemetry.enhancedHint} />{/if}</span>
-        <input id="{uid}-enhanced" aria-labelledby="{uid}-enhanced-name" aria-describedby={embedded ? `${uid}-enhanced-hint` : undefined} type="checkbox" role="switch" checked={consent.mode === 'enhanced'} disabled={busy}
+        <span class="text"><span id="{uid}-enhanced-name">{strings.telemetry.enhanced}</span><InfoTip topic={strings.telemetry.enhanced} text={strings.telemetry.enhancedHint} /></span>
+        <input id="{uid}-enhanced" aria-labelledby="{uid}-enhanced-name" type="checkbox" role="switch" checked={consent.mode === 'enhanced'} disabled={busy}
           onchange={event => void change(event.currentTarget.checked ? 'enhanced' : 'basic')} />
       </label>
-      {#if !embedded}
       {#if consent.pendingDeletion}<p class="hint">{strings.telemetry.pending}</p>{/if}
       <div class="actions">
         {#if consent.mode === 'enhanced'}<button disabled={busy} onclick={() => void dataAction('export')}>{strings.telemetry.export}</button>{/if}
         {#if consent.pendingDeletion}<button disabled={busy} onclick={() => void dataAction('retryForget')}>{strings.telemetry.retry}</button>{/if}
       </div>
-      {/if}
     {/if}
     {#if error}<p role="alert">{error}</p>{/if}
   </section>

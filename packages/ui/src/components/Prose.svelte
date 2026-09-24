@@ -3,8 +3,29 @@
   import { renderMarkdown } from '../lib/markdown';
   import { paragraphBlocks, answerText } from '../lib/message-display';
   import { strings } from '../lib/strings';
+  import { experimentOn } from '../lib/experiments.svelte';
+  import type { Store } from '../lib/store.svelte';
+  import ChatFile from './ChatFile.svelte';
 
-  let { text, live = false }: { text: string; live?: boolean } = $props();
+  let { text, live = false, store, threadId }: { text: string; live?: boolean; store?: Store; threadId?: string } = $props();
+  let selected = $state<{ path: string; line?: number } | null>(null);
+  const rich = $derived(experimentOn('chat-artifacts'));
+  function follow(event: MouseEvent): void {
+    const anchor = event.target instanceof Element ? event.target.closest<HTMLAnchorElement>('a[href]') : null;
+    if (!anchor) return;
+    if (!anchor.dataset.filePath) {
+      const href = anchor.getAttribute('href');
+      if (href?.startsWith('#')) {
+        try {
+          const heading = host?.querySelector(`[id="${CSS.escape(decodeURIComponent(href.slice(1)))}"]`);
+          if (heading) { event.preventDefault(); heading.scrollIntoView({ block: 'nearest' }); }
+        } catch { /* A malformed fragment is not a local file. */ }
+      }
+      return;
+    }
+    event.preventDefault();
+    selected = { path: anchor.dataset.filePath!, ...(anchor.dataset.fileLine ? { line: Number(anchor.dataset.fileLine) } : {}) };
+  }
   let blocks = $derived(paragraphBlocks(answerText(text, live), live));
 
   let host = $state<HTMLDivElement>();
@@ -56,11 +77,17 @@
   }
 </script>
 
-<div class="prose" data-testid="text-part" bind:this={host}>
+<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+<div class="prose" data-testid="text-part" bind:this={host} onclick={follow}>
   {#each blocks as block, index (index)}
-    <div class="paragraph" data-testid="paragraph">{@html renderMarkdown(block)}</div>
+    <div class="paragraph" data-testid="paragraph">{@html renderMarkdown(block, rich)}</div>
   {/each}
 </div>
+{#if selected && rich}
+  {#key `${threadId}:${selected.path}:${selected.line}`}
+    <ChatFile {store} {threadId} path={selected.path} line={selected.line} onclose={() => selected = null} />
+  {/key}
+{/if}
 
 <style>
   .prose {

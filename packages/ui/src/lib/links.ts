@@ -43,21 +43,21 @@ export async function revealFile(path: string): Promise<void> {
 export function installExternalLinks(root: HTMLElement): () => void {
   const onclick = (event: MouseEvent): void => {
     if (event.defaultPrevented) return;
-    if (event.button !== 0 || event.ctrlKey || event.shiftKey || event.metaKey) return;
+    if (event.button !== 0 || (!insideTauri() && (event.ctrlKey || event.shiftKey || event.metaKey))) return;
     const target = event.target;
     if (!(target instanceof Element)) return;
     const anchor = target.closest('a[href]');
     if (!(anchor instanceof HTMLAnchorElement)) return;
 
     const href = anchor.getAttribute('href') ?? '';
-    if (!href.startsWith('http://') && !href.startsWith('https://')) return;
+    if (!/^https?:\/\//i.test(href) && !/^mailto:/i.test(href)) return;
     let origin: string;
     try {
       origin = new URL(href).origin;
     } catch {
       return;
     }
-    if (origin === window.location.origin) return;
+    if (origin === window.location.origin && !insideTauri()) return;
 
     event.preventDefault();
     void openExternal(href);

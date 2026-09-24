@@ -17,6 +17,7 @@ import { RpcFailure } from '../client';
  * `hello` is not in it because the core answers it before the router's gate.
  */
 export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>([
+  'delegation.get', 'delegation.send', 'delegation.stop',
   'sessions.list',
   'push.status', 'push.subscribe', 'push.unsubscribe', 'push.test',
   'projects.list',

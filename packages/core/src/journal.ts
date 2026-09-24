@@ -13,7 +13,7 @@ import type {
   Usage,
 } from '@boite/contracts';
 
-export const SCHEMA_VERSION = 13;
+export const SCHEMA_VERSION = 14;
 const DELTA_WINDOW_MS = 16;
 
 /** What `listMessagePage` hands back: the page itself and the cursor for what is behind it. */
@@ -45,6 +45,7 @@ interface ProjectRow {
 }
 
 interface ThreadRow {
+  parent_thread_id: string | null;
   last_user_message_at?: number | null;
   id: string;
   project_id: string;
@@ -365,6 +366,27 @@ function migrate(db: Database): void {
   }
   // The prompt cache the last turn left, as JSON (`PromptCache`).
   if (version < 13) { db.exec('ALTER TABLE threads ADD COLUMN prompt_cache TEXT'); version = 13; }
+  if (version < 14) {
+    db.transaction(() => {
+      db.exec(`ALTER TABLE threads ADD COLUMN parent_thread_id TEXT;
+        CREATE INDEX threads_parent ON threads(parent_thread_id);
+        CREATE TABLE delegated_agents (
+          thread_id TEXT PRIMARY KEY, root_id TEXT NOT NULL, request_id TEXT NOT NULL,
+          fingerprint TEXT NOT NULL, profile_id TEXT NOT NULL, task TEXT NOT NULL,
+          UNIQUE(root_id, request_id)
+        );
+        CREATE INDEX delegated_root ON delegated_agents(root_id);
+        CREATE TABLE delegation_messages (
+          id TEXT PRIMARY KEY, root_id TEXT NOT NULL, sender_id TEXT NOT NULL, recipient_id TEXT NOT NULL,
+          request_id TEXT NOT NULL, fingerprint TEXT NOT NULL, status TEXT NOT NULL,
+          created_at INTEGER NOT NULL, data TEXT NOT NULL, UNIQUE(sender_id, request_id)
+        );
+        CREATE INDEX delegation_inbox ON delegation_messages(recipient_id, status, created_at);
+        CREATE INDEX delegation_pending ON delegation_messages(status, created_at);
+        CREATE INDEX delegation_history ON delegation_messages(root_id, created_at);`);
+    })();
+    version = 14;
+  }
   db.exec(`PRAGMA user_version = ${version}`);
 }
 
@@ -382,6 +404,7 @@ function toProject(row: ProjectRow): Project {
 
 function toThread(row: ThreadRow): ThreadSummary {
   return {
+    ...(row.parent_thread_id ? { parentThreadId: row.parent_thread_id } : {}),
     lastUserMessageAt: row.last_user_message_at ?? null,
     id: row.id,
     projectId: row.project_id,
@@ -577,8 +600,8 @@ export class Journal {
     this.db
       .query(
         `INSERT OR REPLACE INTO threads
-         (id, project_id, title, title_source, provider_id, account_id, model, effort, cwd, branch, permission_mode, status, unread, archived, pinned, session_id, context, created_at, updated_at, session_generation, selection_version, speed, prompt_cache)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (id, project_id, title, title_source, provider_id, account_id, model, effort, cwd, branch, permission_mode, status, unread, archived, pinned, session_id, context, created_at, updated_at, session_generation, selection_version, speed, parent_thread_id, prompt_cache)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         thread.id,
@@ -603,6 +626,7 @@ export class Journal {
         thread.sessionGeneration ?? 0,
         thread.selectionVersion ?? 0,
         thread.speed ?? null,
+        thread.parentThreadId ?? null,
         thread.promptCache ? JSON.stringify(thread.promptCache) : null,
       );
   }

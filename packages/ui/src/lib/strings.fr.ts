@@ -10,6 +10,25 @@
 import type { Messages } from './i18n.svelte';
 
 export const fr: Messages = {
+  previewComments: {
+  annotate: 'Référencer un élément',
+  picking: 'Sélectionnez un élément dans la page. Échap annule.',
+  comment: 'Que faut-il changer ?',
+  add: 'Ajouter au message',
+  cancel: 'Annuler',
+  added: 'Élément ajouté à votre message.',
+  unavailable: 'Cet élément est inaccessible. Utilisez l’application de bureau pour les pages d’une autre origine.',
+  failed: 'La sélection a échoué. Rechargez la page et réessayez.',
+  reveal: 'Montrer cet élément dans l’aperçu',
+  remove: 'Retirer la référence à cet élément',
+  stale: 'Cet aperçu a changé de page. Rouvrez la page d’origine ou sélectionnez à nouveau l’élément.',
+  missing: 'Cet élément n’existe plus dans la page. Sélectionnez-le à nouveau.',
+  tooMany: 'Un message peut référencer au maximum 8 éléments de page.',
+  activityUnsupported: 'Les références ne sont pas disponibles avec /goal ou /loop. Envoyez un message ordinaire ou retirez les références.',
+  stashUnsupported: 'Ce brouillon contient des références et ne peut pas être mis de côté. Envoyez-le ou retirez les références.'
+},
+  artifacts: { preview: 'Aperçu', download: 'Télécharger', close: 'Fermer l’aperçu', loading: 'Chargement du fichier', unavailable: 'Ce fichier ne peut pas être affiché ici. Téléchargez-le pour l’ouvrir.', failed: 'Impossible d’ouvrir ce fichier', ownerOnly: 'Les liens vers les fichiers locaux nécessitent une connexion propriétaire. Demandez à l’agent de joindre le fichier pour le partager avec cet appareil.' },
+
   brain: {
     heading: 'Brain', description: 'Les mêmes instructions et skills pour tes agents.',
     folder: 'Dossier du brain', pathHint: 'Chemin du dossier', save: 'Connecter le dossier', browse: 'Parcourir', useFolder: 'Choisir ce dossier',
@@ -293,6 +312,7 @@ export const fr: Messages = {
 
   palette: {
     placeholder: 'Cherchez une conversation, ou tapez une commande',
+    terminal: 'Afficher ou masquer le terminal',
     threads: 'Conversations',
     commands: 'Commandes',
     empty: 'Rien ne correspond.',
@@ -440,6 +460,7 @@ export const fr: Messages = {
     traceHint: 'Processus lancés par cette conversation',
     panel: 'Panneau',
     panelHint: "L'établi à côté de cette conversation",
+    terminalHint: 'Terminal dans le dossier de cette conversation',
     cwd: 'Répertoire de travail',
     model: 'Modèle',
     defaultModel: 'Modèle par défaut',
@@ -564,6 +585,7 @@ export const fr: Messages = {
     exchanges: 'Échanges entre agents', noExchanges: "Aucun échange entre agents pour le moment.", details: "Afficher l'échange",
     from: 'De {title} sur {machine}', to: 'À {title}', reply: 'Réponse à {id}',
     receivedFrom: 'Reçu de', sentTo: 'Votre agent a envoyé à', incoming: 'Entrant', outgoing: 'Sortant',
+    userSentTo: 'Vous avez envoyé à', userMessageVia: 'Message utilisateur via',
     receivedStatus: 'Reçu',
     noReceipt: "Remis signifie transmis à l'agent destinataire. Les protocoles des agents ne fournissent aucun accusé de lecture.",
     warning: 'Avertissement de coordination',
@@ -575,6 +597,55 @@ export const fr: Messages = {
       queued: 'En attente', received: 'En attente', delivered: 'Envoyé', uncertain: 'Non confirmé', expired: 'Expiré', rejected: 'Échec'
     }
   },
+  delegation: {
+    heading: 'Agents',
+    panelHint: "Voir les agents",
+    parent: 'Fil principal',
+    activeAgents: 'Agents actifs',
+    loading: 'Chargement des agents',
+    loadingTranscript: 'Chargement de la conversation sélectionnée',
+    noTranscript: "Cet agent n'a encore rien écrit.",
+    configure: "Réglages de l'équipe",
+    enabled: 'Autoriser la délégation',
+    ownerOnly: "Seul le propriétaire peut lancer des agents ou modifier les réglages.",
+    profiles: "Profils",
+    addProfile: 'Ajouter un profil',
+    profileName: 'Agent {count}',
+    profileLabel: 'Profil de l’agent',
+    removeProfile: 'Supprimer le profil',
+    maxAgents: 'Agents au total',
+    maxConcurrent: 'En parallèle',
+    maxTurns: 'Tours de l’équipe',
+    maxMinutes: 'Minutes par tour',
+    pause: 'Suspendre l’équipe',
+    resume: 'Reprendre l’équipe',
+    launch: 'Lancer un agent',
+    launching: 'Lancement',
+    taskPlaceholder: "Tâche à confier",
+    team: 'Membres de l’équipe',
+    empty: 'Aucun agent délégué pour le moment.',
+    agentsShort: 'agents',
+    turnsShort: 'tours',
+    usage: 'Consommation de l’équipe',
+    limitReached: "Limite de tours atteinte. Augmentez-la dans les réglages pour continuer.",
+    openThread: 'Ouvrir la conversation',
+    backToTeam: 'Retour aux agents',
+    stop: 'Arrêter',
+    stopAll: 'Tout arrêter',
+    messagePlaceholder: 'Écrire à cet agent ou le réorienter',
+    send: 'Envoyer à l’agent',
+    queuedDelivery: "Message en attente.",
+    startedOne: '1 agent lancé',
+    startedMany: '{count} agents lancés',
+    completed: '{done}/{total} terminés',
+    failed: '{count} en erreur',
+    stopped: '{count} arrêtés',
+    elapsed: 'Temps écoulé',
+    showTeam: 'Voir les agents',
+    doneStatus: 'Terminé',
+    stoppedStatus: 'Arrêté'
+  },
+
   composer: {
     switchTitle: 'Passer une conversation de {tokens} jetons à {provider} ?',
     switchBody: "{provider} démarre une nouvelle session et reçoit des extraits du début et des échanges les plus récents, environ 20 000 jetons. Le reste lui est inaccessible. Compacter avant ne change rien.",
@@ -764,6 +835,13 @@ export const fr: Messages = {
     slotEmpty: "La page s'affiche ici dès que la coque fournit la vue web"
   },
 
+  terminal: {
+    title: 'Terminal',
+    hide: 'Masquer le terminal',
+    close: 'Fermer le shell',
+    resize: 'Redimensionner le terminal'
+  },
+
   trace: {
     exact: 'Tous les processus enfants suivis',
     limited: 'Suivi des processus limité',
@@ -836,6 +914,8 @@ export const fr: Messages = {
     loginRedirectPlaceholder: "Sur un autre appareil ? Collez l'adresse localhost sur laquelle la page se termine",
     loginSend: 'Envoyer',
     loginCancel: 'Annuler',
+    terminalHint: 'Répondez à ses questions dans le terminal, puis fermez-le une fois connecté.',
+    terminalDone: 'Fermer le terminal',
     remove: 'Supprimer',
     removeTitle: 'Supprimer {account} ?',
     removeBody: "Cela déconnecte le compte de Boite et supprime ses fichiers. Un compte utilisé par une conversation ne peut pas être supprimé.",
@@ -1065,6 +1145,8 @@ export const fr: Messages = {
   },
 
   experiments: {
+    chatArtifacts: { title: 'Fichiers et aperçus dans le chat', hint: 'Ouvrir les liens de fichiers et afficher les fichiers envoyés par un agent dans la conversation' },
+    previewComments: { title: 'Commentaires sur les aperçus', hint: 'Sélectionner un élément dans le navigateur intégré et l’ajouter au brouillon de la conversation' },
     themeGrain: {
       title: 'Thème Grain',
       hint: 'Un fond grainé qui passe du gris clair en haut à gauche au noir en bas à droite'
@@ -1120,7 +1202,6 @@ export const fr: Messages = {
     on: (machine: string) => `Sur ${machine}`,
     update: 'Mettre à jour', skip: 'Ignorer', retry: 'Réessayer',
     updating: (name: string) => `Mise à jour de ${name}`,
-    updatingHint: 'Ses conversations restent en place. Le prochain tour utilisera la nouvelle version.',
     failed: (name: string) => `La mise à jour de ${name} a échoué`,
     upToDate: 'À jour', unknown: 'Vérifie lui-même', runUpdater: 'Lancer sa mise à jour',
     skipped: (version: string) => `${version} ignorée`,
@@ -1260,7 +1341,19 @@ export const fr: Messages = {
   },
 
   onboarding: {
-    privacy: { title: 'Vous êtes chez vous', body: "Un dernier choix. Vos messages, fichiers et comptes restent hors des statistiques.", basic: 'Compter les lancements et les tâches terminées. Activé par défaut.', enhanced: 'Partager les modèles publics, la vitesse et les volumes de jetons. Facultatif, désactivé par défaut.' },
+    privacy: {
+      title: 'VENDEZ VOTRE ÂME À BOITE !',
+      intro: "Boite compte quelques statistiques d'utilisation anonymes pour savoir quoi corriger en premier. Vos messages, fichiers et comptes ne quittent jamais votre machine, l'application marche pareil dans tous les cas, et vous pouvez changer d'avis quand vous voulez dans les réglages.",
+      question: 'Marché conclu ?',
+      video: 'Mème Trade Offer',
+      basic: 'NON ! Ça suffit',
+      basicDefault: '(par défaut)',
+      basicHint: "Des compteurs d'installations actives, de lancements, de conversations et de résultats des tours. Les identifiants d'usage changent chaque jour. Aucun profil.",
+      deal: 'MARCHÉ CONCLU',
+      dealHint: "Ajoute les modèles publics choisis, le niveau de raisonnement, les modes de vitesse et de permission, les durées et les volumes de jetons, sous un identifiant aléatoire stable. Les modèles privés comptent comme « autre ». Ça aide beaucoup. Merci !",
+      optOut: 'Si vous ne voulez VRAIMENT pas aider Boite, Réglages > Général > Confidentialité et statistiques désactive tout. :c',
+      doc: 'Ce qui est collecté'
+    },
     demo: {
       pause: 'Pause', play: 'Rejouer', resume: 'Reprendre',
       record: 'Cliquez sur le micro', speak: 'Dictez votre message', review: "Relisez avant d'envoyer",
@@ -1268,17 +1361,16 @@ export const fr: Messages = {
       chooseAgent: "Choisissez l'agent suivant", handoff: 'Codex reprend la conversation', checked: 'Libellés vérifiés. Contraste amélioré.', nextMessage: 'Écrire à Codex',
       before: 'Avant', after: 'Après', buttonBefore: 'Envoyer', buttonAfter: 'Envoyer le message', changedFile: 'ContactForm.svelte', changesReady: 'Deux lignes modifiées',
       background: 'En cours en arrière-plan', writing: 'Préparer le lancement de demain', notes: 'Notes', noteOne: 'Relire le formulaire de contact', noteTwo: 'Publier le portfolio',
-      privateContent: 'Messages et fichiers', staysHere: 'Hors des statistiques', anonymousCount: 'Tâches terminées',
-      taskResult: 'Formulaire prêt', loginResult: 'Connexion réparée', testsResult: 'Tests réussis', sameResult: 'Le formulaire est prêt.', hoverTray: "Survolez l'icône Boite",
+      taskResult: 'Formulaire prêt', loginResult: 'Connexion réparée', testsResult: 'Tests réussis', hoverTray: "Survolez l'icône Boite",
       conversation: "Changer d'agent", voice: 'Dicter', panel: 'Voir les modifications',
-      task: 'Créer mon portfolio', secondTask: 'Réparer la connexion', thirdTask: 'Écrire les tests', working: 'En cours', complete: 'Terminé', request: 'Ajoute un formulaire de contact', answer: 'Le formulaire est prêt.', followup: "Vérifie maintenant l'accessibilité", continued: 'Même conversation. Même historique.',
+      task: 'Créer mon portfolio', secondTask: 'Réparer la connexion', thirdTask: 'Écrire les tests', working: 'En cours', request: 'Ajoute un formulaire de contact', answer: 'Le formulaire est prêt.', followup: "Vérifie maintenant l'accessibilité", continued: 'Même conversation. Même historique.',
       voiceWords: 'Rends les boutons plus lisibles', voiceHint: 'Parlez, relisez le brouillon, puis envoyez.',
-      changes: 'Modifications', file: 'Formulaire de contact', reviewed: 'Relisez les changements à côté du chat.',
+      changes: 'Modifications', reviewed: 'Relisez les changements à côté du chat.',
       usageLabel: 'Claude', window: 'Limite sur 5 h', used: '24 % utilisés', reset: 'Réinitialisation dans 2 h 10', tray: "Dans la barre des tâches, près de l'horloge", trayHint: "Survolez l'icône Boite pour voir vos limites sans ouvrir l'application.",
       desktop: 'Votre ordinateur', phone: 'Votre téléphone', synced: 'La même conversation', reachHint: "Après un appairage par QR code, suivez vos agents sur votre téléphone. Votre ordinateur continue de les faire tourner.",
       notification: 'Formulaire de contact terminé', quietBody: "Vos agents travaillent sans prendre votre écran ni vos haut-parleurs.",
       installVoice: 'Installer la dictée locale', downloadVoice: 'Environ 200 Mo. Le son reste sur cet ordinateur.', installingVoice: 'Téléchargement du moteur vocal', cancelVoice: 'Annuler le téléchargement', readyVoice: 'La dictée est prête. Utilisez le micro du champ de message.', retryVoice: 'Réessayer la configuration vocale',
-      workspaceBody: 'Cliquez sur une démo pour la voir en action.', finish: 'Bon boitage !', finishBody: 'Vos agents vous attendent. Ouvrez un dossier et confiez-leur une tâche.',
+      workspaceBody: 'Cliquez sur une démo pour la voir en action.',
     },
     label: 'Prise en main',
     skip: 'Passer',

@@ -10,7 +10,9 @@
   const copy: Record<ExperimentId, { title: string; hint: string }> = {
     'theme-grain': strings.experiments.themeGrain,
     'session-import': strings.experiments.sessionImport,
-    'prompt-cache': strings.experiments.promptCache
+    'prompt-cache': strings.experiments.promptCache,
+    'chat-artifacts': strings.experiments.chatArtifacts,
+    'preview-comments': strings.experiments.previewComments
   };
 
   let enabled = $state<ExperimentId[]>(untrack(() => readExperiments()));

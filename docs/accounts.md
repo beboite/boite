@@ -136,6 +136,32 @@ sign in from the agent's own window and check again. A paired phone gets
 neither button and reads `No AI connected` on the chip: `accounts.*` and
 `providers.install` are the owner's.
 
+## Signing in from a terminal
+
+Some login commands are a menu drawn in the terminal: `opencode auth login`
+asks which provider to add, with arrow keys, a search field and a key to paste.
+Piped output turns that into escape codes and gives the user nothing to answer
+with. A descriptor that sets `login.terminal: true` gets a real shell instead,
+the same one as the thread terminal ([terminal.md](terminal.md)):
+
+1. `accounts.loginTerminal` starts the shell in a pseudo-terminal under
+   `login:<accountId>`, with the account's environment and the isolation
+   directory (or the home directory for the default account) as its working
+   directory. Calling it again attaches to the running one.
+2. Once the prompt goes quiet, the core types the login command into it, as the
+   user would have: `& 'C:\path\opencode.exe' auth login` in PowerShell.
+3. The Providers page draws the shell under the provider's row. The user
+   answers the CLI there and closes the terminal once signed in, or types `exit`.
+4. When the shell exits, the core rechecks the account and `accounts.updated`
+   follows. `accounts.loginCancel` closes the shell too.
+
+The default account may sign in this way, unlike a piped login: the command runs
+in plain view, in the user's own CLI, which is what they would have typed in a
+terminal of their own. A sign-in from a row goes to the default account first
+when it is not signed in, then to an isolated account nobody is signed into,
+then to a new one. OpenCode and Grok use it; the phone has no Providers page
+and no terminal.
+
 ## What the core refuses, and why
 
 - The provider has no `login` block. Nothing to run, so the answer is a refusal
@@ -143,9 +169,12 @@ neither button and reads `No AI connected` on the chip: `accounts.*` and
   is a slash command inside its own interface, with no command-line equivalent.
 - A login is already running for that account. One at a time, or two processes
   race on one credentials file.
-- The account uses the provider's own default location. That login is the user's
-  own CLI, outside Boite, and running it from here would write into the real
-  configuration directory the user is logged into. The refusal says so.
+- The account uses the provider's own default location and the login is piped.
+  That login is the user's own CLI, outside Boite, and running it unseen would
+  write into the real configuration directory the user is logged into. The
+  refusal says so. A terminal login is the exception above.
+- `accounts.loginTerminal` for a provider without `login.terminal`, or while a
+  piped login runs for that account. Refused by name, with the field.
 - The login command is empty, or its executable does not resolve. Refused at the
   spawn, naming what was tried.
 - An account of its own, for a provider whose profile has no isolation variable

@@ -1,5 +1,24 @@
 /** Every user-facing string of the UI. No literal UI text lives anywhere else. */
 export const strings = {
+  previewComments: {
+  annotate: 'Reference an element',
+  picking: 'Select an element in the page. Escape cancels.',
+  comment: 'What should change?',
+  add: 'Add to message',
+  cancel: 'Cancel',
+  added: 'Element added to your message.',
+  unavailable: 'Element selection is unavailable on this page. Use the desktop app for cross-origin pages.',
+  failed: 'Element selection failed. Reload the page and try again.',
+  reveal: 'Show this element in the preview',
+  remove: 'Remove element reference',
+  stale: 'This preview has changed page. Reopen the original page or select the element again.',
+  missing: 'This element no longer exists on the page. Select it again.',
+  tooMany: 'A message can reference at most 8 page elements.',
+  activityUnsupported: 'Element references cannot be used with /goal or /loop. Send a regular message or remove the references.',
+  stashUnsupported: 'This draft contains element references and cannot be stashed. Send it or remove the references first.'
+},
+  artifacts: { preview: 'Preview', download: 'Download', close: 'Close preview', loading: 'Loading file', unavailable: 'No inline preview for this file. Download it to open it.', failed: 'Could not open this file', ownerOnly: 'Local file links need an owner connection. Ask the agent to attach the file to share it with this device.' },
+
   brain: {
     heading: 'Brain', description: 'Your agents share the same instructions and skills.',
     folder: 'Brain folder', pathHint: 'Folder path', save: 'Connect folder', browse: 'Browse', useFolder: 'Choose this folder',
@@ -284,6 +303,7 @@ export const strings = {
 
   palette: {
     placeholder: 'Search threads, or type a command',
+    terminal: 'Show or hide the terminal',
     threads: 'Threads',
     commands: 'Commands',
     empty: 'Nothing matches.',
@@ -436,6 +456,7 @@ export const strings = {
     /** The header's button: it shows or hides the panel, whatever surface is in it. */
     panel: 'Panel',
     panelHint: 'The workbench beside this thread',
+    terminalHint: "Terminal in this thread's folder",
     cwd: 'Working directory',
     model: 'Model',
     defaultModel: 'Default model',
@@ -570,6 +591,7 @@ export const strings = {
     exchanges: 'Agent exchanges', noExchanges: 'No agent exchange yet.', details: 'Show exchange',
     from: 'From {title} on {machine}', to: 'To {title}', reply: 'Reply to {id}',
     receivedFrom: 'Received from', sentTo: 'Your agent sent to', incoming: 'Incoming', outgoing: 'Outgoing',
+    userSentTo: 'You sent to', userMessageVia: 'User message via',
     receivedStatus: 'Received',
     noReceipt: 'Delivered means submitted to the recipient agent. Agent protocols provide no read receipt.',
     warning: 'Coordination warning',
@@ -581,6 +603,55 @@ export const strings = {
       queued: 'Waiting', received: 'Waiting', delivered: 'Sent', uncertain: 'Unconfirmed', expired: 'Expired', rejected: 'Failed'
     }
   },
+  delegation: {
+    heading: 'Agents',
+    panelHint: "View agents",
+    parent: 'Parent thread',
+    activeAgents: 'Active agents',
+    loading: 'Reading this team',
+    loadingTranscript: 'Loading the selected conversation',
+    noTranscript: 'This agent has not written anything yet.',
+    configure: 'Team settings',
+    enabled: 'Allow agent delegation',
+    ownerOnly: "Only the owner can launch agents or change settings.",
+    profiles: "Profiles",
+    addProfile: 'Add profile',
+    profileName: 'Agent {count}',
+    profileLabel: 'Agent profile',
+    removeProfile: 'Remove profile',
+    maxAgents: 'Agents total',
+    maxConcurrent: 'Running at once',
+    maxTurns: 'Team turns',
+    maxMinutes: 'Minutes per turn',
+    pause: 'Pause team',
+    resume: 'Resume team',
+    launch: 'Launch agent',
+    launching: 'Launching',
+    taskPlaceholder: "Task for this agent",
+    team: 'Team members',
+    empty: 'No delegated agent yet.',
+    agentsShort: 'agents',
+    turnsShort: 'turns',
+    usage: 'Delegated team usage',
+    limitReached: "Turn limit reached. Increase it in team settings to continue.",
+    openThread: 'Open conversation',
+    backToTeam: 'Back to the team',
+    stop: 'Stop',
+    stopAll: 'Stop all',
+    messagePlaceholder: 'Message or steer this agent',
+    send: 'Send to agent',
+    queuedDelivery: "Message queued.",
+    startedOne: 'Started 1 agent',
+    startedMany: 'Started {count} agents',
+    completed: '{done}/{total} completed',
+    failed: '{count} failed',
+    stopped: '{count} stopped',
+    elapsed: 'Elapsed time',
+    showTeam: 'View agents',
+    doneStatus: 'Completed',
+    stoppedStatus: 'Stopped'
+  },
+
   composer: {
     switchTitle: 'Switch a {tokens} token thread to {provider}?',
     switchBody: '{provider} starts a new session and receives excerpts of the opening and of the most recent exchanges, about 20k tokens. The rest is lost to it. Compacting first changes nothing.',
@@ -782,6 +853,13 @@ export const strings = {
     slotEmpty: 'The page opens here once the shell provides the webview'
   },
 
+  terminal: {
+    title: 'Terminal',
+    hide: 'Hide the terminal',
+    close: 'Close the shell',
+    resize: 'Resize the terminal'
+  },
+
   trace: {
     exact: 'All child processes tracked',
     limited: 'Limited process tracking',
@@ -855,6 +933,8 @@ export const strings = {
     loginRedirectPlaceholder: 'On another device? Paste the localhost address the page ends on',
     loginSend: 'Send',
     loginCancel: 'Cancel',
+    terminalHint: 'Answer its questions in the terminal, then close it once you are signed in.',
+    terminalDone: 'Close the terminal',
     remove: 'Remove',
     removeTitle: 'Remove {account}?',
     removeBody: 'This signs the account out of Boite and deletes its files. Accounts used by a thread cannot be removed.',
@@ -1086,6 +1166,8 @@ export const strings = {
   },
 
   experiments: {
+    chatArtifacts: { title: 'Chat files and previews', hint: 'Open file links and preview files returned by an agent in the conversation' },
+    previewComments: { title: 'Preview comments', hint: 'Select an element in the integrated browser and add feedback to the conversation draft' },
     themeGrain: {
       title: 'Grain theme',
       hint: 'A grainy ground fading from light grey at the top left to black at the bottom right'
@@ -1141,7 +1223,6 @@ export const strings = {
     on: (machine: string) => `On ${machine}`,
     update: 'Update', skip: 'Skip', retry: 'Try again',
     updating: (name: string) => `Updating ${name}`,
-    updatingHint: 'Its threads stay as they are. The next turn starts the new version.',
     failed: (name: string) => `${name} did not update`,
     upToDate: 'Up to date', unknown: 'Checks by itself', runUpdater: 'Run its updater',
     skipped: (version: string) => `${version} skipped`,
@@ -1286,7 +1367,20 @@ export const strings = {
    * it up are the same pass.
    */
   onboarding: {
-    privacy: { title: 'Make yourself at home', body: 'One last choice. Your messages, files and account details stay out of analytics.', basic: 'Count launches and completed tasks. On by default.', enhanced: 'Share public model names, speed and token counts. Your choice, off by default.' },
+    /** Boite Legacy's trade offer: picking a row is the tour's last click. */
+    privacy: {
+      title: 'SELL YOUR SOUL TO BOITE!',
+      intro: 'Boite counts a few anonymous usage stats so we know what to fix first. Your messages, files and accounts never leave your machine, the app works the same either way, and you can change your mind anytime in Settings.',
+      question: 'Deal?',
+      video: 'Trade offer meme',
+      basic: 'NO! Enough is enough',
+      basicDefault: '(default)',
+      basicHint: 'Counts of active installs, launches, conversations and turn outcomes. The usage IDs change every day. No profile.',
+      deal: 'DEAL',
+      dealHint: 'Adds the public models you pick, reasoning level, speed and permission modes, durations and token volumes, under a stable random ID. Private models count as "other". It helps a lot. Thank you!',
+      optOut: "If you REALLY don't want to help Boite, Settings > General > Privacy and analytics turns everything off. :c",
+      doc: 'What is collected'
+    },
     demo: {
       pause: 'Pause', play: 'Replay', resume: 'Resume',
       record: 'Click the microphone', speak: 'Speak your message', review: 'Review before sending',
@@ -1294,17 +1388,16 @@ export const strings = {
       chooseAgent: 'Choose the next agent', handoff: 'Codex picks up the conversation', checked: 'Labels checked. Contrast improved.', nextMessage: 'Message Codex',
       before: 'Before', after: 'After', buttonBefore: 'Send', buttonAfter: 'Send message', changedFile: 'ContactForm.svelte', changesReady: 'Two lines changed',
       background: 'Working in the background', writing: "Preparing tomorrow's launch", notes: 'Notes', noteOne: 'Review the new contact form', noteTwo: 'Publish the portfolio',
-      privateContent: 'Messages and files', staysHere: 'Stay out of analytics', anonymousCount: 'Tasks completed',
-      taskResult: 'Contact form ready', loginResult: 'Login fixed', testsResult: 'Tests passed', sameResult: 'The form is ready.', hoverTray: 'Hover the Boite icon',
+      taskResult: 'Contact form ready', loginResult: 'Login fixed', testsResult: 'Tests passed', hoverTray: 'Hover the Boite icon',
       conversation: 'Change agent', voice: 'Dictate', panel: 'Inspect changes',
-      task: 'Build my portfolio', secondTask: 'Fix the login', thirdTask: 'Write the tests', working: 'Working', complete: 'Done', request: 'Add a contact form', answer: 'The form is ready.', followup: 'Now check the accessibility', continued: 'Same thread. Same history.',
+      task: 'Build my portfolio', secondTask: 'Fix the login', thirdTask: 'Write the tests', working: 'Working', request: 'Add a contact form', answer: 'The form is ready.', followup: 'Now check the accessibility', continued: 'Same thread. Same history.',
       voiceWords: 'Make the buttons easier to read', voiceHint: 'Speak, review the draft, then send.',
-      changes: 'Changes', file: 'Contact form', reviewed: 'Review the changes beside the chat.',
+      changes: 'Changes', reviewed: 'Review the changes beside the chat.',
       usageLabel: 'Claude', window: '5-hour limit', used: '24% used', reset: 'Resets in 2 h 10 min', tray: 'In your taskbar, beside the clock', trayHint: 'Hover the Boite icon to see your limits without opening the app.',
       desktop: 'Your computer', phone: 'Your phone', synced: 'The same conversation', reachHint: 'After pairing by QR code, follow your agents from your phone. Your computer keeps running them.',
       notification: 'Contact form finished', quietBody: 'Let your agents work without taking over your screen or your speakers.',
       installVoice: 'Install local dictation', downloadVoice: 'About 200 MB. Audio stays on this computer.', installingVoice: 'Downloading voice engine', cancelVoice: 'Cancel download', readyVoice: 'Dictation is ready. Use the microphone in the composer.', retryVoice: 'Retry voice setup',
-      workspaceBody: 'Click a demo to see how it works.', finish: 'Happy Boiting!', finishBody: 'Your agents are ready when you are. Open a folder and give them a task.',
+      workspaceBody: 'Click a demo to see how it works.',
     },
     label: 'Getting started',
     skip: 'Skip',

@@ -58,10 +58,8 @@ test('an agent update is a pinned notice with Update and Skip, on a desktop and 
   await page.waitFor(`document.querySelector('${notice('claude')}') === null`);
   expect(await page.evaluate(`document.querySelectorAll('${id('harness-update-notice')}').length`)).toBe(1);
 
-  // Update turns the card into a progress card, then the core says it is current and the card leaves.
+  // Update takes the card away at once; the agent updates in the background.
   await page.click(`${notice('codex')} ${id('harness-update-run')}`);
-  await page.waitFor(`document.querySelector('${notice('codex')}')?.dataset.state === 'updating'`);
-  await capture('harness-updates-updating.png');
   await page.waitFor(`document.querySelector('${id('harness-update-notices')}') === null`);
 }, 20_000);
 

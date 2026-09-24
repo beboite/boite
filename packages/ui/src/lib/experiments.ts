@@ -15,12 +15,12 @@
  * context meter asks the same of `prompt-cache` before drawing its timer.
  */
 
-export type ExperimentId = 'theme-grain' | 'session-import' | 'prompt-cache';
+export type ExperimentId = 'theme-grain' | 'session-import' | 'prompt-cache' | 'chat-artifacts' | 'preview-comments';
 
 export const EXPERIMENTS_STORAGE_KEY = 'boite.experiments';
 
 /** Every experiment this build ships, in the order the page lists them. */
-export const EXPERIMENT_IDS: ExperimentId[] = ['theme-grain', 'session-import', 'prompt-cache'];
+export const EXPERIMENT_IDS: ExperimentId[] = ['theme-grain', 'session-import', 'prompt-cache', 'chat-artifacts', 'preview-comments'];
 
 type Listener = (enabled: ExperimentId[]) => void;
 

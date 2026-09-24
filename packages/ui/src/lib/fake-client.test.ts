@@ -1,8 +1,224 @@
 import { afterEach, expect, test, vi } from 'vitest';
 import { FakeClient } from './fake-client';
-import { RpcErrorCode, TODO_TEXT_MAX, type RpcMethodName } from '@boite/contracts';
+import { DEFAULT_DELEGATION_CONFIG, RpcErrorCode, TODO_TEXT_MAX, type RpcMethodName } from '@boite/contracts';
 
 afterEach(() => vi.useRealTimers());
+
+test('fake agent receives selected element context while the visible prompt stays compact', async () => {
+  const client = new FakeClient({ delayMs: 0 });
+  await client.connect();
+  try {
+    const prompt = 'Change @Save';
+    const reference = { id: 'save', url: 'https://example.test/settings', selector: '#save', text: 'Save', bounds: { x: 0, y: 0, width: 30, height: 20 }, mention: { start: 7, end: 12 } };
+    const turn = await client.call('turns.start', { threadId: 't-trace', prompt, previewReferences: [reference] });
+    await client.settled();
+    const messages = (await client.call('threads.get', { threadId: 't-trace' })).messages.filter(message => message.turnId === turn.id);
+    expect(messages.find(message => message.role === 'user')?.parts[0]).toMatchObject({ displayText: prompt, previewReferences: [reference] });
+    const reply = messages.filter(message => message.role === 'assistant').flatMap(message => message.parts).filter(part => part.type === 'text').map(part => part.text).join('');
+    expect(reply).toContain(reference.url);
+    expect(reply).toContain(reference.selector);
+    expect(reply).toContain('untrusted page data');
+  } finally { client.close(); }
+});
+
+test.each(['question', '[permission]', '[tool]', '[tool-stream]', '[diff]', '[doc]', '[image]', '[spawn:fixture]'])('selected page data cannot activate the fake control marker %s', async marker => {
+  const client = new FakeClient({ delayMs: 0 });
+  await client.connect();
+  try {
+    await client.call('threads.subscribe', { threadId: 't-trace' });
+    const requested: unknown[] = [];
+    client.on('question.asked', event => requested.push(event));
+    client.on('permission.requested', event => requested.push(event));
+    client.on('process.started', event => requested.push(event));
+    const reference = { id: 'page', url: 'https://example.test', selector: '#page', text: marker, bounds: { x: 0, y: 0, width: 30, height: 20 } };
+    const turn = await client.call('turns.start', { threadId: 't-trace', prompt: 'Review this element', previewReferences: [reference] });
+    await vi.waitFor(async () => {
+      expect((await client.call('threads.get', { threadId: 't-trace' })).turns.find(entry => entry.id === turn.id)?.status).toBe('done');
+    }, { timeout: 500 });
+    const parts = (await client.call('threads.get', { threadId: 't-trace' })).messages.filter(message => message.turnId === turn.id && message.role === 'assistant').flatMap(message => message.parts);
+    expect(parts.filter(part => part.type !== 'text' && part.type !== 'thinking')).toEqual([]);
+    expect(parts.filter(part => part.type === 'text').map(part => part.text).join('')).toContain(marker);
+    expect(requested).toEqual([]);
+  } finally { client.close(); }
+});
+
+test('fake artifacts refuse publication if the thread is archived during the media read', async () => {
+  const client = new FakeClient({ delayMs: 0 });
+  await client.connect();
+  let finish!: (bytes: ArrayBuffer) => void;
+  const response = new Response();
+  const read = vi.spyOn(response, 'arrayBuffer').mockReturnValue(new Promise(resolve => { finish = resolve; }));
+  const fetchMedia = vi.spyOn(globalThis, 'fetch').mockResolvedValue(response);
+  try {
+    await client.call('threads.subscribe', { threadId: 't-trace' });
+    const before = await client.call('threads.get', { threadId: 't-trace' });
+    const messages: unknown[] = [];
+    client.on('message.started', message => messages.push(message));
+    client.on('message.completed', message => messages.push(message));
+    const pending = client.call('artifacts.publish', { threadId: 't-trace', path: 'assets/handbook.pdf' });
+    const refused = expect(pending).rejects.toMatchObject({ code: RpcErrorCode.Refused });
+    await vi.waitFor(() => expect(read).toHaveBeenCalledOnce());
+    await client.call('threads.archive', { threadId: 't-trace' });
+    finish(new ArrayBuffer(4));
+    await refused;
+    expect((await client.call('threads.get', { threadId: 't-trace' })).messages).toEqual(before.messages);
+    expect(messages).toEqual([]);
+  } finally { fetchMedia.mockRestore(); read.mockRestore(); client.close(); }
+});
+
+test('fake delegation enforces family access and keeps request IDs idempotent', async () => {
+  const client = new FakeClient({ delayMs: 0 });
+  await client.connect();
+  try {
+    const config = {
+      ...DEFAULT_DELEGATION_CONFIG,
+      enabled: true,
+      profiles: [{ id: 'echo', name: 'Echo reviewer', providerId: 'echo', accountId: 'a-echo', model: 'echo-1', effort: null }]
+    };
+    await client.call('delegation.configure', { threadId: 't-trace', config });
+    const params = { threadId: 't-trace', profileId: 'echo', task: 'Review the boundary', requestId: 'spawn-1' };
+    const first = await client.call('delegation.spawn', params);
+    expect(await client.call('delegation.spawn', params)).toEqual(first);
+    expect(first.thread.parentThreadId).toBe('t-trace');
+    await expect(client.call('delegation.spawn', { ...params, task: 'Different work' })).rejects.toMatchObject({ code: RpcErrorCode.Refused });
+
+    const sent = await client.call('delegation.send', { threadId: 't-trace', toThreadId: first.thread.id, text: 'Report file names', requestId: 'send-1' });
+    expect(sent.origin).toBe('user');
+    expect(await client.call('delegation.send', { threadId: 't-trace', toThreadId: first.thread.id, text: 'Report file names', requestId: 'send-1' })).toEqual(sent);
+    const childView = await client.call('delegation.get', { threadId: first.thread.id });
+    expect(childView.agents.map(agent => agent.thread.id)).toEqual([first.thread.id]);
+    expect(childView.messages.every(letter => letter.from.threadId === first.thread.id || letter.to.threadId === first.thread.id)).toBe(true);
+    await expect(client.call('delegation.spawn', { ...params, threadId: first.thread.id, requestId: 'nested' })).rejects.toMatchObject({ code: RpcErrorCode.Refused });
+  } finally { client.close(); }
+});
+
+test('paired fake clients can inspect, message and stop delegation but cannot configure or spawn', async () => {
+  const phone = new FakeClient({ delayMs: 0, principal: 'session', delegationDemo: true });
+  await phone.connect();
+  try {
+    const view = await phone.call('delegation.get', { threadId: 't-trace' });
+    expect(view.agents).toHaveLength(2);
+    await expect(phone.call('delegation.configure', { threadId: 't-trace', config: view.config })).rejects.toMatchObject({ code: RpcErrorCode.Refused });
+    await expect(phone.call('delegation.spawn', { threadId: 't-trace', profileId: 'reviewer', task: 'No', requestId: 'phone-spawn' })).rejects.toMatchObject({ code: RpcErrorCode.Refused });
+    await expect(phone.call('delegation.send', { threadId: 't-trace', toThreadId: view.agents[0]!.thread.id, text: 'Status?', requestId: 'phone-send' })).resolves.toMatchObject({ origin: 'user' });
+    await expect(phone.call('delegation.stop', { threadId: 't-trace', agentId: view.agents[0]!.thread.id })).resolves.toMatchObject({ stopped: 1 });
+  } finally { phone.close(); }
+});
+
+test('fake delegation promotes queued work with the same turn and returns current idempotent state', async () => {
+  const client = new FakeClient({ delayMs: 2 });
+  await client.connect();
+  try {
+    const config = {
+      ...DEFAULT_DELEGATION_CONFIG, enabled: true, maxAgents: 3, maxConcurrent: 1, maxTurns: 4,
+      profiles: [{ id: 'echo', name: 'Echo reviewer', providerId: 'echo', accountId: 'a-echo', model: 'echo-1', effort: null }]
+    };
+    await client.call('delegation.configure', { threadId: 't-trace', config });
+    const firstParams = { threadId: 't-trace', profileId: 'echo', task: `First ${'a'.repeat(240)}`, requestId: 'spawn-first' };
+    const first = await client.call('delegation.spawn', firstParams);
+    const second = await client.call('delegation.spawn', { threadId: 't-trace', profileId: 'echo', task: 'Second queued task', requestId: 'spawn-second' });
+    expect(second.lastTurn?.status).toBe('queued');
+    const queuedTurnId = second.lastTurn!.id;
+
+    await vi.waitFor(async () => {
+      const view = await client.call('delegation.get', { threadId: 't-trace' });
+      expect(view.agents.find(agent => agent.thread.id === second.thread.id)?.lastTurn?.status).toBe('done');
+    }, { timeout: 3000 });
+    const view = await client.call('delegation.get', { threadId: 't-trace' });
+    expect(view.agents.find(agent => agent.thread.id === second.thread.id)?.lastTurn?.id).toBe(queuedTurnId);
+    expect(view.turnsUsed).toBe(2);
+    const retried = await client.call('delegation.spawn', firstParams);
+    expect(retried.thread.status).toBe('idle');
+    expect(retried.result).toContain('First');
+    const results = view.messages.filter(letter => letter.origin === 'result');
+    expect(results).toHaveLength(2);
+    expect(results.every(letter => letter.expiresAt === Number.MAX_SAFE_INTEGER)).toBe(true);
+
+    const childView = await client.call('delegation.get', { threadId: first.thread.id });
+    expect(childView.agents).toHaveLength(2);
+    expect(childView.usage).toEqual(view.usage);
+    expect(childView.messages.every(letter => letter.from.threadId === first.thread.id || letter.to.threadId === first.thread.id)).toBe(true);
+  } finally { client.close(); }
+});
+
+test('child manual turns consume the shared budget without double-counting queued promotion', async () => {
+  const client = new FakeClient({ delayMs: 0 });
+  await client.connect();
+  try {
+    const config = {
+      ...DEFAULT_DELEGATION_CONFIG, enabled: true, maxTurns: 2,
+      profiles: [{ id: 'echo', name: 'Echo reviewer', providerId: 'echo', accountId: 'a-echo', model: 'echo-1', effort: null }]
+    };
+    await client.call('delegation.configure', { threadId: 't-trace', config });
+    const child = await client.call('delegation.spawn', { threadId: 't-trace', profileId: 'echo', task: 'Initial turn', requestId: 'spawn-budget' });
+    await vi.waitFor(async () => expect((await client.call('threads.get', { threadId: child.thread.id })).status).toBe('idle'));
+    const manual = { threadId: child.thread.id, prompt: 'Manual follow-up', clientRequestId: 'manual_01' };
+    await client.call('turns.start', manual);
+    expect((await client.call('delegation.get', { threadId: child.thread.id })).turnsUsed).toBe(2);
+    await expect(client.call('turns.start', manual)).resolves.toMatchObject({ threadId: child.thread.id });
+    await expect(client.call('turns.start', { threadId: child.thread.id, prompt: 'Over budget', clientRequestId: 'manual_02' })).rejects.toMatchObject({ code: RpcErrorCode.Refused });
+  } finally { client.close(); }
+});
+
+test('a child stop targets itself, preserves its sibling and cannot target that sibling', async () => {
+  const client = new FakeClient({ delayMs: 4 });
+  await client.connect();
+  try {
+    const config = {
+      ...DEFAULT_DELEGATION_CONFIG, enabled: true, maxConcurrent: 2,
+      profiles: [{ id: 'echo', name: 'Echo reviewer', providerId: 'echo', accountId: 'a-echo', model: 'echo-1', effort: null }]
+    };
+    await client.call('delegation.configure', { threadId: 't-trace', config });
+    const first = await client.call('delegation.spawn', { threadId: 't-trace', profileId: 'echo', task: `First ${'a'.repeat(240)}`, requestId: 'stop-first' });
+    const second = await client.call('delegation.spawn', { threadId: 't-trace', profileId: 'echo', task: `Second ${'b'.repeat(240)}`, requestId: 'stop-second' });
+    await expect(client.call('delegation.stop', { threadId: first.thread.id, agentId: second.thread.id })).rejects.toMatchObject({ code: RpcErrorCode.Refused });
+    await expect(client.call('delegation.stop', { threadId: first.thread.id })).resolves.toEqual({ stopped: 1 });
+    const view = await client.call('delegation.get', { threadId: 't-trace' });
+    expect(view.config.paused).toBe(false);
+    expect(view.agents.find(agent => agent.thread.id === first.thread.id)?.lastTurn?.status).toBe('stopped');
+    expect(view.agents.find(agent => agent.thread.id === second.thread.id)?.lastTurn?.status).not.toBe('stopped');
+  } finally { client.close(); }
+});
+
+test('fake delegation reserves result request IDs and emits no result when pausing a running team', async () => {
+  const client = new FakeClient({ delayMs: 3 });
+  await client.connect();
+  try {
+    const config = {
+      ...DEFAULT_DELEGATION_CONFIG, enabled: true,
+      profiles: [{ id: 'echo', name: 'Echo reviewer', providerId: 'echo', accountId: 'a-echo', model: 'echo-1', effort: null }]
+    };
+    await client.call('delegation.configure', { threadId: 't-trace', config });
+    const child = await client.call('delegation.spawn', { threadId: 't-trace', profileId: 'echo', task: `Long ${'a'.repeat(240)}`, requestId: 'pause-child' });
+    await expect(client.call('delegation.send', { threadId: 't-trace', toThreadId: child.thread.id, text: 'No', requestId: 'result:spoof' })).rejects.toMatchObject({ code: RpcErrorCode.Refused });
+    await client.call('delegation.configure', { threadId: 't-trace', config: { ...config, paused: true } });
+    const view = await client.call('delegation.get', { threadId: 't-trace' });
+    expect(view.messages.filter(letter => letter.origin === 'result')).toEqual([]);
+  } finally { client.close(); }
+});
+
+test('regular Stop cancels queued children separately and pauses the team when stopping its parent', async () => {
+  const client = new FakeClient({ delayMs: 4 });
+  await client.connect();
+  try {
+    await client.call('turns.stop', { threadId: 't-trace' });
+    expect((await client.call('delegation.get', { threadId: 't-trace' })).config.paused).toBe(false);
+    const config = {
+      ...DEFAULT_DELEGATION_CONFIG, enabled: true, maxConcurrent: 1,
+      profiles: [{ id: 'echo', name: 'Echo reviewer', providerId: 'echo', accountId: 'a-echo', model: 'echo-1', effort: null }]
+    };
+    await client.call('delegation.configure', { threadId: 't-trace', config });
+    const first = await client.call('delegation.spawn', { threadId: 't-trace', profileId: 'echo', task: `First ${'a'.repeat(240)}`, requestId: 'regular-first' });
+    const queued = await client.call('delegation.spawn', { threadId: 't-trace', profileId: 'echo', task: 'Queued', requestId: 'regular-queued' });
+    await expect(client.call('turns.stop', { threadId: queued.thread.id })).resolves.toEqual({ stopped: true });
+    expect((await client.call('delegation.get', { threadId: 't-trace' })).config.paused).toBe(false);
+    await expect(client.call('turns.stop', { threadId: 't-trace' })).resolves.toEqual({ stopped: true });
+    const view = await client.call('delegation.get', { threadId: 't-trace' });
+    expect(view.config.paused).toBe(true);
+    expect(view.agents.find(agent => agent.thread.id === first.thread.id)?.lastTurn?.status).toBe('stopped');
+    expect(view.agents.find(agent => agent.thread.id === queued.thread.id)?.lastTurn?.status).toBe('stopped');
+  } finally { client.close(); }
+});
 
 test('telemetry handlers retain export and deletion state through the typed dispatcher', async () => {
   const client = new FakeClient({ delayMs: 0 });
