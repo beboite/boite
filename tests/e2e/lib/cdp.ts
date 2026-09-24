@@ -192,7 +192,14 @@ export class BrowserPage {
     const unseen = await page.evaluate<boolean>(
       `(() => { try { return localStorage.getItem(${JSON.stringify(ONBOARDING_STORAGE_KEY)}) === null; } catch { return false; } })()`,
     );
-    if (unseen) await page.reload();
+    if (unseen) {
+      // That first boot may also have settled this device as a first run (the
+      // calm preset, `WORK_STORAGE_KEY` in `lib/work-prefs.svelte.ts`). Forget
+      // it: with the tour seen, the reload settles it as a working setup, as
+      // every page `launch` drives does.
+      await page.evaluate(`(() => { try { localStorage.removeItem('boite.work'); } catch {} })()`);
+      await page.reload();
+    }
     return page;
   }
 
