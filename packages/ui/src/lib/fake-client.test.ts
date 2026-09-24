@@ -4,6 +4,30 @@ import { RpcErrorCode, TODO_TEXT_MAX, type RpcMethodName } from '@boite/contract
 
 afterEach(() => vi.useRealTimers());
 
+test('fake artifacts refuse publication if the thread is archived during the media read', async () => {
+  const client = new FakeClient({ delayMs: 0 });
+  await client.connect();
+  let finish!: (bytes: ArrayBuffer) => void;
+  const response = new Response();
+  const read = vi.spyOn(response, 'arrayBuffer').mockReturnValue(new Promise(resolve => { finish = resolve; }));
+  const fetchMedia = vi.spyOn(globalThis, 'fetch').mockResolvedValue(response);
+  try {
+    await client.call('threads.subscribe', { threadId: 't-trace' });
+    const before = await client.call('threads.get', { threadId: 't-trace' });
+    const messages: unknown[] = [];
+    client.on('message.started', message => messages.push(message));
+    client.on('message.completed', message => messages.push(message));
+    const pending = client.call('artifacts.publish', { threadId: 't-trace', path: 'assets/handbook.pdf' });
+    const refused = expect(pending).rejects.toMatchObject({ code: RpcErrorCode.Refused });
+    await vi.waitFor(() => expect(read).toHaveBeenCalledOnce());
+    await client.call('threads.archive', { threadId: 't-trace' });
+    finish(new ArrayBuffer(4));
+    await refused;
+    expect((await client.call('threads.get', { threadId: 't-trace' })).messages).toEqual(before.messages);
+    expect(messages).toEqual([]);
+  } finally { fetchMedia.mockRestore(); read.mockRestore(); client.close(); }
+});
+
 test('telemetry handlers retain export and deletion state through the typed dispatcher', async () => {
   const client = new FakeClient({ delayMs: 0 });
   await client.connect();

@@ -1380,6 +1380,7 @@ export class FakeClient implements ObservableClient {
       const media = FAKE_MEDIA[path];
       const body = media ? new Uint8Array(await (await fetch(media.url())).arrayBuffer()) : new TextEncoder().encode(this.#files.get(path) ?? '');
       if (body.length > 5 * 1024 * 1024) throw refusal('artifacts.publish file must be at most 5 MB');
+      if (thread.archived) throw refusal('artifacts.publish needs an active thread');
       let binary = '';
       for (const byte of body) binary += String.fromCharCode(byte);
       const message: Message = { id: `m-${++this.#seq}`, threadId: thread.id, turnId: turn.id, role: 'assistant', state: 'complete', createdAt: this.#now(), parts: [{ type: 'file', name: path.split('/').at(-1) ?? path, mimeType: media?.mime ?? 'application/octet-stream', data: btoa(binary) }] };
