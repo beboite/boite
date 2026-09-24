@@ -27,7 +27,8 @@
       for (const update of machine.store.harnessUpdates) {
         // A failure with nothing newer behind it is a failed check, which belongs to the settings page.
         const failedUpdate = update.state === 'failed' && update.latest !== null && update.latest !== update.current && update.skipped !== update.latest;
-        if (!update.pending && update.state !== 'updating' && !failedUpdate) continue;
+        // An update runs in the background once asked for: only a failure brings the notice back.
+        if (!update.pending && !failedUpdate) continue;
         out.push({ key: `${machine.id}::${update.providerId}`, machine: machine.label, store: machine.store, update });
       }
     }
@@ -45,10 +46,7 @@
       <article class="notice" data-testid="harness-update-notice" data-update-provider={update.providerId} data-state={update.state}>
         <span class="logo"><ProviderLogo providerId={update.providerId} size={20} /></span>
         <div class="lines">
-          {#if update.state === 'updating'}
-            <span class="heading">{strings.harnessUpdates.updating(update.name)}</span>
-            <p>{strings.harnessUpdates.updatingHint}</p>
-          {:else if update.state === 'failed'}
+          {#if update.state === 'failed'}
             <span class="heading bad">{strings.harnessUpdates.failed(update.name)}</span>
             <p class="message">{update.message}</p>
           {:else}
@@ -58,18 +56,14 @@
             </p>
           {/if}
         </div>
-        {#if update.state === 'updating'}
-          <span class="bar" aria-hidden="true"></span>
-        {:else}
-          <div class="actions">
-            <button type="button" class="quiet small" data-testid="harness-update-skip" onclick={() => void notice.store.skipHarnessUpdate(update.providerId, update.latest)}>
-              {strings.harnessUpdates.skip}
-            </button>
-            <button type="button" class="primary small" data-testid="harness-update-run" onclick={() => void notice.store.updateHarness(update.providerId)}>
-              {update.state === 'failed' ? strings.harnessUpdates.retry : strings.harnessUpdates.update}
-            </button>
-          </div>
-        {/if}
+        <div class="actions">
+          <button type="button" class="quiet small" data-testid="harness-update-skip" onclick={() => void notice.store.skipHarnessUpdate(update.providerId, update.latest)}>
+            {strings.harnessUpdates.skip}
+          </button>
+          <button type="button" class="primary small" data-testid="harness-update-run" onclick={() => void notice.store.updateHarness(update.providerId)}>
+            {update.state === 'failed' ? strings.harnessUpdates.retry : strings.harnessUpdates.update}
+          </button>
+        </div>
       </article>
     {/each}
   </div>
@@ -142,26 +136,8 @@
     gap: 6px;
   }
 
-  .bar {
-    position: absolute;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    height: 2px;
-    background: linear-gradient(90deg, transparent, var(--color-accent), transparent);
-    background-size: 50% 100%;
-    background-repeat: no-repeat;
-    animation: slide 1.4s linear infinite;
-  }
-
-  @keyframes slide {
-    from { background-position: -100% 0; }
-    to { background-position: 300% 0; }
-  }
-
   @media (prefers-reduced-motion: reduce) {
-    .notice, .bar { animation: none; }
-    .bar { background-size: 100% 100%; }
+    .notice { animation: none; }
   }
 
   /* A phone shows one at a time: answering it brings the next. */

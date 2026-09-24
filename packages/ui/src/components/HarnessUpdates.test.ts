@@ -50,7 +50,7 @@ test('a pending update is a notice that stays until Update or Skip, answered by 
   expect(notices().map((notice) => notice.dataset['updateProvider'])).toEqual(['codex', 'claude', 'codex']);
 });
 
-test('Update shows the agent updating, then the notice leaves once the core says it is current', async () => {
+test('Update takes the notice away at once and the agent updates in the background', async () => {
   vi.useFakeTimers();
   const local = await machine('local', 'This PC');
   mounted = mount(HarnessUpdateNotices, { target: document.body });
@@ -61,9 +61,8 @@ test('Update shows the agent updating, then the notice leaves once the core says
   expect(codex.textContent).not.toContain('On This PC');
   codex.querySelector<HTMLButtonElement>('[data-testid="harness-update-run"]')!.click();
   await settle();
-  const updating = notices().find((notice) => notice.dataset['updateProvider'] === 'codex')!;
-  expect(updating.dataset['state']).toBe('updating');
-  expect(updating.querySelector('button')).toBeNull();
+  expect(local.harnessUpdates.find((update) => update.providerId === 'codex')?.state).toBe('updating');
+  expect(notices().map((notice) => notice.dataset['updateProvider'])).toEqual(['claude']);
 
   await vi.advanceTimersByTimeAsync(1500);
   await settle();

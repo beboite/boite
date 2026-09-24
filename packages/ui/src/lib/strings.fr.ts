@@ -1052,7 +1052,6 @@ export const fr: Messages = {
     on: (machine: string) => `Sur ${machine}`,
     update: 'Mettre à jour', skip: 'Ignorer', retry: 'Réessayer',
     updating: (name: string) => `Mise à jour de ${name}`,
-    updatingHint: 'Ses conversations restent en place. Le prochain tour utilisera la nouvelle version.',
     failed: (name: string) => `La mise à jour de ${name} a échoué`,
     upToDate: 'À jour', unknown: 'Vérifie lui-même', runUpdater: 'Lancer sa mise à jour',
     skipped: (version: string) => `${version} ignorée`,
