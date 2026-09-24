@@ -767,6 +767,28 @@ test('OpenCode signs in from a terminal with its login command typed in, and clo
   await waitFor(() => document.querySelector('[data-testid=settings]') === null);
 });
 
+test('the guided connection signs OpenCode in from a terminal too, then hands it to the composer', async () => {
+  await mountOnFake();
+  // Signed out since: the dialog has a sign-in to offer.
+  await waitFor(() => store.accountOf('a-opencode') !== null);
+  store.accountOf('a-opencode')!.status = 'unauthenticated';
+  store.openConnect('opencode');
+  await waitFor(() => document.querySelector('[data-testid=connect-sign-in]') !== null);
+  query<HTMLButtonElement>('[data-testid=connect-sign-in]').click();
+  // The user's own OpenCode login, in a terminal: its menu is not something a pipe can answer.
+  await waitFor(() => document.querySelector('[data-testid=connect-login-terminal] [data-testid=terminal]') !== null);
+  expect(query('[data-testid=connect-login-terminal] [data-testid=terminal]').getAttribute('data-terminal-id')).toBe('login:a-opencode');
+  await waitFor(() => query('[data-testid=connect-login-terminal]').textContent?.includes('opencode auth login') === true);
+  expect(query('[data-testid=connect-step]').getAttribute('data-step')).toBe('signing-in');
+  expect(document.querySelector('[data-testid=connect-login-input]')).toBeNull();
+
+  query<HTMLButtonElement>('[data-testid=connect-login-terminal-close]').click();
+  await waitFor(() => document.querySelector('[data-testid=connect-use]') !== null);
+  query<HTMLButtonElement>('[data-testid=connect-use]').click();
+  await waitFor(() => document.querySelector('[data-testid=connect-dialog]') === null);
+  expect(store.accountOf('a-opencode')?.status).toBe('ok');
+});
+
 test('the header wears the context meter, a compaction is a divider, and a turn moves the meter', async () => {
   await mountOnFake();
   await waitFor(() => store.openThread?.id === 't-descriptors');

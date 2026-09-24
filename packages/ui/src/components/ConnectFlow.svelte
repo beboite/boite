@@ -63,12 +63,16 @@
   let others = $derived(store.providers.filter((p) => !FEATURED.includes(p.id)));
   let provider = $derived(providerId ? store.providerOf(providerId) : null);
   let accounts = $derived(provider ? store.accountsOf(provider.id) : []);
-  const loggingIn = (id: string): boolean => store.logins[id]?.state === 'running';
+  const loggingIn = (id: string): boolean => store.logins[id]?.state === 'running' || store.loginTerminals.includes(id);
+  /** A CLI that signs in through its own menu: the dialog shows a terminal with the command typed in. */
+  const inTerminal = (entry: ProviderSummary): boolean => entry.login !== false && entry.login.kind === 'terminal';
+  /** xterm and its shell, loaded the first time a sign-in needs a terminal. */
+  const terminalView = () => import('./TerminalView.svelte');
   let step = $derived<SetupStep | null>(provider ? stepFor(provider) : null);
   /** The account whose login this dialog shows: the one it was opened for, else the running or failed one. */
   let loginAccount = $derived.by((): Account | null => {
     const named = accountId ? accounts.find((a) => a.id === accountId) ?? null : null;
-    if (named && store.logins[named.id]) return named;
+    if (named && (store.logins[named.id] || store.loginTerminals.includes(named.id))) return named;
     return accounts.find((a) => loggingIn(a.id)) ?? accounts.find((a) => store.logins[a.id]) ?? null;
   });
   let login = $derived(loginAccount ? store.logins[loginAccount.id] : undefined);
@@ -77,7 +81,7 @@
   function stepFor(entry: ProviderSummary): SetupStep {
     // A sign-in asked for one account: that account's state decides, not the provider's best.
     const named = accountId ? store.accountsOf(entry.id).find((a) => a.id === accountId) : undefined;
-    if (named && entry.available && named.status !== 'ok' && !loggingIn(named.id)) return entry.login && named.isolationDir !== null ? 'sign-in' : 'external';
+    if (named && entry.available && named.status !== 'ok' && !loggingIn(named.id)) return entry.login && (named.isolationDir !== null || inTerminal(entry)) ? 'sign-in' : 'external';
     return setupStep(entry, store.installOf(entry.id), store.accountsOf(entry.id), loggingIn);
   }
 
@@ -107,12 +111,16 @@
     if (!provider || busy) return;
     busy = true;
     try {
+      const terminal = inTerminal(provider);
       const named = accountId ? accounts.find((a) => a.id === accountId) ?? null : null;
-      const account = (named && named.isolationDir !== null ? named : signInTarget(accounts))
+      // In a terminal the user's own CLI signs in, the way they would have typed it.
+      const own = terminal ? accounts.find((a) => a.isolationDir === null && a.status !== 'ok') : undefined;
+      const account = (named && (named.isolationDir !== null || terminal) ? named : own ?? signInTarget(accounts))
         ?? await store.addAccount({ providerId: provider.id, label: nextAccountLabel(provider, accounts), useDefaultLocation: false });
       if (account) {
         accountId = account.id;
-        await store.loginAccount(account.id);
+        if (terminal) store.showLoginTerminal(account.id);
+        else await store.loginAccount(account.id);
       }
     } finally { busy = false; }
   }
@@ -237,6 +245,21 @@
               {#if login?.state === 'failed'}<p class="bad" role="alert" data-testid="connect-login-failed">{login.output}</p>{/if}
               <button type="button" class="primary" data-testid="connect-sign-in" disabled={busy} onclick={() => void signIn()}>{fill(strings.connect.signIn, { provider: provider.name })}</button>
               <p class="muted">{strings.connect.signInNote}</p>
+            {:else if step === 'signing-in' && loginAccount && store.loginTerminals.includes(loginAccount.id)}
+              {@const terminalAccount = loginAccount}
+              <p class="muted">{strings.accounts.terminalHint}</p>
+              <div class="screen" data-testid="connect-login-terminal">
+                {#await terminalView() then { default: TerminalView }}
+                  <TerminalView
+                    {store}
+                    id="login:{terminalAccount.id}"
+                    start={(cols, rows) => store.loginTerminal(terminalAccount.id, cols, rows)}
+                    onexit={() => store.hideLoginTerminal(terminalAccount.id)}
+                    autofocus
+                  />
+                {/await}
+              </div>
+              <button type="button" class="quiet small" data-testid="connect-login-terminal-close" onclick={() => void store.closeTerminal(`login:${terminalAccount.id}`)}>{strings.accounts.terminalDone}</button>
             {:else if step === 'signing-in' && loginAccount}
               {#if login?.url}
                 <a class="button primary" href={login.url} target="_blank" rel="noreferrer" data-testid="connect-login-url">{strings.accounts.loginOpen}</a>
@@ -362,6 +385,8 @@
   }
   a.button.primary { background: var(--color-accent); border-color: var(--color-accent); color: var(--color-accent-ink); }
   a.button.primary:hover { background: color-mix(in oklch, var(--color-accent) 88%, var(--color-foreground)); }
+  /* The terminal's own height: a menu of a dozen lines fits without a scroll. */
+  .screen { width: 100%; height: 280px; min-width: 0; border-radius: var(--radius-sm); overflow: hidden; }
   .code { display: flex; gap: 6px; width: 100%; }
   .code input { flex: 1; min-width: 0; height: var(--input); }
 

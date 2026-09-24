@@ -123,8 +123,9 @@ Claude and Codex first, each naming the plan it uses, the other agents below.
 Choosing one walks the same steps as its row on the Providers page
 (`lib/provider-setup.ts`), one at a time: the download when Boite can fetch the
 agent, its own installer page otherwise, then the sign-in with the page to open
-and the field for a code. A download asked for here goes on to the sign-in by
-itself. Once the account answers, `Use <provider>` moves the composer to it
+and the field for a code. An agent whose login is a menu (see below) gets the
+same terminal as on the Providers page, inside the dialog. A download asked for
+here goes on to the sign-in by itself. Once the account answers, `Use <provider>` moves the composer to it
 through `store.useProvider`, the same remembered choice a pick in the model
 picker writes, and the text being typed stays where it was.
 
@@ -132,7 +133,8 @@ An account that answered `unauthenticated` gets a `Sign in again` chip beside
 the model chip, and an error in its thread carries the same button. Both open
 the dialog on that account, so the login lands on it instead of creating a
 second one; a default-location account, which Boite never logs in, is told to
-sign in from the agent's own window and check again. A paired phone gets
+sign in from the agent's own window and check again, unless its login runs in a
+terminal, which is then the user's own CLI answering. A paired phone gets
 neither button and reads `No AI connected` on the chip: `accounts.*` and
 `providers.install` are the owner's.
 
