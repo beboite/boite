@@ -2,7 +2,7 @@
 
 ## Using boite
 
-- [Desktop updates](updates.md): Boite, boite de nuit, downloads and restarting.
+- [Desktop updates](updates.md): Boite, Boite Nightly, downloads and restarting.
 - [The tour](onboarding.md): the first launch, and what it sets up.
 - [Language](language.md): English and French, and where the sentences live.
 - [Accounts](accounts.md): agent logins and isolated accounts.
@@ -17,6 +17,8 @@
 - [Analytics](analytics.md): optional telemetry, consent, collected fields and data controls.
 - [Keyboard shortcuts](keybindings.md): defaults and customization.
 - [The right panel](panel.md): browser, changes, files, tasks and trace beside the chat.
+- [Chat and preview experiments](experiments.md): file delivery and browser comments.
+- [The thread terminal](terminal.md): the shell under the chat, and sign-ins that need one.
 - [The `boite` CLI](cli.md): what an agent runs to reach its thread and its panel.
 - [Titles](titles.md): automatic and manual conversation titles.
 - [Session import](imports.md): bringing in a Claude Code conversation.

@@ -24,7 +24,7 @@
   import { workspace } from './lib/workspace.svelte';
   import { tourRequested, tourSeen } from './lib/onboarding.svelte';
   import { startTheme } from './lib/theme';
-  import { appUpdater } from './lib/app-update.svelte';
+  import { appName, appUpdater } from './lib/app-update.svelte';
   import MobileNavigation from './components/MobileNavigation.svelte';
   import { startViewport } from './lib/viewport';
   import { WsClient } from './lib/client';
@@ -46,11 +46,14 @@
     CommandPalette: () => import('./components/CommandPalette.svelte'),
     ProjectPicker: () => import('./components/ProjectPicker.svelte'),
     ImportDialog: () => import('./components/ImportDialog.svelte'),
-    Onboarding: () => import('./components/Onboarding.svelte')
+    Onboarding: () => import('./components/Onboarding.svelte'),
+    // xterm.js and its stylesheet: only once a terminal is asked for.
+    TerminalDrawer: () => import('./components/TerminalDrawer.svelte')
   };
   type Deferred = { [K in keyof typeof deferredLoaders]?: Awaited<ReturnType<(typeof deferredLoaders)[K]>>['default'] };
   let deferred = $state.raw<Deferred>({});
   const requested = new Set<keyof Deferred>();
+  let terminalShown = $derived(store.openThread !== null && store.owner && store.terminalShown(store.openThread.id));
   function need(name: keyof Deferred): void {
     if (requested.has(name)) return;
     requested.add(name);
@@ -82,6 +85,10 @@
 
   $effect(() => {
     if (panelSlot.shown) need('RightPanel');
+  });
+
+  $effect(() => {
+    if (terminalShown) need('TerminalDrawer');
   });
 
   // Asked for before the idle prefetch got to it: fetch it now.
@@ -200,7 +207,8 @@
   // tab say "(2) Boite" while the window is somewhere behind.
   $effect(() => {
     const unread = store.unreadCount;
-    document.title = unread > 0 ? `(${unread}) ${strings.app.name}` : strings.app.name;
+    const name = appName();
+    document.title = unread > 0 ? `(${unread}) ${name}` : name;
   });
 
   onMount(() => {
@@ -421,6 +429,12 @@
         {:else}
           {#key store}
             <ChatView {store} />
+          {/key}
+        {/if}
+        {#if terminalShown && store.openThread && deferred.TerminalDrawer}
+          {@const TerminalDrawer = deferred.TerminalDrawer}
+          {#key `${store.endpointUrl}:${store.openThread.id}`}
+            <TerminalDrawer {store} threadId={store.openThread.id} cwd={store.openThread.cwd} />
           {/key}
         {/if}
       </main>

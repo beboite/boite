@@ -5,6 +5,30 @@ import { FakeClient } from './fake-client';
 import { setNotificationSender, type Toast } from './notify';
 import { resumeAnchor, Store } from './store.svelte';
 
+test('changing a Store endpoint drops the previous machine composer and element callbacks', async () => {
+  const { store, client } = await ready();
+  const saved = Object.entries(localStorage);
+  const connect = vi.spyOn(store, 'connect').mockResolvedValue();
+  const open = vi.spyOn(store, 'openWhereLeft').mockResolvedValue();
+  const insert = vi.fn();
+  const reference = { id: 'save', url: 'https://first.test', selector: '#save', text: 'Save', bounds: { x: 0, y: 0, width: 30, height: 20 } };
+  store.editComposerText('same', 'First machine');
+  store.addPreviewReference('same', reference);
+  store.registerComposerInsertion('same', insert);
+  try {
+    await store.connectTo('https://second.test', 'fixture-token');
+    expect(store.composerStates).toEqual({});
+    store.addPreviewReference('same', { ...reference, url: 'https://second.test' });
+    expect(insert).not.toHaveBeenCalled();
+    expect(store.composerStates.same?.text).toBe('@Save');
+  } finally {
+    connect.mockRestore(); open.mockRestore();
+    store.client?.close(); store.detach(); client.close();
+    localStorage.clear();
+    for (const [key, value] of saved) localStorage.setItem(key, value);
+  }
+});
+
 test('dropped folders use the local core when a remote machine is selected', async () => {
   const { store, client: remote } = await ready();
   const local = new FakeClient({ delayMs: 0 });

@@ -826,6 +826,76 @@ shellTest(
   TIMEOUT,
 );
 
+shellTest('native preview references attach to the composer and highlight from sent history', async () => {
+  if (!page) throw new Error('shell is not ready');
+  const fixture = Bun.serve({
+    hostname: '127.0.0.1', port: 0,
+    fetch: () => new Response('<!doctype html><html><head><title>Preview fixture</title></head><body><button id="native-preview-target">Save changes</button></body></html>', { headers: { 'content-type': 'text/html' } })
+  });
+  const url = `http://127.0.0.1:${fixture.port}/preview`;
+  let child: BrowserPage | undefined;
+  try {
+    await page.click(testid('nav-settings'));
+    await page.click(testid('settings-tab-experiments'));
+    await page.click(testid('experiment-preview-comments'));
+    await page.click(testid('settings-back'));
+    await page.type(testid('composer-input'), 'Make clearer.');
+    await page.evaluate(`(() => { const input = document.querySelector('${testid('composer-input')}'); input.setSelectionRange(5, 5); input.dispatchEvent(new Event('select')); })()`);
+    await page.click(testid('panel-toggle'));
+    await page.waitFor(`document.querySelector('${testid('launch-browser')}')`);
+    await page.click(testid('launch-browser'));
+    await page.type(testid('browser-url'), url);
+    await page.evaluate(`document.querySelector('${testid('browser-url')}').closest('form').requestSubmit()`);
+    await waitForTargets(url, 1, 20_000);
+    child = await BrowserPage.attach(debugPort, url);
+    await child.waitFor(`document.querySelector('#native-preview-target')`);
+    await page.click(testid('preview-annotate'));
+    await child.waitFor(`typeof window.__boiteStopPreviewPick === 'function'`);
+    // Even while the data-only picker is armed, a page gets no host commands.
+    const refused = await child.evaluate<string>(`(async () => {
+      if (!window.__TAURI_INTERNALS__?.invoke) return 'unavailable';
+      try { await window.__TAURI_INTERNALS__.invoke('core_endpoint'); return 'allowed'; }
+      catch { return 'refused'; }
+    })()`);
+    expect(refused).not.toBe('allowed');
+    await child.click('#native-preview-target');
+    await page.waitFor(`document.querySelector('${testid('composer')} ${testid('preview-reference')}')`);
+    expect(await page.text(`${testid('composer')} ${testid('preview-reference')}`)).toBe('@Save changes');
+    expect(await child.evaluate('location.href')).toBe(url);
+    const draft = await page.evaluate<string>(`document.querySelector('${testid('composer-input')}').value`);
+    expect(draft).toBe('Make @Save changes clearer.');
+    expect(await page.evaluate(`!!document.querySelector('${testid('preview-comment-form')}')`)).toBe(false);
+    await page.click(`${testid('composer')} ${testid('preview-reference')}`);
+    await child.waitFor(`document.querySelector('[data-boite-preview-highlight]')`);
+    await page.screenshot(join(import.meta.dir, '.artifacts', 'preview-native-reference.png'));
+    await clickWhenEnabled(testid('composer-send'));
+    await page.waitFor(`document.querySelector('[data-role="user"] ${testid('preview-reference')}')`);
+    await page.waitFor(`!document.querySelector('${testid('composer')} ${testid('preview-reference')}')`);
+    expect(await page.evaluate(`Array.from(document.querySelectorAll('[data-role="user"] ${testid('text-part')}')).at(-1).textContent`)).toBe('Make @Save changes clearer.');
+    await child.close();
+    child = undefined;
+    await page.click(testid('panel-tab-close'));
+    await waitForTargets(url, 0, 20_000);
+    // Closing the last tab already closes the panel. Its exit animation keeps
+    // the close button mounted briefly; clicking it would toggle the panel open.
+    await page.waitFor(`!document.querySelector('${testid('right-panel')}')`);
+    // A reference from history restores a closed tab, waits for the real page,
+    // then highlights its element in the newly created child webview.
+    await page.click(`[data-role="user"] ${testid('preview-reference')}`);
+    await waitForTargets(url, 1, 20_000);
+    child = await BrowserPage.attach(debugPort, url);
+    await child.waitFor(`document.querySelector('[data-boite-preview-highlight]')`);
+    expect(await child.evaluate('location.href')).toBe(url);
+    await page.screenshot(join(import.meta.dir, '.artifacts', 'preview-native-sent.png'));
+  } finally {
+    await child?.close();
+    // Closing the last tab destroys the child view and closes the panel.
+    if (await page.evaluate(`!!document.querySelector('${testid('panel-tab-close')}')`)) await page.click(testid('panel-tab-close'));
+    await page.type(testid('composer-input'), '');
+    fixture.stop(true);
+  }
+}, TIMEOUT);
+
 /**
  * The material itself is drawn by the compositor behind the window, so no
  * capture of this webview can show it. What is provable here is the half the UI

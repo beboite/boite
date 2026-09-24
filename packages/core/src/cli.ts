@@ -28,6 +28,7 @@ export interface CliIo {
 export const USAGE = `usage: boite <command> [args] [--json]
 
   where                          this thread, project, cwd, branch
+  attach <file>                  publish a file in chat, up to 5 MB (experimental)
   show <file>[:line]             open a file in the panel, at a line
   diff [file]                    open the changes, or one file's diff
   browse <url>                   open a url in the panel's browser
@@ -200,6 +201,11 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
   };
 
   switch (command) {
+    case 'attach': {
+      const message = await client.call('artifacts.publish', { threadId, path: absolute(io.cwd, want(0, 'a file')) });
+      print([`attached: ${rest[0]}`, `message: ${message.id}`], message);
+      return;
+    }
     case 'delegate': {
       const action = want(0, 'profiles, list, spawn, send or stop');
       if (action === 'profiles' || action === 'list') {

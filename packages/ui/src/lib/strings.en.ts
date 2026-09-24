@@ -1,5 +1,24 @@
 /** Every user-facing string of the UI. No literal UI text lives anywhere else. */
 export const strings = {
+  previewComments: {
+  annotate: 'Reference an element',
+  picking: 'Select an element in the page. Escape cancels.',
+  comment: 'What should change?',
+  add: 'Add to message',
+  cancel: 'Cancel',
+  added: 'Element added to your message.',
+  unavailable: 'Element selection is unavailable on this page. Use the desktop app for cross-origin pages.',
+  failed: 'Element selection failed. Reload the page and try again.',
+  reveal: 'Show this element in the preview',
+  remove: 'Remove element reference',
+  stale: 'This preview has changed page. Reopen the original page or select the element again.',
+  missing: 'This element no longer exists on the page. Select it again.',
+  tooMany: 'A message can reference at most 8 page elements.',
+  activityUnsupported: 'Element references cannot be used with /goal or /loop. Send a regular message or remove the references.',
+  stashUnsupported: 'This draft contains element references and cannot be stashed. Send it or remove the references first.'
+},
+  artifacts: { preview: 'Preview', download: 'Download', close: 'Close preview', loading: 'Loading file', unavailable: 'No inline preview for this file. Download it to open it.', failed: 'Could not open this file', ownerOnly: 'Local file links need an owner connection. Ask the agent to attach the file to share it with this device.' },
+
   brain: {
     heading: 'Brain', description: 'Your agents share the same instructions and skills.',
     folder: 'Brain folder', pathHint: 'Folder path', save: 'Connect folder', browse: 'Browse', useFolder: 'Choose this folder',
@@ -115,6 +134,8 @@ export const strings = {
   },
   app: {
     name: 'Boite',
+    /** What a nightly build calls itself: window title, tray and title bar. The settings name its track Boite Nightly. */
+    nightlyName: 'boite (de nuit)',
     /** The tag the title bar shows when the core is the dev install. */
     channelDev: 'Dev',
     channelDevTitle: 'The dev channel, on its own data directory',
@@ -140,7 +161,7 @@ export const strings = {
     unsupported: 'Automatic app updates are available in installed Windows x64 builds.',
     channel: 'Release channel',
     stable: 'Boite',
-    nightly: 'boite de nuit',
+    nightly: 'Boite Nightly',
     nightlyHint: 'Nightly is experimental and may contain unfinished changes. You can return to Boite even when its version number is lower.',
     nightlyTitle: 'This app follows experimental nightly releases',
     installedVersion: 'Installed version',
@@ -253,6 +274,7 @@ export const strings = {
 
   palette: {
     placeholder: 'Search threads, or type a command',
+    terminal: 'Show or hide the terminal',
     threads: 'Threads',
     commands: 'Commands',
     empty: 'Nothing matches.',
@@ -399,6 +421,7 @@ export const strings = {
     /** The header's button: it shows or hides the panel, whatever surface is in it. */
     panel: 'Panel',
     panelHint: 'The workbench beside this thread',
+    terminalHint: "Terminal in this thread's folder",
     cwd: 'Working directory',
     model: 'Model',
     defaultModel: 'Default model',
@@ -783,6 +806,13 @@ export const strings = {
     slotEmpty: 'The page opens here once the shell provides the webview'
   },
 
+  terminal: {
+    title: 'Terminal',
+    hide: 'Hide the terminal',
+    close: 'Close the shell',
+    resize: 'Resize the terminal'
+  },
+
   trace: {
     exact: 'All child processes tracked',
     limited: 'Limited process tracking',
@@ -856,6 +886,8 @@ export const strings = {
     loginRedirectPlaceholder: 'On another device? Paste the localhost address the page ends on',
     loginSend: 'Send',
     loginCancel: 'Cancel',
+    terminalHint: 'Answer its questions in the terminal, then close it once you are signed in.',
+    terminalDone: 'Close the terminal',
     remove: 'Remove',
     removeTitle: 'Remove {account}?',
     removeBody: 'This signs the account out of Boite and deletes its files. Accounts used by a thread cannot be removed.',
@@ -1079,6 +1111,8 @@ export const strings = {
   },
 
   experiments: {
+    chatArtifacts: { title: 'Chat files and previews', hint: 'Open file links and preview files returned by an agent in the conversation' },
+    previewComments: { title: 'Preview comments', hint: 'Select an element in the integrated browser and add feedback to the conversation draft' },
     themeGrain: {
       title: 'Grain theme',
       hint: 'A grainy ground fading from light grey at the top left to black at the bottom right'

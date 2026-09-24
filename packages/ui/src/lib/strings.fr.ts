@@ -10,6 +10,25 @@
 import type { Messages } from './i18n.svelte';
 
 export const fr: Messages = {
+  previewComments: {
+  annotate: 'Référencer un élément',
+  picking: 'Sélectionnez un élément dans la page. Échap annule.',
+  comment: 'Que faut-il changer ?',
+  add: 'Ajouter au message',
+  cancel: 'Annuler',
+  added: 'Élément ajouté à votre message.',
+  unavailable: 'Cet élément est inaccessible. Utilisez l’application de bureau pour les pages d’une autre origine.',
+  failed: 'La sélection a échoué. Rechargez la page et réessayez.',
+  reveal: 'Montrer cet élément dans l’aperçu',
+  remove: 'Retirer la référence à cet élément',
+  stale: 'Cet aperçu a changé de page. Rouvrez la page d’origine ou sélectionnez à nouveau l’élément.',
+  missing: 'Cet élément n’existe plus dans la page. Sélectionnez-le à nouveau.',
+  tooMany: 'Un message peut référencer au maximum 8 éléments de page.',
+  activityUnsupported: 'Les références ne sont pas disponibles avec /goal ou /loop. Envoyez un message ordinaire ou retirez les références.',
+  stashUnsupported: 'Ce brouillon contient des références et ne peut pas être mis de côté. Envoyez-le ou retirez les références.'
+},
+  artifacts: { preview: 'Aperçu', download: 'Télécharger', close: 'Fermer l’aperçu', loading: 'Chargement du fichier', unavailable: 'Ce fichier ne peut pas être affiché ici. Téléchargez-le pour l’ouvrir.', failed: 'Impossible d’ouvrir ce fichier', ownerOnly: 'Les liens vers les fichiers locaux nécessitent une connexion propriétaire. Demandez à l’agent de joindre le fichier pour le partager avec cet appareil.' },
+
   brain: {
     heading: 'Brain', description: 'Les mêmes instructions et skills pour tes agents.',
     folder: 'Dossier du brain', pathHint: 'Chemin du dossier', save: 'Connecter le dossier', browse: 'Parcourir', useFolder: 'Choisir ce dossier',
@@ -126,6 +145,7 @@ export const fr: Messages = {
   },
   app: {
     name: 'Boite',
+    nightlyName: 'boite (de nuit)',
     channelDev: 'Dev',
     channelDevTitle: 'Le canal dev, sur son propre répertoire de données',
     loading: 'Démarrage',
@@ -146,13 +166,13 @@ export const fr: Messages = {
 
   appUpdate: {
     heading: "Mises à jour de l'application",
-    intro: 'Choisissez les versions suivies par cette application de bureau. Boite et boite de nuit partagent cette installation, vos conversations et vos réglages.',
+    intro: 'Choisissez les versions suivies par cette application de bureau. Boite et Boite Nightly partagent cette installation, vos conversations et vos réglages.',
     unsupported: 'Les mises à jour automatiques sont disponibles dans les versions Windows x64 installées.',
     channel: 'Canal de publication',
     stable: 'Boite',
-    nightly: 'boite de nuit',
-    nightlyHint: "Boite de nuit est expérimentale et peut contenir des changements inachevés. Vous pouvez revenir à Boite même si son numéro de version est inférieur.",
-    nightlyTitle: 'Cette application suit les versions expérimentales de boite de nuit',
+    nightly: 'Boite Nightly',
+    nightlyHint: "Boite Nightly est expérimentale et peut contenir des changements inachevés. Vous pouvez revenir à Boite même si son numéro de version est inférieur.",
+    nightlyTitle: 'Cette application suit les versions expérimentales de Boite Nightly',
     installedVersion: 'Version installée',
     installedChannel: 'Canal installé',
     targetVersion: 'Version de mise à jour',
@@ -263,6 +283,7 @@ export const fr: Messages = {
 
   palette: {
     placeholder: 'Cherchez une conversation, ou tapez une commande',
+    terminal: 'Afficher ou masquer le terminal',
     threads: 'Conversations',
     commands: 'Commandes',
     empty: 'Rien ne correspond.',
@@ -405,6 +426,7 @@ export const fr: Messages = {
     traceHint: 'Processus lancés par cette conversation',
     panel: 'Panneau',
     panelHint: "L'établi à côté de cette conversation",
+    terminalHint: 'Terminal dans le dossier de cette conversation',
     cwd: 'Répertoire de travail',
     model: 'Modèle',
     defaultModel: 'Modèle par défaut',
@@ -768,6 +790,13 @@ export const fr: Messages = {
     slotEmpty: "La page s'affiche ici dès que la coque fournit la vue web"
   },
 
+  terminal: {
+    title: 'Terminal',
+    hide: 'Masquer le terminal',
+    close: 'Fermer le shell',
+    resize: 'Redimensionner le terminal'
+  },
+
   trace: {
     exact: 'Tous les processus enfants suivis',
     limited: 'Suivi des processus limité',
@@ -840,6 +869,8 @@ export const fr: Messages = {
     loginRedirectPlaceholder: "Sur un autre appareil ? Collez l'adresse localhost sur laquelle la page se termine",
     loginSend: 'Envoyer',
     loginCancel: 'Annuler',
+    terminalHint: 'Répondez à ses questions dans le terminal, puis fermez-le une fois connecté.',
+    terminalDone: 'Fermer le terminal',
     remove: 'Supprimer',
     removeTitle: 'Supprimer {account} ?',
     removeBody: "Cela déconnecte le compte de Boite et supprime ses fichiers. Un compte utilisé par une conversation ne peut pas être supprimé.",
@@ -1061,6 +1092,8 @@ export const fr: Messages = {
   },
 
   experiments: {
+    chatArtifacts: { title: 'Fichiers et aperçus dans le chat', hint: 'Ouvrir les liens de fichiers et afficher les fichiers envoyés par un agent dans la conversation' },
+    previewComments: { title: 'Commentaires sur les aperçus', hint: 'Sélectionner un élément dans le navigateur intégré et l’ajouter au brouillon de la conversation' },
     themeGrain: {
       title: 'Thème Grain',
       hint: 'Un fond grainé qui passe du gris clair en haut à gauche au noir en bas à droite'

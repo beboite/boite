@@ -1,6 +1,8 @@
 import {
   DEFAULT_DELEGATION_CONFIG,
   attachmentError,
+  previewReferencesError,
+  previewPrompt,
   KEYBINDING_COMMANDS,
   MESSAGE_PAGE,
   MESSAGE_PAGE_MAX,
@@ -40,6 +42,7 @@ import {
   type PanelSurface,
   type PermissionRequest,
   type Principal,
+  type PreviewReference,
   type ProcessRecord,
   type Project,
   type ProviderInstallState,
@@ -128,6 +131,20 @@ import {
 } from './fake-client/shared.ts';
 import { longThread, seedThreads } from './fake-client/threads-seed';
 import { fakeUsageHistory, type FakeFinishedTurn } from './fake-usage';
+
+/** What OpenCode's menu looks like once the command is typed: the capture shows the real thing's shape. */
+const FAKE_LOGIN_MENU = [
+  '\x1b[90m┌\x1b[39m  Add credential',
+  '\x1b[90m│\x1b[39m',
+  '\x1b[36m◆\x1b[39m  Select provider',
+  '\x1b[36m│\x1b[39m  \x1b[32m●\x1b[39m OpenCode Zen \x1b[90m(recommended)\x1b[39m',
+  '\x1b[36m│\x1b[39m  ○ OpenAI',
+  '\x1b[36m│\x1b[39m  ○ GitHub Copilot',
+  '\x1b[36m│\x1b[39m  ○ Anthropic',
+  '\x1b[36m│\x1b[39m  ○ Google',
+  '\x1b[36m└\x1b[39m',
+  ''
+].join('\r\n');
 
 type FakeMethods = { [M in Exclude<RpcMethodName, `plugins.${string}`>]: (params: RpcParams<M>) => Promise<RpcResult<M>> };
 
@@ -238,6 +255,8 @@ export class FakeClient implements ObservableClient {
   #inFlight = new Map<ThreadId, { cancelled: boolean; done: Promise<void> }>();
   /** The current output of every active fake login, also returned after reconnect. */
   #logins = new Map<string, RpcEvents['account.login']>();
+  /** Fake shells by terminal id: what they printed and the line being typed. */
+  #terminals = new Map<string, { cwd: string; output: string; line: string }>();
   #seq = 0;
   #turnRequests = new Map<string, { content: string; turn: Turn }>();
   #delayMs: number;
@@ -750,6 +769,61 @@ export class FakeClient implements ObservableClient {
       void this.#finishFakeLogin(account);
       return { ok: true };
     },
+    'accounts.loginTerminal': async (params) => {
+      const account = this.#accounts.find((a) => a.id === params.accountId);
+      if (!account) throw this.#notFound('account', params.accountId);
+      const provider = this.#providers.find((p) => p.id === account.providerId);
+      if (!provider?.login || provider.login.kind !== 'terminal') {
+        throw new RpcFailure({ code: RpcErrorCode.Refused, message: `${provider?.name ?? account.providerId} does not sign in from a terminal` });
+      }
+      const id = `login:${account.id}`;
+      const cwd = account.isolationDir ?? 'C:\\Users\\you';
+      if (!this.#terminals.has(id)) {
+        this.#terminals.set(id, { cwd, output: `PS ${cwd}> & ${provider.id} auth login\r\n${FAKE_LOGIN_MENU}`, line: '' });
+      }
+      const shell = this.#terminals.get(id)!;
+      return { id, cwd: shell.cwd, output: shell.output };
+    },
+    'terminals.open': async (params) => {
+      const thread = this.#threads.get(params.threadId);
+      if (!thread) throw this.#notFound('thread', params.threadId);
+      const id = `terminal:${thread.id}`;
+      if (!this.#terminals.has(id)) this.#terminals.set(id, { cwd: thread.cwd, output: `PS ${thread.cwd}> `, line: '' });
+      const shell = this.#terminals.get(id)!;
+      return { id, cwd: shell.cwd, output: shell.output };
+    },
+    'terminals.write': async (params) => {
+      const shell = this.#terminals.get(params.id);
+      if (!shell) throw this.#notFound('terminal', params.id);
+      let echo = '';
+      for (const char of params.data) {
+        if (char === '\r') {
+          const typed = shell.line.trim();
+          shell.line = '';
+          if (typed === 'exit') {
+            this.#closeTerminal(params.id);
+            return { ok: true };
+          }
+          echo += `\r\n${typed.length > 0 ? `${typed}\r\n` : ''}PS ${shell.cwd}> `;
+        } else if (char === '\x7f') {
+          if (shell.line.length > 0) { shell.line = shell.line.slice(0, -1); echo += '\b \b'; }
+        } else if (char >= ' ') {
+          shell.line += char;
+          echo += char;
+        }
+      }
+      shell.output += echo;
+      if (echo.length > 0) this.#emit('terminal.output', { id: params.id, data: echo });
+      return { ok: true };
+    },
+    'terminals.resize': async (params) => {
+      if (!this.#terminals.has(params.id)) throw this.#notFound('terminal', params.id);
+      return { ok: true };
+    },
+    'terminals.close': async (params) => {
+      this.#closeTerminal(params.id);
+      return { ok: true };
+    },
     'threads.list': async (params) => {
       return [...this.#threads.values()]
         .filter((t) => (params.projectId ? t.projectId === params.projectId : true))
@@ -925,9 +999,11 @@ export class FakeClient implements ObservableClient {
       return { ok: true };
     },
     'turns.start': async (params) => {
+      const referenceError = previewReferencesError(params.previewReferences ?? [], params.prompt);
+      if (referenceError) throw new RpcFailure({ code: RpcErrorCode.Refused, message: referenceError });
       if (params.attachments !== undefined && (!Array.isArray(params.attachments) || params.attachments.some(a => !a || typeof a !== 'object'))) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'attachments must be an array of attachment objects' });
       const key = params.clientRequestId ? `${params.threadId}:${params.clientRequestId}` : null;
-      const content = JSON.stringify([params.prompt, (params.attachments ?? []).map(a => [a.kind, a.mimeType, a.data, a.name])]);
+      const content = JSON.stringify([params.prompt, (params.attachments ?? []).map(a => [a.kind, a.mimeType, a.data, a.name]), ...(params.previewReferences?.length ? [params.previewReferences] : [])]);
       if (params.clientRequestId !== undefined && !/^[A-Za-z0-9_-]{8,128}$/.test(params.clientRequestId)) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'clientRequestId must contain 8 to 128 URL-safe characters' });
       const previous = key ? this.#turnRequests.get(key) : undefined;
       if (previous) {
@@ -949,7 +1025,7 @@ export class FakeClient implements ObservableClient {
         if (!config.enabled || config.paused) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'delegation is disabled or paused' });
         if ((this.#delegationTurns.get(rootId) ?? 0) >= config.maxTurns) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'delegation turn budget reached' });
       }
-      const turn = this.#startTurn(params.threadId, params.prompt, params.attachments ?? [], rootId ? 'delegation' : undefined);
+      const turn = this.#startTurn(params.threadId, params.prompt, params.attachments ?? [], rootId ? 'delegation' : undefined, undefined, undefined, params.previewReferences ?? []);
       if (rootId) this.#delegationTurns.set(rootId, (this.#delegationTurns.get(rootId) ?? 0) + 1);
       if (key) this.#turnRequests.set(key, { content, turn });
       return turn;
@@ -1565,6 +1641,24 @@ export class FakeClient implements ObservableClient {
       };
       return where;
     },
+    'artifacts.publish': async (params) => {
+      const thread = this.#thread(params.threadId);
+      if (thread.archived) throw refusal('artifacts.publish needs an active thread');
+      const turn = thread.turns.at(-1);
+      if (!turn) throw refusal('artifacts.publish needs a thread with a turn');
+      const path = this.#inside(thread.cwd, params.path, 'artifacts.publish path', 'file');
+      const media = FAKE_MEDIA[path];
+      const body = media ? new Uint8Array(await (await fetch(media.url())).arrayBuffer()) : new TextEncoder().encode(this.#files.get(path) ?? '');
+      if (body.length > 5 * 1024 * 1024) throw refusal('artifacts.publish file must be at most 5 MB');
+      if (thread.archived) throw refusal('artifacts.publish needs an active thread');
+      let binary = '';
+      for (const byte of body) binary += String.fromCharCode(byte);
+      const message: Message = { id: `m-${++this.#seq}`, threadId: thread.id, turnId: turn.id, role: 'assistant', state: 'complete', createdAt: this.#now(), parts: [{ type: 'file', name: path.split('/').at(-1) ?? path, mimeType: media?.mime ?? 'application/octet-stream', data: btoa(binary) }] };
+      thread.messages.push(message);
+      this.#emitToThread(thread.id, 'message.started', structuredClone(message));
+      this.#emitToThread(thread.id, 'message.completed', { threadId: thread.id, messageId: message.id, state: 'complete' });
+      return structuredClone(message);
+    },
     'panel.open': async (params) => {
       const thread = this.#thread(params.threadId);
       const surface = this.#checkSurface(thread.cwd, params.surface);
@@ -1856,7 +1950,9 @@ const ready = true;
     return stopped;
   }
 
-  #startTurn(threadId: ThreadId, prompt: string, attachments: Attachment[] = [], operation?: 'compact' | 'delegation', activityKind?: 'goal' | 'loop', queuedTurn?: Turn): Turn {
+  #startTurn(threadId: ThreadId, prompt: string, attachments: Attachment[] = [], operation?: 'compact' | 'delegation', activityKind?: 'goal' | 'loop', queuedTurn?: Turn, previewReferences: PreviewReference[] = []): Turn {
+    // The real transport serializes Svelte proxies before they reach the core.
+    previewReferences = JSON.parse(JSON.stringify(previewReferences)) as PreviewReference[];
     const thread = this.#thread(threadId);
     if (thread.archived) {
       throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'cannot start a turn on an archived thread', data: { threadId } });
@@ -1895,7 +1991,7 @@ const ready = true;
       role: 'user',
       // The images ride after the text, the order the core journals them in.
       parts: [
-        { type: 'text', text: activityKind ? `/${activityKind} ${prompt}` : prompt, ...(activityKind ? { activity: { kind: activityKind, iteration: (thread.activity?.[activityKind]?.iterations ?? 0) + 1 } } : {}) },
+        { type: 'text', text: activityKind ? `/${activityKind} ${prompt}` : previewPrompt(prompt, previewReferences), ...(previewReferences.length ? { displayText: prompt, previewReferences: structuredClone(previewReferences) } : {}), ...(activityKind ? { activity: { kind: activityKind, iteration: (thread.activity?.[activityKind]?.iterations ?? 0) + 1 } } : {}) },
         ...attachments.map((attachment): MessagePart => attachment.kind === 'file' ? { type: 'file', mimeType: attachment.mimeType, data: attachment.data, name: attachment.name } : ({
           type: 'image',
           mimeType: attachment.mimeType,
@@ -1926,7 +2022,7 @@ const ready = true;
     this.#pushScheduler(turn, 'running');
 
     const record = { cancelled: false, done: Promise.resolve() };
-    record.done = this.#stream(thread, turn, prompt, record, attachments);
+    record.done = this.#stream(thread, turn, prompt, record, attachments, previewPrompt(prompt, previewReferences));
     this.#inFlight.set(threadId, record);
 
     return structuredClone(turn);
@@ -1937,7 +2033,8 @@ const ready = true;
     turn: Turn,
     prompt: string,
     record: { cancelled: boolean },
-    attachments: Attachment[] = []
+    attachments: Attachment[] = [],
+    modelPrompt: string = prompt
   ): Promise<void> {
     const compactAfter = Math.max(1, Math.floor((thread.context?.tokens ?? FAKE_CONTEXT_FLOOR) / 4));
     const message: Message = {
@@ -1953,7 +2050,7 @@ const ready = true;
     this.#emitToThread(thread.id, 'message.started', structuredClone(message));
 
     // The reasoning first, in two deltas, the way a provider streams a thinking block.
-    const reasoning = `thinking about: ${prompt}`;
+    const reasoning = `thinking about: ${modelPrompt}`;
     const cut = Math.ceil(reasoning.length / 2);
     for (const piece of [reasoning.slice(0, cut), reasoning.slice(cut)]) {
       if (record.cancelled || piece.length === 0) break;
@@ -1979,7 +2076,7 @@ const ready = true;
 
     // `/shout <text>` comes back in capitals, the one command the fake acts on.
     const shouted = prompt.startsWith(`/${SHOUT} `) ? prompt.slice(SHOUT.length + 2) : null;
-    const echoed = shouted === null ? prompt : shouted.toUpperCase();
+    const echoed = shouted === null ? modelPrompt : modelPrompt.slice(SHOUT.length + 2).toUpperCase();
 
     // An image is named back the way the echo driver names it, format and
     // weight first, then the prompt itself is echoed.
@@ -2059,11 +2156,11 @@ const ready = true;
     });
 
     const usage: Usage = {
-      inputTokens: Math.max(1, Math.ceil(prompt.length / 4)),
-      outputTokens: Math.max(1, Math.ceil(prompt.length / 4)),
+      inputTokens: Math.max(1, Math.ceil(modelPrompt.length / 4)),
+      outputTokens: Math.max(1, Math.ceil(modelPrompt.length / 4)),
       cacheReadTokens: 0,
       cacheWriteTokens: 0,
-      costUsdEquivalent: Math.round(prompt.length * 0.02) / 1000
+      costUsdEquivalent: Math.round(modelPrompt.length * 0.02) / 1000
     };
     turn.status = record.cancelled ? 'stopped' : 'done';
     turn.finishedAt = this.#now();
@@ -2076,7 +2173,7 @@ const ready = true;
     thread.unread = !this.#subscribed.has(thread.id);
     // The context meter grows with every turn, the way a real session's does.
     thread.context = {
-      tokens: prompt === '[compact]' && !record.cancelled ? compactAfter : (thread.context?.tokens ?? FAKE_CONTEXT_FLOOR) + FAKE_CONTEXT_PER_TURN + prompt.length * 4,
+      tokens: prompt === '[compact]' && !record.cancelled ? compactAfter : (thread.context?.tokens ?? FAKE_CONTEXT_FLOOR) + FAKE_CONTEXT_PER_TURN + modelPrompt.length * 4,
       window: FAKE_CONTEXT_WINDOW,
       at: this.#now()
     };
@@ -2490,6 +2587,18 @@ const ready = true;
       this.#logins.set(event.accountId, existing ? Object.assign(existing, event) : event);
     } else this.#logins.delete(event.accountId);
     this.#emit('account.login', structuredClone(event));
+  }
+
+  /** The shell goes; a sign-in one leaves its account signed in, as the real CLI would. */
+  #closeTerminal(id: string): void {
+    if (!this.#terminals.delete(id)) return;
+    this.#emit('terminal.exited', { id, exitCode: 0 });
+    if (!id.startsWith('login:')) return;
+    const account = this.#accounts.find((a) => `login:${a.id}` === id);
+    if (!account) return;
+    account.status = 'ok';
+    account.identity = 'you@example.com';
+    this.#emit('accounts.updated', structuredClone(account));
   }
 
   #cancelLogin(accountId: string): void {

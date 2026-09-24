@@ -37,6 +37,9 @@ export async function startTestCore(options: TestCoreOptions = {}): Promise<Test
   process.env.BOITE_DATA_DIR = dataDir;
   // The echo provider ships only when asked for; every test drives it.
   process.env.BOITE_ECHO = '1';
+  // A shell the tests open must not write what they type into the user's own
+  // PowerShell or bash history: cmd and sh keep none.
+  process.env.BOITE_TERMINAL_SHELL = process.platform === 'win32' ? (process.env.ComSpec ?? 'C:\\Windows\\System32\\cmd.exe') : '/bin/sh';
 
   const token = newToken();
   const core = new Core({ dataDir, token });

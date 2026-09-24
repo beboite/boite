@@ -135,6 +135,7 @@ export const AGENT_METHODS: ReadonlyMap<RpcMethodName, string> = new Map<RpcMeth
   ['agent.where', 'the thread, its project, its working directory and its branch: what the CLI prints first'],
   ['panel.open', 'showing the user a file, a diff or a page instead of pasting it into the transcript'],
   ['questions.ask', 'a question card on its own thread that it does not wait on; the answer comes back as a message'],
+  ['artifacts.publish', 'explicitly sharing a bounded snapshot from its own working directory in its own conversation'],
   ['threads.tasks.set', 'the plan the tasks surface draws, from an agent whose protocol carries no todo tool'],
   ['threads.tasks.get', 'the same plan read back, so a new process continues the list it did not write'],
   ['todos.list', 'the project cards, shared with the other threads of the project'],
