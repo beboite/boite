@@ -667,6 +667,16 @@ test('Ctrl+J opens the shell of the thread under the chat, hides it again, and i
   expect(query('[data-testid=terminal-toggle]').classList.contains('on')).toBe(true);
   expect(query<HTMLButtonElement>('[data-testid=terminal-toggle]').title).toContain('Ctrl+J');
 
+  // Back from a dropped socket, the view asks the core for the shell again.
+  const reopen = vi.spyOn(store, 'openTerminal');
+  store.connection = 'connecting';
+  flushSync();
+  store.connection = 'ready';
+  flushSync();
+  await waitFor(() => reopen.mock.calls.length === 1);
+  expect(reopen.mock.calls[0]?.[0]).toBe(threadId);
+  reopen.mockRestore();
+
   expect(document.body.dispatchEvent(chord())).toBe(false);
   await waitFor(() => document.querySelector('[data-testid=terminal-drawer]') === null);
   expect(store.terminalShown(threadId)).toBe(false);

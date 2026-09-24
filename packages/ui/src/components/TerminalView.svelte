@@ -26,6 +26,24 @@
   } = $props();
 
   let host = $state<HTMLDivElement | undefined>(undefined);
+  /** Set once attached: asks the core for the shell again after a reconnect. */
+  let reattach: (() => void) | null = null;
+  let connection: string | null = null;
+
+  // Output sent while the socket was down never arrived, and a restarted core
+  // has no shell any more: back on line, the screen is redrawn from the core.
+  $effect(() => {
+    const now = store.connection;
+    const was = connection;
+    connection = now;
+    if (now === 'ready' && was !== null && was !== 'ready') reattach?.();
+  });
+
+  /**
+   * Chords the app leaves alone while a text field has the focus. The shell
+   * takes them: Ctrl+W deletes a word there, Ctrl+S and Ctrl+Enter are its own.
+   */
+  const SHELL_CHORDS = new Set(['close-surface', 'stash', 'send-and-draft']);
 
   /** The chrome's own tokens, so the terminal changes with the theme. ANSI colours stay xterm's. */
   function theme() {
@@ -65,7 +83,11 @@
       term.open(host);
       cleanups.push(() => term.dispose());
       try { fit.fit(); } catch { /* a host with no size yet keeps xterm's default */ }
-      term.attachCustomKeyEventHandler((event) => event.type !== 'keydown' || store.commandForKey(event) === null);
+      term.attachCustomKeyEventHandler((event) => {
+        if (event.type !== 'keydown') return true;
+        const command = store.commandForKey(event);
+        return command === null || SHELL_CHORDS.has(command);
+      });
 
       // Everything printed before the snapshot is in it, so only what follows is drawn.
       let attached = false;
@@ -97,9 +119,24 @@
       themes.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme', 'style', 'class'] });
       cleanups.push(() => themes.disconnect());
       if (autofocus) term.focus();
+
+      reattach = () => {
+        attached = false;
+        void start(term.cols, term.rows).then((again) => {
+          if (disposed) return;
+          if (again === null) {
+            onexit?.(null);
+            return;
+          }
+          term.reset();
+          term.write(again.output);
+          attached = true;
+        });
+      };
     })();
     return () => {
       disposed = true;
+      reattach = null;
       for (const cleanup of cleanups.reverse()) cleanup();
     };
   });

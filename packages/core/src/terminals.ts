@@ -97,6 +97,7 @@ export class TerminalStore {
   /** The thread's shell, started in its working directory the first time. */
   openThread(threadId: ThreadId, cols: number, rows: number): TerminalState {
     const thread = this.core.threads.require(threadId);
+    if (thread.archived) throw refused(`the thread ${threadId} is archived`, { threadId, field: 'archived', expected: false });
     return this.open(threadTerminalId(threadId), { cwd: thread.cwd, env: { ...process.env }, cols, rows });
   }
 
@@ -179,10 +180,14 @@ export class TerminalStore {
     return { ok: true };
   }
 
-  /** Kills the shell with everything it started, and waits for it to be gone. */
+  /**
+   * Kills the shell with everything it started, and waits for it to be gone.
+   * The session stops taking keys at once, even when the exit is slow.
+   */
   async close(id: string): Promise<{ ok: true }> {
     const session = this.sessions.get(id);
     if (session === undefined) return { ok: true };
+    this.sessions.delete(id);
     this.core.procs.killTree(id);
     let timer: ReturnType<typeof setTimeout> | undefined;
     await Promise.race([

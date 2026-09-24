@@ -266,7 +266,7 @@ export class AccountStore {
         { accountId, providerId: provider.id, field: 'isolationDir' },
       );
     }
-    if (this.logins.has(accountId)) {
+    if (this.logins.has(accountId) || this.core.terminals.has(loginThreadId(accountId))) {
       throw refused(`a login is already running for ${account.label}`, { accountId });
     }
 

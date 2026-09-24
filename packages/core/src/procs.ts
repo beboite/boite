@@ -236,7 +236,22 @@ export class ProcRegistry {
 
     const record = this.register(threadId, proc.pid, cmd, args, {
       kill: () => {
-        proc.kill();
+        if (process.platform === 'win32') {
+          proc.kill();
+          return;
+        }
+        // An interactive shell ignores SIGTERM. A hang-up is what closing a
+        // terminal sends: the shell exits on it and passes it to its jobs.
+        proc.kill('SIGHUP');
+        const hard = setTimeout(() => {
+          try {
+            proc.kill('SIGKILL');
+          } catch {
+            // already exited
+          }
+        }, 2000);
+        hard.unref();
+        void proc.exited.finally(() => clearTimeout(hard));
       },
       usage: () => {
         const usage = proc.resourceUsage();

@@ -98,6 +98,7 @@ describe('terminals', () => {
     await client.call('threads.archive', { threadId });
     await waitFor(() => seen.exited() !== null, SHELL_MS);
     expect(harness.core.terminals.has(id)).toBe(false);
+    await expect(client.call('terminals.open', { threadId, cols: 80, rows: 24 })).rejects.toThrow(/is archived/);
   }, 30_000);
 
   test('a terminal login types its command, and closing the shell rechecks the account', async () => {
@@ -117,8 +118,9 @@ describe('terminals', () => {
     // The shell prompt comes up, the command is typed on it, the CLI prints its link.
     await waitFor(() => seen.text().includes('example.invalid/login?code=echo'), SHELL_MS);
     expect(seen.text()).toContain('echo-login.ts');
-    // Attaching again is the same shell, not a second login.
+    // Attaching again is the same shell, not a second login, and no piped one starts beside it.
     expect((await client.call('accounts.loginTerminal', { accountId: account.id, cols: 100, rows: 30 })).id).toBe(id);
+    await expect(client.call('accounts.login', { accountId: account.id })).rejects.toThrow(/already running/);
 
     await client.call('terminals.write', { id, data: 'fake-code\r' });
     await waitFor(() => existsSync(join(account.isolationDir ?? '', '.credentials.json')), SHELL_MS);
