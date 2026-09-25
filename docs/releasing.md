@@ -42,7 +42,10 @@ it does not compile again. The end-to-end suite refuses missing or stale artifac
   `boite-core.exe core/main.js`. The runtime carries its publisher's signature;
   an unsigned compiled core costs about 650 ms more at every start on Windows 11
   ([performance.md](performance.md)). `stage-sidecar.ts` warns when the runtime's
-  signature is not valid. `apps/shell/scripts/tauri.ts` adds
+  signature is not valid, and it refuses a Bun other than the `packageManager`
+  pin, as do `packages/core/bin/compile.ts` and `build:core:linux`, since each
+  ships the Bun it runs under. `BOITE_ALLOW_BUN_MISMATCH=1` allows another one
+  for a build that is not shipped. `apps/shell/scripts/tauri.ts` adds
   `tauri.bundle.windows.conf.json`, which names the `core` directory as a
   resource, to any Windows build that passes the bundle overlay.
 - `stage:core` puts the sidecar, both workers and the two `boite` shims
@@ -219,17 +222,38 @@ anything: it names every file and where it goes.
 
 ## How the shell finds a core
 
-Closing the window exits the shell and its owned core by default. General settings
+Closing the window exits the shell by default, and the resident core keeps running. General settings
 can keep it in the notification area instead. The choice lives in
 `<dataDir>/shell-settings.json` and survives restart. The tray's Quit action always
 exits. Hovering or clicking the tray icon opens a compact quota window; its Show
 action restores the main window. Quota polling runs only while that popup is open.
+The popup is a second WebView2 page with its own socket, about 85 MB: 45 seconds
+after it hides, the shell destroys it, and the next hover builds it again.
+A window in the tray or minimized hides its page and its browser panels from
+WebView2 as well, which does not notice a hidden host by itself: the page stops
+painting and sees `document.hidden`, and the panels that were open come back
+with the window.
+One shell runs per data directory (`shell.lock`). Launching Boite again while it
+runs shows the running window, from the tray or behind other windows, through a
+loopback port and token the owner writes to `<dataDir>/shell-wake`. A shell
+started with `BOITE_SHELL_HIDDEN=1` never asks.
 
-The installed shell starts a core of its own, adopts one that already answers,
-and owns the one it started through a `KILL_ON_JOB_CLOSE` Job Object, so a shell
-killed hard takes its core down with it instead of leaving an orphan holding
-`boite-core.exe` open, which is exactly what once made an install fail on "error
-opening file for writing".
+A release shell has no console, so a shell that fails writes why to
+`<dataDir>/shell-error.log`: a setup error, such as a broken WebView2 install or
+a profile directory it cannot write, and any panic. A setup error also shows a
+message box naming the error and that file, except in a hidden test shell. A
+missing WebView2 runtime is Tauri's own message box. When the tray icon cannot
+be created, the shell runs without it and closing the window quits.
+
+The installed shell starts a core of its own or adopts one of its own version
+that already answers. That core is resident: it outlives the shell. Since a
+running core keeps `boite-core.exe` open, which once made an install fail on
+"error opening file for writing", the updater stops it before it launches the
+installer, and the installer's hooks (`windows/hooks.nsh`) close the shell,
+which would restart it, and then stop the core of that install before an
+install or an uninstall writes the file. With
+`BOITE_CORE_RESIDENT=0` (tests) the shell owns its core through a
+`KILL_ON_JOB_CLOSE` Job Object instead, so a shell killed hard takes it down.
 
 It looks for the core in this order:
 

@@ -247,6 +247,8 @@ function spawnHiddenShell(ownDataDir: string, debugPort?: number, resident = fal
   env.BOITE_DRAFTS_DIR = join(ownDataDir, 'Documents', 'Boite');
   env.BOITE_ECHO = '1';
   env.BOITE_HOST_AGENTS = '0';
+  // A hidden quota popup gives its page back after this long, not 45 s.
+  env.BOITE_QUOTA_IDLE_MS = '1500';
   delete env.BOITE_SHELL_DEBUG_PORT;
   if (debugPort !== undefined) {
     env.BOITE_SHELL_DEBUG_PORT = String(debugPort);
@@ -359,6 +361,8 @@ shellTest('close exits by default; the persisted setting hides instead; the nati
     await ownPage.evaluate(`document.querySelector('[data-testid="titlebar"] .close').click()`);
     expect(await healthy(ownCore.port)).toBe(true);
     expect(pidAlive(ownPid)).toBe(true);
+    // In the tray the page is hidden to WebView2 too, so it stops painting.
+    await ownPage.waitFor(`document.visibilityState === 'hidden'`);
 
     // Keep every real login out of this test. The popup still crosses real IPC and WS.
     const client = await connect(`http://127.0.0.1:${ownCore.port}`, ownCore.token);
@@ -392,6 +396,17 @@ shellTest('close exits by default; the persisted setting hides instead; the nati
     expect(geometry.inside, JSON.stringify(geometry)).toBe(true);
     await popup.screenshot(join(import.meta.dir, '.artifacts', 'shell-quota-popup.png'));
     await popup.evaluate(`window.__TAURI_INTERNALS__.invoke('quota_window', {action:'hide'})`);
+    await popup.close(); popup = undefined;
+    // A popup left hidden gives its renderer back (BOITE_QUOTA_IDLE_MS), and
+    // the next show builds it again.
+    const quotaTargets = async () => ((await (await fetch(`http://127.0.0.1:${secondPort}/json/list`)).json()) as { url: string }[])
+      .filter(target => target.url.includes('view=quotas')).length;
+    const releaseBy = Date.now() + 15_000;
+    while (await quotaTargets() > 0 && Date.now() < releaseBy) await Bun.sleep(POLL_MS);
+    expect(await quotaTargets()).toBe(0);
+    await ownPage.evaluate(`window.__TAURI_INTERNALS__.invoke('quota_window', {action:'show'})`);
+    popup = await BrowserPage.attach(secondPort, 'view=quotas');
+    await popup.waitFor(`document.querySelector('[data-testid="quota-popup"]')`);
     await popup.close(); popup = undefined;
     await quitShell(ownPage);
     await waitUntil(() => !pidAlive(ownPid), CORE_GONE_TIMEOUT_MS);
@@ -951,11 +966,21 @@ async function reloadShellPage(): Promise<void> {
 shellTest(
   'the stored window material is stamped on every load, and solid stamps nothing',
   async () => {
+    // The list depends on the Windows build: solid always, mica from 22000,
+    // acrylic from 22523. Nothing off Windows. A runner on Windows Server 2022
+    // (20348) offers solid alone, and a stored mica then stamps nothing.
+    const supported = await page?.evaluate<string[]>(
+      `window.__TAURI_INTERNALS__.invoke('window_material_supported')`,
+    );
+    if (process.platform === 'win32') expect(supported).toContain('solid');
+    else expect(supported).toEqual([]);
+    const mica = supported?.includes('mica') ?? false;
+
     await page?.evaluate<null>(
       `(() => { window.localStorage.setItem('boite.glass', 'mica'); return null; })()`,
     );
     await reloadShellPage();
-    await page?.waitFor(`document.documentElement.dataset.glass === 'mica'`, 30_000);
+    await page?.waitFor(`document.documentElement.dataset.glass === ${mica ? "'mica'" : 'undefined'}`, 30_000);
 
     await page?.evaluate<null>(
       `(() => { window.localStorage.setItem('boite.glass', 'solid'); return null; })()`,
@@ -969,12 +994,7 @@ shellTest(
     // The other half, which the UI swallows on purpose: the command is really
     // registered, it really reaches the window, and a material nobody defined is
     // refused by name rather than falling back on one.
-    const supported = await page?.evaluate<boolean>(
-      `window.__TAURI_INTERNALS__.invoke('window_material_supported')`,
-    );
-    expect(supported).toBe(process.platform === 'win32');
-
-    await invokeShell('window_material', { kind: 'mica' });
+    if (mica) await invokeShell('window_material', { kind: 'mica' });
     await invokeShell('window_material', { kind: 'solid' });
 
     let refusal = '';

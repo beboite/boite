@@ -3,13 +3,15 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 const { invoke } = vi.hoisted(() => ({ invoke: vi.fn<(command: string, args?: Record<string, unknown>) => Promise<unknown>>() }));
 vi.mock('@tauri-apps/api/core', () => ({ invoke }));
 
-import { applyGlass, GLASS_STORAGE_KEY, readGlass, setGlass } from './glass';
+import { applyGlass, effectiveGlass, GLASS_STORAGE_KEY, readGlass, setGlass, supportedGlass } from './glass';
 
 type Shell = { __TAURI_INTERNALS__?: unknown };
 
 function enterShell(): void {
   (window as Shell).__TAURI_INTERNALS__ = { invoke: () => undefined };
 }
+
+const EVERY = ['acrylic', 'mica', 'solid'];
 
 function leaveShell(): void {
   delete (window as Shell).__TAURI_INTERNALS__;
@@ -18,7 +20,7 @@ function leaveShell(): void {
 describe('the window material', () => {
   beforeEach(() => {
     invoke.mockReset();
-    invoke.mockImplementation(async (command) => command === 'window_material_supported' ? true : undefined);
+    invoke.mockImplementation(async (command) => command === 'window_material_supported' ? EVERY : undefined);
     window.localStorage.clear();
     delete document.documentElement.dataset.glass;
   });
@@ -58,17 +60,43 @@ describe('the window material', () => {
 
   test('unsupported shells stay opaque and never receive a material command', async () => {
     enterShell();
-    invoke.mockResolvedValue(false);
+    for (const answer of [false, [], ['solid']]) {
+      invoke.mockResolvedValue(answer);
+      await applyGlass('acrylic');
+      await Promise.resolve();
+      expect(document.documentElement.dataset.glass).toBeUndefined();
+      expect(invoke).not.toHaveBeenCalledWith('window_material', expect.anything());
+    }
+  });
+
+  test('a material this Windows does not offer becomes solid instead of a see-through window', async () => {
+    enterShell();
+    // Windows 11 before 22523: mica, but no acrylic without lag.
+    invoke.mockImplementation(async (command) => command === 'window_material_supported' ? ['mica', 'solid'] : undefined);
+    document.documentElement.dataset.glass = 'acrylic';
     await applyGlass('acrylic');
-    await Promise.resolve();
+    expect(invoke).toHaveBeenCalledWith('window_material', { kind: 'solid' });
+    expect(invoke).not.toHaveBeenCalledWith('window_material', { kind: 'acrylic' });
     expect(document.documentElement.dataset.glass).toBeUndefined();
-    expect(invoke).not.toHaveBeenCalledWith('window_material', expect.anything());
+    await applyGlass('mica');
+    expect(document.documentElement.dataset.glass).toBe('mica');
+  });
+
+  test('the shell answer is read as a list, and an older shell answering true offers every kind', async () => {
+    expect(await supportedGlass()).toEqual([]);
+    enterShell();
+    invoke.mockResolvedValue(['mica', 'solid', 'frosted']);
+    expect(await supportedGlass()).toEqual(['mica', 'solid']);
+    invoke.mockResolvedValue(true);
+    expect(await supportedGlass()).toEqual(EVERY);
+    expect(effectiveGlass('acrylic', ['mica', 'solid'])).toBe('solid');
+    expect(effectiveGlass('mica', ['mica', 'solid'])).toBe('mica');
   });
 
   test('material refusal keeps the document opaque', async () => {
     enterShell();
     invoke.mockImplementation(async (command) => {
-      if (command === 'window_material_supported') return true;
+      if (command === 'window_material_supported') return EVERY;
       throw new Error('material unavailable');
     });
     await applyGlass('mica');
@@ -83,7 +111,7 @@ describe('the window material', () => {
     let nativeMaterial = 'solid';
     const changes: string[] = [];
     invoke.mockImplementation(async (command, args) => {
-      if (command === 'window_material_supported') return true;
+      if (command === 'window_material_supported') return EVERY;
       const kind = String(args?.kind);
       changes.push(kind);
       if (kind === 'mica') await micaGate;

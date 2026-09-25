@@ -46,6 +46,14 @@ while the core is up takes effect the next time it starts. That is what the line
 under the switch says, and one `core.log` line at start names the address and the
 setting that chose it.
 
+The port stays the same across restarts. With no `--port`, a core asks for the
+port its previous run wrote to `core.json`, so a paired phone and an installed
+page keep their address after a reboot or an engine stop. When another program
+took that port meanwhile, the core picks a new one and says so in its log; the
+phone then needs a new pairing link. A `--port` is only ever that port, and a
+taken one stops the core with an error. When the core listens on every
+interface, a pairing link names this machine's LAN address, never `127.0.0.1`.
+
 Two things guard the socket whatever it is bound to. The `Origin` header must be
 absent, one of the shell origins, or the core's own HTTP origin, and the first
 frame must be `hello` carrying a credential within five seconds, or the socket

@@ -161,6 +161,7 @@ describe('ids and flags', () => {
   test('the flags follow the documented defaults', () => {
     expect(parseFlags([])).toEqual({
       port: 0,
+      portExplicit: false,
       host: '127.0.0.1',
       hostExplicit: false,
       dataDir: undefined,
@@ -168,6 +169,7 @@ describe('ids and flags', () => {
     });
     expect(parseFlags(['--port', '8080', '--lan'])).toEqual({
       port: 8080,
+      portExplicit: true,
       host: '0.0.0.0',
       hostExplicit: true,
       dataDir: undefined,
@@ -175,6 +177,7 @@ describe('ids and flags', () => {
     });
     expect(parseFlags(['--host', '10.0.0.2', '--data-dir', 'D:/data'])).toEqual({
       port: 0,
+      portExplicit: false,
       host: '10.0.0.2',
       hostExplicit: true,
       dataDir: 'D:/data',

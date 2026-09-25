@@ -16,6 +16,7 @@ import { Journal, scheduleEventRetention } from './journal.ts';
 import { KeybindingStore } from './keybindings.ts';
 import { registerModules } from './modules.ts';
 import { currentOs } from './paths.ts';
+import { lanAddress } from './server/lan.ts';
 import { ProcRegistry } from './procs.ts';
 import { ProjectStore } from './projects.ts';
 import { ProviderRegistry } from './providers/loader.ts';
@@ -142,6 +143,25 @@ export class Core {
   };
 
   private endpoint = { host: '127.0.0.1', port: 0 };
+  #onShutdown: (() => void) | undefined;
+  #shutdownRequested = false;
+
+  /**
+   * Asks the process to stop the way `core.shutdown` does: the answer goes out
+   * first, then the process drains and exits. False for an embedded core,
+   * which has no process of its own to stop. `POST /shutdown` calls it too,
+   * which is how the desktop shell and its installer stop a resident core.
+   */
+  requestShutdown(): boolean {
+    const stop = this.#onShutdown;
+    if (!stop) return false;
+    if (!this.#shutdownRequested) {
+      this.#shutdownRequested = true;
+      // Leave time for the acknowledgement before the socket is closed.
+      setTimeout(stop, 25).unref();
+    }
+    return true;
+  }
 
   constructor(options: CoreOptions) {
     this.dataDir = options.dataDir;
@@ -179,14 +199,9 @@ export class Core {
 
     this.workforce = new AgentStore(this);
     registerModules(this);
-    let shutdownRequested = false;
+    this.#onShutdown = options.onShutdown;
     this.router.register('core.shutdown', () => {
-      if (!options.onShutdown) throw new Error('This embedded core does not support process shutdown.');
-      if (!shutdownRequested) {
-        shutdownRequested = true;
-        // Leave time for the RPC acknowledgement before the socket is closed.
-        setTimeout(options.onShutdown, 25).unref();
-      }
+      if (!this.requestShutdown()) throw new Error('This embedded core does not support process shutdown.');
       return { ok: true as const };
     });
     this.procs.applySettings(this.settings.get());
@@ -208,6 +223,17 @@ export class Core {
 
   baseUrl(): string {
     return `http://${this.displayHost()}:${this.endpoint.port}`;
+  }
+
+  /**
+   * The address a pairing link names. A core listening on every interface is
+   * reached from a phone through this machine's LAN address: 127.0.0.1 on the
+   * phone is the phone.
+   */
+  reachableUrl(): string {
+    const everywhere = this.endpoint.host === '0.0.0.0' || this.endpoint.host === '::';
+    const lan = everywhere ? lanAddress() : null;
+    return lan === null ? this.baseUrl() : `http://${lan}:${this.endpoint.port}`;
   }
 
   info(): CoreInfo {

@@ -1,13 +1,22 @@
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, Runtime, Webview, WebviewUrl};
+use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, Runtime, Webview, WebviewUrl, WebviewWindow};
 
 pub const LABEL: &str = "quotas";
 const HOVER_DELAY: Duration = Duration::from_millis(500);
+/// How long a hidden popup keeps its page. The page is a WebView2 renderer of
+/// its own, about 85 MB, plus a second socket to the core: a popup nobody
+/// opened again for this long gives both back, and the next hover builds it
+/// again during its 500 ms delay.
+const IDLE_RELEASE: Duration = Duration::from_secs(45);
+
 #[derive(Default)]
 pub struct HoverState {
     generation: AtomicU64,
     over_icon: AtomicBool,
+    /// Counts every show, so a release planned at a hide knows whether the
+    /// popup was opened again since.
+    opened: AtomicU64,
 }
 
 impl HoverState {
@@ -18,6 +27,38 @@ impl HoverState {
     pub fn cancel_open(&self) {
         self.generation.fetch_add(1, Ordering::AcqRel);
     }
+
+    /// Whether the popup hidden when `opened` was the count stayed hidden.
+    fn still_closed(&self, opened: u64) -> bool {
+        self.opened.load(Ordering::Acquire) == opened
+    }
+}
+
+/// The popup's page stays alive while it is hidden for this long. Tests shorten it.
+fn idle_release() -> Duration {
+    std::env::var("BOITE_QUOTA_IDLE_MS").ok().and_then(|ms| ms.parse().ok()).map(Duration::from_millis).unwrap_or(IDLE_RELEASE)
+}
+
+/// Every way the popup closes goes through here: hide it, tell its page, and
+/// destroy it once it stayed hidden for [`IDLE_RELEASE`]. `destroy` rather
+/// than `close`, so no close handler can turn the release into another hide.
+pub fn hide<R: Runtime>(app: &AppHandle<R>, window: &WebviewWindow<R>) -> tauri::Result<()> {
+    window.hide()?;
+    window.emit("tray://closed", ())?;
+    let opened = app.state::<HoverState>().opened.load(Ordering::Acquire);
+    let handle = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(idle_release());
+        let app = handle.clone();
+        let _ = handle.run_on_main_thread(move || {
+            if !app.state::<HoverState>().still_closed(opened) { return; }
+            let Some(window) = app.get_webview_window(LABEL) else { return };
+            if !window.is_visible().unwrap_or(true) {
+                if let Err(error) = window.destroy() { eprintln!("[shell] the hidden quota window could not be released: {error}"); }
+            }
+        });
+    });
+    Ok(())
 }
 
 type Bounds = (f64, f64, f64, f64);
@@ -54,6 +95,7 @@ pub fn position(icon_x: f64, icon_y: f64, width: f64, height: f64, monitor: (f64
 }
 
 pub fn show<R: Runtime>(app: &AppHandle<R>, point: PhysicalPosition<f64>) -> tauri::Result<()> {
+    app.state::<HoverState>().opened.fetch_add(1, Ordering::AcqRel);
     let window = if let Some(window) = app.get_webview_window(LABEL) { window } else {
         let mut builder = tauri::WebviewWindowBuilder::new(app, LABEL, WebviewUrl::App("index.html?view=quotas".into()))
             .title("Boite quotas").inner_size(380.0, 460.0).resizable(false)
@@ -152,8 +194,7 @@ pub fn leave<R: Runtime>(app: &AppHandle<R>) {
                 };
                 if !inside {
                     state.cancel_open();
-                    let _ = window.hide();
-                    let _ = window.emit("tray://closed", ());
+                    let _ = hide(&app, &window);
                 }
             }).is_err() { break; }
             std::thread::sleep(Duration::from_millis(200));
@@ -168,11 +209,11 @@ pub async fn quota_window(app: AppHandle, webview: Webview, action: String) -> R
         "show" => show(&app, app.cursor_position().map_err(|e| e.to_string())?).map_err(|e| e.to_string()),
         "hide" => {
             app.state::<HoverState>().generation.fetch_add(1, Ordering::AcqRel);
-            if let Some(window) = app.get_webview_window(LABEL) { window.hide().map_err(|e| e.to_string())?; window.emit("tray://closed", ()).map_err(|e| e.to_string())?; }
+            if let Some(window) = app.get_webview_window(LABEL) { hide(&app, &window).map_err(|e| e.to_string())?; }
             Ok(())
         }
         "providers" => {
-            if let Some(window) = app.get_webview_window(LABEL) { let _ = window.hide(); let _ = window.emit("tray://closed", ()); }
+            if let Some(window) = app.get_webview_window(LABEL) { let _ = hide(&app, &window); }
             crate::show_main(&app);
             app.emit_to(crate::browser::MAIN_LABEL, "tray://providers", ()).map_err(|e| e.to_string())
         }
@@ -195,6 +236,14 @@ mod tests {
         state.over_icon.store(true, Ordering::Release);
         assert!(!state.ready(0, Duration::from_millis(900)));
         assert!(!state.ready(1, Duration::from_millis(499)));
+    }
+    #[test]
+    fn a_hidden_popup_is_released_only_when_nothing_opened_it_since() {
+        let state = HoverState::default();
+        let at_hide = state.opened.load(Ordering::Acquire);
+        assert!(state.still_closed(at_hide));
+        state.opened.fetch_add(1, Ordering::AcqRel);
+        assert!(!state.still_closed(at_hide));
     }
     #[test]
     fn visible_and_auto_hidden_taskbars_reserve_the_same_space() {

@@ -19,7 +19,9 @@ of the tour carries the same control ([onboarding.md](onboarding.md)).
 The change is immediate everywhere, with no reload: the sidebar, the open
 thread, the settings page under the control, the tray popup. `<html lang>` is
 stamped at the same time, so the browser hyphenates and reads the page in the
-right language.
+right language. The tray icon's menu is native: the UI sends its two labels
+through `tray_labels` at start and on every change. App update errors come from
+the shell and stay in English.
 
 Dates and numbers follow, and keep the machine's region when it speaks the
 language the app is set to: a French machine on French reads `jeu. 21:48` and

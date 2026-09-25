@@ -107,7 +107,7 @@ export class SessionStore {
   }
 
   pairingUrl(grant: string): string {
-    return `${this.core.settings.get().publicUrl ?? this.core.baseUrl()}/?${GRANT_QUERY_PARAM}=${grant}`;
+    return `${this.core.settings.get().publicUrl ?? this.core.reachableUrl()}/?${GRANT_QUERY_PARAM}=${grant}`;
   }
 
   /**

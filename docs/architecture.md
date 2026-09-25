@@ -11,6 +11,14 @@ Local cores are resident by default: shell exit leaves them running, and an
 owner can stop them explicitly through `core.shutdown`. Tests can set
 `BOITE_CORE_RESIDENT=0`; on Windows that mode retains the shell's
 `KILL_ON_JOB_CLOSE` Job Object. Adopted and remote cores remain independent.
+The shell passes the data directory to the core with `--data-dir` and adopts a
+core only when its pid is alive and `/health` reports the shell's own version;
+a core of another version is stopped through `POST /shutdown` and replaced. A
+core that exits while starting is reported at once with the last lines it
+printed. A resident core still starting after 60 seconds is kept, and the next
+request for the endpoint picks it up. When the local core stops answering, the
+UI asks the shell again after four seconds, and the shell starts a new core if
+the old one died.
 [Persistent agents](agents.md) describes the background queue and recovery.
 The shell also carries a channel, read once from its own
 bundle identifier: `Boite` and `Boite Dev` are two installs on one machine, and

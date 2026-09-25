@@ -1,12 +1,16 @@
-import { existsSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { PROTOCOL_VERSION, RPC_PATH, RpcCloseCode, RpcErrorCode } from '@boite/contracts';
 import { connect } from '../src/client.ts';
 import type { RpcFailure } from '../src/errors.ts';
-import { pair } from '../src/main.ts';
-import { isAllowedOrigin, PLACEHOLDER_HTML, preauthPeer, preauthRefusal, ServerConnection, UI_DIST } from '../src/server.ts';
-import { startTestCore } from './harness.ts';
+import { Core } from '../src/core.ts';
+import { newToken } from '../src/ids.ts';
+import { pair, readPreviousRun } from '../src/main.ts';
+import { isAllowedOrigin, PLACEHOLDER_HTML, preauthPeer, preauthRefusal, ServerConnection, startServer, startServerOnStickyPort, UI_DIST } from '../src/server.ts';
+import { lanAddress } from '../src/server/lan.ts';
+import { removeDir, startTestCore } from './harness.ts';
 import type { TestCore } from './harness.ts';
 
 const HELLO_TIMEOUT_MS = 200;
@@ -177,6 +181,83 @@ describe('server', () => {
     expect(body.ok).toBe(true);
     expect(body.version).toBe(harness.core.version);
     expect(body.pid).toBe(process.pid);
+  });
+
+  test('shutdown takes a POST with the core token, and an embedded core says it cannot stop', async () => {
+    const at = `${harness.url}/shutdown`;
+    expect((await fetch(at)).status).toBe(405);
+    expect((await fetch(at, { method: 'POST' })).status).toBe(401);
+    expect((await fetch(at, { method: 'POST', headers: { authorization: 'Bearer nope' } })).status).toBe(401);
+    // A proxy on this machine forwards a public name: the route is not for it.
+    const proxied = await fetch(at, { method: 'POST', headers: { authorization: `Bearer ${harness.token}`, host: 'boite.example' } });
+    expect(proxied.status).toBe(403);
+    // The harness core has no process of its own to stop.
+    expect((await fetch(at, { method: 'POST', headers: { authorization: `Bearer ${harness.token}` } })).status).toBe(501);
+  });
+
+  test('shutdown with the core token stops a core that owns its process', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'boite-shutdown-'));
+    let stopped = 0;
+    const token = newToken();
+    const core = new Core({ dataDir, token, onShutdown: () => { stopped += 1; } });
+    const server = startServer({ core, host: '127.0.0.1', port: 0 });
+    try {
+      const ask = () => fetch(`${server.url}/shutdown`, { method: 'POST', headers: { authorization: `Bearer ${token}` } });
+      const first = await ask();
+      expect(first.status).toBe(202);
+      expect(((await first.json()) as { pid: number }).pid).toBe(process.pid);
+      // A second request while the first is draining is not a second stop.
+      expect((await ask()).status).toBe(202);
+      await Bun.sleep(60);
+      expect(stopped).toBe(1);
+    } finally {
+      await server.stop();
+      await core.close();
+      await removeDir(dataDir);
+    }
+  });
+
+  test('a restarted core listens on the port of its previous run, and on another when that one is taken', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'boite-sticky-'));
+    const core = new Core({ dataDir, token: newToken() });
+    const warnings: string[] = [];
+    const log = core.log.bind(core);
+    core.log = (level, message) => { if (level === 'warn') warnings.push(message); log(level, message); };
+    const first = startServerOnStickyPort({ core, host: '127.0.0.1', port: 0, explicitPort: false, previousPort: null });
+    const port = first.port;
+    await first.stop();
+    const coreFile = join(dataDir, 'core.json');
+    writeFileSync(coreFile, JSON.stringify({ port, host: '127.0.0.1', token: 'kept', pid: 1 }));
+    expect(readPreviousRun(coreFile)).toEqual({ token: 'kept', port });
+    const again = startServerOnStickyPort({ core, host: '127.0.0.1', port: 0, explicitPort: false, previousPort: readPreviousRun(coreFile).port });
+    const squatter = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => new Response('mine') });
+    try {
+      expect(again.port).toBe(port);
+      await again.stop();
+      // Another program took the port meanwhile: a new one, said in the log.
+      const moved = startServerOnStickyPort({ core, host: '127.0.0.1', port: 0, explicitPort: false, previousPort: squatter.port! });
+      expect(moved.port).not.toBe(squatter.port!);
+      expect(warnings.some((line) => line.includes(`port ${squatter.port}`))).toBe(true);
+      await moved.stop();
+      // A port the operator named is never swapped for another.
+      expect(() => startServerOnStickyPort({ core, host: '127.0.0.1', port: squatter.port!, explicitPort: true, previousPort: port })).toThrow();
+    } finally {
+      void squatter.stop(true);
+      await core.close();
+      await removeDir(dataDir);
+    }
+  });
+
+  test('a pairing link names the LAN address of a core listening on every interface', () => {
+    const iface = (address: string, internal = false) => ({ address, family: 'IPv4', internal, netmask: '', mac: '', cidr: null }) as never;
+    expect(lanAddress({ lo: [iface('127.0.0.1', true)], vpn: [iface('100.64.0.2')], eth: [iface('192.168.1.20')] })).toBe('192.168.1.20');
+    expect(lanAddress({ eth: [iface('169.254.3.4')], wan: [iface('100.64.0.2')] })).toBe('100.64.0.2');
+    expect(lanAddress({ lo: [iface('127.0.0.1', true)] })).toBeNull();
+    const url = new URL(harness.core.sessions.pairingUrl('grant'));
+    expect(url.hostname).toBe('127.0.0.1');
+    harness.core.setEndpoint('0.0.0.0', 4321);
+    const lan = lanAddress();
+    expect(new URL(harness.core.sessions.pairingUrl('grant')).host).toBe(`${lan ?? '127.0.0.1'}:4321`);
   });
 
   test('the root serves the UI build, or the placeholder when there is none', async () => {

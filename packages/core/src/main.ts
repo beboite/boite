@@ -16,7 +16,7 @@ import { CORE_VERSION, Core } from './core.ts';
 import { messageOf } from './errors.ts';
 import { newToken } from './ids.ts';
 import { resolveDataDir } from './paths.ts';
-import { startServer } from './server.ts';
+import { startServerOnStickyPort } from './server.ts';
 
 const CHANNELS: readonly Channel[] = ['stable', 'dev'];
 
@@ -35,6 +35,8 @@ interface CoreFile {
 export interface Flags {
   publicUrl?: string;
   port: number;
+  /** True once `--port` named one: then no other port is tried. */
+  portExplicit: boolean;
   host: string;
   /** True once `--host` or `--lan` named an address, so the setting no longer decides. */
   hostExplicit: boolean;
@@ -46,6 +48,7 @@ export interface Flags {
 export function parseFlags(argv: string[]): Flags {
   const flags: Flags = {
     port: 0,
+    portExplicit: false,
     host: '127.0.0.1',
     hostExplicit: false,
     dataDir: undefined,
@@ -66,6 +69,7 @@ export function parseFlags(argv: string[]): Flags {
           throw new Error(`--port expects an integer between 0 and 65535, got ${value ?? '(nothing)'}`);
         }
         flags.port = port;
+        flags.portExplicit = true;
         index += 1;
         break;
       }
@@ -100,13 +104,20 @@ export function parseFlags(argv: string[]): Flags {
   return flags;
 }
 
-function readToken(file: string): string | null {
-  if (!existsSync(file)) return null;
+/**
+ * What the previous run of this data directory left in `core.json`: the owner
+ * token, kept so `boite-core pair` and the CLI survive a restart, and the port,
+ * kept so a paired phone does.
+ */
+export function readPreviousRun(file: string): { token: string | null; port: number | null } {
+  if (!existsSync(file)) return { token: null, port: null };
   try {
     const parsed = JSON.parse(readFileSync(file, 'utf8')) as Partial<CoreFile>;
-    return typeof parsed.token === 'string' && parsed.token.length > 0 ? parsed.token : null;
+    const token = typeof parsed.token === 'string' && parsed.token.length > 0 ? parsed.token : null;
+    const port = Number.isInteger(parsed.port) && parsed.port! > 0 && parsed.port! <= 65535 ? parsed.port! : null;
+    return { token, port };
   } catch {
-    return null;
+    return { token: null, port: null };
   }
 }
 
@@ -259,13 +270,15 @@ export function main(argv: string[]): void {
   // Before the journal is opened, because opening it is already a write.
   const unlock = lockDataDir(dataDir);
   const coreFile = join(dataDir, 'core.json');
-  const token = readToken(coreFile) ?? newToken();
+  const previous = readPreviousRun(coreFile);
+  const token = previous.token ?? newToken();
   let core: Core;
   try {
     core = new Core({ dataDir, token, channel: flags.channel, onShutdown: () => shutdown() });
   } catch (error) {
     // A journal from a newer release, among others: say why and leave the data as it is.
-    process.stderr.write(`boite-core: ${messageOf(error)}\n`);
+    process.stderr.write(`boite-core: ${messageOf(error)}
+`);
     unlock();
     process.exit(1);
   }
@@ -273,7 +286,7 @@ export function main(argv: string[]): void {
   if (publicUrl !== undefined) core.settings.set({ publicUrl });
   const settings = core.settings.get();
   const host = resolveHost(flags, settings);
-  const server = startServer({ core, host, port: flags.port });
+  const server = startServerOnStickyPort({ core, host, port: flags.port, explicitPort: flags.portExplicit, previousPort: previous.port });
   core.updates.start();
   if (core.cliDir === null) {
     console.warn('the boite CLI shim is not beside the core: agents started here cannot run `boite`. Copy `boite` next to the executable, or name its directory in BOITE_CLI_DIR');

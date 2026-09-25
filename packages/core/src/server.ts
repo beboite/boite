@@ -1,5 +1,6 @@
 import type { RpcEvents, ThreadId } from '@boite/contracts';
 import { FILE_ROUTE, RPC_MAX_FRAME_BYTES, RPC_PATH, RpcCloseCode } from '@boite/contracts';
+import { timingSafeEqual } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { hostname, networkInterfaces } from 'node:os';
 import { basename, dirname, join, normalize, resolve, sep } from 'node:path';
@@ -267,6 +268,55 @@ function ticketedFile(core: Core, ticket: string, range: string | null): Respons
   });
 }
 
+/**
+ * `core.shutdown` for a caller with no WebSocket: the desktop shell before it
+ * hands its files to the installer, the installer itself, and a shell that
+ * found an older core than itself. Only the core token opens it, only through
+ * a loopback name, so a proxy on this machine forwarding a public name cannot
+ * reach it. The answer is 202: the process drains and exits after it.
+ */
+export const SHUTDOWN_PATH = '/shutdown';
+
+function sameToken(given: string, expected: string): boolean {
+  const a = Buffer.from(given);
+  const b = Buffer.from(expected);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
+export function shutdownResponse(core: Core, request: Request): Response {
+  if (request.method !== 'POST') return new Response('POST only', { status: 405, headers: { allow: 'POST' } });
+  if (!isLoopbackHost(request.headers.get('host'))) {
+    return new Response('shutdown is only served on a loopback name', { status: 403 });
+  }
+  const header = request.headers.get('authorization') ?? '';
+  const token = header.startsWith('Bearer ') ? header.slice('Bearer '.length) : '';
+  if (token === '' || !sameToken(token, core.token)) {
+    return new Response('shutdown needs "Authorization: Bearer <core token>" from core.json', { status: 401 });
+  }
+  if (!core.requestShutdown()) return new Response('this embedded core has no process to stop', { status: 501 });
+  return Response.json({ ok: true, pid: process.pid }, { status: 202 });
+}
+
+/**
+ * The server of a core started from `main.ts`. A `--port` the operator named is
+ * the only one tried, and a taken one is a loud error: a reverse proxy points
+ * at it. Otherwise the port the previous run of this data directory bound, so a
+ * paired phone and an installed PWA keep their origin across a restart; when
+ * another program took it meanwhile, a random one, said in the log.
+ */
+export function startServerOnStickyPort(
+  options: ServerOptions & { explicitPort: boolean; previousPort: number | null },
+): RunningServer {
+  const { explicitPort, previousPort, ...server } = options;
+  if (explicitPort || previousPort === null) return startServer(server);
+  try {
+    return startServer({ ...server, port: previousPort });
+  } catch (error) {
+    server.core.log('warn', `port ${previousPort} of the previous run is taken (${messageOf(error)}), listening on another`);
+    return startServer({ ...server, port: 0 });
+  }
+}
+
 export function startServer(options: ServerOptions): RunningServer {
   const core = options.core;
   const host = options.host ?? '127.0.0.1';
@@ -302,6 +352,8 @@ export function startServer(options: ServerOptions): RunningServer {
       if (url.pathname === '/health') {
         return Response.json({ ok: true, version: core.version, pid: process.pid });
       }
+
+      if (url.pathname === SHUTDOWN_PATH) return shutdownResponse(core, request);
 
       if (url.pathname.startsWith(`${FILE_ROUTE}/`)) {
         if (request.method !== 'GET') return new Response('method not allowed', { status: 405 });

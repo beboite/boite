@@ -37,6 +37,11 @@ then repeats every six hours. A manual check is available in the card. Checks
 and downloads run one at a time. A ready update is kept until installation or
 a channel change, without downloading the same version every six hours.
 
+No request has a total deadline, because an installer on a slow link may take
+minutes. Each one gets 15 seconds to connect and fails after 30 seconds without
+receiving a byte, so a link that stops sending gives the updater back instead of
+holding it until the app restarts. The release listing is requested gzipped.
+
 Downloads show bytes received and a percentage when a total is known. The shell
 checks the updater signature before offering installation, writes the verified
 payload to disk and releases the download buffer. Progress events are limited
@@ -45,10 +50,31 @@ before handing those bytes to Tauri's installer.
 
 Restarting always requires a click and an in-app confirmation. It interrupts
 agents owned by that desktop. Saved conversations remain; interrupted turns
-are not automatically retried. The Windows Job Object closes when the updater
-exits the shell, stopping its owned core and agents before replacement. A failed
-installer launch leaves that core running. A remote core or a separately started
-core is not terminated by the desktop updater.
+are not automatically retried. The local core is resident and outlives the
+shell, so before launching the installer the shell asks it to stop through its
+authenticated `POST /shutdown` and waits up to 12 seconds, then ends it. Until
+the installer takes over, the shell refuses to start a core again, so the
+window's reconnect cannot relaunch the old executable. If the core cannot be
+stopped, nothing is installed and the card shows why; if the installer cannot
+launch, the next reconnect starts the core again. A remote
+core is not touched by the desktop updater.
+
+The Windows installer stops the core of its own install too, for an update, a
+manual reinstall and an uninstall. Its hooks (`windows/hooks.nsh` and
+`windows/stop-core.ps1`) first close a running shell, with the installer's own
+"Boite is running" question: an open window would start the core again within
+seconds, from the file about to be replaced. They then find the
+`boite-core.exe` processes running that install's exact file, ask the one named
+in that channel's `core.json` (`boite2` or `boite2-dev`) to shut down, and end
+any still running after 15 seconds. Boite Dev's core runs another file and is
+left alone. No window opens. `scripts/ci/installer-hooks.test.ts` builds the
+hooks into the generated installer script and runs them over a shell that
+restarts its core; it needs a Windows `build:shell` first and is skipped
+without one.
+
+When the new shell starts, it reads the version the running core reports on
+`/health`. A core of another version, left by an install that could not stop
+it, is stopped and replaced by the core shipped with the shell.
 
 Offline checks, missing releases, signature failures and installation failures
 appear in the card with a retry action. They do not display a system dialog or

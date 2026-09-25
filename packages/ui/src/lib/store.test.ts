@@ -3,7 +3,8 @@ import { PROTOCOL_VERSION, RpcErrorCode, type ThreadStatus } from '@boite/contra
 import { RpcFailure } from './client';
 import { FakeClient } from './fake-client';
 import { setNotificationSender, type Toast } from './notify';
-import { resumeAnchor, Store } from './store.svelte';
+import * as endpoints from './endpoint';
+import { LOCAL_RECOVERY_MS, resumeAnchor, Store } from './store.svelte';
 import { strings } from './strings';
 import { confirm } from './confirm.svelte';
 import { readStoredEndpoint, storeEndpoint } from './endpoint';
@@ -1096,4 +1097,59 @@ test('a link in the address becomes the stored core only after a hello, and an u
     vi.unstubAllGlobals();
     vi.useRealTimers();
   }
+});
+
+describe('the shell core lost under a local store', () => {
+  async function localStore() {
+    const client = new FakeClient({ delayMs: 0 });
+    const store = new Store();
+    store.attach(client);
+    await store.connect();
+    store.localCore = true;
+    store.endpointUrl = 'http://127.0.0.1:41000';
+    window.__TAURI_INTERNALS__ = {} as typeof window.__TAURI_INTERNALS__;
+    return { store, client };
+  }
+
+  test('a core unreachable for a while is asked of the shell again, and the store follows it to its new address', async () => {
+    vi.useFakeTimers();
+    const { store, client } = await localStore();
+    const fromTauri = vi.spyOn(endpoints, 'fromTauri').mockResolvedValue({ url: 'http://127.0.0.1:42000', token: 'next', local: true });
+    const connect = vi.spyOn(store, 'connect').mockResolvedValue();
+    const open = vi.spyOn(store, 'openWhereLeft').mockResolvedValue();
+    try {
+      client.drop();
+      await vi.advanceTimersByTimeAsync(LOCAL_RECOVERY_MS - 100);
+      expect(fromTauri).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(200);
+      expect(fromTauri).toHaveBeenCalledOnce();
+      expect(store.endpointUrl).toBe('http://127.0.0.1:42000');
+      expect(store.localCore).toBe(true);
+    } finally {
+      vi.useRealTimers();
+      fromTauri.mockRestore(); connect.mockRestore(); open.mockRestore();
+      delete window.__TAURI_INTERNALS__;
+      store.client?.close(); store.detach(); client.close();
+    }
+  });
+
+  test('a core stopped on purpose stays stopped, and a refresh asks the shell for it again', async () => {
+    vi.useFakeTimers();
+    const { store, client } = await localStore();
+    const fromTauri = vi.spyOn(endpoints, 'fromTauri').mockResolvedValue(null);
+    const refused = vi.spyOn(endpoints, 'shellEndpointError').mockReturnValue('the core exited (exit code: 3) before it was ready');
+    try {
+      client.close();
+      await vi.advanceTimersByTimeAsync(LOCAL_RECOVERY_MS * 2);
+      expect(fromTauri).not.toHaveBeenCalled();
+      await store.connect();
+      expect(fromTauri).toHaveBeenCalledOnce();
+      expect(store.error).toContain('exit code: 3');
+    } finally {
+      vi.useRealTimers();
+      fromTauri.mockRestore(); refused.mockRestore();
+      delete window.__TAURI_INTERNALS__;
+      store.detach(); client.close();
+    }
+  });
 });
