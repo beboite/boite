@@ -9,6 +9,8 @@ const REMOTE_DELTA_WINDOW_MS = 80;
 
 export interface SocketData {
   connection: ServerConnection;
+  /** The address its hello wait is counted under; null for the owner's own machine. */
+  peer: string | null;
 }
 
 interface OutgoingResponse {

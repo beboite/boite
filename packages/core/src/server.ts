@@ -17,10 +17,14 @@ const DEFAULT_HELLO_TIMEOUT_MS = 5000;
 /** A hello is a few hundred bytes; nothing larger is parsed from a socket nobody has authenticated. */
 const PREAUTH_FRAME_MAX_BYTES = 64 * 1024;
 /**
- * Sockets waiting for their hello at once. A real client spends milliseconds
- * there, so this only bounds a LAN peer opening them by the thousand.
+ * Sockets from other machines waiting for their hello at once. A real client
+ * spends milliseconds there, so this only bounds a peer opening them by the
+ * thousand. The owner's own machine is never counted, so no peer can lock the
+ * shell or an agent out of the core by holding every place.
  */
 const PREAUTH_SOCKETS_MAX = 32;
+/** The same bound per LAN address, so one host cannot hold every place from the others. */
+const PREAUTH_SOCKETS_PER_ADDRESS = 8;
 /**
  * Seconds an HTTP connection may sit without a byte either way. No route here
  * holds a request open: the coordination POST answers at once, and a ticketed
@@ -99,6 +103,44 @@ export function isLoopbackHost(header: string | null): boolean {
   if (header === null) return false;
   const name = header.trim().toLowerCase().replace(/:\d+$/, '').replace(/^\[|\]$/g, '');
   return name === '127.0.0.1' || name === 'localhost' || name === '::1';
+}
+
+/** The peer address `Server.requestIP` gives, IPv4-mapped IPv6 included. */
+export function isLoopbackAddress(address: string | null): boolean {
+  if (address === null) return false;
+  const bare = address.toLowerCase().replace(/^::ffff:/, '');
+  return bare === '::1' || /^127\.\d+\.\d+\.\d+$/.test(bare);
+}
+
+/**
+ * What a socket waiting for hello is counted under: null for the owner's own
+ * machine, which is never counted, else the peer address. The address comes
+ * from the TCP connection and cannot be forged; a local tunnel or proxy
+ * connects from loopback too but forwards a public `Host`, so its peers are
+ * counted, all under the one loopback address.
+ */
+export function preauthPeer(address: string | null, host: string | null): string | null {
+  if (isLoopbackAddress(address) && isLoopbackHost(host)) return null;
+  return address ?? 'unknown';
+}
+
+/**
+ * Why a socket from `peer` may not wait for its hello beside the `waiting`
+ * ones, or null when it may. Peers behind a local tunnel share the loopback
+ * address, which says nothing about who they are, so only the total bounds them.
+ */
+export function preauthRefusal(waiting: Iterable<string>, peer: string): string | null {
+  let total = 0;
+  let same = 0;
+  for (const other of waiting) {
+    total += 1;
+    if (other === peer) same += 1;
+  }
+  if (total >= PREAUTH_SOCKETS_MAX) return `${total} sockets from other machines are already waiting for their hello`;
+  if (!isLoopbackAddress(peer) && same >= PREAUTH_SOCKETS_PER_ADDRESS) {
+    return `${same} sockets from ${peer} are already waiting for their hello`;
+  }
+  return null;
 }
 
 const IMMUTABLE_FOR_A_YEAR = 'public, max-age=31536000, immutable';
@@ -231,6 +273,11 @@ export function startServer(options: ServerOptions): RunningServer {
   const helloTimeoutMs = options.helloTimeoutMs ?? envTimeout() ?? DEFAULT_HELLO_TIMEOUT_MS;
   const connections = new Set<ServerConnection>();
   const helloTimers = new Map<ServerConnection, ReturnType<typeof setTimeout>>();
+  /** The counted peer of each open socket from another machine, until it closes. */
+  const peers = new Map<ServerConnection, string>();
+  function* waitingPeers(): Generator<string> {
+    for (const [connection, peer] of peers) if (!connection.authenticated) yield peer;
+  }
   const frames = new Set<Promise<void>>();
   const peerRequests = new Set<Promise<Response>>();
   let stopping = false;
@@ -267,14 +314,14 @@ export function startServer(options: ServerOptions): RunningServer {
           core.log('warn', `refused a websocket from origin ${origin ?? '(none)'}`);
           return new Response('forbidden origin', { status: 403 });
         }
-        let waiting = 0;
-        for (const open of connections) if (!open.authenticated) waiting += 1;
-        if (waiting >= PREAUTH_SOCKETS_MAX) {
-          core.log('warn', `refused a websocket: ${waiting} sockets are already waiting for their hello`);
+        const peer = preauthPeer(self.requestIP(request)?.address ?? null, request.headers.get('host'));
+        const refusal = peer === null ? null : preauthRefusal(waitingPeers(), peer);
+        if (refusal !== null) {
+          core.log('warn', `refused a websocket: ${refusal}`);
           return new Response('too many connections waiting for hello', { status: 503 });
         }
         const connection = new ServerConnection(core, !isLoopbackHost(request.headers.get('host')));
-        if (self.upgrade(request, { data: { connection } })) return undefined;
+        if (self.upgrade(request, { data: { connection, peer } })) return undefined;
         return new Response('expected a websocket upgrade', { status: 400 });
       }
 
@@ -304,6 +351,7 @@ export function startServer(options: ServerOptions): RunningServer {
         const connection = socket.data.connection;
         connection.attach(socket);
         connections.add(connection);
+        if (socket.data.peer !== null) peers.set(connection, socket.data.peer);
         helloTimers.set(connection, setTimeout(() => {
           helloTimers.delete(connection);
           if (connection.authenticated) return;
@@ -330,6 +378,7 @@ export function startServer(options: ServerOptions): RunningServer {
         clearTimeout(helloTimers.get(socket.data.connection));
         helloTimers.delete(socket.data.connection);
         connections.delete(socket.data.connection);
+        peers.delete(socket.data.connection);
       },
     },
   });
@@ -389,6 +438,7 @@ export function startServer(options: ServerOptions): RunningServer {
       helloTimers.clear();
       for (const connection of connections) connection.close(1001, 'core stopping');
       connections.clear();
+      peers.clear();
       // Bun 1.3.11 never resolves server.stop() once a socket has been upgraded,
       // so the listener is closed without waiting on that promise.
       void server.stop(true);

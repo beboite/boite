@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { PROTOCOL_VERSION, RPC_PATH, RpcCloseCode, RpcErrorCode } from '@boite/contracts';
 import { connect } from '../src/client.ts';
 import { pair } from '../src/main.ts';
-import { isAllowedOrigin, PLACEHOLDER_HTML, ServerConnection, UI_DIST } from '../src/server.ts';
+import { isAllowedOrigin, PLACEHOLDER_HTML, preauthPeer, preauthRefusal, ServerConnection, UI_DIST } from '../src/server.ts';
 import { startTestCore } from './harness.ts';
 import type { TestCore } from './harness.ts';
 
@@ -203,25 +203,59 @@ describe('server', () => {
     // A core that waits longer for hello than this file's 200 ms, so the sockets stay pending.
     const patient = await startTestCore({ helloTimeoutMs: 10_000 });
     const waiting: WebSocket[] = [];
+    const owner: WebSocket[] = [];
+    // Peers of a tunnel on this machine: loopback address, public Host. They
+    // are counted; the owner's shell, loopback both ways, never is.
+    const tunnelled = { headers: { host: 'phone.example' } };
+    const hello = (socket: WebSocket) => socket.send(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'hello', params: {
+      token: patient.token, protocolVersion: PROTOCOL_VERSION, client: { name: 'test', version: '0' },
+    } }));
     try {
       const url = patient.url.replace('http', 'ws') + RPC_PATH;
-      for (let at = 0; at < 32; at += 1) waiting.push(new WebSocket(url));
+      for (let at = 0; at < 32; at += 1) waiting.push(new WebSocket(url, tunnelled as never));
       await Promise.all(waiting.map(opened));
-      const refused = await fetch(`${patient.url}${RPC_PATH}`);
+      const refused = await fetch(`${patient.url}${RPC_PATH}`, tunnelled);
       expect(refused.status).toBe(503);
+
+      // The owner still connects, and more than once, while every place is held.
+      expect((await fetch(`${patient.url}${RPC_PATH}`)).status).toBe(400);
+      for (let at = 0; at < 3; at += 1) owner.push(new WebSocket(url));
+      await Promise.all(owner.map(opened));
+      const shell = owner[0] as WebSocket;
+      const answer = firstFrame(shell);
+      hello(shell);
+      expect((await answer).result).toBeDefined();
+
       // An authenticated client is not waiting: one hello frees a place.
       const first = waiting[0] as WebSocket;
-      const hello = firstFrame(first);
-      first.send(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'hello', params: {
-        token: patient.token, protocolVersion: PROTOCOL_VERSION, client: { name: 'test', version: '0' },
-      } }));
-      expect((await hello).result).toBeDefined();
-      const next = await fetch(`${patient.url}${RPC_PATH}`);
+      const freed = firstFrame(first);
+      hello(first);
+      expect((await freed).result).toBeDefined();
+      const next = await fetch(`${patient.url}${RPC_PATH}`, tunnelled);
       expect(next.status).toBe(400);
     } finally {
-      for (const socket of waiting) socket.close();
+      for (const socket of [...waiting, ...owner]) socket.close();
       await patient.stop();
     }
+  });
+
+  test('one LAN address may hold only 8 of the places waiting for hello, and loopback peers only the total', () => {
+    expect(preauthPeer('127.0.0.1', '127.0.0.1:8777')).toBeNull();
+    expect(preauthPeer('::ffff:127.0.0.1', 'localhost')).toBeNull();
+    expect(preauthPeer('::1', '[::1]:8777')).toBeNull();
+    // A loopback name forged by a LAN peer does not exempt it, nor a tunnel's public name its peers.
+    expect(preauthPeer('192.168.1.20', '127.0.0.1:8777')).toBe('192.168.1.20');
+    expect(preauthPeer('127.0.0.1', 'boite.example')).toBe('127.0.0.1');
+    expect(preauthPeer(null, '127.0.0.1')).toBe('unknown');
+
+    const phone = '192.168.1.20';
+    expect(preauthRefusal(Array(7).fill(phone), phone)).toBeNull();
+    expect(preauthRefusal(Array(8).fill(phone), phone)).toContain(`8 sockets from ${phone}`);
+    // Another host keeps its own places.
+    expect(preauthRefusal(Array(8).fill(phone), '192.168.1.21')).toBeNull();
+    // Tunnelled peers share one address that names nobody: only the total bounds them.
+    expect(preauthRefusal(Array(31).fill('127.0.0.1'), '127.0.0.1')).toBeNull();
+    expect(preauthRefusal(Array(32).fill('127.0.0.1'), '192.168.1.21')).toContain('32 sockets from other machines');
   });
 
   // Without `bun run build:ui` there is nothing to serve and nothing to assert;
