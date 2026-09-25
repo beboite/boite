@@ -19,10 +19,10 @@ pub(crate) mod process;
 #[cfg(windows)]
 pub(crate) mod windows;
 #[cfg(windows)]
-pub(crate) use windows::{notify, prepare_command};
+pub(crate) use windows::{alert, notify, prepare_command};
 #[cfg(not(windows))]
 mod posix;
 #[cfg(not(windows))]
-pub(crate) use posix::{notify, prepare_command};
+pub(crate) use posix::{alert, notify, prepare_command};
 
 pub(crate) mod appbars;

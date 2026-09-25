@@ -235,6 +235,13 @@ runs shows the running window, from the tray or behind other windows, through a
 loopback port and token the owner writes to `<dataDir>/shell-wake`. A shell
 started with `BOITE_SHELL_HIDDEN=1` never asks.
 
+A release shell has no console, so a shell that fails writes why to
+`<dataDir>/shell-error.log`: a setup error, such as a broken WebView2 install or
+a profile directory it cannot write, and any panic. A setup error also shows a
+message box naming the error and that file, except in a hidden test shell. A
+missing WebView2 runtime is Tauri's own message box. When the tray icon cannot
+be created, the shell runs without it and closing the window quits.
+
 The installed shell starts a core of its own or adopts one of its own version
 that already answers. That core is resident: it outlives the shell. Since a
 running core keeps `boite-core.exe` open, which once made an install fail on

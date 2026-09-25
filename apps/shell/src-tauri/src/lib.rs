@@ -1295,6 +1295,32 @@ fn hide_main<R: Runtime>(app: &AppHandle<R>) {
     }
 }
 
+/// Where a shell that failed writes why. A release build has no console
+/// (`windows_subsystem = "windows"`), so without this file a setup error or a
+/// panic was the app starting and vanishing without a word.
+const FAILURE_LOG: &str = "shell-error.log";
+
+/// Appends one line to `<dataDir>/shell-error.log` and stderr. It never fails:
+/// it runs while the shell is already failing.
+fn record_failure(directory: &Path, text: &str) {
+    eprintln!("[shell] {text}");
+    let seconds = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_secs())
+        .unwrap_or(0);
+    let _ = std::fs::create_dir_all(directory);
+    if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(directory.join(FAILURE_LOG)) {
+        let _ = writeln!(file, "[unix {seconds}] {text}");
+    }
+}
+
+/// Closing the window hides it only where something can bring it back: the
+/// tray icon. Without one, a hidden window is a running app nobody can reach.
+/// A test shell has no tray and hides anyway, since nobody sees it either way.
+fn hides_on_close(close_to_tray: bool, has_tray: bool, test_shell: bool) -> bool {
+    close_to_tray && (has_tray || test_shell)
+}
+
 fn quit<R: Runtime>(app: &AppHandle<R>) {
     if let Some(state) = app.try_state::<CoreState>() {
         state.kill_child();
@@ -1364,13 +1390,21 @@ pub fn run() {
     // Only the owner of the lock may answer a second launch: without the lock
     // two shells would share one wake file.
     let owns_directory = _instance.is_some();
+    // Every later panic leaves a line where the user can find it.
+    let failures = directory.clone();
+    let previous_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        record_failure(&failures, &format!("the shell panicked: {info}"));
+        previous_hook(info);
+    }));
+    let failures = directory.clone();
     let preferences_path = directory.join("shell-settings.json");
     let close_to_tray = close_to_tray_or_default(&preferences_path);
     let app_updater = updater::AppUpdater::new(context.package_info().version.to_string(), directory.clone(),
         cfg!(all(windows, target_arch = "x86_64")) && !cfg!(debug_assertions)
             && channel == Channel::Stable && !hidden());
 
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -1419,7 +1453,10 @@ pub fn run() {
             start_core(&handle);
             let window = build_main_window(&handle, channel)?;
             if !hidden() {
-                build_tray(&handle, channel)?;
+                // The window works without a tray: closing it then quits.
+                if let Err(error) = build_tray(&handle, channel) {
+                    record_failure(&directory, &format!("the tray icon could not be created, so closing the window quits Boite: {error}"));
+                }
             }
 
             let closing = handle.clone();
@@ -1427,7 +1464,8 @@ pub fn run() {
             window.on_window_event(move |event| match event {
                 WindowEvent::CloseRequested { api, .. } => {
                     api.prevent_close();
-                    if closing.state::<CloseBehavior>().enabled.load(Ordering::Acquire) { hide_main(&closing); }
+                    let enabled = closing.state::<CloseBehavior>().enabled.load(Ordering::Acquire);
+                    if hides_on_close(enabled, closing.tray_by_id("boite").is_some(), hidden()) { hide_main(&closing); }
                     else { quit(&closing); }
                 }
                 // Minimizing hides nothing from WebView2: the page is parked
@@ -1440,9 +1478,24 @@ pub fn run() {
             });
             Ok(())
         })
-        .build(context)
-        .expect("the Boite shell could not be built")
-        .run(|app, event| match event {
+        .build(context);
+    // A broken WebView2 install, a profile directory that cannot be written:
+    // setup fails with the window never built. Say so where the user looks.
+    let app = match app {
+        Ok(app) => app,
+        Err(error) => {
+            let text = format!("Boite could not start: {error}");
+            record_failure(&failures, &text);
+            if !hidden() {
+                platform::alert("Boite", &format!(
+                    "{text}\n\nThis is written in {}.\n\nRepairing or reinstalling the Microsoft Edge WebView2 Runtime often fixes it: https://developer.microsoft.com/microsoft-edge/webview2/",
+                    failures.join(FAILURE_LOG).display()
+                ));
+            }
+            std::process::exit(1);
+        }
+    };
+    app.run(|app, event| match event {
             tauri::RunEvent::Exit => {
                 if let Some(state) = app.try_state::<CoreState>() {
                     state.kill_child();
@@ -1457,7 +1510,29 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::{effects_for, label_for, supported_materials, Channel};
+    use super::{effects_for, hides_on_close, label_for, record_failure, supported_materials, Channel, FAILURE_LOG};
+
+    #[test]
+    fn closing_hides_only_where_a_tray_can_bring_the_window_back() {
+        assert!(hides_on_close(true, true, false));
+        assert!(!hides_on_close(true, false, false), "no tray: a hidden window could never come back");
+        assert!(hides_on_close(true, false, true));
+        assert!(!hides_on_close(false, true, false));
+    }
+
+    #[test]
+    fn a_failure_is_appended_to_the_log_in_the_data_directory() {
+        let directory = std::env::temp_dir().join(format!("boite-failure-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&directory);
+        record_failure(&directory, "first");
+        record_failure(&directory, "second");
+        let text = std::fs::read_to_string(directory.join(FAILURE_LOG)).unwrap();
+        let lines: Vec<_> = text.lines().collect();
+        assert_eq!(lines.len(), 2, "{text}");
+        assert!(lines[0].starts_with("[unix ") && lines[0].ends_with("] first"), "{text}");
+        assert!(lines[1].ends_with("] second"), "{text}");
+        std::fs::remove_dir_all(directory).unwrap();
+    }
     use tauri::window::Effect;
 
     #[test]
