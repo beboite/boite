@@ -47,6 +47,11 @@ test('an agent update is a pinned notice with Update and Skip, on a desktop and 
   // One card at a time on a phone, under the header.
   expect(await page.evaluate(`[...document.querySelectorAll('${id('harness-update-notice')}')].filter(card => card.offsetParent !== null).length`)).toBe(1);
   expect(await page.evaluate(`document.documentElement.scrollWidth <= 390`)).toBe(true);
+  // Below the conversation's own header row: its title and toggles stay in reach.
+  expect(await page.evaluate(`(() => {
+    const card = [...document.querySelectorAll('${id('harness-update-notice')}')].find(card => card.offsetParent !== null).getBoundingClientRect();
+    return card.top >= document.querySelector('${id('thread-header')}').getBoundingClientRect().bottom;
+  })()`)).toBe(true);
   await capture('harness-updates-phone.png');
   await desktop();
 

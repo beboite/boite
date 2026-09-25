@@ -148,6 +148,8 @@
       right: 16px;
       width: auto;
     }
+    /* A conversation adds its header row under the phone's own: the card sits below both. */
+    :global(.app.phone-chat) .update-notices { top: calc(56px + var(--titlebar, 44px) + 8px + env(safe-area-inset-top, 0px)); }
     .notice:nth-child(n + 2) { display: none; }
     .update-notices.off-chat { display: none; }
   }
