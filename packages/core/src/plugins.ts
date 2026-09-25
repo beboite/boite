@@ -609,7 +609,9 @@ export class PluginStore {
       if (this.closing) throw refused('Boite is shutting down.');
       this.cache.delete(id);
       this.core.quotas.invalidate();
-      for (const account of this.core.accounts.list()) if (this.blocksAccount(account.id)) this.core.accounts.check(account.id);
+      // Announced whatever the status reads: a switch between two signed-in
+      // logins leaves it at 'ok', yet the model lists belong to the old login.
+      for (const account of this.core.accounts.list()) if (this.blocksAccount(account.id)) this.core.accounts.check(account.id, true);
       return await this.accounts(id);
     } finally {
       this.action = null;
