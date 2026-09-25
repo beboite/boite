@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { echoThread, startTestCore, type TestCore } from './harness.ts';
-import { hasGitHubRemote, parsePullRequests, PullRequests } from '../src/pull-requests.ts';
+import { hasGitHubRemote, LIST_LIMIT, parsePullRequestList, parsePullRequests, PullRequests, repositoryOf } from '../src/pull-requests.ts';
 let harness: TestCore;
 beforeEach(async () => {
   harness = await startTestCore();
@@ -159,9 +159,100 @@ test('threads of one repository share one git remote and one gh call, and a miss
     expect(await missing.read(ids[0]!)).toBeNull();
     expect(await missing.read(ids[1]!, false)).toBeNull();
     expect(commands).toEqual(['git', 'gh']);
-    // A user's refresh tries gh again.
-    expect(await missing.read(ids[1]!, true)).toBeNull();
+    // A user's refresh tries gh again and says why it cannot answer.
+    await expect(missing.read(ids[1]!, true)).rejects.toThrow('Executable not found in $PATH: "gh"');
     expect(commands).toEqual(['git', 'gh', 'git', 'gh']);
+    // Automatic lookups stay quiet after that refusal.
+    expect(await missing.read(ids[2]!)).toBeNull();
+    expect(commands).toEqual(['git', 'gh', 'git', 'gh']);
+  } finally {
+    replacement.mockRestore();
+  }
+});
+
+/** The fixture repository's own identity: a commit needs one, and the machine's config is not the test's business. */
+const FIXTURE_GIT_ENV = {
+  ...process.env,
+  GIT_AUTHOR_NAME: 'boite test',
+  GIT_AUTHOR_EMAIL: 'test@boite.invalid',
+  GIT_COMMITTER_NAME: 'boite test',
+  GIT_COMMITTER_EMAIL: 'test@boite.invalid',
+};
+
+function git(cwd: string, ...args: string[]): void {
+  const run = Bun.spawnSync({ cmd: ['git', ...args], cwd, env: FIXTURE_GIT_ENV, stdout: 'pipe', stderr: 'pipe', windowsHide: true });
+  if (!run.success) throw new Error(`git ${args.join(' ')} failed: ${run.stderr.toString()}`);
+}
+
+test('threads in two worktrees of one repository share one git remote and one gh call', async () => {
+  const client = await harness.connect();
+  const repo = join(harness.dataDir, 'main-checkout');
+  mkdirSync(repo, { recursive: true });
+  git(repo, 'init', '-q');
+  git(repo, 'commit', '-q', '--allow-empty', '-m', 'init');
+  const ids: string[] = [];
+  for (let index = 0; index < 2; index++) {
+    const checkout = join(harness.dataDir, '.boite-worktrees', 'repo', `wt-${index}`);
+    git(repo, 'worktree', 'add', '-q', '-b', `topic-${index}`, checkout);
+    expect(statSync(join(checkout, '.git')).isFile()).toBe(true);
+    expect(repositoryOf(checkout)).toBe(repositoryOf(repo));
+    const { threadId } = await echoThread(harness, client);
+    harness.core.journal.putThread({ ...harness.core.threads.require(threadId), cwd: checkout, branch: `topic-${index}` });
+    ids.push(threadId);
+  }
+  expect(repositoryOf(join(harness.dataDir, 'repo-other'))).not.toBe(repositoryOf(repo));
+  const spawn = harness.core.procs.spawn.bind(harness.core.procs);
+  const commands: string[] = [];
+  const replacement = spyOn(harness.core.procs, 'spawn').mockImplementation((scope, command, args, options) => {
+    commands.push(command);
+    if (command === 'git') return spawn(scope, process.execPath, ['-e', 'console.log("origin\\thttps://github.com/example/repo.git (fetch)")'], options);
+    return spawn(scope, process.execPath, fakeGh([{ headRefName: 'topic-0', number: 7 }, { headRefName: 'topic-1', number: 8 }]), options);
+  });
+  try {
+    const reader = new PullRequests(harness.core);
+    const results = await Promise.all(ids.map((id) => reader.read(id)));
+    expect(results.map((pr) => pr?.number ?? null)).toEqual([7, 8]);
+    expect(commands).toEqual(['git', 'gh']);
+  } finally {
+    replacement.mockRestore();
+  }
+});
+
+test('a full page asks for a missing branch alone, even when two of its pull requests share a branch', async () => {
+  // 200 pull requests, two of them from one reused branch: 199 branches, a full page all the same.
+  const page = Array.from({ length: LIST_LIMIT }, (_, index) => ({
+    headRefName: index < 2 ? 'patch-1' : `branch-${index}`,
+    number: 1000 - index,
+    url: `https://github.com/example/repo/pull/${1000 - index}`,
+    state: 'OPEN',
+  }));
+  const parsed = parsePullRequestList(JSON.stringify(page));
+  expect(parsed.byHead.size).toBe(LIST_LIMIT - 1);
+  expect(parsed.count).toBe(LIST_LIMIT);
+  expect(parsed.byHead.get('patch-1')?.number).toBe(1000);
+
+  const client = await harness.connect();
+  const repo = join(harness.dataDir, 'busy-repo');
+  mkdirSync(join(repo, '.git'), { recursive: true });
+  const { threadId } = await echoThread(harness, client);
+  harness.core.journal.putThread({ ...harness.core.threads.require(threadId), cwd: repo, branch: 'old-topic' });
+  // The page goes through a file: 200 pull requests inline would crowd Windows' command line limit.
+  const pageFile = join(harness.dataDir, 'gh-page.json');
+  writeFileSync(pageFile, JSON.stringify(page));
+  const spawn = harness.core.procs.spawn.bind(harness.core.procs);
+  const calls: string[][] = [];
+  const replacement = spyOn(harness.core.procs, 'spawn').mockImplementation((scope, command, args, options) => {
+    if (command === 'git') return spawn(scope, process.execPath, ['-e', 'console.log("origin\\thttps://github.com/example/repo.git (fetch)")'], options);
+    calls.push(args);
+    const script = args.includes('--head')
+      ? `console.log(${JSON.stringify(JSON.stringify([{ number: 3, url: 'https://github.com/example/repo/pull/3', state: 'MERGED' }]))})`
+      : `console.log(await Bun.file(${JSON.stringify(pageFile)}).text())`;
+    return spawn(scope, process.execPath, ['-e', script], options);
+  });
+  try {
+    expect(await new PullRequests(harness.core).read(threadId)).toEqual({ number: 3, url: 'https://github.com/example/repo/pull/3', state: 'MERGED' });
+    expect(calls).toHaveLength(2);
+    expect(calls[1]).toEqual(expect.arrayContaining(['--head', 'old-topic']));
   } finally {
     replacement.mockRestore();
   }

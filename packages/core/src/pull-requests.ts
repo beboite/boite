@@ -1,7 +1,7 @@
 import type { ThreadSummary } from '@boite/contracts';
 import type { Core } from './core.ts';
-import { existsSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { existsSync, readFileSync, statSync } from 'node:fs';
+import { dirname, join, normalize, resolve } from 'node:path';
 import { messageOf, refused } from './errors.ts';
 
 type PullRequest = ThreadSummary['pullRequest'];
@@ -45,15 +45,44 @@ export function parsePullRequests(text: string): PullRequest {
   return values.length === 0 ? null : toPullRequest(values[0]);
 }
 
-/** A repository's pull requests by head branch, the newest first when a branch has several, as gh lists them. */
-export function parsePullRequestList(text: string): Map<string, NonNullable<PullRequest>> {
-  const out = new Map<string, NonNullable<PullRequest>>();
-  for (const value of pullRequestArray(text)) {
+type PullRequestList = {
+  /** The newest pull request of each head branch, as gh lists them newest first. */
+  byHead: Map<string, NonNullable<PullRequest>>;
+  /** How many pull requests gh returned, before two of one branch collapse into one entry. */
+  count: number;
+};
+
+/** A repository's pull requests by head branch, and how many gh returned. */
+export function parsePullRequestList(text: string): PullRequestList {
+  const values = pullRequestArray(text);
+  const byHead = new Map<string, NonNullable<PullRequest>>();
+  for (const value of values) {
     const head = (value as { headRefName?: unknown } | null)?.headRefName;
     if (typeof head !== 'string' || head.length === 0) throw new Error('gh output must name each pull request\'s headRefName');
-    if (!out.has(head)) out.set(head, toPullRequest(value));
+    if (!byHead.has(head)) byHead.set(head, toPullRequest(value));
   }
-  return out;
+  return { byHead, count: values.length };
+}
+
+/**
+ * The repository a checkout belongs to: its common git directory. Every
+ * `git worktree add` checkout has a `.git` file of its own, and each of those
+ * files leads to the same common directory.
+ */
+export function repositoryOf(root: string): string {
+  let gitDir = join(root, '.git');
+  try {
+    if (statSync(gitDir).isFile()) {
+      const pointer = /^gitdir:\s*(.+?)\s*$/m.exec(readFileSync(gitDir, 'utf8'))?.[1];
+      if (pointer) {
+        gitDir = resolve(root, pointer);
+        const common = join(gitDir, 'commondir');
+        if (existsSync(common)) gitDir = resolve(gitDir, readFileSync(common, 'utf8').trim());
+      }
+    }
+  } catch { /* An unreadable pointer leaves the checkout standing for itself. */ }
+  const key = normalize(gitDir);
+  return process.platform === 'win32' ? key.toLowerCase() : key;
 }
 
 /** Pull requests one `gh pr list` call brings back for a repository. */
@@ -74,14 +103,15 @@ function unavailable(error: unknown): boolean {
 
 /**
  * The pull request of each thread's branch, answered from one `gh pr list` per
- * repository: forty threads of one checkout make one gh call, not forty.
- * Every process runs two at a time at most, and stops after ten seconds.
- * Results and failures are kept a minute; `refresh` drops what is kept for
- * that repository and tries a missing gh again.
+ * repository: forty threads in one checkout, or in forty worktrees of it,
+ * make one gh call, not forty. Every process runs two at a time at most, and
+ * stops after ten seconds. Results and failures are kept a minute; `refresh`
+ * drops what is kept for that repository, tries a missing gh again and
+ * reports why gh cannot answer.
  */
 export class PullRequests {
   #remotes = new Map<string, Cached<boolean>>();
-  #lists = new Map<string, Cached<Map<string, NonNullable<PullRequest>>>>();
+  #lists = new Map<string, Cached<PullRequestList>>();
   #heads = new Map<string, Cached<string>>();
   #branches = new Map<string, Cached<PullRequest>>();
   /** Why gh cannot answer, once it said so; automatic lookups then spawn nothing. */
@@ -104,38 +134,44 @@ export class PullRequests {
       if (parent === root) return null;
       root = parent;
     }
+    // Kept per repository: the worktrees of one repository share what is kept.
+    const repository = repositoryOf(root);
     if (refresh) {
       this.#ghUnavailable = null;
-      this.#remotes.delete(root);
-      this.#lists.delete(root);
+      this.#remotes.delete(repository);
+      this.#lists.delete(repository);
       this.#heads.delete(thread.cwd);
-      for (const key of this.#branches.keys()) if (key.startsWith(`${root}\n`)) this.#branches.delete(key);
+      for (const key of this.#branches.keys()) if (key.startsWith(`${repository}\n`)) this.#branches.delete(key);
     }
     // Forgejo, GitLab and local repositories have no GitHub PR to query.
-    const github = await this.#cached(this.#remotes, root, REMOTES_TTL_MS, async () => hasGitHubRemote(await this.#run(thread, root, 'git', ['remote', '-v'])));
+    const github = await this.#cached(this.#remotes, repository, REMOTES_TTL_MS, async () => hasGitHubRemote(await this.#run(thread, root, 'git', ['remote', '-v'])));
     if (!github) return null;
     const branch = thread.branch ?? (await this.#cached(this.#heads, thread.cwd, LIST_TTL_MS, async () => (await this.#run(thread, thread.cwd, 'git', ['rev-parse', '--abbrev-ref', 'HEAD'])).trim()));
     if (branch === 'HEAD') return null;
     if (this.#ghUnavailable !== null) return null;
-    const list = await this.#gh(() => this.#cached(this.#lists, root, LIST_TTL_MS, async () => parsePullRequestList(
+    const list = await this.#gh(refresh, () => this.#cached(this.#lists, repository, LIST_TTL_MS, async () => parsePullRequestList(
       await this.#run(thread, root, 'gh', ['pr', 'list', '--state', 'all', '--limit', String(LIST_LIMIT), '--json', 'headRefName,number,url,state']),
     )));
     if (list === null) return null;
-    const found = list.get(branch);
+    const found = list.byHead.get(branch);
     // A full page may have left an older pull request out: that branch alone is asked for.
-    if (found !== undefined || list.size < LIST_LIMIT) return found ?? null;
-    return this.#gh(() => this.#cached(this.#branches, `${root}\n${branch}`, LIST_TTL_MS, async () => parsePullRequests(
+    if (found !== undefined || list.count < LIST_LIMIT) return found ?? null;
+    return this.#gh(refresh, () => this.#cached(this.#branches, `${repository}\n${branch}`, LIST_TTL_MS, async () => parsePullRequests(
       await this.#run(thread, root, 'gh', ['pr', 'list', '--head', branch, '--state', 'all', '--limit', '1', '--json', 'number,url,state']),
     )));
   }
 
-  /** A gh call, or null once gh turned out missing or signed out. */
-  async #gh<T>(call: () => Promise<T>): Promise<T | null> {
+  /**
+   * A gh call, or null once gh turned out missing or signed out. A user's
+   * refresh gets the reason instead: it is the only place to learn it.
+   */
+  async #gh<T>(refresh: boolean, call: () => Promise<T>): Promise<T | null> {
     try {
       return await call();
     } catch (error) {
       if (!unavailable(error)) throw error;
       this.#ghUnavailable = messageOf(error);
+      if (refresh) throw error;
       return null;
     }
   }
