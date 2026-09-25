@@ -217,6 +217,12 @@ exit; it does not discover grandchildren or poll a process group. Bun supplies
 exit usage for its own subprocesses, while the Node spawn path has no exit
 usage off Windows. The reported `poll` mode denotes this limited fallback.
 
+On Linux the thread load is read from procfs every second: CPU time from each
+registered child's `/proc/<pid>/stat` (in the kernel's fixed 100 ticks a
+second) and resident memory from the `VmRSS` line of its `/proc/<pid>/status`.
+It counts the direct children only, not what they started. macOS has no
+procfs, so its gauge still reads 0% and 0 B while a process runs.
+
 Nothing hides that. `TraceCapability` carries the operating system, a `mode` of
 `events`, `poll` or `none`, and a note saying why, and every client reads it
 before promising anything. Windows with a working FFI surface reports `events`;
