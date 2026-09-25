@@ -172,6 +172,31 @@ test('reloading the current conversation keeps the selected agent transcript sub
   } finally { store.detach(); client.close(); }
 });
 
+test('a reconnect catches up the agent transcript and the team statuses the gap missed', async () => {
+  const client = new FakeClient({ delayMs: 0, delegationDemo: true });
+  const store = new Store();
+  store.attach(client);
+  try {
+    await store.connect();
+    await store.open('t-trace');
+    await store.loadDelegation('t-trace');
+    await store.selectDelegatedAgent('t-team-running');
+    const answer = store.delegationThread!.messages.at(-1)!;
+    const full = (answer.parts[0] as { text: string }).text;
+    // What the gap loses: the end of a streamed reply and a status change.
+    answer.parts = [{ type: 'text', text: 'I found the' }];
+    store.delegation!.agents.find((agent) => agent.thread.id === 't-team-running')!.thread.status = 'idle';
+    const called = vi.spyOn(client, 'call');
+    client.drop();
+    await client.restore();
+    await waitFor(() => (store.delegation?.agents.find((agent) => agent.thread.id === 't-team-running')?.thread.status === 'running' ? true : undefined));
+    await waitFor(() => ((store.delegationThread?.messages.at(-1)?.parts[0] as { text?: string } | undefined)?.text === full ? true : undefined));
+    expect(store.delegationSelectedAgentId).toBe('t-team-running');
+    expect(store.delegationThread?.messages.map((message) => message.id)).toEqual(['m-t-team-running-1', 'm-t-team-running-2']);
+    expect(called).toHaveBeenCalledWith('threads.get', { threadId: 't-team-running', after: 'm-t-team-running-1' });
+  } finally { store.detach(); client.close(); }
+});
+
 test('starting a draft cancels a pending child subscription even without an open subscription', async () => {
   const client = new FakeClient({ delayMs: 0, delegationDemo: true });
   const store = new Store();

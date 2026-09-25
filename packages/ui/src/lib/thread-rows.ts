@@ -1,4 +1,4 @@
-import type { ProjectId, ThreadSummary } from '@boite/contracts';
+import type { ProjectId, Thread, ThreadSummary } from '@boite/contracts';
 
 /** Same value: primitives by identity, the small objects of a summary (load, context, cache) by content. */
 function same(a: unknown, b: unknown): boolean {
@@ -29,4 +29,20 @@ export function threadsByProject(threads: readonly ThreadSummary[]): Map<Project
     else groups.set(thread.projectId, [thread]);
   }
   return groups;
+}
+
+/**
+ * A `threads.get` answer that starts at `messagesFrom`, laid over the window
+ * already held: what came before that message stays, the rest is the core's.
+ */
+export function mergeResumed(held: Thread, fetched: Thread): void {
+  if (fetched.messagesFrom === undefined) return;
+  const fresh = new Set(fetched.messages.map((message) => message.id));
+  const from = held.messages.findIndex((message) => message.id === fetched.messagesFrom);
+  const kept = held.messages.slice(0, from === -1 ? held.messages.length : from).filter((message) => !fresh.has(message.id));
+  fetched.messages = [...kept, ...fetched.messages];
+  const freshTurns = new Set(fetched.turns.map((turn) => turn.id));
+  fetched.turns = [...held.turns.filter((turn) => !freshTurns.has(turn.id)), ...fetched.turns];
+  fetched.messagesBefore = held.messagesBefore;
+  delete fetched.messagesFrom;
 }

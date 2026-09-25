@@ -92,7 +92,7 @@ import { work, type Profile } from './work-prefs.svelte';
 import { onboardingSeen } from './onboarding';
 import { rightPanel, type BoundPanel } from './right-panel.svelte';
 import { fill, strings } from './strings';
-import { patchRow, threadsByProject } from './thread-rows';
+import { mergeResumed, patchRow, threadsByProject } from './thread-rows';
 import { confirm } from './confirm.svelte';
 import { DEFAULT_MODEL_NAMES, INITIAL_MODEL_DEFAULTS, readModelDefaults, writeModelDefaults, resolveModelDefault, type ModelDefaults } from './model-defaults';
 import { FAVORITES_KEY, isNamedModel, readFavorites, type FavoriteModel } from './model-order';
@@ -1706,6 +1706,31 @@ export class Store {
       } catch (error) {
         this.#fail(error);
       }
+      // The socket resubscribed the agent and the team, but what they said
+      // during the gap reached nobody: fetch it, as open() did for the thread.
+      if (client === this.#client && this.openThread?.id === open.id) {
+        await this.#refreshDelegated(client);
+        void this.loadDelegation(open.id);
+        if (this.coordination?.self.threadId === open.id) void this.loadCoordination(open.id, this.coordinationDirectory !== null);
+      }
+    }
+  }
+
+  /** The agent transcript on screen caught up in place, not blanked and fetched whole as a new selection is. */
+  async #refreshDelegated(client: Client): Promise<void> {
+    const held = this.delegationThread;
+    const threadId = this.delegationSelectedAgentId;
+    if (!held || held.id !== threadId) return;
+    const epoch = this.#delegationSelectionEpoch;
+    const current = () => epoch === this.#delegationSelectionEpoch && client === this.#client && this.delegationThread === held;
+    const after = resumeAnchor(held);
+    try {
+      const thread = await client.call('threads.get', after === null ? { threadId } : { threadId, after });
+      if (!current()) return;
+      mergeResumed(held, thread);
+      this.delegationThread = thread;
+    } catch (error) {
+      if (current()) this.delegationError = this.#reason(error);
     }
   }
 
@@ -2086,14 +2111,8 @@ export class Store {
       this.rememberReadingThread();
       const cached = this.#readingThreads.get(threadId);
       const freshIds = new Set(thread.messages.map(m => m.id));
-      if (thread.messagesFrom !== undefined && held) {
-        const from = held.messages.findIndex((m) => m.id === thread.messagesFrom);
-        thread.messages = [...held.messages.slice(0, from === -1 ? held.messages.length : from).filter((m) => !freshIds.has(m.id)), ...thread.messages];
-        const freshTurns = new Set(thread.turns.map((turn) => turn.id));
-        thread.turns = [...held.turns.filter((turn) => !freshTurns.has(turn.id)), ...thread.turns];
-        thread.messagesBefore = held.messagesBefore;
-        delete thread.messagesFrom;
-      } else if (cached && cached.messages.some(m => freshIds.has(m.id))) {
+      if (thread.messagesFrom !== undefined && held) mergeResumed(held, thread);
+      else if (cached && cached.messages.some(m => freshIds.has(m.id))) {
         const merged = new Map(cached.messages.map(m => [m.id, m]));
         for (const message of thread.messages) merged.set(message.id, message);
         thread.messages = [...merged.values()].sort((a, b) => a.createdAt - b.createdAt);
