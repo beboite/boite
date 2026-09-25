@@ -44,6 +44,13 @@ replace the socket only if it stays silent for 4 seconds, so a tab switch no
 longer drops a healthy connection or reloads the lists. A hidden page is not
 checked.
 
+Retries wait 1, 2, 4, 8, then 10 seconds, each 20 % longer or shorter at random
+so the clients of a restarted core do not all return at once. An attempt gets
+10 seconds to open and say hello, the next one 20, then 30, so a slow, lossy
+link is not cut off every time. While the browser reports itself offline, a
+remote host is not retried at all: the `online` event starts the next attempt.
+A loopback core is retried regardless, since it is on the same machine.
+
 ## Browser and phone connections
 
 The desktop shell is an allowed origin on every core. A browser or phone has

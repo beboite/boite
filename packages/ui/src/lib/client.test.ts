@@ -1,6 +1,6 @@
 import { describe, expect, test, vi } from 'vitest';
 import { PROTOCOL_VERSION, RPC_MAX_FRAME_BYTES, RpcCloseCode, RpcErrorCode, type CoreInfo } from '@boite/contracts';
-import { RpcFailure, WsClient, rpcUrl, type SocketLike } from './client';
+import { RpcFailure, WsClient, defaultBackoff, openDeadline, rpcUrl, type SocketLike } from './client';
 
 const CORE: CoreInfo = {
   version: '2.0.0-beta.1',
@@ -75,6 +75,69 @@ function connected(): { client: WsClient; socket: FakeSocket; urls: string[] } {
   void client.connect().catch(() => undefined);
   return { client, socket: take(sockets, 0), urls };
 }
+
+describe('reconnect timing', () => {
+  test('the backoff doubles to 10 s with 20 % jitter either way', () => {
+    expect([0, 1, 2, 3, 4, 9].map((attempt) => defaultBackoff(attempt, () => 0.5))).toEqual([1000, 2000, 4000, 8000, 10_000, 10_000]);
+    expect(defaultBackoff(0, () => 0)).toBe(800);
+    expect(defaultBackoff(9, () => 1)).toBe(12_000);
+  });
+
+  test('an attempt gets 10 s, then 20 s, then 30 s to answer', async () => {
+    expect([0, 1, 2, 5].map(openDeadline)).toEqual([10_000, 20_000, 30_000, 30_000]);
+    vi.useFakeTimers();
+    const sockets: FakeSocket[] = [];
+    const client = new WsClient({ url: 'https://core.test', token: 'secret', backoff: () => 0, socketFactory: () => {
+      const socket = new FakeSocket(); sockets.push(socket); return socket;
+    } });
+    try {
+      const first = client.connect().catch((error: Error) => error.message);
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(await first).toBe('connection did not answer within 10 seconds');
+      await vi.advanceTimersByTimeAsync(1);
+      expect(sockets).toHaveLength(2);
+      await vi.advanceTimersByTimeAsync(19_000);
+      expect(take(sockets, 1).closed).toBe(false);
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(take(sockets, 1).closed).toBe(true);
+    } finally { client.close(); vi.useRealTimers(); }
+  });
+
+  test('offline, a remote client waits for the online event instead of retrying', async () => {
+    vi.useFakeTimers();
+    const online = vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false);
+    const sockets: FakeSocket[] = [];
+    const client = new WsClient({ url: 'https://core.test', token: 'secret', backoff: () => 1_000, socketFactory: () => {
+      const socket = new FakeSocket(); sockets.push(socket); return socket;
+    } });
+    try {
+      void client.connect().catch(() => undefined);
+      take(sockets, 0).close();
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(sockets).toHaveLength(1);
+      expect(client.state).toBe('connecting');
+
+      online.mockReturnValue(true);
+      void client.resume().catch(() => undefined);
+      expect(sockets).toHaveLength(2);
+    } finally { online.mockRestore(); client.close(); vi.useRealTimers(); }
+  });
+
+  test('offline, a loopback client keeps retrying: its core is on this machine', async () => {
+    vi.useFakeTimers();
+    const online = vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false);
+    const sockets: FakeSocket[] = [];
+    const client = new WsClient({ url: 'http://127.0.0.1:8777', token: 'secret', backoff: () => 1_000, socketFactory: () => {
+      const socket = new FakeSocket(); sockets.push(socket); return socket;
+    } });
+    try {
+      void client.connect().catch(() => undefined);
+      take(sockets, 0).close();
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(sockets).toHaveLength(2);
+    } finally { online.mockRestore(); client.close(); vi.useRealTimers(); }
+  });
+});
 
 describe('rpcUrl', () => {
   test('points at the RPC path over ws', () => {

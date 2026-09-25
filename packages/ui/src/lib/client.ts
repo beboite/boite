@@ -101,9 +101,21 @@ export interface WsClientOptions {
   backoff?: (attempt: number) => number;
 }
 
-/** 1 s, 2 s, 4 s, 8 s, then 10 s forever. */
-export function defaultBackoff(attempt: number): number {
-  return Math.min(1000 * 2 ** attempt, 10_000);
+/**
+ * 1 s, 2 s, 4 s, 8 s, then 10 s forever, each 20 % either way at random, so
+ * the phones of a core that restarts do not all knock at the same instant.
+ */
+export function defaultBackoff(attempt: number, random: () => number = Math.random): number {
+  return Math.round(Math.min(1000 * 2 ** attempt, 10_000) * (0.8 + random() * 0.4));
+}
+
+/**
+ * How long one attempt gets for TCP, TLS, the upgrade and the hello together:
+ * 10 s, then 20 s, then 30 s. A lossy link that needs longer than 10 s would
+ * otherwise be cut off on every attempt and never connect.
+ */
+export function openDeadline(attempt: number): number {
+  return 10_000 * (1 + Math.min(attempt, 2));
 }
 
 export function rpcUrl(coreUrl: string): string {
@@ -360,12 +372,13 @@ export class WsClient implements ObservableClient {
     const socket = this.#options.socketFactory(rpcUrl(this.#options.url));
     this.#socket = socket;
 
+    const deadline = openDeadline(this.#attempt);
     return new Promise<CoreInfo>((resolve, reject) => {
       let settled = false;
       const timeout = setTimeout(() => {
-        fail('connection did not answer within 10 seconds');
+        fail(`connection did not answer within ${deadline / 1000} seconds`);
         socket.close();
-      }, 10_000);
+      }, deadline);
       const fail = (message: string) => {
         if (settled) return;
         settled = true;
@@ -534,6 +547,9 @@ export class WsClient implements ObservableClient {
 
   #scheduleRetry(): void {
     if (this.#retryTimer !== null) return;
+    // Offline, a remote host cannot answer: the 'online' event calls resume().
+    // A loopback core still can, and a browser may say offline beside it.
+    if (this.#remote && typeof navigator !== 'undefined' && navigator.onLine === false) return;
     const delay = this.#options.backoff(this.#attempt);
     this.#attempt += 1;
     this.#retryTimer = setTimeout(() => {
