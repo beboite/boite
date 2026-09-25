@@ -157,25 +157,27 @@ export function jsonLinesOnly(
   const decoder = new TextDecoder();
   const encoder = new TextEncoder();
   let out: ReadableStreamDefaultController<Uint8Array> | null = null;
-  let complete = false;
+  // A pull that returns without enqueuing is not called again, and the
+  // reader's pending read never resolves: pull reads on until a protocol line
+  // went out, whatever the dropped and oversized lines in between.
+  let enqueued = false;
   const lines = new LineSplitter((text) => {
-    complete = true;
     if (text.trimStart().startsWith('{')) {
       out?.enqueue(encoder.encode(`${text}\n`));
+      enqueued = true;
       return;
     }
     onOther(text.trim());
   }, {
     maxLine: STDOUT_LINE_MAX,
     onOverflow: () => {
-      complete = true;
       onOther('the agent sent a stdout line too large to be a protocol line');
     },
   });
   return new ReadableStream<Uint8Array>({
     async pull(controller) {
       out = controller;
-      complete = false;
+      enqueued = false;
       for (;;) {
         const { done, value } = await reader.read();
         if (done) {
@@ -185,7 +187,7 @@ export function jsonLinesOnly(
           return;
         }
         lines.feed(decoder.decode(value, { stream: true }));
-        if (complete) return;
+        if (enqueued) return;
       }
     },
     cancel(reason) {
