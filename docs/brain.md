@@ -43,8 +43,14 @@ Skill bodies stay on disk for the agent to read when needed. Project instruction
 files still follow each agent's native discovery rules.
 
 The shared driver context carries the prefix, including on warm sessions.
-The user's journalled message remains unchanged. Entry files and the catalog
-are reread for each normal turn, so a refresh or process restart is unnecessary.
+The user's journalled message remains unchanged. Each normal turn picks up
+edits to the entry files and the catalog, so a refresh or process restart is
+unnecessary. The core keeps its last scan and, before each turn, stats every
+path that scan looked at: the entry files, each catalog folder and each skill
+or plugin file, present or absent. Any difference in time or size means a new
+scan. A path changed within two seconds of a scan is not trusted, so an edit on
+a file system with coarse times is not missed. On a 26-entry brain this took a
+turn from 32 ms of scanning to about 6 ms of stats (2026-09-25).
 Missing folders or unreadable instruction files fail the turn instead of silently
 dropping their content. The combined prefix is limited to 128 KiB.
 
