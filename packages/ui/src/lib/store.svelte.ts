@@ -92,6 +92,7 @@ import { work, type Profile } from './work-prefs.svelte';
 import { onboardingSeen } from './onboarding';
 import { rightPanel, type BoundPanel } from './right-panel.svelte';
 import { fill, strings } from './strings';
+import { patchRow, threadsByProject } from './thread-rows';
 import { confirm } from './confirm.svelte';
 import { DEFAULT_MODEL_NAMES, INITIAL_MODEL_DEFAULTS, readModelDefaults, writeModelDefaults, resolveModelDefault, type ModelDefaults } from './model-defaults';
 import { FAVORITES_KEY, isNamedModel, readFavorites, type FavoriteModel } from './model-order';
@@ -465,8 +466,9 @@ export class Store {
     return window.__TAURI_INTERNALS__ !== undefined && this.localCore;
   }
 
+  #unreadCount = $derived(this.threads.filter((t) => t.unread).length);
   get unreadCount(): number {
-    return this.threads.filter((t) => t.unread).length;
+    return this.#unreadCount;
   }
 
   /** The project of the open thread or of the draft, the one the composer writes into. */
@@ -492,8 +494,10 @@ export class Store {
     return status === 'running' || status === 'queued' || status === 'waiting';
   }
 
+  /** One pass over the rows per change of a project, flag or the list itself; a load tick is none of those. */
+  #byProject = $derived(threadsByProject(this.threads));
   threadsOf(projectId: ProjectId): ThreadSummary[] {
-    return this.threads.filter((t) => t.projectId === projectId && !t.archived && !t.parentThreadId);
+    return this.#byProject.get(projectId) ?? [];
   }
 
   /** Pinned threads first, then the live ones, then by last activity; the search box narrows it. */
@@ -3110,8 +3114,8 @@ export class Store {
   }
 
   #upsertThread(summary: ThreadSummary): void {
-    const index = this.threads.findIndex((t) => t.id === summary.id);
-    if (index >= 0) this.threads[index] = summary;
+    const row = this.threads.find((t) => t.id === summary.id);
+    if (row) patchRow(row, summary);
     else this.threads.push(summary);
   }
 

@@ -12,9 +12,10 @@
   let machines = $derived(workspace.machines.length ? workspace.machines : [{ id: 'local', label: strings.machines.local, store }]);
   let machine = $derived(machines.find(m => m.store === store));
   let project = $derived(store.openProject ?? store.projects[0]);
-  let entries = $derived(machines.flatMap(machine => machine.store.threads.filter(t => !t.archived).map(thread => ({
-    machine, thread, project: machine.store.projects.find(p => p.id === thread.projectId)
-  }))));
+  let entries = $derived(machines.flatMap(machine => {
+    const byId = new Map(machine.store.projects.map(p => [p.id, p]));
+    return machine.store.threads.filter(t => !t.archived).map(thread => ({ machine, thread, project: thread.projectId === null ? undefined : byId.get(thread.projectId) }));
+  }));
   let waiting = $derived(entries.filter(e => e.thread.status === 'waiting'));
   let active = $derived(entries.filter(e => ['waiting', 'running', 'queued'].includes(e.thread.status)));
   let rows = $derived((screen === 'activity' ? active : entries)
