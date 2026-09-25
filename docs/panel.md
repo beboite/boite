@@ -8,7 +8,10 @@ reload there opens on the chat with the panel shut and its tabs kept for the
 next open, and Back shuts it. That reload-time shut is held in memory beside
 the stored layout, so a wider window of the same browser still finds its panels
 open after the phone has used its own. `packages/ui/src/lib/right-panel.svelte.ts` is the store,
-`RightPanel.svelte` the frame, one component per surface.
+`RightPanel.svelte` the frame, one component per surface. The frame's launcher,
+resize handle and tab icon are `SurfaceLauncher.svelte`, `PanelResizeHandle.svelte`
+and `SurfaceIcon.svelte`; `lib/surface-labels.ts` names each surface and says where
+it is available.
 
 A thread that is archived, here or from another client, or removed with its
 project, takes its layout with it, and its browser views are destroyed rather
