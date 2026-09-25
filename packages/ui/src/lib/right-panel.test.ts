@@ -276,6 +276,21 @@ describe('the right panel', () => {
     expect(again.for('t-3').surfaces).toHaveLength(0);
   });
 
+  test('a phone comes back to the chat: the stored panel is shut, its tabs kept for the next open', () => {
+    const first = panel('t-1');
+    first.bound.open('trace');
+    const matchMedia = window.matchMedia;
+    window.matchMedia = ((media: string) => ({ media, matches: media === '(max-width: 720px)' })) as unknown as typeof window.matchMedia;
+    try {
+      const again = new RightPanelStore().for('t-1');
+      expect(again.isOpen).toBe(false);
+      expect(again.activeSurfaceId).toBe('trace');
+      expect(JSON.parse(window.localStorage.getItem(PANEL_STORAGE_KEY) ?? '{}').threads['t-1'].isOpen).toBe(true);
+    } finally {
+      window.matchMedia = matchMedia;
+    }
+  });
+
   test('a stored blob of another version is dropped whole', () => {
     window.localStorage.setItem(
       PANEL_STORAGE_KEY,

@@ -187,7 +187,14 @@ export class RightPanelStore {
   load(): void {
     try {
       const raw = window.localStorage.getItem(PANEL_STORAGE_KEY);
-      this.threads = raw ? parse(raw) : {};
+      const threads = raw ? parse(raw) : {};
+      // On a phone the panel is a sheet over the whole chat: a reload opens on
+      // the chat, and the tabs wait for the next open. Nothing is saved here,
+      // so a desktop reading the same storage still finds its panel open.
+      if (typeof window.matchMedia === 'function' && window.matchMedia('(max-width: 720px)').matches) {
+        for (const state of Object.values(threads)) state.isOpen = false;
+      }
+      this.threads = threads;
     } catch {
       this.threads = {};
     }
