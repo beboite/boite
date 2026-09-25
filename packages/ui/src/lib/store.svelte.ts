@@ -1646,7 +1646,7 @@ export class Store {
     const [projects, threads, providers, accounts, settings, scheduler, permissions, questions, logins, keybindings] = results;
     if (permissions.status === 'fulfilled') this.#mergePermissions(permissions.value, 'all');
     if (questions.status === 'fulfilled') this.#mergeQuestions(questions.value, 'all');
-    if (projects.status === 'fulfilled') this.projects = projects.value;
+    if (projects.status === 'fulfilled') { this.projects = projects.value; this.#projectsAt = Date.now(); }
     if (threads.status === 'fulfilled') {
       // Held rows are patched, not replaced, so a reconnect redraws only what changed.
       this.threads = reconcileRows(this.threads, threads.value);
@@ -1931,10 +1931,12 @@ export class Store {
    * repository, can change while the app is open: a draft asks again, so its
    * worktree switch follows a `git init` done in a terminal. A failure keeps
    * the list the app has; the boot already reported a core that cannot answer.
+   * A list the boot fetched under five seconds ago is fresh enough.
    */
+  #projectsAt = 0;
   async #refreshProjects(): Promise<void> {
     const client = this.#client;
-    if (!client || this.connection !== 'ready') return;
+    if (!client || this.connection !== 'ready' || Date.now() - this.#projectsAt < 5_000) return;
     try {
       const fresh = new Map((await client.call('projects.list', {})).map((project) => [project.id, project]));
       // Another machine took this Store meanwhile: project ids can collide between machines.

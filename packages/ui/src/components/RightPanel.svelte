@@ -14,7 +14,9 @@
     UsersRound,
     X
   } from '@lucide/svelte';
+  import { untrack } from 'svelte';
   import { browserBridge } from '../lib/browser-bridge';
+  import { stripOverflows } from '../lib/strip-overflow';
   import { contextMenu } from '../lib/context-menu.svelte';
   import { separator } from '../lib/menu';
   import { closeTabs } from '../lib/panel-close';
@@ -155,7 +157,9 @@
   function measure(): void {
     const node = tabs;
     if (!node) return;
-    overflowing = node.scrollWidth - node.clientWidth > 1;
+    const gap = parseFloat(getComputedStyle(node.parentElement ?? node).columnGap) || 0;
+    const room = [...(node.parentElement?.querySelectorAll<HTMLElement>(':scope > .chev') ?? [])].reduce((sum, chevron) => sum + chevron.offsetWidth + gap, 0);
+    overflowing = stripOverflows(node.scrollWidth, node.clientWidth, room, overflowing);
   }
 
   $effect(() => {
@@ -163,12 +167,21 @@
     if (!node) return;
     // The strip is remeasured when its width or its content changes.
     void surfaces.length;
-    measure();
+    untrack(measure);
     // jsdom lays nothing out and ships no ResizeObserver: the strip still renders.
     if (typeof ResizeObserver === 'undefined') return;
-    const observer = new ResizeObserver(measure);
+    // The chevrons resize the observed tabs: toggling them inside the callback
+    // was a resize the observer could not deliver that frame (a loop error).
+    let frame = 0;
+    const observer = new ResizeObserver(() => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(measure);
+    });
     observer.observe(node);
-    return () => observer.disconnect();
+    return () => {
+      cancelAnimationFrame(frame);
+      observer.disconnect();
+    };
   });
 
   // The tab that is showing is always the one in view.
@@ -568,9 +581,11 @@
     pointer-events: none;
   }
 
+  /* The column takes its width on the first frame, so the chat beside it
+     re-wraps once; a width animation re-laid the whole chat out every frame. */
   @keyframes panel-in {
     from {
-      width: 0;
+      transform: translateX(16px);
       opacity: 0;
     }
   }

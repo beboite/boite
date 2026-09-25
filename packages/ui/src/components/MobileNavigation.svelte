@@ -20,7 +20,7 @@
   let active = $derived(entries.filter(e => ['waiting', 'running', 'queued'].includes(e.thread.status)));
   let rows = $derived((screen === 'activity' ? active : entries)
     .filter(e => `${e.thread.title} ${projectName(e.project)} ${e.machine.label}`.toLowerCase().includes(search.toLowerCase()))
-    .toSorted((a, b) => (Number(b.thread.status === 'waiting') - Number(a.thread.status === 'waiting')) || b.thread.updatedAt - a.thread.updatedAt));
+    .sort((a, b) => (Number(b.thread.status === 'waiting') - Number(a.thread.status === 'waiting')) || b.thread.updatedAt - a.thread.updatedAt));
   let projects = $derived([...machines.flatMap(m => m.store.projects.map(p => ({
     id: JSON.stringify([m.id, p.id]), label: projectName(p), hint: m.label,
     active: m.store === store && p.id === project?.id

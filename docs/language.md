@@ -42,6 +42,13 @@ objects. A component writing `{strings.settings.theme}` in its markup is
 subscribed to the language by the read itself, so the sentence swaps when the
 language does, with no prop, no context and no store. Writing to it throws.
 
+English is in the startup bundle; every other language is a chunk of its
+own, fetched only on a device that speaks it. `main.ts` waits for it before the
+first frame, so a French device never draws English and swaps a tick later,
+and a small script the build puts in `index.html` (`lib/locale-preload.ts`)
+starts that fetch beside the entry's. A switch in the settings keeps the screen
+in the current language until the new one has arrived, then swaps all of it.
+
 A component imports from `lib/strings` and nothing else, the way it did before
 there were two languages. Only `i18n.svelte.ts` reads the catalogues, and only
 a screen that changes the language itself, the Appearance page and the tour,
@@ -76,9 +83,14 @@ of the first frame. In a component, read `strings.x.y` in the markup or in a
 1. Copy `strings.fr.ts` to `strings.<code>.ts`, translate it, keep the type,
    and name its export after the code: `scripts/ci/translations.ts` finds a
    catalogue by that file name and that export.
-2. Add the code to `Locale` and `LOCALES` in `i18n.svelte.ts`, and the
-   catalogue to `CATALOGUES`.
+2. Add the code to `Locale` and `LOCALES` in `i18n.svelte.ts`, and a dynamic
+   import of the catalogue to `LOADERS`. The build finds the chunk by its file
+   name and preloads it on a device that speaks the language.
 3. Name it in `settings.languageNames`, in every catalogue, in its own
    language: the list is what the picker draws.
+4. Translate the too-old-browser sentence in the `notices` object of the
+   inline script in `packages/ui/index.html`. It runs when the app failed to
+   parse, so no catalogue ever loads; `src/lib/boot-notice.test.ts` fails for a
+   language of `LOCALES` that still gets the English sentence.
 
 The picker, the tour, the detection and the fallback need nothing else.

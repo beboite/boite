@@ -84,7 +84,13 @@ phone on the LAN gets the gzip.
 
 The command palette, the project picker, the import dialog and the right panel
 are separate chunks. They load when first asked for, and all of them once the
-page is idle, so a PWA that goes offline later still has them in its cache.
+app has booted and the page is idle, so a PWA that goes offline later still has
+them in its cache. A link that asks to save data, or reads as 3G or slower,
+skips that prefetch and fetches each one when it opens (`lib/prefetch.ts`). The
+tour is prefetched only for a device that has not seen it.
+
+The French catalogue and the quota window are chunks of their own too, so an
+English page does not download or parse either (`docs/language.md`).
 
 The service worker still asks the core for the app shell first, but waits
 2.5 s at most before serving the cached one; the late answer is stored for the

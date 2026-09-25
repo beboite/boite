@@ -8,11 +8,15 @@ export function visibleUserText(text: string): string {
 
 /** Hide protocol-only lines, including a marker that is still streaming. */
 export function visibleAnswer(text: string): string {
-  const tail = /(?:^|\n)([\t ]*\[BOITE[^\r\n]*?)[\t ]*(?:\r?\n[\t ]*)*$/.exec(text);
+  // Only the last line that is not blank can hold the marker, so the regex reads
+  // from the break before it rather than trying every offset of the answer.
+  const from = Math.max(0, text.trimEnd().lastIndexOf('\n'));
+  const tail = /(?:^|\n)([\t ]*\[BOITE[^\r\n]*?)[\t ]*(?:\r?\n[\t ]*)*$/.exec(text.slice(from));
   if (!tail) return text;
   const marker = tail[1]!.trim();
   if (!['[BOITE_GOAL_COMPLETE]', '[BOITE_GOAL_BLOCKED]'].some(value => value.startsWith(marker))) return text;
-  const start = tail.index + (text[tail.index] === '\n' ? 1 : 0);
+  const index = from + tail.index;
+  const start = index + (text[index] === '\n' ? 1 : 0);
   // A terminal marker inside an unfinished fenced example is still answer content.
   let fence: string | null = null;
   for (const line of text.slice(0, start).split('\n')) {
@@ -101,26 +105,54 @@ export function answerText(text: string, _live: boolean): string {
 
 /** Only complete paragraphs and fenced blocks enter the timeline while streaming. */
 export function paragraphBlocks(text: string, live: boolean): string[] {
-  const blocks: string[] = [];
-  let start = 0;
-  let offset = 0;
-  let fence = '';
-  for (const line of text.split(/(?<=\n)/)) {
-    const trimmed = line.trim();
-    const marker = /^(?:`{3,}|~{3,})/.exec(trimmed)?.[0];
-    if (marker) {
-      if (!fence) fence = marker;
-      else if (marker[0] === fence[0] && marker.length >= fence.length && trimmed === marker) fence = '';
+  return new ParagraphScan().blocks(text, live);
+}
+
+/**
+ * paragraphBlocks for a text that grows: a new text that extends the last one
+ * resumes at the last complete line, so a delta reads only its own lines. The
+ * same array comes back until a paragraph completes. Only complete lines are
+ * read, because an unfinished line can open a fence but never close a block.
+ */
+export class ParagraphScan {
+  #read = '';
+  #start = 0;
+  #fence = '';
+  #done: string[] = [];
+  #tail = '';
+  #result: string[] | null = null;
+
+  blocks(text: string, live: boolean): string[] {
+    if (!text.startsWith(this.#read)) {
+      this.#read = '';
+      this.#start = 0;
+      this.#fence = '';
+      this.#done = [];
+      this.#result = null;
     }
-    offset += line.length;
-    if (!fence && !trimmed && line.endsWith('\n')) {
-      const block = text.slice(start, offset).trim();
-      if (block) blocks.push(block);
-      start = offset;
+    let offset = this.#read.length;
+    let grew = false;
+    for (let end = text.indexOf('\n', offset); end !== -1; end = text.indexOf('\n', offset)) {
+      const trimmed = text.slice(offset, end + 1).trim();
+      offset = end + 1;
+      const marker = /^(?:`{3,}|~{3,})/.exec(trimmed)?.[0];
+      if (marker) {
+        if (!this.#fence) this.#fence = marker;
+        else if (marker[0] === this.#fence[0] && marker.length >= this.#fence.length && trimmed === marker) this.#fence = '';
+      }
+      if (!this.#fence && !trimmed) {
+        const block = text.slice(this.#start, offset).trim();
+        if (block) { this.#done.push(block); grew = true; }
+        this.#start = offset;
+      }
     }
+    this.#read = text.slice(0, offset);
+    const tail = live ? '' : text.slice(this.#start).trim();
+    if (this.#result && !grew && tail === this.#tail) return this.#result;
+    this.#tail = tail;
+    this.#result = tail ? [...this.#done, tail] : [...this.#done];
+    return this.#result;
   }
-  if (!live && text.slice(start).trim()) blocks.push(text.slice(start).trim());
-  return blocks;
 }
 
 /** Codex can append several bold thought headings inside the same part. */

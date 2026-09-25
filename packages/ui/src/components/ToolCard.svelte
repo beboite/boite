@@ -387,4 +387,8 @@
     border-radius: 1px;
     animation: blink 1s steps(2, start) infinite;
   }
+
+  /* An endless loop stops under reduced motion; the static mark keeps its colour. */
+  @media (prefers-reduced-motion: reduce) { :is(.pulse, .spinner, .cursor) { animation: none; } }
+  :global(html[data-motion='reduced']) :is(.pulse, .spinner, .cursor) { animation: none; }
 </style>

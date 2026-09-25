@@ -62,7 +62,7 @@
     : group ? w.scope.kind === 'group' && w.scope.id === group.id
     : mission ? w.scope.kind === 'mission' && w.scope.id === mission.id
     : team ? teamScopes.some(s => w.scope.kind === 'mission' && w.scope.id === s.id)
-    : false).toReversed());
+    : false).reverse());
   /** The history page the activity tab asks for: the same filter as `work`. */
   const workHistory = $derived<{ kind: 'work'; agentId?: string; scopes?: AgentScope[] } | null>(
     profile ? { kind: 'work', agentId: profile.id } : scope && (group || mission) ? { kind: 'work', scopes: [scope] } : team && teamScopes.length ? { kind: 'work', scopes: teamScopes } : null);

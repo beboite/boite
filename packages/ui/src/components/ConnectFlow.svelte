@@ -402,4 +402,8 @@
     .dialog { width: 100%; max-height: 90dvh; border-radius: var(--radius-xl) var(--radius-xl) 0 0; }
     .service { min-height: var(--touch-target); }
   }
+
+  /* An endless loop stops under reduced motion; the static mark keeps its colour. */
+  @media (prefers-reduced-motion: reduce) { .bar.indeterminate { animation: none; } }
+  :global(html[data-motion='reduced']) .bar.indeterminate { animation: none; }
 </style>

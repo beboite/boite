@@ -157,6 +157,11 @@ type FakeMethods = { [M in Exclude<RpcMethodName, `plugins.${string}` | `agents.
 export interface FakeClientOptions {
   /** Milliseconds between two streamed chunks. Tests pass 0. */
   delayMs?: number;
+  /**
+   * Characters per streamed delta, like the echo driver's 16, so a per-delta
+   * cost shows. Unset streams an answer in five deltas; `?fake=1&stream=tokens` sets 16.
+   */
+  chunkSize?: number;
   /** Seeds one thread of 400 messages, what `?fake=1&long=1` opens the list on. */
   long?: boolean;
   /** A fresh machine with no agents, accounts or projects, for the setup flow. */
@@ -176,6 +181,11 @@ function quietUpdates(): boolean {
   if (typeof location === 'undefined') return false;
   const query = new URLSearchParams(location.search);
   return query.get('fake') === '1' && query.get('updates') !== '1';
+}
+
+function tokenStream(): number | undefined {
+  if (typeof location === 'undefined') return undefined;
+  return new URLSearchParams(location.search).get('stream') === 'tokens' ? 16 : undefined;
 }
 
 export class FakeClient implements ObservableClient {
@@ -288,11 +298,13 @@ export class FakeClient implements ObservableClient {
   #seq = 0;
   #turnRequests = new Map<string, { content: string; turn: Turn }>();
   #delayMs: number;
+  #chunkSize: number | undefined;
   #long: boolean;
   #principal: Principal;
 
   constructor(options: FakeClientOptions = {}) {
     this.#delayMs = options.delayMs ?? 18;
+    this.#chunkSize = options.chunkSize ?? tokenStream();
     this.#long = options.long ?? false;
     this.#principal = options.principal ?? 'owner';
     const coreId = options.coreId ?? `fake-core-${crypto.randomUUID()}`;
@@ -2129,8 +2141,7 @@ const ready = true;
 
     // The reasoning first, in two deltas, the way a provider streams a thinking block.
     const reasoning = `thinking about: ${modelPrompt}`;
-    const cut = Math.ceil(reasoning.length / 2);
-    for (const piece of [reasoning.slice(0, cut), reasoning.slice(cut)]) {
+    for (const piece of chunkText(reasoning, 2, this.#chunkSize)) {
       if (record.cancelled || piece.length === 0) break;
       await this.#pause();
       const part = message.parts[0];
@@ -2167,7 +2178,7 @@ const ready = true;
         )
         .join('') + echoed;
 
-    for (const piece of chunkText(reply, 5)) {
+    for (const piece of chunkText(reply, 5, this.#chunkSize)) {
       if (record.cancelled) break;
       await this.#pause();
       const part = message.parts[textIndex];

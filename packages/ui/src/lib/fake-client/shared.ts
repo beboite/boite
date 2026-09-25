@@ -142,9 +142,10 @@ export function addUsage(a: Usage, b: Usage): Usage {
   };
 }
 
-export function chunkText(text: string, pieces: number): string[] {
+/** `pieces` parts, or parts of `size` characters when one is given (the echo driver's rate). */
+export function chunkText(text: string, pieces: number, chunkSize?: number): string[] {
   if (text.length === 0) return [''];
-  const size = Math.max(1, Math.ceil(text.length / pieces));
+  const size = chunkSize ?? Math.max(1, Math.ceil(text.length / pieces));
   const out: string[] = [];
   for (let i = 0; i < text.length; i += size) out.push(text.slice(i, i + size));
   return out;

@@ -4,8 +4,13 @@
 
   let { path, oldText, newText }: { path: string; oldText: string; newText: string } = $props();
 
+  /** Rows drawn before the show-all button: the box shows about fourteen. */
+  const FIRST_ROWS = 300;
+
   let rows = $derived(diffRows(oldText, newText));
   let counts = $derived(diffCounts(rows));
+  let expanded = $state(false);
+  let shown = $derived(expanded ? rows : rows.slice(0, FIRST_ROWS));
 
   /** The gutter of a row: what a patch puts in its first column. */
   function sign(kind: string): string {
@@ -26,7 +31,7 @@
     {/if}
   </div>
   <div class="rows mono">
-    {#each rows as row, index (index)}
+    {#each shown as row, index (index)}
       {#if row.kind === 'gap'}
         <div class="row gap" data-kind="gap">
           <span class="num"></span>
@@ -41,6 +46,11 @@
         </div>
       {/if}
     {/each}
+    {#if shown.length < rows.length}
+      <button type="button" class="ghost small more" data-testid="diff-show-all" onclick={() => (expanded = true)}>
+        {fill(strings.chat.diffShowAll, { count: String(rows.length) })}
+      </button>
+    {/if}
   </div>
 </div>
 
@@ -99,6 +109,10 @@
     align-items: flex-start;
     gap: 0;
     line-height: 1.55;
+  }
+
+  .more {
+    margin: 4px 10px;
   }
 
   .num {

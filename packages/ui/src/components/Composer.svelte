@@ -429,22 +429,22 @@
     else store.remember(choice);
   }
 
+  let grown = ''; // Last value measured. Reading the style before the auto write forces one layout, not two.
   function grow() {
     const el = box;
     if (!el) return;
-    el.style.height = 'auto';
     const line = parseFloat(getComputedStyle(el).lineHeight) || 20;
+    el.style.height = 'auto';
     el.style.height = `${Math.min(el.scrollHeight, line * MAX_LINES + 16)}px`;
-    syncInput();
+    grown = el.value; syncInput(); // The height can toggle the scrollbar, and the paint layer's width follows it.
   }
 
-  // Context inserted from a preview changes the shared draft without an input
-  // event. Measure after Svelte has written that text into the textarea.
+  // A preview insertion writes the draft with no input event: measure once Svelte wrote it, unless oninput did.
   $effect(() => {
     void text;
     if (!box) return;
     let current = true;
-    void tick().then(() => { if (current) grow(); });
+    void tick().then(() => { if (current && box?.value !== grown) grow(); });
     return () => { current = false; };
   });
 

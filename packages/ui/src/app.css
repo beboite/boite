@@ -8,7 +8,7 @@
   font-family: 'Geist';
   font-style: normal;
   font-weight: 100 900;
-  font-display: block;
+  font-display: swap;
   src: url('/fonts/Geist-Variable.woff2') format('woff2');
 }
 
@@ -16,7 +16,7 @@
   font-family: 'Geist Mono';
   font-style: normal;
   font-weight: 100 900;
-  font-display: block;
+  font-display: swap;
   src: url('/fonts/GeistMono-Variable.woff2') format('woff2');
 }
 
@@ -152,6 +152,14 @@
   color-scheme: light;
 }
 
+/* Safari 15.4 to 16.1 have oklch but not color-mix: the shared accent tint keeps
+   its 18 percent there, and the few one-off mixes simply draw no tint. */
+@supports not (color: color-mix(in oklch, red 50%, blue)) {
+  :root {
+    --color-accent-soft: oklch(68% 0.19 var(--accent-hue) / 0.18);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   :root {
     --dur-1: 0.01ms;
@@ -160,6 +168,8 @@
   }
 }
 
+/* The same, forced from the page: the tests set it, since jsdom has no media
+   queries. Components that loop forever guard both. */
 html[data-motion='reduced'] {
   --dur-1: 0.01ms;
   --dur-2: 0.01ms;

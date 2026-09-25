@@ -1,14 +1,17 @@
-import { afterEach, beforeEach, expect, test, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, expect, test, vi } from 'vitest';
 import { flushSync, mount, tick, unmount } from 'svelte';
 import Onboarding from './Onboarding.svelte';
 import { FakeClient } from '../lib/fake-client';
-import { LOCALE_STORAGE_KEY, setLocaleSetting } from '../lib/i18n.svelte';
+import { loadLocale, LOCALE_STORAGE_KEY, setLocaleSetting } from '../lib/i18n.svelte';
 import { ONBOARDING_STORAGE_KEY, ONBOARDING_VERSION, readOnboarding, steps } from '../lib/onboarding';
 import { closeTour, openTour, tourRequested, tourSeen } from '../lib/onboarding.svelte';
 import { Store } from '../lib/store.svelte';
 import { THEME_STORAGE_KEY } from '../lib/theme';
 import { PREFS_STORAGE_KEY } from '../lib/prefs';
 import { work, WORK_STORAGE_KEY } from '../lib/work-prefs.svelte';
+
+// French is its own chunk: loaded once, the tour's language buttons switch at once.
+beforeAll(() => loadLocale('fr'));
 
 /**
  * The tour: the screens it walks, the switches it carries, and the record it

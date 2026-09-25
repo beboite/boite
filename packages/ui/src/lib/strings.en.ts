@@ -605,6 +605,7 @@ export const strings = {
     /** An image the user sent with the prompt, when it came with no name. */
     imagePart: 'Image sent with the prompt',
     diffHidden: '{count} unchanged lines',
+    diffShowAll: 'Show all {count} lines',
     diffAdded: '+{count}',
     diffRemoved: '-{count}',
     noOutput: 'No output',
@@ -774,6 +775,7 @@ export const strings = {
     models: 'Models',
     searchModels: 'Search models',
     noModels: 'No model matches',
+    showAllModels: 'Show all {count} models',
     legacyModels: 'Legacy models',
     refreshModels: 'Refresh models',
     probing: "Reading the agent's models",
