@@ -16,7 +16,6 @@ import {
   writeSync,
 } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { Unzip, UnzipInflate } from 'fflate';
 import type { ProviderId, ProviderInstall, ProviderInstallState } from '@boite/contracts';
 import { newId } from '../ids.ts';
 import { agentsDirPath, currentOs, providerAgentDir } from '../paths.ts';
@@ -446,6 +445,9 @@ export class InstallManager {
     const open = new Map<string, number>();
     let failure: Error | null = null;
 
+    // Loaded here, not at the top: evaluating fflate builds its Huffman tables,
+    // about 8 ms that every core start would pay for an install it rarely runs.
+    const { Unzip, UnzipInflate } = await import('fflate');
     const unzip = new Unzip((file) => {
       if (failure !== null) return;
       const safe = safeEntryPath(file.name);

@@ -83,6 +83,14 @@ The service worker still asks the core for the app shell first, but waits
 2.5 s at most before serving the cached one; the late answer is stored for the
 next open.
 
+## Core startup
+
+`fflate`, the unzip library behind provider installs and the local speech
+runtime, is imported where it unzips. Evaluating it builds its Huffman tables,
+about 8 ms per core start measured on 2026-09-25, for code most starts never
+run. `packages/core/test/startup-imports.test.ts` fails if a static import
+brings it back.
+
 ## Shell startup
 
 The shell spawns the core before it builds the WebView2 window, and polls for
