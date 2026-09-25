@@ -153,7 +153,7 @@ test('a wide markdown table scrolls inside itself and leaves the conversation st
   await page.evaluate(`document.querySelector('[data-testid=composer-input]').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))`);
   await page.waitFor(`document.querySelector('[data-testid=timeline] table')?.textContent.includes('header row on phones')`, 20_000);
   await page.evaluate(`document.querySelector('[data-testid=timeline] table').scrollIntoView({ block: 'center', inline: 'end' })`);
-  const sizes = await page.evaluate<{ timeline: number[]; table: number[] }>(`(() => {
+  const sizes = await page.evaluate<{ timeline: [number, number, number]; table: [number, number] }>(`(() => {
     const t = document.querySelector('[data-testid=timeline]'), table = t.querySelector('table');
     return { timeline: [t.scrollWidth, t.clientWidth, t.scrollLeft], table: [table.scrollWidth, table.clientWidth] };
   })()`);
