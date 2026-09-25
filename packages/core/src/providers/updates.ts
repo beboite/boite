@@ -5,7 +5,7 @@ import type { Core } from '../core.ts';
 import { forgetProbes } from '../drivers/index.ts';
 import { notFound, refused } from '../errors.ts';
 import type { InstallOutcome } from './install.ts';
-import { profileFor, resolveCommand } from './loader.ts';
+import { profileFor, resolveCommand } from './resolve.ts';
 import { forgetWhich } from './which.ts';
 
 /**

@@ -30,7 +30,7 @@ import type {
 } from '@boite/contracts';
 import { messageOf, unavailable } from '../errors.ts';
 import type { SpawnedChild } from '../procs.ts';
-import { profileFor, resolveExecutable } from '../providers/loader.ts';
+import { profileFor, resolveExecutable } from '../providers/resolve.ts';
 import { titleRequest } from '../titles.ts';
 import type { ProbeContext, ProbeResult, Driver, PromptCacheLife, TitleContext, TurnContext, TurnHandle, TurnResult } from './types.ts';
 

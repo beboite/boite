@@ -34,7 +34,7 @@ import type {
 import { messageOf, unavailable } from '../errors.ts';
 import { resolveDataDir } from '../paths.ts';
 import type { SpawnedChild } from '../procs.ts';
-import { launchPrefix, profileFor, resolveExecutable } from '../providers/loader.ts';
+import { launchPrefix, profileFor, resolveExecutable } from '../providers/resolve.ts';
 import { LineSplitter } from './lines.ts';
 import { ModelProbes } from './model-probes.ts';
 import type {

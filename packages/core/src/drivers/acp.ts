@@ -38,7 +38,7 @@ import type {
 import pkg from '../../package.json';
 import { messageOf, unavailable } from '../errors.ts';
 import type { SpawnedChild, SpawnOptions } from '../procs.ts';
-import { agentEnv, launchPrefix, profileFor, resolveExecutable } from '../providers/loader.ts';
+import { agentEnv, launchPrefix, profileFor, resolveExecutable } from '../providers/resolve.ts';
 import { normalizeAntigravityTool, isAntigravityQuestion } from './antigravity.ts';
 import { grokEffortOf, grokLaunchArgs, grokReasoningEffortOf } from './grok.ts';
 import { imageDocument } from './documents.ts';

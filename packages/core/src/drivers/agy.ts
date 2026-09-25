@@ -41,7 +41,7 @@ import type {
 } from '@boite/contracts';
 import { messageOf, unavailable } from '../errors.ts';
 import type { SpawnedChild } from '../procs.ts';
-import { agentEnv, launchPrefix, profileFor, resolveExecutable } from '../providers/loader.ts';
+import { agentEnv, launchPrefix, profileFor, resolveExecutable } from '../providers/resolve.ts';
 import { LineSplitter, STDOUT_LINE_MAX } from './lines.ts';
 import { stderrLines } from './stderr-lines.ts';
 import type {

@@ -4,7 +4,9 @@ A provider is an agent Boite can run, described by JSON rather than by code, so
 adding one is a file instead of a release. Shipped descriptors live in
 `packages/core/src/providers/shipped/` and are read-only; a user drops their own
 under `<dataDir>/providers/*.json`. The types are in the contract, the loader in
-`packages/core/src/providers/loader.ts`.
+`packages/core/src/providers/loader.ts`, the field checks in `validate.ts`, the
+load-time tokens in `expand.ts` and executable resolution in `resolve.ts`, all
+beside it.
 
 A descriptor loads or is refused with the file, the field and what was expected.
 An unknown field is a refusal, a user file may not take a shipped id, and `roots`
