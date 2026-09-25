@@ -218,11 +218,10 @@ struct Surfaces {
 }
 
 impl Surfaces {
-    /// Records that the UI wants `label` shown or not, and answers whether to
-    /// show it now: never while the window is parked.
-    fn want(&mut self, label: &str, shown: bool) -> bool {
+    /// Records that the UI wants `label` shown or not. `visible` says whether
+    /// it is shown now: never while the window is parked.
+    fn want(&mut self, label: &str, shown: bool) {
         if shown { self.shown.insert(label.to_owned()); } else { self.shown.remove(label); }
-        shown && !self.parked
     }
 
     /// True when this call parked the window, false when it already was.
@@ -234,12 +233,47 @@ impl Surfaces {
     fn unpark(&mut self) -> Option<Vec<String>> {
         std::mem::replace(&mut self.parked, false).then(|| self.shown.iter().cloned().collect())
     }
+
+    /// Whether the webview `label` belongs on screen now: the UI's page while
+    /// the window is not parked, a surface while the UI also wants it.
+    fn visible(&self, label: &str) -> bool {
+        !self.parked && (label == MAIN_LABEL || self.shown.contains(label))
+    }
 }
 
 static SURFACES: LazyLock<Mutex<Surfaces>> = LazyLock::new(Mutex::default);
 
 fn surfaces() -> std::sync::MutexGuard<'static, Surfaces> {
     SURFACES.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// Shows or hides each of `labels` as `Surfaces` says it should be when the
+/// call runs, not when it was asked for. `browser_set_bounds` runs on a worker,
+/// `unpark_all` on the tray or wake thread and `park_all` on the main thread,
+/// and a `hide` or `show` from a worker is queued to the event loop while one
+/// from the main thread runs at once: deciding on the caller's thread let a
+/// stale `show` land after a newer `hide` (a surface over the UI after the UI
+/// parked it, or painting in a parked window). Every change of visibility is
+/// therefore decided and made here, on the main thread, one label at a time
+/// against the current state.
+fn reconcile<R: Runtime>(app: &AppHandle<R>, labels: Vec<String>) {
+    let handle = app.clone();
+    let apply = move || {
+        for label in labels {
+            let Some(view) = handle.get_webview(&label) else { continue };
+            // Read just before the call, and released before it: a webview
+            // call that re-enters a window handler must not find it held.
+            let visible = surfaces().visible(&label);
+            let outcome = if visible { view.show() } else { view.hide() };
+            if let Err(error) = outcome {
+                let verb = if visible { "shown" } else { "hidden" };
+                eprintln!("[shell] the webview {label} could not be {verb}: {error}");
+            }
+        }
+    };
+    if let Err(error) = app.run_on_main_thread(apply) {
+        eprintln!("[shell] the webviews could not be shown or hidden: {error}");
+    }
 }
 
 /// The window went to the tray or was minimized: its page and every surface
@@ -249,26 +283,19 @@ pub fn park_all<R: Runtime>(app: &AppHandle<R>) {
     if !surfaces().park() {
         return;
     }
-    for (label, view) in app.webviews() {
-        if label == MAIN_LABEL || label.starts_with(LABEL_PREFIX) {
-            if let Err(error) = view.hide() {
-                eprintln!("[shell] the webview {label} could not be parked: {error}");
-            }
-        }
-    }
+    let labels = app
+        .webviews()
+        .into_keys()
+        .filter(|label| label == MAIN_LABEL || label.starts_with(LABEL_PREFIX))
+        .collect();
+    reconcile(app, labels);
 }
 
 /// The window is back on screen: its page, and the surfaces the UI last asked
 /// to see.
 pub fn unpark_all<R: Runtime>(app: &AppHandle<R>) {
     let Some(shown) = surfaces().unpark() else { return };
-    for label in std::iter::once(MAIN_LABEL.to_owned()).chain(shown) {
-        if let Some(view) = app.get_webview(&label) {
-            if let Err(error) = view.show() {
-                eprintln!("[shell] the webview {label} could not be shown again: {error}");
-            }
-        }
-    }
+    reconcile(app, std::iter::once(MAIN_LABEL.to_owned()).chain(shown).collect());
 }
 
 /// Every browser surface belongs to the page that asked for it. When the UI
@@ -578,9 +605,8 @@ pub async fn browser_set_bounds(
     let view = view_of(&app, &id)?;
     let Some(rect) = rect.filter(|rect| rect.width >= 1.0 && rect.height >= 1.0) else {
         surfaces().want(view.label(), false);
-        return view
-            .hide()
-            .map_err(|error| format!("the browser surface {id:?} could not be parked: {error}"));
+        reconcile(&app, vec![view.label().to_owned()]);
+        return Ok(());
     };
     view.set_bounds(Rect {
         position: Position::Logical(LogicalPosition::new(rect.x, rect.y)),
@@ -592,11 +618,10 @@ pub async fn browser_set_bounds(
             rect.width, rect.height, rect.x, rect.y
         )
     })?;
-    if !surfaces().want(view.label(), true) {
-        return Ok(());
-    }
-    view.show()
-        .map_err(|error| format!("the browser surface {id:?} could not be shown: {error}"))
+    // Shown unless the window is parked meanwhile, which `reconcile` decides.
+    surfaces().want(view.label(), true);
+    reconcile(&app, vec![view.label().to_owned()]);
+    Ok(())
 }
 
 #[tauri::command]
@@ -694,24 +719,54 @@ pub async fn browser_destroy(app: AppHandle, webview: Webview, id: String) -> Re
 
 #[cfg(test)]
 mod tests {
-    use super::{checked_url, label_of, read_selection, Surfaces, LABEL_PREFIX, MAX_SELECTION_CALLBACK_BYTES, PICKS};
+    use super::{checked_url, label_of, read_selection, Surfaces, LABEL_PREFIX, MAIN_LABEL, MAX_SELECTION_CALLBACK_BYTES, PICKS};
 
     #[test]
     fn a_parked_window_shows_nothing_and_brings_back_only_the_surfaces_the_ui_wanted() {
         let mut surfaces = Surfaces::default();
-        assert!(surfaces.want("boite-browser:a", true));
-        assert!(surfaces.want("boite-browser:b", true));
+        assert!(surfaces.visible(MAIN_LABEL));
+        surfaces.want("boite-browser:a", true);
+        surfaces.want("boite-browser:b", true);
+        assert!(surfaces.visible("boite-browser:a") && surfaces.visible("boite-browser:b"));
         assert!(surfaces.park());
         // A minimized window sends resize events over and over: one park.
         assert!(!surfaces.park());
+        assert!(!surfaces.visible(MAIN_LABEL) && !surfaces.visible("boite-browser:a"));
         // The UI keeps working while the window is in the tray.
-        assert!(!surfaces.want("boite-browser:c", true));
-        assert!(!surfaces.want("boite-browser:b", false));
+        surfaces.want("boite-browser:c", true);
+        assert!(!surfaces.visible("boite-browser:c"));
+        surfaces.want("boite-browser:b", false);
         let mut back = surfaces.unpark().unwrap();
         back.sort();
         assert_eq!(back, ["boite-browser:a", "boite-browser:c"]);
         assert!(surfaces.unpark().is_none());
-        assert!(surfaces.want("boite-browser:b", true));
+        assert!(!surfaces.visible("boite-browser:b"));
+        surfaces.want("boite-browser:b", true);
+        assert!(surfaces.visible("boite-browser:b") && surfaces.visible(MAIN_LABEL));
+    }
+
+    /// The two interleavings the review found, replayed in the order the
+    /// threads ran them. Each `visible` is what `reconcile` reads on the main
+    /// thread when the queued call runs, after every change made before it.
+    #[test]
+    fn a_late_show_or_hide_follows_the_state_it_finds_not_the_one_it_was_asked_in() {
+        // (a) unpark lists b, the UI parks b, then the unpark's call runs: b
+        // stays hidden.
+        let mut surfaces = Surfaces::default();
+        surfaces.want("boite-browser:b", true);
+        surfaces.park();
+        let listed = surfaces.unpark().unwrap();
+        surfaces.want("boite-browser:b", false);
+        assert_eq!(listed, ["boite-browser:b"]);
+        assert!(!surfaces.visible("boite-browser:b"), "a surface the UI parked came back over it");
+        // (b) the UI shows b, the window parks, then the show runs: b stays
+        // hidden until the window comes back.
+        let mut surfaces = Surfaces::default();
+        surfaces.want("boite-browser:b", true);
+        surfaces.park();
+        assert!(!surfaces.visible("boite-browser:b"), "a surface painted in a parked window");
+        surfaces.unpark();
+        assert!(surfaces.visible("boite-browser:b"));
     }
 
     #[test]
