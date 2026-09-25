@@ -1303,9 +1303,17 @@ pub fn run() {
     let directory = resolve_data_dir(channel);
     let _instance = match instance::acquire(&directory) {
         Ok(Some(file)) => Some(file),
-        // Another instance already owns this data directory: it has the
-        // window, so this process has nothing left to do.
-        Ok(None) => return,
+        // Another instance already owns this data directory: it shows its
+        // window, which may be in the tray or behind others, and this process
+        // has nothing left to do. Automation never raises a window.
+        Ok(None) => {
+            if !hidden() {
+                if let Err(error) = instance::wake(&directory) {
+                    eprintln!("[shell] Boite is already running, but it could not be asked to show its window: {error}");
+                }
+            }
+            return;
+        }
         Err(error) => {
             eprintln!(
                 "[shell] the shell instance lock could not be acquired: {error}; continuing without single-instance protection"
@@ -1313,6 +1321,9 @@ pub fn run() {
             None
         }
     };
+    // Only the owner of the lock may answer a second launch: without the lock
+    // two shells would share one wake file.
+    let owns_directory = _instance.is_some();
     let preferences_path = directory.join("shell-settings.json");
     let close_to_tray = close_to_tray_or_default(&preferences_path);
     let app_updater = updater::AppUpdater::new(context.package_info().version.to_string(), directory.clone(),
@@ -1356,6 +1367,12 @@ pub fn run() {
             let launch = Launch::new(channel, directory.clone(), handle.path().resource_dir().ok(),
                 handle.package_info().version.to_string());
             app.manage(CoreState::new(launch));
+            if owns_directory {
+                let waking = handle.clone();
+                if let Err(error) = instance::listen(&directory, move || show_main(&waking)) {
+                    eprintln!("[shell] a second launch will not bring this window back: {error}");
+                }
+            }
             // First, so the core starts while WebView2 does: building the window
             // holds this thread for several hundred milliseconds, and the core
             // used to wait behind it for no reason (bench/startup.ts).
@@ -1377,12 +1394,16 @@ pub fn run() {
         })
         .build(context)
         .expect("the Boite shell could not be built")
-        .run(|app, event| {
-            if let tauri::RunEvent::Exit = event {
+        .run(|app, event| match event {
+            tauri::RunEvent::Exit => {
                 if let Some(state) = app.try_state::<CoreState>() {
                     state.kill_child();
                 }
             }
+            // A click on the dock icon.
+            #[cfg(target_os = "macos")]
+            tauri::RunEvent::Reopen { .. } => show_main(app),
+            _ => {}
         });
 }
 

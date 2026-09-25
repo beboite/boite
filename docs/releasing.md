@@ -224,6 +224,10 @@ can keep it in the notification area instead. The choice lives in
 `<dataDir>/shell-settings.json` and survives restart. The tray's Quit action always
 exits. Hovering or clicking the tray icon opens a compact quota window; its Show
 action restores the main window. Quota polling runs only while that popup is open.
+One shell runs per data directory (`shell.lock`). Launching Boite again while it
+runs shows the running window, from the tray or behind other windows, through a
+loopback port and token the owner writes to `<dataDir>/shell-wake`. A shell
+started with `BOITE_SHELL_HIDDEN=1` never asks.
 
 The installed shell starts a core of its own or adopts one of its own version
 that already answers. That core is resident: it outlives the shell. Since a
