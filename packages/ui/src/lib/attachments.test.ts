@@ -40,6 +40,17 @@ test('an image over the size cap is refused by weight, the ones under it still l
   expect(refused).toBe('huge.png is too big: a file may weigh 5 MB at most.');
 });
 
+test('three phone photos under the per-file cap stop at the turn total, which names the one left out', () => {
+  // 4.5 MB each: two fit in the 10 MB a turn carries, the third would not.
+  const photo = (name: string) => image(name, { mimeType: 'image/jpeg', data: 'A'.repeat(6_291_456) });
+  const first = acceptAttachments([], [photo('one.jpg'), photo('two.jpg')]);
+  expect(first.refused).toBeNull();
+
+  const { accepted, refused } = acceptAttachments(first.accepted, [photo('three.jpg'), image('small.png')]);
+  expect(accepted.map((one) => one.name)).toEqual(['one.jpg', 'two.jpg', 'small.png']);
+  expect(refused).toBe('The files of one turn weigh 10 MB at most together, so three.jpg was left out.');
+});
+
 test('a format no agent reads is refused by name, and an unnamed paste still has a subject', () => {
   const { accepted, refused } = acceptAttachments([], [image(null, { mimeType: 'image/bmp' as never })]);
 

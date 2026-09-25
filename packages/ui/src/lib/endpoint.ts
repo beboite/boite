@@ -17,6 +17,12 @@ export interface Endpoint {
   paired?: boolean;
   /** The core the shell started on this computer, the one a native folder picker can name paths for. */
   local?: boolean;
+  /**
+   * Taken from the address this page was opened on. Nothing about it is
+   * stored until the core has answered a hello, so a link that leads nowhere,
+   * or somewhere the user refused, leaves the stored core as it was.
+   */
+  fromLink?: boolean;
 }
 
 export const ENDPOINT_STORAGE_KEY = 'boite.core';
@@ -197,6 +203,8 @@ export function parsePairingLink(text: string): { url: string; grant: string } |
  * The core's own pairing link carries a grant alone, on a page it serves
  * itself, so an absent `core` parameter means the origin of this page. A
  * `token` is the other form, a UI opened by hand on a token one already holds.
+ * A `core` with neither reopens a core this device already holds a key for,
+ * with that key. Nothing is stored here: see `Endpoint.fromLink`.
  */
 function takeFromQuery(): Endpoint | null {
   const params = new URLSearchParams(window.location.search);
@@ -205,14 +213,11 @@ function takeFromQuery(): Endpoint | null {
   const grant = params.get(GRANT_QUERY_PARAM);
   if (!core && !token && !grant) return null;
 
-  const endpoint: Endpoint = {
-    url: normalise(core ?? window.location.origin),
-    token: token ?? '',
-    ...(grant ? { grant } : {})
-  };
-  // A grant is not a credential to keep: the stored token stays empty until
-  // the session comes back, then `onSession` writes that one.
-  storeEndpoint({ url: endpoint.url, token: endpoint.token });
+  const url = normalise(core ?? window.location.origin);
+  const known = !token && !grant ? knownEndpoint(url) : null;
+  const endpoint: Endpoint = known
+    ? { ...known, fromLink: true }
+    : { url, token: token ?? '', ...(grant ? { grant } : {}), fromLink: true };
 
   params.delete(CORE_QUERY_PARAM);
   params.delete(PAIR_QUERY_PARAM);
@@ -244,14 +249,37 @@ function fromOrigin(): Endpoint | null {
   return { url: normalise(window.location.origin), token: '' };
 }
 
+/** The stored core or a remembered one at this address, with the key this device holds for it. */
+function knownEndpoint(url: string): Endpoint | null {
+  const stored = readStoredEndpoint();
+  if (stored?.url === url) return stored;
+  const remembered = readEnvironments().find((env) => env.url === url);
+  return remembered ? { url, token: remembered.token, ...(remembered.paired ? { paired: true } : {}) } : null;
+}
+
+/**
+ * A link on this page's own origin, or naming a core this device already
+ * holds a key for, goes through. Any other core could be anyone's: a crafted
+ * `?core=` would otherwise point this UI at a stranger who then sees every
+ * prompt typed here, so the user is asked first, and a missing asker refuses.
+ */
+async function followLink(endpoint: Endpoint, approve?: (url: string) => Promise<boolean>): Promise<boolean> {
+  if (endpoint.url === normalise(window.location.origin) || knownEndpoint(endpoint.url) !== null) return true;
+  return approve ? await approve(endpoint.url) : false;
+}
+
 /**
  * Where the core is, in order: a pairing link, then in the Tauri shell a core
  * this app was paired with and otherwise the one the shell started, then what
- * was stored by an earlier pairing, then the origin that served this page.
+ * was stored by an earlier pairing, then the origin that served this page. A
+ * link to an unknown core counts only once `approve` says yes.
  */
-export async function resolveEndpoint(preferLocal = false): Promise<Endpoint | null> {
-  const paired = takeFromQuery();
-  if (paired) return paired;
+export async function resolveEndpoint(
+  preferLocal = false,
+  approve?: (url: string) => Promise<boolean>
+): Promise<Endpoint | null> {
+  const linked = takeFromQuery();
+  if (linked && (await followLink(linked, approve))) return linked;
 
   if (insideTauri()) {
     const stored = readStoredEndpoint();

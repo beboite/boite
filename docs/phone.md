@@ -73,6 +73,15 @@ forgotten on the spot. A link opened twice, or after its time, is refused by
 name. The core token itself stays in `<dataDir>/core.json`, where the shell
 reads it, and travels nowhere.
 
+On a weak link the answer carrying the key can be lost after the core made it.
+The page therefore sends a `nonce` with the grant, 16 random bytes it picks once
+and keeps in memory, and its retry repeats both. The core keeps that exchange's
+answer until the grant's ten minutes run out or the key first says hello on its
+own, and hands the same key to a retry with the same nonce. Anyone else holding
+the link, without the nonce, is still refused. A nonce of another length than
+16 to 256 characters, or one sent with a token, is refused by name before the
+grant is spent, so a client never believes a retry is safe when it is not.
+
 A link carries a role. `device` is the default and the only one the QR code is
 drawn for: a phone, whose key says hello as `session` and reaches the list below.
 `owner` is for another computer of the owner's that drives a core running
@@ -111,9 +120,16 @@ The link carries `?grant=` alone, with no `core=`, because the page it opens is
 the one the core is serving: an absent `core` parameter means the origin of this
 page. `?core=<url>` is the other form, for a UI served from somewhere else and
 pointed at a core elsewhere, and `?token=` opens a page on a token one already
-holds. The UI strips all three from the address bar on the first load, stores
-the endpoint in `localStorage`, and never stores a grant: what it keeps is the
-session key that came back.
+holds. The UI strips all three from the address bar on the first load and
+never stores a grant: what it keeps is the session key that came back.
+
+A link never replaces the stored core before its target has answered a hello.
+When `core=` names a core that is neither this page's origin nor one this device
+already holds a key for, the page first asks whether to connect to that host.
+Anyone can send a link that points at a core they run, and that core would see
+every prompt typed afterwards. Cancel opens the stored core as before. A
+`core=` link to a core the device already knows reuses the key it holds for it
+and asks nothing.
 
 ## The app on the phone
 
@@ -172,7 +188,8 @@ Open the installed icon and pair there if the browser did not carry the session
 across. Installing a PWA and using Web Push require no Apple Developer account.
 
 `packages/ui/public/sw.js` caches the files for later opens. It is plain
-JavaScript that Vite copies to `dist/sw.js` untouched, and `lib/sw.ts` registers
+JavaScript that Vite copies to `dist/sw.js` with one change, the build id in
+its cache name, and `lib/sw.ts` registers
 it after the first paint, never before: the registration must not delay what the
 user sees. It registers only where it helps, which is the core's own http(s)
 origin. The Tauri shell loads the identical build from `tauri://`, where the
@@ -182,8 +199,14 @@ core behind it; both are skipped. A registration that fails is one
 
 ## What is cached, and what never is
 
-One cache, `boite-ui-v3`. Activation deletes older `boite-ui-` caches and leaves
-other applications' caches alone before the worker claims its clients.
+One cache per build, `boite-ui-v3-<build id>`. The build id is a hash of the
+file names under `dist/assets`, written into `dist/sw.js` before it is
+compressed (`packages/ui/vite.config.ts`). A core update therefore serves a
+different `sw.js`, the browser installs it, and activation deletes older
+`boite-ui-` caches, the previous build's hashed files with them. Other
+applications' caches are left alone. Before this, `sw.js` was the same file in
+every build, so no new worker ever installed and every update's chunks stayed
+in the one cache for good. A dev server serves the unstamped `boite-ui-v3`.
 
 | Request | Rule |
 |---|---|

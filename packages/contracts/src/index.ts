@@ -689,7 +689,7 @@ export type ToolDocument =
   /** `data` is base64 with no `data:` prefix. The core caps it before it is journalled. */
   | { kind: 'image'; mimeType: string; data: string; alt: string | null };
 
-export { IMAGE_MIME_TYPES, ATTACHMENT_MAX_BYTES, ATTACHMENTS_PER_TURN } from './attachment-limits.ts';
+export { IMAGE_MIME_TYPES, ATTACHMENT_MAX_BYTES, ATTACHMENTS_PER_TURN, ATTACHMENTS_TOTAL_MAX_BYTES, RPC_MAX_FRAME_BYTES } from './attachment-limits.ts';
 import type { ImageMimeType } from './attachment-limits.ts';
 export type { ImageMimeType } from './attachment-limits.ts';
 
@@ -1615,11 +1615,20 @@ export interface RpcMethods extends AgentsRpcMethods {
    * a pairing grant, exchanged here for a session whose token comes back in
    * `session` and is what this client says hello with from then on. One of the
    * two, never both.
+   *
+   * `nonce` goes with a grant: a random string of 16 to 256 characters the
+   * client picks once and repeats on every retry. When the answer carrying the
+   * session is lost, the same grant and nonce get the same session back until
+   * the grant would have expired or the session first says hello with its
+   * token. Without a nonce a grant is strictly one-shot. A nonce of another
+   * length, or one sent with a token, is refused with `InvalidParams` naming
+   * `nonce`, before the grant is spent.
    */
   hello: {
     params: {
       token?: string;
       grant?: string;
+      nonce?: string;
       protocolVersion: number;
       client: { name: string; version: string };
     };

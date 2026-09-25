@@ -50,6 +50,13 @@ else, and gets two things.
   other event and before any response, so the order on the wire stays the order
   of the turn.
 
+When a socket backs up (Bun's `send` returns -1), every frame is still queued
+except `message.delta`, which is dropped. On `drain` the core resends the text
+parts those deltas belonged to, one `message.part` each, and nothing else: a
+finished tool output in the same message never goes out twice. Deltas the bus
+still holds are dispatched before that resend, so they fold into the part
+instead of arriving after it as a second copy.
+
 ## What the UI asks for
 
 - `Store.open` writes subscribe, `threads.get`, `permissions.list` and
@@ -75,6 +82,22 @@ page is idle, so a PWA that goes offline later still has them in its cache.
 The service worker still asks the core for the app shell first, but waits
 2.5 s at most before serving the cached one; the late answer is stored for the
 next open.
+
+## Core startup
+
+`fflate`, the unzip library behind provider installs and the local speech
+runtime, is imported where it unzips. Evaluating it builds its Huffman tables,
+about 8 ms per core start measured on 2026-09-25, for code most starts never
+run. `packages/core/test/startup-imports.test.ts` fails if a static import
+brings it back.
+
+The core lists its providers twice before it listens (the registry loads, then
+the default accounts ask which ones are available), and again for every client
+that boots. Each listing looks up every candidate program on the PATH, with
+every PATHEXT extension on Windows. `packages/core/src/providers/which.ts`
+keeps each answer for two seconds, so a burst of listings scans the PATH once,
+and forgets them all on a providers reload, an install or an agent update.
+`packages/core/test/providers-which.test.ts` counts the lookups.
 
 ## Shell startup
 

@@ -202,6 +202,9 @@ export const strings = {
     prUnavailable: 'Pull request unavailable', manual: 'Connect with URL and token',
     filter: 'Filter machines', all: 'All machines',
     timeout: 'Machine did not answer within 12 seconds. Check its address and browser origins, then reconnect.',
+    linkTitle: 'Connect to {host}?',
+    linkBody: 'The link you opened points this page at a machine this device has never connected to. That machine will see everything you type here. Connect only if you made this link or trust who sent it. Cancel keeps your current machine.',
+    linkConfirm: 'Connect', linkCancel: 'Cancel',
     browserOrigins: 'Allowed browser origins',
     browserOriginsHint: 'For a browser or phone viewing several machines, add the origin that serves Boite on each remote machine. One exact http(s) origin per line. Desktop connections need no extra origin.',
     agentLinks: 'Agent links', agentLinksHint: 'Let agents on two connected owner machines find each other. Each core exchanges its public signing key and address. No owner token or private key is shared.',
@@ -813,6 +816,7 @@ export const strings = {
     attachFormat: '{name} is {type}, and an image must be one of {formats}.',
     attachTooLarge: '{name} is too big: a file may weigh {max} at most.',
     attachTooMany: 'A turn carries at most {max} files, so {name} was left out.',
+    attachTotalTooLarge: 'The files of one turn weigh {max} at most together, so {name} was left out.',
     attachNoImages: '{provider} takes no images: send the prompt without them.'
   },
 

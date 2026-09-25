@@ -1,14 +1,17 @@
 /*
- * The PWA's service worker. Plain JavaScript, copied to `dist/sw.js` as it is:
- * Vite never touches `public/`, so nothing here is bundled or transpiled.
+ * The PWA's service worker. Plain JavaScript, copied to `dist/sw.js` with one
+ * change: the build appends its own id to CACHE (`src/lib/worker-stamp.ts`).
+ * Nothing else here is bundled or transpiled.
  *
  * What it buys a phone that opened the pairing link once: the app shell paints
  * on the next open before the core has answered, and Vite's hashed files are
  * read from disk instead of the wire. What it must never touch: the RPC socket,
  * which is the only thing that carries live state.
  *
- * Bump CACHE whenever the strategy below changes. `activate` deletes older
- * Boite caches when a new worker takes over, leaving other apps alone.
+ * Every build is then a new worker, and `activate` deletes the older Boite
+ * caches when it takes over, the previous build's hashed files with them,
+ * leaving other apps alone. Bump the version whenever the strategy below
+ * changes, so a dev server's unstamped worker moves on too.
  */
 const CACHE = 'boite-ui-v3';
 const SHELL = '/';

@@ -1,6 +1,6 @@
 import { describe, expect, test, vi } from 'vitest';
-import { PROTOCOL_VERSION, RpcCloseCode, RpcErrorCode, type CoreInfo } from '@boite/contracts';
-import { RpcFailure, WsClient, rpcUrl, type SocketLike } from './client';
+import { PROTOCOL_VERSION, RPC_MAX_FRAME_BYTES, RpcCloseCode, RpcErrorCode, type CoreInfo } from '@boite/contracts';
+import { RpcFailure, WsClient, defaultBackoff, openDeadline, rpcUrl, type SocketLike } from './client';
 
 const CORE: CoreInfo = {
   version: '2.0.0-beta.1',
@@ -76,6 +76,69 @@ function connected(): { client: WsClient; socket: FakeSocket; urls: string[] } {
   return { client, socket: take(sockets, 0), urls };
 }
 
+describe('reconnect timing', () => {
+  test('the backoff doubles to 10 s with 20 % jitter either way', () => {
+    expect([0, 1, 2, 3, 4, 9].map((attempt) => defaultBackoff(attempt, () => 0.5))).toEqual([1000, 2000, 4000, 8000, 10_000, 10_000]);
+    expect(defaultBackoff(0, () => 0)).toBe(800);
+    expect(defaultBackoff(9, () => 1)).toBe(12_000);
+  });
+
+  test('an attempt gets 10 s, then 20 s, then 30 s to answer', async () => {
+    expect([0, 1, 2, 5].map(openDeadline)).toEqual([10_000, 20_000, 30_000, 30_000]);
+    vi.useFakeTimers();
+    const sockets: FakeSocket[] = [];
+    const client = new WsClient({ url: 'https://core.test', token: 'secret', backoff: () => 0, socketFactory: () => {
+      const socket = new FakeSocket(); sockets.push(socket); return socket;
+    } });
+    try {
+      const first = client.connect().catch((error: Error) => error.message);
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(await first).toBe('connection did not answer within 10 seconds');
+      await vi.advanceTimersByTimeAsync(1);
+      expect(sockets).toHaveLength(2);
+      await vi.advanceTimersByTimeAsync(19_000);
+      expect(take(sockets, 1).closed).toBe(false);
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(take(sockets, 1).closed).toBe(true);
+    } finally { client.close(); vi.useRealTimers(); }
+  });
+
+  test('offline, a remote client waits for the online event instead of retrying', async () => {
+    vi.useFakeTimers();
+    const online = vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false);
+    const sockets: FakeSocket[] = [];
+    const client = new WsClient({ url: 'https://core.test', token: 'secret', backoff: () => 1_000, socketFactory: () => {
+      const socket = new FakeSocket(); sockets.push(socket); return socket;
+    } });
+    try {
+      void client.connect().catch(() => undefined);
+      take(sockets, 0).close();
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(sockets).toHaveLength(1);
+      expect(client.state).toBe('connecting');
+
+      online.mockReturnValue(true);
+      void client.resume().catch(() => undefined);
+      expect(sockets).toHaveLength(2);
+    } finally { online.mockRestore(); client.close(); vi.useRealTimers(); }
+  });
+
+  test('offline, a loopback client keeps retrying: its core is on this machine', async () => {
+    vi.useFakeTimers();
+    const online = vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false);
+    const sockets: FakeSocket[] = [];
+    const client = new WsClient({ url: 'http://127.0.0.1:8777', token: 'secret', backoff: () => 1_000, socketFactory: () => {
+      const socket = new FakeSocket(); sockets.push(socket); return socket;
+    } });
+    try {
+      void client.connect().catch(() => undefined);
+      take(sockets, 0).close();
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(sockets).toHaveLength(2);
+    } finally { online.mockRestore(); client.close(); vi.useRealTimers(); }
+  });
+});
+
 describe('rpcUrl', () => {
   test('points at the RPC path over ws', () => {
     expect(rpcUrl('http://127.0.0.1:8777')).toBe('ws://127.0.0.1:8777/rpc');
@@ -84,7 +147,7 @@ describe('rpcUrl', () => {
 });
 
 describe('WsClient', () => {
-  test('a silent RPC expires without resending it or closing a healthy connection', async () => {
+  test('a silent RPC expires without resending it, and a probe the core answers keeps the connection', async () => {
     vi.useFakeTimers();
     const { client, socket } = connected();
     try {
@@ -96,16 +159,156 @@ describe('WsClient', () => {
       await vi.advanceTimersByTimeAsync(120_000);
       expect(failure).toBeInstanceOf(RpcFailure);
       expect((failure as Error).message).toContain('timed out');
-      expect(socket.sent.map(raw => JSON.parse(raw).method)).toEqual(['hello', 'turns.start']);
+      // Never resent; the timeout asks the socket whether anything is still there.
+      expect(socket.sent.map(raw => JSON.parse(raw).method)).toEqual(['hello', 'turns.start', 'hello']);
+      socket.receive({ id: socket.frame(2).id, result: { core: CORE, principal: 'owner' } });
+      await vi.advanceTimersByTimeAsync(20_000);
       expect(client.state).toBe('ready');
+      expect(socket.closed).toBe(false);
       await pending;
       // A late response cannot settle a subsequent request with another id.
       socket.receive({ id: socket.frame(1).id, result: {} });
       const next = client.call('projects.list', {});
-      socket.receive({ id: socket.frame(2).id, result: [] });
+      socket.receive({ id: socket.frame(3).id, result: [] });
       expect(await next).toEqual([]);
       expect(vi.getTimerCount()).toBe(0);
     } finally { client.close(); vi.useRealTimers(); }
+  });
+
+  test('a call that times out on a dead socket replaces the socket', async () => {
+    vi.useFakeTimers();
+    const sockets: FakeSocket[] = [];
+    const client = new WsClient({ url: 'http://127.0.0.1:8777', token: 'secret', backoff: () => 0, socketFactory: () => {
+      const socket = new FakeSocket(); sockets.push(socket); return socket;
+    } });
+    try {
+      void client.connect();
+      const first = take(sockets, 0);
+      first.open();
+      first.receive({ id: first.frame(0).id, result: { core: CORE, principal: 'owner' } });
+      await client.connect();
+      const pending = client.call('turns.start', { threadId: 'thread', prompt: 'once' }).catch((error: Error) => error.message);
+      await vi.advanceTimersByTimeAsync(120_000 + 15_000);
+      expect(await pending).toContain('timed out');
+      expect(first.closed).toBe(true);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(sockets).toHaveLength(2);
+      expect(client.state).toBe('connecting');
+    } finally { client.close(); vi.useRealTimers(); }
+  });
+
+  test('a remote socket that goes silent is probed, then replaced when nothing comes back', async () => {
+    vi.useFakeTimers();
+    const sockets: FakeSocket[] = [];
+    const states: string[] = [];
+    const client = new WsClient({ url: 'https://core.test', token: 'session', backoff: () => 1_000, socketFactory: () => {
+      const socket = new FakeSocket(); sockets.push(socket); return socket;
+    } });
+    client.onState((state) => states.push(state));
+    try {
+      void client.connect();
+      const first = take(sockets, 0);
+      first.open();
+      first.receive({ id: first.frame(0).id, result: { core: CORE, principal: 'session' } });
+      await client.connect();
+
+      await vi.advanceTimersByTimeAsync(25_000);
+      expect(first.sent.map(raw => JSON.parse(raw).method)).toEqual(['hello', 'hello']);
+      expect(client.state).toBe('ready');
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(first.closed).toBe(true);
+      expect(states).toEqual(['connecting', 'ready', 'connecting']);
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(sockets).toHaveLength(2);
+    } finally { client.close(); vi.useRealTimers(); }
+  });
+
+  test('a remote call whose one large answer takes 45 s to arrive keeps its socket and resolves', async () => {
+    vi.useFakeTimers();
+    const sockets: FakeSocket[] = [];
+    const client = new WsClient({ url: 'https://core.test', token: 'session', backoff: () => 1_000, socketFactory: () => {
+      const socket = new FakeSocket(); sockets.push(socket); return socket;
+    } });
+    try {
+      void client.connect();
+      const socket = take(sockets, 0);
+      socket.open();
+      socket.receive({ id: socket.frame(0).id, result: { core: CORE, principal: 'session' } });
+      await client.connect();
+      let outcome = '';
+      void client.call('threads.list', {}).then(() => { outcome = 'answered'; }, (error: Error) => { outcome = error.message; });
+
+      // Nothing arrives for 45 s: the answer is one frame still downloading.
+      await vi.advanceTimersByTimeAsync(45_000);
+      expect(socket.closed).toBe(false);
+      expect(client.state).toBe('ready');
+      expect(socket.sent.map(raw => JSON.parse(raw).method)).toEqual(['hello', 'threads.list']);
+      socket.receive({ id: socket.frame(1).id, result: [] });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(outcome).toBe('answered');
+      expect(sockets).toHaveLength(1);
+
+      // Idle again, the socket is probed as before.
+      await vi.advanceTimersByTimeAsync(25_000);
+      expect(socket.sent.map(raw => JSON.parse(raw).method)).toEqual(['hello', 'threads.list', 'hello']);
+    } finally { client.close(); vi.useRealTimers(); }
+  });
+
+  test('a half-open remote socket carrying a call is replaced once that call times out', async () => {
+    vi.useFakeTimers();
+    const sockets: FakeSocket[] = [];
+    const client = new WsClient({ url: 'https://core.test', token: 'session', backoff: () => 1_000, socketFactory: () => {
+      const socket = new FakeSocket(); sockets.push(socket); return socket;
+    } });
+    try {
+      void client.connect();
+      const first = take(sockets, 0);
+      first.open();
+      first.receive({ id: first.frame(0).id, result: { core: CORE, principal: 'session' } });
+      await client.connect();
+      let failure = '';
+      void client.call('threads.list', {}).catch((error: Error) => { failure = error.message; });
+
+      await vi.advanceTimersByTimeAsync(119_999);
+      expect(first.sent.map(raw => JSON.parse(raw).method)).toEqual(['hello', 'threads.list']);
+      expect(first.closed).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(failure).toContain('timed out');
+      expect(first.sent.map(raw => JSON.parse(raw).method)).toEqual(['hello', 'threads.list', 'hello']);
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(first.closed).toBe(true);
+      expect(client.state).toBe('connecting');
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(sockets).toHaveLength(2);
+    } finally { client.close(); vi.useRealTimers(); }
+  });
+
+  test('a remote socket that keeps receiving is never probed, and a loopback one never at all', async () => {
+    vi.useFakeTimers();
+    const run = async (url: string, chatty: boolean): Promise<string[]> => {
+      const sockets: FakeSocket[] = [];
+      const client = new WsClient({ url, token: 'secret', socketFactory: () => {
+        const socket = new FakeSocket(); sockets.push(socket); return socket;
+      } });
+      void client.connect();
+      const socket = take(sockets, 0);
+      socket.open();
+      socket.receive({ id: socket.frame(0).id, result: { core: CORE, principal: 'owner' } });
+      await client.connect();
+      for (let second = 0; second < 120; second += 1) {
+        if (chatty && second % 10 === 0) socket.receive({ method: 'core.log', params: { level: 'info', message: 'tick', at: second } });
+        await vi.advanceTimersByTimeAsync(1_000);
+      }
+      const methods = socket.sent.map(raw => JSON.parse(raw).method as string);
+      expect(socket.closed).toBe(false);
+      expect(sockets).toHaveLength(1);
+      client.close();
+      return methods;
+    };
+    try {
+      expect(await run('https://core.test', true)).toEqual(['hello']);
+      expect(await run('http://127.0.0.1:8777', false)).toEqual(['hello']);
+    } finally { vi.useRealTimers(); }
   });
 
   test('a synchronous send failure does not leave a pending request or timer', async () => {
@@ -121,28 +324,89 @@ describe('WsClient', () => {
     } finally { client.close(); vi.useRealTimers(); }
   });
 
+  test('a frame over the core limit is refused before it leaves, and the connection keeps working', async () => {
+    const { client, socket } = connected();
+    try {
+      socket.open();
+      socket.receive({ id: socket.frame(0).id, result: { core: CORE, principal: 'owner' } });
+      await client.connect();
+      const prompt = 'x'.repeat(RPC_MAX_FRAME_BYTES);
+      let failure: unknown;
+      await client.call('turns.start', { threadId: 'thread', prompt }).catch((error) => { failure = error; });
+      expect(failure).toBeInstanceOf(RpcFailure);
+      expect((failure as RpcFailure).code).toBe(RpcErrorCode.InvalidParams);
+      expect((failure as Error).message).toBe('turns.start is 16 MB, over the 16 MB the core reads in one frame');
+      expect(socket.sent).toHaveLength(1);
+      expect(client.state).toBe('ready');
+
+      const next = client.call('projects.list', {});
+      socket.receive({ id: socket.frame(1).id, result: [] });
+      expect(await next).toEqual([]);
+    } finally { client.close(); }
+  });
+
+  test('a close for a frame too big says so to every call it drops', async () => {
+    const { client, socket } = connected();
+    socket.open();
+    socket.receive({ id: socket.frame(0).id, result: { core: CORE, principal: 'owner' } });
+    await client.connect();
+    const pending = client.call('threads.list', {}).catch((error: Error) => error.message);
+    socket.close(1009);
+    expect(await pending).toBe('the core refused a frame over 16 MB and closed the connection');
+  });
+
   test('resuming replaces a half-open socket without replaying a pending prompt', async () => {
+    vi.useFakeTimers();
     const sockets: FakeSocket[] = [];
     const client = new WsClient({ url: 'https://core.test', token: 'session', socketFactory: () => {
       const socket = new FakeSocket(); sockets.push(socket); return socket;
     } });
+    try {
+      const connecting = client.connect();
+      const first = take(sockets, 0);
+      first.open();
+      first.receive({ id: first.frame(0).id, result: { core: CORE, principal: 'session' } });
+      await connecting;
+      const pending = client.call('turns.start', { threadId: 'thread', prompt: 'once' }).catch(error => error);
+      const resumed = client.resume();
+      // The probe gets nothing back within its deadline.
+      expect(first.sent.map(raw => JSON.parse(raw).method)).toEqual(['hello', 'turns.start', 'hello']);
+      await vi.advanceTimersByTimeAsync(4_000);
+      expect(first.closed).toBe(true);
+      const second = take(sockets, 1);
+      second.open();
+      second.receive({ id: second.frame(0).id, result: { core: CORE, principal: 'session' } });
+      await resumed;
+      expect(await pending).toBeInstanceOf(Error);
+      expect(second.sent.map(raw => JSON.parse(raw).method)).toEqual(['hello']);
+      client.close();
+      await client.resume();
+      expect(sockets).toHaveLength(2);
+    } finally { client.close(); vi.useRealTimers(); }
+  });
+
+  test('resuming on a socket that answers keeps it, and the call it carries', async () => {
+    const sockets: FakeSocket[] = [];
+    const states: string[] = [];
+    const client = new WsClient({ url: 'https://core.test', token: 'session', socketFactory: () => {
+      const socket = new FakeSocket(); sockets.push(socket); return socket;
+    } });
+    client.onState((state) => states.push(state));
     const connecting = client.connect();
     const first = take(sockets, 0);
     first.open();
     first.receive({ id: first.frame(0).id, result: { core: CORE, principal: 'session' } });
     await connecting;
-    const pending = client.call('turns.start', { threadId: 'thread', prompt: 'once' }).catch(error => error);
+    const pending = client.call('threads.compact', { threadId: 'thread' });
     const resumed = client.resume();
-    expect(first.closed).toBe(true);
-    const second = take(sockets, 1);
-    second.open();
-    second.receive({ id: second.frame(0).id, result: { core: CORE, principal: 'session' } });
+    first.receive({ id: first.frame(2).id, result: { core: CORE, principal: 'session' } });
     await resumed;
-    expect(await pending).toBeInstanceOf(Error);
-    expect(second.sent.map(raw => JSON.parse(raw).method)).toEqual(['hello']);
+    first.receive({ id: first.frame(1).id, result: { ok: true } });
+    expect(await pending).toEqual({ ok: true });
+    expect(first.closed).toBe(false);
+    expect(sockets).toHaveLength(1);
+    expect(states).toEqual(['connecting', 'ready']);
     client.close();
-    await client.resume();
-    expect(sockets).toHaveLength(2);
   });
   test('hello is the first frame, and it carries the token', async () => {
     const sockets: FakeSocket[] = [];
@@ -215,6 +479,44 @@ describe('WsClient', () => {
     second.open();
     expect(second.frame(0).params).toMatchObject({ token: 'minted' });
     expect(second.frame(0).params).not.toHaveProperty('grant');
+    client.close();
+  });
+
+  test('a grant hello whose answer is lost is retried with the same grant and nonce', async () => {
+    const sockets: FakeSocket[] = [];
+    const stored: { id: string; token: string }[] = [];
+    const client = new WsClient({
+      url: 'http://192.0.2.1:8777',
+      token: '',
+      grant: 'one-time',
+      onSession: (session) => stored.push(session),
+      socketFactory: () => {
+        const socket = new FakeSocket();
+        sockets.push(socket);
+        return socket;
+      },
+      backoff: () => 0
+    });
+    void client.connect().catch(() => undefined);
+    const first = take(sockets, 0);
+    first.open();
+    const nonce = first.frame(0).params?.['nonce'];
+    expect(nonce).toMatch(/^[0-9a-f]{32}$/);
+    // The socket dies before the answer carrying the session arrives.
+    first.close();
+    await new Promise((resolve) => setTimeout(resolve, 5));
+
+    const second = take(sockets, 1);
+    second.open();
+    expect(second.frame(0).params).toMatchObject({ grant: 'one-time', nonce });
+    second.receive({
+      jsonrpc: '2.0',
+      id: second.frame(0).id,
+      result: { core: CORE, principal: 'session', session: { id: 'ses-1', token: 'minted' } }
+    });
+    await Promise.resolve();
+    expect(stored).toEqual([{ id: 'ses-1', token: 'minted' }]);
+    expect(client.state).toBe('ready');
     client.close();
   });
 

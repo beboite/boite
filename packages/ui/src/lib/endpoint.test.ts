@@ -29,34 +29,99 @@ describe('resolveEndpoint', () => {
     at('/');
   });
 
-  test('a pairing link wins, is stored, and leaves the URL clean', async () => {
+  test('a pairing link the user accepts wins, is stored by nobody yet, and leaves the URL clean', async () => {
     at('/?core=http://192.168.1.20:8777&token=abc123&keep=1');
+    const asked: string[] = [];
 
-    const endpoint = await resolveEndpoint();
+    const endpoint = await resolveEndpoint(false, async (url) => {
+      asked.push(url);
+      return true;
+    });
 
-    expect(endpoint).toEqual({ url: 'http://192.168.1.20:8777', token: 'abc123' });
-    expect(readStoredEndpoint()).toEqual({ url: 'http://192.168.1.20:8777', token: 'abc123' });
+    expect(asked).toEqual(['http://192.168.1.20:8777']);
+    expect(endpoint).toEqual({ url: 'http://192.168.1.20:8777', token: 'abc123', fromLink: true });
+    // The store writes it once the core has answered a hello.
+    expect(readStoredEndpoint()).toBeNull();
     expect(window.location.search).toBe('?keep=1');
   });
 
-  test('the core pairing link carries the token alone, on its own origin', async () => {
+  test('the core pairing link carries the token alone, on its own origin, and asks nothing', async () => {
     at('/?token=abc123');
 
     const endpoint = await resolveEndpoint();
 
-    expect(endpoint).toEqual({ url: window.location.origin, token: 'abc123' });
-    expect(readStoredEndpoint()).toEqual({ url: window.location.origin, token: 'abc123' });
+    expect(endpoint).toEqual({ url: window.location.origin, token: 'abc123', fromLink: true });
+    expect(readStoredEndpoint()).toBeNull();
     expect(window.location.search).toBe('');
   });
 
-  test('a grant link is carried in memory, stored without the grant, and stripped from the URL', async () => {
+  test('a grant link is carried in memory, never stored, and stripped from the URL', async () => {
     at('/?grant=onetime');
 
     const endpoint = await resolveEndpoint();
 
-    expect(endpoint).toEqual({ url: window.location.origin, token: '', grant: 'onetime' });
-    expect(readStoredEndpoint()).toEqual({ url: window.location.origin, token: '' });
+    expect(endpoint).toEqual({ url: window.location.origin, token: '', grant: 'onetime', fromLink: true });
+    expect(readStoredEndpoint()).toBeNull();
     expect(window.location.search).toBe('');
+  });
+
+  test('a core link alone to an unknown core keeps the paired core stored and in use when refused', async () => {
+    storeEndpoint({ url: 'https://my-core.example', token: 'session-key', paired: true });
+    at('/?core=https://other.example');
+
+    const endpoint = await resolveEndpoint(false, async () => false);
+
+    expect(endpoint).toEqual({ url: 'https://my-core.example', token: 'session-key', paired: true });
+    expect(readStoredEndpoint()).toEqual({ url: 'https://my-core.example', token: 'session-key', paired: true });
+    expect(window.location.search).toBe('');
+  });
+
+  test('with nobody to ask, a link to an unknown core is refused', async () => {
+    storeEndpoint({ url: 'https://my-core.example', token: 'session-key', paired: true });
+    at('/?core=https://other.example&grant=minted-there');
+
+    await expect(resolveEndpoint()).resolves.toEqual({ url: 'https://my-core.example', token: 'session-key', paired: true });
+    expect(readStoredEndpoint()).toEqual({ url: 'https://my-core.example', token: 'session-key', paired: true });
+  });
+
+  test('a grant link to an unknown core is asked about, and carries its grant once accepted', async () => {
+    at('/?core=https://other.example&grant=minted-there');
+    const asked: string[] = [];
+
+    const endpoint = await resolveEndpoint(false, async (url) => {
+      asked.push(url);
+      return true;
+    });
+
+    expect(asked).toEqual(['https://other.example']);
+    expect(endpoint).toEqual({ url: 'https://other.example', token: '', grant: 'minted-there', fromLink: true });
+    expect(readStoredEndpoint()).toBeNull();
+  });
+
+  test('a core link alone to a core this device knows reopens it with its key, unasked', async () => {
+    storeEndpoint({ url: 'https://my-core.example', token: 'session-key', paired: true });
+    upsertEnvironment({ url: 'https://server.example', token: 'server-key', paired: true });
+    const ask = async (): Promise<boolean> => {
+      throw new Error('a known core is not asked about');
+    };
+
+    at('/?core=https://my-core.example/');
+    await expect(resolveEndpoint(false, ask)).resolves.toEqual({
+      url: 'https://my-core.example',
+      token: 'session-key',
+      paired: true,
+      fromLink: true
+    });
+
+    at('/?core=https://server.example');
+    await expect(resolveEndpoint(false, ask)).resolves.toEqual({
+      url: 'https://server.example',
+      token: 'server-key',
+      paired: true,
+      fromLink: true
+    });
+    // Following a link wrote nothing: the stored core is still the first one.
+    expect(readStoredEndpoint()).toEqual({ url: 'https://my-core.example', token: 'session-key', paired: true });
   });
 
   test('what a pairing link stored is used next time', async () => {

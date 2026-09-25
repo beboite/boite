@@ -112,6 +112,10 @@ test('two real cores pair, route turns independently, reconnect and survive a re
     const ta = await create(a, first.dataDir, 'Primary project');
     const tb = await create(b, second.dataDir, 'Remote project');
     await page.navigate(`${url}/?core=${encodeURIComponent(first.url)}&token=${encodeURIComponent(first.token)}`);
+    // A link to a core this page never met is asked about before anything connects.
+    await page.waitFor(`document.querySelector('${id('confirm-ok')}')`);
+    await capture('link-confirm.png');
+    await page.click(id('confirm-ok'));
     await page.waitFor(`document.querySelector('[data-thread-id="${ta.id}"]')`);
     await page.click(id('nav-settings'));
     await page.click(id('settings-tab-machines'));

@@ -98,8 +98,10 @@ in-memory fake.
   thread instead, which is the page most captures and e2e tests look at.
 - `?grant=<grant>` is a pairing link: the page exchanges it once for a session
   key of its own and stores that. `?token=<token>` opens the page on a token
-  one already holds, and `?core=<url>` points it somewhere else. All three are
-  stripped from the address bar; the grant is never stored.
+  one already holds, and `?core=<url>` points it somewhere else, after asking
+  when that core is new to the device. All three are stripped from the address
+  bar; the grant is never stored, and the endpoint is stored only once it has
+  answered a hello.
 
 The service worker never registers under `?fake=1`, so a rebuild is always what
 a reload shows.
@@ -466,7 +468,11 @@ compaction. `tests/e2e/chat-context.test.ts` covers these interactions.
 ### File attachments
 
 Desktop and paired phones can pick, paste or drop files into the composer.
-A turn accepts eight attachments, each at most 5 MB. PNG, JPEG, GIF and WebP
+A turn accepts eight attachments, each at most 5 MB and 10 MB together. The
+total keeps the `turns.start` frame, where they travel as base64, under the
+16 MB the core reads in one frame (`RPC_MAX_FRAME_BYTES`, the websocket's
+`maxPayloadLength`); a larger frame would close the socket before any handler
+ran, so the UI client refuses one before sending it. PNG, JPEG, GIF and WebP
 use the provider's native image input. Other formats, including PDF, text,
 source files and archives, use `kind: 'file'` and do not require image support.
 The core validates and journals their base64 bytes, then writes a sanitized,

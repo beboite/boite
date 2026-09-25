@@ -29,8 +29,8 @@ const KEYBOARD_SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui-keyboard.png
 const RETITLE_SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui-retitle.png');
 const IMPORT_SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui-import.png');
 const EXPERIMENTS_SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui-experiments.png');
-/** The one name `public/sw.js` opens; every other cache is deleted on activate. */
-const UI_CACHE = 'boite-ui-v3';
+/** The cache `public/sw.js` opens, before the build appends its id; every other cache is deleted on activate. */
+const UI_CACHE_PREFIX = 'boite-ui-v3-';
 /** What the echo provider's `[tool-stream]` directive types, one piece at a time. */
 const STREAMED_TOOL_INPUT = '{"command":"echo streamed","description":"a streamed input"}';
 
@@ -808,14 +808,17 @@ test(
     // controlling this page long before the suite reaches this test.
     await page.waitFor('navigator.serviceWorker.controller !== null', RECONNECT_TIMEOUT_MS);
     await page.evaluate<null>('navigator.serviceWorker.ready.then(() => null)');
-    expect(await page.evaluate<string[]>('caches.keys()')).toEqual([UI_CACHE]);
+    const cacheNames = await page.evaluate<string[]>('caches.keys()');
+    expect(cacheNames).toHaveLength(1);
+    expect(cacheNames[0]!.startsWith(UI_CACHE_PREFIX)).toBe(true);
+    const uiCache = cacheNames[0]!;
 
     // The hashed files of the first load were fetched before the worker took
     // control, so they only reach the cache on the load after it: which is
     // exactly the phone that opens Boite a second time.
     await page.navigate(`${core.url}/`);
     await page.waitFor(`document.querySelector('[data-testid=status-connection]')?.dataset.state === 'ready'`, RECONNECT_TIMEOUT_MS);
-    const cachedPaths = `caches.open(${JSON.stringify(UI_CACHE)})
+    const cachedPaths = `caches.open(${JSON.stringify(uiCache)})
       .then((cache) => cache.keys())
       .then((keys) => keys.map((request) => new URL(request.url).pathname))`;
     await page.waitFor(`${cachedPaths}.then((paths) => paths.some((path) => path.startsWith('/assets/')))`, 30_000);

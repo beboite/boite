@@ -1,5 +1,5 @@
 import type { RpcEvents, ThreadId } from '@boite/contracts';
-import { FILE_ROUTE, RPC_PATH, RpcCloseCode } from '@boite/contracts';
+import { FILE_ROUTE, RPC_MAX_FRAME_BYTES, RPC_PATH, RpcCloseCode } from '@boite/contracts';
 import { existsSync } from 'node:fs';
 import { hostname, networkInterfaces } from 'node:os';
 import { basename, dirname, join, normalize, resolve, sep } from 'node:path';
@@ -14,6 +14,23 @@ import { handleFrame } from './server/frame.ts';
 export { ServerConnection } from './server/connection.ts';
 
 const DEFAULT_HELLO_TIMEOUT_MS = 5000;
+/** A hello is a few hundred bytes; nothing larger is parsed from a socket nobody has authenticated. */
+const PREAUTH_FRAME_MAX_BYTES = 64 * 1024;
+/**
+ * Sockets from other machines waiting for their hello at once. A real client
+ * spends milliseconds there, so this only bounds a peer opening them by the
+ * thousand. The owner's own machine is never counted, so no peer can lock the
+ * shell or an agent out of the core by holding every place.
+ */
+const PREAUTH_SOCKETS_MAX = 32;
+/** The same bound per LAN address, so one host cannot hold every place from the others. */
+const PREAUTH_SOCKETS_PER_ADDRESS = 8;
+/**
+ * Seconds an HTTP connection may sit without a byte either way. No route here
+ * holds a request open: the coordination POST answers at once, and a ticketed
+ * file a paused video stops reading is fetched again by `Range`.
+ */
+const HTTP_IDLE_TIMEOUT_S = 60;
 
 /**
  * The UI build. `packages/core/src` and `packages/core/dist` are the same depth,
@@ -88,6 +105,44 @@ export function isLoopbackHost(header: string | null): boolean {
   return name === '127.0.0.1' || name === 'localhost' || name === '::1';
 }
 
+/** The peer address `Server.requestIP` gives, IPv4-mapped IPv6 included. */
+export function isLoopbackAddress(address: string | null): boolean {
+  if (address === null) return false;
+  const bare = address.toLowerCase().replace(/^::ffff:/, '');
+  return bare === '::1' || /^127\.\d+\.\d+\.\d+$/.test(bare);
+}
+
+/**
+ * What a socket waiting for hello is counted under: null for the owner's own
+ * machine, which is never counted, else the peer address. The address comes
+ * from the TCP connection and cannot be forged; a local tunnel or proxy
+ * connects from loopback too but forwards a public `Host`, so its peers are
+ * counted, all under the one loopback address.
+ */
+export function preauthPeer(address: string | null, host: string | null): string | null {
+  if (isLoopbackAddress(address) && isLoopbackHost(host)) return null;
+  return address ?? 'unknown';
+}
+
+/**
+ * Why a socket from `peer` may not wait for its hello beside the `waiting`
+ * ones, or null when it may. Peers behind a local tunnel share the loopback
+ * address, which says nothing about who they are, so only the total bounds them.
+ */
+export function preauthRefusal(waiting: Iterable<string>, peer: string): string | null {
+  let total = 0;
+  let same = 0;
+  for (const other of waiting) {
+    total += 1;
+    if (other === peer) same += 1;
+  }
+  if (total >= PREAUTH_SOCKETS_MAX) return `${total} sockets from other machines are already waiting for their hello`;
+  if (!isLoopbackAddress(peer) && same >= PREAUTH_SOCKETS_PER_ADDRESS) {
+    return `${same} sockets from ${peer} are already waiting for their hello`;
+  }
+  return null;
+}
+
 const IMMUTABLE_FOR_A_YEAR = 'public, max-age=31536000, immutable';
 
 /**
@@ -102,11 +157,20 @@ const IMMUTABLE_FOR_A_YEAR = 'public, max-age=31536000, immutable';
 function cacheHeaders(pathname: string): Record<string, string> {
   if (pathname.startsWith('/assets/')) return { 'cache-control': IMMUTABLE_FOR_A_YEAR };
   if (pathname === '/sw.js') return { 'cache-control': 'no-cache', 'service-worker-allowed': '/' };
-  if (pathname === '/' || pathname === '/index.html' || pathname === '/manifest.webmanifest') {
-    return { 'cache-control': 'no-cache' };
-  }
+  if (pathname === '/' || pathname === '/index.html') return { 'cache-control': 'no-cache', ...NO_FOREIGN_FRAMES };
+  if (pathname === '/manifest.webmanifest') return { 'cache-control': 'no-cache' };
   return {};
 }
+
+/**
+ * The page is the owner's whole UI, so no other site may frame it and lay a
+ * decoy over Allow or Revoke. Ticketed files keep no such header: the panel
+ * frames them, from the same origin in a browser.
+ */
+const NO_FOREIGN_FRAMES = {
+  'content-security-policy': "frame-ancestors 'self'",
+  'x-frame-options': 'SAMEORIGIN',
+} as const;
 
 function staticFile(pathname: string): string | null {
   if (!existsSync(UI_DIST)) return null;
@@ -209,6 +273,11 @@ export function startServer(options: ServerOptions): RunningServer {
   const helloTimeoutMs = options.helloTimeoutMs ?? envTimeout() ?? DEFAULT_HELLO_TIMEOUT_MS;
   const connections = new Set<ServerConnection>();
   const helloTimers = new Map<ServerConnection, ReturnType<typeof setTimeout>>();
+  /** The counted peer of each open socket from another machine, until it closes. */
+  const peers = new Map<ServerConnection, string>();
+  function* waitingPeers(): Generator<string> {
+    for (const [connection, peer] of peers) if (!connection.authenticated) yield peer;
+  }
   const frames = new Set<Promise<void>>();
   const peerRequests = new Set<Promise<Response>>();
   let stopping = false;
@@ -216,7 +285,8 @@ export function startServer(options: ServerOptions): RunningServer {
   const server = Bun.serve<SocketData>({
     hostname: host,
     port: options.port ?? 0,
-    idleTimeout: 0,
+    // HTTP only: the websocket block below keeps Bun's own 120 s and its pings.
+    idleTimeout: HTTP_IDLE_TIMEOUT_S,
 
     fetch(request, self) {
       if (stopping) return new Response('core stopping', { status: 503 });
@@ -244,15 +314,21 @@ export function startServer(options: ServerOptions): RunningServer {
           core.log('warn', `refused a websocket from origin ${origin ?? '(none)'}`);
           return new Response('forbidden origin', { status: 403 });
         }
+        const peer = preauthPeer(self.requestIP(request)?.address ?? null, request.headers.get('host'));
+        const refusal = peer === null ? null : preauthRefusal(waitingPeers(), peer);
+        if (refusal !== null) {
+          core.log('warn', `refused a websocket: ${refusal}`);
+          return new Response('too many connections waiting for hello', { status: 503 });
+        }
         const connection = new ServerConnection(core, !isLoopbackHost(request.headers.get('host')));
-        if (self.upgrade(request, { data: { connection } })) return undefined;
+        if (self.upgrade(request, { data: { connection, peer } })) return undefined;
         return new Response('expected a websocket upgrade', { status: 400 });
       }
 
       const file = staticFile(url.pathname);
       if (file !== null) return staticResponse(file, url.pathname, request.headers.get('accept-encoding'));
       if (url.pathname === '/') {
-        return new Response(PLACEHOLDER_HTML, { headers: { 'content-type': 'text/html; charset=utf-8' } });
+        return new Response(PLACEHOLDER_HTML, { headers: { 'content-type': 'text/html; charset=utf-8', ...NO_FOREIGN_FRAMES } });
       }
       return new Response('not found', { status: 404 });
     },
@@ -266,11 +342,16 @@ export function startServer(options: ServerOptions): RunningServer {
       // (`ServerConnection.sendEvent`). Whether a frame is deflated at all is
       // the connection's call, in `ServerConnection.write`.
       perMessageDeflate: true,
+      // Bun closes the socket on a larger frame before any handler sees it.
+      // The contract derives the attachment total of a turn from this number,
+      // and the UI refuses a larger frame before sending it.
+      maxPayloadLength: RPC_MAX_FRAME_BYTES,
 
       open(socket) {
         const connection = socket.data.connection;
         connection.attach(socket);
         connections.add(connection);
+        if (socket.data.peer !== null) peers.set(connection, socket.data.peer);
         helloTimers.set(connection, setTimeout(() => {
           helloTimers.delete(connection);
           if (connection.authenticated) return;
@@ -280,6 +361,11 @@ export function startServer(options: ServerOptions): RunningServer {
 
       message(socket, raw) {
         if (stopping) return;
+        const connection = socket.data.connection;
+        if (!connection.authenticated && raw.length > PREAUTH_FRAME_MAX_BYTES) {
+          connection.close(RpcCloseCode.Unauthorized, 'hello frame too large');
+          return;
+        }
         const frame = handleFrame(core, socket.data.connection, typeof raw === 'string' ? raw : raw.toString());
         frames.add(frame);
         void frame.catch((error: unknown) => core.log('error', messageOf(error))).finally(() => frames.delete(frame));
@@ -292,6 +378,7 @@ export function startServer(options: ServerOptions): RunningServer {
         clearTimeout(helloTimers.get(socket.data.connection));
         helloTimers.delete(socket.data.connection);
         connections.delete(socket.data.connection);
+        peers.delete(socket.data.connection);
       },
     },
   });
@@ -354,6 +441,7 @@ export function startServer(options: ServerOptions): RunningServer {
       helloTimers.clear();
       for (const connection of connections) connection.close(1001, 'core stopping');
       connections.clear();
+      peers.clear();
       // Bun 1.3.11 never resolves server.stop() once a socket has been upgraded,
       // so the listener is closed without waiting on that promise.
       void server.stop(true);

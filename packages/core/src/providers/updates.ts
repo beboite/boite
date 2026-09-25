@@ -463,6 +463,7 @@ export class HarnessUpdates {
       });
       // A new release may list other models, and the path may have moved.
       forgetProbes({ providerId: id });
+      forgetWhich();
       this.core.bus.emit('providers.updated', this.core.providers.list());
     } catch (error) {
       this.entries.set(id, { ...before, state: 'failed', message: error instanceof Error ? error.message : String(error), checkedAt: Date.now() });

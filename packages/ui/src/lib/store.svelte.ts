@@ -91,6 +91,7 @@ import { work, type Profile } from './work-prefs.svelte';
 import { onboardingSeen } from './onboarding';
 import { rightPanel, type BoundPanel } from './right-panel.svelte';
 import { strings } from './strings';
+import { confirm } from './confirm.svelte';
 import { DEFAULT_MODEL_NAMES, INITIAL_MODEL_DEFAULTS, readModelDefaults, writeModelDefaults, resolveModelDefault, type ModelDefaults } from './model-defaults';
 import { FAVORITES_KEY, isNamedModel, readFavorites, type FavoriteModel } from './model-order';
 
@@ -149,6 +150,23 @@ export const UI_VERSION = '2.0.0-beta.1';
 
 function observable(client: Client): client is ObservableClient {
   return 'onState' in client;
+}
+
+/** A link names a core this device never met: the user says whether to go there. */
+function askToFollowLink(url: string): Promise<boolean> {
+  let host = url;
+  try {
+    host = new URL(url).host;
+  } catch {
+    /* the raw text, then */
+  }
+  return confirm.ask({
+    title: strings.machines.linkTitle.replace('{host}', host),
+    body: strings.machines.linkBody,
+    confirmLabel: strings.machines.linkConfirm,
+    cancelLabel: strings.machines.linkCancel,
+    danger: true
+  });
 }
 
 /** What the summaries say about every managed install, as one map. */
@@ -1026,12 +1044,24 @@ export class Store {
 
   async connectEndpoint(endpoint: Endpoint): Promise<void> {
     this.#attachEndpoint(endpoint, false);
-    let timeout: ReturnType<typeof setTimeout> | undefined;
+    const client = this.#client;
+    let timedOut = false;
+    // Only a handshake that never finished is given up on. Once the machine
+    // said hello, a slow link still loading the lists is waited for: closing
+    // it there dropped a working machine for good.
+    const timeout = setTimeout(() => {
+      if (client === null || client.state === 'ready') return;
+      timedOut = true;
+      client.close();
+    }, 12_000);
     try {
-      await Promise.race([this.connect(), new Promise<void>(resolve => {
-        timeout = setTimeout(() => { this.error = strings.machines.timeout; this.#client?.close(); resolve(); }, 12_000);
-      })]);
-    } finally { clearTimeout(timeout); this.booted = true; }
+      await this.connect();
+    } finally {
+      clearTimeout(timeout);
+      // Set last: the calls the close dropped report "client closed" first.
+      if (timedOut) this.error = strings.machines.timeout;
+      this.booted = true;
+    }
   }
 
   /** Picks the transport, connects, loads everything the UI opens on. */
@@ -1068,7 +1098,7 @@ export class Store {
             this.environments = refreshLocalEnvironment(local);
           }
         }
-        const endpoint = await resolveEndpoint(preferLocal);
+        const endpoint = await resolveEndpoint(preferLocal, askToFollowLink);
         if (!endpoint) {
           this.connection = 'closed';
           this.booted = true;
@@ -1076,6 +1106,9 @@ export class Store {
         }
         this.machineId = endpoint.url;
         this.#attachEndpoint(endpoint);
+        // A grant link is stored by `onSession`. Any other link becomes the
+        // stored core only once it has answered, never before.
+        if (endpoint.fromLink && endpoint.grant === undefined) this.#rememberOnceReady(endpoint);
       }
       const opens = this.#openGeneration;
       await this.connect();
@@ -1106,6 +1139,17 @@ export class Store {
     else if (name === 'tasks') panel.openTasks();
     else if (name === 'agents') panel.open('agents');
     else if (name === 'trace') panel.open('trace');
+  }
+
+  #rememberOnceReady(endpoint: Endpoint): void {
+    const client = this.#client;
+    if (client === null || !observable(client)) return;
+    const off = client.onState((state) => {
+      if (state !== 'ready') return;
+      off();
+      storeEndpoint({ url: endpoint.url, token: endpoint.token, ...(endpoint.paired ? { paired: true } : {}) });
+    });
+    this.#off.push(off);
   }
 
   #attachEndpoint(endpoint: Endpoint, rememberActive = true): void {

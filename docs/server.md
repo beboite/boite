@@ -165,6 +165,19 @@ a fixed port:
 There is no TLS on the socket. Never bind a public address: the key a pairing
 link becomes travels in the first frame, and `ws://` carries it in the clear.
 
+Anything on that network can still knock, so the core bounds what an
+unauthenticated peer costs it. A socket gets 5 seconds to say hello, and a
+frame over 64 KB before hello closes it unread. At most 32 sockets from other
+machines may wait for their hello at once, and 8 from any one LAN address; the
+next upgrade gets a 503. The address is the TCP peer's, so it cannot be forged.
+A socket from this machine that also dialled a loopback name is never counted,
+so a flood cannot lock the owner's shell or agents out. Peers behind a tunnel on
+this machine arrive from loopback with a public `Host`: they are counted, under
+the 32 only. An HTTP connection idle for
+60 seconds is closed. An authenticated socket reads frames up to 16 MB, the
+limit the attachments of one turn are sized for. The UI page is served with
+`frame-ancestors 'self'`, so no other site can frame it.
+
 A systemd user unit keeps it running, with `loginctl enable-linger <account>` so
 it starts at boot without a login:
 

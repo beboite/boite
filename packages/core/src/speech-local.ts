@@ -1,7 +1,6 @@
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, openSync, closeSync, writeSync, renameSync, rmSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join, basename } from 'node:path';
-import { unzipSync } from 'fflate';
 import type { Core } from './core.ts';
 import { refused } from './errors.ts';
 import { freeBytesAt } from './providers/install.ts';
@@ -213,6 +212,8 @@ export class SpeechLocal {
       const staging = join(this.root, 'runtime-staging');
       try {
         await this.download(RUNTIME, archive, signal);
+        // Loaded on install only, like the provider installer's unzip.
+        const { unzipSync } = await import('fflate');
         const files = unzipSync(new Uint8Array(await Bun.file(archive).arrayBuffer()));
         rmSync(staging, { recursive: true, force: true });
         mkdirSync(staging, { recursive: true });
