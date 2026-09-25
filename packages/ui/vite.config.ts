@@ -89,7 +89,8 @@ function dropFakeClient(): Plugin {
     name: 'boite-drop-fake-client',
     apply: 'build',
     configResolved(config) {
-      dev = config.define?.['import.meta.env.DEV'] === 'true';
+      // A build under NODE_ENV=test (bun test runs one in tests/e2e/ui.test.ts) is a dev build too.
+      dev = config.define?.['import.meta.env.DEV'] === 'true' || config.env.DEV === true;
     },
     generateBundle(_options, bundle) {
       if (dev) return;
