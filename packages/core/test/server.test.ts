@@ -76,6 +76,80 @@ describe('server', () => {
     connection.sendEvent('message.delta', delta);
     expect(closed).toEqual([1013]);
   });
+  test('catch-up resends only the part whose deltas were dropped, and only once', () => {
+    const journal = harness.core.journal;
+    const tool = { type: 'tool' as const, toolId: 'tool_big', name: 'Read', input: {}, output: 'x'.repeat(200_000), status: 'ok' as const };
+    journal.putMessage({ id: 'msg_parts', threadId: 'thr_parts', turnId: 'turn_parts', role: 'assistant',
+      state: 'streaming', createdAt: Date.now(), parts: [tool, { type: 'text', text: '' }] });
+    const writes: { method: string; params: { partIndex?: number; part?: { text?: string } } }[] = [];
+    let result = -1;
+    const connection = new ServerConnection(harness.core);
+    connection.attach({ send: (frame: string) => { writes.push(JSON.parse(frame)); return result; },
+      close: () => undefined } as unknown as Parameters<ServerConnection['attach']>[0]);
+    const delta = { threadId: 'thr_parts', messageId: 'msg_parts', partIndex: 1, text: 'one' };
+    journal.appendDelta(delta.threadId, delta.messageId, 1, delta.text);
+    connection.sendEvent('message.delta', delta);
+    journal.appendDelta(delta.threadId, delta.messageId, 1, ' two');
+    connection.sendEvent('message.delta', { ...delta, text: ' two' });
+    expect(writes).toHaveLength(1);
+
+    // Still congested: the part goes out queued, and a later drain has nothing new to resend.
+    connection.drain();
+    expect(writes.slice(1).map((frame) => [frame.method, frame.params.partIndex])).toEqual([['message.part', 1]]);
+    connection.drain();
+    expect(writes).toHaveLength(2);
+
+    // Congested again, a dropped delta brings the part back once, never the tool output before it.
+    journal.appendDelta(delta.threadId, delta.messageId, 1, ' three');
+    connection.sendEvent('message.delta', { ...delta, text: ' three' });
+    journal.appendDelta(delta.threadId, delta.messageId, 1, ' four');
+    connection.sendEvent('message.delta', { ...delta, text: ' four' });
+    expect(writes).toHaveLength(3);
+    result = 20;
+    connection.drain();
+    expect(writes.slice(3).map((frame) => [frame.method, frame.params.partIndex])).toEqual([['message.part', 1]]);
+    expect(writes[3]?.params.part?.text).toBe('one two three four');
+    connection.drain();
+    expect(writes).toHaveLength(4);
+  });
+  test('recovering from backpressure never sends a delta the resent part already holds', () => {
+    const journal = harness.core.journal;
+    const bus = harness.core.bus;
+    journal.putMessage({ id: 'msg_dup', threadId: 'thr_dup', turnId: 'turn_dup', role: 'assistant',
+      state: 'streaming', createdAt: Date.now(), parts: [] });
+    const frames: { method: string; params: { partIndex: number; text?: string; part?: { text: string } } }[] = [];
+    let result = -1;
+    const connection = new ServerConnection(harness.core);
+    connection.attach({ send: (frame: string) => { frames.push(JSON.parse(frame)); return result; },
+      close: () => undefined } as unknown as Parameters<ServerConnection['attach']>[0]);
+    const off = bus.onAny((name, payload) => connection.sendEvent(name, payload));
+    // The same two buffers threads.ts feeds for every delta.
+    const stream = (text: string) => {
+      journal.appendDelta('thr_dup', 'msg_dup', 0, text);
+      bus.emit('message.delta', { threadId: 'thr_dup', messageId: 'msg_dup', partIndex: 0, text });
+    };
+    try {
+      stream('alpha ');
+      bus.flush();
+      stream('beta ');
+      bus.flush();
+      // Still inside the bus window when the socket drains.
+      stream('gamma ');
+      result = 20;
+      connection.drain();
+      bus.flush();
+    } finally {
+      off();
+    }
+    let shown = '';
+    for (const frame of frames) {
+      if (frame.method === 'message.delta') shown += frame.params.text ?? '';
+      if (frame.method === 'message.part') shown = frame.params.part?.text ?? '';
+    }
+    const stored = journal.getMessage('msg_dup')?.parts[0];
+    expect(stored?.type === 'text' ? stored.text : null).toBe('alpha beta gamma ');
+    expect(shown).toBe('alpha beta gamma ');
+  });
   test('a valid token with an incompatible protocol closes 4010', async () => {
     const socket = rawSocket();
     await opened(socket);

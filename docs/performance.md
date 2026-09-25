@@ -50,6 +50,13 @@ else, and gets two things.
   other event and before any response, so the order on the wire stays the order
   of the turn.
 
+When a socket backs up (Bun's `send` returns -1), every frame is still queued
+except `message.delta`, which is dropped. On `drain` the core resends the text
+parts those deltas belonged to, one `message.part` each, and nothing else: a
+finished tool output in the same message never goes out twice. Deltas the bus
+still holds are dispatched before that resend, so they fold into the part
+instead of arriving after it as a second copy.
+
 ## What the UI asks for
 
 - `Store.open` writes subscribe, `threads.get`, `permissions.list` and
