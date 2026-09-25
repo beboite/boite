@@ -6,6 +6,7 @@
  */
 
 import type { KeybindingCommand } from '@boite/contracts';
+import { archiveThread } from './archive';
 import { experimentOn } from './experiments.svelte';
 import { openTour } from './onboarding.svelte';
 import type { PaletteItem } from './palette';
@@ -155,7 +156,7 @@ export function runCommand(store: Store, id: string, inShell: boolean): void {
     case 'theme-dark': setTheme('dark'); break;
     case 'theme-light': setTheme('light'); break;
     case 'theme-system': setTheme('system'); break;
-    case 'archive': if (open) void store.archive(open.id); break;
+    case 'archive': if (open) void archiveThread(store, open.id); break;
     case 'import-session': {
       // The open thread's project, else the draft's, else the first one.
       const projectId = open?.projectId ?? store.draft?.projectId ?? store.projects[0]?.id;

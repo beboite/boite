@@ -150,6 +150,12 @@ they are in its trace. Archiving the thread leaves the worktree and the branch
 where they are: the branch may carry work nobody merged, and deleting it is a
 person's call, `git worktree remove` from the project.
 
+Archiving stops the thread's running turn, its pending questions and its child
+agents, so the sidebar menu, the header and the palette ask first when the thread
+is working, waits on an answer or has a live child agent. An idle thread archives
+at once. Settings > General > Archived threads lists the archived conversations on
+demand and restores one to the sidebar; stopped work does not resume.
+
 ## Pending prompts, goals and loops
 
 Enter during a running turn queues the message and its attachments. The composer

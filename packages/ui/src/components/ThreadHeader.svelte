@@ -3,6 +3,7 @@
   import { ArrowLeft, GitBranch, PanelRight, SquareTerminal, UsersRound } from '@lucide/svelte';
   import { focusOnMount } from '../lib/actions';
   import { contextMenu } from '../lib/context-menu.svelte';
+  import { archiveThread } from '../lib/archive';
   import { separator } from '../lib/menu';
   import { strings } from '../lib/strings';
   import { projectName } from '../lib/format';
@@ -69,7 +70,7 @@
         if (action === 'rename') beginRename();
         else if (action === 'retitle') void store.retitle(open.id);
         else if (action === 'copy') void store.copy(open.cwd);
-        else if (action === 'archive') void store.archive(open.id);
+        else if (action === 'archive') void archiveThread(store, open.id);
       }
     );
   }

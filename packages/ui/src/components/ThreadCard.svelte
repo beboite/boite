@@ -5,6 +5,7 @@
   import type { Machine } from '../lib/workspace.svelte';
   import { workspace } from '../lib/workspace.svelte';
   import { contextMenu } from '../lib/context-menu.svelte';
+  import { archiveThread } from '../lib/archive';
   import { separator } from '../lib/menu';
   import { focusOnMount } from '../lib/actions';
   import { strings } from '../lib/strings';
@@ -90,7 +91,7 @@
         if (action === 'retitle') void owner.retitle(thread.id);
         if (action === 'pin') void owner.pin(thread.id, !thread.pinned);
         if (action === 'pr') void refreshPr(true);
-        if (action === 'archive') void owner.archive(thread.id);
+        if (action === 'archive') void archiveThread(owner, thread.id);
       }
     );
   }

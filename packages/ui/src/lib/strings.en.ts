@@ -380,6 +380,8 @@ export const strings = {
     unpin: 'Unpin',
     pinned: 'Pinned',
     archive: 'Archive',
+    archiveTitle: 'Archive this thread?',
+    archiveBody: 'Its agent stops, its sub-threads stop with it, and the questions waiting for an answer are dropped. Settings, General, Archived threads brings the conversation back, not the work that was stopped.',
     draft: 'New thread'
   },
 
@@ -1203,6 +1205,13 @@ export const strings = {
     dataDir: 'Data directory',
     endpoint: 'Endpoint',
     noCore: 'Not connected to a core.',
+    archived: {
+      heading: 'Archived threads',
+      intro: 'An archived thread leaves the sidebar and its agent stops. Restore it to bring the conversation back; its agent starts again with the next message.',
+      show: 'Show archived threads',
+      empty: 'No archived thread on this machine.',
+      restore: 'Restore'
+    },
     pairing: {
       heading: 'Phones and other devices',
       intro: 'A pairing link opens Boite on another device with a key of its own. It works once and for ten minutes.',

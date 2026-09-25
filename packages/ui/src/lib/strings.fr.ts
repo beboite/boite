@@ -390,6 +390,8 @@ export const fr: Translation = {
     unpin: 'Désépingler',
     pinned: 'Épinglée',
     archive: 'Archiver',
+    archiveTitle: 'Archiver cette conversation ?',
+    archiveBody: "Son agent s'arrête, ses sous-conversations aussi, et les questions en attente de réponse sont abandonnées. Réglages, Général, Conversations archivées ramène la conversation, pas le travail interrompu.",
     draft: 'Nouvelle conversation'
   },
 
@@ -1181,6 +1183,13 @@ export const fr: Translation = {
     dataDir: 'Répertoire de données',
     endpoint: 'Point de connexion',
     noCore: 'Pas connecté à un cœur.',
+    archived: {
+      heading: 'Conversations archivées',
+      intro: "Une conversation archivée quitte la barre latérale et son agent s'arrête. Restaurez-la pour retrouver la conversation ; son agent repart au prochain message.",
+      show: 'Afficher les conversations archivées',
+      empty: 'Aucune conversation archivée sur cette machine.',
+      restore: 'Restaurer'
+    },
     pairing: {
       heading: 'Téléphones et appareils',
       intro: "Un lien d'appairage ouvre Boite sur un autre appareil avec une clé à lui. Il sert une fois et tient dix minutes.",
