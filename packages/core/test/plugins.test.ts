@@ -190,14 +190,14 @@ describe('recommended plugins', () => {
 
 describe('a plugin download on a slow link', () => {
   /** One recommended plugin whose download trickles `bytes` in pieces `gapMs` apart, then stalls forever when `stall` is set. */
-  async function trickle(gapMs: number, stall: boolean): Promise<{ client: Awaited<ReturnType<TestCore['connect']>>; bytes: Uint8Array }> {
+  async function trickle(gapMs: number, stall: boolean): Promise<{ client: Awaited<ReturnType<TestCore['connect']>>; bytes: Uint8Array<ArrayBuffer> }> {
     harness = await startTestCore(); const client = await harness.connect();
     const kebacc = RECOMMENDED[0]!;
     const url = kebacc.artifacts[platformKey() as keyof typeof kebacc.artifacts]!.url;
     const bytes = new Uint8Array(8).map((_, index) => index + 1);
     harness.core.plugins.recommended = [{ ...kebacc, artifacts: { [platformKey()]: { url, sha256: sha256(bytes) } } }];
     harness.core.plugins.downloadIdleMs = 300;
-    fetchSpy = spyOn(globalThis, 'fetch').mockImplementation((async () => new Response(new ReadableStream<Uint8Array>({
+    fetchSpy = spyOn(globalThis, 'fetch').mockImplementation((async (_input: string | URL | Request) => new Response(new ReadableStream<Uint8Array>({
       async start(controller) {
         for (let at = 0; at < bytes.length; at += 2) {
           if (stall && at === 4) return;
