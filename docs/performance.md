@@ -66,6 +66,13 @@ instead of arriving after it as a second copy.
   it had before it. A reconnect to a quiet thread costs one message instead of
   the last 120. An unknown message, or a tail longer than a page, gets the whole
   page as before.
+- On a reconnect, the open thread's `threads.get` leaves before the boot lists,
+  so the missed text does not wait for the slowest of them. The fresh
+  `threads.list` is laid over the rows already held: a row keeps its object and
+  only the fields that changed are written, so the sidebar redraws the rows that
+  moved and no others. A `thread.updated` load tick patches its row the same way.
+- A streamed delta, part or turn looks up its message or turn from the end of
+  the loaded timeline, where the item being written sits.
 - The trace is read when the trace surface is on screen, not on every open.
 
 ## Static files

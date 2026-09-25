@@ -863,6 +863,44 @@ describe('Store', () => {
     expect(client.clientSubscriptions).toEqual(['t-trace']);
   });
 
+  test('a reconnect catches up the open thread first and keeps every sidebar row it can', async () => {
+    const { store, client } = await ready();
+    await store.open('t-scheduler');
+    const rows = new Map(store.threads.map((row) => [row.id, row]));
+    client.drop();
+    // A load sample of the gap, which reached nobody.
+    client.sampleLoad('t-bench', 3);
+    const called = vi.spyOn(client, 'call');
+    await client.restore();
+    await waitFor(() => (store.threads.find((row) => row.id === 't-bench')?.load?.processes === 3 ? true : undefined));
+    await store.reload();
+    for (const row of store.threads) expect(row).toBe(rows.get(row.id));
+    const methods = called.mock.calls.map(([method]) => method);
+    expect(methods.indexOf('threads.get')).toBeGreaterThanOrEqual(0);
+    expect(methods.indexOf('threads.get')).toBeLessThan(methods.indexOf('threads.list'));
+  });
+
+  test('a list answer that lands after the open thread was read does not mark it unread again', async () => {
+    const { store, client } = await ready();
+    await store.open('t-scheduler');
+    const real = client.call.bind(client);
+    let listed: (() => void) | null = null;
+    vi.spyOn(client, 'call').mockImplementation(((method: string, params: never) => {
+      const answer = real(method as never, params);
+      if (method !== 'threads.list') return answer;
+      // Read by the core before the open thread's markRead, answered after it.
+      return answer.then((threads) => new Promise((resolve) => {
+        listed = () => resolve((threads as { id: string }[]).map((row) => (row.id === 't-scheduler' ? { ...row, unread: true } : row)) as never);
+      }));
+    }) as typeof client.call);
+    client.drop();
+    await client.restore();
+    await waitFor(() => listed ?? undefined);
+    listed!();
+    await store.reload();
+    expect(store.threads.find((row) => row.id === 't-scheduler')?.unread).toBe(false);
+  });
+
   test('a request the core settled while the socket was down leaves the card', async () => {
     const { store, client } = await ready();
     await store.open('t-scheduler');

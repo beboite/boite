@@ -92,7 +92,7 @@ import { work, type Profile } from './work-prefs.svelte';
 import { onboardingSeen } from './onboarding';
 import { rightPanel, type BoundPanel } from './right-panel.svelte';
 import { fill, strings } from './strings';
-import { lastIndexById, mergeResumed, patchRow, threadsByProject } from './thread-rows';
+import { lastIndexById, mergeResumed, patchRow, reconcileRows, threadsByProject } from './thread-rows';
 import { confirm } from './confirm.svelte';
 import { DEFAULT_MODEL_NAMES, INITIAL_MODEL_DEFAULTS, readModelDefaults, writeModelDefaults, resolveModelDefault, type ModelDefaults } from './model-defaults';
 import { FAVORITES_KEY, isNamedModel, readFavorites, type FavoriteModel } from './model-order';
@@ -1659,6 +1659,10 @@ export class Store {
     const client = this.#client;
     if (!client) return;
     const loginRevision = this.#loginRevision;
+    // The open thread's catch-up leaves ahead of the lists, so the text missed
+    // during a drop does not wait for the slowest of them.
+    const open = this.openThread;
+    const reopened = open && this.visible ? this.open(open.id, false).catch((error: unknown) => this.#fail(error)) : null;
     // One rejected call used to take the whole boot down: `Promise.all` jumped
     // to the catch, which only toasted, and projects, threads, providers and
     // accounts silently kept their pre-reconnect values under an app that
@@ -1685,7 +1689,11 @@ export class Store {
     if (questions.status === 'fulfilled') this.#mergeQuestions(questions.value, 'all');
     if (projects.status === 'fulfilled') this.projects = projects.value;
     if (threads.status === 'fulfilled') {
-      this.threads = threads.value;
+      // Held rows are patched, not replaced, so a reconnect redraws only what changed.
+      this.threads = reconcileRows(this.threads, threads.value);
+      // A list read before the open thread's markRead may answer after it.
+      const read = reopened && this.openThread?.unread === false ? this.threads.find((t) => t.id === this.openThread?.id) : undefined;
+      if (read) read.unread = false;
       // Archived while this client was away: their layouts would never be shown again.
       const listed = new Set(threads.value.map((t) => this.threadKey(t.id)));
       rightPanel.prune((key) => this.#ownsPanelKey(key) && !listed.has(key));
@@ -1711,13 +1719,8 @@ export class Store {
     // What `bench/startup.ts` reads: the first moment the app holds its data.
     if (typeof performance !== 'undefined' && performance.getEntriesByName('boite:ready').length === 0) performance.mark('boite:ready');
     void this.loadHarnessUpdates();
-    const open = this.openThread;
-    if (open && this.visible) {
-      try {
-        await this.open(open.id, false);
-      } catch (error) {
-        this.#fail(error);
-      }
+    if (open && reopened) {
+      await reopened;
       // The socket resubscribed the agent and the team, but what they said
       // during the gap reached nobody: fetch it, as open() did for the thread.
       if (client === this.#client && this.openThread?.id === open.id) {

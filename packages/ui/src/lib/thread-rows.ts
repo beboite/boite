@@ -19,6 +19,21 @@ export function patchRow(row: ThreadSummary, next: ThreadSummary): void {
   for (const [key, value] of Object.entries(source)) if (!same(target[key], value)) target[key] = value;
 }
 
+/**
+ * A fresh `threads.list` over the rows already held: a row the list still has
+ * keeps its identity, patched, so a reconnect re-renders only the rows that
+ * changed. The list's order wins and a row it no longer has is gone.
+ */
+export function reconcileRows(held: readonly ThreadSummary[], fresh: ThreadSummary[]): ThreadSummary[] {
+  const byId = new Map(held.map((row) => [row.id, row]));
+  return fresh.map((next) => {
+    const row = byId.get(next.id);
+    if (!row) return next;
+    patchRow(row, next);
+    return row;
+  });
+}
+
 /** The live top-level threads of each project, in one pass over the rows. */
 export function threadsByProject(threads: readonly ThreadSummary[]): Map<ProjectId, ThreadSummary[]> {
   const groups = new Map<ProjectId, ThreadSummary[]>();
