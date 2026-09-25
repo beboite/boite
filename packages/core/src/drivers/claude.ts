@@ -483,6 +483,10 @@ class ClaudeTurn {
       this.error = refused;
       return;
     }
+    // The CLI answers an interrupt with an error result (`error_during_execution`,
+    // `[ede_diagnostic] ...`): that is the stop the user asked for, not a failure.
+    // An aborted result Boite did not ask for still fails below.
+    if (this.isStopped) return;
     if (message.subtype !== 'success') {
       this.fail(message.errors.length > 0 ? message.errors.join('; ') : message.subtype);
     } else if (message.is_error) {

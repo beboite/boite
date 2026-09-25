@@ -67,6 +67,11 @@ class FakeQuery {
   private ended = false;
   interrupts = 0;
   closes = 0;
+  /**
+   * The real CLI (2.1.282) answers an interrupt with an error result before it
+   * ends; true is an older fake that ends with no result at all.
+   */
+  silentInterrupt = false;
   /** Every live setter the driver reached for, in order, as `<name> <value>`. */
   readonly setters: string[] = [];
   /** The name of the one setter this CLI refuses, the way an older one would. */
@@ -92,6 +97,7 @@ class FakeQuery {
 
   interrupt(): Promise<undefined> {
     this.interrupts += 1;
+    if (!this.silentInterrupt) this.emit(interrupted());
     this.end();
     return Promise.resolve(undefined);
   }
@@ -295,6 +301,19 @@ function failure(sessionId: string): SDKMessage {
     modelUsage: {},
     permission_denials: [],
     errors: ['the tool loop gave up'],
+  });
+}
+
+/** What CLI 2.1.282 writes when an interrupt lands before any assistant block was committed. */
+function interrupted(): SDKMessage {
+  return sdk({
+    ...(failure('') as object),
+    // The fake does not know its session: no id, so the one it had stays.
+    session_id: undefined,
+    terminal_reason: 'aborted_streaming',
+    usage: { input_tokens: 4, output_tokens: 1 },
+    total_cost_usd: 0.002,
+    errors: ['[ede_diagnostic] result_type=user last_content_type=n/a stop_reason=null'],
   });
 }
 
@@ -652,8 +671,33 @@ describe('claude driver', () => {
     await waitFor(() => queries.length === 1);
 
     expect(await client.call('turns.stop', { threadId })).toEqual({ stopped: true });
-    expect((await finished).status).toBe('stopped');
+    const done = await finished;
+    expect(done.status).toBe('stopped');
     expect(queries[0]?.interrupts).toBe(1);
+    // The CLI's own error result for the interrupt is the stop, not a failure.
+    expect(done.error).toBeNull();
+    // Its usage is still counted.
+    expect(done.usage?.costUsdEquivalent).toBe(0.002);
+    const thread = await client.call('threads.get', { threadId });
+    expect(thread.messages.flatMap((message) => message.parts).some((part) => part.type === 'error')).toBe(false);
+    expect(thread.status).toBe('idle');
+  });
+
+  test('an aborted result nobody asked for is still an error', async () => {
+    const client = await harness.connect();
+    const threadId = await claudeThread(client);
+
+    scripted((fake) => {
+      fake.emit(init('sess-aborted'));
+      fake.emit(interrupted());
+      fake.end();
+    });
+
+    const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 10000);
+    await client.call('turns.start', { threadId, prompt: 'go' });
+    const done = await finished;
+    expect(done.status).toBe('error');
+    expect(done.error).toContain('[ede_diagnostic]');
   });
 
   test('an error result ends the turn with the reason the CLI gave', async () => {
