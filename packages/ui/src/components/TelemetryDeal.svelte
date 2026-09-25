@@ -141,6 +141,8 @@
   /* A short window shrinks the clip, never the line that says what is counted. */
   @media (max-height: 640px) { .clip { max-height: 16vh; } .row { padding: 8px 14px; } }
   @media (max-height: 520px) { .clip { display: none; } }
+  /* A finger needs the full touch target, the opt-out included, not the 20 px line of text it sits on. */
+  @media (max-width: 720px) { .link { display: inline-flex; align-items: center; justify-content: center; min-height: var(--touch-target); padding: 0 8px; vertical-align: middle; } }
   @media (prefers-reduced-motion: reduce) { .clip { animation: none; } .row:hover:not(:disabled) { transform: none; } }
   :global(html[data-motion="reduced"]) .clip { animation: none; }
 </style>
