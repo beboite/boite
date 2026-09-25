@@ -234,7 +234,11 @@ note. Off Windows, each registered child is spawned detached, so it leads a
 process group of its own that whatever it starts joins. `resources.killTree`
 sends SIGTERM to each child's group, then SIGKILL two seconds later, which the
 group still gets after its leader exited: a tool that ignored SIGTERM goes too,
-and project removal no longer times out on it. A tool that leaves the group with
+and project removal no longer times out on it. The group is probed every 100 ms
+meanwhile, and a group found empty gets no SIGKILL: once its last member is gone
+its id is free, and a new session leader could hold it two seconds later. A
+normal quit, and a hang-up of the terminal the core was started from, wait for
+those SIGKILLs before the core exits. A tool that leaves the group with
 its own `setsid` escapes, and the trace still lists only the direct children.
 The focus guard and audio mute do not exist there. A hard kill of the shell
 does not guarantee that its core exits on Linux or macOS.

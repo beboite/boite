@@ -52,7 +52,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  harness.core.procs.killAll();
+  await harness.core.procs.killAll();
   await harness.stop();
 });
 

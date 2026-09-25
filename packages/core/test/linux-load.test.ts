@@ -105,7 +105,7 @@ describe('the registry on the Linux backend', () => {
   });
 
   afterEach(async () => {
-    procs.killAll();
+    await procs.killAll();
     await waitFor(() => procs.liveCount('busy') === 0);
     await procs.close();
     journal.close();

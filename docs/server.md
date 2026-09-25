@@ -185,7 +185,9 @@ WantedBy=default.target
 ```
 
 Each process the core starts leads a process group of its own, and stopping a
-thread signals that group: SIGTERM, then SIGKILL two seconds later. A tool that
+thread signals that group: SIGTERM, then SIGKILL two seconds later to a group
+that still has members. The core's own shutdown, on SIGTERM, SIGINT or SIGHUP,
+does the same to every group and waits for it before it exits. A tool that
 leaves the group on purpose (a daemon calling `setsid`) escapes it, and a core
 killed hard leaves the groups it started running. Stopping the unit still reaps
 them: systemd's default `KillMode=control-group` stops everything in the

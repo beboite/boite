@@ -25,7 +25,7 @@ for (const os of ['linux', 'macos'] as const) {
     });
 
     afterEach(async () => {
-      procs.killAll();
+      await procs.killAll();
       await waitFor(() => procs.liveCount('one') + procs.liveCount('two') === 0);
       await procs.close();
       journal.close();

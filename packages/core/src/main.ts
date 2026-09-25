@@ -328,6 +328,14 @@ export function main(argv: string[]): void {
   };
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
+  // The terminal a core was started from closed. Off Windows each child leads a
+  // session of its own and gets no hang-up of its own any more, so without this
+  // the core died on the default action and left every group running. A hang-up
+  // can arrive twice (from the kernel and from `bun run` passing it on) and is
+  // never the operator asking to hurry, so a repeat does not cut the shutdown short.
+  process.on('SIGHUP', () => {
+    if (!stopping) shutdown();
+  });
 }
 
 if (import.meta.main) main(process.argv.slice(2));

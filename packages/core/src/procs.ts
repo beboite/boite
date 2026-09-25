@@ -49,7 +49,8 @@ export interface SpawnedTerminal {
 
 interface Entry {
   record: ProcessRecord;
-  kill(): void;
+  /** Off Windows, the group stop that follows: resolved once the group is gone or SIGKILLed. */
+  kill(): void | Promise<void>;
   usage(): { cpuMs: number; peakMemoryBytes: number } | null;
 }
 
@@ -97,6 +98,8 @@ export class ProcRegistry {
   private readonly loadTimer: ReturnType<typeof setInterval>;
   /** A sweep waiting for the thread to stay idle, cancelled by its next turn. */
   private readonly sweepTimers = new Map<ThreadId, ReturnType<typeof setTimeout>>();
+  /** Group stops still inside their grace, off Windows: what `killAll` waits for. */
+  private readonly stops = new Set<Promise<void>>();
   private reapOrphans = true;
   private readonly orphanGraceMs: number;
   private readonly forgetDelayMs: number;
@@ -202,9 +205,7 @@ export class ProcRegistry {
     });
 
     const record = this.register(threadId, proc.pid, cmd, args, {
-      kill: () => {
-        killBunChild(proc);
-      },
+      kill: () => killBunChild(proc),
       usage: () => {
         const usage = proc.resourceUsage();
         if (!usage) return null;
@@ -239,9 +240,7 @@ export class ProcRegistry {
     });
 
     const record = this.register(threadId, proc.pid, cmd, args, {
-      kill: () => {
-        killBunChild(proc);
-      },
+      kill: () => killBunChild(proc),
       usage: () => {
         const usage = proc.resourceUsage();
         if (!usage) return null;
@@ -334,8 +333,9 @@ export class ProcRegistry {
 
     const record = this.register(threadId, child.pid ?? -1, cmd, args, {
       kill: () => {
-        if (OWN_GROUP) stopGroup(child.pid ?? -1, () => child.exitCode === null && child.signalCode === null);
-        else child.kill();
+        if (OWN_GROUP) return stopGroup(child.pid ?? -1, () => child.exitCode === null && child.signalCode === null);
+        child.kill();
+        return undefined;
       },
       usage: () => null,
     });
@@ -469,7 +469,8 @@ export class ProcRegistry {
       if (entry.record.pid <= 0) continue;
       this.platform.terminateUnassigned(entry.record.pid);
       try {
-        entry.kill();
+        const stop = entry.kill();
+        if (stop !== undefined) this.trackStop(stop);
       } catch {
         // already exited
       }
@@ -477,8 +478,20 @@ export class ProcRegistry {
     return entries.length;
   }
 
-  killAll(): void {
+  /**
+   * Stops every thread's processes. Off Windows it resolves once each group
+   * stop has ended, SIGKILL included, which is at most `KILL_GRACE_MS` for a
+   * group that ignored SIGTERM: a core that exited first would leave it running
+   * in its own session. Stops started earlier, by an interrupt say, are awaited too.
+   */
+  killAll(): Promise<void> {
     for (const threadId of [...this.live.keys()]) this.killTree(threadId);
+    return Promise.all([...this.stops]).then(() => undefined);
+  }
+
+  private trackStop(stop: Promise<void>): void {
+    this.stops.add(stop);
+    void stop.finally(() => this.stops.delete(stop));
   }
 
   /** Project removal must wait for exit records before deleting the projection. */
@@ -653,9 +666,10 @@ export class ProcRegistry {
 }
 
 /** A Bun child's kill: its whole group off Windows, the process itself on Windows. */
-function killBunChild(proc: Bun.Subprocess): void {
-  if (OWN_GROUP) stopGroup(proc.pid, () => proc.exitCode === null && proc.signalCode === null);
-  else proc.kill();
+function killBunChild(proc: Bun.Subprocess): Promise<void> | undefined {
+  if (OWN_GROUP) return stopGroup(proc.pid, () => proc.exitCode === null && proc.signalCode === null);
+  proc.kill();
+  return undefined;
 }
 
 function baseName(path: string): string {
