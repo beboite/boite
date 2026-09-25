@@ -42,7 +42,10 @@ it does not compile again. The end-to-end suite refuses missing or stale artifac
   `boite-core.exe core/main.js`. The runtime carries its publisher's signature;
   an unsigned compiled core costs about 650 ms more at every start on Windows 11
   ([performance.md](performance.md)). `stage-sidecar.ts` warns when the runtime's
-  signature is not valid. `apps/shell/scripts/tauri.ts` adds
+  signature is not valid, and it refuses a Bun other than the `packageManager`
+  pin, as do `packages/core/bin/compile.ts` and `build:core:linux`, since each
+  ships the Bun it runs under. `BOITE_ALLOW_BUN_MISMATCH=1` allows another one
+  for a build that is not shipped. `apps/shell/scripts/tauri.ts` adds
   `tauri.bundle.windows.conf.json`, which names the `core` directory as a
   resource, to any Windows build that passes the bundle overlay.
 - `stage:core` puts the sidecar, both workers and the two `boite` shims

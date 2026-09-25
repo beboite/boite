@@ -27,6 +27,7 @@
 import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, rmSync, statSync, utimesSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { requirePinnedBun } from '../../../scripts/ci/bun-version.ts';
 import { nativeTarget } from './targets.ts';
 
 /** Only the platforms whose compiled core this repository actually produces. */
@@ -70,6 +71,7 @@ function sidecarSource(): string {
   if (!/^bun(?:-profile)?\.exe$/i.test(basename(runtime))) {
     refuse(`this script runs under ${runtime}; expected bun.exe, which is staged as the sidecar`);
   }
+  requirePinnedBun('the staged sidecar');
   const signature = Bun.spawnSync(
     ['powershell', '-NoProfile', '-NonInteractive', '-Command', `(Get-AuthenticodeSignature -LiteralPath '${runtime.replaceAll("'", "''")}').Status`],
     { stdout: 'pipe', stderr: 'pipe', windowsHide: true },
