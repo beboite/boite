@@ -78,7 +78,7 @@ describe('server', () => {
   });
   test('catch-up resends only the part whose deltas were dropped, and only once', () => {
     const journal = harness.core.journal;
-    const tool = { type: 'tool' as const, toolId: 'tool_big', name: 'Read', input: {}, output: 'x'.repeat(200_000), status: 'ok' as const };
+    const tool = { type: 'tool' as const, toolId: 'tool_big', name: 'Read', input: {}, output: 'x'.repeat(200_000), status: 'done' as const };
     journal.putMessage({ id: 'msg_parts', threadId: 'thr_parts', turnId: 'turn_parts', role: 'assistant',
       state: 'streaming', createdAt: Date.now(), parts: [tool, { type: 'text', text: '' }] });
     const writes: { method: string; params: { partIndex?: number; part?: { text?: string } } }[] = [];
