@@ -1147,8 +1147,15 @@ class ClaudeSession {
     // The ticket alone never settles when the CLI dies with the card open: the
     // turn ends, and the deny the core then writes would land behind
     // `message.completed`. Every other driver races the turn's stop here.
-    const decision = await Promise.race([ticket, turn.stopped.then(() => 'cancelled' as const)]);
+    // The CLI also aborts `signal` when it cancels the call by itself: the card
+    // is taken back then, so it does not stay clickable for nobody.
+    const decision = await Promise.race([ticket, turn.stopped.then(() => 'cancelled' as const), abortedBy(options.signal)]);
     if (decision === 'cancelled') return { behavior: 'deny', message: DENIED };
+    if (decision === 'withdrawn') {
+      ticket.withdraw();
+      turn.part(index, { type: 'permission', requestId: ticket.requestId, toolName, decision: 'deny' });
+      return { behavior: 'deny', message: DENIED };
+    }
     turn.part(index, { type: 'permission', requestId: ticket.requestId, toolName, decision });
     if (decision === 'allow') return { behavior: 'allow', updatedInput: input };
     return { behavior: 'deny', message: DENIED };
@@ -1310,6 +1317,15 @@ async function titleQuery(deps: ClaudeDeps, ctx: TitleContext): Promise<string |
   } finally {
     clearTimeout(timer);
   }
+}
+
+/** Settles `withdrawn` when the CLI cancels the request `signal` belongs to; never otherwise. */
+function abortedBy(signal: AbortSignal | undefined): Promise<'withdrawn'> {
+  return new Promise((resolve) => {
+    if (signal === undefined) return;
+    if (signal.aborted) resolve('withdrawn');
+    else signal.addEventListener('abort', () => resolve('withdrawn'), { once: true });
+  });
 }
 
 /** The Agent or Task tool call a message belongs to, or null for the main loop's own. */

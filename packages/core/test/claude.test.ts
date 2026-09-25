@@ -660,6 +660,49 @@ describe('claude driver', () => {
     ]);
   });
 
+  test('a card the CLI cancels is taken back, and the turn goes on', async () => {
+    const client = await harness.connect();
+    const threadId = await claudeThread(client);
+
+    const answers: (PermissionResult | null)[] = [];
+    const cancel = new AbortController();
+    let resumed = (): void => undefined;
+    scripted((fake, options) => {
+      const ask = options.canUseTool;
+      if (ask === undefined) throw new Error('the driver must pass canUseTool');
+      fake.emit(init('sess-cancel'));
+      void (async () => {
+        answers.push(await ask('Bash', { command: 'ls' }, { signal: cancel.signal, toolUseID: 'toolu_cancel', requestId: 'req_cancel' }));
+        // The CLI moved on: the turn keeps running after the cancel.
+        await new Promise<void>((resolve) => { resumed = resolve; });
+        fake.emit(success('sess-cancel'));
+        fake.end();
+      })();
+    });
+
+    const requested = client.next('permission.requested', (request) => request.threadId === threadId, 10000);
+    const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 10000);
+    await client.call('turns.start', { threadId, prompt: 'list the files' });
+    const request = await requested;
+    const resolved = client.next('permission.resolved', (event) => event.requestId === request.id, 10000);
+    cancel.abort();
+
+    expect((await resolved).decision).toBe('deny');
+    await waitFor(() => answers.length === 1, 5000);
+    expect(answers).toEqual([{ behavior: 'deny', message: expect.any(String) }]);
+    expect(await client.call('permissions.list', { threadId })).toEqual([]);
+    expect((await client.call('threads.get', { threadId })).status).toBe('running');
+    await expect(client.call('permissions.answer', { requestId: request.id, decision: 'allow' })).rejects.toThrow();
+
+    resumed();
+    expect((await finished).status).toBe('done');
+    const thread = await client.call('threads.get', { threadId });
+    const parts: MessagePart[] = thread.messages[thread.messages.length - 1]?.parts ?? [];
+    expect(parts.filter((part) => part.type === 'permission')).toEqual([
+      { type: 'permission', requestId: request.id, toolName: 'Bash', decision: 'deny' },
+    ]);
+  });
+
   test('a CLI that dies with a card open writes nothing behind the completed message', async () => {
     const client = await harness.connect();
     const threadId = await claudeThread(client);

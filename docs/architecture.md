@@ -37,7 +37,10 @@ change without a reload. `message.*`, `permission.*`, `question.*` and
 `panel.*` reach only the sockets subscribed to that thread. A client that
 connects mid-turn rebuilds the pending permission card from
 `permissions.list`, because `permission.requested` only reached the sockets
-that existed when it fired.
+that existed when it fired. A card leaves that list when it is answered, when
+its turn ends, and when the agent stops waiting for it: Claude aborts the
+request's signal when the CLI cancels the call, and the driver withdraws the
+card, which reaches every client as `permission.resolved` with `deny`.
 
 Three principals say hello. The owner holds the core token or an owner
 pairing; a session is a paired phone, held to `DEVICE_METHODS`; an agent is a

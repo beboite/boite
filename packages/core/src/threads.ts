@@ -1464,7 +1464,7 @@ export class ThreadStore {
     input: unknown,
     description: string | null,
   ): PermissionTicket {
-    if (this.core.workforce.resident.isCompacting(thread.id)) return Object.assign(Promise.resolve('deny' as const), { requestId: newId('req_') });
+    if (this.core.workforce.resident.isCompacting(thread.id)) return Object.assign(Promise.resolve('deny' as const), { requestId: newId('req_'), withdraw: () => undefined });
     const request: PermissionRequest = {
       id: newId('req_'),
       threadId: thread.id,
@@ -1485,7 +1485,10 @@ export class ThreadStore {
     );
     this.setStatus(thread.id, 'waiting');
     this.core.bus.emit('permission.requested', request);
-    return Object.assign(promise, { requestId: request.id });
+    const withdraw = (): void => {
+      if (this.permissions.has(request.id)) this.answerPermission({ requestId: request.id, decision: 'deny' });
+    };
+    return Object.assign(promise, { requestId: request.id, withdraw });
   }
 
   private askQuestion(thread: ThreadSummary, turn: Turn, ask: QuestionAsk): QuestionTicket {
