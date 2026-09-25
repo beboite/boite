@@ -285,9 +285,13 @@ object ID before its size and content are read; a working-tree file is sized and
 read through the same handle.
 
 The in-memory client checks each RPC handler's input and result against the
-shared contract. Its plugin domain owns installation state and cancellation;
-file, conversation and provider fixtures live under `lib/fake-client/`, and
-`lib/fake-client/checks.ts` holds the core's refusals it repeats. The contract
+shared contract. `lib/fake-client.ts` is its entry and the socket surface;
+`lib/fake-client/context.ts` holds the state of one fake core, and each domain
+(threads, turns, accounts, providers, projects, settings, coordination,
+delegation, the working directory and the rest) answers its methods from its
+own module under `lib/fake-client/`. Its plugin domain owns installation state
+and cancellation; file, conversation and provider fixtures live beside them,
+and `lib/fake-client/checks.ts` holds the core's refusals it repeats. The contract
 scenarios in `tests/contract/scenarios.ts` run against both the core and the
 fake ([development](development.md#contract-scenarios)), so a rule the fake stops
 following fails by name.
