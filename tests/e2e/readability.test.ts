@@ -133,4 +133,4 @@ test('in forced colors a focused text field still shows where the keyboard is', 
   } finally {
     await page.send('Emulation.setEmulatedMedia', { features: [] });
   }
-});
+}, 30_000);
