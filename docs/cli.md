@@ -126,7 +126,10 @@ Replies preserve their message reference and authenticated sender identity.
 The singular `agent` commands belong to [persistent agents](agents.md), not
 ordinary thread coordination. They use the calling session's current scope.
 Pass `--request-id <stable-id>` when retrying a send, artifact or decision after
-a lost response. An artifact object contains `missionId`, `taskId`, `title`,
+a lost response. The same flag covers `agents send`, `agents reply`,
+`delegate spawn` and `delegate send`: a retry with the id of a call that already
+landed returns that letter or child instead of making a second one. Without the
+flag each call gets a fresh id. An artifact object contains `missionId`, `taskId`, `title`,
 `summary`, `paths`, `commit` and `verification`. A decision contains `prompt`
 and `options`; it yields execution until the user answers. A memory contains
 `title` and `text`, with `id` and `expectedRevision` for an edit. The core adds
