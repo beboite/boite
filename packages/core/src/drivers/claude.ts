@@ -51,6 +51,8 @@ const LINGER_MS = 15_000;
 const ORPHANS_MAX = 5_000;
 /** The system message a turn the agent opened on its own starts with. */
 const WAKE_TEXT = 'Background work finished';
+/** What the CLI answers a `resume` whose transcript is gone (CLI 2.1.282, probed offline). */
+const MISSING_SESSION = /^No conversation found with session ID: /;
 
 /** The effort levels the SDK takes as an option; see `Options['effort']`. */
 const SDK_EFFORTS: readonly string[] = ['low', 'medium', 'high', 'xhigh', 'max'];
@@ -272,6 +274,8 @@ class ClaudeTurn {
   readonly stopped: Promise<void>;
   isStopped = false;
   settled = false;
+  /** The CLI refused to resume: the transcript this turn asked for is gone. */
+  sessionLost = false;
   /** The session holding it right now: a stranded turn moves to another one. */
   session: ClaudeSession | null = null;
 
@@ -316,6 +320,7 @@ class ClaudeTurn {
       usage: this.usage,
       error: this.error ?? undefined,
       promptCache: this.cacheLife,
+      ...(this.sessionLost ? { sessionLost: true } : {}),
     });
   }
 
@@ -327,6 +332,11 @@ class ClaudeTurn {
   }
 
   handle(message: SDKMessage): void {
+    const parent = subagentOf(message);
+    if (parent !== null) {
+      this.handleSubagent(message, parent);
+      return;
+    }
     switch (message.type) {
       case 'stream_event':
         this.handleStream(message.event as StreamEvent);
@@ -424,6 +434,19 @@ class ClaudeTurn {
     accumulated.set(this.apiMessageId, (accumulated.get(this.apiMessageId) ?? '') + text);
   }
 
+  /**
+   * What a subagent (the Agent or Task tool) writes, tagged with the tool call
+   * that runs it. Its text, thinking and tool calls are its own conversation,
+   * which the main message does not show, as an imported transcript drops the
+   * sidechain too; the Agent tool's own result is what the main loop reads. Its
+   * usage is not the thread's context, and an API error it hits is its own:
+   * the main loop recovers or fails on its own result.
+   */
+  private handleSubagent(message: SDKMessage, parentToolId: string): void {
+    if (message.type !== 'assistant' || message.error === undefined) return;
+    this.ctx.log('warn', `claude: the subagent of ${parentToolId} hit an error: ${errorSentence(message.error)}`);
+  }
+
   private handleAssistant(message: SDKAssistantMessage): void {
     if (message.error !== undefined) {
       this.fail(errorSentence(message.error));
@@ -433,8 +456,7 @@ class ClaudeTurn {
     const apiId = body?.id ?? '';
     const carried = requestTokens(body?.usage);
     if (carried !== null) this.contextTokens = carried;
-    // A subagent's requests build their own prefix; the thread's cache is the main loop's.
-    if (message.parent_tool_use_id === null) this.cacheLife = cacheLifeOf(body?.usage) ?? this.cacheLife;
+    this.cacheLife = cacheLifeOf(body?.usage) ?? this.cacheLife;
     for (const block of contentBlocks(body?.content)) {
       if (block.type === 'text') {
         const text = block.text ?? '';
@@ -469,11 +491,34 @@ class ClaudeTurn {
     if (this.contextTokens !== null) {
       this.ctx.context({ tokens: this.contextTokens, window: contextWindowOf(message, this.ctx.thread.model) });
     }
+    const refused = this.resumeRefused(message);
+    if (refused !== null) {
+      // No error part: the core starts a fresh session and runs the turn again,
+      // so the conversation shows the answer, not the refusal.
+      this.sessionLost = true;
+      this.status = 'error';
+      this.error = refused;
+      return;
+    }
+    // The CLI answers an interrupt with an error result (`error_during_execution`,
+    // `[ede_diagnostic] ...`): that is the stop the user asked for, not a failure.
+    // An aborted result Boite did not ask for still fails below.
+    if (this.isStopped) return;
     if (message.subtype !== 'success') {
       this.fail(message.errors.length > 0 ? message.errors.join('; ') : message.subtype);
     } else if (message.is_error) {
       this.fail(message.result.length > 0 ? message.result : 'the turn ended on an API error');
     }
+  }
+
+  /**
+   * The one refusal that means the native session is gone for good: a resume
+   * whose transcript the CLI cannot find, before the turn wrote anything. Any
+   * other failure keeps the session.
+   */
+  private resumeRefused(message: SDKResultMessage): string | null {
+    if (message.subtype !== 'error_during_execution' || this.ctx.sessionId === null || this.messageId !== null) return null;
+    return message.errors.some((error) => MISSING_SESSION.test(error)) ? message.errors.join('; ') : null;
   }
 
   // -- parts ----------------------------------------------------------------
@@ -539,6 +584,12 @@ class ClaudeTurn {
     if (inputText === null) entry.documents = editDocuments(name, input);
     this.tools.set(toolId, entry);
     this.emitTool(toolId, entry);
+  }
+
+  /** The tool's card already carries its parsed input. */
+  hasParsedTool(toolId: string): boolean {
+    const entry = this.tools.get(toolId);
+    return entry !== undefined && entry.inputText === null;
   }
 
   finishTool(toolId: string, output: string, status: ToolStatus): void {
@@ -882,6 +933,9 @@ class ClaudeSession {
     // One result per user message: that is the end of this turn, not of the CLI.
     if (message.type === 'result') {
       if (typeof message.total_cost_usd === 'number') this.costSoFar = message.total_cost_usd;
+      // A CLI that could not resume holds no session worth keeping warm: the
+      // retry the core sends next must get a query of its own, with no resume.
+      if (turn.sessionLost) this.close(null);
       this.endTurn(turn);
     }
   }
@@ -943,6 +997,9 @@ class ClaudeSession {
    */
   private adopt(message: SDKMessage): void {
     if (this.closing || this.ended) return;
+    // A background subagent still talking after the turn is not the CLI going
+    // on by itself: no turn opens for it, and the turn that comes drops it.
+    if (subagentOf(message) !== null) return;
     // The result closes the adopted turn: it is kept beyond the cap.
     if (this.orphans.length >= ORPHANS_MAX && message.type !== 'result') return;
     this.orphans.push(message);
@@ -974,7 +1031,9 @@ class ClaudeSession {
     this.orphans = [];
     this.woken = false;
     this.foreignResults = 0;
-    // What the CLI ran in the background went with it.
+    // The CLI no longer tracks what it ran in the background. The command itself
+    // can outlive it (Windows kills no tree): the registry's orphan sweep, which
+    // the core schedules when it releases the thread, stops that.
     if (this.background.length > 0) {
       this.background = [];
       this.ctx.background?.([]);
@@ -1088,8 +1147,15 @@ class ClaudeSession {
     // The ticket alone never settles when the CLI dies with the card open: the
     // turn ends, and the deny the core then writes would land behind
     // `message.completed`. Every other driver races the turn's stop here.
-    const decision = await Promise.race([ticket, turn.stopped.then(() => 'cancelled' as const)]);
+    // The CLI also aborts `signal` when it cancels the call by itself: the card
+    // is taken back then, so it does not stay clickable for nobody.
+    const decision = await Promise.race([ticket, turn.stopped.then(() => 'cancelled' as const), abortedBy(options.signal)]);
     if (decision === 'cancelled') return { behavior: 'deny', message: DENIED };
+    if (decision === 'withdrawn') {
+      ticket.withdraw();
+      turn.part(index, { type: 'permission', requestId: ticket.requestId, toolName, decision: 'deny' });
+      return { behavior: 'deny', message: DENIED };
+    }
     turn.part(index, { type: 'permission', requestId: ticket.requestId, toolName, decision });
     if (decision === 'allow') return { behavior: 'allow', updatedInput: input };
     return { behavior: 'deny', message: DENIED };
@@ -1123,15 +1189,25 @@ class ClaudeSession {
 
   /** No matcher: this hook sees every tool call, which is what makes it the single gate. */
   private readonly preToolUse = async (input: HookInput): Promise<HookJSONOutput> => {
-    if (input.hook_event_name === 'PreToolUse') {
-      this.head()?.upsertTool(input.tool_use_id, input.tool_name, input.tool_input);
+    // A subagent's tool calls are its own conversation: no card on the main message.
+    // The assistant frame already drew the parsed input: the hook only draws a
+    // call no frame announced, so one call is not written twice.
+    if (input.hook_event_name === 'PreToolUse' && input.agent_id === undefined) {
+      const turn = this.head();
+      if (turn !== null && !turn.hasParsedTool(input.tool_use_id)) {
+        turn.upsertTool(input.tool_use_id, input.tool_name, input.tool_input);
+      }
     }
     return {};
   };
 
+  /**
+   * Only the coordination context. The tool's result is the `tool_result` the
+   * CLI sends next, with its own text and error flag; `tool_response` here is
+   * the raw object, a whole `originalFile` for an Edit, that no card shows.
+   */
   private readonly postToolUse = async (input: HookInput): Promise<HookJSONOutput> => {
     if (input.hook_event_name === 'PostToolUse') {
-      this.head()?.finishTool(input.tool_use_id, stringify(input.tool_response), 'done');
       const additionalContext = this.head()?.ctx.coordination?.();
       if (additionalContext) return { hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext } };
     }
@@ -1241,6 +1317,22 @@ async function titleQuery(deps: ClaudeDeps, ctx: TitleContext): Promise<string |
   } finally {
     clearTimeout(timer);
   }
+}
+
+/** Settles `withdrawn` when the CLI cancels the request `signal` belongs to; never otherwise. */
+function abortedBy(signal: AbortSignal | undefined): Promise<'withdrawn'> {
+  return new Promise((resolve) => {
+    if (signal === undefined) return;
+    if (signal.aborted) resolve('withdrawn');
+    else signal.addEventListener('abort', () => resolve('withdrawn'), { once: true });
+  });
+}
+
+/** The Agent or Task tool call a message belongs to, or null for the main loop's own. */
+function subagentOf(message: SDKMessage): string | null {
+  if (message.type !== 'assistant' && message.type !== 'user' && message.type !== 'stream_event') return null;
+  const parent = (message as { parent_tool_use_id?: unknown }).parent_tool_use_id;
+  return typeof parent === 'string' && parent.length > 0 ? parent : null;
 }
 
 function contentBlocks(content: unknown): ContentBlock[] {

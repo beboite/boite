@@ -514,6 +514,17 @@ export class ProcRegistry {
     return stopped;
   }
 
+  /**
+   * The same sweep a finished turn schedules, for a thread whose agent process
+   * the core just released with no turn to finish (`ThreadStore.releaseAgent`:
+   * a Stop on an idle thread, an archive, an account switch, a stopped child
+   * agent, a provider update). The agent exits on its own inside the grace, and
+   * what it ran in the background (a dev server, a watcher) is an orphan then.
+   */
+  sweepSoon(threadId: ThreadId): void {
+    this.scheduleSweep(threadId);
+  }
+
   private scheduleSweep(threadId: ThreadId): void {
     this.cancelSweep(threadId);
     if (!this.reapOrphans || !this.live.has(threadId)) return;

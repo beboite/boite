@@ -35,9 +35,11 @@ export interface EmitSink {
 
 /**
  * The decision, plus the id of the request that carries it, so a driver can
- * draw the permission card before the user has answered.
+ * draw the permission card before the user has answered. `withdraw` takes the
+ * card back when the agent stopped waiting for it: the core denies it, tells
+ * every client, and the ticket settles `deny`. Once answered, it does nothing.
  */
-export type PermissionTicket = Promise<'allow' | 'deny'> & { readonly requestId: RequestId };
+export type PermissionTicket = Promise<'allow' | 'deny'> & { readonly requestId: RequestId; withdraw(): void };
 
 /** What a driver hands the core to draw a question card. */
 export interface QuestionAsk {
@@ -146,6 +148,15 @@ export interface TurnResult {
    * The core stamps the time, the model and the account; see `PromptCache`.
    */
   promptCache?: PromptCacheLife | null;
+  /**
+   * The agent no longer has the native session the turn asked to resume (a
+   * transcript cleaned up, deleted or never copied), and the turn wrote
+   * nothing. Only that specific refusal sets it, never a transport error or a
+   * crash. The core then starts a fresh session carrying the journal's history
+   * and runs the turn again, once, unless the user stopped it: a stopped turn
+   * reports `stopped` and is never run again.
+   */
+  sessionLost?: boolean;
 }
 
 export type PromptCacheLife = Pick<import('@boite/contracts').PromptCache, 'ttlSeconds' | 'maxSeconds' | 'source'>;

@@ -198,6 +198,16 @@ interface StopDeadline {
   timer: ReturnType<typeof setTimeout> | null;
 }
 
+/**
+ * The parts of a turn's prompt that building it consumes: the async answers
+ * held for the thread and the delegation letters it marks as sent. A retry on
+ * a fresh session reuses them instead of taking again and finding nothing.
+ */
+interface CarriedInput {
+  deferred?: string;
+  letters?: string;
+}
+
 export class ThreadStore {
   /** Internal-only entry: callers supply an already authorized workspace, never a fabricated project. */
   createAgentSession(agent: AgentProfile, sessionId: string, cwd: string, projectId: string | null = null, branch: string | null = null): ThreadSummary {
@@ -216,6 +226,8 @@ export class ThreadStore {
   private readonly handles = new Map<ThreadId, TurnHandle>();
   /** Per running turn: what settles it when its driver never answers a stop. */
   private readonly stopDeadlines = new Map<ThreadId, StopDeadline>();
+  /** Threads whose running turn the user stopped: a lost session is not retried for them. */
+  private readonly stopRequested = new Set<ThreadId>();
   private readonly steering = new Set<ThreadId>();
   private readonly permissions = new Map<RequestId, PendingPermission>();
   private readonly questions = new Map<RequestId, PendingQuestion>();
@@ -554,7 +566,7 @@ export class ThreadStore {
     }
     if (switched) {
       if (!['queued', 'running', 'waiting'].includes(thread.status)) {
-        releaseThread(thread.id);
+        this.releaseAgent(thread.id);
         this.noteBackground(thread.id, []);
       }
       this.commands.delete(thread.id);
@@ -576,7 +588,7 @@ export class ThreadStore {
     if (archived) {
       this.core.delegation.stop(threadId);
       this.core.scheduler.stop(threadId);
-      releaseThread(threadId);
+      this.releaseAgent(threadId);
       this.commands.delete(threadId);
       this.noteBackground(threadId, []);
       // Nobody answers a card on a thread put away, and no turn should start from one.
@@ -794,9 +806,20 @@ export class ThreadStore {
     // No turn left, but the agent still runs work in the background: Stop ends
     // the agent process, and that work with it.
     if ((this.background.get(threadId)?.length ?? 0) === 0) return false;
-    releaseThread(threadId);
+    this.releaseAgent(threadId);
     this.noteBackground(threadId, []);
     return true;
+  }
+
+  /**
+   * Ends the thread's agent process outside a turn (Stop on an idle thread, an
+   * archive, an account switch, a stopped child agent, a provider update) and
+   * sweeps what it leaves. A command the agent ran in the background survives
+   * its exit, and with no `turn.finished` to follow nothing else would sweep it.
+   */
+  releaseAgent(threadId: ThreadId): void {
+    releaseThread(threadId);
+    this.core.procs.sweepSoon(threadId);
   }
 
   stopQueuedCoordination(threadId: ThreadId): boolean {
@@ -834,6 +857,7 @@ export class ThreadStore {
     // thread stays `waiting`, and Stop does nothing the user can see.
     this.clearPermissionsOf(threadId);
     this.clearQuestionsOf(threadId);
+    this.stopRequested.add(threadId);
     handle.stop();
     this.armStopDeadline(threadId, handle);
     return true;
@@ -985,9 +1009,9 @@ export class ThreadStore {
       this.markQueuedStopped(turnId);
       return;
     }
-    const thread = { ...selected, ...queued.execution };
+    let thread = { ...selected, ...queued.execution };
 
-    const running: Turn = { ...queued, status: 'running', startedAt: Date.now() };
+    let running: Turn = { ...queued, status: 'running', startedAt: Date.now() };
     this.core.journal.append({ type: 'turn.started', threadId, version: 1, payload: running }, () => {
       this.core.journal.putTurn(running);
     });
@@ -1000,12 +1024,30 @@ export class ThreadStore {
       const provider = this.core.providers.require(thread.providerId);
       const account = this.core.accounts.require(thread.accountId);
       const driver = getDriver(provider.protocol);
-      const handle = driver.startTurn(this.makeContext(thread, provider, account, running));
+      this.stopRequested.delete(threadId);
+      // What building the prompt takes for good (held answers, delegation
+      // letters), kept so a retry on a fresh session sends it too.
+      const carried: CarriedInput = {};
+      const handle = driver.startTurn(this.makeContext(thread, provider, account, running, carried));
       this.handles.set(threadId, handle);
       const forced = Promise.withResolvers<TurnResult>();
       this.stopDeadlines.set(threadId, { handle, forced, timer: null });
       // A `done` that settles after a forced stop is ignored.
       result = await Promise.race([handle.done, forced.promise]);
+      const fresh = result.sessionLost === true ? this.dropLostSession(thread, result) : null;
+      if (fresh !== null && result.status === 'error' && this.stopRequested.has(threadId)) {
+        // The user stopped a turn whose resume the agent refused: the prompt
+        // never reached a model, and the stop stands.
+        result = { ...result, status: 'stopped', error: undefined };
+      } else if (fresh !== null && result.status === 'error') {
+        // Same turn, fresh session: the prompt now carries the journal's history.
+        thread = fresh;
+        running = { ...running, ...(running.execution ? { execution: { ...running.execution, sessionId: null, sessionGeneration: fresh.sessionGeneration ?? 0 } } : {}) };
+        const retry = driver.startTurn(this.makeContext(thread, provider, account, running, carried));
+        this.handles.set(threadId, retry);
+        this.stopDeadlines.set(threadId, { handle: retry, forced, timer: null });
+        result = await Promise.race([retry.done, forced.promise]);
+      }
       if (running.execution?.operation === 'coordination' && result.status === 'done') this.core.coordination.submitted(threadId, turnId);
     } catch (error) {
       result = { status: 'error', sessionId: thread.sessionId, usage: null, error: messageOf(error) };
@@ -1014,6 +1056,7 @@ export class ThreadStore {
       const deadline = this.stopDeadlines.get(threadId);
       if (deadline?.timer) clearTimeout(deadline.timer);
       this.stopDeadlines.delete(threadId);
+      this.stopRequested.delete(threadId);
     }
 
     if (this.core.journal.isClosed()) return;
@@ -1065,6 +1108,26 @@ export class ThreadStore {
     if (result.status === 'done' && !next.archived && this.deferredAnswers.has(threadId)) {
       setTimeout(() => this.flushDeferred(threadId), 0);
     }
+  }
+
+  /**
+   * The agent no longer has the native session this turn resumed: a Claude
+   * transcript past `cleanupPeriodDays`, a deleted Codex rollout, a copied data
+   * directory. Keeping the id would fail every prompt of the thread for good,
+   * so it goes, and the generation moves on as an account switch does: the
+   * next start is fresh and carries the journal's history. Returns the turn's
+   * thread snapshot for that fresh start, or null when the thread moved on
+   * meanwhile (archived, switched account, or a resident agent's session).
+   */
+  private dropLostSession(thread: ThreadSummary, result: TurnResult): ThreadSummary | null {
+    if (thread.agentSessionId || thread.sessionId === null) return null;
+    const current = this.core.journal.getThread(thread.id);
+    if (current === null || current.archived) return null;
+    if ((current.sessionGeneration ?? 0) !== (thread.sessionGeneration ?? 0) || current.sessionId !== thread.sessionId) return null;
+    const generation = (current.sessionGeneration ?? 0) + 1;
+    this.core.log('info', `thread ${thread.id}: the agent has no session ${thread.sessionId} any more (${result.error ?? 'no reason given'}); starting a fresh one with the thread's history`);
+    this.save({ ...current, sessionId: null, sessionGeneration: generation, context: null, promptCache: null }, 'thread.updated');
+    return { ...thread, sessionId: null, sessionGeneration: generation, context: null, promptCache: null };
   }
 
   /**
@@ -1329,6 +1392,7 @@ export class ThreadStore {
     provider: ProviderDescriptor,
     account: Account,
     turn: Turn,
+    carried: CarriedInput = {},
   ): TurnContext {
     const threadId = thread.id;
     const env = this.core.accounts.accountEnv(account, provider);
@@ -1393,12 +1457,16 @@ export class ThreadStore {
       ? continuationInput(this.core.journal, threadId, turn.id, input, provider, part => fileReference(this.core.dataDir, part))
       : input;
     const prepared = prepareAttachments(this.core.dataDir, continued);
+    // Both are taken once per turn: a second context for the same turn gets what the first one took.
+    const command = prepared.prompt.trimStart().startsWith('/');
+    carried.deferred ??= turn.execution?.operation || command ? '' : this.takeDeferred(threadId);
+    carried.letters ??= turn.execution?.operation === 'compact' ? '' : this.core.delegation.initialInput(threadId, turn.id);
     return {
       thread,
       account,
       provider,
       turn,
-      prompt: ((turn.execution?.operation && thread.sessionId !== null) || prepared.prompt.trimStart().startsWith('/') ? '' : this.core.brain.instructions(provider.id)) + (turn.execution?.operation || prepared.prompt.trimStart().startsWith('/') ? '' : this.takeDeferred(threadId)) +prepared.prompt + (turn.execution?.operation === 'compact' ? '' : this.core.coordination.instructions(threadId) + this.core.delegation.instructions(threadId) + this.core.delegation.initialInput(threadId, turn.id)) + this.askInstructions(thread, provider, turn, prepared.prompt),
+      prompt: ((turn.execution?.operation && thread.sessionId !== null) || command ? '' : this.core.brain.instructions(provider.id)) + carried.deferred + prepared.prompt + (turn.execution?.operation === 'compact' ? '' : this.core.coordination.instructions(threadId) + this.core.delegation.instructions(threadId) + carried.letters) + this.askInstructions(thread, provider, turn, prepared.prompt),
       coordination: () => this.core.delegation.take(threadId, turn.id) ?? this.core.coordination.take(threadId, turn.id),
       attachments: prepared.attachments,
       sessionId: thread.sessionId,
@@ -1484,7 +1552,7 @@ export class ThreadStore {
     input: unknown,
     description: string | null,
   ): PermissionTicket {
-    if (this.core.workforce.resident.isCompacting(thread.id)) return Object.assign(Promise.resolve('deny' as const), { requestId: newId('req_') });
+    if (this.core.workforce.resident.isCompacting(thread.id)) return Object.assign(Promise.resolve('deny' as const), { requestId: newId('req_'), withdraw: () => undefined });
     const request: PermissionRequest = {
       id: newId('req_'),
       threadId: thread.id,
@@ -1505,7 +1573,10 @@ export class ThreadStore {
     );
     this.setStatus(thread.id, 'waiting');
     this.core.bus.emit('permission.requested', request);
-    return Object.assign(promise, { requestId: request.id });
+    const withdraw = (): void => {
+      if (this.permissions.has(request.id)) this.answerPermission({ requestId: request.id, decision: 'deny' });
+    };
+    return Object.assign(promise, { requestId: request.id, withdraw });
   }
 
   private askQuestion(thread: ThreadSummary, turn: Turn, ask: QuestionAsk): QuestionTicket {

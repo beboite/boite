@@ -262,6 +262,17 @@ test('the regular Stop command reports cancellation of a queued parent wake', as
   expect(h.core.threads.require(blocker).status).toBe('running');
 });
 
+test('stopping an idle child sweeps what its released agent left running', async () => {
+  const runs = scripted(); const { h, owner, threadId, spawn } = await setup();
+  const child = await spawn();
+  runs.get(child.thread.id)!.finish();
+  await waitFor(() => h.core.threads.require(child.thread.id).status === 'idle');
+  const swept: string[] = [];
+  h.core.procs.sweepSoon = (id: string): void => { swept.push(id); };
+  await owner.call('delegation.stop', { threadId, agentId: child.thread.id });
+  expect(swept).toEqual([child.thread.id]);
+});
+
 test('child inbox hides parent messages to siblings', async () => {
   scripted(); const { h, owner, threadId, spawn } = await setup();
   const one = await spawn('one'), two = await spawn('two');
@@ -300,6 +311,42 @@ test('budget-exhausted results join a manual parent prompt even when the driver 
   h.core.threads.startTurn(threadId, 'Continue with the result');
   expect(runs.get(threadId)!.ctx.prompt).toContain('Completed boundary review');
   expect(h.core.delegation.get(threadId).turnsUsed).toBe(1);
+});
+
+test('a turn retried on a fresh session after a lost resume still carries the held answers and child results', async () => {
+  const calls: TurnContext[] = [];
+  let lose = false;
+  restores.push(setDriver('echo', { protocol: 'echo', startTurn(ctx) {
+    calls.push(ctx);
+    if (lose && ctx.sessionId !== null) {
+      // The agent refused the resume before the prompt reached any model.
+      return { done: Promise.resolve<TurnResult>({ status: 'error', sessionId: ctx.sessionId, usage: null, error: 'no conversation found', sessionLost: true }), stop() {} };
+    }
+    const id = ctx.emit.startMessage('assistant');
+    ctx.emit.part(id, 0, { type: 'text', text: ctx.thread.parentThreadId ? 'Completed boundary review' : 'Planned.' });
+    ctx.emit.complete(id, 'complete');
+    return { done: Promise.resolve<TurnResult>({ status: 'done', sessionId: `session:${ctx.thread.id}`, usage: null }), stop() {} };
+  } }));
+  const { h, threadId, spawn } = await setup({ maxTurns: 1 });
+  h.core.threads.startTurn(threadId, 'Plan the work');
+  await waitFor(() => h.core.threads.require(threadId).sessionId === `session:${threadId}` && h.core.threads.require(threadId).status === 'idle');
+  const child = await spawn();
+  await waitFor(() => h.core.threads.require(child.thread.id).status === 'idle');
+  // The budget is spent, so the result waits in the parent's inbox for its next prompt.
+  await waitFor(() => h.core.delegation.get(threadId).messages.some(m => m.origin === 'result' && m.status === 'received'));
+  (h.core.threads as unknown as { deferredAnswers: Map<string, string[]> }).deferredAnswers.set(threadId, ['Held async answer']);
+
+  lose = true;
+  calls.length = 0;
+  const turn = h.core.threads.startTurn(threadId, 'Continue with the result');
+  await waitFor(() => h.core.journal.getTurn(turn.id)?.status === 'done', 5000);
+  expect(calls.map(ctx => ctx.sessionId)).toEqual([`session:${threadId}`, null]);
+  for (const ctx of calls) {
+    expect(ctx.prompt).toContain('Completed boundary review');
+    expect(ctx.prompt).toContain('Held async answer');
+  }
+  expect(h.core.delegation.get(threadId).messages.find(m => m.origin === 'result')?.status).toBe('delivered');
+  expect(h.core.threads.require(threadId).sessionGeneration).toBe(1);
 });
 
 test('the deadline also stops an automatic parent wake and pauses the team', async () => {

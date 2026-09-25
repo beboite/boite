@@ -2,7 +2,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
 import type { HarnessUpdate, OsProfile, ProviderDescriptor, ProviderId, ProviderSelfUpdate } from '@boite/contracts';
 import type { Core } from '../core.ts';
-import { forgetProbes, releaseThread } from '../drivers/index.ts';
+import { forgetProbes } from '../drivers/index.ts';
 import { notFound, refused } from '../errors.ts';
 import type { InstallOutcome } from './install.ts';
 import { profileFor, resolveCommand } from './loader.ts';
@@ -234,7 +234,7 @@ export class HarnessUpdates {
     }
     // A running program cannot be replaced, and a warm session is one.
     for (const thread of this.core.journal.listThreads()) {
-      if (thread.providerId === providerId) releaseThread(thread.id);
+      if (thread.providerId === providerId) this.core.threads.releaseAgent(thread.id);
     }
     this.put(providerId, { ...entry, state: 'updating', message: null });
     void this.runUpdate(target, entry).catch((error: unknown) => {

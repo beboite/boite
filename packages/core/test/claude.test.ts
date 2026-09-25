@@ -67,6 +67,11 @@ class FakeQuery {
   private ended = false;
   interrupts = 0;
   closes = 0;
+  /**
+   * The real CLI (2.1.282) answers an interrupt with an error result before it
+   * ends; true is an older fake that ends with no result at all.
+   */
+  silentInterrupt = false;
   /** Every live setter the driver reached for, in order, as `<name> <value>`. */
   readonly setters: string[] = [];
   /** The name of the one setter this CLI refuses, the way an older one would. */
@@ -92,6 +97,7 @@ class FakeQuery {
 
   interrupt(): Promise<undefined> {
     this.interrupts += 1;
+    if (!this.silentInterrupt) this.emit(interrupted());
     this.end();
     return Promise.resolve(undefined);
   }
@@ -298,6 +304,19 @@ function failure(sessionId: string): SDKMessage {
   });
 }
 
+/** What CLI 2.1.282 writes when an interrupt lands before any assistant block was committed. */
+function interrupted(): SDKMessage {
+  return sdk({
+    ...(failure('') as object),
+    // The fake does not know its session: no id, so the one it had stays.
+    session_id: undefined,
+    terminal_reason: 'aborted_streaming',
+    usage: { input_tokens: 4, output_tokens: 1 },
+    total_cost_usd: 0.002,
+    errors: ['[ede_diagnostic] result_type=user last_content_type=n/a stop_reason=null'],
+  });
+}
+
 describe('claude driver', () => {
   test('a scripted turn maps deltas, the tool pair, the usage and the session id', async () => {
     const client = await harness.connect();
@@ -470,6 +489,64 @@ describe('claude driver', () => {
     });
   });
 
+  test('one Edit writes its card three times, and the hooks never ship the original file', async () => {
+    const client = await harness.connect();
+    const threadId = await claudeThread(client);
+    await client.call('threads.subscribe', { threadId });
+    const written: MessagePart[] = [];
+    client.on('message.part', (event) => {
+      if (event.threadId === threadId && event.part.type === 'tool') written.push(event.part);
+    });
+
+    const originalFile = 'x'.repeat(100_000);
+    const input = { file_path: 'a.ts', old_string: 'x', new_string: 'y' };
+    const signal = new AbortController().signal;
+    scripted((fake, options) => {
+      const pre = options.hooks!.PreToolUse![0]!.hooks[0]!;
+      const post = options.hooks!.PostToolUse![0]!.hooks[0]!;
+      const base = { session_id: 'sess-edit', transcript_path: '', cwd: harness.dataDir, tool_use_id: 'toolu_edit', tool_name: 'Edit', tool_input: input };
+      void (async () => {
+        // The CLI's order: the streamed block, the assistant frame, the two hooks, the result.
+        fake.emit(init('sess-edit'));
+        fake.emit(streamEvent('sess-edit', { type: 'message_start', message: { id: 'msg_1' } }));
+        fake.emit(streamEvent('sess-edit', { type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'toolu_edit', name: 'Edit', input: {} } }));
+        fake.emit(streamEvent('sess-edit', { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: JSON.stringify(input) } }));
+        fake.emit(assistant('sess-edit', [{ type: 'tool_use', id: 'toolu_edit', name: 'Edit', input }]));
+        await waitFor(() => written.length >= 2);
+        await pre({ ...base, hook_event_name: 'PreToolUse' }, 'toolu_edit', { signal });
+        await post({ ...base, hook_event_name: 'PostToolUse', tool_response: { filePath: 'a.ts', originalFile, structuredPatch: [] } }, 'toolu_edit', { signal });
+        fake.emit(toolResult('sess-edit', 'toolu_edit', 'The file a.ts has been updated.'));
+        fake.emit(success('sess-edit'));
+        fake.end();
+      })();
+    });
+
+    expect(await runTurn(client, threadId, 'edit it')).toBe('done');
+    expect(written).toHaveLength(3);
+    expect(written.some((part) => JSON.stringify(part).includes(originalFile))).toBe(false);
+    const thread = await client.call('threads.get', { threadId });
+    const tool = thread.messages.at(-1)?.parts.find((part) => part.type === 'tool');
+    expect(tool).toMatchObject({ toolId: 'toolu_edit', status: 'done', output: 'The file a.ts has been updated.', input });
+  });
+
+  test('a PreToolUse with no assistant frame before it still draws the card', async () => {
+    const client = await harness.connect();
+    const threadId = await claudeThread(client);
+    scripted((fake, options) => {
+      const pre = options.hooks!.PreToolUse![0]!.hooks[0]!;
+      void (async () => {
+        fake.emit(init('sess-hook'));
+        await pre({ hook_event_name: 'PreToolUse', session_id: 'sess-hook', transcript_path: '', cwd: harness.dataDir, tool_use_id: 'toolu_only', tool_name: 'Bash', tool_input: { command: 'ls' } }, 'toolu_only', { signal: new AbortController().signal });
+        fake.emit(toolResult('sess-hook', 'toolu_only', 'a.ts'));
+        fake.emit(success('sess-hook'));
+        fake.end();
+      })();
+    });
+    expect(await runTurn(client, threadId, 'list')).toBe('done');
+    const thread = await client.call('threads.get', { threadId });
+    expect(thread.messages.at(-1)?.parts.find((part) => part.type === 'tool')).toMatchObject({ toolId: 'toolu_only', name: 'Bash', input: { command: 'ls' }, output: 'a.ts', status: 'done' });
+  });
+
   test('Edit, Write and MultiEdit inputs become diff documents on their tool parts', async () => {
     const client = await harness.connect();
     const threadId = await claudeThread(client);
@@ -583,6 +660,49 @@ describe('claude driver', () => {
     ]);
   });
 
+  test('a card the CLI cancels is taken back, and the turn goes on', async () => {
+    const client = await harness.connect();
+    const threadId = await claudeThread(client);
+
+    const answers: (PermissionResult | null)[] = [];
+    const cancel = new AbortController();
+    let resumed = (): void => undefined;
+    scripted((fake, options) => {
+      const ask = options.canUseTool;
+      if (ask === undefined) throw new Error('the driver must pass canUseTool');
+      fake.emit(init('sess-cancel'));
+      void (async () => {
+        answers.push(await ask('Bash', { command: 'ls' }, { signal: cancel.signal, toolUseID: 'toolu_cancel', requestId: 'req_cancel' }));
+        // The CLI moved on: the turn keeps running after the cancel.
+        await new Promise<void>((resolve) => { resumed = resolve; });
+        fake.emit(success('sess-cancel'));
+        fake.end();
+      })();
+    });
+
+    const requested = client.next('permission.requested', (request) => request.threadId === threadId, 10000);
+    const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 10000);
+    await client.call('turns.start', { threadId, prompt: 'list the files' });
+    const request = await requested;
+    const resolved = client.next('permission.resolved', (event) => event.requestId === request.id, 10000);
+    cancel.abort();
+
+    expect((await resolved).decision).toBe('deny');
+    await waitFor(() => answers.length === 1, 5000);
+    expect(answers).toEqual([{ behavior: 'deny', message: expect.any(String) }]);
+    expect(await client.call('permissions.list', { threadId })).toEqual([]);
+    expect((await client.call('threads.get', { threadId })).status).toBe('running');
+    await expect(client.call('permissions.answer', { requestId: request.id, decision: 'allow' })).rejects.toThrow();
+
+    resumed();
+    expect((await finished).status).toBe('done');
+    const thread = await client.call('threads.get', { threadId });
+    const parts: MessagePart[] = thread.messages[thread.messages.length - 1]?.parts ?? [];
+    expect(parts.filter((part) => part.type === 'permission')).toEqual([
+      { type: 'permission', requestId: request.id, toolName: 'Bash', decision: 'deny' },
+    ]);
+  });
+
   test('a CLI that dies with a card open writes nothing behind the completed message', async () => {
     const client = await harness.connect();
     const threadId = await claudeThread(client);
@@ -652,8 +772,33 @@ describe('claude driver', () => {
     await waitFor(() => queries.length === 1);
 
     expect(await client.call('turns.stop', { threadId })).toEqual({ stopped: true });
-    expect((await finished).status).toBe('stopped');
+    const done = await finished;
+    expect(done.status).toBe('stopped');
     expect(queries[0]?.interrupts).toBe(1);
+    // The CLI's own error result for the interrupt is the stop, not a failure.
+    expect(done.error).toBeNull();
+    // Its usage is still counted.
+    expect(done.usage?.costUsdEquivalent).toBe(0.002);
+    const thread = await client.call('threads.get', { threadId });
+    expect(thread.messages.flatMap((message) => message.parts).some((part) => part.type === 'error')).toBe(false);
+    expect(thread.status).toBe('idle');
+  });
+
+  test('an aborted result nobody asked for is still an error', async () => {
+    const client = await harness.connect();
+    const threadId = await claudeThread(client);
+
+    scripted((fake) => {
+      fake.emit(init('sess-aborted'));
+      fake.emit(interrupted());
+      fake.end();
+    });
+
+    const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 10000);
+    await client.call('turns.start', { threadId, prompt: 'go' });
+    const done = await finished;
+    expect(done.status).toBe('error');
+    expect(done.error).toContain('[ede_diagnostic]');
   });
 
   test('an error result ends the turn with the reason the CLI gave', async () => {
@@ -676,6 +821,72 @@ describe('claude driver', () => {
     const parts: MessagePart[] = thread.messages[thread.messages.length - 1]?.parts ?? [];
     expect(parts).toEqual([{ type: 'error', message: 'the tool loop gave up' }]);
     expect(thread.status).toBe('error');
+  });
+
+  test('a resume whose transcript is gone starts a fresh session with the history, once', async () => {
+    const client = await harness.connect();
+    const threadId = await claudeThread(client);
+
+    // Query 1 opens the session, query 2 asks to resume it and the CLI no longer
+    // has it (its answer, word for word), query 3 is the fresh start.
+    scripted((fake, options) => {
+      if (options.resume === 'sess-gone') {
+        fake.emit(sdk({ ...(failure('sess-gone') as object), errors: ['No conversation found with session ID: sess-gone'] }));
+        fake.end();
+        return;
+      }
+      const id = calls.length === 1 ? 'sess-gone' : 'sess-fresh';
+      fake.emit(init(id));
+      fake.emit(assistant(id, [{ type: 'text', text: calls.length === 1 ? 'first answer' : 'second answer' }]));
+      fake.emit(success(id));
+      fake.end();
+    });
+
+    expect(await runTurn(client, threadId, 'first question')).toBe('done');
+    expect((await client.call('threads.get', { threadId })).sessionId).toBe('sess-gone');
+
+    const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 10000);
+    await client.call('turns.start', { threadId, prompt: 'second question' });
+    const done = await finished;
+    expect(done.status).toBe('done');
+    expect(done.error).toBeNull();
+
+    expect(calls.map((call) => call.options.resume ?? null)).toEqual([null, 'sess-gone', null]);
+    await waitFor(() => (calls[2]?.prompts.length ?? 0) > 0);
+    // The fresh session is told what the lost one knew.
+    expect(calls[2]?.prompts[0]).toContain('first answer');
+    expect(calls[2]?.prompts[0]).toContain('second question');
+
+    const thread = await client.call('threads.get', { threadId });
+    expect(thread.sessionId).toBe('sess-fresh');
+    expect(thread.sessionGeneration).toBe(1);
+    expect(thread.status).toBe('idle');
+    const parts = thread.messages.flatMap((message) => message.parts);
+    expect(parts.some((part) => part.type === 'error')).toBe(false);
+    expect(thread.messages.filter((message) => message.role === 'assistant')).toHaveLength(2);
+  });
+
+  test('a failed resume for any other reason keeps the session', async () => {
+    const client = await harness.connect();
+    const threadId = await claudeThread(client);
+
+    scripted((fake, options) => {
+      if (options.resume === 'sess-kept') {
+        fake.emit(failure('sess-kept'));
+        fake.end();
+        return;
+      }
+      fake.emit(init('sess-kept'));
+      fake.emit(success('sess-kept'));
+      fake.end();
+    });
+
+    expect(await runTurn(client, threadId, 'first')).toBe('done');
+    expect(await runTurn(client, threadId, 'second')).toBe('error');
+    expect(calls).toHaveLength(2);
+    const thread = await client.call('threads.get', { threadId });
+    expect(thread.sessionId).toBe('sess-kept');
+    expect(thread.sessionGeneration ?? 0).toBe(0);
   });
 
   test('spawnClaudeCodeProcess goes through the registry and is traced', async () => {
@@ -1258,6 +1469,90 @@ describe('claude driver: questions and background work', () => {
     expect(calls[0]!.prompts).toHaveLength(1);
     // Nothing left to keep it for: the cold rule closes it now.
     await waitFor(() => (queries[0] as unknown as { ended: boolean }).ended);
+  });
+
+  test('Stop on an idle thread, an archive and an account switch sweep what the released CLI left', async () => {
+    const client = await harness.connect();
+    const threadId = await claudeThread(client);
+    const swept: string[] = [];
+    harness.core.procs.sweepSoon = (id: string): void => {
+      swept.push(id);
+    };
+    const withBackground = (sessionId: string): void => scripted((fake) => {
+      fake.emit(init(sessionId));
+      fake.emit(sdk({ type: 'system', subtype: 'background_tasks_changed', session_id: sessionId, tasks: [{ task_id: 'bash-1', task_type: 'local_bash', description: 'npm run dev' }] }));
+      fake.emit(success(sessionId));
+    });
+
+    withBackground('sess-sweep');
+    expect(await runTurn(client, threadId, 'start the dev server')).toBe('done');
+    expect(await client.call('turns.stop', { threadId })).toEqual({ stopped: true });
+    expect(swept).toEqual([threadId]);
+
+    const echo = (await client.call('accounts.list', {})).find((account) => account.providerId === 'echo')!;
+    await client.call('threads.update', { threadId, accountId: echo.id });
+    expect(swept).toEqual([threadId, threadId]);
+
+    await client.call('threads.archive', { threadId, archived: true });
+    expect(swept).toEqual([threadId, threadId, threadId]);
+  });
+
+  test("a subagent's own messages stay off the main message, and its API error does not fail the turn", async () => {
+    const client = await harness.connect();
+    const threadId = await claudeThread(client);
+    const sessionId = 'sess-sub';
+    /** What a subagent writes: the same shapes, tagged with the Agent call that runs it. */
+    const sub = (type: 'assistant' | 'user', body: Record<string, unknown>): SDKMessage =>
+      sdk({ type, session_id: sessionId, parent_tool_use_id: 'toolu_task', ...body });
+    scripted((fake, options) => {
+      fake.emit(init(sessionId));
+      fake.emit(assistant(sessionId, [{ type: 'tool_use', id: 'toolu_task', name: 'Agent', input: { prompt: 'look around' } }]));
+      // The hooks fire for the subagent's tools too, tagged with its agent id.
+      const pre = options.hooks!.PreToolUse![0]!.hooks[0]!;
+      void pre({ hook_event_name: 'PreToolUse', agent_id: 'agent-1', session_id: sessionId, transcript_path: '', cwd: harness.dataDir, tool_use_id: 'toolu_hooked', tool_name: 'Read', tool_input: {} }, 'toolu_hooked', { signal: new AbortController().signal });
+      fake.emit(sub('assistant', { message: { id: 'msg_sub1', role: 'assistant', content: [
+        { type: 'text', text: 'SUBAGENT THINKING ALOUD' },
+        { type: 'tool_use', id: 'toolu_grep', name: 'Grep', input: { pattern: 'x' } },
+      ], usage: { input_tokens: 50000 } } }));
+      fake.emit(sdk({ type: 'stream_event', session_id: sessionId, parent_tool_use_id: 'toolu_task', event: { type: 'message_start', message: { id: 'msg_sub2' } } }));
+      fake.emit(sdk({ type: 'stream_event', session_id: sessionId, parent_tool_use_id: 'toolu_task', event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'SUBAGENT STREAM' } } }));
+      fake.emit(sub('user', { message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_grep', content: 'hit' }] } }));
+      fake.emit(sub('assistant', { error: 'rate_limit', message: { id: 'msg_sub3', role: 'assistant', content: [{ type: 'text', text: 'API Error: 429' }] } }));
+      fake.emit(toolResult(sessionId, 'toolu_task', 'the subagent report'));
+      fake.emit(sdk({ type: 'assistant', session_id: sessionId, parent_tool_use_id: null, message: { id: 'msg_main', role: 'assistant', content: [{ type: 'text', text: 'MAIN ANSWER' }], usage: { input_tokens: 120, cache_read_input_tokens: 30 } } }));
+      fake.emit(success(sessionId));
+      fake.end();
+    });
+
+    expect(await runTurn(client, threadId, 'explore')).toBe('done');
+    const thread = await client.call('threads.get', { threadId });
+    const parts = thread.messages.filter((message) => message.role === 'assistant').flatMap((message) => message.parts);
+    expect(parts.some((part) => part.type === 'error')).toBe(false);
+    expect(parts.filter((part) => part.type === 'tool').map((part) => part.type === 'tool' ? part.toolId : '')).toEqual(['toolu_task']);
+    const texts = parts.filter((part) => part.type === 'text').map((part) => part.type === 'text' ? part.text : '');
+    expect(texts).toEqual(['MAIN ANSWER']);
+    // The meter is the main loop's last request, never the subagent's prompt.
+    expect(thread.context?.tokens).toBe(150);
+  });
+
+  test('a background subagent talking after the turn opens no turn of its own', async () => {
+    const client = await harness.connect();
+    const threadId = await claudeThread(client);
+    const sessionId = 'sess-bg-sub';
+    scripted((fake) => {
+      fake.emit(init(sessionId));
+      fake.emit(assistant(sessionId, [{ type: 'tool_use', id: 'toolu_agent', name: 'Agent', input: { prompt: 'dig', run_in_background: true } }]));
+      fake.emit(sdk({ type: 'system', subtype: 'background_tasks_changed', session_id: sessionId, tasks: [{ task_id: 'agent-1', task_type: 'local_agent', description: 'dig' }] }));
+      fake.emit(toolResult(sessionId, 'toolu_agent', 'Async agent launched'));
+      fake.emit(success(sessionId));
+    });
+    expect(await runTurn(client, threadId, 'dig in the background')).toBe('done');
+
+    queries[0]!.emit(sdk({ type: 'assistant', session_id: sessionId, parent_tool_use_id: 'toolu_agent', message: { id: 'msg_bg', role: 'assistant', content: [{ type: 'text', text: 'still digging' }] } }));
+    await Bun.sleep(300);
+    expect(harness.core.journal.listTurns(threadId)).toHaveLength(1);
+    expect((await client.call('threads.get', { threadId })).status).toBe('idle');
+    await client.call('turns.stop', { threadId });
   });
 
   test('output the CLI writes while the last turn is still closing opens its turn right after', async () => {

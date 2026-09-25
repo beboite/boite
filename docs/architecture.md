@@ -40,7 +40,10 @@ history included, up to about 200 KB, and only the open thread shows it. An
 agent socket still gets its own thread's. A client that
 connects mid-turn rebuilds the pending permission card from
 `permissions.list`, because `permission.requested` only reached the sockets
-that existed when it fired.
+that existed when it fired. A card leaves that list when it is answered, when
+its turn ends, and when the agent stops waiting for it: Claude aborts the
+request's signal when the CLI cancels the call, and the driver withdraws the
+card, which reaches every client as `permission.resolved` with `deny`.
 
 Three principals say hello. The owner holds the core token or an owner
 pairing; a session is a paired phone, held to `DEVICE_METHODS`; an agent is a
@@ -82,7 +85,11 @@ the other listeners still get it. An error nothing caught still ends the core,
 as Bun would, after a log line and the usual shutdown that releases the data
 directory lock. The provider transcript is never remodelled. A thread resumes the
 selected account's native `sessionId`; changing accounts starts a fresh session
-with bounded journal excerpts. Each accepted turn freezes its execution target,
+with bounded journal excerpts. So does a resume the agent refuses because the
+session is gone (Claude's `No conversation found with session ID`, Codex's
+`no rollout found for thread id`): the core drops the id and runs the same turn
+once more on a fresh session, with no error part. Any other resume failure
+keeps the id. Each accepted turn freezes its execution target,
 so a later picker change cannot redirect queued work.
 
 ## The scheduler counts turns, not threads
@@ -162,13 +169,21 @@ it finishes opens a turn of its own, marked "Background work finished".
 
 Where they differ is worth knowing before you touch one. `claude-sdk` runs the
 Claude Agent SDK with a `PreToolUse` hook as the single gate that journals and
-decides every tool call. `acp` speaks the Agent Client Protocol over the agent's
+decides every tool call. What a subagent (the Agent or Task tool) writes, tagged
+with `parent_tool_use_id`, stays off the main message, as it does in an imported
+transcript: its text, tool calls and usage are its own, the Agent card shows the
+report the main loop reads, and an API error inside the subagent is a log line,
+not a failed turn. `acp` speaks the Agent Client Protocol over the agent's
 stdio and sends the thread's permission mode as `session/set_mode`, matching the
 agent's own spelling out of a candidate list, because ACP standardises the call
 and never the ids. `codex-appserver` carries its own ndjson JSON-RPC peer, since
 OpenAI ships the protocol as generated TypeScript rather than a client, and its
 permission mode is part of the session key: Codex takes the approval policy and
-the sandbox when the thread opens and has no call that changes them later.
+the sandbox when the thread opens and has no call that changes them later. Its
+Stop is `turn/interrupt`, like Claude's `interrupt()` given three seconds: an
+app-server that has not ended the turn by then loses its process, and the next
+turn resumes the Codex thread on a new one. A Stop that lands while the process
+or the thread is still opening sends no prompt at all.
 `muse` has its own peer too, for Muse Code's session protocol: the approval
 mode is a call on the running host and the sandbox is a host flag, so only the
 flags are in the session key. `pi` takes its session on the command line rather

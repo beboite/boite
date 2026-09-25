@@ -5,7 +5,7 @@ import type { Core } from './core.ts';
 import { invalidParams, messageOf, refused } from './errors.ts';
 import { checkEffort, checkModel } from './threads.ts';
 import { newId } from './ids.ts';
-import { assertDriverRunnable, releaseThread } from './drivers/index.ts';
+import { assertDriverRunnable } from './drivers/index.ts';
 
 interface AgentRow { thread_id: string; root_id: string; request_id: string; fingerprint: string; profile_id: string; task: string }
 interface LetterRow { data: string; fingerprint: string }
@@ -83,7 +83,7 @@ export class Delegation {
     if (children.some(t => ['queued', 'running', 'waiting'].includes(t.status)) || this.inbox(rootId).length) return false;
     this.core.journal.db.transaction(() => {
       for (const child of children.filter(t => !t.archived)) {
-        releaseThread(child.id);
+        this.core.threads.releaseAgent(child.id);
         const archived = { ...child, archived: true, updatedAt: Date.now() };
         this.core.journal.putThread(archived);
         this.core.bus.emit('thread.updated', archived);
@@ -394,7 +394,7 @@ export class Delegation {
       this.core.activity.pauseAll(id);
       this.core.coordination.pause(id);
       if (this.core.scheduler.stop(id)) stopped++;
-      releaseThread(id);
+      this.core.threads.releaseAgent(id);
       for (const letter of this.letters(id, 'received')) this.update(letter, 'rejected', 'Agent stopped');
       for (const letter of this.letters(id, 'uncertain')) {
         if (letter.error?.startsWith('Queued for provider turn ')) this.update(letter, 'rejected', 'Agent stopped before provider delivery');
