@@ -1,7 +1,7 @@
 import { currentOs } from '../src/paths.ts';
 import { chmodSync, mkdirSync, writeFileSync } from 'node:fs';
 import { resolveCommand } from '../src/providers/loader.ts';
-import { join, sep } from 'node:path';
+import { delimiter, join, sep } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { startTestCore } from './harness.ts';
 import type { TestCore } from './harness.ts';
@@ -63,6 +63,33 @@ describe('providers', () => {
       { kind: 'file', value: directory },
       { kind: 'file', value: process.execPath },
     ], isolation: {} })?.executable).toBe(process.execPath);
+  });
+
+  test.skipIf(process.platform !== 'win32')('an npm launcher script on PATH is not an agent to start, but a program behind it is', () => {
+    const shims = join(harness.dataDir, 'npm-prefix');
+    const programs = join(harness.dataDir, 'programs');
+    mkdirSync(shims);
+    mkdirSync(programs);
+    writeFileSync(join(shims, 'fakeagent.cmd'), '@echo off\r\n');
+    const saved = process.env['PATH'];
+    try {
+      process.env['PATH'] = shims;
+      const profile = { detect: {}, executable: [{ kind: 'path' as const, value: 'fakeagent' }], isolation: {} };
+      // node's spawn refuses a .cmd with EINVAL: the agent is missing, and its install is offered.
+      expect(resolveCommand(profile)).toBeNull();
+      expect(resolveCommand({ ...profile, detect: { command: 'fakeagent' } })).toBeNull();
+
+      writeFileSync(join(programs, 'fakeagent.exe'), 'MZ');
+      process.env['PATH'] = [shims, programs].join(delimiter);
+      expect(resolveCommand(profile)?.executable.toLowerCase()).toBe(join(programs, 'fakeagent.exe').toLowerCase());
+
+      // A profile that names a launcher script itself maps one to its program, as Muse does.
+      process.env['PATH'] = shims;
+      const scripted = { ...profile, executable: [{ kind: 'file' as const, value: join(programs, 'missing.cmd') }, ...profile.executable] };
+      expect(resolveCommand(scripted)?.executable.toLowerCase()).toBe(join(shims, 'fakeagent.cmd').toLowerCase());
+    } finally {
+      process.env['PATH'] = saved;
+    }
   });
 
   test.skipIf(process.platform === 'win32')('a non-executable file cannot mask a runnable fallback on POSIX', () => {

@@ -105,7 +105,13 @@ session protocol either.
 - `detect` is `{ command }` or `{ file }`. A provider whose detect does not
   resolve reports unavailable rather than failing at spawn.
 - `executable` is an ordered candidate list, first hit wins. `kind: "file"` is
-  an exact path and `kind: "path"` a name looked up on PATH. `kind: "npm"` names
+  an exact path and `kind: "path"` a name looked up on PATH. On Windows a PATH
+  lookup passes over `.cmd`, `.bat` and `.ps1` launchers to the next PATH
+  directory holding a real program of that name, and misses when there is none:
+  the drivers spawn through node, which refuses a launcher script with EINVAL,
+  so the agent reads as not installed and its row offers the install instead.
+  A profile that names a launcher script as a `file` candidate keeps them, as
+  Muse Code does, since its driver maps its launcher to its program. `kind: "npm"` names
   a globally installed package, `@scope/name#bin`, for the agents npm installs
   as a `.cmd` shim Bun cannot spawn. The core looks for the package under the
   npm prefix (`npm_config_prefix`, `%APPDATA%/npm`, the directory of `npm`,

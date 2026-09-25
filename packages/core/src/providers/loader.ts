@@ -1,5 +1,5 @@
 import { accessSync, constants, existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
-import { join, normalize, relative, resolve } from 'node:path';
+import { delimiter, join, normalize, relative, resolve } from 'node:path';
 import type {
   EffortLevel,
   ExecutableCandidate,
@@ -689,11 +689,44 @@ export interface ResolvedCommand {
   updateEnv: Record<string, string>;
 }
 
+/**
+ * A Windows launcher script (an npm `.cmd` or `.ps1` shim, a `.bat`). The
+ * drivers spawn through node's `child_process.spawn`, which refuses one with
+ * EINVAL, so a PATH hit on one is not a way to start the agent.
+ */
+export function isLauncherScript(path: string): boolean {
+  return process.platform === 'win32' && /\.(cmd|bat|ps1)$/i.test(path);
+}
+
+/**
+ * `Bun.which`, passing over launcher scripts on Windows to the next PATH
+ * directory that holds a real program of that name. `scripts` keeps them, for a
+ * profile that names a launcher script itself and maps it to its program.
+ */
+export function whichProgram(name: string, scripts = false): string | null {
+  // Named outright: Bun.which alone keeps the PATH the process started with.
+  const PATH = process.env['PATH'] ?? '';
+  const found = Bun.which(name, { PATH });
+  if (found === null || scripts || !isLauncherScript(found)) return found;
+  for (const dir of PATH.split(delimiter)) {
+    if (dir.length === 0) continue;
+    const hit = Bun.which(name, { PATH: dir });
+    if (hit !== null && !isLauncherScript(hit)) return hit;
+  }
+  return null;
+}
+
+/** True when the profile names a launcher script as a file, so its driver knows what to make of one. */
+function takesScripts(profile: OsProfile): boolean {
+  return profile.executable.some((candidate) => candidate.kind === 'file' && isLauncherScript(candidate.value));
+}
+
 export function resolveCommand(profile: OsProfile): ResolvedCommand | null {
+  const scripts = takesScripts(profile);
   for (const candidate of profile.executable) {
     const updateEnv = candidate.updateEnv ?? {};
     if (candidate.kind === 'path') {
-      const found = Bun.which(candidate.value);
+      const found = whichProgram(candidate.value, scripts);
       if (found !== null) return { executable: found, prefix: [], shown: found, updateEnv };
     } else if (candidate.kind === 'file') {
       try {
@@ -723,7 +756,7 @@ function detectResolves(profile: OsProfile, agentsDir: string, dataDir: string):
   if (profile.detect.file !== undefined && !existsSync(substituteHome(profile.detect.file, agentsDir, dataDir))) {
     return false;
   }
-  if (profile.detect.command !== undefined && Bun.which(profile.detect.command) === null) return false;
+  if (profile.detect.command !== undefined && whichProgram(profile.detect.command, takesScripts(profile)) === null) return false;
   return true;
 }
 
