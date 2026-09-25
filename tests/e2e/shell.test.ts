@@ -246,6 +246,7 @@ function spawnHiddenShell(ownDataDir: string, debugPort?: number, resident = fal
   env.BOITE_DATA_DIR = ownDataDir;
   env.BOITE_DRAFTS_DIR = join(ownDataDir, 'Documents', 'Boite');
   env.BOITE_ECHO = '1';
+  env.BOITE_HOST_AGENTS = '0';
   delete env.BOITE_SHELL_DEBUG_PORT;
   if (debugPort !== undefined) {
     env.BOITE_SHELL_DEBUG_PORT = String(debugPort);
