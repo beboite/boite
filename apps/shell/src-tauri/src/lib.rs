@@ -1244,12 +1244,14 @@ fn show_main<R: Runtime>(app: &AppHandle<R>) {
         let _ = window.unminimize();
         let _ = window.set_skip_taskbar(false);
         let _ = window.show();
+        browser::unpark_all(app);
         let _ = window.set_focus();
     }
 }
 
 fn hide_main<R: Runtime>(app: &AppHandle<R>) {
     if let Some(window) = app.get_webview_window(MAIN_LABEL) {
+        browser::park_all(app);
         let _ = window.hide();
         let _ = window.set_skip_taskbar(true);
     }
@@ -1383,12 +1385,20 @@ pub fn run() {
             }
 
             let closing = handle.clone();
-            window.on_window_event(move |event| {
-                if let WindowEvent::CloseRequested { api, .. } = event {
+            let resized = window.clone();
+            window.on_window_event(move |event| match event {
+                WindowEvent::CloseRequested { api, .. } => {
                     api.prevent_close();
                     if closing.state::<CloseBehavior>().enabled.load(Ordering::Acquire) { hide_main(&closing); }
                     else { quit(&closing); }
                 }
+                // Minimizing hides nothing from WebView2: the page is parked
+                // here, and unparked by the resize that restores the window.
+                WindowEvent::Resized(_) => {
+                    if resized.is_minimized().unwrap_or(false) { browser::park_all(&closing); }
+                    else if resized.is_visible().unwrap_or(false) { browser::unpark_all(&closing); }
+                }
+                _ => {}
             });
             Ok(())
         })

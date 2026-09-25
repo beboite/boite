@@ -17,7 +17,7 @@
 //! navigation handler refuses it again for a link the page itself followed.
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{LazyLock, Mutex};
 use tauri::webview::{NewWindowResponse, PageLoadEvent, WebviewBuilder};
 use tauri::{
@@ -205,6 +205,72 @@ pub fn only_main(webview: &Webview) -> Result<(), String> {
     ))
 }
 
+/// Which surfaces the UI wants on screen, and whether the window is parked.
+/// WebView2 does not notice a hidden or minimized host window by itself: its
+/// page keeps painting and its timers keep running until the host says so. The
+/// shell says so by hiding every webview of a parked window, and has to
+/// remember which surfaces to bring back, because the UI does not send a rect
+/// again when it did not change.
+#[derive(Default)]
+struct Surfaces {
+    shown: HashSet<String>,
+    parked: bool,
+}
+
+impl Surfaces {
+    /// Records that the UI wants `label` shown or not, and answers whether to
+    /// show it now: never while the window is parked.
+    fn want(&mut self, label: &str, shown: bool) -> bool {
+        if shown { self.shown.insert(label.to_owned()); } else { self.shown.remove(label); }
+        shown && !self.parked
+    }
+
+    /// True when this call parked the window, false when it already was.
+    fn park(&mut self) -> bool {
+        !std::mem::replace(&mut self.parked, true)
+    }
+
+    /// The surfaces to show again, or `None` when the window was not parked.
+    fn unpark(&mut self) -> Option<Vec<String>> {
+        std::mem::replace(&mut self.parked, false).then(|| self.shown.iter().cloned().collect())
+    }
+}
+
+static SURFACES: LazyLock<Mutex<Surfaces>> = LazyLock::new(Mutex::default);
+
+fn surfaces() -> std::sync::MutexGuard<'static, Surfaces> {
+    SURFACES.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// The window went to the tray or was minimized: its page and every surface
+/// stop painting, and `document.hidden` turns true for the UI's own savings.
+/// Repeated calls, one per resize event of a minimized window, do nothing.
+pub fn park_all<R: Runtime>(app: &AppHandle<R>) {
+    if !surfaces().park() {
+        return;
+    }
+    for (label, view) in app.webviews() {
+        if label == MAIN_LABEL || label.starts_with(LABEL_PREFIX) {
+            if let Err(error) = view.hide() {
+                eprintln!("[shell] the webview {label} could not be parked: {error}");
+            }
+        }
+    }
+}
+
+/// The window is back on screen: its page, and the surfaces the UI last asked
+/// to see.
+pub fn unpark_all<R: Runtime>(app: &AppHandle<R>) {
+    let Some(shown) = surfaces().unpark() else { return };
+    for label in std::iter::once(MAIN_LABEL.to_owned()).chain(shown) {
+        if let Some(view) = app.get_webview(&label) {
+            if let Err(error) = view.show() {
+                eprintln!("[shell] the webview {label} could not be shown again: {error}");
+            }
+        }
+    }
+}
+
 /// Every browser surface belongs to the page that asked for it. When the UI
 /// reloads, that page is gone and its surfaces with it, so the child webviews
 /// are closed here rather than left hidden behind a page that has forgotten
@@ -215,6 +281,7 @@ pub fn close_all<R: Runtime>(app: &AppHandle<R>) {
     if let Ok(mut picks) = PICKS.lock() {
         picks.clear();
     }
+    surfaces().shown.clear();
     for (label, view) in app.webviews() {
         if !label.starts_with(LABEL_PREFIX) {
             continue;
@@ -510,6 +577,7 @@ pub async fn browser_set_bounds(
     only_main(&webview)?;
     let view = view_of(&app, &id)?;
     let Some(rect) = rect.filter(|rect| rect.width >= 1.0 && rect.height >= 1.0) else {
+        surfaces().want(view.label(), false);
         return view
             .hide()
             .map_err(|error| format!("the browser surface {id:?} could not be parked: {error}"));
@@ -524,6 +592,9 @@ pub async fn browser_set_bounds(
             rect.width, rect.height, rect.x, rect.y
         )
     })?;
+    if !surfaces().want(view.label(), true) {
+        return Ok(());
+    }
     view.show()
         .map_err(|error| format!("the browser surface {id:?} could not be shown: {error}"))
 }
@@ -615,6 +686,7 @@ pub async fn browser_destroy(app: AppHandle, webview: Webview, id: String) -> Re
     only_main(&webview)?;
     cancel_pick(&id);
     if let Ok(mut highlights) = HIGHLIGHTS.lock() { highlights.remove(&id); }
+    surfaces().want(&label_of(&id)?, false);
     view_of(&app, &id)?
         .close()
         .map_err(|error| format!("the browser surface {id:?} could not be closed: {error}"))
@@ -622,7 +694,25 @@ pub async fn browser_destroy(app: AppHandle, webview: Webview, id: String) -> Re
 
 #[cfg(test)]
 mod tests {
-    use super::{checked_url, label_of, read_selection, LABEL_PREFIX, MAX_SELECTION_CALLBACK_BYTES, PICKS};
+    use super::{checked_url, label_of, read_selection, Surfaces, LABEL_PREFIX, MAX_SELECTION_CALLBACK_BYTES, PICKS};
+
+    #[test]
+    fn a_parked_window_shows_nothing_and_brings_back_only_the_surfaces_the_ui_wanted() {
+        let mut surfaces = Surfaces::default();
+        assert!(surfaces.want("boite-browser:a", true));
+        assert!(surfaces.want("boite-browser:b", true));
+        assert!(surfaces.park());
+        // A minimized window sends resize events over and over: one park.
+        assert!(!surfaces.park());
+        // The UI keeps working while the window is in the tray.
+        assert!(!surfaces.want("boite-browser:c", true));
+        assert!(!surfaces.want("boite-browser:b", false));
+        let mut back = surfaces.unpark().unwrap();
+        back.sort();
+        assert_eq!(back, ["boite-browser:a", "boite-browser:c"]);
+        assert!(surfaces.unpark().is_none());
+        assert!(surfaces.want("boite-browser:b", true));
+    }
 
     #[test]
     fn preview_selection_is_bound_to_one_surface_and_consumed_once() {

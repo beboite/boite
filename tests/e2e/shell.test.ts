@@ -359,6 +359,8 @@ shellTest('close exits by default; the persisted setting hides instead; the nati
     await ownPage.evaluate(`document.querySelector('[data-testid="titlebar"] .close').click()`);
     expect(await healthy(ownCore.port)).toBe(true);
     expect(pidAlive(ownPid)).toBe(true);
+    // In the tray the page is hidden to WebView2 too, so it stops painting.
+    await ownPage.waitFor(`document.visibilityState === 'hidden'`);
 
     // Keep every real login out of this test. The popup still crosses real IPC and WS.
     const client = await connect(`http://127.0.0.1:${ownCore.port}`, ownCore.token);
