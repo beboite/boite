@@ -46,6 +46,11 @@ Clone projects into `/workspace` or replace its volume with a bind mount.
 Bind-mounted files must be writable by UID 1000. Paths entered in boite refer
 to the container. Do not mount the Docker socket or the host's complete home.
 
+The container has no CPU cap and a 4 GB memory cap by default. Set `BOITE_CPUS`
+in a local `.env` file to cap its CPUs, for example `BOITE_CPUS=2`; the value
+must not exceed the host's CPU count, or Docker refuses to start the container.
+`BOITE_MEM` sets the memory cap, for example `BOITE_MEM=2g`.
+
 For a Codex login, for example:
 
 ```sh
