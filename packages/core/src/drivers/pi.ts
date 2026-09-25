@@ -36,6 +36,7 @@ import { resolveDataDir } from '../paths.ts';
 import type { SpawnedChild } from '../procs.ts';
 import { launchPrefix, profileFor, resolveExecutable } from '../providers/loader.ts';
 import { LineSplitter } from './lines.ts';
+import { ModelProbes } from './model-probes.ts';
 import type {
   Driver,
   ProbeContext,
@@ -86,6 +87,22 @@ const SESSION_ROOT = 'pi-sessions';
 const AGENT_OWN_MODEL = 'default';
 /** The four `extension_ui_request` methods that block until the client answers. */
 const UI_DIALOGS = new Set(['select', 'confirm', 'input', 'editor']);
+/** The `extension_ui_request` methods pi sends and expects no answer to (`docs/rpc-extension-ui.md`). */
+const UI_NOTICES = new Set(['notify', 'setStatus', 'setWidget', 'setTitle', 'set_editor_text']);
+/**
+ * How long a stopped turn waits for `agent_settled` after `abort` before the
+ * process is closed. pi's abort waits for its tool trees to die, and a Windows
+ * taskkill can take seconds; Muse gives its host 30 s.
+ */
+const STOP_DEADLINE_MS = 15_000;
+let stopDeadlineMs = STOP_DEADLINE_MS;
+/** How long the context read after a turn waits for `get_session_stats`. */
+const STATS_TIMEOUT_MS = 5_000;
+
+/** Tests shorten the stop deadline; `null` puts the default back. */
+export function setPiStopDeadlineForTests(ms: number | null): void {
+  stopDeadlineMs = ms ?? STOP_DEADLINE_MS;
+}
 
 /**
  * What every pi process Boite starts gets on top of the environment, turns and
@@ -321,6 +338,10 @@ class PiTurn {
   decided = false;
   isStopped = false;
   settled = false;
+  /** The error of the last assistant message, promoted only if the run settles on it. */
+  pendingError: string | null = null;
+  /** Set once the stop deadline runs for this turn. */
+  stopDeadline = false;
 
   constructor(readonly ctx: TurnContext) {
     this.sessionId = ctx.sessionId;
@@ -345,18 +366,26 @@ class PiTurn {
   }
 
   /**
-   * An assistant message that ended badly. pi keeps running after one (a retry,
-   * a queued message), so it is remembered and `agent_settled` still decides.
+   * How the last assistant message ended: its error, or null when it went well.
+   * pi retries an overloaded or dropped request by itself (`auto_retry_*`) and
+   * recovers from a context overflow by compacting, inside the same run, so an
+   * error may still be followed by a good answer. Nothing is drawn until
+   * `agent_settled`, and only the outcome standing then counts.
    */
-  noteError(reason: string): void {
-    if (this.error !== null) return;
-    this.error = reason;
-    this.part(this.takeIndex(), { type: 'error', message: reason });
+  noteOutcome(error: string | null): void {
+    this.pendingError = error;
   }
 
-  /** `agent_settled`: the run is over, whatever happened inside it. */
+  /**
+   * `agent_settled`: the run is over, whatever happened inside it. A stop wins
+   * over the error of a request the stop itself cut short.
+   */
   settleRun(): void {
     if (this.decided) return;
+    if (this.error === null && this.pendingError !== null && !this.isStopped) {
+      this.error = this.pendingError;
+      this.part(this.takeIndex(), { type: 'error', message: this.error });
+    }
     if (this.error !== null) this.status = 'error';
     else if (this.isStopped) this.status = 'stopped';
     this.decided = true;
@@ -511,6 +540,11 @@ class PiSession {
   private running = 0;
   private closing = false;
   private ended = false;
+  /** Ends every process of the thread: the agent and whatever its tools left running. */
+  private killTree: (() => void) | null = null;
+  /** The model and the thinking level the process is on, so a warm turn only sends a change. */
+  private model: string | null = null;
+  private effort: string | null = null;
 
   constructor(
     readonly key: string,
@@ -541,7 +575,10 @@ class PiSession {
     });
   }
 
-  /** `abort` is pi's only stop; the run still settles, as aborted. */
+  /**
+   * `abort` is pi's only stop; the run still settles, as aborted. A turn not
+   * yet running sends nothing: `runTurn` sees the stop before its prompt.
+   */
   stopTurn(turn: PiTurn): void {
     if (turn.settled) return;
     turn.markStopped();
@@ -553,9 +590,51 @@ class PiSession {
     }
     const peer = this.peer;
     if (peer === null) return;
-    // pi may continue queued steering after abort. Clear it before cancelling.
-    if (this.steered) void peer.command('clear_queue').then(() => peer.command('abort')).catch(() => this.drop());
-    else void peer.command('abort').catch(() => undefined);
+    this.abort(turn, peer);
+  }
+
+  /**
+   * `abort`, after `clear_queue` when coordination steered the run, since pi
+   * may continue queued steering after an abort. A refused command is not a
+   * failed turn: the deadline still ends it as stopped.
+   *
+   * An idle pi answers `abort` and emits nothing, which is what a prompt still
+   * in preflight (an extension dialog) or an extension command leaves behind.
+   * `get_state` after the answer says whether a run is still going: pi writes
+   * in order, so a run that ended has sent `agent_settled` before it.
+   */
+  private abort(turn: PiTurn, peer: PiPeer): void {
+    const cleared = this.steered ? peer.command('clear_queue').catch(() => undefined) : Promise.resolve(undefined);
+    void cleared
+      .then(() => peer.command('abort'))
+      .then(() => peer.command('get_state'))
+      .then((state) => {
+        if (!turn.decided && dataOf(state)['isStreaming'] !== true) turn.settleRun();
+      })
+      .catch(() => undefined);
+    this.armStopDeadline(turn);
+  }
+
+  /**
+   * A pi that does not settle after `abort` (an extension tool that ignores the
+   * signal, a blocked event loop) is closed: the turn ends stopped, then the
+   * process and every tool it started go. Stopped first, or the child's close
+   * would fail the turn.
+   */
+  private armStopDeadline(turn: PiTurn): void {
+    if (turn.stopDeadline) return;
+    turn.stopDeadline = true;
+    const ms = stopDeadlineMs;
+    const timer = setTimeout(() => {
+      if (turn.decided) return;
+      turn.ctx.log('warn', `pi: the agent did not settle within ${ms / 1000} s of abort, closing it`);
+      turn.settleRun();
+      this.drop();
+    }, ms);
+    timer.unref?.();
+    void turn.finished.then(() => {
+      clearTimeout(timer);
+    });
   }
 
   /** Submit attributed coordination at pi's next tool boundary. */
@@ -577,6 +656,12 @@ class PiSession {
   // -- the turn -------------------------------------------------------------
 
   private async runTurn(turn: PiTurn): Promise<void> {
+    // A turn stopped while it waited for the process sends nothing to the model.
+    if (turn.isStopped) {
+      turn.settleRun();
+      this.endTurn(turn, false);
+      return;
+    }
     try {
       await this.start(turn.ctx);
     } catch (error) {
@@ -592,21 +677,36 @@ class PiSession {
       this.endTurn(turn, true);
       return;
     }
+    if (turn.isStopped) {
+      turn.settleRun();
+      this.endTurn(turn, false);
+      return;
+    }
 
     turn.noteSession(sessionId);
     this.current = turn;
     this.steered = false;
     try {
-      if (turn.ctx.turn.execution?.operation === 'compact') {
-        const result = dataOf(await peer.command('compact')) as { tokensBefore?: number };
-        turn.part(turn.takeIndex(), { type: 'compaction', trigger: 'manual', preTokens: result?.tokensBefore ?? turn.ctx.thread.context?.tokens ?? null, postTokens: null });
+      await this.align(turn.ctx, peer);
+      if (turn.isStopped) {
+        turn.settleRun();
+      } else if (turn.ctx.turn.execution?.operation === 'compact') {
+        const result = dataOf(await peer.command('compact')) as { tokensBefore?: unknown; estimatedTokensAfter?: unknown; usage?: PiUsage };
+        if (result.usage !== undefined && result.usage !== null) turn.addUsage(result.usage);
+        turn.part(turn.takeIndex(), {
+          type: 'compaction',
+          trigger: 'manual',
+          preTokens: numberOf(result.tokensBefore) ?? turn.ctx.thread.context?.tokens ?? null,
+          postTokens: numberOf(result.estimatedTokensAfter),
+        });
         turn.settleRun();
       } else {
-      await peer.command('prompt', {
-        message: turn.ctx.prompt,
-        ...(turn.ctx.attachments.length === 0 ? {} : { images: imagesOf(turn.ctx.attachments) }),
-      });
-      if (turn.isStopped) void peer.command('abort').catch(() => undefined);
+        await peer.command('prompt', {
+          message: turn.ctx.prompt,
+          ...(turn.ctx.attachments.length === 0 ? {} : { images: imagesOf(turn.ctx.attachments) }),
+        });
+        if (turn.isStopped) this.abort(turn, peer);
+        else await this.settleIfIdle(turn, peer);
       }
     } catch (error) {
       // A child that died takes the pipe with it, and its exit says more than
@@ -619,8 +719,81 @@ class PiSession {
     }
 
     await turn.finished;
+    await this.readContext(turn, peer);
     this.current = null;
     this.endTurn(turn, turn.isStopped);
+  }
+
+  /**
+   * A warm process on another model or level than the thread now wants. pi
+   * takes both over RPC (`set_model`, `set_thinking_level`), so the process
+   * stays. `set_model` clamps the level to the new model, so the level is sent
+   * again after it. A refusal fails the turn with pi's own sentence and drops
+   * the process, and the next turn launches with `--model`.
+   */
+  private async align(ctx: TurnContext, peer: PiPeer): Promise<void> {
+    const model = ctx.thread.model;
+    if (model === null || model === AGENT_OWN_MODEL) return;
+    let changed = false;
+    if (model !== this.model) {
+      const slash = model.indexOf('/');
+      if (slash <= 0 || slash === model.length - 1) {
+        throw new Error(`pi cannot switch to the model ${model}: its id is not <provider>/<id>`);
+      }
+      await peer.command('set_model', { provider: model.slice(0, slash), modelId: model.slice(slash + 1) });
+      this.model = model;
+      changed = true;
+    }
+    const effort = ctx.thread.effort;
+    if (effort !== null && (changed || effort !== this.effort)) {
+      await peer.command('set_thinking_level', { level: effort });
+      this.effort = effort;
+    }
+  }
+
+  /**
+   * A prompt pi handled without a run: an extension command, or an input
+   * handler that consumed the text. pi answers the prompt and never emits
+   * `agent_settled`. pi marks a run active in the same tick it answers the
+   * prompt and writes in order, so `get_state` sent now says `isStreaming` for
+   * a run that started, and a run that already ended has settled before the
+   * answer. A refused `get_state` leaves the turn to `agent_settled`.
+   */
+  private async settleIfIdle(turn: PiTurn, peer: PiPeer): Promise<void> {
+    let state: Record<string, unknown>;
+    try {
+      state = dataOf(await peer.command('get_state'));
+    } catch (error) {
+      turn.ctx.log('warn', `pi: get_state after the prompt failed: ${messageOf(error)}`);
+      return;
+    }
+    if (!turn.decided && state['isStreaming'] !== true) turn.settleRun();
+  }
+
+  /**
+   * The context meter, read once the run is over: `get_session_stats` carries
+   * the tokens pi counts against the window. `tokens` is null right after a
+   * compaction, until the next answer, so nothing is written then.
+   */
+  private async readContext(turn: PiTurn, peer: PiPeer): Promise<void> {
+    if (this.peer !== peer) return;
+    let timer: Timer | undefined;
+    try {
+      const expired = new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => {
+          reject(new Error(`no answer in ${STATS_TIMEOUT_MS / 1000} s`));
+        }, STATS_TIMEOUT_MS);
+        timer.unref?.();
+      });
+      const stats = dataOf(await Promise.race([peer.command('get_session_stats'), expired]));
+      const usage = (stats['contextUsage'] ?? {}) as { tokens?: unknown; contextWindow?: unknown };
+      const tokens = numberOf(usage.tokens);
+      if (tokens !== null) turn.ctx.context({ tokens, window: numberOf(usage.contextWindow) });
+    } catch (error) {
+      turn.ctx.log('warn', `pi: get_session_stats failed: ${messageOf(error)}`);
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   private endTurn(turn: PiTurn, drop: boolean): void {
@@ -673,6 +846,9 @@ class PiSession {
       env: agentEnv(ctx.accountEnv),
     });
     this.child = child;
+    this.killTree = ctx.killTree ?? null;
+    this.model = ctx.thread.model;
+    this.effort = ctx.thread.effort;
     const peer = new PiPeer(child, {
       event: (message) => {
         this.onEvent(ctx, message);
@@ -758,12 +934,20 @@ class PiSession {
     return this.lastStderr.length === 0 ? head : `${head}: ${this.lastStderr}`;
   }
 
-  /** The one teardown: the pipes go, then the child, through the registry. */
+  /**
+   * The one teardown: the pipes go, then the child and whatever its tools
+   * started, through the registry. A turn still in flight ends here, while the
+   * journal is still open, rather than from the child's `close`, which can
+   * land after core shutdown closed it.
+   */
   private drop(): void {
     if (this.ended) return;
     this.ended = true;
     this.closing = true;
     this.clearIdle();
+    const turn = this.current;
+    this.current = null;
+    turn?.fail('the pi session was closed');
     this.peer?.fail('the pi session was closed');
     this.peer = null;
     const child = this.child;
@@ -775,7 +959,11 @@ class PiSession {
         // the pipe is already gone
       }
       try {
-        child.kill();
+        // The bash tool's children (a dev server started with `&`) are not
+        // pi's to reap once bash exits; the thread's tree is. On Linux and
+        // macOS the tree is the direct children only, which is `kill()`.
+        if (this.killTree !== null) this.killTree();
+        else child.kill();
       } catch {
         // already exited
       }
@@ -844,20 +1032,54 @@ class PiSession {
         if (assistant === undefined || assistant.role !== 'assistant') break;
         if (assistant.usage !== undefined) turn.addUsage(assistant.usage);
         turn.cacheLife = piCacheLife(assistant) ?? turn.cacheLife;
-        if (assistant.stopReason === 'error') {
-          turn.noteError(assistant.errorMessage ?? 'the pi agent failed the turn');
-        }
+        turn.noteOutcome(assistant.stopReason === 'error' ? (assistant.errorMessage ?? 'the pi agent failed the turn') : null);
         break;
       }
+      case 'auto_retry_start':
+        turn.ctx.log(
+          'info',
+          `pi: retrying the request (attempt ${String(message['attempt'])} of ${String(message['maxAttempts'])}, in ${String(message['delayMs'])} ms): ${textOf(message['errorMessage'])}`,
+        );
+        break;
+      case 'auto_retry_end':
+        if (message['success'] === false) {
+          turn.noteOutcome(textOf(message['finalError']) || turn.pendingError || 'pi gave up retrying the request');
+        }
+        break;
+      case 'compaction_end':
+        this.onCompaction(turn, message);
+        break;
       case 'agent_settled':
         turn.settleRun();
         break;
       default:
         // agent_start, agent_end, turn_start, turn_end, message_start, the
-        // tool_execution_update, bash, queue, compaction and retry families:
-        // the contract has no part for them, so they are dropped.
+        // tool_execution_update, bash and queue families: the contract has no
+        // part for them, so they are dropped.
         break;
     }
+  }
+
+  /**
+   * An automatic compaction, on a threshold or to recover from an overflow,
+   * drawn as the divider a manual one gets. A manual one is the `compact`
+   * command's, which draws its own from the response.
+   */
+  private onCompaction(turn: PiTurn, message: Record<string, unknown>): void {
+    const reason = textOf(message['reason']);
+    if (reason === 'manual' || message['aborted'] === true) return;
+    const result = message['result'] as { tokensBefore?: unknown; estimatedTokensAfter?: unknown; usage?: PiUsage } | undefined | null;
+    if (result === undefined || result === null) {
+      turn.ctx.log('warn', `pi: the automatic compaction failed: ${textOf(message['errorMessage']) || 'no reason given'}`);
+      return;
+    }
+    if (result.usage !== undefined && result.usage !== null) turn.addUsage(result.usage);
+    turn.part(turn.takeIndex(), {
+      type: 'compaction',
+      trigger: 'auto',
+      preTokens: numberOf(result.tokensBefore),
+      postTokens: numberOf(result.estimatedTokensAfter),
+    });
   }
 
   /**
@@ -866,6 +1088,10 @@ class PiSession {
    */
   private async answerDialog(ctx: TurnContext, message: Record<string, unknown>): Promise<void> {
     const method = textOf(message['method']);
+    if (UI_NOTICES.has(method)) {
+      this.onNotice(ctx, method, message);
+      return;
+    }
     const id = message['id'];
     const peer = this.peer;
     // Nothing can be answered without the id the agent waits on, and nothing is
@@ -900,13 +1126,52 @@ class PiSession {
     const ticket = live.askQuestion(ask);
     const index = turn.takeIndex();
     turn.part(index, { type: 'question', questionId: ticket.questionId, ...ask, answer: null });
-    const answer = await Promise.race([ticket, turn.stopped.then(() => null)]);
+    // A dialog with a `timeout` resolves itself on pi's side with its default
+    // once the time is up, and the agent goes on: the card goes with it.
+    const timeout = typeof message['timeout'] === 'number' && message['timeout'] > 0 ? message['timeout'] : null;
+    let timer: Timer | undefined;
+    const expired = new Promise<'expired'>((resolve) => {
+      if (timeout === null) return;
+      timer = setTimeout(() => {
+        resolve('expired');
+      }, timeout);
+      timer.unref?.();
+    });
+    const answer = await Promise.race([ticket, turn.stopped.then(() => null), expired]);
+    clearTimeout(timer);
+    if (answer === 'expired') {
+      live.withdrawQuestion?.(ticket.questionId);
+      turn.part(index, { type: 'question', questionId: ticket.questionId, ...ask, answer: null });
+      return;
+    }
     if (answer === null) { peer.answer({ type: 'extension_ui_response', id, cancelled: true }); return; }
     turn.part(index, { type: 'question', questionId: ticket.questionId, ...ask, answer });
     const value = method === 'select' ? options.find((option) => option.id === answer.optionIds[0])?.label : answer.text ?? '';
     peer.answer(method === 'confirm'
       ? { type: 'extension_ui_response', id, confirmed: answer.optionIds[0] === 'yes' }
       : { type: 'extension_ui_response', id, value });
+  }
+
+  /**
+   * The UI methods pi expects no answer to. A `notify` is what an extension
+   * command often says instead of running the model, so it is drawn in the
+   * turn; an error notice is an error card, but it does not fail the turn.
+   * Status lines, widgets, window titles and editor text have no place in a
+   * chat and are dropped.
+   */
+  private onNotice(ctx: TurnContext, method: string, message: Record<string, unknown>): void {
+    if (method !== 'notify') return;
+    const text = textOf(message['message']);
+    if (text.length === 0) return;
+    const turn = this.current;
+    if (turn === null) {
+      ctx.log('info', `pi extension: ${text}`);
+      return;
+    }
+    turn.part(
+      turn.takeIndex(),
+      textOf(message['notifyType']) === 'error' ? { type: 'error', message: text } : { type: 'text', text: `pi: ${text}` },
+    );
   }
 }
 
@@ -916,6 +1181,10 @@ class PiSession {
 
 function textOf(value: unknown): string {
   return typeof value === 'string' ? value : '';
+}
+
+function numberOf(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
 /**
@@ -970,18 +1239,19 @@ function modelArgs(ctx: TurnContext): string[] {
 
 /**
  * What a session was started with. A turn that differs on any of it needs its
- * own, because pi reads all of it once, on the command line. The model and the
- * effort stay in here where the other drivers took them out: they are one
- * `--model <id>:<effort>` argument at spawn, pi's rpc mode has no call that
- * changes either on a running session, so a change has nowhere to go but a new
- * process. The permission mode is not in here: pi has no approval gate in RPC
- * mode, so nothing about it ever reaches the agent and changing it would drop a
- * process for nothing.
+ * own, because pi reads all of it once, on the command line. A change from one
+ * named model or level to another is not in here: pi's RPC mode takes both on
+ * a running session (`set_model`, `set_thinking_level`), which `align` sends.
+ * Going back to pi's own model, or to no level at all, has no RPC call, so
+ * whether the thread names each one is in the key. The permission mode is not
+ * in here: pi has no approval gate in RPC mode, so nothing about it ever
+ * reaches the agent and changing it would drop a process for nothing.
  */
 function sessionKey(ctx: TurnContext): string {
+  const model = ctx.thread.model;
   return JSON.stringify({
-    model: ctx.thread.model,
-    effort: ctx.thread.effort,
+    ownModel: model === null || model === AGENT_OWN_MODEL,
+    ownEffort: ctx.thread.effort === null,
     cwd: ctx.thread.cwd,
     accountId: ctx.account.id,
     providerId: ctx.provider.id,
@@ -1225,62 +1495,24 @@ function checkLevels(ctx: ProbeContext, listing: PiListing): void {
   );
 }
 
-interface ProbeEntry {
-  providerId: ProviderId;
-  accountId: AccountId;
-  /** The one process in flight for this key, so two callers share it. */
-  running: Promise<ProbeResult> | null;
-  result: ProbeResult | null;
-}
-
 /** One `pi --mode rpc` process per thread, kept between turns like the Codex one. */
 export function createPiDriver(): Driver {
   const sessions = new Map<ThreadId, PiSession>();
-  const probes = new Map<string, ProbeEntry>();
-
-  const keyOf = (providerId: ProviderId, accountId: AccountId): string => `${providerId}::${accountId}`;
+  const probes = new ModelProbes(readModels);
 
   return {
     protocol: 'pi',
 
-    async probe(ctx: ProbeContext): Promise<ProbeResult> {
-      const key = keyOf(ctx.provider.id, ctx.accountId);
-      const entry: ProbeEntry = probes.get(key) ?? {
-        providerId: ctx.provider.id,
-        accountId: ctx.accountId,
-        running: null,
-        result: null,
-      };
-      probes.set(key, entry);
-      if (entry.result !== null) return entry.result;
-      if (entry.running !== null) return entry.running;
-
-      const running = readModels(ctx).then((models) => ({ models, probedAt: Date.now() }));
-      entry.running = running;
-      try {
-        const result = await running;
-        // A `providers.reload` during the probe dropped the entry: nothing is
-        // cached behind its back, the next caller probes again.
-        if (probes.get(key) === entry) entry.result = result;
-        return result;
-      } catch (error) {
-        if (probes.get(key) === entry) probes.delete(key);
-        throw error;
-      } finally {
-        entry.running = null;
-      }
+    probe(ctx: ProbeContext): Promise<ProbeResult> {
+      return probes.probe(ctx);
     },
 
     probedModels(providerId: ProviderId, accountId: AccountId): ModelInfo[] | null {
-      return probes.get(keyOf(providerId, accountId))?.result?.models ?? null;
+      return probes.models(providerId, accountId);
     },
 
     forgetProbes(filter: ProbeFilter = {}): void {
-      for (const [key, entry] of [...probes]) {
-        if (filter.providerId !== undefined && filter.providerId !== entry.providerId) continue;
-        if (filter.accountId !== undefined && filter.accountId !== entry.accountId) continue;
-        probes.delete(key);
-      }
+      probes.forget(filter);
     },
 
     startTurn(ctx: TurnContext): TurnHandle {
@@ -1323,6 +1555,7 @@ export function createPiDriver(): Driver {
       const open = [...sessions.values()];
       sessions.clear();
       for (const session of open) session.close(null);
+      probes.forget();
     },
   };
 }

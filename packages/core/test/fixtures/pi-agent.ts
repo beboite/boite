@@ -18,13 +18,44 @@
  */
 import { appendFileSync } from 'node:fs';
 
-const DIRECTIVE = /\[(tool|thought|usage|slow|crash|ask|select|input|editor)\]/g;
+const DIRECTIVE = /\[(tool|thought|usage|slow|crash|ask|select|input|editor|retry|giveup|deaf|noclear|notify|timeout|compacted)\]/g;
 const CHUNKS = 3;
 
-type Directive = 'tool' | 'thought' | 'usage' | 'slow' | 'crash' | 'ask' | 'select' | 'input' | 'editor';
+/**
+ * `retry` and `giveup` play pi's own auto-retry after a 529, recovered or not.
+ * `deaf` never settles and ignores `abort`, like a pi stuck in a tool that
+ * ignores the signal. `noclear` makes `clear_queue` fail. `notify` sends the
+ * fire-and-forget UI methods, `timeout` a confirm that pi gives up on after
+ * 50 ms, `compacted` an automatic compaction inside the run.
+ */
+type Directive =
+  | 'tool'
+  | 'thought'
+  | 'usage'
+  | 'slow'
+  | 'crash'
+  | 'ask'
+  | 'select'
+  | 'input'
+  | 'editor'
+  | 'retry'
+  | 'giveup'
+  | 'deaf'
+  | 'noclear'
+  | 'notify'
+  | 'timeout'
+  | 'compacted';
 
 let toolCounter = 0;
 let dialogCounter = 0;
+/** What `get_state` reports as `isStreaming`: true from the prompt's answer to `agent_settled`, as in pi. */
+let streaming = false;
+/** Set by `[deaf]`: `abort` gets no answer at all. */
+let deaf = false;
+/** Set by `[noclear]`: `clear_queue` is refused. */
+let noClear = false;
+/** Set by `set_thinking_level`, reported by `get_state`. */
+let thinkingLevel = 'medium';
 /** Resolves when an `abort` arrives, for the one directive that waits on it. */
 let waitingAbort: (() => void) | null = null;
 /**
@@ -198,12 +229,60 @@ function assistantMessage(stopReason: string, usage: Record<string, unknown>): R
   };
 }
 
+/** The end of a run as pi writes it: `turn_end`, `agent_end` with nothing left to retry, `agent_settled`. */
+function endRun(message: Record<string, unknown>): void {
+  send({ type: 'turn_end', message, toolResults: [] });
+  send({ type: 'agent_end', messages: [message], willRetry: false });
+  streaming = false;
+  send({ type: 'agent_settled' });
+}
+
+/**
+ * pi's auto-retry after a 529, in the order `agent-session.js` writes it: the
+ * failed message, `agent_end` that will retry, `auto_retry_start`, then the
+ * next attempt inside the same run and `auto_retry_end` once it is known.
+ */
+async function runRetry(giveUp: boolean): Promise<void> {
+  send({ type: 'agent_start' });
+  const failed = { ...assistantMessage('error', zeroUsage()), errorMessage: '529 overloaded' };
+  send({ type: 'message_end', message: failed });
+  send({ type: 'turn_end', message: failed, toolResults: [] });
+  send({ type: 'agent_end', messages: [failed], willRetry: true });
+  send({ type: 'auto_retry_start', attempt: 1, maxAttempts: 3, delayMs: 10, errorMessage: '529 overloaded' });
+  await new Promise<void>((resolve) => {
+    setTimeout(resolve, 10);
+  });
+  send({ type: 'agent_start' });
+  if (giveUp) {
+    const again = { ...assistantMessage('error', zeroUsage()), errorMessage: '529 overloaded' };
+    send({ type: 'message_end', message: again });
+    send({ type: 'auto_retry_end', success: false, attempt: 3, finalError: '529 overloaded after 3 attempts' });
+    endRun(again);
+    return;
+  }
+  send({ type: 'message_start', message: assistantMessage('pending', zeroUsage()) });
+  send({
+    type: 'message_update',
+    usage: zeroUsage(),
+    assistantMessageEvent: { type: 'text_delta', contentIndex: 0, delta: 'recovered answer' },
+  });
+  const answer = assistantMessage('stop', zeroUsage());
+  send({ type: 'message_end', message: answer });
+  send({ type: 'auto_retry_end', success: true, attempt: 2 });
+  endRun(answer);
+}
+
 async function runPrompt(text: string): Promise<void> {
+  const directives = directivesOf(text);
+  if (directives.includes('retry') || directives.includes('giveup')) {
+    await runRetry(directives.includes('giveup'));
+    return;
+  }
+
   send({ type: 'agent_start' });
   send({ type: 'turn_start' });
   send({ type: 'message_start', message: assistantMessage('pending', zeroUsage()) });
 
-  const directives = directivesOf(text);
   const say = (chunk: string): void => {
     send({
       type: 'message_update',
@@ -272,17 +351,67 @@ async function runPrompt(text: string): Promise<void> {
         // The exit is what the client sees; this promise never settles.
         await new Promise<void>(() => undefined);
         break;
+      case 'deaf':
+        log('waiting forever');
+        await new Promise<void>(() => undefined);
+        break;
+      case 'notify':
+        dialogCounter += 1;
+        send({ type: 'extension_ui_request', id: `n-${dialogCounter}`, method: 'notify', message: 'heads up', notifyType: 'warning' });
+        send({ type: 'extension_ui_request', id: `s-${dialogCounter}`, method: 'setStatus', statusKey: 'fake', statusText: 'busy' });
+        send({ type: 'extension_ui_request', id: `w-${dialogCounter}`, method: 'setWidget', widgetKey: 'fake', widgetLines: ['one'] });
+        send({ type: 'extension_ui_request', id: `t-${dialogCounter}`, method: 'setTitle', title: 'fake' });
+        send({ type: 'extension_ui_request', id: `e-${dialogCounter}`, method: 'set_editor_text', text: 'draft' });
+        send({ type: 'extension_ui_request', id: `x-${dialogCounter}`, method: 'notify', message: 'it broke', notifyType: 'error' });
+        break;
+      case 'timeout': {
+        // pi resolves a dialog with a timeout by itself and goes on.
+        const pending = askDialog('confirm', { title: 'Hurry?', message: 'pi waits 50 ms', timeout: 50 });
+        const id = `ui-${dialogCounter}`;
+        const answer = await Promise.race([
+          pending,
+          new Promise<null>((resolve) => {
+            setTimeout(() => {
+              resolve(null);
+            }, 50);
+          }),
+        ]);
+        if (answer === null) {
+          dialogs.delete(id);
+          log('dialog timed out');
+          say('dialog timed out');
+        }
+        break;
+      }
+      case 'compacted':
+        send({ type: 'compaction_start', reason: 'threshold' });
+        send({
+          type: 'compaction_end',
+          reason: 'threshold',
+          result: {
+            summary: 'earlier work',
+            firstKeptEntryId: 'm-2',
+            tokensBefore: 180000,
+            estimatedTokensAfter: 30000,
+            usage: usageBlock(),
+            details: {},
+          },
+          aborted: false,
+          willRetry: false,
+        });
+        break;
+      case 'retry':
+      case 'giveup':
+      case 'noclear':
       case 'thought':
-        // Already sent above, before the answer.
+        // Handled before the run or when the prompt arrived.
         break;
     }
   }
 
   const message = assistantMessage(stopReason, usage);
   send({ type: 'message_end', message });
-  send({ type: 'turn_end', message, toolResults: [] });
-  send({ type: 'agent_end', messages: [message], willRetry: false });
-  send({ type: 'agent_settled' });
+  endRun(message);
 }
 
 function handle(message: Record<string, unknown>): void {
@@ -294,6 +423,9 @@ function handle(message: Record<string, unknown>): void {
     if (resolve !== undefined) {
       dialogs.delete(textOf(id));
       resolve(message);
+    } else {
+      // An answer to something nothing waits on: a notice, or a dialog pi gave up on.
+      log(`ui-response ${textOf(id)}`);
     }
     return;
   }
@@ -305,7 +437,37 @@ function handle(message: Record<string, unknown>): void {
       return;
     }
     case 'clear_queue': {
+      if (noClear) {
+        send({ id, type: 'response', command: 'clear_queue', success: false, error: 'the fake queue is locked' });
+        return;
+      }
       send({ id, type: 'response', command: 'clear_queue', success: true, data: { steering: [], followUp: [] } });
+      return;
+    }
+    case 'set_model': {
+      log(`model ${textOf(message['provider'])}/${textOf(message['modelId'])}`);
+      const found = MODELS.find((entry) => entry.provider === message['provider'] && entry.id === message['modelId']);
+      if (found === undefined) {
+        send({ id, type: 'response', command: 'set_model', success: false, error: `Model not found: ${textOf(message['provider'])}/${textOf(message['modelId'])}` });
+        return;
+      }
+      send({ id, type: 'response', command: 'set_model', success: true, data: found });
+      return;
+    }
+    case 'set_thinking_level': {
+      thinkingLevel = textOf(message['level']);
+      log(`level ${thinkingLevel}`);
+      send({ id, type: 'response', command: 'set_thinking_level', success: true });
+      return;
+    }
+    case 'get_session_stats': {
+      send({
+        id,
+        type: 'response',
+        command: 'get_session_stats',
+        success: true,
+        data: { sessionId, contextUsage: { tokens: 4321, contextWindow: 200000, percent: 2.16 } },
+      });
       return;
     }
     case 'steer': {
@@ -322,11 +484,22 @@ function handle(message: Record<string, unknown>): void {
           log(`image ${textOf(entry['mimeType'])} ${textOf(entry['data']).length}`);
         }
       }
+      const text = textOf(message['message']);
+      if (text.trimStart().startsWith('/fake-report')) {
+        // An extension command: pi runs it, answers the prompt and starts no run,
+        // so no event and no `agent_settled` follow.
+        send({ id, type: 'response', command: 'prompt', success: true });
+        log('extension command handled');
+        return;
+      }
+      streaming = true;
+      deaf = text.includes('[deaf]');
+      noClear = text.includes('[noclear]');
       send({ id, type: 'response', command: 'prompt', success: true });
       // After the response is written, never before: the real mode answers the
       // command and streams the run afterwards.
       setTimeout(() => {
-        void runPrompt(textOf(message['message']));
+        void runPrompt(text);
       }, 0);
       return;
     }
@@ -338,8 +511,8 @@ function handle(message: Record<string, unknown>): void {
         success: true,
         data: {
           model: CURRENT,
-          thinkingLevel: 'medium',
-          isStreaming: false,
+          thinkingLevel,
+          isStreaming: streaming,
           isCompacting: false,
           sessionId,
           messageCount: 0,
@@ -379,6 +552,10 @@ function handle(message: Record<string, unknown>): void {
       return;
     }
     case 'abort': {
+      if (deaf) {
+        log('abort ignored');
+        return;
+      }
       const waiter = waitingAbort;
       waitingAbort = null;
       if (waiter === undefined || waiter === null) pendingAbort = true;

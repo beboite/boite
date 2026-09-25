@@ -487,3 +487,34 @@ process here goes through `procs.spawnChild`. The driver refuses a host whose
 - The profile sets `MUSE_NO_AUTO_UPDATE=1`, so the launcher never updates what
   Boite pinned, and unsets `META_API_KEY`, so a key in the user's environment
   never replaces the account's login.
+
+### pi
+
+`packages/core/src/drivers/pi.ts` speaks pi's RPC mode: JSON lines over the
+stdio of `pi --mode rpc`.
+
+- A turn ends on `agent_settled`, never on `agent_end`. pi retries an overloaded
+  or dropped request by itself inside the same run (`auto_retry_start`,
+  `auto_retry_end`) and recovers from a context overflow by compacting, so only
+  the outcome of the last assistant message counts. A 529 that pi recovered
+  from ends the turn done; one it gave up on fails the turn with pi's final
+  error.
+- An extension command, or an input handler that consumes the prompt, answers
+  `prompt` without starting a run and never sends `agent_settled`. The driver
+  sends `get_state` after each accepted prompt and ends the turn when
+  `isStreaming` is false.
+- Stop sends `abort`, after `clear_queue` when coordination steered the run. A
+  pi that has not settled 15 s later is closed and the turn ends stopped.
+  Closing a session ends the thread's whole process tree on Windows, so a dev
+  server a tool left running goes with it. On Linux and macOS only the direct
+  child is killed.
+- Extension dialogs (`select`, `confirm`, `input`, `editor`) become question
+  cards. A dialog with a `timeout` loses its card when the time runs out,
+  because pi then answers it with its default. `notify` is drawn in the turn,
+  and an error notice becomes an error card that does not fail the turn.
+  `setStatus`, `setWidget`, `setTitle` and `set_editor_text` get no answer and
+  are not drawn.
+- A warm process follows a change of model or level with `set_model` and
+  `set_thinking_level`. There is no call that goes back to pi's own model or to
+  no level, so either change starts a new process.
+- After each turn `get_session_stats` feeds the context meter.
