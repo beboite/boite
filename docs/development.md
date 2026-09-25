@@ -283,7 +283,7 @@ Both finish in under a second. `KNOWN_DIVERGENCES` lists a scenario allowed to
 fail on one side, with the reason; a listed scenario that passes fails its
 runner, so a fixed drift leaves the list. The rules the fake repeats live in
 `packages/ui/src/lib/fake-client/checks.ts`, and `settings.set` validation is
-one function in the contract (`settingsPatchError`). What only one side can
+one function in the contract (`checkSettingsPatch`). What only one side can
 show (a shell to close, a login to cancel, a device kept from owner events) is
 in `packages/ui/src/lib/fake-client.parity.test.ts`. In the fake, a folder
 under one named `missing` does not exist.
