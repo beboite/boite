@@ -5,6 +5,7 @@ import type { ProcessRecord, Settings, ThreadId, ThreadLoad, TraceCapability, Tu
 import type { Bus } from './bus.ts';
 import type { Journal } from './journal.ts';
 import { processPlatform } from './platform/index.ts';
+import { stopGroup } from './platform/posix-kill.ts';
 import type { GuardStatus, NativeProcessExit, NativeProcessInfo, ProcessPlatform } from './platform/types.ts';
 
 export interface SpawnOptions {
@@ -64,6 +65,11 @@ const FORGET_DELAY_MS = 30_000;
  * child it means to keep does so well inside that.
  */
 const ORPHAN_GRACE_MS = 10_000;
+/**
+ * Off Windows each child leads a process group of its own, so its kill reaches
+ * what it started (platform/posix-kill.ts). On Windows the thread's job does that.
+ */
+const OWN_GROUP = process.platform !== 'win32';
 
 export interface ProcRegistryOptions {
   orphanGraceMs?: number;
@@ -192,11 +198,12 @@ export class ProcRegistry {
       stdout: 'pipe',
       stderr: 'pipe',
       windowsHide: true,
+      detached: OWN_GROUP,
     });
 
     const record = this.register(threadId, proc.pid, cmd, args, {
       kill: () => {
-        proc.kill();
+        killBunChild(proc);
       },
       usage: () => {
         const usage = proc.resourceUsage();
@@ -228,11 +235,12 @@ export class ProcRegistry {
       stdout: 'pipe',
       stderr: 'pipe',
       windowsHide: true,
+      detached: OWN_GROUP,
     });
 
     const record = this.register(threadId, proc.pid, cmd, args, {
       kill: () => {
-        proc.kill();
+        killBunChild(proc);
       },
       usage: () => {
         const usage = proc.resourceUsage();
@@ -321,11 +329,13 @@ export class ProcRegistry {
       env: opts.env,
       stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true,
+      detached: OWN_GROUP,
     });
 
     const record = this.register(threadId, child.pid ?? -1, cmd, args, {
       kill: () => {
-        child.kill();
+        if (OWN_GROUP) stopGroup(child.pid ?? -1, () => child.exitCode === null && child.signalCode === null);
+        else child.kill();
       },
       usage: () => null,
     });
@@ -635,6 +645,12 @@ export class ProcRegistry {
       this.lastPushed.delete(threadId);
     }
   }
+}
+
+/** A Bun child's kill: its whole group off Windows, the process itself on Windows. */
+function killBunChild(proc: Bun.Subprocess): void {
+  if (OWN_GROUP) stopGroup(proc.pid, () => proc.exitCode === null && proc.signalCode === null);
+  else proc.kill();
 }
 
 function baseName(path: string): string {

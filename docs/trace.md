@@ -60,7 +60,7 @@ totals.
 - `trace.get` gives one thread's processes, newest first.
 - `resources.list` gives every thread with its live processes and its totals.
 - `resources.killTree` kills one thread's tree, `TerminateJobObject` on Windows
-  and registered direct children elsewhere. It returns before the completion port has
+  and the process group of each registered child elsewhere. It returns before the completion port has
   reported the exits, so anything that then reads the trace on the next line
   still sees them live: wait for the live count to reach zero instead.
 - `ThreadLoad` is sampled on a timer and carried on every thread summary: how
@@ -110,7 +110,9 @@ parent and are never taken. Neither is a process whose shell is still
 running, such as a background command the agent is still waiting on. A process
 an agent detaches on purpose and means to keep across turns is stopped too:
 that is what the switch below is for. Off Windows, only direct children are
-tracked, and their parent is the core, so the sweep finds nothing.
+tracked, and their parent is the core, so the sweep finds nothing and the
+setting does nothing there: what a turn leaves running stays until the
+thread's tree is killed.
 
 ## The focus guard
 
@@ -206,6 +208,11 @@ Nothing hides that. `TraceCapability` carries the operating system, a `mode` of
 `events`, `poll` or `none`, and a note saying why, and every client reads it
 before promising anything. Windows with a working FFI surface reports `events`;
 Windows where that surface failed to load reports `poll` with the error in the
-note. Off Windows, `resources.killTree` kills registered direct children only.
+note. Off Windows, each registered child is spawned detached, so it leads a
+process group of its own that whatever it starts joins. `resources.killTree`
+sends SIGTERM to each child's group, then SIGKILL two seconds later, which the
+group still gets after its leader exited: a tool that ignored SIGTERM goes too,
+and project removal no longer times out on it. A tool that leaves the group with
+its own `setsid` escapes, and the trace still lists only the direct children.
 The focus guard and audio mute do not exist there. A hard kill of the shell
 does not guarantee that its core exits on Linux or macOS.

@@ -8,6 +8,16 @@ const TREE_SIZE = process.platform === 'win32' ? 2 : 1;
 
 let harness: TestCore;
 
+/** Signal 0 checks that a pid exists without touching it. */
+function isRunning(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 beforeEach(async () => {
   harness = await startTestCore();
 });
@@ -89,6 +99,29 @@ describe('procs', () => {
     await new Promise<void>((resolve, reject) => { second.once('exit', () => resolve()); second.once('error', reject); });
     await waitFor(() => harness.core.procs.liveCount(threadId) === 0, 5000);
     expect(registry.forgetTimers.has(threadId)).toBe(true);
+  }, 15000);
+
+  test.skipIf(process.platform === 'win32')('off Windows killTree reaches what the child started', async () => {
+    const threadId = 'posix-group';
+    // The shell prints the pid of its background sleep, then waits on it.
+    const spawned = harness.core.procs.spawn(threadId, 'sh', ['-c', 'sleep 30 & echo $!; wait']);
+    const reader = spawned.proc.stdout.getReader();
+    const { value } = await reader.read();
+    const grandchild = Number(new TextDecoder().decode(value).trim());
+    expect(grandchild).toBeGreaterThan(0);
+
+    expect(harness.core.procs.killTree(threadId)).toBe(1);
+    await spawned.exited;
+    await waitFor(() => !isRunning(grandchild), 5000);
+  }, 15000);
+
+  test.skipIf(process.platform === 'win32')('off Windows a child that ignores SIGTERM still lets its thread stop', async () => {
+    const threadId = 'posix-stubborn';
+    const spawned = harness.core.procs.spawn(threadId, 'sh', ['-c', 'trap "" TERM; echo ready; while :; do sleep 1; done']);
+    await spawned.proc.stdout.getReader().read();
+    const started = Date.now();
+    await harness.core.procs.stopAndWait(threadId);
+    expect(Date.now() - started).toBeLessThan(5000);
   }, 15000);
 
   test('the trace capability says what it can promise on this OS', async () => {
