@@ -602,6 +602,7 @@ export const fr: Translation = {
     documentImage: "Ce que l'outil a produit",
     imagePart: 'Image envoyée avec le message',
     diffHidden: '{count} lignes inchangées',
+    diffShowAll: 'Afficher les {count} lignes',
     diffAdded: '+{count}',
     diffRemoved: '-{count}',
     noOutput: 'Aucune sortie',

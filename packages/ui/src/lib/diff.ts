@@ -9,9 +9,11 @@ export const CONTEXT_LINES = 3;
 /**
  * The largest LCS table this builds, in cells. Past it the two texts share too
  * little to be worth aligning line by line, and the whole old block is shown
- * removed and the whole new one added instead of freezing the tab.
+ * removed and the whole new one added instead of freezing the tab. A million
+ * cells is a 4 MB table, about 7 ms on a fast machine and several times that
+ * on an old phone, all on the main thread.
  */
-const CELL_BUDGET = 4_000_000;
+const CELL_BUDGET = 1_000_000;
 
 export type DiffRow =
   | { kind: 'context'; text: string; oldLine: number; newLine: number }

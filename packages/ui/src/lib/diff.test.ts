@@ -41,3 +41,11 @@ test('a new file is every line added, with no removed one', () => {
   expect(rows.map((row) => row.kind)).toEqual(['add', 'add']);
   expect(diffCounts(rows)).toEqual({ added: 2, removed: 0 });
 });
+
+test('a middle past a million cells is shown removed then added instead of aligned', () => {
+  const before = Array.from({ length: 1100 }, (_, index) => `line ${index}`);
+  const after = before.map((line, index) => (index % 2 ? `${line} changed` : line));
+  const counts = diffCounts(diffRows(before.join('\n'), after.join('\n')));
+  // Aligned, only the 550 odd lines would change; unaligned, the whole middle does.
+  expect(counts).toEqual({ added: 1099, removed: 1099 });
+});
