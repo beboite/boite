@@ -1031,7 +1031,9 @@ class ClaudeSession {
     this.orphans = [];
     this.woken = false;
     this.foreignResults = 0;
-    // What the CLI ran in the background went with it.
+    // The CLI no longer tracks what it ran in the background. The command itself
+    // can outlive it (Windows kills no tree): the registry's orphan sweep, which
+    // the core schedules when it releases the thread, stops that.
     if (this.background.length > 0) {
       this.background = [];
       this.ctx.background?.([]);

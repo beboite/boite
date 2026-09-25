@@ -1428,6 +1428,32 @@ describe('claude driver: questions and background work', () => {
     await waitFor(() => (queries[0] as unknown as { ended: boolean }).ended);
   });
 
+  test('Stop on an idle thread, an archive and an account switch sweep what the released CLI left', async () => {
+    const client = await harness.connect();
+    const threadId = await claudeThread(client);
+    const swept: string[] = [];
+    harness.core.procs.sweepSoon = (id: string): void => {
+      swept.push(id);
+    };
+    const withBackground = (sessionId: string): void => scripted((fake) => {
+      fake.emit(init(sessionId));
+      fake.emit(sdk({ type: 'system', subtype: 'background_tasks_changed', session_id: sessionId, tasks: [{ task_id: 'bash-1', task_type: 'local_bash', description: 'npm run dev' }] }));
+      fake.emit(success(sessionId));
+    });
+
+    withBackground('sess-sweep');
+    expect(await runTurn(client, threadId, 'start the dev server')).toBe('done');
+    expect(await client.call('turns.stop', { threadId })).toEqual({ stopped: true });
+    expect(swept).toEqual([threadId]);
+
+    const echo = (await client.call('accounts.list', {})).find((account) => account.providerId === 'echo')!;
+    await client.call('threads.update', { threadId, accountId: echo.id });
+    expect(swept).toEqual([threadId, threadId]);
+
+    await client.call('threads.archive', { threadId, archived: true });
+    expect(swept).toEqual([threadId, threadId, threadId]);
+  });
+
   test("a subagent's own messages stay off the main message, and its API error does not fail the turn", async () => {
     const client = await harness.connect();
     const threadId = await claudeThread(client);

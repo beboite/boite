@@ -538,6 +538,7 @@ export class ThreadStore {
     if (switched) {
       if (!['queued', 'running', 'waiting'].includes(thread.status)) {
         releaseThread(thread.id);
+        this.core.procs.sweepSoon(thread.id);
         this.noteBackground(thread.id, []);
       }
       this.commands.delete(thread.id);
@@ -560,6 +561,7 @@ export class ThreadStore {
       this.core.delegation.stop(threadId);
       this.core.scheduler.stop(threadId);
       releaseThread(threadId);
+      this.core.procs.sweepSoon(threadId);
       this.commands.delete(threadId);
       this.noteBackground(threadId, []);
       // Nobody answers a card on a thread put away, and no turn should start from one.
@@ -777,6 +779,8 @@ export class ThreadStore {
     // the agent process, and that work with it.
     if ((this.background.get(threadId)?.length ?? 0) === 0) return false;
     releaseThread(threadId);
+    // The agent's exit does not take the command it ran with it.
+    this.core.procs.sweepSoon(threadId);
     this.noteBackground(threadId, []);
     return true;
   }

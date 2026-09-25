@@ -109,9 +109,16 @@ describe('orphan sweep', () => {
     expect(job.stopped).toEqual([]);
   });
 
+  test('a released agent schedules the same sweep with no turn to finish', async () => {
+    procs.sweepSoon(THREAD);
+    await waitFor(() => job.stopped.length === 2, 2000);
+    expect(job.stopped.sort()).toEqual([103, 104]);
+  });
+
   test('the setting turns it off', async () => {
     procs.applySettings({ ...DEFAULT_SETTINGS, reapOrphans: false });
     bus.emit(...turn('turn.finished'));
+    procs.sweepSoon(THREAD);
     await new Promise((resolve) => setTimeout(resolve, GRACE_MS * 3));
     expect(job.stopped).toEqual([]);
   });
