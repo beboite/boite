@@ -23,8 +23,9 @@ phone menu also applies to owner sessions; it does not change RPC permissions.
 
 Device sessions receive only events corresponding to the state they may read.
 Account login output, process traces, plugin state, quotas and core diagnostics
-remain owner-only. Event permissions are deny-by-default in `access.ts`, just
-like RPC permissions.
+remain owner-only. Event permissions are deny-by-default in
+`packages/contracts/src/access.ts`, just like RPC permissions, and `?fake=1`
+with `principal=session` withholds the same events.
 
 [Phone settings](images/phone-settings.png) · [Desktop settings](images/phone-settings-desktop.png)
 
@@ -107,8 +108,9 @@ deletes the row, after which its key opens nothing.
 
 ## What a paired device may call
 
-`packages/core/src/access.ts` holds the whole boundary, as one list the router
-checks before any handler runs. Read it as the phone's screen: the sidebar, a
+`packages/contracts/src/access.ts` holds the whole boundary, as one list the
+router checks before any handler runs; the in-memory client applies the same
+list. Read it as the phone's screen: the sidebar, a
 thread, the composer, the cards an agent raises, and the settings it only
 displays. Nothing on that list writes outside a thread, names a path on the
 machine, starts a process of its own or changes what the core trusts.

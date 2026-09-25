@@ -2208,3 +2208,5 @@ export const CLIENT_NAMES = ['shell', 'pwa', 'cli', 'test', 'bench'] as const;
 export type ClientName = (typeof CLIENT_NAMES)[number];
 
 export { attachmentError } from './attachment-validation.ts';
+export { DEVICE_METHODS, DEVICE_EVENTS, AGENT_EVENTS } from './access.ts';
+export { settingsPatchError } from './settings-validation.ts';
