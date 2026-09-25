@@ -80,6 +80,14 @@ use at most eight workers and persist transformed modules in Vitest's disk cache
 The cache key includes the lockfile and the Svelte and Vitest configuration;
 Vitest validates individual source files when loading cached transforms.
 
+Core test files run in parallel worker processes, one per CPU core by default
+(`bun test --parallel`). Each file gets a fresh global object, and the test
+harness gives every core its own temporary data directory and port, so files
+stay isolated. The whole core suite took 189 s serially and 35 s with 16
+workers on a 16-thread desktop on 2026-09-25, 53 s with 4 workers.
+`bun run --cwd packages/core test:serial` runs the files one after another
+when a failure needs a quiet run.
+
 The Windows job builds the installer and runs Rust tests in the release profile,
 sharing compiled dependencies. Successful main jobs save Cargo caches under a
 release-specific key. Failed or interrupted jobs do not save an incomplete cache

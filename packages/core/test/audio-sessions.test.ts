@@ -115,6 +115,18 @@ describeWindows('the audio sessions of the default endpoint', () => {
       expect(fixture.pid).toBeGreaterThan(0);
 
       await waitFor(() => hasSession(fixture.pid), SESSION_WINDOW_MS);
+      // Windows keeps a mute per executable, so the fixture's bun.exe can open
+      // its session already muted by an earlier run, here or in another checkout.
+      // The core leaves a session that reads muted alone, as the user's choice:
+      // give the fixture's own session its sound back and let the core take it.
+      if (!harness.core.procs.guardStatus().mutedPids.includes(fixture.pid)) {
+        const inherited = sessionsOf(fixture.pid);
+        try {
+          for (const session of inherited) if (session.getMute() === true) session.mute(false);
+        } finally {
+          for (const session of inherited) session.release();
+        }
+      }
       await waitFor(() => harness.core.procs.guardStatus().mutedPids.includes(fixture.pid), MUTE_WINDOW_MS);
       const status = harness.core.procs.guardStatus();
       expect(status.audio).toBe('on');
