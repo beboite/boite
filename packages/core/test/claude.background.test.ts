@@ -187,7 +187,7 @@ describe('claude driver: questions and background work', () => {
     expect(await runTurn(client, threadId, 'first')).toBe('done');
     // The core is told the output is there, but the user's prompt gets in first.
     const fake = queries[0]!;
-    const threads = harness.core.threads as unknown as { wake(threadId: string, text: string): void };
+    const threads = harness.core.threads.deferred;
     const wake = threads.wake.bind(threads);
     threads.wake = () => {};
     fake.emit(assistant(sessionId, [{ type: 'text', text: 'ON ITS OWN' }]));

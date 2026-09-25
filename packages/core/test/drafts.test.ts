@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { connect } from '../src/client.ts';
 import type { CoreClient } from '../src/client.ts';
 import { xdgDocuments } from '../src/platform/folders.ts';
-import { draftFolderName } from '../src/threads.ts';
+import { draftFolderName } from '../src/threads/inputs.ts';
 import { startTestCore } from './harness.ts';
 import type { TestCore } from './harness.ts';
 

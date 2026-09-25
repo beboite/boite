@@ -4,7 +4,8 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
 import type { Message } from '@boite/contracts';
-import { Journal, JournalTooNewError, SCHEMA_VERSION } from '../src/journal.ts';
+import { Journal } from '../src/journal.ts';
+import { JournalTooNewError, SCHEMA_VERSION } from '../src/journal/schema.ts';
 
 let dir: string;
 let file: string;

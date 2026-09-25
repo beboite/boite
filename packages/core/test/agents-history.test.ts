@@ -6,7 +6,7 @@ import type { AgentHistoryCursor, AgentProfile, AgentRecord, AgentScope, AgentWo
 import { connect } from '../src/client.ts';
 import type { CoreClient } from '../src/client.ts';
 import { Core } from '../src/core.ts';
-import { SCHEMA_VERSION } from '../src/journal.ts';
+import { SCHEMA_VERSION } from '../src/journal/schema.ts';
 import { PRUNE_RECORD_EVENTS } from '../src/agents/repository.ts';
 import { startTestCore } from './harness.ts';
 import type { TestCore } from './harness.ts';

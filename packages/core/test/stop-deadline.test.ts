@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { setDriver } from '../src/drivers/index.ts';
 import type { Driver, TurnResult } from '../src/drivers/types.ts';
-import { STOP_DEADLINE, STOP_DEADLINE_ERROR } from '../src/threads.ts';
+import { STOP_DEADLINE, STOP_DEADLINE_ERROR } from '../src/threads/turn-runner.ts';
 import { echoThread, startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
 

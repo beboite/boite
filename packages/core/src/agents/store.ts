@@ -11,7 +11,7 @@ import type { Core } from '../core.ts';
 import { refused } from '../errors.ts';
 import { newId } from '../ids.ts';
 import { existingInside } from '../workdir.ts';
-import { checkModel, checkEffort } from '../threads.ts';
+import { checkModel, checkEffort } from '../threads/selection.ts';
 import { AgentsRepository, OPEN_WORK, type RecentFilter } from './repository.ts';
 import { ResidentAgents } from './resident.ts';
 import { AgentRoutines } from './routines.ts';

@@ -4,7 +4,7 @@ import type { AgentProfile, AgentRuntimeConfig } from '@boite/contracts';
 import { DEFAULT_DELEGATION_CONFIG } from '@boite/contracts';
 import { startTestCore, waitFor, type TestCore } from './harness.ts';
 import { Core } from '../src/core.ts';
-import { SCHEMA_VERSION } from '../src/journal.ts';
+import { SCHEMA_VERSION } from '../src/journal/schema.ts';
 import { nextOccurrence } from '../src/agents/routines.ts';
 import { Database } from 'bun:sqlite';
 import { join } from 'node:path';

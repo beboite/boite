@@ -13,8 +13,8 @@ same for every provider, including one that has no MCP client.
 ## How an agent finds the core
 
 Every process a thread launches, the agent and whatever it spawns, carries
-three variables and one PATH entry, put there by `packages/core/src/threads.ts`
-around the driver's spawn:
+three variables and one PATH entry, put there by
+`packages/core/src/threads/turn-context.ts` around the driver's spawn:
 
 | Variable           | Value                                            |
 | ------------------ | ------------------------------------------------ |
