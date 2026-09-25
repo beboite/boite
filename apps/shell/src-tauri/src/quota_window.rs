@@ -104,8 +104,8 @@ pub fn show<R: Runtime>(app: &AppHandle<R>, point: PhysicalPosition<f64>) -> tau
             .on_navigation(|url| matches!(url.scheme(), "tauri" | "http" | "https") && matches!(url.host_str(), Some("tauri.localhost") | Some("localhost")));
         #[cfg(windows)]
         { builder = builder.transparent(true); }
-        if let Some(profile) = crate::webview_profile() { builder = builder.data_directory(profile); }
-        if let Some(args) = crate::test_browser_args() { builder = builder.additional_browser_args(&args); }
+        if let Some(profile) = crate::window::webview_profile() { builder = builder.data_directory(profile); }
+        if let Some(args) = crate::window::test_browser_args() { builder = builder.additional_browser_args(&args); }
         builder.build()?
     };
     if let Some(monitor) = window.monitor_from_point(point.x, point.y)? {
@@ -129,7 +129,7 @@ pub fn show<R: Runtime>(app: &AppHandle<R>, point: PhysicalPosition<f64>) -> tau
         window.set_position(PhysicalPosition::new(x as i32, y as i32))?;
     }
     // Test shells create and render the same page without ever showing a window.
-    if !crate::hidden() {
+    if !crate::window::hidden() {
         window.set_focusable(false)?;
         window.show()?;
         // Showing cannot activate the popup; a later deliberate click can.
@@ -214,7 +214,7 @@ pub async fn quota_window(app: AppHandle, webview: Webview, action: String) -> R
         }
         "providers" => {
             if let Some(window) = app.get_webview_window(LABEL) { let _ = hide(&app, &window); }
-            crate::show_main(&app);
+            crate::window::show_main(&app);
             app.emit_to(crate::browser::MAIN_LABEL, "tray://providers", ()).map_err(|e| e.to_string())
         }
         _ => Err("quota window action must be show, hide or providers".into()),

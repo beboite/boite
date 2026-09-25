@@ -407,10 +407,10 @@ pub async fn browser_create(
     // data folder is a second WebView2 browser process: another hundred
     // megabytes idle, and it cannot bind the `--remote-debugging-port` the
     // first one already holds, which is the port the end to end suite drives.
-    if let Some(directory) = crate::webview_profile() {
+    if let Some(directory) = crate::window::webview_profile() {
         builder = builder.data_directory(directory);
     }
-    if let Some(args) = crate::test_browser_args() {
+    if let Some(args) = crate::window::test_browser_args() {
         builder = builder.additional_browser_args(&args);
     }
 

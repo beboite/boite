@@ -12,6 +12,7 @@ use std::net::{SocketAddr, TcpStream};
 use std::path::Path;
 use std::time::Duration;
 
+use crate::local_core::health::{health, read_core_file, HEALTH_TIMEOUT};
 use crate::platform::process::Watched;
 
 /// What the core gets to drain its agents and close its journal. The core's
@@ -24,7 +25,7 @@ const KILL_WAIT: Duration = Duration::from_secs(3);
 /// on its own after answering.
 pub fn request_shutdown(port: u16, token: &str) -> Result<(), String> {
     let address = SocketAddr::from(([127, 0, 0, 1], port));
-    let mut stream = TcpStream::connect_timeout(&address, crate::HEALTH_TIMEOUT)
+    let mut stream = TcpStream::connect_timeout(&address, HEALTH_TIMEOUT)
         .map_err(|error| format!("no core answers on port {port}: {error}"))?;
     let _ = stream.set_read_timeout(Some(Duration::from_secs(3)));
     let _ = stream.set_write_timeout(Some(Duration::from_secs(3)));
@@ -50,12 +51,12 @@ pub fn request_shutdown(port: u16, token: &str) -> Result<(), String> {
 /// nothing to stop, `Err` when a core is still there after `grace` and a kill.
 pub fn stop_local_core(directory: &Path, grace: Duration) -> Result<Option<u32>, String> {
     let file = directory.join("core.json");
-    let Some(core) = crate::read_core_file(&file)? else { return Ok(None) };
+    let Some(core) = read_core_file(&file)? else { return Ok(None) };
     let Some(pid) = core.pid else { return Ok(None) };
     // Opened before anything is asked of it: from here on the pid cannot name
     // another process, even if this one exits and Windows reuses the number.
     let Some(process) = Watched::open(pid) else { return Ok(None) };
-    if crate::health(core.port, pid).is_none() {
+    if health(core.port, pid).is_none() {
         // A live pid that is not the core `core.json` described: a reused
         // number after a reboot, most likely. Not ours to stop.
         return Ok(None);

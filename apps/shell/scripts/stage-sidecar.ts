@@ -17,7 +17,7 @@
  * from `events` to `poll`, without the second the focus guard never starts).
  *
  * The shell exe in `src-tauri/target/release` runs whatever `boite-core.exe`
- * sits beside it (`resolve_core` in `src-tauri/src/lib.rs`), which is what the
+ * sits beside it (`resolve_core` in `src-tauri/src/local_core/resolve.rs`), which is what the
  * end to end suite drives, so the copy goes there too whenever that exe exists.
  * `tests/e2e/shell.test.ts` refuses a sidecar older than the core sources and
  * names the fix, `bun run stage:core`, which is this script after
