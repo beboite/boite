@@ -2,7 +2,7 @@ import type { Options, Query, SDKMessage, SpawnOptions as SdkSpawnOptions } from
 import type { BackgroundTask } from '@boite/contracts';
 import { messageOf, unavailable } from '../../errors.ts';
 import type { SpawnedChild } from '../../procs.ts';
-import { profileFor, resolveExecutable } from '../../providers/loader.ts';
+import { profileFor, resolveExecutable } from '../../providers/resolve.ts';
 import type { TurnContext } from '../types.ts';
 import { backgroundKind, commandsOf, restoredCost, subagentOf } from './mapping.ts';
 import { toolGate } from './permissions.ts';

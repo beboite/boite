@@ -21,7 +21,7 @@ import { connect } from '../src/client.ts';
 import { Core } from '../src/core.ts';
 import { jsonLinesOnly } from '../src/drivers/acp/stdout.ts';
 import { newToken } from '../src/ids.ts';
-import { agentEnv, profileFor, resolveExecutable } from '../src/providers/loader.ts';
+import { agentEnv, profileFor, resolveExecutable } from '../src/providers/resolve.ts';
 import { startServer } from '../src/server.ts';
 import { removeDir, waitFor } from './harness.ts';
 

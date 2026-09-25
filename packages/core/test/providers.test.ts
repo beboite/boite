@@ -2,7 +2,7 @@ import { currentOs } from '../src/paths.ts';
 import { chmodSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import type { Account } from '@boite/contracts';
 import { assertDriverRunnable } from '../src/drivers/index.ts';
-import { resolveCommand } from '../src/providers/loader.ts';
+import { resolveCommand } from '../src/providers/resolve.ts';
 import { globalRoots } from '../src/providers/npm.ts';
 import { delimiter, join, sep } from 'node:path';
 import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';

@@ -3,7 +3,7 @@ import pkg from '../../../package.json';
 import { messageOf, unavailable } from '../../errors.ts';
 import { openAiCacheLife } from '../../prompt-cache.ts';
 import type { SpawnedChild } from '../../procs.ts';
-import { profileFor, resolveExecutable } from '../../providers/loader.ts';
+import { profileFor, resolveExecutable } from '../../providers/resolve.ts';
 import type { QuestionAsk, TurnContext } from '../types.ts';
 import {
   answerTextOf,

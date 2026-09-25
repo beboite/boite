@@ -1,7 +1,7 @@
 import { mkdirSync } from 'node:fs';
 import { messageOf, unavailable } from '../../errors.ts';
 import type { SpawnedChild } from '../../procs.ts';
-import { launchPrefix, profileFor, resolveExecutable } from '../../providers/loader.ts';
+import { launchPrefix, profileFor, resolveExecutable } from '../../providers/resolve.ts';
 import type { TurnContext } from '../types.ts';
 import {
   agentEnv,

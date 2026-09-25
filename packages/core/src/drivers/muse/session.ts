@@ -1,7 +1,7 @@
 import { resolve } from 'node:path';
 import { messageOf } from '../../errors.ts';
 import type { SpawnedChild } from '../../procs.ts';
-import { agentEnv, profileFor } from '../../providers/loader.ts';
+import { agentEnv, profileFor } from '../../providers/resolve.ts';
 import { writeLandsInside } from '../../workdir.ts';
 import type { QuestionAsk, TurnContext } from '../types.ts';
 import {

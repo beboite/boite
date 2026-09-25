@@ -1,7 +1,7 @@
 /** The probe: what `agy models` lists, as the picker's models. */
 import type { EffortLevel, ModelInfo, ProviderDescriptor } from '@boite/contracts';
 import { messageOf, unavailable } from '../../errors.ts';
-import { agentEnv, launchPrefix, profileFor, resolveExecutable } from '../../providers/loader.ts';
+import { agentEnv, launchPrefix, profileFor, resolveExecutable } from '../../providers/resolve.ts';
 import type { ProbeContext } from '../types.ts';
 import { STDERR_MAX } from './events.ts';
 

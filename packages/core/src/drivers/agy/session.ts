@@ -2,7 +2,7 @@
 import type { PermissionMode } from '@boite/contracts';
 import { messageOf, unavailable } from '../../errors.ts';
 import type { SpawnedChild } from '../../procs.ts';
-import { agentEnv, launchPrefix, profileFor, resolveExecutable } from '../../providers/loader.ts';
+import { agentEnv, launchPrefix, profileFor, resolveExecutable } from '../../providers/resolve.ts';
 import { LineSplitter, STDOUT_LINE_MAX, stderrLines } from '../lines.ts';
 import type { TurnContext } from '../types.ts';
 import { conversationOf, rowOf, STDERR_MAX, textOf, type Row } from './events.ts';

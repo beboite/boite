@@ -2,7 +2,7 @@ import type { Query, SpawnOptions as SdkSpawnOptions } from '@anthropic-ai/claud
 import type { ModelInfo } from '@boite/contracts';
 import { unavailable } from '../../errors.ts';
 import type { SpawnedChild } from '../../procs.ts';
-import { profileFor, resolveExecutable } from '../../providers/loader.ts';
+import { profileFor, resolveExecutable } from '../../providers/resolve.ts';
 import type { ProbeContext, ProbeResult } from '../types.ts';
 import { childEnv, PromptQueue } from './query.ts';
 import type { ClaudeDeps } from './query.ts';

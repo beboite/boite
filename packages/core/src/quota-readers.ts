@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import type { Account, QuotaWindow } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { homePath } from './paths.ts';
-import { hostAgentsEnabled } from './providers/loader.ts';
+import { hostAgentsEnabled } from './providers/resolve.ts';
 
 export const ANTIGRAVITY_QUOTA_ID = 'quota:antigravity-cli';
 const obj = (value: unknown): Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};

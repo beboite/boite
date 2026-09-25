@@ -4,7 +4,7 @@ import type { ClientConnection, SessionConfigOption } from '@agentclientprotocol
 import type { AccountId, ModelInfo, ProviderId } from '@boite/contracts';
 import pkg from '../../../package.json';
 import { messageOf, unavailable } from '../../errors.ts';
-import { agentEnv, launchPrefix, profileFor, resolveExecutable } from '../../providers/loader.ts';
+import { agentEnv, launchPrefix, profileFor, resolveExecutable } from '../../providers/resolve.ts';
 import { stderrLines } from '../lines.ts';
 import type { ProbeContext, ProbeResult } from '../types.ts';
 import { agentModelsOf, categoryOption, effortFrom, modelsFrom, selectValues, type AgentModels } from './models.ts';

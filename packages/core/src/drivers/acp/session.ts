@@ -12,7 +12,7 @@ import type { OsProfile, PermissionMode, ProviderDescriptor, ProviderId } from '
 import pkg from '../../../package.json';
 import { messageOf, unavailable } from '../../errors.ts';
 import type { SpawnedChild } from '../../procs.ts';
-import { agentEnv, launchPrefix, profileFor, resolveExecutable } from '../../providers/loader.ts';
+import { agentEnv, launchPrefix, profileFor, resolveExecutable } from '../../providers/resolve.ts';
 import { grokLaunchArgs } from '../grok.ts';
 import { stderrLines } from '../lines.ts';
 import type { TurnContext } from '../types.ts';

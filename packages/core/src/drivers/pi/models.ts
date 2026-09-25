@@ -1,6 +1,6 @@
 import type { EffortLevel, ModelInfo, ProviderDescriptor } from '@boite/contracts';
 import { messageOf, unavailable } from '../../errors.ts';
-import { launchPrefix, profileFor, resolveExecutable } from '../../providers/loader.ts';
+import { launchPrefix, profileFor, resolveExecutable } from '../../providers/resolve.ts';
 import type { ProbeContext } from '../types.ts';
 import { agentEnv, textOf } from './mapping.ts';
 import { AGENT_OWN_MODEL, PROBE_TIMEOUT_MS, STDERR_MAX, THINKING_LEVELS } from './protocol.ts';

@@ -1,7 +1,7 @@
 import type { SDKUserMessage, SpawnOptions as SdkSpawnOptions } from '@anthropic-ai/claude-agent-sdk';
 import { unavailable } from '../../errors.ts';
 import type { SpawnedChild } from '../../procs.ts';
-import { profileFor, resolveExecutable } from '../../providers/loader.ts';
+import { profileFor, resolveExecutable } from '../../providers/resolve.ts';
 import { titleRequest } from '../../titles.ts';
 import type { TitleContext } from '../types.ts';
 import { childEnv, STDERR_MAX } from './query.ts';
