@@ -69,7 +69,7 @@ export interface ProcessPlatform {
   sample(threadId: string): ProcessSample | null;
   pidAdded(threadId: string, pid: number): void;
   pidRemoved(threadId: string, pid: number): void;
-  /** A turn is starting: have the protections ready before its first process. */
+  /** A turn is starting: have the process drain and the protections ready before its first process. */
   warm(): void;
   /** The registry forgot an idle thread: drop what the platform keeps for it. */
   forget(threadId: string): void;

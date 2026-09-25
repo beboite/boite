@@ -8,7 +8,7 @@ import { AudioEndpoint, NO_ENDPOINT, NO_ENDPOINT_RETRY_MS } from '../src/platfor
 import type { AudioSessions } from '../src/platform/windows/audio-sessions.ts';
 import { MuteLogic } from '../src/platform/windows/mute-logic.ts';
 import { jobsWorkerRunning, setJobsIdleGrace } from '../src/platform/windows/jobs.ts';
-import type { ThreadId } from '@boite/contracts';
+import type { ThreadId, Turn } from '@boite/contracts';
 import { echoThread, startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
 
@@ -572,6 +572,18 @@ describeWindows('the focus guard Worker', () => {
       await waitFor(() => !procs.guardStatus().running && !jobsWorkerRunning(), 5000);
     } finally {
       setGuardWorkerForTests(null);
+      setJobsIdleGrace(30_000);
+    }
+  }, 30000);
+
+  test('a starting turn boots the process drain before its first process, and a turn that spawns nothing lets it go', async () => {
+    setJobsIdleGrace(200);
+    try {
+      expect(jobsWorkerRunning()).toBe(false);
+      harness.core.bus.emit('turn.started', { threadId: 'warm-only' } as Turn);
+      expect(jobsWorkerRunning()).toBe(true);
+      await waitFor(() => !jobsWorkerRunning(), 5000);
+    } finally {
       setJobsIdleGrace(30_000);
     }
   }, 30000);

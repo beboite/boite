@@ -14,6 +14,7 @@ import type { Pointer } from 'bun:ffi';
 import type { TraceCapability } from '@boite/contracts';
 import type { JobsWorkerMessage, JobsWorkerStart } from './jobs-worker.ts';
 import { workerEntry } from './worker-entry.ts';
+import { commandLineOf, cpuMsOf, exitCodeOf, imageNameOf, ioBytesOf, parentPidOf, workingSetOf } from './process-reads.ts';
 
 import type { NativeProcessInfo, NativeProcessExit, ProcessSample, ProcessEventSink, ProcessLimits } from '../types.ts';
 
@@ -44,7 +45,8 @@ const PROCESS_VM_READ = 0x10;
 const PROCESS_SET_QUOTA = 0x100;
 const PROCESS_QUERY_INFORMATION = 0x400;
 const ERROR_ACCESS_DENIED = 5;
-const STILL_ACTIVE = 259;
+/** What OpenProcess says for a pid no process holds any more. */
+const ERROR_INVALID_PARAMETER = 87;
 const KILL_EXIT_CODE = 9;
 
 // -- Struct offsets, all x64 ------------------------------------------------
@@ -65,28 +67,6 @@ const OFF_TOTAL_KERNEL_TIME = 8;
 const OFF_ACTIVE_PROCESSES = 40;
 /** The accounting struct plus its IO_COUNTERS tail. */
 const ACCOUNTING_SIZE = 96;
-/** PROCESS_BASIC_INFORMATION.InheritedFromUniqueProcessId. UniqueProcessId sits at 32. */
-const OFF_INHERITED_FROM = 40;
-const PROCESS_BASIC_INFORMATION_SIZE = 48;
-/** PROCESS_BASIC_INFORMATION.PebBaseAddress. */
-const OFF_PEB_BASE = 8;
-/** PEB.ProcessParameters. */
-const OFF_PROCESS_PARAMETERS = 0x20;
-/** RTL_USER_PROCESS_PARAMETERS.CommandLine, a UNICODE_STRING (Length u16, Buffer at +8). */
-const OFF_COMMAND_LINE = 0x70;
-/** PROCESS_MEMORY_COUNTERS: cb, PageFaultCount, then eight SIZE_T fields. */
-const PROCESS_MEMORY_COUNTERS_SIZE = 72;
-const OFF_PEAK_WORKING_SET = 8;
-const OFF_WORKING_SET = 16;
-/** IO_COUNTERS: six u64, the three operation counts then the three transfer counts. */
-const IO_COUNTERS_SIZE = 48;
-const OFF_READ_TRANSFER = 24;
-const OFF_WRITE_TRANSFER = 32;
-/** GetProcessTimes writes four FILETIMEs; kernel is the third, user the fourth. */
-const OFF_KERNEL_TIME = 16;
-const OFF_USER_TIME = 24;
-/** The longest command line Windows accepts, so anything past it is a bad read. */
-const MAX_COMMAND_LINE_BYTES = 32768;
 
 const INVALID_HANDLE_VALUE = 0xffffffffffffffffn;
 const INFINITE = 0xffffffff;
@@ -259,6 +239,23 @@ export function retainJobs(events: ProcessEventSink): void {
 /** Test seams: how long the Worker outlives the last process, and whether one runs. */
 export function setJobsIdleGrace(ms: number): void {
   idleGraceMs = ms;
+}
+
+/**
+ * A turn is starting: boot the drain now, while the turn prepares, rather than
+ * when its first process joins a job. A Worker takes tens of milliseconds to
+ * start, and a process that starts and ends inside that wait is gone before
+ * anything can read what it was. The idle window runs from here, as it does
+ * after the last exit, so a turn that never spawns does not keep it.
+ */
+export function warmJobs(): void {
+  if (workerFailure !== null) return;
+  const api = ensureNative();
+  if (api === null) return;
+  if (completionPort === 0) completionPort = api.createPort();
+  if (completionPort === 0) return;
+  ensureWorker(completionPort);
+  if (worker !== null && jobsEmpty()) armIdle();
 }
 
 export function jobsWorkerRunning(): boolean {
@@ -530,7 +527,7 @@ function ensureWorker(port: number): void {
     };
     // No timeout: the Worker sleeps in the kernel until a packet comes, and
     // teardown posts one of its own to wake it.
-    const start: JobsWorkerStart = { port, stop: shared, waitMs: INFINITE };
+    const start: JobsWorkerStart = { port, stop: shared, waitMs: INFINITE, inspectAccess: INSPECT_ACCESS };
     created.postMessage(start);
     // Typed structurally: the bench type-checks this file under the DOM lib, whose Worker has no unref.
     (created as { unref?: () => void }).unref?.();
@@ -617,7 +614,7 @@ function retireWorker(): void {
 function onWorkerMessage(message: JobsWorkerMessage): void {
   switch (message.kind) {
     case 'packet':
-      onJobPacket(message.message, message.key, message.pid);
+      onJobPacket(message.message, message.key, message.pid, message.handle);
       return;
     case 'failed':
       failWorker(message.reason);
@@ -627,12 +624,15 @@ function onWorkerMessage(message: JobsWorkerMessage): void {
   }
 }
 
-function onJobPacket(message: number, key: number, pid: number): void {
+function onJobPacket(message: number, key: number, pid: number, handle = 0): void {
   const threadId = threadsByKey.get(key);
-  if (threadId === undefined) return;
+  if (threadId === undefined) {
+    if (handle !== 0) native?.close(handle);
+    return;
+  }
   switch (message) {
     case MSG_NEW_PROCESS:
-      onProcessStarted(threadId, pid);
+      onProcessStarted(threadId, pid, handle);
       return;
     case MSG_EXIT_PROCESS:
     case MSG_ABNORMAL_EXIT_PROCESS:
@@ -688,15 +688,31 @@ function listJobPids(api: Native, job: number): Set<number> | null {
 
 // -- per process reads ------------------------------------------------------
 
-function onProcessStarted(threadId: string, pid: number): void {
-  if (pid <= 0 || tracked.has(pid) || ignored.has(pid)) return;
-  cancelIdle();
+/**
+ * `opened` is the handle the Worker took the moment the packet came, 0 when it
+ * had none. Opening it here instead waits for this thread's event loop, and a
+ * process killed within that wait is gone: nothing then tells a console host
+ * from a real child, and the trace gains a nameless process.
+ */
+function onProcessStarted(threadId: string, pid: number, opened = 0): void {
   const api = ensureNative();
-  if (api === null) return;
+  if (pid <= 0 || tracked.has(pid) || ignored.has(pid) || api === null) {
+    if (opened !== 0) api?.close(opened);
+    return;
+  }
+  cancelIdle();
   threadJobs.get(threadId)?.pids.add(pid);
 
-  const handle = api.openProcess(INSPECT_ACCESS, pid);
+  const handle = opened !== 0 ? opened : api.openProcess(INSPECT_ACCESS, pid);
   if (handle === 0) {
+    // Gone before anything could open it, typically the console host of a
+    // child killed within a millisecond of its start: there is no name, no
+    // parent and no true start time to record. Its exit is swallowed the same
+    // way as a console host's; its CPU stays in the job totals.
+    if (api.lastError() === ERROR_INVALID_PARAMETER) {
+      ignored.add(pid);
+      return;
+    }
     sink?.started(threadId, pid, { exe: 'unknown', commandLine: null, parentPid: null });
     return;
   }
@@ -744,91 +760,12 @@ function reportExit(threadId: string, pid: number): void {
   sink?.exited(threadId, pid, exit);
 }
 
-function imageNameOf(api: Native, handle: number): string | null {
-  const buffer = new Uint16Array(520);
-  const size = new Uint32Array([buffer.length]);
-  if (!api.imageName(handle, buffer, size)) return null;
-  const length = size[0] ?? 0;
-  if (length === 0) return null;
-  return Buffer.from(buffer.buffer, 0, length * 2).toString('utf16le');
-}
-
-function parentPidOf(api: Native, handle: number): number | null {
-  if (!api.hasNt) return null;
-  const buffer = new Uint8Array(PROCESS_BASIC_INFORMATION_SIZE);
-  if (!api.basicInfo(handle, buffer)) return null;
-  const parent = Number(new DataView(buffer.buffer).getBigUint64(OFF_INHERITED_FROM, true));
-  return parent > 0 ? parent : null;
-}
-
-function commandLineOf(api: Native, handle: number): string | null {
-  if (!api.hasNt) return null;
-  const basic = new Uint8Array(PROCESS_BASIC_INFORMATION_SIZE);
-  if (!api.basicInfo(handle, basic)) return null;
-  const peb = new DataView(basic.buffer).getBigUint64(OFF_PEB_BASE, true);
-  if (peb === 0n) return null;
-
-  const parameters = readPointer(api, handle, peb + BigInt(OFF_PROCESS_PARAMETERS));
-  if (parameters === null || parameters === 0n) return null;
-
-  const unicode = new Uint8Array(16);
-  if (!api.readMemory(handle, parameters + BigInt(OFF_COMMAND_LINE), unicode)) return null;
-  const view = new DataView(unicode.buffer);
-  const length = view.getUint16(0, true);
-  const address = view.getBigUint64(8, true);
-  if (length === 0 || address === 0n || length > MAX_COMMAND_LINE_BYTES) return null;
-
-  const text = new Uint8Array(length);
-  if (!api.readMemory(handle, address, text)) return null;
-  return Buffer.from(text.buffer, 0, length).toString('utf16le');
-}
-
-function readPointer(api: Native, handle: number, address: bigint): bigint | null {
-  const buffer = new Uint8Array(8);
-  if (!api.readMemory(handle, address, buffer)) return null;
-  return new DataView(buffer.buffer).getBigUint64(0, true);
-}
-
-function exitCodeOf(api: Native, handle: number): number | null {
-  const code = new Uint32Array(1);
-  if (!api.exitCode(handle, code)) return null;
-  const value = code[0] ?? 0;
-  return value === STILL_ACTIVE ? null : value | 0;
-}
-
-function cpuMsOf(api: Native, handle: number): number | null {
-  const times = new Uint8Array(32);
-  if (!api.processTimes(handle, times)) return null;
-  const view = new DataView(times.buffer);
-  const total = view.getBigUint64(OFF_KERNEL_TIME, true) + view.getBigUint64(OFF_USER_TIME, true);
-  return Math.round(Number(total) / 10_000);
-}
-
-/** Bytes the process read and wrote, files, pipes and devices alike. */
-function ioBytesOf(api: Native, handle: number): number | null {
-  const counters = new Uint8Array(IO_COUNTERS_SIZE);
-  if (!api.ioCounters(handle, counters)) return null;
-  const view = new DataView(counters.buffer);
-  const total = view.getBigUint64(OFF_READ_TRANSFER, true) + view.getBigUint64(OFF_WRITE_TRANSFER, true);
-  return Number(total);
-}
-
 function peakMemoryOf(api: Native, entry: TrackedProcess): number | null {
   const memory = workingSetOf(api, entry.handle);
   const peak = Math.max(memory?.peak ?? 0, entry.peakMemoryBytes);
   return peak > 0 ? peak : null;
 }
 
-function workingSetOf(api: Native, handle: number): { workingSet: number; peak: number } | null {
-  const buffer = new Uint8Array(PROCESS_MEMORY_COUNTERS_SIZE);
-  const view = new DataView(buffer.buffer);
-  view.setUint32(0, PROCESS_MEMORY_COUNTERS_SIZE, true);
-  if (!api.memoryInfo(handle, buffer)) return null;
-  return {
-    workingSet: Number(view.getBigUint64(OFF_WORKING_SET, true)),
-    peak: Number(view.getBigUint64(OFF_PEAK_WORKING_SET, true)),
-  };
-}
 
 // -- teardown ---------------------------------------------------------------
 

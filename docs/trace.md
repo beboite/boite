@@ -47,13 +47,19 @@ after a thread's last process exits, the registry forgets the thread and its job
 is closed, unless the job still reports a process in it.
 
 A completion port on the job reports every process that enters or leaves it,
-grandchildren included, and a Worker drains it. The Worker is built on the first
-traced pid rather than at core start, like everything else heavy here. Its wait
-has no timeout, so it sleeps in the kernel until a packet comes; it stops once
-no job has held a process for 30 seconds, and the shutdown or that idle stop
-posts a packet of its own to end the wait. The port stays open: the next
-assigned process starts a new Worker, after the old one has left, and the events
-queued meanwhile are read then. Those
+grandchildren included, and a Worker drains it. The Worker is built when a turn
+starts or on the first traced pid, whichever comes first, never at core start:
+it takes tens of milliseconds to boot, and a turn prepares for about that long
+before its agent runs. Its wait has no timeout, so it sleeps in the kernel until
+a packet comes; it stops once no job has held a process for 30 seconds, a turn
+that spawned nothing included, and the shutdown or that idle stop posts a packet
+of its own to end the wait. The port stays open: the next assigned process
+starts a new Worker, after the old one has left, and the events queued meanwhile
+are read then. The Worker opens each new process the moment its packet comes,
+because the core's own thread may read the packet much later. A process already
+gone by then, such as the console host of an agent stopped within a millisecond
+of its start, has no name, parent or true start time left to record: it stays
+out of the trace, and its CPU stays in the job totals. Those
 events become `process.started` and `process.exited` on the wire, each carrying
 pid, parent pid, thread, executable, the command line when it is readable, start
 and exit times, exit code, CPU milliseconds, peak memory and bytes moved.

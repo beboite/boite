@@ -33,7 +33,10 @@ export const platform: ProcessPlatform = {
   sample: jobs.sampleThreadJob,
   pidAdded: guard.guardPidAdded,
   pidRemoved: guard.guardPidRemoved,
-  warm: guard.warmGuard,
+  warm() {
+    jobs.warmJobs();
+    guard.warmGuard();
+  },
   forget: jobs.releaseThreadJob,
   guardStatus: guard.guardStatus,
 };
