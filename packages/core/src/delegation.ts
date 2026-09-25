@@ -40,15 +40,32 @@ export class Delegation {
     }
     this.off = core.bus.onAny((name, payload) => {
       if (this.closed) return;
-      if (name === 'turn.finished') this.finished(payload as Turn);
+      if (name === 'turn.finished') {
+        this.finished(payload as Turn);
+        // A thread that yields takes the letters that waited for it now, not at the next tick.
+        this.kick((payload as Turn).threadId);
+      }
       if (name === 'thread.updated') {
         const thread = payload as ThreadSummary;
         if (thread.parentThreadId) this.changed(thread.parentThreadId);
       }
       if (name === 'thread.removed') this.remove((payload as { threadId: string }).threadId);
     });
+    // The tick remains for expiry, the per-turn deadline and a steer a driver was not ready for.
     this.timer = setInterval(() => this.tick(), 1000);
     this.timer.unref?.();
+  }
+
+  private track(job: Promise<void>): void {
+    this.jobs.add(job);
+    void job.finally(() => this.jobs.delete(job));
+  }
+  /** Delivery to one thread once the current synchronous work (a journal write, a turn end) is done. */
+  private kick(threadId: string): void {
+    queueMicrotask(() => {
+      if (this.closed || this.core.journal.isClosed()) return;
+      this.track(this.deliver(threadId).catch(error => { if (!this.closed) this.core.log('warn', `delegation ${threadId}: ${messageOf(error)}`); }));
+    });
   }
 
   private root(threadId: string): ThreadSummary {
@@ -256,6 +273,7 @@ export class Delegation {
     // An explicit new instruction resumes this child only. It cannot resume a paused team.
     this.stopped.delete(recipient.id);
     this.changed(root.id);
+    this.kick(recipient.id);
     return letter;
   }
   private letters(threadId: string, status: AgentLetter['status']): AgentLetter[] {
@@ -408,11 +426,7 @@ export class Delegation {
       if (letter.expiresAt <= Date.now()) this.update(letter, 'expired', 'Message expired before delivery');
       else recipients.add(letter.to.threadId);
     }
-    for (const threadId of recipients) {
-      const job = this.deliver(threadId);
-      this.jobs.add(job);
-      void job.finally(() => this.jobs.delete(job));
-    }
+    for (const threadId of recipients) this.track(this.deliver(threadId));
     for (const running of this.core.scheduler.state().running) {
       const thread = this.core.journal.getThread(running.threadId);
       if (!thread) continue;
