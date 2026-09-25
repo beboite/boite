@@ -5,7 +5,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import type { MessagePart, RpcEvents, Settings } from '@boite/contracts';
 import type { CoreClient } from '../src/client.ts';
 import { getDriver } from '../src/drivers/index.ts';
-import { setPiStopDeadlineForTests } from '../src/drivers/pi.ts';
+import { setPiStopDeadlineForTests } from '../src/drivers/pi/session.ts';
 import { startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
 

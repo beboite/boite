@@ -594,8 +594,8 @@ process here goes through `procs.spawnChild`. The driver refuses a host whose
 
 ### pi
 
-`packages/core/src/drivers/pi.ts` speaks pi's RPC mode: JSON lines over the
-stdio of `pi --mode rpc`.
+`packages/core/src/drivers/pi.ts` and the modules under `drivers/pi/` speak
+pi's RPC mode: JSON lines over the stdio of `pi --mode rpc`.
 
 - A turn ends on `agent_settled`, never on `agent_end`. pi retries an overloaded
   or dropped request by itself inside the same run (`auto_retry_start`,
