@@ -1232,7 +1232,7 @@ export class FakeClient implements ObservableClient {
         record.exitedAt = this.#now();
         record.exitCode = 1;
         killed += 1;
-        this.#emit('process.exited', structuredClone(record));
+        this.#emitToThread(record.threadId, 'process.exited', structuredClone(record));
       }
       const thread = this.#threads.get(params.threadId);
       if (thread) {
@@ -2662,7 +2662,7 @@ const ready = true;
     this.#processes.push(record);
     thread.load = { processes: 1, cpuPercent: 12, memoryBytes: 48 * 1024 * 1024 };
     this.#touch(thread);
-    this.#emit('process.started', structuredClone(record));
+    this.#emitToThread(record.threadId, 'process.started', structuredClone(record));
 
     await this.#pause();
 
@@ -2673,7 +2673,7 @@ const ready = true;
     record.ioBytes = 32 * 1024;
     thread.load = null;
     this.#touch(thread);
-    this.#emit('process.exited', structuredClone(record));
+    this.#emitToThread(record.threadId, 'process.exited', structuredClone(record));
   }
 
   // -------------------------------------------------------------------------
@@ -3297,12 +3297,14 @@ const ready = true;
     const out: ThreadResources[] = [];
     for (const thread of this.#threads.values()) {
       const mine = this.#processes.filter((p) => p.threadId === thread.id);
-      if (mine.length === 0) continue;
+      const live = mine.filter((p) => p.exitedAt === null);
+      // The core's rule: nothing ever ran, or archived with nothing running.
+      if (mine.length === 0 || (thread.archived && live.length === 0)) continue;
       out.push({
         threadId: thread.id,
         title: thread.title,
         status: thread.status,
-        live: mine.filter((p) => p.exitedAt === null),
+        live,
         totals: {
           processes: mine.length,
           cpuMs: mine.reduce((sum, p) => sum + (p.cpuMs ?? 0), 0),

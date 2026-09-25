@@ -72,8 +72,8 @@ describe('orphan sweep', () => {
     sink.exited(THREAD, 102, { exitCode: 1, cpuMs: null, peakMemoryBytes: null, ioBytes: null });
   });
 
-  afterEach(() => {
-    procs.close();
+  afterEach(async () => {
+    await procs.close();
     journal.close();
     if (previousDataDir === undefined) delete process.env.BOITE_DATA_DIR;
     else process.env.BOITE_DATA_DIR = previousDataDir;
@@ -100,6 +100,20 @@ describe('orphan sweep', () => {
     sink.started(THREAD, 108, { exe: 'C:\\tools\\git.exe', commandLine: null, parentPid: 100 });
     expect(procs.sweepOrphans(THREAD, Date.now() + 1000).sort()).toEqual([103, 104, 107]);
     expect(procs.liveOf(THREAD).some((record) => record.pid === 108)).toBe(true);
+  });
+
+  test('everything under an orphan goes with it, however deep, and a sibling tree stays', () => {
+    const sink = job.sink();
+    // A dev server whose watcher forked a chain of workers, the shell above it gone.
+    const chain = Array.from({ length: 200 }, (_, index) => 1000 + index);
+    for (const pid of chain) {
+      sink.started(THREAD, pid, { exe: 'C:\\tools\\node.exe', commandLine: null, parentPid: pid === 1000 ? 999 : pid - 1 });
+    }
+    // Under the MCP server, whose parent is the live agent: never taken.
+    sink.started(THREAD, 2000, { exe: 'C:\\tools\\node.exe', commandLine: null, parentPid: 101 });
+    const stopped = procs.sweepOrphans(THREAD, Date.now() + GRACE_MS);
+    expect(stopped.sort((a, b) => a - b)).toEqual([103, 104, ...chain]);
+    expect(procs.liveOf(THREAD).map((record) => record.pid).sort((a, b) => a - b)).toEqual([100, 101, 105, 2000]);
   });
 
   test('a new turn inside the grace cancels the sweep', async () => {

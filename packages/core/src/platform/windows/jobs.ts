@@ -89,6 +89,7 @@ const OFF_USER_TIME = 24;
 const MAX_COMMAND_LINE_BYTES = 32768;
 
 const INVALID_HANDLE_VALUE = 0xffffffffffffffffn;
+const INFINITE = 0xffffffff;
 const ASSIGN_ACCESS = PROCESS_SET_QUOTA | PROCESS_TERMINATE | PROCESS_QUERY_INFORMATION;
 const INSPECT_ACCESS = PROCESS_QUERY_INFORMATION | PROCESS_VM_READ | PROCESS_TERMINATE;
 
@@ -114,6 +115,7 @@ function loadKernel32() {
     TerminateJobObject: { args: [FFIType.ptr, FFIType.u32], returns: FFIType.i32 },
     TerminateProcess: { args: [FFIType.ptr, FFIType.u32], returns: FFIType.i32 },
     CreateIoCompletionPort: { args: [FFIType.u64, FFIType.ptr, FFIType.u64, FFIType.u32], returns: FFIType.ptr },
+    PostQueuedCompletionStatus: { args: [FFIType.ptr, FFIType.u32, FFIType.u64, FFIType.ptr], returns: FFIType.i32 },
     OpenProcess: { args: [FFIType.u32, FFIType.i32, FFIType.u32], returns: FFIType.ptr },
     CloseHandle: { args: [FFIType.ptr], returns: FFIType.i32 },
     GetLastError: { args: [], returns: FFIType.u32 },
@@ -170,6 +172,8 @@ function nativeApi(k32: Kernel32, nt: Ntdll | null) {
     terminateProcess: (proc: number, exitCode: number): boolean =>
       k32.TerminateProcess(asPointer(proc), exitCode) !== 0,
     createPort: (): number => asHandle(k32.CreateIoCompletionPort(INVALID_HANDLE_VALUE, null, 0n, 1)),
+    /** Key 0 on the port: the drain's signal to stop. Thread job keys start at 1. */
+    wakeToStop: (port: number): boolean => k32.PostQueuedCompletionStatus(asPointer(port), 0, 0n, null) !== 0,
     openProcess: (access: number, pid: number): number => asHandle(k32.OpenProcess(access, 0, pid)),
     close: (handle: number): void => {
       k32.CloseHandle(asPointer(handle));
@@ -261,11 +265,12 @@ export function jobsWorkerRunning(): boolean {
   return worker !== null;
 }
 
-export function releaseJobs(): void {
+/** Resolves once the drain left its wait and the port is closed, one second at most. */
+export function releaseJobs(): Promise<void> {
   refCount = Math.max(0, refCount - 1);
-  if (refCount > 0) return;
+  if (refCount > 0) return Promise.resolve();
   sink = null;
-  teardown();
+  return teardown();
 }
 
 /**
@@ -278,6 +283,16 @@ export function setProcessLimits(next: ProcessLimits): void {
   if (api === null) return;
   if (globalJob !== 0) applyCpuCap(api, globalJob);
   for (const job of threadJobs.values()) applyThreadLimits(api, job.handle);
+}
+
+/** The global job's CPU rate control as the kernel holds it. Read by the tests only. */
+export function cpuRateOfGlobalJob(): { flags: number; rate: number } | null {
+  const api = native;
+  if (api === null || globalJob === 0) return null;
+  const buffer = new Uint8Array(8);
+  if (!api.queryJobInfo(globalJob, CLASS_CPU_RATE_CONTROL, buffer)) return null;
+  const view = new DataView(buffer.buffer);
+  return { flags: view.getUint32(0, true), rate: view.getUint32(4, true) };
 }
 
 export function jobsCapability(): TraceCapability {
@@ -352,6 +367,25 @@ export function terminateJobProcess(threadId: string, pid: number): boolean {
   return api.terminateProcess(entry.handle, KILL_EXIT_CODE);
 }
 
+/**
+ * Close the job of a thread the registry forgot. A job that still holds a pid
+ * is kept: closing it would kill that process through KILL_ON_JOB_CLOSE. Once
+ * the key is gone a late packet for it is dropped, and the same thread id
+ * spawning again gets a new job and a new key.
+ */
+export function releaseThreadJob(threadId: string): void {
+  const job = threadJobs.get(threadId);
+  if (job === undefined || job.pids.size > 0) return;
+  threadJobs.delete(threadId);
+  threadsByKey.delete(job.key);
+  native?.close(job.handle);
+}
+
+/** How many thread jobs are open. Read by the tests only. */
+export function threadJobCount(): number {
+  return threadJobs.size;
+}
+
 /** CPU over the interval since the previous sample, memory as the live working sets. */
 export function sampleThreadJob(threadId: string): ProcessSample | null {
   const job = threadJobs.get(threadId);
@@ -411,12 +445,16 @@ function ensureNative(): Native | null {
 
 function applyCpuCap(api: Native, job: number): void {
   const percent = limits.agentCpuCapPercent;
-  if (!(percent > 0) || percent >= 100) return;
   const buffer = new Uint8Array(8);
-  const view = new DataView(buffer.buffer);
-  view.setUint32(0, CPU_RATE_CONTROL_ENABLE | CPU_RATE_CONTROL_HARD_CAP, true);
-  // CpuRate is in hundredths of a percent of the whole machine.
-  view.setUint32(4, Math.max(1, Math.round(percent * 100)), true);
+  // 0 and 100 mean no cap. They are still written, as all zeros: a cap set
+  // earlier stays on the job until something replaces it, and zeros on a job
+  // that never had one succeed and change nothing.
+  if (percent > 0 && percent < 100) {
+    const view = new DataView(buffer.buffer);
+    view.setUint32(0, CPU_RATE_CONTROL_ENABLE | CPU_RATE_CONTROL_HARD_CAP, true);
+    // CpuRate is in hundredths of a percent of the whole machine.
+    view.setUint32(4, Math.max(1, Math.round(percent * 100)), true);
+  }
   api.setJobInfo(job, CLASS_CPU_RATE_CONTROL, buffer);
 }
 
@@ -490,7 +528,9 @@ function ensureWorker(port: number): void {
     created.onerror = (event: unknown): void => {
       failWorker(describeWorkerError(event));
     };
-    const start: JobsWorkerStart = { port, stop: shared, waitMs: 250 };
+    // No timeout: the Worker sleeps in the kernel until a packet comes, and
+    // teardown posts one of its own to wake it.
+    const start: JobsWorkerStart = { port, stop: shared, waitMs: INFINITE };
     created.postMessage(start);
     if (typeof created.unref === 'function') created.unref();
     worker = created;
@@ -567,6 +607,8 @@ function retireWorker(): void {
     else if (message.kind === 'packet') onWorkerMessage(message);
   };
   if (flag !== null) Atomics.store(flag, 0, 1);
+  // The wait has no timeout: this packet is what wakes it to read the flag.
+  if (completionPort !== 0) native?.wakeToStop(completionPort);
   const timer = setTimeout(finish, 1000);
   if (typeof timer.unref === 'function') timer.unref();
 }
@@ -789,7 +831,7 @@ function workingSetOf(api: Native, handle: number): { workingSet: number; peak: 
 
 // -- teardown ---------------------------------------------------------------
 
-function teardown(): void {
+function teardown(): Promise<void> {
   if (pollTimer !== null) {
     clearInterval(pollTimer);
     pollTimer = null;
@@ -829,21 +871,26 @@ function teardown(): void {
   };
   if (running === null) {
     release();
-    return;
+    return Promise.resolve();
   }
   if (flag !== null) Atomics.store(flag, 0, 1);
-  let released = false;
-  const once = (): void => {
-    if (released) return;
-    released = true;
-    clearTimeout(timer);
-    release();
-  };
-  // The loop leaves within one wait and posts 'stopped'; the port closes then,
-  // never while the worker may still be blocked on it.
-  running.onmessage = (event: { data: unknown }): void => {
-    if ((event.data as JobsWorkerMessage).kind === 'stopped') once();
-  };
-  const timer = setTimeout(once, 1000);
-  if (typeof timer.unref === 'function') timer.unref();
+  // The wait has no timeout: this packet is what wakes it to read the flag.
+  if (api !== null && port !== 0) api.wakeToStop(port);
+  return new Promise<void>((resolve) => {
+    let released = false;
+    const once = (): void => {
+      if (released) return;
+      released = true;
+      clearTimeout(timer);
+      release();
+      resolve();
+    };
+    // The loop leaves on that packet and posts 'stopped'; the port closes then,
+    // never while the worker may still be blocked on it. Closing it on the
+    // fallback also ends a wait nothing woke.
+    running.onmessage = (event: { data: unknown }): void => {
+      if ((event.data as JobsWorkerMessage).kind === 'stopped') once();
+    };
+    const timer = setTimeout(once, 1000);
+  });
 }

@@ -29,7 +29,7 @@ const SECONDS = 2;
 const WAVEHDR_SIZE = 48;
 const WAVEFORMATEX_SIZE = 18;
 /** How long the device stays open after the buffer, so the poll has time to see it. */
-const HOLD_MS = 3000;
+const HOLD_MS = 6000;
 
 const winmm = dlopen('winmm.dll', {
   waveOutOpen: {

@@ -414,7 +414,10 @@ export function startServer(options: ServerOptions): RunningServer {
       name.startsWith('question.') ||
       // A panel request is for the clients watching that thread: a second
       // window on another thread must not have its panel taken over.
-      name.startsWith('panel.');
+      name.startsWith('panel.') ||
+      // Every grandchild's record, command line included: only that thread's
+      // trace panel reads it.
+      name.startsWith('process.');
     const threadId = eventThreadId(payload);
     for (const connection of connections) {
       if (!connection.authenticated) continue;

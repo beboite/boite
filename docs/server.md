@@ -197,6 +197,15 @@ RestartSec=5
 WantedBy=default.target
 ```
 
+Each process the core starts leads a process group of its own, and stopping a
+thread signals that group: SIGTERM, then SIGKILL two seconds later to a group
+that still has members. The core's own shutdown, on SIGTERM, SIGINT or SIGHUP,
+does the same to every group and waits for it before it exits. A tool that
+leaves the group on purpose (a daemon calling `setsid`) escapes it, and a core
+killed hard leaves the groups it started running. Stopping the unit still reaps
+them: systemd's default `KillMode=control-group` stops everything in the
+service's cgroup, so keep that default and never set `KillMode=process`.
+
 The data directory is `~/.local/share/boite2` on the stable channel and
 `~/.local/share/boite2-dev` on the dev one, or whatever `--data-dir` or
 `BOITE_DATA_DIR` names: the journal, the accounts, `core.json` with the core

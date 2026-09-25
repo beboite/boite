@@ -1155,18 +1155,27 @@ export class Journal {
     return rows.map(toProcess);
   }
 
-  processTotals(threadId: string): { processes: number; cpuMs: number; peakMemoryBytes: number } {
-    const row = this.db
+  /**
+   * Drops the trace of an id no thread stands behind: a plugin call, a brain
+   * sync, a dictation. No RPC reads those rows, and a caller minting an id per
+   * call would otherwise add rows for the life of the install.
+   */
+  forgetProcessesWithoutThread(threadId: string): void {
+    this.db
+      .query('DELETE FROM processes WHERE thread_id = ? AND NOT EXISTS (SELECT 1 FROM threads WHERE id = ?)')
+      .run(threadId, threadId);
+  }
+
+  /** Process count, CPU time and peak memory of every thread that ran something, in one scan. */
+
+  processTotalsByThread(): Map<string, { processes: number; cpuMs: number; peakMemoryBytes: number }> {
+    const rows = this.db
       .query(
-        `SELECT COUNT(*) AS processes, COALESCE(SUM(cpu_ms), 0) AS cpu_ms, COALESCE(MAX(peak_memory_bytes), 0) AS peak
-         FROM processes WHERE thread_id = ?`,
+        `SELECT thread_id, COUNT(*) AS processes, COALESCE(SUM(cpu_ms), 0) AS cpu_ms, COALESCE(MAX(peak_memory_bytes), 0) AS peak
+         FROM processes GROUP BY thread_id`,
       )
-      .get(threadId) as { processes: number; cpu_ms: number; peak: number } | null;
-    return {
-      processes: row?.processes ?? 0,
-      cpuMs: row?.cpu_ms ?? 0,
-      peakMemoryBytes: row?.peak ?? 0,
-    };
+      .all() as { thread_id: string; processes: number; cpu_ms: number; peak: number }[];
+    return new Map(rows.map((row) => [row.thread_id, { processes: row.processes, cpuMs: row.cpu_ms, peakMemoryBytes: row.peak }]));
   }
 
   // -- accounts -------------------------------------------------------------

@@ -12,8 +12,9 @@
  * whole poll.
  *
  * Nothing here is silent: a `HRESULT` that is not a success throws with the
- * call's name and the value in hex. The one exception is a machine with no
- * render endpoint, which is not a failure and answers `null`.
+ * call's name and the value in hex, or, for one session of a walk, is handed to
+ * the walk's `skipped` callback. The one exception is a machine with no render
+ * endpoint, which is not a failure and answers `null`.
  */
 import { CFunction, dlopen, FFIType, ptr, read } from 'bun:ffi';
 import type { Pointer } from 'bun:ffi';
@@ -32,8 +33,17 @@ export interface AudioSession {
 
 /** The session manager of the default render endpoint, open until `release`. */
 export interface AudioSessions {
-  /** Every session of the endpoint right now, each holding its own interface. */
-  list(): AudioSession[];
+  /**
+   * Every session of the endpoint right now, each holding its own interface.
+   * A session that cannot be read is left out and named to `skipped`; only a
+   * failure of the endpoint itself throws.
+   */
+  list(skipped?: (message: string) => void): AudioSession[];
+  /**
+   * True once this is no longer the default render device: the user switched
+   * output, or the device went away. Sessions of the new default are elsewhere.
+   */
+  stale(): boolean;
   release(): void;
 }
 
@@ -46,6 +56,17 @@ const AUDCLNT_S_NO_SINGLE_PROCESS = 0x0889000d;
 /** `HRESULT_FROM_WIN32(ERROR_NOT_FOUND)`: this machine has no such endpoint. */
 const E_NOTFOUND = 0x80070490;
 const RPC_E_CHANGED_MODE = 0x80010106;
+/**
+ * Failures that say the endpoint itself is gone, not one session: the device was
+ * removed or reset, the audio service went away, the COM proxy was cut. The walk
+ * throws on these so the Worker opens the endpoint again.
+ */
+const ENDPOINT_WIDE = new Set([
+  0x88890004, // AUDCLNT_E_DEVICE_INVALIDATED
+  0x88890010, // AUDCLNT_E_SERVICE_NOT_RUNNING
+  0x80010108, // RPC_E_DISCONNECTED
+  0x800706ba, // HRESULT_FROM_WIN32(RPC_S_SERVER_UNAVAILABLE)
+]);
 
 const CLSCTX_INPROC_SERVER = 0x1;
 const CLSCTX_ALL = 0x17;
@@ -60,8 +81,11 @@ const SLOT_QUERY_INTERFACE = 0;
 const SLOT_RELEASE = 2;
 /** `IMMDeviceEnumerator::GetDefaultAudioEndpoint`. */
 const SLOT_GET_DEFAULT_ENDPOINT = 4;
-/** `IMMDevice::Activate`. */
+/** `IMMDevice::Activate` and `::GetId`. */
 const SLOT_ACTIVATE = 3;
+const SLOT_GET_ID = 5;
+/** A device id is a short endpoint path; anything past this is a bad read. */
+const MAX_DEVICE_ID_CHARS = 512;
 /** `IAudioSessionManager2::GetSessionEnumerator`, after the two it inherits. */
 const SLOT_GET_SESSION_ENUMERATOR = 5;
 /** `IAudioSessionEnumerator::GetCount` and `::GetSession`. */
@@ -109,6 +133,7 @@ function loadOle32() {
       args: [FFIType.ptr, FFIType.ptr, FFIType.u32, FFIType.ptr, FFIType.ptr],
       returns: FFIType.i32,
     },
+    CoTaskMemFree: { args: [FFIType.ptr], returns: FFIType.void },
   });
 }
 
@@ -182,8 +207,23 @@ function hex(hr: number): string {
   return `0x${(hr >>> 0).toString(16).padStart(8, '0')}`;
 }
 
+/** A failed COM call, with its `HRESULT` kept for the caller to classify. */
+export class ComError extends Error {
+  constructor(
+    readonly call: string,
+    readonly hr: number,
+  ) {
+    super(`${call} failed with ${hex(hr)}`);
+  }
+}
+
+/** True when a failure means the whole endpoint must be opened again. */
+export function isEndpointWide(error: unknown): boolean {
+  return error instanceof ComError && ENDPOINT_WIDE.has(error.hr >>> 0);
+}
+
 function ok(hr: number, call: string): void {
-  if (hr !== S_OK) throw new Error(`${call} failed with ${hex(hr)}`);
+  if (hr !== S_OK) throw new ComError(call, hr);
 }
 
 function asPointer(address: number): Pointer {
@@ -217,7 +257,8 @@ function queryInterface(self: Pointer, iid: Uint8Array, name: string): Pointer {
 /**
  * The session manager of the default render endpoint, or null when the machine
  * has no render endpoint at all (`E_NOTFOUND`), which is a fact rather than a
- * failure: a box with no sound card has nothing to mute.
+ * failure: a box with no sound card has nothing to mute. The enumerator and the
+ * device id stay held, so `stale` can ask which device is the default now.
  */
 export function openSessions(): AudioSessions | null {
   if (process.platform !== 'win32') return null;
@@ -235,58 +276,96 @@ export function openSessions(): AudioSessions | null {
   );
   const enumerator = taken(created, 'CoCreateInstance(MMDeviceEnumerator)');
 
-  let device: Pointer;
-  try {
-    const out = outParameter();
-    const hr = slot(
-      enumerator,
-      SLOT_GET_DEFAULT_ENDPOINT,
-      'IMMDeviceEnumerator::GetDefaultAudioEndpoint',
-      SIG_GET_DEFAULT_ENDPOINT,
-    )(enumerator, E_RENDER, E_MULTIMEDIA, ptr(out));
-    if ((hr >>> 0) === E_NOTFOUND) return null;
-    ok(hr, 'IMMDeviceEnumerator::GetDefaultAudioEndpoint');
-    device = taken(out, 'IMMDeviceEnumerator::GetDefaultAudioEndpoint');
-  } finally {
-    release(enumerator);
-  }
-
+  let deviceId: string;
   let manager: Pointer;
   try {
-    const out = outParameter();
-    const hr = slot(device, SLOT_ACTIVATE, 'IMMDevice::Activate', SIG_ACTIVATE)(
-      device,
-      ptr(IID_IAUDIO_SESSION_MANAGER2),
-      CLSCTX_ALL,
-      null,
-      ptr(out),
-    );
-    ok(hr, 'IMMDevice::Activate(IAudioSessionManager2)');
-    manager = taken(out, 'IMMDevice::Activate(IAudioSessionManager2)');
-  } finally {
-    release(device);
+    const device = defaultDevice(enumerator);
+    if (device === null) {
+      release(enumerator);
+      return null;
+    }
+    try {
+      deviceId = deviceIdOf(device);
+      const out = outParameter();
+      const hr = slot(device, SLOT_ACTIVATE, 'IMMDevice::Activate', SIG_ACTIVATE)(
+        device,
+        ptr(IID_IAUDIO_SESSION_MANAGER2),
+        CLSCTX_ALL,
+        null,
+        ptr(out),
+      );
+      ok(hr, 'IMMDevice::Activate(IAudioSessionManager2)');
+      manager = taken(out, 'IMMDevice::Activate(IAudioSessionManager2)');
+    } finally {
+      release(device);
+    }
+  } catch (error) {
+    release(enumerator);
+    throw error;
   }
 
   let open = true;
   return {
-    list: (): AudioSession[] => {
+    list: (skipped?: (message: string) => void): AudioSession[] => {
       if (!open) throw new Error('IAudioSessionManager2 was already released');
-      return listSessions(manager);
+      return listSessions(manager, skipped);
+    },
+    stale: (): boolean => {
+      if (!open) return true;
+      const device = defaultDevice(enumerator);
+      if (device === null) return true;
+      try {
+        return deviceIdOf(device) !== deviceId;
+      } finally {
+        release(device);
+      }
     },
     release: (): void => {
       if (!open) return;
       open = false;
       release(manager);
+      release(enumerator);
     },
   };
 }
 
+/** The default render device for multimedia, or null when there is none. */
+function defaultDevice(enumerator: Pointer): Pointer | null {
+  const out = outParameter();
+  const hr = slot(
+    enumerator,
+    SLOT_GET_DEFAULT_ENDPOINT,
+    'IMMDeviceEnumerator::GetDefaultAudioEndpoint',
+    SIG_GET_DEFAULT_ENDPOINT,
+  )(enumerator, E_RENDER, E_MULTIMEDIA, ptr(out));
+  if ((hr >>> 0) === E_NOTFOUND) return null;
+  ok(hr, 'IMMDeviceEnumerator::GetDefaultAudioEndpoint');
+  return taken(out, 'IMMDeviceEnumerator::GetDefaultAudioEndpoint');
+}
+
+/** `IMMDevice::GetId`: a string owned by COM, copied out and freed here. */
+function deviceIdOf(device: Pointer): string {
+  const out = outParameter();
+  ok(slot(device, SLOT_GET_ID, 'IMMDevice::GetId', SIG_OUT_POINTER)(device, ptr(out)), 'IMMDevice::GetId');
+  const text = taken(out, 'IMMDevice::GetId');
+  try {
+    const units: number[] = [];
+    for (let offset = 0; units.length < MAX_DEVICE_ID_CHARS; offset += 2) {
+      const unit = read.u16(text, offset);
+      if (unit === 0) break;
+      units.push(unit);
+    }
+    return String.fromCharCode(...units);
+  } finally {
+    ole().CoTaskMemFree(text);
+  }
+}
 /**
  * Walk the endpoint's sessions once. Every interface this opens is released
  * again except the `ISimpleAudioVolume` of a session it hands back, which the
  * caller owns and releases.
  */
-function listSessions(manager: Pointer): AudioSession[] {
+function listSessions(manager: Pointer, skipped?: (message: string) => void): AudioSession[] {
   const out = outParameter();
   ok(
     slot(manager, SLOT_GET_SESSION_ENUMERATOR, 'IAudioSessionManager2::GetSessionEnumerator', SIG_OUT_POINTER)(
@@ -307,18 +386,25 @@ function listSessions(manager: Pointer): AudioSession[] {
     const count = countOut[0] ?? 0;
 
     for (let index = 0; index < count; index += 1) {
-      const controlOut = outParameter();
-      ok(
-        slot(sessions, SLOT_GET_SESSION, 'IAudioSessionEnumerator::GetSession', SIG_GET_SESSION)(
-          sessions,
-          index,
-          ptr(controlOut),
-        ),
-        'IAudioSessionEnumerator::GetSession',
-      );
-      const control = taken(controlOut, 'IAudioSessionEnumerator::GetSession');
-      const session = readSession(control);
-      if (session !== null) found.push(session);
+      // One session that cannot be read (expired, torn down by its driver) is
+      // skipped: failing the walk would leave every other session unmuted.
+      try {
+        const controlOut = outParameter();
+        ok(
+          slot(sessions, SLOT_GET_SESSION, 'IAudioSessionEnumerator::GetSession', SIG_GET_SESSION)(
+            sessions,
+            index,
+            ptr(controlOut),
+          ),
+          'IAudioSessionEnumerator::GetSession',
+        );
+        const control = taken(controlOut, 'IAudioSessionEnumerator::GetSession');
+        const session = readSession(control);
+        if (session !== null) found.push(session);
+      } catch (error) {
+        if (isEndpointWide(error)) throw error;
+        skipped?.(error instanceof Error ? error.message : String(error));
+      }
     }
   } catch (error) {
     for (const session of found) session.release();
@@ -347,7 +433,7 @@ function readSession(control: Pointer): AudioSession | null {
       // A session that spans several processes still names the one that opened
       // it, which is the process this core traced.
       if (hr !== S_OK && (hr >>> 0) !== AUDCLNT_S_NO_SINGLE_PROCESS) {
-        throw new Error(`IAudioSessionControl2::GetProcessId failed with ${hex(hr)}`);
+        throw new ComError('IAudioSessionControl2::GetProcessId', hr);
       }
       pid = pidOut[0] ?? 0;
     } finally {

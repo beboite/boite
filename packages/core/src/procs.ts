@@ -5,6 +5,7 @@ import type { ProcessRecord, Settings, ThreadId, ThreadLoad, TraceCapability, Tu
 import type { Bus } from './bus.ts';
 import type { Journal } from './journal.ts';
 import { processPlatform } from './platform/index.ts';
+import { stopGroup } from './platform/posix-kill.ts';
 import type { GuardStatus, NativeProcessExit, NativeProcessInfo, ProcessPlatform } from './platform/types.ts';
 
 export interface SpawnOptions {
@@ -48,7 +49,8 @@ export interface SpawnedTerminal {
 
 interface Entry {
   record: ProcessRecord;
-  kill(): void;
+  /** Off Windows, the group stop that follows: resolved once the group is gone or SIGKILLed. */
+  kill(): void | Promise<void>;
   usage(): { cpuMs: number; peakMemoryBytes: number } | null;
 }
 
@@ -64,9 +66,16 @@ const FORGET_DELAY_MS = 30_000;
  * child it means to keep does so well inside that.
  */
 const ORPHAN_GRACE_MS = 10_000;
+/**
+ * Off Windows each child leads a process group of its own, so its kill reaches
+ * what it started (platform/posix-kill.ts). On Windows the thread's job does that.
+ */
+const OWN_GROUP = process.platform !== 'win32';
 
 export interface ProcRegistryOptions {
   orphanGraceMs?: number;
+  /** How long an idle thread is kept before it is forgotten. Tests shorten it. */
+  forgetDelayMs?: number;
 }
 
 /**
@@ -89,9 +98,13 @@ export class ProcRegistry {
   private readonly loadTimer: ReturnType<typeof setInterval>;
   /** A sweep waiting for the thread to stay idle, cancelled by its next turn. */
   private readonly sweepTimers = new Map<ThreadId, ReturnType<typeof setTimeout>>();
+  /** Group stops still inside their grace, off Windows: what `killAll` waits for. */
+  private readonly stops = new Set<Promise<void>>();
   private reapOrphans = true;
   private readonly orphanGraceMs: number;
+  private readonly forgetDelayMs: number;
   private readonly stopListening: () => void;
+  private closing: Promise<void> | null = null;
 
   constructor(
     private readonly journal: Journal,
@@ -100,8 +113,12 @@ export class ProcRegistry {
     options: ProcRegistryOptions = {},
   ) {
     this.orphanGraceMs = options.orphanGraceMs ?? ORPHAN_GRACE_MS;
+    this.forgetDelayMs = options.forgetDelayMs ?? FORGET_DELAY_MS;
     this.stopListening = this.bus.onAny((name, payload) => {
-      if (name === 'turn.started') this.cancelSweep((payload as Turn).threadId);
+      if (name === 'turn.started') {
+        this.cancelSweep((payload as Turn).threadId);
+        this.platform.warm();
+      }
       else if (name === 'turn.finished') this.scheduleSweep((payload as Turn).threadId);
     });
     this.platform.retain({
@@ -156,7 +173,12 @@ export class ProcRegistry {
     return this.platform.guardStatus();
   }
 
-  close(): void {
+  /**
+   * Resolves once the platform let go of everything native, the guard's muted
+   * sessions included. Closing twice waits on the same release.
+   */
+  close(): Promise<void> {
+    if (this.closing !== null) return this.closing;
     this.stopListening();
     for (const timer of this.sweepTimers.values()) clearTimeout(timer);
     this.sweepTimers.clear();
@@ -165,7 +187,8 @@ export class ProcRegistry {
     this.exitTimers.clear();
     for (const timer of this.forgetTimers.values()) clearTimeout(timer);
     this.forgetTimers.clear();
-    this.platform.release();
+    this.closing = this.platform.release();
+    return this.closing;
   }
 
   spawn(threadId: ThreadId, cmd: string, args: string[], opts: SpawnOptions = {}): SpawnedProcess {
@@ -178,12 +201,11 @@ export class ProcRegistry {
       stdout: 'pipe',
       stderr: 'pipe',
       windowsHide: true,
+      detached: OWN_GROUP,
     });
 
     const record = this.register(threadId, proc.pid, cmd, args, {
-      kill: () => {
-        proc.kill();
-      },
+      kill: () => killBunChild(proc),
       usage: () => {
         const usage = proc.resourceUsage();
         if (!usage) return null;
@@ -214,12 +236,11 @@ export class ProcRegistry {
       stdout: 'pipe',
       stderr: 'pipe',
       windowsHide: true,
+      detached: OWN_GROUP,
     });
 
     const record = this.register(threadId, proc.pid, cmd, args, {
-      kill: () => {
-        proc.kill();
-      },
+      kill: () => killBunChild(proc),
       usage: () => {
         const usage = proc.resourceUsage();
         if (!usage) return null;
@@ -307,11 +328,14 @@ export class ProcRegistry {
       env: opts.env,
       stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true,
+      detached: OWN_GROUP,
     });
 
     const record = this.register(threadId, child.pid ?? -1, cmd, args, {
       kill: () => {
+        if (OWN_GROUP) return stopGroup(child.pid ?? -1, () => child.exitCode === null && child.signalCode === null);
         child.kill();
+        return undefined;
       },
       usage: () => null,
     });
@@ -377,9 +401,8 @@ export class ProcRegistry {
     }
     seen.add(record.pid);
 
-    this.journal.append({ type: 'process.started', threadId, version: 1, payload: record }, () => {
-      this.journal.putProcess(record);
-    });
+    // The trace row only: a copy in the event log would be read by nothing.
+    this.journal.putProcess(record);
     this.bus.emit('process.started', { ...record });
   }
 
@@ -446,7 +469,8 @@ export class ProcRegistry {
       if (entry.record.pid <= 0) continue;
       this.platform.terminateUnassigned(entry.record.pid);
       try {
-        entry.kill();
+        const stop = entry.kill();
+        if (stop !== undefined) this.trackStop(stop);
       } catch {
         // already exited
       }
@@ -454,8 +478,20 @@ export class ProcRegistry {
     return entries.length;
   }
 
-  killAll(): void {
+  /**
+   * Stops every thread's processes. Off Windows it resolves once each group
+   * stop has ended, SIGKILL included, which is at most `KILL_GRACE_MS` for a
+   * group that ignored SIGTERM: a core that exited first would leave it running
+   * in its own session. Stops started earlier, by an interrupt say, are awaited too.
+   */
+  killAll(): Promise<void> {
     for (const threadId of [...this.live.keys()]) this.killTree(threadId);
+    return Promise.all([...this.stops]).then(() => undefined);
+  }
+
+  private trackStop(stop: Promise<void>): void {
+    this.stops.add(stop);
+    void stop.finally(() => this.stops.delete(stop));
   }
 
   /** Project removal must wait for exit records before deleting the projection. */
@@ -490,15 +526,21 @@ export class ProcRegistry {
       stopping.set(record.pid, record);
     }
     if (stopping.size === 0) return [];
-    // An orphan's own children still have a live parent: they go with it.
-    for (let grew = true; grew;) {
-      grew = false;
-      for (const record of records) {
-        if (stopping.has(record.pid) || record.parentPid === null) continue;
-        const parent = stopping.get(record.parentPid);
-        if (parent === undefined || parent.startedAt > record.startedAt) continue;
-        stopping.set(record.pid, record);
-        grew = true;
+    // An orphan's own children still have a live parent: they go with it. One
+    // index by parent, then one walk down, so a deep tree costs its size.
+    const children = new Map<number, ProcessRecord[]>();
+    for (const record of records) {
+      if (record.parentPid === null) continue;
+      const siblings = children.get(record.parentPid);
+      if (siblings === undefined) children.set(record.parentPid, [record]);
+      else siblings.push(record);
+    }
+    const pending = [...stopping.values()];
+    for (let parent = pending.pop(); parent !== undefined; parent = pending.pop()) {
+      for (const child of children.get(parent.pid) ?? []) {
+        if (stopping.has(child.pid) || parent.startedAt > child.startedAt) continue;
+        stopping.set(child.pid, child);
+        pending.push(child);
       }
     }
     const stopped: number[] = [];
@@ -576,9 +618,8 @@ export class ProcRegistry {
       if (fromJob.peakMemoryBytes !== null) record.peakMemoryBytes = fromJob.peakMemoryBytes;
       if (fromJob.ioBytes !== null) record.ioBytes = fromJob.ioBytes;
     }
-    this.journal.append({ type: 'process.exited', threadId, version: 1, payload: record }, () => {
-      this.journal.putProcess(record);
-    });
+    this.journal.putProcess(record);
+
     this.bus.emit('process.exited', { ...record });
   }
 
@@ -600,7 +641,11 @@ export class ProcRegistry {
       this.known.delete(threadId);
       this.lastLoad.delete(threadId);
       this.lastPushed.delete(threadId);
-    }, FORGET_DELAY_MS);
+      // The thread's Job Object too: an id minted per call would otherwise hold
+      // one kernel handle for the life of the core.
+      this.platform.forget(threadId);
+      if (!this.journal.isClosed()) this.journal.forgetProcessesWithoutThread(threadId);
+    }, this.forgetDelayMs);
     timer.unref();
     this.forgetTimers.set(threadId, timer);
   }
@@ -629,6 +674,13 @@ export class ProcRegistry {
       this.lastPushed.delete(threadId);
     }
   }
+}
+
+/** A Bun child's kill: its whole group off Windows, the process itself on Windows. */
+function killBunChild(proc: Bun.Subprocess): Promise<void> | undefined {
+  if (OWN_GROUP) return stopGroup(proc.pid, () => proc.exitCode === null && proc.signalCode === null);
+  proc.kill();
+  return undefined;
 }
 
 function baseName(path: string): string {
