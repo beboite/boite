@@ -44,7 +44,9 @@ fn alive_pid(pid: libc::pid_t) -> bool {
     std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
 }
 
-/// Whether a process with this pid is still running.
+/// Whether a process with this pid is still running. A child of this process
+/// that exited counts until it is waited on: a caller holding its `Child`
+/// calls `try_wait` first (`reap_child` in lib.rs).
 pub fn alive(pid: u32) -> bool {
     libc::pid_t::try_from(pid).is_ok_and(|pid| pid > 0 && alive_pid(pid))
 }

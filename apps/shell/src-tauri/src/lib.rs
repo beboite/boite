@@ -508,6 +508,7 @@ impl Settled {
 fn current_endpoint(state: &CoreState) -> Result<CoreEndpoint, String> {
     let patience = state.launch.patience();
     let settled = wait_for_endpoint(&state.slot, patience)?;
+    reap_child(state);
     if !settled.stale() {
         return settled.outcome;
     }
@@ -515,6 +516,19 @@ fn current_endpoint(state: &CoreState) -> Result<CoreEndpoint, String> {
         publish(&state.slot, resolve_core(state));
     }
     wait_for_endpoint(&state.slot, patience)?.outcome
+}
+
+/// Collects the exit of a core this shell started, if it exited. On Linux and
+/// macOS that core is the shell's child, and a child nobody waited on stays a
+/// zombie that `kill(pid, 0)` still finds, so `stale` took a crashed core for
+/// a live one and nothing started another. The `Child` stays in place, with the
+/// status it now holds, for `running_child` and `exited_early`.
+fn reap_child(state: &CoreState) {
+    if let Ok(mut guard) = state.child.lock() {
+        if let Some(spawned) = guard.as_mut() {
+            let _ = spawned.child.try_wait();
+        }
+    }
 }
 
 /// Takes the slot for a new resolution if nobody did since `generation` settled.
@@ -1945,6 +1959,19 @@ setInterval(() => {}, 1000);
             let mut guard = state.child.lock().unwrap();
             let spawned = guard.as_mut().unwrap();
             spawned.child.kill().unwrap();
+            // A crash, as the shell meets it: nobody has waited on the core.
+            // On POSIX it is now a zombie, which is waited for here without
+            // reaping it (`WNOWAIT`), so the reaping stays the shell's job.
+            #[cfg(unix)]
+            {
+                let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+                let options = libc::WEXITED | libc::WNOWAIT;
+                assert_eq!(unsafe { libc::waitid(libc::P_PID, first_pid as libc::id_t, &mut info, options) }, 0);
+                assert!(platform::process::alive(first_pid), "the zombie this test reproduces was reaped already");
+            }
+            // Windows has no zombie: the process handle the `Child` holds
+            // stays signalled once it exits, and waiting on it reaps nothing.
+            #[cfg(windows)]
             spawned.child.wait().unwrap();
         }
         let second = current_endpoint(&state);
