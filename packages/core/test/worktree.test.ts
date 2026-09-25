@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, realpathSync, rmSync, symlinkSync, unlinkSync } 
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { slugOf, worktreeRoot } from '../src/worktree.ts';
-import { startTestCore } from './harness.ts';
+import { startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
 import type { CoreClient } from '../src/client.ts';
 
@@ -159,9 +159,11 @@ describe('a thread in its own worktree', () => {
     const listed = await client.call('projects.list', {});
     expect(listed.find((project) => project.id === plain.id)?.repository).toBe(false);
     expect(listed.find((project) => project.id === repo.id)?.repository).toBe(true);
-    // Read on each answer: a folder that becomes a repository says so next time.
+    // Each answer starts a check off the event loop: a folder that becomes a
+    // repository says so once that check has answered.
     git(plainPath, 'init', '-q');
-    expect((await client.call('projects.list', {})).find((project) => project.id === plain.id)?.repository).toBe(true);
+    await client.call('projects.list', {});
+    await waitFor(() => harness.core.projects.list().find((project) => project.id === plain.id)?.repository === true, 2000);
   });
 
   test('a model nobody offers is refused before any worktree exists', async () => {
