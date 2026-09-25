@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import type { Account, QuotaWindow } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { homePath } from './paths.ts';
+import { hostAgentsEnabled } from './providers/loader.ts';
 
 export const ANTIGRAVITY_QUOTA_ID = 'quota:antigravity-cli';
 const obj = (value: unknown): Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
@@ -91,7 +92,7 @@ export function supportsAntigravityUsage(version: string): boolean {
 
 async function readAntigravity(core: Core): Promise<QuotaWindow[]> {
   const installed = join(process.env['LOCALAPPDATA'] ?? join(homePath(), 'AppData', 'Local'), 'agy', 'bin', 'agy.exe');
-  const executable = Bun.which('agy') ?? (process.platform === 'win32' && existsSync(installed) ? installed : null);
+  const executable = !hostAgentsEnabled() ? null : Bun.which('agy') ?? (process.platform === 'win32' && existsSync(installed) ? installed : null);
   if (!executable) throw new Error('Install Antigravity CLI 1.1.11 or later, run agy to sign in, then refresh.');
   const cwd = await mkdtemp(join(tmpdir(), 'boite-agy-quota-'));
   const threadId = ANTIGRAVITY_QUOTA_ID;

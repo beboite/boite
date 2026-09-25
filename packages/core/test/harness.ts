@@ -39,6 +39,10 @@ export async function startTestCore(options: TestCoreOptions = {}): Promise<Test
   process.env.BOITE_DRAFTS_DIR = join(dataDir, 'Documents', 'Boite');
   // The echo provider ships only when asked for; every test drives it.
   process.env.BOITE_ECHO = '1';
+  // No test runs the agents installed on this machine, unless an opt-in live
+  // test asked for them: a version check or a probe would start the user's CLIs.
+  const live = Object.keys(process.env).some((name) => /^BOITE_(E2E|BENCH)_/.test(name) && process.env[name] === '1');
+  process.env.BOITE_HOST_AGENTS = live ? '1' : '0';
   // A shell the tests open must not write what they type into the user's own
   // PowerShell or bash history: cmd and sh keep none.
   process.env.BOITE_TERMINAL_SHELL = process.platform === 'win32' ? (process.env.ComSpec ?? 'C:\\Windows\\System32\\cmd.exe') : '/bin/sh';
