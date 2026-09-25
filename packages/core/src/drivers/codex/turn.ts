@@ -119,14 +119,19 @@ export class CodexTurn {
 
   /**
    * The thread this turn resumes no longer exists on the agent's side. No
-   * error part: the core starts a fresh session and runs the turn again.
+   * error part: the core starts a fresh session and runs the turn again. A
+   * turn the user stopped meanwhile ends stopped, so nothing runs it again.
    */
   loseSession(reason: string): void {
     if (this.decided) return;
     this.decided = true;
     this.sessionLost = true;
-    this.status = 'error';
-    this.error = reason;
+    if (this.isStopped) {
+      this.status = 'stopped';
+    } else {
+      this.status = 'error';
+      this.error = reason;
+    }
     this.decide();
   }
 

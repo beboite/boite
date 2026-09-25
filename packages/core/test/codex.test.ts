@@ -744,6 +744,42 @@ describe('codex driver', () => {
     expect(answer?.type === 'text' ? answer.text : '').toContain('remember the word pelican');
   });
 
+  test('a stop that lands while a lost thread resumes ends the turn stopped and starts nothing fresh', async () => {
+    const client = await startCore({ warmProcessMinutes: 0 });
+    const threadId = await codexThread(client);
+    await runTurn(client, threadId, 'remember the word pelican');
+    const lost = (await client.call('threads.get', { threadId })).sessionId ?? '';
+    expect(lost).not.toBe('');
+
+    process.env['CODEX_FAKE_LOST'] = '1';
+    process.env['CODEX_FAKE_SLOW_START'] = '800';
+    const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 15000);
+    await client.call('turns.start', { threadId, prompt: 'expensive prompt' });
+    await waitFor(() => fakeLog().includes(`thread/resume ${lost} `));
+    expect(await client.call('turns.stop', { threadId })).toEqual({ stopped: true });
+    const done = await finished;
+    expect(done.status).toBe('stopped');
+    expect(done.error).toBeNull();
+    // The resume was refused and nothing followed it: no fresh process, thread or prompt.
+    const log = fakeLog();
+    const afterResume = log.slice(log.indexOf('thread/resume'));
+    expect(afterResume).not.toContain('initialize');
+    expect(afterResume).not.toContain('thread/start');
+    expect(afterResume).not.toContain('turn/start');
+    const stopped = await client.call('threads.get', { threadId });
+    expect(stopped.messages.flatMap((message) => message.parts).some((part) => part.type === 'error')).toBe(false);
+    // The lost id goes all the same: the next prompt opens a fresh thread with the history.
+    expect(stopped.sessionId).toBeNull();
+    expect(stopped.sessionGeneration).toBe(1);
+
+    delete process.env['CODEX_FAKE_SLOW_START'];
+    await runTurn(client, threadId, 'which word?');
+    expect(countLines('initialize')).toBe(3);
+    const thread = await client.call('threads.get', { threadId });
+    const answer = thread.messages.at(-1)?.parts.find((part) => part.type === 'text');
+    expect(answer?.type === 'text' ? answer.text : '').toContain('remember the word pelican');
+  });
+
   test('the permission mode becomes the approval policy and the sandbox codex takes', async () => {
     const planning = await startCore();
     const planThread = await codexThread(planning, 'plan');

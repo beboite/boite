@@ -148,7 +148,8 @@ export interface TurnResult {
    * transcript cleaned up, deleted or never copied), and the turn wrote
    * nothing. Only that specific refusal sets it, never a transport error or a
    * crash. The core then starts a fresh session carrying the journal's history
-   * and runs the turn again, once.
+   * and runs the turn again, once, unless the user stopped it: a stopped turn
+   * reports `stopped` and is never run again.
    */
   sessionLost?: boolean;
 }

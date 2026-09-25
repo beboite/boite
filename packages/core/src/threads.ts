@@ -199,6 +199,8 @@ export class ThreadStore {
     return thread;
   }
   private readonly handles = new Map<ThreadId, TurnHandle>();
+  /** Threads whose running turn the user stopped: a lost session is not retried for them. */
+  private readonly stopRequested = new Set<ThreadId>();
   private readonly steering = new Set<ThreadId>();
   private readonly permissions = new Map<RequestId, PendingPermission>();
   private readonly questions = new Map<RequestId, PendingQuestion>();
@@ -820,6 +822,7 @@ export class ThreadStore {
     // thread stays `waiting`, and Stop does nothing the user can see.
     this.clearPermissionsOf(threadId);
     this.clearQuestionsOf(threadId);
+    this.stopRequested.add(threadId);
     handle.stop();
     return true;
   }
@@ -961,11 +964,16 @@ export class ThreadStore {
       const provider = this.core.providers.require(thread.providerId);
       const account = this.core.accounts.require(thread.accountId);
       const driver = getDriver(provider.protocol);
+      this.stopRequested.delete(threadId);
       const handle = driver.startTurn(this.makeContext(thread, provider, account, running));
       this.handles.set(threadId, handle);
       result = await handle.done;
       const fresh = result.sessionLost === true ? this.dropLostSession(thread, result) : null;
-      if (fresh !== null && result.status === 'error') {
+      if (fresh !== null && result.status === 'error' && this.stopRequested.has(threadId)) {
+        // The user stopped a turn whose resume the agent refused: the prompt
+        // never reached a model, and the stop stands.
+        result = { ...result, status: 'stopped', error: undefined };
+      } else if (fresh !== null && result.status === 'error') {
         // Same turn, fresh session: the prompt now carries the journal's history.
         thread = fresh;
         running = { ...running, ...(running.execution ? { execution: { ...running.execution, sessionId: null, sessionGeneration: fresh.sessionGeneration ?? 0 } } : {}) };
@@ -978,6 +986,7 @@ export class ThreadStore {
       result = { status: 'error', sessionId: thread.sessionId, usage: null, error: messageOf(error) };
     } finally {
       this.handles.delete(threadId);
+      this.stopRequested.delete(threadId);
     }
 
     if (this.core.journal.isClosed()) return;

@@ -14,7 +14,7 @@
  * so a test can count the agent processes a warm session did or did not save.
  * `CODEX_FAKE_LOST=1` makes every `thread/resume` fail the way a missing
  * rollout does, `CODEX_FAKE_SLOW_START=<ms>` delays the answer to
- * `thread/start`, and `CODEX_FAKE_DEAF=1` answers `turn/interrupt` without
+ * `thread/start` and `thread/resume`, and `CODEX_FAKE_DEAF=1` answers `turn/interrupt` without
  * ending the turn.
  *
  * The wire is copied from the real server on purpose: responses and
@@ -470,9 +470,14 @@ function handle(method: string, raw: unknown): unknown {
       log(
         `thread/resume ${threadId} approvalPolicy=${textOf(params['approvalPolicy'])} sandbox=${textOf(params['sandbox'])}`,
       );
-      // `CODEX_FAKE_LOST=1`: the rollout of every thread is gone, in the real server's words.
-      if (process.env['CODEX_FAKE_LOST'] === '1') throw new Error(`no rollout found for thread id ${threadId}`);
-      return { thread: threadRecord(), model: 'fake-codex', modelProvider: 'fake', serviceTier: null };
+      const answer = (): unknown => {
+        // `CODEX_FAKE_LOST=1`: the rollout of every thread is gone, in the real server's words.
+        if (process.env['CODEX_FAKE_LOST'] === '1') throw new Error(`no rollout found for thread id ${threadId}`);
+        return { thread: threadRecord(), model: 'fake-codex', modelProvider: 'fake', serviceTier: null };
+      };
+      const slow = Number(process.env['CODEX_FAKE_SLOW_START'] ?? '0');
+      if (slow > 0) return Bun.sleep(slow).then(answer);
+      return answer();
     }
     case 'thread/compact/start': {
       log('thread/compact/start');

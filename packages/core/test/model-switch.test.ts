@@ -82,6 +82,40 @@ test('a queued turn keeps its original account and late completion cannot attach
   expect(h.core.journal.getTurn(queued.id)?.execution?.accountId).toBe(accountId);
 });
 
+test('a turn stopped while the agent refuses to resume its lost session is not run again on a fresh one', async () => {
+  const { client, threadId } = await setup();
+  const seen: TurnContext[] = [];
+  const gate: { refuse: (() => void) | null } = { refuse: null };
+  restore = setDriver('echo', {
+    protocol: 'echo',
+    startTurn(ctx) {
+      seen.push(ctx);
+      if (ctx.sessionId === null) {
+        const id = ctx.emit.startMessage('assistant');
+        ctx.emit.part(id, 0, { type: 'text', text: 'first answer' });
+        ctx.emit.complete(id, 'complete');
+        return { stop() {}, done: Promise.resolve<TurnResult>({ status: 'done', sessionId: 'native-1', usage: null }) };
+      }
+      // A driver that reports the refusal as it came, whatever Stop said meanwhile.
+      const done = new Promise<TurnResult>((resolve) => {
+        gate.refuse = () => resolve({ status: 'error', sessionId: ctx.sessionId, usage: null, error: 'no conversation found', sessionLost: true });
+      });
+      return { stop() {}, done };
+    },
+  });
+  const first = await client.call('turns.start', { threadId, prompt: 'first' });
+  await waitFor(() => h.core.journal.getTurn(first.id)?.status === 'done');
+  const second = await client.call('turns.start', { threadId, prompt: 'second' });
+  await waitFor(() => gate.refuse !== null);
+  expect(await client.call('turns.stop', { threadId })).toEqual({ stopped: true });
+  gate.refuse!();
+  await waitFor(() => h.core.journal.getTurn(second.id)?.finishedAt != null);
+  expect(h.core.journal.getTurn(second.id)).toMatchObject({ status: 'stopped', error: null });
+  expect(seen).toHaveLength(2);
+  // The lost id still goes: the next prompt starts fresh instead of failing on it again.
+  expect(h.core.threads.require(threadId)).toMatchObject({ sessionId: null, sessionGeneration: 1, status: 'idle' });
+});
+
 test('a stale model selection is refused before a prompt is journalled', async () => {
   const { client, threadId } = await setup();
   await client.call('threads.update', { threadId, accountId: 'second-account', model: 'echo', expectedSelectionVersion: 0 });
