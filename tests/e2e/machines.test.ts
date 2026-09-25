@@ -66,7 +66,7 @@ test('project and recent cards show both hosts, PRs and user-message ordering on
     mobile: true
   });
   await page.click('[data-testid="mobile-conversations"]');
-  await page.waitFor(`document.querySelectorAll('[data-testid="mobile-list"] [data-testid^="mobile-thread-"]').length === 8`);
+  await page.waitFor(`document.querySelectorAll('[data-testid="mobile-list"] .thread').length === 8`);
   await capture('recent-machines-phone.png');
   expect(await page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')).toBe(true);
   await page.evaluate(`document.documentElement.dataset.theme = 'light'`);
