@@ -1,12 +1,16 @@
 <script lang="ts">
-  import { ChevronDown, ChevronRight, Plug, Search, Sparkles, Star, RefreshCw } from '@lucide/svelte';
+  import { ChevronDown, ChevronRight, Plug, Sparkles, Star, RefreshCw } from '@lucide/svelte';
   import { isNamedModel, orderedModels, type FavoriteModel } from '../lib/model-order';
-  import type { Account, ModelInfo, ProviderSummary } from '@boite/contracts';
+  import type { Account, ModelInfo } from '@boite/contracts';
+  import AccountSeats from './AccountSeats.svelte';
+  import ModelSearch from './ModelSearch.svelte';
   import ProviderLogo from './ProviderLogo.svelte';
+  import ProviderTiles from './ProviderTiles.svelte';
   import { floating } from '../lib/floating';
   import { Closing } from '../lib/closing.svelte';
   import { fill, strings } from '../lib/strings';
   import { FIRST_MODELS, favoriteIds, firstModels, groupModels } from '../lib/model-list';
+  import { pickerKeydown } from '../lib/model-picker-keys';
   import type { Choice, PickPatch, Store } from '../lib/store.svelte';
 
   /**
@@ -61,14 +65,6 @@
       onpick({ providerId: entry.providerId, accountId: entry.accountId, model: entry.model.id });
       popover.hide();
     } finally { favoritePending = false; }
-  }
-
-  interface Tile {
-    provider: ProviderSummary;
-    /** Why this provider cannot run, or null: it dims the tile and rides in its title. */
-    reason: string | null;
-    /** True while an open thread holds the choice on another provider. */
-    held: boolean;
   }
 
   let provider = $derived(choice ? store.providerOf(choice.providerId) : null);
@@ -149,42 +145,6 @@
     return siblings.length > 1 && account ? `${name} · ${account.label}` : name;
   });
 
-  /** One tile per provider, in the order the core listed them. */
-  let tiles = $derived.by((): Tile[] =>
-    store.providers.map((entry) => {
-      const reason = !entry.available
-        ? strings.composer.unavailable
-        : store.accountsOf(entry.id).length === 0
-          ? strings.composer.noAccount
-          : null;
-      return { provider: entry, reason, held: locked && choice?.providerId !== entry.id };
-    })
-  );
-
-  function tileTitle(tile: Tile): string {
-    if (tile.held) return strings.composer.lockedHint;
-    return tile.reason === null ? tile.provider.name : `${tile.provider.name}, ${tile.reason}`;
-  }
-
-  /** What keeps an account chip from being clicked, or null. */
-  function seatReason(seat: Account): string | null {
-    if (!shown) return null;
-    const hints: string[] = [];
-    if (!shown.available) hints.push(strings.composer.unavailable);
-    if (seat.status === 'unauthenticated') hints.push(strings.accounts.status.unauthenticated);
-    return hints.join(', ') || null;
-  }
-
-  function seatHeld(seat: Account): boolean {
-    return locked && !(choice?.providerId === shown?.id && choice?.accountId === seat.id);
-  }
-
-  function seatTitle(seat: Account): string {
-    if (seatHeld(seat)) return strings.composer.lockedHint;
-    const reason = seatReason(seat);
-    return reason === null ? (seat.identity ?? seat.label) : `${seat.label}, ${reason}`;
-  }
-
   let currentModels = $derived(shownModels.filter((m) => !m.legacy));
   let legacyModels = $derived(shownModels.filter((m) => m.legacy));
 
@@ -242,17 +202,15 @@
   }
 
   /** A tile only moves the column: the choice follows a model or an account chip. */
-  function pickTile(tile: Tile) {
-    if (tile.held) return;
+  function pickTile(providerId: string) {
     favoritesOpen = false;
-    shownProviderId = tile.provider.id;
+    shownProviderId = providerId;
     legacy.hide();
     modelQuery = '';
   }
 
   function pickSeat(seat: Account) {
-    if (!shown || seatHeld(seat) || !shown.available) return;
-    if (choice?.providerId === shown.id && choice.accountId === seat.id) return;
+    if (!shown) return;
     modelQuery = '';
     onpick({ providerId: shown.id, accountId: seat.id, model: store.defaultModelOf(shown) });
   }
@@ -286,102 +244,17 @@
     return seat ? { providerId, accountId: seat.id } : null;
   }
 
-  function focusable(): HTMLElement[] {
-    return Array.from(activeMenu()?.querySelectorAll<HTMLElement>('[data-row]:not(:disabled)') ?? []);
-  }
-
-  function activeMenu(): HTMLElement | null {
-    return legacyOpen ? root?.querySelector<HTMLElement>('[data-testid=picker-legacy-menu]') ?? null : menu ?? null;
-  }
-
-  /** The model rows alone: what the arrows walk once the search field has the focus. */
-  function modelRows(): HTMLElement[] {
-    return Array.from(activeMenu()?.querySelectorAll<HTMLElement>('.models [data-row]:not(:disabled)') ?? []);
-  }
-
-  function handleEscape(event: KeyboardEvent) {
-    event.stopPropagation();
-    if (legacyOpen) {
-      legacy.hide();
-      root?.querySelector<HTMLElement>('[data-testid=picker-legacy]')?.focus();
-      return;
-    }
-    // The query goes first: closing on it would throw away what was just typed.
-    if (searchable && modelQuery !== '') {
-      modelQuery = '';
-      searchBox?.focus();
-      return;
-    }
-    popover.hide();
-  }
-
-  function handleLegacyNavigation(event: KeyboardEvent, active: HTMLElement | null): boolean {
-    if (event.key === 'ArrowRight' && active?.dataset.testid === 'picker-legacy') {
-      event.preventDefault();
-      legacy.show();
-      queueMicrotask(() => root?.querySelector<HTMLElement>('[data-testid=picker-legacy-menu] [data-model]')?.focus());
-      return true;
-    }
-    if (event.key === 'ArrowLeft' && active?.closest('[data-testid=picker-legacy-menu]')) {
-      event.preventDefault();
-      legacy.hide();
-      root?.querySelector<HTMLElement>('[data-testid=picker-legacy]')?.focus();
-      return true;
-    }
-    return false;
-  }
-
-  function handleModelSearch(event: KeyboardEvent, active: HTMLElement | null): boolean {
-    if (legacyOpen) return false;
-    if (!searchable || (active !== searchBox && !active?.hasAttribute('data-model'))) return false;
-    if (event.key === 'Enter') {
-      // A focused row is activated by the browser too; taking the default keeps it to one pick.
-      event.preventDefault();
-      const row = active === searchBox ? modelRows()[0] : active;
-      row?.click();
-      return true;
-    }
-    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return false;
-    event.preventDefault();
-    const list = modelRows();
-    const here = active === searchBox || !active ? -1 : list.indexOf(active);
-    if (event.key === 'ArrowDown') list[Math.min(here + 1, list.length - 1)]?.focus();
-    else if (here <= 0) searchBox?.focus();
-    else list[here - 1]?.focus();
-    return true;
-  }
-
-  function handleAccountNavigation(event: KeyboardEvent, active: HTMLElement | null): boolean {
-    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return false;
-    // The account chips are a segmented control: the arrows walk them.
-    const chips = root ? Array.from(root.querySelectorAll<HTMLElement>('.popover [data-seat]:not(:disabled)')) : [];
-    const here = active ? chips.indexOf(active) : -1;
-    if (here === -1) return false;
-    event.preventDefault();
-    const step = event.key === 'ArrowRight' ? 1 : -1;
-    chips[(here + step + chips.length) % chips.length]?.focus();
-    return true;
-  }
-
-  function handleRowNavigation(event: KeyboardEvent, active: HTMLElement | null) {
-    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
-    const list = focusable();
-    if (list.length === 0) return;
-    event.preventDefault();
-    const index = active ? list.indexOf(active) : -1;
-    const next = event.key === 'ArrowDown' ? (index + 1) % list.length : (index - 1 + list.length) % list.length;
-    list[next]?.focus();
-  }
-
-  function onkeydown(event: KeyboardEvent) {
-    if (!popover.open) return;
-    const active = document.activeElement as HTMLElement | null;
-    if (event.key === 'Escape') return handleEscape(event);
-    if (handleLegacyNavigation(event, active)) return;
-    if (handleModelSearch(event, active)) return;
-    if (handleAccountNavigation(event, active)) return;
-    handleRowNavigation(event, active);
-  }
+  const onkeydown = pickerKeydown({
+    popover,
+    legacy,
+    root: () => root,
+    menu: () => menu,
+    searchBox: () => searchBox,
+    legacyOpen: () => legacyOpen,
+    searchable: () => searchable,
+    modelQuery: () => modelQuery,
+    clearQuery: () => { modelQuery = ''; }
+  });
 
   function onWindowPointerdown(event: PointerEvent) {
     if (!popover.open) return;
@@ -440,24 +313,7 @@
         <button class="refresh" type="button" data-testid="picker-refresh" aria-label={strings.composer.refreshModels} title={strings.composer.refreshModels} disabled={probing || needsInstall} onclick={() => void refreshModels()}><RefreshCw size={14} class={probing ? 'spin' : ''} /></button>
       {/if}
       <div class="column rail">
-        <button type="button" class="tile" class:current={favoritesOpen} role="menuitem" data-row data-provider="favorites" title={strings.composer.favorites} aria-label={strings.composer.favorites} onclick={() => { favoritesOpen = true; modelQuery = ''; }}><Star size={24} /></button>
-        {#each tiles as tile (tile.provider.id)}
-          <button
-            type="button"
-            class="tile"
-            class:current={!favoritesOpen && shown?.id === tile.provider.id}
-            class:dim={tile.reason !== null}
-            disabled={tile.held}
-            role="menuitem"
-            data-row
-            data-provider={tile.provider.id}
-            title={tileTitle(tile)}
-            aria-label={tile.provider.name}
-            onclick={() => pickTile(tile)}
-          >
-            <ProviderLogo providerId={tile.provider.id} size={28} />
-          </button>
-        {/each}
+        <ProviderTiles {store} {choice} {locked} current={shown?.id ?? null} {favoritesOpen} onfavorites={() => { favoritesOpen = true; modelQuery = ''; }} onpick={pickTile} />
       </div>
 
       <div class="column models main-models">
@@ -497,24 +353,7 @@
         {:else}
         <div class="head">
           <span class="provider-name">{shown ? shown.name : strings.composer.models}</span>
-          {#if seats.length > 1}
-            <div class="seats" role="group" aria-label={strings.accounts.heading}>
-              {#each seats as seat (seat.id)}
-                <button
-                  type="button"
-                  class="seat"
-                  disabled={seatHeld(seat) || !(shown?.available ?? false)}
-                  data-seat
-                  data-instance="{shown?.id}::{seat.id}"
-                  aria-pressed={seat.id === shownAccountId}
-                  title={seatTitle(seat)}
-                  onclick={() => pickSeat(seat)}
-                >
-                  {seat.label}
-                </button>
-              {/each}
-            </div>
-          {/if}
+          <AccountSeats {shown} {seats} {shownAccountId} {choice} {locked} onpick={pickSeat} />
         </div>
         {#key `${shown?.id}:${shownAccountId}`}
         <div class="model-list">
@@ -538,19 +377,7 @@
           {/if}
         {:else}
           {#if searchable}
-            <div class="search-bar">
-              <label class="search">
-                <Search size={13} strokeWidth={1.75} />
-                <input
-                  bind:this={searchBox}
-                  bind:value={modelQuery}
-                  placeholder={strings.composer.searchModels}
-                  aria-label={strings.composer.searchModels}
-                  data-testid="picker-search"
-                  spellcheck="false"
-                />
-              </label>
-            </div>
+            <ModelSearch bind:value={modelQuery} bind:input={searchBox} />
             {#if pinnedModel}
               {@render modelRow(pinnedModel)}
             {/if}
@@ -703,40 +530,6 @@
     background: var(--color-surface);
   }
 
-  .tile {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    flex: none;
-    width: var(--control-lg);
-    height: var(--control-lg);
-    padding: 0;
-    border: none;
-    border-radius: var(--radius-md);
-    background: transparent;
-    color: var(--color-muted-foreground);
-    transition:
-      background var(--dur-2) var(--ease-out-quint),
-      color var(--dur-2) var(--ease-out-quint);
-  }
-
-  .tile:hover:not(:disabled),
-  .tile:focus-visible {
-    background: var(--color-hover);
-    color: var(--color-foreground);
-    outline: none;
-  }
-
-  .tile.current {
-    background: var(--color-active);
-    color: var(--color-foreground);
-  }
-
-  /* Nothing runs on it: still pickable, so its column can say why. */
-  .tile.dim {
-    opacity: 0.45;
-  }
-
   .models > * { flex-shrink: 0; }
   .main-models { grid-area: 1 / 2 / 3 / 3; overflow: hidden; padding: 0; gap: 0; border-left: 1px solid var(--color-border); }
   .main-models .head { flex-direction: column; align-items: stretch; gap: 6px; padding: 10px 12px; border-bottom: 1px solid var(--color-border); }
@@ -760,54 +553,6 @@
     white-space: nowrap;
   }
 
-  .seats {
-    display: flex;
-    gap: 2px;
-    align-self: flex-start;
-    flex-shrink: 0;
-    max-width: 100%;
-    overflow-x: auto;
-    overflow-y: hidden;
-    padding: 2px;
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-md);
-    background: var(--color-surface);
-    min-width: 0;
-  }
-
-  .seat {
-    height: var(--control-sm);
-    min-height: var(--control-sm);
-    flex-shrink: 0;
-    max-width: 150px;
-    padding: 0 7px;
-    border: none;
-    border-radius: var(--radius-sm);
-    background: transparent;
-    color: var(--color-muted-foreground);
-    font-size: var(--text-sm);
-    font-weight: 500;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    display: block;
-    transition:
-      background var(--dur-2) var(--ease-out-quint),
-      color var(--dur-2) var(--ease-out-quint);
-  }
-
-  .seat:hover:not(:disabled),
-  .seat:focus-visible {
-    background: var(--color-surface-3);
-    color: var(--color-foreground);
-    outline: none;
-  }
-
-  .seat[aria-pressed='true'] {
-    background: var(--color-surface-3);
-    color: var(--color-foreground);
-    box-shadow: var(--shadow-e1);
-  }
-
   .locked-note {
     padding: 0 4px 6px;
     font-size: var(--text-sm);
@@ -817,50 +562,6 @@
   .to-settings {
     align-self: flex-start;
     margin: 2px 0 0 4px;
-  }
-
-  /* The sidebar's search box, kept in place while hundreds of rows scroll under it. */
-  .search-bar {
-    position: sticky;
-    /* The column pads by 6, so the bar starts 6 higher and paints that strip itself. */
-    top: -6px;
-    z-index: 1;
-    margin: 0 -6px 4px;
-    padding: 6px 6px 4px;
-    background: var(--color-surface-2);
-  }
-
-  .search {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    height: var(--control);
-    padding: 0 8px;
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-md);
-    background: var(--color-surface);
-    color: var(--color-subtle);
-    transition: border-color var(--dur-2) var(--ease-out-quint);
-  }
-
-  .search:focus-within {
-    border-color: var(--color-edge);
-    color: var(--color-muted-foreground);
-  }
-
-  .search input {
-    flex: 1;
-    min-width: 0;
-    height: 100%;
-    padding: 0;
-    border: none;
-    background: transparent;
-    color: var(--color-foreground);
-    font-size: var(--text-sm);
-  }
-
-  .search input:focus {
-    outline: none;
   }
 
   .group {
@@ -973,13 +674,10 @@
       border-bottom: 1px solid var(--color-border);
     }
 
-    /* The rail is the finger's first stop on a phone, so its tiles and the
-       refresh button take a full touch target like every other control. */
+    /* The rail is the finger's first stop on a phone, so its tiles (ProviderTiles)
+       and the refresh button take a full touch target like every other control. */
     .main-models { grid-area: 2 / 1 / 3 / 3; border-left: none; }
-    .seat { height: var(--touch-target); min-height: var(--touch-target); }
     .refresh { grid-area: 1 / 2; align-self: center; justify-self: end; justify-content: center; width: var(--touch-target); padding: 0; border: none; }
-    .tile { justify-content: center; padding: 0; }
-    .tile,
     .refresh {
       width: var(--touch-target);
       height: var(--touch-target);
