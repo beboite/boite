@@ -23,11 +23,11 @@
  */
 import { appendFileSync } from 'node:fs';
 
-const DIRECTIVE = /\[(command|approve|thought|usage|late-context|slow|crash|input|async|stream|elicit|elicit-url|permissions|time)\]/g;
+const DIRECTIVE = /\[(command|approve|thought|summary|usage|late-context|slow|crash|input|async|stream|elicit|elicit-url|permissions|time)\]/g;
 const CHUNKS = 3;
 
 type Directive =
-  | 'command' | 'approve' | 'thought' | 'usage' | 'late-context' | 'slow' | 'crash' | 'input' | 'async' | 'stream'
+  | 'command' | 'approve' | 'thought' | 'summary' | 'usage' | 'late-context' | 'slow' | 'crash' | 'input' | 'async' | 'stream'
   | 'elicit' | 'elicit-url' | 'permissions' | 'time';
 
 let threadCounter = 0;
@@ -238,6 +238,18 @@ async function runTurn(turnId: string, text: string): Promise<void> {
     });
   }
 
+  // Two summary sections of one reasoning item, the first in two deltas: the
+  // real server streams each section as its own `summaryIndex`.
+  if (directives.includes('summary')) {
+    const summary = (summaryIndex: number, delta: string): void => {
+      notify('item/reasoning/summaryTextDelta', { threadId, turnId, itemId: 'reasoning-2', delta, summaryIndex });
+    };
+    summary(0, '**Reading**');
+    summary(0, ' the file');
+    notify('item/reasoning/summaryPartAdded', { threadId, turnId, itemId: 'reasoning-2', summaryIndex: 1 });
+    summary(1, '**Editing** it');
+  }
+
   for (const chunk of chunksOf(plainOf(text))) say(chunk);
 
   for (const directive of directives) {
@@ -415,6 +427,7 @@ async function runTurn(turnId: string, text: string): Promise<void> {
         await new Promise<void>(() => undefined);
         break;
       case 'thought':
+      case 'summary':
         // Already sent above, before the answer.
         break;
     }

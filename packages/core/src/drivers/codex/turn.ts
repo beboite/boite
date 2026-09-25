@@ -28,6 +28,8 @@ export class CodexTurn {
   private nextIndex = 0;
   private textIndex: number | null = null;
   private thinkingIndex: number | null = null;
+  /** The reasoning section the last thinking delta belonged to. */
+  private thinkingSection: string | null = null;
   private readonly tools = new Map<string, ToolEntry>();
   /** Tools whose streamed output waits for the next flush, so a chatty command costs one write per beat. */
   private readonly dirty = new Set<string>();
@@ -179,8 +181,13 @@ export class CodexTurn {
     this.ctx.emit.delta(this.message(), this.textIndex, text);
   }
 
-  /** The reasoning deltas, which the UI folds. Their own part, like the text. */
-  writeThinking(text: string): void {
+  /**
+   * The reasoning deltas, which the UI folds. Their own part, like the text.
+   * `section` names the reasoning item and its summary or content index: the
+   * server streams each section with no newline around it, so a delta of a new
+   * section that lands in the same part starts after a blank line.
+   */
+  writeThinking(text: string, section?: string): void {
     if (text.length === 0) return;
     if (this.thinkingIndex === null) {
       const index = this.nextIndex;
@@ -188,7 +195,10 @@ export class CodexTurn {
       this.thinkingIndex = index;
       this.textIndex = null;
       this.part(index, { type: 'thinking', text: '' });
+    } else if (section !== undefined && this.thinkingSection !== null && section !== this.thinkingSection) {
+      this.ctx.emit.delta(this.message(), this.thinkingIndex, '\n\n');
     }
+    if (section !== undefined) this.thinkingSection = section;
     this.ctx.emit.delta(this.message(), this.thinkingIndex, text);
   }
 

@@ -477,6 +477,19 @@ describe('codex driver', () => {
     expect(thread.messages[1]?.parts).toEqual([{ type: 'text', text: 'time ok' }]);
   });
 
+  test('reasoning summary sections are kept apart, the deltas of one section are not', async () => {
+    const client = await startCore();
+    const threadId = await codexThread(client);
+    const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 20000);
+    await client.call('turns.start', { threadId, prompt: '[summary][thought]the answer' });
+    expect((await finished).status).toBe('done');
+    const thread = await client.call('threads.get', { threadId });
+    expect(thread.messages[1]?.parts).toEqual([
+      { type: 'thinking', text: 'thinking about it\n\n**Reading** the file\n\n**Editing** it' },
+      { type: 'text', text: 'the answer' },
+    ]);
+  });
+
   test('context reported after completion is retained, including a missing total', async () => {
     const client = await startCore({warmProcessMinutes: 1});
     const threadId = await codexThread(client);

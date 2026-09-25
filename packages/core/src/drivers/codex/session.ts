@@ -439,8 +439,10 @@ export class CodexSession {
         break;
       }
       case 'item/reasoning/textDelta':
+        turn.writeThinking(textOf(params['delta']), `${textOf(params['itemId'])}:content:${String(params['contentIndex'] ?? 0)}`);
+        break;
       case 'item/reasoning/summaryTextDelta':
-        turn.writeThinking(textOf(params['delta']));
+        turn.writeThinking(textOf(params['delta']), `${textOf(params['itemId'])}:summary:${String(params['summaryIndex'] ?? 0)}`);
         break;
       case 'item/started':
       case 'item/completed': {
