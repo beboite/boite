@@ -27,7 +27,7 @@ OpenCode's descriptor, with the `linux` and `macos` profiles left out:
       "detect": {},
       "executable": [
         { "kind": "file", "value": "{agentsDir}/opencode.exe" },
-        { "kind": "file", "value": "{appdata}/npm/node_modules/opencode-ai/bin/opencode.exe" },
+        { "kind": "file", "value": "{npmRoot}/opencode-ai/bin/opencode.exe" },
         { "kind": "path", "value": "opencode" }
       ],
       "launch": { "args": ["acp", "--port", "0"] },
@@ -105,7 +105,15 @@ session protocol either.
 - `detect` is `{ command }` or `{ file }`. A provider whose detect does not
   resolve reports unavailable rather than failing at spawn.
 - `executable` is an ordered candidate list, first hit wins. `kind: "file"` is
-  an exact path and `kind: "path"` a name looked up on PATH. `kind: "npm"` names
+  an exact path and `kind: "path"` a name looked up on PATH. On Windows a PATH
+  lookup passes over `.cmd`, `.bat` and `.ps1` launchers to the next PATH
+  directory holding a real program of that name, and misses when there is none:
+  the drivers spawn through node, which refuses a launcher script with EINVAL,
+  so the agent reads as not installed and its row offers the install instead.
+  A turn started on it is refused with the launcher script's path, so the
+  reason is on screen rather than a bare "not available".
+  A profile that names a launcher script as a `file` candidate keeps them, as
+  Muse Code does, since its driver maps its launcher to its program. `kind: "npm"` names
   a globally installed package, `@scope/name#bin`, for the agents npm installs
   as a `.cmd` shim Bun cannot spawn. The core looks for the package under the
   npm prefix (`npm_config_prefix`, `%APPDATA%/npm`, the directory of `npm`,
@@ -116,6 +124,19 @@ session protocol either.
   the summary shows the script as the executable. Only the `pi` and `acp`
   protocols take an `npm` candidate: the SDK and app-server drivers spawn the
   program with no leading argument.
+- A `file` candidate that starts with `{npmRoot}` is looked for under each
+  global npm `node_modules` directory, the same list an `npm` candidate walks,
+  with the profile's `path` names as the bin hints. That is how Codex and
+  OpenCode find the program their npm package vendors under nvm-windows, fnm,
+  scoop or a custom prefix, where the shim on PATH is a `.cmd`. The token is
+  expanded at each resolution, not at load, and only at the start of a `file`
+  value.
+- A PATH lookup, for a candidate, a `detect.command` or the npm roots, is
+  remembered for 30 seconds per name and PATH, so the provider list and each
+  turn start do not walk PATH again. A remembered program that is gone is looked
+  up again. A reload, a managed install or uninstall and an update forget every
+  lookup; a program installed outside Boite shows up within 30 seconds, or at
+  once on a reload.
 - `launch.args` put the agent into the mode Boite speaks to. The `agy` driver
   adds its print-mode flags itself, because the same binary also answers
   `agy models` for the probe, so the Antigravity CLI declares none; anything a
@@ -153,7 +174,8 @@ declared line as it is.
 ## Managed installs
 
 An `install` block is how Boite ships an agent whose binary is not on the machine
-and which has no installer of its own: a `version`, a zip `url`, its `sha256`, its
+and which has no installer of its own: a `version` (letters, digits and `. _ + -`,
+since it names the release directory), a zip `url`, its `sha256`, its
 `archiveBytes`, and every `files` entry expected out of the archive with its exact
 size, the first one the executable.
 Additional executable files declare `executable: true`; the installer gives
@@ -204,11 +226,30 @@ junction on Windows and a symlink elsewhere, and `.install-complete.json` is
 written beside the files: that record, with its version matching the descriptor's,
 is the only thing that makes a provider read as `installed`.
 
+A bad connection does not start the download over. A dropped connection, a
+server answer of 408, 429 or 5xx, or 30 seconds without a byte ends one attempt,
+and the download tries again after 1, 2, 4, 8 and 16 seconds. Each retry asks
+only for the missing bytes (`Range`, with `If-Range` carrying the server's ETag
+or date); a server that sends the whole file again is read from the start. Once
+the retries run out the install fails with how far it got, and keeps the `.part`
+beside a `.part.json` naming its URL and digest. The next install of the same
+archive hashes those bytes again and resumes after them. A body longer than
+`archiveBytes`, or a `Content-Length` that disagrees with it, is refused at once.
+
 Free space is checked first, against the archive plus the unpacked files plus a
-256 MB margin. A cancel aborts the fetch and leaves no `.part`, and nothing goes
-into the journal, so a core that dies mid-download comes back saying `absent`.
+256 MB margin, less what a kept `.part` already holds. A cancel aborts the fetch
+and leaves no `.part`. Nothing goes into the journal, so a core that stops
+mid-download comes back saying `absent`, and its `.part` stays for the next
+install to resume.
 `providers.uninstall` deletes `<dataDir>/agents/<id>` and is refused while a lease
 is held, and one is held for every process a thread, probe or login launched.
+
+An update installs the new release beside the old one and repoints `current`.
+The old release is deleted as soon as no lease is held: right after the update,
+or when the last process of that provider ends. A core that starts also deletes
+every release `current` does not point at, and every download except the `.part`
+of the version the descriptor pins. A file Windows still holds is logged and
+left for the next of those moments.
 
 ## What ships
 
@@ -250,6 +291,10 @@ runs on. Four descriptor fields exist for it and are open to any provider:
 - `unsetEnv`, on an OS profile, names variables taken out of the inherited
   environment before the spawn, so a key the user set for their own tools cannot
   redirect the agent Boite runs.
+- `session`, on an OS profile, replaces `auth.session` on that OS. An empty list
+  says no file holds the login there, so its accounts read `unknown` and turns
+  still start. Claude's macOS profile sets it: Claude Code keeps its login in the
+  Keychain there, not in `.credentials.json`.
 - `seedFiles`, on the descriptor, maps a relative path to content written under
   the isolation directory before anything starts. Antigravity needs
   `antigravity-acp/settings.json` holding `{"auth":{"type":"oauth-personal"}}`.
@@ -388,8 +433,10 @@ question:
 
 The child is killed through the registry on every path. The answer keeps the
 descriptor's `default` first, so the choice can always go back to the agent, is
-cached per provider and account until `providers.reload` or a change to that
-account, and reaches every client as `providers.probed`. Two callers at once share
+cached per provider and account until a `providers.reload` that changes a
+descriptor, what one resolves to or a rejection, or a change to that
+account, and reaches every client as `providers.probed`. A reload that changes
+none of that emits no `providers.updated`. Two callers at once share
 one process. `refresh: true` bypasses a completed cache entry, sharing any probe
 already in flight. The UI keeps a persistent display cache and reads asynchronously.
 A probe that finds no executable, whose agent dies or that runs past

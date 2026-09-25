@@ -66,14 +66,17 @@ statuses:
 
 | Status | Meaning |
 |---|---|
-| `unknown` | never checked, or the provider is not available on this machine |
+| `unknown` | never checked, the provider is not available on this machine, or no file holds its login on this OS (Claude on macOS, whose login is in the Keychain) |
 | `ok` | the session file is there |
 | `unauthenticated` | the directory exists and the session file does not |
 | `error` | the check itself failed, with the reason |
 
 The check runs when an account is added, when it is asked for, and after a login
-process exits. Its result reaches every client as `accounts.updated`, so a second
-shell or a phone follows it without a reload. `auth.identity`, where a descriptor
+process exits. A changed status reaches every client as `accounts.updated`, so a
+second shell or a phone follows it without a reload. A check asked for that
+finds the same status answers with the account and writes and sends nothing, so
+the Accounts page checking on every focus costs no journal row and keeps the
+cached model lists; a new account and a finished login are always sent. `auth.identity`, where a descriptor
 provides it, is what turns a status into a name the picker can show.
 
 ## The login flow

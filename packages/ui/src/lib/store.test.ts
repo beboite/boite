@@ -669,7 +669,10 @@ describe('Store', () => {
       throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'the provider or account changed during discovery; refresh models' });
     });
     const request = store.probeModels('opencode', 'a-opencode');
+    // A check that finds the same status is silent, as on the core; a login
+    // changed under the account is announced and is what outdates the probe.
     await original('accounts.check', { accountId: 'a-opencode' });
+    client.announceLogin('a-opencode');
     release(); await request;
     expect(store.error).toBeNull();
     calls.mockRestore();

@@ -1,4 +1,5 @@
-import { readFile, mkdtemp, rm } from 'node:fs/promises';
+import { readFile, mkdtemp } from 'node:fs/promises';
+import { removeDir } from './fs-retry.ts';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -119,7 +120,7 @@ async function readAntigravity(core: Core): Promise<QuotaWindow[]> {
     try { report = JSON.parse(output); } catch { throw new Error('Antigravity returned an invalid usage report.'); }
     return antigravityQuotaWindows(report);
   } finally {
-    await core.procs.stopAndWait(threadId);
-    await rm(cwd, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
+    await core.procs.stopAndWait(threadId).catch((error: unknown) => core.log('warn', `antigravity quota: ${error instanceof Error ? error.message : String(error)}`));
+    await removeDir(cwd, (message) => core.log('warn', `antigravity quota: ${message}`));
   }
 }

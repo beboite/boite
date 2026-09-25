@@ -5,8 +5,11 @@ import {
   lstatSync,
   mkdirSync,
   openSync,
+  readdirSync,
   readFileSync,
+  realpathSync,
   renameSync,
+  statSync,
   rmdirSync,
   rmSync,
   statfsSync,
@@ -15,12 +18,13 @@ import {
   writeFileSync,
   writeSync,
 } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, isAbsolute, join, relative } from 'node:path';
 import { Unzip, UnzipInflate } from 'fflate';
 import type { ProviderId, ProviderInstall, ProviderInstallState } from '@boite/contracts';
 import { newId } from '../ids.ts';
 import { agentsDirPath, currentOs, providerAgentDir } from '../paths.ts';
 import { messageOf, refused, unavailable } from '../errors.ts';
+import { forgetWhich } from './which.ts';
 
 /** Room left on the volume after the archive and the unpacked files, so nothing fills the disk. */
 export const FREE_SPACE_MARGIN = 256 * 1024 * 1024;
@@ -31,10 +35,36 @@ export const RELEASE_RECORD = '.install-complete.json';
 /** How often a download reports itself while it runs. */
 const PROGRESS_INTERVAL_MS = 250;
 
+/** Compressed bytes handed to the unzip at once, and how long it may hold the thread before yielding. */
+const EXTRACT_SLICE_BYTES = 16 * 1024;
+const EXTRACT_YIELD_MS = 10;
+
+/** A download that receives nothing for this long is dropped and tried again from where it stopped. */
+const IDLE_TIMEOUT_MS = 30_000;
+
+/** The wait before each new attempt after a dropped connection: five retries, then the install fails and keeps what it has. */
+const RETRY_DELAYS_MS: readonly number[] = [1_000, 2_000, 4_000, 8_000, 16_000];
+
 interface ReleaseRecord {
   version: string;
   files: string[];
   installedAt: number;
+}
+
+/** Written beside a `.part`, so a later install knows the bytes it holds belong to the same archive. */
+interface PartRecord {
+  url: string;
+  sha256: string;
+  /** The server's strong ETag or Last-Modified, sent back as `If-Range`; null when it gave neither. */
+  validator: string | null;
+}
+
+/** The bytes a download holds so far and their running digest. */
+interface Progress {
+  received: number;
+  hasher: Bun.CryptoHasher;
+  /** What the server said identifies the file, sent back as `If-Range` by the next attempt. */
+  validator: string | null;
 }
 
 /** What the manager writes back to the rest of the core. */
@@ -51,12 +81,28 @@ interface Running {
   state: ProviderInstallState;
 }
 
+/** How a run ended, and the state it left: a cancelled update reads as the old release, which is not a success. */
+export interface InstallOutcome {
+  providerId: ProviderId;
+  outcome: 'installed' | 'failed' | 'cancelled';
+  state: ProviderInstallState;
+}
+
 class Cancelled extends Error {
-  constructor() {
+  /** True when the core is stopping rather than the user cancelling: the bytes already downloaded stay for the next install. */
+  readonly keep: boolean;
+  constructor(keep = false) {
     super('the install was cancelled');
     this.name = 'InstallCancelled';
+    this.keep = keep;
   }
 }
+
+/** One attempt lost its connection, stalled or met a server error that may pass: the download tries again. */
+class Retryable extends Error {}
+
+/** Every retry failed. The `.part` stays, so installing again resumes where this stopped. */
+class Dropped extends Error {}
 
 /** A zip member may not climb out of the directory it is unpacked into. */
 export function safeEntryPath(name: string): string | null {
@@ -100,6 +146,11 @@ export class InstallManager {
   #failed = new Map<ProviderId, ProviderInstallState>();
   /** How many live processes are running out of this provider's managed files. */
   #leases = new Map<ProviderId, number>();
+  #waiters = new Map<ProviderId, ((outcome: InstallOutcome) => void)[]>();
+  #settledListeners: ((outcome: InstallOutcome) => void)[] = [];
+  /** Test seams: how long a silent download waits, and the pauses between attempts. */
+  idleTimeoutMs = IDLE_TIMEOUT_MS;
+  retryDelaysMs: readonly number[] = RETRY_DELAYS_MS;
 
   constructor(private readonly dataDir: string) {}
 
@@ -114,11 +165,52 @@ export class InstallManager {
   }
 
   releaseDir(providerId: ProviderId, version: string): string {
-    return join(providerAgentDir(this.dataDir, providerId), 'releases', version);
+    return this.#inside(join(providerAgentDir(this.dataDir, providerId), 'releases'), version);
   }
 
   partFile(providerId: ProviderId, version: string): string {
-    return join(providerAgentDir(this.dataDir, providerId), 'downloads', `${version}.zip.part`);
+    return this.#inside(join(providerAgentDir(this.dataDir, providerId), 'downloads'), `${version}.zip.part`);
+  }
+
+  /** A version is deleted recursively on failure: whatever it says, it stays one entry of its directory. */
+  #inside(dir: string, name: string): string {
+    const path = join(dir, name);
+    const within = relative(dir, path);
+    if (within.length === 0 || within.startsWith('..') || isAbsolute(within) || /[\\/]/.test(within)) {
+      throw refused(`the release version ${name} is not a plain directory name under ${dir}`, { dir, name });
+    }
+    return path;
+  }
+
+  #partRecordFile(part: string): string {
+    return `${part}.json`;
+  }
+
+  #readPartRecord(part: string): PartRecord | null {
+    try {
+      const raw = JSON.parse(readFileSync(this.#partRecordFile(part), 'utf8')) as Partial<PartRecord>;
+      if (typeof raw.url !== 'string' || typeof raw.sha256 !== 'string') return null;
+      return { url: raw.url, sha256: raw.sha256, validator: typeof raw.validator === 'string' ? raw.validator : null };
+    } catch {
+      return null;
+    }
+  }
+
+  /** The bytes a `.part` of this exact archive already holds, zero when there is none or it belongs to another. */
+  #resumableBytes(part: string, install: ProviderInstall): number {
+    const record = this.#readPartRecord(part);
+    if (record === null || record.url !== install.url || record.sha256.toLowerCase() !== install.sha256.toLowerCase()) return 0;
+    try {
+      const size = statSync(part).size;
+      return size <= install.archiveBytes ? size : 0;
+    } catch {
+      return 0;
+    }
+  }
+
+  #dropPart(part: string): void {
+    rmSync(part, { force: true });
+    rmSync(this.#partRecordFile(part), { force: true });
   }
 
   // -- state ----------------------------------------------------------------
@@ -147,6 +239,12 @@ export class InstallManager {
       };
     }
     return { state: 'absent', version: install.version, archiveBytes: install.archiveBytes };
+  }
+
+  /** The release `current` holds, whatever runs meanwhile; null when there is none or its record is unreadable. */
+  installedVersion(providerId: ProviderId): string | null {
+    try { return this.#readRecord(providerId)?.version ?? null; }
+    catch { return null; }
   }
 
   #readRecord(providerId: ProviderId): ReleaseRecord | null {
@@ -180,21 +278,85 @@ export class InstallManager {
 
   release(providerId: ProviderId): void {
     const count = this.#leases.get(providerId) ?? 0;
-    if (count <= 1) this.#leases.delete(providerId);
-    else this.#leases.set(providerId, count - 1);
+    if (count <= 1) {
+      this.#leases.delete(providerId);
+      // The last process may have run out of a release an update replaced.
+      queueMicrotask(() => this.prune(providerId));
+    } else this.#leases.set(providerId, count - 1);
   }
 
   leaseCount(providerId: ProviderId): number {
     return this.#leases.get(providerId) ?? 0;
   }
 
+  /**
+   * Deletes the releases `current` no longer points at, once nothing runs out
+   * of this provider's files and no install is under way. A file Windows still
+   * holds is left for the next prune. `keepDownload` names the version whose
+   * `.part` may still be resumed; every other download goes, and leaving it
+   * out leaves the downloads alone.
+   */
+  prune(providerId: ProviderId, keepDownload?: string | null): void {
+    if (this.#running.has(providerId) || this.leaseCount(providerId) > 0) return;
+    const root = providerAgentDir(this.dataDir, providerId);
+    let current: string;
+    try { current = realpathSync(this.currentDir(providerId)); }
+    catch { return; }
+    const same = (a: string, b: string): boolean => (process.platform === 'linux' ? a === b : a.toLowerCase() === b.toLowerCase());
+    const remove = (path: string): void => {
+      try { rmSync(path, { recursive: true, force: true }); }
+      catch (error) { this.#log('warn', `${path} could not be removed yet (${messageOf(error)}); the next prune tries again`); }
+    };
+    for (const name of this.#list(join(root, 'releases'))) {
+      const dir = join(root, 'releases', name);
+      let target = dir;
+      try { target = realpathSync(dir); } catch { /* compared as it is */ }
+      if (!same(target, current)) remove(dir);
+    }
+    if (keepDownload === undefined) return;
+    for (const name of this.#list(join(root, 'downloads'))) {
+      if (keepDownload !== null && name.startsWith(`${keepDownload}.zip.part`)) continue;
+      remove(join(root, 'downloads', name));
+    }
+  }
+
+  #list(dir: string): string[] {
+    try { return readdirSync(dir); }
+    catch { return []; }
+  }
+
+  // -- waiting on a run ------------------------------------------------------
+
+  /** The end of the run in flight for this provider, or null when none is. */
+  whenDone(providerId: ProviderId): Promise<InstallOutcome> | null {
+    if (!this.#running.has(providerId)) return null;
+    return new Promise((resolve) => {
+      this.#waiters.set(providerId, [...(this.#waiters.get(providerId) ?? []), resolve]);
+    });
+  }
+
+  /** Called once each run ends, whoever started it. */
+  onSettled(listener: (outcome: InstallOutcome) => void): void {
+    this.#settledListeners.push(listener);
+  }
+
+  #settle(outcome: InstallOutcome): void {
+    const waiters = this.#waiters.get(outcome.providerId) ?? [];
+    this.#waiters.delete(outcome.providerId);
+    for (const resolve of waiters) resolve(outcome);
+    for (const listener of this.#settledListeners) {
+      try { listener(outcome); }
+      catch (error) { this.#log('error', `after installing ${outcome.providerId}: ${messageOf(error)}`); }
+    }
+  }
+
   // -- operations -----------------------------------------------------------
 
   /**
    * The download, and the update: a provider whose record names an older
-   * version installs the new release beside it and repoints `current`. Nothing
-   * of the old release is deleted here, a process may still be running out of
-   * it; `uninstall` takes the whole directory.
+   * version installs the new release beside it and repoints `current`. The old
+   * release goes once no process of this provider is left (`prune`), since one
+   * may still be running out of it; `uninstall` takes the whole directory.
    */
   start(providerId: ProviderId, install: ProviderInstall): ProviderInstallState {
     if (install.arch && install.arch !== process.arch) {
@@ -206,6 +368,9 @@ export class InstallManager {
         operationId: this.#running.get(providerId)?.operationId,
       });
     }
+    // Both paths are checked here, where a refusal reaches the caller, not inside the run.
+    this.releaseDir(providerId, install.version);
+    this.partFile(providerId, install.version);
     const record = this.#readRecord(providerId);
     if (record !== null && record.version === install.version) {
       throw refused(`${providerId} is up to date on ${install.version}`, {
@@ -216,7 +381,9 @@ export class InstallManager {
     this.#failed.delete(providerId);
 
     const extractedBytes = install.format === 'binary' ? 0 : totalFileBytes(install);
-    const needed = install.archiveBytes + extractedBytes + FREE_SPACE_MARGIN;
+    // What an earlier attempt left in the `.part` is already on the disk.
+    const already = this.#resumableBytes(this.partFile(providerId, install.version), install);
+    const needed = install.archiveBytes - already + extractedBytes + FREE_SPACE_MARGIN;
     const free = freeBytesAt(this.dataDir);
     if (free === null) {
       this.#log('warn', `no free space reading on this platform, installing ${providerId} without the check`);
@@ -277,6 +444,7 @@ export class InstallManager {
     const dir = providerAgentDir(this.dataDir, providerId);
     this.#removeCurrent(providerId);
     rmSync(dir, { recursive: true, force: true });
+    forgetWhich();
     this.#failed.delete(providerId);
     await Promise.resolve();
     const state: ProviderInstallState = {
@@ -289,9 +457,9 @@ export class InstallManager {
     return state;
   }
 
-  /** Core shutdown: abort what is still downloading rather than leaving a fetch behind. */
+  /** Core shutdown: abort what is still downloading rather than leaving a fetch behind. Its bytes stay for the next install. */
   stop(): void {
-    for (const running of this.#running.values()) running.controller.abort(new Cancelled());
+    for (const running of this.#running.values()) running.controller.abort(new Cancelled(true));
     this.#running.clear();
   }
 
@@ -316,7 +484,8 @@ export class InstallManager {
         )}\n`,
       );
       this.#point(providerId, releaseDir);
-      rmSync(part, { force: true });
+      forgetWhich();
+      this.#dropPart(part);
 
       const record = this.#readRecord(providerId);
       const state: ProviderInstallState = {
@@ -326,12 +495,18 @@ export class InstallManager {
         available: install.version,
       };
       this.#running.delete(providerId);
+      // The release this one replaced goes now, or when its last process ends.
+      this.prune(providerId, null);
       // The provider list goes out first: a client that saw `installed` while it
       // still held the provider as missing would offer a repair for one frame.
       this.#sink?.updated();
       this.#emit(providerId, state);
+      this.#settle({ providerId, outcome: 'installed', state });
     } catch (error) {
-      rmSync(part, { force: true });
+      // A connection that kept dropping, or a core that stopped, leaves the bytes
+      // it got so far: the next install resumes there. A cancel, a wrong size or
+      // a wrong digest starts over.
+      if (!(error instanceof Dropped) && !(error instanceof Cancelled && error.keep)) this.#dropPart(part);
       rmSync(releaseDir, { recursive: true, force: true });
       this.#running.delete(providerId);
       if (error instanceof Cancelled || (error as { name?: string } | null)?.name === 'InstallCancelled') {
@@ -343,6 +518,7 @@ export class InstallManager {
           archiveBytes: install.archiveBytes,
         };
         this.#emit(providerId, state);
+        this.#settle({ providerId, outcome: 'cancelled', state });
         return;
       }
       const message = error instanceof Error ? error.message : String(error);
@@ -350,6 +526,7 @@ export class InstallManager {
       this.#failed.set(providerId, state);
       this.#log('error', `installing ${providerId} failed: ${message}`);
       this.#emit(providerId, state);
+      this.#settle({ providerId, outcome: 'failed', state });
     }
   }
 
@@ -360,41 +537,40 @@ export class InstallManager {
     part: string,
   ): Promise<void> {
     mkdirSync(dirname(part), { recursive: true });
-    rmSync(part, { force: true });
-
-    const response = await fetch(install.url, { signal: running.controller.signal });
-    if (!response.ok || response.body === null) {
-      throw unavailable(`${install.url} answered ${response.status} ${response.statusText}`, {
-        providerId,
-        url: install.url,
-        status: response.status,
-      });
-    }
-
-    const hasher = new Bun.CryptoHasher('sha256');
-    const handle = openSync(part, 'w');
-    let received = 0;
-    let lastReport = 0;
-    try {
-      for await (const chunk of response.body as unknown as AsyncIterable<Uint8Array>) {
-        if (running.controller.signal.aborted) throw new Cancelled();
-        hasher.update(chunk);
-        writeSync(handle, chunk);
-        received += chunk.byteLength;
-        const now = Date.now();
-        if (now - lastReport >= PROGRESS_INTERVAL_MS) {
-          lastReport = now;
-          this.#move(running, providerId, {
-            state: 'downloading',
-            version: install.version,
-            receivedBytes: received,
-            totalBytes: install.archiveBytes,
-            operationId: running.operationId,
-          });
-        }
+    const progress: Progress = { received: 0, hasher: new Bun.CryptoHasher('sha256'), validator: null };
+    if (this.#resumableBytes(part, install) > 0) {
+      progress.validator = this.#readPartRecord(part)?.validator ?? null;
+      for await (const chunk of Bun.file(part).stream()) {
+        if (running.controller.signal.aborted) throw running.controller.signal.reason;
+        progress.hasher.update(chunk);
+        progress.received += chunk.byteLength;
       }
-    } finally {
-      closeSync(handle);
+      this.#log('info', `resuming the download of ${providerId} at ${humanMegabytes(progress.received)} of ${humanMegabytes(install.archiveBytes)}`);
+    } else {
+      this.#dropPart(part);
+    }
+    this.#report(running, providerId, install, progress);
+
+    let retries = 0;
+    while (progress.received < install.archiveBytes) {
+      try {
+        await this.#attempt(providerId, install, running, part, progress);
+        break;
+      } catch (error) {
+        if (!(error instanceof Retryable)) throw error;
+        const delay = this.retryDelaysMs[retries];
+        const at = `${humanMegabytes(progress.received)} of ${humanMegabytes(install.archiveBytes)}`;
+        if (delay === undefined) {
+          throw new Dropped(`${error.message} at ${at}, and ${retries} retr${retries === 1 ? 'y' : 'ies'} did not get past it; install again to resume`);
+        }
+        retries += 1;
+        this.#log('warn', `downloading ${providerId}: ${error.message} at ${at}, retrying (${retries}/${this.retryDelaysMs.length})`);
+        await new Promise<void>((done) => {
+          const timer = setTimeout(done, delay);
+          running.controller.signal.addEventListener('abort', () => { clearTimeout(timer); done(); }, { once: true });
+        });
+        if (running.controller.signal.aborted) throw running.controller.signal.reason;
+      }
     }
 
     this.#move(running, providerId, {
@@ -403,19 +579,152 @@ export class InstallManager {
       operationId: running.operationId,
     });
 
-    if (received !== install.archiveBytes) {
+    if (progress.received !== install.archiveBytes) {
       throw refused(
-        `${install.url} is ${received} bytes, the descriptor expected ${install.archiveBytes}`,
-        { providerId, url: install.url, expectedBytes: install.archiveBytes, actualBytes: received },
+        `${install.url} is ${progress.received} bytes, the descriptor expected ${install.archiveBytes}`,
+        { providerId, url: install.url, expectedBytes: install.archiveBytes, actualBytes: progress.received },
       );
     }
-    const digest = hasher.digest('hex');
+    const digest = progress.hasher.digest('hex');
     if (digest !== install.sha256.toLowerCase()) {
       throw refused(
         `${install.url} hashes to ${digest}, the descriptor expected ${install.sha256.toLowerCase()}`,
         { providerId, url: install.url, expectedSha256: install.sha256.toLowerCase(), actualSha256: digest },
       );
     }
+  }
+
+  /** One request, appended to `progress`. Throws `Retryable` for what another attempt may get past. */
+  async #attempt(
+    providerId: ProviderId,
+    install: ProviderInstall,
+    running: Running,
+    part: string,
+    progress: Progress,
+  ): Promise<void> {
+    const attempt = new AbortController();
+    const signal = AbortSignal.any([running.controller.signal, attempt.signal]);
+    let stalled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const arm = (): void => {
+      clearTimeout(timer);
+      timer = setTimeout(() => { stalled = true; attempt.abort(); }, this.idleTimeoutMs);
+    };
+    // What the network threw, in words: the user's cancel stays a cancel, the
+    // rest is worth another attempt. Bun's own text asks for `verbose: true`.
+    const lost = (error: unknown): Error => {
+      if (running.controller.signal.aborted) return running.controller.signal.reason as Error;
+      if (stalled) return new Retryable(`no data for ${Math.round(this.idleTimeoutMs / 1000)} s`);
+      return new Retryable(`the connection dropped (${error instanceof Error ? error.name : 'error'})`);
+    };
+
+    let handle: number | null = null;
+    arm();
+    try {
+      const headers: Record<string, string> = { 'accept-encoding': 'identity' };
+      if (progress.received > 0) {
+        headers['range'] = `bytes=${progress.received}-`;
+        if (progress.validator !== null) headers['if-range'] = progress.validator;
+      }
+      let response: Response;
+      try {
+        response = await fetch(install.url, { signal, headers });
+      } catch (error) {
+        throw lost(error);
+      }
+      const status = response.status;
+      if (status === 408 || status === 429 || status >= 500) {
+        throw new Retryable(`the server answered ${status} ${response.statusText}`.trim());
+      }
+      if (status === 206) {
+        const start = /^bytes (\d+)-/.exec(response.headers.get('content-range') ?? '')?.[1];
+        if (start === undefined || Number(start) !== progress.received) {
+          // A range the download did not ask for: the next attempt takes the whole file.
+          this.#restart(part, progress);
+          throw new Retryable(`the server resumed at byte ${start ?? 'unknown'} instead of ${progress.received}`);
+        }
+      } else if (status === 200) {
+        // The whole file: a server that does not resume, or a file that changed.
+        if (progress.received > 0) this.#restart(part, progress);
+      } else {
+        throw unavailable(`${install.url} answered ${status} ${response.statusText}`.trim(), {
+          providerId,
+          url: install.url,
+          status,
+        });
+      }
+      if (response.body === null) {
+        throw unavailable(`${install.url} answered ${status} with no body`, { providerId, url: install.url, status });
+      }
+      const length = response.headers.get('content-length');
+      if (length !== null && response.headers.get('content-encoding') === null) {
+        const total = progress.received + Number(length);
+        if (total !== install.archiveBytes) {
+          throw refused(`${install.url} is ${total} bytes, the descriptor expected ${install.archiveBytes}`, {
+            providerId, url: install.url, expectedBytes: install.archiveBytes, actualBytes: total,
+          });
+        }
+      }
+      const etag = response.headers.get('etag');
+      // `If-Range` takes a strong ETag or a date; a weak one would never match.
+      progress.validator = etag !== null && !etag.startsWith('W/')
+        ? etag
+        : (response.headers.get('last-modified') ?? (status === 206 ? progress.validator : null));
+      const record: PartRecord = { url: install.url, sha256: install.sha256, validator: progress.validator };
+      writeFileSync(this.#partRecordFile(part), `${JSON.stringify(record)}\n`);
+
+      handle = openSync(part, progress.received > 0 ? 'a' : 'w');
+      const reader = response.body.getReader();
+      let lastReport = 0;
+      for (;;) {
+        let read: Awaited<ReturnType<typeof reader.read>>;
+        try {
+          read = await reader.read();
+        } catch (error) {
+          throw lost(error);
+        }
+        // An abort does not always reach a body that already has data waiting.
+        if (signal.aborted) throw lost(null);
+        if (read.done) break;
+        arm();
+        const chunk = read.value;
+        if (progress.received + chunk.byteLength > install.archiveBytes) {
+          throw refused(`${install.url} sent more than the ${install.archiveBytes} bytes the descriptor expected`, {
+            providerId, url: install.url, expectedBytes: install.archiveBytes,
+          });
+        }
+        progress.hasher.update(chunk);
+        writeSync(handle, chunk);
+        progress.received += chunk.byteLength;
+        const now = Date.now();
+        if (now - lastReport >= PROGRESS_INTERVAL_MS) {
+          lastReport = now;
+          this.#report(running, providerId, install, progress);
+        }
+      }
+      if (running.controller.signal.aborted) throw running.controller.signal.reason;
+    } finally {
+      clearTimeout(timer);
+      if (handle !== null) closeSync(handle);
+      attempt.abort();
+    }
+  }
+
+  /** Throws away what a download held, for a server that answers with the whole file again. */
+  #restart(part: string, progress: Progress): void {
+    rmSync(part, { force: true });
+    progress.received = 0;
+    progress.hasher = new Bun.CryptoHasher('sha256');
+  }
+
+  #report(running: Running, providerId: ProviderId, install: ProviderInstall, progress: Progress): void {
+    this.#move(running, providerId, {
+      state: 'downloading',
+      version: install.version,
+      receivedBytes: progress.received,
+      totalBytes: install.archiveBytes,
+      operationId: running.operationId,
+    });
   }
 
   /**
@@ -432,7 +741,7 @@ export class InstallManager {
     const wanted = new Map(install.files.map((file) => [file.path.split('\\').join('/'), file]));
     mkdirSync(releaseDir, { recursive: true });
     if (install.format === 'binary') {
-      if (running.controller.signal.aborted) throw new Cancelled();
+      if (running.controller.signal.aborted) throw running.controller.signal.reason;
       const file = install.files[0];
       if (!file || install.files.length !== 1 || safeEntryPath(file.path) === null) {
         throw refused('a binary install requires exactly one safe relative file path');
@@ -480,12 +789,23 @@ export class InstallManager {
     try {
       const stream = Bun.file(part).stream();
       const reader = stream.getReader();
+      // Inflating runs on the core's own thread: a compressible member turns one
+      // read into megabytes of output. Small slices, and a turn of the event loop
+      // whenever a few milliseconds went by, keep RPCs and the cancel answering.
+      let lastYield = performance.now();
       for (;;) {
-        if (running.controller.signal.aborted) throw new Cancelled();
+        if (running.controller.signal.aborted) throw running.controller.signal.reason;
         const { done, value } = await reader.read();
         if (done) break;
-        unzip.push(value, false);
-        if (failure !== null) throw failure;
+        for (let offset = 0; offset < value.byteLength; offset += EXTRACT_SLICE_BYTES) {
+          unzip.push(value.subarray(offset, offset + EXTRACT_SLICE_BYTES), false);
+          if (failure !== null) throw failure;
+          if (performance.now() - lastYield >= EXTRACT_YIELD_MS) {
+            await new Promise<void>((done) => setImmediate(done));
+            lastYield = performance.now();
+            if (running.controller.signal.aborted) throw running.controller.signal.reason;
+          }
+        }
       }
       unzip.push(new Uint8Array(0), true);
       if (failure !== null) throw failure;

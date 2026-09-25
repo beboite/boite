@@ -489,6 +489,17 @@ export class FakeClient implements ObservableClient {
   }
 
   /**
+   * What the core announces when the login under an account changed while its
+   * status did not, after a plugin switched the saved login for example
+   * (`packages/core/src/plugins.ts`): the account again, which outdates its probes.
+   */
+  announceLogin(accountId: string): void {
+    const account = this.#accounts.find((a) => a.id === accountId);
+    if (!account) throw this.#notFound('account', accountId);
+    this.#emit('accounts.updated', structuredClone(account));
+  }
+
+  /**
    * What the core's recovery does to a thread whose turn it ends: every
    * request still waiting is settled and dropped, the question with a null
    * answer and the permission with a deny (`packages/core/src/threads.ts`).
@@ -669,6 +680,9 @@ export class FakeClient implements ObservableClient {
       return { loaded: structuredClone(this.#providers), rejected: [] };
     },
     'providers.reload': async (params) => {
+      // As the core: a reload that changes no provider tells nobody, so a page
+      // that reloads on focus keeps every model list it already read.
+      const before = JSON.stringify(this.#providers);
       for (const provider of this.#providers) {
         if (!provider.available || this.#accounts.some(account => account.providerId === provider.id)) continue;
         const id = `a-${++this.#seq}`;
@@ -681,7 +695,7 @@ export class FakeClient implements ObservableClient {
         this.#emit('accounts.updated', structuredClone(account));
       }
       const result = { loaded: structuredClone(this.#providers), rejected: [] };
-      this.#emit('providers.updated', structuredClone(result));
+      if (JSON.stringify(this.#providers) !== before) this.#emit('providers.updated', structuredClone(result));
       return result;
     },
     'providers.probe': async (params) => {
@@ -767,8 +781,11 @@ export class FakeClient implements ObservableClient {
     'accounts.check': async (params) => {
       const account = this.#accounts.find((a) => a.id === params.accountId);
       if (!account) throw this.#notFound('account', params.accountId);
-      account.status = account.isolationDir === null ? 'ok' : 'unauthenticated';
-      account.identity = account.status === 'ok' ? 'you@example.com' : null;
+      const status = account.isolationDir === null ? 'ok' : 'unauthenticated';
+      // As the core: an unchanged status writes nothing and tells nobody.
+      if (status === account.status) return structuredClone(account);
+      account.status = status;
+      account.identity = status === 'ok' ? 'you@example.com' : null;
       this.#emit('accounts.updated', structuredClone(account));
       return structuredClone(account);
     },

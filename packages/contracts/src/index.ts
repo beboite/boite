@@ -165,6 +165,13 @@ export interface OsProfile {
    * redirect the agent Boite runs.
    */
   unsetEnv?: string[];
+  /**
+   * The files that carry the login on this OS, in place of `auth.session`. An
+   * empty list says the login is kept outside any file here (Claude Code uses
+   * the macOS Keychain), so an account's status reads `unknown`, never
+   * `unauthenticated`.
+   */
+  session?: string[];
   /** Process names the core closes when an account is removed. */
   close?: { processes?: string[] };
 }
@@ -1017,8 +1024,9 @@ export interface Settings {
    */
   reapOrphans?: boolean;
   /**
-   * The core updates its agents by itself: checked a minute after start and
-   * every six hours, each one updated once no turn of its provider is in
+   * The core updates its agents by itself: checked ten minutes after start,
+   * or six hours after the reading kept from the last run when that is later,
+   * then every six hours, each one updated once no turn of its provider is in
    * flight. It needs no client connected, which is how a server stays current.
    */
   autoUpdateHarnesses: boolean;
@@ -1709,7 +1717,9 @@ export interface RpcMethods extends AgentsRpcMethods {
   };
   /**
    * Claude, ACP, Codex and pi list models through a temporary agent process.
-   * Results are kept until refresh, `providers.reload` or an account change.
+   * Results are kept until refresh, a `providers.reload` that changes a
+   * descriptor, or an account whose status or login changes: an unchanged
+   * reload or `accounts.check` keeps them.
    * For any other protocol they are the descriptor's models, with `probedAt`
    * the moment of the call.
    */
@@ -1726,13 +1736,13 @@ export interface RpcMethods extends AgentsRpcMethods {
   /**
    * Download and unpack the release this profile's `install` block names. On a
    * provider already installed at an older version this is the update: the new
-   * release lands beside the old one and `current` is repointed, the old
-   * directory staying until `providers.uninstall` because a process may still
-   * be running out of it. Refused when the profile carries no such block, when
-   * the installed version is already the one the descriptor names, when an
+   * release lands beside the old one and `current` is repointed. The old
+   * release is deleted once no process of that provider is left, since one may
+   * still be running out of it. Refused when the profile carries no such block,
+   * when the installed version is already the one the descriptor names, when an
    * install is already running for that provider, or when the free space under
-   * the data directory is under the archive plus the unpacked files plus a
-   * 256 MB margin. Progress arrives as `providers.installProgress`.
+   * the data directory is under the archive, less what a kept `.part` of that
+   * same archive already holds, plus the unpacked files plus a 256 MB margin. Progress arrives as `providers.installProgress`.
    */
   'providers.install': { params: { providerId: ProviderId }; result: ProviderInstallState };
   /** Abort the running install. The operation id is the one its state carries. */
@@ -1745,7 +1755,8 @@ export interface RpcMethods extends AgentsRpcMethods {
   /**
    * Where every available agent stands against its newest release, on the
    * machine this core runs on. `refresh` asks the agents and the registries
-   * again; without it the last reading answers, and the first call reads.
+   * again; without it the last reading answers, an empty list when the core
+   * has none yet. A plain call never runs an agent.
    */
   'providers.updates': { params: { refresh?: boolean }; result: HarnessUpdate[] };
   /**

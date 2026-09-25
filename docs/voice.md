@@ -98,7 +98,12 @@ journal audio or transcripts. Local WAV and output files are removed in a
 `finally` block; a restarted core removes its own abandoned audio directories.
 Local processes use `procs.spawn` under a synthetic speech ID. Downloads check
 byte length and SHA-256, write partial files, and only publish completed
-artifacts. Cancellation removes partial downloads. No model loads at startup.
+artifacts. A download has no total deadline: it gives up after 60 s without a
+byte. A dropped or silent connection keeps the partial file, and installing
+again asks the server for the rest with a `Range` header; a server that sends
+the whole file instead starts the file over. A retry keeps a runtime already
+unpacked. A wrong size or digest, and a cancel, remove the partial file.
+whisper-cli picks its own thread count, at most four. No model loads at startup.
 
 ## Verification
 

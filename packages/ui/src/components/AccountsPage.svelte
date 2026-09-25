@@ -187,7 +187,7 @@
     try {
       await store.checkAccount(account.id);
       if (store.providerOf(account.providerId)?.available) {
-        const { models } = await store.client.call('providers.probe', { providerId: account.providerId, accountId: account.id });
+        const { models } = await store.client.call('providers.probe', { providerId: account.providerId, accountId: account.id, refresh: true });
         verified = { ...verified, [account.id]: models.length };
       }
     } catch (error) { store.error = String(error); }

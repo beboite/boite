@@ -210,7 +210,8 @@ A descriptor's model list is a starting point. A Claude, ACP, Codex, pi or agy a
 real one, so `providers.probe` spawns one short-lived process under the synthetic
 thread `probe:<providerId>:<accountId>`, asks the protocol's own models call,
 kills the child on every path, and caches the answer per provider and account
-until `providers.reload`, a manual refresh or a change to that account. The UI
+until a `providers.reload` that changes a descriptor, a manual refresh or a
+change to that account's status. The UI
 keeps a persistent display cache while it reads models asynchronously. `threads.create` and
 `threads.update` accept what the last probe listed on top of the descriptor's;
 a model nobody probed is refused, saying to open the picker. Two callers at once

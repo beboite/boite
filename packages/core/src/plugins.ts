@@ -39,7 +39,9 @@ import recommendedList from './plugins/recommended.json';
 
 const INSTALLED_FILE = 'installed.json';
 const DOWNLOAD_MAX_BYTES = 64 * 1024 * 1024;
-const DOWNLOAD_TIMEOUT_MS = 120_000;
+/** A download that receives nothing for this long stops; one still receiving goes on, up to the ceiling. */
+const DOWNLOAD_IDLE_MS = 30_000;
+const DOWNLOAD_CEILING_MS = 30 * 60_000;
 const RUN_MAX_BYTES = 4 * 1024 * 1024;
 const RUN_TIMEOUT_MS = 60_000;
 const PREVIEW_TTL_MS = 10 * 60_000;
@@ -160,6 +162,9 @@ export class PluginStore {
   private shutdown = new AbortController();
   private sequence = 0;
   private closing = false;
+
+  /** Test seam: how long a download may receive nothing. */
+  downloadIdleMs = DOWNLOAD_IDLE_MS;
 
   constructor(private core: Core) {}
 
@@ -330,8 +335,23 @@ export class PluginStore {
     mkdirSync(dir, { recursive: true });
     const temporary = join(dir, 'download.part');
     const record = join(dir, `${INSTALLED_FILE}.part`);
+    // An idle timer rather than a deadline on the whole transfer: a slow link that
+    // keeps sending finishes, a silent one stops with words saying so.
+    let size = 0;
+    const idle = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const arm = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => idle.abort(new Error(`${id} download stalled: no data for ${Math.round(this.downloadIdleMs / 1000)} seconds after ${size} bytes.`)), this.downloadIdleMs);
+    };
+    const ceiling = setTimeout(() => idle.abort(new Error(`${id} download did not finish within ${DOWNLOAD_CEILING_MS / 60_000} minutes.`)), DOWNLOAD_CEILING_MS);
+    const stop = AbortSignal.any([signal, idle.signal]);
+    // A body already handed over does not always hear the abort: every wait races it.
+    const stopped = new Promise<never>((_, reject) => stop.addEventListener('abort', () => reject(stop.reason), { once: true }));
+    stopped.catch(() => undefined);
     try {
-      const response = await fetch(artifact.url, { signal: AbortSignal.any([signal, AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS)]) });
+      arm();
+      const response = await Promise.race([fetch(artifact.url, { signal: stop }), stopped]);
       if (response.url !== '' && !response.url.startsWith('https://')) {
         throw new Error(`${id} download was redirected to ${response.url}; artifacts come over https only.`);
       }
@@ -341,18 +361,18 @@ export class PluginStore {
       const total = declared || 3_000_000;
       const reader = response.body.getReader();
       const chunks: Uint8Array[] = [];
-      let size = 0;
       try {
         for (;;) {
-          const chunk = await reader.read();
+          const chunk = await Promise.race([reader.read(), stopped]);
           if (chunk.done) break;
+          arm();
           size += chunk.value.length;
           if (size > DOWNLOAD_MAX_BYTES) throw new Error(`${id} download exceeds the 64 MB a plugin may take.`);
           chunks.push(chunk.value);
           const progress = Math.min(95, Math.floor(size / total * 95));
           if (progress !== job.progress) { job.progress = progress; this.emit(id); }
         }
-      } finally { await reader.cancel(); }
+      } finally { clearTimeout(timer); clearTimeout(ceiling); void reader.cancel().catch(() => undefined); }
       const bytes = Buffer.concat(chunks);
       verifyPluginDownload(bytes, artifact.sha256, id);
       signal.throwIfAborted();
@@ -367,6 +387,8 @@ export class PluginStore {
       await rename(record, join(dir, INSTALLED_FILE));
       job.progress = 100;
     } finally {
+      clearTimeout(timer);
+      clearTimeout(ceiling);
       await rm(temporary, { force: true });
       await rm(record, { force: true });
     }
@@ -587,7 +609,9 @@ export class PluginStore {
       if (this.closing) throw refused('Boite is shutting down.');
       this.cache.delete(id);
       this.core.quotas.invalidate();
-      for (const account of this.core.accounts.list()) if (this.blocksAccount(account.id)) this.core.accounts.check(account.id);
+      // Announced whatever the status reads: a switch between two signed-in
+      // logins leaves it at 'ok', yet the model lists belong to the old login.
+      for (const account of this.core.accounts.list()) if (this.blocksAccount(account.id)) this.core.accounts.check(account.id, true);
       return await this.accounts(id);
     } finally {
       this.action = null;

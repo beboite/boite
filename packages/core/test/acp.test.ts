@@ -686,7 +686,7 @@ describe('acp driver', () => {
     ).rejects.toThrow(/model must be a non-empty string/);
   });
 
-  test('a second probe answers from the cache, and providers.reload empties it', async () => {
+  test('a second probe answers from the cache, an unchanged reload keeps it, and refresh reads again', async () => {
     const client = await startCore();
     const { accountId } = await acpAccount(client);
 
@@ -696,8 +696,13 @@ describe('acp driver', () => {
     // One agent process for the two calls: the fake logs one line per process.
     expect(initializeCount()).toBe(1);
 
+    // A reload that changes no descriptor tells nobody, so the Accounts page
+    // checking on focus keeps the model lists it already read.
     await client.call('providers.reload', {});
-    const third = await client.call('providers.probe', { providerId: 'acp-fake', accountId });
+    expect((await client.call('providers.probe', { providerId: 'acp-fake', accountId })).probedAt).toBe(first.probedAt);
+    expect(initializeCount()).toBe(1);
+
+    const third = await client.call('providers.probe', { providerId: 'acp-fake', accountId, refresh: true });
     expect(third.probedAt).toBeGreaterThanOrEqual(first.probedAt);
     expect(initializeCount()).toBe(2);
   });

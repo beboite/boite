@@ -6,7 +6,9 @@
  * Nothing native happens here. The Worker is built on the first traced pid, the
  * same way the Job Object one is, so a core that never launches a process never
  * pays for a Worker, a `user32.dll` handle, a system-wide hook or a COM
- * apartment. Other operating systems use the separate POSIX backend.
+ * apartment. Once the last traced pid is gone for `IDLE_GRACE_MS` it goes
+ * again, and the next traced pid builds a new one. Other operating systems use
+ * the separate POSIX backend.
  */
 import { workerEntry } from './worker-entry.ts';
 import type { GuardWorkerCommand, GuardWorkerMessage } from './guard-worker.ts';
@@ -15,6 +17,8 @@ import type { GuardEventSink, GuardStatus } from '../types.ts';
 
 /** One bounded wait on the message queue before the stop flag is read again. */
 const WAIT_MS = 100;
+/** How long the Worker stays up with no traced pid left, so a burst of short processes keeps one. */
+const IDLE_GRACE_MS = 30_000;
 
 let refCount = 0;
 let sink: GuardEventSink | null = null;
@@ -27,6 +31,15 @@ let muteEnabled = true;
 let audioFailure: string | null = null;
 /** The pids the Worker said it muted, minus the ones that have since exited. */
 const mutedPids = new Set<number>();
+/** The traced pids still running: the Worker is only needed while there is one. */
+const livePids = new Set<number>();
+let idleGraceMs = IDLE_GRACE_MS;
+let idleTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** Test seam: how long the Worker outlives the last traced pid. */
+export function setGuardIdleGrace(ms: number): void {
+  idleGraceMs = ms;
+}
 
 export function retainGuard(events: GuardEventSink): void {
   refCount += 1;
@@ -55,6 +68,8 @@ export function setGuardMute(next: boolean): void {
 
 export function guardPidAdded(threadId: string, pid: number): void {
   if (pid <= 0) return;
+  livePids.add(pid);
+  cancelIdle();
   ensureWorker();
   post({ kind: 'pid-add', threadId, pid });
 }
@@ -63,6 +78,24 @@ export function guardPidRemoved(threadId: string, pid: number): void {
   if (pid <= 0) return;
   mutedPids.delete(pid);
   post({ kind: 'pid-remove', threadId, pid });
+  livePids.delete(pid);
+  if (livePids.size === 0 && worker !== null) armIdle();
+}
+
+function cancelIdle(): void {
+  if (idleTimer === null) return;
+  clearTimeout(idleTimer);
+  idleTimer = null;
+}
+
+/** The hook, the COM apartment and the pump's ten wakeups a second go once nothing is left to guard. */
+function armIdle(): void {
+  cancelIdle();
+  idleTimer = setTimeout(() => {
+    idleTimer = null;
+    if (livePids.size === 0) stopWorker();
+  }, idleGraceMs);
+  if (typeof idleTimer.unref === 'function') idleTimer.unref();
 }
 
 export function guardStatus(): GuardStatus {
@@ -145,15 +178,24 @@ function onWorkerMessage(message: GuardWorkerMessage): void {
 }
 
 function teardown(): void {
+  cancelIdle();
+  livePids.clear();
+  failure = null;
+  audioFailure = null;
+  mutedPids.clear();
+  stopWorker();
+}
+
+/** Stops the pump and unhooks. The settings and what failed stay for the next Worker. */
+function stopWorker(): void {
   const running = worker;
   const flag = stopFlag;
   worker = null;
   stopFlag = null;
   hook = null;
-  failure = null;
-  audioFailure = null;
-  mutedPids.clear();
   if (running === null) return;
+  // A Worker on its way out can no longer turn the guard off for its successor.
+  running.onerror = null;
 
   if (flag !== null) Atomics.store(flag, 0, 1);
   let released = false;

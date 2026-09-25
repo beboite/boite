@@ -2,8 +2,9 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, spyOn, test } from 'bun:test';
-import { PLUGIN_MANIFEST_FILE } from '@boite/contracts';
+import { PLUGIN_MANIFEST_FILE, type Account } from '@boite/contracts';
 import { connect } from '../src/client.ts';
+import { getDriver } from '../src/drivers/index.ts';
 import { RECOMMENDED, parsePluginPool, verifyPluginDownload } from '../src/plugins.ts';
 import { platformKey } from '../src/plugins/manifest.ts';
 import { startTestCore, waitFor, type TestCore } from './harness.ts';
@@ -143,6 +144,30 @@ test('the adapter runs the v2 pool flags through the process registry and normal
   } finally { replacement.mockRestore(); }
 });
 
+test('a plugin login switch announces the default account and drops its probed models, even when its status stays the same', async () => {
+  harness = await startTestCore();
+  const dir = join(harness.dataDir, 'plugins', 'kebacc-switcher'); mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'installed.json'), '{"version":"2.0.1"}');
+  writeFileSync(join(dir, `kebacc${EXE}`), 'fixture');
+  const fixture = join(dir, 'fixture.ts');
+  writeFileSync(fixture, `const args = process.argv.slice(2); if (args[0] === 'list') console.log(JSON.stringify({accounts:[{email:'next@example.com', live:true, fiveHour:1, sevenDay:2, checkedSecondsAgo:0}]})); else if (args[0] !== 'switch') process.exit(3);`);
+  const spawn = harness.core.procs.spawn.bind(harness.core.procs);
+  const replacement = spyOn(harness.core.procs, 'spawn').mockImplementation((thread, _cmd, args, options) => spawn(thread, process.execPath, [fixture, ...args], options));
+  const account = harness.core.accounts.add({ providerId: 'claude', label: 'Default', useDefaultLocation: true });
+  expect(account.isolationDir).toBeNull();
+  const announced: string[] = [];
+  const off = harness.core.bus.onAny((name, payload) => { const next = payload as Account; if (name === 'accounts.updated' && next.id === account.id) announced.push(next.status); });
+  const forget = spyOn(getDriver('claude-sdk'), 'forgetProbes');
+  try {
+    // A plain check that finds the same status stays silent: that is what the switch must not rely on.
+    harness.core.accounts.check(account.id);
+    expect(announced).toEqual([]);
+    await harness.core.plugins.accountAction({ id: 'kebacc-switcher', provider: 'claude', action: 'switch', email: 'next@example.com' });
+    expect(announced).toEqual([account.status]);
+    expect(forget).toHaveBeenCalledWith({ providerId: 'claude', accountId: account.id });
+  } finally { off(); forget.mockRestore(); replacement.mockRestore(); }
+});
+
 describe('recommended plugins', () => {
   test('kebacc-switcher is listed and installs through the manifest path, its download checked and recorded', async () => {
     harness = await startTestCore(); const client = await harness.connect();
@@ -185,6 +210,47 @@ describe('recommended plugins', () => {
     expect(state.status).toBe('error');
     expect(state.error).toContain('sha256 does not match');
     expect(existsSync(join(harness.dataDir, 'plugins', 'kebacc-switcher'))).toBe(false);
+  });
+});
+
+describe('a plugin download on a slow link', () => {
+  /** One recommended plugin whose download trickles `bytes` in pieces `gapMs` apart, then stalls forever when `stall` is set. */
+  async function trickle(gapMs: number, stall: boolean): Promise<{ client: Awaited<ReturnType<TestCore['connect']>>; bytes: Uint8Array<ArrayBuffer> }> {
+    harness = await startTestCore(); const client = await harness.connect();
+    const kebacc = RECOMMENDED[0]!;
+    const url = kebacc.artifacts[platformKey() as keyof typeof kebacc.artifacts]!.url;
+    const bytes = new Uint8Array(8).map((_, index) => index + 1);
+    harness.core.plugins.recommended = [{ ...kebacc, artifacts: { [platformKey()]: { url, sha256: sha256(bytes) } } }];
+    harness.core.plugins.downloadIdleMs = 300;
+    fetchSpy = spyOn(globalThis, 'fetch').mockImplementation((async (_input: string | URL | Request) => new Response(new ReadableStream<Uint8Array>({
+      async start(controller) {
+        for (let at = 0; at < bytes.length; at += 2) {
+          if (stall && at === 4) return;
+          controller.enqueue(bytes.slice(at, at + 2));
+          await Bun.sleep(gapMs);
+        }
+        controller.close();
+      },
+    }), { headers: { 'content-length': String(bytes.length) } })) as typeof fetch);
+    return { client, bytes };
+  }
+
+  test('a download that keeps receiving finishes, however long it takes in all', async () => {
+    const { client, bytes } = await trickle(150, false);
+    await client.call('plugins.install', { id: 'kebacc-switcher' });
+    await waitFor(() => harness!.core.plugins.state('kebacc-switcher').status !== 'installing');
+    expect(harness!.core.plugins.state('kebacc-switcher')).toMatchObject({ status: 'installed', error: null });
+    expect(new Uint8Array(readFileSync(join(harness!.dataDir, 'plugins', 'kebacc-switcher', `kebacc${EXE}`)))).toEqual(bytes);
+  });
+
+  test('a download that goes silent stops after the idle wait and says it stalled', async () => {
+    const { client } = await trickle(10, true);
+    await client.call('plugins.install', { id: 'kebacc-switcher' });
+    await waitFor(() => harness!.core.plugins.state('kebacc-switcher').status !== 'installing', 3_000);
+    const state = harness!.core.plugins.state('kebacc-switcher');
+    expect(state.status).toBe('error');
+    expect(state.error).toMatch(/stalled: no data for \d+ seconds after 4 bytes/);
+    expect(existsSync(join(harness!.dataDir, 'plugins', 'kebacc-switcher'))).toBe(false);
   });
 });
 
