@@ -37,6 +37,7 @@
       "update": { "args": ["update"], "latestNpm": "@anthropic-ai/claude-code" },
       "executable": [{ "kind": "path", "value": "claude" }],
       "isolation": { "CLAUDE_CONFIG_DIR": "{isolationDir}" },
+      "session": [],
       "close": { "processes": ["claude"] }
     }
   },

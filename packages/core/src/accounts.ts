@@ -592,7 +592,8 @@ export class AccountStore {
 
   private sessionStatus(account: Account, provider: ProviderDescriptor): Account['status'] {
     if (provider.auth.kind === 'none') return 'ok';
-    const session = provider.auth.session ?? [];
+    // A profile may say where the login lives on its OS, or that no file holds it there.
+    const session = profileFor(provider)?.session ?? provider.auth.session ?? [];
     if (session.length === 0) return 'unknown';
     const base = account.isolationDir ?? this.defaultLocation(provider);
     if (base === null) return 'unknown';

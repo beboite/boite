@@ -299,7 +299,7 @@ function checkUpdate(value: unknown, file: string, field: string): ProviderSelfU
 
 function checkProfile(value: unknown, file: string, field: string): OsProfile {
   const obj = asObject(value, file, field);
-  checkKeys(obj, ['detect', 'executable', 'launch', 'install', 'update', 'isolation', 'env', 'unsetEnv', 'close'], file, field);
+  checkKeys(obj, ['detect', 'executable', 'launch', 'install', 'update', 'isolation', 'env', 'unsetEnv', 'session', 'close'], file, field);
 
   const detectRaw = asObject(obj['detect'] ?? {}, file, `${field}.detect`);
   checkKeys(detectRaw, ['command', 'file'], file, `${field}.detect`);
@@ -340,6 +340,12 @@ function checkProfile(value: unknown, file: string, field: string): OsProfile {
   if (obj['unsetEnv'] !== undefined) {
     profile.unsetEnv = asArray(obj['unsetEnv'], file, `${field}.unsetEnv`).map((entry, index) =>
       asString(entry, file, `${field}.unsetEnv[${index}]`),
+    );
+  }
+
+  if (obj['session'] !== undefined) {
+    profile.session = asArray(obj['session'], file, `${field}.session`).map((entry, index) =>
+      asString(entry, file, `${field}.session[${index}]`),
     );
   }
 

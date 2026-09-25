@@ -165,6 +165,13 @@ export interface OsProfile {
    * redirect the agent Boite runs.
    */
   unsetEnv?: string[];
+  /**
+   * The files that carry the login on this OS, in place of `auth.session`. An
+   * empty list says the login is kept outside any file here (Claude Code uses
+   * the macOS Keychain), so an account's status reads `unknown`, never
+   * `unauthenticated`.
+   */
+  session?: string[];
   /** Process names the core closes when an account is removed. */
   close?: { processes?: string[] };
 }

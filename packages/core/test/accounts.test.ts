@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
@@ -132,6 +132,39 @@ describe('accounts', () => {
     await waitFor(() => updated.length === 1);
     expect(updated).toEqual(['ok']);
     expect(harness.core.journal.countEvents('account.checked')).toBe(rows + 1);
+  });
+
+  test('a profile whose login lives outside any file reads unknown rather than unauthenticated', async () => {
+    const client = await harness.connect();
+    const providerId = await addLoginProvider(harness, client);
+    const os = process.platform === 'win32' ? 'windows' : process.platform === 'darwin' ? 'macos' : 'linux';
+    const file = join(harness.dataDir, 'providers', 'echo-auth.json');
+    const raw = JSON.parse(readFileSync(file, 'utf8')) as { profiles: Record<string, Record<string, unknown>> };
+    raw.profiles[os]!['session'] = [];
+    writeFileSync(file, JSON.stringify(raw), 'utf8');
+    expect((await client.call('providers.reload', {})).rejected).toEqual([]);
+
+    const account = await client.call('accounts.add', { providerId, label: 'Keychain', useDefaultLocation: false });
+    expect(account.status).toBe('unknown');
+    expect((await client.call('accounts.check', { accountId: account.id })).status).toBe('unknown');
+
+    // Claude on macOS keeps its login in the Keychain, not in .credentials.json.
+    const shipped = JSON.parse(readFileSync(join(import.meta.dir, '../src/providers/shipped/claude.json'), 'utf8')) as {
+      profiles: Record<string, { session?: string[] }>;
+    };
+    expect(shipped.profiles['macos']?.session).toEqual([]);
+    expect(shipped.profiles['windows']?.session).toBeUndefined();
+  });
+
+  test('a profile session list that is not an array of strings is refused with the file and the field', async () => {
+    const client = await harness.connect();
+    await addLoginProvider(harness, client);
+    const file = join(harness.dataDir, 'providers', 'echo-auth.json');
+    const raw = JSON.parse(readFileSync(file, 'utf8')) as { profiles: Record<string, Record<string, unknown>> };
+    raw.profiles['linux']!['session'] = 'keychain';
+    writeFileSync(file, JSON.stringify(raw), 'utf8');
+    const loaded = await client.call('providers.reload', {});
+    expect(loaded.rejected[0]).toMatchObject({ file, field: 'profiles.linux.session' });
   });
 
   test('the isolation environment substitutes the account directory', async () => {
