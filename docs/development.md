@@ -402,7 +402,15 @@ does not retry or skip tests.
 `bun run check` includes `bun run check:architecture`. The architecture check
 uses Bun's parser and needs no installed workspace dependencies. CI runs it in
 the changes job on every pull request. `bun test scripts/architecture` verifies
-cycle detection, import resolution and the package boundaries.
+cycle detection, import resolution, the package boundaries and the size budget.
+
+The same check fails when a production `.ts`, `.js` or `.svelte` file passes
+900 lines. The files already above it are listed in
+`scripts/architecture/size-budget.json` with the most lines each may have. A
+file that grows past its entry fails; split it instead of raising the number.
+When a file shrinks, the check prints a note, and
+`bun run check:architecture --write-size-budget` lowers its entry to match, or
+removes it once the file is back under 900. That flag never raises an entry.
 
 `bun run audit:complexity` ranks production functions by cyclomatic complexity.
 Use `bun run audit:complexity --json` to save a comparison. It is advisory;

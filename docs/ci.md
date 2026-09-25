@@ -16,8 +16,11 @@ The squash commit message body is left empty.
 
 The changes job also runs `check:architecture` and its regression tests, even
 for documentation-only changes. Runtime dependency cycles and forbidden
-cross-package imports fail before the build matrix starts. The advisory
-complexity report does not impose a numeric merge threshold.
+cross-package imports fail before the build matrix starts. So does a
+production source file above 900 lines: the files already past it are listed in
+`scripts/architecture/size-budget.json` at their size on 2026-09-25, and may
+shrink but not grow. The advisory complexity report does not impose a numeric
+merge threshold.
 
 The changes job runs `scripts/ci/translations.ts` too. A UI sentence that
 exists in English and not yet in another language is a warning there, with its
