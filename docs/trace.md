@@ -157,7 +157,9 @@ after every new pid, the sessions of the default render endpoint are walked over
 `bun:ffi`: the device enumerator to the default endpoint, the session manager,
 each session's process id, then its volume interface. A session whose process id
 is a traced pid and that is not muted already is muted, and its volume interface
-is held.
+is held. A session that cannot be read is skipped and named once in the core
+log; only a failure of the endpoint itself, such as a removed device, drops it
+and opens it again on the next walk.
 
 Holding it is the point. Windows keeps a rendering session's mute across
 restarts, so a process that exited muted would come back muted. The mute is

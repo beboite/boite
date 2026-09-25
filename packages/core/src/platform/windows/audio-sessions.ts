@@ -12,8 +12,9 @@
  * whole poll.
  *
  * Nothing here is silent: a `HRESULT` that is not a success throws with the
- * call's name and the value in hex. The one exception is a machine with no
- * render endpoint, which is not a failure and answers `null`.
+ * call's name and the value in hex, or, for one session of a walk, is handed to
+ * the walk's `skipped` callback. The one exception is a machine with no render
+ * endpoint, which is not a failure and answers `null`.
  */
 import { CFunction, dlopen, FFIType, ptr, read } from 'bun:ffi';
 import type { Pointer } from 'bun:ffi';
@@ -32,8 +33,12 @@ export interface AudioSession {
 
 /** The session manager of the default render endpoint, open until `release`. */
 export interface AudioSessions {
-  /** Every session of the endpoint right now, each holding its own interface. */
-  list(): AudioSession[];
+  /**
+   * Every session of the endpoint right now, each holding its own interface.
+   * A session that cannot be read is left out and named to `skipped`; only a
+   * failure of the endpoint itself throws.
+   */
+  list(skipped?: (message: string) => void): AudioSession[];
   release(): void;
 }
 
@@ -46,6 +51,17 @@ const AUDCLNT_S_NO_SINGLE_PROCESS = 0x0889000d;
 /** `HRESULT_FROM_WIN32(ERROR_NOT_FOUND)`: this machine has no such endpoint. */
 const E_NOTFOUND = 0x80070490;
 const RPC_E_CHANGED_MODE = 0x80010106;
+/**
+ * Failures that say the endpoint itself is gone, not one session: the device was
+ * removed or reset, the audio service went away, the COM proxy was cut. The walk
+ * throws on these so the Worker opens the endpoint again.
+ */
+const ENDPOINT_WIDE = new Set([
+  0x88890004, // AUDCLNT_E_DEVICE_INVALIDATED
+  0x88890010, // AUDCLNT_E_SERVICE_NOT_RUNNING
+  0x80010108, // RPC_E_DISCONNECTED
+  0x800706ba, // HRESULT_FROM_WIN32(RPC_S_SERVER_UNAVAILABLE)
+]);
 
 const CLSCTX_INPROC_SERVER = 0x1;
 const CLSCTX_ALL = 0x17;
@@ -182,8 +198,23 @@ function hex(hr: number): string {
   return `0x${(hr >>> 0).toString(16).padStart(8, '0')}`;
 }
 
+/** A failed COM call, with its `HRESULT` kept for the caller to classify. */
+export class ComError extends Error {
+  constructor(
+    readonly call: string,
+    readonly hr: number,
+  ) {
+    super(`${call} failed with ${hex(hr)}`);
+  }
+}
+
+/** True when a failure means the whole endpoint must be opened again. */
+export function isEndpointWide(error: unknown): boolean {
+  return error instanceof ComError && ENDPOINT_WIDE.has(error.hr >>> 0);
+}
+
 function ok(hr: number, call: string): void {
-  if (hr !== S_OK) throw new Error(`${call} failed with ${hex(hr)}`);
+  if (hr !== S_OK) throw new ComError(call, hr);
 }
 
 function asPointer(address: number): Pointer {
@@ -269,9 +300,9 @@ export function openSessions(): AudioSessions | null {
 
   let open = true;
   return {
-    list: (): AudioSession[] => {
+    list: (skipped?: (message: string) => void): AudioSession[] => {
       if (!open) throw new Error('IAudioSessionManager2 was already released');
-      return listSessions(manager);
+      return listSessions(manager, skipped);
     },
     release: (): void => {
       if (!open) return;
@@ -286,7 +317,7 @@ export function openSessions(): AudioSessions | null {
  * again except the `ISimpleAudioVolume` of a session it hands back, which the
  * caller owns and releases.
  */
-function listSessions(manager: Pointer): AudioSession[] {
+function listSessions(manager: Pointer, skipped?: (message: string) => void): AudioSession[] {
   const out = outParameter();
   ok(
     slot(manager, SLOT_GET_SESSION_ENUMERATOR, 'IAudioSessionManager2::GetSessionEnumerator', SIG_OUT_POINTER)(
@@ -307,18 +338,25 @@ function listSessions(manager: Pointer): AudioSession[] {
     const count = countOut[0] ?? 0;
 
     for (let index = 0; index < count; index += 1) {
-      const controlOut = outParameter();
-      ok(
-        slot(sessions, SLOT_GET_SESSION, 'IAudioSessionEnumerator::GetSession', SIG_GET_SESSION)(
-          sessions,
-          index,
-          ptr(controlOut),
-        ),
-        'IAudioSessionEnumerator::GetSession',
-      );
-      const control = taken(controlOut, 'IAudioSessionEnumerator::GetSession');
-      const session = readSession(control);
-      if (session !== null) found.push(session);
+      // One session that cannot be read (expired, torn down by its driver) is
+      // skipped: failing the walk would leave every other session unmuted.
+      try {
+        const controlOut = outParameter();
+        ok(
+          slot(sessions, SLOT_GET_SESSION, 'IAudioSessionEnumerator::GetSession', SIG_GET_SESSION)(
+            sessions,
+            index,
+            ptr(controlOut),
+          ),
+          'IAudioSessionEnumerator::GetSession',
+        );
+        const control = taken(controlOut, 'IAudioSessionEnumerator::GetSession');
+        const session = readSession(control);
+        if (session !== null) found.push(session);
+      } catch (error) {
+        if (isEndpointWide(error)) throw error;
+        skipped?.(error instanceof Error ? error.message : String(error));
+      }
     }
   } catch (error) {
     for (const session of found) session.release();
@@ -347,7 +385,7 @@ function readSession(control: Pointer): AudioSession | null {
       // A session that spans several processes still names the one that opened
       // it, which is the process this core traced.
       if (hr !== S_OK && (hr >>> 0) !== AUDCLNT_S_NO_SINGLE_PROCESS) {
-        throw new Error(`IAudioSessionControl2::GetProcessId failed with ${hex(hr)}`);
+        throw new ComError('IAudioSessionControl2::GetProcessId', hr);
       }
       pid = pidOut[0] ?? 0;
     } finally {

@@ -30,7 +30,8 @@ export class MuteLogic {
   #enabled: boolean;
 
   constructor(
-    private readonly listSessions: () => AudioSession[],
+    /** One walk. A session it could not read goes to `skipped` and the walk goes on. */
+    private readonly listSessions: (skipped: (message: string) => void) => AudioSession[],
     enabled: boolean,
   ) {
     this.#enabled = enabled;
@@ -76,7 +77,9 @@ export class MuteLogic {
 
     let sessions: AudioSession[];
     try {
-      sessions = this.listSessions();
+      sessions = this.listSessions((message) => {
+        this.fail(message);
+      });
     } catch (error) {
       this.fail(error instanceof Error ? error.message : String(error));
       return;

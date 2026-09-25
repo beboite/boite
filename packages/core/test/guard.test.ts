@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { ComError, isEndpointWide } from '../src/platform/windows/audio-sessions.ts';
 import type { AudioSession } from '../src/platform/windows/audio-sessions.ts';
 import { setGuardWorkerForTests } from '../src/platform/windows/guard.ts';
 import { GuardLogic, HWND_BOTTOM, PUSH_BACK_FLAGS } from '../src/platform/windows/guard-logic.ts';
@@ -234,6 +235,8 @@ class FakeEndpoint {
   readonly mixers = new Map<number, { muted: boolean; gone?: boolean }>();
   readonly handed: FakeSession[] = [];
   throws: string | null = null;
+  /** A session the walk could not read, reported the way `listSessions` does. */
+  unreadable: string | null = null;
 
   add(pid: number): { muted: boolean; gone?: boolean } {
     const mixer = { muted: false };
@@ -241,8 +244,9 @@ class FakeEndpoint {
     return mixer;
   }
 
-  list = (): AudioSession[] => {
+  list = (skipped: (message: string) => void): AudioSession[] => {
     if (this.throws !== null) throw new Error(this.throws);
+    if (this.unreadable !== null) skipped(this.unreadable);
     const sessions: FakeSession[] = [];
     for (const [pid, mixer] of this.mixers) sessions.push(new FakeSession(pid, mixer));
     this.handed.push(...sessions);
@@ -350,6 +354,31 @@ describe('the audio mute rule', () => {
     mute.tick();
     mute.tick();
     expect(mute.takeEvents()).toHaveLength(2);
+  });
+
+  test('one unreadable session does not stop the walk, and is reported once', () => {
+    const endpoint = new FakeEndpoint();
+    endpoint.unreadable = 'IAudioSessionControl2::GetProcessId failed with 0x88890004';
+    const mixer = endpoint.add(MUTED_PID);
+    const mute = new MuteLogic(endpoint.list, true);
+
+    mute.addPid('thr_one', MUTED_PID);
+    mute.tick();
+    mute.tick();
+
+    expect(mixer.muted).toBe(true);
+    expect(mute.mutedPids()).toEqual([MUTED_PID]);
+    expect(mute.takeEvents()).toEqual([
+      { kind: 'audio-failed', message: 'IAudioSessionControl2::GetProcessId failed with 0x88890004' },
+      { kind: 'session-muted', threadId: 'thr_one', pid: MUTED_PID },
+    ]);
+  });
+
+  test('only a failure of the endpoint itself fails the whole walk', () => {
+    expect(isEndpointWide(new ComError('IAudioSessionEnumerator::GetSession', 0x88890004 | 0))).toBe(true);
+    expect(isEndpointWide(new ComError('IAudioSessionControl2::GetProcessId', 0x80010108 | 0))).toBe(true);
+    expect(isEndpointWide(new ComError('IUnknown::QueryInterface(ISimpleAudioVolume)', 0x80004002 | 0))).toBe(false);
+    expect(isEndpointWide(new Error('IAudioSessionEnumerator::GetSession answered S_OK and no interface'))).toBe(false);
   });
 
   test('a session that vanished before the pid exits is released without a throw', () => {

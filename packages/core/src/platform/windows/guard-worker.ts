@@ -160,7 +160,7 @@ let comReady = false;
  * machine with no render endpoint turns the audio half off for the Worker's
  * life, and the throw is what puts the reason in a single `audio-failed`.
  */
-function listSessions(): AudioSession[] {
+function listSessions(skipped: (message: string) => void): AudioSession[] {
   if (endpoint === null) {
     const opened = openSessions();
     if (opened === null) {
@@ -171,9 +171,10 @@ function listSessions(): AudioSession[] {
     endpoint = opened;
   }
   try {
-    return endpoint.list();
+    return endpoint.list(skipped);
   } catch (error) {
-    // The device is gone or COM refused: drop it so the next walk opens a fresh one.
+    // The endpoint itself failed (one bad session does not throw): drop it so the
+    // next walk opens a fresh one.
     endpoint.release();
     endpoint = null;
     throw error;
