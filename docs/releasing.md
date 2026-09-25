@@ -249,8 +249,9 @@ The installed shell starts a core of its own or adopts one of its own version
 that already answers. That core is resident: it outlives the shell. Since a
 running core keeps `boite-core.exe` open, which once made an install fail on
 "error opening file for writing", the updater stops it before it launches the
-installer, and the installer's hooks (`windows/hooks.nsh`) stop the core of
-that install before an install or an uninstall writes the file. With
+installer, and the installer's hooks (`windows/hooks.nsh`) close the shell,
+which would restart it, and then stop the core of that install before an
+install or an uninstall writes the file. With
 `BOITE_CORE_RESIDENT=0` (tests) the shell owns its core through a
 `KILL_ON_JOB_CLOSE` Job Object instead, so a shell killed hard takes it down.
 

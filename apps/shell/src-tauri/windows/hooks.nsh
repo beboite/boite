@@ -5,6 +5,12 @@
 ; boite-shell.exe by name). A reinstall or an uninstall over a running core
 ; cannot write or delete boite-core.exe ("Error opening file for writing"), so
 ; these hooks stop the core of this install first, with stop-core.ps1.
+;
+; Tauri's installer.nsi includes this file near its top, before it defines
+; BUNDLEID, MAINBINARYNAME and PRODUCTNAME. Nothing outside the macros below
+; may read those: `!if` at file level would compare the literal text
+; "${BUNDLEID}". A macro body is read where it is inserted, inside a section,
+; after the template defined them.
 
 ; Read here, where it names this file's directory: inside the macro it would
 ; name the generated installer's.
@@ -16,15 +22,26 @@
   !define BOITE_DATA_ROOT "$LOCALAPPDATA"
 !endif
 
-; The data directory this install's core writes core.json in: the name
-; `Channel::data_dir_name` gives in src/lib.rs.
-!if "${BUNDLEID}" == "com.boite.two.dev"
-  !define BOITE_DATA_NAME "boite2-dev"
-!else
-  !define BOITE_DATA_NAME "boite2"
-!endif
-
 !macro BOITE_STOP_CORE
+  !ifndef BUNDLEID
+    !error "hooks.nsh: BUNDLEID is not defined where BOITE_STOP_CORE is inserted"
+  !endif
+  ; The data directory this install's core writes core.json in: the name
+  ; `Channel::data_dir_name` gives in src/lib.rs.
+  !if "${BUNDLEID}" == "com.boite.two.dev"
+    !define /redef BOITE_DATA_NAME "boite2-dev"
+  !else
+    !define /redef BOITE_DATA_NAME "boite2"
+  !endif
+  !echo "Boite hooks: ${BUNDLEID} stops the core of ${BOITE_DATA_ROOT}\${BOITE_DATA_NAME}"
+
+  ; The window first. A running shell restarts a core it lost within seconds,
+  ; from the executable this installer is about to replace, and the check the
+  ; template runs after this hook waits on an OK/Cancel box before it ends the
+  ; shell. This is that same check, run earlier: the same question before
+  ; anything is stopped, and the template's then finds nothing left to close.
+  !insertmacro CheckIfAppIsRunning "${MAINBINARYNAME}.exe" "${PRODUCTNAME}"
+
   Push $0
   Push $1
   InitPluginsDir

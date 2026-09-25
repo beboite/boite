@@ -59,10 +59,16 @@ core is not touched by the desktop updater.
 
 The Windows installer stops the core of its own install too, for an update, a
 manual reinstall and an uninstall. Its hooks (`windows/hooks.nsh` and
-`windows/stop-core.ps1`) find the `boite-core.exe` processes running that
-install's exact file, ask the one named in `core.json` to shut down, and end any
-still running after 15 seconds. Boite Dev's core runs another file and is left
-alone. No window opens.
+`windows/stop-core.ps1`) first close a running shell, with the installer's own
+"Boite is running" question: an open window would start the core again within
+seconds, from the file about to be replaced. They then find the
+`boite-core.exe` processes running that install's exact file, ask the one named
+in that channel's `core.json` (`boite2` or `boite2-dev`) to shut down, and end
+any still running after 15 seconds. Boite Dev's core runs another file and is
+left alone. No window opens. `scripts/ci/installer-hooks.test.ts` builds the
+hooks into the generated installer script and runs them over a shell that
+restarts its core; it needs a Windows `build:shell` first and is skipped
+without one.
 
 When the new shell starts, it reads the version the running core reports on
 `/health`. A core of another version, left by an install that could not stop
