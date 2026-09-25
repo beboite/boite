@@ -11,8 +11,9 @@
     <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="icon" type="image/svg+xml" href="./icons/icon.svg" />
     <link rel="icon" type="image/png" sizes="192x192" href="./icons/icon-192.png" />
+    <!-- Geist only: the first screen draws no mono text, and on a slow link Geist Mono's
+         70 KB would compete with the entry chunk. The service worker caches both. -->
     <link rel="preload" href="./fonts/Geist-Variable.woff2" as="font" type="font/woff2" crossorigin />
-    <link rel="preload" href="./fonts/GeistMono-Variable.woff2" as="font" type="font/woff2" crossorigin />
     <title>Boite</title>
     <!-- Painted before the stylesheet arrives, so a reload never flashes the wrong ground. -->
     <style>
