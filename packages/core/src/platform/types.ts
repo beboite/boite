@@ -69,5 +69,7 @@ export interface ProcessPlatform {
   sample(threadId: string): ProcessSample | null;
   pidAdded(threadId: string, pid: number): void;
   pidRemoved(threadId: string, pid: number): void;
+  /** The registry forgot an idle thread: drop what the platform keeps for it. */
+  forget(threadId: string): void;
   guardStatus(): GuardStatus;
 }

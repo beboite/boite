@@ -67,6 +67,8 @@ const ORPHAN_GRACE_MS = 10_000;
 
 export interface ProcRegistryOptions {
   orphanGraceMs?: number;
+  /** How long an idle thread is kept before it is forgotten. Tests shorten it. */
+  forgetDelayMs?: number;
 }
 
 /**
@@ -91,6 +93,7 @@ export class ProcRegistry {
   private readonly sweepTimers = new Map<ThreadId, ReturnType<typeof setTimeout>>();
   private reapOrphans = true;
   private readonly orphanGraceMs: number;
+  private readonly forgetDelayMs: number;
   private readonly stopListening: () => void;
   private closing: Promise<void> | null = null;
 
@@ -101,6 +104,7 @@ export class ProcRegistry {
     options: ProcRegistryOptions = {},
   ) {
     this.orphanGraceMs = options.orphanGraceMs ?? ORPHAN_GRACE_MS;
+    this.forgetDelayMs = options.forgetDelayMs ?? FORGET_DELAY_MS;
     this.stopListening = this.bus.onAny((name, payload) => {
       if (name === 'turn.started') this.cancelSweep((payload as Turn).threadId);
       else if (name === 'turn.finished') this.scheduleSweep((payload as Turn).threadId);
@@ -596,7 +600,10 @@ export class ProcRegistry {
       this.known.delete(threadId);
       this.lastLoad.delete(threadId);
       this.lastPushed.delete(threadId);
-    }, FORGET_DELAY_MS);
+      // The thread's Job Object too: an id minted per call would otherwise hold
+      // one kernel handle for the life of the core.
+      this.platform.forget(threadId);
+    }, this.forgetDelayMs);
     timer.unref();
     this.forgetTimers.set(threadId, timer);
   }

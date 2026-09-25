@@ -35,7 +35,9 @@ inside a global job. Both are created unnamed, so neither can be looked up from
 another process. Both carry `KILL_ON_JOB_CLOSE` and neither carries
 `BREAKAWAY_OK`, so nothing a thread starts can leave the job, and
 a core that dies takes every agent process with it. The child is assigned right
-after spawn, and `windowsHide: true` is set on every one of them.
+after spawn, and `windowsHide: true` is set on every one of them. Thirty seconds
+after a thread's last process exits, the registry forgets the thread and its job
+is closed, unless the job still reports a process in it.
 
 A completion port on the job reports every process that enters or leaves it,
 grandchildren included, and a Worker drains it. The Worker is built on the first

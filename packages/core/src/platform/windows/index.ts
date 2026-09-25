@@ -34,5 +34,6 @@ export const platform: ProcessPlatform = {
   sample: jobs.sampleThreadJob,
   pidAdded: guard.guardPidAdded,
   pidRemoved: guard.guardPidRemoved,
+  forget: jobs.releaseThreadJob,
   guardStatus: guard.guardStatus,
 };

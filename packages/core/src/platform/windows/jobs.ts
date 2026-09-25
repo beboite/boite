@@ -340,6 +340,25 @@ export function terminateJobProcess(threadId: string, pid: number): boolean {
   return api.terminateProcess(entry.handle, KILL_EXIT_CODE);
 }
 
+/**
+ * Close the job of a thread the registry forgot. A job that still holds a pid
+ * is kept: closing it would kill that process through KILL_ON_JOB_CLOSE. Once
+ * the key is gone a late packet for it is dropped, and the same thread id
+ * spawning again gets a new job and a new key.
+ */
+export function releaseThreadJob(threadId: string): void {
+  const job = threadJobs.get(threadId);
+  if (job === undefined || job.pids.size > 0) return;
+  threadJobs.delete(threadId);
+  threadsByKey.delete(job.key);
+  native?.close(job.handle);
+}
+
+/** How many thread jobs are open. Read by the tests only. */
+export function threadJobCount(): number {
+  return threadJobs.size;
+}
+
 /** CPU over the interval since the previous sample, memory as the live working sets. */
 export function sampleThreadJob(threadId: string): ProcessSample | null {
   const job = threadJobs.get(threadId);

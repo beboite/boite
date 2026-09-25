@@ -14,6 +14,7 @@ export function createPosixPlatform(os: 'linux' | 'macos'): ProcessPlatform {
     sample: () => null,
     pidAdded() {},
     pidRemoved() {},
+    forget() {},
     guardStatus: () => ({ running: false, hook: null, failure: null, audio: 'off', mutedPids: [] }),
   };
 }
