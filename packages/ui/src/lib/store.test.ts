@@ -35,6 +35,42 @@ test('changing a Store endpoint drops the previous machine composer and element 
   }
 });
 
+test('changing a Store endpoint drops the previous machine updates, todos, resources and trace', async () => {
+  const { store, client } = await ready();
+  const saved = Object.entries(localStorage);
+  const connect = vi.spyOn(store, 'connect').mockResolvedValue();
+  const open = vi.spyOn(store, 'openWhereLeft').mockResolvedValue();
+  store.harnessUpdates = [{ providerId: 'claude', name: 'Claude', route: 'managed', current: '1.0.0', latest: '1.1.0', pending: false, skipped: null, state: 'idle', message: null, checkedAt: null }] as never;
+  store.todos = { 'p-boite': [{ id: 'todo-1' }] } as never;
+  store.resources = [{ threadId: 't-trace' }] as never;
+  store.trace = [{ pid: 1 }] as never;
+  try {
+    await store.connectTo('https://second.test', 'fixture-token');
+    expect(store.harnessUpdates).toEqual([]);
+    expect(store.todos).toEqual({});
+    expect(store.resources).toEqual([]);
+    expect(store.trace).toEqual([]);
+  } finally {
+    connect.mockRestore(); open.mockRestore();
+    store.client?.close(); store.detach(); client.close();
+    localStorage.clear();
+    for (const [key, value] of saved) localStorage.setItem(key, value);
+  }
+});
+
+test('a core without agent updates shows none, not the last machine list', async () => {
+  const { store, client } = await ready();
+  store.harnessUpdates = [{ providerId: 'claude' }] as never;
+  const real = client.call.bind(client);
+  vi.spyOn(client, 'call').mockImplementation(((method: string, params: never) => method === 'providers.updates'
+    ? Promise.reject(new RpcFailure({ code: RpcErrorCode.MethodNotFound, message: 'unknown method providers.updates' }))
+    : real(method as never, params)) as typeof client.call);
+  try {
+    await store.loadHarnessUpdates();
+    expect(store.harnessUpdates).toEqual([]);
+  } finally { store.detach(); client.close(); }
+});
+
 test('dropped folders use the local core when a remote machine is selected', async () => {
   const { store, client: remote } = await ready();
   const local = new FakeClient({ delayMs: 0 });

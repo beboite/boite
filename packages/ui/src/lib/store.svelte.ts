@@ -1233,6 +1233,12 @@ export class Store {
     this.sessions = [];
     this.projects = [];
     this.threads = [];
+    // What the next core answers replaces these; one that cannot answer must not show the last one's.
+    this.harnessUpdates = [];
+    this.todos = {};
+    this.resources = [];
+    this.trace = [];
+    this.#tracedThreadId = null;
     this.principal = null;
     this.core = null;
     this.#attachEndpoint(endpoint);
@@ -3029,7 +3035,10 @@ export class Store {
       const updates = await client.call('providers.updates', refresh ? { refresh: true } : {});
       if (client === this.#client) this.harnessUpdates = updates;
     } catch (error) {
-      if (error instanceof RpcFailure && error.code === RpcErrorCode.MethodNotFound) return;
+      if (error instanceof RpcFailure && error.code === RpcErrorCode.MethodNotFound) {
+        if (client === this.#client) this.harnessUpdates = [];
+        return;
+      }
       if (refresh) this.#fail(error);
       else console.warn('reading the agent updates failed', error);
     }
