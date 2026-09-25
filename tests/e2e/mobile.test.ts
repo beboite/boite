@@ -188,6 +188,25 @@ test('the panel sheet, Agents and Settings keep clear of a notch and the status 
   }
 }, 30_000);
 
+test('the connect sheet keeps its last button above the home indicator', async () => {
+  const origin = await page.evaluate<string>('location.origin');
+  await page.navigate(`${origin}/?fake=1&uninstalled=1`);
+  await page.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 47, bottom: 34, left: 0, right: 0 } });
+  try {
+    await page.waitFor(`document.querySelector('[data-testid=composer-connect], [data-testid=mobile-new]')`);
+    if (!(await page.evaluate<boolean>(`!!document.querySelector('[data-testid=composer-connect]')`))) await page.click('[data-testid=mobile-new]');
+    await page.click('[data-testid=composer-connect]');
+    await page.click('[data-testid=connect-service][data-provider=claude]');
+    await page.click('[data-testid=connect-install]');
+    await page.waitFor(`document.querySelector('[data-testid=connect-step]')?.dataset.step === 'installing'`);
+    const bottom = await page.evaluate<number>(`[...document.querySelectorAll('[data-testid=connect-step] > *')].at(-1).getBoundingClientRect().bottom`);
+    await capture('mobile-connect-safe.png');
+    expect(bottom).toBeLessThanOrEqual(await page.evaluate<number>('innerHeight') - 34);
+  } finally {
+    await page.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 0, bottom: 0, left: 0, right: 0 } });
+  }
+}, 30_000);
+
 test('Appearance in French at 360 px keeps every label beside its choices readable', async () => {
   const origin = await page.evaluate<string>('location.origin');
   await page.navigate(`${origin}/?fake=1&open=recent`);

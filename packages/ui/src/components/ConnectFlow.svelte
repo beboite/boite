@@ -57,10 +57,14 @@
 
   $effect(() => { if (overlay.open) return mobileOverlay(() => store.closeConnect()); });
 
-  async function focusFirst() {
+  async function focusFirst(unlessInside = false) {
     await tick();
+    if (unlessInside && dialog?.contains(document.activeElement)) return;
     dialog?.querySelector<HTMLElement>('.body button:not(:disabled), .body a, .body input')?.focus({ preventScroll: true });
   }
+
+  // A step that replaces the pressed button hands the keyboard to its own first control, not to the page behind.
+  $effect(() => { void [step, login?.url]; if (overlay.open) void focusFirst(true); });
 
   let featured = $derived(store.providers.filter((p) => FEATURED.includes(p.id)).sort((a, b) => FEATURED.indexOf(a.id) - FEATURED.indexOf(b.id)));
   let others = $derived(store.providers.filter((p) => !FEATURED.includes(p.id)));
@@ -402,7 +406,8 @@
 
   @media (max-width: 720px) {
     .scrim { align-items: flex-end; padding: 0; }
-    .dialog { width: 100%; max-height: 90dvh; border-radius: var(--radius-xl) var(--radius-xl) 0 0; }
+    .dialog { width: 100%; max-height: calc(90dvh - env(safe-area-inset-top, 0px)); border-radius: var(--radius-xl) var(--radius-xl) 0 0; }
+    .body { padding-bottom: calc(18px + env(safe-area-inset-bottom, 0px)); }
     .service { min-height: var(--touch-target); }
   }
 </style>
