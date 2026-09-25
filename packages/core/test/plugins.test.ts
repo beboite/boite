@@ -188,6 +188,47 @@ describe('recommended plugins', () => {
   });
 });
 
+describe('a plugin download on a slow link', () => {
+  /** One recommended plugin whose download trickles `bytes` in pieces `gapMs` apart, then stalls forever when `stall` is set. */
+  async function trickle(gapMs: number, stall: boolean): Promise<{ client: Awaited<ReturnType<TestCore['connect']>>; bytes: Uint8Array }> {
+    harness = await startTestCore(); const client = await harness.connect();
+    const kebacc = RECOMMENDED[0]!;
+    const url = kebacc.artifacts[platformKey() as keyof typeof kebacc.artifacts]!.url;
+    const bytes = new Uint8Array(8).map((_, index) => index + 1);
+    harness.core.plugins.recommended = [{ ...kebacc, artifacts: { [platformKey()]: { url, sha256: sha256(bytes) } } }];
+    harness.core.plugins.downloadIdleMs = 300;
+    fetchSpy = spyOn(globalThis, 'fetch').mockImplementation((async () => new Response(new ReadableStream<Uint8Array>({
+      async start(controller) {
+        for (let at = 0; at < bytes.length; at += 2) {
+          if (stall && at === 4) return;
+          controller.enqueue(bytes.slice(at, at + 2));
+          await Bun.sleep(gapMs);
+        }
+        controller.close();
+      },
+    }), { headers: { 'content-length': String(bytes.length) } })) as typeof fetch);
+    return { client, bytes };
+  }
+
+  test('a download that keeps receiving finishes, however long it takes in all', async () => {
+    const { client, bytes } = await trickle(150, false);
+    await client.call('plugins.install', { id: 'kebacc-switcher' });
+    await waitFor(() => harness!.core.plugins.state('kebacc-switcher').status !== 'installing');
+    expect(harness!.core.plugins.state('kebacc-switcher')).toMatchObject({ status: 'installed', error: null });
+    expect(new Uint8Array(readFileSync(join(harness!.dataDir, 'plugins', 'kebacc-switcher', `kebacc${EXE}`)))).toEqual(bytes);
+  });
+
+  test('a download that goes silent stops after the idle wait and says it stalled', async () => {
+    const { client } = await trickle(10, true);
+    await client.call('plugins.install', { id: 'kebacc-switcher' });
+    await waitFor(() => harness!.core.plugins.state('kebacc-switcher').status !== 'installing', 3_000);
+    const state = harness!.core.plugins.state('kebacc-switcher');
+    expect(state.status).toBe('error');
+    expect(state.error).toMatch(/stalled: no data for \d+ seconds after 4 bytes/);
+    expect(existsSync(join(harness!.dataDir, 'plugins', 'kebacc-switcher'))).toBe(false);
+  });
+});
+
 describe('plugins from a git URL', () => {
   test('inspect reads the manifest at the commit, add installs it, uninstall takes back everything it wrote', async () => {
     harness = await startTestCore(); const client = await harness.connect();
