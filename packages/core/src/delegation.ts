@@ -3,7 +3,7 @@ import { DEFAULT_DELEGATION_CONFIG } from '@boite/contracts';
 import type { AgentLetter, DelegatedAgent, DelegationConfig, DelegationView, RpcParams, ThreadSummary, Turn, Usage } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { invalidParams, messageOf, refused } from './errors.ts';
-import { checkEffort, checkModel } from './threads.ts';
+import { checkEffort, checkModel } from './threads/selection.ts';
 import { newId } from './ids.ts';
 import { assertDriverRunnable } from './drivers/index.ts';
 

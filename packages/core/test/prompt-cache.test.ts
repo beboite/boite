@@ -3,8 +3,7 @@ import type { PromptCache, Usage } from '@boite/contracts';
 import { cacheLifeOf } from '../src/drivers/claude.ts';
 import { acpCacheLife } from '../src/drivers/acp.ts';
 import { piCacheLife } from '../src/drivers/pi.ts';
-import { openAiCacheLife } from '../src/prompt-cache.ts';
-import { promptCacheOf } from '../src/threads.ts';
+import { openAiCacheLife, promptCacheOf } from '../src/prompt-cache.ts';
 
 describe('openAiCacheLife', () => {
   test('GPT-5.6 and later keep a prefix 30 minutes after its last use', () => {

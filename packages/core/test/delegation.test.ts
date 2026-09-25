@@ -334,7 +334,7 @@ test('a turn retried on a fresh session after a lost resume still carries the he
   await waitFor(() => h.core.threads.require(child.thread.id).status === 'idle');
   // The budget is spent, so the result waits in the parent's inbox for its next prompt.
   await waitFor(() => h.core.delegation.get(threadId).messages.some(m => m.origin === 'result' && m.status === 'received'));
-  (h.core.threads as unknown as { deferredAnswers: Map<string, string[]> }).deferredAnswers.set(threadId, ['Held async answer']);
+  h.core.threads.deferred.deferredAnswers.set(threadId, ['Held async answer']);
 
   lose = true;
   calls.length = 0;

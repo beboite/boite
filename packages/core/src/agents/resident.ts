@@ -5,7 +5,7 @@ import { DEFAULT_DELEGATION_CONFIG } from '@boite/contracts';
 import type { AgentAccountGrant, AgentBrain, AgentProfile, AgentRuntimeConfig, AgentScope, AgentSelection, AgentWork, RpcParams } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { refused } from '../errors.ts';
-import { checkEffort, checkModel } from '../threads.ts';
+import { checkEffort, checkModel } from '../threads/selection.ts';
 import { ids, integer, object, text } from './validation.ts';
 import { OPEN_WORK } from './repository.ts';
 

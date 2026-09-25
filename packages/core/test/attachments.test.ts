@@ -4,7 +4,7 @@ import { isAbsolute, relative } from 'node:path';
 import type { Attachment, FileAttachment } from '@boite/contracts';
 import { ATTACHMENT_MAX_BYTES, RpcErrorCode } from '@boite/contracts';
 import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
-import { checkAttachments } from '../src/threads.ts';
+import { checkAttachments } from '../src/threads/inputs.ts';
 import { fileReference, prepareAttachments } from '../src/attachments.ts';
 import { continuationInput } from '../src/continuation.ts';
 
