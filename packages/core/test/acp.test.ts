@@ -9,7 +9,7 @@ import type { MessagePart, PermissionMode, RpcEvents, Settings } from '@boite/co
 import type { CoreClient } from '../src/client.ts';
 import type { AcpSdk } from '../src/drivers/acp.ts';
 import { createAcpDriver, runAcpLogin, toolOutputText } from '../src/drivers/acp.ts';
-import { stderrLines } from '../src/drivers/stderr-lines.ts';
+import { stderrLines } from '../src/drivers/lines.ts';
 import { getDriver, setDriver } from '../src/drivers/index.ts';
 import { startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';

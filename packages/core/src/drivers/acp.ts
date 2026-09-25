@@ -42,8 +42,7 @@ import { agentEnv, launchPrefix, profileFor, resolveExecutable } from '../provid
 import { normalizeAntigravityTool, isAntigravityQuestion } from './antigravity.ts';
 import { grokEffortOf, grokLaunchArgs, grokReasoningEffortOf } from './grok.ts';
 import { imageDocument } from './documents.ts';
-import { LineSplitter, STDOUT_LINE_MAX } from './lines.ts';
-import { stderrLines } from './stderr-lines.ts';
+import { LineSplitter, STDOUT_LINE_MAX, stderrLines } from './lines.ts';
 import type {
   Driver,
   ProbeContext,

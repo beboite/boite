@@ -42,8 +42,7 @@ import type {
 import { messageOf, unavailable } from '../errors.ts';
 import type { SpawnedChild } from '../procs.ts';
 import { agentEnv, launchPrefix, profileFor, resolveExecutable } from '../providers/loader.ts';
-import { LineSplitter, STDOUT_LINE_MAX } from './lines.ts';
-import { stderrLines } from './stderr-lines.ts';
+import { LineSplitter, STDOUT_LINE_MAX, stderrLines } from './lines.ts';
 import type {
   Driver,
   ProbeContext,
