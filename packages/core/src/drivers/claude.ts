@@ -332,6 +332,11 @@ class ClaudeTurn {
   }
 
   handle(message: SDKMessage): void {
+    const parent = subagentOf(message);
+    if (parent !== null) {
+      this.handleSubagent(message, parent);
+      return;
+    }
     switch (message.type) {
       case 'stream_event':
         this.handleStream(message.event as StreamEvent);
@@ -429,6 +434,19 @@ class ClaudeTurn {
     accumulated.set(this.apiMessageId, (accumulated.get(this.apiMessageId) ?? '') + text);
   }
 
+  /**
+   * What a subagent (the Agent or Task tool) writes, tagged with the tool call
+   * that runs it. Its text, thinking and tool calls are its own conversation,
+   * which the main message does not show, as an imported transcript drops the
+   * sidechain too; the Agent tool's own result is what the main loop reads. Its
+   * usage is not the thread's context, and an API error it hits is its own:
+   * the main loop recovers or fails on its own result.
+   */
+  private handleSubagent(message: SDKMessage, parentToolId: string): void {
+    if (message.type !== 'assistant' || message.error === undefined) return;
+    this.ctx.log('warn', `claude: the subagent of ${parentToolId} hit an error: ${errorSentence(message.error)}`);
+  }
+
   private handleAssistant(message: SDKAssistantMessage): void {
     if (message.error !== undefined) {
       this.fail(errorSentence(message.error));
@@ -438,8 +456,7 @@ class ClaudeTurn {
     const apiId = body?.id ?? '';
     const carried = requestTokens(body?.usage);
     if (carried !== null) this.contextTokens = carried;
-    // A subagent's requests build their own prefix; the thread's cache is the main loop's.
-    if (message.parent_tool_use_id === null) this.cacheLife = cacheLifeOf(body?.usage) ?? this.cacheLife;
+    this.cacheLife = cacheLifeOf(body?.usage) ?? this.cacheLife;
     for (const block of contentBlocks(body?.content)) {
       if (block.type === 'text') {
         const text = block.text ?? '';
@@ -974,6 +991,9 @@ class ClaudeSession {
    */
   private adopt(message: SDKMessage): void {
     if (this.closing || this.ended) return;
+    // A background subagent still talking after the turn is not the CLI going
+    // on by itself: no turn opens for it, and the turn that comes drops it.
+    if (subagentOf(message) !== null) return;
     // The result closes the adopted turn: it is kept beyond the cap.
     if (this.orphans.length >= ORPHANS_MAX && message.type !== 'result') return;
     this.orphans.push(message);
@@ -1154,7 +1174,8 @@ class ClaudeSession {
 
   /** No matcher: this hook sees every tool call, which is what makes it the single gate. */
   private readonly preToolUse = async (input: HookInput): Promise<HookJSONOutput> => {
-    if (input.hook_event_name === 'PreToolUse') {
+    // A subagent's tool calls are its own conversation: no card on the main message.
+    if (input.hook_event_name === 'PreToolUse' && input.agent_id === undefined) {
       this.head()?.upsertTool(input.tool_use_id, input.tool_name, input.tool_input);
     }
     return {};
@@ -1162,7 +1183,7 @@ class ClaudeSession {
 
   private readonly postToolUse = async (input: HookInput): Promise<HookJSONOutput> => {
     if (input.hook_event_name === 'PostToolUse') {
-      this.head()?.finishTool(input.tool_use_id, stringify(input.tool_response), 'done');
+      if (input.agent_id === undefined) this.head()?.finishTool(input.tool_use_id, stringify(input.tool_response), 'done');
       const additionalContext = this.head()?.ctx.coordination?.();
       if (additionalContext) return { hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext } };
     }
@@ -1272,6 +1293,13 @@ async function titleQuery(deps: ClaudeDeps, ctx: TitleContext): Promise<string |
   } finally {
     clearTimeout(timer);
   }
+}
+
+/** The Agent or Task tool call a message belongs to, or null for the main loop's own. */
+function subagentOf(message: SDKMessage): string | null {
+  if (message.type !== 'assistant' && message.type !== 'user' && message.type !== 'stream_event') return null;
+  const parent = (message as { parent_tool_use_id?: unknown }).parent_tool_use_id;
+  return typeof parent === 'string' && parent.length > 0 ? parent : null;
 }
 
 function contentBlocks(content: unknown): ContentBlock[] {

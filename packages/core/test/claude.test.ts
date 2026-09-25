@@ -1370,6 +1370,64 @@ describe('claude driver: questions and background work', () => {
     await waitFor(() => (queries[0] as unknown as { ended: boolean }).ended);
   });
 
+  test("a subagent's own messages stay off the main message, and its API error does not fail the turn", async () => {
+    const client = await harness.connect();
+    const threadId = await claudeThread(client);
+    const sessionId = 'sess-sub';
+    /** What a subagent writes: the same shapes, tagged with the Agent call that runs it. */
+    const sub = (type: 'assistant' | 'user', body: Record<string, unknown>): SDKMessage =>
+      sdk({ type, session_id: sessionId, parent_tool_use_id: 'toolu_task', ...body });
+    scripted((fake, options) => {
+      fake.emit(init(sessionId));
+      fake.emit(assistant(sessionId, [{ type: 'tool_use', id: 'toolu_task', name: 'Agent', input: { prompt: 'look around' } }]));
+      // The hooks fire for the subagent's tools too, tagged with its agent id.
+      const pre = options.hooks!.PreToolUse![0]!.hooks[0]!;
+      void pre({ hook_event_name: 'PreToolUse', agent_id: 'agent-1', session_id: sessionId, transcript_path: '', cwd: harness.dataDir, tool_use_id: 'toolu_hooked', tool_name: 'Read', tool_input: {} }, 'toolu_hooked', { signal: new AbortController().signal });
+      fake.emit(sub('assistant', { message: { id: 'msg_sub1', role: 'assistant', content: [
+        { type: 'text', text: 'SUBAGENT THINKING ALOUD' },
+        { type: 'tool_use', id: 'toolu_grep', name: 'Grep', input: { pattern: 'x' } },
+      ], usage: { input_tokens: 50000 } } }));
+      fake.emit(sdk({ type: 'stream_event', session_id: sessionId, parent_tool_use_id: 'toolu_task', event: { type: 'message_start', message: { id: 'msg_sub2' } } }));
+      fake.emit(sdk({ type: 'stream_event', session_id: sessionId, parent_tool_use_id: 'toolu_task', event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'SUBAGENT STREAM' } } }));
+      fake.emit(sub('user', { message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_grep', content: 'hit' }] } }));
+      fake.emit(sub('assistant', { error: 'rate_limit', message: { id: 'msg_sub3', role: 'assistant', content: [{ type: 'text', text: 'API Error: 429' }] } }));
+      fake.emit(toolResult(sessionId, 'toolu_task', 'the subagent report'));
+      fake.emit(sdk({ type: 'assistant', session_id: sessionId, parent_tool_use_id: null, message: { id: 'msg_main', role: 'assistant', content: [{ type: 'text', text: 'MAIN ANSWER' }], usage: { input_tokens: 120, cache_read_input_tokens: 30 } } }));
+      fake.emit(success(sessionId));
+      fake.end();
+    });
+
+    expect(await runTurn(client, threadId, 'explore')).toBe('done');
+    const thread = await client.call('threads.get', { threadId });
+    const parts = thread.messages.filter((message) => message.role === 'assistant').flatMap((message) => message.parts);
+    expect(parts.some((part) => part.type === 'error')).toBe(false);
+    expect(parts.filter((part) => part.type === 'tool').map((part) => part.type === 'tool' ? part.toolId : '')).toEqual(['toolu_task']);
+    const texts = parts.filter((part) => part.type === 'text').map((part) => part.type === 'text' ? part.text : '');
+    expect(texts).toEqual(['MAIN ANSWER']);
+    // The meter is the main loop's last request, never the subagent's prompt.
+    expect(thread.context?.tokens).toBe(150);
+  });
+
+  test('a background subagent talking after the turn opens no turn of its own', async () => {
+    const client = await harness.connect();
+    const threadId = await claudeThread(client);
+    const sessionId = 'sess-bg-sub';
+    scripted((fake) => {
+      fake.emit(init(sessionId));
+      fake.emit(assistant(sessionId, [{ type: 'tool_use', id: 'toolu_agent', name: 'Agent', input: { prompt: 'dig', run_in_background: true } }]));
+      fake.emit(sdk({ type: 'system', subtype: 'background_tasks_changed', session_id: sessionId, tasks: [{ task_id: 'agent-1', task_type: 'local_agent', description: 'dig' }] }));
+      fake.emit(toolResult(sessionId, 'toolu_agent', 'Async agent launched'));
+      fake.emit(success(sessionId));
+    });
+    expect(await runTurn(client, threadId, 'dig in the background')).toBe('done');
+
+    queries[0]!.emit(sdk({ type: 'assistant', session_id: sessionId, parent_tool_use_id: 'toolu_agent', message: { id: 'msg_bg', role: 'assistant', content: [{ type: 'text', text: 'still digging' }] } }));
+    await Bun.sleep(300);
+    expect(harness.core.journal.listTurns(threadId)).toHaveLength(1);
+    expect((await client.call('threads.get', { threadId })).status).toBe('idle');
+    await client.call('turns.stop', { threadId });
+  });
+
   test('output the CLI writes while the last turn is still closing opens its turn right after', async () => {
     const client = await harness.connect();
     const threadId = await claudeThread(client);

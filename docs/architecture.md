@@ -137,7 +137,11 @@ it finishes opens a turn of its own, marked "Background work finished".
 
 Where they differ is worth knowing before you touch one. `claude-sdk` runs the
 Claude Agent SDK with a `PreToolUse` hook as the single gate that journals and
-decides every tool call. `acp` speaks the Agent Client Protocol over the agent's
+decides every tool call. What a subagent (the Agent or Task tool) writes, tagged
+with `parent_tool_use_id`, stays off the main message, as it does in an imported
+transcript: its text, tool calls and usage are its own, the Agent card shows the
+report the main loop reads, and an API error inside the subagent is a log line,
+not a failed turn. `acp` speaks the Agent Client Protocol over the agent's
 stdio and sends the thread's permission mode as `session/set_mode`, matching the
 agent's own spelling out of a candidate list, because ACP standardises the call
 and never the ids. `codex-appserver` carries its own ndjson JSON-RPC peer, since
