@@ -202,12 +202,13 @@
   .scrim.closing { animation-name: fade-out; pointer-events: none; }
   /* The title bar stays above the tour: the window can still be moved, minimized or closed. */
   .scrim.shell { top: var(--titlebar); }
-  .panel { display: flex; flex-direction: column; width: min(640px, 100%); max-height: calc(100dvh - 32px); background: var(--color-surface); border: 1px solid var(--color-edge); border-radius: var(--radius-xl); box-shadow: var(--shadow-e3); animation: pop var(--dur-3) var(--ease-out-quint); }
+  /* One height for every step, so Next stays under the pointer from one screen to the next; a longer step scrolls. */
+  .panel { display: flex; flex-direction: column; width: min(640px, 100%); height: min(808px, calc(100dvh - 32px)); background: var(--color-surface); border: 1px solid var(--color-edge); border-radius: var(--radius-xl); box-shadow: var(--shadow-e3); animation: pop var(--dur-3) var(--ease-out-quint); }
   .panel:focus, h1:focus { outline: none; }
   .panel.closing { animation: pop-out var(--dur-2) var(--ease-out-quint); }
   header { display: flex; align-items: center; gap: 8px; padding: 12px 16px; color: var(--color-muted-foreground); font-size: var(--text-sm); }
   header button { margin-left: auto; }
-  .screen { overflow-y: auto; min-height: 0; padding: 12px 28px 24px; }
+  .screen { flex: 1; overflow-y: auto; min-height: 0; padding: 12px 28px 24px; }
   h1 { font-size: var(--text-lg); line-height: 1.35; margin: 0 0 8px; }
   h1.soul { text-align: center; font-size: var(--text-xl); font-weight: 900; letter-spacing: .08em; animation: soul 10s linear forwards; }
   @keyframes soul {
