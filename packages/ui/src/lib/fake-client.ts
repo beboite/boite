@@ -1,7 +1,9 @@
 import { FakeAgents } from './fake-agents';
 import {
   DEFAULT_DELEGATION_CONFIG,
+  DEVICE_EVENTS,
   attachmentError,
+  settingsPatchError,
   previewReferencesError,
   previewPrompt,
   KEYBINDING_COMMANDS,
@@ -74,6 +76,7 @@ import {
 import { decodedBytes } from './attachments';
 import { RpcFailure, type ClientState, type EventHandler, type ObservableClient } from './client';
 import { seedAccounts } from './fake-client/accounts-seed';
+import { checkAnswer, checkAsk, checkCwd, checkEffort, checkModel, checkRunnable, defaultModel, missingFolder, pathKey, sessionStatus } from './fake-client/checks';
 import {
   DIFF_NEW,
   DIFF_OLD,
@@ -284,6 +287,8 @@ export class FakeClient implements ObservableClient {
   #logins = new Map<string, RpcEvents['account.login']>();
   /** Fake shells by terminal id: what they printed and the line being typed. */
   #terminals = new Map<string, { cwd: string; output: string; line: string }>();
+  /** Threads whose title is being written, which the core refuses a second ask for. */
+  #retitling = new Set<ThreadId>();
   #seq = 0;
   #turnRequests = new Map<string, { content: string; turn: Turn }>();
   #delayMs: number;
@@ -493,6 +498,11 @@ export class FakeClient implements ObservableClient {
    * status did not, after a plugin switched the saved login for example
    * (`packages/core/src/plugins.ts`): the account again, which outdates its probes.
    */
+  /** A line of the core's own log, as `core.log` carries it: a failed scheduler, a guard at work. */
+  emitCoreLog(level: RpcEvents['core.log']['level'], message: string): void {
+    this.#emit('core.log', { level, message, at: this.#now() });
+  }
+
   announceLogin(accountId: string): void {
     const account = this.#accounts.find((a) => a.id === accountId);
     if (!account) throw this.#notFound('account', accountId);
@@ -623,6 +633,12 @@ export class FakeClient implements ObservableClient {
       };
     },
     'projects.add': async (params) => {
+      if (missingFolder(params.path)) {
+        throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'a project path must be an existing directory', data: { path: params.path } });
+      }
+      // As the core on Windows: the same folder in another case is the project already there.
+      const existing = this.#projects.find((p) => pathKey(p.path) === pathKey(params.path));
+      if (existing) return structuredClone(existing);
       const project: Project = {
         id: `p-${++this.#seq}`,
         name: params.name ?? params.path.split(/[\\/]/).filter(Boolean).pop() ?? params.path,
@@ -655,9 +671,17 @@ export class FakeClient implements ObservableClient {
       return thread?.pullRequest ?? null;
     },
     'projects.remove': async (params) => {
+      if (!this.#projects.some((p) => p.id === params.projectId)) throw this.#notFound('project', params.projectId);
+      if (this.#agents.referencesProject(params.projectId)) {
+        throw refusal('this project is referenced by persistent agents; keep it registered to preserve their workspaces and shared context');
+      }
       this.#projects = this.#projects.filter((p) => p.id !== params.projectId);
       const threads = [...this.#threads.values()].filter((thread) => thread.projectId === params.projectId);
-      for (const thread of threads) thread.archived = true;
+      // As the core: each thread is archived, and says so, before the records go.
+      for (const thread of threads) {
+        thread.archived = true;
+        this.#touch(thread);
+      }
       await Promise.all(threads.map((thread) => this.#stopTurn(thread.id)));
       for (const thread of threads) {
         this.#threads.delete(thread.id);
@@ -757,12 +781,15 @@ export class FakeClient implements ObservableClient {
       const account: Account = {
         id,
         providerId: params.providerId,
-        label: params.label,
+        label: params.label.length > 0 ? params.label : 'Account',
         isolationDir: params.useDefaultLocation && !provider.alwaysIsolated ? null : `${DATA_DIR}\\accounts\\${id}`,
         status: 'unknown',
         identity: null,
         createdAt: this.#now()
       };
+      // As the core's `check`: a fresh isolated account is signed out until a login runs in it.
+      account.status = sessionStatus(provider, account, false);
+      account.identity = account.status === 'ok' ? 'you@example.com' : null;
       this.#accounts.push(account);
       this.#emit('accounts.updated', structuredClone(account));
       return structuredClone(account);
@@ -781,7 +808,8 @@ export class FakeClient implements ObservableClient {
     'accounts.check': async (params) => {
       const account = this.#accounts.find((a) => a.id === params.accountId);
       if (!account) throw this.#notFound('account', params.accountId);
-      const status = account.isolationDir === null ? 'ok' : 'unauthenticated';
+      // A finished login left an identity behind: the session it wrote is still there.
+      const status = sessionStatus(this.#providers.find((p) => p.id === account.providerId), account, account.identity !== null);
       // As the core: an unchanged status writes nothing and tells nobody.
       if (status === account.status) return structuredClone(account);
       account.status = status;
@@ -802,7 +830,7 @@ export class FakeClient implements ObservableClient {
           message: `${account.label} uses the provider's own location: log it in with your own CLI, outside Boite`
         });
       }
-      if (this.#logins.has(account.id)) {
+      if (this.#logins.has(account.id) || this.#terminals.has(`login:${account.id}`)) {
         throw new RpcFailure({
           code: RpcErrorCode.Refused,
           message: `a login is already running for ${account.label}`
@@ -900,12 +928,22 @@ export class FakeClient implements ObservableClient {
         .map((t) => structuredClone(toSummary(t)));
     },
     'threads.create': async (params) => {
-      if (!this.#providers.some(provider => provider.id === params.providerId)) throw this.#notFound('provider', params.providerId);
       const project = this.#projects.find((p) => p.id === params.projectId);
       if (!project) throw this.#notFound('project', params.projectId);
-      this.#checkSpeed(params.providerId, params.accountId, params.model ?? null, params.speed ?? null);
+      const provider = this.#providers.find(entry => entry.id === params.providerId);
+      if (!provider) throw this.#notFound('provider', params.providerId);
+      const account = this.#accounts.find((entry) => entry.id === params.accountId);
+      if (!account) throw this.#notFound('account', params.accountId);
+      if (account.providerId !== provider.id) {
+        throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'the account belongs to another provider', data: { accountId: account.id, accountProviderId: account.providerId, providerId: provider.id } });
+      }
+      const models = this.#modelsOf(provider.id, account.id);
+      const model = checkModel(provider, account.id, models, params.model ?? defaultModel(provider));
+      const effort = checkEffort(provider, models, model, params.effort ?? null);
+      this.#checkSpeed(params.providerId, params.accountId, model, params.speed ?? null);
+      if (params.cwd !== undefined && params.cwd.length > 0 && params.worktree === undefined) checkCwd(project.path, params.cwd);
       const at = this.#now();
-      const title = params.title ?? 'Untitled thread';
+      const title = params.title !== undefined && params.title.length > 0 ? params.title : 'New thread';
       // The core's own placement: a branch named after the title, the
       // worktree beside the repository. No git here, only the two strings.
       if (params.worktree !== undefined && project.kind === 'drafts') throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'a draft has no worktree: the drafts folder is not a git repository', data: { projectId: project.id } });
@@ -921,10 +959,10 @@ export class FakeClient implements ObservableClient {
         titleSource: 'prompt',
         providerId: params.providerId,
         accountId: params.accountId,
-        model: params.model ?? null,
-        effort: params.effort ?? null,
+        model,
+        effort,
         speed: params.speed ?? null,
-        cwd: placed?.path ?? draftFolder ?? params.cwd ?? project.path,
+        cwd: placed?.path ?? draftFolder ?? (params.cwd || project.path),
         branch: placed?.branch ?? null,
         permissionMode: params.permissionMode ?? 'default',
         status: 'idle',
@@ -985,6 +1023,7 @@ export class FakeClient implements ObservableClient {
       const nextProviderId = this.#accounts.find(a => a.id === nextAccountId)?.providerId ?? thread.providerId;
       const changedModel = (params.model !== undefined && params.model !== thread.model) || nextAccountId !== thread.accountId;
       this.#checkSpeed(nextProviderId, nextAccountId, params.model !== undefined ? params.model : thread.model, params.speed !== undefined ? params.speed : changedModel ? null : thread.speed ?? null);
+      this.#checkSelection(thread, params);
       const before = [thread.accountId, thread.model, thread.effort, thread.speed, thread.permissionMode].join('\0');
       if (params.accountId !== undefined && params.accountId !== thread.accountId) {
         const account = this.#accounts.find((entry) => entry.id === params.accountId);
@@ -994,7 +1033,7 @@ export class FakeClient implements ObservableClient {
         }
         thread.accountId = account.id;
         thread.providerId = account.providerId;
-        thread.model = params.model === undefined ? provider.models.find((model) => model.default)?.id ?? null : params.model;
+        thread.model = params.model === undefined ? defaultModel(provider) : params.model;
         thread.effort = null; thread.speed = null;
         thread.sessionId = null;
         thread.sessionGeneration = (thread.sessionGeneration ?? 0) + 1;
@@ -1002,7 +1041,8 @@ export class FakeClient implements ObservableClient {
         thread.commands = [];
         this.#emit('thread.commands', { threadId: thread.id, commands: [] });
       }
-      if (params.title !== undefined) {
+      // As the core: an empty title is no title, and the one there stays.
+      if (params.title !== undefined && params.title.length > 0) {
         thread.title = params.title;
         thread.titleSource = 'user';
       }
@@ -1023,8 +1063,16 @@ export class FakeClient implements ObservableClient {
           data: { threadId: params.threadId }
         });
       }
+      if (this.#retitling.has(thread.id)) {
+        throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'a title is already being written for this thread', data: { threadId: thread.id } });
+      }
       // The echo agent's rule, at the echo agent's pace: its prefix and the first five words.
-      await new Promise<void>((resolve) => setTimeout(resolve, RETITLE_DELAY_MS));
+      this.#retitling.add(thread.id);
+      try {
+        await new Promise<void>((resolve) => setTimeout(resolve, RETITLE_DELAY_MS));
+      } finally {
+        this.#retitling.delete(thread.id);
+      }
       const words = first.parts
         .map((part) => (part.type === 'text' ? part.text : ''))
         .join(' ')
@@ -1047,6 +1095,8 @@ export class FakeClient implements ObservableClient {
         }
         this.#heldAnswers.delete(thread.id);
         if ((thread.background?.length ?? 0) > 0) this.#setBackground(thread, []);
+        // Its shell goes too, the way the core closes `terminal:<id>`.
+        this.#closeTerminal(`terminal:${thread.id}`);
       }
       return this.#touch(thread);
     },
@@ -1059,6 +1109,8 @@ export class FakeClient implements ObservableClient {
     },
     'threads.markRead': async (params) => {
       const thread = this.#thread(params.threadId);
+      // As the core: a thread already read is not written again, so nothing is announced.
+      if (!thread.unread) return { ok: true };
       thread.unread = false;
       this.#touch(thread);
       return { ok: true };
@@ -1093,6 +1145,11 @@ export class FakeClient implements ObservableClient {
       const providerId = thread.providerId;
       const provider = this.#providers.find(p => p.id === providerId);
       if (!provider) throw this.#notFound('provider', providerId);
+      // As the core, in its order: an archived or busy thread first, then whether the agent can run at all.
+      if (!thread.archived && !['queued', 'running', 'waiting'].includes(thread.status) && !this.#inFlight.has(thread.id)) {
+        const account = this.#accounts.find((a) => a.id === thread.accountId);
+        if (account) checkRunnable(provider, account);
+      }
       const error = attachmentError(params.attachments ?? [], provider);
       if (error) throw new RpcFailure({ code: RpcErrorCode.Refused, ...error });
       const rootId = thread.parentThreadId;
@@ -1196,19 +1253,23 @@ export class FakeClient implements ObservableClient {
     },
     'questions.ask': async (params) => {
       const thread = this.#thread(params.threadId);
-      const turn = thread.turns.at(-1);
+      if (thread.archived) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'cannot ask on an archived thread', data: { threadId: thread.id } });
+      const asked = checkAsk(params);
+      const turn = thread.turns.find((entry) => entry.status === 'running') ?? thread.turns.at(-1);
       if (!turn) {
         throw new RpcFailure({
           code: RpcErrorCode.Refused,
-          message: `thread ${params.threadId} has no turn to ask in yet`,
+          message: 'the thread has no turn to ask in yet',
           data: { threadId: params.threadId }
         });
       }
-      return { questionId: this.#askAsync(thread, turn, null, params.text, params.options ?? [], params.multiple === true) };
+      return { questionId: this.#askAsync(thread, turn, null, asked.text, asked.labels, asked.multiple) };
     },
     'questions.answer': async (params) => {
       const pending = this.#pendingQuestions.get(params.questionId);
       if (!pending) throw this.#notFound('question', params.questionId);
+      // Every refusal comes before the delete, so a refused answer leaves the card pending.
+      checkAnswer(pending.request, params);
       this.#pendingQuestions.delete(params.questionId);
       const text = params.text ?? '';
       const answer: QuestionAnswer =
@@ -1615,12 +1676,8 @@ export class FakeClient implements ObservableClient {
       return structuredClone(this.#keybindings);
     },
     'settings.set': async (params) => {
-      for (const field of ['maxConcurrentTurns', 'perAccountConcurrency'] as const) {
-        const value = params[field];
-        if (value !== undefined && (!Number.isInteger(value) || value < 1)) {
-          throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: `${field} must be a positive integer`, data: { field } });
-        }
-      }
+      const invalid = settingsPatchError(params);
+      if (invalid) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: invalid.message, data: { field: invalid.field } });
       this.#settings = { ...this.#settings, ...params };
       this.#scheduler = {
         ...this.#scheduler,
@@ -2700,9 +2757,20 @@ const ready = true;
     this.#emit('accounts.updated', structuredClone(account));
   }
 
+  /**
+   * As the core's `loginCancel`: the sign-in terminal closes without signing
+   * anyone in, the killed login ends as failed, and the account is read again.
+   */
   #cancelLogin(accountId: string): void {
-    if (!this.#logins.has(accountId)) return;
-    this.#loginEvent({ accountId, state: 'done', output: 'Login cancelled', url: null, exitCode: null });
+    const terminal = `login:${accountId}`;
+    if (this.#terminals.delete(terminal)) this.#emit('terminal.exited', { id: terminal, exitCode: 1 });
+    const running = this.#logins.get(accountId);
+    if (!running) return;
+    this.#loginEvent({ accountId, state: 'failed', output: running.output, url: running.url, exitCode: 1 });
+    const account = this.#accounts.find((a) => a.id === accountId);
+    if (!account) return;
+    account.status = sessionStatus(this.#providers.find((p) => p.id === account.providerId), account, account.identity !== null);
+    this.#emit('accounts.updated', structuredClone(account));
   }
 
   /** What a provider CLI prints first: a link to open, then a question. */
@@ -2869,6 +2937,8 @@ const ready = true;
     // A socket that is down carries nothing. Everything the core emitted
     // during the gap is lost, which is what `reload()` exists to repair.
     if (this.#state !== 'ready') return;
+    // The core's `mayReceiveEvent`: a paired device hears only the device events.
+    if (this.#principal === 'session' && !DEVICE_EVENTS.has(event)) return;
     const set = this.#handlers.get(event);
     if (!set) return;
     for (const handler of [...set]) handler(payload);
@@ -3067,9 +3137,39 @@ const ready = true;
    * ACP, Codex and pi probe their own catalogs. Demo models are explicitly
    * named as such; only OpenCode uses the large catalog fixture.
    */
+  /**
+   * The core's model and effort checks on `threads.update`, run before
+   * anything changes: the model when it changes or the account does, and the
+   * effort against the model the thread ends on.
+   */
+  #checkSelection(thread: Thread, params: RpcParams<'threads.update'>): void {
+    const account = this.#accounts.find((entry) => entry.id === (params.accountId ?? thread.accountId));
+    const provider = account && this.#providers.find((entry) => entry.id === account.providerId);
+    if (!account || !provider) return;
+    const models = this.#modelsOf(provider.id, account.id);
+    const switched = account.id !== thread.accountId;
+    let model = thread.model;
+    let effort = thread.effort;
+    if (switched) {
+      model = checkModel(provider, account.id, models, params.model === undefined ? defaultModel(provider) : params.model);
+      effort = null;
+    }
+    if (params.model !== undefined && (params.model !== thread.model || switched)) {
+      model = checkModel(provider, account.id, models, params.model);
+      effort = null;
+    }
+    if (params.effort !== undefined) effort = params.effort;
+    checkEffort(provider, models, model, effort);
+  }
+
+  /** The core's `modelsFor`: what the last probe of this account read, else the descriptor's list. */
+  #modelsOf(providerId: string, accountId: string): ModelInfo[] {
+    return this.#modelCatalogs.get(providerId + '::' + accountId) ?? this.#providers.find(p => p.id === providerId)?.models ?? [];
+  }
+
   #checkSpeed(providerId: string, accountId: string, model: string | null, speed: string | null): void {
     if (speed === null) return;
-    const models = this.#modelCatalogs.get(providerId + '::' + accountId) ?? this.#providers.find(p => p.id === providerId)?.models ?? [];
+    const models = this.#modelsOf(providerId, accountId);
     if (!models.find(m => m.id === model)?.speeds?.some(option => option.id === speed)) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'the model does not offer this speed' });
   }
 

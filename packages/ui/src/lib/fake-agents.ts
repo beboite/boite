@@ -39,6 +39,13 @@ export class FakeAgents {
     stop: (threadId: string) => void;
     protocol: (providerId: string) => string | undefined;
   }) {}
+  /** The core's reason to keep a project: a mission, team, resource or memory of an agent names it. */
+  referencesProject(projectId: string): boolean {
+    return this.all('mission').some(mission => mission.projectId === projectId)
+      || this.all('team').some(team => team.projectIds.includes(projectId))
+      || this.all('resource').some(resource => resource.scope.kind === 'project' && resource.scope.id === projectId)
+      || this.all('memory').some(memory => memory.scope.kind === 'project' && memory.scope.id === projectId);
+  }
   close(): void { this.closed = true; }
   open(): void { this.closed = false; this.kick(); }
   private kick(): void { queueMicrotask(() => { this.pauseRuns(); this.pump(); }); }

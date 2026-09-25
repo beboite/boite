@@ -639,9 +639,9 @@ test('an account check or provider reload that changes nothing stays silent, as 
     const heard: string[] = [];
     client.on('accounts.updated', account => heard.push(`account:${account.id}:${account.status}`));
     client.on('providers.updated', () => heard.push('providers'));
+    // As the core's `add`, which returns its own check: the new account is read and announced once.
     const account = await client.call('accounts.add', { providerId: 'opencode', label: 'Checked', useDefaultLocation: true });
-    heard.length = 0;
-    expect((await client.call('accounts.check', { accountId: account.id })).status).toBe('ok');
+    expect(account.status).toBe('ok');
     expect(heard).toEqual([`account:${account.id}:ok`]);
     heard.length = 0;
     expect((await client.call('accounts.check', { accountId: account.id })).status).toBe('ok');

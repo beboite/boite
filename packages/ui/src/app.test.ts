@@ -2,6 +2,7 @@ import { afterEach, expect, test, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import type { RpcMethodName } from '@boite/contracts';
 import App from './App.svelte';
+import type { FakeClient } from './lib/fake-client';
 import { confirm } from './lib/confirm.svelte';
 import { store } from './lib/store.svelte';
 import { workspace } from './lib/workspace.svelte';
@@ -1721,7 +1722,31 @@ test('account lifecycle cancel button stops login and restores retry', async () 
   await waitFor(() => document.querySelector('[data-testid=account-login-cancel]') !== null);
   query<HTMLButtonElement>('[data-testid=account-login-cancel]').click();
   await waitFor(() => document.querySelector('[data-testid=account-login-row]') === null);
+  // The core ends a cancelled login as failed, not done: the store drops the row all the same.
+  expect(store.logins).toEqual({});
   expect(document.querySelector('[data-testid=account-login]')).not.toBeNull();
+});
+
+test('a new isolated account is signed out, and a thread on it offers the sign-in', async () => {
+  await mountOnFake();
+  const client = store.client!;
+  const account = await client.call('accounts.add', { providerId: 'claude', label: 'Work', useDefaultLocation: false });
+  expect(account.status).toBe('unauthenticated');
+  const [project] = await client.call('projects.list', {});
+  const thread = await client.call('threads.create', { projectId: project!.id, providerId: 'claude', accountId: account.id, title: 'Signed out' });
+  await waitFor(() => store.threads.some((entry) => entry.id === thread.id));
+  await store.open(thread.id);
+  await waitFor(() => document.querySelector('[data-testid=composer-reconnect]') !== null);
+});
+
+test('an error line of the core log shows the error toast, a warning does not', async () => {
+  await mountOnFake();
+  const fake = store.client as unknown as FakeClient;
+  // Events reach the store as they are sent, so the warning has been handled once this returns.
+  fake.emitCoreLog('warn', 'the disk is slow');
+  expect(store.error).toBeNull();
+  fake.emitCoreLog('error', 'the scheduler failed');
+  await waitFor(() => document.querySelector('[data-testid=error-toast]')?.textContent?.includes('the scheduler failed') === true);
 });
 
 test('account lifecycle provider metadata gates login and the command-line login', async () => {
