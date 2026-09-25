@@ -284,6 +284,22 @@ change drops the process. Nothing ever sends `authenticate` to Grok: an account
 with no `auth.json` is refused before a turn starts, and `authenticate` on an
 empty home opens a browser.
 
+An ACP thread resumes its session with `session/load` when the agent
+advertises `loadSession`. When the agent refuses that load while its process is
+alive, the turn fails with a sentence saying the agent no longer has the
+conversation and asking to send the message again; the core forgets the
+session id and starts a new session generation, so the next turn opens a fresh
+session and carries the conversation so far in its prompt. An agent without
+`loadSession` gets the same treatment whenever its process goes with the turn,
+and the log says it cannot load a session. Stop sends `session/cancel` and
+gives the agent three seconds to end the turn before the process is dropped; a
+stop while the process or the session is still starting drops it at once. An
+agent that exits before it answers `initialize`, in a turn, a probe or a login,
+fails with its exit code and the last line it wrote to stderr. Stderr is read in
+whole lines, a line cut at 64 KB. A tool's text output and a markdown document
+are cut at 64K characters with a note saying where, and a diff whose two sides
+pass that size is drawn as a sentence giving its size.
+
 ## The Antigravity CLI
 
 Two rows carry Antigravity, and they are two different programs.
@@ -324,7 +340,9 @@ change starts a new process on the same conversation. With
 `warmProcessMinutes` above zero the process stays up between turns; otherwise
 stdin closes when the turn ends, the process gets eight seconds to leave, and
 the next one of the thread waits for it. Stop kills the whole tree, since agy
-starts the MCP servers from its own settings as children. `BROWSER` points at
+starts the MCP servers from its own settings as children. A stop that lands
+while the models are still being listed, before the launch, ends the turn at
+once and starts no process. `BROWSER` points at
 `{browserNoop}` for every process, so nothing agy does opens a window.
 `/compact` is refused: print mode rejects the CLI's interactive-only commands.
 
@@ -350,6 +368,10 @@ question:
   `session/set_config_option` in a fresh probe process and reads the scale the
   answer carries. One read per model is cached with the list, the composer asks
   for the model it lands on, and a failed read keeps the list already cached.
+  A model's scale is read once, even when the agent names none for it. The
+  config options a turn's own `session/new` or `session/load` answers are kept
+  for the account too, so a later process that resumes a session seeds its
+  controls from them instead of opening a discovery `session/new` every time.
 - Codex: `initialize`, the `initialized` notification, then `model/list` until no
   cursor comes back. Each model carries its own efforts and its own default, so
   two models on one account can offer two different scales. `serviceTiers` supplies

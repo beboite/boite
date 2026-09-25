@@ -86,6 +86,10 @@ Claude's `total_cost_usd` is a running total: it grows across the turns of a
 warm process, and a process that resumes a session restores it. The driver
 charges each turn the difference, reading the earlier turns of the session from
 the journal, and takes the total as it stands when the CLI started from zero.
+The ACP `usage_update` cost is the session's running total in the same way:
+a warm session charges each turn the difference from the session's earlier
+turns, and a new or resumed process that starts below that sum is charged its
+own total. A `usage_update` with no token counts still records its cost.
 On a subscription the figure is what the same tokens would cost on the API, not
 money spent.
 
