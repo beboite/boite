@@ -5,6 +5,7 @@
   import { appUpdateInstall } from '../lib/app-update-install.svelte';
   import { bytes, time } from '../lib/format';
   import { fill, strings } from '../lib/strings';
+  import { formatLocale } from '../lib/i18n.svelte';
 
   let { updater = appUpdater }: { updater?: AppUpdater } = $props();
   let update = $derived(updater.snapshot);
@@ -75,7 +76,7 @@
       {/if}
       {#if update.publishedAt}
         <dt>{strings.appUpdate.published}</dt>
-        <dd>{new Date(update.publishedAt).toLocaleDateString()}</dd>
+        <dd>{new Date(update.publishedAt).toLocaleDateString(formatLocale())}</dd>
       {/if}
     </dl>
 

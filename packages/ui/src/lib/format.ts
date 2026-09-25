@@ -15,6 +15,9 @@ interface Formatters {
   relative: Intl.RelativeTimeFormat;
   counter: Intl.NumberFormat;
   plain: Intl.NumberFormat;
+  /** One digit after the decimal sign, always: `38.0 s`, `38,0 s`. */
+  tenths: Intl.NumberFormat;
+  whole: Intl.NumberFormat;
   weekday: Intl.DateTimeFormat;
 }
 
@@ -31,6 +34,8 @@ function formatters(): Formatters {
     relative: new Intl.RelativeTimeFormat(tag, { numeric: 'auto', style: 'narrow' }),
     counter: new Intl.NumberFormat(tag, { notation: 'compact', maximumFractionDigits: 1 }),
     plain: new Intl.NumberFormat(tag),
+    tenths: new Intl.NumberFormat(tag, { minimumFractionDigits: 1, maximumFractionDigits: 1 }),
+    whole: new Intl.NumberFormat(tag, { maximumFractionDigits: 0 }),
     weekday: new Intl.DateTimeFormat(tag, { weekday: 'short', hour: '2-digit', minute: '2-digit' })
   };
   sets.set(tag, made);
@@ -40,19 +45,40 @@ function formatters(): Formatters {
 export function bytes(value: number | null | undefined): string {
   const units = strings.units;
   if (value === null || value === undefined) return strings.common.none;
+  const { tenths, whole } = formatters();
   if (value < 1024) return `${value} ${units.bytes}`;
-  if (value < 1024 * 1024) return `${(value / 1024).toFixed(0)} ${units.kilobytes}`;
-  if (value < 1024 * 1024 * 1024) return `${(value / (1024 * 1024)).toFixed(0)} ${units.megabytes}`;
-  return `${(value / (1024 * 1024 * 1024)).toFixed(1)} ${units.gigabytes}`;
+  if (value < 1024 * 1024) return `${whole.format(value / 1024)} ${units.kilobytes}`;
+  if (value < 1024 * 1024 * 1024) return `${whole.format(value / (1024 * 1024))} ${units.megabytes}`;
+  return `${tenths.format(value / (1024 * 1024 * 1024))} ${units.gigabytes}`;
 }
 
 export function millis(value: number | null | undefined): string {
   const units = strings.units;
   if (value === null || value === undefined) return strings.common.none;
+  const { tenths } = formatters();
   if (value < 1000) return `${Math.round(value)} ${units.milliseconds}`;
-  if (value < 60_000) return `${(value / 1000).toFixed(1)} ${units.seconds}`;
-  if (value < 3_600_000) return `${(value / 60_000).toFixed(1)} ${units.minutes}`;
-  return `${(value / 3_600_000).toFixed(1)} ${units.hours}`;
+  if (value < 60_000) return `${tenths.format(value / 1000)} ${units.seconds}`;
+  if (value < 3_600_000) return `${tenths.format(value / 60_000)} ${units.minutes}`;
+  return `${tenths.format(value / 3_600_000)} ${units.hours}`;
+}
+
+/** An effort or speed level in the app's language, by the id providers share; another id keeps the provider's word. */
+export function levelName(level: { id: string; label: string }): string {
+  const name: unknown = (strings.effortLevels as unknown as Record<string, unknown>)[level.id];
+  return typeof name === 'string' ? name : level.label;
+}
+
+/** A quota window the core named in English (`5 hours`, `Weekly`, `Monthly`) in the app's language; any other name as sent. */
+export function quotaWindowName(label: string): string {
+  if (label === 'Weekly') return strings.quotas.windowWeekly;
+  if (label === 'Monthly') return strings.quotas.windowMonthly;
+  const hours = /^(\d+(?:\.\d+)?) hours$/.exec(label)?.[1];
+  return hours === undefined ? label : strings.quotas.windowHours.replace('{hours}', formatters().plain.format(Number(hours)));
+}
+
+/** Up to one decimal, in the language's own digits: a percentage left on a quota. */
+export function tenth(value: number): string {
+  return formatters().plain.format(Math.round(value * 10) / 10);
 }
 
 export function duration(startedAt: number, endedAt: number | null): string {

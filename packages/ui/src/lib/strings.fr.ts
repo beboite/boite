@@ -1280,6 +1280,9 @@ export const fr: Translation = {
     intro: "Limites d'abonnement communiquées par vos fournisseurs. C'est distinct des jetons dépensés dans Boite.",
     remaining: '{percent} % restants',
     resets: 'Repart {time}',
+    windowHours: '{hours} heures',
+    windowWeekly: 'Hebdomadaire',
+    windowMonthly: 'Mensuelle',
     checked: 'Mis à jour {time}',
     stale: 'Dernière lecture réussie',
     empty: "Connectez un fournisseur pour voir ses limites d'abonnement.",
@@ -1428,6 +1431,19 @@ export const fr: Translation = {
     minutes: 'min',
     hours: 'h',
     tokens: 'jetons'
+  },
+
+  effortLevels: {
+    off: 'Désactivé',
+    minimal: 'Minimal',
+    low: 'Faible',
+    medium: 'Moyen',
+    high: 'Élevé',
+    xhigh: 'Très élevé',
+    max: 'Max',
+    ultra: 'Ultra',
+    ultrathink: 'Ultrathink',
+    fast: 'Rapide'
   },
 
   common: {

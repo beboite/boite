@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import type { Usage, UsageHistory, UsageHistoryRow } from '@boite/contracts';
 import { fakeUsageHistory } from './fake-usage';
+import { setLocaleSetting } from './i18n.svelte';
 import { dayEdges, formatMetric, formatTick, niceScale, seriesFor, summarize, topThreads } from './usage';
 
 function usage(inputTokens: number, outputTokens: number, cost: number | null = null): Usage {
@@ -116,6 +117,17 @@ describe('formatMetric', () => {
     expect(formatMetric('cost', 12_400)).toBe('$12.4k');
     expect(formatTick('cost', 2.5)).toBe('$2.5');
     expect(formatTick('cost', 1500)).toBe('$1.5k');
+  });
+
+  test('writes counts and money the way the language the app speaks does', () => {
+    setLocaleSetting('fr');
+    try {
+      const plain = (text: string) => text.replace(/\s/g, ' ');
+      expect(plain(formatMetric('turns', 1594))).toBe('1 594');
+      expect(plain(formatMetric('cost', 113.23))).toBe('113,23 $US');
+      expect(plain(formatMetric('cost', 12_400))).toBe('12,4k $US');
+      expect(plain(formatTick('cost', 2.5))).toBe('2,5 $US');
+    } finally { setLocaleSetting('en'); }
   });
 });
 

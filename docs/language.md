@@ -24,9 +24,18 @@ through `tray_labels` at start and on every change. App update errors come from
 the shell and stay in English.
 
 Dates and numbers follow, and keep the machine's region when it speaks the
-language the app is set to: a French machine on French reads `jeu. 21:48` and
-`31 000`, an English machine on French reads `Thu 21:48`. An app set to English
-on a French machine reads as English, not as a French machine writing English.
+language the app is set to. A French machine on French reads `jeu. 21:48` and
+`31 000`, and so does an English machine on French, in French's default
+region. An app set to English on a French machine reads as English, not as a French machine
+writing English. Every date, count, duration, size and dollar amount goes
+through `formatLocale()` (`lib/format.ts`, `lib/usage.ts`), never the system's
+default: French reads `38,0 s`, `1 594 tours` and `113,23 $US`.
+
+The core names effort levels and quota windows in English. The UI shows its
+own word instead: an effort or speed level by its id (`high`, `xhigh`, `fast`,
+`strings.effortLevels`), a quota window by the name the core gives it (`5
+hours`, `Weekly`, `Monthly`). A level or a window the UI has no word for shows
+the provider's own name.
 
 ## Where the sentences are
 
