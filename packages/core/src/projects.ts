@@ -76,7 +76,7 @@ export class ProjectStore {
   /** The drafts project, its folder and its row made on the first call. */
   drafts(): Project {
     const path = this.draftsPath();
-    const existing = this.list().find((project) => project.path === path);
+    const existing = this.list().find((project) => this.isDrafts(project));
     if (existing !== undefined) {
       mkdirSync(path, { recursive: true });
       return existing;
@@ -89,8 +89,9 @@ export class ProjectStore {
     return this.add(path, 'Drafts');
   }
 
+  /** Compared the way `add` dedupes: the drafts folder registered in another case is still the drafts. */
   isDrafts(project: Project): boolean {
-    return project.path === this.draftsPath();
+    return pathKey(project.path) === pathKey(this.draftsPath());
   }
 
   /** The files a mention can name, ranked on the query. */
@@ -148,13 +149,15 @@ export class ProjectStore {
       isDirectory = false;
     }
     if (!isDirectory) throw refused('a project path must be an existing directory', { path: full });
-    // The folder just answered, so this check does too; the answer is exact from the start.
-    this.git.set(full, { value: existsSync(join(full, '.git')), inflight: false });
 
-    // No second check of a folder that was just checked. Windows paths ignore
-    // case, so `d:\dev\app` is the project `D:\Dev\App` already registered.
+    // Windows paths ignore case, so `d:\dev\app` is the project `D:\Dev\App`
+    // already registered. The git flag is keyed by the stored spelling, the
+    // one `described` and `refreshGit` read.
     const key = pathKey(full);
     const existing = this.core.journal.listProjects().find((project) => pathKey(project.path) === key);
+    // The folder just answered, so this check does too; the answer is exact from the start.
+    this.git.set(existing?.path ?? full, { value: existsSync(join(full, '.git')), inflight: false });
+    // No second check of a folder that was just checked.
     if (existing !== undefined) return this.described(existing, false);
 
     const project: Project = {
