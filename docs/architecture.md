@@ -57,8 +57,10 @@ card, which reaches every client as `permission.resolved` with `deny`.
 Three principals say hello. The owner holds the core token or an owner
 pairing; a session is a paired phone, held to `DEVICE_METHODS`; an agent is a
 process a thread launched, holding the per-thread token the core put in its
-environment, held to `AGENT_METHODS` on that thread alone. Both lists live in
-`packages/core/src/access.ts` with the reason for each entry;
+environment, held to `AGENT_METHODS` on that thread alone. The device lists
+(`DEVICE_METHODS`, `DEVICE_EVENTS`) live in `packages/contracts/src/access.ts`,
+where the core's router and the in-memory client both read them; the agent list
+lives in `packages/core/src/access.ts`, each entry with its reason;
 [cli.md](cli.md) says how an agent uses its door.
 
 ## The journal is the truth, the tables are a projection
@@ -284,7 +286,11 @@ read through the same handle.
 
 The in-memory client checks each RPC handler's input and result against the
 shared contract. Its plugin domain owns installation state and cancellation;
-file, conversation and provider fixtures live under `lib/fake-client/`.
+file, conversation and provider fixtures live under `lib/fake-client/`, and
+`lib/fake-client/checks.ts` holds the core's refusals it repeats. The contract
+scenarios in `tests/contract/scenarios.ts` run against both the core and the
+fake ([development](development.md#contract-scenarios)), so a rule the fake stops
+following fails by name.
 
 `bun run check:architecture` checks runtime imports in production TypeScript
 and JavaScript, including literal dynamic imports. It rejects cycles, core/UI

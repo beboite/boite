@@ -251,6 +251,27 @@ and the release shell executable driven over the WebView2 debugging port. The
 shell part runs with `BOITE_SHELL_HIDDEN=1`, which is the only way an agent may
 ever start that executable: a window on the user's screen is forbidden.
 
+### Contract scenarios
+
+`tests/contract/scenarios.ts` holds the contract as behaviour: each scenario
+drives methods through a small environment (`call`, `on`, a new folder, a
+missing one) and throws on the first code, data key or event that breaks the
+rule. It reads codes and data keys, never message text. Two runners share it:
+`packages/core/test/contract.test.ts` against one echo core over WebSocket, and
+`packages/ui/src/lib/fake-client.contract.test.ts` against the in-memory client.
+Both finish in under a second. `KNOWN_DIVERGENCES` lists a scenario allowed to
+fail on one side, with the reason; a listed scenario that passes fails its
+runner, so a fixed drift leaves the list. The rules the fake repeats live in
+`packages/ui/src/lib/fake-client/checks.ts`, and `settings.set` validation is
+one function in the contract (`settingsPatchError`). What only one side can
+show (a shell to close, a login to cancel, a device kept from owner events) is
+in `packages/ui/src/lib/fake-client.parity.test.ts`. In the fake, a folder
+under one named `missing` does not exist.
+
+Vitest gives each UI test 15 seconds (`packages/ui/vitest.config.ts`); the
+`waitFor` of `app.test.ts` stops at 8 seconds, so a slow wait fails with the
+page's text rather than as a bare timeout.
+
 ## Rebuilding the shell executable
 
 `bun run test:shell` runs the Rust unit tests. A full `bun run e2e` fails when
