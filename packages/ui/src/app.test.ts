@@ -283,6 +283,8 @@ test('the keyboard stays in the connect dialog while its steps replace the butto
   code.closest('form')!.requestSubmit();
   await waitFor(() => document.querySelector('[data-testid=connect-use]') !== null, 20_000);
   await waitFor(() => document.activeElement === document.querySelector('[data-testid=connect-use]'));
+  query<HTMLButtonElement>('[data-testid=connect-use]').click();
+  await waitFor(() => document.querySelector('[data-testid=connect-dialog]') === null);
 }, 30_000);
 
 test('the sidebar draft row hands the keyboard back to the composer', async () => {
