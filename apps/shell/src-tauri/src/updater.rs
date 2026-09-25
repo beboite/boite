@@ -1,7 +1,7 @@
 //! Signed desktop updates. These commands never update a connected remote core.
 use std::{path::PathBuf, sync::{atomic::{AtomicBool, Ordering}, Mutex}, time::{Duration, Instant}};
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter, State, Webview};
+use tauri::{AppHandle, Emitter, Manager, State, Webview};
 use tauri_plugin_updater::{Update, UpdaterExt};
 use sha2::{Digest, Sha256};
 
@@ -43,8 +43,6 @@ pub struct AppUpdater {
     busy: AtomicBool,
     preference: PathBuf,
     cache: PathBuf,
-    /// The data directory, whose `core.json` names the core an install must stop.
-    directory: PathBuf,
 }
 struct Operation<'a>(&'a AtomicBool);
 impl Drop for Operation<'_> { fn drop(&mut self) { self.0.store(false, Ordering::Release); } }
@@ -70,7 +68,7 @@ impl AppUpdater {
             phase: if error.is_some() { "error" } else { "idle" }.into(), current_version: version,
             current_channel, channel, version: None, notes: None, published_at: None,
             received: 0, total: None, error, supported,
-        }), pending: Mutex::new(None), busy: AtomicBool::new(false), preference, cache, directory }
+        }), pending: Mutex::new(None), busy: AtomicBool::new(false), preference, cache }
     }
     fn begin(&self) -> Result<Operation<'_>, String> {
         if !self.snapshot.lock().unwrap().supported { return Err("Updates require an installed Windows x64 build of Boite".into()); }
@@ -218,21 +216,25 @@ pub async fn app_update_install(webview: Webview, app: AppHandle, state: State<'
     // /shutdown, before the installer has to replace boite-core.exe. A core
     // still running would keep that file locked and, once the new shell
     // started, be adopted as the engine of a version it is not.
-    let directory = state.directory.clone();
-    let stopped = tauri::async_runtime::spawn_blocking(move || crate::resident::stop_local_core(&directory, crate::resident::GRACE)).await;
-    if let Some(error) = match stopped { Ok(Ok(_)) => None, Ok(Err(e)) => Some(e), Err(e) => Some(e.to_string()) } {
+    let core = app.clone();
+    let stopped = tauri::async_runtime::spawn_blocking(move || match core.try_state::<crate::CoreState>() {
+        Some(core) => core.stop_for_install(),
+        None => Ok(()),
+    }).await;
+    if let Some(error) = match stopped { Ok(Ok(())) => None, Ok(Err(e)) => Some(e), Err(e) => Some(e.to_string()) } {
         let error = format!("The engine could not be stopped for the update, so nothing was installed: {error}");
         state.fail(&app, error.clone());
         return Err(error);
     }
     // The in-memory digest ties these exact bytes to the verified download.
     // On Windows Tauri exits once the installer launches. If it cannot
-    // launch, the engine stays stopped until the window reconnects, which
-    // starts it again.
+    // launch, the hold is released and the window's next reconnect starts the
+    // engine again.
     let result = tauri::async_runtime::spawn_blocking(move || pending.update.install(bytes)).await;
     match result {
         Ok(Ok(())) => { app.restart(); }
         outcome => {
+            if let Some(core) = app.try_state::<crate::CoreState>() { core.release_hold(); }
             let error = match outcome { Ok(Err(e)) => e.to_string(), Err(e) => e.to_string(), _ => unreachable!() };
             state.fail(&app, error.clone());
             Err(error)

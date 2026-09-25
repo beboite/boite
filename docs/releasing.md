@@ -219,17 +219,20 @@ anything: it names every file and where it goes.
 
 ## How the shell finds a core
 
-Closing the window exits the shell and its owned core by default. General settings
+Closing the window exits the shell by default, and the resident core keeps running. General settings
 can keep it in the notification area instead. The choice lives in
 `<dataDir>/shell-settings.json` and survives restart. The tray's Quit action always
 exits. Hovering or clicking the tray icon opens a compact quota window; its Show
 action restores the main window. Quota polling runs only while that popup is open.
 
-The installed shell starts a core of its own, adopts one that already answers,
-and owns the one it started through a `KILL_ON_JOB_CLOSE` Job Object, so a shell
-killed hard takes its core down with it instead of leaving an orphan holding
-`boite-core.exe` open, which is exactly what once made an install fail on "error
-opening file for writing".
+The installed shell starts a core of its own or adopts one of its own version
+that already answers. That core is resident: it outlives the shell. Since a
+running core keeps `boite-core.exe` open, which once made an install fail on
+"error opening file for writing", the updater stops it before it launches the
+installer, and the installer's hooks (`windows/hooks.nsh`) stop the core of
+that install before an install or an uninstall writes the file. With
+`BOITE_CORE_RESIDENT=0` (tests) the shell owns its core through a
+`KILL_ON_JOB_CLOSE` Job Object instead, so a shell killed hard takes it down.
 
 It looks for the core in this order:
 

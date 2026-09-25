@@ -45,8 +45,11 @@ Restarting always requires a click and an in-app confirmation. It interrupts
 agents owned by that desktop. Saved conversations remain; interrupted turns
 are not automatically retried. The local core is resident and outlives the
 shell, so before launching the installer the shell asks it to stop through its
-authenticated `POST /shutdown` and waits up to 12 seconds, then ends it. If the
-core cannot be stopped, nothing is installed and the card shows why. A remote
+authenticated `POST /shutdown` and waits up to 12 seconds, then ends it. Until
+the installer takes over, the shell refuses to start a core again, so the
+window's reconnect cannot relaunch the old executable. If the core cannot be
+stopped, nothing is installed and the card shows why; if the installer cannot
+launch, the next reconnect starts the core again. A remote
 core is not touched by the desktop updater.
 
 The Windows installer stops the core of its own install too, for an update, a

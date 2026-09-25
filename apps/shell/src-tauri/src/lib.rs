@@ -272,7 +272,13 @@ pub struct CoreState {
     /// Held for the life of the shell process: see `job::CoreJob`.
     job: Mutex<Option<CoreJob>>,
     launch: Launch,
+    /// Set while an update installs: the core was stopped so the installer can
+    /// replace its files, and nothing may start it again from the old ones.
+    held: AtomicBool,
 }
+
+/// The refusal a caller gets while an update installs.
+const HELD: &str = "the core is stopped while the app update installs";
 
 /// Normal installations keep the core alive. Automation can request owned lifetime.
 fn resident_core() -> bool { std::env::var("BOITE_CORE_RESIDENT").as_deref() != Ok("0") }
@@ -326,7 +332,26 @@ impl CoreState {
             child: Mutex::new(None),
             job: Mutex::new(None),
             launch,
+            held: AtomicBool::new(false),
         }
+    }
+
+    /// Stops the local core before an installer replaces its files, and keeps
+    /// it stopped: the window notices the lost core within seconds and asks for
+    /// it again, which would otherwise start the old executable and lock it.
+    /// An error leaves the core running and the hold released.
+    pub(crate) fn stop_for_install(&self) -> Result<(), String> {
+        self.held.store(true, Ordering::SeqCst);
+        let stopped = resident::stop_local_core(&self.launch.directory, resident::GRACE);
+        if stopped.is_err() {
+            self.release_hold();
+        }
+        stopped.map(|_| ())
+    }
+
+    /// The install did not happen: the next caller starts the core again.
+    pub(crate) fn release_hold(&self) {
+        self.held.store(false, Ordering::SeqCst);
     }
 
     /// Closing a client leaves a resident core running. Automation may own its child.
@@ -941,6 +966,9 @@ fn exited_early(state: &CoreState) -> Option<String> {
 /// is the one an update or a reinstall left running: it is stopped first,
 /// since it holds the data directory's lock and speaks an older protocol.
 fn resolve_core(state: &CoreState) -> Result<(CoreEndpoint, Option<u32>), String> {
+    if state.held.load(Ordering::SeqCst) {
+        return Err(HELD.to_string());
+    }
     let launch = &state.launch;
     let file = launch.directory.join("core.json");
 
@@ -968,6 +996,10 @@ fn resolve_core(state: &CoreState) -> Result<(CoreEndpoint, Option<u32>), String
     let ready = match running_child(state) {
         Some(ready) => ready,
         None => {
+            // Asked again here: stopping an older core above takes seconds.
+            if state.held.load(Ordering::SeqCst) {
+                return Err(HELD.to_string());
+            }
             let (spawned, job) = spawn_core(launch)?;
             let ready = spawned.ready.clone();
             if let Ok(mut guard) = state.child.lock() { *guard = Some(spawned); }
@@ -1743,6 +1775,27 @@ setInterval(() => {}, 1000);
         let second = second.expect("a new core is started for the next caller");
         assert_ne!(second_pid, Some(first_pid));
         assert_ne!(second.url, first.url);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn a_core_stopped_for_an_install_stays_stopped_until_the_hold_is_released() {
+        let _process_guard = crate::PROCESS_TEST_LOCK.lock().unwrap();
+        let directory = scratch("hold");
+        let state = state(&directory, "2.0.0", fake_command(&directory, "2.0.0", "serve"), false, Duration::from_secs(30));
+        publish(&state.slot, resolve_core(&state));
+        let first = current_endpoint(&state).expect("the first core answers");
+        let first_pid = spawned_pid(&state).unwrap();
+        state.stop_for_install().expect("the core stops on request");
+        assert!(!platform::process::alive(first_pid), "the core outlived the stop");
+        // The window asks again once it lost the core: nothing may start.
+        assert_eq!(current_endpoint(&state).err().as_deref(), Some(HELD));
+        assert!(spawned_pid(&state).is_none_or(|pid| pid == first_pid), "a core was started during the install");
+        // The installer never ran: the next ask brings the engine back.
+        state.release_hold();
+        let second = current_endpoint(&state);
+        state.kill_child();
+        assert_ne!(second.expect("a new core after the hold").url, first.url);
         std::fs::remove_dir_all(directory).unwrap();
     }
 
