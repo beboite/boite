@@ -167,9 +167,9 @@ export interface OsProfile {
   unsetEnv?: string[];
   /**
    * The files that carry the login on this OS, in place of `auth.session`. An
-   * empty list says the login is kept outside any file here (Claude Code uses
-   * the macOS Keychain), so an account's status reads `unknown`, never
-   * `unauthenticated`.
+   * empty list says the login can be kept outside any file here (Claude Code
+   * uses the macOS Keychain): the `auth.session` files still read `ok` when
+   * present, and their absence reads `unknown`, never `unauthenticated`.
    */
   session?: string[];
   /** Process names the core closes when an account is removed. */

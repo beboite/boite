@@ -592,15 +592,16 @@ export class AccountStore {
 
   private sessionStatus(account: Account, provider: ProviderDescriptor): Account['status'] {
     if (provider.auth.kind === 'none') return 'ok';
-    // A profile may say where the login lives on its OS, or that no file holds it there.
-    const session = profileFor(provider)?.session ?? provider.auth.session ?? [];
+    // A profile may say where the login lives on its OS, or, with an empty list,
+    // that it can live outside any file there: then a file still proves a login
+    // and its absence proves nothing.
+    const own = profileFor(provider)?.session;
+    const session = own !== undefined && own.length > 0 ? own : provider.auth.session ?? [];
     if (session.length === 0) return 'unknown';
     const base = account.isolationDir ?? this.defaultLocation(provider);
     if (base === null) return 'unknown';
-    for (const file of session) {
-      if (!existsSync(join(base, file))) return 'unauthenticated';
-    }
-    return 'ok';
+    if (session.every((file) => existsSync(join(base, file)))) return 'ok';
+    return own?.length === 0 ? 'unknown' : 'unauthenticated';
   }
 
   /**

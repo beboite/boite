@@ -607,6 +607,11 @@ describe('echo driver', () => {
     const client = await harness.connect();
     const project = await client.call('projects.add', { path: harness.dataDir, name: 'claude project' });
     const account = await client.call('accounts.add', { providerId: 'claude', label: 'no login' });
+    if (process.platform === 'darwin') {
+      // The login may be in the Keychain there: the account reads unknown and a turn still starts.
+      expect(account.status).toBe('unknown');
+      return;
+    }
     expect(account.status).toBe('unauthenticated');
 
     const thread = await client.call('threads.create', {

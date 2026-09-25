@@ -66,7 +66,7 @@ statuses:
 
 | Status | Meaning |
 |---|---|
-| `unknown` | never checked, the provider is not available on this machine, or no file holds its login on this OS (Claude on macOS, whose login is in the Keychain) |
+| `unknown` | never checked, the provider is not available on this machine, or its session file is missing on an OS where the login can live outside any file (Claude on macOS, whose login is in the Keychain) |
 | `ok` | the session file is there |
 | `unauthenticated` | the directory exists and the session file does not |
 | `error` | the check itself failed, with the reason |

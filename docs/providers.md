@@ -294,9 +294,11 @@ runs on. Four descriptor fields exist for it and are open to any provider:
   environment before the spawn, so a key the user set for their own tools cannot
   redirect the agent Boite runs.
 - `session`, on an OS profile, replaces `auth.session` on that OS. An empty list
-  says no file holds the login there, so its accounts read `unknown` and turns
+  says the login can live outside any file there: the `auth.session` files still
+  read `ok` when present, and without them its accounts read `unknown` and turns
   still start. Claude's macOS profile sets it: Claude Code keeps its login in the
-  Keychain there, not in `.credentials.json`.
+  Keychain there, and writes `.credentials.json` only when the Keychain is out
+  of reach.
 - `seedFiles`, on the descriptor, maps a relative path to content written under
   the isolation directory before anything starts. Antigravity needs
   `antigravity-acp/settings.json` holding `{"auth":{"type":"oauth-personal"}}`.
