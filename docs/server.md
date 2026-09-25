@@ -141,9 +141,11 @@ bun run build:ui
 bun run build:core:linux
 ```
 
-That is `build:core` followed by `bun build --compile --target=bun-linux-x64`,
+That is `build:core` followed by `bun build --compile --target=bun-linux-x64-baseline`,
 which writes `packages/core/dist/boite-core-linux-x64`: one executable for x64
-glibc Linux that carries its own Bun. Cross-compiling works from Windows. Copy it
+glibc Linux that carries its own Bun, in the baseline build that also runs on
+CPUs without AVX2. The image's Bun comes from `oven/bun`, whose x64 build is the
+baseline one too. Cross-compiling works from Windows. Copy it
 to the server with `packages/ui/dist` beside it, renamed `ui`, since a compiled
 core looks for the UI next to its own executable. The build also writes
 `packages/core/dist/boite`, the shim behind the `boite` command an agent runs

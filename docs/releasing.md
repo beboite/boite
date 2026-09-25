@@ -33,13 +33,18 @@ it does not compile again. The end-to-end suite refuses missing or stale artifac
   Keep every emitted file together when distributing this bundle. Lazy imports
   keep the SDKs off the start path. `bun run core` and the shell both prefer this
   bundle over the sources when it is there.
-- `build:core:exe` compiles `packages/core/dist/boite-core`, with `.exe` on Windows. The two worker
+- `build:core:exe` compiles `packages/core/dist/boite-core`, with `.exe` on Windows. On x64 it embeds
+  Bun's baseline runtime, which needs no AVX2. The two worker
   files are not compiled into it: the core loads them by name from beside its own
   executable, so they travel with it.
-- On Windows the installed sidecar is not that executable. It is the Bun runtime
-  the build ran under, copied as `boite-core.exe`, with every file of the bundle
+- On Windows the installed sidecar is not that executable. It is Bun's baseline
+  runtime of the version the build ran under, copied as `boite-core.exe`, with every file of the bundle
   but the workers in a `core` directory beside it, and the shell starts it as
-  `boite-core.exe core/main.js`. The runtime carries its publisher's signature;
+  `boite-core.exe core/main.js`. The baseline build runs on x64 CPUs without
+  AVX2, where the default one stops at its first instruction. `stage-sidecar.ts`
+  downloads it once from the Bun release, checks the archive against the
+  release's `SHASUMS256.txt` and keeps it under `node_modules/.cache`, so the
+  first staging needs the network. The runtime carries its publisher's signature;
   an unsigned compiled core costs about 650 ms more at every start on Windows 11
   ([performance.md](performance.md)). `stage-sidecar.ts` warns when the runtime's
   signature is not valid. `apps/shell/scripts/tauri.ts` adds
@@ -201,7 +206,7 @@ name is `Boite`. The install is per user and asks for no elevation.
 `%LOCALAPPDATA%\Boite` ends up holding:
 
 - `boite-shell.exe`, the window and the tray icon.
-- `boite-core.exe`, the sidecar it starts: the Bun runtime under the core's name.
+- `boite-core.exe`, the sidecar it starts: Bun's baseline runtime under the core's name.
   Run by hand with no script it is `bun`, so a subcommand goes after the bundle:
   `boite-core.exe core\main.js pair --owner`.
 - `core/`, the bundled core that runtime runs: `main.js` and its lazy chunks.

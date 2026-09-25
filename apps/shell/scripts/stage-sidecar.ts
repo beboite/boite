@@ -1,7 +1,8 @@
 /**
  * Puts the core where the two things that run it expect it.
  *
- * On Windows the sidecar is the Bun runtime itself, copied under the name
+ * On Windows the sidecar is the Bun runtime itself, in its baseline build that
+ * needs no AVX2, copied under the name
  * `boite-core.exe`, with the bundled core in a `core` directory beside it; the
  * shell starts it as `boite-core.exe core/main.js`. The runtime carries its
  * publisher's signature and the output of `bun build --compile` carries none,
@@ -24,8 +25,8 @@
  *
  * Run from the repository root: `bun run apps/shell/scripts/stage-sidecar.ts`.
  */
-import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, rmSync, statSync, utimesSync } from 'node:fs';
-import { basename, dirname, join, resolve } from 'node:path';
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync, utimesSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { nativeTarget } from './targets.ts';
 
@@ -63,13 +64,59 @@ const shims = join(repo, 'packages', 'core', 'shims');
 const RUNTIME_SIDECAR = process.platform === 'win32';
 const BUNDLE_DIR = 'core';
 
-/** The executable staged as the sidecar: the Bun running this script on Windows, the compiled core elsewhere. */
+/**
+ * Bun's baseline runtime for Windows x64, of the version running this script.
+ * The default build needs AVX2 and stops with an illegal instruction on a CPU
+ * without it, before the core's first line; the baseline one runs on every x64
+ * CPU, starts as fast and carries the same signature (docs/performance.md). It
+ * is downloaded once, checked against the release's SHASUMS256.txt and kept
+ * under `node_modules/.cache`.
+ */
+async function baselineRuntime(): Promise<string> {
+  const name = 'bun-windows-x64-baseline';
+  const dir = join(repo, 'node_modules', '.cache', 'boite-bun-runtime', `${name}-v${Bun.version}`);
+  const exe = join(dir, 'bun.exe');
+  if (existsSync(exe)) return exe;
+  const release = `https://github.com/oven-sh/bun/releases/download/bun-v${Bun.version}`;
+  const download = async (file: string): Promise<Response> => {
+    const response = await fetch(`${release}/${file}`, { signal: AbortSignal.timeout(300_000) }).catch((error: unknown) =>
+      refuse(`could not download ${release}/${file}: ${error instanceof Error ? error.message : String(error)}`));
+    if (!response.ok) refuse(`${release}/${file} answered ${response.status}`);
+    return response;
+  };
+  const sums = await (await download('SHASUMS256.txt')).text();
+  const expected = sums.split('\n').map((line) => line.trim().split(/\s+/)).find(([, file]) => file === `${name}.zip`)?.[0];
+  if (expected === undefined) refuse(`${release}/SHASUMS256.txt lists no ${name}.zip`);
+  const zip = new Uint8Array(await (await download(`${name}.zip`)).arrayBuffer());
+  const actual = new Bun.CryptoHasher('sha256').update(zip).digest('hex');
+  if (actual !== expected) refuse(`${name}.zip has SHA-256 ${actual}, SHASUMS256.txt says ${expected}`);
+
+  // Unpacked beside the cache entry and renamed into it, so a cut download never counts as cached.
+  const scratch = `${dir}.partial`;
+  rmSync(scratch, { recursive: true, force: true });
+  mkdirSync(scratch, { recursive: true });
+  const archive = join(scratch, `${name}.zip`);
+  await Bun.write(archive, zip);
+  // Windows' own bsdtar reads zip archives; a Git for Windows tar earlier on PATH does not.
+  const tar = join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe');
+  const unpacked = Bun.spawnSync([tar, '-xf', archive, '-C', scratch], { stdout: 'pipe', stderr: 'pipe', windowsHide: true });
+  if (unpacked.exitCode !== 0) refuse(`${tar} could not unpack ${archive}: ${unpacked.stderr.toString()}`);
+  const extracted = join(scratch, name, 'bun.exe');
+  if (!existsSync(extracted)) refuse(`${name}.zip has no ${name}/bun.exe`);
+  rmSync(dir, { recursive: true, force: true });
+  mkdirSync(dir, { recursive: true });
+  renameSync(extracted, exe);
+  rmSync(scratch, { recursive: true, force: true });
+  console.log(`stage-sidecar: ${exe} (Bun ${Bun.version} baseline, SHA-256 of the archive checked)`);
+  return exe;
+}
+
+/** The executable staged as the sidecar: Bun's baseline runtime on Windows, the compiled core elsewhere. */
+const sidecar = RUNTIME_SIDECAR ? await baselineRuntime() : join(coreDist, 'boite-core');
+
 function sidecarSource(): string {
-  if (!RUNTIME_SIDECAR) return join(coreDist, 'boite-core');
-  const runtime = process.execPath;
-  if (!/^bun(?:-profile)?\.exe$/i.test(basename(runtime))) {
-    refuse(`this script runs under ${runtime}; expected bun.exe, which is staged as the sidecar`);
-  }
+  if (!RUNTIME_SIDECAR) return sidecar;
+  const runtime = sidecar;
   const signature = Bun.spawnSync(
     ['powershell', '-NoProfile', '-NonInteractive', '-Command', `(Get-AuthenticodeSignature -LiteralPath '${runtime.replaceAll("'", "''")}').Status`],
     { stdout: 'pipe', stderr: 'pipe', windowsHide: true },
