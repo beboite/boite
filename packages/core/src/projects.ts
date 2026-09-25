@@ -48,6 +48,8 @@ export class ProjectStore {
   private readonly git = new Map<string, GitFlag>();
   /** Replaced by a test to hold a check pending. */
   gitProbe: (folder: string) => Promise<boolean | null> = probeGit;
+  /** How long `projects.list` waits for the checks it starts; lowered by a test. */
+  gitWaitMs = GIT_PROBE_TIMEOUT_MS;
 
   constructor(private readonly core: Core) {
     // The first `projects.list` after a start already has answers.
@@ -97,6 +99,33 @@ export class ProjectStore {
     return this.core.journal.listProjects().map((project) => this.described(project));
   }
 
+  /**
+   * The list a client asks for, with a fresh `.git` answer per folder: a
+   * `git init` done in a terminal shows on the very next answer. Each check
+   * runs off the event loop and gets `gitWaitMs`; past it, or when a folder's
+   * previous check is still pending (a share whose host is gone), that folder
+   * answers from its last check instead of holding the list.
+   */
+  async listFresh(): Promise<Project[]> {
+    const projects = this.core.journal.listProjects();
+    const checks: Promise<void>[] = [];
+    for (const project of projects) {
+      const check = this.refreshGit(project.path);
+      if (check !== null) checks.push(check);
+    }
+    if (checks.length > 0) {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const deadline = new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, this.gitWaitMs);
+        timer.unref?.();
+      });
+      await Promise.race([Promise.all(checks), deadline]);
+      clearTimeout(timer);
+    }
+    // Every folder was just checked or is still being checked: no second probe.
+    return this.core.journal.listProjects().map((project) => this.described(project, false));
+  }
+
   require(projectId: ProjectId | null): Project {
     if (projectId === null) throw refused('this agent session has no project');
     if (this.removing.has(projectId)) throw refused('this project is being removed', { projectId });
@@ -117,8 +146,9 @@ export class ProjectStore {
     // The folder just answered, so this check does too; the answer is exact from the start.
     this.git.set(full, { value: existsSync(join(full, '.git')), inflight: false });
 
-    const existing = this.list().find((project) => project.path === full);
-    if (existing !== undefined) return existing;
+    // No second check of a folder that was just checked.
+    const existing = this.core.journal.listProjects().find((project) => project.path === full);
+    if (existing !== undefined) return this.described(existing, false);
 
     const project: Project = {
       id: newId('prj_'),
@@ -129,7 +159,7 @@ export class ProjectStore {
     this.core.journal.append({ type: 'project.added', threadId: null, version: 1, payload: project }, () => {
       this.core.journal.putProject(project);
     });
-    const answered = this.described(project);
+    const answered = this.described(project, false);
     this.core.bus.emit('project.added', answered);
     return answered;
   }
@@ -172,12 +202,13 @@ export class ProjectStore {
    * repository, by the same test `Worktrees.add` refuses on, and whether it is
    * the drafts folder. The flag is the last check's answer and never touches
    * the disk here: each answer starts the next check in the background, so a
-   * folder that gained or lost its `.git` shows it on the following answer.
-   * Before any check has answered, `repository` is left out.
+   * folder that gained or lost its `.git` shows it on the following answer
+   * (`listFresh` waits for it instead). Before any check has answered,
+   * `repository` is left out.
    */
-  private described(project: Project): Project {
+  private described(project: Project, refresh = true): Project {
     const flag = this.git.get(project.path);
-    this.refreshGit(project.path);
+    if (refresh) this.refreshGit(project.path);
     return {
       ...project,
       ...(flag?.value === undefined ? {} : { repository: flag.value }),
@@ -185,18 +216,24 @@ export class ProjectStore {
     };
   }
 
-  private refreshGit(path: string): void {
+  /** Starts a check of `path`, or returns null when one is already pending. */
+  private refreshGit(path: string): Promise<void> | null {
     const flag = this.git.get(path) ?? { value: undefined, inflight: false };
-    if (flag.inflight) return;
+    if (flag.inflight) return null;
     flag.inflight = true;
     this.git.set(path, flag);
     // One check per folder at a time, held until the disk answers: a dead share
     // costs one pending check, never a pile of them.
-    void this.gitProbe(path).then((found) => {
-      flag.inflight = false;
-      // No clear answer keeps the last one: a sleeping share is not a lost repository.
-      if (found !== null) flag.value = found;
-    });
+    return this.gitProbe(path).then(
+      (found) => {
+        flag.inflight = false;
+        // No clear answer keeps the last one: a sleeping share is not a lost repository.
+        if (found !== null) flag.value = found;
+      },
+      () => {
+        flag.inflight = false;
+      },
+    );
   }
 }
 
@@ -218,7 +255,7 @@ export function registerProjectMethods(core: Core): void {
       throw refused(`projects.browse.path: cannot read directory "${full}": ${error instanceof Error ? error.message : String(error)}`);
     }
   });
-  core.router.register('projects.list', () => core.projects.list());
+  core.router.register('projects.list', () => core.projects.listFresh());
   core.router.register('projects.add', (params) => core.projects.add(params.path, params.name));
   core.router.register('projects.drafts', () => core.projects.drafts());
   core.router.register('projects.remove', async (params) => {
