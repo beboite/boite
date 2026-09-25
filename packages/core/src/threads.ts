@@ -1422,6 +1422,9 @@ export class ThreadStore {
       requestPermission: (toolName: string, input: unknown, description: string | null): PermissionTicket =>
         this.requestPermission(thread, turn, toolName, input, description),
       askQuestion: (ask: QuestionAsk): QuestionTicket => this.askQuestion(thread, turn, ask),
+      withdrawQuestion: (questionId) => {
+        this.withdrawQuestion(threadId, questionId);
+      },
       // Every driver reaches the launcher through these two, so this is the one
       // place a lease on the provider's managed files can be held for the life
       // of an agent process, warm sessions included. `providers.uninstall`
@@ -1545,6 +1548,17 @@ export class ThreadStore {
       this.core.bus.emit('question.answered', { questionId: id, threadId, answer: null });
       pending.resolve(null);
     }
+  }
+
+  /** The agent gave up waiting on one card by itself: it goes like a cancelled one. */
+  private withdrawQuestion(threadId: ThreadId, questionId: QuestionTicket['questionId']): void {
+    const pending = this.questions.get(questionId);
+    if (pending === undefined || pending.request.threadId !== threadId) return;
+    this.questions.delete(questionId);
+    this.asyncCards.delete(questionId);
+    this.core.bus.emit('question.answered', { questionId, threadId, answer: null });
+    if (pending.request.async !== true) this.setStatus(threadId, this.waitingOn(threadId) ? 'waiting' : 'running');
+    pending.resolve(null);
   }
 
   /** The turn ended with a card still open: it is denied, and every client is told so. */

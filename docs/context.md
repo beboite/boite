@@ -41,7 +41,8 @@ finite or below zero writes nothing.
 | Codex | `tokenUsage.last.totalTokens` in `thread/tokenUsage/updated` | `tokenUsage.modelContextWindow` when reported | completed `contextCompaction` items |
 | Muse Code | `usedTokens` in `session/contextUsage` | `windowTokens` when reported | completed `compaction` items, with `tokensBefore` and `tokensAfter` |
 | Antigravity CLI | the last `agent_response` step's `usage` in the turn, input plus cache reads plus output, once at the end | not reported | none, compaction is refused |
-| OpenCode, Antigravity, Grok, pi | none yet | | pi's manual compaction response |
+| pi | `contextUsage.tokens` of `get_session_stats`, read once after each turn; nothing right after a compaction, where pi reports null until its next answer | `contextUsage.contextWindow` | `compaction_end` of an automatic compaction (`threshold` or `overflow`), with `tokensBefore` and `estimatedTokensAfter`; the manual `compact` response, with the same two |
+| OpenCode, Antigravity, Grok | none yet | | none |
 
 Codex's count includes the last request's output. When `totalTokens` is absent,
 the driver adds the reported input and output counts. Context notifications
@@ -62,10 +63,10 @@ The existing Stop action cancels the maintenance turn. Paired devices may call i
 |---|---|
 | Claude | `/compact` through the SDK prompt, without prompt-only reasoning suffixes |
 | Codex | `thread/compact/start`, completed by normal turn notifications |
-| pi | `compact` RPC, completed by its response; Stop closes the process because prompt abort does not cancel this RPC |
+| pi | `compact` RPC, completed by its response, whose `estimatedTokensAfter` is pi's own estimate of what is left; Stop closes the process because prompt abort does not cancel this RPC |
 | ACP | `/compact` only when the session advertised that command |
 | agy | none: print mode refuses the CLI's interactive-only commands, so the core refuses the call and the control stays disabled |
-| echo | `[compact]`, a deterministic test operation |
+| echo | `[compact]`, a deterministic test operation; the divider it draws says `manual`, while `[compact]` inside a prompt draws an `auto` one |
 
 The control is disabled while a turn runs, before a native session exists, or
 when an ACP agent has not advertised support. Compaction can make a provider

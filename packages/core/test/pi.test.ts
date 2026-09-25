@@ -5,6 +5,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import type { MessagePart, RpcEvents, Settings } from '@boite/contracts';
 import type { CoreClient } from '../src/client.ts';
 import { getDriver } from '../src/drivers/index.ts';
+import { setPiStopDeadlineForTests } from '../src/drivers/pi.ts';
 import { startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
 
@@ -674,6 +675,221 @@ describe('pi driver', () => {
     // The probe's own process wrote an argv line too; the turn's is the last one.
     expect(argvLines()[argvLines().length - 1]).toContain('model=fake-a/quick:high');
   });
+
+  test('a 529 that pi retried by itself ends the turn done, with no error card', async () => {
+    const client = await startCore();
+    const threadId = await piThread(client);
+    const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 20000);
+    await client.call('turns.start', { threadId, prompt: '[retry]' });
+    const done = await finished;
+    expect(done.status).toBe('done');
+    expect(done.error).toBeNull();
+    const thread = await client.call('threads.get', { threadId });
+    const parts = thread.messages.flatMap((message) => message.parts);
+    expect(parts.some((part) => part.type === 'error')).toBe(false);
+    expect(parts.some((part) => part.type === 'text' && part.text === 'recovered answer')).toBe(true);
+    expect(thread.status).toBe('idle');
+  });
+
+  test('a 529 pi gave up on after its retries fails the turn with one error card', async () => {
+    const client = await startCore();
+    const threadId = await piThread(client);
+    const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 20000);
+    await client.call('turns.start', { threadId, prompt: '[giveup]' });
+    const done = await finished;
+    expect(done.status).toBe('error');
+    expect(done.error).toBe('529 overloaded after 3 attempts');
+    const thread = await client.call('threads.get', { threadId });
+    const errors = thread.messages.flatMap((message) => message.parts).filter((part) => part.type === 'error');
+    expect(errors).toEqual([{ type: 'error', message: '529 overloaded after 3 attempts' }]);
+  });
+
+  test('an extension command that starts no run ends the turn, and the process stays warm', async () => {
+    const client = await startCore({ warmProcessMinutes: 5 });
+    const threadId = await piThread(client);
+    const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 10000);
+    await client.call('turns.start', { threadId, prompt: '/fake-report' });
+    const done = await finished;
+    expect(done.status).toBe('done');
+    expect(fakeLog()).toContain('extension command handled');
+    expect(harness?.core.procs.liveCount(threadId)).toBe(1);
+    // A normal turn on the same process still streams to its own agent_settled.
+    await runTurn(client, threadId, '[tool] after the command');
+    expect(argvLines()).toHaveLength(1);
+  });
+
+  test('a stop that pi never answers ends the turn stopped at the deadline, and the process is gone', async () => {
+    setPiStopDeadlineForTests(300);
+    try {
+      const client = await startCore();
+      const threadId = await piThread(client);
+      const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 10000);
+      await client.call('turns.start', { threadId, prompt: '[deaf]' });
+      await waitFor(() => fakeLog().includes('waiting forever'));
+      await client.call('turns.stop', { threadId });
+      expect((await finished).status).toBe('stopped');
+      expect(fakeLog()).toContain('abort ignored');
+      await waitFor(() => harness?.core.procs.liveCount(threadId) === 0);
+    } finally {
+      setPiStopDeadlineForTests(null);
+    }
+  });
+
+  test('a stop while pi never answers the prompt ends the turn stopped at the deadline', async () => {
+    setPiStopDeadlineForTests(300);
+    try {
+      const client = await startCore();
+      const threadId = await piThread(client);
+      const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 10000);
+      await client.call('turns.start', { threadId, prompt: '[preflight]' });
+      await waitFor(() => fakeLog().includes('preflight never ends'));
+      await client.call('turns.stop', { threadId });
+      expect((await finished).status).toBe('stopped');
+      await waitFor(() => harness?.core.procs.liveCount(threadId) === 0);
+      expect((await client.call('threads.get', { threadId })).status).not.toBe('running');
+    } finally {
+      setPiStopDeadlineForTests(null);
+    }
+  });
+
+  test('a refused clear_queue after a steer still ends the turn stopped', async () => {
+    const client = await startCore();
+    const threadId = await piThread(client);
+    const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 10000);
+    await client.call('turns.start', { threadId, prompt: '[slow][noclear] Deploy' });
+    await waitFor(() => fakeLog().includes('waiting for abort'));
+    await waitFor(() => harness!.core.journal.listMessages(threadId).some((m) => m.role === 'assistant'));
+    expect(await harness!.core.threads.steer(threadId, 'Boite agent coordination. Wait.')).toBe(true);
+    await client.call('turns.stop', { threadId });
+    expect((await finished).status).toBe('stopped');
+    expect(fakeLog()).toContain('clear_queue\nabort');
+  });
+
+  test('a notify is drawn in the turn and no fire-and-forget method gets an answer', async () => {
+    const client = await startCore();
+    const threadId = await piThread(client);
+    const logs = collectLogs(client);
+    const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 20000);
+    await client.call('turns.start', { threadId, prompt: '[notify]' });
+    const done = await finished;
+    expect(done.status).toBe('done');
+    const thread = await client.call('threads.get', { threadId });
+    const parts = thread.messages.flatMap((message) => message.parts);
+    expect(parts).toContainEqual({ type: 'text', text: 'pi: heads up' });
+    expect(parts).toContainEqual({ type: 'error', message: 'it broke' });
+    expect(fakeLog()).not.toContain('ui-response');
+    expect(logs.some((line) => line.includes('refused'))).toBe(false);
+  });
+
+  test('a dialog pi gave up on after its timeout takes its card away while the turn runs', async () => {
+    const client = await startCore();
+    const threadId = await piThread(client);
+    const asked = client.next('question.asked', (request) => request.threadId === threadId, 20000);
+    const withdrawn = client.next('question.answered', (event) => event.threadId === threadId, 20000);
+    const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 20000);
+    await client.call('turns.start', { threadId, prompt: '[timeout][slow]' });
+    const request = await asked;
+    const answered = await withdrawn;
+    expect(answered.questionId).toBe(request.id);
+    expect(answered.answer).toBeNull();
+    await waitFor(() => fakeLog().includes('waiting for abort'));
+    expect(await client.call('questions.list', { threadId })).toEqual([]);
+    expect((await client.call('threads.get', { threadId })).status).toBe('running');
+    expect(fakeLog()).not.toContain('ui-response');
+    await client.call('turns.stop', { threadId });
+    expect((await finished).status).toBe('stopped');
+  });
+
+  test('an automatic compaction draws its divider and the turn reports the context pi counts', async () => {
+    const client = await startCore();
+    const threadId = await piThread(client);
+    const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 20000);
+    await client.call('turns.start', { threadId, prompt: '[compacted] go on' });
+    expect((await finished).status).toBe('done');
+    const thread = await client.call('threads.get', { threadId });
+    const parts = thread.messages.flatMap((message) => message.parts);
+    expect(parts).toContainEqual({ type: 'compaction', trigger: 'auto', preTokens: 180000, postTokens: 30000 });
+    expect(thread.context?.tokens).toBe(4321);
+    expect(thread.context?.window).toBe(200000);
+  });
+
+  test('a warm process takes a new effort and a new model over RPC instead of restarting', async () => {
+    const client = await startCore({ warmProcessMinutes: 5 });
+    const { projectId, accountId } = await piAccount(client);
+    await client.call('providers.probe', { providerId: 'pi-fake', accountId });
+    const created = await client.call('threads.create', {
+      projectId,
+      providerId: 'pi-fake',
+      accountId,
+      title: 'switching',
+      model: 'fake-a/smart',
+      effort: 'low',
+    });
+    const threadId = created.id;
+    await client.call('threads.subscribe', { threadId });
+    await runTurn(client, threadId, 'first');
+    await client.call('threads.update', { threadId, effort: 'high' });
+    await runTurn(client, threadId, 'second');
+    await client.call('threads.update', { threadId, model: 'fake-a/quick', effort: 'high' });
+    await runTurn(client, threadId, 'third');
+    const turnProcesses = argvLines().filter((line) => !line.includes('sessionId= '));
+    expect(turnProcesses).toHaveLength(1);
+    expect(turnProcesses[0]).toContain('model=fake-a/smart:low');
+    expect(fakeLog()).toContain('level high\n');
+    expect(fakeLog()).toContain('model fake-a/quick\nset_thinking_level\nlevel high\n');
+  });
+
+  test('core shutdown during a turn pi never settles ends it before the journal closes', async () => {
+    const client = await startCore();
+    const threadId = await piThread(client);
+    const finished: { status: string; error: string | null }[] = [];
+    const logs: string[] = [];
+    harness!.core.bus.onAny((name, payload) => {
+      if (name === 'core.log') logs.push((payload as RpcEvents['core.log']).message);
+      if (name !== 'turn.finished') return;
+      const turn = payload as RpcEvents['turn.finished'];
+      if (turn.threadId === threadId) finished.push({ status: turn.status, error: turn.error });
+    });
+    const uncaught: string[] = [];
+    const onUncaught = (error: unknown): void => {
+      uncaught.push(error instanceof Error ? error.message : String(error));
+    };
+    process.on('uncaughtException', onUncaught);
+    process.on('unhandledRejection', onUncaught);
+    try {
+      await client.call('turns.start', { threadId, prompt: '[deaf]' });
+      await waitFor(() => fakeLog().includes('waiting forever'));
+      // Nothing may write to the closed journal once the child's close lands.
+      await stopCore();
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    } finally {
+      process.off('uncaughtException', onUncaught);
+      process.off('unhandledRejection', onUncaught);
+    }
+    // The drain stops the turn, pi ignores the abort, and the driver shutdown
+    // ends it stopped while the bus and the journal are still open.
+    expect(finished).toEqual([{ status: 'stopped', error: null }]);
+    expect(uncaught).toEqual([]);
+    expect(logs.filter((line) => /closed database|database is closed/i.test(line))).toEqual([]);
+  }, 20000);
+
+  test('core shutdown before the stop deadline keeps a stopped pi turn stopped', async () => {
+    const client = await startCore();
+    const threadId = await piThread(client);
+    const statuses: string[] = [];
+    harness!.core.bus.onAny((name, payload) => {
+      if (name !== 'turn.finished') return;
+      const turn = payload as RpcEvents['turn.finished'];
+      if (turn.threadId === threadId) statuses.push(turn.status);
+    });
+    await client.call('turns.start', { threadId, prompt: '[deaf]' });
+    await waitFor(() => fakeLog().includes('waiting forever'));
+    await client.call('turns.stop', { threadId });
+    await waitFor(() => fakeLog().includes('abort ignored'));
+    // The 15 s stop deadline has not run: the shutdown is what closes pi.
+    await stopCore();
+    expect(statuses).toEqual(['stopped']);
+  }, 20000);
 
   function countProcesses(
     client: CoreClient,

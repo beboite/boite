@@ -120,6 +120,11 @@ export interface TurnContext {
   requestPermission(toolName: string, input: unknown, description: string | null): PermissionTicket;
   /** The inline question card. One call per question, and they are asked in order. */
   askQuestion(ask: QuestionAsk): QuestionTicket;
+  /**
+   * The agent stopped waiting on a card by itself (pi's dialog `timeout`): the
+   * card goes as if cancelled, every client is told, and the thread runs again.
+   */
+  withdrawQuestion?(questionId: QuestionTicket['questionId']): void;
   spawn(cmd: string, args: string[], opts?: SpawnOptions): SpawnedProcess;
   /** Same registry as `spawn`, node streams and node events, environment as given. */
   spawnChild(cmd: string, args: string[], opts?: SpawnOptions): SpawnedChild;
