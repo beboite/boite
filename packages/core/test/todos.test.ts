@@ -9,6 +9,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { CoreClient } from '../src/client.ts';
 import { connect } from '../src/client.ts';
+import { AGENT_OPEN_TODOS_MAX } from '../src/todos.ts';
 import { echoThread, startTestCore } from './harness.ts';
 import type { TestCore } from './harness.ts';
 
@@ -142,6 +143,27 @@ describe('the todo list of a project', () => {
       }
       expect(message).toBe("todos.update status done is the owner's: an agent claims a card, the user confirms it");
       expect((await client.call('todos.list', { threadId }))[0]?.status).toBe('open');
+    } finally {
+      agent.close();
+    }
+  });
+
+  test('an agent is refused a card past the open limit, the user is not, and a confirmed card frees a place', async () => {
+    for (let index = 0; index < AGENT_OPEN_TODOS_MAX; index++) {
+      await client.call('todos.add', { threadId, text: `card ${index}` });
+    }
+    const agent = await agentClient();
+    try {
+      await expect(agent.call('todos.add', { threadId, text: 'one more' })).rejects.toThrow(
+        `an agent adds a card only while the project holds fewer than ${AGENT_OPEN_TODOS_MAX} open or claimed cards, this one has ${AGENT_OPEN_TODOS_MAX}`,
+      );
+      expect(await client.call('todos.list', { threadId })).toHaveLength(AGENT_OPEN_TODOS_MAX);
+      const owners = await client.call('todos.add', { threadId, text: 'the user still adds' });
+      await client.call('todos.update', { threadId, todoId: owners.id, status: 'done' });
+      const [oldest] = (await client.call('todos.list', { threadId })).slice(-2);
+      await client.call('todos.update', { threadId, todoId: oldest!.id, status: 'done' });
+      const added = await agent.call('todos.add', { threadId, text: 'one more' });
+      expect(added.status).toBe('open');
     } finally {
       agent.close();
     }
