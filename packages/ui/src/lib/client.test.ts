@@ -211,16 +211,73 @@ describe('WsClient', () => {
       first.open();
       first.receive({ id: first.frame(0).id, result: { core: CORE, principal: 'session' } });
       await client.connect();
-      let failure = '';
-      void client.call('threads.list', {}).catch((error: Error) => { failure = error.message; });
 
       await vi.advanceTimersByTimeAsync(25_000);
-      expect(first.sent.map(raw => JSON.parse(raw).method)).toEqual(['hello', 'threads.list', 'hello']);
+      expect(first.sent.map(raw => JSON.parse(raw).method)).toEqual(['hello', 'hello']);
       expect(client.state).toBe('ready');
       await vi.advanceTimersByTimeAsync(15_000);
       expect(first.closed).toBe(true);
-      expect(failure).toBe('connection lost; check the conversation before resending');
       expect(states).toEqual(['connecting', 'ready', 'connecting']);
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(sockets).toHaveLength(2);
+    } finally { client.close(); vi.useRealTimers(); }
+  });
+
+  test('a remote call whose one large answer takes 45 s to arrive keeps its socket and resolves', async () => {
+    vi.useFakeTimers();
+    const sockets: FakeSocket[] = [];
+    const client = new WsClient({ url: 'https://core.test', token: 'session', backoff: () => 1_000, socketFactory: () => {
+      const socket = new FakeSocket(); sockets.push(socket); return socket;
+    } });
+    try {
+      void client.connect();
+      const socket = take(sockets, 0);
+      socket.open();
+      socket.receive({ id: socket.frame(0).id, result: { core: CORE, principal: 'session' } });
+      await client.connect();
+      let outcome = '';
+      void client.call('threads.list', {}).then(() => { outcome = 'answered'; }, (error: Error) => { outcome = error.message; });
+
+      // Nothing arrives for 45 s: the answer is one frame still downloading.
+      await vi.advanceTimersByTimeAsync(45_000);
+      expect(socket.closed).toBe(false);
+      expect(client.state).toBe('ready');
+      expect(socket.sent.map(raw => JSON.parse(raw).method)).toEqual(['hello', 'threads.list']);
+      socket.receive({ id: socket.frame(1).id, result: [] });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(outcome).toBe('answered');
+      expect(sockets).toHaveLength(1);
+
+      // Idle again, the socket is probed as before.
+      await vi.advanceTimersByTimeAsync(25_000);
+      expect(socket.sent.map(raw => JSON.parse(raw).method)).toEqual(['hello', 'threads.list', 'hello']);
+    } finally { client.close(); vi.useRealTimers(); }
+  });
+
+  test('a half-open remote socket carrying a call is replaced once that call times out', async () => {
+    vi.useFakeTimers();
+    const sockets: FakeSocket[] = [];
+    const client = new WsClient({ url: 'https://core.test', token: 'session', backoff: () => 1_000, socketFactory: () => {
+      const socket = new FakeSocket(); sockets.push(socket); return socket;
+    } });
+    try {
+      void client.connect();
+      const first = take(sockets, 0);
+      first.open();
+      first.receive({ id: first.frame(0).id, result: { core: CORE, principal: 'session' } });
+      await client.connect();
+      let failure = '';
+      void client.call('threads.list', {}).catch((error: Error) => { failure = error.message; });
+
+      await vi.advanceTimersByTimeAsync(119_999);
+      expect(first.sent.map(raw => JSON.parse(raw).method)).toEqual(['hello', 'threads.list']);
+      expect(first.closed).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(failure).toContain('timed out');
+      expect(first.sent.map(raw => JSON.parse(raw).method)).toEqual(['hello', 'threads.list', 'hello']);
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(first.closed).toBe(true);
+      expect(client.state).toBe('connecting');
       await vi.advanceTimersByTimeAsync(1_000);
       expect(sockets).toHaveLength(2);
     } finally { client.close(); vi.useRealTimers(); }

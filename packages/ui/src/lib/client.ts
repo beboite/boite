@@ -128,6 +128,8 @@ export function rpcUrl(coreUrl: string): string {
 }
 
 interface Pending {
+  /** A `hello` sent on a ready socket is a liveness probe, not a caller's request. */
+  method: RpcMethodName;
   resolve: (value: unknown) => void;
   reject: (reason: Error) => void;
 }
@@ -143,9 +145,11 @@ function transportFailure(message: string): RpcFailure {
  */
 const IDLE_PROBE_MS = 25_000;
 /**
- * How long a probe waits for any frame at all. Long enough for a slow link that
- * is still carrying one large frame, which would otherwise read as dead and be
- * fetched again on the reconnect.
+ * How long a probe waits for any frame at all. The idle probe only goes out
+ * while no call waits for its answer: frames arrive in order, so behind a large
+ * answer still downloading on a slow link, the probe's answer would come too
+ * late and a healthy socket would read as dead. A call's own 120 s timeout
+ * decides for a socket that carries one.
  */
 const PROBE_DEADLINE_MS = 15_000;
 /** How long `resume()` gives the socket it already has before replacing it. */
@@ -371,6 +375,7 @@ export class WsClient implements ObservableClient {
         if (method !== 'hello') this.#suspect(socket);
       }, 120_000);
       const pending: Pending = {
+        method,
         resolve: (value) => { clearTimeout(timer); resolve(value as RpcResult<M>); },
         reject: (error) => { clearTimeout(timer); reject(error); }
       };
@@ -542,11 +547,20 @@ export class WsClient implements ObservableClient {
       if (pageHidden()) { this.#armLiveness(IDLE_PROBE_MS); return; }
       const quiet = Date.now() - this.#lastFrameAt;
       if (quiet < IDLE_PROBE_MS) { this.#armLiveness(IDLE_PROBE_MS - quiet); return; }
+      // Silence while a call waits may be its answer still arriving: that
+      // call's timeout asks the socket instead.
+      if (this.#awaitingAnswer()) { this.#armLiveness(IDLE_PROBE_MS); return; }
       void this.#probeSocket(socket, PROBE_DEADLINE_MS).then((alive) => {
         if (alive) this.#armLiveness(IDLE_PROBE_MS);
         else this.#lost(socket);
       });
     }, delayMs);
+  }
+
+  /** Whether a caller's request is still waiting; a probe's own hello does not count. */
+  #awaitingAnswer(): boolean {
+    for (const pending of this.#pending.values()) if (pending.method !== 'hello') return true;
+    return false;
   }
 
   #stopLiveness(): void {
