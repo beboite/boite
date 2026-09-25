@@ -260,7 +260,15 @@ export function main(argv: string[]): void {
   const unlock = lockDataDir(dataDir);
   const coreFile = join(dataDir, 'core.json');
   const token = readToken(coreFile) ?? newToken();
-  const core = new Core({ dataDir, token, channel: flags.channel, onShutdown: () => shutdown() });
+  let core: Core;
+  try {
+    core = new Core({ dataDir, token, channel: flags.channel, onShutdown: () => shutdown() });
+  } catch (error) {
+    // A journal from a newer release, among others: say why and leave the data as it is.
+    process.stderr.write(`boite-core: ${messageOf(error)}\n`);
+    unlock();
+    process.exit(1);
+  }
   const publicUrl = flags.publicUrl ?? process.env.BOITE_PUBLIC_URL;
   if (publicUrl !== undefined) core.settings.set({ publicUrl });
   const settings = core.settings.get();
@@ -323,11 +331,22 @@ export function main(argv: string[]): void {
       .finally(() => {
         clearTimeout(deadline);
         unlock();
-        process.exit(0);
+        process.exit(typeof process.exitCode === 'number' ? process.exitCode : 0);
       });
   };
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
+  // The last line of defence: Bun exits on either anyway. This leaves a log
+  // line, stops the turns and releases the lock on the way out; the process
+  // never carries on after an error nobody expected.
+  const fatal = (kind: string) => (error: unknown): void => {
+    core.log('error', `${kind}: ${messageOf(error)}`);
+    process.stderr.write(`boite-core ${kind}: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}\n`);
+    process.exitCode = 1;
+    shutdown();
+  };
+  process.on('uncaughtException', fatal('uncaught exception'));
+  process.on('unhandledRejection', fatal('unhandled rejection'));
 }
 
 if (import.meta.main) main(process.argv.slice(2));

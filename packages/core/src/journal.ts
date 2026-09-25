@@ -15,6 +15,26 @@ import type {
 
 export const SCHEMA_VERSION = 16;
 const DELTA_WINDOW_MS = 16;
+/** The shortest wait before a streaming message's parts are written to its row. */
+const PERSIST_MS = 500;
+/** A slow write stretches the wait so that writing takes at most 1/PERSIST_SHARE of the time. */
+const PERSIST_SHARE = 20;
+const PERSIST_MAX_MS = 5_000;
+/** A delta whose write keeps failing is dropped after this many tries, and the loss reported. */
+const DELTA_ATTEMPTS = 3;
+
+/** Raised when the journal was written by a newer core than this one. */
+export class JournalTooNewError extends Error {
+  constructor(readonly file: string, readonly found: number, readonly supported: number) {
+    super(`${file} has journal schema ${found}, and this Boite reads up to ${supported}. Install the newer release again, or restore the backup made before it.`);
+    this.name = 'JournalTooNewError';
+  }
+}
+
+export interface JournalOptions {
+  /** Where a write that fails on a timer, with no caller to throw to, is reported. */
+  onError?: (message: string) => void;
+}
 
 /** What `listMessagePage` hands back: the page itself and the cursor for what is behind it. */
 export interface MessagePage {
@@ -35,6 +55,17 @@ interface PendingDelta {
   messageId: string;
   partIndex: number;
   text: string;
+  attempts?: number;
+}
+
+/**
+ * A message still streaming. Its parts live here and reach the row on a timer,
+ * so a delta or a tool card costs a change in memory instead of a rewrite of a
+ * row that holds every part of the turn.
+ */
+interface OpenMessage {
+  message: Message;
+  dirty: boolean;
 }
 
 interface ProjectRow {
@@ -304,9 +335,12 @@ const SCHEMA_V8 = `
 ALTER TABLE sessions ADD COLUMN role TEXT NOT NULL DEFAULT 'device';
 `;
 
-function migrate(db: Database): void {
+function migrate(db: Database, file: string): void {
   const row = db.query('PRAGMA user_version').get() as { user_version: number } | null;
   let version = row?.user_version ?? 0;
+  // An older core must not write a schema it does not know: it would stamp its
+  // own version on it and skip what the newer one relies on.
+  if (version > SCHEMA_VERSION) throw new JournalTooNewError(file, version, SCHEMA_VERSION);
   if (version < 1) {
     db.exec(SCHEMA_V1);
     version = 1;
@@ -349,6 +383,12 @@ function migrate(db: Database): void {
     version = 9;
   }
   if (version < 10) { db.exec('ALTER TABLE threads ADD COLUMN speed TEXT'); version = 10; }
+  // `foreign_keys` is off, so the REFERENCES ... ON DELETE CASCADE clauses below
+  // are dead and deleteThreadsOfProject clears these tables itself. Turning it
+  // on first needs putThread and putTurn moved from INSERT OR REPLACE to
+  // INSERT ... ON CONFLICT(id) DO UPDATE: a REPLACE deletes the old row, and the
+  // cascade would wipe that thread's coordination rows and that turn's request
+  // keys on every save.
   if (version < 11) {
     db.exec('CREATE TABLE turn_requests (thread_id TEXT NOT NULL, request_id TEXT NOT NULL, fingerprint TEXT NOT NULL, turn_id TEXT NOT NULL REFERENCES turns(id) ON DELETE CASCADE, PRIMARY KEY(thread_id, request_id))');
     version = 11;
@@ -550,17 +590,29 @@ export class Journal {
   readonly db: Database;
   private readonly deltas = new Map<string, PendingDelta>();
   private deltaTimer: ReturnType<typeof setTimeout> | null = null;
+  private readonly open = new Map<string, OpenMessage>();
+  private persistTimer: ReturnType<typeof setTimeout> | null = null;
+  private persistDelay = PERSIST_MS;
+  private readonly onError: (message: string) => void;
   private closed = false;
 
-  constructor(file: string) {
+  constructor(file: string, options: JournalOptions = {}) {
+    this.onError = options.onError ?? ((message) => console.error(message));
     this.db = new Database(file, { create: true });
-    this.db.exec('PRAGMA journal_mode = WAL');
-    this.db.exec('PRAGMA synchronous = NORMAL');
-    this.db.exec('PRAGMA busy_timeout = 5000');
-    this.db.transaction(() => migrate(this.db))();
-    this.db.exec('CREATE INDEX IF NOT EXISTS turns_by_status ON turns (status)');
-    this.db.exec('CREATE INDEX IF NOT EXISTS messages_by_turn ON messages (thread_id, turn_id)');
-    this.db.exec('CREATE INDEX IF NOT EXISTS turns_by_finished ON turns (finished_at)');
+    try {
+      this.db.exec('PRAGMA journal_mode = WAL');
+      this.db.exec('PRAGMA synchronous = NORMAL');
+      this.db.exec('PRAGMA busy_timeout = 5000');
+      // A large transaction grows the WAL file; this lets it shrink back at the next checkpoint.
+      this.db.exec('PRAGMA journal_size_limit = 33554432');
+      this.db.transaction(() => migrate(this.db, file))();
+      this.db.exec('CREATE INDEX IF NOT EXISTS turns_by_status ON turns (status)');
+      this.db.exec('CREATE INDEX IF NOT EXISTS messages_by_turn ON messages (thread_id, turn_id)');
+      this.db.exec('CREATE INDEX IF NOT EXISTS turns_by_finished ON turns (finished_at)');
+    } catch (error) {
+      this.db.close(false);
+      throw error;
+    }
   }
 
   append<T>(event: JournalEvent, apply: (db: Database) => T): T {
@@ -577,14 +629,14 @@ export class Journal {
     const current = this.deltas.get(key);
     if (current) current.text += text;
     else this.deltas.set(key, { threadId, messageId, partIndex, text });
-    if (this.deltaTimer === null) {
-      this.deltaTimer = setTimeout(() => {
-        this.deltaTimer = null;
-        this.flushDeltas();
-      }, DELTA_WINDOW_MS);
-    }
+    this.armDeltaTimer();
   }
 
+  /**
+   * Applies the buffered text. Streamed text is no event of its own: it is
+   * journaled as the message it lands in, between the `message.started`,
+   * `message.part` and `message.completed` events that frame it.
+   */
   flushDeltas(): void {
     if (this.deltaTimer !== null) {
       clearTimeout(this.deltaTimer);
@@ -593,22 +645,84 @@ export class Journal {
     if (this.deltas.size === 0 || this.closed) return;
     const items = [...this.deltas.values()];
     this.deltas.clear();
-    const run = this.db.transaction(() => {
-      for (const item of items) {
-        this.writeEvent({
-          type: 'message.delta',
-          threadId: item.threadId,
-          version: 1,
-          payload: { messageId: item.messageId, partIndex: item.partIndex, text: item.text },
-        });
-        this.appendToPart(item.messageId, item.partIndex, item.text);
-      }
-    });
-    run();
+    const stored: PendingDelta[] = [];
+    for (const item of items) {
+      if (this.open.has(item.messageId)) this.appendToPart(item.messageId, item.partIndex, item.text);
+      else stored.push(item);
+    }
+    if (stored.length === 0) return;
+    try {
+      this.db.transaction(() => {
+        for (const item of stored) this.appendToPart(item.messageId, item.partIndex, item.text);
+      })();
+    } catch (error) {
+      this.requeue(stored);
+      throw error;
+    }
+  }
+
+  /** Writes the parts of every streaming message whose row is behind. */
+  persistMessages(): void {
+    if (this.persistTimer !== null) {
+      clearTimeout(this.persistTimer);
+      this.persistTimer = null;
+    }
+    if (this.closed) return;
+    const dirty = [...this.open.values()].filter((entry) => entry.dirty);
+    if (dirty.length === 0) return;
+    // Under a caller's transaction the write below is only a savepoint, which
+    // that caller can still roll back: the parts are written but stay dirty,
+    // and the timer writes them again on their own.
+    const nested = this.db.inTransaction;
+    const started = performance.now();
+    const write = this.db.query('UPDATE messages SET parts = ? WHERE id = ?');
+    this.db.transaction(() => {
+      for (const entry of dirty) write.run(JSON.stringify(entry.message.parts), entry.message.id);
+    })();
+    if (nested) {
+      this.armPersistTimer();
+      return;
+    }
+    // Clean only once committed: a rolled-back write stays dirty for the next try.
+    for (const entry of dirty) entry.dirty = false;
+    const elapsed = performance.now() - started;
+    this.persistDelay = Math.min(PERSIST_MAX_MS, Math.max(PERSIST_MS, Math.round(elapsed * PERSIST_SHARE)));
+  }
+
+  /**
+   * The turn is over: whatever message its driver left open is written and no
+   * longer held in memory. Its state stays what the driver left.
+   */
+  releaseTurn(turnId: string): void {
+    this.flushDeltas();
+    for (const [id, entry] of this.open) {
+      if (entry.message.turnId !== turnId) continue;
+      // Written whatever the flag says: it can be clean after a write a caller's
+      // transaction rolled back, and the memory copy is dropped right after.
+      this.writeParts(entry);
+      this.open.delete(id);
+    }
   }
 
   isClosed(): boolean {
     return this.closed;
+  }
+
+  /**
+   * Looks at the `limit` oldest events and deletes those written before
+   * `before`; 0 means nothing old is left at the front. Only the front is read,
+   * never the whole table: ids grow with time. Nothing replays events, since
+   * the projections are written in the same transaction. The newest agents
+   * event stays, because its id is the agents revision and must never go back.
+   */
+  pruneEvents(before: number, limit: number): number {
+    if (this.closed) return 0;
+    return this.db
+      .query(
+        `DELETE FROM events WHERE id IN (SELECT id FROM events ORDER BY id LIMIT ?) AND ts < ?
+           AND id IS NOT (SELECT MAX(id) FROM events WHERE type IN ('agents.record', 'agents.limits'))`,
+      )
+      .run(limit, before).changes;
   }
 
   countEvents(type?: string): number {
@@ -621,9 +735,14 @@ export class Journal {
 
   close(): void {
     if (this.closed) return;
-    this.flushDeltas();
-    this.closed = true;
-    this.db.close(false);
+    try {
+      this.flushDeltas();
+      this.persistMessages();
+    } finally {
+      this.open.clear();
+      this.closed = true;
+      this.db.close(false);
+    }
   }
 
   // -- projects -------------------------------------------------------------
@@ -701,9 +820,15 @@ export class Journal {
 
   deleteThreadsOfProject(projectId: string): string[] {
     const rows = this.db.query('SELECT id FROM threads WHERE project_id = ?').all(projectId) as { id: string }[];
-    for (const table of ['turn_requests', 'turns', 'messages', 'processes']) {
+    const removed = new Set(rows.map((row) => row.id));
+    for (const [id, entry] of this.open) if (removed.has(entry.message.threadId)) this.open.delete(id);
+    // Foreign keys are off, so the ON DELETE CASCADE clauses never fire: every
+    // table keyed by thread is cleared here, events included, so a removed
+    // project's prompts and tool output leave the disk.
+    for (const table of ['turn_requests', 'turns', 'messages', 'processes', 'coordination_letters', 'coordination_wakes', 'events']) {
       this.db.query(`DELETE FROM ${table} WHERE thread_id IN (SELECT id FROM threads WHERE project_id = ?)`).run(projectId);
     }
+    this.db.query("DELETE FROM settings WHERE key IN (SELECT 'activity:' || id FROM threads WHERE project_id = ?)").run(projectId);
     this.db.query('DELETE FROM threads WHERE project_id = ?').run(projectId);
     return rows.map((row) => row.id);
   }
@@ -849,6 +974,8 @@ export class Journal {
   // -- messages -------------------------------------------------------------
 
   putMessage(message: Message): void {
+    if (message.state === 'streaming') this.open.set(message.id, { message: { ...message, parts: [...message.parts] }, dirty: false });
+    else this.open.delete(message.id);
     this.db
       .query(
         `INSERT OR REPLACE INTO messages (id, thread_id, turn_id, role, parts, state, created_at)
@@ -866,11 +993,14 @@ export class Journal {
   }
 
   getMessage(messageId: string): Message | null {
+    const open = this.open.get(messageId);
+    if (open !== undefined) return { ...open.message, parts: [...open.message.parts] };
     const row = this.db.query('SELECT * FROM messages WHERE id = ?').get(messageId) as MessageRow | null;
     return row === null ? null : toMessage(row);
   }
 
   listMessages(threadId: string): Message[] {
+    this.persistMessages();
     const rows = this.db
       .query('SELECT * FROM messages WHERE thread_id = ? ORDER BY rowid')
       .all(threadId) as MessageRow[];
@@ -878,12 +1008,14 @@ export class Journal {
   }
 
   lastUserMessage(threadId: string, turnId: string): Message | null {
+    this.persistMessages();
     const row = this.db.query("SELECT * FROM messages WHERE thread_id = ? AND turn_id = ? AND role = 'user' ORDER BY rowid DESC LIMIT 1")
       .get(threadId, turnId) as MessageRow | null;
     return row === null ? null : toMessage(row);
   }
 
   *walkTurnMessages(threadId: string, turnId: string): Iterable<Message> {
+    this.persistMessages();
     const statement = this.db.prepare('SELECT * FROM messages WHERE thread_id = ? AND turn_id = ? ORDER BY rowid');
     try {
       for (const row of statement.iterate(threadId, turnId)) yield toMessage(row as MessageRow);
@@ -894,6 +1026,7 @@ export class Journal {
   *walkMessages(threadId: string): Iterable<Message> {
     // A caller may stop at its current turn. Do not leave a partially consumed
     // cached statement for the next continuation to reuse.
+    this.persistMessages();
     const statement = this.db.prepare('SELECT * FROM messages WHERE thread_id = ? ORDER BY rowid');
     try {
       for (const row of statement.iterate(threadId)) yield toMessage(row as MessageRow);
@@ -925,6 +1058,7 @@ export class Journal {
     // Subscribers have already received buffered deltas. A reload must not replace
     // those messages with an older projection while the next delta is streaming.
     this.flushDeltas();
+    this.persistMessages();
     const limit = Math.max(1, Math.trunc(options.limit));
     // One row past the page is what says whether anything is left behind it.
     const rows =
@@ -946,6 +1080,7 @@ export class Journal {
   /** That message and what was written after it, oldest first, or null when that is more than `limit`. */
   listMessagesFrom(threadId: string, fromRowid: number, limit: number): Message[] | null {
     this.flushDeltas();
+    this.persistMessages();
     const rows = this.db
       .query('SELECT * FROM messages WHERE thread_id = ? AND rowid >= ? ORDER BY rowid ASC LIMIT ?')
       .all(threadId, fromRowid, limit + 1) as MessageRow[];
@@ -953,6 +1088,13 @@ export class Journal {
   }
 
   setMessagePart(messageId: string, partIndex: number, part: MessagePart): void {
+    const open = this.open.get(messageId);
+    if (open !== undefined) {
+      padInPlace(open.message.parts, partIndex);
+      open.message.parts[partIndex] = part;
+      this.markDirty(open);
+      return;
+    }
     const message = this.getMessage(messageId);
     if (message === null) return;
     const parts = padParts(message.parts, partIndex);
@@ -961,6 +1103,11 @@ export class Journal {
   }
 
   setMessageState(messageId: string, state: Message['state']): void {
+    const open = this.open.get(messageId);
+    // Written whatever the flag says when the memory copy goes: a clean flag can
+    // follow a write that a caller's transaction rolled back.
+    if (open !== undefined && (open.dirty || state !== 'streaming')) this.writeParts(open);
+    if (state !== 'streaming') this.open.delete(messageId);
     this.db.query('UPDATE messages SET state = ? WHERE id = ?').run(state, messageId);
   }
 
@@ -1056,6 +1203,10 @@ export class Journal {
       .run(key, JSON.stringify(value ?? null));
   }
 
+  deleteSetting(key: string): void {
+    this.db.query('DELETE FROM settings WHERE key = ?').run(key);
+  }
+
   private writeEvent(event: JournalEvent): void {
     this.db
       .query('INSERT INTO events (thread_id, ts, type, version, payload) VALUES (?, ?, ?, ?, ?)')
@@ -1063,23 +1214,137 @@ export class Journal {
   }
 
   private appendToPart(messageId: string, partIndex: number, text: string): void {
+    const open = this.open.get(messageId);
+    if (open !== undefined) {
+      padInPlace(open.message.parts, partIndex);
+      appendText(open.message.parts, partIndex, text);
+      this.markDirty(open);
+      return;
+    }
     const message = this.getMessage(messageId);
     if (message === null) return;
     const parts = padParts(message.parts, partIndex);
-    const part = parts[partIndex];
-    // A delta appends to whatever kind of text part sits there: text or thinking.
-    if (part !== undefined && (part.type === 'text' || part.type === 'thinking')) {
-      parts[partIndex] = { type: part.type, text: part.text + text };
-    } else if (part !== undefined && part.type === 'tool') {
-      // On a tool part a delta is the input's JSON, still being typed by the model.
-      parts[partIndex] = { ...part, inputText: (part.inputText ?? '') + text };
-    } else parts[partIndex] = { type: 'text', text };
+    appendText(parts, partIndex, text);
     this.db.query('UPDATE messages SET parts = ? WHERE id = ?').run(JSON.stringify(parts), messageId);
   }
+
+  private markDirty(entry: OpenMessage): void {
+    entry.dirty = true;
+    this.armPersistTimer();
+  }
+
+  private armPersistTimer(): void {
+    if (this.persistTimer !== null || this.closed) return;
+    this.persistTimer = setTimeout(() => {
+      this.persistTimer = null;
+      try {
+        this.persistMessages();
+      } catch (error) {
+        // The parts stay dirty in memory: the next change or read writes them again.
+        this.onError(`journal message write: ${messageOfError(error)}`);
+      }
+    }, this.persistDelay);
+    this.persistTimer.unref?.();
+  }
+
+  private writeParts(entry: OpenMessage): void {
+    this.db.query('UPDATE messages SET parts = ? WHERE id = ?').run(JSON.stringify(entry.message.parts), entry.message.id);
+    // A write inside a caller's transaction is not committed yet: it stays dirty.
+    if (!this.db.inTransaction) entry.dirty = false;
+  }
+
+  private armDeltaTimer(): void {
+    if (this.deltaTimer !== null || this.closed) return;
+    this.deltaTimer = setTimeout(() => {
+      this.deltaTimer = null;
+      // No caller to throw to: an error thrown from a timer ends the whole process.
+      try {
+        this.flushDeltas();
+      } catch (error) {
+        this.onError(`journal delta flush: ${messageOfError(error)}`);
+      }
+    }, DELTA_WINDOW_MS);
+  }
+
+  /**
+   * Puts back the text of a failed flush, ahead of anything newer for the same
+   * part. The next flush, from the next delta, event or close, tries it again.
+   */
+  private requeue(items: PendingDelta[]): void {
+    for (const item of items) {
+      const attempts = (item.attempts ?? 0) + 1;
+      if (attempts >= DELTA_ATTEMPTS) {
+        this.onError(`journal dropped ${item.text.length} characters of message ${item.messageId} part ${item.partIndex} after ${attempts} failed writes`);
+        continue;
+      }
+      const key = `${item.messageId}|${item.partIndex}`;
+      const current = this.deltas.get(key);
+      if (current) {
+        current.text = item.text + current.text;
+        current.attempts = attempts;
+      } else this.deltas.set(key, { ...item, attempts });
+    }
+  }
+}
+
+/** How long events are kept. The projections hold the state; events are the recent trail. */
+export const EVENT_RETENTION_MS = 30 * 86_400_000;
+const RETENTION_FIRST_MS = 60_000;
+const RETENTION_EVERY_MS = 86_400_000;
+const RETENTION_BATCH = 5_000;
+
+/**
+ * Prunes events past the retention a minute after start and then daily, one
+ * batch per timer tick so that no pass holds the event loop on an old machine.
+ * Returns the stop.
+ */
+export function scheduleEventRetention(journal: Journal, onError: (message: string) => void): () => void {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const arm = (delay: number): void => {
+    timer = setTimeout(pass, delay);
+    timer.unref?.();
+  };
+  const pass = (): void => {
+    timer = null;
+    if (journal.isClosed()) return;
+    try {
+      if (journal.pruneEvents(Date.now() - EVENT_RETENTION_MS, RETENTION_BATCH) > 0) {
+        arm(10);
+        return;
+      }
+    } catch (error) {
+      onError(`journal event retention: ${messageOfError(error)}`);
+    }
+    arm(RETENTION_EVERY_MS);
+  };
+  arm(RETENTION_FIRST_MS);
+  return () => {
+    if (timer !== null) clearTimeout(timer);
+    timer = null;
+  };
+}
+
+function messageOfError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function padParts(parts: MessagePart[], index: number): MessagePart[] {
   const out = [...parts];
-  while (out.length <= index) out.push({ type: 'text', text: '' });
+  padInPlace(out, index);
   return out;
+}
+
+function padInPlace(parts: MessagePart[], index: number): void {
+  while (parts.length <= index) parts.push({ type: 'text', text: '' });
+}
+
+/** A delta appends to whatever kind of text part sits there: text or thinking. */
+function appendText(parts: MessagePart[], index: number, text: string): void {
+  const part = parts[index];
+  if (part !== undefined && (part.type === 'text' || part.type === 'thinking')) {
+    parts[index] = { type: part.type, text: part.text + text };
+  } else if (part !== undefined && part.type === 'tool') {
+    // On a tool part a delta is the input's JSON, still being typed by the model.
+    parts[index] = { ...part, inputText: (part.inputText ?? '') + text };
+  } else parts[index] = { type: 'text', text };
 }

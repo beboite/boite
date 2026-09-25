@@ -128,9 +128,14 @@ saying so in `capped`. A glob or a negation in `.gitignore` is not read, so a
 tree ignored through one still shows up in the menu.
 
 A draft on a git repository has one more chip, `Worktree`. `Project.repository`
-says whether the folder holds a `.git`, read by the core on every answer with
-the test the worktree refuses on; a core that does not send the field keeps the
-chip. On, the first send passes
+says whether the folder holds a `.git`, by the test the worktree refuses on. The
+answer is the last check's: each answer starts the next check off the event
+loop, one per folder at a time, so a folder that gains a `.git` says so on a
+later answer, and a project on a share whose host is gone never blocks the core
+(a synchronous check there froze it for 21 s). A check with no clear answer
+keeps the last one. The core checks every project at start and on
+`projects.add`; before any check has answered, the field is left out, and a
+client that gets no field keeps the chip. On, the first send passes
 `worktree: {}` to `threads.create` and the core runs `git worktree add -b`
 before writing the thread: the branch is `boite/<slug of the title>` (`-2`,
 `-3` when the name is taken, or the `branch` the call names), the directory

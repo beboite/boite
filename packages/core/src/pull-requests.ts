@@ -1,8 +1,8 @@
 import type { ThreadSummary } from '@boite/contracts';
 import type { Core } from './core.ts';
-import { existsSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname } from 'node:path';
 import { messageOf, refused } from './errors.ts';
+import { GIT_PROBE_TIMEOUT_MS, hasGitMarker } from './projects.ts';
 
 type PullRequest = ThreadSummary['pullRequest'];
 
@@ -56,8 +56,14 @@ export class PullRequests {
     if (this.#running >= 2) await new Promise<void>((resolve) => this.#queue.push(resolve));
     else this.#running++;
     try {
+      // Off the event loop and under one deadline: a folder on a share whose
+      // host is gone answers nothing for 21 s.
+      const deadline = Date.now() + GIT_PROBE_TIMEOUT_MS;
       let folder = thread.cwd;
-      while (!existsSync(join(folder, '.git'))) {
+      for (;;) {
+        const found = await hasGitMarker(folder, Math.max(0, deadline - Date.now()));
+        if (found === null) return null;
+        if (found) break;
         const parent = dirname(folder);
         if (parent === folder) return null;
         folder = parent;
