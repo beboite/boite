@@ -71,7 +71,17 @@ newest release Boite can read. Muse Code has no updater, so it is not listed.
 
 Every run of an agent goes through the process registry under the synthetic
 thread `update:<provider id>`, so it is traced and capped like any other agent
-process. A version read has 20 seconds, an agent's own updater 15 minutes.
+process. A version read has 20 seconds, an agent's own updater 15 minutes. At
+the limit the core ends the run's whole process tree, and gives up on its
+output two seconds later even when a descendant it could not reach still holds
+the pipe. Only the last 256 KB of each output stream is kept.
+
+A check reads two agents at a time. Its readings land in
+`<dataDir>/harness-versions.json`, so a restart shows the last reading and its
+notices without running any agent. The first automatic check comes ten minutes
+after start, or six hours after the kept reading when that is later, and waits
+ten more minutes while any turn is queued, running or waiting. A check started
+from the card counts: the timer does not read again within six hours of it.
 
 A managed update has no time limit: it waits for its download, which retries a
 dropped connection by itself and fails once the retries run out
@@ -106,7 +116,7 @@ list per machine and sends Update to the machine that owns the agent. The
 notice names the machine when more than one is connected.
 
 A server with no window needs no client at all: with
-`autoUpdateHarnesses` on, its core checks a minute after start and every six
+`autoUpdateHarnesses` on, its core checks ten minutes after start and every six
 hours, and updates each agent whose newest release it can read once none of
 its turns is in flight. Turn it on
 from Settings, Providers while that machine is the selected one. On Linux and
@@ -119,8 +129,10 @@ The client treats that machine as having no updates and shows no error.
 
 ## RPC
 
-- `providers.updates { refresh? }`: the list. The first call reads, later calls
-  answer from memory unless `refresh` is true.
+- `providers.updates { refresh? }`: the list, answered from the last reading
+  without running any agent. `refresh: true` reads every agent first. On a core
+  with no reading yet the list is empty; Settings, Providers asks for a refresh
+  when it opens on an empty list.
 - `providers.update { providerId }`: start one update.
 - `providers.updateSkip { providerId, version }`: skip a version, `null`
   forgets the skip.

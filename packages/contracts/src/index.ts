@@ -1745,7 +1745,8 @@ export interface RpcMethods extends AgentsRpcMethods {
   /**
    * Where every available agent stands against its newest release, on the
    * machine this core runs on. `refresh` asks the agents and the registries
-   * again; without it the last reading answers, and the first call reads.
+   * again; without it the last reading answers, an empty list when the core
+   * has none yet. A plain call never runs an agent.
    */
   'providers.updates': { params: { refresh?: boolean }; result: HarnessUpdate[] };
   /**

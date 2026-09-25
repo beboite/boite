@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
   import InfoTip from './InfoTip.svelte';
   import type { HarnessUpdate } from '@boite/contracts';
   import { strings } from '../lib/strings';
@@ -20,6 +21,12 @@
       checking = false;
     }
   }
+
+  // The core answers from its last reading and never runs the agents for a plain list:
+  // opening this card on a core that has not read them yet is the moment to.
+  onMount(() => {
+    if (store.owner && store.harnessUpdates.length === 0 && !busy) void check();
+  });
 
   function newer(update: HarnessUpdate): boolean {
     return update.latest !== null && update.current !== null && update.latest !== update.current && (update.pending || update.skipped === update.latest || update.state === 'failed');

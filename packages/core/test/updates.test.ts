@@ -4,6 +4,8 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, test } from 'bun:test';
 import type { HarnessUpdate } from '@boite/contracts';
 import type { CoreClient } from '../src/client.ts';
+import { Core } from '../src/core.ts';
+import { newToken } from '../src/ids.ts';
 import { compareVersions, inside, readVersion } from '../src/providers/updates.ts';
 import { echoThread, startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
@@ -89,7 +91,7 @@ describe('harness updates', () => {
   test('an agent that checks by itself is read, updated by its own updater, and traced', async () => {
     const { client, state } = await start('command');
 
-    const before = only(await client.call('providers.updates', {}));
+    const before = only(await client.call('providers.updates', { refresh: true }));
     expect(before).toMatchObject({ route: 'self', current: '1.0.0', latest: '1.2.0', pending: true, state: 'idle', skipped: null });
 
     const changed = client.next('providers.updatesChanged', (list) => list[0]?.state === 'idle' && list[0]?.current === '1.2.0', 20000);
@@ -110,7 +112,7 @@ describe('harness updates', () => {
   test('an agent that cannot name its newest version announces nothing and still runs its updater when asked', async () => {
     const { client, state } = await start('none');
 
-    const before = only(await client.call('providers.updates', {}));
+    const before = only(await client.call('providers.updates', { refresh: true }));
     expect(before).toMatchObject({ route: 'self', current: '1.0.0', latest: null, pending: false, state: 'idle' });
 
     const changed = client.next('providers.updatesChanged', (list) => list[0]?.state === 'idle' && list[0]?.current === '1.2.0', 20000);
@@ -123,7 +125,7 @@ describe('harness updates', () => {
   test('the npm registry names the newest version, and a skipped one stays quiet until the next', async () => {
     const { client } = await start('npm');
 
-    expect(only(await client.call('providers.updates', {}))).toMatchObject({ current: '1.0.0', latest: '1.1.0', pending: true });
+    expect(only(await client.call('providers.updates', { refresh: true }))).toMatchObject({ current: '1.0.0', latest: '1.1.0', pending: true });
 
     const skipped = await client.call('providers.updateSkip', { providerId: 'update-fake', version: '1.1.0' });
     expect(skipped).toMatchObject({ pending: false, skipped: '1.1.0' });
@@ -139,7 +141,7 @@ describe('harness updates', () => {
 
   test('an updater that fails says why, and the version stays what it was', async () => {
     const { client } = await start('command', 'update-broken');
-    await client.call('providers.updates', {});
+    await client.call('providers.updates', { refresh: true });
 
     const failed = client.next('providers.updatesChanged', (list) => list[0]?.state === 'failed', 20000);
     await client.call('providers.update', { providerId: 'update-fake' });
@@ -151,14 +153,14 @@ describe('harness updates', () => {
 
   test('an updater that reads how it was installed gets the environment its skipped launcher sets', async () => {
     const bare = await start('command', 'update-launched');
-    await bare.client.call('providers.updates', {});
+    await bare.client.call('providers.updates', { refresh: true });
     const failed = bare.client.next('providers.updatesChanged', (list) => list[0]?.state === 'failed', 20000);
     await bare.client.call('providers.update', { providerId: 'update-fake' });
     expect(only(await failed).message).toContain('Could not detect the installation method');
     await harness!.stop();
 
     const { client, state } = await start('command', 'update-launched', { FAKE_MANAGED_BY_NPM: '1' });
-    await client.call('providers.updates', {});
+    await client.call('providers.updates', { refresh: true });
     const changed = client.next('providers.updatesChanged', (list) => list[0]?.state === 'idle' && list[0]?.current === '1.2.0', 20000);
     await client.call('providers.update', { providerId: 'update-fake' });
     expect(only(await changed)).toMatchObject({ current: '1.2.0', message: null });
@@ -168,7 +170,7 @@ describe('harness updates', () => {
 
   test('a provider with a turn in flight is not updated under it', async () => {
     const { client } = await start('command');
-    await client.call('providers.updates', {});
+    await client.call('providers.updates', { refresh: true });
     const project = await client.call('projects.add', { path: harness!.dataDir, name: 'updates' });
     const account = await client.call('accounts.add', { providerId: 'update-fake', label: 'Fake', useDefaultLocation: true });
     const thread = await client.call('threads.create', { projectId: project.id, providerId: 'update-fake', accountId: account.id, title: 'busy' });
@@ -180,7 +182,7 @@ describe('harness updates', () => {
   test('an accepted turn still protects its provider after the picker changes', async () => {
     const { client, state } = await start('command');
     const core = harness!.core;
-    await client.call('providers.updates', {});
+    await client.call('providers.updates', { refresh: true });
     await client.call('settings.set', { maxConcurrentTurns: 1 });
     const blocker = await echoThread(harness!, client);
     await client.call('turns.start', { threadId: blocker.threadId, prompt: '[sleep:60000]' });
@@ -197,7 +199,7 @@ describe('harness updates', () => {
 
   test('an update asked for during a check waits for it, and a second one is refused while the first runs', async () => {
     const { client } = await start('npm');
-    await client.call('providers.updates', {});
+    await client.call('providers.updates', { refresh: true });
 
     const project = await client.call('projects.add', { path: harness!.dataDir, name: 'updates' });
     const account = await client.call('accounts.add', { providerId: 'update-fake', label: 'Fake', useDefaultLocation: true });
@@ -259,4 +261,55 @@ describe('harness updates', () => {
     await expect(update).rejects.toThrow('stopping');
     expect(readFileSync(state, 'utf8')).toBe('1.0.0');
   });
+
+  test('a client that connects is answered from memory: nothing spawns and the registry is not asked', async () => {
+    const { client } = await start('npm');
+    let asked = 0;
+    harness!.core.updates.npmLatest = async () => {
+      asked += 1;
+      return '1.1.0';
+    };
+    expect(await client.call('providers.updates', {})).toEqual([]);
+    expect(asked).toBe(0);
+    expect(await client.call('trace.get', { threadId: 'update:update-fake' })).toEqual([]);
+    // The first automatic check waits ten minutes, not one.
+    expect(harness!.core.updates.firstDelay()).toBe(10 * 60 * 1000);
+  });
+
+  test('a restart shows the last reading without running the agent, and waits out the six hours', async () => {
+    const { client } = await start('npm');
+    const checked = only(await client.call('providers.updates', { refresh: true }));
+    expect(checked).toMatchObject({ current: '1.0.0', latest: '1.1.0', pending: true });
+
+    const second = new Core({ dataDir: harness!.dataDir, token: newToken() });
+    try {
+      let asked = 0;
+      second.updates.npmLatest = async () => {
+        asked += 1;
+        return '1.1.0';
+      };
+      const [remembered] = await second.updates.list();
+      expect(remembered).toMatchObject({ providerId: 'update-fake', current: '1.0.0', latest: '1.1.0', pending: true, state: 'idle' });
+      expect(asked).toBe(0);
+      expect(second.procs.liveCount('update:update-fake')).toBe(0);
+      const delay = second.updates.firstDelay();
+      expect(delay).toBeGreaterThan(5 * 60 * 60 * 1000);
+      expect(delay).toBeLessThanOrEqual(6 * 60 * 60 * 1000);
+      // Seven hours later the reading is stale, and the check comes after the usual ten minutes.
+      expect(second.updates.firstDelay(Date.now() + 7 * 60 * 60 * 1000)).toBe(10 * 60 * 1000);
+    } finally {
+      await second.close();
+    }
+  });
+
+  test('a version read whose launcher leaves a child on its pipes fails at its timeout with the whole tree gone', async () => {
+    const { client } = await start('command', 'update', { FAKE_HANG: '1' });
+    harness!.core.updates.versionTimeoutMs = 1000;
+    const began = Date.now();
+    const update = only(await client.call('providers.updates', { refresh: true }));
+    expect(Date.now() - began).toBeLessThan(6000);
+    expect(update).toMatchObject({ state: 'failed' });
+    expect(update.message).toMatch(/did not answer `.*--version` within 1 s/);
+    await waitFor(() => harness?.core.procs.liveCount('update:update-fake') === 0);
+  }, 15000);
 });

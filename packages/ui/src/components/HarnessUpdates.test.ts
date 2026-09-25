@@ -105,3 +105,19 @@ test('the settings card carries the automatic switch, the versions and a way bac
   await settle();
   expect(local.harnessUpdates.find((update) => update.providerId === 'claude')).toMatchObject({ skipped: null, pending: true });
 });
+
+test('the settings card reads the agents once when the core has no reading yet, and only then', async () => {
+  const local = await machine('local', 'This PC');
+  const load = vi.spyOn(local, 'loadHarnessUpdates');
+  mounted = mount(HarnessUpdatesCard, { target: document.body, props: { store: local } });
+  await settle();
+  expect(load).not.toHaveBeenCalled();
+  await unmount(mounted);
+
+  local.harnessUpdates = [];
+  mounted = mount(HarnessUpdatesCard, { target: document.body, props: { store: local } });
+  await settle();
+  expect(load).toHaveBeenCalledTimes(1);
+  expect(load).toHaveBeenCalledWith(true);
+  expect(document.querySelectorAll('[data-testid="harness-update-row"]')).toHaveLength(4);
+});
