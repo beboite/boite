@@ -80,7 +80,9 @@ docker compose up -d
 docker compose ps
 ```
 
-The image health check polls `/health`. Compose restarts exited containers;
+The image health check polls `/health` on the port and host the running core
+wrote to `/data/core.json`, so a `--port` passed in `command:` is followed.
+Compose restarts exited containers;
 Docker does not automatically restart an unhealthy process.
 
 To pin a release, set `BOITE_IMAGE=ghcr.io/beboite/boite/boite-server:v<version>` in
