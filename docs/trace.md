@@ -109,7 +109,11 @@ The agent process and anything else the core spawned have the core as their
 parent and are never taken. Neither is a process whose shell is still
 running, such as a background command the agent is still waiting on. A process
 an agent detaches on purpose and means to keep across turns is stopped too:
-that is what the switch below is for. Off Windows, only direct children are
+that is what the switch below is for. So is the child of a launcher that hands
+over and exits, even a launcher the core spawned: only a process whose parent
+is the core itself is exempt, since the rule reads the parent pid, never the
+intent. The walk is linear in the thread's live
+processes, and it runs once per finished turn. Off Windows, only direct children are
 tracked, and their parent is the core, so the sweep finds nothing and the
 setting does nothing there: what a turn leaves running stays until the
 thread's tree is killed.

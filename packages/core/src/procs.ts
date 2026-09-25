@@ -514,15 +514,21 @@ export class ProcRegistry {
       stopping.set(record.pid, record);
     }
     if (stopping.size === 0) return [];
-    // An orphan's own children still have a live parent: they go with it.
-    for (let grew = true; grew;) {
-      grew = false;
-      for (const record of records) {
-        if (stopping.has(record.pid) || record.parentPid === null) continue;
-        const parent = stopping.get(record.parentPid);
-        if (parent === undefined || parent.startedAt > record.startedAt) continue;
-        stopping.set(record.pid, record);
-        grew = true;
+    // An orphan's own children still have a live parent: they go with it. One
+    // index by parent, then one walk down, so a deep tree costs its size.
+    const children = new Map<number, ProcessRecord[]>();
+    for (const record of records) {
+      if (record.parentPid === null) continue;
+      const siblings = children.get(record.parentPid);
+      if (siblings === undefined) children.set(record.parentPid, [record]);
+      else siblings.push(record);
+    }
+    const pending = [...stopping.values()];
+    for (let parent = pending.pop(); parent !== undefined; parent = pending.pop()) {
+      for (const child of children.get(parent.pid) ?? []) {
+        if (stopping.has(child.pid) || parent.startedAt > child.startedAt) continue;
+        stopping.set(child.pid, child);
+        pending.push(child);
       }
     }
     const stopped: number[] = [];
