@@ -217,8 +217,8 @@ test harness, the end to end suite and the bench set it; an opt-in live test
 ## Checks and tests
 
 ```bash
-bun run check    # contracts, core, UI and end-to-end test types
-bun run test     # bun test in packages/core, vitest in packages/ui
+bun run check    # contracts, core, UI, end-to-end test, bench and telemetry Worker types
+bun run test     # bun test in packages/core (parallel workers), vitest in packages/ui
 bun run build:ui # required by the core-backed browser tests on a fresh checkout
 bun run e2e      # tests/e2e
 ```
