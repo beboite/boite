@@ -306,7 +306,10 @@ and seven around the reading position. Distant prompts are grouped behind a
 keyboard-accessible list, so every loaded prompt remains reachable. Desktop
 markers are 12 px apart; the compact activity panel sits 4 px above the composer.
 
-The fake client is excluded from production bundles. Tests that need it must
+The fake client is excluded from production bundles. Its imports sit behind
+`import.meta.env.DEV`, and because Rolldown still writes a chunk for a dynamic
+import in a dead branch, `vite.config.ts` deletes that orphan chunk and fails
+the build if a shipped chunk still names it. Tests that need it must
 use the Vite development server. `tests/e2e/settings.test.ts` starts and closes
 one within the test process; the other end-to-end paths use a real temporary
 core with the echo driver.

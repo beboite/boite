@@ -74,8 +74,36 @@ function browserFloor(): Plugin {
   };
 }
 
+/**
+ * The fake client and its seeded fixtures are for the dev server and the tests.
+ * Its three imports sit behind `import.meta.env.DEV`, but Rolldown splits the
+ * chunk before it folds those branches away, so a release build still wrote it,
+ * unreferenced, beside the app. This drops that orphan before compression, and
+ * fails the build if a shipped chunk still reaches it. The e2e's fake bundle
+ * (`tests/e2e/lib/warm.ts`) defines DEV as true and keeps it.
+ */
+function dropFakeClient(): Plugin {
+  let dev = false;
+  return {
+    name: 'boite-drop-fake-client',
+    apply: 'build',
+    configResolved(config) {
+      dev = config.define?.['import.meta.env.DEV'] === 'true';
+    },
+    generateBundle(_options, bundle) {
+      if (dev) return;
+      const fake = Object.values(bundle).filter((file) => file.type === 'chunk' && /[\\/]src[\\/]lib[\\/]fake-client\.ts$/.test(file.facadeModuleId ?? ''));
+      for (const chunk of fake) {
+        const users = Object.values(bundle).filter((file) => file !== chunk && (file.type === 'chunk' ? file.code : String(file.source)).includes(chunk.fileName.replace(/^assets\//, '')));
+        if (users.length) this.error(`${users.map((file) => file.fileName).join(', ')} reaches the dev-only fake client (${chunk.fileName}); guard the import with import.meta.env.DEV`);
+        delete bundle[chunk.fileName];
+      }
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [svelte(), browserFloor(), precompress()],
+  plugins: [svelte(), browserFloor(), dropFakeClient(), precompress()],
   base: './',
   // AudioWorklet modules must be same-origin files, never data URLs under the shell CSP.
   build: { outDir: 'dist', emptyOutDir: true, target: 'es2022', assetsInlineLimit: (file) => file.endsWith('speech-worklet.js') ? false : undefined },
