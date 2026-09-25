@@ -5,7 +5,7 @@ import { sign } from 'node:crypto';
 import type { AgentAddress, CoordinationConfig } from '@boite/contracts';
 import { connect } from '../src/client.ts';
 import { Core } from '../src/core.ts';
-import { coordinationUrl, letterPrompt } from '../src/coordination.ts';
+import { coordinationUrl, LETTER_RETENTION_MS, letterPrompt } from '../src/coordination.ts';
 import { setDriver } from '../src/drivers/index.ts';
 import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
 
@@ -231,3 +231,31 @@ test('an offline peer recovers before expiry without duplicate delivery', async 
   expect(two.h.core.coordination.get(two.b).messages.map(m => m.id)).toEqual([letter.id]);
   expect(two.h.core.coordination.get(two.b).wakes).toBe(0);
 }, 14000);
+
+test('a letter wakes an idle recipient at once, without waiting for the sweep', async () => {
+  const { h, a, b } = await setup(); enable(h, a, b);
+  await send(h, a, dest(h, b));
+  // The sweep runs every 2 s: 100 ms leaves it a 5 % chance to be the one that delivered.
+  await new Promise(resolve => setTimeout(resolve, 100));
+  expect(h.core.journal.listTurns(b).map(turn => turn.execution?.operation)).toEqual(['coordination']);
+});
+
+test('the sweep reads pending letters through the status index and prunes settled old ones', async () => {
+  const { h, a, b } = await setup(); enable(h, a, b);
+  h.core.coordination.pause(b);
+  const kept = await send(h, a, dest(h, b), 'Still waiting');
+  const old = await send(h, a, dest(h, b), 'Long settled');
+  const db = h.core.journal.db;
+  db.query("UPDATE coordination_letters SET status = 'delivered', created_at = ? WHERE id = ?").run(Date.now() - LETTER_RETENTION_MS - 1, old.id);
+  const plan = (sql: string, ...params: (string | number)[]) => (db.query(`EXPLAIN QUERY PLAN ${sql}`).all(...params) as { detail: string }[]).map(row => row.detail).join(' | ');
+  for (const sql of [
+    "SELECT 1 FROM coordination_letters WHERE status IN ('queued', 'received', 'uncertain') LIMIT 1",
+    "SELECT data FROM coordination_letters WHERE status IN ('queued', 'received') AND json_extract(data, '$.expiresAt') <= 1",
+    "SELECT DISTINCT thread_id FROM coordination_letters WHERE direction = 'in' AND status = 'received'",
+    "SELECT data FROM coordination_letters WHERE direction = 'out' AND status IN ('queued', 'received', 'uncertain') AND json_extract(data, '$.expiresAt') > 1",
+  ]) expect(plan(sql)).toContain('coordination_status');
+  await (h.core.coordination as unknown as { tick(): Promise<void> }).tick();
+  const ids = (db.query('SELECT id FROM coordination_letters').all() as { id: string }[]).map(row => row.id);
+  expect(ids).toContain(kept.id);
+  expect(ids).not.toContain(old.id);
+});

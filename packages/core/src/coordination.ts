@@ -6,6 +6,8 @@ import type { Core } from './core.ts';
 import { invalidParams, messageOf, refused, RpcFailure } from './errors.ts';
 
 const HOUR = 3_600_000;
+/** How long a delivered, expired or rejected letter stays in the journal. */
+export const LETTER_RETENTION_MS = 30 * 24 * HOUR;
 const MAX_BODY = 262_144;
 const ROUTE = '/agent-messages';
 const initial = (): CoordinationConfig => ({ mode: 'off', resources: '', remote: false, paused: false });
@@ -67,6 +69,9 @@ export class Coordination {
   private readonly attempts = new Map<string, number>();
   private ticking = false;
   private readonly timer: ReturnType<typeof setInterval>;
+  private readonly off: () => void;
+  /** When the sweep last pruned the wake log and old letters; both are hourly bookkeeping. */
+  private swept = 0;
 
   constructor(private readonly core: Core) {
     // A restart never resumes token-spending work without an owner action.
@@ -74,8 +79,23 @@ export class Coordination {
       const config = this.config(thread.id);
       if (config.mode !== 'off' && !config.paused) this.saveConfig(thread.id, { ...config, paused: true });
     }
+    // A thread that finishes a turn can take its waiting letters now, not at the next sweep.
+    this.off = core.bus.onAny((name, payload) => {
+      if (name === 'turn.finished' && !this.closed) this.kick((payload as { threadId: string }).threadId);
+    });
+    // The sweep remains for expiry, remote retries and a steer a driver was not ready for.
     this.timer = setInterval(() => { void this.tick(); }, 2000);
     this.timer.unref?.();
+  }
+
+  /** Delivery to one thread once the current synchronous work (a journal write, a turn end) is done. */
+  private kick(threadId: string): void {
+    queueMicrotask(() => {
+      if (this.closed || this.core.journal.isClosed()) return;
+      const job = this.deliver(threadId).catch(error => { if (!this.closed) this.core.log('warn', `coordination ${threadId}: ${messageOf(error)}`); });
+      this.pending.add(job);
+      void job.finally(() => this.pending.delete(job));
+    });
   }
 
   private identityKey(): void {
@@ -253,7 +273,7 @@ export class Coordination {
     this.changed(from.threadId);
     if (to.coreId === from.coreId) {
       try { this.receive(letter); } catch (error) { this.update(letter, 'rejected', messageOf(error)); }
-    }
+    } else queueMicrotask(() => { void this.tick(); });
     return this.find(letter.id, 'out')!;
   }
   private receive(letter: AgentLetter, peer?: CoordinationPeer): AgentLetter {
@@ -279,6 +299,7 @@ export class Coordination {
     const accepted: AgentLetter = { id: letter.id, from, to: this.self(target.threadId), toTitle: target.title, text: text(letter.text, 'letter.text'), replyTo: letter.replyTo === null ? null : text(letter.replyTo, 'letter.replyTo', 100), createdAt: Date.now(), expiresAt: letter.expiresAt, status: 'received', error: null };
     this.core.journal.append({ type: 'coordination.received', threadId: target.threadId, version: 1, payload: accepted }, () => this.put(accepted, 'in', target.threadId));
     this.update(accepted, 'received');
+    this.kick(target.threadId);
     return accepted;
   }
   private rows(where: string, ...params: (string | number)[]): Row[] { return this.core.journal.db.query(`SELECT data, fingerprint FROM coordination_letters WHERE ${where}`).all(...params) as Row[]; }
@@ -394,6 +415,17 @@ export class Coordination {
     finally { this.pending.delete(job); this.ticking = false; }
   }
   private async work(): Promise<void> {
+    const now = Date.now();
+    if (now - this.swept >= HOUR) {
+      this.swept = now;
+      this.core.journal.db.query('DELETE FROM coordination_wakes WHERE at < ?').run(now - HOUR);
+      // A settled letter has nothing left to deliver or acknowledge: its expiry is 15
+      // minutes, a receipt asks only for a letter that has not expired, and a thread
+      // shows its last 100.
+      this.core.journal.db.query("DELETE FROM coordination_letters WHERE status IN ('delivered', 'expired', 'rejected') AND created_at < ?").run(now - LETTER_RETENTION_MS);
+    }
+    // Nothing waits on the sweep: one probe on the status index, then back to sleep.
+    if (!this.core.journal.db.query("SELECT 1 FROM coordination_letters WHERE status IN ('queued', 'received', 'uncertain') LIMIT 1").get()) return;
     for (const row of this.rows("status IN ('queued', 'received') AND json_extract(data, '$.expiresAt') <= ?", Date.now())) this.update(JSON.parse(row.data), 'expired', 'Message expired before delivery');
     const threads = this.core.journal.db.query("SELECT DISTINCT thread_id FROM coordination_letters WHERE direction = 'in' AND status = 'received'").all() as { thread_id: string }[];
     for (const { thread_id } of threads) {
@@ -410,7 +442,6 @@ export class Coordination {
     for (const id of this.attempts.keys()) if (!ids.has(id)) this.attempts.delete(id);
     const next = outgoing.sort((a, b) => (this.attempts.get(a.id) ?? 0) - (this.attempts.get(b.id) ?? 0)).slice(0, 4);
     await Promise.all(next.map(letter => this.relay(letter)));
-    if (!this.closed) this.core.journal.db.query('DELETE FROM coordination_wakes WHERE at < ?').run(Date.now() - HOUR);
   }
 
   private async relay(letter: AgentLetter): Promise<void> {
@@ -493,7 +524,7 @@ export class Coordination {
     this.identityKey();
     return new Response(raw, { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store', 'x-boite-signature': sign(null, Buffer.from(raw), this.key!).toString('base64') } });
   }
-  beginClose(): void { this.closed = true; clearInterval(this.timer); }
+  beginClose(): void { this.closed = true; clearInterval(this.timer); this.off(); }
   async close(): Promise<void> { this.beginClose(); await Promise.allSettled([...this.pending]); }
 }
 class PeerRefusal extends Error {}
