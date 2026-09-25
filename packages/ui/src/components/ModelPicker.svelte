@@ -5,7 +5,8 @@
   import ProviderLogo from './ProviderLogo.svelte';
   import { floating } from '../lib/floating';
   import { Closing } from '../lib/closing.svelte';
-  import { strings } from '../lib/strings';
+  import { fill, strings } from '../lib/strings';
+  import { FIRST_MODELS, favoriteIds, firstModels, groupModels } from '../lib/model-list';
   import type { Choice, PickPatch, Store } from '../lib/store.svelte';
 
   /**
@@ -46,8 +47,9 @@
   let favoritesOpen = $state(false);
   let favoritePending = $state(false);
   const favorites = $derived(store.favorites.filter((f) => store.accountOf(f.accountId)?.providerId === f.providerId));
+  const favoriteSet = $derived.by(() => favoriteIds(store.favorites, shown?.id, shownAccountId));
   function favorite(model: ModelInfo): boolean {
-    return store.favorites.some((f) => f.providerId === shown?.id && f.accountId === shownAccountId && f.model.id === model.id);
+    return favoriteSet.has(model.id);
   }
   async function pickFavorite(entry: FavoriteModel) {
     if (favoritePending) return;
@@ -212,24 +214,10 @@
   );
   let filteredLegacy = $derived(searchable ? legacyModels.filter(matches) : legacyModels);
 
-  interface Group {
-    /** The part of the id before the first slash, empty for a model that has none. */
-    key: string;
-    models: ModelInfo[];
-  }
-
-  /** One label per prefix, the groups in the order the agent first mentioned each. */
-  let groups = $derived.by((): Group[] => {
-    const byKey = new Map<string, Group>();
-    for (const model of filteredCurrent) {
-      const slash = model.id.indexOf('/');
-      const key = slash > 0 ? model.id.slice(0, slash) : '';
-      const group = byKey.get(key);
-      if (group) group.models.push(model);
-      else byKey.set(key, { key, models: [model] });
-    }
-    return [...byKey.values()];
-  });
+  // Nothing typed on a long list: its first rows, the current model and a show-all row.
+  let expandedFor = $state<string | null>(null);
+  let capped = $derived(expandedFor !== shown?.id && words.length === 0 && filteredCurrent.length > FIRST_MODELS);
+  let groups = $derived(groupModels(capped ? firstModels(filteredCurrent, isCurrentModel) : filteredCurrent));
 
   function isCurrentModel(model: ModelInfo): boolean {
     return shown !== null && choice?.providerId === shown.id && choice?.model === model.id;
@@ -249,6 +237,7 @@
       favoritesOpen = favorites.length > 0;
       legacy.hide();
       modelQuery = '';
+      expandedFor = null;
     }
   }
 
@@ -573,6 +562,9 @@
                 {@render modelRow(model)}
               {/each}
             {/each}
+            {#if capped}
+              <button type="button" class="row fold small" data-row data-testid="picker-show-all" onclick={() => { expandedFor = shown?.id ?? null; searchBox?.focus(); }}>{fill(strings.composer.showAllModels, { count: String(filteredCurrent.length) })}</button>
+            {/if}
             {#if groups.length === 0 && filteredLegacy.length === 0 && modelQuery.trim() !== ''}
               <p class="none subtle" data-testid="picker-no-models">{strings.composer.noModels}</p>
             {/if}

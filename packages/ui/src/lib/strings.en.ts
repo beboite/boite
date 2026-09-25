@@ -775,6 +775,7 @@ export const strings = {
     models: 'Models',
     searchModels: 'Search models',
     noModels: 'No model matches',
+    showAllModels: 'Show all {count} models',
     legacyModels: 'Legacy models',
     refreshModels: 'Refresh models',
     probing: "Reading the agent's models",

@@ -764,6 +764,7 @@ export const fr: Translation = {
     models: 'Modèles',
     searchModels: 'Rechercher un modèle',
     noModels: 'Aucun modèle ne correspond',
+    showAllModels: 'Afficher les {count} modèles',
     legacyModels: 'Anciens modèles',
     refreshModels: 'Actualiser les modèles',
     probing: "Lecture des modèles de l'agent",
