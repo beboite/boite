@@ -109,9 +109,6 @@
     align-items: flex-start;
     gap: 0;
     line-height: 1.55;
-    /* Rows scrolled out of the box skip layout and paint. */
-    content-visibility: auto;
-    contain-intrinsic-size: auto 1.55em;
   }
 
   .more {
