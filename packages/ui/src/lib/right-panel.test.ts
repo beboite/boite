@@ -291,6 +291,33 @@ describe('the right panel', () => {
     }
   });
 
+  test('a panel write after a phone load keeps every desktop panel stored open', () => {
+    const first = panel('t-1');
+    first.bound.open('trace');
+    first.root.for('t-2').open('changes');
+    const matchMedia = window.matchMedia;
+    window.matchMedia = ((media: string) => ({ media, matches: media === '(max-width: 720px)' })) as unknown as typeof window.matchMedia;
+    try {
+      const phone = new RightPanelStore();
+      const stored = () => JSON.parse(window.localStorage.getItem(PANEL_STORAGE_KEY) ?? '{}').threads as Record<string, { isOpen: boolean }>;
+      // A write on another thread, and one on a shut panel that leaves it shut.
+      phone.for('t-3').open('files');
+      phone.for('t-2').update('changes', { path: 'src/app.ts' });
+      expect(phone.for('t-2').isOpen).toBe(false);
+      expect(stored()['t-1']?.isOpen).toBe(true);
+      expect(stored()['t-2']?.isOpen).toBe(true);
+      // Opened on the phone, then shut by hand: that is the phone user's choice, and it is saved.
+      phone.for('t-1').toggle();
+      expect(phone.for('t-1').isOpen).toBe(true);
+      phone.for('t-1').hide();
+      expect(phone.for('t-1').isOpen).toBe(false);
+      expect(stored()['t-1']?.isOpen).toBe(false);
+      expect(stored()['t-2']?.isOpen).toBe(true);
+    } finally {
+      window.matchMedia = matchMedia;
+    }
+  });
+
   test('a stored blob of another version is dropped whole', () => {
     window.localStorage.setItem(
       PANEL_STORAGE_KEY,

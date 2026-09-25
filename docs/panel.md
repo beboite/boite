@@ -5,7 +5,9 @@ button, the `panel` chord or one of the surface chords. It keeps its own tabs
 and width for each thread in the browser's storage, so a thread comes back the
 way it was left. Under 720 px the panel is a sheet over the whole chat, so a
 reload there opens on the chat with the panel shut and its tabs kept for the
-next open, and Back shuts it. `packages/ui/src/lib/right-panel.svelte.ts` is the store,
+next open, and Back shuts it. That reload-time shut is held in memory beside
+the stored layout, so a wider window of the same browser still finds its panels
+open after the phone has used its own. `packages/ui/src/lib/right-panel.svelte.ts` is the store,
 `RightPanel.svelte` the frame, one component per surface.
 
 A panel with no tab yet opens on the surface the device starts with, Files or

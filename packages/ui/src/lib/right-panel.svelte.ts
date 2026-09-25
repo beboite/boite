@@ -7,6 +7,7 @@
  */
 
 import type { PanelSurface } from '@boite/contracts';
+import { SvelteSet } from 'svelte/reactivity';
 import { browserBridge } from './browser-bridge';
 import { work } from './work-prefs.svelte';
 
@@ -178,6 +179,13 @@ export class RightPanelStore {
    */
   readonly drafts = new Map<string, Map<string, string>>();
 
+  /**
+   * The threads a phone-width load shut, kept beside the stored layout rather
+   * than in it: every write saves the whole map, and a desktop reading the same
+   * storage must still find these panels open. Opening one takes it out.
+   */
+  readonly phoneShut = new SvelteSet<string>();
+
   #bound = new Map<string, BoundPanel>();
 
   constructor() {
@@ -189,10 +197,11 @@ export class RightPanelStore {
       const raw = window.localStorage.getItem(PANEL_STORAGE_KEY);
       const threads = raw ? parse(raw) : {};
       // On a phone the panel is a sheet over the whole chat: a reload opens on
-      // the chat, and the tabs wait for the next open. Nothing is saved here,
-      // so a desktop reading the same storage still finds its panel open.
+      // the chat, and the tabs wait for the next open. The stored layout keeps
+      // isOpen, so a desktop reading the same storage still finds its panel open.
+      this.phoneShut.clear();
       if (typeof window.matchMedia === 'function' && window.matchMedia('(max-width: 720px)').matches) {
-        for (const state of Object.values(threads)) state.isOpen = false;
+        for (const [threadId, state] of Object.entries(threads)) if (state.isOpen) this.phoneShut.add(threadId);
       }
       this.threads = threads;
     } catch {
@@ -248,6 +257,7 @@ export class RightPanelStore {
     }
     const { [threadId]: _gone, ...kept } = this.threads;
     this.threads = kept;
+    this.phoneShut.delete(threadId);
     this.#bound.delete(threadId);
     this.drafts.delete(threadId);
     this.save();
@@ -267,8 +277,10 @@ export class BoundPanel {
     return this.#key === '' ? null : this.#key;
   }
 
+  /** The layout as this device shows it: a panel a phone-width load shut reads closed. */
   get state(): PanelState {
-    return this.#root.threads[this.#key] ?? emptyState();
+    const stored = this.#root.threads[this.#key] ?? emptyState();
+    return stored.isOpen && this.#root.phoneShut.has(this.#key) ? { ...stored, isOpen: false } : stored;
   }
 
   get isOpen(): boolean {
@@ -289,6 +301,10 @@ export class BoundPanel {
   }
 
   #write(next: PanelState): void {
+    // A write that leaves a phone-shut panel shut keeps what the desktop stored.
+    const stored = this.#root.threads[this.#key];
+    if (next.isOpen) this.#root.phoneShut.delete(this.#key);
+    else if (this.#root.phoneShut.has(this.#key) && stored?.isOpen && next.surfaces.length > 0) next = { ...next, isOpen: true };
     this.#root.threads = { ...this.#root.threads, [this.#key]: next };
     this.#root.save();
   }
