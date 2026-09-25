@@ -27,7 +27,7 @@ OpenCode's descriptor, with the `linux` and `macos` profiles left out:
       "detect": {},
       "executable": [
         { "kind": "file", "value": "{agentsDir}/opencode.exe" },
-        { "kind": "file", "value": "{appdata}/npm/node_modules/opencode-ai/bin/opencode.exe" },
+        { "kind": "file", "value": "{npmRoot}/opencode-ai/bin/opencode.exe" },
         { "kind": "path", "value": "opencode" }
       ],
       "launch": { "args": ["acp", "--port", "0"] },
@@ -110,6 +110,8 @@ session protocol either.
   directory holding a real program of that name, and misses when there is none:
   the drivers spawn through node, which refuses a launcher script with EINVAL,
   so the agent reads as not installed and its row offers the install instead.
+  A turn started on it is refused with the launcher script's path, so the
+  reason is on screen rather than a bare "not available".
   A profile that names a launcher script as a `file` candidate keeps them, as
   Muse Code does, since its driver maps its launcher to its program. `kind: "npm"` names
   a globally installed package, `@scope/name#bin`, for the agents npm installs
@@ -122,6 +124,13 @@ session protocol either.
   the summary shows the script as the executable. Only the `pi` and `acp`
   protocols take an `npm` candidate: the SDK and app-server drivers spawn the
   program with no leading argument.
+- A `file` candidate that starts with `{npmRoot}` is looked for under each
+  global npm `node_modules` directory, the same list an `npm` candidate walks,
+  with the profile's `path` names as the bin hints. That is how Codex and
+  OpenCode find the program their npm package vendors under nvm-windows, fnm,
+  scoop or a custom prefix, where the shim on PATH is a `.cmd`. The token is
+  expanded at each resolution, not at load, and only at the start of a `file`
+  value.
 - A PATH lookup, for a candidate, a `detect.command` or the npm roots, is
   remembered for 30 seconds per name and PATH, so the provider list and each
   turn start do not walk PATH again. A remembered program that is gone is looked

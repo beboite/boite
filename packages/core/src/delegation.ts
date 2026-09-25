@@ -174,7 +174,7 @@ export class Delegation {
     const persistentOwner = this.core.workforce.resident.ownerOf(parent.id);
     if (persistentOwner && !this.core.workforce.resident.allowed(persistentOwner, { ...profile, permissionMode: parent.permissionMode }, true)) throw refused('account/model access was withdrawn from this agent');
     const provider = this.core.providers.require(profile.providerId);
-    assertDriverRunnable(provider.protocol, this.core.providers.summary(provider.id), this.core.accounts.require(profile.accountId));
+    assertDriverRunnable(provider.protocol, this.core.providers.summary(provider.id), this.core.accounts.require(profile.accountId), () => this.core.providers.launcherScriptOnly(provider.id));
     const id = newId('thr_');
     const row: AgentRow = { thread_id: id, root_id: parent.id, request_id: requestId, fingerprint, profile_id: profile.id, task };
     // Relationship and creation commit together. Start can fail (missing executable,

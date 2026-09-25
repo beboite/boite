@@ -24,7 +24,7 @@ import type {
 import type { Core } from '../core.ts';
 import { agentsDirPath, appDataPath, browserNoopPath, currentOs, homePath } from '../paths.ts';
 import { InstallManager } from './install.ts';
-import { isNpmSpec, resolveNpm } from './npm.ts';
+import { globalRoots, isNpmSpec, resolveNpm } from './npm.ts';
 import { notFound, refused } from '../errors.ts';
 import antigravityShipped from './shipped/antigravity.json';
 import antigravityCliShipped from './shipped/antigravity-cli.json';
@@ -62,6 +62,14 @@ export function hostAgentsEnabled(): boolean {
  * that swaps a profile's list for its own fixture program gets that program.
  */
 const HOST_CANDIDATES = new WeakSet<ExecutableCandidate[]>();
+
+/**
+ * A global npm `node_modules` directory, expanded when a file candidate is
+ * resolved rather than when the descriptor loads: which prefix holds the
+ * package (default npm, nvm-windows, fnm, scoop, a custom prefix) is only known
+ * from the environment and PATH of the moment.
+ */
+const NPM_ROOT = '{npmRoot}';
 
 /**
  * Where the shipped descriptors and the scripts they name live. A login command
@@ -200,6 +208,9 @@ function checkCandidate(value: unknown, file: string, field: string): Executable
   const candidateValue = asString(obj['value'], file, `${field}.value`);
   if (kind === 'npm' && !isNpmSpec(candidateValue)) {
     reject(file, `${field}.value`, 'an npm package name, @scope/name, with an optional #bin', `${candidateValue} is not an npm package name`);
+  }
+  if (candidateValue.includes(NPM_ROOT) && (kind !== 'file' || !/^{npmRoot}[\/]/.test(candidateValue))) {
+    reject(file, `${field}.value`, `${NPM_ROOT} only at the start of a file candidate, followed by a separator`, `${candidateValue} places ${NPM_ROOT} where it cannot expand`);
   }
   const candidate: ExecutableCandidate = { kind: kind as ExecutableCandidate['kind'], value: candidateValue };
   if (obj['updateEnv'] !== undefined) candidate.updateEnv = checkStringMap(obj['updateEnv'], file, `${field}.updateEnv`);
@@ -754,15 +765,57 @@ export function resolveCommand(profile: OsProfile): ResolvedCommand | null {
       const found = whichProgram(candidate.value, scripts);
       if (found !== null) return { executable: found, prefix: [], shown: found, updateEnv };
     } else if (candidate.kind === 'file') {
-      try {
-        if (!statSync(candidate.value).isFile()) continue;
-        accessSync(candidate.value, constants.X_OK);
-        return { executable: candidate.value, prefix: [], shown: candidate.value, updateEnv };
-      } catch { /* Missing or non-executable candidates leave the next one available. */ }
+      for (const path of filePaths(candidate.value, profile)) {
+        if (runnableFile(path)) return { executable: path, prefix: [], shown: path, updateEnv };
+      }
     } else if (candidate.kind === 'npm') {
       const found = resolveNpm(candidate.value);
       if (found !== null) return { executable: found.executable, prefix: [found.script], shown: found.script, updateEnv };
     }
+  }
+  return null;
+}
+
+function runnableFile(path: string): boolean {
+  try {
+    if (!statSync(path).isFile()) return false;
+    accessSync(path, constants.X_OK);
+    return true;
+  } catch {
+    // Missing or non-executable candidates leave the next one available.
+    return false;
+  }
+}
+
+/**
+ * The paths a file candidate stands for: itself, or with `{npmRoot}` one per
+ * global npm root. The profile's PATH names are the hints, so the prefix whose
+ * shim is on PATH is looked in, whatever Node manager put it there.
+ */
+function filePaths(value: string, profile: OsProfile): string[] {
+  if (!value.startsWith(NPM_ROOT)) return [value];
+  const rest = value.slice(NPM_ROOT.length);
+  const hints = profile.executable.filter((candidate) => candidate.kind === 'path').map((candidate) => candidate.value);
+  const roots: string[] = [];
+  for (const hint of hints.length === 0 ? [null] : hints) {
+    for (const root of globalRoots(hint)) if (!roots.includes(root)) roots.push(root);
+  }
+  return roots.map((root) => normalize(root + rest));
+}
+
+/**
+ * The launcher script PATH holds for this profile when nothing it names is a
+ * program Boite can start: what the person installed, and the reason the agent
+ * still reads as missing. Null off Windows, when a candidate resolves, or when
+ * the profile takes launcher scripts itself.
+ */
+export function launcherScriptOnly(profile: OsProfile): string | null {
+  if (process.platform !== 'win32' || HOST_CANDIDATES.has(profile.executable) || takesScripts(profile)) return null;
+  if (resolveCommand(profile) !== null) return null;
+  for (const candidate of profile.executable) {
+    if (candidate.kind !== 'path') continue;
+    const found = which(candidate.value);
+    if (found !== null && isLauncherScript(found)) return found;
   }
   return null;
 }
@@ -914,6 +967,13 @@ export class ProviderRegistry {
   summary(id: ProviderId): ProviderSummary | undefined {
     const entry = this.entries.get(id);
     return entry === undefined ? undefined : summarize(entry, this.installs, this.dataDir);
+  }
+
+  /** The launcher script on PATH that stands where this provider's program should be, if that is why it is missing. */
+  launcherScriptOnly(id: ProviderId): string | null {
+    const descriptor = this.entries.get(id)?.descriptor;
+    const profile = descriptor === undefined ? undefined : profileFor(descriptor);
+    return profile === undefined ? null : launcherScriptOnly(profile);
   }
 
   available(): ProviderSummary[] {

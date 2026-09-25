@@ -1,6 +1,9 @@
 import { currentOs } from '../src/paths.ts';
 import { chmodSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import type { Account } from '@boite/contracts';
+import { assertDriverRunnable } from '../src/drivers/index.ts';
 import { resolveCommand } from '../src/providers/loader.ts';
+import { globalRoots } from '../src/providers/npm.ts';
 import { delimiter, join, sep } from 'node:path';
 import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import { startTestCore, waitFor } from './harness.ts';
@@ -77,7 +80,6 @@ describe('providers', () => {
       const profile = { detect: {}, executable: [{ kind: 'path' as const, value: 'fakeagent' }], isolation: {} };
       // node's spawn refuses a .cmd with EINVAL: the agent is missing, and its install is offered.
       expect(resolveCommand(profile)).toBeNull();
-      expect(resolveCommand({ ...profile, detect: { command: 'fakeagent' } })).toBeNull();
 
       writeFileSync(join(programs, 'fakeagent.exe'), 'MZ');
       process.env['PATH'] = [shims, programs].join(delimiter);
@@ -89,6 +91,98 @@ describe('providers', () => {
       expect(resolveCommand(scripted)?.executable.toLowerCase()).toBe(join(shims, 'fakeagent.cmd').toLowerCase());
     } finally {
       process.env['PATH'] = saved;
+    }
+  });
+
+  test.skipIf(process.platform !== 'win32')('a detect.command that finds only a launcher script reads unavailable, and a program later on PATH makes it available', async () => {
+    const shims = join(harness.dataDir, 'detect-shims');
+    const programs = join(harness.dataDir, 'detect-programs');
+    mkdirSync(shims);
+    mkdirSync(programs);
+    writeFileSync(join(shims, 'fakedetect.cmd'), '@echo off\r\n');
+    const descriptor = validDescriptor();
+    descriptor['id'] = 'detected';
+    (descriptor['profiles'] as Record<string, unknown>)['windows'] = { detect: { command: 'fakedetect' }, executable: [], isolation: {} };
+    writeUserDescriptor('detected.json', descriptor);
+    const saved = process.env['PATH'];
+    try {
+      process.env['PATH'] = shims;
+      const client = await harness.connect();
+      const { loaded, rejected } = await client.call('providers.reload', {});
+      expect(rejected).toEqual([]);
+      expect(loaded.find((provider) => provider.id === 'detected')?.available).toBe(false);
+
+      writeFileSync(join(programs, 'fakedetect.exe'), 'MZ');
+      process.env['PATH'] = [shims, programs].join(delimiter);
+      expect(harness.core.providers.summary('detected')?.available).toBe(true);
+    } finally {
+      process.env['PATH'] = saved;
+    }
+  });
+
+  test.skipIf(process.platform !== 'win32')('an {npmRoot} candidate finds the program an npm package vendors under the prefix whose shim is on PATH', async () => {
+    // A custom prefix, as nvm-windows, fnm or scoop make one: the shim in it, the package under its node_modules.
+    const prefix = join(harness.dataDir, 'custom-prefix');
+    const vendored = join(prefix, 'node_modules', 'fake-npm-agent', 'bin');
+    mkdirSync(vendored, { recursive: true });
+    writeFileSync(join(prefix, 'npmagent.cmd'), '@echo off\r\n');
+    const exe = join(vendored, 'npmagent.exe');
+    writeFileSync(exe, 'MZ');
+    const descriptor = validDescriptor();
+    descriptor['id'] = 'npm-rooted';
+    (descriptor['profiles'] as Record<string, unknown>)['windows'] = {
+      detect: {},
+      executable: [
+        { kind: 'file', value: '{npmRoot}/fake-npm-agent/bin/npmagent.exe' },
+        { kind: 'path', value: 'npmagent' },
+      ],
+      isolation: {},
+    };
+    writeUserDescriptor('npm-rooted.json', descriptor);
+    const saved = process.env['PATH'];
+    try {
+      process.env['PATH'] = prefix;
+      const client = await harness.connect();
+      const { loaded, rejected } = await client.call('providers.reload', {});
+      expect(rejected).toEqual([]);
+      const found = loaded.find((provider) => provider.id === 'npm-rooted');
+      expect(found?.available).toBe(true);
+      expect(found?.executable?.toLowerCase()).toBe(exe.toLowerCase());
+      expect(harness.core.providers.launcherScriptOnly('npm-rooted')).toBeNull();
+
+      // Without the vendored program only the shim is left: missing, and a turn says why.
+      rmSync(exe);
+      const summary = harness.core.providers.summary('npm-rooted');
+      expect(summary?.available).toBe(false);
+      const script = harness.core.providers.launcherScriptOnly('npm-rooted');
+      expect(script?.toLowerCase()).toBe(join(prefix, 'npmagent.cmd').toLowerCase());
+      const account: Account = { id: 'acc_x', providerId: 'npm-rooted', label: 'Default', isolationDir: null, status: 'ok', identity: null, createdAt: 0 };
+      expect(() => assertDriverRunnable('acp', summary, account, () => harness.core.providers.launcherScriptOnly('npm-rooted')))
+        .toThrow(`PATH has only the launcher script ${script}, which Boite cannot start`);
+    } finally {
+      process.env['PATH'] = saved;
+    }
+  });
+
+  test('{npmRoot} is refused anywhere but the start of a file candidate', async () => {
+    const client = await harness.connect();
+    const placements = [
+      { kind: 'path', value: '{npmRoot}/agent' },
+      { kind: 'file', value: '{home}/{npmRoot}/agent.exe' },
+      { kind: 'file', value: '{npmRoot}agent.exe' },
+    ];
+    for (const [index, candidate] of placements.entries()) {
+      const descriptor = validDescriptor();
+      descriptor['id'] = `npm-misplaced-${index}`;
+      (descriptor['profiles'] as Record<string, unknown>)['linux'] = { detect: {}, executable: [candidate], isolation: {} };
+      writeUserDescriptor(`npm-misplaced-${index}.json`, descriptor);
+    }
+    const { rejected } = await client.call('providers.reload', {});
+    const refused = rejected.filter((entry) => entry.file.includes('npm-misplaced-'));
+    expect(refused.length).toBe(3);
+    for (const entry of refused) {
+      expect(entry.field).toBe('profiles.linux.executable[0].value');
+      expect(entry.expected).toContain('{npmRoot} only at the start of a file candidate');
     }
   });
 
@@ -249,14 +343,14 @@ describe('providers', () => {
     expect(descriptor.login?.command).toEqual(['opencode', 'auth', 'login']);
   });
 
-  test('{appdata} expands at load, so the windows candidate is a real absolute path', () => {
+  test('the windows npm copy is looked for under every global npm root, the default %APPDATA% one included', () => {
     const windows = harness.core.providers.require('opencode').profiles.windows;
     // Boite's own release is named first, the npm copy right behind it.
     const candidate = windows?.executable[1];
     expect(candidate?.kind).toBe('file');
-    expect(candidate?.value).not.toContain('{appdata}');
+    expect(candidate?.value).toStartWith('{npmRoot}');
     if (process.platform === 'win32') {
-      expect(candidate?.value.startsWith(process.env['APPDATA'] ?? '')).toBe(true);
+      expect(globalRoots(null)).toContain(join(process.env['APPDATA'] ?? '', 'npm', 'node_modules'));
     }
     expect(candidate?.value).toContain(`opencode-ai${sep}bin`);
     expect(candidate?.value.toLowerCase()).toEndWith('opencode.exe');
@@ -406,12 +500,11 @@ describe('providers', () => {
       return;
     }
     // Boite's own release is named first. npm installs a `.cmd` shim Bun cannot
-    // spawn, so the real vendored exe is named next, and `{appdata}` has to be a
-    // real path by the time it runs.
+    // spawn, so the real vendored exe is named next, under whichever global npm
+    // root holds the package.
     const candidate = profile?.executable[1];
     expect(candidate?.kind).toBe('file');
-    expect(candidate?.value).not.toContain('{appdata}');
-    expect(candidate?.value.startsWith(process.env['APPDATA'] ?? '')).toBe(true);
+    expect(candidate?.value).toStartWith('{npmRoot}');
     expect(candidate?.value.toLowerCase()).toEndWith('codex.exe');
     expect(profile?.executable.at(-1)).toEqual({ kind: 'path', value: 'codex' });
     expect(profile?.close?.processes).toEqual(['codex.exe', 'codex-x86_64-pc-windows-msvc.exe']);

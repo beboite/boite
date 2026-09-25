@@ -510,7 +510,7 @@ export class ThreadStore {
     const switched = account.id !== thread.accountId;
     const provider = this.core.providers.require(account.providerId);
     if (switched) {
-      assertDriverRunnable(provider.protocol, this.core.providers.summary(provider.id), account);
+      assertDriverRunnable(provider.protocol, this.core.providers.summary(provider.id), account, () => this.core.providers.launcherScriptOnly(provider.id));
       next.accountId = account.id;
       next.providerId = provider.id;
       next.model = checkModel(provider, account.id, params.model === undefined ? defaultModel(provider) : params.model);
@@ -712,6 +712,7 @@ export class ThreadStore {
       provider.protocol,
       this.core.providers.summary(thread.providerId),
       this.core.accounts.require(thread.accountId),
+      () => this.core.providers.launcherScriptOnly(thread.providerId),
     );
     checkStoredEffort(provider, thread.accountId, thread.model, thread.effort);
     checkSpeed(provider, thread.accountId, thread.model, thread.speed ?? null);
