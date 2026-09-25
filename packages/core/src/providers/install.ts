@@ -24,6 +24,7 @@ import type { ProviderId, ProviderInstall, ProviderInstallState } from '@boite/c
 import { newId } from '../ids.ts';
 import { agentsDirPath, currentOs, providerAgentDir } from '../paths.ts';
 import { messageOf, refused, unavailable } from '../errors.ts';
+import { forgetWhich } from './which.ts';
 
 /** Room left on the volume after the archive and the unpacked files, so nothing fills the disk. */
 export const FREE_SPACE_MARGIN = 256 * 1024 * 1024;
@@ -443,6 +444,7 @@ export class InstallManager {
     const dir = providerAgentDir(this.dataDir, providerId);
     this.#removeCurrent(providerId);
     rmSync(dir, { recursive: true, force: true });
+    forgetWhich();
     this.#failed.delete(providerId);
     await Promise.resolve();
     const state: ProviderInstallState = {
@@ -482,6 +484,7 @@ export class InstallManager {
         )}\n`,
       );
       this.#point(providerId, releaseDir);
+      forgetWhich();
       this.#dropPart(part);
 
       const record = this.#readRecord(providerId);

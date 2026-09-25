@@ -1,8 +1,8 @@
 import { currentOs } from '../src/paths.ts';
-import { chmodSync, mkdirSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { resolveCommand } from '../src/providers/loader.ts';
 import { delimiter, join, sep } from 'node:path';
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import { startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
 
@@ -88,6 +88,39 @@ describe('providers', () => {
       const scripted = { ...profile, executable: [{ kind: 'file' as const, value: join(programs, 'missing.cmd') }, ...profile.executable] };
       expect(resolveCommand(scripted)?.executable.toLowerCase()).toBe(join(shims, 'fakeagent.cmd').toLowerCase());
     } finally {
+      process.env['PATH'] = saved;
+    }
+  });
+
+  test('a PATH lookup is remembered: a burst of resolutions walks PATH once, a reload or a vanished program reads again', () => {
+    const programs = join(harness.dataDir, 'cached-programs');
+    mkdirSync(programs);
+    const exe = join(programs, process.platform === 'win32' ? 'cachedagent.exe' : 'cachedagent');
+    const write = (): void => {
+      writeFileSync(exe, process.platform === 'win32' ? 'MZ' : '#!/bin/sh\n');
+      if (process.platform !== 'win32') chmodSync(exe, 0o755);
+    };
+    write();
+    const saved = process.env['PATH'];
+    const which = spyOn(Bun, 'which');
+    try {
+      process.env['PATH'] = programs;
+      const profile = { detect: { command: 'cachedagent' }, executable: [{ kind: 'path' as const, value: 'cachedagent' }], isolation: {} };
+      expect(resolveCommand(profile)?.executable.toLowerCase()).toBe(exe.toLowerCase());
+      const walks = which.mock.calls.length;
+      for (let index = 0; index < 20; index += 1) resolveCommand(profile);
+      expect(which.mock.calls.length).toBe(walks);
+
+      // A remembered program that is gone is looked up again, never handed to a spawn.
+      rmSync(exe);
+      expect(resolveCommand(profile)).toBeNull();
+      // A miss stays a miss for a while; a reload forgets it.
+      write();
+      expect(resolveCommand(profile)).toBeNull();
+      harness.core.providers.load();
+      expect(resolveCommand(profile)?.executable.toLowerCase()).toBe(exe.toLowerCase());
+    } finally {
+      which.mockRestore();
       process.env['PATH'] = saved;
     }
   });

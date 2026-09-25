@@ -6,6 +6,7 @@ import { forgetProbes, releaseThread } from '../drivers/index.ts';
 import { notFound, refused } from '../errors.ts';
 import type { InstallOutcome } from './install.ts';
 import { profileFor, resolveCommand } from './loader.ts';
+import { forgetWhich } from './which.ts';
 
 /**
  * The earliest automatic check after the core is up, so nothing spawns or
@@ -412,6 +413,8 @@ export class HarnessUpdates {
     try {
       if (target.route === 'managed') await this.runManaged(target);
       else await this.run(target, (target.profile.update as ProviderSelfUpdate).args, UPDATE_TIMEOUT_MS);
+      // An updater may have moved the program on PATH.
+      forgetWhich();
       const read = await this.read(target);
       if (this.closed || this.core.stopping) return;
       const stuck = target.route === 'self' && before.current !== null && read.current === before.current && this.newer({ ...before, ...read });

@@ -122,6 +122,12 @@ session protocol either.
   the summary shows the script as the executable. Only the `pi` and `acp`
   protocols take an `npm` candidate: the SDK and app-server drivers spawn the
   program with no leading argument.
+- A PATH lookup, for a candidate, a `detect.command` or the npm roots, is
+  remembered for 30 seconds per name and PATH, so the provider list and each
+  turn start do not walk PATH again. A remembered program that is gone is looked
+  up again. A reload, a managed install or uninstall and an update forget every
+  lookup; a program installed outside Boite shows up within 30 seconds, or at
+  once on a reload.
 - `launch.args` put the agent into the mode Boite speaks to. The `agy` driver
   adds its print-mode flags itself, because the same binary also answers
   `agy models` for the probe, so the Antigravity CLI declares none; anything a

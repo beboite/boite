@@ -1,5 +1,6 @@
 import { accessSync, constants, existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { delimiter, join, normalize, relative, resolve } from 'node:path';
+import { forgetWhich, which } from './which.ts';
 import type {
   EffortLevel,
   ExecutableCandidate,
@@ -722,18 +723,18 @@ export function isLauncherScript(path: string): boolean {
 }
 
 /**
- * `Bun.which`, passing over launcher scripts on Windows to the next PATH
+ * `which`, passing over launcher scripts on Windows to the next PATH
  * directory that holds a real program of that name. `scripts` keeps them, for a
  * profile that names a launcher script itself and maps it to its program.
  */
 export function whichProgram(name: string, scripts = false): string | null {
-  // Named outright: Bun.which alone keeps the PATH the process started with.
+  // Named outright: Bun.which alone would keep the PATH the process started with.
   const PATH = process.env['PATH'] ?? '';
-  const found = Bun.which(name, { PATH });
+  const found = which(name, PATH);
   if (found === null || scripts || !isLauncherScript(found)) return found;
   for (const dir of PATH.split(delimiter)) {
     if (dir.length === 0) continue;
-    const hit = Bun.which(name, { PATH: dir });
+    const hit = which(name, dir);
     if (hit !== null && !isLauncherScript(hit)) return hit;
   }
   return null;
@@ -842,6 +843,8 @@ export class ProviderRegistry {
   }
 
   load(): ProviderLoadResult {
+    // A reload is also how a program installed or moved outside Boite is found at once.
+    forgetWhich();
     const entries = new Map<ProviderId, LoadedProvider>();
     const rejected: ProviderRejected[] = [];
 
