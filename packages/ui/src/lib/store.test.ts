@@ -6,6 +6,7 @@ import { setNotificationSender, type Toast } from './notify';
 import * as endpoints from './endpoint';
 import { LOCAL_RECOVERY_MS, resumeAnchor, Store } from './store.svelte';
 import { strings } from './strings';
+import { compareThreads } from './thread-order';
 import { confirm } from './confirm.svelte';
 import { readStoredEndpoint, storeEndpoint } from './endpoint';
 
@@ -537,15 +538,16 @@ describe('Store', () => {
   test('a pinned thread floats above the live ones of its project, and unpinning drops it back', async () => {
     const { store } = await ready();
     const project = store.threads.find((t) => t.id === 't-trace')?.projectId ?? '';
-    const before = store.sortedThreadsOf(project).map((t) => t.id);
+    const sorted = () => store.threadsOf(project).slice().sort(compareThreads).map((t) => t.id);
+    const before = sorted();
     expect(before[0]).not.toBe('t-trace');
 
     await store.pin('t-trace', true);
     expect(store.threads.find((t) => t.id === 't-trace')?.pinned).toBe(true);
-    expect(store.sortedThreadsOf(project)[0]?.id).toBe('t-trace');
+    expect(sorted()[0]).toBe('t-trace');
 
     await store.pin('t-trace', false);
-    expect(store.sortedThreadsOf(project).map((t) => t.id)).toEqual(before);
+    expect(sorted()).toEqual(before);
   });
 
   test('a prompt streams into one text part and the thread goes running then idle', async () => {

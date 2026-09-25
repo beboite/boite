@@ -19,7 +19,8 @@
     project,
     thread,
     now,
-    hidden = false
+    hidden = false,
+    showProject = true
   }: {
     machine: Machine;
     project: Project;
@@ -27,6 +28,8 @@
     now: number;
     /** In a folded project: the card waits for the unfold to look up its pull request. */
     hidden?: boolean;
+    /** Off under the project's own header, where the folder line would only repeat it. */
+    showProject?: boolean;
   } = $props();
   let owner = $derived(machine.store);
   let open = $derived(workspace.active === owner && owner.openThread?.id === thread.id);
@@ -134,7 +137,7 @@
       </span>
     </button>
     <div class="metadata">
-      <span class="project-name" title={project.path}><Folder size={12} /><span>{projectName(project)}</span></span>
+      {#if showProject}<span class="project-name" data-testid="thread-project" title={project.path}><Folder size={12} /><span>{projectName(project)}</span></span>{/if}
       {#if pullRequest}
         <a class="pr-link" data-testid="thread-pr" href={pullRequest.url} target="_blank" rel="noopener noreferrer"
           title={pullRequest.url} aria-label={`#${pullRequest.number}`}><GitPullRequest size={12} />#{pullRequest.number}</a>
@@ -251,6 +254,7 @@
   }
   .machine {
     flex: none;
+    margin-left: auto;
   }
   .machine.offline {
     color: var(--color-danger);

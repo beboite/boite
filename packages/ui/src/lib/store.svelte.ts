@@ -225,9 +225,6 @@ function sameProcess(a: ProcessRecord, b: ProcessRecord): boolean {
  */
 export const LOCAL_RECOVERY_MS = 4_000;
 
-const LIVE: ThreadStatusRank = { waiting: 0, running: 1, queued: 2, error: 3, idle: 4 };
-type ThreadStatusRank = Record<ThreadSummary['status'], number>;
-
 /**
  * The message a held thread asks `threads.get` to start from: the oldest one of
  * a turn this client has not seen finish, since its parts may still have moved,
@@ -494,17 +491,6 @@ export class Store {
 
   threadsOf(projectId: ProjectId): ThreadSummary[] {
     return this.threads.filter((t) => t.projectId === projectId && !t.archived && !t.parentThreadId);
-  }
-
-  /** Pinned threads first, then the live ones, then by last activity; the search box narrows it. */
-  sortedThreadsOf(projectId: ProjectId): ThreadSummary[] {
-    const needle = this.search.trim().toLowerCase();
-    return this.threadsOf(projectId)
-      .filter((t) => needle === '' || t.title.toLowerCase().includes(needle))
-      .sort(
-        (a, b) =>
-          Number(b.pinned) - Number(a.pinned) || LIVE[a.status] - LIVE[b.status] || b.updatedAt - a.updatedAt
-      );
   }
 
   accountsOf(providerId: ProviderId): Account[] {

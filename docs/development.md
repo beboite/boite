@@ -112,6 +112,11 @@ its directories through the owner-only `projects.browse` method. The native
 folder button is available only for the shell's local core. A folder dropped
 from the desktop switches to that local core before opening the path.
 
+Both sidebar views order threads the same way (`lib/thread-order.ts`): pinned
+threads first, then a thread waiting on the user, then running, queued and failed
+ones, then the rest by the user's last message. Under a project's header a row
+leaves out the project name; Recent shows it.
+
 The sidebar footer counts authenticated machine connections. Remembered cores
 use separate sockets without thread subscriptions; failed connections retry
 every thirty seconds. The menu names disconnected machines and opens connection
