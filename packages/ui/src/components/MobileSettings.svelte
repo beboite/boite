@@ -1,6 +1,6 @@
 <script lang="ts">
   import TelemetrySettings from './TelemetrySettings.svelte';
-  import { ArrowLeft, Bell, Brain, ChevronRight, Coins, Compass, Gauge, Monitor, Palette, Mic } from '@lucide/svelte';
+  import { ArchiveRestore, ArrowLeft, Bell, Brain, ChevronRight, Coins, Compass, Gauge, Monitor, Palette, Mic } from '@lucide/svelte';
   import type { Store } from '../lib/store.svelte';
   import { workspace } from '../lib/workspace.svelte';
   import { strings } from '../lib/strings';
@@ -13,13 +13,17 @@
   import UsagePage from './UsagePage.svelte';
   import VoiceSettings from './VoiceSettings.svelte';
   import BrainPage from './BrainPage.svelte';
+  import ArchivedThreads from './ArchivedThreads.svelte';
 
   let { store }: { store: Store } = $props();
   let phone = $state(false);
+  /** The phone has no General page, so the archive, which lives there on the desktop, gets a page of its own. */
+  let archived = $state(false);
   let page = $derived((store.owner && store.settingsTab === 'brain') || store.settingsTab === 'appearance' || store.settingsTab === 'machines' || store.settingsTab === 'voice' || store.settingsTab === 'usage' || store.settingsTab === 'limits'
-    ? store.settingsTab : phone ? 'phone' : 'home');
+    ? store.settingsTab : phone ? 'phone' : archived ? 'archived' : 'home');
   let machine = $derived(workspace.machines.find(machine => machine.store === store));
   let title = $derived(page === 'brain' ? strings.brain.heading : page === 'phone' ? strings.mobile.settingsPhone
+    : page === 'archived' ? strings.settings.archived.heading
     : page === 'voice' ? strings.speech.heading : page === 'appearance' ? strings.settings.tabs.appearance
     : page === 'usage' ? strings.usage.heading : page === 'limits' ? strings.usage.limits : strings.machines.heading);
   let detail = $derived(page !== 'home');
@@ -28,7 +32,7 @@
   $effect(() => {
     if (page === 'phone' && store.connection === 'ready') void store.loadSessions();
   });
-  function back() { phone = false; store.showSettings('general'); }
+  function back() { phone = false; archived = false; store.showSettings('general'); }
 </script>
 
 <!-- `settings` gives the detail pages the same grammar as the desktop ones. -->
@@ -68,6 +72,9 @@
           <button class="ghost row" data-testid="settings-tab-limits" onclick={() => store.showSettings('limits')}>
             <Gauge size={20} /><span><strong>{strings.usage.limits}</strong><small>{strings.usage.limitsIntro}</small></span><ChevronRight size={18} />
           </button>
+          <button class="ghost row" data-testid="mobile-settings-archived" onclick={() => { archived = true; }}>
+            <ArchiveRestore size={20} /><span><strong>{strings.settings.archived.heading}</strong><small>{strings.mobile.settingsArchivedHint}</small></span><ChevronRight size={18} />
+          </button>
         </div>
         <p>{strings.mobile.settingsRemoteHint}</p>
       </section>
@@ -94,6 +101,11 @@
         <UsagePage {store} />
       {:else if page === 'limits'}
         <LimitsPage {store} />
+      {:else if page === 'archived'}
+        <div class="page archived-page">
+          <p class="lead">{strings.settings.archived.intro}</p>
+          <ArchivedThreads {store} />
+        </div>
       {:else}
         <MachinesPage mobile />
       {/if}
@@ -124,6 +136,7 @@
   header h1 { font-size: var(--text-md); }
   .phone-page { padding: 16px; }
   .scope { overflow-wrap: anywhere; margin-top: 0; }
+  .lead { margin-top: 0; }
   .phone-page :global(.card) { padding: 18px; }
   .detail :global(.page), .detail :global(.machines-page) { padding: 16px; }
   /* The bar above already names the page, so its own title steps aside. */
@@ -131,4 +144,6 @@
   .detail :global(.machines-page > .head h1),
   .detail :global(.usage > header h1) { display: none; }
   .detail :global(.switch-row) { flex-wrap: wrap; gap: 12px; }
+  /* The bar names the page and the line above says what it holds: the card's own heading and tip step aside. */
+  .archived-page :global(#settings-archived > h2) { display: none; }
 </style>

@@ -184,6 +184,7 @@ export const strings = {
     settingsPhone: 'App & notifications', settingsPhoneHint: 'Installation and alerts from your connected machine.',
     settingsMachinesHint: 'Connect, switch or disconnect a remote machine.',
     settingsAppearanceHint: 'Theme and accent for this phone.',
+    settingsArchivedHint: 'Bring back a conversation archived on the connected machine.',
     settingsRemoteHint: 'Providers, projects and server administration are managed from the desktop app.',
     settingsBack: 'Back to settings',
     navigation: 'Navigation', threads: 'Conversations', activity: 'Activity', project: 'Choose project',
@@ -383,7 +384,7 @@ export const strings = {
     pinned: 'Pinned',
     archive: 'Archive',
     archiveTitle: 'Archive this thread?',
-    archiveBody: 'Its agent stops, its sub-threads stop with it, and the questions waiting for an answer are dropped. Settings, General, Archived threads brings the conversation back, not the work that was stopped.',
+    archiveBody: 'Its agent stops, its sub-threads stop with it, and the questions waiting for an answer are dropped. Archived threads, in Settings, brings the conversation back, not the work that was stopped.',
     draft: 'New thread'
   },
 

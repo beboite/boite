@@ -197,6 +197,7 @@ export const fr: Translation = {
     settingsPhone: 'Application et notifications', settingsPhoneHint: 'Installation et alertes de la machine connectée.',
     settingsMachinesHint: 'Connecter, changer ou déconnecter une machine distante.',
     settingsAppearanceHint: 'Thème et couleur pour ce téléphone.',
+    settingsArchivedHint: 'Ramener une conversation archivée sur la machine connectée.',
     settingsRemoteHint: "Les fournisseurs, les projets et l'administration du serveur se gèrent depuis l'application de bureau.",
     settingsBack: 'Retour aux réglages',
     navigation: 'Navigation', threads: 'Conversations', activity: 'Activité', project: 'Choisir un projet',
@@ -393,7 +394,7 @@ export const fr: Translation = {
     pinned: 'Épinglée',
     archive: 'Archiver',
     archiveTitle: 'Archiver cette conversation ?',
-    archiveBody: "Son agent s'arrête, ses sous-conversations aussi, et les questions en attente de réponse sont abandonnées. Réglages, Général, Conversations archivées ramène la conversation, pas le travail interrompu.",
+    archiveBody: "Son agent s'arrête, ses sous-conversations aussi, et les questions en attente de réponse sont abandonnées. Conversations archivées, dans les Réglages, ramène la conversation, pas le travail interrompu.",
     draft: 'Nouvelle conversation'
   },
 
