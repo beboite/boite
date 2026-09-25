@@ -581,9 +581,11 @@
     pointer-events: none;
   }
 
+  /* The column takes its width on the first frame, so the chat beside it
+     re-wraps once; a width animation re-laid the whole chat out every frame. */
   @keyframes panel-in {
     from {
-      width: 0;
+      transform: translateX(16px);
       opacity: 0;
     }
   }
