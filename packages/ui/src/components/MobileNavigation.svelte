@@ -1,10 +1,12 @@
 <script lang="ts">
-  import { Activity, ArrowLeft, Bot, ChevronDown, MessageSquare, Plus, Settings } from '@lucide/svelte';
+  import { Activity, ArrowLeft, Bot, ChevronDown, Ellipsis, MessageSquare, Pin, Plus, Settings } from '@lucide/svelte';
   import type { Store } from '../lib/store.svelte';
   import { workspace } from '../lib/workspace.svelte';
   import { strings } from '../lib/strings';
   import { projectName } from '../lib/format';
   import { mobileOverlay } from '../lib/mobile-history';
+  import { separator, type MenuItem } from '../lib/menu';
+  import type { ThreadSummary } from '@boite/contracts';
   import Menu from './Menu.svelte';
   import StatusMark from './StatusMark.svelte';
 
@@ -41,6 +43,22 @@
     from = next === 'chat' && screen !== 'chat' ? screen : null;
     screen = next;
   }
+  /** What the sidebar's thread menu offers, minus what needs the desktop. */
+  function rowItems(owner: Store, thread: ThreadSummary): MenuItem[] {
+    const retitling = owner.retitling.includes(thread.id);
+    return [
+      { id: 'pin', label: thread.pinned ? strings.sidebar.unpin : strings.sidebar.pin },
+      { id: 'retitle', label: retitling ? strings.sidebar.retitling : strings.sidebar.retitle, disabled: retitling },
+      separator(),
+      { id: 'archive', label: strings.sidebar.archive, danger: true }
+    ];
+  }
+  /** Thread ids can collide between machines: the row's own store acts. */
+  function rowAction(owner: Store, thread: ThreadSummary, action: string) {
+    if (action === 'pin') void owner.pin(thread.id, !thread.pinned);
+    else if (action === 'retitle') void owner.retitle(thread.id);
+    else if (action === 'archive') void owner.archive(thread.id);
+  }
   async function pickProject(key: string) {
     if (key === 'add-project') { store.projectPickerOpen = true; return; }
     const [id, projectId] = JSON.parse(key) as [string, string];
@@ -72,11 +90,14 @@
       <input type="search" bind:value={search} aria-label={strings.mobile.search} placeholder={strings.mobile.search} />
     </div>
     {#each rows as row (`${row.machine.id}:${row.thread.id}`)}
-      <button class="ghost thread" data-testid="mobile-thread-{row.thread.id}" onclick={async () => { await workspace.select(row.machine.store, row.thread.id); show('chat'); }}>
-        <StatusMark status={row.thread.status} />
-        <span class="summary"><span class="title">{row.thread.title}</span><span class="detail">{projectName(row.project)} · {row.machine.label}</span></span>
-        {#if row.thread.unread}<span class="unread" role="img" aria-label={strings.mobile.unread}></span>{/if}
-      </button>
+      <div class="row">
+        <button class="ghost thread" data-testid="mobile-thread-{row.thread.id}" onclick={async () => { await workspace.select(row.machine.store, row.thread.id); show('chat'); }}>
+          <StatusMark status={row.thread.status} />
+          <span class="summary"><span class="title">{#if row.thread.pinned}<Pin size={12} />{/if}{row.thread.title}</span><span class="detail">{projectName(row.project)} · {row.machine.label}</span></span>
+          {#if row.thread.unread}<span class="unread" role="img" aria-label={strings.mobile.unread}></span>{/if}
+        </button>
+        <Menu items={rowItems(row.machine.store, row.thread)} onpick={(action) => rowAction(row.machine.store, row.thread, action)} label={strings.sidebar.threadMenu} placement="bottom" variant="ghost" testid="mobile-thread-menu-{row.thread.id}"><Ellipsis size={18} /></Menu>
+      </div>
     {:else}
       <p class="empty">{screen === 'activity' ? strings.mobile.noActivity : strings.mobile.noThreads}</p>
     {/each}
@@ -103,9 +124,12 @@
     h1 { font-size: var(--text-lg); margin: 0; }
     p { font-size: var(--text-sm); }
     input { width: 100%; }
-    .thread { display: flex; width: 100%; gap: 12px; align-items: center; min-height: 76px; height: auto; text-align: left; border-bottom: 1px solid var(--color-border); border-radius: var(--radius-md); padding: 14px 12px; }
+    .row { display: flex; align-items: center; border-bottom: 1px solid var(--color-border); }
+    .row :global(.menu) { flex: none; }
+    .thread { display: flex; flex: 1; min-width: 0; gap: 12px; align-items: center; min-height: 76px; height: auto; text-align: left; border-radius: var(--radius-md); padding: 14px 12px; }
     .summary { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 5px; }
     .title { font-size: var(--text-base); font-weight: 500; white-space: normal; overflow-wrap: anywhere; }
+    .title :global(svg) { margin-right: 4px; color: var(--color-muted-foreground); vertical-align: -1px; }
     .detail { font-size: var(--text-xs); color: var(--color-muted-foreground); }
     .unread { width: 7px; height: 7px; border-radius: 50%; background: var(--color-accent); }
     .mobile-tabs { display: flex; flex-shrink: 0; padding: 2px max(8px, env(safe-area-inset-right)) max(4px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left)); background: var(--color-background); }

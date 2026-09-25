@@ -145,6 +145,27 @@ test('returning to a long conversation preserves the reading position', async ()
   expect(Math.abs(restoredAnchor.offset - anchor.offset)).toBeLessThan(10);
 }, 15_000);
 
+test('a phone pins and archives a thread without a right-click, from the header and from the list', async () => {
+  const origin = await page.evaluate<string>('location.origin');
+  await page.navigate(`${origin}/?fake=1&open=recent`);
+  await page.waitFor(`document.querySelector('[data-testid=thread-menu-trigger]')?.offsetParent`);
+  const id = await page.evaluate<string>('__boiteTest.workspace.active.openThread.id');
+  const trigger = await page.evaluate<{ width: number; height: number }>(`(() => { const r = document.querySelector('[data-testid=thread-menu-trigger]').getBoundingClientRect(); return { width: r.width, height: r.height }; })()`);
+  expect(trigger.height).toBeGreaterThanOrEqual(44);
+  await page.click('[data-testid=thread-menu-trigger]');
+  await page.waitFor(`document.querySelector('[data-testid=thread-menu-trigger-menu]')`);
+  await capture('mobile-thread-menu.png');
+  await page.click('[data-testid=thread-menu-trigger-menu] [data-value=pin]');
+  await page.waitFor(`__boiteTest.workspace.active.openThread.pinned === true`);
+  await page.click('[data-testid=mobile-conversations]');
+  await page.click(`[data-testid=mobile-thread-menu-${id}]`);
+  await page.waitFor(`document.querySelector('[data-testid=mobile-thread-menu-${id}-menu] [data-value=pin]')?.textContent.includes('Unpin')`);
+  await capture('mobile-thread-row-menu.png');
+  await page.click(`[data-testid=mobile-thread-menu-${id}-menu] [data-value=archive]`);
+  await page.waitFor(`!document.querySelector('[data-testid=mobile-thread-${id}]')`);
+  expect(page.errors()).toEqual([]);
+}, 20_000);
+
 test('Back returns from a conversation to the list and closes the context popup, the panel and the project picker first', async () => {
   const origin = await page.evaluate<string>('location.origin');
   await page.navigate(`${origin}/?fake=1&open=recent`);

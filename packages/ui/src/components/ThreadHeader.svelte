@@ -1,12 +1,13 @@
 <script lang="ts">
-  import { ArrowLeft, GitBranch, PanelRight, SquareTerminal, UsersRound } from '@lucide/svelte';
+  import { ArrowLeft, ChevronDown, GitBranch, PanelRight, SquareTerminal, UsersRound } from '@lucide/svelte';
   import { focusOnMount } from '../lib/actions';
   import { contextMenu } from '../lib/context-menu.svelte';
-  import { separator } from '../lib/menu';
+  import { separator, type MenuItem } from '../lib/menu';
   import { strings } from '../lib/strings';
   import { projectName } from '../lib/format';
   import type { Store } from '../lib/store.svelte';
   import ContextControl from './ContextControl.svelte';
+  import Menu from './Menu.svelte';
   import StatusMark from './StatusMark.svelte';
   let { store }: { store: Store } = $props();
   let thread = $derived(store.openThread);
@@ -43,29 +44,32 @@
     }
   }
 
-  function openTitleMenu(event: MouseEvent) {
+  /** The title's actions: a right-click on a desktop, a tap on the title on a phone. */
+  let titleItems = $derived.by((): MenuItem[] => {
+    if (!thread) return [];
+    const retitling = store.retitling.includes(thread.id);
+    return [
+      { id: 'rename', label: strings.sidebar.rename },
+      { id: 'retitle', label: retitling ? strings.sidebar.retitling : strings.sidebar.retitle, disabled: retitling },
+      { id: 'pin', label: thread.pinned ? strings.sidebar.unpin : strings.sidebar.pin },
+      { id: 'copy', label: strings.sidebar.copyPath, hint: thread.cwd },
+      separator(),
+      { id: 'archive', label: strings.sidebar.archive, danger: true }
+    ];
+  });
+
+  function titleAction(action: string) {
     const open = store.openThread;
     if (!open) return;
-    contextMenu.open(
-      event,
-      [
-        { id: 'rename', label: strings.sidebar.rename },
-        {
-          id: 'retitle',
-          label: store.retitling.includes(open.id) ? strings.sidebar.retitling : strings.sidebar.retitle,
-          disabled: store.retitling.includes(open.id)
-        },
-        { id: 'copy', label: strings.sidebar.copyPath, hint: open.cwd },
-        separator(),
-        { id: 'archive', label: strings.sidebar.archive, danger: true }
-      ],
-      (action) => {
-        if (action === 'rename') beginRename();
-        else if (action === 'retitle') void store.retitle(open.id);
-        else if (action === 'copy') void store.copy(open.cwd);
-        else if (action === 'archive') void store.archive(open.id);
-      }
-    );
+    if (action === 'rename') beginRename();
+    else if (action === 'retitle') void store.retitle(open.id);
+    else if (action === 'pin') void store.pin(open.id, !open.pinned);
+    else if (action === 'copy') void store.copy(open.cwd);
+    else if (action === 'archive') void store.archive(open.id);
+  }
+
+  function openTitleMenu(event: MouseEvent) {
+    if (store.openThread) contextMenu.open(event, titleItems, titleAction);
   }
 
 </script>
@@ -94,6 +98,12 @@
           >
             {thread.title}
           </button>
+          <!-- A phone has no right-click: the title opens the same actions as a sheet. -->
+          <span class="title-menu">
+            <Menu items={titleItems} onpick={titleAction} label={strings.sidebar.threadMenu} placement="bottom" variant="text" testid="thread-menu-trigger">
+              <span class="title-text">{thread.title}</span><ChevronDown size={14} />
+            </Menu>
+          </span>
         {/if}
       {:else}
         <span class="draft-mark"></span>
@@ -225,5 +235,15 @@
 
 
   .title { min-width: 0; }
-  @media (max-width: 720px) { .path { display: none; } .trace { padding: 0 6px; } }
+  .title-menu { display: none; }
+  @media (max-width: 720px) {
+    .path { display: none; }
+    .trace { padding: 0 6px; }
+    .title { display: none; }
+    .title-menu { display: flex; min-width: 0; flex: 0 1 auto; margin-left: -6px; }
+    .title-menu :global(.menu) { min-width: 0; max-width: 100%; }
+    .title-menu :global(.trigger) { min-width: 0; max-width: 100%; min-height: var(--touch-target); font-weight: 600; color: var(--color-foreground); }
+    .title-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .title-menu :global(.trigger svg) { flex: none; color: var(--color-muted-foreground); }
+  }
 </style>

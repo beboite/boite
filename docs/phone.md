@@ -143,7 +143,10 @@ and asks nothing.
 
 The browser uses mobile navigation under 720 px. Conversations lists threads
 across connected machines; Activity puts waiting requests first, followed by
-running and queued turns. Settings is the third destination. The header names
+running and queued turns. A phone has no right-click, so the actions a desktop
+finds there open from a tap: the conversation's title in its header lists
+rename, regenerate title, pin, copy path and archive, and the `...` button of a
+row in the list offers pin, regenerate title and archive. Settings is the third destination. The header names
 the machine, connection and project, and starts a new conversation.
 
 Model, effort and action menus open as bottom sheets. The browser's Back, the
