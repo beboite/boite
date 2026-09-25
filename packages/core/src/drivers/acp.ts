@@ -41,6 +41,7 @@ import { agentEnv, launchPrefix, profileFor, resolveExecutable } from '../provid
 import { normalizeAntigravityTool, isAntigravityQuestion } from './antigravity.ts';
 import { grokEffortOf, grokLaunchArgs, grokReasoningEffortOf } from './grok.ts';
 import { imageDocument } from './documents.ts';
+import { LineSplitter, STDOUT_LINE_MAX } from './lines.ts';
 import type {
   Driver,
   ProbeContext,
@@ -140,9 +141,6 @@ const MODE_CANDIDATES: Record<PermissionMode, readonly string[]> = {
   dontAsk: ['dontAsk', 'dont_ask', 'bypassPermissions', 'bypass_permissions', 'yolo', 'auto'],
 };
 
-/** A stdout line longer than this is a protocol line nobody should be buffering. */
-const STDOUT_LINE_MAX = 16 * 1024 * 1024;
-
 /**
  * The agent's stdout with everything that is not a JSON-RPC line taken out of
  * it. Antigravity prints its Google sign-in link on stdout, in the middle of
@@ -158,51 +156,35 @@ export function jsonLinesOnly(
   const reader = source.getReader();
   const decoder = new TextDecoder();
   const encoder = new TextEncoder();
-  let buffer = '';
-  let discarding = false;
-  const take = (line: string, controller: ReadableStreamDefaultController<Uint8Array>): void => {
-    const text = line.replace(/\r$/, '');
+  let out: ReadableStreamDefaultController<Uint8Array> | null = null;
+  let complete = false;
+  const lines = new LineSplitter((text) => {
+    complete = true;
     if (text.trimStart().startsWith('{')) {
-      controller.enqueue(encoder.encode(`${text}\n`));
+      out?.enqueue(encoder.encode(`${text}\n`));
       return;
     }
-    if (text.trim().length > 0) onOther(text.trim());
-  };
+    onOther(text.trim());
+  }, {
+    maxLine: STDOUT_LINE_MAX,
+    onOverflow: () => {
+      complete = true;
+      onOther('the agent sent a stdout line too large to be a protocol line');
+    },
+  });
   return new ReadableStream<Uint8Array>({
     async pull(controller) {
+      out = controller;
+      complete = false;
       for (;;) {
         const { done, value } = await reader.read();
         if (done) {
-          if (buffer.length > 0) {
-            const tail = buffer;
-            buffer = '';
-            take(tail, controller);
-          }
+          lines.feed(decoder.decode());
+          lines.end();
           controller.close();
           return;
         }
-        let chunk = decoder.decode(value, { stream: true });
-        if (discarding) {
-          const end = chunk.indexOf('\n');
-          if (end < 0) continue;
-          chunk = chunk.slice(end + 1);
-          discarding = false;
-        }
-        buffer += chunk;
-        let index = buffer.indexOf('\n');
-        let complete = false;
-        while (index >= 0) {
-          if (index > STDOUT_LINE_MAX) onOther('the agent sent a stdout line too large to be a protocol line');
-          else take(buffer.slice(0, index), controller);
-          buffer = buffer.slice(index + 1);
-          index = buffer.indexOf('\n');
-          complete = true;
-        }
-        if (buffer.length > STDOUT_LINE_MAX) {
-          buffer = '';
-          discarding = true;
-          onOther('the agent sent a stdout line too large to be a protocol line');
-        }
+        lines.feed(decoder.decode(value, { stream: true }));
         if (complete) return;
       }
     },

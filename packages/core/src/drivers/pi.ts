@@ -35,6 +35,7 @@ import { messageOf, unavailable } from '../errors.ts';
 import { resolveDataDir } from '../paths.ts';
 import type { SpawnedChild } from '../procs.ts';
 import { launchPrefix, profileFor, resolveExecutable } from '../providers/loader.ts';
+import { LineSplitter } from './lines.ts';
 import type {
   Driver,
   ProbeContext,
@@ -185,7 +186,9 @@ interface PeerHandlers {
 class PiPeer {
   private nextId = 1;
   private readonly pending = new Map<string, { resolve(value: Record<string, unknown>): void; reject(error: Error): void }>();
-  private buffer = '';
+  private readonly lines = new LineSplitter((line) => {
+    this.onLine(line);
+  });
   private closed = false;
 
   constructor(
@@ -194,7 +197,7 @@ class PiPeer {
   ) {
     child.stdout.setEncoding('utf8');
     child.stdout.on('data', (chunk: string) => {
-      this.feed(chunk);
+      this.lines.feed(chunk);
     });
     child.stdin.on('error', () => undefined);
   }
@@ -236,24 +239,15 @@ class PiPeer {
     }
   }
 
-  private feed(chunk: string): void {
-    this.buffer += chunk;
-    for (;;) {
-      const at = this.buffer.indexOf('\n');
-      if (at < 0) break;
-      let line = this.buffer.slice(0, at);
-      this.buffer = this.buffer.slice(at + 1);
-      if (line.endsWith('\r')) line = line.slice(0, -1);
-      if (line.trim().length === 0) continue;
-      let message: Record<string, unknown>;
-      try {
-        message = JSON.parse(line) as Record<string, unknown>;
-      } catch {
-        this.handlers.log('warn', `pi agent: a line that is not json: ${line.slice(0, STDERR_MAX)}`);
-        continue;
-      }
-      this.dispatch(message);
+  private onLine(line: string): void {
+    let message: Record<string, unknown>;
+    try {
+      message = JSON.parse(line) as Record<string, unknown>;
+    } catch {
+      this.handlers.log('warn', `pi agent: a line that is not json: ${line.slice(0, STDERR_MAX)}`);
+      return;
     }
+    this.dispatch(message);
   }
 
   private dispatch(message: Record<string, unknown>): void {

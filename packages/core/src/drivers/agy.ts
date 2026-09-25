@@ -42,6 +42,7 @@ import type {
 import { messageOf, unavailable } from '../errors.ts';
 import type { SpawnedChild } from '../procs.ts';
 import { agentEnv, launchPrefix, profileFor, resolveExecutable } from '../providers/loader.ts';
+import { LineSplitter, STDOUT_LINE_MAX } from './lines.ts';
 import type {
   Driver,
   ProbeContext,
@@ -107,25 +108,6 @@ function errorText(value: unknown): string {
     return JSON.stringify(value);
   } catch {
     return String(value);
-  }
-}
-
-/** Splits a stream on `\n` only, a trailing `\r` stripped, empty lines dropped. */
-class LineReader {
-  private buffer = '';
-
-  constructor(private readonly onLine: (line: string) => void) {}
-
-  feed(chunk: string): void {
-    this.buffer += chunk;
-    for (;;) {
-      const at = this.buffer.indexOf('\n');
-      if (at < 0) break;
-      let line = this.buffer.slice(0, at);
-      this.buffer = this.buffer.slice(at + 1);
-      if (line.endsWith('\r')) line = line.slice(0, -1);
-      if (line.trim().length > 0) this.onLine(line);
-    }
   }
 }
 
@@ -580,7 +562,7 @@ class AgySession {
   }
 
   private watch(child: SpawnedChild, ctx: TurnContext): void {
-    const stdout = new LineReader((line) => {
+    const stdout = new LineSplitter((line) => {
       let event: Row;
       try {
         event = rowOf(JSON.parse(line));
@@ -589,6 +571,11 @@ class AgySession {
         return;
       }
       this.onEvent(event);
+    }, {
+      maxLine: STDOUT_LINE_MAX,
+      onOverflow: () => {
+        ctx.log('warn', `agy: dropped a stdout line longer than ${STDOUT_LINE_MAX / (1024 * 1024)} MiB`);
+      },
     });
     child.stdout.setEncoding('utf8');
     child.stdout.on('data', (chunk: string) => {
