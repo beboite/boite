@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import type { PromptCache, Usage } from '@boite/contracts';
 import { cacheLifeOf } from '../src/drivers/claude.ts';
-import { acpCacheLife } from '../src/drivers/acp.ts';
+import { acpCacheLife } from '../src/drivers/acp/turn.ts';
 import { piCacheLife } from '../src/drivers/pi.ts';
 import { openAiCacheLife } from '../src/prompt-cache.ts';
 import { promptCacheOf } from '../src/threads.ts';

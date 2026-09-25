@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { jsonLinesOnly } from '../src/drivers/acp.ts';
+import { jsonLinesOnly } from '../src/drivers/acp/stdout.ts';
 
 test('a large chunk keeps complete protocol lines and discards the whole oversized line', async () => {
   const encoder = new TextEncoder();

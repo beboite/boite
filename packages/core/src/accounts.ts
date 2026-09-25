@@ -4,7 +4,7 @@ import type { Account, AccountId, ProviderDescriptor, ProviderId, RpcEvents, Ter
 import type { Core } from './core.ts';
 import { newId } from './ids.ts';
 import { invalidParams, messageOf, notFound, refused } from './errors.ts';
-import { runAcpLogin, type AcpLoginRun } from './drivers/acp.ts';
+import { runAcpLogin, type AcpLoginRun } from './drivers/acp/login.ts';
 import { agentEnv, launchPrefix, profileFor, resolveExecutable } from './providers/loader.ts';
 import { browserNoopPath, browserNoopScript, currentOs, homePath } from './paths.ts';
 import type { SpawnedPipedProcess } from './procs.ts';
