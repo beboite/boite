@@ -543,6 +543,21 @@ test.each(['input', 'inputText', 'output', 'documents'])('reading cache excludes
   } finally { store.detach(); client.close(); }
 });
 
+test('sizing a timeline for the reading cache reads string lengths, never a JSON copy of each part', async () => {
+  const { store, client } = await ready();
+  try {
+    await store.open('t-bench');
+    let copies = 0;
+    const big = 'x'.repeat(256 * 1024);
+    const part = () => ({ type: 'text' as const, text: big, toJSON() { copies++; return { type: 'text', text: big }; } });
+    store.openThread!.messages.unshift(...Array.from({ length: 50 }, (_, index) => ({ id: `big-${index}`, threadId: 't-bench', turnId: 'old', role: 'assistant' as const, parts: [part()], state: 'complete' as const, createdAt: 0 })));
+    await store.open('t-scheduler');
+    expect(copies).toBe(0);
+    await store.open('t-bench');
+    expect(store.openThread!.messages.some((message) => message.id === 'big-0')).toBe(false);
+  } finally { store.detach(); client.close(); }
+});
+
 describe('Store', () => {
   beforeEach(() => {
     window.localStorage.clear();

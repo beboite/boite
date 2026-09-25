@@ -93,6 +93,7 @@ import { onboardingSeen } from './onboarding';
 import { rightPanel, type BoundPanel } from './right-panel.svelte';
 import { fill, strings } from './strings';
 import { lastIndexById, mergeResumed, patchRow, reconcileRows, threadsByProject } from './thread-rows';
+import { fitsReadingCache } from './reading-cache';
 import { confirm } from './confirm.svelte';
 import { DEFAULT_MODEL_NAMES, INITIAL_MODEL_DEFAULTS, readModelDefaults, writeModelDefaults, resolveModelDefault, type ModelDefaults } from './model-defaults';
 import { FAVORITES_KEY, isNamedModel, readFavorites, type FavoriteModel } from './model-order';
@@ -253,13 +254,8 @@ export class Store {
     if (!thread) return;
     // Four recent timelines, with at most 4 MB of text/image data each.
     // The active timeline remains unrestricted; old visits must not retain every image forever.
-    let bytes = 0;
-    for (const message of thread.messages) for (const part of message.parts) {
-      // Include nested tool inputs and documents, with conservative JSON overhead.
-      bytes += JSON.stringify(part).length * 2;
-    }
     this.#readingThreads.delete(thread.id);
-    if (bytes <= 4 * 1024 * 1024 && thread.messages.length <= 2000) this.#readingThreads.set(thread.id, thread);
+    if (fitsReadingCache(thread.messages)) this.#readingThreads.set(thread.id, thread);
     while (this.#readingThreads.size > 4) this.#readingThreads.delete(this.#readingThreads.keys().next().value!);
   }
   #pendingSends = new Map<string, { id: string; prompt: string; attachments: Attachment[]; previewReferences: PreviewReference[]; selectionVersion: number }>();
