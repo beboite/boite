@@ -31,6 +31,11 @@ const FIXTURE = join(import.meta.dir, 'fixtures', 'silent-tone.ts');
  * with the mute, so the clock starts when the session is in the mixer.
  */
 const MUTE_WINDOW_MS = 3000;
+/**
+ * How long a session the core muted takes to show in its mutedPids: one poll of
+ * the guard Worker (a second) and the message to the main thread, with margin.
+ */
+const INHERITED_WINDOW_MS = 2000;
 const SESSION_WINDOW_MS = 15000;
 
 describeWindows('the audio sessions of the default endpoint', () => {
@@ -115,19 +120,42 @@ describeWindows('the audio sessions of the default endpoint', () => {
       expect(fixture.pid).toBeGreaterThan(0);
 
       await waitFor(() => hasSession(fixture.pid), SESSION_WINDOW_MS);
+      const coreMuted = (): boolean => harness.core.procs.guardStatus().mutedPids.includes(fixture.pid);
       // Windows keeps a mute per executable, so the fixture's bun.exe can open
       // its session already muted by an earlier run, here or in another checkout.
-      // The core leaves a session that reads muted alone, as the user's choice:
-      // give the fixture's own session its sound back and let the core take it.
-      if (!harness.core.procs.guardStatus().mutedPids.includes(fixture.pid)) {
+      // The core leaves a session that reads muted alone, as the user's choice,
+      // and never reports it. Its own mute is reported within one poll, so only a
+      // session the core has not claimed after that window is given its sound
+      // back, for the core to take on its next poll.
+      const claimed = await waitFor(coreMuted, INHERITED_WINDOW_MS).then(
+        () => true,
+        () => false,
+      );
+      let unmuted = false;
+      if (!claimed) {
         const inherited = sessionsOf(fixture.pid);
         try {
-          for (const session of inherited) if (session.getMute() === true) session.mute(false);
+          for (const session of inherited) {
+            if (session.getMute() === true && session.mute(false)) unmuted = true;
+          }
         } finally {
           for (const session of inherited) session.release();
         }
       }
-      await waitFor(() => harness.core.procs.guardStatus().mutedPids.includes(fixture.pid), MUTE_WINDOW_MS);
+      await waitFor(coreMuted, MUTE_WINDOW_MS);
+      if (unmuted) {
+        // The core's report can still land just after the window on a loaded
+        // machine. Then the mute this test lifted was the core's own, which it
+        // holds and never takes twice: put it back rather than read our own
+        // unmute as the core's failure. An inherited mute is taken again by the
+        // core itself, and the mixer already reads muted.
+        const retaken = sessionsOf(fixture.pid);
+        try {
+          for (const session of retaken) if (session.getMute() === false) session.mute(true);
+        } finally {
+          for (const session of retaken) session.release();
+        }
+      }
       const status = harness.core.procs.guardStatus();
       expect(status.audio).toBe('on');
       expect(status.mutedPids).toContain(fixture.pid);
