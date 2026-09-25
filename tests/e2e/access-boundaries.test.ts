@@ -30,6 +30,9 @@ test('a phone sees a completed turn but receives none of its process trace', asy
   const offOwner = owner.on('process.started', event => ownerTrace.push(event.pid));
   const offPhone = phone.on('process.started', event => phoneTrace.push(event.pid));
   try {
+    // Process events go only to the thread's subscribers: the owner subscribes
+    // so it proves the trace exists, the phone so it proves it is withheld.
+    await owner.call('threads.subscribe', { threadId });
     await phone.call('threads.subscribe', { threadId });
     const finished = phone.next('turn.finished', turn => turn.threadId === threadId, 15_000);
     await phone.call('turns.start', { threadId, prompt: '[spawn:echo traced-child] trace boundary' });
