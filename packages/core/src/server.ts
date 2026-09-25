@@ -233,6 +233,26 @@ export function shutdownResponse(core: Core, request: Request): Response {
   return Response.json({ ok: true, pid: process.pid }, { status: 202 });
 }
 
+/**
+ * The server of a core started from `main.ts`. A `--port` the operator named is
+ * the only one tried, and a taken one is a loud error: a reverse proxy points
+ * at it. Otherwise the port the previous run of this data directory bound, so a
+ * paired phone and an installed PWA keep their origin across a restart; when
+ * another program took it meanwhile, a random one, said in the log.
+ */
+export function startServerOnStickyPort(
+  options: ServerOptions & { explicitPort: boolean; previousPort: number | null },
+): RunningServer {
+  const { explicitPort, previousPort, ...server } = options;
+  if (explicitPort || previousPort === null) return startServer(server);
+  try {
+    return startServer({ ...server, port: previousPort });
+  } catch (error) {
+    server.core.log('warn', `port ${previousPort} of the previous run is taken (${messageOf(error)}), listening on another`);
+    return startServer({ ...server, port: 0 });
+  }
+}
+
 export function startServer(options: ServerOptions): RunningServer {
   const core = options.core;
   const host = options.host ?? '127.0.0.1';

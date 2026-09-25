@@ -6,8 +6,9 @@ import { PROTOCOL_VERSION, RPC_PATH, RpcCloseCode, RpcErrorCode } from '@boite/c
 import { connect } from '../src/client.ts';
 import { Core } from '../src/core.ts';
 import { newToken } from '../src/ids.ts';
-import { pair } from '../src/main.ts';
-import { isAllowedOrigin, PLACEHOLDER_HTML, ServerConnection, startServer, UI_DIST } from '../src/server.ts';
+import { pair, readPreviousRun } from '../src/main.ts';
+import { isAllowedOrigin, PLACEHOLDER_HTML, ServerConnection, startServer, startServerOnStickyPort, UI_DIST } from '../src/server.ts';
+import { lanAddress } from '../src/server/lan.ts';
 import { removeDir, startTestCore } from './harness.ts';
 import type { TestCore } from './harness.ts';
 
@@ -139,6 +140,49 @@ describe('server', () => {
       await core.close();
       await removeDir(dataDir);
     }
+  });
+
+  test('a restarted core listens on the port of its previous run, and on another when that one is taken', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'boite-sticky-'));
+    const core = new Core({ dataDir, token: newToken() });
+    const warnings: string[] = [];
+    const log = core.log.bind(core);
+    core.log = (level, message) => { if (level === 'warn') warnings.push(message); log(level, message); };
+    const first = startServerOnStickyPort({ core, host: '127.0.0.1', port: 0, explicitPort: false, previousPort: null });
+    const port = first.port;
+    await first.stop();
+    const coreFile = join(dataDir, 'core.json');
+    writeFileSync(coreFile, JSON.stringify({ port, host: '127.0.0.1', token: 'kept', pid: 1 }));
+    expect(readPreviousRun(coreFile)).toEqual({ token: 'kept', port });
+    const again = startServerOnStickyPort({ core, host: '127.0.0.1', port: 0, explicitPort: false, previousPort: readPreviousRun(coreFile).port });
+    const squatter = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => new Response('mine') });
+    try {
+      expect(again.port).toBe(port);
+      await again.stop();
+      // Another program took the port meanwhile: a new one, said in the log.
+      const moved = startServerOnStickyPort({ core, host: '127.0.0.1', port: 0, explicitPort: false, previousPort: squatter.port! });
+      expect(moved.port).not.toBe(squatter.port!);
+      expect(warnings.some((line) => line.includes(`port ${squatter.port}`))).toBe(true);
+      await moved.stop();
+      // A port the operator named is never swapped for another.
+      expect(() => startServerOnStickyPort({ core, host: '127.0.0.1', port: squatter.port!, explicitPort: true, previousPort: port })).toThrow();
+    } finally {
+      void squatter.stop(true);
+      await core.close();
+      await removeDir(dataDir);
+    }
+  });
+
+  test('a pairing link names the LAN address of a core listening on every interface', () => {
+    const iface = (address: string, internal = false) => ({ address, family: 'IPv4', internal, netmask: '', mac: '', cidr: null }) as never;
+    expect(lanAddress({ lo: [iface('127.0.0.1', true)], vpn: [iface('100.64.0.2')], eth: [iface('192.168.1.20')] })).toBe('192.168.1.20');
+    expect(lanAddress({ eth: [iface('169.254.3.4')], wan: [iface('100.64.0.2')] })).toBe('100.64.0.2');
+    expect(lanAddress({ lo: [iface('127.0.0.1', true)] })).toBeNull();
+    const url = new URL(harness.core.sessions.pairingUrl('grant'));
+    expect(url.hostname).toBe('127.0.0.1');
+    harness.core.setEndpoint('0.0.0.0', 4321);
+    const lan = lanAddress();
+    expect(new URL(harness.core.sessions.pairingUrl('grant')).host).toBe(`${lan ?? '127.0.0.1'}:4321`);
   });
 
   test('the root serves the UI build, or the placeholder when there is none', async () => {

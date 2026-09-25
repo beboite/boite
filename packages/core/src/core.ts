@@ -16,6 +16,7 @@ import { Journal } from './journal.ts';
 import { KeybindingStore } from './keybindings.ts';
 import { registerModules } from './modules.ts';
 import { currentOs } from './paths.ts';
+import { lanAddress } from './server/lan.ts';
 import { ProcRegistry } from './procs.ts';
 import { ProjectStore } from './projects.ts';
 import { ProviderRegistry } from './providers/loader.ts';
@@ -220,6 +221,17 @@ export class Core {
 
   baseUrl(): string {
     return `http://${this.displayHost()}:${this.endpoint.port}`;
+  }
+
+  /**
+   * The address a pairing link names. A core listening on every interface is
+   * reached from a phone through this machine's LAN address: 127.0.0.1 on the
+   * phone is the phone.
+   */
+  reachableUrl(): string {
+    const everywhere = this.endpoint.host === '0.0.0.0' || this.endpoint.host === '::';
+    const lan = everywhere ? lanAddress() : null;
+    return lan === null ? this.baseUrl() : `http://${lan}:${this.endpoint.port}`;
   }
 
   info(): CoreInfo {
