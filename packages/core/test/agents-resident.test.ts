@@ -4,6 +4,7 @@ import type { AgentProfile, AgentRuntimeConfig } from '@boite/contracts';
 import { DEFAULT_DELEGATION_CONFIG } from '@boite/contracts';
 import { startTestCore, waitFor, type TestCore } from './harness.ts';
 import { Core } from '../src/core.ts';
+import { SCHEMA_VERSION } from '../src/journal.ts';
 import { nextOccurrence } from '../src/agents/routines.ts';
 import { Database } from 'bun:sqlite';
 import { join } from 'node:path';
@@ -183,6 +184,6 @@ test('schema 14 from the earlier persistent branch upgrades without losing proje
   expect(thread.agentSessionId).toBe(session.id);
   expect(thread.turns).toHaveLength(1);
   expect(next.workforce.records.get('profile',agent.id).name).toBe(agent.name);
-  expect(next.journal.db.query('PRAGMA user_version').get()).toEqual({user_version:16});
+  expect(next.journal.db.query('PRAGMA user_version').get()).toEqual({user_version:SCHEMA_VERSION});
  } finally { await next.close(); }
 });
