@@ -9,8 +9,9 @@ const own = navigator.language;
 
 /** The inline script that writes the too-old-browser sentence. */
 function noticeScript(): string {
-  const script = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)]
-    .map((match) => match[1] ?? '')
+  const page = new DOMParser().parseFromString(html, 'text/html');
+  const script = [...page.querySelectorAll('script:not([src])')]
+    .map((element) => element.textContent ?? '')
     .find((body) => body.includes('__boiteBooted'));
   if (!script) throw new Error('index.html has no script that checks __boiteBooted');
   return script;
