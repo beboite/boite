@@ -58,6 +58,17 @@ test('archiving a thread closes its shell, as threads.ts archive', async () => {
   expect(await code(client.call('terminals.write', { id: shell.id, data: 'dir\r' }))).toBe(RpcErrorCode.NotFound);
 });
 
+test('removing a project closes the shells of its threads, as projects.ts remove', async () => {
+  const client = await fake();
+  const project = await client.call('projects.add', { path: 'C:\\Users\\you\\shells' });
+  const thread = await client.call('threads.create', { projectId: project.id, providerId: 'echo', accountId: 'a-echo' });
+  const shell = await client.call('terminals.open', { threadId: thread.id, cols: 80, rows: 24 });
+  const events = heard(client, ['terminal.exited']);
+  await client.call('projects.remove', { projectId: project.id });
+  expect(events).toEqual([`terminal.exited ${JSON.stringify({ id: shell.id, exitCode: 0 })}`]);
+  expect(await code(client.call('terminals.write', { id: shell.id, data: 'dir\r' }))).toBe(RpcErrorCode.NotFound);
+});
+
 test('a cancelled login fails, closes its terminal without signing in, and is read again, as accounts.ts loginCancel', async () => {
   const client = await fake();
   const account = await client.call('accounts.add', { providerId: 'opencode', label: 'Work', useDefaultLocation: false });
@@ -92,12 +103,3 @@ test('a paired device hears only the device events, as access.ts mayReceiveEvent
   expect(phoneLog.map((line) => line.split(' ')[0])).toEqual(['thread.updated']);
 });
 
-test('a project an agent memory names is kept, as projects.ts remove', async () => {
-  const client = await fake();
-  const project = await client.call('projects.add', { path: 'C:\\Users\\you\\kept' });
-  await client.call('agents.memory.save', {
-    value: { scope: { kind: 'project', id: project.id }, title: 'Layout', text: 'Tests live beside the code.', sourceScopes: [], sourceRunId: null, expiresAt: null },
-  });
-  expect(await code(client.call('projects.remove', { projectId: project.id }))).toBe(RpcErrorCode.Refused);
-  expect((await client.call('projects.list', {})).some((entry) => entry.id === project.id)).toBe(true);
-});

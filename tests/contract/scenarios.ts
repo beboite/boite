@@ -314,6 +314,15 @@ export const SCENARIOS: Record<string, Scenario> = {
     updates.stop();
     check(answer.archived, 'the answer is not archived');
   },
+  'projects.remove refuses a project an agent memory names, and keeps it': async (env) => {
+    const setup = await echo(env);
+    await env.call('agents.memory.save', {
+      value: { scope: { kind: 'project', id: setup.projectId }, title: 'Layout', text: 'Tests live beside the code.', sourceScopes: [], sourceRunId: null, expiresAt: null },
+    });
+    const data = await refusedWith(env.call('projects.remove', { projectId: setup.projectId }), RpcErrorCode.Refused, ['projectId']);
+    same(data.projectId, setup.projectId, 'the project');
+    check((await env.call('projects.list', {})).some((entry) => entry.id === setup.projectId), 'the refused project is gone');
+  },
   'projects.remove archives each thread before removing it': async (env) => {
     const setup = await echo(env);
     const created = await thread(env, setup);

@@ -673,7 +673,11 @@ export class FakeClient implements ObservableClient {
     'projects.remove': async (params) => {
       if (!this.#projects.some((p) => p.id === params.projectId)) throw this.#notFound('project', params.projectId);
       if (this.#agents.referencesProject(params.projectId)) {
-        throw refusal('this project is referenced by persistent agents; keep it registered to preserve their workspaces and shared context');
+        throw new RpcFailure({
+          code: RpcErrorCode.Refused,
+          message: 'this project is referenced by persistent agents; keep it registered to preserve their workspaces and shared context',
+          data: { projectId: params.projectId }
+        });
       }
       this.#projects = this.#projects.filter((p) => p.id !== params.projectId);
       const threads = [...this.#threads.values()].filter((thread) => thread.projectId === params.projectId);
@@ -682,7 +686,7 @@ export class FakeClient implements ObservableClient {
         thread.archived = true;
         this.#touch(thread);
       }
-      await Promise.all(threads.map((thread) => this.#stopTurn(thread.id)));
+      await Promise.all(threads.map((thread) => this.#putAway(thread)));
       for (const thread of threads) {
         this.#threads.delete(thread.id);
         this.#emit('thread.removed', { threadId: thread.id });
@@ -1085,19 +1089,7 @@ export class FakeClient implements ObservableClient {
     'threads.archive': async (params) => {
       const thread = this.#thread(params.threadId);
       thread.archived = params.archived ?? true;
-      if (thread.archived) {
-        await this.#stopTurn(thread.id);
-        // As the core: nobody answers a card on a thread put away, and its background work goes.
-        for (const [questionId, pending] of [...this.#pendingQuestions]) {
-          if (pending.request.threadId !== thread.id) continue;
-          this.#pendingQuestions.delete(questionId);
-          pending.resolve(null);
-        }
-        this.#heldAnswers.delete(thread.id);
-        if ((thread.background?.length ?? 0) > 0) this.#setBackground(thread, []);
-        // Its shell goes too, the way the core closes `terminal:<id>`.
-        this.#closeTerminal(`terminal:${thread.id}`);
-      }
+      if (thread.archived) await this.#putAway(thread);
       return this.#touch(thread);
     },
     'threads.pin': async (params) => {
@@ -3112,6 +3104,24 @@ const ready = true;
       message: `no such ${what}: ${id}`,
       data: { id }
     });
+  }
+
+  /**
+   * What the core's archive does beyond the flag, from `threads.archive` and
+   * `projects.remove` alike: the turn stops, nobody answers a card on the
+   * thread, its background work goes, and its shell closes the way the core
+   * closes `terminal:<id>`.
+   */
+  async #putAway(thread: Thread): Promise<void> {
+    await this.#stopTurn(thread.id);
+    for (const [questionId, pending] of [...this.#pendingQuestions]) {
+      if (pending.request.threadId !== thread.id) continue;
+      this.#pendingQuestions.delete(questionId);
+      pending.resolve(null);
+    }
+    this.#heldAnswers.delete(thread.id);
+    if ((thread.background?.length ?? 0) > 0) this.#setBackground(thread, []);
+    this.#closeTerminal(`terminal:${thread.id}`);
   }
 
   #touch(thread: Thread): ThreadSummary {
