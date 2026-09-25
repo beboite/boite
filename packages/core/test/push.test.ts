@@ -136,7 +136,9 @@ test('public HTTPS origin is validated, used for QR links and accepted by the so
   for (const publicUrl of ['http://phone.test', 'https://phone.test/path', 'https://user:pass@phone.test', 'https://phone.test?token=x']) {
     await expect(owner.call('settings.set', { publicUrl })).rejects.toThrow('publicUrl');
   }
-  await owner.call('settings.set', { publicUrl: 'https://phone.test' });
+  // A copy from the address bar ends in a slash: the same origin, stored bare.
+  expect((await owner.call('settings.set', { publicUrl: 'https://phone.test/' })).publicUrl).toBe('https://phone.test');
+  expect(harness.core.settings.get().publicUrl).toBe('https://phone.test');
   const grant = await owner.call('pairing.grant', {});
   expect(new URL(grant.url).origin).toBe('https://phone.test');
   const socket = new WebSocket(harness.url.replace('http:', 'ws:') + '/rpc', { headers: { Origin: 'https://phone.test' } });

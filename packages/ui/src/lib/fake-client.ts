@@ -11,6 +11,7 @@ import {
   parseChord,
   PROTOCOL_VERSION,
   RpcErrorCode,
+  checkSettingsPatch,
   TODO_STATUSES,
   type Account,
   type AgentProfile,
@@ -305,7 +306,7 @@ export class FakeClient implements ObservableClient {
     this.#settings = {
       maxConcurrentTurns: 6,
       perAccountConcurrency: 2,
-      warmProcessMinutes: 5,
+      warmProcessMinutes: 0,
       listenOnLan: false,
       agentCpuCapPercent: 75,
       threadMemoryCapMb: 0,
@@ -1615,13 +1616,10 @@ export class FakeClient implements ObservableClient {
       return structuredClone(this.#keybindings);
     },
     'settings.set': async (params) => {
-      for (const field of ['maxConcurrentTurns', 'perAccountConcurrency'] as const) {
-        const value = params[field];
-        if (value !== undefined && (!Number.isInteger(value) || value < 1)) {
-          throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: `${field} must be a positive integer`, data: { field } });
-        }
-      }
-      this.#settings = { ...this.#settings, ...params };
+      // The core's own check, so a value the core refuses is refused here too.
+      const checked = checkSettingsPatch(params);
+      if (!checked.ok) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: checked.message, data: { field: checked.field } });
+      this.#settings = { ...this.#settings, ...checked.patch };
       this.#scheduler = {
         ...this.#scheduler,
         maxConcurrentTurns: this.#settings.maxConcurrentTurns,

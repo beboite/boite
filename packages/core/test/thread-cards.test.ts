@@ -49,11 +49,14 @@ test('last user message survives assistant output, title changes and reloading t
   expect(journal.getThread(threadId)?.lastUserMessageAt).toBe(1000);
 });
 
-test('browser origins are exact, explicit, validated and removable', async () => {
+test('browser origins are explicit, validated, stored bare and removable', async () => {
   const client = await harness.connect();
-  await expect(client.call('settings.set', { browserOrigins: ['https://example.com/path'] })).rejects.toThrow(
-    'browserOrigins'
-  );
+  // The Origin header carries no path: one pasted with the address is dropped, twice is once.
+  const pasted = await client.call('settings.set', {
+    browserOrigins: ['http://192.168.1.20:8777/app', 'http://192.168.1.20:8777/', ' https://example.com/ ']
+  });
+  expect(pasted.browserOrigins).toEqual(['http://192.168.1.20:8777', 'https://example.com']);
+  await expect(client.call('settings.set', { browserOrigins: ['ftp://example.com'] })).rejects.toThrow('browserOrigins');
   await expect(client.call('settings.set', { browserOrigins: ['*'] })).rejects.toThrow('browserOrigins');
   const next = await client.call('settings.set', { browserOrigins: ['https://example.com'] });
   expect(next.browserOrigins).toEqual(['https://example.com']);

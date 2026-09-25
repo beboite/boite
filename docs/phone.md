@@ -187,8 +187,11 @@ needs a certificate the phone trusts for PWA features.
 Set the matching origin in General, Phone app, Public HTTPS address. A headless
 core accepts `--public-url https://boite.example.com` or `BOITE_PUBLIC_URL`.
 This saves `settings.publicUrl`, uses it in new pairing links, and permits that
-exact browser origin at the WebSocket gate. Clearing the setting returns links
-to the core's local address. No wildcard origin or forwarded header is trusted.
+exact browser origin at the WebSocket gate. An address copied from the browser
+bar with its trailing `/` is stored as the bare origin; an address with a path
+is refused, because pairing links cannot point into a proxy's subpath. Clearing
+the setting returns links to the core's local address. No wildcard origin or
+forwarded header is trusted.
 
 On iPhone, open the pairing link in Safari, choose Share, then Add to Home Screen.
 On Android, use Install Boite in Phone app or the browser's installation menu.

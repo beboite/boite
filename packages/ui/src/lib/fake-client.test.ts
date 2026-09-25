@@ -399,6 +399,22 @@ test.each(['maxConcurrentTurns', 'perAccountConcurrency'] as const)('fake settin
   client.close();
 });
 
+test('fake settings store a pasted address as its origin and refuse what the core refuses', async () => {
+  const client = new FakeClient({ delayMs: 0 });
+  await client.connect();
+  expect((await client.call('settings.get', {})).warmProcessMinutes).toBe(0);
+  const saved = await client.call('settings.set', {
+    publicUrl: 'https://boite.example.com/',
+    browserOrigins: ['http://192.168.1.20:8777/app', 'http://192.168.1.20:8777/']
+  });
+  expect(saved.publicUrl).toBe('https://boite.example.com');
+  expect(saved.browserOrigins).toEqual(['http://192.168.1.20:8777']);
+  for (const patch of [{ publicUrl: 'https://boite.example.com/app' }, { warmProcessMinutes: -3 }, { agentCpuCapPercent: 120 }, { focusGuard: 'yes' as unknown as boolean }]) {
+    await expect(client.call('settings.set', patch)).rejects.toMatchObject({ code: RpcErrorCode.InvalidParams });
+  }
+  client.close();
+});
+
 test('fake refuses a second active turn and archived threads without adding messages', async () => {
   vi.useFakeTimers();
   const client = new FakeClient({ delayMs: 1 });

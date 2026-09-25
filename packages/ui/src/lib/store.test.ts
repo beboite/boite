@@ -817,6 +817,13 @@ describe('Store', () => {
     expect(store.pendingPermissions).toEqual([]);
   });
 
+  test('a public address pasted from the address bar saves without an error', async () => {
+    const { store } = await ready();
+    await store.saveSettings({ publicUrl: 'https://boite.example.com/' });
+    expect(store.error).toBeNull();
+    expect(store.settings?.publicUrl).toBe('https://boite.example.com');
+  });
+
   test('an answer sent while the socket is down says so and can be sent again', async () => {
     const { store, client } = await ready();
     await store.open('t-scheduler');

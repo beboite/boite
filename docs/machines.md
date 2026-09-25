@@ -60,7 +60,10 @@ A loopback core is retried regardless, since it is on the same machine.
 The desktop shell is an allowed origin on every core. A browser or phone has
 the origin of the core serving its page. On each additional machine, add that
 exact origin to Machines, Allowed browser origins. Origins contain a scheme,
-host and optional port, with no path or wildcard. Save the list on that core.
+host and optional port, with no wildcard. A pasted address keeps only its
+origin: the core drops a trailing `/` or a path, since the browser's `Origin`
+header never carries one, and a line given twice is kept once. Save the list on
+that core.
 Removing an origin blocks new connections from it; existing authenticated
 connections must be revoked separately if they should lose access immediately.
 
