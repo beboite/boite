@@ -5,18 +5,18 @@
  * What it proves is the part no unit test can: the surface the CLI asked for is
  * the one the panel draws.
  */
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { connect } from '../../packages/core/src/client.ts';
 import { BrowserPage } from './lib/cdp.ts';
 import { pairingUrlOf, removeDirectory, startCore, type RunningCore } from './lib/core.ts';
+import { ensureProductionUi } from './lib/prod-ui.ts';
 
 const TIMEOUT = 60_000;
 const ROOT = join(import.meta.dir, '..', '..');
 const MAIN = join(ROOT, 'packages', 'core', 'src', 'main.ts');
-const UI_INDEX = join(ROOT, 'packages', 'ui', 'dist', 'index.html');
 const ARTIFACTS = join(import.meta.dir, '.artifacts');
 
 let core: RunningCore;
@@ -58,11 +58,7 @@ async function capture(name: string): Promise<void> {
 }
 
 beforeAll(async () => {
-  if (process.env.BOITE_E2E_PREBUILT_UI !== '1') {
-    const built = Bun.spawnSync({ cmd: ['bun', 'run', '--cwd', 'packages/ui', 'build'], cwd: ROOT, stdout: 'pipe', stderr: 'pipe', windowsHide: true });
-    if (!built.success) throw new Error(`the ui did not build:\n${built.stderr.toString()}`);
-  }
-  if (!existsSync(UI_INDEX)) throw new Error(`Missing prebuilt UI: ${UI_INDEX}. Run bun run build:ui first.`);
+  ensureProductionUi();
   projectDir = mkdtempSync(join(tmpdir(), 'boite-e2e-cli-'));
   mkdirSync(join(projectDir, 'src'));
   writeFileSync(join(projectDir, 'src', 'app.ts'), Array.from({ length: 40 }, (_, i) => `export const line${i + 1} = ${i + 1};`).join('\n') + '\n');
