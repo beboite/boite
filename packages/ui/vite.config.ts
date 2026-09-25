@@ -5,6 +5,7 @@ import { brotliCompressSync, constants, gzipSync } from 'node:zlib';
 import { defineConfig, type Plugin } from 'vite';
 import { svelte } from '@sveltejs/vite-plugin-svelte';
 import { stampWorkerCache } from './src/lib/worker-stamp';
+import { tooNewForFloor } from './src/lib/browser-floor';
 
 const COMPRESSIBLE = /\.(?:html|js|css|svg|json|webmanifest)$/;
 
@@ -57,8 +58,24 @@ function precompress(): Plugin {
   };
 }
 
+/**
+ * Refuses a build whose chunks use what the browser floor lacks
+ * (`src/lib/browser-floor.ts`): a lookbehind in a startup chunk blanks the app
+ * on Safari before 16.4, and no build target lowers a regex.
+ */
+function browserFloor(): Plugin {
+  return {
+    name: 'boite-browser-floor',
+    apply: 'build',
+    generateBundle(_options, bundle) {
+      const hits = Object.values(bundle).flatMap((file) => file.type === 'chunk' ? tooNewForFloor(file.code).map((hit) => `${file.fileName}: ${hit}`) : []);
+      if (hits.length) this.error(`the build uses what Safari 15.4 cannot run (docs/phone.md):\n${hits.join('\n')}`);
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [svelte(), precompress()],
+  plugins: [svelte(), browserFloor(), precompress()],
   base: './',
   // AudioWorklet modules must be same-origin files, never data URLs under the shell CSP.
   build: { outDir: 'dist', emptyOutDir: true, target: 'es2022', assetsInlineLimit: (file) => file.endsWith('speech-worklet.js') ? false : undefined },

@@ -71,6 +71,22 @@
         }
       } catch (e) {}
     </script>
+    <!-- A browser under the floor (Safari 15.4, Chrome 111: docs/phone.md) fails to
+         parse the app and never runs main.ts, which sets the flag first. It says so
+         instead of staying blank. Two literal sentences: the catalogues never loaded. -->
+    <script>
+      window.addEventListener('load', function () {
+        var app = document.getElementById('app');
+        if (window.__boiteBooted || !app || app.childElementCount > 0) return;
+        var note = document.createElement('p');
+        note.setAttribute('role', 'alert');
+        note.style.cssText = 'margin:0;padding:32px 24px;max-width:520px;font:15px/1.5 system-ui,-apple-system,sans-serif';
+        note.textContent = /^fr\b/i.test(navigator.language || '')
+          ? 'Boite ne peut pas démarrer dans ce navigateur. Il faut Safari 15.4 (iOS 15.4) ou Chrome 111, ou une version plus récente.'
+          : 'Boite cannot start in this browser. It needs Safari 15.4 (iOS 15.4) or Chrome 111, or a newer version.';
+        app.appendChild(note);
+      });
+    </script>
   </head>
   <body>
     <div id="app"></div>

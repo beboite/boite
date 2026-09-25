@@ -165,6 +165,21 @@ Reusing the id with different content is refused. This applies to every driver.
 Changing the thread's model, effort or other selection before retrying creates
 a new request ID for that selection.
 
+### Oldest browsers
+
+The UI runs on Safari 15.4 (iOS and iPadOS 15.4) and Chrome 111 or newer. The
+build target lowers syntax only, so what those engines lack is refused where it
+would ship: `packages/ui/vite.config.ts` fails the build on a regex lookbehind or
+a copying array method (`toSorted`, `toReversed`, `toSpliced`) in any chunk, and
+`src/lib/browser-floor.test.ts` checks the sources the same way. A lookbehind is
+a parse error before Safari 16.4, and one in a startup chunk used to leave iOS 15
+with a blank page. Safari 15.4 to 16.1 have `oklch` but not `color-mix`, so the
+shared accent tint has a plain fallback and a few one-off tints are not drawn.
+
+A browser under the floor fails to parse the app, so `main.ts` never runs. An
+inline script in `index.html` notices on `load` and writes one sentence in the
+page instead: this browser cannot start Boite, and the versions it needs.
+
 ## HTTPS and installation
 
 HTTP on a LAN opens the chat, but service workers and push need a secure origin.

@@ -9,8 +9,8 @@
   import { separator, type MenuItem } from '../lib/menu';
   let { store, filter = null, onfilter }: { store: Store; filter?: string | null; onfilter?: (id: string | null) => void } = $props();
 
-  const machines = $derived((workspace.machines.length ? workspace.machines : [{ id: 'current', label: strings.machines.local, store }])
-    .toSorted((a, b) => Number(isThisPC(b)) - Number(isThisPC(a))));
+  const machines = $derived([...(workspace.machines.length ? workspace.machines : [{ id: 'current', label: strings.machines.local, store }])]
+    .sort((a, b) => Number(isThisPC(b)) - Number(isThisPC(a))));
   const connected = $derived(machines.filter(m => m.store.connection === 'ready').length);
   const issues = $derived(machines.filter(m => m.store.connection === 'closed' || (m.store.booted && m.store.connection !== 'ready')).length);
   const items = $derived<MenuItem[]>([

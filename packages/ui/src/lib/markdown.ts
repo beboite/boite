@@ -19,9 +19,11 @@ function inline(text: string, rich = false): string {
   const code: string[] = [];
   let marker = '\0';
   while (text.includes(marker)) marker += '\0';
-  const protectedText = text.replace(/(?<!`)(`+)(.+?)\1(?!`)/g, (_match, _ticks: string, value: string) => {
+  // The lead stands in for a lookbehind (Safari before 16.4 cannot parse one): a
+  // previous span always ends on a backtick, so consuming one character is equivalent.
+  const protectedText = text.replace(/(^|[^`])(`+)(.+?)\2(?!`)/g, (_match, lead: string, _ticks: string, value: string) => {
     code.push(`<code>${rich && fileLike(value) ? linkHtml(value, value) : escape(value)}</code>`);
-    return `${marker}${code.length - 1}${marker}`;
+    return `${lead}${marker}${code.length - 1}${marker}`;
   });
   // Format around opaque spans, then restore them without parsing their contents.
   return (rich ? richInline(protectedText, inlineFormatting) : inlineFormatting(protectedText)).split(marker).map((part, index) => index % 2 ? code[Number(part)]! : part).join('');
@@ -67,7 +69,15 @@ function renderItems(items: ListItem[], rich = false): string {
 /** Cells of one table row, the outer pipes optional, a `\|` kept as a pipe. */
 function cells(line: string): string[] {
   const trimmed = line.trim().replace(/^\|/, '').replace(/\|$/, '');
-  return trimmed.split(/(?<!\\)\|/).map((cell) => cell.replaceAll('\\|', '|').trim());
+  const split: string[] = [];
+  let start = 0;
+  for (let index = trimmed.indexOf('|'); index !== -1; index = trimmed.indexOf('|', index + 1)) {
+    if (trimmed[index - 1] === '\\') continue;
+    split.push(trimmed.slice(start, index));
+    start = index + 1;
+  }
+  split.push(trimmed.slice(start));
+  return split.map((cell) => cell.replaceAll('\\|', '|').trim());
 }
 
 function alignments(line: string): (string | null)[] {

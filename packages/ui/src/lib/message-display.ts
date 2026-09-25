@@ -99,13 +99,29 @@ export function answerText(text: string, _live: boolean): string {
   return visibleAnswer(text);
 }
 
+/**
+ * The lines of `text` split after each break, written out because the regex
+ * form needs a lookbehind, which Safari before 16.4 cannot parse. Every line
+ * keeps its break, and a trailing break adds no empty line.
+ */
+export function linesKeepingBreaks(text: string): string[] {
+  const lines: string[] = [];
+  let start = 0;
+  for (let end = text.indexOf('\n'); end !== -1; end = text.indexOf('\n', start)) {
+    lines.push(text.slice(start, end + 1));
+    start = end + 1;
+  }
+  if (start < text.length || lines.length === 0) lines.push(text.slice(start));
+  return lines;
+}
+
 /** Only complete paragraphs and fenced blocks enter the timeline while streaming. */
 export function paragraphBlocks(text: string, live: boolean): string[] {
   const blocks: string[] = [];
   let start = 0;
   let offset = 0;
   let fence = '';
-  for (const line of text.split(/(?<=\n)/)) {
+  for (const line of linesKeepingBreaks(text)) {
     const trimmed = line.trim();
     const marker = /^(?:`{3,}|~{3,})/.exec(trimmed)?.[0];
     if (marker) {
