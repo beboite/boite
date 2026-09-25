@@ -10,6 +10,13 @@ pub(crate) mod job;
 pub(crate) mod job;
 
 #[cfg(windows)]
+#[path = "windows_process.rs"]
+pub(crate) mod process;
+#[cfg(not(windows))]
+#[path = "posix_process.rs"]
+pub(crate) mod process;
+
+#[cfg(windows)]
 pub(crate) mod windows;
 #[cfg(windows)]
 pub(crate) use windows::{notify, prepare_command};

@@ -43,6 +43,8 @@ pub struct AppUpdater {
     busy: AtomicBool,
     preference: PathBuf,
     cache: PathBuf,
+    /// The data directory, whose `core.json` names the core an install must stop.
+    directory: PathBuf,
 }
 struct Operation<'a>(&'a AtomicBool);
 impl Drop for Operation<'_> { fn drop(&mut self) { self.0.store(false, Ordering::Release); } }
@@ -68,7 +70,7 @@ impl AppUpdater {
             phase: if error.is_some() { "error" } else { "idle" }.into(), current_version: version,
             current_channel, channel, version: None, notes: None, published_at: None,
             received: 0, total: None, error, supported,
-        }), pending: Mutex::new(None), busy: AtomicBool::new(false), preference, cache }
+        }), pending: Mutex::new(None), busy: AtomicBool::new(false), preference, cache, directory }
     }
     fn begin(&self) -> Result<Operation<'_>, String> {
         if !self.snapshot.lock().unwrap().supported { return Err("Updates require an installed Windows x64 build of Boite".into()); }
@@ -211,10 +213,22 @@ pub async fn app_update_install(webview: Webview, app: AppHandle, state: State<'
         state.fail(&app, error.clone()); return Err(error);
     }
     state.change(&app, |s| s.phase = "installing".into());
+    // The core outlives the shell (it is resident by default), so nothing
+    // stops it when this process exits: it is stopped here, through its own
+    // /shutdown, before the installer has to replace boite-core.exe. A core
+    // still running would keep that file locked and, once the new shell
+    // started, be adopted as the engine of a version it is not.
+    let directory = state.directory.clone();
+    let stopped = tauri::async_runtime::spawn_blocking(move || crate::resident::stop_local_core(&directory, crate::resident::GRACE)).await;
+    if let Some(error) = match stopped { Ok(Ok(_)) => None, Ok(Err(e)) => Some(e), Err(e) => Some(e.to_string()) } {
+        let error = format!("The engine could not be stopped for the update, so nothing was installed: {error}");
+        state.fail(&app, error.clone());
+        return Err(error);
+    }
     // The in-memory digest ties these exact bytes to the verified download.
-    // On Windows Tauri exits only after the installer launches. Windows then
-    // closes the shell's KILL_ON_JOB_CLOSE handle and stops its owned core.
-    // An installer launch failure leaves the core and its agents running.
+    // On Windows Tauri exits once the installer launches. If it cannot
+    // launch, the engine stays stopped until the window reconnects, which
+    // starts it again.
     let result = tauri::async_runtime::spawn_blocking(move || pending.update.install(bytes)).await;
     match result {
         Ok(Ok(())) => { app.restart(); }

@@ -81,6 +81,11 @@ next open.
 The shell spawns the core before it builds the WebView2 window, and polls for
 `core.json` every 10 ms instead of every 120 ms.
 
+The window is built hidden. It appears once the page has painted and either the
+core answered or two seconds passed, so a fast start shows no empty frame and a
+slow one shows the page's "connecting" state. After ten seconds it appears
+whatever the page said, so a broken bundle still gets a window to quit from.
+
 ## Benches
 
 ```sh

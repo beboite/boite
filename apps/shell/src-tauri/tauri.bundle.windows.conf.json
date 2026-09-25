@@ -3,6 +3,11 @@
   "bundle": {
     "resources": {
       "binaries/core": "core"
+    },
+    "windows": {
+      "nsis": {
+        "installerHooks": "windows/hooks.nsh"
+      }
     }
   }
 }

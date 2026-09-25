@@ -43,10 +43,22 @@ before handing those bytes to Tauri's installer.
 
 Restarting always requires a click and an in-app confirmation. It interrupts
 agents owned by that desktop. Saved conversations remain; interrupted turns
-are not automatically retried. The Windows Job Object closes when the updater
-exits the shell, stopping its owned core and agents before replacement. A failed
-installer launch leaves that core running. A remote core or a separately started
-core is not terminated by the desktop updater.
+are not automatically retried. The local core is resident and outlives the
+shell, so before launching the installer the shell asks it to stop through its
+authenticated `POST /shutdown` and waits up to 12 seconds, then ends it. If the
+core cannot be stopped, nothing is installed and the card shows why. A remote
+core is not touched by the desktop updater.
+
+The Windows installer stops the core of its own install too, for an update, a
+manual reinstall and an uninstall. Its hooks (`windows/hooks.nsh` and
+`windows/stop-core.ps1`) find the `boite-core.exe` processes running that
+install's exact file, ask the one named in `core.json` to shut down, and end any
+still running after 15 seconds. Boite Dev's core runs another file and is left
+alone. No window opens.
+
+When the new shell starts, it reads the version the running core reports on
+`/health`. A core of another version, left by an install that could not stop
+it, is stopped and replaced by the core shipped with the shell.
 
 Offline checks, missing releases, signature failures and installation failures
 appear in the card with a retry action. They do not display a system dialog or
