@@ -18,7 +18,7 @@ import {
   writeFileSync,
   writeSync,
 } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, isAbsolute, join, relative } from 'node:path';
 import { Unzip, UnzipInflate } from 'fflate';
 import type { ProviderId, ProviderInstall, ProviderInstallState } from '@boite/contracts';
 import { newId } from '../ids.ts';
@@ -160,11 +160,21 @@ export class InstallManager {
   }
 
   releaseDir(providerId: ProviderId, version: string): string {
-    return join(providerAgentDir(this.dataDir, providerId), 'releases', version);
+    return this.#inside(join(providerAgentDir(this.dataDir, providerId), 'releases'), version);
   }
 
   partFile(providerId: ProviderId, version: string): string {
-    return join(providerAgentDir(this.dataDir, providerId), 'downloads', `${version}.zip.part`);
+    return this.#inside(join(providerAgentDir(this.dataDir, providerId), 'downloads'), `${version}.zip.part`);
+  }
+
+  /** A version is deleted recursively on failure: whatever it says, it stays one entry of its directory. */
+  #inside(dir: string, name: string): string {
+    const path = join(dir, name);
+    const within = relative(dir, path);
+    if (within.length === 0 || within.startsWith('..') || isAbsolute(within) || /[\\/]/.test(within)) {
+      throw refused(`the release version ${name} is not a plain directory name under ${dir}`, { dir, name });
+    }
+    return path;
   }
 
   #partRecordFile(part: string): string {
@@ -353,6 +363,9 @@ export class InstallManager {
         operationId: this.#running.get(providerId)?.operationId,
       });
     }
+    // Both paths are checked here, where a refusal reaches the caller, not inside the run.
+    this.releaseDir(providerId, install.version);
+    this.partFile(providerId, install.version);
     const record = this.#readRecord(providerId);
     if (record !== null && record.version === install.version) {
       throw refused(`${providerId} is up to date on ${install.version}`, {

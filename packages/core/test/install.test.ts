@@ -432,6 +432,25 @@ describe('managed installs', () => {
     }
   });
 
+  test('a version that is not one plain path segment is refused by field, and never reaches a delete', async () => {
+    const dir = join(harness.dataDir, 'providers');
+    mkdirSync(dir, { recursive: true });
+    const victim = join(harness.dataDir, 'victim');
+    mkdirSync(victim, { recursive: true });
+    for (const version of ['../../../victim', '..', '.', 'a/b', 'C:x']) {
+      writeFileSync(join(dir, 'managed.json'), JSON.stringify(descriptor({ ...goodInstall(), url: url('/missing.zip'), version })), 'utf8');
+      const client = await harness.connect();
+      const { rejected } = await client.call('providers.reload', {});
+      expect(rejected.map((entry) => entry.field)).toEqual(['profiles.windows.install.version']);
+    }
+    const installs = harness.core.providers.installs;
+    for (const version of ['..', '.', '../victim', 'a/b']) {
+      expect(() => installs.releaseDir('managed', version)).toThrow('not a plain directory name');
+      expect(() => installs.partFile('managed', `../${version}`)).toThrow('not a plain directory name');
+    }
+    expect(existsSync(victim)).toBe(true);
+  });
+
   test('installing the version already on disk is refused as up to date', async () => {
     await loadDescriptor(goodInstall());
     const client = await harness.connect();

@@ -153,7 +153,8 @@ declared line as it is.
 ## Managed installs
 
 An `install` block is how Boite ships an agent whose binary is not on the machine
-and which has no installer of its own: a `version`, a zip `url`, its `sha256`, its
+and which has no installer of its own: a `version` (letters, digits and `. _ + -`,
+since it names the release directory), a zip `url`, its `sha256`, its
 `archiveBytes`, and every `files` entry expected out of the archive with its exact
 size, the first one the executable.
 Additional executable files declare `executable: true`; the installer gives

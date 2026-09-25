@@ -245,7 +245,12 @@ function checkInstall(value: unknown, file: string, field: string): ProviderInst
   if (format === 'binary' && (files.length !== 1 || files[0]?.bytes !== archiveBytes)) {
     reject(file, `${field}.files`, 'one file whose bytes equal archiveBytes', `${field}.files must describe the downloaded binary`);
   }
-  return { version: asString(obj['version'], file, `${field}.version`), url, sha256, archiveBytes, files,
+  // The version names a directory the installer deletes on failure, so it is one plain path segment.
+  const version = asString(obj['version'], file, `${field}.version`);
+  if (!/^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}$/.test(version)) {
+    reject(file, `${field}.version`, 'letters, digits and . _ + -, starting with a letter or digit', `${field}.version is not a plain version: ${version}`);
+  }
+  return { version, url, sha256, archiveBytes, files,
     ...(arch === undefined ? {} : { arch: arch as 'x64' | 'arm64' }),
     ...(format === 'zip' || format === 'binary' ? { format } : {}) };
 }
