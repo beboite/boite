@@ -19,7 +19,9 @@ export async function gitStatus(core: Core, threadId: ThreadId): Promise<GitStat
   const parsed = parseStatus(status.stdout);
   // A repository with no commit has no HEAD to compare to: the paths are still
   // reported, without numbers, rather than failing the whole read.
-  const numstat = await git(core, threadId, cwd, ['diff', '--numstat', '-z', 'HEAD']);
+  // The plumbing `diff-index`, not `diff`: the porcelain writes a refreshed
+  // index back whatever GIT_OPTIONAL_LOCKS says. `-M` keeps its renames.
+  const numstat = await git(core, threadId, cwd, ['diff-index', '-M', '--numstat', '-z', 'HEAD']);
   const numbers = numstat.code === 0 ? parseNumstat(numstat.stdout) : new Map<string, { additions: number | null; deletions: number | null }>();
   for (const change of parsed.changes) {
     const counted = numbers.get(change.path);

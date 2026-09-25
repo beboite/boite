@@ -5,13 +5,14 @@
  * output git produces for a rename and a binary file.
  */
 
-import { mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import { DIFF_MAX_BYTES, RpcErrorCode } from '@boite/contracts';
 import type { CoreClient } from '../src/client.ts';
 import { parseNumstat, parseStatus } from '../src/git.ts';
-import { startTestCore } from './harness.ts';
+import { git as readGit } from '../src/git/read.ts';
+import { startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
 
 let harness: TestCore;
@@ -98,6 +99,51 @@ describe('git.status', () => {
     // Untracked files are outside the diff, so they carry no numbers at all.
     expect(byPath.get('new.txt')).toMatchObject({ status: 'untracked', staged: false, additions: null, deletions: null });
     expect(byPath.get('pic.png')).toMatchObject({ status: 'modified', additions: null, deletions: null });
+  });
+
+  test('reading the changes never rewrites the index an agent in the same checkout may be locking', async () => {
+    const path = await fixture();
+    const threadId = await threadIn(path, 'repo');
+    git(path, 'add', '-A');
+    git(path, 'commit', '-q', '-m', 'second');
+    // Stale stat data: a plain `git status` refreshes it and writes the index back under index.lock.
+    const index = join(path, '.git', 'index');
+    const old = new Date(Date.now() - 3_600_000);
+    utimesSync(index, old, old);
+    const later = new Date(Date.now() - 60_000);
+    utimesSync(join(path, 'a.txt'), later, later);
+    const envs: (Record<string, string | undefined> | undefined)[] = [];
+    const spawn = harness.core.procs.spawn.bind(harness.core.procs);
+    const spy = spyOn(harness.core.procs, 'spawn').mockImplementation((scope, command, args, options) => {
+      envs.push(options?.env);
+      return spawn(scope, command, args, options);
+    });
+    try {
+      await client.call('git.status', { threadId });
+      await client.call('git.diff', { threadId, path: 'a.txt' });
+    } finally {
+      spy.mockRestore();
+    }
+    expect(envs.length).toBeGreaterThan(2);
+    expect(envs.every((env) => env?.['GIT_OPTIONAL_LOCKS'] === '0')).toBe(true);
+    expect(statSync(index).mtimeMs).toBe(old.getTime());
+  });
+
+  test('a git that does not answer is stopped by its own process and the read refused by name', async () => {
+    const path = await fixture();
+    const threadId = await threadIn(path, 'repo');
+    const spawn = harness.core.procs.spawn.bind(harness.core.procs);
+    const spy = spyOn(harness.core.procs, 'spawn').mockImplementation((scope, _command, _args, options) =>
+      spawn(scope, process.execPath, ['-e', 'await Bun.sleep(20000)'], options),
+    );
+    try {
+      const started = Date.now();
+      await expect(readGit(harness.core, threadId, path, ['status'], 300)).rejects.toThrow(/git status did not answer within 0.3 s/);
+      expect(Date.now() - started).toBeLessThan(5_000);
+      await waitFor(() => harness.core.procs.liveCount(threadId) === 0);
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   test('a working directory outside a repository is refused by name', async () => {
