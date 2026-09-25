@@ -177,6 +177,24 @@ describe('harness updates', () => {
     await expect(client.call('providers.update', { providerId: 'update-fake' })).rejects.toThrow(/1 turn in flight/);
   });
 
+  test("an update releases the provider's idle threads and sweeps what their agents left", async () => {
+    const { client } = await start('command');
+    await client.call('providers.updates', {});
+    const project = await client.call('projects.add', { path: harness!.dataDir, name: 'updates' });
+    const account = await client.call('accounts.add', { providerId: 'update-fake', label: 'Fake', useDefaultLocation: true });
+    const thread = await client.call('threads.create', { projectId: project.id, providerId: 'update-fake', accountId: account.id, title: 'idle' });
+    const swept: string[] = [];
+    harness!.core.procs.sweepSoon = (id: string): void => {
+      swept.push(id);
+    };
+
+    const changed = client.next('providers.updatesChanged', (list) => list[0]?.state === 'idle' && list[0]?.current === '1.2.0', 20000);
+    expect((await client.call('providers.update', { providerId: 'update-fake' })).state).toBe('updating');
+    expect(swept).toEqual([thread.id]);
+    await changed;
+    await waitFor(() => harness?.core.procs.liveCount('update:update-fake') === 0);
+  });
+
   test('an accepted turn still protects its provider after the picker changes', async () => {
     const { client, state } = await start('command');
     const core = harness!.core;

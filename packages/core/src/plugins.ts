@@ -19,7 +19,6 @@ import { PLUGIN_MANIFEST_FILE } from '@boite/contracts';
 import type { PluginArtifact, PluginManifest, PluginPool, PluginPreview, PluginRejected, PluginSource, PluginState, RpcParams } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { invalidParams, messageOf, refused } from './errors.ts';
-import { getDriver } from './drivers/index.ts';
 import { newToken } from './ids.ts';
 import {
   ManifestRefused,
@@ -576,10 +575,7 @@ export class PluginStore {
       const affected = this.core.journal.listThreads().filter((thread) => this.blocksAccount(thread.accountId));
       if (this.core.scheduler.activeAccountIds().some((accountId) => this.blocksAccount(accountId))) throw refused('Stop this provider\'s default-account turns before changing its saved login.');
       if (affected.some((thread) => ['running', 'queued', 'waiting'].includes(thread.status))) throw refused('Stop this provider\'s default-account turns before changing its saved login.');
-      for (const thread of affected) {
-        const provider = this.core.providers.require(thread.providerId);
-        getDriver(provider.protocol).releaseThread?.(thread.id);
-      }
+      for (const thread of affected) this.core.threads.releaseAgent(thread.id);
       const args = params.action === 'add' ? POOL_COMMANDS.add(params.provider)
         : params.action === 'switch' ? POOL_COMMANDS.switch(params.provider, params.email!)
         : POOL_COMMANDS.remove(params.provider, params.email!);

@@ -262,6 +262,17 @@ test('the regular Stop command reports cancellation of a queued parent wake', as
   expect(h.core.threads.require(blocker).status).toBe('running');
 });
 
+test('stopping an idle child sweeps what its released agent left running', async () => {
+  const runs = scripted(); const { h, owner, threadId, spawn } = await setup();
+  const child = await spawn();
+  runs.get(child.thread.id)!.finish();
+  await waitFor(() => h.core.threads.require(child.thread.id).status === 'idle');
+  const swept: string[] = [];
+  h.core.procs.sweepSoon = (id: string): void => { swept.push(id); };
+  await owner.call('delegation.stop', { threadId, agentId: child.thread.id });
+  expect(swept).toEqual([child.thread.id]);
+});
+
 test('child inbox hides parent messages to siblings', async () => {
   scripted(); const { h, owner, threadId, spawn } = await setup();
   const one = await spawn('one'), two = await spawn('two');

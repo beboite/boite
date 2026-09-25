@@ -93,11 +93,14 @@ browser. The job holds it, so the trace and the load still count it, but
 nothing will ever stop it before `resources.killTree` or the core's exit.
 
 Ten seconds after `turn.finished`, if no new turn has started in the thread,
-the registry sweeps it. The same sweep follows the three ways the core releases
-an agent process with no turn to finish: Stop on an idle thread whose agent
-still runs background work, an archive, and an account switch. The agent exits
-inside those ten seconds, and a background command it started (a dev server, a
-watcher) is an orphan by then. A process is an orphan when the job reported it, it is
+the registry sweeps it. The same sweep follows every release of an agent
+process with no turn to finish, which all go through
+`ThreadStore.releaseAgent`: Stop on an idle thread whose agent still runs
+background work, an archive, an account switch, a stopped child agent, the
+archive of the previous delegation episode's children, a provider update, a
+plugin login change and a resident agent's compaction checkpoint. The agent
+exits inside those ten seconds, and a background command it started (a dev
+server, a watcher) is an orphan by then. A process is an orphan when the job reported it, it is
 at least ten seconds old, and its parent pid is not a live process of the
 thread, or belongs to one that started after it (a pid Windows gave to someone
 else). Each orphan is stopped with everything under it, through the process
