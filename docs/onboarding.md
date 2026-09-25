@@ -48,7 +48,7 @@ minimized or closed during the tour.
 
 The shell opens its main window at 1280 x 890, centred in the primary monitor's
 work area, and at 92% of that area on a smaller screen (`centred` in
-`apps/shell/src-tauri/src/lib.rs`). 890 is the tallest tour screen, the French
+`apps/shell/src-tauri/src/window.rs`). 890 is the tallest tour screen, the French
 consent screen at 808 px, plus the scrim's margin and the title bar. A screen
 that grows past it scrolls inside the panel; raise the constant with it. Every
 screen takes that same panel height, or the window's height when it is shorter,

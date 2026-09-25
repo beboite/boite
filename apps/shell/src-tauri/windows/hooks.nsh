@@ -27,7 +27,7 @@
     !error "hooks.nsh: BUNDLEID is not defined where BOITE_STOP_CORE is inserted"
   !endif
   ; The data directory this install's core writes core.json in: the name
-  ; `Channel::data_dir_name` gives in src/lib.rs.
+  ; `Channel::data_dir_name` gives in src/channel.rs.
   !if "${BUNDLEID}" == "com.boite.two.dev"
     !define /redef BOITE_DATA_NAME "boite2-dev"
   !else
