@@ -764,6 +764,12 @@ export class ProviderRegistry {
   constructor(private readonly dataDir: string) {
     this.installs = new InstallManager(dataDir);
     this.load();
+    // Nothing of an agent runs yet at start: releases an update left behind, and
+    // downloads of a version no longer pinned, go now.
+    for (const id of this.entries.keys()) {
+      const install = this.installBlock(id);
+      if (install !== undefined) this.installs.prune(id, install.version);
+    }
   }
 
   /** The install block of this provider's profile for the OS the core runs on. */

@@ -222,6 +222,13 @@ install to resume.
 `providers.uninstall` deletes `<dataDir>/agents/<id>` and is refused while a lease
 is held, and one is held for every process a thread, probe or login launched.
 
+An update installs the new release beside the old one and repoints `current`.
+The old release is deleted as soon as no lease is held: right after the update,
+or when the last process of that provider ends. A core that starts also deletes
+every release `current` does not point at, and every download except the `.part`
+of the version the descriptor pins. A file Windows still holds is logged and
+left for the next of those moments.
+
 ## What ships
 
 Nine descriptors ship, and only the first eight are ever visible to a user: `echo`

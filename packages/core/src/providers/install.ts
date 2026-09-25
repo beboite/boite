@@ -5,7 +5,9 @@ import {
   lstatSync,
   mkdirSync,
   openSync,
+  readdirSync,
   readFileSync,
+  realpathSync,
   renameSync,
   statSync,
   rmdirSync,
@@ -261,12 +263,51 @@ export class InstallManager {
 
   release(providerId: ProviderId): void {
     const count = this.#leases.get(providerId) ?? 0;
-    if (count <= 1) this.#leases.delete(providerId);
-    else this.#leases.set(providerId, count - 1);
+    if (count <= 1) {
+      this.#leases.delete(providerId);
+      // The last process may have run out of a release an update replaced.
+      queueMicrotask(() => this.prune(providerId));
+    } else this.#leases.set(providerId, count - 1);
   }
 
   leaseCount(providerId: ProviderId): number {
     return this.#leases.get(providerId) ?? 0;
+  }
+
+  /**
+   * Deletes the releases `current` no longer points at, once nothing runs out
+   * of this provider's files and no install is under way. A file Windows still
+   * holds is left for the next prune. `keepDownload` names the version whose
+   * `.part` may still be resumed; every other download goes, and leaving it
+   * out leaves the downloads alone.
+   */
+  prune(providerId: ProviderId, keepDownload?: string | null): void {
+    if (this.#running.has(providerId) || this.leaseCount(providerId) > 0) return;
+    const root = providerAgentDir(this.dataDir, providerId);
+    let current: string;
+    try { current = realpathSync(this.currentDir(providerId)); }
+    catch { return; }
+    const same = (a: string, b: string): boolean => (process.platform === 'linux' ? a === b : a.toLowerCase() === b.toLowerCase());
+    const remove = (path: string): void => {
+      try { rmSync(path, { recursive: true, force: true }); }
+      catch (error) { this.#log('warn', `${path} could not be removed yet (${messageOf(error)}); the next prune tries again`); }
+    };
+    for (const name of this.#list(join(root, 'releases'))) {
+      const dir = join(root, 'releases', name);
+      let target = dir;
+      try { target = realpathSync(dir); } catch { /* compared as it is */ }
+      if (!same(target, current)) remove(dir);
+    }
+    if (keepDownload === undefined) return;
+    for (const name of this.#list(join(root, 'downloads'))) {
+      if (keepDownload !== null && name.startsWith(`${keepDownload}.zip.part`)) continue;
+      remove(join(root, 'downloads', name));
+    }
+  }
+
+  #list(dir: string): string[] {
+    try { return readdirSync(dir); }
+    catch { return []; }
   }
 
   // -- waiting on a run ------------------------------------------------------
@@ -298,9 +339,9 @@ export class InstallManager {
 
   /**
    * The download, and the update: a provider whose record names an older
-   * version installs the new release beside it and repoints `current`. Nothing
-   * of the old release is deleted here, a process may still be running out of
-   * it; `uninstall` takes the whole directory.
+   * version installs the new release beside it and repoints `current`. The old
+   * release goes once no process of this provider is left (`prune`), since one
+   * may still be running out of it; `uninstall` takes the whole directory.
    */
   start(providerId: ProviderId, install: ProviderInstall): ProviderInstallState {
     if (install.arch && install.arch !== process.arch) {
@@ -434,6 +475,8 @@ export class InstallManager {
         available: install.version,
       };
       this.#running.delete(providerId);
+      // The release this one replaced goes now, or when its last process ends.
+      this.prune(providerId, null);
       // The provider list goes out first: a client that saw `installed` while it
       // still held the provider as missing would offer a repair for one frame.
       this.#sink?.updated();

@@ -338,7 +338,7 @@ describe('managed installs', () => {
     expect(installed?.install?.state).toBe('installed');
   });
 
-  test('an installed release names the version on offer, and an update lands beside the old one', async () => {
+  test('an installed release names the version on offer, and an update replaces the old one', async () => {
     await loadDescriptor(goodInstall());
     const client = await harness.connect();
 
@@ -373,9 +373,8 @@ describe('managed installs', () => {
     await client.call('providers.install', { providerId: 'managed' });
     await waitFor(() => states.some((state) => state.state === 'installed'));
 
-    // The new release sits beside the old directory, which nothing deleted: a
-    // process of it may still be alive.
-    expect(existsSync(agentDir('releases', '1.0.0'))).toBe(true);
+    // Nothing ran out of the old release, so it is gone.
+    expect(existsSync(agentDir('releases', '1.0.0'))).toBe(false);
     expect(existsSync(agentDir('releases', '1.1.0'))).toBe(true);
     expect(statSync(agentDir('current', 'bin', 'agent.exe')).size).toBe(EXE_V2.byteLength);
 
@@ -386,6 +385,51 @@ describe('managed installs', () => {
       installedAt: expect.any(Number),
       available: '1.1.0',
     });
+  });
+
+  test('an old release a process still runs out of stays until that process ends', async () => {
+    await loadDescriptor(goodInstall());
+    const client = await harness.connect();
+    const states: ProviderInstallState[] = [];
+    client.on('providers.installProgress', (event) => states.push(event));
+    await client.call('providers.install', { providerId: 'managed' });
+    await waitFor(() => states.some((state) => state.state === 'installed'));
+
+    const installs = harness.core.providers.installs;
+    installs.acquire('managed');
+    await loadDescriptor(nextInstall());
+    states.length = 0;
+    await client.call('providers.install', { providerId: 'managed' });
+    await waitFor(() => states.some((state) => state.state === 'installed'));
+    expect(existsSync(agentDir('releases', '1.0.0'))).toBe(true);
+
+    installs.release('managed');
+    await waitFor(() => !existsSync(agentDir('releases', '1.0.0')));
+    expect(statSync(agentDir('current', 'bin', 'agent.exe')).size).toBe(EXE_V2.byteLength);
+  });
+
+  test('a core that starts removes releases and downloads nothing points at any more', async () => {
+    await loadDescriptor(goodInstall());
+    const client = await harness.connect();
+    const states: ProviderInstallState[] = [];
+    client.on('providers.installProgress', (event) => states.push(event));
+    await client.call('providers.install', { providerId: 'managed' });
+    await waitFor(() => states.some((state) => state.state === 'installed'));
+    mkdirSync(agentDir('releases', '0.9.0'), { recursive: true });
+    writeFileSync(agentDir('releases', '0.9.0', 'left.txt'), 'an older release');
+    mkdirSync(agentDir('downloads'), { recursive: true });
+    writeFileSync(agentDir('downloads', '0.9.0.zip.part'), 'old');
+    writeFileSync(agentDir('downloads', '1.0.0.zip.part'), 'resumable');
+
+    const second = new Core({ dataDir: harness.dataDir, token: newToken() });
+    try {
+      expect(existsSync(agentDir('releases', '0.9.0'))).toBe(false);
+      expect(existsSync(agentDir('downloads', '0.9.0.zip.part'))).toBe(false);
+      expect(existsSync(agentDir('downloads', '1.0.0.zip.part'))).toBe(true);
+      expect(existsSync(agentDir('current', 'bin', 'agent.exe'))).toBe(true);
+    } finally {
+      await second.close();
+    }
   });
 
   test('installing the version already on disk is refused as up to date', async () => {
