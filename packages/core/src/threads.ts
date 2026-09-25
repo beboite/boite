@@ -183,6 +183,16 @@ interface PendingQuestion {
   resolve: (answer: QuestionAnswer | null) => void;
 }
 
+/**
+ * The parts of a turn's prompt that building it consumes: the async answers
+ * held for the thread and the delegation letters it marks as sent. A retry on
+ * a fresh session reuses them instead of taking again and finding nothing.
+ */
+interface CarriedInput {
+  deferred?: string;
+  letters?: string;
+}
+
 export class ThreadStore {
   /** Internal-only entry: callers supply an already authorized workspace, never a fabricated project. */
   createAgentSession(agent: AgentProfile, sessionId: string, cwd: string, projectId: string | null = null, branch: string | null = null): ThreadSummary {
@@ -965,7 +975,10 @@ export class ThreadStore {
       const account = this.core.accounts.require(thread.accountId);
       const driver = getDriver(provider.protocol);
       this.stopRequested.delete(threadId);
-      const handle = driver.startTurn(this.makeContext(thread, provider, account, running));
+      // What building the prompt takes for good (held answers, delegation
+      // letters), kept so a retry on a fresh session sends it too.
+      const carried: CarriedInput = {};
+      const handle = driver.startTurn(this.makeContext(thread, provider, account, running, carried));
       this.handles.set(threadId, handle);
       result = await handle.done;
       const fresh = result.sessionLost === true ? this.dropLostSession(thread, result) : null;
@@ -977,7 +990,7 @@ export class ThreadStore {
         // Same turn, fresh session: the prompt now carries the journal's history.
         thread = fresh;
         running = { ...running, ...(running.execution ? { execution: { ...running.execution, sessionId: null, sessionGeneration: fresh.sessionGeneration ?? 0 } } : {}) };
-        const retry = driver.startTurn(this.makeContext(thread, provider, account, running));
+        const retry = driver.startTurn(this.makeContext(thread, provider, account, running, carried));
         this.handles.set(threadId, retry);
         result = await retry.done;
       }
@@ -1321,6 +1334,7 @@ export class ThreadStore {
     provider: ProviderDescriptor,
     account: Account,
     turn: Turn,
+    carried: CarriedInput = {},
   ): TurnContext {
     const threadId = thread.id;
     const env = this.core.accounts.accountEnv(account, provider);
@@ -1385,12 +1399,16 @@ export class ThreadStore {
       ? continuationInput(this.core.journal, threadId, turn.id, input, provider, part => fileReference(this.core.dataDir, part))
       : input;
     const prepared = prepareAttachments(this.core.dataDir, continued);
+    // Both are taken once per turn: a second context for the same turn gets what the first one took.
+    const command = prepared.prompt.trimStart().startsWith('/');
+    carried.deferred ??= turn.execution?.operation || command ? '' : this.takeDeferred(threadId);
+    carried.letters ??= turn.execution?.operation === 'compact' ? '' : this.core.delegation.initialInput(threadId, turn.id);
     return {
       thread,
       account,
       provider,
       turn,
-      prompt: ((turn.execution?.operation && thread.sessionId !== null) || prepared.prompt.trimStart().startsWith('/') ? '' : this.core.brain.instructions(provider.id)) + (turn.execution?.operation || prepared.prompt.trimStart().startsWith('/') ? '' : this.takeDeferred(threadId)) +prepared.prompt + (turn.execution?.operation === 'compact' ? '' : this.core.coordination.instructions(threadId) + this.core.delegation.instructions(threadId) + this.core.delegation.initialInput(threadId, turn.id)) + this.askInstructions(thread, provider, turn, prepared.prompt),
+      prompt: ((turn.execution?.operation && thread.sessionId !== null) || command ? '' : this.core.brain.instructions(provider.id)) + carried.deferred + prepared.prompt + (turn.execution?.operation === 'compact' ? '' : this.core.coordination.instructions(threadId) + this.core.delegation.instructions(threadId) + carried.letters) + this.askInstructions(thread, provider, turn, prepared.prompt),
       coordination: () => this.core.delegation.take(threadId, turn.id) ?? this.core.coordination.take(threadId, turn.id),
       attachments: prepared.attachments,
       sessionId: thread.sessionId,
