@@ -28,6 +28,7 @@
 import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync, utimesSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { readSignature, signatureProblem } from './runtime-signature.ts';
 import { nativeTarget } from './targets.ts';
 
 /** Only the platforms whose compiled core this repository actually produces. */
@@ -70,13 +71,21 @@ const BUNDLE_DIR = 'core';
  * without it, before the core's first line; the baseline one runs on every x64
  * CPU, starts as fast and carries the same signature (docs/performance.md). It
  * is downloaded once, checked against the release's SHASUMS256.txt and kept
- * under `node_modules/.cache`.
+ * under `node_modules/.cache`. The checksum comes from the same release, so the
+ * publisher's signature is what vouches for the file: it is checked on the
+ * download and again on the cached copy at every staging, and a runtime that is
+ * not validly signed by Bun's publisher is refused.
  */
 async function baselineRuntime(): Promise<string> {
   const name = 'bun-windows-x64-baseline';
   const dir = join(repo, 'node_modules', '.cache', 'boite-bun-runtime', `${name}-v${Bun.version}`);
   const exe = join(dir, 'bun.exe');
-  if (existsSync(exe)) return exe;
+  if (existsSync(exe)) {
+    const cached = signatureProblem(exe, readSignature(exe));
+    if (cached === null) return exe;
+    console.warn(`stage-sidecar: ${cached}; downloading it again`);
+    rmSync(dir, { recursive: true, force: true });
+  }
   const release = `https://github.com/oven-sh/bun/releases/download/bun-v${Bun.version}`;
   const download = async (file: string): Promise<Response> => {
     const response = await fetch(`${release}/${file}`, { signal: AbortSignal.timeout(300_000) }).catch((error: unknown) =>
@@ -103,30 +112,22 @@ async function baselineRuntime(): Promise<string> {
   if (unpacked.exitCode !== 0) refuse(`${tar} could not unpack ${archive}: ${unpacked.stderr.toString()}`);
   const extracted = join(scratch, name, 'bun.exe');
   if (!existsSync(extracted)) refuse(`${name}.zip has no ${name}/bun.exe`);
+  const problem = signatureProblem(extracted, readSignature(extracted));
+  if (problem !== null) {
+    rmSync(scratch, { recursive: true, force: true });
+    refuse(`${problem}. The download is not staged.`);
+  }
   rmSync(dir, { recursive: true, force: true });
   mkdirSync(dir, { recursive: true });
   renameSync(extracted, exe);
   rmSync(scratch, { recursive: true, force: true });
-  console.log(`stage-sidecar: ${exe} (Bun ${Bun.version} baseline, SHA-256 of the archive checked)`);
+  console.log(`stage-sidecar: ${exe} (Bun ${Bun.version} baseline, SHA-256 of the archive and signature checked)`);
   return exe;
 }
 
 /** The executable staged as the sidecar: Bun's baseline runtime on Windows, the compiled core elsewhere. */
 const sidecar = RUNTIME_SIDECAR ? await baselineRuntime() : join(coreDist, 'boite-core');
 
-function sidecarSource(): string {
-  if (!RUNTIME_SIDECAR) return sidecar;
-  const runtime = sidecar;
-  const signature = Bun.spawnSync(
-    ['powershell', '-NoProfile', '-NonInteractive', '-Command', `(Get-AuthenticodeSignature -LiteralPath '${runtime.replaceAll("'", "''")}').Status`],
-    { stdout: 'pipe', stderr: 'pipe', windowsHide: true },
-  );
-  const status = signature.stdout.toString().trim();
-  if (status !== 'Valid') {
-    console.warn(`stage-sidecar: ${runtime} has signature status "${status}", expected "Valid". An unsigned runtime starts as slowly as a compiled core.`);
-  }
-  return runtime;
-}
 
 /** Every file of the bundle but the Workers, which stay beside the executable where the core looks first. */
 function stageBundle(targetDir: string): void {
@@ -150,7 +151,7 @@ function stageBundle(targetDir: string): void {
  * looks for, and the two `boite` shims the core puts on an agent's PATH.
  */
 export function stageCore(targetDir: string, exeName: string): void {
-  const exeSource = sidecarSource();
+  const exeSource = sidecar;
   const exeBytes = sizeOf(exeSource, `${exeSource} does not exist. Build it first: bun run build:core:exe`);
   const workers = WORKERS.map((name) => {
     const source = join(coreDist, name);

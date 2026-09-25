@@ -46,8 +46,12 @@ it does not compile again. The end-to-end suite refuses missing or stale artifac
   release's `SHASUMS256.txt` and keeps it under `node_modules/.cache`, so the
   first staging needs the network. The runtime carries its publisher's signature;
   an unsigned compiled core costs about 650 ms more at every start on Windows 11
-  ([performance.md](performance.md)). `stage-sidecar.ts` warns when the runtime's
-  signature is not valid. `apps/shell/scripts/tauri.ts` adds
+  ([performance.md](performance.md)). The checksum comes from the same release,
+  so the signature is what vouches for the file: `stage-sidecar.ts` refuses a
+  runtime whose signature is not valid or whose signer is not Bun's publisher
+  (`O=Codeblog CORP`, `apps/shell/scripts/runtime-signature.ts`). It checks the
+  cached copy again at every staging and downloads it again when that copy
+  fails. `apps/shell/scripts/tauri.ts` adds
   `tauri.bundle.windows.conf.json`, which names the `core` directory as a
   resource, to any Windows build that passes the bundle overlay.
 - `stage:core` puts the sidecar, both workers and the two `boite` shims
