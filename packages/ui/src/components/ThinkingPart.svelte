@@ -1,7 +1,7 @@
 <script lang="ts">
   import { ChevronRight } from '@lucide/svelte';
   import { renderMarkdown } from '../lib/markdown';
-  import { paragraphBlocks, currentThought } from '../lib/message-display';
+  import { ParagraphScan, currentThought } from '../lib/message-display';
   import { strings } from '../lib/strings';
 
   let { text, live = false }: { text: string; live?: boolean } = $props();
@@ -19,7 +19,8 @@
   let current = $derived(currentThought(text));
   // One block per paragraph, like Prose: a new paragraph renders alone and the
   // earlier ones keep their nodes, folded or not.
-  let blocks = $derived(paragraphBlocks(current.text, live));
+  const scan = new ParagraphScan();
+  let blocks = $derived(scan.blocks(current.text, live));
   let preview = $derived(current.title ?? strings.chat.thinking);
 </script>
 

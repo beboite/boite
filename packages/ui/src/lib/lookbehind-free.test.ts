@@ -1,18 +1,16 @@
 import { expect, test } from 'vitest';
 import { richInline } from './chat-links';
 import { renderMarkdown } from './markdown';
-import { linesKeepingBreaks, paragraphBlocks } from './message-display';
+import { paragraphBlocks } from './message-display';
 
 // These replaced regex lookbehinds, which Safari before 16.4 cannot parse
 // (docs/phone.md). Each case is one the lookbehind decided.
 
 test('lines keep their breaks and a trailing break adds no empty line', () => {
-  expect(linesKeepingBreaks('')).toEqual(['']);
-  expect(linesKeepingBreaks('a')).toEqual(['a']);
-  expect(linesKeepingBreaks('a\n')).toEqual(['a\n']);
-  expect(linesKeepingBreaks('a\nb')).toEqual(['a\n', 'b']);
-  expect(linesKeepingBreaks('\n\n')).toEqual(['\n', '\n']);
-  expect(linesKeepingBreaks('a\r\n\r\nb')).toEqual(['a\r\n', '\r\n', 'b']);
+  expect(paragraphBlocks('', false)).toEqual([]);
+  expect(paragraphBlocks('a\n', false)).toEqual(['a']);
+  expect(paragraphBlocks('\n\n', false)).toEqual([]);
+  expect(paragraphBlocks('a\r\n\r\nb', true)).toEqual(['a']);
   expect(paragraphBlocks('one\n\ntwo\n\nthr', true)).toEqual(['one', 'two']);
 });
 

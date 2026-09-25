@@ -1,7 +1,7 @@
 <script lang="ts">
   import { tick } from 'svelte';
   import { renderMarkdown } from '../lib/markdown';
-  import { paragraphBlocks, answerText } from '../lib/message-display';
+  import { ParagraphScan, answerText } from '../lib/message-display';
   import { strings } from '../lib/strings';
   import { experimentOn } from '../lib/experiments.svelte';
   import type { Store } from '../lib/store.svelte';
@@ -26,7 +26,9 @@
     event.preventDefault();
     selected = { path: anchor.dataset.filePath!, ...(anchor.dataset.fileLine ? { line: Number(anchor.dataset.fileLine) } : {}) };
   }
-  let blocks = $derived(paragraphBlocks(answerText(text, live), live));
+  // The scan resumes where the last delta stopped instead of reading the answer again.
+  const scan = new ParagraphScan();
+  let blocks = $derived(scan.blocks(answerText(text, live), live));
 
   let host = $state<HTMLDivElement>();
 
