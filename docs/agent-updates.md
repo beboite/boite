@@ -78,7 +78,11 @@ the pipe. Only the last 256 KB of each output stream is kept.
 
 A check reads two agents at a time. Its readings land in
 `<dataDir>/harness-versions.json`, so a restart shows the last reading and its
-notices without running any agent. The first automatic check comes ten minutes
+notices without running any agent. At start the core reads each managed agent
+again, which spawns nothing, so a Boite build that pins a newer release offers
+it at once; a kept row whose agent is gone or changed route is dropped. An
+agent that updates itself keeps its kept reading until the next check. The
+first automatic check comes ten minutes
 after start, or six hours after the kept reading when that is later, and waits
 ten more minutes while any turn is queued, running or waiting. A check started
 from the card counts: the timer does not read again within six hours of it.

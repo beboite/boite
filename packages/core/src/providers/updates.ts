@@ -132,7 +132,41 @@ export class HarnessUpdates {
 
   /** Arms the periodic check. The core's entry point calls it; a test core never does. */
   start(): void {
+    this.refreshRestored();
     this.schedule(this.firstDelay());
+  }
+
+  /**
+   * Brings the readings kept from the last run up to this build without
+   * spawning anything. A managed row is read again at once, since its read is
+   * the release on disk and the version this Boite pins, and a new build may
+   * pin a newer one. A row whose provider lost its route, or took another, is
+   * dropped. A 'self' row keeps its reading until the scheduled check, which
+   * has to run the agent to read it.
+   */
+  refreshRestored(): void {
+    let changed = false;
+    for (const [id, entry] of [...this.entries]) {
+      if (entry.state === 'updating' || entry.state === 'checking') continue;
+      if (this.targetOf(id)?.route !== entry.route) {
+        this.entries.delete(id);
+        changed = true;
+      }
+    }
+    for (const summary of this.core.providers.list().loaded) {
+      const id = summary.id;
+      if (this.core.providers.installs.installedVersion(id) === null) continue;
+      const target = this.targetOf(id);
+      const previous = this.entries.get(id);
+      if (target?.route !== 'managed' || previous?.state === 'updating' || previous?.state === 'checking') continue;
+      const read = this.readManaged(target);
+      if (previous !== undefined && previous.current === read.current && previous.latest === read.latest) continue;
+      this.entries.set(id, { route: 'managed', ...read, state: 'idle', message: null, checkedAt: Date.now() });
+      changed = true;
+    }
+    if (!changed) return;
+    this.writeReadings();
+    this.emit();
   }
 
   /** How long after start the first automatic check waits: ten minutes, or until the kept reading is six hours old. */
@@ -343,10 +377,7 @@ export class HarnessUpdates {
   }
 
   private async read(target: Target): Promise<{ current: string | null; latest: string | null }> {
-    const id = target.descriptor.id;
-    if (target.route === 'managed') {
-      return { current: this.core.providers.installs.installedVersion(id), latest: target.profile.install?.version ?? null };
-    }
+    if (target.route === 'managed') return this.readManaged(target);
     const spec = target.profile.update as ProviderSelfUpdate;
     const current = readVersion(await this.run(target, spec.versionArgs ?? ['--version'], this.versionTimeoutMs));
     if (current === null) throw new Error(`${target.descriptor.name} printed no version`);
@@ -365,6 +396,11 @@ export class HarnessUpdates {
       if (latest === null) throw new Error(`${target.descriptor.name} named no latestVersion when asked for updates`);
     }
     return { current, latest };
+  }
+
+  /** A managed release is read off disk and the descriptor's pin: nothing runs. */
+  private readManaged(target: Target): { current: string | null; latest: string | null } {
+    return { current: this.core.providers.installs.installedVersion(target.descriptor.id), latest: target.profile.install?.version ?? null };
   }
 
   /** One short run of the agent's own program, traced like every process of an agent. */

@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { zipSync } from 'fflate';
@@ -682,6 +682,41 @@ describe('managed updates', () => {
     await client.call('providers.installCancel', { providerId: 'managed', operationId: downloading.operationId });
     await waitFor(() => updates.at(-1)?.[0]?.state === 'failed');
     expect(updates.at(-1)?.[0]).toMatchObject({ current: '1.0.0', message: 'the download was cancelled', pending: true });
+  });
+
+  test('a restart on a build that pins a newer release offers it at once, and forgets a row whose agent is gone', async () => {
+    await loadDescriptor(goodInstall());
+    const client = await harness.connect();
+    const states: ProviderInstallState[] = [];
+    client.on('providers.installProgress', (event) => states.push(event));
+    await client.call('providers.install', { providerId: 'managed' });
+    await waitFor(() => states.some((state) => state.state === 'installed'));
+    harness.core.updates.only = new Set(['managed']);
+    const [current] = await client.call('providers.updates', { refresh: true });
+    expect(current).toMatchObject({ providerId: 'managed', route: 'managed', current: '1.0.0', latest: '1.0.0', pending: false });
+
+    // What the last run kept, plus a row for an agent this machine no longer has.
+    const file = join(harness.dataDir, 'harness-versions.json');
+    const kept = JSON.parse(readFileSync(file, 'utf8')) as { checkedAt: number; readings: Record<string, unknown> };
+    kept.readings['claude'] = { route: 'self', current: '1.0.0', latest: '2.0.0', state: 'idle', message: null, checkedAt: kept.checkedAt };
+    writeFileSync(file, JSON.stringify(kept));
+    // The next build pins 1.1.0.
+    writeFileSync(join(harness.dataDir, 'providers', 'managed.json'), JSON.stringify(descriptor(nextInstall()), null, 2), 'utf8');
+
+    const second = new Core({ dataDir: harness.dataDir, token: newToken() });
+    try {
+      expect((await second.updates.list()).map((update) => [update.providerId, update.latest])).toEqual([['claude', '2.0.0'], ['managed', '1.0.0']]);
+      second.updates.start();
+      const [entry, ...rest] = await second.updates.list();
+      expect(rest).toEqual([]);
+      expect(entry).toMatchObject({ providerId: 'managed', route: 'managed', current: '1.0.0', latest: '1.1.0', pending: true, state: 'idle' });
+      // Read off disk, not by running anything, and the scheduled check still waits out its six hours.
+      expect(second.procs.liveCount('update:managed')).toBe(0);
+      expect(second.updates.firstDelay()).toBeGreaterThan(5 * 60 * 60 * 1000);
+      expect(JSON.parse(readFileSync(file, 'utf8')).readings).not.toHaveProperty('claude');
+    } finally {
+      await second.close();
+    }
   });
 
   test('a release the install card lands clears its pending update without another check', async () => {
