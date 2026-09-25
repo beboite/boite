@@ -1,21 +1,8 @@
 {
   "ceiling": 900,
-  "allow": {
-    "packages/core/src/drivers/acp.ts": 1703,
-    "packages/core/src/drivers/agy.ts": 1015,
-    "packages/core/src/drivers/claude.ts": 1570,
-    "packages/core/src/drivers/pi.ts": 1334,
-    "packages/core/src/journal.ts": 1085,
-    "packages/core/src/providers/loader.ts": 975,
-    "packages/core/src/threads.ts": 1768,
-    "packages/ui/src/components/Composer.svelte": 1307,
-    "packages/ui/src/components/MessageList.svelte": 985,
-    "packages/ui/src/components/ModelPicker.svelte": 996,
-    "packages/ui/src/lib/store.svelte.ts": 3063
-  },
+  "allow": {},
   "exempt": {
     "packages/contracts/src/index.ts": "every RPC method, event and shared type is declared here before it is implemented (AGENTS.md)",
-    "packages/ui/src/lib/fake-client.ts": "the in-memory client implements the whole contract, and changes with the real core",
     "packages/ui/src/lib/strings.*.ts": "one entry per UI sentence, mirrored in every language (docs/language.md)"
   }
 }
