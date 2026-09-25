@@ -18,7 +18,8 @@
  */
 import { dlopen, FFIType, JSCallback, ptr } from 'bun:ffi';
 import { coInitialize, coUninitialize, openSessions } from './audio-sessions.ts';
-import type { AudioSession, AudioSessions } from './audio-sessions.ts';
+import type { AudioSession } from './audio-sessions.ts';
+import { AudioEndpoint } from './audio-endpoint.ts';
 import { GuardLogic } from './guard-logic.ts';
 import type { ForegroundPushed, GuardWin32 } from './guard-logic.ts';
 import { MuteLogic } from './mute-logic.ts';
@@ -146,41 +147,20 @@ function nativeWin32(u32: User32, k32: Kernel32): GuardWin32 {
 let logic: GuardLogic | null = null;
 let mute: MuteLogic | null = null;
 /**
- * The endpoint's session manager, opened on the first walk and reopened after a
- * failure: a default device that changes invalidates the one that was held.
+ * The default render endpoint, opened on the first walk and reopened after a
+ * failure, after the user switched output device, and every half minute on a
+ * machine that had none. A walk that throws is what puts the reason in a single
+ * `audio-failed`.
  */
-let endpoint: AudioSessions | null = null;
-/** True once this machine has answered that it has no render endpoint at all. */
-let noEndpoint = false;
+const endpoint = new AudioEndpoint(openSessions);
+/** True once COM refused this thread: the audio half stays off for the Worker's life. */
+let comFailed = false;
 /** True between a `CoInitializeEx` that took and its matching `CoUninitialize`. */
 let comReady = false;
 
-/**
- * One walk of the endpoint's sessions, opening it if this is the first. A
- * machine with no render endpoint turns the audio half off for the Worker's
- * life, and the throw is what puts the reason in a single `audio-failed`.
- */
 function listSessions(skipped: (message: string) => void): AudioSession[] {
-  if (endpoint === null) {
-    const opened = openSessions();
-    if (opened === null) {
-      noEndpoint = true;
-      mute?.setEnabled(false);
-      throw new Error('this machine has no default audio render endpoint');
-    }
-    endpoint = opened;
-  }
-  try {
-    return endpoint.list(skipped);
-  } catch (error) {
-    // The endpoint itself failed (one bad session does not throw): drop it so the
-    // next walk opens a fresh one.
-    endpoint.release();
-    endpoint = null;
-    throw error;
-  }
+  return endpoint.list(skipped);
 }
-
 scope.onmessage = (event: { data: unknown }): void => {
   const command = event.data as GuardWorkerCommand;
   if (command.kind !== 'start') {
@@ -249,7 +229,7 @@ scope.onmessage = (event: { data: unknown }): void => {
     comReady = true;
   } catch (error) {
     audio.setEnabled(false);
-    noEndpoint = true;
+    comFailed = true;
     send({ kind: 'audio-failed', message: error instanceof Error ? error.message : String(error) });
   }
 
@@ -297,8 +277,7 @@ scope.onmessage = (event: { data: unknown }): void => {
 function shutDownAudio(audio: MuteLogic): void {
   audio.releaseAll();
   mute = null;
-  endpoint?.release();
-  endpoint = null;
+  endpoint.release();
   if (!comReady) return;
   comReady = false;
   try {
@@ -321,8 +300,8 @@ function onCommand(command: Exclude<GuardWorkerCommand, GuardWorkerStart>): void
       break;
     case 'set':
       logic.setEnabled(command.enabled);
-      // A machine that answered it has no endpoint stays off whatever the user asks.
-      if (!noEndpoint) mute?.setEnabled(command.mute);
+      // A thread COM refused stays off whatever the user asks.
+      if (!comFailed) mute?.setEnabled(command.mute);
       break;
     default:
       return;

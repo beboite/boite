@@ -4,6 +4,8 @@ import type { AudioSession } from '../src/platform/windows/audio-sessions.ts';
 import { setGuardWorkerForTests } from '../src/platform/windows/guard.ts';
 import { GuardLogic, HWND_BOTTOM, PUSH_BACK_FLAGS } from '../src/platform/windows/guard-logic.ts';
 import type { GuardWin32, WindowOwner } from '../src/platform/windows/guard-logic.ts';
+import { AudioEndpoint, NO_ENDPOINT, NO_ENDPOINT_RETRY_MS } from '../src/platform/windows/audio-endpoint.ts';
+import type { AudioSessions } from '../src/platform/windows/audio-sessions.ts';
 import { MuteLogic } from '../src/platform/windows/mute-logic.ts';
 import { echoThread, startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
@@ -395,6 +397,107 @@ describe('the audio mute rule', () => {
     expect(mute.mutedPids()).toEqual([]);
     expect(endpoint.handed.every((session) => session.released)).toBe(true);
     expect(mute.events).toEqual([]);
+  });
+});
+
+// -- which endpoint the mute walks -----------------------------------------
+
+/** One device as `openSessions` hands it out: its own mixer, and a default flag. */
+class FakeDevice {
+  readonly endpoint = new FakeEndpoint();
+  isDefault = true;
+  released = false;
+  staleThrows = false;
+
+  sessions(): AudioSessions {
+    return {
+      list: (skipped) => this.endpoint.list(skipped ?? (() => undefined)),
+      stale: () => {
+        if (this.staleThrows) throw new Error('IMMDevice::GetId failed with 0x80070005');
+        return !this.isDefault;
+      },
+      release: () => {
+        this.released = true;
+      },
+    };
+  }
+}
+
+describe('the audio endpoint the mute walks', () => {
+  test('a switch of the default output device moves the walk to the new device', () => {
+    const speakers = new FakeDevice();
+    const headset = new FakeDevice();
+    let current = speakers;
+    let opened = 0;
+    const endpoint = new AudioEndpoint(() => {
+      opened += 1;
+      return current.sessions();
+    });
+    const mute = new MuteLogic((skipped) => endpoint.list(skipped), true);
+
+    const onSpeakers = speakers.endpoint.add(MUTED_PID);
+    mute.addPid('thr_one', MUTED_PID);
+    expect(onSpeakers.muted).toBe(true);
+
+    // The user picks the headset: the speakers stay a valid device, and the
+    // agent reopens its stream on the headset.
+    speakers.isDefault = false;
+    headset.isDefault = true;
+    current = headset;
+    const onHeadset = headset.endpoint.add(MUTED_PID);
+    mute.tick();
+
+    expect(opened).toBe(2);
+    expect(speakers.released).toBe(true);
+    expect(onHeadset.muted).toBe(true);
+    // The session held on the speakers is still given back when the pid exits.
+    mute.removePid(MUTED_PID);
+    expect([onSpeakers.muted, onHeadset.muted]).toEqual([false, false]);
+  });
+
+  test('the same default device is walked again without reopening it', () => {
+    const device = new FakeDevice();
+    let opened = 0;
+    const endpoint = new AudioEndpoint(() => {
+      opened += 1;
+      return device.sessions();
+    });
+    endpoint.list(() => undefined);
+    endpoint.list(() => undefined);
+    expect(opened).toBe(1);
+
+    device.staleThrows = true;
+    endpoint.list(() => undefined);
+    expect(opened).toBe(2);
+  });
+
+  test('a machine with no render endpoint is asked again every half minute, not every walk', () => {
+    let clock = 1_000;
+    let available: FakeDevice | null = null;
+    let opened = 0;
+    const endpoint = new AudioEndpoint(() => {
+      opened += 1;
+      return available?.sessions() ?? null;
+    }, () => clock);
+
+    const walk = (): string | null => {
+      try {
+        endpoint.list(() => undefined);
+        return null;
+      } catch (error) {
+        return (error as Error).message;
+      }
+    };
+    expect(walk()).toBe(NO_ENDPOINT);
+    clock += 1_000;
+    expect(walk()).toBe(NO_ENDPOINT);
+    expect(opened).toBe(1);
+
+    // A headset is plugged in.
+    available = new FakeDevice();
+    clock += NO_ENDPOINT_RETRY_MS;
+    expect(walk()).toBeNull();
+    expect(opened).toBe(2);
   });
 });
 

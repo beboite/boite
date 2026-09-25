@@ -127,6 +127,8 @@ describeWindows('the audio sessions of the default endpoint', () => {
 
   test('the default render endpoint answers with a session list and nothing is touched', () => {
     expect(endpoint).not.toBeNull();
+    // Nobody switched output device during the test: the id read back matches.
+    expect(endpoint?.stale()).toBe(false);
     const sessions = endpoint?.list() ?? [];
     try {
       for (const session of sessions) {

@@ -39,6 +39,11 @@ export interface AudioSessions {
    * failure of the endpoint itself throws.
    */
   list(skipped?: (message: string) => void): AudioSession[];
+  /**
+   * True once this is no longer the default render device: the user switched
+   * output, or the device went away. Sessions of the new default are elsewhere.
+   */
+  stale(): boolean;
   release(): void;
 }
 
@@ -76,8 +81,11 @@ const SLOT_QUERY_INTERFACE = 0;
 const SLOT_RELEASE = 2;
 /** `IMMDeviceEnumerator::GetDefaultAudioEndpoint`. */
 const SLOT_GET_DEFAULT_ENDPOINT = 4;
-/** `IMMDevice::Activate`. */
+/** `IMMDevice::Activate` and `::GetId`. */
 const SLOT_ACTIVATE = 3;
+const SLOT_GET_ID = 5;
+/** A device id is a short endpoint path; anything past this is a bad read. */
+const MAX_DEVICE_ID_CHARS = 512;
 /** `IAudioSessionManager2::GetSessionEnumerator`, after the two it inherits. */
 const SLOT_GET_SESSION_ENUMERATOR = 5;
 /** `IAudioSessionEnumerator::GetCount` and `::GetSession`. */
@@ -125,6 +133,7 @@ function loadOle32() {
       args: [FFIType.ptr, FFIType.ptr, FFIType.u32, FFIType.ptr, FFIType.ptr],
       returns: FFIType.i32,
     },
+    CoTaskMemFree: { args: [FFIType.ptr], returns: FFIType.void },
   });
 }
 
@@ -248,7 +257,8 @@ function queryInterface(self: Pointer, iid: Uint8Array, name: string): Pointer {
 /**
  * The session manager of the default render endpoint, or null when the machine
  * has no render endpoint at all (`E_NOTFOUND`), which is a fact rather than a
- * failure: a box with no sound card has nothing to mute.
+ * failure: a box with no sound card has nothing to mute. The enumerator and the
+ * device id stay held, so `stale` can ask which device is the default now.
  */
 export function openSessions(): AudioSessions | null {
   if (process.platform !== 'win32') return null;
@@ -266,36 +276,32 @@ export function openSessions(): AudioSessions | null {
   );
   const enumerator = taken(created, 'CoCreateInstance(MMDeviceEnumerator)');
 
-  let device: Pointer;
-  try {
-    const out = outParameter();
-    const hr = slot(
-      enumerator,
-      SLOT_GET_DEFAULT_ENDPOINT,
-      'IMMDeviceEnumerator::GetDefaultAudioEndpoint',
-      SIG_GET_DEFAULT_ENDPOINT,
-    )(enumerator, E_RENDER, E_MULTIMEDIA, ptr(out));
-    if ((hr >>> 0) === E_NOTFOUND) return null;
-    ok(hr, 'IMMDeviceEnumerator::GetDefaultAudioEndpoint');
-    device = taken(out, 'IMMDeviceEnumerator::GetDefaultAudioEndpoint');
-  } finally {
-    release(enumerator);
-  }
-
+  let deviceId: string;
   let manager: Pointer;
   try {
-    const out = outParameter();
-    const hr = slot(device, SLOT_ACTIVATE, 'IMMDevice::Activate', SIG_ACTIVATE)(
-      device,
-      ptr(IID_IAUDIO_SESSION_MANAGER2),
-      CLSCTX_ALL,
-      null,
-      ptr(out),
-    );
-    ok(hr, 'IMMDevice::Activate(IAudioSessionManager2)');
-    manager = taken(out, 'IMMDevice::Activate(IAudioSessionManager2)');
-  } finally {
-    release(device);
+    const device = defaultDevice(enumerator);
+    if (device === null) {
+      release(enumerator);
+      return null;
+    }
+    try {
+      deviceId = deviceIdOf(device);
+      const out = outParameter();
+      const hr = slot(device, SLOT_ACTIVATE, 'IMMDevice::Activate', SIG_ACTIVATE)(
+        device,
+        ptr(IID_IAUDIO_SESSION_MANAGER2),
+        CLSCTX_ALL,
+        null,
+        ptr(out),
+      );
+      ok(hr, 'IMMDevice::Activate(IAudioSessionManager2)');
+      manager = taken(out, 'IMMDevice::Activate(IAudioSessionManager2)');
+    } finally {
+      release(device);
+    }
+  } catch (error) {
+    release(enumerator);
+    throw error;
   }
 
   let open = true;
@@ -304,14 +310,56 @@ export function openSessions(): AudioSessions | null {
       if (!open) throw new Error('IAudioSessionManager2 was already released');
       return listSessions(manager, skipped);
     },
+    stale: (): boolean => {
+      if (!open) return true;
+      const device = defaultDevice(enumerator);
+      if (device === null) return true;
+      try {
+        return deviceIdOf(device) !== deviceId;
+      } finally {
+        release(device);
+      }
+    },
     release: (): void => {
       if (!open) return;
       open = false;
       release(manager);
+      release(enumerator);
     },
   };
 }
 
+/** The default render device for multimedia, or null when there is none. */
+function defaultDevice(enumerator: Pointer): Pointer | null {
+  const out = outParameter();
+  const hr = slot(
+    enumerator,
+    SLOT_GET_DEFAULT_ENDPOINT,
+    'IMMDeviceEnumerator::GetDefaultAudioEndpoint',
+    SIG_GET_DEFAULT_ENDPOINT,
+  )(enumerator, E_RENDER, E_MULTIMEDIA, ptr(out));
+  if ((hr >>> 0) === E_NOTFOUND) return null;
+  ok(hr, 'IMMDeviceEnumerator::GetDefaultAudioEndpoint');
+  return taken(out, 'IMMDeviceEnumerator::GetDefaultAudioEndpoint');
+}
+
+/** `IMMDevice::GetId`: a string owned by COM, copied out and freed here. */
+function deviceIdOf(device: Pointer): string {
+  const out = outParameter();
+  ok(slot(device, SLOT_GET_ID, 'IMMDevice::GetId', SIG_OUT_POINTER)(device, ptr(out)), 'IMMDevice::GetId');
+  const text = taken(out, 'IMMDevice::GetId');
+  try {
+    const units: number[] = [];
+    for (let offset = 0; units.length < MAX_DEVICE_ID_CHARS; offset += 2) {
+      const unit = read.u16(text, offset);
+      if (unit === 0) break;
+      units.push(unit);
+    }
+    return String.fromCharCode(...units);
+  } finally {
+    ole().CoTaskMemFree(text);
+  }
+}
 /**
  * Walk the endpoint's sessions once. Every interface this opens is released
  * again except the `ISimpleAudioVolume` of a session it hands back, which the

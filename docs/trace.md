@@ -159,7 +159,9 @@ each session's process id, then its volume interface. A session whose process id
 is a traced pid and that is not muted already is muted, and its volume interface
 is held. A session that cannot be read is skipped and named once in the core
 log; only a failure of the endpoint itself, such as a removed device, drops it
-and opens it again on the next walk.
+and opens it again on the next walk. Each walk also reads the default device's id
+again: when the user switches output, from speakers to a headset say, the old
+device is released and the walk moves to the new one, where the agents now play.
 
 Holding it is the point. Windows keeps a rendering session's mute across
 restarts, so a process that exited muted would come back muted. The mute is
@@ -168,8 +170,9 @@ and when the Worker stops. The core's shutdown waits for that last release, one
 second at most, before it lets the process exit: a core that left first would
 leave those executables muted for their next run. A session the user muted by hand in the mixer reads as
 muted already, so it is left alone and never unmuted on exit. `process.muted`
-says which thread and which pid, and a machine with no render endpoint says so
-once and keeps that half off for the Worker's life.
+says which thread and which pid. A machine with no render endpoint says so once
+and asks again every 30 seconds, so a headset plugged in later is covered. Only
+a COM runtime that refuses to start keeps that half off for the Worker's life.
 
 Like the guard, the rule is a logic class decided on a fake. The one test that
 touches the real endpoint plays two seconds of zeroed PCM, which is a session in
